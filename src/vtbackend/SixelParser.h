@@ -129,6 +129,13 @@ class SixelParser: public ParserExtension
 
     // ParserExtension overrides
     void pass(char ch) override;
+
+    /// Consumes a whole run of sixel bytes.
+    ///
+    /// Overridden rather than left to the base's per-byte loop: pixel data is most of a sixel
+    /// stream and needs no dispatch at all, so the run is consumed directly.
+    /// @param bytes The payload bytes.
+    void pass(std::string_view bytes) override;
     void finalize() override;
 
   private:

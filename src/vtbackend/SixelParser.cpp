@@ -351,6 +351,28 @@ void SixelParser::pass(char ch)
     parse(ch);
 }
 
+void SixelParser::pass(std::string_view bytes)
+{
+    auto const* input = bytes.data();
+    auto const* const end = input + bytes.size();
+
+    while (input != end)
+    {
+        // In Ground state a sixel byte does nothing but render: parse() picks the Ground arm,
+        // fallback() finds isSixel(), and the state does not move. So a run of them can go straight
+        // to the sink, skipping a virtual call, a state switch and an introducer test per byte.
+        // Pixel data is most of a sixel stream, so this is the path almost every byte takes.
+        if (_state == State::Ground)
+            while (input != end && isSixel(*input))
+                _events.render(toSixel(*input++));
+
+        if (input == end)
+            break;
+
+        parse(*input++);
+    }
+}
+
 void SixelParser::finalize()
 {
     done();
