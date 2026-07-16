@@ -107,6 +107,7 @@
     <release version="0.7.0" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Adds a a GUI settings page for changing the configuration.</li>
           <li>Adds a Save Layout entry to the command palette that prompts for a name, so a window's tabs can be saved as a layout — and thereby launched — without a keybinding; a key bound to SaveLayout with no name opens the same prompt</li>
           <li>Adds a right-click context menu to the terminal: copy, paste, select all, the hyperlink under the cursor, opening the current folder, splitting and closing panes, switching profile, and a soft or hard terminal reset. It opens exactly when a selection drag would have worked, so an application that asked for the mouse (vim, tmux) still receives its right-click; hold Shift to open the menu anyway. Bind OpenContextMenu in input_mapping to move it to another button</li>
           <li>Adds the actions SelectAll, SoftReset (DECSTR), CopyHyperlink, and CopyLastCommandPrompt, CopyLastCommandOutput and CopyLastCommandBlock for copying the most recently finished command straight from the scrollback</li>
