@@ -4,6 +4,7 @@
 #include <crispy/times.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <array>
 #include <format>
@@ -688,6 +689,78 @@ TEST_CASE("SixelParser.storage_is_right_sized", "[sixel]")
         CHECK(ib.size() == ImageSize { Width(20), Height(18) });
         // The contract Screen::sixelImage() relies on when it moves the buffer into an Image.
         CHECK(ib.data().size() == 20u * 18u * 4u);
+    }
+}
+
+TEST_CASE("SixelParser.run_matches_per_byte", "[sixel]")
+{
+    // A run of pixel data reaches the sink as one renderRun() rather than N render()s, so the sink
+    // can establish once what every column of the run shares. That is only sound if the two agree
+    // byte for byte, so this drives parse() per byte as the reference and pass() as the batched
+    // path, and compares the whole buffer -- not hand-computed pixels, which would stop pinning the
+    // equivalence the moment either side changed.
+    auto const build = [](std::string_view input, bool batched, ImageSize canvas, bool explicitRaster) {
+        auto ib = SixelImageBuilder(
+            canvas, 1, 1, RGBAColor { 0, 0, 0, 0xFF }, std::make_shared<SixelColorPalette>(16, 256));
+        if (explicitRaster)
+            ib.setRaster(1, 1, canvas);
+        auto sp = SixelParser { ib };
+        if (batched)
+            sp.parseFragment(input); // routes through pass() -> renderRun()
+        else
+            for (auto const ch: input) // the per-byte reference
+                sp.parse(ch);
+        sp.done();
+        return std::tuple { ib.size(), ib.sixelCursor(), ib.data() };
+    };
+
+    auto const agree = [&](std::string_view input, ImageSize canvas, bool explicitRaster) {
+        return build(input, true, canvas, explicitRaster) == build(input, false, canvas, explicitRaster);
+    };
+
+    auto const canvas = ImageSize { Width(8), Height(12) };
+
+    // Both rasters: the explicit path is what every real encoder emits and takes the batched code,
+    // while the implicit path still has to grow the image a column at a time.
+    auto const explicitRaster = GENERATE(true, false);
+    CAPTURE(explicitRaster);
+
+    SECTION("a run shorter than a band")
+    {
+        CHECK(agree("#1;2;100;100;0@", canvas, explicitRaster));
+        CHECK(agree("#1;2;100;100;0~~~", canvas, explicitRaster));
+    }
+    SECTION("a run of every bit pattern")
+    {
+        // 63..126 is the whole data alphabet; this walks all 64 patterns through both paths.
+        auto input = std::string { "#1;2;100;100;0" };
+        for (auto const ch: std::views::iota(63, 127))
+            input += static_cast<char>(ch);
+        CHECK(agree(input, ImageSize { Width(80), Height(12) }, explicitRaster));
+    }
+    SECTION("a run reaching and passing the canvas edge")
+    {
+        CHECK(agree("#1;2;100;100;0~~~~~~~~", canvas, explicitRaster));     // exactly the width
+        CHECK(agree("#1;2;100;100;0~~~~~~~~~~~~", canvas, explicitRaster)); // past it
+    }
+    SECTION("a run spanning a colour change")
+    {
+        CHECK(agree("#1;2;100;100;0~~#2;2;0;100;100~~", canvas, explicitRaster));
+    }
+    SECTION("runs spanning bands and rewinds")
+    {
+        CHECK(agree("#1;2;100;100;0~~~-~~~", canvas, explicitRaster));
+        CHECK(agree("#1;2;100;100;0~~~$#2;2;0;100;100@@", canvas, explicitRaster));
+    }
+    SECTION("runs interleaved with repeats")
+    {
+        CHECK(agree("#1;2;100;100;0~!3@~", canvas, explicitRaster));
+        CHECK(agree("#1;2;100;100;0!3?~~", canvas, explicitRaster));
+    }
+    SECTION("a run overhanging the canvas bottom")
+    {
+        // The bottom band's high bits paint nothing; the batched path must clip exactly as render().
+        CHECK(agree("#1;2;100;100;0~~~---~~~", ImageSize { Width(8), Height(9) }, explicitRaster));
     }
 }
 

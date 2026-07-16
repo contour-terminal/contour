@@ -6,9 +6,9 @@
 
 #include <vtparser/ParserExtension.h>
 
-#include <crispy/range.h>
-
 #include <array>
+#include <cstddef>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -197,6 +197,19 @@ class SixelParser: public ParserExtension
                 render(sixel);
         }
 
+        /// Renders a run of consecutive sixels, starting at the sixel-cursor.
+        ///
+        /// The default implementation simply loops over render(). Implementers override it to hoist
+        /// whatever a single render() re-establishes per column but that cannot change within a run
+        /// -- the canvas bounds, the colour, the buffer geometry, the band's rows. On a real image
+        /// that setup costs several times the pixel stores it guards.
+        /// @param sixels the run's raw bytes, each still biased by 63.
+        virtual void renderRun(std::string_view sixels)
+        {
+            for (auto const ch: sixels)
+                render(static_cast<int8_t>(static_cast<int>(ch) - 63));
+        }
+
         /// Finalizes the image by optimizing the underlying storage to its minimal dimension in storage.
         virtual void finalize() = 0;
     };
@@ -206,21 +219,26 @@ class SixelParser: public ParserExtension
 
     using iterator = char const*;
 
+    /// Consumes @p range.
+    ///
+    /// Defers to pass(), which is the one implementation of "consume these bytes": having a second
+    /// one here meant the tests drove a different code path than a real terminal, so the bulk path
+    /// production depends on was the one path nothing covered.
+    void parseFragment(std::string_view range) { pass(range); }
+
     void parseFragment(iterator begin, iterator end)
     {
-        for (auto const ch: crispy::range(begin, end))
-            parse(ch);
+        parseFragment(std::string_view { begin, static_cast<size_t>(std::distance(begin, end)) });
     }
 
-    void parseFragment(std::string_view range) { parseFragment(range.data(), range.data() + range.size()); }
-
+    /// Consumes a single byte, dispatching it through the state table.
     void parse(char value);
     void done();
 
     static void parse(std::string_view range, Events& events)
     {
         auto parser = SixelParser { events };
-        parser.parseFragment(range.data(), range.data() + range.size());
+        parser.parseFragment(range);
         parser.done();
     }
 
@@ -411,6 +429,7 @@ class SixelImageBuilder: public SixelParser::Events
     void setRaster(unsigned int pan, unsigned int pad, std::optional<ImageSize> imageSize) override;
     void render(int8_t sixel) override;
     void renderRepeated(int8_t sixel, unsigned count) override;
+    void renderRun(std::string_view sixels) override;
     void finalize() override;
 
     [[nodiscard]] CellLocation const& sixelCursor() const noexcept { return _sixelCursor; }

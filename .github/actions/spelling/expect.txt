@@ -29,6 +29,7 @@ CCCC
 CCCCC
 CCCCCC
 CDEFGH
+chafa
 circleval
 claude
 COLSx

@@ -307,13 +307,18 @@ void SixelParser::pass(std::string_view bytes)
 
     while (input != end)
     {
-        // In Ground state a sixel byte does nothing but render: parse() picks the Ground arm,
-        // fallback() finds isSixel(), and the state does not move. So a run of them can go straight
-        // to the sink, skipping a virtual call, a state switch and an introducer test per byte.
-        // Pixel data is most of a sixel stream, so this is the path almost every byte takes.
+        // In Ground state a sixel byte does nothing but render: the table names Render and does not
+        // move. So a run of them goes straight to the sink, skipping the table lookup and the
+        // dispatch per byte -- and, more importantly, reaching the sink as a run rather than as N
+        // separate calls, so the sink can establish once what every column of it shares.
         if (_state == State::Ground)
+        {
+            auto const* const runBegin = input;
             while (input != end && isSixel(*input))
-                _events.render(toSixel(*input++));
+                ++input;
+            if (input != runBegin)
+                _events.renderRun(std::string_view { runBegin, static_cast<size_t>(input - runBegin) });
+        }
 
         if (input == end)
             break;
@@ -543,6 +548,83 @@ void SixelImageBuilder::render(int8_t sixel)
     }
 
     _sixelCursor.column++;
+}
+
+void SixelImageBuilder::renderRun(std::string_view sixels)
+{
+    // Without an explicit raster the image grows as it is painted, so the canvas a column may write
+    // into depends on what the column before it did -- nothing below would be loop-invariant. Every
+    // real encoder declares a raster (img2sixel, chafa and termbench-pro all emit '"Pan;Pad;Ph;Pv'),
+    // so the growth path keeps the per-column code and stays the simple one.
+    if (!_explicitSize)
+    {
+        Events::renderRun(sixels);
+        return;
+    }
+
+    auto const canvas = canvasSize();
+    auto const canvasWidth = unbox<unsigned>(canvas.width);
+    auto x = _sixelCursor.column.as<unsigned>();
+    if (x >= canvasWidth)
+        return; // render() paints nothing and does not advance once the cursor is off the canvas
+
+    auto const run = std::min(static_cast<unsigned>(sixels.size()), canvasWidth - x);
+
+    // Everything from here to the loop is what render() re-established on every single column, and
+    // none of it can change within a run: the cursor's line, the canvas, the colour and the buffer's
+    // geometry are all fixed until a '-', '$', '#' or '!' ends the run -- and any of those would
+    // have ended it before this call. On a real frame that setup measured 9.8 instructions per
+    // painted column against 2.7 for the pixel stores it guarded.
+    auto const canvasHeight = unbox<unsigned>(canvas.height);
+    auto const y0 = _sixelCursor.line.as<unsigned>();
+    auto const color = currentColor();
+    auto const rowBytes = static_cast<size_t>(_stride) * 4;
+    // An explicit raster is exactly what storage covers -- setRaster() reshapes to it -- so the
+    // reserve() render() calls here can only ever early-return.
+    auto* const base = _buffer.data();
+
+    // Which of the band's six bits land on the canvas, and where each one's first row begins. Both
+    // are properties of the band, not of the column, yet render() re-derives them per set bit.
+    auto rowOffsets = std::array<size_t, SixelBitCount> {};
+    auto fittingBits = 0u;
+    for (auto const bit: std::views::iota(0u, SixelBitCount))
+    {
+        auto const y = y0 + (bit * _aspectRatio);
+        if (y + _aspectRatio > canvasHeight)
+            break; // bits only climb, so nothing above this fits either
+        fittingBits |= 1u << bit;
+        rowOffsets[bit] = static_cast<size_t>(y) * rowBytes;
+    }
+
+    for (auto const ch: sixels.substr(0, run))
+    {
+        // Masking by fittingBits here is what replaces render()'s per-bit bounds check: a bit that
+        // would overhang the canvas simply is not in the set to walk.
+        auto const bits = static_cast<unsigned>(static_cast<int>(ch) - 63) & SixelBitMask & fittingBits;
+        for (auto remaining = bits; remaining != 0; remaining &= remaining - 1)
+        {
+            auto const bit = static_cast<unsigned>(std::countr_zero(remaining));
+            auto* pixel = base + rowOffsets[bit] + (static_cast<size_t>(x) * 4);
+            pixel[0] = color.red;
+            pixel[1] = color.green;
+            pixel[2] = color.blue;
+            pixel[3] = 0xFF;
+
+            // Aspect ratio 1 is the norm and means one pixel row per bit; only a stretched image
+            // repeats.
+            for ([[maybe_unused]] auto const row: std::views::iota(1u, _aspectRatio))
+            {
+                pixel += rowBytes;
+                pixel[0] = color.red;
+                pixel[1] = color.green;
+                pixel[2] = color.blue;
+                pixel[3] = 0xFF;
+            }
+        }
+        ++x;
+    }
+
+    _sixelCursor.column = ColumnOffset::cast_from(x);
 }
 
 void SixelImageBuilder::renderRepeated(int8_t sixel, unsigned count)
