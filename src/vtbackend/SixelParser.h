@@ -261,6 +261,13 @@ class SixelParser: public ParserExtension
 
     void paramShiftAndAddDigit(unsigned value);
 
+    /// Folds a whole run of digits into the current parameter.
+    ///
+    /// Exactly paramShiftAndAddDigit() applied to each in turn, but the parameter is kept in a
+    /// register across the run rather than re-read per digit. Digits are 30% of a sixel stream.
+    /// @param digits the run's raw bytes, each in '0'..'9'.
+    void foldDigits(std::string_view digits);
+
     /// Hands the gathered raster attributes to the sink, if they form a well-shaped set.
     void submitRaster();
 

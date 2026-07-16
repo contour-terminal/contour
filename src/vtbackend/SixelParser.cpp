@@ -20,6 +20,11 @@ namespace vtbackend
 
 namespace
 {
+    constexpr bool isDigit(char value) noexcept
+    {
+        return value >= '0' && value <= '9';
+    }
+
     constexpr uint8_t toDigit(char value) noexcept
     {
         return static_cast<uint8_t>(value) - '0';
@@ -232,6 +237,15 @@ void SixelParser::paramShiftAndAddDigit(unsigned value)
     number = (number * 10) + value;
 }
 
+void SixelParser::foldDigits(std::string_view digits)
+{
+    unsigned& number = _params[_paramCount - 1];
+    auto value = number;
+    for (auto const ch: digits)
+        value = (value * 10) + toDigit(ch);
+    number = value;
+}
+
 void SixelParser::submitRaster()
 {
     // Fewer than two parameters says nothing, and more than four is not a raster attribute at all.
@@ -318,6 +332,25 @@ void SixelParser::pass(std::string_view bytes)
                 ++input;
             if (input != runBegin)
                 _events.renderRun(std::string_view { runBegin, static_cast<size_t>(input - runBegin) });
+        }
+        else if (auto const s = Table::index(_state);
+                 isDigit(*input)
+                 && SixelTable.transitions[s][static_cast<uint8_t>(*input)] == State::Undefined)
+        {
+            // The table says a digit here stays put and folds into the current parameter. That is
+            // true of every parameter state but not of ColorIntroducer, whose first digit opens
+            // ColorParam -- so the branch is gated on the table rather than on a list of states
+            // spelled out here. Scanning the rest of the run by isDigit() alone is sound because all
+            // ten digits share that one cell, which theHotRunsAreFoldable() asserts at compile time.
+            //
+            // Digits are 30% of a sixel stream and each one otherwise pays a full table dispatch to
+            // do n = n*10 + d.
+            auto const* const runBegin = input;
+            do
+                ++input;
+            while (input != end && isDigit(*input));
+            foldDigits(std::string_view { runBegin, static_cast<size_t>(input - runBegin) });
+            continue;
         }
 
         if (input == end)

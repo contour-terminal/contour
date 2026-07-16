@@ -774,6 +774,94 @@ TEST_CASE("SixelParser.run_matches_per_byte", "[sixel]")
     }
 }
 
+TEST_CASE("SixelParser.digit_runs_match_per_byte", "[sixel]")
+{
+    // pass() folds a run of digits into the current parameter on one dispatch rather than one per
+    // digit -- digits are 30% of a sixel stream, and each otherwise paid a full table dispatch to do
+    // n = n*10 + d. Pinned as an equivalence against parse() byte by byte, which still folds them one
+    // at a time: comparing against hand-computed values would stop pinning it the moment the fold
+    // changed. aspectRatio() is in the tuple because a raster's parameters are only visible there.
+    auto const build = [](std::string_view input, bool batched) {
+        auto const canvas = ImageSize { Width(8), Height(12) };
+        auto ib = SixelImageBuilder(
+            canvas, 1, 1, RGBAColor { 0, 0, 0, 0xFF }, std::make_shared<SixelColorPalette>(16, 256));
+        auto sp = SixelParser { ib };
+        if (batched)
+            sp.parseFragment(input); // routes through pass() -> foldDigits()
+        else
+            for (auto const ch: input) // the per-byte reference
+                sp.parse(ch);
+        sp.done();
+        return std::tuple { ib.size(), ib.sixelCursor(), ib.data(), ib.aspectRatio() };
+    };
+    auto const agree = [&](std::string_view s) {
+        return build(s, true) == build(s, false);
+    };
+
+    SECTION("multi-digit colour parameters")
+    {
+        CHECK(agree("#1;2;100;50;25~"));
+        CHECK(agree("#255;2;100;100;0~"));
+    }
+    SECTION("multi-digit repeat count")
+    {
+        CHECK(agree("#1;2;100;100;0!12~"));
+    }
+    SECTION("multi-digit raster")
+    {
+        CHECK(agree("\"12;34;8;12#1;2;100;100;0~"));
+    }
+    SECTION("leading zeros")
+    {
+        CHECK(agree("#1;2;007;050;000~"));
+    }
+    SECTION("a run long enough to overflow wraps the same way")
+    {
+        // The fold keeps the parameter in a register across the run; per byte it is read back each
+        // time. Both are unsigned, so both wrap -- but they must wrap identically.
+        CHECK(agree("#1;2;99999999999999999999;100;0~"));
+        CHECK(agree("!99999999999999999999~"));
+    }
+    SECTION("a digit that is not part of a run still parses")
+    {
+        // ColorIntroducer's first digit transitions into ColorParam, so it is not foldable and must
+        // go through the ordinary dispatch. A one-digit parameter is the case that proves it.
+        CHECK(agree("#1~"));
+        CHECK(agree("#1;2;1;1;1~"));
+    }
+
+    SECTION("a parameter split across two calls continues rather than restarts")
+    {
+        // This is the production path, and the only one that can tell "continue the parameter" from
+        // "start it at zero": every fold within a single call begins on a parameter that
+        // ResetParams or ParamSeparator has just zeroed, so both read the same. A DCS payload
+        // arrives from the PTY in whatever chunks read() returned -- a megabytes-long sixel comes in
+        // tens of thousands of them -- so a parameter's digits straddling a call is routine.
+        auto const buildSplit = [](std::string_view first, std::string_view second) {
+            auto const canvas = ImageSize { Width(8), Height(12) };
+            auto ib = SixelImageBuilder(
+                canvas, 1, 1, RGBAColor { 0, 0, 0, 0xFF }, std::make_shared<SixelColorPalette>(16, 256));
+            auto sp = SixelParser { ib };
+            sp.parseFragment(first);
+            sp.parseFragment(second);
+            sp.done();
+            return std::tuple { ib.size(), ib.sixelCursor(), ib.data(), ib.aspectRatio() };
+        };
+
+        // Split inside a colour parameter, a repeat count and a raster parameter in turn.
+        CHECK(buildSplit("#1;2;10", "0;50;25~") == build("#1;2;100;50;25~", true));
+        CHECK(buildSplit("#1;2;100;100;0!1", "2~") == build("#1;2;100;100;0!12~", true));
+        CHECK(buildSplit("\"12;3", "4;8;12#1;2;100;100;0~") == build("\"12;34;8;12#1;2;100;100;0~", true));
+        // And split at every position of a multi-digit parameter, so no offset is special.
+        auto const whole = std::string_view { "#1;2;12345;50;25~" };
+        for (auto const at: std::views::iota(size_t { 1 }, whole.size()))
+        {
+            CAPTURE(at);
+            CHECK(buildSplit(whole.substr(0, at), whole.substr(at)) == build(whole, true));
+        }
+    }
+}
+
 TEST_CASE("SixelParser.param_count_saturates", "[sixel]")
 {
     // The parameter list is a fixed array whose count saturates one past the five any sixel command
