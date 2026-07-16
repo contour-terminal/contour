@@ -505,6 +505,7 @@ TEST_CASE("GUI QML tab components load without errors (offscreen)", "[contour][g
         QStringLiteral("qrc:/contour/ui/TabItem.qml"),
         QStringLiteral("qrc:/contour/ui/TabContextMenu.qml"),
         QStringLiteral("qrc:/contour/ui/TabColorFlyout.qml"),
+        QStringLiteral("qrc:/contour/ui/NewTabMenu.qml"),
         QStringLiteral("qrc:/contour/ui/TabStrip.qml"),
         QStringLiteral("qrc:/contour/ui/WindowControls.qml"),
         QStringLiteral("qrc:/contour/ui/ResizeBorder.qml"),
@@ -513,6 +514,12 @@ TEST_CASE("GUI QML tab components load without errors (offscreen)", "[contour][g
         QStringLiteral("qrc:/contour/ui/CommandPalette.qml"),
         QStringLiteral("qrc:/contour/ui/SaveLayoutDialog.qml"),
         QStringLiteral("qrc:/contour/ui/TerminalContextMenu.qml"),
+        QStringLiteral("qrc:/contour/ui/SettingsNavItem.qml"),
+        QStringLiteral("qrc:/contour/ui/SettingsListItem.qml"),
+        QStringLiteral("qrc:/contour/ui/ConfirmDialog.qml"),
+        QStringLiteral("qrc:/contour/ui/SettingRow.qml"),
+        QStringLiteral("qrc:/contour/ui/ColorSchemeEditor.qml"),
+        QStringLiteral("qrc:/contour/ui/SettingsPage.qml"),
     };
 
     for (auto const& url: components)

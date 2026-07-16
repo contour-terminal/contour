@@ -13,6 +13,7 @@
         <file>ui/SessionChrome.qml</file>
         <file>ui/TitleBar.qml</file>
         <file>ui/TabStrip.qml</file>
+        <file>ui/NewTabMenu.qml</file>
         <file>ui/TabItem.qml</file>
         <file>ui/TabContextMenu.qml</file>
         <file>ui/TabColorFlyout.qml</file>
@@ -23,6 +24,12 @@
         <file>ui/TerminalContextMenu.qml</file>
         <file>ui/CommandPalette.qml</file>
         <file>ui/SaveLayoutDialog.qml</file>
+        <file>ui/SettingsPage.qml</file>
+        <file>ui/SettingsNavItem.qml</file>
+        <file>ui/SettingsListItem.qml</file>
+        <file>ui/ConfirmDialog.qml</file>
+        <file>ui/SettingRow.qml</file>
+        <file>ui/ColorSchemeEditor.qml</file>
         <file>ui/main.qml</file>
     </qresource>
 </RCC>

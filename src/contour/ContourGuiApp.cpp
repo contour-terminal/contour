@@ -6,6 +6,7 @@
 #include <contour/QtExternalLauncher.h>
 #include <contour/RenderingBackendSelection.h>
 #include <contour/SessionFactory.h>
+#include <contour/SettingsController.h>
 #include <contour/WindowController.h>
 #include <contour/display/ContentScale.h>
 #include <contour/display/TerminalDisplay.h>
@@ -541,10 +542,12 @@ int ContourGuiApp::terminalGuiAction()
     qmlRegisterUncreatableType<PaneProxy>("Contour.Terminal", 1, 0, "PaneProxy", "Created by the session manager.");
     qmlRegisterUncreatableType<WindowController>("Contour.Terminal", 1, 0, "WindowController", "Created by the session manager.");
     qmlRegisterUncreatableType<CommandPaletteModel>("Contour.Terminal", 1, 0, "CommandPaletteModel", "Created by the window controller.");
+    qmlRegisterUncreatableType<SettingsController>("Contour.Terminal", 1, 0, "SettingsController", "Created by the window controller.");
     qRegisterMetaType<TerminalSession*>("TerminalSession*");
     qRegisterMetaType<PaneProxy*>("PaneProxy*");
     qRegisterMetaType<WindowController*>("WindowController*");
     qRegisterMetaType<CommandPaletteModel*>("CommandPaletteModel*");
+    qRegisterMetaType<SettingsController*>("SettingsController*");
     // clang-format on
 
     {

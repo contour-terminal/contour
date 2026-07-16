@@ -109,7 +109,8 @@ Popup {
     // because only QML knows the live OS accent and which row is current.
     //
     // The whole string is HTML-escaped (a live tab title can contain & < >), so it is always valid
-    // StyledText. Indices are byte offsets from the model, exact for the ASCII command titles shown.
+    // StyledText. `matches` are UTF-16 code-unit indices (the model converts them from the fuzzy filter's
+    // UTF-8 byte offsets), so they line up with charAt() even when a title contains multibyte characters.
     function highlightedTitle(text, matches, selected) {
         var open = selected ? "<b>" : "<b><font color=\"" + systemPalette.highlight.toString() + "\">";
         var close = selected ? "</b>" : "</font></b>";

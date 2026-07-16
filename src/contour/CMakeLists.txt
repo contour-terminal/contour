@@ -56,6 +56,7 @@ set(_header_files
     ContextMenuModel.h
     ContourApp.h
     FuzzyFilter.h
+    GuiConfigStore.h
     Shortcut.h
     TabLabel.h
 )
@@ -79,6 +80,7 @@ set(_core_source_files
     ContextMenuModel.cpp
     ContourApp.cpp
     FuzzyFilter.cpp
+    GuiConfigStore.cpp
     Shortcut.cpp
     TabLabel.cpp
 )
@@ -104,6 +106,7 @@ if(CONTOUR_FRONTEND_GUI)
         PaneProxy.h
         QtExternalLauncher.h
         SessionFactory.h
+        SettingsController.h
         TerminalSession.h
         TerminalSessionManager.h
         helper.h
@@ -119,6 +122,7 @@ if(CONTOUR_FRONTEND_GUI)
         LayoutBuilder.cpp
         LayoutStore.cpp
         SessionFactory.cpp
+        SettingsController.cpp
         TerminalSession.cpp
         TerminalSessionManager.cpp
         WindowController.cpp
@@ -311,6 +315,8 @@ if(CONTOUR_FRONTEND_GUI)
             test/CommandHistory_test.cpp
             test/CommandPaletteModel_test.cpp
             test/Config_test.cpp
+            test/SettingsController_test.cpp
+            test/SettingsPageQml_test.cpp
             test/ContextMenu_test.cpp
             test/FuzzyFilter_test.cpp
             test/Shortcut_test.cpp

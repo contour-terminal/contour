@@ -3,7 +3,9 @@
 #include <contour/ContextMenu.h>
 #include <contour/ContextMenuModel.h>
 #include <contour/ContourGuiApp.h>
+#include <contour/GuiConfigStore.h>
 #include <contour/PaneProxy.h>
+#include <contour/SettingsController.h>
 #include <contour/Shortcut.h>
 #include <contour/TabColorScheme.h>
 #include <contour/TabLabel.h>
@@ -42,6 +44,15 @@ WindowController::WindowController(TerminalSessionManager& manager, vtmux::Windo
 {
     _commandPalette->setSources(
         { &_tabCommands, &_profileCommands, &_layoutCommands, &_boundCommands, &_actionCommands });
+
+    // The editable settings bridge. Its collaborators are injected so the whole workflow is testable:
+    // a config accessor into the app's live (reload-in-place) Config, a file-backed side-file store
+    // rooted at the config directory, and an apply step that reloads every session after a save.
+    _settingsController = std::make_unique<SettingsController>(
+        [this]() -> config::Config const& { return _manager.app().config(); },
+        std::make_shared<FileGuiConfigStore>(_manager.app().config().configFile.parent_path()),
+        [this]() { _manager.reloadAllSessions(); },
+        this);
 }
 
 WindowController::~WindowController() = default;
@@ -57,6 +68,35 @@ void WindowController::openCommandPalette()
     _commandPalette->refresh();
 
     emit commandPaletteRequested();
+}
+
+void WindowController::openSettings()
+{
+    // Rebuild the models against the current config on every open, so a config reload since the last
+    // visit is reflected — the same freshness discipline openCommandPalette() uses.
+    _settingsController->refresh();
+    setSettingsActive(true);
+}
+
+void WindowController::closeSettings()
+{
+    setSettingsActive(false);
+}
+
+void WindowController::toggleSettings()
+{
+    setSettingsActive(!_settingsActive);
+}
+
+void WindowController::setSettingsActive(bool active)
+{
+    if (_settingsActive == active)
+        return;
+    _settingsActive = active;
+    emit settingsActiveChanged();
+    // Toggling the settings view flips whether a terminal tab reads as active (see IsActiveRole), so
+    // repaint the strip: the active tab de-highlights on open and re-highlights on close.
+    refreshActiveTabHighlight();
 }
 
 void WindowController::openContextMenu()
@@ -204,7 +244,9 @@ QVariant WindowController::data(QModelIndex const& index, int role) const
             auto const color = tab != nullptr ? tab->color() : std::nullopt;
             return color.has_value() ? toQColor(*color) : QColor(Qt::transparent);
         }
-        case IsActiveRole: return row == activeTabIndex();
+        // No terminal tab reads as active while the settings "tab" is showing — the settings tab is the
+        // active view then, so the strip must not highlight two tabs at once.
+        case IsActiveRole: return !_settingsActive && row == activeTabIndex();
         case PaneCountRole: return tab != nullptr ? tab->paneCount() : 1;
         case ZoomedRole: return tab != nullptr && tab->isZoomed();
         default: return {};
@@ -259,13 +301,20 @@ QString WindowController::resolvedTabLabel(vtmux::Tab* tab, TerminalSession* ses
 // {{{ Tab-strip invokables — structural/session-lifetime ops delegate to the manager, tagged with
 // THIS window's id, so the same operation issued from any OS window targets that window's tabs.
 // Pure per-tab attributes (title, color) resolve the tab locally and write the model directly.
-void WindowController::createNewTab()
+void WindowController::createNewTab(QString const& profileName)
 {
-    _manager.createNewTab(_windowId);
+    // A new terminal tab is a terminal view: leave the settings page so the content area shows it.
+    setSettingsActive(false);
+    auto profile = profileName.isEmpty() ? std::optional<std::string> { std::nullopt }
+                                         : std::optional<std::string> { profileName.toStdString() };
+    _manager.createNewTab(_windowId, std::move(profile));
 }
 
 void WindowController::activateTab(int index)
 {
+    // Selecting a tab returns to the terminal content — the settings page and the tabs are mutually
+    // exclusive views of the same region, so activating any tab dismisses the settings page.
+    setSettingsActive(false);
     _manager.activateTab(_windowId, index);
 }
 

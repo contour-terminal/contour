@@ -92,13 +92,24 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     }
 
     /// Creates a backing session + its model tab in @p window (the calling controller's window).
-    contour::TerminalSession* createSessionInBackground(vtmux::WindowId window);
+    /// @param window      The target window.
+    /// @param profileName Profile to launch the session with, or std::nullopt for the app default.
+    contour::TerminalSession* createSessionInBackground(
+        vtmux::WindowId window, std::optional<std::string> profileName = std::nullopt);
 
     /// Creates a new tab in @p window (the GUI "+" button entry point, via WindowController).
-    contour::TerminalSession* createSession(vtmux::WindowId window);
+    /// @param window      The target window.
+    /// @param profileName Profile to launch the tab with, or std::nullopt for the app default.
+    contour::TerminalSession* createSession(vtmux::WindowId window,
+                                            std::optional<std::string> profileName = std::nullopt);
 
     /// Creates and activates a new tab in @p window.
-    void createNewTab(vtmux::WindowId window) { createSession(window); }
+    /// @param window      The target window.
+    /// @param profileName Profile to launch the tab with, or std::nullopt for the app default.
+    void createNewTab(vtmux::WindowId window, std::optional<std::string> profileName = std::nullopt)
+    {
+        createSession(window, std::move(profileName));
+    }
 
     /// Creates and activates a new tab in the window hosting @p acting (the CreateNewTab keybinding).
     void createNewTab(TerminalSession* acting);
@@ -141,6 +152,16 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// No-ops if @p acting has no hosting window.
     /// @param acting The session that triggered the action; its hosting window shows the palette.
     void openCommandPalette(TerminalSession* acting);
+
+    /// Shows the in-app settings page over the window hosting @p acting (the OpenConfiguration action's
+    /// default, and the tab-strip gear). No-ops if @p acting has no hosting window.
+    /// @param acting The session that triggered the action; its hosting window shows the settings page.
+    void openSettings(TerminalSession* acting);
+
+    /// Re-reads the master configuration from disk (picking up any GUI side-file changes) and pushes
+    /// it to every live session. The apply step the settings page runs after a Save/Delete so the
+    /// change takes effect immediately, without waiting for the optional live-reload file watcher.
+    void reloadAllSessions();
 
     /// Opens the terminal context menu over the pane of @p acting (the OpenContextMenu action).
     ///

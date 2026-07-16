@@ -428,6 +428,30 @@ TEST_CASE("TerminalSessionManager: launchLayout births panes at the live window 
     CHECK(*factory->requestedPageSizes.back() == liveSize);
 }
 
+TEST_CASE("TerminalSessionManager: createSession launches under the named profile (new-tab dropdown)",
+          "[manager][profile]")
+{
+    // The new-tab profile dropdown threads a profile name through createNewTab -> createSession ->
+    // createSessionInBackground -> createBackingSession. Without a name the session follows the app
+    // default (no override); with one it records that profile as its explicit override.
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    contour::test::TestApp app { std::move(factoryOwned) };
+    contour::test::ScopedController win { app.manager() };
+
+    // A second profile to launch (cloned from the default so it resolves against the config).
+    auto& profiles = app.app().config().profiles.value();
+    profiles["work"] = profiles.at(app.app().profileName());
+
+    auto* def = app.manager().createSession(win.id);
+    REQUIRE(def != nullptr);
+    CHECK_FALSE(def->profileOverride().has_value()); // no argument -> follows the default profile
+
+    auto* work = app.manager().createSession(win.id, "work");
+    REQUIRE(work != nullptr);
+    REQUIRE(work->profileOverride().has_value());
+    CHECK(*work->profileOverride() == "work");
+}
+
 // ============================================================================================
 // Command palette: the full round trip a user actually performs — press Ctrl+Shift+P, pick a command,
 // see it run, and find it under "recently used" on the next start.

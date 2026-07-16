@@ -58,7 +58,7 @@ class CommandPaletteModel: public QAbstractListModel
         ShortcutRole,              //!< Rendered key binding ("Ctrl+Shift+E"), or empty if unbound.
         SectionRole,               //!< The row's Section, as an int.
         SectionStartRole,          //!< True on the FIRST row of a section, so QML draws one header for it.
-        TitleMatchesRole,          //!< Title character indices the current filter matched, for highlighting.
+        TitleMatchesRole,          //!< Matched title indices (UTF-16 code units) for highlighting.
     };
 
     /// @param history The app-wide most-recently-used list. Must outlive this model.
@@ -115,9 +115,10 @@ class CommandPaletteModel: public QAbstractListModel
     {
         Command const* command;
         Section section;
-        /// Byte offsets into the command's title that the active filter matched, ascending — what QML
-        /// bolds. Empty when there is no filter, or when the row matched only through its id (there is
-        /// nothing in the visible title to highlight then).
+        /// UTF-8 byte offsets into the command's title that the active filter matched, ascending. These
+        /// are converted to UTF-16 code-unit indices at the TitleMatchesRole boundary (what QML bolds).
+        /// Empty when there is no filter, or when the row matched only through its id (there is nothing in
+        /// the visible title to highlight then).
         std::vector<int> titleMatches;
     };
 

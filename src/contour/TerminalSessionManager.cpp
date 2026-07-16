@@ -3,6 +3,7 @@
 #include <contour/ContourGuiApp.h>
 #include <contour/LayoutBuilder.h>
 #include <contour/PaneProxy.h>
+#include <contour/SettingsController.h>
 #include <contour/TabLabel.h>
 #include <contour/TerminalSession.h>
 #include <contour/TerminalSessionManager.h>
@@ -117,7 +118,8 @@ WindowController* TerminalSessionManager::controllerForDisplay(
     return _controllersByWindow.begin()->second;
 }
 
-TerminalSession* TerminalSessionManager::createSessionInBackground(vtmux::WindowId window)
+TerminalSession* TerminalSessionManager::createSessionInBackground(vtmux::WindowId window,
+                                                                   std::optional<std::string> profileName)
 {
     // TODO: Remove dependency on app-knowledge and pass shell / terminal-size instead.
     // The GuiApp *or* (Global)Config could be made a global to be accessible from within QML.
@@ -154,7 +156,7 @@ TerminalSession* TerminalSessionManager::createSessionInBackground(vtmux::Window
     // Pre-mint the session id so the model's allocator (see ctor) hands it back, keeping the model
     // tab/pane and the Qt session on one id.
     auto const sessionId = vtmux::SessionId { _nextSessionId++ };
-    auto* session = createBackingSession(sessionId, ptyPath, pageSize);
+    auto* session = createBackingSession(sessionId, ptyPath, pageSize, std::nullopt, profileName);
 
     // Mirror this new session into the vtmux model as a new single-pane tab.
     if (auto* tab = _model->createTab(window))
@@ -272,12 +274,13 @@ void TerminalSessionManager::syncFocusForWindow(WindowController* controller)
         setFocusedSession(controller->activeSession());
 }
 
-TerminalSession* TerminalSessionManager::createSession(vtmux::WindowId window)
+TerminalSession* TerminalSessionManager::createSession(vtmux::WindowId window,
+                                                       std::optional<std::string> profileName)
 {
     // Just create the backing session + its model tab. The model's activeTabChanged fires the owning
     // controller's proxy rebuild, and the pane tree's `session:` binding attaches the session to its
     // display — no legacy activateSession display-assignment.
-    return createSessionInBackground(window);
+    return createSessionInBackground(window, std::move(profileName));
 }
 
 void TerminalSessionManager::createNewTab(TerminalSession* acting)
@@ -444,6 +447,34 @@ void TerminalSessionManager::openCommandPalette(TerminalSession* acting)
 
     ensureCommandHistoryReady();
     controller->openCommandPalette();
+}
+
+void TerminalSessionManager::openSettings(TerminalSession* acting)
+{
+    auto* controller = controllerHostingSession(acting);
+    if (controller == nullptr)
+        return;
+
+    controller->openSettings();
+}
+
+void TerminalSessionManager::reloadAllSessions()
+{
+    // Refresh the master config first, so the app — and the settings page that reads it — see the new
+    // side files immediately. Then have each live session re-read and re-apply, updating the terminals.
+    config::loadConfigFromFile(_app.config(), _app.config().configFile);
+    for (auto& [id, session]: _sessionsById)
+        if (session != nullptr)
+            session->onConfigReload();
+
+    // The settings page reads through the app config just reloaded above, but each OS window owns its
+    // own SettingsController with model caches rebuilt only by refresh(). The controller that triggered
+    // the save refreshes itself; refresh every OTHER window's too, so a settings page open in a second
+    // window reflects the change immediately instead of serving stale caches until it is reopened.
+    for (auto& [windowId, controller]: _controllersByWindow)
+        if (controller != nullptr)
+            if (auto* settings = controller->settingsController(); settings != nullptr)
+                settings->refresh();
 }
 
 void TerminalSessionManager::openContextMenu(TerminalSession* acting)

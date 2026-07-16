@@ -54,6 +54,30 @@ TEST_CASE("makeModifiers maps Qt keyboard modifiers onto VT modifiers", "[helper
     CHECK(combined.locks.none());
 }
 
+TEST_CASE("unshiftedCodepoint inverts the US-ASCII shift level", "[helper][input]")
+{
+    using contour::unshiftedCodepoint;
+    // Punctuation and number-row shifted symbols map back to the base key label a binding is written
+    // with (this is what lets `Ctrl+Shift+,` fire when Qt delivers the shifted '<').
+    CHECK(unshiftedCodepoint(U'<') == U',');
+    CHECK(unshiftedCodepoint(U'>') == U'.');
+    CHECK(unshiftedCodepoint(U'?') == U'/');
+    CHECK(unshiftedCodepoint(U':') == U';');
+    CHECK(unshiftedCodepoint(U'"') == U'\'');
+    CHECK(unshiftedCodepoint(U'{') == U'[');
+    CHECK(unshiftedCodepoint(U'|') == U'\\');
+    CHECK(unshiftedCodepoint(U'_') == U'-');
+    CHECK(unshiftedCodepoint(U'+') == U'=');
+    CHECK(unshiftedCodepoint(U'!') == U'1');
+    CHECK(unshiftedCodepoint(U'@') == U'2');
+    CHECK(unshiftedCodepoint(U')') == U'0');
+    // Non-shifted symbols and letters (shift-invariant here) are returned unchanged.
+    CHECK(unshiftedCodepoint(U',') == U',');
+    CHECK(unshiftedCodepoint(U'P') == U'P');
+    CHECK(unshiftedCodepoint(U'a') == U'a');
+    CHECK(unshiftedCodepoint(U'5') == U'5');
+}
+
 #if !defined(_WIN32) && !defined(__APPLE__)
 TEST_CASE("makeModifiers derives CapsLock/NumLock from the X11 native modifier mask", "[helper][input]")
 {
