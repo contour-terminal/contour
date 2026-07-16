@@ -117,7 +117,10 @@ namespace
         if (!fs::exists(path))
             return nullopt;
 
-        auto ifs = ifstream(path.string());
+        // Binary mode is mandatory here: the read below is sized by fs::file_size(), so any text-mode
+        // CRLF->LF translation (Windows) would make read() fall short of that byte count and leave a
+        // trailing NUL that corrupts the parse.
+        auto ifs = ifstream(path, std::ios::binary);
         if (!ifs.good())
             return nullopt;
 
@@ -125,6 +128,12 @@ namespace
         auto text = string {};
         text.resize(size);
         ifs.read(text.data(), static_cast<std::streamsize>(size));
+
+        // Normalize CRLF -> LF. Files saved by Windows editors carry '\r' bytes that our YAML parser
+        // keeps as trailing characters on plain scalar values ("true\r"), which then fail typed
+        // conversion. Stripping them makes side files parse identically regardless of how they were
+        // saved; every caller here consumes the result as text, so this is always safe.
+        std::erase(text, '\r');
         return { text };
     }
 

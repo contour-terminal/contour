@@ -1981,6 +1981,31 @@ profiles:
     CHECK(config.profileOrigins.at("work") == contour::config::SettingsOrigin::SideFile);
 }
 
+TEST_CASE("Config: a profiles/<name>.yml with CRLF line endings still loads", "[config][gui]")
+{
+    // Regression guard for a Windows-only defect: the side-file reader sizes its read by
+    // fs::file_size(), so it must open in binary. A text-mode read would collapse CRLF->LF, fall
+    // short of the byte count, and leave a trailing NUL that breaks the YAML parse. Editors on
+    // Windows routinely save CRLF, so this must round-trip. We write the bytes explicitly (binary)
+    // to exercise the CRLF path on every platform, not just Windows.
+    QTemporaryDir dir;
+    {
+        auto const path = std::filesystem::path(dir.path().toStdString()) / "profiles" / "crlf.yml";
+        std::filesystem::create_directories(path.parent_path());
+        auto out = std::ofstream(path, std::ios::binary);
+        // A bool and a string value, both terminated by CRLF. The string is the sharp test: a stray
+        // '\r' kept on the scalar would make wm_class compare unequal to "contour-crlf".
+        out << "show_title_bar: false\r\n"
+               "wm_class: contour-crlf\r\n";
+    }
+    auto const config = loadFromYaml(dir, "default_profile: main\n");
+
+    auto const* crlf = config.findProfile("crlf");
+    REQUIRE(crlf != nullptr);
+    CHECK(crlf->showTitleBar.value() == false);
+    CHECK(crlf->wmClass.value() == "contour-crlf");
+}
+
 TEST_CASE("Config: settings.yml default_profile overrides contour.yml's", "[config][gui]")
 {
     QTemporaryDir dir;
