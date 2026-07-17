@@ -3044,13 +3044,22 @@ void Terminal::hardReset()
 void Terminal::forceRedraw(std::function<void()> const& artificialSleep)
 {
     auto const totalPageSize = _settings.pageSize;
-    auto const pageSizeInPixels = cellPixelSize() * totalPageSize;
     auto const tmpPageSize = PageSize { totalPageSize.lines, totalPageSize.columns + ColumnCount(1) };
 
-    resizeScreen(tmpPageSize, pageSizeInPixels);
+    // Read the cell size once, up front: resizeScreen() re-derives it from what it is handed, so
+    // asking again in between would return whatever the first call concluded.
+    auto const cellSize = cellPixelSize();
+
+    // Each resize carries the pixel size OF THE PAGE IT NAMES. resizeScreen() derives the cell size
+    // as pixels/page, so handing the real page's pixels to the one-column-wider page derived a cell
+    // width of cellW*columns/(columns+1) and pushed that to the child. A program that reads
+    // TIOCGWINSZ on the resulting SIGWINCH -- which is exactly what img2sixel and chafa do -- then
+    // sized its image canvas from a cell a pixel too narrow per column, and the second resize below
+    // issues no third SIGWINCH to correct one that already read the first.
+    resizeScreen(tmpPageSize, cellSize * tmpPageSize);
     if (artificialSleep)
         artificialSleep();
-    resizeScreen(totalPageSize, pageSizeInPixels);
+    resizeScreen(totalPageSize, cellSize * totalPageSize);
 }
 
 void Terminal::finalizeScreenTransition() noexcept

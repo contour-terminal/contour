@@ -549,6 +549,32 @@ TEST_CASE("Terminal.RIS", "[terminal]")
     CHECK(mc.terminal.statusDisplayType() == StatusDisplayType::None);
 }
 
+TEST_CASE("Terminal.forceRedraw keeps the cell size", "[terminal]")
+{
+    using namespace vtbackend;
+
+    // forceRedraw() briefly resizes to one extra column to make applications redraw, then back.
+    // resizeScreen() derives the cell size as pixels/page, so each call must carry the pixel size OF
+    // THE PAGE IT NAMES: handing the real page's pixels to the one-column-wider page derived a cell
+    // width of cellW*columns/(columns+1) and pushed that to the child on the first SIGWINCH. A
+    // program that reads TIOCGWINSZ once at startup -- img2sixel and chafa both do -- sizes its image
+    // canvas from that, and the restoring resize issues no third SIGWINCH to correct it.
+    //
+    // The artificialSleep hook runs between the two resizes, which is the only place the transient
+    // state is observable at all.
+    auto constexpr CellSize = ImageSize { Width(9), Height(18) };
+
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    mc.terminal.setCellPixelSize(CellSize);
+    REQUIRE(mc.terminal.cellPixelSize() == CellSize);
+
+    auto cellSizeWhileWidened = ImageSize {};
+    mc.terminal.forceRedraw([&]() { cellSizeWhileWidened = mc.terminal.cellPixelSize(); });
+
+    CHECK(cellSizeWhileWidened == CellSize);
+    CHECK(mc.terminal.cellPixelSize() == CellSize);
+}
+
 TEST_CASE("Terminal.clampedTotalPageSize", "[terminal]")
 {
     using namespace vtbackend;
