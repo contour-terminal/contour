@@ -2923,6 +2923,14 @@ void Terminal::softReset()
 
     setMode(AnsiMode::Insert, false);                  // IRM
     setMode(DECMode::UseApplicationCursorKeys, false); // DECCKM (Cursor keys)
+
+    // Reverse wraparound, both forms. A soft reset puts an xterm private mode back to the value the
+    // terminal was configured with, and neither is configurable here, so both go off. Leaving them on
+    // would let one application's choice outlive it: a backspace at the left margin would keep walking
+    // backwards into the line above long after whoever asked for that had gone.
+    setMode(DECMode::ReverseWraparound, false);
+    setMode(DECMode::ReverseWraparoundExtended, false);
+
     setTopBottomMargin({}, boxed_cast<LineOffset>(_settings.pageSize.lines) - LineOffset(1));       // DECSTBM
     setLeftRightMargin({}, boxed_cast<ColumnOffset>(_settings.pageSize.columns) - ColumnOffset(1)); // DECRLM
 
@@ -4077,6 +4085,8 @@ std::string to_string(DECMode mode)
         case DECMode::SixelCursorNextToGraphic: return "SixelCursorNextToGraphic";
         case DECMode::ReportColorPaletteUpdated: return "ReportColorPaletteUpdated";
         case DECMode::SemanticBlockProtocol: return "SemanticBlockProtocol";
+        case DECMode::ReverseWraparound: return "ReverseWraparound";
+        case DECMode::ReverseWraparoundExtended: return "ReverseWraparoundExtended";
         case DECMode::Win32InputMode: return "Win32InputMode";
         case DECMode::DECModeCount: break;
     }

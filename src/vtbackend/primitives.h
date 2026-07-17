@@ -786,6 +786,19 @@ enum class DECMode : std::uint8_t
     Win32InputMode = 44,
     // }}}
 
+    /// Reverse wraparound (45), xterm's.
+    ///
+    /// With it -- and DECAWM -- a backspace at the left margin moves to the right margin of the line
+    /// above, but only if the text actually wrapped onto this line. It does nothing on its own: a
+    /// terminal that does not wrap forward has no wrap to reverse.
+    ReverseWraparound = 49,
+
+    /// Extended reverse wraparound (1045), xterm's -- "reverse-wrap without limits".
+    ///
+    /// As above, but it follows *any* line, wrapped or not, and from the top of the scrolling region it
+    /// comes back round at the bottom.
+    ReverseWraparoundExtended = 50,
+
     /// Sentinel value for sizing the mode bitset. Must remain the last entry.
     DECModeCount = 45
 };
@@ -896,6 +909,8 @@ constexpr unsigned toDECModeNum(DECMode m) noexcept
         case DECMode::ReportGridCellSelection: return 2030;
         case DECMode::ReportColorPaletteUpdated: return 2031;
         case DECMode::SemanticBlockProtocol: return 2034;
+        case DECMode::ReverseWraparound: return 45;
+        case DECMode::ReverseWraparoundExtended: return 1045;
         case DECMode::BatchedRendering: return 2026;
         case DECMode::Unicode: return 2027;
         case DECMode::TextReflow: return 2028;
@@ -959,6 +974,8 @@ constexpr std::optional<DECMode> fromDECModeNum(unsigned int modeNum) noexcept
         case 2030: return DECMode::ReportGridCellSelection;
         case 2031: return DECMode::ReportColorPaletteUpdated;
         case 2034: return DECMode::SemanticBlockProtocol;
+        case 45: return DECMode::ReverseWraparound;
+        case 1045: return DECMode::ReverseWraparoundExtended;
         case 8452: return DECMode::SixelCursorNextToGraphic;
         case 9001: return DECMode::Win32InputMode;
         default: return std::nullopt;

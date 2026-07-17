@@ -6758,3 +6758,85 @@ TEST_CASE("DECDC deletes a column from every line, including the blank ones", "[
     CHECK(screen.grid().lineText(LineOffset(1)) == "ACDEFG ");
     CHECK(screen.grid().lineText(LineOffset(4)) == "       ");
 }
+
+// {{{ Backspace, margins and reverse wraparound
+
+TEST_CASE("Backspace stops at the left margin", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[?69h");  // DECLRMM
+    mock.writeToScreen("\033[5;10s"); // DECSLRM: columns 5..10
+
+    SECTION("a cursor on the left margin does not move")
+    {
+        mock.writeToScreen("\033[1;5H");
+        mock.writeToScreen("\b");
+        CHECK(screen.cursor().position.column == ColumnOffset(4));
+    }
+
+    SECTION("a cursor left of the left margin is not held by it")
+    {
+        // The margin is not holding a cursor that is already outside it -- the screen's edge is.
+        mock.writeToScreen("\033[1;3H");
+        mock.writeToScreen("\b");
+        CHECK(screen.cursor().position.column == ColumnOffset(1));
+    }
+}
+
+TEST_CASE("Reverse wraparound carries the cursor to the line above", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    SECTION("it does nothing without DECAWM")
+    {
+        // A terminal that does not wrap forward has no wrap to reverse.
+        mock.writeToScreen("\033[?7l");  // DECAWM off
+        mock.writeToScreen("\033[?45h"); // reverse wraparound on
+        mock.writeToScreen("\033[2;1H");
+        mock.writeToScreen("\b");
+        CHECK(screen.cursor().position == CellLocation { LineOffset(1), ColumnOffset(0) });
+    }
+
+    SECTION("the plain form follows only a line the text wrapped onto")
+    {
+        mock.writeToScreen("\033[?7h");  // DECAWM
+        mock.writeToScreen("\033[?45h"); // reverse wraparound
+        mock.writeToScreen("\033[2;1H"); // line 2 is blank, so line 1 was never wrapped onto it
+        mock.writeToScreen("\b");
+        CHECK(screen.cursor().position == CellLocation { LineOffset(1), ColumnOffset(0) });
+    }
+
+    SECTION("the plain form does follow a line the text wrapped onto")
+    {
+        mock.writeToScreen("\033[?7h");
+        mock.writeToScreen("\033[1;1H");
+        mock.writeToScreen("ABCDEF"); // wraps onto line 2, marking line 2 as wrapped
+        mock.writeToScreen("\033[?45h");
+        mock.writeToScreen("\033[2;1H");
+        mock.writeToScreen("\b");
+        CHECK(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(4) });
+    }
+
+    SECTION("the extended form follows any line at all")
+    {
+        mock.writeToScreen("\033[?7h");
+        mock.writeToScreen("\033[?1045h"); // extended reverse wraparound
+        mock.writeToScreen("\033[2;1H");   // line 2 is blank, and it follows it anyway
+        mock.writeToScreen("\b");
+        CHECK(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(4) });
+    }
+
+    SECTION("a soft reset turns it off, so it cannot outlive the application that asked for it")
+    {
+        mock.writeToScreen("\033[?7h");
+        mock.writeToScreen("\033[?1045h");
+        mock.writeToScreen("\033[!p"); // DECSTR
+        CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::ReverseWraparoundExtended));
+        CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::ReverseWraparound));
+    }
+}
+
+// }}} Backspace

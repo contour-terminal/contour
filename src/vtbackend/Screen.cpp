@@ -1118,8 +1118,8 @@ void Screen::linefeed()
 
 void Screen::backspace()
 {
-    if (_cursor.position.column.value)
-        _cursor.position.column--;
+    // BS and CUB are the same movement, and xterm implements them with the same function.
+    moveCursorBackward(ColumnCount(1));
 }
 
 void Screen::setScrollSpeed(int speed)
@@ -1945,12 +1945,87 @@ void Screen::moveCursorForward(ColumnCount n)
 
 void Screen::moveCursorBackward(ColumnCount n)
 {
-    // even if you move to 80th of 80 columns, it'll first write a char and THEN flag wrap pending
-    if (margin().horizontal.contains(_cursor.position.column))
-        _cursor.position.column = margin().horizontal.clamp(_cursor.position.column - n.as<ColumnOffset>());
-    else
-        _cursor.position.column = clampedColumn(_cursor.position.column + boxed_cast<ColumnOffset>(n));
+    // A port of xterm's CursorBack(), which is what both BS and CUB do.
+    //
+    // Three things make this more than a subtraction:
+    //
+    //   - The cursor stops at the *left margin*, not at the screen's edge -- unless it already sits
+    //     left of the margin, in which case the margin is not holding it and the edge is its bound.
+    //   - Reverse wraparound (DEC mode 45, and 1045 for the unlimited variant) carries the cursor to
+    //     the right margin of the line above. Both are inert without DECAWM: a terminal that does not
+    //     wrap forward has no wrap to reverse. The plain one only follows a line the text actually
+    //     wrapped onto; the extended one follows any line, and comes round at the bottom of the
+    //     scrolling region when it walks off the top.
+    //   - A cursor in the wrap-pending position is not *past* the right margin -- it still sits on the
+    //     last column -- so the first step merely clears that flag rather than moving anywhere.
+    auto const autoWrap = _terminal->isModeEnabled(DECMode::AutoWrap);
+    auto const reverseWrap = autoWrap && _terminal->isModeEnabled(DECMode::ReverseWraparound);
+    auto const reverseWrapExtended = autoWrap && _terminal->isModeEnabled(DECMode::ReverseWraparoundExtended);
+
+    auto const top = margin().vertical.from;
+    auto const bottom = margin().vertical.to;
+    auto const right = margin().horizontal.to;
+    auto const left =
+        _cursor.position.column < margin().horizontal.from ? ColumnOffset(0) : margin().horizontal.from;
+
+    auto line = _cursor.position.line;
+    auto column = _cursor.position.column;
+    auto count = unbox(n);
+
+    // A count of zero moves nowhere -- it only clears the wrap-pending flag.
+    if (count > 0)
+    {
+        if ((reverseWrap || reverseWrapExtended) && _cursor.wrapPending)
+            --count;
+        else
+            --column;
+    }
+
+    while (count > 0)
+    {
+        if (column < left)
+        {
+            if (reverseWrapExtended)
+            {
+                // Off the top of the scrolling region, the unlimited form comes round at the bottom.
+                if (line == top)
+                    line = bottom + LineOffset(1);
+            }
+            else if (!reverseWrap)
+            {
+                column = left;
+                break;
+            }
+            else if (!_grid.lineAt(line).wrapped())
+            {
+                // The plain form only reverses a wrap that actually happened, and the flag for it lives
+                // on the *continuation* line -- the one the cursor is leaving. (xterm marks the line
+                // that wrapped; Contour marks the line that continues it. Same fact, one line apart.)
+                column = left;
+                break;
+            }
+
+            // There is no line above the first one to wrap onto.
+            if (line == LineOffset(0))
+            {
+                column = left;
+                break;
+            }
+
+            --line;
+            column = right;
+        }
+
+        if (--count <= 0)
+            break;
+
+        --column;
+    }
+
+    _cursor.position.line = clampedLine(line);
+    _cursor.position.column = clampedColumn(column);
     _cursor.wrapPending = false;
+    updateCursorIterator();
 }
 
 void Screen::moveCursorToColumn(ColumnOffset column)
