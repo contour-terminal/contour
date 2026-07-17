@@ -132,6 +132,7 @@ displayless
 django
 doctest
 doublesize
+downscale
 downscaling
 DPIs
 DPRs
@@ -321,7 +322,7 @@ Pcmw
 Pcn
 Pcss
 PCXAL
-pdfs
+PDFs
 Pdt
 Pflags
 Pfn
@@ -442,6 +443,7 @@ strtod
 Subresource
 subresource
 subspan
+supersample
 supersampled
 swapchain
 Sxbp
@@ -486,6 +488,7 @@ unsyncs
 unzoom
 unzoomed
 unzooms
+upscales
 UPSS
 upstat
 URval
@@ -502,7 +505,7 @@ vtconformance
 vtdocs
 VTID
 vtmux
-vtparse
+VTparse
 vttest
 vwx
 vzd
@@ -534,3 +537,16 @@ xzf
 Zabcdefghijklmnopqrstuvwxyz
 zleep
 zzzznotacommand
+regis
+Pmode
+Bresenham
+Catmull
+Zingl
+RLogin
+macrographs
+rasterises
+colouring
+neighbours
+bilinearly
+xaa
+xea

@@ -40,71 +40,10 @@ namespace
         return static_cast<int8_t>(static_cast<int>(value) - 63);
     }
 
-    constexpr RGBColor rgb(uint8_t r, uint8_t g, uint8_t b)
-    {
-        return RGBColor { r, g, b };
-    }
-
-    constexpr double hue2rgb(double p, double q, double t) noexcept
-    {
-        if (t < 0)
-            t += 1;
-        if (t > 1)
-            t -= 1;
-        if (t < 1. / 6)
-            return p + ((q - p) * 6 * t);
-        if (t < 1. / 2)
-            return q;
-        if (t < 2. / 3)
-            return p + ((q - p) * (2. / 3 - t) * 6);
-        return p;
-    }
-
-    using NormalizedValue = double; // normalized value between [0, 1]
-
-    constexpr RGBColor hsl2rgb(NormalizedValue h, NormalizedValue s, NormalizedValue l) noexcept
-    {
-        // See http://en.wikipedia.org/wiki/HSL_color_space.
-
-        if (0 == s)
-        {
-            auto const grayscale = static_cast<uint8_t>(l * 255.);
-            return RGBColor { grayscale, grayscale, grayscale };
-        }
-        else
-        {
-            auto const q = l < 0.5 ? l * (1 + s) : l + s - (l * s);
-            auto const p = (2 * l) - q;
-
-            auto result = RGBColor {};
-            result.red = static_cast<uint8_t>(hue2rgb(p, q, h + (1. / 3)) * 255);
-            result.green = static_cast<uint8_t>(hue2rgb(p, q, h) * 255);
-            result.blue = static_cast<uint8_t>(hue2rgb(p, q, h - (1. / 3)) * 255);
-            return result;
-        }
-    }
-
 } // namespace
 
-// VT 340 default color palette (https://www.vt100.net/docs/vt3xx-gp/chapter2.html#S2.4)
-constexpr inline std::array<RGBColor, 16> DefaultColors = {
-    rgb(0, 0, 0),       //  0: black
-    rgb(51, 51, 204),   //  1: blue
-    rgb(204, 33, 33),   //  2: red
-    rgb(51, 204, 51),   //  3: green
-    rgb(204, 51, 204),  //  4: magenta
-    rgb(51, 204, 204),  //  5: cyan
-    rgb(204, 204, 51),  //  6: yellow
-    rgb(135, 135, 135), //  7: gray 50%
-    rgb(66, 66, 66),    //  8: gray 25%
-    rgb(84, 84, 153),   //  9: less saturated blue
-    rgb(153, 66, 66),   // 10: less saturated red
-    rgb(84, 153, 84),   // 11: less saturated green
-    rgb(153, 84, 153),  // 12: less saturated magenta
-    rgb(84, 153, 153),  // 13: less saturated cyan
-    rgb(153, 153, 84),  // 14: less saturated yellow
-    rgb(204, 204, 204), // 15: gray 75%
-};
+// The VT340 default palette and the HLS->RGB conversion live in vtbackend/Color.h, shared verbatim
+// with the ReGIS colour introducer (@ref vtbackend::VT340DefaultColorPalette, @ref decHlsToRgb).
 
 // {{{ SixelColorPalette
 SixelColorPalette::SixelColorPalette(unsigned int size, unsigned int maxSize): _maxSize { maxSize }
@@ -117,8 +56,8 @@ SixelColorPalette::SixelColorPalette(unsigned int size, unsigned int maxSize): _
 
 void SixelColorPalette::reset()
 {
-    for (size_t i = 0; i < min(static_cast<size_t>(size()), DefaultColors.size()); ++i)
-        _palette[i] = DefaultColors[i];
+    for (size_t i = 0; i < min(static_cast<size_t>(size()), VT340DefaultColorPalette.size()); ++i)
+        _palette[i] = VT340DefaultColorPalette[i];
 }
 
 void SixelColorPalette::setSize(unsigned int newSize)
@@ -321,15 +260,10 @@ void SixelParser::submitColor()
                 //
                 // (Hue angle seems to be shifted by 120 deg in other Sixel implementations.)
                 //
-                // Saturated for the same reason the RGB branch above is: these parameters arrive off the
-                // wire unclamped, and hsl2rgb() of an out-of-range value converts a double far outside
-                // 0..255 to uint8_t, which is undefined. Each saturates at the top of the range the
-                // VT340 defines for it.
-                auto const h = static_cast<double>(std::min(_params[2], 360u)) - 120.0;
-                auto const hc = (h < 0 ? 360 + h : h) / 360.0;
-                auto const sc = static_cast<double>(std::min(_params[4], 100u)) / 100.0;
-                auto const ls = static_cast<double>(std::min(_params[3], 100u)) / 100.0;
-                auto const rgb = hsl2rgb(hc, sc, ls);
+                // decHlsToRgb saturates each parameter to its VT340 range first: they arrive off the
+                // wire unclamped, and converting an out-of-range double to uint8_t is undefined. The
+                // conversion is shared with the ReGIS colour introducer so both render identically.
+                auto const rgb = decHlsToRgb(_params[2], _params[3], _params[4]);
                 _events.setColor(index, rgb);
                 break;
             }

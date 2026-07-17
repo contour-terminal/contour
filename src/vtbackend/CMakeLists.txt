@@ -43,6 +43,13 @@ set(vtbackend_HEADERS
     Sequence.h
     SequenceBuilder.h
     SixelParser.h
+    regis/ReGISTables.h
+    regis/ReGISColor.h
+    regis/ReGISRasterizer.h
+    regis/ReGISContext.h
+    regis/ReGISFont.h
+    regis/ReGISTextRasterizer.h
+    regis/ReGISParser.h
     SoAClusterWriter.h
     StatusLineBuilder.h
     Terminal.h
@@ -82,6 +89,12 @@ set(vtbackend_SOURCES
     SoAClusterWriter.cpp
     Sequence.cpp
     SixelParser.cpp
+    regis/ReGISColor.cpp
+    regis/ReGISRasterizer.cpp
+    regis/ReGISContext.cpp
+    regis/ReGISFont.cpp
+    regis/ReGISTextRasterizer.cpp
+    regis/ReGISParser.cpp
     StatusLineBuilder.cpp
     Terminal.cpp
     VTType.cpp
@@ -161,6 +174,13 @@ if(LIBTERMINAL_TESTING)
         LineSoA_test.cpp
         SoAClusterWriter_test.cpp
         SixelParser_test.cpp
+        ReGIS_test.cpp
+        regis/ReGISTables_test.cpp
+        regis/ReGISColor_test.cpp
+        regis/ReGISRasterizer_test.cpp
+        regis/ReGISFont_test.cpp
+        regis/ReGISTextRasterizer_test.cpp
+        regis/ReGISParser_test.cpp
         ViCommands_test.cpp
         VTWriter_test.cpp
     )

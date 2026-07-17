@@ -45,6 +45,14 @@ class Terminal;
 struct CommandBlockInfo;
 struct Settings;
 
+namespace regis
+{
+    struct ReGISContext;
+    class ReGISRasterizer;
+    class ReGISTextRasterizer;
+    class ReGISEvents;
+} // namespace regis
+
 // {{{ TODO: move me somewhere more appropriate
 // XTSMGRAPHICS (xterm extension)
 // CSI ? Pi ; Pa ; Pv S
@@ -348,6 +356,25 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void requestPixelSize(RequestPixelSize area);
     void requestCharacterSize(RequestPixelSize area);
     void sixelImage(ImageSize pixelSize, Image::Data&& rgbaData);
+
+    /// Publishes the persistent ReGIS canvas to the grid as an overlay image. Invoked when a ReGIS
+    /// DCS string drew anything.
+    /// @param pixelSize The canvas pixel dimensions.
+    /// @param rgbaData The canvas RGBA pixels (a copy; the persistent canvas is left intact).
+    void regisImage(ImageSize pixelSize, Image::Data&& rgbaData);
+
+    /// Commits the current ReGIS canvas to the grid via @ref regisImage if anything was drawn.
+    void commitReGIS();
+
+    /// Injects the rasterizer used for ReGIS text glyphs, replacing the built-in embedded font.
+    ///
+    /// The display layer calls this with a text_shaper-backed implementation so ReGIS text renders
+    /// through the terminal's real font engine; passing nullptr restores the embedded default.
+    /// @param rasterizer The text rasterizer to use (shared with the display).
+    void setReGISTextRasterizer(std::shared_ptr<regis::ReGISTextRasterizer> rasterizer) noexcept
+    {
+        _regisTextRasterizer = std::move(rasterizer);
+    }
     void requestStatusString(RequestStatusString value);
     void requestTabStops();
     void resetDynamicColor(DynamicColorName name);
@@ -773,6 +800,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     [[nodiscard]] std::unique_ptr<ParserExtension> hookSTP(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookSixel(Sequence const& seq);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookReGIS(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECAUPSS(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECDLD(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECDMAC(Sequence const& seq);
@@ -812,6 +840,13 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     Line* _currentLine = nullptr;
     std::unique_ptr<SixelImageBuilder> _sixelImageBuilder;
+
+    // Persistent ReGIS interpreter state and canvas: ReGIS state and pixels survive across DCS
+    // strings, so these live on the Screen and a fresh parser references them each hook.
+    std::unique_ptr<regis::ReGISContext> _regisContext;
+    std::unique_ptr<regis::ReGISRasterizer> _regisCanvas;
+    std::shared_ptr<regis::ReGISTextRasterizer> _regisTextRasterizer;
+    std::unique_ptr<regis::ReGISEvents> _regisEvents;
 
 #if defined(LIBTERMINAL_LOG_TRACE)
     std::atomic<bool> _logCharTrace = true;

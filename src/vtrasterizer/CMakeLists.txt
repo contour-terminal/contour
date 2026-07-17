@@ -8,6 +8,7 @@ set(_header_files
     ImageRenderer.h
     Pixmap.h
     RenderTarget.h
+    ReGISFontRasterizer.h
     Renderer.h
     TextClusterGrouper.h
     TextRenderer.h
@@ -23,6 +24,7 @@ set(_source_files
     ImageRenderer.cpp
     Pixmap.cpp
     RenderTarget.cpp
+    ReGISFontRasterizer.cpp
     Renderer.cpp
     TextClusterGrouper.cpp
     TextRenderer.cpp
@@ -34,6 +36,7 @@ set(_test_files
     BoxDrawingRenderer_test.cpp
     GlyphAdvance_test.cpp
     ImageRenderer_test.cpp
+    ReGISFontRasterizer_test.cpp
     TextRenderer_test.cpp
 )
 

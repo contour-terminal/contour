@@ -1172,6 +1172,19 @@ class Terminal
     [[nodiscard]] Screen& primaryScreen() noexcept { return *_pages[0]; }
     [[nodiscard]] Screen const& alternateScreen() const noexcept { return *_pages[AlternateScreenPageIndex.value]; }
     [[nodiscard]] Screen& alternateScreen() noexcept { return *_pages[AlternateScreenPageIndex.value]; }
+
+    /// Injects the ReGIS text rasterizer into every page so ReGIS text renders through the display's
+    /// font engine rather than the built-in embedded font. See Screen::setReGISTextRasterizer.
+    ///
+    /// Takes the terminal lock: this is called from the GUI thread (a session rebind) while the parser
+    /// thread reads @c _regisTextRasterizer under the same lock in Screen::hookReGIS, so an unlocked
+    /// write would race the shared_ptr control block.
+    void setReGISTextRasterizer(std::shared_ptr<regis::ReGISTextRasterizer> rasterizer)
+    {
+        auto const guard = std::lock_guard { *this };
+        for (auto& page: _pages)
+            page->setReGISTextRasterizer(rasterizer);
+    }
     [[nodiscard]] Screen const& hostWritableStatusLineDisplay() const noexcept { return _hostWritableStatusLineScreen; }
     [[nodiscard]] Screen const& indicatorStatusLineDisplay() const noexcept { return _indicatorStatusScreen; }
     // clang-format on

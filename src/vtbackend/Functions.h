@@ -196,6 +196,8 @@ constexpr inline auto DECSIXEL = FunctionDocumentation { .mnemonic = "DECSIXEL",
 constexpr inline auto STP = FunctionDocumentation { .mnemonic = "STP", .comment = "Set Terminal Profile" };
 constexpr inline auto XTGETTCAP = FunctionDocumentation { .mnemonic = "XTGETTCAP", .comment = "Request Termcap/Terminfo String" };
 
+constexpr inline auto REGIS = FunctionDocumentation { .mnemonic = "REGIS", .comment = "ReGIS Vector Graphics", .parameters = "Pmode", .description = "Enters ReGIS (Remote Graphics Instruction Set) mode, DEC's vector graphics protocol from the " "VT330/VT340. The ReGIS command string that follows (terminated by ST) draws lines, curves, " "circles, filled polygons and text onto a persistent graphics canvas that Contour rasterizes " "and places into the terminal grid. `Pmode` controls state carry-over: 1 or 3 reset the graphics " "state and clear the canvas, 0 (and 2) resume the persistent context (position, colors, write " "controls and address window carry across successive DCS strings).", .notes = "VT330/VT340. See also DECSIXEL for raster graphics." };
+
 // GIP (Good Image Protocol)
 constexpr inline auto GIP = FunctionDocumentation { .mnemonic = "GIP", .comment = "Good Image Protocol (upload, render, release, oneshot, query)." };
 
@@ -826,6 +828,7 @@ constexpr inline auto DECDMAC     = detail::DCS(std::nullopt, 0, 3, '!', 'z', VT
 constexpr inline auto DECRQSS     = detail::DCS(std::nullopt, 0, 0, '$', 'q', VTType::VT420, documentation::DECRQSS);
 constexpr inline auto DECUDK      = detail::DCS(std::nullopt, 0, 2, std::nullopt, '|', VTType::VT220, documentation::DECUDK);
 constexpr inline auto DECSIXEL    = detail::DCS(std::nullopt, 0, 3, std::nullopt, 'q', VTType::VT330, documentation::DECSIXEL);
+constexpr inline auto REGIS       = detail::DCS(std::nullopt, 0, 1, std::nullopt, 'p', VTType::VT330, documentation::REGIS);
 constexpr inline auto STP         = detail::DCS(std::nullopt, 0, 0, '$', 'p', VTExtension::Contour, documentation::STP);
 constexpr inline auto XTGETTCAP   = detail::DCS(std::nullopt, 0, 0, '+', 'q', VTExtension::XTerm, documentation::XTGETTCAP);
 
@@ -1088,6 +1091,7 @@ constexpr static auto allFunctionsArray() noexcept
         STP,
         DECRQSS,
         DECSIXEL,
+        REGIS,
         XTGETTCAP,
 
         // OSC

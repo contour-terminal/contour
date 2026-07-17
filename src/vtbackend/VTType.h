@@ -63,6 +63,7 @@ enum class DeviceAttributes : uint32_t
     HorizontalScrolling = (1 << 15),
     TextMacros = (1 << 16),
     SoftCharacterSet = (1 << 17),
+    RegisGraphics = (1 << 18),
 };
 
 constexpr DeviceAttributes operator|(DeviceAttributes a, DeviceAttributes b)

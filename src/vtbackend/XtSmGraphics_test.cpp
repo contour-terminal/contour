@@ -191,9 +191,11 @@ TEST_CASE("XtSmGraphics.SixelGeometry.a ceiling change keeps what an application
     }
 }
 
-TEST_CASE("XtSmGraphics.ReGISGeometry always answers failure", "[screen][xtsmgraphics]")
+TEST_CASE("XtSmGraphics.ReGISGeometry reports the fixed VT340 canvas", "[screen][xtsmgraphics]")
 {
-    // Contour implements no ReGIS. Failure is the honest answer; silence hangs the caller.
+    // Contour now implements ReGIS. Its addressing space is the fixed VT340 800x480 pixel canvas,
+    // which Contour rasterizes and scales into the grid (the internal supersampled buffer is not
+    // reported). The read/reset/limit actions all report that fixed size with a success status (0).
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(11) } };
     configure(mock, ImageSize { Width(1920), Height(1080) });
 
@@ -205,14 +207,23 @@ TEST_CASE("XtSmGraphics.ReGISGeometry always answers failure", "[screen][xtsmgra
     {
         mock.writeToScreen("\033[?3;2S");
     }
-    SECTION("set to value")
-    {
-        mock.writeToScreen("\033[?3;3;10;10S");
-    }
     SECTION("read limit")
     {
         mock.writeToScreen("\033[?3;4S");
     }
+
+    CHECK(mock.terminal.peekInput() == "\033[?3;0;800;480S"sv);
+}
+
+TEST_CASE("XtSmGraphics.ReGISGeometry rejects a set request", "[screen][xtsmgraphics]")
+{
+    // The ReGIS geometry is fixed, so a request to set it to a specific value must be rejected with a
+    // failure status (3) rather than falsely acknowledged -- an application that believed its size was
+    // accepted would draw to the wrong coordinate space.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(11) } };
+    configure(mock, ImageSize { Width(1920), Height(1080) });
+
+    mock.writeToScreen("\033[?3;3;10;10S");
 
     CHECK(mock.terminal.peekInput() == "\033[?3;3;0S"sv);
 }

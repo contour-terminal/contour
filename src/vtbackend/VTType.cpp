@@ -38,6 +38,7 @@ string to_string(DeviceAttributes v)
         pair { DeviceAttributes::HorizontalScrolling, "HorizontalScrolling" },
         pair { DeviceAttributes::TextMacros, "TextMacros" },
         pair { DeviceAttributes::SoftCharacterSet, "SoftCharacterSet" },
+        pair { DeviceAttributes::RegisGraphics, "RegisGraphics" },
     };
 
     for (auto const& mapping: Mappings)
@@ -82,6 +83,7 @@ string to_params(DeviceAttributes v)
     auto constexpr Mappings = std::array {
         pair { DeviceAttributes::Columns132, "1" },
         pair { DeviceAttributes::Printer, "2" },
+        pair { DeviceAttributes::RegisGraphics, "3" },
         pair { DeviceAttributes::SixelGraphics, "4" },
         pair { DeviceAttributes::SelectiveErase, "6" },
         pair { DeviceAttributes::SoftCharacterSet, "7" },
