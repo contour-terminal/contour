@@ -294,9 +294,13 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void index();        // IND
     void reverseIndex(); // RI
 
-    void setScrollSpeed(int speed);      // DECSSCLS
-    void deviceStatusReport();           // DSR
-    void reportCursorPosition();         // CPR
+    void setScrollSpeed(int speed); // DECSSCLS
+    void deviceStatusReport();      // DSR
+    void reportCursorPosition();    // CPR
+
+    /// DECCKSR (`CSI ? 63 ; Pid n`) -- the checksum of the macro memory.
+    /// @param requestId The id the request was tagged with, carried back in the reply.
+    void reportMacroSpaceChecksum(unsigned requestId);
     void reportExtendedCursorPosition(); // DECXCPR
     void reportCursorInformation();      // DECCIR
     void reportColorPaletteUpdate();

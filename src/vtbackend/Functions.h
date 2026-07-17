@@ -84,6 +84,21 @@ constexpr inline auto DECIC = FunctionDocumentation { .mnemonic = "DECIC", .comm
 constexpr inline auto DECINVM = FunctionDocumentation { .mnemonic = "DECINVM", .comment = "Invoke Macro" };
 constexpr inline auto DECPS = FunctionDocumentation { .mnemonic = "DECPS", .comment = "Controls the sound frequency or notes" };
 constexpr inline auto DECRM = FunctionDocumentation { .mnemonic = "DECRM", .comment = "Reset DEC-mode" };
+constexpr inline auto DECREQTPARM = FunctionDocumentation {
+    .mnemonic = "DECREQTPARM",
+    .comment = "Request Terminal Parameters",
+    .parameters = "Ps",
+    .description = "Requests the terminal's communication parameters. The terminal answers with "
+                   "DECREPTPARM: `CSI Psol ; Ppar ; Pnbits ; Pxspeed ; Prspeed ; Pclkmul ; Pflags x`.",
+    .notes = "Ps selects whether the terminal may afterwards send unsolicited reports (0, the default) "
+             "or not (1); Psol echoes that choice back as Ps + 2. The remaining values describe a "
+             "serial line that no longer exists, so every modern terminal reports the same fiction: "
+             "no parity, eight bits, 38400 baud in both directions.\n\n"
+             "xterm answers only below terminal id 200, on the grounds that DEC dropped the sequence "
+             "after the VT100. Contour follows wezterm and answers at every level: vttest offers the "
+             "test regardless of the reported level, and an application that does not want the report "
+             "simply never asks for it.",
+};
 constexpr inline auto DECRQM = FunctionDocumentation { .mnemonic = "DECRQM", .comment = "Request DEC-mode" };
 constexpr inline auto DECRQM_ANSI = FunctionDocumentation { .mnemonic = "DECRQM_ANSI", .comment = "Request ANSI-mode" }; // NOLINT
 constexpr inline auto DECRQPSR = FunctionDocumentation { .mnemonic = "DECRQPSR", .comment = "Request presentation state report" };
@@ -104,8 +119,30 @@ constexpr inline auto DECSSDT = FunctionDocumentation { .mnemonic = "DECSSDT", .
 constexpr inline auto DECSTBM = FunctionDocumentation { .mnemonic = "DECSTBM", .comment = "Set top/bottom margin" };
 constexpr inline auto DECSTGLT = FunctionDocumentation { .mnemonic = "DECSTGLT", .comment = "Select Color Look-Up Table", .parameters = "table", .description = "Selects the color mode used to display text: 1 or 2 = alternate color (text color comes from the " "attribute combinations assigned via DECATC, and ANSI SGR color parameters are ignored entirely; a " "combination with no DECATC assignment uses the default text colors), 3 = ANSI SGR color (the " "power-up default, and what an omitted parameter selects). The monochrome table (0) of the original " "VT525 is not supported.", .notes = "VT525. See also DECATC and DECAC.", };
 constexpr inline auto DECSTR = FunctionDocumentation { .mnemonic = "DECSTR", .comment = "Soft terminal reset" };
+constexpr inline auto DECTST = FunctionDocumentation {
+    .mnemonic = "DECTST",
+    .comment = "Invoke Confidence Test",
+    .parameters = "Ps1 ; Ps2 ...",
+    .description =
+        "Runs the terminal's built-in confidence tests. Ps1 selects the invoke opcode and Ps2 onwards "
+        "name the tests: 0 = all, 1 = power-up self test, 2 = RS-232 data loopback, 3 = printer port "
+        "loopback, 4 = speed select, 5 = reserved, 6 = RS-232 modem-control loopback, 7 = EIA-423 "
+        "loopback, 8 = parallel port loopback, 9 = repeat the other tests in the string.\n\n"
+        "Contour is a software terminal, so it has none of the hardware those loopback tests exercise "
+        "and none of it can fail: every test trivially passes and nothing is reported. The one test "
+        "with an effect a program can observe is the power-up self test, which -- being a power-up -- "
+        "resets the terminal.",
+    .notes =
+        "Ps1 differs by generation: a VT100 invokes with 2 (`CSI 2 ; Ps y`), a VT510 and later with 4 "
+        "(`CSI 4 ; Ps y`). Both are accepted, because a terminal that reports VT525 is still driven by "
+        "VT100-era software -- vttest itself sends the VT100 form. Any other Ps1 is not an invocation "
+        "and is ignored.\n\n"
+        "A failure would be reported by DRAWING a diagnostic code, not by replying, so a terminal that "
+        "passes its tests writes nothing at all. No reply is ever sent.",
+    .examples = "CSI 2 ; 1 y   # VT100 form: power-up self test\n"
+                "CSI 4 ; 0 y   # VT510 form: all tests"
+};
 constexpr inline auto DECUDK = FunctionDocumentation { .mnemonic = "DECUDK", .comment = "User-Defined Keys" };
-constexpr inline auto DECXCPR = FunctionDocumentation { .mnemonic = "DECXCPR", .comment = "Report cursor position" };
 constexpr inline auto DL = FunctionDocumentation { .mnemonic = "DL", .comment = "Delete lines" };
 constexpr inline auto DSR = FunctionDocumentation { .mnemonic = "DSR", .comment = "Device Status Report (DEC)" };
 constexpr inline auto ECH = FunctionDocumentation { .mnemonic = "ECH", .comment = "Erase characters" };
@@ -127,6 +164,15 @@ constexpr inline auto SU = FunctionDocumentation { .mnemonic = "SU", .comment = 
 constexpr inline auto UNSCROLL = FunctionDocumentation { .mnemonic = "UNSCROLL", .comment = "Scroll Down with Scrollback Fill (kitty unscroll)" };
 constexpr inline auto TBC = FunctionDocumentation { .mnemonic = "TBC", .comment = "Horizontal Tab Clear" };
 constexpr inline auto VPA = FunctionDocumentation { .mnemonic = "VPA", .comment = "Vertical Position Absolute" };
+constexpr inline auto VPR = FunctionDocumentation {
+    .mnemonic = "VPR",
+    .comment = "Vertical Position Relative",
+    .parameters = "Ps",
+    .description = "Moves the cursor down Ps lines (default 1), keeping its column.",
+    .notes = "Behaves as CUD. xterm alone distinguishes the two -- it routes VPR through CursorSet, "
+             "which clamps to the page, while CUD stops at the bottom scroll margin -- but no other "
+             "mainstream terminal makes that distinction and ECMA-48 does not require it.",
+};
 constexpr inline auto WINMANIP = FunctionDocumentation { .mnemonic = "WINMANIP", .comment = "Window Manipulation" };
 constexpr inline auto XTCAPTURE = FunctionDocumentation { .mnemonic = "XTCAPTURE", .comment = "Report screen buffer capture." };
 constexpr inline auto XTPOPCOLORS = FunctionDocumentation { .mnemonic = "XTPOPCOLORS", .comment = "Pops the color palette from the palette's saved-stack." };
@@ -689,7 +735,7 @@ constexpr inline auto DECRQCRA    = detail::CSI(std::nullopt, 0, 6, '*', 'y', VT
 constexpr inline auto DECSACE     = detail::CSI(std::nullopt, 0, 1, '*', 'x', VTType::VT420, documentation::DECSACE);
 constexpr inline auto DECRM       = detail::CSI('?', 1, ArgsMax, std::nullopt, 'l', VTType::VT100, documentation::DECRM);
 constexpr inline auto DECRQM      = detail::CSI('?', 1, 1, '$', 'p', VTType::VT100, documentation::DECRQM);
-constexpr inline auto DECRQM_ANSI = detail::CSI(std::nullopt, 1, 1, '$', 'p', VTType::VT100, documentation::DECRQM_ANSI);// NOLINT
+constexpr inline auto DECREQTPARM = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'x', VTType::VT100, documentation::DECREQTPARM);
 constexpr inline auto DECRQPSR    = detail::CSI(std::nullopt, 1, 1, '$', 'w', VTType::VT320, documentation::DECRQPSR);
 constexpr inline auto DECSASD     = detail::CSI(std::nullopt, 0, 1, '$', '}', VTType::VT420, documentation::DECSASD);
 constexpr inline auto DECSCA      = detail::CSI(std::nullopt, 0, 1, '"', 'q', VTType::VT240, documentation::DECSCA);
@@ -707,9 +753,9 @@ constexpr inline auto DECSSDT     = detail::CSI(std::nullopt, 0, 1, '$', '~', VT
 constexpr inline auto DECSTBM     = detail::CSI(std::nullopt, 0, 2, std::nullopt, 'r', VTType::VT100, documentation::DECSTBM);
 constexpr inline auto DECSTGLT    = detail::CSI(std::nullopt, 0, 1, ')', '{', VTType::VT525, documentation::DECSTGLT);
 constexpr inline auto DECSTR      = detail::CSI(std::nullopt, 0, 0, '!', 'p', VTType::VT100, documentation::DECSTR);
-constexpr inline auto DECXCPR     = detail::CSI(std::nullopt, 0, 0, std::nullopt, '6', VTType::VT100, documentation::DECXCPR);
+constexpr inline auto DECTST      = detail::CSI(std::nullopt, 1, ArgsMax, std::nullopt, 'y', VTType::VT100, documentation::DECTST);
 constexpr inline auto DL          = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'M', VTType::VT100, documentation::DL);
-constexpr inline auto DSR         = detail::CSI('?', 1, 1, std::nullopt, 'n', VTType::VT100, documentation::DSR);
+constexpr inline auto DSR         = detail::CSI('?', 1, 2, std::nullopt, 'n', VTType::VT100, documentation::DSR);
 constexpr inline auto ECH         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'X', VTType::VT420, documentation::ECH);
 constexpr inline auto ED          = detail::CSI(std::nullopt, 0, ArgsMax, std::nullopt, 'J', VTType::VT100, documentation::ED);
 constexpr inline auto EL          = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'K', VTType::VT100, documentation::EL);
@@ -731,6 +777,7 @@ constexpr inline auto SR          = detail::CSI(std::nullopt, 0, 1, ' ', 'A', VT
 constexpr inline auto UNSCROLL    = detail::CSI(std::nullopt, 0, 1, '+', 'T', VTExtension::Unknown, documentation::UNSCROLL);
 constexpr inline auto TBC         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'g', VTType::VT100, documentation::TBC);
 constexpr inline auto VPA         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'd', VTType::VT100, documentation::VPA);
+constexpr inline auto VPR         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'e', VTType::VT100, documentation::VPR);
 constexpr inline auto WINMANIP    = detail::CSI(std::nullopt, 1, 3, std::nullopt, 't', VTExtension::XTerm, documentation::WINMANIP);
 constexpr inline auto XTCAPTURE   = detail::CSI('>', 0, 2, std::nullopt, 't', VTExtension::Contour, documentation::XTCAPTURE);
 constexpr inline auto XTPOPCOLORS    = detail::CSI(std::nullopt, 0, ArgsMax, '#', 'Q', VTExtension::XTerm, documentation::XTPOPCOLORS);
@@ -934,6 +981,7 @@ constexpr static auto allFunctionsArray() noexcept
         DECIC,
         DECPS,
         DECRARA,
+        DECREQTPARM,
         DECRQCRA,
         DECSACE,
         DECSCA,
@@ -964,7 +1012,7 @@ constexpr static auto allFunctionsArray() noexcept
         DECSTBM,
         DECSTGLT,
         DECSTR,
-        DECXCPR,
+        DECTST,
         DL,
         ECH,
         ED,
@@ -989,6 +1037,7 @@ constexpr static auto allFunctionsArray() noexcept
         UNSCROLL,
         TBC,
         VPA,
+        VPR,
         WINMANIP,
         XTPOPCOLORS,
         XTPUSHCOLORS,

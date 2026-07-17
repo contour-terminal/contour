@@ -197,6 +197,9 @@ TEST_CASE("writeText.autowrap.threeIdenticalFullLines", "[screen]")
     mock.writeToScreen("\033[?7h");       // autowrap ON
 
     auto const full = std::string(Cols, '*');
+    CHECK(screen.grid().lineText(LineOffset(0)) == full);                   // row 1
+    CHECK(screen.grid().lineText(LineOffset(1)) == full);                   // row 2
+    CHECK(screen.grid().lineText(LineOffset(2)) == full);                   // row 3
     CHECK(screen.grid().lineText(LineOffset(3)) == std::string(Cols, ' ')); // row 4 stays empty
 }
 
@@ -2889,9 +2892,8 @@ TEST_CASE("Index_outside_margin", "[screen]")
     screen.index();
     REQUIRE("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP\n" == screen.renderMainPageText());
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
+    CHECK(mock.terminal.primaryScreen().cursor().position == CellLocation { LineOffset(1), ColumnOffset(2) });
 
-    // with cursor below bottom margin and above bottom screen (=> only moves cursor one down)
-    screen.moveCursorTo(LineOffset { 4 }, ColumnOffset { 2 });
     screen.index();
     REQUIRE("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP\n" == screen.renderMainPageText());
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(5), ColumnOffset(2) });
@@ -2907,6 +2909,10 @@ TEST_CASE("DCH.worksOutsideTopBottomMargin", "[screen]")
     // patch 316) -- it is confined only by the left/right margins.
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("abcde");                             // row 1 = "abcde"
+    mock.writeToScreen("\033[2;3r");                         // DECSTBM(2,3): vertical margin is rows 2..3
+    mock.writeToScreen("\033[1;1H");                         // cursor to row 1, outside the vertical margin
+    mock.writeToScreen("\033[99P");                          // DCH(99)
     CHECK(screen.grid().lineText(LineOffset(0)) == "     "); // row 1 was still deleted
 }
 
@@ -2915,7 +2921,10 @@ TEST_CASE("ED.2_ignoresScrollRegion", "[screen]")
     // ED 2 erases the whole screen regardless of a DECSTBM scrolling region (the region is ignored).
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
-    logScreenText(screen, "initial setup");
+    mock.writeToScreen("\033[Haaa\r\nbbb\r\nccc");         // fill rows 1..3
+    mock.writeToScreen("\033[2;2r");                       // DECSTBM(2,2): margin is row 2 only
+    mock.writeToScreen("\033[2J");                         // ED 2
+    mock.writeToScreen("\033[r");                          // reset margin
     CHECK(screen.grid().lineText(LineOffset(0)) == "   "); // row 1 cleared (outside region)
     CHECK(screen.grid().lineText(LineOffset(2)) == "   "); // row 3 cleared (outside region)
 }
@@ -2926,6 +2935,10 @@ TEST_CASE("CBT.ignoresLeftRightMargin", "[screen]")
     // the left margin (5) to column 1, not stopping at the margin.
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
     auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("\033[?69h");                           // DECLRMM: enable left/right margins
+    mock.writeToScreen("\033[5;30s");                          // DECSLRM(5,30)
+    mock.writeToScreen("\033[1;9H");                           // CUP to column 9
+    mock.writeToScreen("\033[2Z");                             // CBT(2)
     CHECK(screen.cursor().position.column == ColumnOffset(0)); // column 1, ignoring the left margin
 }
 
@@ -2963,8 +2976,14 @@ TEST_CASE("LNM.VT_and_FF_honor_linefeed_mode", "[screen]")
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
     auto& screen = mock.terminal.primaryScreen();
 
+    mock.writeToScreen("\033[20l");                                                     // RM LNM (off)
+    mock.writeToScreen("\033[1;5H");                                                    // CUP row 1, col 5
+    mock.writeToScreen("\013");                                                         // VT
     CHECK(screen.cursor().position == CellLocation { LineOffset(1), ColumnOffset(4) }); // column kept
 
+    mock.writeToScreen("\033[20h");                                                     // SM LNM (on)
+    mock.writeToScreen("\033[1;5H");                                                    // CUP row 1, col 5
+    mock.writeToScreen("\014");                                                         // FF
     CHECK(screen.cursor().position == CellLocation { LineOffset(1), ColumnOffset(0) }); // carriage returned
 }
 
@@ -4997,6 +5016,89 @@ TEST_CASE("DECSTR", "[screen]")
             == CellLocation { LineOffset(2), ColumnOffset(0) });
     REQUIRE(mock.terminal.primaryScreen().savedCursorState().position
             == CellLocation { LineOffset(0), ColumnOffset(0) });
+}
+
+TEST_CASE("DECTST", "[screen]")
+{
+    // DECTST runs the terminal's built-in confidence tests. Contour has no hardware to test, so every
+    // test passes and nothing is reported -- a failure would be DRAWN as a diagnostic code, never
+    // replied. The one observable effect is the power-up self test, which resets the terminal.
+    auto const pageSize = PageSize { LineCount(4), ColumnCount(10) };
+
+    auto const isPristine = [](MockTerm<vtpty::MockPty>& mock) {
+        return mock.terminal.primaryScreen().renderMainPageText()
+               == "          \n          \n          \n          \n";
+    };
+
+    SECTION("the VT100 invoke opcode (2) runs the power-up self test, which resets")
+    {
+        // vttest sends exactly this, to every terminal it meets, whatever the terminal reports itself
+        // to be. @see vttest reset.c:36 `dectst(1)` -> esc.c:1126 `brc2(2, pn, 'y')`.
+        auto mock = MockTerm { pageSize };
+        mock.writeToScreen("ABCD");
+        REQUIRE_FALSE(isPristine(mock));
+
+        mock.writeToScreen("\033[2;1y");
+        CHECK(isPristine(mock));
+        // A terminal that passes its tests says nothing at all.
+        CHECK(mock.terminal.peekInput().empty());
+    }
+
+    SECTION("the VT510 invoke opcode (4) does the same")
+    {
+        // The sequence changed shape between generations -- VT100 invokes with 2, VT510 with 4 -- and a
+        // terminal reporting VT525 must still answer VT100-era software. @see vt100.net DECTST.
+        auto mock = MockTerm { pageSize };
+        mock.writeToScreen("ABCD");
+        mock.writeToScreen("\033[4;1y");
+        CHECK(isPristine(mock));
+    }
+
+    SECTION("test 0 runs all tests, and so resets too")
+    {
+        auto mock = MockTerm { pageSize };
+        mock.writeToScreen("ABCD");
+        mock.writeToScreen("\033[2;0y");
+        CHECK(isPristine(mock));
+    }
+
+    SECTION("a loopback test has no hardware to drive, so it changes nothing")
+    {
+        // 2 = RS-232 data loopback: there is no port, nothing to loop, and nothing that can fail. It
+        // must not be mistaken for the power-up test and reset the screen.
+        auto mock = MockTerm { pageSize };
+        mock.writeToScreen("ABCD");
+        mock.writeToScreen("\033[2;2y");
+        CHECK_FALSE(isPristine(mock));
+        CHECK(mock.terminal.peekInput().empty());
+    }
+
+    SECTION("naming no test runs no test")
+    {
+        // DECTST invokes what it is asked for, and `CSI 2 y` asks for nothing.
+        auto mock = MockTerm { pageSize };
+        mock.writeToScreen("ABCD");
+        mock.writeToScreen("\033[2y");
+        CHECK_FALSE(isPristine(mock));
+    }
+
+    SECTION("a Ps1 that is not an invoke opcode is not DECTST")
+    {
+        auto mock = MockTerm { pageSize };
+        mock.writeToScreen("ABCD");
+        mock.writeToScreen("\033[3;1y");
+        CHECK_FALSE(isPristine(mock));
+    }
+
+    SECTION("an unassigned test number is rejected, and resets nothing on the way")
+    {
+        // The power-up test is named first and the invalid one second: validating the whole string
+        // before running anything is what keeps a rejected DECTST from leaving the terminal half-reset.
+        auto mock = MockTerm { pageSize };
+        mock.writeToScreen("ABCD");
+        mock.writeToScreen("\033[2;1;42y");
+        CHECK_FALSE(isPristine(mock));
+    }
 }
 
 TEST_CASE("SGRSAVE and SGRRESTORE", "[screen]")
@@ -7303,6 +7405,74 @@ TEST_CASE("VT525 keyboard/national modes are settable toggles", "[screen]")
 
 // }}} ANSI Mode Tests
 
+// {{{ DECREQTPARM (Request Terminal Parameters) Tests
+
+TEST_CASE("DECREQTPARM: reports the terminal's communication parameters", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+
+    SECTION("Ps omitted defaults to 0, so Psol is 2")
+    {
+        mock.writeToScreen("\033[x");
+        mock.terminal.flushInput();
+        CHECK(mock.replyData() == "\033[2;1;1;128;128;1;0x");
+    }
+
+    SECTION("Ps = 0 reports Psol = 2")
+    {
+        mock.writeToScreen("\033[0x");
+        mock.terminal.flushInput();
+        CHECK(mock.replyData() == "\033[2;1;1;128;128;1;0x");
+    }
+
+    SECTION("Ps = 1 reports Psol = 3")
+    {
+        mock.writeToScreen("\033[1x");
+        mock.terminal.flushInput();
+        CHECK(mock.replyData() == "\033[3;1;1;128;128;1;0x");
+    }
+
+    SECTION("any other Ps is rejected without a reply")
+    {
+        mock.writeToScreen("\033[2x");
+        mock.terminal.flushInput();
+        CHECK(mock.replyData().empty());
+    }
+}
+
+// }}} DECREQTPARM Tests
+
+// {{{ VPR (Vertical Position Relative) Tests
+
+TEST_CASE("VPR: moves the cursor down, keeping its column", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[2;3H"); // row 2, column 3
+    REQUIRE(screen.cursor().position == CellLocation { LineOffset(1), ColumnOffset(2) });
+
+    SECTION("an omitted parameter moves down one line")
+    {
+        mock.writeToScreen("\033[e");
+        CHECK(screen.cursor().position == CellLocation { LineOffset(2), ColumnOffset(2) });
+    }
+
+    SECTION("Ps moves down that many lines")
+    {
+        mock.writeToScreen("\033[2e");
+        CHECK(screen.cursor().position == CellLocation { LineOffset(3), ColumnOffset(2) });
+    }
+
+    SECTION("movement is clamped to the page")
+    {
+        mock.writeToScreen("\033[99e");
+        CHECK(screen.cursor().position == CellLocation { LineOffset(4), ColumnOffset(2) });
+    }
+}
+
+// }}} VPR Tests
+
 // {{{ DECRQCRA / XTCHECKSUM Tests
 
 // The expected checksums below are what xterm-406 answers for the same screen and the same
@@ -7901,6 +8071,60 @@ TEST_CASE("OSC.105 resets the special colors", "[screen]")
 }
 
 // }}} Special colors
+
+// {{{ DECDSR (device status reports)
+
+TEST_CASE("DECDSR answers for the devices the terminal does not have", "[screen]")
+{
+    // A terminal with no printer, no user-defined keys, no macro memory and no session multiplexer still
+    // has to *say so*, in the words the standard gives it. Silence is not an answer: an application that
+    // asked is waiting, and will read whatever comes next in its place.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    auto const check = [&](std::string_view request, std::string_view expected) {
+        INFO("request: " << crispy::escape(request));
+        mock.discardPendingReplies();
+        mock.writeToScreen(request);
+        CHECK(e(mock.terminal.peekInput()) == e(expected));
+    };
+
+    check("\033[?15n", "\033[?13n");       // printer port: none
+    check("\033[?25n", "\033[?20n");       // user-defined keys: unlocked
+    check("\033[?26n", "\033[?27;0;0;5n"); // keyboard
+    check("\033[?53n", "\033[?50n");       // locator status: none
+    check("\033[?55n", "\033[?50n");       // locator status, xterm's spelling
+    check("\033[?56n", "\033[?57;0n");     // locator type: unknown
+    check("\033[?62n", "\033[0*{");        // DECMSR: no macro space
+    check("\033[?75n", "\033[?70n");       // data integrity: no errors
+    check("\033[?85n", "\033[?83n");       // sessions: not configured for multiple
+}
+
+TEST_CASE("DECXCPR reports the cursor's position and its page", "[screen]")
+{
+    // `CSI ? 6 n`. It used to be registered with a final byte of '6' -- which is not a final byte at all
+    // -- so the sequence matched nothing and the implementation behind it was unreachable.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    mock.writeToScreen("\033[5;6H");
+    mock.discardPendingReplies();
+
+    mock.writeToScreen("\033[?6n");
+    INFO(mock.terminal.peekInput());
+    REQUIRE(e(mock.terminal.peekInput()) == e("\033[?5;6;1R"));
+}
+
+TEST_CASE("DECCKSR carries back the id it was asked with", "[screen]")
+{
+    // There is no macro memory to checksum, so the checksum is zero -- but the reply still has to carry
+    // the request's id, which is how an application with several requests in flight tells them apart.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) } };
+
+    mock.writeToScreen("\033[?63;123n");
+    INFO(mock.terminal.peekInput());
+    REQUIRE(e(mock.terminal.peekInput()) == e("\033P123!~0000\033\\"));
+}
+
+// }}} DECDSR
 
 // {{{ Backspace, margins and reverse wraparound
 

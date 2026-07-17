@@ -732,7 +732,8 @@ void Screen::writeTextFromExternal(std::string_view text)
 
 void Screen::crlfIfWrapPending()
 {
-    if (_cursor.wrapPending && _cursor.autoWrap) // && !_terminal->isModeEnabled(DECMode::TextReflow))
+    if (_cursor.wrapPending
+        && _terminal->isModeEnabled(DECMode::AutoWrap)) // && !_terminal->isModeEnabled(DECMode::TextReflow))
     {
         bool const lineWrappable = currentLine().wrappable();
         crlf();
@@ -1182,6 +1183,14 @@ void Screen::deviceStatusReport()
 void Screen::reportCursorPosition()
 {
     reply("\033[{};{}R", logicalCursorPosition().line + 1, logicalCursorPosition().column + 1);
+}
+
+void Screen::reportMacroSpaceChecksum(unsigned requestId)
+{
+    // DECCKSR. There is no macro memory to checksum, so the checksum of it is zero -- but the reply
+    // still carries back the id it was asked with, which is how an application with several requests in
+    // flight tells the answers apart.
+    reply("\033P{}!~0000\033\\", requestId);
 }
 
 void Screen::reportColorPaletteUpdate()
@@ -3477,15 +3486,75 @@ namespace impl
             }
         }
 
+        /// One DECDSR (`CSI ? Ps n`) request whose answer never changes.
+        ///
+        /// A terminal with no printer, no user-defined keys, no macro memory and no session multiplexer
+        /// still has to *say so*, in the words the standard gives it. Most of DECDSR is exactly that: a
+        /// fixed answer to a fixed question. The two that are not -- the cursor's position, and the
+        /// checksum of a macro memory that does not exist -- are handled apart from this table.
+        ///
+        /// Adding a report is adding a row.
+        struct DeviceStatusReport
+        {
+            unsigned request; ///< The Ps that asks for it.
+            std::string_view reply;
+            std::string_view comment;
+        };
+
+        constexpr auto DeviceStatusReports = std::array {
+            DeviceStatusReport { .request = 15, .reply = "\033[?13n", .comment = "Printer port: no printer" },
+            DeviceStatusReport {
+                .request = 25, .reply = "\033[?20n", .comment = "User-defined keys: unlocked" },
+            DeviceStatusReport { .request = 26,
+                                 .reply = "\033[?27;0;0;5n",
+                                 .comment = "Keyboard: language unknown, ready, PCXAL" },
+            DeviceStatusReport {
+                .request = 53, .reply = "\033[?50n", .comment = "Locator: none, until DECELR is honoured" },
+            DeviceStatusReport { .request = 55,
+                                 .reply = "\033[?50n",
+                                 .comment = "Locator, xterm's spelling of the same question" },
+            DeviceStatusReport { .request = 56, .reply = "\033[?57;0n", .comment = "Locator type: unknown" },
+            DeviceStatusReport { .request = 62,
+                                 .reply = "\033[0*{",
+                                 .comment = "DECMSR: no macro space, because there are no macros" },
+            DeviceStatusReport { .request = 75,
+                                 .reply = "\033[?70n",
+                                 .comment = "Data integrity: no errors. There is no link to have any." },
+            DeviceStatusReport {
+                .request = 85, .reply = "\033[?83n", .comment = "Sessions: not configured for multiple" },
+        };
+
+        /// DECDSR -- `CSI ? Ps n`, the device status reports.
         ApplyResult DSR(Sequence const& seq, Screen& screen)
         {
-            switch (seq.param(0))
+            auto const request = seq.param_or(0, 0u);
+
+            switch (request)
             {
+                case 6:
+                    // DECXCPR: the cursor's position, and the page it is on.
+                    screen.reportExtendedCursorPosition();
+                    return ApplyResult::Ok;
+                case 63:
+                    // DECCKSR: the checksum of the macro memory. There are no macros, so it is zero --
+                    // but the reply still carries back the id the request was tagged with, so that an
+                    // application issuing several can tell the answers apart.
+                    screen.reportMacroSpaceChecksum(seq.param_or(1, 0u));
+                    return ApplyResult::Ok;
                 case ColorPaletteUpdateDsrRequestId:
                     screen.reportColorPaletteUpdate();
                     return ApplyResult::Ok;
-                default: return ApplyResult::Unsupported;
+                default: break;
             }
+
+            // `auto const`, not `auto const*`: libstdc++'s array iterator is a raw pointer but MSVC's
+            // is a class type. @see setDynamicColorCommand in primitives.h.
+            auto const report = std::ranges::find(DeviceStatusReports, request, &DeviceStatusReport::request);
+            if (report == DeviceStatusReports.end())
+                return ApplyResult::Unsupported;
+
+            screen.reply(report->reply);
+            return ApplyResult::Ok;
         }
 
         ApplyResult DECRQPSR(Sequence const& seq, Screen& screen)
@@ -3895,6 +3964,76 @@ namespace impl
             auto const lineCount = LineCount(seq.param_or(1, *terminal.pageSize().lines));
 
             terminal.requestCaptureBuffer(lineCount, logicalLines);
+
+            return ApplyResult::Ok;
+        }
+
+        /// The confidence tests DECTST can be asked to run, and what each means here.
+        ///
+        /// Adding a test is adding a row. @see documentation::DECTST.
+        struct ConfidenceTest
+        {
+            unsigned id;
+
+            /// Whether running it resets the terminal.
+            ///
+            /// True only for the power-up self test: it is a *power-up*, and that is the one effect of
+            /// any of these tests a program can observe. The rest loop data back through an RS-232
+            /// port, a printer port, a modem's control lines or a parallel port -- hardware a software
+            /// terminal does not have, so there is nothing to drive and nothing that can fail.
+            bool resetsTerminal;
+        };
+
+        constexpr auto ConfidenceTests = std::array {
+            ConfidenceTest { .id = 0, .resetsTerminal = true },  // all tests -- includes the power-up one
+            ConfidenceTest { .id = 1, .resetsTerminal = true },  // power-up self test
+            ConfidenceTest { .id = 2, .resetsTerminal = false }, // RS-232 data loopback
+            ConfidenceTest { .id = 3, .resetsTerminal = false }, // printer port loopback
+            ConfidenceTest { .id = 4, .resetsTerminal = false }, // speed select and speed indicator
+            ConfidenceTest { .id = 5, .resetsTerminal = false }, // reserved -- no action
+            ConfidenceTest { .id = 6, .resetsTerminal = false }, // RS-232 modem control line loopback
+            ConfidenceTest { .id = 7, .resetsTerminal = false }, // EIA-423 port loopback
+            ConfidenceTest { .id = 8, .resetsTerminal = false }, // parallel port loopback
+            ConfidenceTest { .id = 9, .resetsTerminal = false }, // repeat (loop on) the other tests
+        };
+
+        /// The Ps1 values that mean "invoke the tests named by the rest of the parameters".
+        ///
+        /// Two, because the sequence changed shape between generations: a VT100 invokes with 2, a VT510
+        /// and later with 4. Both are honoured -- a terminal reporting VT525 is still driven by
+        /// VT100-era software, and vttest sends the VT100 form to every terminal it meets.
+        constexpr auto ConfidenceTestInvokeOpcodes = std::array { 2U, 4U };
+
+        /// DECTST: runs the built-in confidence tests.
+        ///
+        /// Every test passes -- there is no hardware here to fail one -- and a failure would be
+        /// reported by drawing a diagnostic code rather than by replying, so a terminal that passes
+        /// writes nothing. @see documentation::DECTST.
+        ApplyResult invokeConfidenceTest(Sequence const& seq, Terminal& terminal)
+        {
+            auto const invoke = seq.param_or(0, 0U);
+            if (std::ranges::find(ConfidenceTestInvokeOpcodes, invoke) == ConfidenceTestInvokeOpcodes.end())
+                return ApplyResult::Invalid;
+
+            // No test named means no test run: DECTST invokes what it is asked for, and `CSI 2 y` asks
+            // for nothing. (Ps2 defaults to 0 -- "all tests" -- only when it is present and empty.)
+            auto reset = false;
+            for (auto const i: std::views::iota(size_t { 1 }, seq.parameterCount()))
+            {
+                auto const requested = seq.param_or(i, 0U);
+                // `auto const`, not `auto const*`: libstdc++'s array iterator is a raw pointer but
+                // MSVC's is a class type. @see setDynamicColorCommand in primitives.h.
+                auto const test = std::ranges::find(
+                    ConfidenceTests, requested, [](ConfidenceTest const& t) { return t.id; });
+                if (test == ConfidenceTests.end())
+                    return ApplyResult::Invalid;
+                reset = reset || test->resetsTerminal;
+            }
+
+            // Deferred to after the whole string is validated, so that an invalid test later in the
+            // string cannot leave the terminal half-reset by an earlier valid one.
+            if (reset)
+                terminal.hardReset();
 
             return ApplyResult::Ok;
         }
@@ -4822,7 +4961,32 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             // terminal identification, 4 hex codes
             reply("\033P!|C0000000\033\\");
             break;
-        case DCH: deleteCharacters(seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
+        case DECREQTPARM: {
+            // DECREPTPARM: CSI Psol ; Ppar ; Pnbits ; Pxspeed ; Prspeed ; Pclkmul ; Pflags x
+            //
+            // Psol echoes the request's Ps back, offset by 2. The rest describe a serial line that
+            // has not existed for decades, so -- like every other terminal -- we report the same
+            // fiction: no parity, eight bits, 38400 baud each way.
+            auto constexpr NoParity = 1;
+            auto constexpr EightBits = 1;
+            auto constexpr Baud38400 = 128;
+            auto constexpr ClockMultiplier = 1;
+            auto constexpr StpFlags = 0;
+
+            auto const ps = seq.param_or(0, 0);
+            if (ps != 0 && ps != 1)
+                return ApplyResult::Invalid;
+
+            reply("\033[{};{};{};{};{};{};{}x",
+                  ps + 2,
+                  NoParity,
+                  EightBits,
+                  Baud38400,
+                  Baud38400,
+                  ClockMultiplier,
+                  StpFlags);
+            break;
+        }
         case DCH: deleteCharacters(seq.param_positive_or<ColumnCount>(0, ColumnCount { 1 })); break;
         case DECCARA: {
             auto const area = impl::readRectangularArea(seq, 0, origin(), pageSize());
@@ -5084,6 +5248,8 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
                 // The usable (main-page) line count, not the total: the frontend adds the status-line
                 // height back itself (see DECCOLM / XTWINOPS `CSI 8 t`). Passing the total double-counts
                 // the status line.
+                _terminal->requestWindowResize(PageSize {
+                    _terminal->pageSize().lines, ColumnCount::cast_from(columnCount ? columnCount : 80) });
                 return ApplyResult::Ok;
             }
             else
@@ -5136,7 +5302,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
                 return ApplyResult::Invalid;
             _terminal->softReset();
             break;
-        case DECXCPR: reportExtendedCursorPosition(); break;
+        case DECTST: return impl::invokeConfidenceTest(seq, *_terminal);
         case NP: nextPage(seq.param_or(0, 1)); break;
         case PP: previousPage(seq.param_or(0, 1)); break;
         case PPA: pagePositionAbsolute(seq.param_or(0, 1)); break;
