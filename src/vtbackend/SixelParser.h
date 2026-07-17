@@ -442,8 +442,6 @@ class SixelImageBuilder: public SixelParser::Events
     [[nodiscard]] CellLocation const& sixelCursor() const noexcept { return _sixelCursor; }
 
   private:
-    void write(CellLocation const& coord, RGBColor const& value) noexcept;
-
     /// Re-lays the pixel buffer out to @p newStride pixels per row and @p newRows rows.
     ///
     /// Overlapping pixel content is preserved. This is the only function that moves pixels, so the

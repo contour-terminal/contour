@@ -428,36 +428,6 @@ RGBAColor SixelImageBuilder::at(CellLocation coord) const noexcept
     return RGBAColor { color[0], color[1], color[2], color[3] };
 }
 
-void SixelImageBuilder::write(CellLocation const& coord, RGBColor const& value) noexcept
-{
-    auto const canvas = canvasSize();
-    if (unbox(coord.line) >= 0
-        && unbox(coord.line) + static_cast<int>(_aspectRatio) <= unbox<int>(canvas.height)
-        && unbox(coord.column) >= 0 && unbox(coord.column) < unbox<int>(canvas.width))
-    {
-        if (!_explicitSize)
-        {
-            if (unbox(coord.line) >= unbox<int>(_size.height))
-                _size.height = Height::cast_from(std::min(coord.line.as<unsigned int>() + _aspectRatio,
-                                                          unbox<unsigned int>(canvas.height)));
-            if (unbox(coord.column) >= unbox<int>(_size.width))
-                _size.width = Width::cast_from(coord.column + 1);
-        }
-
-        reserve(unbox<unsigned>(coord.column) + 1, coord.line.as<unsigned int>() + _aspectRatio);
-
-        for (unsigned int i = 0; i < _aspectRatio; ++i)
-        {
-            auto const base = ((coord.line.as<unsigned int>() + i) * _stride * 4u)
-                              + (unbox<unsigned int>(coord.column) * 4u);
-            _buffer[base + 0] = value.red;
-            _buffer[base + 1] = value.green;
-            _buffer[base + 2] = value.blue;
-            _buffer[base + 3] = 0xFF;
-        }
-    }
-}
-
 void SixelImageBuilder::setColor(unsigned index, RGBColor const& color)
 {
     _colors->setColor(index, color);
