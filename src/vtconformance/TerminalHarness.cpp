@@ -59,6 +59,8 @@ void TerminalHarness::pump()
     while (!_terminating.load())
         if (!_engine->processInputOnce())
             break;
+
+    _pumpDrained.store(true);
 }
 
 void TerminalHarness::startScanning(std::span<std::string_view const> markers)
@@ -118,14 +120,26 @@ bool TerminalHarness::alive() const noexcept
 
 bool TerminalHarness::waitForExit(std::chrono::milliseconds timeout) const
 {
+    // The child's death is NOT a barrier for its output. Its last words outlive it: they sit in the
+    // pty's buffer until someone reads them, and the pump thread reads on its own schedule. Returning
+    // on `!alive()` alone hands the caller a screen the child's final write may not have reached yet --
+    // which is a race the caller cannot even see, because the screen it gets is a plausible one.
+    //
+    // The causal barrier is end-of-file. Once the child is gone its slave end is closed, so the read
+    // drains what is buffered and then reports EOF, and the pump loop leaves. That is the point at
+    // which "everything the child said has been rendered" is true, and nothing earlier is.
+    auto const drained = [this] {
+        return !_pumpThread || _pumpDrained.load();
+    };
+
     auto const deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline)
     {
-        if (!alive())
+        if (!alive() && drained())
             return true;
         std::this_thread::sleep_for(PollInterval);
     }
-    return !alive();
+    return !alive() && drained();
 }
 
 void TerminalHarness::writeInput(std::string_view text)

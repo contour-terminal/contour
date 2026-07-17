@@ -110,10 +110,15 @@ class TerminalHarness
     /// Waits for a self-driving program to run to completion.
     ///
     /// The counterpart to scanning for a prompt marker (@see startScanning, readBatch), for suites that
-    /// need no driving at all: esctest walks its own test list and exits, so the only barrier is the
-    /// child's death.
+    /// need no driving at all: esctest walks its own test list and exits, so there is no prompt to
+    /// answer.
     ///
-    /// @return false if the child was still running when @p timeout elapsed.
+    /// Waits for end-of-file, not merely for the child to die -- the two are different instants, and
+    /// only the later one means the child's output has been rendered. When the harness does not own the
+    /// pump, the caller drives the reads and only the child's death is waited on.
+    ///
+    /// @return false if the child was still running, or its output still undrained, when @p timeout
+    ///         elapsed.
     [[nodiscard]] bool waitForExit(std::chrono::milliseconds timeout) const;
 
     /// @return The visible page as plain text, read under the terminal lock.
@@ -145,6 +150,11 @@ class TerminalHarness
 
     std::unique_ptr<TerminalEngine> _engine;
     std::atomic<bool> _terminating { false };
+
+    /// Set when the pump loop leaves, which it does on end-of-file -- i.e. once the child's last bytes
+    /// have been read *and* fed to the engine. @see waitForExit.
+    std::atomic<bool> _pumpDrained { false };
+
     std::unique_ptr<std::thread> _pumpThread;
 
     /// Set only while a caller drives the reads itself. @see startScanning, readBatch.
