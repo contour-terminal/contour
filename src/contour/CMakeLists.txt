@@ -393,8 +393,15 @@ if(CONTOUR_FRONTEND_GUI)
                 COMMAND $<TARGET_FILE:contour>
                         config ${CMAKE_CURRENT_BINARY_DIR}/e2e/coverage-config.yml
                         early-exit-threshold 0 execute sh -c "exit 0")
+            # `setsid -w`, not a bare `sh`: the sweep runs `contour capture`, which reaches its terminal
+            # peer by opening /dev/tty. That is the CONTROLLING terminal -- redirecting the script's
+            # stdin/stdout does not detach from it -- so run from an interactive shell it drove the
+            # developer's own terminal, right down to a permission prompt that could block the run. A
+            # fresh session has no controlling terminal, which is both what the test means by "no terminal
+            # peer" and what CI has anyway; -w propagates the exit status (bare setsid may fork and
+            # return 0, which would make the test pass vacuously).
             add_test(NAME contour_e2e_cli
-                COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/cli-surface.sh $<TARGET_FILE:contour>)
+                COMMAND setsid -w sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/cli-surface.sh $<TARGET_FILE:contour>)
 
             # LeakSanitizer is disabled for the e2e app runs (LSAN_OPTIONS=detect_leaks=0). Booting the
             # real binary probes the audio/GPU driver stack (QMediaDevices::audioOutputs() ->

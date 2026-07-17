@@ -40,6 +40,7 @@ QNative
 QObject
 QOffscreen
 QOpen
+QPlatform
 QPoint
 QPointer
 QProcess
