@@ -5818,6 +5818,39 @@ TEST_CASE("DECDLD: switching away from DRCS uses normal font", "[screen]")
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
 // }}} DEC Multi-Page Support Tests
 
+// {{{ DECALN (Screen Alignment Pattern) Tests
+
+TEST_CASE("DECALN: fills the page with E's", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(4) } };
+    mock.writeToScreen("\033#8");
+
+    CHECK(mock.terminal.primaryScreen().renderMainPageText() == "EEEE\nEEEE\nEEEE\n");
+}
+
+TEST_CASE("DECALN: page that wraps the history ring is still filled in bounds", "[screen]")
+{
+    // Grid::_lines is a ring whose rotation is an INDEX move, not a data move. Once enough lines
+    // have scrolled into history, the logical main page straddles the ring's physical end. Anything
+    // that walks the page as a contiguous block therefore runs off the underlying vector -- which is
+    // what DECALN used to do, and what ASan catches here.
+    //
+    // Found by driving vttest through the conformance harness; there was no DECALN test at all.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(4) }, LineCount(2) };
+
+    // Scroll past the history capacity so the ring's zero-index no longer sits at physical zero.
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 6))
+        mock.writeToScreen("x\r\n");
+
+    REQUIRE(mock.terminal.primaryScreen().historyLineCount() == LineCount(2));
+
+    mock.writeToScreen("\033#8");
+
+    CHECK(mock.terminal.primaryScreen().renderMainPageText() == "EEEE\nEEEE\nEEEE\n");
+}
+
+// }}} DECALN Tests
+
 // {{{ One-based parameters: omitted, empty and zero all mean "the default"
 
 TEST_CASE("An omitted one-based parameter takes its default", "[screen]")

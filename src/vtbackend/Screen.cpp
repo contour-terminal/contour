@@ -2201,11 +2201,13 @@ void Screen::screenAlignmentPattern()
     // and moves the cursor to the home position
     moveCursorTo({}, {});
 
-    // fills the complete screen area with a test pattern
-    for (auto& line: _grid.mainPage())
-    {
-        line.fill(_grid.defaultLineFlags(), GraphicsAttributes {}, U'E', 1);
-    }
+    // Fills the complete screen area with a test pattern.
+    //
+    // Indexed line by line rather than over a contiguous span: the grid's line storage is a ring, so
+    // once lines have scrolled into history the page wraps its physical end and a span would run off
+    // the buffer.
+    for (auto const line: std::views::iota(0, *pageSize().lines))
+        _grid.lineAt(LineOffset(line)).fill(_grid.defaultLineFlags(), GraphicsAttributes {}, U'E', 1);
 }
 
 void Screen::applicationKeypadMode(bool enable)
