@@ -3024,6 +3024,10 @@ void Terminal::softReset()
     // extension up front would otherwise lose it to the first DECSTR it sends.
     _checksumExtension = _settings.checksumExtension;
 
+    // DECSCA is reset by setGraphicsRendition(GraphicsRendition::Reset) above. The character-protection
+    // *mode* (DEC/ISO) is separate screen state, so clear it too -- xterm's ReallyReset zeroes
+    // protected_mode unconditionally, i.e. on a soft reset as well as a hard one.
+    _currentScreen->resetProtection();
     // TODO: DECNRCM (National replacement character set)
     // TODO: GL, GR (G0, G1, G2, G3)
     // TODO: DECAUPSS (Assign user preference supplemental set)

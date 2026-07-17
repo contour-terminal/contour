@@ -221,22 +221,31 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void clearScreen();
     void setMark();
 
+    // Erase, sparing cells that carry @p protectedFlag. The default (CharacterProtected) is DEC/DECSCA
+    // protection, so the DECSEL/DECSED/DECSERA handlers erase selectively with no argument. The regular
+    // ED/EL/ECH erases pass CharacterProtectedISO to spare ISO 6429 (SPA/EPA) guarded cells instead.
+
     // DECSEL
-    void selectiveEraseToBeginOfLine();
-    void selectiveEraseToEndOfLine();
-    void selectiveEraseLine(LineOffset line);
+    void selectiveEraseToBeginOfLine(CellFlag protectedFlag = CellFlag::CharacterProtected);
+    void selectiveEraseToEndOfLine(CellFlag protectedFlag = CellFlag::CharacterProtected);
+    void selectiveEraseLine(LineOffset line, CellFlag protectedFlag = CellFlag::CharacterProtected);
 
     // DECSED
-    void selectiveEraseToBeginOfScreen();
-    void selectiveEraseToEndOfScreen();
-    void selectiveEraseScreen();
+    void selectiveEraseToBeginOfScreen(CellFlag protectedFlag = CellFlag::CharacterProtected);
+    void selectiveEraseToEndOfScreen(CellFlag protectedFlag = CellFlag::CharacterProtected);
+    void selectiveEraseScreen(CellFlag protectedFlag = CellFlag::CharacterProtected);
 
-    void selectiveEraseArea(Rect area);
+    void selectiveEraseArea(Rect area, CellFlag protectedFlag = CellFlag::CharacterProtected);
 
-    void selectiveErase(LineOffset line, ColumnOffset begin, ColumnOffset end);
-    [[nodiscard]] bool containsProtectedCharacters(LineOffset line,
-                                                   ColumnOffset begin,
-                                                   ColumnOffset end) const;
+    void selectiveErase(LineOffset line,
+                        ColumnOffset begin,
+                        ColumnOffset end,
+                        CellFlag protectedFlag = CellFlag::CharacterProtected);
+    [[nodiscard]] bool containsProtectedCharacters(
+        LineOffset line,
+        ColumnOffset begin,
+        ColumnOffset end,
+        CellFlag protectedFlag = CellFlag::CharacterProtected) const;
 
     void eraseCharacters(ColumnCount n);  // ECH
     void insertCharacters(ColumnCount n); // ICH
@@ -688,6 +697,12 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void fail(std::string const& message) const;
 
     void hardReset();
+
+    /// Clears any active ISO 6429 (SPA/EPA) guarded-area protection. Called from both the hard reset
+    /// (RIS) and the soft reset (DECSTR), mirroring xterm's unconditional reset of `protected_mode`.
+    /// The per-cell DECSCA flag is cleared separately, by the SGR reset. @see SPA, EPA, DECSCA.
+    void resetProtection() noexcept { _isoProtectionActive = false; }
+
     void applyPageSizeToMainDisplay(PageSize pageSize);
 
     void saveCursor();
@@ -789,8 +804,15 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Controls whether DECCARA/DECRARA operate on the full rectangle (true) or stream (false).
     bool _rectangularAttributeMode = true;
 
-    /// XTCHECKSUM extension flags for DECRQCRA checksum computation.
-    int _checksumExtension = 0;
+    /// Whether ISO 6429 guarded-area protection (SPA/EPA) is in effect. Set by SPA, and left set by
+    /// EPA (which only stops guarding *new* cells); cleared only by a reset. @see resetProtection.
+    bool _isoProtectionActive = false;
+
+    /// Whether the regular erases (ED/EL/ECH) must spare CellFlag::CharacterProtectedISO cells.
+    /// True only while ISO protection is active; when false those erases take their fast paths. DECSCA
+    /// (CellFlag::CharacterProtected) is honoured by the selective erases instead, never here.
+    [[nodiscard]] bool eraseSkipsProtectedCells() const noexcept { return _isoProtectionActive; }
+
 };
 
 inline void Screen::scrollUp(LineCount n, Margin margin)

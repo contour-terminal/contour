@@ -619,6 +619,10 @@ constexpr inline auto LS1R    = detail::ESC(std::nullopt, '~', VTType::VT220, { 
 constexpr inline auto LS2R    = detail::ESC(std::nullopt, '}', VTType::VT220, { .mnemonic = "LS2R", .comment = "Locking Shift 2 Right; Maps G2 into GR." });
 constexpr inline auto LS3R    = detail::ESC(std::nullopt, '|', VTType::VT220, { .mnemonic = "LS3R", .comment = "Locking Shift 3 Right; Maps G3 into GR." });
 
+// ISO 6429 guarded-area protection (the 8-bit C1 forms 0x96/0x97 fold onto these via the parser).
+constexpr inline auto SPA     = detail::ESC(std::nullopt, 'V', VTType::VT220, { .mnemonic = "SPA", .comment = "Start of Protected Area; protects written cells against erases." });
+constexpr inline auto EPA     = detail::ESC(std::nullopt, 'W', VTType::VT220, { .mnemonic = "EPA", .comment = "End of Protected Area; stops protecting newly written cells." });
+
 // VT52 — the legacy single-character escape grammar, active only in VT52 mode (DECANM reset). These
 // share ESC finals with ANSI functions (e.g. ESC H = home vs HTS), hence their own FunctionCategory.
 constexpr inline auto VT52_CUU        = detail::VT52('A', 0, 0, { .mnemonic = "VT52_CUU", .comment = "VT52: Cursor Up." }); // NOLINT
@@ -881,6 +885,8 @@ constexpr static auto allFunctionsArray() noexcept
         LS1R,
         LS2R,
         LS3R,
+        SPA,
+        EPA,
         VT52_CUU,
         VT52_CUD,
         VT52_CUF,

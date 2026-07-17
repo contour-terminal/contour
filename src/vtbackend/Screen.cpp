@@ -477,6 +477,7 @@ void Screen::hardReset()
     _grid.reset();
     _cursor = {};
     _lastCursorPosition = {};
+    resetProtection();
     updateCursorIterator();
 }
 
@@ -1346,6 +1347,14 @@ void Screen::sendTerminalId()
 
 void Screen::clearToEndOfScreen()
 {
+    // Under ISO protection a regular ED must spare the ISO-guarded cells -- which is the selective
+    // erase sparing CharacterProtectedISO, so delegate rather than duplicate the per-cell skip logic.
+    if (eraseSkipsProtectedCells())
+    {
+        selectiveEraseToEndOfScreen(CellFlag::CharacterProtectedISO);
+        return;
+    }
+
     clearToEndOfLine();
 
     for (auto const lineOffset: iota(unbox(_cursor.position.line) + 1, unbox(pageSize().lines)))
@@ -1357,6 +1366,12 @@ void Screen::clearToEndOfScreen()
 
 void Screen::clearToBeginOfScreen()
 {
+    if (eraseSkipsProtectedCells())
+    {
+        selectiveEraseToBeginOfScreen(CellFlag::CharacterProtectedISO);
+        return;
+    }
+
     clearToBeginOfLine();
 
     for (auto const lineOffset: iota(0, *_cursor.position.line))
@@ -1368,6 +1383,14 @@ void Screen::clearToBeginOfScreen()
 
 void Screen::clearScreen()
 {
+    // Under ISO protection the guarded cells must stay put, so we cannot scroll the page into
+    // history; erase the non-ISO-guarded cells in place instead (matching xterm's ED 2 under protection).
+    if (eraseSkipsProtectedCells())
+    {
+        selectiveEraseScreen(CellFlag::CharacterProtectedISO);
+        return;
+    }
+
     // Instead of *just* clearing the screen, and thus, losing potential important content,
     // we scroll up by RowCount number of lines, so move it all into history, so the user can scroll
     // up in case the content is still needed.
@@ -1389,6 +1412,16 @@ void Screen::eraseCharacters(ColumnCount n)
     auto const columnsAvailable = pageSize().columns - boxed_cast<ColumnCount>(realCursorPosition().column);
     auto const clampedN = unbox<long>(clamp(n, ColumnCount(1), columnsAvailable));
 
+    // Under ISO protection the ISO-guarded cells within the run must survive, so route through the
+    // selective erase sparing CharacterProtectedISO, exactly as ED/EL do.
+    if (eraseSkipsProtectedCells())
+    {
+        auto const endColumn = ColumnOffset::cast_from(_cursor.position.column.value + clampedN);
+        selectiveErase(
+            _cursor.position.line, _cursor.position.column, endColumn, CellFlag::CharacterProtectedISO);
+        return;
+    }
+
     auto& line = currentLine();
     for (int i = 0; i < clampedN; ++i)
         line.useCellAt(_cursor.position.column + i).reset(_cursor.graphicsRendition);
@@ -1396,28 +1429,31 @@ void Screen::eraseCharacters(ColumnCount n)
 
 // {{{ DECSEL
 
-void Screen::selectiveEraseToEndOfLine()
+void Screen::selectiveEraseToEndOfLine(CellFlag protectedFlag)
 {
     if (isFullHorizontalMargins() && _cursor.position.column.value == 0)
-        selectiveEraseLine(_cursor.position.line);
+        selectiveEraseLine(_cursor.position.line, protectedFlag);
     else
-        selectiveErase(
-            _cursor.position.line, _cursor.position.column, ColumnOffset::cast_from(pageSize().columns));
+        selectiveErase(_cursor.position.line,
+                       _cursor.position.column,
+                       ColumnOffset::cast_from(pageSize().columns),
+                       protectedFlag);
 }
 
-void Screen::selectiveEraseToBeginOfLine()
+void Screen::selectiveEraseToBeginOfLine(CellFlag protectedFlag)
 {
     if (isFullHorizontalMargins() && _cursor.position.column.value == pageSize().columns.value)
-        selectiveEraseLine(_cursor.position.line);
+        selectiveEraseLine(_cursor.position.line, protectedFlag);
     else
-        selectiveErase(_cursor.position.line, ColumnOffset(0), _cursor.position.column + 1);
+        selectiveErase(_cursor.position.line, ColumnOffset(0), _cursor.position.column + 1, protectedFlag);
 }
 
-void Screen::selectiveEraseLine(LineOffset line)
+void Screen::selectiveEraseLine(LineOffset line, CellFlag protectedFlag)
 {
-    if (containsProtectedCharacters(line, ColumnOffset(0), ColumnOffset::cast_from(pageSize().columns)))
+    if (containsProtectedCharacters(
+            line, ColumnOffset(0), ColumnOffset::cast_from(pageSize().columns), protectedFlag))
     {
-        selectiveErase(line, ColumnOffset(0), ColumnOffset::cast_from(pageSize().columns));
+        selectiveErase(line, ColumnOffset(0), ColumnOffset::cast_from(pageSize().columns), protectedFlag);
         return;
     }
 
@@ -1433,12 +1469,12 @@ void Screen::selectiveEraseLine(LineOffset line)
     _terminal->markRegionDirty(area);
 }
 
-void Screen::selectiveErase(LineOffset line, ColumnOffset begin, ColumnOffset end)
+void Screen::selectiveErase(LineOffset line, ColumnOffset begin, ColumnOffset end, CellFlag protectedFlag)
 {
     for (auto col = begin; col < end; ++col)
     {
         auto cell = at(line, col);
-        if (!cell.isFlagEnabled(CellFlag::CharacterProtected))
+        if (!cell.isFlagEnabled(protectedFlag))
             cell.reset(_cursor.graphicsRendition);
     }
 
@@ -1451,12 +1487,15 @@ void Screen::selectiveErase(LineOffset line, ColumnOffset begin, ColumnOffset en
     _terminal->markRegionDirty(area);
 }
 
-bool Screen::containsProtectedCharacters(LineOffset line, ColumnOffset begin, ColumnOffset end) const
+bool Screen::containsProtectedCharacters(LineOffset line,
+                                         ColumnOffset begin,
+                                         ColumnOffset end,
+                                         CellFlag protectedFlag) const
 {
     for (auto col = begin; col < end; ++col)
     {
         auto cell = at(line, col);
-        if (cell.isFlagEnabled(CellFlag::CharacterProtected))
+        if (cell.isFlagEnabled(protectedFlag))
             return true;
     }
     return false;
@@ -1464,39 +1503,40 @@ bool Screen::containsProtectedCharacters(LineOffset line, ColumnOffset begin, Co
 // }}}
 // {{{ DECSED
 
-void Screen::selectiveEraseToEndOfScreen()
+void Screen::selectiveEraseToEndOfScreen(CellFlag protectedFlag)
 {
-    selectiveEraseToEndOfLine();
+    selectiveEraseToEndOfLine(protectedFlag);
 
     auto const lineStart = unbox(_cursor.position.line) + 1;
     auto const lineEnd = unbox(pageSize().lines);
 
     for (auto const lineOffset: iota(lineStart, lineEnd))
-        selectiveEraseLine(LineOffset::cast_from(lineOffset));
+        selectiveEraseLine(LineOffset::cast_from(lineOffset), protectedFlag);
 }
 
-void Screen::selectiveEraseToBeginOfScreen()
+void Screen::selectiveEraseToBeginOfScreen(CellFlag protectedFlag)
 {
-    selectiveEraseToBeginOfLine();
+    selectiveEraseToBeginOfLine(protectedFlag);
 
     for (auto const lineOffset: iota(0, *_cursor.position.line))
-        selectiveEraseLine(LineOffset::cast_from(lineOffset));
+        selectiveEraseLine(LineOffset::cast_from(lineOffset), protectedFlag);
 }
 
-void Screen::selectiveEraseScreen()
+void Screen::selectiveEraseScreen(CellFlag protectedFlag)
 {
     for (auto const lineOffset: iota(0, *pageSize().lines))
-        selectiveEraseLine(LineOffset::cast_from(lineOffset));
+        selectiveEraseLine(LineOffset::cast_from(lineOffset), protectedFlag);
 }
 // }}}
 // {{{ DECSERA
 
-void Screen::selectiveEraseArea(Rect area)
+/// Erases the cells of @p area that are not guarded by @p protectedFlag.
 ///
 /// @param area The area to erase, as zero-based offsets already resolved against origin mode and
 ///             clamped to the page. @see impl::readRectangularArea().
+/// @param protectedFlag The protection flag that spares a cell (DEC by default; ISO for regular erases).
+void Screen::selectiveEraseArea(Rect area, CellFlag protectedFlag)
 {
-    auto const [top, left, bottom, right] = applyOriginMode(area).clampTo(_settings->pageSize);
     auto const [top, left, bottom, right] = area;
     Require(unbox(right) < unbox(pageSize().columns));
     Require(unbox(bottom) < unbox(pageSize().lines));
@@ -1509,7 +1549,7 @@ void Screen::selectiveEraseArea(Rect area)
         for (int x = left.value; x <= right.value; ++x)
         {
             auto cell = grid().lineAt(LineOffset::cast_from(y)).useCellAt(ColumnOffset::cast_from(x));
-            if (!cell.isFlagEnabled(CellFlag::CharacterProtected))
+            if (!cell.isFlagEnabled(protectedFlag))
             {
                 cell.writeTextOnly(L' ', 1);
                 cell.setHyperlink(HyperlinkId(0));
@@ -1523,6 +1563,12 @@ void Screen::selectiveEraseArea(Rect area)
 
 void Screen::clearToEndOfLine()
 {
+    if (eraseSkipsProtectedCells())
+    {
+        selectiveEraseToEndOfLine(CellFlag::CharacterProtectedISO);
+        return;
+    }
+
     if (isFullHorizontalMargins() && _cursor.position.column.value == 0)
     {
         currentLine().reset(currentLine().flags(), _cursor.graphicsRendition);
@@ -1550,6 +1596,12 @@ void Screen::clearToEndOfLine()
 
 void Screen::clearToBeginOfLine()
 {
+    if (eraseSkipsProtectedCells())
+    {
+        selectiveEraseToBeginOfLine(CellFlag::CharacterProtectedISO);
+        return;
+    }
+
     auto& currentLineRef = _grid.lineAt(_cursor.position.line);
     if (currentLineRef.isBlankWithFillAttrs(_cursor.graphicsRendition))
         return;
@@ -1567,6 +1619,12 @@ void Screen::clearToBeginOfLine()
 
 void Screen::clearLine()
 {
+    if (eraseSkipsProtectedCells())
+    {
+        selectiveEraseLine(_cursor.position.line, CellFlag::CharacterProtectedISO);
+        return;
+    }
+
     currentLine().reset(currentLine().flags(), _cursor.graphicsRendition);
 
     auto const line = _cursor.position.line;
@@ -4654,6 +4712,18 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case LS1R: _cursor.charsets.lockingShiftGR(CharsetTable::G1); break;
         case LS2R: _cursor.charsets.lockingShiftGR(CharsetTable::G2); break;
         case LS3R: _cursor.charsets.lockingShiftGR(CharsetTable::G3); break;
+        case SPA:
+            // Start of Protected Area (ISO 6429): guard cells written from here on with the ISO flag,
+            // and arm ISO protection so the regular ED/EL/ECH spare those cells.
+            _isoProtectionActive = true;
+            _cursor.graphicsRendition.flags.enable(CellFlag::CharacterProtectedISO);
+            break;
+        case EPA:
+            // End of Protected Area: stop guarding newly written cells. ISO protection itself stays
+            // armed until a reset (matching xterm), so already-guarded cells keep surviving erases.
+            _cursor.graphicsRendition.flags.disable(CellFlag::CharacterProtectedISO);
+            break;
+
         // VT52 -- the legacy single-character escape grammar, dispatched only while the parser is in
         // VT52 mode (DECANM reset). Cursor moves and erases reuse the ANSI primitives.
         case VT52_CUU: moveCursorUp(LineCount(1)); break;
@@ -4843,6 +4913,8 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             break;
         case DECSCA: {
             auto const pc = seq.param_or(0, 0);
+            // DECSCA (DEC) protection is per-cell via CellFlag::CharacterProtected; only the selective
+            // erases (DECSED/DECSEL/DECSERA) spare it. It is independent of the ISO SPA/EPA guard.
             switch (pc)
             {
                 case 1:

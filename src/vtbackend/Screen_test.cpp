@@ -1427,13 +1427,139 @@ TEST_CASE("DECSED-2: lines without protected characters are erased correctly", "
 }
 // }}}
 
+// {{{ SPA / EPA (ISO 6429 guarded-area protection)
+TEST_CASE("SPA/EPA: ED respects ISO protection", "[screen]")
+{
+    // Mirrors esctest ED_respectsISOProtection: a cell written between SPA (ESC V) and EPA (ESC W)
+    // survives a *regular* ED, while the unprotected cells around it are erased.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("ab\033Vc\033W"); // a, b, SPA, protected c, EPA
+    REQUIRE(e(mainPageText(screen)) == "abc\\n");
+
+    mock.writeToScreen("\033[H\033[J"); // CUP home, then ED to end of screen
+    REQUIRE(e(mainPageText(screen)) == "  c\\n");
+}
+
+TEST_CASE("SPA/EPA: EL respects ISO protection", "[screen]")
+{
+    // Mirrors esctest EL_respectsISOProtection: EL 2 (erase whole line) spares the protected cell.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("ab\033Vc\033W");
+    mock.writeToScreen("\033[H\033[2K"); // CUP home, EL 2 (entire line)
+    REQUIRE(e(mainPageText(screen)) == "  c\\n");
+}
+
+TEST_CASE("SPA/EPA: ECH respects ISO protection", "[screen]")
+{
+    // Mirrors esctest ECH_respectsISOProtection: ECH 3 erases three cells but spares the protected one.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("ab\033Vc\033W");
+    mock.writeToScreen("\033[H\033[3X"); // CUP home, ECH 3
+    REQUIRE(e(mainPageText(screen)) == "  c\\n");
+}
+
+TEST_CASE("SPA/EPA: 8-bit C1 forms behave like ESC V / ESC W", "[screen]")
+{
+    // The parser folds a lone C1 byte onto ESC + (byte - 0x40): 0x96 -> SPA, 0x97 -> EPA. So the
+    // 8-bit forms must guard cells identically to the 7-bit ESC V / ESC W (esctest S8C1T_SPA_EPA).
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("ab\x96"
+                       "c\x97"); // a, b, SPA(0x96), protected c, EPA(0x97)
+    mock.writeToScreen("\033[H\033[J");
+    REQUIRE(e(mainPageText(screen)) == "  c\\n");
+}
+
+TEST_CASE("SPA/EPA: 8-bit C1 protection survives inside a coalesced text run", "[screen]")
+{
+    // Regression for the real-PTY case: the bytes arrive in one buffer, so the 8-bit SPA (0x96) sits
+    // mid-run followed by a long text tail -- the condition under which the bulk text scanner would
+    // swallow the C1 as U+FFFD instead of leaving it for the state machine to fold. The guarded cell
+    // must still survive a later erase. (esctest S8C1T_SPA_EPA is the end-to-end counterpart.)
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // "ab", SPA, protected "c", EPA, then a long ASCII tail -- all one write, i.e. one parser buffer.
+    mock.writeToScreen("ab\x96"
+                       "c\x97"
+                       "defghijklmnop");
+    mock.writeToScreen("\033[H\033[K"); // CUP home, EL to end of line
+    REQUIRE(e(mainPageText(screen)).substr(0, 3) == "  c");
+}
+
+TEST_CASE("DECSCA: regular ED does not respect DEC protection", "[screen]")
+{
+    // Mirrors esctest ED_doesNotRespectDECProtection: DECSCA protection is honoured only by the
+    // *selective* erases, so a regular ED erases a DECSCA-protected cell.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
+    auto& screen = mock.terminal.primaryScreen();
+
     mock.writeToScreen("ab\033[1\"qc\033[0\"q");  // a, b, DECSCA(1), protected c, DECSCA(0)
+    mock.writeToScreen("\033[H\033[J");           // CUP home, ED to end
     REQUIRE(e(mainPageText(screen)) == "   \\n"); // c erased too
+}
+
+TEST_CASE("SPA/EPA: soft reset clears ISO protection mode", "[screen]")
+{
+    // xterm's ReallyReset zeroes protected_mode unconditionally, so a DECSTR must return the screen
+    // to the unprotected model: a subsequent regular ED then erases even a previously guarded cell.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("ab\033Vc\033W");
     mock.writeToScreen("\033[!p");                // DECSTR (soft reset)
     mock.writeToScreen("\033[H\033[J");           // CUP home, ED to end
+    REQUIRE(e(mainPageText(screen)) == "   \\n"); // guarded c is now erasable
+}
+
+TEST_CASE("SPA/EPA: selective erases do NOT respect ISO protection", "[screen]")
+{
+    // The inverse pairing: DECSED/DECSEL/DECSERA spare DEC (DECSCA) protection only. An ISO-guarded
+    // cell (SPA/EPA) is erased by them -- mirrors esctest DECSED/DECSEL/DECSERA_doesNotRespectISOProtect.
+    SECTION("DECSED erases an ISO-guarded cell")
+    {
+        auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(2) } };
+        auto& screen = mock.terminal.primaryScreen();
         mock.writeToScreen("a\033Vb\033W"); // a, SPA, ISO-guarded b, EPA
         mock.writeToScreen("\033[?2J");     // DECSED 2 (selective erase display)
+        REQUIRE(e(mainPageText(screen)) == "  \\n");
+    }
+    SECTION("DECSEL erases an ISO-guarded cell")
+    {
+        auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(2) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("a\033Vb\033W");
         mock.writeToScreen("\033[?2K"); // DECSEL 2 (selective erase line)
+        REQUIRE(e(mainPageText(screen)) == "  \\n");
+    }
+    SECTION("DECSERA erases an ISO-guarded cell")
+    {
+        auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(2) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("a\033Vb\033W");
+        mock.writeToScreen("\033[1;1;1;2${"); // DECSERA over the row
+        REQUIRE(e(mainPageText(screen)) == "  \\n");
+    }
+}
+
+TEST_CASE("DECSCA: selective erase still respects DEC protection after the ISO split", "[screen]")
+{
+    // Regression guard for the two-flag split: DECSED must keep sparing DECSCA-protected cells.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(2) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("a\033[1\"qb\033[0\"q"); // a, DECSCA(1), DEC-protected b, DECSCA(0)
+    mock.writeToScreen("\033[?2J");             // DECSED 2 spares the DEC-protected b
+    REQUIRE(e(mainPageText(screen)) == " b\\n");
+}
+// }}}
+
 // {{{ VT52 mode
 TEST_CASE("VT52: enter, cursor movement, and leave", "[screen]")
 {
