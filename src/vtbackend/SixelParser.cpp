@@ -301,10 +301,15 @@ void SixelParser::submitColor()
                 // Pz 	0 to 100 percent 	Saturation
                 //
                 // (Hue angle seems to be shifted by 120 deg in other Sixel implementations.)
-                auto const h = static_cast<double>(_params[2]) - 120.0;
+                //
+                // Saturated for the same reason the RGB branch above is: these parameters arrive off the
+                // wire unclamped, and hsl2rgb() of an out-of-range value converts a double far outside
+                // 0..255 to uint8_t, which is undefined. Each saturates at the top of the range the
+                // VT340 defines for it.
+                auto const h = static_cast<double>(std::min(_params[2], 360u)) - 120.0;
                 auto const hc = (h < 0 ? 360 + h : h) / 360.0;
-                auto const sc = static_cast<double>(_params[4]) / 100.0;
-                auto const ls = static_cast<double>(_params[3]) / 100.0;
+                auto const sc = static_cast<double>(std::min(_params[4], 100u)) / 100.0;
+                auto const ls = static_cast<double>(std::min(_params[3], 100u)) / 100.0;
                 auto const rgb = hsl2rgb(hc, sc, ls);
                 _events.setColor(index, rgb);
                 break;
