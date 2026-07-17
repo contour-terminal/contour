@@ -5,6 +5,9 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
+#include <span>
+#include <vector>
 
 namespace vtrasterizer::atlas
 {
@@ -27,7 +30,13 @@ struct CreateImageTexture
     ImageTextureId id;
     vtbackend::ImageSize size;
     Format format;
-    Buffer data;
+    /// The pixels to upload; exactly @c size worth of them. Borrowed, not owned: valid for as long as
+    /// @c owner is held, which is why the command carries the owner along with it.
+    std::span<uint8_t const> data;
+    /// Keeps the storage behind @c data alive until this queued command executes -- either the source
+    /// image, whose pixels upload straight out of its own buffer, or a widened copy of them. Uploading
+    /// a full-screen image would otherwise copy tens of megabytes on the render thread.
+    std::shared_ptr<void const> owner;
 };
 
 /// Command: release the texture behind @p id.
@@ -66,6 +75,9 @@ class ImageTextureBackend
     virtual ~ImageTextureBackend() = default;
 
     /// Creates a texture and uploads @p param's pixels into it.
+    ///
+    /// The command is queued, so a failure surfaces long after this returns; the caller learns about it
+    /// through @c takeFailedImageTextures().
     virtual void createImageTexture(CreateImageTexture param) = 0;
 
     /// Releases the texture. Ids of destroyed textures may be reused.
@@ -73,6 +85,14 @@ class ImageTextureBackend
 
     /// Queues one quad sampling an image texture.
     virtual void renderImageQuad(RenderImageQuad param) = 0;
+
+    /// Takes the ids whose creation failed since the last call, emptying the list.
+    ///
+    /// A texture the backend never created must not go on counting against the caller's budget, and
+    /// nothing else would ever tell it: the caller commits an image to its cache before the queued
+    /// creation runs, so without this it would hold a cache entry naming a texture that does not exist
+    /// and never retry the upload.
+    [[nodiscard]] virtual std::vector<ImageTextureId> takeFailedImageTextures() = 0;
 };
 
 } // namespace vtrasterizer::atlas

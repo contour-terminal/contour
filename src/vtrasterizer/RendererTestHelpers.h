@@ -60,6 +60,15 @@ class MockImageTextureBackend: public vtrasterizer::atlas::ImageTextureBackend
     {
         quadCommands.emplace_back(param);
     }
+
+    /// Ids the next takeFailedImageTextures() call reports, standing in for a backend that could not
+    /// create the texture (out of GPU memory, no RHI yet).
+    std::vector<vtrasterizer::atlas::ImageTextureId> failedImageTextures;
+
+    [[nodiscard]] std::vector<vtrasterizer::atlas::ImageTextureId> takeFailedImageTextures() override
+    {
+        return std::exchange(failedImageTextures, {});
+    }
 };
 
 /// A headless RenderTarget whose texture scheduler is a MockAtlasBackend.

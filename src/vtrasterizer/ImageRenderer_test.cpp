@@ -49,6 +49,7 @@ std::shared_ptr<RasterizedImage> makeImage(GridSize cellSpan,
 void renderRow(ImageRenderer& renderer, std::shared_ptr<RasterizedImage> const& image, unsigned cellCount)
 {
     renderer.beginFrame();
+    renderer.beginPass();
     for (auto const column: std::views::iota(0u, cellCount))
     {
         auto const fragment = ImageFragment {
@@ -58,7 +59,7 @@ void renderRow(ImageRenderer& renderer, std::shared_ptr<RasterizedImage> const& 
             crispy::point { .x = static_cast<int>(column * unbox<unsigned>(CellSize.width)), .y = 0 },
             fragment);
     }
-    renderer.endFrame();
+    renderer.endPass();
 }
 
 } // namespace
@@ -232,6 +233,7 @@ TEST_CASE("ImageRenderer.never evicts an image the current frame draws", "[image
     };
 
     imageRenderer.beginFrame();
+    imageRenderer.beginPass();
     for (auto const [index, image]: crispy::views::enumerate(images))
     {
         // Each image spans one cell, so the fragment names offset (0,0) WITHIN ITS OWN image; only
@@ -242,7 +244,7 @@ TEST_CASE("ImageRenderer.never evicts an image the current frame draws", "[image
         imageRenderer.renderImage(
             crispy::point { .x = static_cast<int>(index) * unbox<int>(CellSize.width), .y = 0 }, fragment);
     }
-    imageRenderer.endFrame();
+    imageRenderer.endPass();
 
     auto& backend = renderTarget.getMockImageBackend();
     CHECK(backend.createCommands.size() == 3);
@@ -273,6 +275,143 @@ TEST_CASE("ImageRenderer.re-uploads an evicted image when it is seen again", "[i
 
     renderRow(imageRenderer, first, 1);
     CHECK(backend.createCommands.size() == 3); // uploaded again rather than silently missing
+}
+
+TEST_CASE("ImageRenderer.refuses an image whose pixmap is shorter than its geometry", "[image][renderer]")
+{
+    // The upload hands the backend the DECLARED geometry and lets it read height * width * 4 bytes from
+    // the pixmap, so uploading one that does not match reads off the end of the heap allocation.
+    auto renderTarget = MockRenderTarget {};
+    auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
+    auto imageRenderer = ImageRenderer { testGridMetrics, CellSize };
+    imageRenderer.setRenderTarget(renderTarget, directMappingAllocator);
+
+    auto constexpr Span = GridSize { .lines = LineCount(1), .columns = ColumnCount(1) };
+    auto const declaredSize = ImageSize { Width(10), Height(20) };
+    auto shortData = Image::Data(16, 0x7F); // 16 bytes claiming to be 10*20*4 = 800
+    auto image = std::make_shared<Image>(
+        ImageId(1), ImageFormat::RGBA, std::move(shortData), declaredSize, [](auto) {});
+    auto const rasterized = std::make_shared<RasterizedImage>(std::move(image),
+                                                              ImageAlignment::TopStart,
+                                                              ImageResize::NoResize,
+                                                              RGBAColor { 0, 0, 0, 0xFF },
+                                                              Span,
+                                                              CellSize,
+                                                              ImageLayer::Replace);
+
+    renderRow(imageRenderer, rasterized, 1);
+
+    auto& backend = renderTarget.getMockImageBackend();
+    CHECK(backend.createCommands.empty()); // nothing may reach the GPU
+    CHECK(backend.quadCommands.empty());   // and nothing names a texture that was never made
+}
+
+TEST_CASE("ImageRenderer.uploads an RGBA image without copying its pixels", "[image][renderer]")
+{
+    // A full-screen image is tens of megabytes; copying it to hand it over would spend that on the
+    // render thread every time an image is first seen.
+    auto renderTarget = MockRenderTarget {};
+    auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
+    auto imageRenderer = ImageRenderer { testGridMetrics, CellSize };
+    imageRenderer.setRenderTarget(renderTarget, directMappingAllocator);
+
+    auto const image = makeImage(GridSize { .lines = LineCount(1), .columns = ColumnCount(1) });
+    renderRow(imageRenderer, image, 1);
+
+    auto& backend = renderTarget.getMockImageBackend();
+    REQUIRE(backend.createCommands.size() == 1);
+    // The command borrows the image's own buffer rather than a copy of it...
+    CHECK(backend.createCommands.front().data.data() == image->image().data().data());
+    // ...and holds it alive, so the borrow survives until the queued command executes.
+    CHECK(backend.createCommands.front().owner != nullptr);
+}
+
+TEST_CASE("ImageRenderer.forgets a texture the backend failed to create", "[image][renderer]")
+{
+    // The image is committed to the cache before the queued creation runs, so a failure that goes
+    // unreported leaves an entry naming a texture that does not exist: every later frame returns the
+    // cached id and draws nothing, and its bytes go on crowding out images that ARE on screen.
+    auto constexpr Span = GridSize { .lines = LineCount(1), .columns = ColumnCount(1) };
+    auto constexpr ImageBytes = size_t { 10 * 20 * 4 };
+
+    auto renderTarget = MockRenderTarget {};
+    auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
+    auto imageRenderer = ImageRenderer { testGridMetrics, CellSize, ImageBytes }; // room for exactly one
+    imageRenderer.setRenderTarget(renderTarget, directMappingAllocator);
+
+    auto& backend = renderTarget.getMockImageBackend();
+    auto const image = makeImage(Span, ImageLayer::Replace, ImageId(1));
+    renderRow(imageRenderer, image, 1);
+    REQUIRE(backend.createCommands.size() == 1);
+
+    // The backend could not create it (out of GPU memory, say).
+    backend.failedImageTextures.push_back(backend.createCommands.front().id);
+
+    renderRow(imageRenderer, image, 1);
+
+    // Seen again, it is uploaded again rather than drawn as a permanently blank rectangle.
+    CHECK(backend.createCommands.size() == 2);
+    // And its bytes were released, so a second image still fits the budget without evicting anything.
+    CHECK(backend.destroyCommands.empty());
+}
+
+TEST_CASE("ImageRenderer.does not evict what an earlier pass of the same frame drew", "[image][renderer]")
+{
+    // Smooth scrolling draws one frame in two passes (main display, then status line). The LRU stamp
+    // tells an image this frame drew from one merely resident, so a second pass under a later stamp
+    // would offer up the first pass's images -- whose quads are already scheduled and name their
+    // texture -- and releasing one drops it from the very frame it is visible in.
+    auto constexpr Span = GridSize { .lines = LineCount(1), .columns = ColumnCount(1) };
+    auto constexpr ImageBytes = size_t { 10 * 20 * 4 };
+
+    auto renderTarget = MockRenderTarget {};
+    auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
+    auto imageRenderer = ImageRenderer { testGridMetrics, CellSize, ImageBytes }; // room for exactly one
+    imageRenderer.setRenderTarget(renderTarget, directMappingAllocator);
+
+    auto const renderOnePass = [&](std::shared_ptr<RasterizedImage> const& image) {
+        imageRenderer.beginPass();
+        imageRenderer.renderImage(
+            crispy::point { .x = 0, .y = 0 },
+            ImageFragment { image, CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) } });
+        imageRenderer.endPass();
+    };
+
+    // One frame, two passes, a different image in each -- together they exceed the budget.
+    imageRenderer.beginFrame();
+    renderOnePass(makeImage(Span, ImageLayer::Replace, ImageId(1)));
+    renderOnePass(makeImage(Span, ImageLayer::Replace, ImageId(2)));
+
+    auto& backend = renderTarget.getMockImageBackend();
+    REQUIRE(backend.createCommands.size() == 2);
+    // The frame overshoots its budget rather than evicting an image it has already drawn.
+    CHECK(backend.destroyCommands.empty());
+}
+
+TEST_CASE("ImageRenderer.forgets its textures when the render target detaches", "[image][renderer]")
+{
+    // The textures belong to the render target and die with it, so holding entries that name them
+    // would charge the budget for textures that no longer exist and route later discards at a
+    // scheduler that is gone.
+    auto renderTarget = MockRenderTarget {};
+    auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
+    auto imageRenderer = ImageRenderer { testGridMetrics, CellSize };
+    imageRenderer.setRenderTarget(renderTarget, directMappingAllocator);
+
+    auto const image = makeImage(GridSize { .lines = LineCount(1), .columns = ColumnCount(1) });
+    renderRow(imageRenderer, image, 1);
+    REQUIRE(renderTarget.getMockImageBackend().createCommands.size() == 1);
+
+    imageRenderer.detachRenderTarget();
+
+    // A discard draining after the detach must not reach the departed scheduler.
+    imageRenderer.discardImage(ImageId(1));
+
+    // Re-attached, the image is uploaded to the new target rather than assumed resident on it.
+    auto secondTarget = MockRenderTarget {};
+    imageRenderer.setRenderTarget(secondTarget, directMappingAllocator);
+    renderRow(imageRenderer, image, 1);
+    CHECK(secondTarget.getMockImageBackend().createCommands.size() == 1);
 }
 
 TEST_CASE("ImageRenderer.clearCache releases the textures", "[image][renderer]")

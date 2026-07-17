@@ -517,6 +517,11 @@ void RhiRenderer::destroyImageTexture(atlas::DestroyImageTexture param)
     _scheduledExecutions.imageDestroys.emplace_back(param);
 }
 
+std::vector<atlas::ImageTextureId> RhiRenderer::takeFailedImageTextures()
+{
+    return std::exchange(_failedImageTextures, {});
+}
+
 vtrasterizer::atlas::ImageTextureBackend& RhiRenderer::imageScheduler()
 {
     return *this;
@@ -698,7 +703,10 @@ void RhiRenderer::executeCreateImageTexture(QRhiResourceUpdateBatch& updates,
                                             atlas::CreateImageTexture& param)
 {
     if (_rhi == nullptr)
+    {
+        _failedImageTextures.push_back(param.id);
         return;
+    }
 
     auto const pixelSize = QSize(unbox<int>(param.size.width), unbox<int>(param.size.height));
     auto resources =
@@ -708,6 +716,7 @@ void RhiRenderer::executeCreateImageTexture(QRhiResourceUpdateBatch& updates,
     if (!resources.texture->create())
     {
         errorLog()("Failed to create RHI image texture of size {}.", param.size);
+        _failedImageTextures.push_back(param.id);
         return;
     }
 

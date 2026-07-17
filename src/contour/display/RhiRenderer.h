@@ -156,6 +156,7 @@ class RhiRenderer final:
     void createImageTexture(vtrasterizer::atlas::CreateImageTexture param) override;
     void destroyImageTexture(vtrasterizer::atlas::DestroyImageTexture param) override;
     void renderImageQuad(vtrasterizer::atlas::RenderImageQuad param) override;
+    [[nodiscard]] std::vector<vtrasterizer::atlas::ImageTextureId> takeFailedImageTextures() override;
     vtrasterizer::atlas::ImageTextureBackend& imageScheduler() override;
 
     // RenderTarget implementation
@@ -586,6 +587,9 @@ class RhiRenderer final:
         vtbackend::ImageSize size;
     };
     std::unordered_map<uint32_t, ImageTextureResources> _imageTextures;
+
+    /// Ids whose queued creation failed, awaiting collection by takeFailedImageTextures().
+    std::vector<vtrasterizer::atlas::ImageTextureId> _failedImageTextures;
 
     std::vector<float> _frameRectVertices;      ///< Accumulated rect-pass vertices for the current frame.
     std::vector<float> _frameTextVertices;      ///< Accumulated text-pass vertices for the current frame.
