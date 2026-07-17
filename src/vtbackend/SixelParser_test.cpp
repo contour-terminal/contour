@@ -639,6 +639,72 @@ TEST_CASE("SixelParser.at_of_an_image_that_never_painted", "[sixel]")
     CHECK(ib.at(CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) }) == DefaultColor);
 }
 
+TEST_CASE("SixelParser.finalize_keeps_an_explicitly_declared_single_row", "[sixel]")
+{
+    // `"1;1;100;1` declares a 1-pixel-tall image. finalize() compacted anything whose height read 1
+    // down to the sixel cursor's line -- still 0 within the first band -- freeing every pixel and
+    // leaving a zero-height image for the renderer to choke on.
+    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
+    auto constexpr PinColor = RGBColor { 0x10, 0x20, 0x40 };
+
+    auto ib = SixelImageBuilder(ImageSize { Width(640), Height(480) },
+                                1,
+                                1,
+                                DefaultColor,
+                                std::make_shared<SixelColorPalette>(16, 256));
+    ib.setRaster(1, 1, ImageSize { Width(100), Height(1) });
+    ib.setColor(0, PinColor);
+
+    auto sp = SixelParser { ib };
+    sp.parseFragment("@");
+    sp.done();
+
+    CHECK(ib.size() == ImageSize { Width(100), Height(1) });
+    CHECK(ib.data().size() == 100u * 1u * 4u);
+    CHECK(ib.at(CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) }).rgb() == PinColor);
+}
+
+TEST_CASE("SixelParser.finalize_keeps_a_single_painted_row", "[sixel]")
+{
+    // Without a raster the image grows as it paints, and one painted pixel row is a height of 1 --
+    // which is also the constructed sentinel. Compacting on that predicate threw the row away.
+    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
+    auto constexpr PinColor = RGBColor { 0x10, 0x20, 0x40 };
+
+    auto ib = SixelImageBuilder(ImageSize { Width(640), Height(480) },
+                                1,
+                                1,
+                                DefaultColor,
+                                std::make_shared<SixelColorPalette>(16, 256));
+    ib.setColor(0, PinColor);
+
+    auto sp = SixelParser { ib };
+    sp.parseFragment("@"); // bit 0 only: paints pixel row 0 and nothing else
+    sp.done();
+
+    CHECK(ib.size() == ImageSize { Width(1), Height(1) });
+    CHECK(ib.at(CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) }).rgb() == PinColor);
+}
+
+TEST_CASE("SixelParser.finalize_sizes_an_unpainted_image_by_the_cursor", "[sixel]")
+{
+    // The compaction branch exists for this: nothing painted, so the image is only what the cursor
+    // walked over. Asking the storage rather than the height is what still tells this apart from the
+    // two cases above.
+    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
+
+    auto ib = SixelImageBuilder(ImageSize { Width(640), Height(480) },
+                                1,
+                                1,
+                                DefaultColor,
+                                std::make_shared<SixelColorPalette>(16, 256));
+    auto sp = SixelParser { ib };
+    sp.parseFragment("--"); // two newlines, no pixel data
+    sp.done();
+
+    CHECK(ib.size() == ImageSize { Width(1), Height(12) }); // two bands of six rows
+}
+
 TEST_CASE("SixelParser.hls_saturation_is_its_own_parameter", "[sixel]")
 {
     // `#Pc;1;Ph;Pl;Ps` is hue, lightness, saturation -- three distinct slots. Reading saturation

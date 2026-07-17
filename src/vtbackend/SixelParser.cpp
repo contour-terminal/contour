@@ -698,7 +698,12 @@ void SixelImageBuilder::finalize()
         return;
     _finalized = true;
 
-    if (unbox(_size.height) == 1)
+    // Nothing ever painted and no raster declared a size, so the image is only what the cursor
+    // walked over. Asking the storage is what tells that apart: reserve() backs every paint, so an
+    // empty buffer means nothing landed. Testing _size.height against its constructed 1 sentinel
+    // cannot -- a single painted pixel row is a height of 1 too, and an explicit `"1;1;Ph;1` raster
+    // declares one, so both were compacted away to a zero-height image.
+    if (!_explicitSize && _allocatedHeight == 0)
     {
         _size.height = Height::cast_from(_sixelCursor.line.as<unsigned int>() * _aspectRatio);
         reshape(unbox<unsigned>(_size.width), unbox<unsigned>(_size.height));
