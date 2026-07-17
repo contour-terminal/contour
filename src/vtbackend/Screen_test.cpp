@@ -5960,3 +5960,90 @@ TEST_CASE("A zero count moves or edits by one", "[screen]")
 }
 
 // }}} One-based parameters
+
+// {{{ Rectangular areas
+
+TEST_CASE("DECCRA with a defaulted source corner", "[screen]")
+{
+    // The sequence esctest sends: it names no source top-left corner at all. Contour read the omitted
+    // parameters as the value zero, computed `0 - 1`, and copied from column -1 -- aborting the engine
+    // on a precondition, and reading out of bounds in a release build where that precondition is gone.
+    auto mock = MockTerm { PageSize { LineCount(8), ColumnCount(8) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[1;1H");
+    mock.writeToScreen("abcdefgh\r\nijklmnop\r\nqrstuvwx\r\nyz012345\r\n"
+                       "ABCDEFGH\r\nIJKLMNOP\r\nQRSTUVWX\r\nYZ6789!@");
+
+    // Copy the 2x2 area at the page's top-left corner -- named only by its bottom-right corner -- to
+    // row 5, column 5.
+    mock.writeToScreen("\033[;;2;2;;5;5;1$v");
+
+    CHECK(screen.grid().lineText(LineOffset(4)) == "ABCDabGH");
+    CHECK(screen.grid().lineText(LineOffset(5)) == "IJKLijOP");
+
+    // Everything else is untouched.
+    CHECK(screen.grid().lineText(LineOffset(0)) == "abcdefgh");
+    CHECK(screen.grid().lineText(LineOffset(6)) == "QRSTUVWX");
+}
+
+TEST_CASE("A rectangular area is clamped to the page", "[screen]")
+{
+    // "If the value of Pt, Pl, Pb, or Pr exceeds the width or height of the active page, then the value
+    // is treated as the width or height of that page." -- VT520 manual. DECCARA, DECRARA and DECCRA
+    // clamped neither corner, DECERA and DECFRA only the bottom-right one.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(4) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    SECTION("DECFRA past the bottom-right corner")
+    {
+        mock.writeToScreen("\033[88;1;1;99;99$x"); // fill 'X' from 1,1 to line 99, column 99
+        CHECK(screen.grid().lineText(LineOffset(0)) == "XXXX");
+        CHECK(screen.grid().lineText(LineOffset(3)) == "XXXX");
+    }
+
+    SECTION("DECERA past the bottom-right corner")
+    {
+        mock.writeToScreen("\033[1;1H");
+        mock.writeToScreen("abcd\r\nefgh\r\nijkl\r\nmnop");
+        mock.writeToScreen("\033[2;2;99;99$z"); // erase from 2,2 to line 99, column 99
+        CHECK(screen.grid().lineText(LineOffset(0)) == "abcd");
+        CHECK(screen.grid().lineText(LineOffset(1)) == "e   ");
+        CHECK(screen.grid().lineText(LineOffset(3)) == "m   ");
+    }
+
+    SECTION("DECSERA past the bottom-right corner")
+    {
+        mock.writeToScreen("\033[1;1H");
+        mock.writeToScreen("abcd\r\nefgh\r\nijkl\r\nmnop");
+        mock.writeToScreen("\033[2;2;99;99${"); // selectively erase from 2,2 to line 99, column 99
+        CHECK(screen.grid().lineText(LineOffset(0)) == "abcd");
+        CHECK(screen.grid().lineText(LineOffset(1)) == "e   ");
+        CHECK(screen.grid().lineText(LineOffset(3)) == "m   ");
+    }
+}
+
+TEST_CASE("A rectangular area is relative to the origin", "[screen]")
+{
+    // Origin mode (DECOM) moves the origin to the scrolling region's top-left corner, and the area's
+    // coordinates are relative to it. Only DECSERA honoured that; the other five read the given
+    // coordinates as absolute and used the origin merely to default an omitted one.
+    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(4) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[1;1H");
+    mock.writeToScreen("aaaa\r\nbbbb\r\ncccc\r\ndddd\r\neeee\r\nffff");
+
+    mock.writeToScreen("\033[3;5r"); // DECSTBM: scrolling region is lines 3..5
+    mock.writeToScreen("\033[?6h");  // DECOM: on -- row 1 is now the page's row 3
+
+    // Fill 'X' over the area's own rows 1..2, which are the page's rows 3..4.
+    mock.writeToScreen("\033[88;1;1;2;4$x");
+
+    CHECK(screen.grid().lineText(LineOffset(1)) == "bbbb"); // above the region: untouched
+    CHECK(screen.grid().lineText(LineOffset(2)) == "XXXX"); // the region's first row
+    CHECK(screen.grid().lineText(LineOffset(3)) == "XXXX");
+    CHECK(screen.grid().lineText(LineOffset(4)) == "eeee"); // below what was named: untouched
+}
+
+// }}} Rectangular areas

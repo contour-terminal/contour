@@ -1454,10 +1454,14 @@ void Screen::selectiveEraseScreen()
 // {{{ DECSERA
 
 void Screen::selectiveEraseArea(Rect area)
+///
+/// @param area The area to erase, as zero-based offsets already resolved against origin mode and
+///             clamped to the page. @see impl::readRectangularArea().
 {
     auto const [top, left, bottom, right] = applyOriginMode(area).clampTo(_settings->pageSize);
-    assert(unbox(right) <= unbox(pageSize().columns));
-    assert(unbox(bottom) <= unbox(pageSize().lines));
+    auto const [top, left, bottom, right] = area;
+    Require(unbox(right) < unbox(pageSize().columns));
+    Require(unbox(bottom) < unbox(pageSize().lines));
 
     if (top.value > bottom.value || left.value > right.value)
         return;
@@ -2862,6 +2866,55 @@ namespace impl
 {
     namespace
     {
+        /// Reads the rectangular area a DEC rectangular-area sequence names: Pt, Pl, Pb and Pr, the four
+        /// parameters starting at @p firstParameter.
+        ///
+        /// Six sequences name an area this way -- DECCARA, DECRARA, DECCRA, DECERA, DECFRA and DECSERA
+        /// -- and each carried its own copy of this arithmetic, no two of them agreeing. One clamped
+        /// the bottom-right corner but not the top-left, one clamped neither, one guarded the top-left
+        /// against going negative and the rest did not. The one that did not is where esctest aborted
+        /// the engine: `CSI ; ; 2 ; 2 ; ; 5 ; 5 ; 1 $ v` names no source corner, and no source corner
+        /// minus one is column -1.
+        ///
+        /// The coordinates are one-based, and each takes its default when omitted, empty or zero: the
+        /// origin for the top-left corner, the page's edge for the bottom-right. They are relative to
+        /// the origin, which origin mode (DECOM) moves to the scrolling region's top-left corner. A
+        /// coordinate naming a cell beyond the page names the page's edge instead, as the VT520 manual
+        /// requires.
+        ///
+        /// @param seq            The sequence to read from.
+        /// @param firstParameter Index of Pt; Pl, Pb and Pr follow it.
+        /// @param origin         Top-left corner coordinates are relative to. @see Screen::origin().
+        /// @param page           Size of the page the area lives on.
+        /// @return The area, as zero-based offsets into @p page.
+        [[nodiscard]] Rect readRectangularArea(Sequence const& seq,
+                                               size_t firstParameter,
+                                               CellLocation origin,
+                                               PageSize page) noexcept
+        {
+            auto const lines = static_cast<unsigned>(unbox(page.lines));
+            auto const columns = static_cast<unsigned>(unbox(page.columns));
+
+            // One-based, relative to the origin, and never past the page's edge.
+            auto const resolve = [&](size_t index, unsigned fallback, unsigned limit) {
+                return std::min(seq.param_positive_or(index, fallback), limit);
+            };
+
+            auto const top = resolve(firstParameter + 0, 1, lines);
+            auto const left = resolve(firstParameter + 1, 1, columns);
+            auto const bottom = resolve(firstParameter + 2, lines, lines);
+            auto const right = resolve(firstParameter + 3, columns, columns);
+
+            // Zero-based, and translated onto the page.
+            auto const line = static_cast<unsigned>(unbox(origin.line));
+            auto const column = static_cast<unsigned>(unbox(origin.column));
+
+            return Rect { .top = Top::cast_from(std::min(top - 1 + line, lines - 1)),
+                          .left = Left::cast_from(std::min(left - 1 + column, columns - 1)),
+                          .bottom = Bottom::cast_from(std::min(bottom - 1 + line, lines - 1)),
+                          .right = Right::cast_from(std::min(right - 1 + column, columns - 1)) };
+        }
+
         ApplyResult setAnsiMode(Sequence const& seq, size_t modeIndex, bool enable, Terminal& term)
         {
             switch (seq.param(modeIndex))
@@ -4322,9 +4375,11 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case DCH: deleteCharacters(seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
         case DCH: deleteCharacters(seq.param_positive_or<ColumnCount>(0, ColumnCount { 1 })); break;
         case DECCARA: {
-            auto const left = ColumnOffset(seq.param_or(1, *origin.column + 1) - 1);
-            auto const bottom = LineOffset(seq.param_or(2, *pageSize().lines) - 1);
-            auto const right = ColumnOffset(seq.param_or(3, *pageSize().columns) - 1);
+            auto const area = impl::readRectangularArea(seq, 0, origin(), pageSize());
+            auto const top = LineOffset::cast_from(area.top);
+            auto const left = ColumnOffset::cast_from(area.left);
+            auto const bottom = LineOffset::cast_from(area.bottom);
+            auto const right = ColumnOffset::cast_from(area.right);
             if (_rectangularAttributeMode)
             {
                 for (auto row = top; row <= bottom; ++row)
@@ -4351,11 +4406,11 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         }
         break;
         case DECRARA: {
-            auto const origin = this->origin();
-            auto const top = LineOffset(seq.param_or(0, *origin.line + 1) - 1);
-            auto const left = ColumnOffset(seq.param_or(1, *origin.column + 1) - 1);
-            auto const bottom = LineOffset(seq.param_or(2, *pageSize().lines) - 1);
-            auto const right = ColumnOffset(seq.param_or(3, *pageSize().columns) - 1);
+            auto const area = impl::readRectangularArea(seq, 0, origin(), pageSize());
+            auto const top = LineOffset::cast_from(area.top);
+            auto const left = ColumnOffset::cast_from(area.left);
+            auto const bottom = LineOffset::cast_from(area.bottom);
+            auto const right = ColumnOffset::cast_from(area.right);
             // Build a bitmask of CellFlags to toggle from the SGR params at position 4+
             auto flagsToToggle = CellFlags {};
             for (size_t i = 4; i < seq.parameterCount(); ++i)
@@ -4399,57 +4454,28 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         }
         break;
         case DECCRA: {
-            // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
-            // DECCRA is not affected by the page margins.
-            auto const origin = this->origin();
-            auto const top = Top(seq.param_or(0, *origin.line + 1) - 1);
-            auto const left = Left(seq.param_or(1, *origin.column + 1) - 1);
-            auto const bottom = Bottom(seq.param_or(2, *pageSize().lines) - 1);
-            auto const right = Right(seq.param_or(3, *pageSize().columns) - 1);
-            auto const page = seq.param_or(4, 0);
+            // The coordinates are affected by origin mode (DECOM), but not by the page margins.
+            auto const sourceArea = impl::readRectangularArea(seq, 0, origin(), pageSize());
+            auto const sourcePage = seq.param_or(4, 0);
 
-            auto const targetTop = LineOffset(seq.param_or(5, *origin.line + 1) - 1);
-            auto const targetLeft = ColumnOffset(seq.param_or(6, *origin.column + 1) - 1);
-            auto const targetTopLeft = CellLocation { .line = targetTop, .column = targetLeft };
+            // The destination is named by its top-left corner alone; its extent is the source's.
+            auto const target = impl::readRectangularArea(seq, 5, origin(), pageSize());
+            auto const targetTopLeft = CellLocation { .line = LineOffset::cast_from(target.top),
+                                                      .column = ColumnOffset::cast_from(target.left) };
             auto const targetPage = seq.param_or(7, 0);
 
-            copyArea(Rect { .top = top, .left = left, .bottom = bottom, .right = right },
-                     page,
-                     targetTopLeft,
-                     targetPage);
+            copyArea(sourceArea, sourcePage, targetTopLeft, targetPage);
         }
         break;
         case DECERA: {
-            // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
-            auto const origin = this->origin();
-            auto const top = seq.param_or(0, *origin.line + 1) - 1;
-            auto const left = seq.param_or(1, *origin.column + 1) - 1;
-
-            // If the value of Pt, Pl, Pb, or Pr exceeds the width or height of the active page, then the
-            // value is treated as the width or height of that page.
-            auto const size = pageSize();
-            auto const bottom = std::min(seq.param_or(2, unbox(size.lines)), unbox(size.lines)) - 1;
-            auto const right = std::min(seq.param_or(3, unbox(size.columns)), unbox(size.columns)) - 1;
-
-            eraseArea(top, left, bottom, right);
+            auto const area = impl::readRectangularArea(seq, 0, origin(), pageSize());
+            eraseArea(unbox(area.top), unbox(area.left), unbox(area.bottom), unbox(area.right));
         }
         break;
         case DECFRA: {
             auto const ch = seq.param_or(0, Sequence::Parameter { 0 });
-            // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
-            auto const origin = this->origin();
-            auto const top = seq.param_or(1, origin.line);
-            auto const left = seq.param_or(2, origin.column);
-
-            // If the value of Pt, Pl, Pb, or Pr exceeds the width or height of the active page, then the
-            // value is treated as the width or height of that page.
-            auto const size = pageSize();
-            auto const bottom = std::min(seq.param_or(3, unbox(size.lines)), unbox(size.lines));
-            auto const right = std::min(seq.param_or(4, unbox(size.columns)), unbox(size.columns));
-
-            // internal indices starts at 0, for DECFRA they start from 1
-            // we need to adjust it and then make sure they are in bounds
-            fillArea(ch, std::max(0, unbox(top) - 1), std::max(0, unbox(left) - 1), bottom - 1, right - 1);
+            auto const area = impl::readRectangularArea(seq, 1, origin(), pageSize());
+            fillArea(ch, unbox(area.top), unbox(area.left), unbox(area.bottom), unbox(area.right));
         }
         break;
         case DECDC: deleteColumns(seq.param_positive_or(0, ColumnCount(1))); break;
@@ -4492,14 +4518,9 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             }
             return ApplyResult::Ok;
         }
-        case DECSERA: {
-            auto const top = seq.param_or(0, Top(1)) - 1;
-            auto const left = seq.param_or(1, Left(1)) - 1;
-            auto const bottom = seq.param_or(2, Bottom::cast_from(pageSize().lines)) - 1;
-            auto const right = seq.param_or(3, Right::cast_from(pageSize().columns)) - 1;
-            selectiveEraseArea(Rect { .top = top, .left = left, .bottom = bottom, .right = right });
+        case DECSERA:
+            selectiveEraseArea(impl::readRectangularArea(seq, 0, origin(), pageSize()));
             return ApplyResult::Ok;
-        }
         case DECSEL: {
             switch (seq.param_or(0, Sequence::Parameter { 0 }))
             {

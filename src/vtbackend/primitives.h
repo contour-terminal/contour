@@ -296,20 +296,13 @@ using Right = boxed::boxed<int, detail::tags::Right>;
 
 // Rectangular screen operations
 //
+/// A rectangular area of the page, as zero-based offsets, both corners inclusive.
 struct Rect
 {
     Top top;
     Left left;
     Bottom bottom;
     Right right;
-
-    [[nodiscard]] Rect clampTo(PageSize size) const noexcept
-    {
-        return Rect { .top = top,
-                      .left = left,
-                      .bottom = std::min(bottom, Bottom::cast_from(size.lines)),
-                      .right = std::min(right, Right::cast_from(size.columns)) };
-    }
 };
 
 // Screen's page margin

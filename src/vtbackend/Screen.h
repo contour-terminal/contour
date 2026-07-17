@@ -442,20 +442,6 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
             return column + margin().horizontal.from;
     }
 
-    [[nodiscard]] Rect applyOriginMode(Rect area) const noexcept
-    {
-        if (!_cursor.originMode)
-            return area;
-
-        auto const top = Top::cast_from(area.top.value + margin().vertical.from.value);
-        auto const left = Left::cast_from(area.top.value + margin().horizontal.from.value);
-        auto const bottom = Bottom::cast_from(area.bottom.value + margin().vertical.from.value);
-        auto const right = Right::cast_from(area.right.value + margin().horizontal.from.value);
-        // TODO: Should this automatically clamp to margin's botom/right values?
-
-        return Rect { .top = top, .left = left, .bottom = bottom, .right = right };
-    }
-
     /// Clamps given coordinates, respecting DECOM (Origin Mode).
     [[nodiscard]] CellLocation clampCoordinate(CellLocation coord) const noexcept
     {
