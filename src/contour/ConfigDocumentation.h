@@ -700,6 +700,17 @@ constexpr StringLiteral GuiConfigLockedConfig {
     "gui_config_locked: {}\n"
 };
 
+constexpr StringLiteral ThemeConfig {
+    "\n"
+    "{comment} Light/dark appearance of the GUI chrome (title bar, tab strip, command palette,\n"
+    "{comment} settings pages, dialogs), independent of the terminal grid (ignore-case):\n"
+    "{comment}   system = follow the operating system's color scheme (default).\n"
+    "{comment}   dark   = force a dark GUI appearance regardless of the OS.\n"
+    "{comment}   light  = force a light GUI appearance regardless of the OS.\n"
+    "{comment} The terminal grid keeps following the OS light/dark preference via its color scheme.\n"
+    "theme: {}\n"
+};
+
 constexpr StringLiteral ColorSchemesConfig {
     "{comment} Color Profiles\n"
     "{comment} --------------\n"
@@ -1325,6 +1336,13 @@ constexpr StringLiteral GuiConfigLockedWeb {
     "flag, when `true`, opens the in-app settings page read-only and prevents the GUI from writing any "
     "of its side files (`profiles/`, `colorschemes/`, `settings.yml`), so this hand-maintained "
     "configuration file stays the single source of truth. The default value is `false`."
+};
+
+constexpr StringLiteral ThemeWeb {
+    "option selects the light/dark appearance of the GUI chrome (title bar, tab strip, command palette, "
+    "settings pages, dialogs) independently of the operating system. Possible values are `system` "
+    "(follow the OS color scheme), `dark`, and `light`. The terminal grid keeps following the OS "
+    "light/dark preference through its own color scheme. The default value is `system`."
 };
 
 constexpr StringLiteral BypassMouseProtocolModifiersWeb {
@@ -2229,6 +2247,7 @@ using PTYReadBufferSize = DocumentationEntry<PTYReadBufferSizeConfig, PTYReadBuf
 using PTYBufferObjectSize = DocumentationEntry<PTYBufferObjectSizeConfig, PTYBufferObjectSizeWeb>;
 using ReflowOnResize = DocumentationEntry<ReflowOnResizeConfig, ReflowOnResizeWeb>;
 using GuiConfigLocked = DocumentationEntry<GuiConfigLockedConfig, GuiConfigLockedWeb>;
+using Theme = DocumentationEntry<ThemeConfig, ThemeWeb>;
 using ColorSchemes = DocumentationEntry<ColorSchemesConfig, Dummy>;
 using Profiles = DocumentationEntry<ProfilesConfig, ProfilesWeb>;
 using DefaultProfiles = DocumentationEntry<StringLiteral { "default_profile: {}\n" }, DefaultProfilesWeb>;

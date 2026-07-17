@@ -375,6 +375,31 @@ TEST_CASE("SettingsController: global overrides write settings.yml, apply, and r
     CHECK(fx.cfg.reflowOnResize.value() == true);
 }
 
+TEST_CASE("SettingsController: the global theme enum field round-trips with its options", "[settings]")
+{
+    auto fx = Fixture("default_profile: main\n");
+
+    // The theme row advertises the enum type and the three allowed values, so the QML renders a
+    // combo box rather than a text field (the global-fields path previously exposed no options).
+    auto type = QString {};
+    auto options = QStringList {};
+    for (auto const& row: fx.controller->globalFields())
+        if (row.toMap().value("key").toString() == "theme")
+        {
+            type = row.toMap().value("type").toString();
+            options = row.toMap().value("options").toStringList();
+        }
+    CHECK(type == "enum");
+    CHECK(options == QStringList { "system", "dark", "light" });
+
+    // Selecting a value persists it as the corresponding enum on the live config.
+    REQUIRE(fx.controller->setGlobalField("theme", "dark"));
+    CHECK(fx.cfg.theme.value() == config::GuiTheme::Dark);
+
+    REQUIRE(fx.controller->setGlobalField("theme", "system"));
+    CHECK(fx.cfg.theme.value() == config::GuiTheme::System);
+}
+
 TEST_CASE("SettingsController: exposes the configured keybindings read-only", "[settings]")
 {
     auto fx = Fixture(BasicConfig);

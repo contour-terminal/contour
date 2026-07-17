@@ -2,6 +2,7 @@
 #include <contour/CommandPaletteModel.h>
 #include <contour/Config.h>
 #include <contour/ContourGuiApp.h>
+#include <contour/GuiTheme.h>
 #include <contour/PaneProxy.h>
 #include <contour/QtExternalLauncher.h>
 #include <contour/RenderingBackendSelection.h>
@@ -231,6 +232,53 @@ void ContourGuiApp::onExit(TerminalSession& session)
 #if defined(VTPTY_LIBSSH2)
     else if (auto const* sshSession = dynamic_cast<vtpty::SshSession const*>(&session.terminal().device()))
         _exitStatus = sshSession->exitStatus();
+#endif
+}
+
+void ContourGuiApp::applyGuiTheme(config::GuiTheme theme)
+{
+    // qtColorSchemeFor() is the pure decision (see GuiTheme.h): a forced scheme for dark/light,
+    // std::nullopt for system.
+    auto const scheme = qtColorSchemeFor(theme);
+
+    // Force the chrome palette explicitly. This is the load-bearing step: QStyleHints::setColorScheme
+    // does NOT regenerate QGuiApplication::palette() on platforms whose platform-theme plugin owns the
+    // palette (KDE Plasma, GNOME, …), so relying on it alone leaves the chrome uncolored on the Linux
+    // desktop. Setting the application palette via setPalette does recolor it, and every QML
+    // SystemPalette follows — so all chrome recolors without touching any component.
+    if (scheme)
+    {
+        // Capture the OS palette once, before the first override, so System can later restore it.
+        if (!_guiPaletteOverridden)
+        {
+            _guiSystemPalette = QGuiApplication::palette();
+            _guiPaletteOverridden = true;
+        }
+        displayLog()("Applying GUI theme override: {}", theme);
+        QGuiApplication::setPalette(buildThemePalette(*scheme));
+    }
+    else if (_guiPaletteOverridden)
+    {
+        // Returning to System after a prior dark/light override: restore the captured OS palette.
+        // Note: once an explicit palette has been set, Qt no longer auto-tracks live OS theme
+        // switches for the chrome until the next restart (the documented System-mode tradeoff).
+        displayLog()("Applying GUI theme: system (restore OS palette)");
+        QGuiApplication::setPalette(_guiSystemPalette);
+        _guiPaletteOverridden = false;
+    }
+    else
+        displayLog()("Applying GUI theme: system (follow OS color scheme)");
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+    // Also drive QStyleHints so QStyleHints::colorScheme() reports the pinned scheme: Qt Quick
+    // Controls internals and the platforms that DO regenerate their own palette (Windows/macOS) honor
+    // it. On the palette-owning Linux platform themes this is inert on its own — hence the explicit
+    // setPalette above. Setting the scheme emits no colorSchemeChanged to the terminal grid unless the
+    // reported scheme actually changes, and the grid handler is gated to System mode regardless.
+    if (scheme)
+        QGuiApplication::styleHints()->setColorScheme(*scheme);
+    else
+        QGuiApplication::styleHints()->unsetColorScheme();
 #endif
 }
 
@@ -471,23 +519,37 @@ int ContourGuiApp::terminalGuiAction()
     }
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    // Seed the terminal's light/dark preference from the *real* OS color scheme. This is read
+    // before applyGuiTheme() may override the application color scheme below, so a force-pinned GUI
+    // theme (theme: dark|light) never drags the terminal grid away from the OS preference.
     _colorPreference = QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark
                            ? vtbackend::ColorPreference::Dark
                            : vtbackend::ColorPreference::Light;
 
     displayLog()("Color theme mode at startup: {}", _colorPreference);
 
-    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, [&](Qt::ColorScheme newScheme) {
-        auto const newValue = newScheme == Qt::ColorScheme::Dark ? vtbackend::ColorPreference::Dark
-                                                                 : vtbackend::ColorPreference::Light;
-        if (_colorPreference == newValue)
-            return;
+    connect(
+        QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, [this](Qt::ColorScheme newScheme) {
+            // Only the terminal grid tracks the OS here, and only while the GUI theme defers to the
+            // system (theme: system). When the GUI theme is force-pinned (dark/light), colorScheme()
+            // reflects our own override, which must not move the terminal palette.
+            if (_config.theme.value() != config::GuiTheme::System)
+                return;
 
-        _colorPreference = newValue;
-        displayLog()("Color preference changed to {} mode\n", _colorPreference);
-        sessionsManager().updateColorPreference(_colorPreference);
-    });
+            auto const newValue = newScheme == Qt::ColorScheme::Dark ? vtbackend::ColorPreference::Dark
+                                                                     : vtbackend::ColorPreference::Light;
+            if (_colorPreference == newValue)
+                return;
+
+            _colorPreference = newValue;
+            displayLog()("Color preference changed to {} mode\n", _colorPreference);
+            sessionsManager().updateColorPreference(_colorPreference);
+        });
 #endif
+
+    // Apply the configured GUI chrome theme (dark/light/system). Must run after the OS scheme has
+    // been captured above and before the first QQuickWindow is created, so the chrome opens themed.
+    applyGuiTheme(_config.theme.value());
 
     // Pin the Fusion Qt Quick Controls style app-wide so the hand-drawn tab strip, its controls, and the
     // tab context menu render, blend, and stay readable on every OS. Qt otherwise picks the native style

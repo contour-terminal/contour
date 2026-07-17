@@ -269,6 +269,7 @@ namespace
         QString type;
         std::function<QVariant(config::Config const&)> get;
         std::function<std::string(QVariant const&)> toYaml;
+        QStringList options {}; //!< For "enum": the allowed values (the combo model + accepted set).
     };
 
     QString boolToYaml(QVariant const& v)
@@ -313,6 +314,18 @@ namespace
                   return QVariant(QString::fromStdString(c.wordDelimiters.value()));
               },
               [](QVariant const& v) { return v.toString().toStdString(); } },
+            { "theme",
+              "GUI theme",
+              "Light/dark appearance of the GUI chrome (menus, tabs, dialogs). The terminal keeps "
+              "following the OS.",
+              "enum",
+              // Reuse the std::formatter<GuiTheme> (the "system"/"dark"/"light" source of truth) rather
+              // than re-switching the enum here, matching the std::format idiom used for modifiers/keys.
+              [](config::Config const& c) {
+                  return QVariant(QString::fromStdString(std::format("{}", c.theme.value())));
+              },
+              [](QVariant const& v) { return v.toString().toStdString(); },
+              { "system", "dark", "light" } },
         };
         return descriptors;
     }
@@ -762,7 +775,7 @@ QVariantList SettingsController::globalFields() const
         row[QStringLiteral("help")] = descriptor.help;
         row[QStringLiteral("type")] = descriptor.type;
         row[QStringLiteral("value")] = descriptor.get(cfg);
-        row[QStringLiteral("options")] = QStringList {};
+        row[QStringLiteral("options")] = descriptor.options;
         row[QStringLiteral("overridden")] = overrides.contains(descriptor.key.toStdString());
         fields.push_back(row);
     }

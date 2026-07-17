@@ -44,6 +44,34 @@ Default: `true`
 
     reflow_on_resize: true
 
+# GUI theme
+
+Selects the light/dark appearance of the GUI chrome — the title bar, tab strip, command palette,
+settings pages, and dialogs — independently of the operating system.
+
+This affects the GUI elements only. The terminal grid follows the OS light/dark preference through
+its per-profile color scheme (see [Colors](../colors.md)), so forcing a dark GUI does not force the
+terminal itself dark. While a specific theme is pinned (`dark` or `light`), the terminal reflects the
+OS light/dark setting as of startup; live OS theme switches are followed when `theme` is `system`.
+
+| Value    | Meaning                                                       |
+|----------|--------------------------------------------------------------|
+| `system` | Follow the operating system's color scheme. **Default.**     |
+| `dark`   | Force a dark GUI appearance regardless of the OS.            |
+| `light`  | Force a light GUI appearance regardless of the OS.          |
+
+The value is case-insensitive; an unrecognized value keeps the default (`system`).
+
+!!! note
+
+    Switching back from a forced `dark`/`light` theme to `system` restores the OS palette, but the
+    GUI chrome no longer tracks live OS light/dark switches until the terminal is restarted. Starting
+    up in `system` mode tracks live OS switches as usual.
+
+```yml
+theme: system
+```
+
 # Backspace character
 
 There is little consistency between systems as to what should be sent when the

@@ -104,6 +104,21 @@ enum class TabBarVisibility : uint8_t
     Multiple, //!< Show the tab strip only when the window has more than one tab.
 };
 
+/// Selects the light/dark appearance of the Qt GUI chrome (title bar, tab strip, command
+/// palette, settings pages, dialogs) independently of the OS.
+///
+/// This affects the GUI elements only; the terminal grid keeps following the OS light/dark
+/// preference through its per-profile color scheme. @c System defers to the operating
+/// system's color scheme (the historical behavior).
+/// @note Exposed to QML/Settings as the lower-case strings produced by
+///       @c std::formatter<GuiTheme>; the reader parses them case-insensitively.
+enum class GuiTheme : uint8_t
+{
+    System, //!< Follow the operating system's light/dark color scheme (default).
+    Dark,   //!< Force a dark GUI appearance regardless of the OS.
+    Light,  //!< Force a light GUI appearance regardless of the OS.
+};
+
 enum class Permission : uint8_t
 {
     Deny,
@@ -1038,6 +1053,7 @@ struct Config
     ConfigEntry<bool, documentation::SpawnNewProcess> spawnNewProcess { false };
     ConfigEntry<bool, documentation::ReflowOnResize> reflowOnResize { true };
     ConfigEntry<bool, documentation::GuiConfigLocked> guiConfigLocked { false };
+    ConfigEntry<contour::config::GuiTheme, documentation::Theme> theme { contour::config::GuiTheme::System };
     ConfigEntry<vtbackend::Modifiers, documentation::BypassMouseProtocolModifiers>
         bypassMouseProtocolModifiers { vtbackend::Modifier::Shift };
     ConfigEntry<vtbackend::Modifiers, documentation::MouseBlockSelectionModifiers>
@@ -1298,6 +1314,7 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::StatusDisplayPosition& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ScrollBarPosition& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, PixelReporting& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, GuiTheme& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarPosition& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarVisibility& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::FontDescriptions& where);
@@ -2158,6 +2175,22 @@ struct std::formatter<contour::config::TabBarVisibility>: formatter<std::string_
             case contour::config::TabBarVisibility::Always: name = "Always"; break;
             case contour::config::TabBarVisibility::Never: name = "Never"; break;
             case contour::config::TabBarVisibility::Multiple: name = "Multiple"; break;
+        }
+        return formatter<std::string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<contour::config::GuiTheme>: formatter<std::string_view>
+{
+    auto format(contour::config::GuiTheme value, auto& ctx) const
+    {
+        std::string_view name;
+        switch (value)
+        {
+            case contour::config::GuiTheme::System: name = "system"; break;
+            case contour::config::GuiTheme::Dark: name = "dark"; break;
+            case contour::config::GuiTheme::Light: name = "light"; break;
         }
         return formatter<std::string_view>::format(name, ctx);
     }

@@ -561,6 +561,7 @@ Rectangle {
                                         help: modelData.help
                                         type: modelData.type
                                         value: modelData.value
+                                        options: modelData.options
                                         editable: root.controller && !root.controller.locked
                                         onEdited: (key, value) => root.controller.setGlobalField(key, value)
                                     }
