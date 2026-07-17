@@ -9,6 +9,7 @@
 #include <contour/Actions.h>
 #include <contour/Config.h>
 #include <contour/GuiConfigStore.h>
+#include <contour/GuiTheme.h>
 
 #include <vtbackend/Color.h>
 #include <vtbackend/primitives.h>
@@ -1202,9 +1203,13 @@ TEST_CASE("Config: generated default config round-trips through the loader", "[c
     // assert the rendered document actually carries the keys below).
     CHECK(profile->tabBarPosition.value() == defaults.profile().tabBarPosition.value());
     CHECK(profile->tabBarVisibility.value() == defaults.profile().tabBarVisibility.value());
+    // Guards the global `theme` writer<->reader key match: the std::formatter emits "system" into the
+    // generated doc, and the loader must read the same key back.
+    CHECK(reloaded.theme.value() == defaults.theme.value());
     CHECK(rendered.find("pixel_reporting:") != std::string::npos);
     CHECK(rendered.find("tab_bar_position:") != std::string::npos);
     CHECK(rendered.find("tab_bar_visibility:") != std::string::npos);
+    CHECK(rendered.find("theme:") != std::string::npos);
 }
 
 TEST_CASE("Config: dual color schemes, palette list forms, and infinite history load", "[config]")
@@ -1503,6 +1508,90 @@ profiles:
     auto const* profile = config.profile("main");
     REQUIRE(profile != nullptr);
     CHECK(profile->pixelReporting.value() == PixelReporting::Device);
+}
+
+TEST_CASE("Config: theme parses each value (ignore-case)", "[config]")
+{
+    using contour::config::GuiTheme;
+
+    SECTION("default is System (follow the OS color scheme)")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+        CHECK(config.theme.value() == GuiTheme::System);
+    }
+
+    SECTION("dark")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+theme: dark
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+        CHECK(config.theme.value() == GuiTheme::Dark);
+    }
+
+    SECTION("upper-case LIGHT is accepted (ignore-case)")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+theme: LIGHT
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+        CHECK(config.theme.value() == GuiTheme::Light);
+    }
+
+    SECTION("system")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+theme: system
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+        CHECK(config.theme.value() == GuiTheme::System);
+    }
+}
+
+TEST_CASE("Config: an invalid theme value falls back to the default", "[config]")
+{
+    using contour::config::GuiTheme;
+
+    QTemporaryDir dir;
+    // A typo in a visible appearance setting must not silently pass; the reader errorLog()s and keeps
+    // the compiled-in default (System) rather than aborting the whole config load.
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+theme: midnight
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+    CHECK(config.theme.value() == GuiTheme::System);
+}
+
+TEST_CASE("GuiTheme: qtColorSchemeFor maps each theme to a Qt color-scheme override", "[config]")
+{
+    using contour::qtColorSchemeFor;
+    using contour::config::GuiTheme;
+
+    // System defers to the OS (unsetColorScheme), so no override is produced.
+    CHECK_FALSE(qtColorSchemeFor(GuiTheme::System).has_value());
+    CHECK(qtColorSchemeFor(GuiTheme::Dark) == Qt::ColorScheme::Dark);
+    CHECK(qtColorSchemeFor(GuiTheme::Light) == Qt::ColorScheme::Light);
 }
 
 TEST_CASE("Config: tab_bar_position and tab_bar_visibility parse each value (ignore-case)", "[config]")

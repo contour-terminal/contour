@@ -444,6 +444,7 @@ void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
             overrides.loadFromEntry("command_palette_recent_count", config.commandPaletteRecentCount);
             overrides.loadFromEntry("spawn_new_process", config.spawnNewProcess);
             overrides.loadFromEntry("reflow_on_resize", config.reflowOnResize);
+            overrides.loadFromEntry("theme", config.theme);
             overrides.loadFromEntry("early_exit_threshold", config.earlyExitThreshold);
         }
     }
@@ -640,6 +641,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("spawn_new_process", c.spawnNewProcess);
         loadFromEntry("reflow_on_resize", c.reflowOnResize);
         loadFromEntry("gui_config_locked", c.guiConfigLocked);
+        loadFromEntry("theme", c.theme);
         loadFromEntry("experimental", c.experimentalFeatures);
         loadFromEntry("bypass_mouse_protocol_modifier", c.bypassMouseProtocolModifiers);
         loadFromEntry("on_mouse_select", c.onMouseSelection);
@@ -2005,6 +2007,32 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
             where = opt.value();
         else
             errorLog()("Unknown pixel_reporting value '{}'; keeping {}.", rawValue, where);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, GuiTheme& where)
+{
+    // Case-insensitive. An unrecognized value is reported and leaves @p where at its (default)
+    // value: a typo in a visible appearance setting should not silently pass unnoticed.
+    auto parseTheme = [&](std::string const& key) -> std::optional<GuiTheme> {
+        auto const literal = crispy::toLower(key);
+        logger()("Loading entry: {}, value {}", entry, literal);
+        if (literal == "system")
+            return GuiTheme::System;
+        if (literal == "dark")
+            return GuiTheme::Dark;
+        if (literal == "light")
+            return GuiTheme::Light;
+        return std::nullopt;
+    };
+
+    if (auto const child = node[entry])
+    {
+        auto const rawValue = child.as<std::string>();
+        if (auto const opt = parseTheme(rawValue))
+            where = opt.value();
+        else
+            errorLog()("Unknown theme value '{}'; keeping {}.", rawValue, where);
     }
 }
 

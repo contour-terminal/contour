@@ -141,6 +141,21 @@ class ContourGuiApp: public QObject, public ContourApp
 
     [[nodiscard]] vtbackend::ColorPreference colorPreference() const noexcept { return _colorPreference; }
 
+    /// Applies the configured GUI chrome theme (dark/light/system) to the application's color
+    /// scheme, recoloring the Qt chrome (title bar, tab strip, command palette, settings, dialogs).
+    ///
+    /// @c GuiTheme::System defers to the operating system's color scheme; @c Dark / @c Light force
+    /// the appearance regardless of the OS. This affects the GUI chrome only: the terminal grid's
+    /// light/dark preference is derived from the OS independently of this setting, so a forced GUI
+    /// theme never drags the grid with it. Note that forcing a theme pins the shared @c QStyleHints
+    /// color scheme, so while pinned the grid reflects the OS scheme captured at startup; a live OS
+    /// switch is tracked only in @c System mode (see the @c colorSchemeChanged handler in @c run()).
+    /// Safe to call at startup and live (e.g. from the settings page).
+    /// @param theme The GUI theme to apply.
+    /// @note On Qt older than 6.8 (no @c QStyleHints::setColorScheme) this is a no-op and the GUI
+    ///       follows the OS unconditionally.
+    void applyGuiTheme(config::GuiTheme theme);
+
   private:
     static void ensureTermInfoFile();
     void setupQCoreApplication();

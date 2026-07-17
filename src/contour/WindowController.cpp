@@ -51,7 +51,12 @@ WindowController::WindowController(TerminalSessionManager& manager, vtmux::Windo
     _settingsController = std::make_unique<SettingsController>(
         [this]() -> config::Config const& { return _manager.app().config(); },
         std::make_shared<FileGuiConfigStore>(_manager.app().config().configFile.parent_path()),
-        [this]() { _manager.reloadAllSessions(); },
+        [this]() {
+            _manager.reloadAllSessions();
+            // Re-apply the GUI chrome theme live: a settings-page change to `theme` is already in the
+            // reloaded Config, so the chrome recolors without a restart.
+            _manager.app().applyGuiTheme(_manager.app().config().theme.value());
+        },
         this);
 }
 
