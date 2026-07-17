@@ -2522,13 +2522,54 @@ void Terminal::focusTerminalWindow()
     _eventListener.focusTerminalWindow();
 }
 
+std::string foldC1ControlsToEightBit(std::string_view sevenBit)
+{
+    // A single-pass state machine: hold back each ESC and decide when its following byte arrives.
+    // `ESC X` with X in 0x40..0x5F is a 7-bit C1 control and folds to the single byte X + 0x40; anything
+    // else (a lone trailing ESC, or ESC before a non-C1 byte) is emitted verbatim.
+    std::string out;
+    out.reserve(sevenBit.size());
+    auto pendingEsc = false;
+    for (auto const ch: sevenBit)
+    {
+        auto const byte = static_cast<unsigned char>(ch);
+        if (pendingEsc)
+        {
+            pendingEsc = false;
+            if (byte >= 0x40 && byte <= 0x5F)
+            {
+                out.push_back(static_cast<char>(byte + 0x40));
+                continue;
+            }
+            out.push_back('\033'); // the ESC we held back was not a C1 introducer
+        }
+        if (byte == 0x1B)
+            pendingEsc = true; // hold the ESC; the next byte decides whether it is a C1 control
+        else
+            out.push_back(ch);
+    }
+    if (pendingEsc)
+        out.push_back('\033'); // a lone ESC at the very end
+    return out;
+}
+
 void Terminal::reply(string_view text)
 {
     // this is invoked from within the terminal thread.
     // most likely that's not the main thread, which will however write
     // the actual input events.
     // TODO: introduce new mutex to guard terminal writes.
-    _inputGenerator.generateRaw(text);
+
+    // Under S8C1T the terminal transmits its C1 control introducers as single 8-bit bytes (CSI -> 0x9B,
+    // DCS -> 0x90, ST -> 0x9C, ...). 8-bit C1 transmission is a VT200+ capability, so it applies only
+    // while operating at VT level 2 or above: a terminal that has dropped back to VT100 level -- e.g.
+    // after a VT52 round-trip, where setVT52Mode() resets the operating level -- replies in 7-bit even
+    // if S8C1T was selected earlier. This is xterm's rule and is exactly what vttest's post-VT52 check
+    // expects.
+    if (_c1TransmissionMode == ControlTransmissionMode::S8C1T && conformanceLevelOf(_operatingLevel) >= 2)
+        _inputGenerator.generateRaw(foldC1ControlsToEightBit(text));
+    else
+        _inputGenerator.generateRaw(text);
 
     auto const* syncReply = getenv("CONTOUR_SYNC_PTY_OUTPUT");
 

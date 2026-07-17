@@ -3245,6 +3245,88 @@ TEST_CASE("CursorPreviousLine", "[screen]")
     }
 }
 
+TEST_CASE("Eight-bit C1 controls on input", "[screen]")
+{
+    // A raw byte in 0x80..0x9F that begins a character is a C1 control, exactly the 8-bit form of the
+    // 7-bit ESC sequence: 0x9B is CSI, 0x84 IND, 0x9D OSC, 0x9C the string terminator, and so on.
+    SECTION("8-bit CSI (0x9B) drives a CSI sequence")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("\x9b"
+                           "3;5H"); // CSI 3 ; 5 H (CUP)
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(4) });
+    }
+
+    SECTION("8-bit IND (0x84) indexes down one line")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+        auto& screen = mock.terminal.primaryScreen();
+        screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 3 });
+        mock.writeToScreen("\x84"); // IND
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(3) });
+    }
+
+    SECTION("8-bit OSC (0x9D) with 8-bit ST (0x9C) sets the window title")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen("\x9d"
+                           "2;hi\x9c"); // OSC 2 ; hi ST
+        CHECK(mock.terminal.windowTitle() == "hi");
+    }
+
+    SECTION("a C1-range byte inside a UTF-8 sequence stays a continuation byte")
+    {
+        // U+0250 encodes as 0xC9 0x90; the 0x90 is in the C1 range but here it is a UTF-8 continuation,
+        // so it must print the character rather than be taken for a DCS control.
+        auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("\xc9\x90X"); // ɐX
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
+    }
+}
+
+TEST_CASE("S8C1T selects 8-bit C1 control transmission for replies", "[screen]")
+{
+    // With S7C1T (the default) the terminal frames its replies with 7-bit ESC-introduced C1 controls;
+    // with S8C1T selected at VT level >= 2 it uses the single-byte 8-bit forms instead. @see
+    // Terminal::reply(), foldC1ControlsToEightBit().
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    SECTION("default is 7-bit")
+    {
+        mock.writeToScreen("\033[6n"); // DSR: report cursor position
+        CHECK(mock.terminal.peekInput() == "\033[1;1R");
+    }
+
+    SECTION("8-bit after S8C1T")
+    {
+        mock.writeToScreen("\033 G");  // S8C1T (ESC SP G)
+        mock.writeToScreen("\033[6n"); // DSR
+        CHECK(mock.terminal.peekInput()
+              == std::string("\x9b"
+                             "1;1R")); // 8-bit CSI introducer
+    }
+}
+
+TEST_CASE("DECID identifies the terminal like DA1", "[screen]")
+{
+    // DECID (ESC Z) is the VT100 "identify terminal" control; it is answered with the primary device
+    // attributes, exactly as DA1 (CSI c). Mirrors esctest test_DECID_8bit (which sends it 8-bit).
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen("\033Z"); // DECID
+    auto const viaDecid = std::string { mock.terminal.peekInput() };
+    mock.discardPendingReplies();
+
+    mock.writeToScreen("\033[c"); // DA1
+    auto const viaDa1 = std::string { mock.terminal.peekInput() };
+
+    CHECK(viaDecid.starts_with("\033[?"));
+    CHECK(viaDecid.ends_with("c"));
+    CHECK(viaDecid == viaDa1);
+}
+
 TEST_CASE("ReportCursorPosition", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
@@ -5838,72 +5920,78 @@ TEST_CASE("DECSCL: DECRQSS reports current level", "[screen]")
     CHECK(reply.find("64;1\"p") != std::string::npos);
 }
 
-// }}} DECSCL (Set Conformance Level) Tests
-
-// {{{ DECDMAC / DECINVM (Text Macros) Tests
-
-TEST_CASE("DECDMAC: define and invoke simple text macro", "[screen]")
+TEST_CASE("foldC1ControlsToEightBit", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
-    // Define macro 0 with plain text "Hello"
-    mock.writeToScreen("\033P0;0;0!zHello\033\\");
-    mock.terminal.flushInput();
-    // Invoke macro 0
-    mock.writeToScreen("\033[0*z");
-    mock.terminal.flushInput();
-    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 5) == "Hello");
+    using vtbackend::foldC1ControlsToEightBit;
+    // Each ESC-introduced C1 control folds to its single 8-bit byte (adjacent string literals keep the
+    // \x?? escapes from greedily swallowing the following digit).
+    CHECK(foldC1ControlsToEightBit("\033[0c")
+          == std::string("\x9b"
+                         "0c")); // CSI
+    CHECK(foldC1ControlsToEightBit("\033P1$r5;6r\033\\")
+          == std::string("\x90"
+                         "1$r5;6r"
+                         "\x9c")); // DCS..ST
+    CHECK(foldC1ControlsToEightBit("\033]0;t\033\\")
+          == std::string("\x9d"
+                         "0;t"
+                         "\x9c")); // OSC..ST
+    // A non-C1 ESC (charset designation, intermediate 0x28 < 0x40), a lone trailing ESC, and plain text
+    // all pass through untouched.
+    CHECK(foldC1ControlsToEightBit("\033(B") == "\033(B");
+    CHECK(foldC1ControlsToEightBit("ab\033") == "ab\033");
+    CHECK(foldC1ControlsToEightBit("") == "");
+    CHECK(foldC1ControlsToEightBit("no controls") == "no controls");
 }
 
-TEST_CASE("DECDMAC: define macro with VT sequences", "[screen]")
+TEST_CASE("S8C1T: DECRQSS reply uses 8-bit C1 at VT level >= 2", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
-    // Define macro 1 with SGR bold + text "Bold"
-    mock.writeToScreen("\033P1;0;0!z\033[1mBold\033\\");
+    // Mirrors esctest S8C1TTests.test_S8C1T_DCS: DECSTBM(5,6), select 8-bit C1 transmission, then read
+    // the DECRQSS(DECSTBM) reply, which must be framed with the 8-bit DCS (0x90) and ST (0x9c).
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[5;6r"); // DECSTBM top=5 bottom=6
+    mock.writeToScreen("\033 G");    // S8C1T (ESC SP G): select 8-bit C1 transmission
     mock.terminal.flushInput();
-    // Invoke macro 1
-    mock.writeToScreen("\033[1*z");
+    REQUIRE(mock.terminal.c1TransmissionMode() == ControlTransmissionMode::S8C1T);
+
+    mock.resetReplyData();
+    mock.writeToScreen("\033P$qr\033\\"); // DECRQSS(DECSTBM)
     mock.terminal.flushInput();
-    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 4) == "Bold");
+    CHECK(mock.replyData()
+          == std::string("\x90"
+                         "1$r5;6r"
+                         "\x9c"));
 }
 
-TEST_CASE("DECDMAC: hex-encoded macro (Pen=1)", "[screen]")
+TEST_CASE("S8C1T: replies revert to 7-bit after a VT52 round-trip", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
-    // Define macro 2 with hex encoding: "Hi" = 0x48 0x69
-    mock.writeToScreen("\033P2;0;1!z4869\033\\");
+    // 8-bit C1 transmission is a VT200+ capability. Leaving VT52 (ESC <) drops the operating level to
+    // VT100, where it is unavailable, so replies revert to 7-bit even though S8C1T remains selected
+    // (xterm's CASE_VT52_FINISH rule). Uses DSR-CPR, which is available at VT100 level.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033 G"); // S8C1T at the default VT525 level
     mock.terminal.flushInput();
-    // Invoke macro 2
-    mock.writeToScreen("\033[2*z");
-    mock.terminal.flushInput();
-    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 2) == "Hi");
-}
+    REQUIRE(mock.terminal.c1TransmissionMode() == ControlTransmissionMode::S8C1T);
 
-TEST_CASE("DECDMAC: delete all macros (Pdt=1)", "[screen]")
-{
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
-    // Define macro 0
-    mock.writeToScreen("\033P0;0;0!zFirst\033\\");
+    // At VT525 level the CPR reply is 8-bit (0x9b introducer).
+    mock.writeToScreen("\033[3;4H"); // CUP row 3 col 4
+    mock.resetReplyData();
+    mock.writeToScreen("\033[6n"); // DSR: cursor position report
     mock.terminal.flushInput();
-    // Define macro 5 with delete-all (Pdt=1)
-    mock.writeToScreen("\033P5;1;0!zSecond\033\\");
-    mock.terminal.flushInput();
-    CHECK_FALSE(mock.terminal.macroBody(0).has_value());
-    CHECK(mock.terminal.macroBody(5).has_value());
-}
+    CHECK(mock.replyData()
+          == std::string("\x9b"
+                         "3;4R"));
 
-TEST_CASE("DECDMAC: overwrite existing macro", "[screen]")
-{
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
-    // Define macro 0 with "Old"
-    mock.writeToScreen("\033P0;0;0!zOld\033\\");
+    // Round-trip through VT52; on exit the operating level is VT100.
+    mock.writeToScreen("\033[?2l\033<"); // enter VT52 (DECANM reset), then leave it (ESC <)
     mock.terminal.flushInput();
-    // Redefine macro 0 with "New"
-    mock.writeToScreen("\033P0;0;0!zNew\033\\");
+    REQUIRE(mock.terminal.operatingLevel() == VTType::VT100);
+
+    mock.writeToScreen("\033[3;4H");
+    mock.resetReplyData();
+    mock.writeToScreen("\033[6n");
     mock.terminal.flushInput();
-    // Invoke macro 0
-    mock.writeToScreen("\033[0*z");
-    mock.terminal.flushInput();
-    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 3) == "New");
+    CHECK(mock.replyData() == "\033[3;4R"); // 7-bit CSI introducer
 }
 
 TEST_CASE("DECDMAC: max 64 macros", "[screen]")

@@ -735,6 +735,11 @@ class Parser
     State _state = State::Ground;
     EventListener& _eventListener;
     unicode::scan_state _scanState {};
+
+    /// UTF-8 continuation bytes still expected while collecting a string (OSC/APC/PM/DCS/SOS). String
+    /// content may be UTF-8, so an 8-bit ST (0x9C) terminates a string only when this is zero -- at a
+    /// character boundary; otherwise 0x9C is a legitimate continuation byte (e.g. inside U+2705).
+    unsigned _stringUtf8Pending = 0;
 };
 
 /// @returns parsed tuple with OSC code and offset to first data parameter byte.

@@ -4575,6 +4575,17 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case SCS_G3_USASCII: designateCharset(CharsetTable::G3, CharsetId::USASCII); break;
         case SCS_G3_BRITISH: designateCharset(CharsetTable::G3, CharsetId::British); break;
         case DECALN: screenAlignmentPattern(); break;
+        // S7C1T/S8C1T select 7- or 8-bit C1 transmission, but only from VT200 upward: at VT100 a real
+        // VT500 ignores them -- xterm's `vtXX_level >= 2` guard.
+        case S7C1T:
+            if (_terminal->operatingLevel() != VTType::VT100)
+                _terminal->setC1TransmissionMode(ControlTransmissionMode::S7C1T);
+            break;
+        case S8C1T:
+            if (_terminal->operatingLevel() != VTType::VT100)
+                _terminal->setC1TransmissionMode(ControlTransmissionMode::S8C1T);
+            break;
+        case DECID: sendDeviceAttributes(); break; // ESC Z: identify, answered like DA1
         case DECBI: backIndex(); break;
         case DECDHL_Top:
             configureCurrentLineSize({ LineFlag::DoubleWidth, LineFlag::DoubleHeightTop });

@@ -166,6 +166,14 @@ struct Search
     bool initiatedByDoubleClick = false;
 };
 
+/// Folds the 7-bit C1 control introducers in a terminal reply to their single-byte 8-bit forms, as
+/// required when S8C1T (8-bit C1 transmission) is in effect. Every `ESC X` with X in 0x40..0x5F becomes
+/// the single byte X + 0x40 -- e.g. `ESC [` -> CSI (0x9B), `ESC P` -> DCS (0x90), `ESC \` -> ST (0x9C).
+/// A lone trailing ESC, or an ESC followed by a byte outside 0x40..0x5F, is passed through unchanged.
+/// @param sevenBit A reply string that uses 7-bit (ESC-introduced) C1 controls.
+/// @return The reply with its C1 introducers folded to single 8-bit bytes.
+[[nodiscard]] std::string foldC1ControlsToEightBit(std::string_view sevenBit);
+
 // Mandates what execution mode the terminal will take to process VT sequences.
 //
 enum class ExecutionMode : uint8_t

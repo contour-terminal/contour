@@ -532,6 +532,9 @@ constexpr inline auto LS0 = detail::C0('\x0F', "LS0", "Shift In; Maps G0 into GL
 
 // ESC functions
 constexpr inline auto DECALN  = detail::ESC('#', '8', VTType::VT100, { .mnemonic = "DECALN", .comment = "Screen Alignment Pattern"});
+constexpr inline auto S7C1T   = detail::ESC(' ', 'F', VTType::VT220, { .mnemonic = "S7C1T", .comment = "Select 7-bit C1 Control Transmission" }); // NOLINT
+constexpr inline auto S8C1T   = detail::ESC(' ', 'G', VTType::VT220, { .mnemonic = "S8C1T", .comment = "Select 8-bit C1 Control Transmission" }); // NOLINT
+constexpr inline auto DECID   = detail::ESC(std::nullopt, 'Z', VTType::VT100, { .mnemonic = "DECID", .comment = "Identify Terminal" }); // NOLINT
 constexpr inline auto DECBI   = detail::ESC(std::nullopt, '6', VTType::VT100, { .mnemonic = "DECBI", .comment = "Back Index"});
 constexpr inline auto DECDHL_Bottom = detail::ESC('#', '4', VTType::VT100, { .mnemonic = "DECDHL_Bottom", .comment = "Double-Height Line (Bottom Half)" });
 constexpr inline auto DECDHL_Top = detail::ESC('#', '3', VTType::VT100, { .mnemonic = "DECDHL_Top", .comment = "Double-Height Line (Top Half)" });
@@ -771,6 +774,9 @@ constexpr static auto allFunctionsArray() noexcept
 
         // ESC
         DECALN,
+        S7C1T,
+        S8C1T,
+        DECID,
         DECBI,
         DECDHL_Bottom,
         DECDHL_Top,

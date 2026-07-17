@@ -185,7 +185,7 @@ constexpr ParserTable ParserTable::get() // {{{
             Range { .first = 0x00_b, .last = 0x17_b },
             0x19_b,
             Range { .first = 0x1C_b, .last = 0x1F_b });
-    // t.transition(State::IgnoreUntilST, State::Ground, 0x9C_b);
+    // 8-bit ST (0x9C) is handled in processOnceViaStateMachine, at a UTF-8 boundary.
 
     // DCS_Entry
     t.entry(State::DCS_Entry, Action::Clear);
@@ -216,7 +216,6 @@ constexpr ParserTable ParserTable::get() // {{{
             Range { .first = 0x20_b, .last = 0x7F_b });
     t.event(State::DCS_Ignore, Action::Print, Range { .first = 0xA0_b, .last = 0xFF_b });
     t.event(State::DCS_Ignore, Action::Print, UnicodeRange);
-    // t.transition(State::DCS_Ignore, State::Ground, 0x9C_b);
 
     // DCS_Intermediate
     t.event(State::DCS_Intermediate,
@@ -238,7 +237,6 @@ constexpr ParserTable ParserTable::get() // {{{
             Range { .first = 0x20_b, .last = 0x7E_b });
     t.event(State::DCS_PassThrough, Action::Ignore, 0x7F_b);
     t.exit(State::DCS_PassThrough, Action::Unhook);
-    // t.transition(State::DCS_PassThrough, State::Ground, 0x9C_b);
 
     // DCS_Param
     t.event(State::DCS_Param,
@@ -269,7 +267,6 @@ constexpr ParserTable ParserTable::get() // {{{
     t.event(State::OSC_String, Action::OSC_Put, Range { .first = 0xA0_b, .last = 0xFF_b });
     t.event(State::OSC_String, Action::OSC_Put, UnicodeRange);
     t.exit(State::OSC_String, Action::OSC_End);
-    // t.transition(State::OSC_String, State::Ground, 0x9C_b);
     t.transition(State::OSC_String, State::Ground, 0x07_b);
 
     // APC_String
@@ -279,7 +276,6 @@ constexpr ParserTable ParserTable::get() // {{{
     t.event(State::APC_String, Action::APC_Put, Range { .first = 0xA0_b, .last = 0xFF_b });
     t.event(State::APC_String, Action::APC_Put, UnicodeRange);
     t.exit(State::APC_String, Action::APC_End);
-    // t.transition(State::APC_String, State::Ground, 0x9C_b); // ST
     t.transition(State::APC_String, State::Ground, 0x07_b); // BEL
 
     // PM_String
@@ -294,7 +290,6 @@ constexpr ParserTable ParserTable::get() // {{{
             Range { .first = 0xA0_b, .last = 0xFF_b });
     t.event(State::PM_String, Action::PM_Put, UnicodeRange);
     t.exit(State::PM_String, Action::PM_End);
-    // t.transition(State::PM_String, State::Ground, 0x9C_b); // ST
     t.transition(State::PM_String, State::Ground, 0x07_b); // BEL
 
     // CSI_Entry
@@ -409,6 +404,26 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char cons
     }
 }
 
+namespace
+{
+    /// True for the states that collect a string body (OSC/APC/PM/SOS/DCS), where an 8-bit ST must be
+    /// distinguished from a UTF-8 continuation byte.
+    constexpr bool isStringCollectingState(State s) noexcept
+    {
+        switch (s)
+        {
+            case State::OSC_String:
+            case State::APC_String:
+            case State::PM_String:
+            case State::IgnoreUntilST:
+            case State::DCS_PassThrough:
+            case State::DCS_Ignore: return true;
+            default: return false;
+        }
+    }
+
+} // namespace
+
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
 auto Parser<EventListener, TraceStateChanges>::parseBulkDcsPassThrough(char const* begin,
                                                                        char const* end) noexcept
@@ -445,6 +460,42 @@ void Parser<EventListener, TraceStateChanges>::processOnceViaStateMachine(uint8_
     auto const s = static_cast<size_t>(_state);
     ParserTable static constexpr Table = ParserTable::get();
 
+    // Inside a string body an 8-bit ST (0x9C) terminates the string, but only at a UTF-8 character
+    // boundary: string content may be UTF-8, and 0x9C is a valid continuation byte (e.g. the middle
+    // byte of U+2705, 0xE2 0x9C 0x85). Track the continuation bytes still expected so the terminator is
+    // told apart from the content.
+    if (isStringCollectingState(_state))
+    {
+        // A byte only advances an in-progress multi-byte sequence when it is a genuine UTF-8
+        // continuation byte (0x80-0xBF). Trusting the pending count alone is a desync bug: a malformed
+        // lead (a lead byte not followed by continuation bytes) would keep the count > 0 and let it
+        // mask a following 8-bit ST as content, so the string would never terminate. On any
+        // non-continuation byte, abandon the sequence and judge this byte on its own.
+        auto const isContinuationByte = (ch & 0xC0) == 0x80;
+        if (_stringUtf8Pending != 0 && isContinuationByte)
+            --_stringUtf8Pending; // a continuation byte; fall through to collect it
+        else
+        {
+            _stringUtf8Pending = 0;
+            if (ch == 0x9C)
+            {
+                // 8-bit ST at a character boundary: leave the string exactly as the 7-bit ESC \ does.
+                handle(ActionClass::Leave, Table.exitEvents[static_cast<size_t>(_state)], ch);
+                _state = State::Ground;
+                handle(ActionClass::Enter, Table.entryEvents[static_cast<size_t>(State::Ground)], ch);
+                return;
+            }
+            if (ch >= 0xF0)
+                _stringUtf8Pending = 3; // start of a 4-byte UTF-8 sequence
+            else if (ch >= 0xE0)
+                _stringUtf8Pending = 2; // 3-byte
+            else if (ch >= 0xC0)
+                _stringUtf8Pending = 1; // 2-byte
+        }
+    }
+
+    auto const s = static_cast<size_t>(_state);
+
     if (auto const t = Table.transitions[s][static_cast<uint8_t>(ch)]; t != State::Undefined)
     {
         // std::cout << std::format("VTParser: Transitioning from {} to {}", _state, t);
@@ -474,12 +525,21 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     if (_scanState.utf8.expectedLength != 0)
         return { ProcessKind::FallbackToFSM, 0 };
 
+    // A leading 8-bit C1 control (0x80..0x9F) is not text: the bulk scanner would consume it as an
+    // invalid UTF-8 byte and print U+FFFD, so route it through the state machine, where printUtf8Byte
+    // recognises it as the control it is. (It cannot be a UTF-8 continuation byte here -- we are in the
+    // Ground state with no pending sequence.)
+    if (auto const first = static_cast<uint8_t>(*input); first >= 0x80 && first <= 0x9F)
+        return { ProcessKind::FallbackToFSM, 0 };
+
     auto const maxCharCount = _eventListener.maxBulkTextSequenceWidth();
     if (!maxCharCount)
         return { ProcessKind::FallbackToFSM, 0 };
 
     _scanState.next = nullptr;
-    auto const chunk = std::string_view(input, static_cast<size_t>(std::distance(input, end)));
+    // scan_text() stops at a mid-run 8-bit C1 control and leaves it for the state machine (libunicode
+    // >= 0.9.1, guaranteed by the CMake version floor), so the whole buffer is handed to it.
+    auto const chunk = std::string_view(input, static_cast<size_t>(end - input));
     auto const [cellCount, subStart, subEnd] = unicode::scan_text(_scanState, chunk, maxCharCount);
 
     if (_scanState.next == input)
@@ -548,7 +608,22 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
 void Parser<EventListener, TraceStateChanges>::printUtf8Byte(char ch)
 {
-    unicode::ConvertResult const r = unicode::from_utf8(_scanState.utf8, (uint8_t) ch);
+    auto const byte = static_cast<uint8_t>(ch);
+
+    // An 8-bit C1 control (0x80..0x9F) that *begins* a character -- i.e. is not a UTF-8 continuation
+    // byte in a multi-byte sequence -- is a control, not text. DEC terminals and esctest transmit
+    // these as raw single bytes (Latin-1), which are not valid UTF-8, so they must be caught here
+    // before from_utf8() would fold them to U+FFFD. A C1 control is exactly ESC followed by
+    // (byte - 0x40), so replay that pair through the state machine: this reuses every bit of the 7-bit
+    // ESC handling (CSI/DCS/OSC entry, single dispatch, string collection) with no duplication.
+    if (_scanState.utf8.expectedLength == 0 && byte >= 0x80 && byte <= 0x9F)
+    {
+        processOnceViaStateMachine(0x1B);                              // ESC
+        processOnceViaStateMachine(static_cast<uint8_t>(byte - 0x40)); // the equivalent 7-bit byte
+        return;
+    }
+
+    unicode::ConvertResult const r = unicode::from_utf8(_scanState.utf8, byte);
     if (std::holds_alternative<unicode::Incomplete>(r))
         return;
 
@@ -569,7 +644,10 @@ void Parser<EventListener, TraceStateChanges>::handle(ActionClass actionClass,
 
     switch (action)
     {
-        case Action::GroundStart: _scanState.lastCodepointHint = 0; break;
+        case Action::GroundStart:
+            _scanState.lastCodepointHint = 0;
+            _stringUtf8Pending = 0; // a string can only start from Ground, so this is a clean slate
+            break;
         case Action::Clear: _eventListener.clear(); break;
         case Action::CollectLeader: _eventListener.collectLeader(ch); break;
         case Action::Collect: _eventListener.collect(ch); break;
