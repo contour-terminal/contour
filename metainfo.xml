@@ -120,6 +120,7 @@
           <li>Fixes VT and FF not honouring linefeed mode (LNM) as LF does, DCH honouring the top/bottom margin, and ED 2 honouring the scroll region</li>
           <li>Adds 8-bit C1 control support: S7C1T/S8C1T, 8-bit replies under S8C1T, the GR invocation register, and the GL/GR locking shifts</li>
           <li>Adds KAM, LNM, SRM, VPR, DECBI, DECID, DECTST, DECREQTPARM, XTCHECKSUM, and DECSET 41 (MoreFix), which makes a tab honour a pending wrap</li>
+          <li>Adds the User-Preferred Supplemental Set: DECAUPSS assigns it, DECRQUPSS reports it back, and the SCS designator "&lt;" designates it into a G-set</li>
           <li>Adds xterm's title modes (XTSMTITLE/XTRMTITLE), an icon title, a title stack, and the remaining XTWINOPS window operations</li>
           <li>Adds the special colors (OSC 5 and OSC 105), makes the highlight colors settable, answers every color query, and parses the whole X11 colour specification grammar</li>
           <li>Adds OSC 52 clipboard read, gated by an opt-in policy</li>
