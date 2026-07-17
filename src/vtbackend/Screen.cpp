@@ -3898,16 +3898,18 @@ namespace impl
 
         ApplyResult clipboard(Sequence const& seq, Terminal& terminal)
         {
-            // Only setting clipboard contents is supported, not reading.
+            // OSC 52: `OSC 52 ; Pc ; Pd ST`. Pd is base64 data to store, or "?" to read the clipboard
+            // back. Contour models the clipboard ('c') and the default/empty selection.
             auto const& params = seq.intermediateCharacters();
-            if (auto const splits = crispy::split(params, ';');
-                splits.size() == 2 && (splits[0] == "c" || splits[0].empty()))
-            {
-                terminal.copyToClipboard(crispy::base64::decode(splits[1]));
-                return ApplyResult::Ok;
-            }
-            else
+            auto const splits = crispy::split(params, ';');
+            if (splits.size() != 2 || !(splits[0] == "c" || splits[0].empty()))
                 return ApplyResult::Invalid;
+
+            if (splits[1] == "?")
+                terminal.requestClipboardRead(splits[0]); // read (gated by Settings::allowClipboardRead)
+            else
+                terminal.copyToClipboard(crispy::base64::decode(splits[1]));
+            return ApplyResult::Ok;
         }
 
         ApplyResult NOTIFY(Sequence const& seq, Screen& screen)

@@ -14,6 +14,7 @@
 #include <vtpty/MockPty.h>
 
 #include <crispy/assert.h>
+#include <crispy/base64.h>
 #include <crispy/escape.h>
 #include <crispy/utils.h>
 
@@ -2313,6 +2314,20 @@ void Terminal::setFontDef(FontDef const& fontDef)
 void Terminal::copyToClipboard(string_view data)
 {
     _eventListener.copyToClipboard(data);
+}
+
+void Terminal::requestClipboardRead(string_view pc)
+{
+    // Reading the clipboard is opt-in: an application that could read it unbidden could exfiltrate
+    // whatever the user last copied. When disabled, stay silent (as xterm does when the operation is
+    // not permitted) rather than reveal even that a clipboard exists.
+    if (!_settings.allowClipboardRead)
+        return;
+
+    auto const content = _eventListener.getClipboard();
+    // An empty Pc is reported back as xterm's default selection, "s0".
+    auto const selection = pc.empty() ? string_view { "s0" } : pc;
+    reply("\033]52;{};{}\033\\", selection, crispy::base64::encode(content.begin(), content.end()));
 }
 
 void Terminal::openDocument(string_view data)

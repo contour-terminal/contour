@@ -273,6 +273,10 @@ class Terminal
         virtual FontDef getFontDef() { return {}; }
         virtual void setFontDef(FontDef const& /*fontSpec*/) {}
         virtual void copyToClipboard(std::string_view /*data*/) {}
+        /// Returns the current clipboard contents, for an OSC 52 read (`OSC 52 ; Pc ; ? ST`). The base
+        /// implementation returns nothing; only a frontend that permits clipboard reading answers. Reads
+        /// are additionally gated by Settings::allowClipboardRead. @see Terminal::requestClipboardRead.
+        virtual std::string getClipboard() { return {}; }
         virtual void openDocument(std::string_view /*fileOrUrl*/) = 0;
         virtual void inspect() {}
         virtual void notify(std::string_view /*title*/, std::string_view /*body*/) {}
@@ -1379,6 +1383,14 @@ class Terminal
     [[nodiscard]] FontDef getFontDef();
     void setFontDef(FontDef const& fontDef);
     void copyToClipboard(std::string_view data);
+
+    /// Answers an OSC 52 clipboard read (`OSC 52 ; Pc ; ? ST`) by replying with the current clipboard,
+    /// base64-encoded, as `OSC 52 ; Pc ; <base64> ST`. Does nothing when Settings::allowClipboardRead is
+    /// false (the default), so an application cannot read the clipboard unless the user opts in.
+    /// @param pc The selection parameter from the request; an empty Pc is reported back as "s0", xterm's
+    ///           default selection.
+    void requestClipboardRead(std::string_view pc);
+
     void openDocument(std::string_view data);
     void inspect();
     void notify(std::string_view title, std::string_view body);

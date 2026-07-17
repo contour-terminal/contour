@@ -183,6 +183,8 @@ class MockTerm: public Terminal::NullEvents
 
     void copyToClipboard(std::string_view data) override { clipboardData = data; }
 
+    std::string getClipboard() override { return clipboardData; }
+
     void setWindowFrameColor(RGBColor color) override
     {
         windowFrameColor = color;
@@ -204,6 +206,7 @@ class MockTerm: public Terminal::NullEvents
         settings.maxHistoryLineCount = maxHistoryLineCount;
         settings.ptyReadBufferSize = ptyReadBufferSize;
         settings.goodImageProtocol = true;
+        settings.allowClipboardRead = true; // let tests exercise OSC 52 clipboard reads
         return settings;
     }
 

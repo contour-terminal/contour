@@ -6775,6 +6775,37 @@ TEST_CASE("DECSET 41 (MoreFix): a tab honours a pending wrap", "[screen]")
     }
 }
 
+TEST_CASE("OSC 52: clipboard write and gated read", "[screen]")
+{
+    // esctest ManipulateSelectionDataTests.test_ManipulateSelectionData_default. OSC 52 with base64 data
+    // sets the clipboard; OSC 52 with "?" reads it back as `OSC 52 ; s0 ; <base64> ST`. Reading is gated
+    // by Settings::allowClipboardRead (MockTerm enables it). base64("testing 123") == "dGVzdGluZyAxMjM=".
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+
+    SECTION("write then read round-trips through the clipboard")
+    {
+        mock.writeToScreen("\033]52;;dGVzdGluZyAxMjM=\033\\"); // set, empty Pc
+        mock.terminal.flushInput();
+        CHECK(mock.clipboardData == "testing 123");
+
+        mock.resetReplyData();
+        mock.writeToScreen("\033]52;;?\033\\"); // read, empty Pc -> reported back as "s0"
+        mock.terminal.flushInput();
+        CHECK(mock.replyData() == "\033]52;s0;dGVzdGluZyAxMjM=\033\\");
+    }
+
+    SECTION("read is silent when the policy forbids it")
+    {
+        mock.terminal.settings().allowClipboardRead = false;
+        mock.writeToScreen("\033]52;;dGVzdGluZyAxMjM=\033\\");
+        mock.terminal.flushInput();
+        mock.resetReplyData();
+        mock.writeToScreen("\033]52;;?\033\\");
+        mock.terminal.flushInput();
+        CHECK(mock.replyData().empty()); // no reply: the clipboard is not exposed
+    }
+}
+
 // }}} XTSMTITLE / XTRMTITLE (Set/Reset Title Modes) Tests
 
     mock.writeToScreen("\033[0*z");

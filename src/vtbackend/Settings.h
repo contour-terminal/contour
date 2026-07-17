@@ -49,6 +49,11 @@ struct Settings
     ImageSize maxImageSize { Width(800), Height(600) };
     unsigned maxImageRegisterCount = 256;
     bool goodImageProtocol = false;
+
+    /// Whether an application may read the clipboard via OSC 52 (`OSC 52 ; Pc ; ? ST`). Disabled by
+    /// default: clipboard reading is a well-known exfiltration vector, so it is opt-in. Writing the
+    /// clipboard via OSC 52 is unaffected by this. @see Terminal::requestClipboardRead.
+    bool allowClipboardRead = false;
     StatusDisplayType statusDisplayType = StatusDisplayType::None;
     StatusDisplayPosition statusDisplayPosition = StatusDisplayPosition::Bottom;
     struct
