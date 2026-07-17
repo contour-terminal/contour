@@ -2385,6 +2385,58 @@ TEST_CASE("NEL_indexes_and_returns_to_margin", "[screen]")
     }
 }
 
+TEST_CASE("CNL_CPL_clamp_to_scroll_region_and_left_margin", "[screen]")
+{
+    // CNL (CSI E) and CPL (CSI F) are cursor down/up followed by a carriage return. They clamp at the
+    // scroll-region margin (never scrolling), and the carriage return snaps to the left margin.
+    // Mirrors esctest CNLTests/CPLTests StopsAt{Bottom,Top}MarginInScrollRegion and *Below/AboveRegion.
+    auto withRegion =
+        [](auto& mock, LineOffset top, LineOffset bottom, ColumnOffset left, ColumnOffset right) {
+            mock.terminal.setTopBottomMargin(top, bottom);
+            mock.terminal.setMode(DECMode::LeftRightMargin, true);
+            mock.terminal.setLeftRightMargin(left, right);
+        };
+
+    SECTION("CNL stops at the bottom margin and moves to the left margin")
+    {
+        auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(12) } };
+        auto& screen = mock.terminal.primaryScreen();
+        withRegion(mock, LineOffset { 1 }, LineOffset { 3 }, ColumnOffset { 4 }, ColumnOffset { 9 });
+        screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 6 }); // inside the region
+        mock.writeToScreen("\033[99E");                            // CNL 99
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(4) });
+    }
+
+    SECTION("CNL below the region stops at the page bottom and the left margin")
+    {
+        auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(12) } };
+        auto& screen = mock.terminal.primaryScreen();
+        withRegion(mock, LineOffset { 2 }, LineOffset { 3 }, ColumnOffset { 4 }, ColumnOffset { 9 });
+        screen.moveCursorTo(LineOffset { 4 }, ColumnOffset { 6 }); // below the region
+        mock.writeToScreen("\033[99E");
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(5), ColumnOffset(4) });
+    }
+
+    SECTION("CPL stops at the top margin and moves to the left margin")
+    {
+        auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(12) } };
+        auto& screen = mock.terminal.primaryScreen();
+        withRegion(mock, LineOffset { 1 }, LineOffset { 3 }, ColumnOffset { 4 }, ColumnOffset { 9 });
+        screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 6 }); // inside the region
+        mock.writeToScreen("\033[99F");                            // CPL 99
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(4) });
+    }
+
+    SECTION("without margins CNL still stops at the page bottom, column 1")
+    {
+        auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(12) } };
+        auto& screen = mock.terminal.primaryScreen();
+        screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 6 });
+        mock.writeToScreen("\033[99E");
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(5), ColumnOffset(0) });
+    }
+}
+
 TEST_CASE("MoveCursorTo", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
@@ -2801,16 +2853,18 @@ TEST_CASE("CursorNextLine", "[screen]")
             REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(0) });
         }
 
-        SECTION("normal-3")
+        SECTION("clamped-at-bottom-margin")
         {
+            // The region spans real rows 1..3, i.e. logical rows 0..2 in origin mode. CNL clamps at the
+            // bottom margin (logical row 2) and never walks past it, however large the count.
             screen.moveCursorToNextLine(LineCount(3));
-            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(0) });
+            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(0) });
         }
 
-        SECTION("clamped-1")
+        SECTION("clamped-stays-at-bottom-margin")
         {
             screen.moveCursorToNextLine(LineCount(4));
-            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(0) });
+            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(0) });
         }
     }
 }

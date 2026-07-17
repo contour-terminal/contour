@@ -1543,13 +1543,18 @@ void Screen::clearLine()
 
 void Screen::moveCursorToNextLine(LineCount n)
 {
-    moveCursorTo(logicalCursorPosition().line + n.as<LineOffset>(), ColumnOffset(0));
+    // CNL is cursor-down followed by a carriage return (xterm's CursorNextLine). moveCursorDown() clamps
+    // at the bottom margin (or the page edge when the cursor starts below the region), and the carriage
+    // return snaps to the left margin -- so CNL never scrolls and never leaves the scroll region.
+    moveCursorDown(n);
+    moveCursorToBeginOfLine();
 }
 
 void Screen::moveCursorToPrevLine(LineCount n)
 {
-    auto const sanitizedN = std::min(n.as<LineOffset>(), logicalCursorPosition().line);
-    moveCursorTo(logicalCursorPosition().line - sanitizedN, ColumnOffset(0));
+    // CPL is the mirror of CNL: cursor-up clamped at the top margin, then a carriage return.
+    moveCursorUp(n);
+    moveCursorToBeginOfLine();
 }
 
 void Screen::insertCharacters(ColumnCount n)
