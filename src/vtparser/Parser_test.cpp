@@ -66,6 +66,30 @@ TEST_CASE("Parser.APC")
     REQUIRE(listener.text == "ABCDEF");
 }
 
+TEST_CASE("Parser.String_MalformedUtf8_DoesNotSwallow8bitST", "[Parser]")
+{
+    // Regression: inside an OSC/DCS/APC/PM string body an 8-bit ST (0x9C) terminates the string, but
+    // only at a UTF-8 character boundary (0x9C is also a valid continuation byte -- the middle byte of
+    // U+2705, for example). The boundary was tracked by counting the continuation bytes a lead byte
+    // promises, WITHOUT checking each following byte is actually a continuation byte (0x80-0xBF). A
+    // malformed lead -- a lead byte NOT followed by continuation bytes -- therefore left the pending
+    // count > 0, so a subsequent 8-bit ST was miscounted as a continuation byte and swallowed as
+    // content: the string never terminated and every later byte was eaten too, never rendered.
+    MockParserEvents listener;
+    auto p = vtparser::Parser<vtparser::ParserEvents>(listener);
+    REQUIRE(p.state() == vtparser::State::Ground);
+
+    // PM body "X" + a bare 3-byte lead (0xE2) + a NON-continuation byte 'Y' (0x59) + an 8-bit ST
+    // (0x9C). The 0x9C sits at a character boundary once the malformed lead is abandoned, so it must
+    // terminate the PM string; "DEF" must then print as ordinary text rather than be swallowed.
+    p.parseFragment("ABC\033^X\xE2Y\x9C"
+                    "DEF"sv);
+
+    CHECK(p.state() == vtparser::State::Ground);
+    CHECK(listener.pm == "{X\xE2Y}");
+    CHECK(listener.text == "ABCDEF");
+}
+
 TEST_CASE("Parser.BulkText_IncompleteUtf8_SplitAcrossCalls", "[Parser]")
 {
     // This test reproduces a bug where text before incomplete UTF-8 was not printed.

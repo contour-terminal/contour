@@ -172,6 +172,37 @@ TEST_CASE("writeText.bulk.A.3", "[screen]")
     CHECK(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(4) });
 }
 
+// vttest chapter 2 (screen features) page 1: writing 2*cols '*' with autowrap ON fills two lines by
+// wrapping; writing 2*cols '*' with autowrap OFF fills one line (the last column overwrites in place,
+// no wrap). All three lines must be identical, full lines of '*' -- "three identical lines of *'s
+// completely filling the top of the screen without any empty lines between."
+TEST_CASE("writeText.autowrap.threeIdenticalFullLines", "[screen]")
+{
+    auto constexpr Cols = 10;
+    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(Cols) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // Write the stars one at a time, as vttest does (a tprintf per '*'), so the incremental
+    // deferred-wrap path is exercised rather than the bulk fast path.
+    auto const writeStars = [&](int n) {
+        for (auto i = 0; i < n; ++i)
+            mock.writeToScreen("*");
+    };
+
+    mock.writeToScreen("\033[H\033[?7h"); // cursor home, autowrap ON
+    writeStars(2 * Cols);                 // -> rows 1 and 2 by wrapping
+    mock.writeToScreen("\033[?7l");       // autowrap OFF
+    mock.writeToScreen("\033[3;1H");      // cursor to row 3
+    writeStars(2 * Cols);                 // -> row 3 only (last column overwrites, no wrap)
+    mock.writeToScreen("\033[?7h");       // autowrap ON
+
+    auto const full = std::string(Cols, '*');
+    CHECK(screen.grid().lineText(LineOffset(0)) == full);                   // row 1
+    CHECK(screen.grid().lineText(LineOffset(1)) == full);                   // row 2
+    CHECK(screen.grid().lineText(LineOffset(2)) == full);                   // row 3
+    CHECK(screen.grid().lineText(LineOffset(3)) == std::string(Cols, ' ')); // row 4 stays empty
+}
+
 // Text does not fully fill current line.
 TEST_CASE("writeText.bulk.B", "[screen]")
 {
@@ -1399,6 +1430,188 @@ TEST_CASE("DECSED-2: lines without protected characters are erased correctly", "
 }
 // }}}
 
+// {{{ SPA / EPA (ISO 6429 guarded-area protection)
+TEST_CASE("SPA/EPA: ED respects ISO protection", "[screen]")
+{
+    // Mirrors esctest ED_respectsISOProtection: a cell written between SPA (ESC V) and EPA (ESC W)
+    // survives a *regular* ED, while the unprotected cells around it are erased.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("ab\033Vc\033W"); // a, b, SPA, protected c, EPA
+    REQUIRE(e(mainPageText(screen)) == "abc\\n");
+
+    mock.writeToScreen("\033[H\033[J"); // CUP home, then ED to end of screen
+    REQUIRE(e(mainPageText(screen)) == "  c\\n");
+}
+
+TEST_CASE("SPA/EPA: EL respects ISO protection", "[screen]")
+{
+    // Mirrors esctest EL_respectsISOProtection: EL 2 (erase whole line) spares the protected cell.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("ab\033Vc\033W");
+    mock.writeToScreen("\033[H\033[2K"); // CUP home, EL 2 (entire line)
+    REQUIRE(e(mainPageText(screen)) == "  c\\n");
+}
+
+TEST_CASE("SPA/EPA: ECH respects ISO protection", "[screen]")
+{
+    // Mirrors esctest ECH_respectsISOProtection: ECH 3 erases three cells but spares the protected one.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("ab\033Vc\033W");
+    mock.writeToScreen("\033[H\033[3X"); // CUP home, ECH 3
+    REQUIRE(e(mainPageText(screen)) == "  c\\n");
+}
+
+TEST_CASE("SPA/EPA: 8-bit C1 forms behave like ESC V / ESC W", "[screen]")
+{
+    // The parser folds a lone C1 byte onto ESC + (byte - 0x40): 0x96 -> SPA, 0x97 -> EPA. So the
+    // 8-bit forms must guard cells identically to the 7-bit ESC V / ESC W (esctest S8C1T_SPA_EPA).
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("ab\x96"
+                       "c\x97"); // a, b, SPA(0x96), protected c, EPA(0x97)
+    mock.writeToScreen("\033[H\033[J");
+    REQUIRE(e(mainPageText(screen)) == "  c\\n");
+}
+
+TEST_CASE("SPA/EPA: 8-bit C1 protection survives inside a coalesced text run", "[screen]")
+{
+    // Regression for the real-PTY case: the bytes arrive in one buffer, so the 8-bit SPA (0x96) sits
+    // mid-run followed by a long text tail -- the condition under which the bulk text scanner would
+    // swallow the C1 as U+FFFD instead of leaving it for the state machine to fold. The guarded cell
+    // must still survive a later erase. (esctest S8C1T_SPA_EPA is the end-to-end counterpart.)
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // "ab", SPA, protected "c", EPA, then a long ASCII tail -- all one write, i.e. one parser buffer.
+    mock.writeToScreen("ab\x96"
+                       "c\x97"
+                       "defghijklmnop");
+    mock.writeToScreen("\033[H\033[K"); // CUP home, EL to end of line
+    REQUIRE(e(mainPageText(screen)).substr(0, 3) == "  c");
+}
+
+TEST_CASE("DECSCA: regular ED does not respect DEC protection", "[screen]")
+{
+    // Mirrors esctest ED_doesNotRespectDECProtection: DECSCA protection is honoured only by the
+    // *selective* erases, so a regular ED erases a DECSCA-protected cell.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("ab\033[1\"qc\033[0\"q");  // a, b, DECSCA(1), protected c, DECSCA(0)
+    mock.writeToScreen("\033[H\033[J");           // CUP home, ED to end
+    REQUIRE(e(mainPageText(screen)) == "   \\n"); // c erased too
+}
+
+TEST_CASE("SPA/EPA: soft reset clears ISO protection mode", "[screen]")
+{
+    // xterm's ReallyReset zeroes protected_mode unconditionally, so a DECSTR must return the screen
+    // to the unprotected model: a subsequent regular ED then erases even a previously guarded cell.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("ab\033Vc\033W");
+    mock.writeToScreen("\033[!p");                // DECSTR (soft reset)
+    mock.writeToScreen("\033[H\033[J");           // CUP home, ED to end
+    REQUIRE(e(mainPageText(screen)) == "   \\n"); // guarded c is now erasable
+}
+
+TEST_CASE("SPA/EPA: selective erases do NOT respect ISO protection", "[screen]")
+{
+    // The inverse pairing: DECSED/DECSEL/DECSERA spare DEC (DECSCA) protection only. An ISO-guarded
+    // cell (SPA/EPA) is erased by them -- mirrors esctest DECSED/DECSEL/DECSERA_doesNotRespectISOProtect.
+    SECTION("DECSED erases an ISO-guarded cell")
+    {
+        auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(2) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("a\033Vb\033W"); // a, SPA, ISO-guarded b, EPA
+        mock.writeToScreen("\033[?2J");     // DECSED 2 (selective erase display)
+        REQUIRE(e(mainPageText(screen)) == "  \\n");
+    }
+    SECTION("DECSEL erases an ISO-guarded cell")
+    {
+        auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(2) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("a\033Vb\033W");
+        mock.writeToScreen("\033[?2K"); // DECSEL 2 (selective erase line)
+        REQUIRE(e(mainPageText(screen)) == "  \\n");
+    }
+    SECTION("DECSERA erases an ISO-guarded cell")
+    {
+        auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(2) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("a\033Vb\033W");
+        mock.writeToScreen("\033[1;1;1;2${"); // DECSERA over the row
+        REQUIRE(e(mainPageText(screen)) == "  \\n");
+    }
+}
+
+TEST_CASE("DECSCA: selective erase still respects DEC protection after the ISO split", "[screen]")
+{
+    // Regression guard for the two-flag split: DECSED must keep sparing DECSCA-protected cells.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(2) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("a\033[1\"qb\033[0\"q"); // a, DECSCA(1), DEC-protected b, DECSCA(0)
+    mock.writeToScreen("\033[?2J");             // DECSED 2 spares the DEC-protected b
+    REQUIRE(e(mainPageText(screen)) == " b\\n");
+}
+// }}}
+
+// {{{ VT52 mode
+TEST_CASE("VT52: enter, cursor movement, and leave", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[?2l"); // DECANM reset: enter VT52
+    REQUIRE(mock.terminal.isVT52Mode());
+
+    // ESC Y row col -- direct cursor address; each coordinate byte is value + 0x20.
+    mock.writeToScreen("\033Y\x23\x25"); // row 0x23-0x20=3, col 0x25-0x20=5
+    REQUIRE(screen.cursor().position == CellLocation { LineOffset(3), ColumnOffset(5) });
+
+    mock.writeToScreen("\033H"); // ESC H -- home (must be cursor-home in VT52, not HTS)
+    REQUIRE(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(0) });
+
+    mock.writeToScreen("\033B\033B\033C"); // down, down, right
+    REQUIRE(screen.cursor().position == CellLocation { LineOffset(2), ColumnOffset(1) });
+
+    mock.writeToScreen("\033A\033D"); // up, left (ESC D is cursor-left in VT52, not IND)
+    REQUIRE(screen.cursor().position == CellLocation { LineOffset(1), ColumnOffset(0) });
+
+    mock.writeToScreen("\033<"); // ESC < -- leave VT52
+    REQUIRE_FALSE(mock.terminal.isVT52Mode());
+    REQUIRE(mock.terminal.operatingLevel() == VTType::VT100); // VT52 exit enters ANSI at VT100
+
+    // Back in ANSI mode, CSI cursor movement works again.
+    mock.writeToScreen("\033[3;4H");
+    REQUIRE(screen.cursor().position == CellLocation { LineOffset(2), ColumnOffset(3) });
+}
+
+TEST_CASE("VT52: identify responds with ESC / Z", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(4) } };
+    mock.writeToScreen("\033[?2l\033Z"); // enter VT52, then ESC Z (identify)
+    REQUIRE(mock.terminal.peekInput() == "\033/Z");
+}
+
+TEST_CASE("VT52: erase to end of line and screen", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(4) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("abcd\033[?2l");  // fill row 0, enter VT52
+    mock.writeToScreen("\033Y\x20\x22"); // ESC Y: row 0, col 2
+    mock.writeToScreen("\033K");         // ESC K -- erase to end of line
+    REQUIRE(screen.grid().lineText(LineOffset(0)) == "ab  ");
+}
+// }}}
+
 // {{{ DECSERA
 TEST_CASE("DECSERA-all-defaults", "[screen]")
 {
@@ -2286,6 +2499,278 @@ TEST_CASE("MoveCursorToBeginOfLine", "[screen]")
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(0) });
 }
 
+TEST_CASE("CarriageReturn_honours_left_margin", "[screen]")
+{
+    // xterm's CarriageReturn: with DECLRMM on, CR snaps to the left margin when the cursor is at or
+    // right of it, and to the screen's left edge when the cursor is left of it (only reachable in
+    // non-origin mode). In origin mode it always snaps to the left margin.
+    // Mirrors esctest CRTests.test_CR_* with left/right margins [4..9] (1-based cols 5..10).
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(12) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.terminal.setMode(DECMode::LeftRightMargin, true);
+    mock.terminal.setLeftRightMargin(ColumnOffset { 4 }, ColumnOffset { 9 });
+
+    SECTION("right of the left margin: snaps to the left margin")
+    {
+        screen.moveCursorTo(LineOffset { 0 }, ColumnOffset { 5 });
+        screen.moveCursorToBeginOfLine();
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(4) });
+    }
+
+    SECTION("at the left margin: stays put")
+    {
+        screen.moveCursorTo(LineOffset { 0 }, ColumnOffset { 4 });
+        screen.moveCursorToBeginOfLine();
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(4) });
+    }
+
+    SECTION("left of the left margin (non-origin): falls to the screen edge")
+    {
+        screen.moveCursorTo(LineOffset { 0 }, ColumnOffset { 3 });
+        screen.moveCursorToBeginOfLine();
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
+    }
+
+    SECTION("origin mode: always snaps to the left margin")
+    {
+        mock.terminal.setMode(DECMode::Origin, true);
+        // In origin mode addressing is margin-relative, so logical column 3 is absolute column 7.
+        screen.moveCursorTo(LineOffset { 0 }, ColumnOffset { 3 });
+        REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(7) });
+        screen.moveCursorToBeginOfLine();
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(4) });
+    }
+}
+
+TEST_CASE("NEL_indexes_and_returns_to_margin", "[screen]")
+{
+    // NEL (ESC E) is an index followed by a carriage return: it moves down (scrolling within the
+    // scroll region when it hits the bottom margin) and returns to the left margin.
+    SECTION("basic: moves down and to the start of the line")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+        screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 4 });
+        mock.writeToScreen("\033E"); // NEL
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(0) });
+        CHECK("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
+    }
+
+    SECTION("scrolls when it hits the bottom of the page")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("111\r\n222\r\n333");
+        screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 2 }); // last line
+        mock.writeToScreen("\033E");                               // NEL scrolls
+        CHECK("222\n333\n   \n" == screen.renderMainPageText());
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(0) });
+    }
+
+    SECTION("outside the left/right band: no scroll, returns to the left margin")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+        mock.terminal.setTopBottomMargin(LineOffset { 1 }, LineOffset { 3 });
+        mock.terminal.setMode(DECMode::LeftRightMargin, true);
+        mock.terminal.setLeftRightMargin(ColumnOffset { 1 }, ColumnOffset { 3 });
+        screen.moveCursorTo(LineOffset { 3 }, ColumnOffset { 4 }); // bottom margin, right of band
+        mock.writeToScreen("\033E");
+        // No scroll (cursor was outside the band); CR snaps to the left margin (column offset 1).
+        CHECK("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(1) });
+    }
+
+    SECTION("inside the band scrolls within it, returning to the left margin")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+        mock.terminal.setTopBottomMargin(LineOffset { 1 }, LineOffset { 3 });
+        mock.terminal.setMode(DECMode::LeftRightMargin, true);
+        mock.terminal.setLeftRightMargin(ColumnOffset { 1 }, ColumnOffset { 3 });
+        screen.moveCursorTo(LineOffset { 3 }, ColumnOffset { 2 }); // bottom margin, inside band
+        mock.writeToScreen("\033E");
+        CHECK("12345\n6BCD0\nAGHIE\nF   J\nKLMNO\n" == screen.renderMainPageText());
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(1) });
+    }
+}
+
+TEST_CASE("SD_respects_left_right_margin", "[screen]")
+{
+    // SD (CSI Ps T) scrolls only the margined region down. With DECLRMM on it must confine the scroll
+    // to the left/right band. Mirrors esctest test_SD_RespectsLeftRightScrollRegion.
+    //
+    // The page is deliberately taller than the content: with a full-height vertical margin the region
+    // top (0) differs from the bottom, so the copy loop's lower bound (from+n vs. to-n) matters -- the
+    // 5x5 case where they coincide once hid a bug that left the mid-region lines unscrolled.
+    auto mock = MockTerm { PageSize { LineCount(7), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("abcde\r\nfghij\r\nklmno\r\npqrst\r\nuvwxy");
+    mock.writeToScreen("\033[?69h"); // DECSET DECLRMM
+    mock.writeToScreen("\033[2;4s"); // DECSLRM 2;4
+    mock.writeToScreen("\033[2;3H"); // CUP row 2, col 3
+    mock.writeToScreen("\033[2T");   // SD 2
+    CHECK("a   e\nf   j\nkbcdo\npghit\nulmny\n qrs \n vwx \n" == screen.renderMainPageText());
+}
+
+TEST_CASE("IL_over_region_clears_the_band", "[screen]")
+{
+    // IL scrolls the region below the cursor down via scrollDown(). Inserting more lines than the
+    // region is tall must clear its left/right band, not leave the mid-region lines behind (the same
+    // scrollDown loop-bound bug the SD test guards). Mirrors esctest test_IL_RespectsScrollRegion_Over.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("abcde\r\nfGHIj\r\nkLMNo\r\npQRSt\r\nuvwxy");
+    mock.writeToScreen("\033[?69h"); // DECSET DECLRMM
+    mock.writeToScreen("\033[2;4s"); // DECSLRM 2;4
+    mock.writeToScreen("\033[2;4r"); // DECSTBM 2;4
+    mock.writeToScreen("\033[2;3H"); // CUP row 2, col 3
+    mock.writeToScreen("\033[99L");  // IL 99
+    CHECK("abcde\nf   j\nk   o\np   t\nuvwxy\n" == screen.renderMainPageText());
+}
+
+TEST_CASE("Autowrap_within_left_right_margin", "[screen]")
+{
+    // Text written inside the left/right band wraps at the right margin -- not one column early. The
+    // right margin is the last writable column; a char destined for it must land there, and only the
+    // *next* char wraps. Regression for the off-by-one in clearAndAdvance().
+    SECTION("autowrap on: the right-margin char lands, then the next wraps to the left margin")
+    {
+        auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(6) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("\033[?69h"); // DECSET DECLRMM
+        mock.writeToScreen("\033[2;4s"); // DECSLRM 2;4 -> band cols 1..3
+        mock.writeToScreen("\033[1;2H"); // CUP to the left margin
+        mock.writeToScreen("xyzw");      // x y z fill the band; w wraps to the next line's left margin
+        CHECK(" xyz  \n w    \n" == screen.renderMainPageText());
+    }
+
+    SECTION("autowrap off: writes pile up on the right margin")
+    {
+        auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(6) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("\033[?69h"); // DECSET DECLRMM
+        mock.writeToScreen("\033[2;4s"); // DECSLRM 2;4
+        mock.writeToScreen("\033[?7l");  // DECRESET DECAWM (autowrap off)
+        mock.writeToScreen("\033[1;2H"); // CUP to the left margin
+        mock.writeToScreen("xyzw");      // w overwrites the right-margin cell; nothing wraps
+        CHECK(" xyw  \n      \n" == screen.renderMainPageText());
+    }
+}
+
+TEST_CASE("DECBI_back_index", "[screen]")
+{
+    // DECBI (ESC 6): on the left margin it scrolls the margined region right by one column; anywhere
+    // else it moves the cursor back one column without wrapping. Mirrors esctest DECBITests.
+    SECTION("basic: moves the cursor back one column")
+    {
+        auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(6) } };
+        auto& screen = mock.terminal.primaryScreen();
+        screen.moveCursorTo(LineOffset { 5 }, ColumnOffset { 4 });
+        mock.writeToScreen("\0336"); // DECBI
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(5), ColumnOffset(3) });
+    }
+
+    SECTION("does not wrap at the left edge")
+    {
+        auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(6) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("\033[2;1H"); // row 2, col 1
+        screen.moveCursorTo(LineOffset { 1 }, ColumnOffset { 0 });
+        mock.writeToScreen("\0336");
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(0) });
+    }
+
+    SECTION("left of the left margin: moves back toward the screen edge")
+    {
+        auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(12) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.terminal.setMode(DECMode::LeftRightMargin, true);
+        mock.terminal.setLeftRightMargin(ColumnOffset { 2 }, ColumnOffset { 4 });
+        screen.moveCursorTo(LineOffset { 0 }, ColumnOffset { 1 }); // left of the left margin
+        mock.writeToScreen("\0336");
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
+    }
+
+    SECTION("on the left margin, inside the region: scrolls the region right")
+    {
+        auto mock = MockTerm { PageSize { LineCount(7), ColumnCount(6) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("\033[3;2Habcde");
+        mock.writeToScreen("\033[4;2Hfghij");
+        mock.writeToScreen("\033[5;2Hklmno");
+        mock.writeToScreen("\033[6;2Hpqrst");
+        mock.writeToScreen("\033[7;2Huvwxy");
+        mock.terminal.setMode(DECMode::LeftRightMargin, true);
+        mock.terminal.setLeftRightMargin(ColumnOffset { 2 }, ColumnOffset { 4 }); // DECSLRM 3;5
+        mock.terminal.setTopBottomMargin(LineOffset { 3 }, LineOffset { 5 });     // DECSTBM 4;6
+        screen.moveCursorTo(LineOffset { 4 }, ColumnOffset { 2 });                // on the left margin
+        mock.writeToScreen("\0336");
+        // Columns 2..4 of rows 3..5 shift right one; column 5 (outside the band) is untouched.
+        CHECK(" f ghj" == screen.grid().lineText(LineOffset(3)));
+        CHECK(" k lmo" == screen.grid().lineText(LineOffset(4)));
+        CHECK(" p qrt" == screen.grid().lineText(LineOffset(5)));
+        CHECK(" abcde" == screen.grid().lineText(LineOffset(2))); // above the region: unchanged
+        CHECK(" uvwxy" == screen.grid().lineText(LineOffset(6))); // below the region: unchanged
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(4), ColumnOffset(2) });
+    }
+}
+
+TEST_CASE("CNL_CPL_clamp_to_scroll_region_and_left_margin", "[screen]")
+{
+    // CNL (CSI E) and CPL (CSI F) are cursor down/up followed by a carriage return. They clamp at the
+    // scroll-region margin (never scrolling), and the carriage return snaps to the left margin.
+    // Mirrors esctest CNLTests/CPLTests StopsAt{Bottom,Top}MarginInScrollRegion and *Below/AboveRegion.
+    auto withRegion =
+        [](auto& mock, LineOffset top, LineOffset bottom, ColumnOffset left, ColumnOffset right) {
+            mock.terminal.setTopBottomMargin(top, bottom);
+            mock.terminal.setMode(DECMode::LeftRightMargin, true);
+            mock.terminal.setLeftRightMargin(left, right);
+        };
+
+    SECTION("CNL stops at the bottom margin and moves to the left margin")
+    {
+        auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(12) } };
+        auto& screen = mock.terminal.primaryScreen();
+        withRegion(mock, LineOffset { 1 }, LineOffset { 3 }, ColumnOffset { 4 }, ColumnOffset { 9 });
+        screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 6 }); // inside the region
+        mock.writeToScreen("\033[99E");                            // CNL 99
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(4) });
+    }
+
+    SECTION("CNL below the region stops at the page bottom and the left margin")
+    {
+        auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(12) } };
+        auto& screen = mock.terminal.primaryScreen();
+        withRegion(mock, LineOffset { 2 }, LineOffset { 3 }, ColumnOffset { 4 }, ColumnOffset { 9 });
+        screen.moveCursorTo(LineOffset { 4 }, ColumnOffset { 6 }); // below the region
+        mock.writeToScreen("\033[99E");
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(5), ColumnOffset(4) });
+    }
+
+    SECTION("CPL stops at the top margin and moves to the left margin")
+    {
+        auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(12) } };
+        auto& screen = mock.terminal.primaryScreen();
+        withRegion(mock, LineOffset { 1 }, LineOffset { 3 }, ColumnOffset { 4 }, ColumnOffset { 9 });
+        screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 6 }); // inside the region
+        mock.writeToScreen("\033[99F");                            // CPL 99
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(4) });
+    }
+
+    SECTION("without margins CNL still stops at the page bottom, column 1")
+    {
+        auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(12) } };
+        auto& screen = mock.terminal.primaryScreen();
+        screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 6 });
+        mock.writeToScreen("\033[99E");
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(5), ColumnOffset(0) });
+    }
+}
+
 TEST_CASE("MoveCursorTo", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
@@ -2377,16 +2862,285 @@ TEST_CASE("SaveCursor and RestoreCursor", "[screen]")
     mock.terminal.setMode(DECMode::AutoWrap, false);
     mock.terminal.currentScreen().saveCursor();
 
-    // mutate the cursor's position, autowrap and origin flags
+    // mutate the cursor's position and the origin/autowrap modes
     screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 2 });
     mock.terminal.setMode(DECMode::AutoWrap, true);
     mock.terminal.setMode(DECMode::Origin, true);
 
-    // restore cursor and see if the changes have been reverted
+    // Restore: position and origin mode (DECOM) revert, because DECOM is cursor state. Autowrap
+    // (DECAWM) does NOT revert -- it is a terminal mode, not cursor state (DEC STD 070 / xterm), so
+    // DECRC leaves it as it currently stands (ON here).
     mock.terminal.currentScreen().restoreCursor();
     CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
-    CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::AutoWrap));
+    CHECK(mock.terminal.isModeEnabled(DECMode::AutoWrap)); // stays ON: DECRC does not restore autowrap
     CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::Origin));
+}
+
+TEST_CASE("SaveRestoreCursor.AltVsMain", "[screen]")
+{
+    // The primary and alternate screens keep independent saved cursors. A DECSC on the alternate screen
+    // must not disturb the primary's saved cursor, and DECRC must not switch screens (that is DECSET
+    // 47/1049's job). xterm behaves the same.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(10) } };
+
+    mock.writeToScreen("\033[2;3H"); // CUP row 2, col 3 (primary)
+    mock.writeToScreen("\0337");     // DECSC on primary
+    mock.writeToScreen("\033[?47h"); // switch to alternate screen
+    mock.writeToScreen("\033[6;7H"); // CUP row 6, col 7 (alternate)
+    mock.writeToScreen("\0337");     // DECSC on alternate
+
+    mock.writeToScreen("\033[?47l"); // back to primary
+    mock.writeToScreen("\0338");     // DECRC on primary
+    CHECK(mock.terminal.screenType() == ScreenType::Primary);
+    CHECK(mock.terminal.primaryScreen().cursor().position == CellLocation { LineOffset(1), ColumnOffset(2) });
+
+    mock.writeToScreen("\033[?47h"); // switch to alternate
+    mock.writeToScreen("\0338");     // DECRC on alternate
+    CHECK(mock.terminal.screenType() == ScreenType::Alternate);
+    CHECK(mock.terminal.alternateScreen().cursor().position
+          == CellLocation { LineOffset(5), ColumnOffset(6) });
+}
+
+TEST_CASE("AlternateScreen.DECSET_47_1047_1049", "[screen]")
+{
+    // Mirrors esctest DECSETTests.doAltBuftest for the three alternate-screen modes. They differ only
+    // in whether the cursor is carried across the switch (47, 1047 -- xterm's continuous, terminal-level
+    // cursor) or saved and restored (1049), and whether the alternate page is erased on the way out
+    // (1047, 1049) or kept (47). @see Terminal::setAlternateScreen, alternateScreenBehavior.
+    int mode = 0;
+    bool cursorCarried = false;   // 47, 1047: the cursor does not move across enter/exit
+    bool altErasedOnExit = false; // 1047, 1049: the alternate page is blank when re-entered
+    SECTION("mode 47 (ALTBUF)")
+    {
+        mode = 47;
+        cursorCarried = true;
+        altErasedOnExit = false;
+    }
+    SECTION("mode 1047 (OPT_ALTBUF)")
+    {
+        mode = 1047;
+        cursorCarried = true;
+        altErasedOnExit = true;
+    }
+    SECTION("mode 1049 (OPT_ALTBUF_CURSOR)")
+    {
+        mode = 1049;
+        cursorCarried = false;
+        altErasedOnExit = true;
+    }
+    CAPTURE(mode);
+
+    auto const set = "\033[?" + std::to_string(mode) + "h";
+    auto const reset = "\033[?" + std::to_string(mode) + "l";
+
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+
+    // Scribble on the primary screen: "abc" / "abc", leaving the cursor at (line 1, col 3).
+    mock.writeToScreen("abc\r\nabc");
+    auto const primaryCursor = mock.terminal.currentScreen().cursor().position;
+    REQUIRE(primaryCursor == CellLocation { LineOffset(1), ColumnOffset(3) });
+
+    // Enter the alternate screen. Modes 47 and 1047 must not move the cursor.
+    mock.writeToScreen(set);
+    REQUIRE(mock.terminal.isAlternateScreen());
+    if (cursorCarried)
+        CHECK(mock.terminal.currentScreen().cursor().position == primaryCursor);
+
+    // Erase the alternate page and scribble "def" on lines 2 and 3 (1-based), exactly as esctest does.
+    mock.writeToScreen("\033[2J\033[2;1Hdef\r\ndef");
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)) == "     ");
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(1)) == "def  ");
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(2)) == "def  ");
+
+    // Leave the alternate screen. 47/1047 carry the cursor continuously; 1049 restores the saved one.
+    auto const beforeExit = mock.terminal.currentScreen().cursor().position;
+    mock.writeToScreen(reset);
+    REQUIRE(mock.terminal.isPrimaryScreen());
+    CHECK(mock.terminal.currentScreen().cursor().position == (cursorCarried ? beforeExit : primaryCursor));
+
+    // The primary content is untouched by any of the three modes.
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)) == "abc  ");
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(1)) == "abc  ");
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(2)) == "     ");
+
+    // Re-enter the alternate screen: mode 47 kept "def"; modes 1047 and 1049 erased it.
+    mock.writeToScreen(set);
+    REQUIRE(mock.terminal.isAlternateScreen());
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(1))
+          == (altErasedOnExit ? "     " : "def  "));
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(2))
+          == (altErasedOnExit ? "     " : "def  "));
+}
+
+TEST_CASE("DCH.worksOutsideTopBottomMargin", "[screen]")
+{
+    // DCH deletes characters even when the cursor sits outside the top/bottom scrolling margin (xterm
+    // patch 316) -- it is confined only by the left/right margins.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("abcde");                             // row 1 = "abcde"
+    mock.writeToScreen("\033[2;3r");                         // DECSTBM(2,3): vertical margin is rows 2..3
+    mock.writeToScreen("\033[1;1H");                         // cursor to row 1, outside the vertical margin
+    mock.writeToScreen("\033[99P");                          // DCH(99)
+    CHECK(screen.grid().lineText(LineOffset(0)) == "     "); // row 1 was still deleted
+}
+
+TEST_CASE("ED.2_ignoresScrollRegion", "[screen]")
+{
+    // ED 2 erases the whole screen regardless of a DECSTBM scrolling region (the region is ignored).
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("\033[Haaa\r\nbbb\r\nccc");         // fill rows 1..3
+    mock.writeToScreen("\033[2;2r");                       // DECSTBM(2,2): margin is row 2 only
+    mock.writeToScreen("\033[2J");                         // ED 2
+    mock.writeToScreen("\033[r");                          // reset margin
+    CHECK(screen.grid().lineText(LineOffset(0)) == "   "); // row 1 cleared (outside region)
+    CHECK(screen.grid().lineText(LineOffset(2)) == "   "); // row 3 cleared (outside region)
+}
+
+TEST_CASE("CBT.ignoresLeftRightMargin", "[screen]")
+{
+    // CBT (cursor backward tab) ignores the left/right margin (xterm): from column 9 it tabs back past
+    // the left margin (5) to column 1, not stopping at the margin.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("\033[?69h");                           // DECLRMM: enable left/right margins
+    mock.writeToScreen("\033[5;30s");                          // DECSLRM(5,30)
+    mock.writeToScreen("\033[1;9H");                           // CUP to column 9
+    mock.writeToScreen("\033[2Z");                             // CBT(2)
+    CHECK(screen.cursor().position.column == ColumnOffset(0)); // column 1, ignoring the left margin
+}
+
+TEST_CASE("CBT.ignoresLeftRightMarginUnderOriginMode", "[screen]")
+{
+    // Same rule, with origin mode on. CBT computes an absolute target column, so placing it through the
+    // DECOM-aware column setter added the left margin to it a second time and landed the cursor to the
+    // right of the tab stop it had just found.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("\033[?69h");  // DECLRMM: enable left/right margins
+    mock.writeToScreen("\033[5;30s"); // DECSLRM(5,30)
+    mock.writeToScreen("\033[?6h");   // DECOM: origin mode on
+
+    SECTION("default tab stops")
+    {
+        mock.writeToScreen("\033[1;20H"); // CUP, origin-relative: column 5+20-1 = 24
+        REQUIRE(screen.cursor().position.column == ColumnOffset(23));
+        mock.writeToScreen("\033[Z"); // CBT(1) -> the tab stop at column 17 (0-based 16)
+        CHECK(screen.cursor().position.column == ColumnOffset(16));
+    }
+
+    SECTION("back past the left margin lands on the first column, not the margin")
+    {
+        mock.writeToScreen("\033[1;5H"); // CUP, origin-relative: column 5+5-1 = 9
+        REQUIRE(screen.cursor().position.column == ColumnOffset(8));
+        mock.writeToScreen("\033[4Z"); // CBT(4): further back than any tab stop
+        CHECK(screen.cursor().position.column == ColumnOffset(0));
+    }
+}
+
+TEST_CASE("LNM.VT_and_FF_honor_linefeed_mode", "[screen]")
+{
+    // In linefeed mode (LNM), VT and FF -- like LF -- return the carriage after indexing.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[20l");                                                     // RM LNM (off)
+    mock.writeToScreen("\033[1;5H");                                                    // CUP row 1, col 5
+    mock.writeToScreen("\013");                                                         // VT
+    CHECK(screen.cursor().position == CellLocation { LineOffset(1), ColumnOffset(4) }); // column kept
+
+    mock.writeToScreen("\033[20h");                                                     // SM LNM (on)
+    mock.writeToScreen("\033[1;5H");                                                    // CUP row 1, col 5
+    mock.writeToScreen("\014");                                                         // FF
+    CHECK(screen.cursor().position == CellLocation { LineOffset(1), ColumnOffset(0) }); // carriage returned
+}
+
+TEST_CASE("DECSCL.conformance_level_gating", "[screen]")
+{
+    SECTION("DECRQM (a VT300 feature) is silently gated below VT level 3")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+
+        mock.writeToScreen("\033[62;1\"p"); // DECSCL 62 -> VT level 2
+        mock.resetReplyData();
+        mock.writeToScreen("\033[4$p"); // DECRQM (ANSI) for IRM
+        mock.terminal.flushInput();
+        CHECK(mock.replyData().empty()); // level 2 does not answer DECRQM
+
+        mock.writeToScreen("\033[63;1\"p"); // DECSCL 63 -> VT level 3
+        mock.resetReplyData();
+        mock.writeToScreen("\033[4$p"); // DECRQM (ANSI) for IRM
+        mock.terminal.flushInput();
+        CHECK(mock.replyData().find("$y") != std::string::npos); // level 3 answers CSI 4 ; Ps $ y
+    }
+
+    SECTION("DECSLRM (a VT420 feature) is inert below VT level 4")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+
+        mock.writeToScreen("\033[63;1\"p"); // DECSCL 63 -> VT level 3
+        mock.writeToScreen("\033[?69h");    // DECSET DECLRMM (ignored below VT level 4)
+        mock.writeToScreen("\033[5;6s");    // DECSLRM 5;6 (gated below VT level 4)
+        mock.writeToScreen("\033[1;5H");    // CUP row 1, col 5
+        mock.writeToScreen("abc");
+        // No left/right margin is in force, so the cursor flows on to column 8 (col 5 + "abc").
+        CHECK(mock.terminal.primaryScreen().cursor().position.column == ColumnOffset(7));
+    }
+
+    SECTION("DECSCL stays reachable at every level so the level can always be raised again")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+
+        mock.writeToScreen("\033[61\"p"); // DECSCL 61 -> VT level 1 (single-parameter form)
+        CHECK(mock.terminal.operatingLevel() == VTType::VT100);
+        mock.writeToScreen("\033[65;1\"p"); // DECSCL 65 -> VT level 5, from level 1
+        CHECK(mock.terminal.operatingLevel() == VTType::VT525);
+    }
+}
+
+TEST_CASE("DECSTR.resets_left_right_margin_mode", "[screen]")
+{
+    // DEC STD 070: a soft reset (DECSTR) resets DECLRMM, so a subsequent DECSLRM is inert.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+
+    mock.writeToScreen("\033[?69h"); // DECSET DECLRMM
+    CHECK(mock.terminal.isModeEnabled(DECMode::LeftRightMargin));
+
+    mock.writeToScreen("\033[!p"); // DECSTR (soft reset)
+    CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::LeftRightMargin));
+
+    // With DECLRMM off, DECSLRM sets no margin: "abc" from column 3 flows on to column 6.
+    mock.writeToScreen("\033[2;4s"); // DECSLRM 2;4 (inert)
+    mock.writeToScreen("\033[1;3H"); // CUP row 1, col 3
+    mock.writeToScreen("abc");
+    CHECK(mock.terminal.primaryScreen().cursor().position.column == ColumnOffset(5));
+}
+
+TEST_CASE("DECRQCRA.honors_origin_mode", "[screen]")
+{
+    // In origin mode (DECOM) a rectangular-area request is measured from the scroll region's top-left,
+    // not the page's, so DECRQCRA(1,1) reads the origin cell rather than the absolute top-left.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(10) } };
+
+    mock.writeToScreen("\033[5;5HX"); // CUP(5,5) + 'X'
+    mock.writeToScreen("\033[5;7r");  // DECSTBM 5;7
+    mock.writeToScreen("\033[?69h");  // DECSET DECLRMM
+    mock.writeToScreen("\033[5;7s");  // DECSLRM 5;7 -> origin at (5,5)
+    mock.writeToScreen("\033[?6h");   // DECSET DECOM
+
+    mock.resetReplyData();
+    mock.writeToScreen("\033[1;1;1;1;1;1*y"); // DECRQCRA rect (1,1,1,1), origin-relative -> cell (5,5)='X'
+    mock.terminal.flushInput();
+    auto const originReply = mock.replyData();
+    CHECK_FALSE(originReply.empty());
+
+    // The identical request outside origin mode addresses absolute (1,1), a blank cell -> other checksum.
+    mock.writeToScreen("\033[?6l"); // DECRESET DECOM
+    mock.resetReplyData();
+    mock.writeToScreen("\033[1;1;1;1;1;1*y");
+    mock.terminal.flushInput();
+    CHECK(originReply != mock.replyData());
 }
 
 TEST_CASE("Index_outside_margin", "[screen]")
@@ -2466,6 +3220,96 @@ TEST_CASE("Index_at_bottom_margin", "[screen]")
         screen.index();
         CHECK("12345\n6BCD0\nAGHIE\nF   J\nKLMNO\n" == screen.renderMainPageText());
         REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(1) });
+    }
+}
+
+TEST_CASE("VerticalScroll_confined_to_left_right_margins", "[screen]")
+{
+    // With DECLRMM on, vertical motion scrolls only when the cursor is within the left/right margins.
+    // Outside that band the cursor neither scrolls the page nor walks past the top/bottom margin.
+    // This mirrors esctest's test_{IND,RI,LF,FF,VT}_MovesDoesNotScrollOutsideLeftRight.
+    auto setup = [](auto& mock) {
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+        mock.terminal.setTopBottomMargin(LineOffset { 1 }, LineOffset { 3 });
+        mock.terminal.setMode(DECMode::LeftRightMargin, true);
+        mock.terminal.setLeftRightMargin(ColumnOffset { 1 }, ColumnOffset { 3 });
+        return &screen;
+    };
+    auto constexpr Untouched = "12345\n67890\nABCDE\nFGHIJ\nKLMNO\n";
+
+    SECTION("IND at bottom margin, right of the right margin: no scroll, no move")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+        auto* screen = setup(mock);
+        screen->moveCursorTo(LineOffset { 3 }, ColumnOffset { 4 }); // bottom margin, right of band
+        screen->index();
+        CHECK(Untouched == screen->renderMainPageText());
+        CHECK(screen->logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(4) });
+    }
+
+    SECTION("IND at bottom margin, left of the left margin: no scroll, no move")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+        auto* screen = setup(mock);
+        screen->moveCursorTo(LineOffset { 3 }, ColumnOffset { 0 }); // bottom margin, left of band
+        screen->index();
+        CHECK(Untouched == screen->renderMainPageText());
+        CHECK(screen->logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(0) });
+    }
+
+    SECTION("IND above bottom margin, outside band: moves down without scrolling")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+        auto* screen = setup(mock);
+        screen->moveCursorTo(LineOffset { 2 }, ColumnOffset { 4 });
+        screen->index();
+        CHECK(Untouched == screen->renderMainPageText());
+        CHECK(screen->logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(4) });
+    }
+
+    SECTION("RI at top margin, outside band: no reverse scroll, no move")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+        auto* screen = setup(mock);
+        screen->moveCursorTo(LineOffset { 1 }, ColumnOffset { 4 }); // top margin, right of band
+        screen->reverseIndex();
+        CHECK(Untouched == screen->renderMainPageText());
+        CHECK(screen->logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(4) });
+    }
+
+    SECTION("LF (control byte) at bottom margin, outside band: no scroll, no move")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+        auto* screen = setup(mock);
+        screen->moveCursorTo(LineOffset { 3 }, ColumnOffset { 4 });
+        mock.writeToScreen("\n");
+        CHECK(Untouched == screen->renderMainPageText());
+        CHECK(screen->logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(4) });
+    }
+
+    SECTION("FF and VT (control bytes) at bottom margin, outside band: no scroll, no move")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+        auto* screen = setup(mock);
+        screen->moveCursorTo(LineOffset { 3 }, ColumnOffset { 4 });
+        mock.writeToScreen("\f"); // FF -> IND
+        CHECK(Untouched == screen->renderMainPageText());
+        CHECK(screen->logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(4) });
+        mock.writeToScreen("\v"); // VT -> IND
+        CHECK(Untouched == screen->renderMainPageText());
+        CHECK(screen->logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(4) });
+    }
+
+    SECTION("IND inside the band still scrolls, confined to the band")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+        auto* screen = setup(mock);
+        screen->moveCursorTo(LineOffset { 3 }, ColumnOffset { 1 }); // bottom margin, inside band
+        screen->index();
+        // Only columns 1..3 of the scrolling region 1..3 move up; the margins stay put.
+        CHECK("12345\n6BCD0\nAGHIE\nF   J\nKLMNO\n" == screen->renderMainPageText());
+        CHECK(screen->logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(1) });
     }
 }
 
@@ -2676,16 +3520,18 @@ TEST_CASE("CursorNextLine", "[screen]")
             REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(0) });
         }
 
-        SECTION("normal-3")
+        SECTION("clamped-at-bottom-margin")
         {
+            // The region spans real rows 1..3, i.e. logical rows 0..2 in origin mode. CNL clamps at the
+            // bottom margin (logical row 2) and never walks past it, however large the count.
             screen.moveCursorToNextLine(LineCount(3));
-            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(0) });
+            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(0) });
         }
 
-        SECTION("clamped-1")
+        SECTION("clamped-stays-at-bottom-margin")
         {
             screen.moveCursorToNextLine(LineCount(4));
-            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(0) });
+            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(0) });
         }
     }
 }
@@ -2741,6 +3587,190 @@ TEST_CASE("CursorPreviousLine", "[screen]")
             REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
         }
     }
+}
+
+TEST_CASE("DECRQSS reports the scroll-region margins", "[screen]")
+{
+    // DECRQSS replies DCS 1 $ r <setting> ST. The margins are stored 0-based and inclusive, so both
+    // bounds convert back to the 1-based values the sequence was given. Mirrors esctest
+    // test_DECRQSS_DECSTBM and test_DECRQSS_DECSLRM.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    SECTION("DECSTBM top;bottom")
+    {
+        mock.writeToScreen("\033[5;6r");      // DECSTBM 5;6
+        mock.writeToScreen("\033P$qr\033\\"); // DECRQSS "r"
+        CHECK("\033P1$r5;6r\033\\" == mock.terminal.peekInput());
+    }
+
+    SECTION("DECSLRM left;right")
+    {
+        mock.writeToScreen("\033[?69h");      // DECSET DECLRMM
+        mock.writeToScreen("\033[3;4s");      // DECSLRM 3;4
+        mock.writeToScreen("\033P$qs\033\\"); // DECRQSS "s"
+        CHECK("\033P1$r3;4s\033\\" == mock.terminal.peekInput());
+    }
+}
+
+TEST_CASE("DECRQSS reports the current SGR", "[screen]")
+{
+    // The SGR report leads with a 0 (reset) and then lists only the attributes that differ from the
+    // default -- default colours are implied by the reset, not spelled out. Mirrors esctest
+    // test_DECRQSS_SGR.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+
+    SECTION("a single attribute, default colours omitted")
+    {
+        mock.writeToScreen("\033[1m");        // SGR bold
+        mock.writeToScreen("\033P$qm\033\\"); // DECRQSS "m"
+        CHECK("\033P1$r0;1m\033\\" == mock.terminal.peekInput());
+    }
+
+    SECTION("several attributes")
+    {
+        mock.writeToScreen("\033[1;3m");      // SGR bold + italic
+        mock.writeToScreen("\033P$qm\033\\"); // DECRQSS "m"
+        CHECK("\033P1$r0;1;3m\033\\" == mock.terminal.peekInput());
+    }
+}
+
+TEST_CASE("DECRQSS reports the attribute change extent (DECSACE)", "[screen]")
+{
+    // DECSACE selects stream vs rectangle for DECCARA/DECRARA; DECRQSS "*x" reports it. Mirrors esctest
+    // test_DECRQSS_DECSACE, which had no mapping at all.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+
+    SECTION("stream mode reports 0")
+    {
+        mock.writeToScreen("\033[0*x");        // DECSACE 0 (stream)
+        mock.writeToScreen("\033P$q*x\033\\"); // DECRQSS "*x"
+        CHECK("\033P1$r0*x\033\\" == mock.terminal.peekInput());
+    }
+
+    SECTION("rectangle mode reports 2")
+    {
+        mock.writeToScreen("\033[2*x");        // DECSACE 2 (rectangle)
+        mock.writeToScreen("\033P$q*x\033\\"); // DECRQSS "*x"
+        CHECK("\033P1$r2*x\033\\" == mock.terminal.peekInput());
+    }
+}
+
+TEST_CASE("DECRQSS reports the VT525 keyboard settings", "[screen]")
+{
+    // DECELF (CSI Pn +q), DECLFKC (CSI Pn *}) and DECSMKR (CSI Pn +r) are keyboard settings Contour
+    // remembers and hands back verbatim through DECRQSS, though nothing acts on them. Mirrors esctest
+    // test_DECRQSS_DECELF/DECLFKC/DECSMKR (which had no mapping at all).
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+
+    SECTION("DECELF")
+    {
+        mock.writeToScreen("\033[0+q");        // DECELF 0
+        mock.writeToScreen("\033P$q+q\033\\"); // DECRQSS "+q"
+        CHECK("\033P1$r0+q\033\\" == mock.terminal.peekInput());
+    }
+
+    SECTION("DECLFKC")
+    {
+        mock.writeToScreen("\033[0*}");        // DECLFKC 0
+        mock.writeToScreen("\033P$q*}\033\\"); // DECRQSS "*}"
+        CHECK("\033P1$r0*}\033\\" == mock.terminal.peekInput());
+    }
+
+    SECTION("DECSMKR")
+    {
+        mock.writeToScreen("\033[0+r");        // DECSMKR 0
+        mock.writeToScreen("\033P$q+r\033\\"); // DECRQSS "+r"
+        CHECK("\033P1$r0+r\033\\" == mock.terminal.peekInput());
+    }
+
+    SECTION("a non-default value is remembered and reported")
+    {
+        mock.writeToScreen("\033[2+r");        // DECSMKR 2
+        mock.writeToScreen("\033P$q+r\033\\"); // DECRQSS "+r"
+        CHECK("\033P1$r2+r\033\\" == mock.terminal.peekInput());
+    }
+}
+
+TEST_CASE("Eight-bit C1 controls on input", "[screen]")
+{
+    // A raw byte in 0x80..0x9F that begins a character is a C1 control, exactly the 8-bit form of the
+    // 7-bit ESC sequence: 0x9B is CSI, 0x84 IND, 0x9D OSC, 0x9C the string terminator, and so on.
+    SECTION("8-bit CSI (0x9B) drives a CSI sequence")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("\x9b"
+                           "3;5H"); // CSI 3 ; 5 H (CUP)
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(4) });
+    }
+
+    SECTION("8-bit IND (0x84) indexes down one line")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+        auto& screen = mock.terminal.primaryScreen();
+        screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 3 });
+        mock.writeToScreen("\x84"); // IND
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(3) });
+    }
+
+    SECTION("8-bit OSC (0x9D) with 8-bit ST (0x9C) sets the window title")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen("\x9d"
+                           "2;hi\x9c"); // OSC 2 ; hi ST
+        CHECK(mock.terminal.windowTitle() == "hi");
+    }
+
+    SECTION("a C1-range byte inside a UTF-8 sequence stays a continuation byte")
+    {
+        // U+0250 encodes as 0xC9 0x90; the 0x90 is in the C1 range but here it is a UTF-8 continuation,
+        // so it must print the character rather than be taken for a DCS control.
+        auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("\xc9\x90X"); // ɐX
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
+    }
+}
+
+TEST_CASE("S8C1T selects 8-bit C1 control transmission for replies", "[screen]")
+{
+    // With S7C1T (the default) the terminal frames its replies with 7-bit ESC-introduced C1 controls;
+    // with S8C1T selected at VT level >= 2 it uses the single-byte 8-bit forms instead. @see
+    // Terminal::reply(), foldC1ControlsToEightBit().
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    SECTION("default is 7-bit")
+    {
+        mock.writeToScreen("\033[6n"); // DSR: report cursor position
+        CHECK(mock.terminal.peekInput() == "\033[1;1R");
+    }
+
+    SECTION("8-bit after S8C1T")
+    {
+        mock.writeToScreen("\033 G");  // S8C1T (ESC SP G)
+        mock.writeToScreen("\033[6n"); // DSR
+        CHECK(mock.terminal.peekInput()
+              == std::string("\x9b"
+                             "1;1R")); // 8-bit CSI introducer
+    }
+}
+
+TEST_CASE("DECID identifies the terminal like DA1", "[screen]")
+{
+    // DECID (ESC Z) is the VT100 "identify terminal" control; it is answered with the primary device
+    // attributes, exactly as DA1 (CSI c). Mirrors esctest test_DECID_8bit (which sends it 8-bit).
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen("\033Z"); // DECID
+    auto const viaDecid = std::string { mock.terminal.peekInput() };
+    mock.discardPendingReplies();
+
+    mock.writeToScreen("\033[c"); // DA1
+    auto const viaDa1 = std::string { mock.terminal.peekInput() };
+
+    CHECK(viaDecid.starts_with("\033[?"));
+    CHECK(viaDecid.ends_with("c"));
+    CHECK(viaDecid == viaDa1);
 }
 
 TEST_CASE("ReportCursorPosition", "[screen]")
@@ -3593,6 +4623,158 @@ TEST_CASE("OSC.4")
         INFO(mock.terminal.peekInput());
         REQUIRE(e(mock.terminal.peekInput()) == e("\033]4;7;rgb:a0a0/b0b0/c0c0\033\\"));
     }
+
+    SECTION("set color via format rgb:RRRR/GGGG/BBBB")
+    {
+        // The four-digit form is the one Contour itself reports back, and the one applications
+        // overwhelmingly send. It used to be rejected outright, leaving the palette untouched.
+        mock.writeToScreen("\033]4;7;rgb:abab/cdcd/efef\033\\");
+        mock.writeToScreen("\033]4;7;?\033\\");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033]4;7;rgb:abab/cdcd/efef\033\\"));
+    }
+
+    SECTION("several index/specification pairs in one sequence")
+    {
+        mock.writeToScreen("\033]4;0;rgb:f0f0/f0f0/f0f0;1;rgb:f0f0/0000/0000\033\\");
+        mock.writeToScreen("\033]4;0;?;1;?\033\\");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput())
+                == e("\033]4;0;rgb:f0f0/f0f0/f0f0\033\\"
+                     "\033]4;1;rgb:f0f0/0000/0000\033\\"));
+    }
+}
+
+TEST_CASE("OSC.10-19")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(2) } };
+
+    SECTION("set and query the foreground")
+    {
+        mock.writeToScreen("\033]10;rgb:f0f0/f0f0/f0f0\033\\");
+        mock.writeToScreen("\033]10;?\033\\");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033]10;rgb:f0f0/f0f0/f0f0\033\\"));
+    }
+
+    SECTION("one sequence walks upward through the colors")
+    {
+        // OSC 10 with two specifications sets the foreground *and* the background.
+        mock.writeToScreen("\033]10;rgb:f0f0/f0f0/f0f0;rgb:f0f0/0000/0000\033\\");
+        mock.writeToScreen("\033]10;?;?\033\\");
+        INFO(mock.terminal.peekInput());
+
+        // Each answer is tagged with the OSC command of the color it reports, not with the one the
+        // sequence began at. Contour used to read "?;?" as a single color specification, fail to parse
+        // it, and answer with nothing at all.
+        REQUIRE(e(mock.terminal.peekInput())
+                == e("\033]10;rgb:f0f0/f0f0/f0f0\033\\"
+                     "\033]11;rgb:f0f0/0000/0000\033\\"));
+    }
+
+    SECTION("a sequence may begin at any color")
+    {
+        mock.writeToScreen("\033]11;rgb:0101/0202/0303;rgb:0404/0505/0606\033\\");
+        mock.writeToScreen("\033]11;?;?\033\\");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput())
+                == e("\033]11;rgb:0101/0202/0303\033\\"  // background
+                     "\033]12;rgb:0404/0505/0606\033\\") // cursor
+        );
+    }
+
+    SECTION("an empty specification skips its color")
+    {
+        mock.writeToScreen("\033]10;rgb:0f0f/0f0f/0f0f\033\\");
+        mock.writeToScreen("\033]10;;rgb:f0f0/0000/0000\033\\");
+        mock.writeToScreen("\033]10;?;?\033\\");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput())
+                == e("\033]10;rgb:0f0f/0f0f/0f0f\033\\"  // untouched
+                     "\033]11;rgb:f0f0/0000/0000\033\\") // set by the second specification
+        );
+    }
+
+    SECTION("a color we do not model still consumes its specification")
+    {
+        // Specifications 6, 7 and 9 address xterm's Tektronix colors (OSC 15, 16 and 18), which Contour
+        // does not model. They must still be consumed, so that the eighth lands on OSC 17 -- the
+        // highlight background -- and the tenth on OSC 19 -- the highlight foreground -- rather than
+        // shifting onto some earlier color. An eleventh specification runs past OSC 19 and addresses
+        // nothing at all.
+        mock.writeToScreen("\033]10;rgb:0101/0101/0101;rgb:0202/0202/0202;rgb:0303/0303/0303"
+                           ";rgb:0404/0404/0404;rgb:0505/0505/0505;rgb:0606/0606/0606"
+                           ";rgb:0707/0707/0707;rgb:0808/0808/0808;rgb:0909/0909/0909"
+                           ";rgb:0a0a/0a0a/0a0a;rgb:0b0b/0b0b/0b0b\033\\");
+
+        auto const& palette = mock.terminal.colorPalette();
+        CHECK(palette.defaultForeground == RGBColor { 0x01, 0x01, 0x01 });  // OSC 10
+        CHECK(palette.defaultBackground == RGBColor { 0x02, 0x02, 0x02 });  // OSC 11
+        CHECK(get<RGBColor>(palette.cursor.color) == RGBColor { 3, 3, 3 }); // OSC 12
+        CHECK(palette.mouseForeground == RGBColor { 0x04, 0x04, 0x04 });    // OSC 13
+        CHECK(palette.mouseBackground == RGBColor { 0x05, 0x05, 0x05 });    // OSC 14
+                                                                            // OSC 15, 16: Tektronix
+        CHECK(get<RGBColor>(palette.selection.background)                   // OSC 17
+              == RGBColor { 0x08, 0x08, 0x08 });                            //
+                                                                            // OSC 18: Tektronix
+        CHECK(get<RGBColor>(palette.selection.foreground)                   // OSC 19
+              == RGBColor { 0x0A, 0x0A, 0x0A });                            //
+    }
+
+    SECTION("a malformed specification ends the sequence")
+    {
+        mock.writeToScreen("\033]10;rgb:0b0b/0b0b/0b0b\033\\");
+        mock.resetReplyData();
+
+        // As in xterm, the first specification that cannot be parsed stops the walk, so the background
+        // is left alone -- but the foreground set before it stands.
+        mock.writeToScreen("\033]10;not-a-color;rgb:0c0c/0c0c/0c0c\033\\");
+        mock.writeToScreen("\033]10;?\033\\");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033]10;rgb:0b0b/0b0b/0b0b\033\\"));
+    }
+
+    SECTION("the highlight colors are addressable in their own right")
+    {
+        // OSC 17 and OSC 19 could be reached by walking up from OSC 10, but not named directly: only
+        // their reset counterparts (OSC 117 and OSC 119) were ever registered, so a highlight color
+        // could be reset but never set.
+        mock.writeToScreen("\033]17;rgb:1111/2222/3333\033\\");
+        mock.writeToScreen("\033]19;rgb:4444/5555/6666\033\\");
+        mock.writeToScreen("\033]17;?\033\\");
+        mock.writeToScreen("\033]19;?\033\\");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput())
+                == e("\033]17;rgb:1111/2222/3333\033\\"
+                     "\033]19;rgb:4444/5555/6666\033\\"));
+    }
+
+    SECTION("a color following the cell's own color is still reported")
+    {
+        // The highlight foreground follows the cell's foreground by default rather than naming a color
+        // of its own. A query must still be answered -- silence would leave the application reading
+        // some later sequence's reply in place of this one.
+        mock.writeToScreen("\033]10;rgb:1212/3434/5656\033\\"); // the default foreground
+        mock.resetReplyData();
+
+        mock.writeToScreen("\033]19;?\033\\");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033]19;rgb:1212/3434/5656\033\\"));
+    }
+
+    SECTION("resetting a highlight color restores the configured one")
+    {
+        mock.writeToScreen("\033]17;rgb:1111/2222/3333\033\\");
+        mock.writeToScreen("\033]117\033\\"); // RCOLORHIGHLIGHTBG
+        mock.resetReplyData();
+
+        mock.writeToScreen("\033]17;?\033\\");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput())
+                == e(std::format("\033]17;{}\033\\",
+                                 colorSpecification(get<RGBColor>(
+                                     mock.terminal.defaultColorPalette().selection.background)))));
+    }
 }
 
 TEST_CASE("XTGETTCAP")
@@ -3823,6 +5005,33 @@ TEST_CASE("DECCRA.DownLeft.intersecting", "[screen]")
     CHECK(resultText == expectedText);
 }
 
+TEST_CASE("DECCRA.trailing semicolon", "[screen]")
+{
+    // The form vttest actually sends: esc.c:732 is `"%d;%d;%d;%d;%d;%d;%d;%d;$v"` -- eight values and
+    // then a trailing `;`. ECMA-48 5.4.1 makes that a ninth, empty parameter taking its default, and an
+    // omitted parameter is counted here, so DECCRA arrived with nine and matched nothing at all: the
+    // whole copy was silently dropped as an unknown sequence. A terminal must ignore parameters it does
+    // not use. Every other test in this file writes the eight-parameter form, which is why none caught
+    // it -- and vttest's chapter 11.3.6 could not, because its `*` walked straight past the test.
+    auto mock = screenForDECRA();
+    auto& screen = mock.terminal.primaryScreen();
+    REQUIRE(screen.renderMainPageText()
+            == "ABCDEF\n"
+               "abcdef\n"
+               "123456\n"
+               "GHIJKL\n"
+               "ghijkl\n");
+
+    mock.writeToScreen("\033[4;3;5;6;0;3;2;0;$v"); // note the trailing ';'
+
+    CHECK(screen.renderMainPageText()
+          == "ABCDEF\n"
+             "abcdef\n"
+             "1IJKL6\n"
+             "GijklL\n"
+             "ghijkl\n");
+}
+
 TEST_CASE("DECCRA.Right.intersecting", "[screen]")
 {
     // Moves a rectangular area by one column to the right.
@@ -4041,6 +5250,89 @@ TEST_CASE("DECSTR", "[screen]")
             == CellLocation { LineOffset(0), ColumnOffset(0) });
 }
 
+TEST_CASE("DECTST", "[screen]")
+{
+    // DECTST runs the terminal's built-in confidence tests. Contour has no hardware to test, so every
+    // test passes and nothing is reported -- a failure would be DRAWN as a diagnostic code, never
+    // replied. The one observable effect is the power-up self test, which resets the terminal.
+    auto const pageSize = PageSize { LineCount(4), ColumnCount(10) };
+
+    auto const isPristine = [](MockTerm<vtpty::MockPty>& mock) {
+        return mock.terminal.primaryScreen().renderMainPageText()
+               == "          \n          \n          \n          \n";
+    };
+
+    SECTION("the VT100 invoke opcode (2) runs the power-up self test, which resets")
+    {
+        // vttest sends exactly this, to every terminal it meets, whatever the terminal reports itself
+        // to be. @see vttest reset.c:36 `dectst(1)` -> esc.c:1126 `brc2(2, pn, 'y')`.
+        auto mock = MockTerm { pageSize };
+        mock.writeToScreen("ABCD");
+        REQUIRE_FALSE(isPristine(mock));
+
+        mock.writeToScreen("\033[2;1y");
+        CHECK(isPristine(mock));
+        // A terminal that passes its tests says nothing at all.
+        CHECK(mock.terminal.peekInput().empty());
+    }
+
+    SECTION("the VT510 invoke opcode (4) does the same")
+    {
+        // The sequence changed shape between generations -- VT100 invokes with 2, VT510 with 4 -- and a
+        // terminal reporting VT525 must still answer VT100-era software. @see vt100.net DECTST.
+        auto mock = MockTerm { pageSize };
+        mock.writeToScreen("ABCD");
+        mock.writeToScreen("\033[4;1y");
+        CHECK(isPristine(mock));
+    }
+
+    SECTION("test 0 runs all tests, and so resets too")
+    {
+        auto mock = MockTerm { pageSize };
+        mock.writeToScreen("ABCD");
+        mock.writeToScreen("\033[2;0y");
+        CHECK(isPristine(mock));
+    }
+
+    SECTION("a loopback test has no hardware to drive, so it changes nothing")
+    {
+        // 2 = RS-232 data loopback: there is no port, nothing to loop, and nothing that can fail. It
+        // must not be mistaken for the power-up test and reset the screen.
+        auto mock = MockTerm { pageSize };
+        mock.writeToScreen("ABCD");
+        mock.writeToScreen("\033[2;2y");
+        CHECK_FALSE(isPristine(mock));
+        CHECK(mock.terminal.peekInput().empty());
+    }
+
+    SECTION("naming no test runs no test")
+    {
+        // DECTST invokes what it is asked for, and `CSI 2 y` asks for nothing.
+        auto mock = MockTerm { pageSize };
+        mock.writeToScreen("ABCD");
+        mock.writeToScreen("\033[2y");
+        CHECK_FALSE(isPristine(mock));
+    }
+
+    SECTION("a Ps1 that is not an invoke opcode is not DECTST")
+    {
+        auto mock = MockTerm { pageSize };
+        mock.writeToScreen("ABCD");
+        mock.writeToScreen("\033[3;1y");
+        CHECK_FALSE(isPristine(mock));
+    }
+
+    SECTION("an unassigned test number is rejected, and resets nothing on the way")
+    {
+        // The power-up test is named first and the invalid one second: validating the whole string
+        // before running anything is what keeps a rejected DECTST from leaving the terminal half-reset.
+        auto mock = MockTerm { pageSize };
+        mock.writeToScreen("ABCD");
+        mock.writeToScreen("\033[2;1;42y");
+        CHECK_FALSE(isPristine(mock));
+    }
+}
+
 TEST_CASE("SGRSAVE and SGRRESTORE", "[screen]")
 {
     auto mock = MockTerm { ColumnCount(8), LineCount(4) };
@@ -4097,6 +5389,358 @@ TEST_CASE("LS1 and LS0", "[screen]")
     writeTickAndRender("ab");
     REQUIRE(trimmedTextScreenshot(mock) == "ab▒␉ab");
 }
+
+TEST_CASE("LS2 and LS3 (locking shift into GL)", "[screen]")
+{
+    auto mock = MockTerm { ColumnCount(8), LineCount(4) };
+    auto const& charsets = mock.terminal.primaryScreen().cursor().charsets;
+
+    // Designate G2 and G3 to DEC Special so the locking shift has something observable.
+    mock.writeToScreen("\033*0"); // SCS G2 = DEC Special
+    mock.writeToScreen("\033+0"); // SCS G3 = DEC Special
+    REQUIRE(charsets.isSelected(CharsetTable::G2, CharsetId::Special));
+    REQUIRE(charsets.isSelected(CharsetTable::G3, CharsetId::Special));
+    REQUIRE(charsets.selectedTable() == CharsetTable::G0); // GL starts at G0
+
+    // LS2 (ESC n): invoke G2 into GL.
+    mock.writeToScreen("\033n");
+    CHECK(charsets.selectedTable() == CharsetTable::G2);
+    CHECK(charsets.isSelected(CharsetId::Special));
+
+    // LS3 (ESC o): invoke G3 into GL.
+    mock.writeToScreen("\033o");
+    CHECK(charsets.selectedTable() == CharsetTable::G3);
+    CHECK(charsets.isSelected(CharsetId::Special));
+
+    // LS0 (SI): back to G0 (USASCII).
+    mock.writeToScreen("\x0F");
+    CHECK(charsets.selectedTable() == CharsetTable::G0);
+    CHECK(charsets.isSelected(CharsetId::USASCII));
+}
+
+TEST_CASE("LS1R LS2R LS3R (locking shift into GR)", "[screen]")
+{
+    auto mock = MockTerm { ColumnCount(8), LineCount(4) };
+    auto const& charsets = mock.terminal.primaryScreen().cursor().charsets;
+
+    // GR defaults to G2 per the VT standard.
+    REQUIRE(charsets.selectedTableGR() == CharsetTable::G2);
+
+    // LS1R (ESC ~): invoke G1 into GR.
+    mock.writeToScreen("\033~");
+    CHECK(charsets.selectedTableGR() == CharsetTable::G1);
+
+    // LS3R (ESC |): invoke G3 into GR.
+    mock.writeToScreen("\033|");
+    CHECK(charsets.selectedTableGR() == CharsetTable::G3);
+
+    // LS2R (ESC }): invoke G2 into GR (back to the default slot).
+    mock.writeToScreen("\033}");
+    CHECK(charsets.selectedTableGR() == CharsetTable::G2);
+
+    // GR locking shifts must not disturb GL.
+    CHECK(charsets.selectedTable() == CharsetTable::G0);
+}
+
+TEST_CASE("SCS 96-charset designation (ESC - / . / / )", "[screen]")
+{
+    auto mock = MockTerm { ColumnCount(8), LineCount(4) };
+    auto const& charsets = mock.terminal.primaryScreen().cursor().charsets;
+
+    // 96-charsets go into G1, G2, G3 (never G0). Only ISO Latin-1 supplemental ('A') is defined.
+    mock.writeToScreen("\033-A"); // designate G1 = ISO Latin-1 supplemental
+    CHECK(charsets.charsetIdOf(CharsetTable::G1) == CharsetId::ISOLatin1Supplemental);
+    CHECK(charsets.is96Charset(CharsetTable::G1));
+
+    mock.writeToScreen("\033.A"); // designate G2
+    CHECK(charsets.charsetIdOf(CharsetTable::G2) == CharsetId::ISOLatin1Supplemental);
+    CHECK(charsets.is96Charset(CharsetTable::G2));
+
+    mock.writeToScreen("\033/A"); // designate G3
+    CHECK(charsets.charsetIdOf(CharsetTable::G3) == CharsetId::ISOLatin1Supplemental);
+    CHECK(charsets.is96Charset(CharsetTable::G3));
+
+    // A subsequent 94-charset designation clears the 96-charset flag for that G-set.
+    mock.writeToScreen("\033)B"); // designate G1 = USASCII (94-charset)
+    CHECK(charsets.charsetIdOf(CharsetTable::G1) == CharsetId::USASCII);
+    CHECK_FALSE(charsets.is96Charset(CharsetTable::G1));
+    // G0 stays a 94-charset throughout (it cannot hold a 96-charset).
+    CHECK_FALSE(charsets.is96Charset(CharsetTable::G0));
+}
+
+// {{{ UPSS (DECAUPSS / DECRQUPSS)
+
+TEST_CASE("DECRQUPSS reports DEC Supplemental Graphic before any DECAUPSS", "[screen]")
+{
+    // The power-up default is DEC Supplemental Graphic, matching xterm's DFT_UPSS and vttest's own
+    // reset_upss(). Ps=0 because it is a 94-character set.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen("\033[&u"); // DECRQUPSS
+    CHECK(e(mock.terminal.peekInput()) == e("\033P0!u%5\033\\"));
+}
+
+TEST_CASE("DECAUPSS round-trips every set in the table", "[screen]")
+{
+    // Data-driven over UpssTable itself: a new set is a new row, not a new test case. Each row must
+    // survive assignment and come back byte-identical, with Ps re-derived from the set's own size.
+    //
+    // Contour reports back what was assigned rather than forcing ASCII as xterm does in UTF-8 mode --
+    // a deliberate divergence. Contour tracks charset designations faithfully and reports them (as
+    // DECCIR already does) without re-mapping decoded codepoints; answering "US ASCII" to an
+    // application that just assigned DEC Supplemental Graphic would be a lie about state it set.
+    for (auto const& entry: UpssTable)
+    {
+        auto designator = std::string {};
+        if (entry.intermediate != '\0')
+            designator += entry.intermediate;
+        designator += entry.final;
+
+        auto const ps = entry.is96 ? '1' : '0';
+        INFO(std::format("UPSS designator '{}' at Ps={}", designator, ps));
+
+        // VT525 so that even the VT500-era sets are assignable.
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen("\033[65;1\"p"); // DECSCL -> VT level 5
+        mock.writeToScreen(std::format("\033P{}!u{}\033\\", ps, designator));
+        mock.terminal.flushInput(); // drain whatever DECSCL produced
+
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e(std::format("\033P{}!u{}\033\\", ps, designator)));
+    }
+}
+
+TEST_CASE("DECAUPSS Ps names the set's size, not a free parameter", "[screen]")
+{
+    // The sharpest edge in DECAUPSS: Ps is the character-set size, so the *same* designator names two
+    // different sets depending on it, and a Ps that disagrees with the designator names none at all.
+    // xterm's decode_upss skips any table row whose size differs from Ps.
+
+    SECTION("'A' at Ps=0 is US ASCII (94), not ISO Latin-1")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen("\033P0!uA\033\\");
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e("\033P0!uA\033\\"));
+    }
+
+    SECTION("'A' at Ps=1 is ISO Latin-1 (96), not US ASCII")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen("\033P1!uA\033\\");
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e("\033P1!uA\033\\"));
+    }
+
+    SECTION("a size that disagrees with the designator assigns nothing")
+    {
+        // '%5' is a 94-character set, so Ps=1 names no set. UPSS must be left alone -- NOT coerced to
+        // the 94-character reading of the same designator.
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen("\033P1!uA\033\\"); // establish a non-default UPSS first
+        mock.terminal.flushInput();
+
+        mock.writeToScreen("\033P1!u%5\033\\"); // mismatched: %5 is 94-character
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e("\033P1!uA\033\\")); // unchanged
+    }
+}
+
+TEST_CASE("DECAUPSS treats an omitted Ps as zero", "[screen]")
+{
+    // An omitted parameter is stored as 0 *and counted*, so a handler reading it must not fold zero
+    // onto a default -- here zero is itself the meaningful value (94-character), which is why this
+    // reads param_or() rather than param_positive_or().
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen("\033P1!uA\033\\"); // move UPSS off the default (ISO Latin-1, 96)
+    mock.terminal.flushInput();
+
+    mock.writeToScreen("\033P!u>\033\\"); // no Ps at all: must read as Ps=0 -> DEC Technical (94)
+    mock.writeToScreen("\033[&u");
+    CHECK(e(mock.terminal.peekInput()) == e("\033P0!u>\033\\"));
+}
+
+TEST_CASE("DECAUPSS ignores a designator that names no set", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen("\033P0!uZZ\033\\"); // names nothing
+    mock.writeToScreen("\033[&u");
+    CHECK(e(mock.terminal.peekInput()) == e("\033P0!u%5\033\\")); // still the default
+}
+
+TEST_CASE("DECAUPSS gates a set on the conformance level DEC introduced it at", "[screen]")
+{
+    // Two tiers of gating. DECAUPSS itself is VT320+, handled by its Function tag. But the DEC/ISO
+    // Greek, Hebrew, Turkish and Cyrillic sets are VT500-era, which is finer than that tag can express
+    // and so is checked per row.
+    //
+    // Note DECSCL resets the terminal, so UPSS must be assigned *after* it, never before.
+
+    SECTION("a VT500 set is refused at VT320")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen("\033[63;1\"p"); // DECSCL -> VT level 3 (VT320)
+        mock.terminal.flushInput();
+
+        mock.writeToScreen("\033P0!u\"?\033\\"); // DEC Greek: VT500-era
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e("\033P0!u%5\033\\")); // unchanged
+    }
+
+    SECTION("the same set is accepted at VT525")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen("\033[65;1\"p"); // DECSCL -> VT level 5
+        mock.terminal.flushInput();
+
+        mock.writeToScreen("\033P0!u\"?\033\\");
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e("\033P0!u\"?\033\\"));
+    }
+
+    SECTION("DECRQUPSS itself is unrecognised below VT320")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen("\033[61\"p"); // DECSCL -> VT level 1 (VT100)
+        mock.terminal.flushInput();
+
+        mock.writeToScreen("\033[&u");
+        CHECK(mock.terminal.peekInput().empty()); // a VT100 does not answer DECRQUPSS
+    }
+}
+
+TEST_CASE("UPSS survives a screen switch and a cursor save/restore", "[screen]")
+{
+    // UPSS is a terminal-wide user preference, not cursor state. The G-set designations live on the
+    // cursor, so a UPSS kept there would be destroyed by DECSC/DECRC and by every alternate-screen
+    // switch -- the same reason XTCHECKSUM is terminal-level.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen("\033P1!uA\033\\"); // ISO Latin-1
+    mock.terminal.flushInput();
+
+    SECTION("across the alternate screen")
+    {
+        mock.writeToScreen("\033[?1049h"); // to alt
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e("\033P1!uA\033\\"));
+        mock.terminal.flushInput();
+
+        mock.writeToScreen("\033[?1049l"); // back to primary
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e("\033P1!uA\033\\"));
+    }
+
+    SECTION("across DECSC/DECRC")
+    {
+        mock.writeToScreen("\0337"); // DECSC
+        mock.writeToScreen("\033P0!u>\033\\");
+        mock.writeToScreen("\0338"); // DECRC must not roll UPSS back
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e("\033P0!u>\033\\"));
+    }
+}
+
+TEST_CASE("UPSS returns to its configured value on both kinds of reset", "[screen]")
+{
+    // xterm restores the charsets from ReallyReset() unconditionally, i.e. on DECSTR as well as RIS,
+    // so both resets must put UPSS back.
+
+    SECTION("soft reset (DECSTR)")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen("\033P1!uA\033\\");
+        mock.terminal.flushInput();
+
+        mock.writeToScreen("\033[!p"); // DECSTR
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e("\033P0!u%5\033\\"));
+    }
+
+    SECTION("hard reset (RIS)")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen("\033P1!uA\033\\");
+        mock.terminal.flushInput();
+
+        mock.writeToScreen("\033c"); // RIS
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e("\033P0!u%5\033\\"));
+    }
+}
+
+TEST_CASE("SCS designator '<' designates the User-Preferred Supplemental Set", "[screen]")
+{
+    // '<' is unlike every other designator: it names no fixed set, but resolves to whatever DECAUPSS
+    // last assigned (xterm's nrc_DEC_UPSS).
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto const& charsets = mock.terminal.primaryScreen().cursor().charsets;
+
+    SECTION("DECCIR reports '<', not the set it resolves to")
+    {
+        // Sdesig must round-trip the designation the application made. The resolved set is not what
+        // was designated, and is not recoverable back to '<'.
+        mock.writeToScreen("\033(<");
+        CHECK(charsets.isUserPreferred(CharsetTable::G0));
+
+        mock.writeToScreen(DECRQPSR(1));
+        // Sdesig = "<BBB": G0 holds UPSS, G1..G3 are still USASCII.
+        CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;1;1;@;@;@;0;2;@;<BBB\033\\"));
+    }
+
+    SECTION("it is the sanctioned way for G0 to hold a 96-character set")
+    {
+        // DEC STD 070 tells applications not to assume they may designate a 96-charset into G0, "but
+        // that it is possible to do this using UPSS" -- so the slot's syntax does not decide the size
+        // here; the resolved set's does. Scss' G0 bit must therefore be set.
+        mock.writeToScreen("\033P1!uA\033\\"); // UPSS = ISO Latin-1, a 96-character set
+        mock.terminal.flushInput();
+        mock.writeToScreen("\033(<");
+
+        CHECK(charsets.is96Charset(CharsetTable::G0));
+
+        mock.writeToScreen(DECRQPSR(1));
+        // Scss 0x40|1 = 'A': G0 holds a 96-charset.
+        CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;1;1;@;@;@;0;2;A;<BBB\033\\"));
+    }
+
+    SECTION("a later designation clears the UPSS marker")
+    {
+        // The flag records a property of the *designation*, so anything that re-designates the G-set
+        // must clear it -- otherwise DECCIR keeps reporting '<' for a set that is no longer UPSS.
+        mock.writeToScreen("\033(<");
+        REQUIRE(charsets.isUserPreferred(CharsetTable::G0));
+
+        mock.writeToScreen("\033(B"); // designate G0 = USASCII
+        CHECK_FALSE(charsets.isUserPreferred(CharsetTable::G0));
+
+        mock.writeToScreen(DECRQPSR(1));
+        CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;1;1;@;@;@;0;2;@;BBBB\033\\"));
+    }
+
+    SECTION("every G-set can hold it")
+    {
+        mock.writeToScreen("\033)<");
+        mock.writeToScreen("\033*<");
+        mock.writeToScreen("\033+<");
+        CHECK(charsets.isUserPreferred(CharsetTable::G1));
+        CHECK(charsets.isUserPreferred(CharsetTable::G2));
+        CHECK(charsets.isUserPreferred(CharsetTable::G3));
+    }
+
+    SECTION("below VT320 the designator is not recognised")
+    {
+        mock.writeToScreen("\033[61\"p"); // DECSCL -> VT level 1
+        mock.terminal.flushInput();
+
+        mock.writeToScreen("\033(<");
+        CHECK_FALSE(charsets.isUserPreferred(CharsetTable::G0));
+    }
+}
+
+// }}} UPSS
 
 // TODO: Sixel: image that exceeds available lines
 
@@ -4340,6 +5984,30 @@ TEST_CASE("DECCIR.gl_charset_after_locking_shift", "[screen]")
 
     // Pgl=1 (G1 in GL)
     CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;1;1;@;@;@;1;2;@;BBBB\033\\"));
+}
+
+TEST_CASE("DECCIR.gr_charset_after_locking_shift", "[screen]")
+{
+    // Verify Pgr reports the GR register after LS3R maps G3 into GR (default is G2).
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen("\033|"); // LS3R → map G3 into GR
+    mock.writeToScreen(DECRQPSR(1));
+
+    // Pgr=3 (G3 in GR); Pgl stays 0.
+    CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;1;1;@;@;@;0;3;@;BBBB\033\\"));
+}
+
+TEST_CASE("DECCIR.scss_reports_96_charset", "[screen]")
+{
+    // Verify Scss sets the per-G-set size bit and Sdesig reports 'A' when a 96-charset is designated.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen("\033-A"); // designate G1 = ISO Latin-1 supplemental (96-charset)
+    mock.writeToScreen(DECRQPSR(1));
+
+    // Scss = 0x40 | (1 << 1) = 0x42 = 'B'; Sdesig G1 = 'A' (Latin-1). Pgl=0, Pgr=2 (defaults).
+    CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;1;1;@;@;@;0;2;B;BABB\033\\"));
 }
 
 // }}} DECCIR
@@ -4803,6 +6471,33 @@ TEST_CASE("REP.basic_ascii", "[screen]")
     CHECK(screen.grid().lineText(LineOffset(0)) == "||||||||||          ");
 }
 
+TEST_CASE("REP.omitted_parameter_repeats_once", "[screen]")
+{
+    // REP's parameter defaults to 1, so `CSI b` on its own is legal. It was declared as requiring at
+    // least one parameter, though, so a bare `CSI b` matched no function at all and was silently
+    // dropped. vttest sends it.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(8) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("X\033[b");
+
+    CHECK(screen.grid().lineText(LineOffset(0)) == "XX      ");
+}
+
+TEST_CASE("REP.explicit_zero_repeats_once", "[screen]")
+{
+    // REP's parameter is a one-based count, so an explicit zero means the same as an omitted one --
+    // xterm folds both with one_if_default(). Taken literally it repeated nothing and swallowed the
+    // character, which is what param_or() did here while every sibling sequence had moved on to
+    // param_positive_or().
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(8) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("X\033[0b");
+
+    CHECK(screen.grid().lineText(LineOffset(0)) == "XX      ");
+}
+
 TEST_CASE("REP.after_bulk_text", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
@@ -4815,15 +6510,32 @@ TEST_CASE("REP.after_bulk_text", "[screen]")
     CHECK(screen.grid().lineText(LineOffset(0)) == "Hello||||           ");
 }
 
-TEST_CASE("REP.respects_margin", "[screen]")
+TEST_CASE("REP.wraps_at_left_right_margin", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(5) } };
+    // REP repeats through the normal text path, so past the right margin it autowraps to the left
+    // margin of the next line rather than stopping. Mirrors esctest test_REP_RespectsLeftRightMargins.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("\033[?69h"); // DECSET DECLRMM
+    mock.writeToScreen("\033[2;4s"); // DECSLRM 2;4
+    mock.writeToScreen("\033[1;2H"); // CUP row 1, col 2 (the left margin)
+    mock.writeToScreen("a");         // 'a' at the left margin
+    mock.writeToScreen("\033[3b");   // REP 3
+    // Two more fill the band on row 1; the third wraps to the left margin of row 2.
+    CHECK(" aaa \n a   \n" == screen.renderMainPageText());
+}
 
-    // "A" at column 0, then repeat 10 times. Clamped to available columns.
-    mock.writeToScreen("A\033[10b");
-
-    CHECK(screen.grid().lineText(LineOffset(0)) == "AAAA ");
+TEST_CASE("REP.scrolls_at_bottom_margin", "[screen]")
+{
+    // At the bottom margin REP's autowrap scrolls the region, exactly as ordinary text would.
+    // Mirrors esctest test_REP_RespectsTopBottomMargins.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(6) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("\033[2;4r"); // DECSTBM 2;4 -> rows 2..4 (offsets 1..3)
+    mock.writeToScreen("\033[4;4H"); // CUP row 4 (bottom margin), col 4
+    mock.writeToScreen("a");
+    mock.writeToScreen("\033[3b"); // REP 3: fills the row's tail, then wraps + scrolls the region up
+    CHECK("      \n      \n   aaa\na     \n      \n" == screen.renderMainPageText());
 }
 
 TEST_CASE("REP.no_preceding_char", "[screen]")
@@ -5113,7 +6825,305 @@ TEST_CASE("DECSCL: DECRQSS reports current level", "[screen]")
     CHECK(reply.find("64;1\"p") != std::string::npos);
 }
 
+TEST_CASE("foldC1ControlsToEightBit", "[screen]")
+{
+    using vtbackend::foldC1ControlsToEightBit;
+    // Each ESC-introduced C1 control folds to its single 8-bit byte (adjacent string literals keep the
+    // \x?? escapes from greedily swallowing the following digit).
+    CHECK(foldC1ControlsToEightBit("\033[0c")
+          == std::string("\x9b"
+                         "0c")); // CSI
+    CHECK(foldC1ControlsToEightBit("\033P1$r5;6r\033\\")
+          == std::string("\x90"
+                         "1$r5;6r"
+                         "\x9c")); // DCS..ST
+    CHECK(foldC1ControlsToEightBit("\033]0;t\033\\")
+          == std::string("\x9d"
+                         "0;t"
+                         "\x9c")); // OSC..ST
+    // A non-C1 ESC (charset designation, intermediate 0x28 < 0x40), a lone trailing ESC, and plain text
+    // all pass through untouched.
+    CHECK(foldC1ControlsToEightBit("\033(B") == "\033(B");
+    CHECK(foldC1ControlsToEightBit("ab\033") == "ab\033");
+    CHECK(foldC1ControlsToEightBit("") == "");
+    CHECK(foldC1ControlsToEightBit("no controls") == "no controls");
+}
+
+TEST_CASE("S8C1T: DECRQSS reply uses 8-bit C1 at VT level >= 2", "[screen]")
+{
+    // Mirrors esctest S8C1TTests.test_S8C1T_DCS: DECSTBM(5,6), select 8-bit C1 transmission, then read
+    // the DECRQSS(DECSTBM) reply, which must be framed with the 8-bit DCS (0x90) and ST (0x9c).
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[5;6r"); // DECSTBM top=5 bottom=6
+    mock.writeToScreen("\033 G");    // S8C1T (ESC SP G): select 8-bit C1 transmission
+    mock.terminal.flushInput();
+    REQUIRE(mock.terminal.c1TransmissionMode() == ControlTransmissionMode::S8C1T);
+
+    mock.resetReplyData();
+    mock.writeToScreen("\033P$qr\033\\"); // DECRQSS(DECSTBM)
+    mock.terminal.flushInput();
+    CHECK(mock.replyData()
+          == std::string("\x90"
+                         "1$r5;6r"
+                         "\x9c"));
+}
+
+TEST_CASE("S8C1T: replies revert to 7-bit after a VT52 round-trip", "[screen]")
+{
+    // 8-bit C1 transmission is a VT200+ capability. Leaving VT52 (ESC <) drops the operating level to
+    // VT100, where it is unavailable, so replies revert to 7-bit even though S8C1T remains selected
+    // (xterm's CASE_VT52_FINISH rule). Uses DSR-CPR, which is available at VT100 level.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033 G"); // S8C1T at the default VT525 level
+    mock.terminal.flushInput();
+    REQUIRE(mock.terminal.c1TransmissionMode() == ControlTransmissionMode::S8C1T);
+
+    // At VT525 level the CPR reply is 8-bit (0x9b introducer).
+    mock.writeToScreen("\033[3;4H"); // CUP row 3 col 4
+    mock.resetReplyData();
+    mock.writeToScreen("\033[6n"); // DSR: cursor position report
+    mock.terminal.flushInput();
+    CHECK(mock.replyData()
+          == std::string("\x9b"
+                         "3;4R"));
+
+    // Round-trip through VT52; on exit the operating level is VT100.
+    mock.writeToScreen("\033[?2l\033<"); // enter VT52 (DECANM reset), then leave it (ESC <)
+    mock.terminal.flushInput();
+    REQUIRE(mock.terminal.operatingLevel() == VTType::VT100);
+
+    mock.writeToScreen("\033[3;4H");
+    mock.resetReplyData();
+    mock.writeToScreen("\033[6n");
+    mock.terminal.flushInput();
+    CHECK(mock.replyData() == "\033[3;4R"); // 7-bit CSI introducer
+}
+
+TEST_CASE("DECSCL resets the terminal (esctest DECSCL_RISOnChange)", "[screen]")
+{
+    // DECSCL erases the screen, returns the saved cursor to the origin, and clears insert mode -- the
+    // observable reset effects the suite checks -- while leaving hardware-capability modes alone.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    mock.writeToScreen("x");          // 'x' at (0,0)
+    mock.writeToScreen("\033[3;4H");  // CUP to (row 3, col 4)
+    mock.writeToScreen("\0337");      // DECSC: save the cursor away from the origin
+    mock.writeToScreen("\033[4h");    // SM IRM: insert mode on
+    mock.writeToScreen("\033[61\"p"); // DECSCL(61): drop to VT100, resetting the terminal
+
+    // The screen is erased.
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)) == "          ");
+
+    // The saved cursor is back at the origin: DECRC returns there.
+    mock.writeToScreen("\0338"); // DECRC
+    CHECK(mock.terminal.currentScreen().cursor().position == CellLocation { LineOffset(0), ColumnOffset(0) });
+
+    // Insert mode was cleared, so a second write replaces rather than shifts.
+    mock.writeToScreen("\033[1;1Ha\033[1;1Hb");
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 2) == "b ");
+}
+
+TEST_CASE("DECRQCRA answers regardless of the operating level", "[screen]")
+{
+    // DECRQCRA merely reports a checksum, so xterm answers it at any operating level; conformance tools
+    // rely on that to read the screen back even after DECSCL drops to VT100. @see SupportedSequences::reset.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    mock.writeToScreen("\033[61\"p"); // DECSCL(61): VT100 operating level
+    mock.resetReplyData();
+    mock.writeToScreen("\033[1;1;1;1;1;1*y"); // DECRQCRA over the top-left cell
+    mock.terminal.flushInput();
+    CHECK_FALSE(mock.replyData().empty()); // answered, not gated into silence
+}
+
 // }}} DECSCL (Set Conformance Level) Tests
+
+// {{{ XTSMTITLE / XTRMTITLE (Set/Reset Title Modes) Tests
+
+TEST_CASE("XTSMTITLE: hex/UTF-8 title set and query modes", "[screen]")
+{
+    // Mirrors esctest SMTitleTests. XTSMTITLE (CSI > Ps t) enables and XTRMTITLE (CSI > Ps T) disables
+    // the four title-mode features: 0=set-hex, 1=query-hex, 2=set-utf8, 3=query-utf8.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+
+    SECTION("SetHex + QueryUTF8: a hex OSC argument decodes; the report stays plain")
+    {
+        mock.writeToScreen("\033[>2;1T");        // RM_Title(SET_UTF8, QUERY_HEX): disable
+        mock.writeToScreen("\033[>0;3t");        // SM_Title(SET_HEX, QUERY_UTF8): enable
+        mock.writeToScreen("\033]2;6162\033\\"); // OSC 2: window title = hex "6162" -> "ab"
+        mock.terminal.flushInput();
+        CHECK(mock.terminal.windowTitle() == "ab");
+
+        mock.resetReplyData();
+        mock.writeToScreen("\033[21t"); // report window title
+        mock.terminal.flushInput();
+        CHECK(mock.replyData() == "\033]lab\033\\"); // plain UTF-8
+    }
+
+    SECTION("SetUTF8 + QueryHex: a plain OSC argument is stored; the report is hex")
+    {
+        mock.writeToScreen("\033[>0;3T");      // RM_Title(SET_HEX, QUERY_UTF8): disable
+        mock.writeToScreen("\033[>2;1t");      // SM_Title(SET_UTF8, QUERY_HEX): enable
+        mock.writeToScreen("\033]2;ab\033\\"); // OSC 2: window title = "ab" (plain)
+        mock.terminal.flushInput();
+        CHECK(mock.terminal.windowTitle() == "ab");
+
+        mock.resetReplyData();
+        mock.writeToScreen("\033[21t");
+        mock.terminal.flushInput();
+        CHECK(mock.replyData() == "\033]l6162\033\\"); // hex
+    }
+
+    SECTION("the icon title honours the same modes")
+    {
+        mock.writeToScreen("\033[>0;1t");        // enable SetHex + QueryHex
+        mock.writeToScreen("\033]1;6162\033\\"); // OSC 1: icon title = hex "6162" -> "ab"
+        mock.terminal.flushInput();
+        CHECK(mock.terminal.iconTitle() == "ab");
+
+        mock.resetReplyData();
+        mock.writeToScreen("\033[20t"); // report icon title
+        mock.terminal.flushInput();
+        CHECK(mock.replyData() == "\033]L6162\033\\");
+    }
+
+    SECTION("XTRMTITLE with no parameter resets every title mode to default")
+    {
+        mock.writeToScreen("\033[>0;1t"); // enable SetHex + QueryHex
+        REQUIRE(mock.terminal.isTitleModeEnabled(TitleModeFeature::SetHex));
+        REQUIRE(mock.terminal.isTitleModeEnabled(TitleModeFeature::QueryHex));
+        mock.writeToScreen("\033[>T"); // reset all
+        mock.terminal.flushInput();
+        CHECK_FALSE(mock.terminal.isTitleModeEnabled(TitleModeFeature::SetHex));
+        CHECK_FALSE(mock.terminal.isTitleModeEnabled(TitleModeFeature::QueryHex));
+    }
+
+    SECTION("RIS resets all title modes (esctest RIS.test_RIS_ResetTitleMode)")
+    {
+        mock.writeToScreen("\033[>0;1t"); // enable SetHex + QueryHex
+        REQUIRE(mock.terminal.isTitleModeEnabled(TitleModeFeature::SetHex));
+        mock.writeToScreen("\033c"); // RIS
+        mock.terminal.flushInput();
+        CHECK_FALSE(mock.terminal.isTitleModeEnabled(TitleModeFeature::SetHex));
+        CHECK_FALSE(mock.terminal.isTitleModeEnabled(TitleModeFeature::QueryHex));
+    }
+
+    SECTION("XTSMTITLE owns the bare `CSI > Ps t` opcode (single non-zero parameter)")
+    {
+        // The bare `CSI > Ps t` is now XTSMTITLE, not the relocated XTCAPTURE. A single non-zero mode
+        // parameter is honoured; `CSI > 0 t` alone is not exercised because Contour's parser conflates a
+        // lone explicit 0 with an omitted parameter (esctest always sends two parameters).
+        mock.writeToScreen("\033[>1t"); // enable QueryHex only
+        mock.terminal.flushInput();
+        CHECK(mock.terminal.isTitleModeEnabled(TitleModeFeature::QueryHex));
+        CHECK_FALSE(mock.terminal.isTitleModeEnabled(TitleModeFeature::SetHex));
+    }
+}
+
+TEST_CASE("DECSET 41 (MoreFix): a tab honours a pending wrap", "[screen]")
+{
+    // esctest DECSETTests.test_DECSET_MoreFix. Fill the line to the right margin (so a wrap is pending),
+    // then TAB. With MoreFix on the tab honours the pending wrap and lands on the next line's first tab
+    // stop; without it (the default) the tab is swallowed at the right margin and the wrap waits.
+    SECTION("MoreFix ON: the tab wraps to the next line's first tab stop")
+    {
+        auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(10) } };
+        mock.writeToScreen("\033[?7h");   // DECSET DECAWM (autowrap)
+        mock.writeToScreen("\033[?41h");  // DECSET MoreFix
+        mock.writeToScreen("xxxxxxxxxx"); // fill 10 columns -> cursor at the right margin, wrap pending
+        REQUIRE(mock.terminal.currentScreen().cursor().position
+                == CellLocation { LineOffset(0), ColumnOffset(9) });
+        mock.writeToScreen("\t"); // TAB: honour the pending wrap, then tab from the left margin
+        CHECK(mock.terminal.currentScreen().cursor().position
+              == CellLocation { LineOffset(1), ColumnOffset(8) });
+    }
+
+    SECTION("MoreFix OFF (default): the tab is swallowed at the right margin")
+    {
+        auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(10) } };
+        mock.writeToScreen("\033[?7h");   // DECSET DECAWM
+        mock.writeToScreen("xxxxxxxxxx"); // fill 10 columns
+        mock.writeToScreen("\t");         // TAB is swallowed at the right margin
+        CHECK(mock.terminal.currentScreen().cursor().position
+              == CellLocation { LineOffset(0), ColumnOffset(9) });
+        mock.writeToScreen("2"); // only now does the pending wrap execute
+        CHECK(mock.terminal.currentScreen().cursor().position.line == LineOffset(1));
+    }
+}
+
+TEST_CASE("OSC 52: clipboard write and gated read", "[screen]")
+{
+    // esctest ManipulateSelectionDataTests.test_ManipulateSelectionData_default. OSC 52 with base64 data
+    // sets the clipboard; OSC 52 with "?" reads it back as `OSC 52 ; s0 ; <base64> ST`. Reading is gated
+    // by Settings::allowClipboardRead (MockTerm enables it). base64("testing 123") == "dGVzdGluZyAxMjM=".
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+
+    SECTION("write then read round-trips through the clipboard")
+    {
+        mock.writeToScreen("\033]52;;dGVzdGluZyAxMjM=\033\\"); // set, empty Pc
+        mock.terminal.flushInput();
+        CHECK(mock.clipboardData == "testing 123");
+
+        mock.resetReplyData();
+        mock.writeToScreen("\033]52;;?\033\\"); // read, empty Pc -> reported back as "s0"
+        mock.terminal.flushInput();
+        CHECK(mock.replyData() == "\033]52;s0;dGVzdGluZyAxMjM=\033\\");
+    }
+
+    SECTION("read is silent when the policy forbids it")
+    {
+        mock.terminal.settings().allowClipboardRead = false;
+        mock.writeToScreen("\033]52;;dGVzdGluZyAxMjM=\033\\");
+        mock.terminal.flushInput();
+        mock.resetReplyData();
+        mock.writeToScreen("\033]52;;?\033\\");
+        mock.terminal.flushInput();
+        CHECK(mock.replyData().empty()); // no reply: the clipboard is not exposed
+    }
+}
+
+// }}} XTSMTITLE / XTRMTITLE (Set/Reset Title Modes) Tests
+
+TEST_CASE("OSC 110/111 reset dynamic colors to the default palette", "[screen]")
+{
+    // The mechanism esctest ResetSpecialColorTests.test_ResetSpecialColor_Dynamic exercises: OSC 110
+    // (reset foreground) and OSC 111 (reset background) restore the dynamic color to the terminal's
+    // default palette, undoing any OSC 10 / OSC 11 override.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    SECTION("OSC 110 resets the foreground")
+    {
+        mock.writeToScreen("\033]10;?\033\\"); // query the default foreground
+        mock.terminal.flushInput();
+        auto const original = mock.replyData();
+        REQUIRE(original.find("]10;rgb:") != std::string::npos);
+
+        mock.resetReplyData();
+        mock.writeToScreen("\033]10;#aaaabbbbcccc\033\\"); // override it
+        mock.writeToScreen("\033]10;?\033\\");
+        mock.terminal.flushInput();
+        REQUIRE(mock.replyData() == "\033]10;rgb:aaaa/bbbb/cccc\033\\");
+
+        mock.resetReplyData();
+        mock.writeToScreen("\033]110\033\\");  // reset foreground to default
+        mock.writeToScreen("\033]10;?\033\\"); // query again
+        mock.terminal.flushInput();
+        CHECK(mock.replyData() == original);
+    }
+
+    SECTION("OSC 111 resets the background")
+    {
+        mock.writeToScreen("\033]11;?\033\\");
+        mock.terminal.flushInput();
+        auto const original = mock.replyData();
+        REQUIRE(original.find("]11;rgb:") != std::string::npos);
+
+        mock.resetReplyData();
+        mock.writeToScreen("\033]11;#112233445566\033\\");
+        mock.writeToScreen("\033]111\033\\"); // reset background to default
+        mock.writeToScreen("\033]11;?\033\\");
+        mock.terminal.flushInput();
+        CHECK(mock.replyData() == original);
+    }
+}
 
 // {{{ DECDMAC / DECINVM (Text Macros) Tests
 
@@ -5790,3 +7800,1466 @@ TEST_CASE("DECDLD: switching away from DRCS uses normal font", "[screen]")
 
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
 // }}} DEC Multi-Page Support Tests
+
+// {{{ DECALN (Screen Alignment Pattern) Tests
+
+TEST_CASE("DECALN: fills the page with E's", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(4) } };
+    mock.writeToScreen("\033#8");
+
+    CHECK(mock.terminal.primaryScreen().renderMainPageText() == "EEEE\nEEEE\nEEEE\n");
+}
+
+TEST_CASE("DECALN: page that wraps the history ring is still filled in bounds", "[screen]")
+{
+    // Grid::_lines is a ring whose rotation is an INDEX move, not a data move. Once enough lines
+    // have scrolled into history, the logical main page straddles the ring's physical end. Anything
+    // that walks the page as a contiguous block therefore runs off the underlying vector -- which is
+    // what DECALN used to do, and what ASan catches here.
+    //
+    // Found by driving vttest through the conformance harness; there was no DECALN test at all.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(4) }, LineCount(2) };
+
+    // Scroll past the history capacity so the ring's zero-index no longer sits at physical zero.
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 6))
+        mock.writeToScreen("x\r\n");
+
+    REQUIRE(mock.terminal.primaryScreen().historyLineCount() == LineCount(2));
+
+    mock.writeToScreen("\033#8");
+
+    CHECK(mock.terminal.primaryScreen().renderMainPageText() == "EEEE\nEEEE\nEEEE\n");
+}
+
+// }}} DECALN Tests
+
+// {{{ ANSI Mode Tests
+
+TEST_CASE("LNM: set makes LF also return the carriage", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+
+    // Without LNM, a bare LF only moves down: the second line keeps the column.
+    mock.writeToScreen("ab\ncd");
+    CHECK(mock.terminal.primaryScreen().renderMainPageText() == "ab   \n  cd \n     \n");
+
+    auto other = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+    other.writeToScreen("\033[20h"); // LNM set
+    other.writeToScreen("ab\ncd");
+    CHECK(other.terminal.primaryScreen().renderMainPageText() == "ab   \ncd   \n     \n");
+}
+
+TEST_CASE("LF outside the left/right margins does not scroll", "[screen]")
+{
+    // A line feed only scrolls when the cursor is inside the left/right margins -- xterm's
+    // `!ScrnIsColInMargins` guard in xtermIndex(). The catch is LNM: the carriage-return half of the line
+    // feed moves the cursor to the left margin, i.e. INTO the band, so asking the guard *after* the move
+    // made it vacuously true and scrolled the top line of the region away. xterm reads screen->cur_col
+    // first and applies CarriageReturn only afterwards (CASE_VMOT).
+    //
+    // The page is deliberately taller than the scroll region, so a scroll cannot be mistaken for the
+    // cursor simply walking down the page.
+    // The marker sits INSIDE the horizontal margins: a scroll here moves the rectangle bounded by the
+    // margins, so a marker outside them would survive either way and the test would prove nothing.
+    auto const setup = [](auto& mock) {
+        mock.writeToScreen("\033[1;3r");   // DECSTBM: scroll region over lines 1..3
+        mock.writeToScreen("\033[?69h");   // DECLRMM: enable left/right margins
+        mock.writeToScreen("\033[10;20s"); // DECSLRM(10,20)
+        mock.writeToScreen("\033[20h");    // LNM: LF also returns the carriage
+        mock.writeToScreen("\033[1;10Htop");
+    };
+
+    SECTION("right of the right margin: no scroll")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) } };
+        auto& screen = mock.terminal.primaryScreen();
+        setup(mock);
+
+        mock.writeToScreen("\033[3;30H"); // bottom margin line, right of the right margin
+        mock.writeToScreen("\n");
+
+        CHECK(screen.grid().lineText(LineOffset(0)).contains("top"));
+        // Neither scrolled nor advanced past the bottom margin; the carriage still returned to the margin.
+        CHECK(screen.cursor().position == CellLocation { LineOffset(2), ColumnOffset(9) });
+    }
+
+    SECTION("inside the margins: scrolls, as it must")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) } };
+        auto& screen = mock.terminal.primaryScreen();
+        setup(mock);
+
+        mock.writeToScreen("\033[3;15H"); // bottom margin line, inside the margins
+        mock.writeToScreen("\n");
+
+        CHECK_FALSE(screen.grid().lineText(LineOffset(0)).contains("top"));
+    }
+}
+
+TEST_CASE("LNM: set makes the Return key send CR LF", "[screen]")
+{
+    // LNM has two halves, and vttest exercises both. The output half is above; this is the input
+    // half, which lives in the input generator and so must be told about the mode explicitly.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+
+    mock.sendKeyEvent(Key::Enter);
+    mock.terminal.flushInput();
+    CHECK(mock.replyData() == "\r");
+
+    mock.writeToScreen("\033[20h"); // LNM set
+    mock.terminal.flushInput();
+    mock.mockPty().stdinBuffer().clear();
+
+    mock.sendKeyEvent(Key::Enter);
+    mock.terminal.flushInput();
+    CHECK(mock.replyData() == "\r\n");
+
+    mock.writeToScreen("\033[20l"); // LNM reset
+    mock.terminal.flushInput();
+    mock.mockPty().stdinBuffer().clear();
+
+    mock.sendKeyEvent(Key::Enter);
+    mock.terminal.flushInput();
+    CHECK(mock.replyData() == "\r");
+}
+
+TEST_CASE("KAM: set locks the keyboard out", "[screen]")
+{
+    // KAM was implemented all along -- Terminal::allowInput() reads it -- but `CSI 2 h` was rejected
+    // as unsupported, so nothing could ever turn it on.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+
+    mock.writeToScreen("\033[2h"); // KAM set: keyboard locked
+    mock.terminal.flushInput();
+    mock.mockPty().stdinBuffer().clear();
+
+    mock.sendCharEvent('x');
+    mock.terminal.flushInput();
+    CHECK(mock.replyData().empty());
+
+    mock.writeToScreen("\033[2l"); // KAM reset: keyboard unlocked
+    mock.terminal.flushInput();
+
+    mock.sendCharEvent('x');
+    mock.terminal.flushInput();
+    CHECK(mock.replyData() == "x");
+}
+
+TEST_CASE("SRM turns local echo on and off", "[screen]")
+{
+    // SRM is *set* by default -- the host echoes, and the terminal does not. Reset it and the terminal
+    // echoes everything it sends, which is what a host with no echo of its own relies on.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    SECTION("set by default, so nothing is echoed")
+    {
+        CHECK(mock.terminal.isModeEnabled(AnsiMode::SendReceive));
+
+        mock.sendCharSequence("abc");
+        CHECK(mock.replyData() == "abc");                        // sent to the host...
+        CHECK(screen.grid().lineText(LineOffset(0)) == "     "); // ...and not to the screen
+    }
+
+    SECTION("reset, so the terminal echoes what it sends")
+    {
+        mock.writeToScreen("\033[12l");
+        CHECK_FALSE(mock.terminal.isModeEnabled(AnsiMode::SendReceive));
+
+        mock.sendCharSequence("abc");
+        CHECK(mock.replyData() == "abc");                        // still sent to the host...
+        CHECK(screen.grid().lineText(LineOffset(0)) == "abc  "); // ...and now to the screen as well
+    }
+
+    SECTION("set again, and the echo stops")
+    {
+        mock.writeToScreen("\033[12l");
+        mock.writeToScreen("\033[12h");
+        CHECK(mock.terminal.isModeEnabled(AnsiMode::SendReceive));
+
+        mock.sendCharSequence("abc");
+        CHECK(screen.grid().lineText(LineOffset(0)) == "     ");
+    }
+}
+
+TEST_CASE("SRM: echoing input that queries keeps the send buffer intact", "[screen]")
+{
+    // The echo parses the bytes being sent, and a query among them replies -- which appends to the very
+    // std::string the bytes are being read from, reallocating it. Sending them afterwards read freed
+    // memory. The bytes are owned across the echo now; ASan is what fails this if it regresses.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+
+    mock.writeToScreen("\033[12l"); // SRM reset -> local echo
+    mock.terminal.sendRawInput("\033[6n");
+
+    // What was typed reached the host, and the DSR the echo executed queued its answer behind it.
+    CHECK(mock.replyData() == "\033[6n");
+    mock.terminal.flushInput();
+    CHECK(mock.replyData() == "\033[6n\033[1;1R");
+}
+
+TEST_CASE("SRM: a reply issued from inside the parser is echoed, not deadlocked", "[screen]")
+{
+    // A reply can be issued from *inside* the parser -- DSR 996 is answered by
+    // Screen::reportColorPaletteUpdate(), which flushes on the spot -- and with SRM reset that flush
+    // echoes, which parses. Parsing there would re-enter the parser mid-sequence and take the
+    // non-recursive state lock the parse already holds. The echo is deferred to a barrier instead.
+    // A regression hangs this test rather than failing it.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[12l");   // SRM reset -> local echo
+    mock.writeToScreen("\033[?996n"); // DSR: report the color palette, answered from inside the parser
+
+    CHECK(mock.replyData().starts_with("\033[?997;"));
+
+    // And the terminal is still usable afterwards: the deferred echo drained and the parser is at rest.
+    mock.writeToScreen("ok");
+    CHECK(screen.grid().lineText(LineOffset(0)) == "ok                  ");
+}
+
+TEST_CASE("RIS restores SRM", "[screen]")
+{
+    // hardReset() clears the whole mode register, and a *reset* SRM means local echo is ON -- so RIS
+    // leaving it cleared echoed every keystroke on top of the shell's own echo, forever after.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[12l");
+    REQUIRE_FALSE(mock.terminal.isModeEnabled(AnsiMode::SendReceive));
+
+    mock.writeToScreen("\033c"); // RIS
+    CHECK(mock.terminal.isModeEnabled(AnsiMode::SendReceive));
+
+    mock.sendCharSequence("abc");
+    CHECK(screen.grid().lineText(LineOffset(0)) == "     "); // the host echoes again, not us
+}
+
+TEST_CASE("A hard reset leaves VT52", "[screen]")
+{
+    // VT52 has no ANSI grammar, so `ESC <` is the only sequence that leaves it -- not even RIS gets
+    // through, as the section below pins. A program that dies in VT52 therefore leaves a terminal that
+    // nothing the host sends can recover, and the user's Reset action (which calls hardReset() under the
+    // lock, @see TerminalSession::operator()(actions::ClearHistoryAndReset)) is the only way out. It must
+    // restore the ANSI parser, and restore the configured level while it is at it.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[?2l"); // DECANM reset: enter VT52
+    REQUIRE(mock.terminal.isVT52Mode());
+
+    // RIS cannot do it: there is no RIS in the VT52 grammar, so the sequence never reaches hardReset().
+    mock.writeToScreen("\033c");
+    REQUIRE(mock.terminal.isVT52Mode());
+
+    crispy::locked(mock.terminal, [&]() { mock.terminal.hardReset(); });
+    CHECK_FALSE(mock.terminal.isVT52Mode());
+
+    // Unlike `ESC <`, which lands at VT100, RIS restores the level the terminal was configured with.
+    CHECK(mock.terminal.operatingLevel() == VTType::VT525);
+
+    // And the ANSI grammar answers again.
+    mock.writeToScreen("\033[3;4H");
+    CHECK(screen.cursor().position == CellLocation { LineOffset(2), ColumnOffset(3) });
+}
+
+TEST_CASE("DECRQM answers for a mode it knows but can never turn on", "[screen]")
+{
+    // 0 says "I have never heard of this mode"; 4 says "I know exactly what you mean, and it can never
+    // be on here". They are different claims, and Contour used to make the first when it meant the
+    // second -- disclaiming knowledge of a dozen modes ECMA-48 defines.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+
+    SECTION("a mode Contour implements reports its live state")
+    {
+        mock.writeToScreen("\033[4$p"); // IRM
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[4;2$y"));
+        mock.discardPendingReplies();
+
+        mock.writeToScreen("\033[4h");
+        mock.writeToScreen("\033[4$p");
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[4;1$y"));
+    }
+
+    SECTION("a mode Contour knows but hard-wires off reports permanently reset")
+    {
+        mock.writeToScreen("\033[1$p"); // GATM
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[1;4$y"));
+        mock.discardPendingReplies();
+
+        mock.writeToScreen("\033[19$p"); // EBM
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[19;4$y"));
+    }
+
+    SECTION("a mode Contour has never heard of reports not recognized")
+    {
+        mock.writeToScreen("\033[123$p");
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[123;0$y"));
+    }
+}
+
+TEST_CASE("DECRQM reports a DEC mode the terminal remembers but cannot act on", "[screen]")
+{
+    // A terminal that faithfully remembers what it was told is not lying; it would only be lying if it
+    // claimed an effect. Contour has no printer, but it can still say whether DECPFF is set.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+
+    mock.writeToScreen("\033[?18$p"); // DECPFF
+    REQUIRE(e(mock.terminal.peekInput()) == e("\033[?18;2$y"));
+    mock.discardPendingReplies();
+
+    mock.writeToScreen("\033[?18h");
+    mock.writeToScreen("\033[?18$p");
+    REQUIRE(e(mock.terminal.peekInput()) == e("\033[?18;1$y"));
+    mock.discardPendingReplies();
+
+    mock.writeToScreen("\033[?18l");
+    mock.writeToScreen("\033[?18$p");
+    REQUIRE(e(mock.terminal.peekInput()) == e("\033[?18;2$y"));
+}
+
+TEST_CASE("DECRQM answers 4 for a DEC mode that can never turn on", "[screen]")
+{
+    // DECHCCM (horizontal cursor coupling) is meaningless on a page that never scrolls horizontally, so
+    // Contour reports PermanentlyReset (4) rather than Reset (2) -- "I know it, and it cannot be on
+    // here". Mirrors esctest test_DECRQM_DEC_DECHCCM.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+
+    mock.writeToScreen("\033[?60$p"); // DECRQM DECHCCM
+    CHECK(e(mock.terminal.peekInput()) == e("\033[?60;4$y"));
+}
+
+TEST_CASE("VT525 keyboard/national modes are settable toggles", "[screen]")
+{
+    // These VT525 DEC private modes are not yet acted on, but Contour remembers and reports their
+    // state: SM/RM toggle the bit and DECRQM answers Set (1) / Reset (2), rather than pretending the
+    // mode is unknown (0). RightToLeftMode (DECRLM, 34) and HebrewEncodingMode (DECHEM, 36) are the
+    // entry points for real bidirectional/Hebrew support. Mirrors
+    // esctest's doModifiableDecTest for these modes.
+    auto togglesCleanly = [](unsigned decNumber) {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        // Reset -> DECRQM reports 2.
+        mock.writeToScreen(std::format("\033[?{}l\033[?{}$p", decNumber, decNumber));
+        CHECK(e(mock.terminal.peekInput()) == e(std::format("\033[?{};2$y", decNumber)));
+        mock.discardPendingReplies();
+        // Set -> DECRQM reports 1.
+        mock.writeToScreen(std::format("\033[?{}h\033[?{}$p", decNumber, decNumber));
+        CHECK(e(mock.terminal.peekInput()) == e(std::format("\033[?{};1$y", decNumber)));
+    };
+
+    SECTION("DECRLM (34, right-to-left)")
+    {
+        togglesCleanly(34);
+    }
+    SECTION("DECHEM (36, Hebrew encoding)")
+    {
+        togglesCleanly(36);
+    }
+    SECTION("DECVCCM (61, vertical cursor coupling)")
+    {
+        togglesCleanly(61);
+    }
+    SECTION("DECAAM (100, auto answerback)")
+    {
+        togglesCleanly(100);
+    }
+    SECTION("DECOSCNM (106, overscan)")
+    {
+        togglesCleanly(106);
+    }
+}
+
+// }}} ANSI Mode Tests
+
+// {{{ DECREQTPARM (Request Terminal Parameters) Tests
+
+TEST_CASE("DECREQTPARM: reports the terminal's communication parameters", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+
+    SECTION("Ps omitted defaults to 0, so Psol is 2")
+    {
+        mock.writeToScreen("\033[x");
+        mock.terminal.flushInput();
+        CHECK(mock.replyData() == "\033[2;1;1;128;128;1;0x");
+    }
+
+    SECTION("Ps = 0 reports Psol = 2")
+    {
+        mock.writeToScreen("\033[0x");
+        mock.terminal.flushInput();
+        CHECK(mock.replyData() == "\033[2;1;1;128;128;1;0x");
+    }
+
+    SECTION("Ps = 1 reports Psol = 3")
+    {
+        mock.writeToScreen("\033[1x");
+        mock.terminal.flushInput();
+        CHECK(mock.replyData() == "\033[3;1;1;128;128;1;0x");
+    }
+
+    SECTION("any other Ps is rejected without a reply")
+    {
+        mock.writeToScreen("\033[2x");
+        mock.terminal.flushInput();
+        CHECK(mock.replyData().empty());
+    }
+}
+
+// }}} DECREQTPARM Tests
+
+// {{{ VPR (Vertical Position Relative) Tests
+
+TEST_CASE("VPR: moves the cursor down, keeping its column", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[2;3H"); // row 2, column 3
+    REQUIRE(screen.cursor().position == CellLocation { LineOffset(1), ColumnOffset(2) });
+
+    SECTION("an omitted parameter moves down one line")
+    {
+        mock.writeToScreen("\033[e");
+        CHECK(screen.cursor().position == CellLocation { LineOffset(2), ColumnOffset(2) });
+    }
+
+    SECTION("Ps moves down that many lines")
+    {
+        mock.writeToScreen("\033[2e");
+        CHECK(screen.cursor().position == CellLocation { LineOffset(3), ColumnOffset(2) });
+    }
+
+    SECTION("movement is clamped to the page")
+    {
+        mock.writeToScreen("\033[99e");
+        CHECK(screen.cursor().position == CellLocation { LineOffset(4), ColumnOffset(2) });
+    }
+}
+
+// }}} VPR Tests
+
+// {{{ DECRQCRA / XTCHECKSUM Tests
+
+// The expected checksums below are what xterm-406 answers for the same screen and the same
+// XTCHECKSUM flags, measured by driving a real xterm headlessly. See RectangularAreaChecksum_test.cpp
+// for the flag-by-flag breakdown; these tests are about the sequence reaching the algorithm at all,
+// and about the state the algorithm reads.
+
+TEST_CASE("DECRQCRA: reports the checksum of a rectangular area", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+
+    auto const request = [&](std::string_view sequence) -> std::string {
+        mock.mockPty().stdinBuffer().clear();
+        mock.writeToScreen(sequence);
+        mock.terminal.flushInput();
+        return mock.replyData();
+    };
+
+    mock.writeToScreen("ab");
+
+    SECTION("the final byte is `* y`, not `$ y`")
+    {
+        // Regression. DECRQCRA was registered with a '$' intermediate -- which is DECRPM's, a reply
+        // form no terminal ever parses -- so the implementation was unreachable: every application
+        // asking for a checksum, esctest included, waited for an answer that could not come.
+        CHECK(request("\033[1;1;1;1;1;1*y") == "\033P1!~FF9F\033\\");
+
+        // And the old spelling is not DECRQCRA, so it must draw no reply at all.
+        CHECK(request("\033[1;1;1;1;1;1$y").empty());
+    }
+
+    SECTION("the request id is echoed back, so answers can be correlated")
+    {
+        CHECK(request("\033[42;1;1;1;1;1*y") == "\033P42!~FF9F\033\\");
+    }
+
+    SECTION("a rectangle spanning several cells sums them")
+    {
+        CHECK(request("\033[1;1;1;1;1;2*y") == "\033P1!~FF3D\033\\"); // -( 'a' + 'b' )
+    }
+
+    SECTION("an omitted rectangle covers the whole page")
+    {
+        // The two written cells count; the rest of the page was never written to and drops out.
+        CHECK(request("\033[1*y") == "\033P1!~FF3D\033\\");
+    }
+
+    SECTION("cells never written to contribute nothing")
+    {
+        CHECK(request("\033[1;1;3;1;3;5*y") == "\033P1!~0000\033\\");
+    }
+
+    SECTION("a written space is not an empty cell")
+    {
+        mock.writeToScreen("\033[2;1H "); // an explicit space on row 2
+        CHECK(request("\033[1;1;2;1;2;1*y") == "\033P1!~FFE0\033\\");
+    }
+
+    SECTION("video attributes are folded into the value")
+    {
+        mock.writeToScreen("\033[2;1H\033[1ma");                      // bold 'a'
+        CHECK(request("\033[1;1;2;1;2;1*y") == "\033P1!~FF1F\033\\"); // -( 'a' + 0x80 )
+    }
+}
+
+TEST_CASE("XTCHECKSUM: selects how DECRQCRA computes its checksum", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+
+    auto const request = [&](std::string_view sequence) -> std::string {
+        mock.mockPty().stdinBuffer().clear();
+        mock.writeToScreen(sequence);
+        mock.terminal.flushInput();
+        return mock.replyData();
+    };
+    auto const checksumOfFirstCell = [&] {
+        return request("\033[1;1;1;1;1;1*y");
+    };
+
+    mock.writeToScreen("\033[1ma"); // bold 'a' at 1,1
+
+    SECTION("the default is DEC-compatible: negated, with attributes folded in")
+    {
+        REQUIRE(mock.terminal.checksumExtension() == vtbackend::ChecksumFlags {});
+        CHECK(checksumOfFirstCell() == "\033P1!~FF1F\033\\");
+    }
+
+    SECTION("bit 0 reports the plain sum")
+    {
+        mock.writeToScreen("\033[1#y");
+        CHECK(checksumOfFirstCell() == "\033P1!~00E1\033\\");
+    }
+
+    SECTION("bit 1 leaves the video attributes out")
+    {
+        mock.writeToScreen("\033[2#y");
+        CHECK(checksumOfFirstCell() == "\033P1!~FF9F\033\\");
+    }
+
+    SECTION("bit 3 counts cells that were never written to")
+    {
+        mock.writeToScreen("\033[8#y");
+        CHECK(request("\033[1;1;3;1;3;1*y") == "\033P1!~FFE0\033\\"); // an untouched cell reads blank
+    }
+
+    SECTION("bits combine")
+    {
+        // The combination the conformance suites need: undrawn cells read as blanks, and a cell's
+        // attributes stay out of its value.
+        mock.writeToScreen("\033[10#y");
+        CHECK(checksumOfFirstCell() == "\033P1!~FF9F\033\\");
+        CHECK(request("\033[1;1;3;1;3;1*y") == "\033P1!~FFE0\033\\");
+    }
+
+    SECTION("an omitted parameter selects the DEC-compatible default")
+    {
+        mock.writeToScreen("\033[1#y");
+        REQUIRE(mock.terminal.checksumExtension() != vtbackend::ChecksumFlags {});
+        mock.writeToScreen("\033[#y");
+        CHECK(mock.terminal.checksumExtension() == vtbackend::ChecksumFlags {});
+    }
+}
+
+TEST_CASE("XTCHECKSUM: a reset restores the configured extension, not zero", "[screen]")
+{
+    // xterm restores its `checksumExtension` resource on reset rather than clearing it, and Contour
+    // mirrors that via Settings. It matters: esctest sends DECSTR before every single test, so a
+    // reset-to-zero would throw the harness's configuration away on the first one.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+    auto const configured = vtbackend::ChecksumFlags { vtbackend::ChecksumFlag::NoAttributes }
+                            | vtbackend::ChecksumFlag::IncludeUndrawn;
+    mock.terminal.settings().checksumExtension = configured;
+
+    mock.writeToScreen("\033[1#y"); // the application selects something else
+    REQUIRE(mock.terminal.checksumExtension()
+            == vtbackend::ChecksumFlags { vtbackend::ChecksumFlag::Positive });
+
+    SECTION("DECSTR (soft reset) restores it")
+    {
+        mock.writeToScreen("\033[!p");
+        CHECK(mock.terminal.checksumExtension() == configured);
+    }
+
+    SECTION("RIS (hard reset) restores it")
+    {
+        mock.writeToScreen("\033c");
+        CHECK(mock.terminal.checksumExtension() == configured);
+    }
+}
+
+// }}} DECRQCRA / XTCHECKSUM Tests
+
+// {{{ DECSNLS Tests
+
+TEST_CASE("DECSNLS: selects the number of lines per screen", "[screen]")
+{
+    // DECSNLS used to read its parameter as a *column* count, so `CSI 24 * |` silently narrowed an
+    // 80-column page to 24 columns and left the line count alone -- the exact opposite of what the
+    // sequence means. esctest found it by crashing the engine: narrowing the page reflows it, which
+    // walked the cursor off the bottom.
+    auto mock = MockTerm { PageSize { LineCount(25), ColumnCount(80) } };
+
+    SECTION("it sets the lines, and leaves the columns alone")
+    {
+        mock.writeToScreen("\033[24*|");
+        CHECK(mock.terminal.pageSize().lines == LineCount(24));
+        CHECK(mock.terminal.pageSize().columns == ColumnCount(80));
+    }
+
+    SECTION("an omitted parameter changes nothing")
+    {
+        mock.writeToScreen("\033[*|");
+        CHECK(mock.terminal.pageSize().lines == LineCount(25));
+        CHECK(mock.terminal.pageSize().columns == ColumnCount(80));
+    }
+
+    SECTION("a zero parameter changes nothing")
+    {
+        mock.writeToScreen("\033[0*|");
+        CHECK(mock.terminal.pageSize().lines == LineCount(25));
+    }
+
+    SECTION("DECRQSS reports back what was selected")
+    {
+        // esctest asserts exactly this round trip.
+        mock.writeToScreen("\033[24*|");
+        mock.mockPty().stdinBuffer().clear();
+        mock.writeToScreen("\033P$q*|\033\\");
+        mock.terminal.flushInput();
+        CHECK(mock.replyData() == "\033P1$r24*|\033\\");
+    }
+
+    SECTION("the cursor stays inside the page when it shrinks")
+    {
+        mock.writeToScreen("\033[25;1H"); // the last line of a 25-line page
+        REQUIRE(mock.terminal.primaryScreen().cursor().position.line == LineOffset(24));
+
+        mock.writeToScreen("\033[10*|");
+
+        CHECK(mock.terminal.pageSize().lines == LineCount(10));
+        CHECK(*mock.terminal.primaryScreen().cursor().position.line
+              < *mock.terminal.primaryScreen().pageSize().lines);
+    }
+}
+
+// }}} DECSNLS Tests
+
+// {{{ Line feed below the scrolling region
+
+TEST_CASE("LF below the scrolling region stops at the last line of the page", "[screen]")
+{
+    // Only a cursor sitting exactly on the bottom margin scrolls. A cursor *below* the scrolling
+    // region has nothing to scroll -- but it used to be moved down anyway, with nothing stopping it
+    // at the last line of the page, so every further line feed walked it further off the end. Any
+    // application can reach it: set a scrolling region, put the cursor below it, hold down Return.
+    //
+    // Found by esctest, which aborted the engine on it.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[1;2r"); // DECSTBM: scrolling region is lines 1..2
+    mock.writeToScreen("\033[5;1H"); // cursor to the last line of the page, below the region
+    REQUIRE(screen.cursor().position.line == LineOffset(4));
+
+    SECTION("a line feed there does nothing")
+    {
+        mock.writeToScreen("\n");
+        CHECK(screen.cursor().position.line == LineOffset(4));
+    }
+
+    SECTION("and it stays put however many arrive")
+    {
+        for ([[maybe_unused]] auto const _: std::views::iota(0, 10))
+            mock.writeToScreen("\n");
+
+        CHECK(screen.cursor().position.line == LineOffset(4));
+        CHECK(*screen.cursor().position.line < *screen.pageSize().lines);
+    }
+
+    SECTION("the region itself still scrolls")
+    {
+        // The guard must not break the normal case: on the bottom margin, LF scrolls the region.
+        mock.writeToScreen("\033[1;1HA\033[2;1HB");
+        mock.writeToScreen("\033[2;1H\n"); // on the bottom margin -> scroll the region up
+        CHECK(screen.cursor().position.line == LineOffset(1));
+        CHECK(screen.grid().lineAt(LineOffset(0)).toUtf8() == "B    ");
+    }
+
+    SECTION("a line feed inside the page but below the region still moves down")
+    {
+        mock.writeToScreen("\033[3;1H"); // line 3: below the region, not the last line
+        mock.writeToScreen("\n");
+        CHECK(screen.cursor().position.line == LineOffset(3));
+    }
+}
+
+// }}} Line feed below the scrolling region
+
+// {{{ One-based parameters: omitted, empty and zero all mean "the default"
+
+TEST_CASE("An omitted one-based parameter takes its default", "[screen]")
+{
+    // The parser stores an omitted parameter as the value zero *and counts it*, so `CSI ; 5 H` used to
+    // read a row of 0 rather than the default of 1 -- and every handler that computes `param - 1` then
+    // underflowed into a negative offset. There is no row zero and no column zero, so a sequence naming
+    // one is naming the default, exactly as xterm's `if (param < 1) param = 1` has it.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    SECTION("CUP with an omitted row")
+    {
+        mock.writeToScreen("\033[3;3H"); // somewhere other than the home position
+        mock.writeToScreen("\033[;4H");
+        CHECK(screen.cursor().position == CellLocation { .line = LineOffset(0), .column = ColumnOffset(3) });
+    }
+
+    SECTION("CUP with an omitted column")
+    {
+        mock.writeToScreen("\033[3;3H");
+        mock.writeToScreen("\033[4;H");
+        CHECK(screen.cursor().position == CellLocation { .line = LineOffset(3), .column = ColumnOffset(0) });
+    }
+
+    SECTION("CUP with explicit zeroes")
+    {
+        mock.writeToScreen("\033[3;3H");
+        mock.writeToScreen("\033[0;0H");
+        CHECK(screen.cursor().position == CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
+    }
+
+    SECTION("HVP with an omitted row")
+    {
+        mock.writeToScreen("\033[3;3H");
+        mock.writeToScreen("\033[;4f");
+        CHECK(screen.cursor().position == CellLocation { .line = LineOffset(0), .column = ColumnOffset(3) });
+    }
+
+    SECTION("CHA and VPA with a zero")
+    {
+        mock.writeToScreen("\033[3;3H");
+        mock.writeToScreen("\033[0G"); // CHA
+        CHECK(screen.cursor().position.column == ColumnOffset(0));
+        mock.writeToScreen("\033[0d"); // VPA
+        CHECK(screen.cursor().position.line == LineOffset(0));
+    }
+
+    SECTION("HPA without a parameter at all")
+    {
+        // HPA read its parameter with param(), which asserts when none was given.
+        mock.writeToScreen("\033[3;3H");
+        mock.writeToScreen("\033[`");
+        CHECK(screen.cursor().position.column == ColumnOffset(0));
+    }
+
+    SECTION("HPR without a parameter at all")
+    {
+        mock.writeToScreen("\033[1;1H");
+        mock.writeToScreen("\033[a");
+        CHECK(screen.cursor().position.column == ColumnOffset(1));
+    }
+}
+
+TEST_CASE("A zero count moves or edits by one", "[screen]")
+{
+    // A count of zero is a count of one, for the same reason: `CSI 0 A` is `CSI A`.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    SECTION("CUU, CUD, CUF, CUB")
+    {
+        mock.writeToScreen("\033[3;3H");
+        mock.writeToScreen("\033[0A");
+        CHECK(screen.cursor().position.line == LineOffset(1));
+        mock.writeToScreen("\033[0B");
+        CHECK(screen.cursor().position.line == LineOffset(2));
+        mock.writeToScreen("\033[0C");
+        CHECK(screen.cursor().position.column == ColumnOffset(3));
+        mock.writeToScreen("\033[0D");
+        CHECK(screen.cursor().position.column == ColumnOffset(2));
+    }
+
+    SECTION("ICH inserts one cell")
+    {
+        mock.writeToScreen("ABCDE");
+        mock.writeToScreen("\033[1;1H");
+        mock.writeToScreen("\033[0@");
+        CHECK(screen.grid().lineText(LineOffset(0)) == " ABCD");
+    }
+
+    SECTION("DCH deletes one cell")
+    {
+        mock.writeToScreen("ABCDE");
+        mock.writeToScreen("\033[1;1H");
+        mock.writeToScreen("\033[0P");
+        CHECK(screen.grid().lineText(LineOffset(0)) == "BCDE ");
+    }
+
+    SECTION("ECH erases one cell")
+    {
+        mock.writeToScreen("ABCDE");
+        mock.writeToScreen("\033[1;1H");
+        mock.writeToScreen("\033[0X");
+        CHECK(screen.grid().lineText(LineOffset(0)) == " BCDE");
+    }
+}
+
+// }}} One-based parameters
+
+// {{{ Rectangular areas
+
+TEST_CASE("DECCRA with a defaulted source corner", "[screen]")
+{
+    // The sequence esctest sends: it names no source top-left corner at all. Contour read the omitted
+    // parameters as the value zero, computed `0 - 1`, and copied from column -1 -- aborting the engine
+    // on a precondition, and reading out of bounds in a release build where that precondition is gone.
+    auto mock = MockTerm { PageSize { LineCount(8), ColumnCount(8) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[1;1H");
+    mock.writeToScreen("abcdefgh\r\nijklmnop\r\nqrstuvwx\r\nyz012345\r\n"
+                       "ABCDEFGH\r\nIJKLMNOP\r\nQRSTUVWX\r\nYZ6789!@");
+
+    // Copy the 2x2 area at the page's top-left corner -- named only by its bottom-right corner -- to
+    // row 5, column 5.
+    mock.writeToScreen("\033[;;2;2;;5;5;1$v");
+
+    CHECK(screen.grid().lineText(LineOffset(4)) == "ABCDabGH");
+    CHECK(screen.grid().lineText(LineOffset(5)) == "IJKLijOP");
+
+    // Everything else is untouched.
+    CHECK(screen.grid().lineText(LineOffset(0)) == "abcdefgh");
+    CHECK(screen.grid().lineText(LineOffset(6)) == "QRSTUVWX");
+}
+
+TEST_CASE("A rectangular area is clamped to the page", "[screen]")
+{
+    // "If the value of Pt, Pl, Pb, or Pr exceeds the width or height of the active page, then the value
+    // is treated as the width or height of that page." -- VT520 manual. DECCARA, DECRARA and DECCRA
+    // clamped neither corner, DECERA and DECFRA only the bottom-right one.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(4) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    SECTION("DECFRA past the bottom-right corner")
+    {
+        mock.writeToScreen("\033[88;1;1;99;99$x"); // fill 'X' from 1,1 to line 99, column 99
+        CHECK(screen.grid().lineText(LineOffset(0)) == "XXXX");
+        CHECK(screen.grid().lineText(LineOffset(3)) == "XXXX");
+    }
+
+    SECTION("DECERA past the bottom-right corner")
+    {
+        mock.writeToScreen("\033[1;1H");
+        mock.writeToScreen("abcd\r\nefgh\r\nijkl\r\nmnop");
+        mock.writeToScreen("\033[2;2;99;99$z"); // erase from 2,2 to line 99, column 99
+        CHECK(screen.grid().lineText(LineOffset(0)) == "abcd");
+        CHECK(screen.grid().lineText(LineOffset(1)) == "e   ");
+        CHECK(screen.grid().lineText(LineOffset(3)) == "m   ");
+    }
+
+    SECTION("DECSERA past the bottom-right corner")
+    {
+        mock.writeToScreen("\033[1;1H");
+        mock.writeToScreen("abcd\r\nefgh\r\nijkl\r\nmnop");
+        mock.writeToScreen("\033[2;2;99;99${"); // selectively erase from 2,2 to line 99, column 99
+        CHECK(screen.grid().lineText(LineOffset(0)) == "abcd");
+        CHECK(screen.grid().lineText(LineOffset(1)) == "e   ");
+        CHECK(screen.grid().lineText(LineOffset(3)) == "m   ");
+    }
+}
+
+TEST_CASE("A rectangular area is relative to the origin", "[screen]")
+{
+    // Origin mode (DECOM) moves the origin to the scrolling region's top-left corner, and the area's
+    // coordinates are relative to it. Only DECSERA honoured that; the other five read the given
+    // coordinates as absolute and used the origin merely to default an omitted one.
+    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(4) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[1;1H");
+    mock.writeToScreen("aaaa\r\nbbbb\r\ncccc\r\ndddd\r\neeee\r\nffff");
+
+    mock.writeToScreen("\033[3;5r"); // DECSTBM: scrolling region is lines 3..5
+    mock.writeToScreen("\033[?6h");  // DECOM: on -- row 1 is now the page's row 3
+
+    // Fill 'X' over the area's own rows 1..2, which are the page's rows 3..4.
+    mock.writeToScreen("\033[88;1;1;2;4$x");
+
+    CHECK(screen.grid().lineText(LineOffset(1)) == "bbbb"); // above the region: untouched
+    CHECK(screen.grid().lineText(LineOffset(2)) == "XXXX"); // the region's first row
+    CHECK(screen.grid().lineText(LineOffset(3)) == "XXXX");
+    CHECK(screen.grid().lineText(LineOffset(4)) == "eeee"); // below what was named: untouched
+}
+
+// }}} Rectangular areas
+
+TEST_CASE("DECCRA truncates a copy at the page's edge", "[screen]")
+{
+    // An area that would not fit copies only the part that does. Copying every cell the source named
+    // ran the write past the end of a line -- the engine asserted, and a release build would have
+    // corrupted memory.
+    auto mock = MockTerm { PageSize { LineCount(8), ColumnCount(8) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[1;1H");
+    mock.writeToScreen("abcdefgh\r\nijklmnop\r\nqrstuvwx\r\nyz012345\r\n"
+                       "ABCDEFGH\r\nIJKLMNOP\r\nQRSTUVWX\r\nYZ6789!@");
+
+    // Copy the 3x3 area at 2,2 to 7,7 -- where only its top-left 2x2 corner still fits on the page.
+    mock.writeToScreen("\033[2;2;4;4;1;7;7;1$v");
+
+    CHECK(screen.grid().lineText(LineOffset(6)) == "QRSTUVjk");
+    CHECK(screen.grid().lineText(LineOffset(7)) == "YZ6789rs");
+}
+
+TEST_CASE("DECDC deletes a column from every line, including the blank ones", "[screen]")
+{
+    // DECDC deletes a column from every line within the vertical margin -- most of which, on a page
+    // that has just been written to, are still blank. A blank line's SoA arrays are empty, and
+    // deleteChars() wrote through them without materializing them first. insertChars() had always
+    // guarded against that; its sibling never did.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(7) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[1;1H");
+    mock.writeToScreen("abcdefg\r\nABCDEFG");
+    mock.writeToScreen("\033[1;2H"); // column 2, with lines 3..5 still blank
+    mock.writeToScreen("\033['~");   // DECDC, default parameter: delete one column
+
+    CHECK(screen.grid().lineText(LineOffset(0)) == "acdefg ");
+    CHECK(screen.grid().lineText(LineOffset(1)) == "ACDEFG ");
+    CHECK(screen.grid().lineText(LineOffset(4)) == "       ");
+}
+
+// {{{ Titles: the icon's and the window's are independent
+
+TEST_CASE("The icon and window titles are set independently", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(4) } };
+
+    SECTION("OSC 0 sets both")
+    {
+        mock.writeToScreen("\033]0;both\033\\");
+        CHECK(mock.iconTitle == "both");
+        CHECK(mock.windowTitle == "both");
+    }
+
+    SECTION("OSC 1 sets the icon's alone")
+    {
+        mock.writeToScreen("\033]2;window\033\\");
+        mock.writeToScreen("\033]1;icon\033\\");
+        CHECK(mock.iconTitle == "icon");
+        CHECK(mock.windowTitle == "window"); // OSC 1 used to be silently ignored entirely
+    }
+
+    SECTION("OSC 2 sets the window's alone")
+    {
+        mock.writeToScreen("\033]1;icon\033\\");
+        mock.writeToScreen("\033]2;window\033\\");
+        CHECK(mock.iconTitle == "icon");
+        CHECK(mock.windowTitle == "window");
+    }
+}
+
+TEST_CASE("A title is reported with its own OSC", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(4) } };
+
+    mock.writeToScreen("\033]1;the-icon\033\\");
+    mock.writeToScreen("\033]2;the-window\033\\");
+    mock.resetReplyData();
+
+    mock.writeToScreen("\033[20t"); // report the icon's title
+    mock.writeToScreen("\033[21t"); // report the window's title
+    INFO(mock.terminal.peekInput());
+    REQUIRE(e(mock.terminal.peekInput())
+            == e("\033]Lthe-icon\033\\"
+                 "\033]lthe-window\033\\"));
+}
+
+TEST_CASE("XTPUSHTITLE and XTPOPTITLE share one stack of optional pairs", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(4) } };
+
+    SECTION("push both, pop only the icon's")
+    {
+        mock.writeToScreen("\033]0;first\033\\"); // both titles
+        mock.writeToScreen("\033[22;0t");         // push both
+        mock.writeToScreen("\033]0;x\033\\");     // both titles again
+
+        mock.writeToScreen("\033[23;1t"); // pop the icon's alone
+        CHECK(mock.iconTitle == "first");
+        CHECK(mock.windowTitle == "x"); // the window's is left where the application put it
+
+        // The pop took the one entry off the stack, whatever it held -- so there is nothing left for a
+        // pop of the window's to restore. Two independent stacks would wrongly restore "first" here.
+        mock.writeToScreen("\033[23;2t");
+        CHECK(mock.windowTitle == "x");
+    }
+
+    SECTION("push both, pop only the window's")
+    {
+        mock.writeToScreen("\033]0;first\033\\");
+        mock.writeToScreen("\033[22;0t");
+        mock.writeToScreen("\033]0;x\033\\");
+
+        mock.writeToScreen("\033[23;2t"); // pop the window's alone
+        CHECK(mock.iconTitle == "x");
+        CHECK(mock.windowTitle == "first");
+
+        mock.writeToScreen("\033[23;1t"); // nothing left on the stack
+        CHECK(mock.iconTitle == "x");
+    }
+
+    SECTION("push both, pop both")
+    {
+        mock.writeToScreen("\033]0;first\033\\");
+        mock.writeToScreen("\033[22;0t");
+        mock.writeToScreen("\033]0;x\033\\");
+
+        mock.writeToScreen("\033[23;0t");
+        CHECK(mock.iconTitle == "first");
+        CHECK(mock.windowTitle == "first");
+    }
+
+    SECTION("push the icon's, push the window's, pop both")
+    {
+        // The popped entry carries only the window's title, so the icon's is looked for further down the
+        // stack -- and found in the entry below. Both are restored.
+        mock.writeToScreen("\033]2;win\033\\");
+        mock.writeToScreen("\033]1;ico\033\\");
+        mock.writeToScreen("\033[22;1t"); // push the icon's alone
+        mock.writeToScreen("\033[22;2t"); // push the window's alone
+
+        mock.writeToScreen("\033]2;y\033\\");
+        mock.writeToScreen("\033]1;z\033\\");
+
+        mock.writeToScreen("\033[23;0t"); // pop both
+        CHECK(mock.iconTitle == "ico");
+        CHECK(mock.windowTitle == "win");
+    }
+
+    SECTION("a stack, not a single slot")
+    {
+        mock.writeToScreen("\033]1;a\033\\");
+        mock.writeToScreen("\033[22;1t");
+        mock.writeToScreen("\033]1;b\033\\");
+        mock.writeToScreen("\033[22;1t");
+        mock.writeToScreen("\033]1;z\033\\");
+
+        mock.writeToScreen("\033[23;1t");
+        CHECK(mock.iconTitle == "b"); // last in, first out
+        mock.writeToScreen("\033[23;1t");
+        CHECK(mock.iconTitle == "a");
+    }
+
+    SECTION("popping an empty stack leaves the titles alone")
+    {
+        mock.writeToScreen("\033]0;kept\033\\");
+        mock.writeToScreen("\033[23;0t");
+        CHECK(mock.iconTitle == "kept");
+        CHECK(mock.windowTitle == "kept");
+    }
+
+    SECTION("the stack is bounded")
+    {
+        // An unbounded stack is a memory-growth lever for anything that can write to the terminal.
+        for (auto const i: std::views::iota(0u, 20u))
+        {
+            mock.writeToScreen(std::format("\033]1;t{}\033\\", i));
+            mock.writeToScreen("\033[22;1t");
+        }
+
+        // Only the last MaxSavedTitles pushes survive; the oldest were discarded.
+        mock.writeToScreen("\033[23;1t");
+        CHECK(mock.iconTitle == "t19");
+    }
+}
+
+// }}} Titles
+
+// {{{ XTWINOPS dispatches on the operation, not the parameter count
+
+TEST_CASE("XTWINOPS reads its operation from the first parameter", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    SECTION("a resize with two parameters is still a resize")
+    {
+        // `CSI 4 ; h ; w t` carries three parameters and `CSI 8 ; h t` two. Dispatching on the
+        // parameter count -- as this used to -- read the latter as "resize to the display's size".
+        mock.writeToScreen("\033[8;5;12t");
+        REQUIRE(mock.requestedPageSize.has_value());
+        CHECK(*mock.requestedPageSize == PageSize { LineCount(5), ColumnCount(12) });
+    }
+
+    SECTION("an omitted dimension keeps the current one")
+    {
+        // "Omitted parameters reuse the current height or width." -- xterm's ctlseqs.
+        mock.writeToScreen("\033[8;;7t"); // set the columns, keep the lines
+        REQUIRE(mock.requestedPageSize.has_value());
+        CHECK(*mock.requestedPageSize == PageSize { LineCount(10), ColumnCount(7) });
+    }
+
+    SECTION("an omitted width keeps the current one")
+    {
+        mock.writeToScreen("\033[8;3t"); // set the lines, keep the columns
+        REQUIRE(mock.requestedPageSize.has_value());
+        CHECK(*mock.requestedPageSize == PageSize { LineCount(3), ColumnCount(20) });
+    }
+}
+
+// }}} XTWINOPS
+
+TEST_CASE("XTWINOPS reports the window's place on the screen", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.terminal.setCellPixelSize(ImageSize { Width(8), Height(16) });
+
+    SECTION("the window's position is what the frontend last reported")
+    {
+        mock.terminal.setWindowState(
+            WindowState { .position = WindowPosition { .x = 40, .y = 25 }, .iconified = false });
+        mock.writeToScreen("\033[13t");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[3;40;25t"));
+    }
+
+    SECTION("a move asks the frontend, and the frontend reports back")
+    {
+        mock.writeToScreen("\033[3;12;34t");
+        mock.discardPendingReplies();
+        mock.writeToScreen("\033[13t");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[3;12;34t"));
+    }
+
+    SECTION("iconified or not")
+    {
+        mock.writeToScreen("\033[11t");
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[1t")); // not iconified
+        mock.discardPendingReplies();
+
+        mock.writeToScreen("\033[2t"); // iconify
+        mock.writeToScreen("\033[11t");
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[2t"));
+        mock.discardPendingReplies();
+
+        mock.writeToScreen("\033[1t"); // de-iconify
+        mock.writeToScreen("\033[11t");
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[1t"));
+    }
+
+    SECTION("the screen's size in pixels and in characters")
+    {
+        mock.terminal.setWindowState(
+            WindowState { .screenPixelSize = ImageSize { Width(800), Height(480) } });
+
+        mock.writeToScreen("\033[15t"); // the screen, in pixels
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[5;480;800t"));
+        mock.discardPendingReplies();
+
+        // 800/8 = 100 columns, 480/16 = 30 lines. Reporting the *page* size here -- as this used to --
+        // tells every application that the window is already as large as the screen.
+        mock.writeToScreen("\033[19t");
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[9;30;100t"));
+        mock.discardPendingReplies();
+
+        // The text area is still the page.
+        mock.writeToScreen("\033[18t");
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[8;10;20t"));
+    }
+
+    SECTION("a terminal with no screen is exactly as large as the one it does not have")
+    {
+        // The frontend reported no screen, so the window's own size stands in for it -- an honest
+        // answer, and one that keeps a resize-to-the-display meaningful.
+        mock.writeToScreen("\033[15t");
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[5;160;160t")); // 10*16 by 20*8
+    }
+}
+
+TEST_CASE("XTWINOPS resizes to the display when a dimension is zero", "[screen]")
+{
+    // "Omitted parameters reuse the current height or width. Zero parameters use the display's height
+    // or width." -- xterm's ctlseqs. A dimension has three readings, not two.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.terminal.setCellPixelSize(ImageSize { Width(8), Height(16) });
+    mock.terminal.setWindowState(WindowState { .screenPixelSize = ImageSize { Width(800), Height(480) } });
+
+    SECTION("zero lines means the display's height")
+    {
+        mock.writeToScreen("\033[8;0;12t");
+        REQUIRE(mock.requestedPageSize.has_value());
+        CHECK(*mock.requestedPageSize == PageSize { LineCount(30), ColumnCount(12) });
+    }
+
+    SECTION("zero columns means the display's width")
+    {
+        mock.writeToScreen("\033[8;5;0t");
+        REQUIRE(mock.requestedPageSize.has_value());
+        CHECK(*mock.requestedPageSize == PageSize { LineCount(5), ColumnCount(100) });
+    }
+
+    SECTION("an omitted dimension still keeps the current one")
+    {
+        mock.writeToScreen("\033[8;;12t");
+        REQUIRE(mock.requestedPageSize.has_value());
+        CHECK(*mock.requestedPageSize == PageSize { LineCount(10), ColumnCount(12) });
+    }
+}
+
+TEST_CASE("DECSLPP sets the page's length", "[screen]")
+{
+    // DECSLPP shares its final byte with XTWINOPS; xterm tells them apart by the first parameter, which
+    // for DECSLPP is the line count and therefore always 24 or more.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    mock.writeToScreen("\033[42t");
+    REQUIRE(mock.requestedPageSize.has_value());
+    CHECK(*mock.requestedPageSize == PageSize { LineCount(42), ColumnCount(20) });
+}
+
+// {{{ Special colors (OSC 5 / OSC 105)
+
+TEST_CASE("OSC.5 addresses the special colors", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(4) } };
+
+    SECTION("set and query")
+    {
+        mock.writeToScreen("\033]5;0;rgb:f0f0/f0f0/f0f0\033\\"); // bold
+        mock.writeToScreen("\033]5;4;rgb:1010/2020/3030\033\\"); // italic
+        mock.discardPendingReplies();
+
+        mock.writeToScreen("\033]5;0;?\033\\");
+        mock.writeToScreen("\033]5;4;?\033\\");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput())
+                == e("\033]5;0;rgb:f0f0/f0f0/f0f0\033\\"
+                     "\033]5;4;rgb:1010/2020/3030\033\\"));
+
+        CHECK(mock.terminal.colorPalette().specialColor(SpecialColor::Bold) == RGBColor { 0xF0, 0xF0, 0xF0 });
+        CHECK(mock.terminal.colorPalette().specialColor(SpecialColor::Italic)
+              == RGBColor { 0x10, 0x20, 0x30 });
+    }
+
+    SECTION("OSC 4 reaches the same colors, just past the indexed ones")
+    {
+        // An application may name a special color either way: `OSC 5 ; 0` and `OSC 4 ; 256` are the same
+        // color. A report echoes the index it was given, in the form it was given.
+        mock.writeToScreen("\033]4;256;rgb:aaaa/bbbb/cccc\033\\");
+        mock.discardPendingReplies();
+
+        mock.writeToScreen("\033]5;0;?\033\\");
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033]5;0;rgb:aaaa/bbbb/cccc\033\\"));
+        mock.discardPendingReplies();
+
+        mock.writeToScreen("\033]4;256;?\033\\");
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033]4;256;rgb:aaaa/bbbb/cccc\033\\"));
+    }
+
+    SECTION("an index past the last special color names nothing")
+    {
+        mock.writeToScreen("\033]5;5;rgb:0000/0000/0000\033\\");
+        CHECK(mock.terminal.peekInput().empty());
+    }
+
+    SECTION("the dim colors are not reachable, and are not overwritten")
+    {
+        // Contour keeps its own dim colors where xterm keeps its special ones. Naming special color 0
+        // must not land on a dim color.
+        auto const dimBefore = mock.terminal.colorPalette().dimColor(0);
+        mock.writeToScreen("\033]5;0;rgb:f0f0/f0f0/f0f0\033\\");
+        CHECK(mock.terminal.colorPalette().dimColor(0) == dimBefore);
+    }
+}
+
+TEST_CASE("OSC.105 resets the special colors", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(4) } };
+    auto const original = mock.terminal.defaultColorPalette().specialColor(SpecialColor::Bold);
+
+    SECTION("one color")
+    {
+        mock.writeToScreen("\033]5;0;rgb:f0f0/f0f0/f0f0\033\\");
+        mock.writeToScreen("\033]105;0\033\\");
+        CHECK(mock.terminal.colorPalette().specialColor(SpecialColor::Bold) == original);
+    }
+
+    SECTION("all of them, when no index is given")
+    {
+        mock.writeToScreen("\033]5;0;rgb:f0f0/f0f0/f0f0\033\\");
+        mock.writeToScreen("\033]5;4;rgb:f0f0/f0f0/f0f0\033\\");
+        mock.writeToScreen("\033]105\033\\");
+        CHECK(mock.terminal.colorPalette().specialColor(SpecialColor::Bold) == original);
+        CHECK(mock.terminal.colorPalette().specialColor(SpecialColor::Italic)
+              == mock.terminal.defaultColorPalette().specialColor(SpecialColor::Italic));
+    }
+
+    SECTION("OSC 104 with no index resets every index it can address")
+    {
+        mock.writeToScreen("\033]4;3;rgb:f0f0/f0f0/f0f0\033\\");
+        mock.writeToScreen("\033]5;0;rgb:f0f0/f0f0/f0f0\033\\");
+        mock.writeToScreen("\033]104\033\\");
+        CHECK(mock.terminal.colorPalette().palette[3] == mock.terminal.defaultColorPalette().palette[3]);
+        // OSC 4 addresses the special colors too (256..260), so a bare OSC 104 reaches them -- as xterm
+        // walks its whole Acolors.
+        CHECK(mock.terminal.colorPalette().specialColor(SpecialColor::Bold) == original);
+    }
+
+    SECTION("OSC 104 does not reset the dynamic colors")
+    {
+        // The dynamic colors share the ColorPalette but are addressed by OSC 10..19 and reset by
+        // OSC 110..119 -- xterm keeps them in a separate Tcolors for exactly this reason. Assigning the
+        // whole palette here withdrew a background the application set with OSC 11 and nothing asked to
+        // reset: a themed shell lost its background to any stray `tput oc`.
+        mock.writeToScreen("\033]11;rgb:1e1e/1e1e/2e2e\033\\");
+        auto const chosenBackground = mock.terminal.colorPalette().defaultBackground;
+        REQUIRE(chosenBackground != mock.terminal.defaultColorPalette().defaultBackground);
+
+        mock.writeToScreen("\033]104\033\\");
+
+        CHECK(mock.terminal.colorPalette().defaultBackground == chosenBackground);
+    }
+}
+
+// }}} Special colors
+
+// {{{ DECDSR (device status reports)
+
+TEST_CASE("DECDSR answers for the devices the terminal does not have", "[screen]")
+{
+    // A terminal with no printer, no user-defined keys, no macro memory and no session multiplexer still
+    // has to *say so*, in the words the standard gives it. Silence is not an answer: an application that
+    // asked is waiting, and will read whatever comes next in its place.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    auto const check = [&](std::string_view request, std::string_view expected) {
+        INFO("request: " << crispy::escape(request));
+        mock.discardPendingReplies();
+        mock.writeToScreen(request);
+        CHECK(e(mock.terminal.peekInput()) == e(expected));
+    };
+
+    check("\033[?15n", "\033[?13n");       // printer port: none
+    check("\033[?25n", "\033[?20n");       // user-defined keys: unlocked
+    check("\033[?26n", "\033[?27;0;0;5n"); // keyboard
+    check("\033[?53n", "\033[?50n");       // locator status: none
+    check("\033[?55n", "\033[?50n");       // locator status, xterm's spelling
+    check("\033[?56n", "\033[?57;0n");     // locator type: unknown
+    check("\033[?62n", "\033[0*{");        // DECMSR: no macro space
+    check("\033[?75n", "\033[?70n");       // data integrity: no errors
+    check("\033[?85n", "\033[?83n");       // sessions: not configured for multiple
+}
+
+TEST_CASE("DECXCPR reports the cursor's position and its page", "[screen]")
+{
+    // `CSI ? 6 n`. It used to be registered with a final byte of '6' -- which is not a final byte at all
+    // -- so the sequence matched nothing and the implementation behind it was unreachable.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    mock.writeToScreen("\033[5;6H");
+    mock.discardPendingReplies();
+
+    mock.writeToScreen("\033[?6n");
+    INFO(mock.terminal.peekInput());
+    REQUIRE(e(mock.terminal.peekInput()) == e("\033[?5;6;1R"));
+}
+
+TEST_CASE("DECCKSR carries back the id it was asked with", "[screen]")
+{
+    // There is no macro memory to checksum, so the checksum is zero -- but the reply still has to carry
+    // the request's id, which is how an application with several requests in flight tells them apart.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) } };
+
+    mock.writeToScreen("\033[?63;123n");
+    INFO(mock.terminal.peekInput());
+    REQUIRE(e(mock.terminal.peekInput()) == e("\033P123!~0000\033\\"));
+}
+
+// }}} DECDSR
+
+// {{{ Backspace, margins and reverse wraparound
+
+TEST_CASE("Backspace stops at the left margin", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[?69h");  // DECLRMM
+    mock.writeToScreen("\033[5;10s"); // DECSLRM: columns 5..10
+
+    SECTION("a cursor on the left margin does not move")
+    {
+        mock.writeToScreen("\033[1;5H");
+        mock.writeToScreen("\b");
+        CHECK(screen.cursor().position.column == ColumnOffset(4));
+    }
+
+    SECTION("a cursor left of the left margin is not held by it")
+    {
+        // The margin is not holding a cursor that is already outside it -- the screen's edge is.
+        mock.writeToScreen("\033[1;3H");
+        mock.writeToScreen("\b");
+        CHECK(screen.cursor().position.column == ColumnOffset(1));
+    }
+}
+
+TEST_CASE("Reverse wraparound carries the cursor to the line above", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    SECTION("it does nothing without DECAWM")
+    {
+        // A terminal that does not wrap forward has no wrap to reverse.
+        mock.writeToScreen("\033[?7l");  // DECAWM off
+        mock.writeToScreen("\033[?45h"); // reverse wraparound on
+        mock.writeToScreen("\033[2;1H");
+        mock.writeToScreen("\b");
+        CHECK(screen.cursor().position == CellLocation { LineOffset(1), ColumnOffset(0) });
+    }
+
+    SECTION("the plain form follows only a line the text wrapped onto")
+    {
+        mock.writeToScreen("\033[?7h");  // DECAWM
+        mock.writeToScreen("\033[?45h"); // reverse wraparound
+        mock.writeToScreen("\033[2;1H"); // line 2 is blank, so line 1 was never wrapped onto it
+        mock.writeToScreen("\b");
+        CHECK(screen.cursor().position == CellLocation { LineOffset(1), ColumnOffset(0) });
+    }
+
+    SECTION("the plain form does follow a line the text wrapped onto")
+    {
+        mock.writeToScreen("\033[?7h");
+        mock.writeToScreen("\033[1;1H");
+        mock.writeToScreen("ABCDEF"); // wraps onto line 2, marking line 2 as wrapped
+        mock.writeToScreen("\033[?45h");
+        mock.writeToScreen("\033[2;1H");
+        mock.writeToScreen("\b");
+        CHECK(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(4) });
+    }
+
+    SECTION("the extended form follows any line at all")
+    {
+        mock.writeToScreen("\033[?7h");
+        mock.writeToScreen("\033[?1045h"); // extended reverse wraparound
+        mock.writeToScreen("\033[2;1H");   // line 2 is blank, and it follows it anyway
+        mock.writeToScreen("\b");
+        CHECK(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(4) });
+    }
+
+    SECTION("a soft reset turns it off, so it cannot outlive the application that asked for it")
+    {
+        mock.writeToScreen("\033[?7h");
+        mock.writeToScreen("\033[?1045h");
+        mock.writeToScreen("\033[!p"); // DECSTR
+        CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::ReverseWraparoundExtended));
+        CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::ReverseWraparound));
+    }
+}
+
+// }}} Backspace

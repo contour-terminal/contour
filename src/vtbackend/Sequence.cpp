@@ -22,6 +22,7 @@ std::string Sequence::raw() const
     {
         case FunctionCategory::C0: break;
         case FunctionCategory::ESC: sstr << "\033"; break;
+        case FunctionCategory::VT52: sstr << "\033"; break; // a VT52 command is ESC + final byte.
         case FunctionCategory::CSI: sstr << "\033["; break;
         case FunctionCategory::DCS: sstr << "\033P"; break;
         case FunctionCategory::OSC: sstr << "\033]"; break;

@@ -107,6 +107,25 @@
     <release version="0.7.0" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Fixes DECALN (ESC # 8) writing outside the grid once the screen had scrolled</li>
+          <li>Fixes the six rectangular-area sequences (DECCRA, DECFRA, DECERA, DECSERA, DECRQCRA, DECSACE) disagreeing on how to read their coordinates: an omitted one-based parameter was stored as zero and then decremented, addressing outside the grid</li>
+          <li>Fixes DECRQCRA (CSI Ps * y) answering the wrong final byte and the wrong checksum, and ignoring origin mode (DECOM)</li>
+          <li>Fixes DECCRA dropping a copy entirely when the request ended in a trailing semicolon, and running past the target page's edge</li>
+          <li>Fixes the left and right margins (DECSLRM) being ignored by carriage return, NEL, CNL, CPL, backspace, autowrap, REP, CBT and vertical scrolling; and fixes scroll-down inside a left/right margin dropping the lines in the middle of the region</li>
+          <li>Fixes a line feed below the scrolling region walking the cursor off the page, and DECSNLS (CSI Ps * |) resizing the columns instead of the lines</li>
+          <li>Fixes REP (CSI Ps b) dropping a request that omitted its parameter</li>
+          <li>Fixes the cursor not carrying across the alternate-screen switches DECSET 47 and 1047, and maps the 1047 alternate buffer</li>
+          <li>Fixes a 132-column DECCOLM switch surviving a hard reset (RIS), and DECSTR (soft reset) leaving left/right margin mode (DECLRMM) set</li>
+          <li>Fixes an error being logged on every normal shell exit: a pseudo-terminal master reports its last slave closing as EIO, which is end-of-file rather than a failure</li>
+          <li>Fixes VT and FF not honouring linefeed mode (LNM) as LF does, DCH honouring the top/bottom margin, and ED 2 honouring the scroll region</li>
+          <li>Adds 8-bit C1 control support: S7C1T/S8C1T, 8-bit replies under S8C1T, the GR invocation register, and the GL/GR locking shifts</li>
+          <li>Adds KAM, LNM, SRM, VPR, DECBI, DECID, DECTST, DECREQTPARM, XTCHECKSUM, and DECSET 41 (MoreFix), which makes a tab honour a pending wrap</li>
+          <li>Adds the User-Preferred Supplemental Set: DECAUPSS assigns it, DECRQUPSS reports it back, and the SCS designator "&lt;" designates it into a G-set</li>
+          <li>Adds xterm's title modes (XTSMTITLE/XTRMTITLE), an icon title, a title stack, and the remaining XTWINOPS window operations</li>
+          <li>Adds the special colors (OSC 5 and OSC 105), makes the highlight colors settable, answers every color query, and parses the whole X11 colour specification grammar</li>
+          <li>Adds OSC 52 clipboard read, gated by an opt-in policy</li>
+          <li>Improves DECRQM, which now answers for the modes it knows but cannot change, and DECRQSS, which now reports the scroll-region margins one-based, reports DECSACE, and omits default colours from its SGR report</li>
+          <li>Changes DECSCL to erase the screen as a real terminal does, and gates DECRQM and DECSLRM by the conformance level it selects</li>
           <li>Adds a a GUI settings page for changing the configuration.</li>
           <li>Adds a Save Layout entry to the command palette that prompts for a name, so a window's tabs can be saved as a layout — and thereby launched — without a keybinding; a key bound to SaveLayout with no name opens the same prompt</li>
           <li>Adds a right-click context menu to the terminal: copy, paste, select all, the hyperlink under the cursor, opening the current folder, splitting and closing panes, switching profile, and a soft or hard terminal reset. It opens exactly when a selection drag would have worked, so an application that asked for the mouse (vim, tmux) still receives its right-click; hold Shift to open the menu anyway. Bind OpenContextMenu in input_mapping to move it to another button</li>

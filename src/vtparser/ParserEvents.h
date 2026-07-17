@@ -108,6 +108,13 @@ class ParserEvents
     virtual void dispatchCSI(char function) = 0;
 
     /**
+     * A VT52-mode escape command has arrived. VT52's single-character escape grammar collides with
+     * the ANSI one, so it is dispatched separately. @param finalChar the command byte after ESC;
+     * @param line / @param column the 1-based direct cursor address for ESC Y (0 otherwise).
+     */
+    virtual void dispatchVT52(char finalChar, unsigned line, unsigned column) = 0;
+
+    /**
      * When the control function OSC (Operating System Command) is recognised,
      * this action initializes an external parser (the “OSC Handler”)
      * to handle the characters from the control string.
@@ -197,6 +204,7 @@ class NullParserEvents: public ParserEvents
     void paramSubSeparator() override {}
     void dispatchESC(char) override {}
     void dispatchCSI(char) override {}
+    void dispatchVT52(char, unsigned, unsigned) override {}
     void startOSC() override {}
     void putOSC(char) override {}
     void dispatchOSC() override {}

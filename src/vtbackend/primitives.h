@@ -4,7 +4,12 @@
 #include <vtpty/ImageSize.h>
 #include <vtpty/PageSize.h>
 
+#include <crispy/flags.h>
+
+#include <algorithm>
+#include <array>
 #include <cstdint>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <ostream>
@@ -296,20 +301,13 @@ using Right = boxed::boxed<int, detail::tags::Right>;
 
 // Rectangular screen operations
 //
+/// A rectangular area of the page, as zero-based offsets, both corners inclusive.
 struct Rect
 {
     Top top;
     Left left;
     Bottom bottom;
     Right right;
-
-    [[nodiscard]] Rect clampTo(PageSize size) const noexcept
-    {
-        return Rect { .top = top,
-                      .left = left,
-                      .bottom = std::min(bottom, Bottom::cast_from(size.lines)),
-                      .right = std::min(right, Right::cast_from(size.columns)) };
-    }
 };
 
 // Screen's page margin
@@ -558,6 +556,22 @@ enum class ControlTransmissionMode : uint8_t
     S8C1T, // 8-bit controls
 };
 
+/// xterm title-mode features, toggled by XTSMTITLE (`CSI > Ps t`) and XTRMTITLE (`CSI > Ps T`).
+///
+/// Each `Ps` names one independent flag controlling how window/icon title strings are encoded on the
+/// wire. The value is also the bit index into the terminal's title-mode set. Contour is natively UTF-8,
+/// so the two UTF-8 features are inert (the string is already UTF-8); only the hex features transform.
+enum class TitleModeFeature : uint8_t
+{
+    SetHex = 0,    ///< OSC 0/1/2 title arguments arrive hex-encoded and are decoded to bytes.
+    QueryHex = 1,  ///< Title query reports (`CSI 20 t` / `CSI 21 t`) emit the title hex-encoded.
+    SetUTF8 = 2,   ///< OSC title arguments are UTF-8 (Contour's native encoding; inert).
+    QueryUTF8 = 3, ///< Title query reports use UTF-8 (Contour's native encoding; inert).
+};
+
+/// The number of title-mode features, and the size of the terminal's title-mode bitset.
+constexpr inline size_t TitleModeFeatureCount = 4;
+
 enum class GraphicsRendition : uint8_t
 {
     Reset = 0, //!< Reset any rendition (style as well as foreground / background coloring).
@@ -627,6 +641,54 @@ enum class AnsiMode : uint8_t
     AutomaticNewLine = 20, // LNM
 };
 
+/// The ANSI modes ECMA-48 defines that this terminal recognizes but has hard-wired *off*.
+///
+/// DECRQM must answer 4 (permanently reset) for these, and not 0 (not recognized). The two are
+/// different claims, and applications rely on the difference: 0 says "I have never heard of this mode",
+/// 4 says "I know exactly what you mean, and it can never be on here". A terminal that answers 0 for a
+/// mode the standard defines is disclaiming knowledge it has.
+///
+/// None of these has any bearing on a terminal that is not a printing VT with guarded areas and
+/// selectable transfer semantics -- which is to say, on any terminal built in the last forty years.
+/// They are listed so that Contour can say so precisely, rather than by silence.
+///
+/// Adding a mode is adding a row.
+constexpr auto PermanentlyResetAnsiModes = std::array<unsigned, 12> {
+    1,  // GATM -- guarded area transfer
+    5,  // SRTM -- status reporting transfer
+    7,  // VEM  -- vertical editing
+    10, // HEM  -- horizontal editing
+    11, // PUM  -- positioning unit
+    13, // FEAM -- format effector action
+    14, // FETM -- format effector transfer
+    15, // MATM -- multiple area transfer
+    16, // TTM  -- transfer termination
+    17, // SATM -- selected area transfer
+    18, // TSM  -- tabulation stop
+    19, // EBM  -- editing boundary
+};
+
+/// @return Whether @p mode is an ANSI mode this terminal knows of but can never turn on.
+constexpr bool isPermanentlyResetAnsiMode(unsigned mode) noexcept
+{
+    return std::ranges::find(PermanentlyResetAnsiModes, mode) != PermanentlyResetAnsiModes.end();
+}
+
+/// DEC private modes this terminal recognises but can never turn on, so DECRQM answers
+/// PermanentlyReset (4) -- "I know exactly what you mean, and it can never be on here" -- rather than
+/// Reset (2) or NotRecognized (0).
+///
+/// Adding a mode is adding a row.
+constexpr auto PermanentlyResetDECModes = std::array<unsigned, 1> {
+    60, // DECHCCM -- horizontal cursor coupling. Contour's page never scrolls horizontally.
+};
+
+/// @return Whether @p mode is a DEC private mode this terminal knows of but can never turn on.
+constexpr bool isPermanentlyResetDECMode(unsigned mode) noexcept
+{
+    return std::ranges::find(PermanentlyResetDECModes, mode) != PermanentlyResetDECModes.end();
+}
+
 enum class DECMode : std::uint8_t
 {
     UseApplicationCursorKeys = 0,
@@ -643,6 +705,14 @@ enum class DECMode : std::uint8_t
 
     SaveCursor = 10,
     ExtendedAltScreen = 11,
+
+    /// DECSET 1047 -- Optional Alternate Screen Buffer (xterm).
+    ///
+    /// Behaves like mode 47 (@ref UseAlternateScreen) on entry -- the alternate page is NOT erased and
+    /// the cursor is carried across continuously -- but on exit it erases the alternate page first
+    /// (xterm's FromAlternate-with-clear). @see alternateScreenBehavior. The ordinal (69) is only this
+    /// mode's index into the DEC-mode bitset; it is unrelated to the DEC mode number 1047.
+    OptionalAltScreen = 69,
 
     /// DECNKM — Numeric Keypad Mode (VT320).
     ///
@@ -793,9 +863,307 @@ enum class DECMode : std::uint8_t
     Win32InputMode = 44,
     // }}}
 
+    // {{{ Modes the terminal remembers and reports, but which have nothing here to act on.
+    //
+    // DECRQM's contract is to report a mode's *state*, and SM/RM's is to change it. A terminal that
+    // faithfully remembers what it was told is not lying; it would only be lying if it claimed an
+    // effect. These four describe a printing VT with a national keyboard and a page memory Contour
+    // does not have -- so there is nothing for them to do here, and saying "I have never heard of
+    // that mode" would be the less truthful answer.
+
+    /// DECPFF (18) -- Print Form Feed. Contour has no printer.
+    PrintFormFeed = 45,
+
+    /// DECHEBM (35) -- Hebrew/N-A Keyboard Mapping. Contour has no keyboard mapping of its own.
+    HebrewKeyboardMapping = 46,
+
+    /// DECNRCM (42) -- National Replacement Character Set.
+    ///
+    /// Remembered and reported, but not yet acted on: the 96-character sets and the GR register it
+    /// selects between are not implemented. When they are, this stops being inert.
+    NationalReplacementCharacterSet = 47,
+
+    /// DECHCCM (60) -- Horizontal Cursor Coupling. Contour's page never scrolls horizontally.
+    HorizontalCursorCoupling = 48,
+    // }}}
+
+    /// more(1) fix (41), xterm's -- a curses workaround, aka the "curses hack".
+    ///
+    /// When set, a horizontal tab arriving while a wrap is pending (the line was just filled to the
+    /// right margin) honours the pending wrap first -- moving to the next line -- and then tabs. When
+    /// reset (the default), the tab is swallowed at the right margin and the pending wrap waits for the
+    /// next printable character. @see Screen::moveCursorToNextTab.
+    MoreFix = 70,
+
+    /// Reverse wraparound (45), xterm's.
+    ///
+    /// With it -- and DECAWM -- a backspace at the left margin moves to the right margin of the line
+    /// above, but only if the text actually wrapped onto this line. It does nothing on its own: a
+    /// terminal that does not wrap forward has no wrap to reverse.
+    ReverseWraparound = 49,
+
+    /// Extended reverse wraparound (1045), xterm's -- "reverse-wrap without limits".
+    ///
+    /// As above, but it follows *any* line, wrapped or not, and from the top of the scrolling region it
+    /// comes back round at the bottom.
+    ReverseWraparoundExtended = 50,
+
+    // {{{ VT525 keyboard / national / hardware modes -- settable, but not yet acted on.
+    //
+    // TODO: These are the DEC private modes a VT525 defines that Contour does not yet *implement*. Each
+    // is a real, distinct mode, so Contour remembers and reports its state (SM/RM toggle it, DECRQM
+    // reports Set/Reset) -- but nothing here acts on the bit yet. This is deliberately a step above the
+    // "PermanentlyReset" block above (modes 45..48): those can *never* mean anything here, whereas these
+    // are meant to gain real behaviour. As each is implemented, move its handling out of the
+    // "toggle only" default and this comment shrinks.
+    // @see docs/internals/vt-conformance.md -- what is left, and why.
+    //
+    // The bidirectional pair is the priority: RightToLeftMode and
+    // HebrewEncodingMode are the entry points for real bidirectional/Hebrew support, not mere toggles.
+
+    /// DECRLM (34) -- Right-to-Left Mode. TODO: drive bidirectional layout; the priority of this group.
+    RightToLeftMode = 51,
+
+    /// DECHEM (36) -- Hebrew Encoding Mode. TODO: pair with DECRLM for real Hebrew/bidirectional text.
+    HebrewEncodingMode = 52,
+
+    /// DECNAKB (57) -- Greek/N-A Keyboard Mapping. TODO: keyboard layout selection.
+    GreekKeyboardMapping = 53,
+
+    /// DECVCCM (61) -- Vertical Cursor Coupling. TODO: couple the displayed page to vertical scrolling.
+    VerticalCursorCoupling = 54,
+
+    /// DECKBUM (68) -- Keyboard Usage Mode (typewriter vs. data processing keys). TODO: keyboard layer.
+    KeyboardUsageMode = 55,
+
+    /// DECXRLM (73) -- Transmit Rate Limiting. TODO: throttle host transmission (largely a no-op on a pty).
+    TransmitRateLimiting = 56,
+
+    /// DECKPM (81) -- Key Position Mode (report key position vs. character). TODO: key reporting layer.
+    KeyPositionMode = 57,
+
+    /// DECRLCM (96) -- Right-to-Left Copy. TODO: rides with RightToLeftMode's bidirectional support.
+    RightToLeftCopyMode = 58,
+
+    /// DECCRTSM (97) -- CRT Save Mode (screen blanking). TODO: display-power policy, a frontend concern.
+    CRTSaveMode = 59,
+
+    /// DECARSM (98) -- Auto Resize Mode. TODO: auto-resize the page on DECSLPP/DECSCPP.
+    AutoResizeMode = 60,
+
+    /// DECMCM (99) -- Modem Control Mode. TODO: modem signalling; largely inert on a pty.
+    ModemControlMode = 61,
+
+    /// DECAAM (100) -- Auto Answerback Mode. TODO: send the answerback message on connect.
+    AutoAnswerbackMode = 62,
+
+    /// DECCANSM (101) -- Conceal Answerback Message. TODO: hide the answerback from the display.
+    ConcealAnswerbackMode = 63,
+
+    /// DECNULM (102) -- Null Mode (how a received NUL is treated). TODO: discard vs. pass NUL.
+    NullMode = 64,
+
+    /// DECHDPXM (103) -- Half Duplex Mode. TODO: half- vs. full-duplex; inert on a pty.
+    HalfDuplexMode = 65,
+
+    /// DECESKM (104) -- Enable Secondary Keyboard Language. TODO: secondary keyboard layout.
+    SecondaryKeyboardLanguageMode = 66,
+
+    /// DECOSCNM (106) -- Overscan Mode (border colour region). TODO: overscan/border rendering.
+    OverscanMode = 67,
+
+    /// DECNCSM (95) -- No Clearing Screen on Column change. When set, DECCOLM (80<->132) does not
+    /// erase page memory; reset (the default) clears the screen on a column-width change (VT100
+    /// behaviour).
+    NoClearScreenOnColumnChange = 68,
+    // }}}
+
     /// Sentinel value for sizing the mode bitset. Must remain the last entry.
-    DECModeCount = 45
+    DECModeCount = 71
 };
+
+/// The minimum ANSI conformance level (1..5, matching conformanceLevelOf(VTType)) at which a DEC
+/// private mode is recognised. Below it, DECRQM answers "not recognised" and DECSET/DECRST ignore the
+/// mode -- how a real VT gates level-specific features (DECNCSM is a VT500 / level-5 feature). Data
+/// driven: a mode gains a floor by adding a case; everything else is available from VT100 (level 1).
+[[nodiscard]] constexpr int minimumConformanceLevel(DECMode mode) noexcept
+{
+    switch (mode)
+    {
+        case DECMode::NoClearScreenOnColumnChange: return 5; // DECNCSM: VT510+
+        case DECMode::LeftRightMargin: return 4;             // DECLRMM / DECSLRM: VT420+
+        default: return 1;
+    }
+}
+
+/// How one of the "alternate screen buffer" DEC private modes (47, 1047, 1049) behaves when the
+/// application switches into and out of the alternate page.
+///
+/// xterm implements the three as points in this small space (charproc.c: ToAlternate / FromAlternate
+/// and the srm_*ALTBUF* cases). Describing them as data keeps the switch itself a single code path,
+/// rather than three near-duplicate handlers -- adding a fourth alternate-screen variant would be a
+/// new row here, not new control flow.
+struct AlternateScreenBehavior
+{
+    /// Whether the cursor is carried across the switch so that it appears not to move (modes 47 and
+    /// 1047). xterm's cursor is a terminal-level entity -- SwitchBufs swaps only the line storage, never
+    /// the cursor -- so it is continuous across the buffer swap. When false (mode 1049), each page keeps
+    /// its own cursor, which serves as an implicit DECSC/DECRC: the main cursor waits untouched on the
+    /// main page while the application works on the alternate one.
+    bool carryCursor;
+
+    /// Whether the alternate page is erased when entering it (mode 1049 clears; 47 and 1047 keep it).
+    bool clearOnEnter;
+
+    /// Whether the alternate page is erased when leaving it (mode 1047 clears; 47 and 1049 keep it --
+    /// 1049 relies on its clear-on-enter instead).
+    bool clearOnExit;
+};
+
+/// Maps an alternate-screen DEC private mode to its entry/exit behavior, or std::nullopt for any other
+/// mode. @see AlternateScreenBehavior, Terminal::setAlternateScreen.
+/// @param mode The DEC private mode to classify.
+/// @return The behavior for modes 47/1047/1049, otherwise std::nullopt.
+[[nodiscard]] constexpr std::optional<AlternateScreenBehavior> alternateScreenBehavior(DECMode mode) noexcept
+{
+    switch (mode)
+    {
+            // clang-format off
+        case DECMode::UseAlternateScreen: return AlternateScreenBehavior { .carryCursor = true,  .clearOnEnter = false, .clearOnExit = false }; // 47
+        case DECMode::OptionalAltScreen:  return AlternateScreenBehavior { .carryCursor = true,  .clearOnEnter = false, .clearOnExit = true  }; // 1047
+        case DECMode::ExtendedAltScreen:  return AlternateScreenBehavior { .carryCursor = false, .clearOnEnter = true,  .clearOnExit = false }; // 1049
+        // clang-format on
+        default: return std::nullopt;
+    }
+}
+
+/// The top-left corner of a window, in screen pixels.
+///
+/// Signed, because a window manager may place a window partly off the screen, and because a terminal
+/// must report back whatever position it was actually given rather than a clamped fiction.
+struct WindowPosition
+{
+    int x = 0;
+    int y = 0;
+
+    constexpr bool operator==(WindowPosition const&) const noexcept = default;
+};
+
+/// Where and how the terminal's window sits on the user's screen.
+///
+/// A terminal engine has no window, no screen and no window manager -- all of this is the frontend's to
+/// know, and the frontend pushes it in as it changes. Nothing here is inferred: a frontend that has no
+/// real window (a test harness, a headless session) states what it has, rather than having a fiction
+/// invented on its behalf.
+struct WindowState
+{
+    /// The window's top-left corner, in screen pixels. Reported by XTWINOPS `CSI 13 t`.
+    WindowPosition position {};
+
+    /// The size of the screen the window is on, in pixels. Reported by XTWINOPS `CSI 15 t`.
+    ///
+    /// An empty size means the frontend has no screen to speak of, in which case the window's own size
+    /// stands in for it -- an honest answer for a headless terminal, which is exactly as large as the
+    /// display it does not have. @see Terminal::screenPixelSize().
+    ImageSize screenPixelSize {};
+
+    /// Whether the window is iconified (minimized). Reported by XTWINOPS `CSI 11 t`.
+    bool iconified = false;
+};
+
+/// What a maximize request asks of the window manager. @see XTWINOPS (`CSI 9 ; Ps t`).
+enum class WindowMaximize : uint8_t
+{
+    Restore,      ///< `Ps = 0`: put the window back to the size it had before it was maximized.
+    Both,         ///< `Ps = 1`: maximize along both axes.
+    Vertically,   ///< `Ps = 2`
+    Horizontally, ///< `Ps = 3`
+};
+
+/// @return What the selector @p ps of `CSI 9 ; Ps t` asks for, or std::nullopt if it asks for nothing.
+constexpr std::optional<WindowMaximize> windowMaximizeOf(unsigned ps) noexcept
+{
+    switch (ps)
+    {
+        case 0: return WindowMaximize::Restore;
+        case 1: return WindowMaximize::Both;
+        case 2: return WindowMaximize::Vertically;
+        case 3: return WindowMaximize::Horizontally;
+        default: return std::nullopt;
+    }
+}
+
+/// What a full-screen request asks of the window manager. @see XTWINOPS (`CSI 10 ; Ps t`).
+enum class WindowFullScreen : uint8_t
+{
+    Exit,   ///< `Ps = 0`
+    Enter,  ///< `Ps = 1`
+    Toggle, ///< `Ps = 2`
+};
+
+/// @return What the selector @p ps of `CSI 10 ; Ps t` asks for, or std::nullopt if it asks for nothing.
+constexpr std::optional<WindowFullScreen> windowFullScreenOf(unsigned ps) noexcept
+{
+    switch (ps)
+    {
+        case 0: return WindowFullScreen::Exit;
+        case 1: return WindowFullScreen::Enter;
+        case 2: return WindowFullScreen::Toggle;
+        default: return std::nullopt;
+    }
+}
+
+/// One of the two titles a terminal carries.
+///
+/// They are independent, and each has a save stack of its own: `OSC 1` sets the icon's title alone,
+/// `CSI 22 ; 1 t` pushes the icon's title alone, and `CSI 23 ; 2 t` pops the window's alone. A single
+/// shared title, or a single shared stack, cannot express that.
+enum class TitleKind : uint8_t
+{
+    /// The icon (or tab) title. Set by `OSC 1`, reported by `CSI 20 t` as `OSC L <title> ST`.
+    Icon = 1 << 0,
+
+    /// The window title. Set by `OSC 2`, reported by `CSI 21 t` as `OSC l <title> ST`.
+    Window = 1 << 1,
+};
+
+/// A set of titles a single XTPUSHTITLE, XTPOPTITLE or `OSC 0` acts on.
+using TitleKinds = crispy::flags<TitleKind>;
+
+/// One entry of the title stack: the titles a single XTPUSHTITLE saved.
+///
+/// Either may be absent, because `CSI 22 ; 1 t` saves the icon's title alone and `CSI 22 ; 2 t` the
+/// window's alone. There is one stack, not one per title: a pop takes an entry off it whatever that
+/// entry holds, so pushing both and popping only the icon leaves nothing behind for a later pop of the
+/// window. A pop that needs a title the entry does not carry looks further *down* the stack for the
+/// nearest entry that does, which is what makes "push the icon's, push the window's, pop both" restore
+/// both. @see xterm's xtermPopTitle() and its TryHigher().
+struct SavedTitles
+{
+    std::optional<std::string> icon;
+    std::optional<std::string> window;
+};
+
+/// How deep the title stack goes, matching xterm's MAX_SAVED_TITLES.
+///
+/// Bounded on purpose: an unbounded stack is a memory-growth lever for any application that can write
+/// to the terminal. A push onto a full stack discards the oldest entry.
+constexpr auto MaxSavedTitles = size_t { 10 };
+
+/// The titles the selector @p ps of XTPUSHTITLE / XTPOPTITLE (`CSI 22 / 23 ; Ps t`) names.
+///
+/// @param ps The selector: 0 both, 1 the icon's title, 2 the window's.
+/// @return The titles named, or std::nullopt if @p ps names none.
+constexpr std::optional<TitleKinds> titleKindsOf(unsigned ps) noexcept
+{
+    switch (ps)
+    {
+        case 0: return TitleKinds { TitleKind::Icon } | TitleKind::Window;
+        case 1: return TitleKinds { TitleKind::Icon };
+        case 2: return TitleKinds { TitleKind::Window };
+        default: return std::nullopt;
+    }
+}
 
 /// OSC color-setting related commands that can be grouped into one
 enum class DynamicColorName : uint8_t
@@ -859,117 +1227,113 @@ constexpr bool isValidAnsiMode(unsigned int mode) noexcept
 std::string to_string(AnsiMode mode);
 std::string to_string(DECMode mode);
 
+/// One row of the @ref DECModeNumbers table: a @ref DECMode and the DEC private mode number it is
+/// spelled as on the wire (the `Ps` in `CSI ? Ps h`).
+struct DECModeNumbering
+{
+    DECMode mode;    ///< The internal mode enumerator.
+    unsigned number; ///< Its DEC private mode number.
+};
+
+/// The bijection between a @ref DECMode and its DEC private mode number, shared by SM/RM,
+/// DECSET/DECRST and DECRQM/DECRPM. Both @ref toDECModeNum and @ref fromDECModeNum read this single
+/// table, so adding a mode is one new row and the two directions can never fall out of sync.
+///
+/// Unmapped numbers a real terminal recognises but Contour does not yet implement include 38 (enter
+/// Tektronix mode, DECTEK) and 44 (turn on margin bell); they intentionally have no row.
+constexpr inline auto DECModeNumbers = std::to_array<DECModeNumbering>({
+    { DECMode::UseApplicationCursorKeys, 1 },
+    { DECMode::DesignateCharsetUSASCII, 2 },
+    { DECMode::Columns132, 3 },
+    { DECMode::NoClearScreenOnColumnChange, 95 },
+    { DECMode::SmoothScroll, 4 },
+    { DECMode::ReverseVideo, 5 },
+    { DECMode::Origin, 6 },
+    { DECMode::AutoWrap, 7 },
+    { DECMode::AutoRepeat, 8 },
+    { DECMode::MouseProtocolX10, 9 },
+    { DECMode::ShowToolbar, 10 },
+    { DECMode::BlinkingCursor, 12 },
+    { DECMode::PrinterExtend, 19 },
+    { DECMode::VisibleCursor, 25 },
+    { DECMode::ShowScrollbar, 30 },
+    { DECMode::AllowColumns80to132, 40 },
+    { DECMode::DebugLogging, 46 },
+    { DECMode::UseAlternateScreen, 47 },
+    { DECMode::OptionalAltScreen, 1047 },
+    { DECMode::MoreFix, 41 },
+    { DECMode::PageCursorCoupling, 64 },
+    { DECMode::ApplicationKeypad, 66 },
+    { DECMode::BackarrowKey, 67 },
+    { DECMode::LeftRightMargin, 69 },
+    { DECMode::MouseProtocolNormalTracking, 1000 },
+    { DECMode::MouseProtocolHighlightTracking, 1001 },
+    { DECMode::MouseProtocolButtonTracking, 1002 },
+    { DECMode::MouseProtocolAnyEventTracking, 1003 },
+    { DECMode::SaveCursor, 1048 },
+    { DECMode::ExtendedAltScreen, 1049 },
+    { DECMode::BracketedPaste, 2004 },
+    { DECMode::FocusTracking, 1004 },
+    { DECMode::NoSixelScrolling, 80 },
+    { DECMode::UsePrivateColorRegisters, 1070 },
+    { DECMode::MouseExtended, 1005 },
+    { DECMode::MouseSGR, 1006 },
+    { DECMode::MouseURXVT, 1015 },
+    { DECMode::MouseSGRPixels, 1016 },
+    { DECMode::MouseAlternateScroll, 1007 },
+    { DECMode::MousePassiveTracking, 2029 },
+    { DECMode::ReportGridCellSelection, 2030 },
+    { DECMode::ReportColorPaletteUpdated, 2031 },
+    { DECMode::SemanticBlockProtocol, 2034 },
+    { DECMode::PrintFormFeed, 18 },
+    { DECMode::HebrewKeyboardMapping, 35 },
+    { DECMode::NationalReplacementCharacterSet, 42 },
+    { DECMode::HorizontalCursorCoupling, 60 },
+    { DECMode::RightToLeftMode, 34 },
+    { DECMode::HebrewEncodingMode, 36 },
+    { DECMode::GreekKeyboardMapping, 57 },
+    { DECMode::VerticalCursorCoupling, 61 },
+    { DECMode::KeyboardUsageMode, 68 },
+    { DECMode::TransmitRateLimiting, 73 },
+    { DECMode::KeyPositionMode, 81 },
+    { DECMode::RightToLeftCopyMode, 96 },
+    { DECMode::CRTSaveMode, 97 },
+    { DECMode::AutoResizeMode, 98 },
+    { DECMode::ModemControlMode, 99 },
+    { DECMode::AutoAnswerbackMode, 100 },
+    { DECMode::ConcealAnswerbackMode, 101 },
+    { DECMode::NullMode, 102 },
+    { DECMode::HalfDuplexMode, 103 },
+    { DECMode::SecondaryKeyboardLanguageMode, 104 },
+    { DECMode::OverscanMode, 106 },
+    { DECMode::ReverseWraparound, 45 },
+    { DECMode::ReverseWraparoundExtended, 1045 },
+    { DECMode::BatchedRendering, 2026 },
+    { DECMode::Unicode, 2027 },
+    { DECMode::TextReflow, 2028 },
+    { DECMode::SixelCursorNextToGraphic, 8452 },
+    { DECMode::Win32InputMode, 9001 },
+});
+
+/// @return The DEC private mode number for @p m, or its raw ordinal when it has no assigned number.
 constexpr unsigned toDECModeNum(DECMode m) noexcept
 {
-    switch (m)
-    {
-        case DECMode::UseApplicationCursorKeys: return 1;
-        case DECMode::DesignateCharsetUSASCII: return 2;
-        case DECMode::Columns132: return 3;
-        case DECMode::SmoothScroll: return 4;
-        case DECMode::ReverseVideo: return 5;
-        case DECMode::Origin: return 6;
-        case DECMode::AutoWrap: return 7;
-        case DECMode::AutoRepeat: return 8;
-        case DECMode::MouseProtocolX10: return 9;
-        case DECMode::ShowToolbar: return 10;
-        case DECMode::BlinkingCursor: return 12;
-        case DECMode::PrinterExtend: return 19;
-        case DECMode::VisibleCursor: return 25;
-        case DECMode::ShowScrollbar: return 30;
-        case DECMode::AllowColumns80to132: return 40;
-        case DECMode::DebugLogging: return 46;
-        case DECMode::UseAlternateScreen: return 47;
-        case DECMode::PageCursorCoupling: return 64;
-        case DECMode::ApplicationKeypad: return 66;
-        case DECMode::BackarrowKey: return 67;
-        case DECMode::LeftRightMargin: return 69;
-        case DECMode::MouseProtocolNormalTracking: return 1000;
-        case DECMode::MouseProtocolHighlightTracking: return 1001;
-        case DECMode::MouseProtocolButtonTracking: return 1002;
-        case DECMode::MouseProtocolAnyEventTracking: return 1003;
-        case DECMode::SaveCursor: return 1048;
-        case DECMode::ExtendedAltScreen: return 1049;
-        case DECMode::BracketedPaste: return 2004;
-        case DECMode::FocusTracking: return 1004;
-        case DECMode::NoSixelScrolling: return 80;
-        case DECMode::UsePrivateColorRegisters: return 1070;
-        case DECMode::MouseExtended: return 1005;
-        case DECMode::MouseSGR: return 1006;
-        case DECMode::MouseURXVT: return 1015;
-        case DECMode::MouseSGRPixels: return 1016;
-        case DECMode::MouseAlternateScroll: return 1007;
-        case DECMode::MousePassiveTracking: return 2029;
-        case DECMode::ReportGridCellSelection: return 2030;
-        case DECMode::ReportColorPaletteUpdated: return 2031;
-        case DECMode::SemanticBlockProtocol: return 2034;
-        case DECMode::BatchedRendering: return 2026;
-        case DECMode::Unicode: return 2027;
-        case DECMode::TextReflow: return 2028;
-        case DECMode::SixelCursorNextToGraphic: return 8452;
-        case DECMode::Win32InputMode: return 9001;
-        case DECMode::DECModeCount: break;
-    }
+    // A range-based scan rather than std::ranges::find: std::array's iterator is a raw pointer on
+    // libstdc++/libc++ but a wrapper class on MSVC, so binding the result to a typed local is not
+    // portable across standard libraries.
+    for (auto const& row: DECModeNumbers)
+        if (row.mode == m)
+            return row.number;
     return static_cast<unsigned>(m);
 }
 
+/// @return The @ref DECMode a DEC private mode number denotes, or std::nullopt when unrecognised.
 constexpr std::optional<DECMode> fromDECModeNum(unsigned int modeNum) noexcept
 {
-    switch (modeNum)
-    {
-        case 1: return DECMode::UseApplicationCursorKeys;
-        case 2: return DECMode::DesignateCharsetUSASCII;
-        case 3: return DECMode::Columns132;
-        case 4: return DECMode::SmoothScroll;
-        case 5: return DECMode::ReverseVideo;
-        case 6: return DECMode::Origin;
-        case 7: return DECMode::AutoWrap;
-        case 8: return DECMode::AutoRepeat;
-        case 9: return DECMode::MouseProtocolX10;
-        case 10: return DECMode::ShowToolbar;
-        case 12: return DECMode::BlinkingCursor;
-        case 19: return DECMode::PrinterExtend;
-        case 25: return DECMode::VisibleCursor;
-        case 30: return DECMode::ShowScrollbar;
-        // TODO: Ps = 3 5  -> Enable font-shifting functions (rxvt).
-        // IGNORE? Ps = 3 8  -> Enter Tektronix Mode (DECTEK), VT240, xterm.
-        case 40: return DECMode::AllowColumns80to132;
-        // IGNORE: Ps = 4 1  -> more(1) fix (see curses resource).
-        // TODO: Ps = 4 2  -> Enable National Replacement Character sets (DECNRCM), VT220.
-        // TODO: Ps = 4 4  -> Turn On Margin Bell, xterm.
-        // TODO: Ps = 4 5  -> Reverse-wraparound Mode, xterm.
-        case 46: return DECMode::DebugLogging;
-        case 47: return DECMode::UseAlternateScreen;
-        case 64: return DECMode::PageCursorCoupling;
-        case 66: return DECMode::ApplicationKeypad;
-        case 67: return DECMode::BackarrowKey;
-        case 69: return DECMode::LeftRightMargin;
-        case 80: return DECMode::NoSixelScrolling;
-        case 1000: return DECMode::MouseProtocolNormalTracking;
-        case 1001: return DECMode::MouseProtocolHighlightTracking;
-        case 1002: return DECMode::MouseProtocolButtonTracking;
-        case 1003: return DECMode::MouseProtocolAnyEventTracking;
-        case 1004: return DECMode::FocusTracking;
-        case 1005: return DECMode::MouseExtended;
-        case 1006: return DECMode::MouseSGR;
-        case 1007: return DECMode::MouseAlternateScroll;
-        case 1015: return DECMode::MouseURXVT;
-        case 1016: return DECMode::MouseSGRPixels;
-        case 1048: return DECMode::SaveCursor;
-        case 1049: return DECMode::ExtendedAltScreen;
-        case 1070: return DECMode::UsePrivateColorRegisters;
-        case 2004: return DECMode::BracketedPaste;
-        case 2026: return DECMode::BatchedRendering;
-        case 2027: return DECMode::Unicode;
-        case 2028: return DECMode::TextReflow;
-        case 2029: return DECMode::MousePassiveTracking;
-        case 2030: return DECMode::ReportGridCellSelection;
-        case 2031: return DECMode::ReportColorPaletteUpdated;
-        case 2034: return DECMode::SemanticBlockProtocol;
-        case 8452: return DECMode::SixelCursorNextToGraphic;
-        case 9001: return DECMode::Win32InputMode;
-        default: return std::nullopt;
-    }
+    for (auto const& row: DECModeNumbers)
+        if (row.number == modeNum)
+            return row.mode;
+    return std::nullopt;
 }
 
 constexpr bool isValidDECMode(unsigned int mode) noexcept
@@ -977,34 +1341,55 @@ constexpr bool isValidDECMode(unsigned int mode) noexcept
     return fromDECModeNum(mode).has_value();
 }
 
-constexpr DynamicColorName getChangeDynamicColorCommand(unsigned value)
+/// Lowest OSC command addressing a dynamic color (xterm's OSC 10).
+constexpr auto FirstDynamicColorCommand = unsigned { 10 };
+
+/// The dynamic color each of OSC 10..19 addresses, indexed by `command - FirstDynamicColorCommand`.
+///
+/// The three slots Contour does not model -- xterm's Tektronix colors, OSC 15, 16 and 18 -- are
+/// present but empty on purpose. One `OSC 10 ; spec ; spec ; ... ST` walks these slots one at a time,
+/// so a slot omitted from the table would silently shift every later specification of such a sequence
+/// onto the wrong color.
+constexpr auto DynamicColorCommands = std::array<std::optional<DynamicColorName>, 10> {
+    DynamicColorName::DefaultForegroundColor,   // OSC 10
+    DynamicColorName::DefaultBackgroundColor,   // OSC 11
+    DynamicColorName::TextCursorColor,          // OSC 12
+    DynamicColorName::MouseForegroundColor,     // OSC 13
+    DynamicColorName::MouseBackgroundColor,     // OSC 14
+    std::nullopt,                               // OSC 15: Tektronix foreground
+    std::nullopt,                               // OSC 16: Tektronix background
+    DynamicColorName::HighlightBackgroundColor, // OSC 17
+    std::nullopt,                               // OSC 18: Tektronix cursor
+    DynamicColorName::HighlightForegroundColor, // OSC 19
+};
+
+/// Highest OSC command addressing a dynamic color (xterm's OSC 19).
+constexpr auto LastDynamicColorCommand =
+    FirstDynamicColorCommand + static_cast<unsigned>(DynamicColorCommands.size()) - 1;
+
+/// @param command The OSC command number, e.g. 11 for the default background color.
+/// @return The dynamic color @p command addresses, or std::nullopt if it addresses no color Contour
+///         models -- including any command outside OSC 10..19.
+constexpr std::optional<DynamicColorName> getChangeDynamicColorCommand(unsigned command) noexcept
 {
-    switch (value)
-    {
-        case 10: return DynamicColorName::DefaultForegroundColor;
-        case 11: return DynamicColorName::DefaultBackgroundColor;
-        case 12: return DynamicColorName::TextCursorColor;
-        case 13: return DynamicColorName::MouseForegroundColor;
-        case 14: return DynamicColorName::MouseBackgroundColor;
-        case 19: return DynamicColorName::HighlightForegroundColor;
-        case 17: return DynamicColorName::HighlightBackgroundColor;
-        default: return DynamicColorName::DefaultForegroundColor;
-    }
+    if (command < FirstDynamicColorCommand || command > LastDynamicColorCommand)
+        return std::nullopt;
+
+    return DynamicColorCommands[command - FirstDynamicColorCommand];
 }
 
-constexpr unsigned setDynamicColorCommand(DynamicColorName name)
+/// @param name The dynamic color.
+/// @return The OSC command number addressing @p name, e.g. 11 for the default background color.
+constexpr unsigned setDynamicColorCommand(DynamicColorName name) noexcept
 {
-    switch (name)
-    {
-        case DynamicColorName::DefaultForegroundColor: return 10;
-        case DynamicColorName::DefaultBackgroundColor: return 11;
-        case DynamicColorName::TextCursorColor: return 12;
-        case DynamicColorName::MouseForegroundColor: return 13;
-        case DynamicColorName::MouseBackgroundColor: return 14;
-        case DynamicColorName::HighlightForegroundColor: return 19;
-        case DynamicColorName::HighlightBackgroundColor: return 17;
-        default: return 0;
-    }
+    // The iterator is deliberately not bound to a named variable. libstdc++'s `std::array` iterator
+    // *is* a raw pointer, so `auto const*` compiles there -- and clang-tidy's readability-qualified-auto
+    // asks for exactly that -- while MSVC's is a class type and rejects it. Naming nothing satisfies
+    // both.
+    return FirstDynamicColorCommand
+           + static_cast<unsigned>(
+               std::ranges::distance(DynamicColorCommands.begin(),
+                                     std::ranges::find(DynamicColorCommands, std::optional { name })));
 }
 
 struct SearchResult

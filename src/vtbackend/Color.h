@@ -413,7 +413,18 @@ constexpr Opacity& operator--(Opacity& value) noexcept
 }
 // }}}
 
-std::optional<RGBColor> parseColor(std::string_view const& value);
+/// Parses an X11 colour specification, as accepted by OSC 4/5/10..19 and Contour's configuration.
+///
+/// Three syntaxes are recognised, mirroring XParseColor(3):
+///   - @c rgb:<h>/<h>/<h> — one to four hexadecimal digits per channel, the digit count giving the
+///     channel's precision (so @c rgb:f/f/f, @c rgb:ff/ff/ff and @c rgb:ffff/ffff/ffff all mean white).
+///   - @c rgbi:<f>/<f>/<f> — decimal intensities in [0.0, 1.0].
+///   - @c \#rgb, @c \#rrggbb, @c \#rrrgggbbb, @c \#rrrrggggbbbb — the "old style" syntax, whose digits
+///     are left-justified and zero-filled rather than rescaled (so @c \#fff is @em not white).
+///
+/// @param value The specification to parse.
+/// @return The colour, or std::nullopt if @p value is not a well-formed specification.
+[[nodiscard]] std::optional<RGBColor> parseColor(std::string_view const& value);
 
 } // namespace vtbackend
 

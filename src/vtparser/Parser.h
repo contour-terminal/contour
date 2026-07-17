@@ -601,6 +601,17 @@ concept ParserEventsConcept = requires(T& handler, T const& immutable) {
     { handler.dispatchCSI(char {}) } -> std::same_as<void>;
 
     /**
+     * A VT52-mode escape command has arrived. VT52 has its own single-character
+     * escape grammar that collides with the ANSI one (e.g. ESC H is cursor-home in
+     * VT52 but HTS in ANSI), so it is dispatched separately from dispatchESC().
+     *
+     * @param finalChar the command byte following ESC (e.g. 'A', 'H', 'Y', '<').
+     * @param line for the direct cursor address (ESC Y), the 1-based row; else 0.
+     * @param column for the direct cursor address (ESC Y), the 1-based column; else 0.
+     */
+    { handler.dispatchVT52(char {}, unsigned {}, unsigned {}) } -> std::same_as<void>;
+
+    /**
      * When the control function OSC (Operating System Command) is recognised,
      * this action initializes an external parser (the “OSC Handler”)
      * to handle the characters from the control string.
@@ -691,6 +702,17 @@ class Parser
 
     [[nodiscard]] State state() const noexcept { return _state; }
 
+    /// Enables or disables VT52 compatibility mode. In VT52 mode the parser recognises the legacy
+    /// single-character escape grammar (ESC A/B/.../Y/<) rather than the ANSI CSI grammar. The backend
+    /// sets it when DECANM is reset (`CSI ? 2 l`) and clears it when `ESC <` leaves VT52.
+    void setVT52Mode(bool enabled) noexcept
+    {
+        _vt52Mode = enabled;
+        _vt52State = Vt52State::Ground;
+    }
+
+    [[nodiscard]] bool isVT52Mode() const noexcept { return _vt52Mode; }
+
     [[nodiscard]] char32_t precedingGraphicCharacter() const noexcept { return _scanState.lastCodepointHint; }
 
     /// Returns a mutable reference to the grapheme segmenter state maintained by the parser's scan state.
@@ -727,14 +749,36 @@ class Parser
     std::tuple<ProcessKind, size_t> parseBulkDcsPassThrough(char const* begin, char const* end) noexcept;
 
     void processOnceViaStateMachine(uint8_t ch);
+    /// Handles one input byte while in VT52 mode. @see setVT52Mode. Returns true if the byte was
+    /// consumed by the VT52 grammar; false if it should fall through to the normal (Ground) handling.
+    bool processVT52(uint8_t ch);
 
     void handle(ActionClass actionClass, Action action, uint8_t codepoint);
+
+    /// The VT52 escape sub-state. Independent of @c _state (which stays Ground while printing in VT52),
+    /// so the VT52 grammar does not disturb the ANSI state table.
+    enum class Vt52State : uint8_t
+    {
+        Ground,       ///< Not inside a VT52 escape; printable text and C0 controls flow normally.
+        Escape,       ///< ESC seen; the next byte is the VT52 command.
+        CursorRow,    ///< ESC Y seen; the next byte is the row of the direct cursor address.
+        CursorColumn, ///< ESC Y <row> seen; the next byte is the column.
+        Ignore,       ///< ESC <0x20..0x2F> seen; swallow one more byte (unimplemented 2-byte VT52 seq).
+    };
 
     // private properties
     //
     State _state = State::Ground;
+    bool _vt52Mode = false;
+    Vt52State _vt52State = Vt52State::Ground;
+    uint8_t _vt52CursorRow = 0; ///< The row byte captured after ESC Y, pending the column byte.
     EventListener& _eventListener;
     unicode::scan_state _scanState {};
+
+    /// UTF-8 continuation bytes still expected while collecting a string (OSC/APC/PM/DCS/SOS). String
+    /// content may be UTF-8, so an 8-bit ST (0x9C) terminates a string only when this is zero -- at a
+    /// character boundary; otherwise 0x9C is a legitimate continuation byte (e.g. inside U+2705).
+    unsigned _stringUtf8Pending = 0;
 };
 
 /// @returns parsed tuple with OSC code and offset to first data parameter byte.

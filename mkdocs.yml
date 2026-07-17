@@ -130,3 +130,4 @@ nav:
     - internals/index.md
     - internals/CODING_STYLE.md
     - internals/text-stack.md
+    - internals/vt-conformance.md

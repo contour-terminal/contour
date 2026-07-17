@@ -8,6 +8,26 @@ set -e
 CONTOUR="$1"
 [ -x "$CONTOUR" ] || { echo "usage: $0 /path/to/contour" >&2; exit 64; }
 
+# This script must run with NO controlling terminal, and says so rather than assuming it.
+#
+# `capture` below reaches its terminal peer by opening /dev/tty (CaptureScreen.cpp) -- the CONTROLLING
+# terminal, which `< /dev/null > /dev/null` does NOT detach from; only a session without one does. Run
+# from an interactive shell it therefore drove the DEVELOPER'S OWN terminal, raising a real capture
+# permission prompt that could block the run. (The other terminal-facing verbs here, `set profile` and
+# `cat`, only write escape sequences to stdout, which is redirected to a file below.)
+#
+# It also made the outcome environment-dependent: a CI runner has no /dev/tty, so capture failed there
+# for a reason a developer's machine never reproduced -- the test passed for different reasons in each.
+#
+# CMake runs this under `setsid -w` for exactly that reason. This check is what keeps the contract true
+# if that ever gets dropped: better a loud failure than silently reaching for someone's terminal.
+# The open runs in a SUBSHELL: `:` is a special built-in, and POSIX has a redirection error on one abort
+# the whole shell -- testing this inline would kill the script instead of answering the question.
+if (: < /dev/tty) 2>/dev/null; then
+    echo "error: $0 must run without a controlling terminal (CMake runs it under 'setsid -w')" >&2
+    exit 1
+fi
+
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 
@@ -37,8 +57,8 @@ done
 "$CONTOUR" generate integration shell fish to "$OUT/integration.fish"
 "$CONTOUR" generate integration shell bash to "$OUT/integration.bash"
 "$CONTOUR" generate parser-table > "$OUT/parser-table.txt"
-# These two normally target a live terminal; without one they may exit non-zero after exercising
-# their argument handling — either outcome is acceptable, only crashes are not.
+# These two target a live terminal, and there is none here (see the /dev/tty check above), so they exit
+# non-zero after exercising their argument handling — which is the point: only crashes are unacceptable.
 "$CONTOUR" set profile to main > "$OUT/set-profile.txt" 2>&1 || true
 "$CONTOUR" cat "$(dirname "$0")/../../../../docs/screenshots/contour-font-ligatures.png" \
     > "$OUT/cat-image.txt" 2>&1 || true

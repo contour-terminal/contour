@@ -1,7 +1,9 @@
 #pragma once
 
+#include <vtbackend/Charset.h>
 #include <vtbackend/ColorPalette.h>
 #include <vtbackend/InputGenerator.h> // Modifier
+#include <vtbackend/RectangularAreaChecksum.h>
 #include <vtbackend/VTType.h>
 #include <vtbackend/primitives.h>
 
@@ -48,6 +50,11 @@ struct Settings
     ImageSize maxImageSize { Width(800), Height(600) };
     unsigned maxImageRegisterCount = 256;
     bool goodImageProtocol = false;
+
+    /// Whether an application may read the clipboard via OSC 52 (`OSC 52 ; Pc ; ? ST`). Disabled by
+    /// default: clipboard reading is a well-known exfiltration vector, so it is opt-in. Writing the
+    /// clipboard via OSC 52 is unaffected by this. @see Terminal::requestClipboardRead.
+    bool allowClipboardRead = false;
     StatusDisplayType statusDisplayType = StatusDisplayType::None;
     StatusDisplayPosition statusDisplayPosition = StatusDisplayPosition::Bottom;
     struct
@@ -66,6 +73,21 @@ struct Settings
     std::chrono::milliseconds cursorMotionAnimationDuration { 80 };
 
     bool usePrivateColorRegisters = false;
+
+    /// The checksum extension (XTCHECKSUM) the terminal starts with, and returns to on a soft or
+    /// hard reset. Zero -- the default -- is DEC-compatible.
+    ///
+    /// This mirrors xterm's `checksumExtension` resource. It exists because the conformance suites
+    /// need a terminal whose checksums they can interpret (esctest, for one, cannot pass any
+    /// terminal that leaves this at its default), yet neither suite ever sends XTCHECKSUM itself.
+    ChecksumFlags checksumExtension {};
+
+    /// The User-Preferred Supplemental Set (UPSS) the terminal starts with, and returns to on a soft
+    /// or hard reset. DEC Supplemental Graphic is the DEC power-up default.
+    ///
+    /// This mirrors xterm's `DFT_UPSS`/`preferLatin1` pair: xterm lets a resource pick between DEC
+    /// Supplemental Graphic and ISO Latin-1, and so does this.
+    UserPreferredSupplementalSet userPreferredSupplementalSet = DefaultUserPreferredSupplementalSet;
 
     std::chrono::milliseconds cursorBlinkInterval = std::chrono::milliseconds { 500 };
     RefreshRate refreshRate = { 30.0 };

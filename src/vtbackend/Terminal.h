@@ -166,6 +166,14 @@ struct Search
     bool initiatedByDoubleClick = false;
 };
 
+/// Folds the 7-bit C1 control introducers in a terminal reply to their single-byte 8-bit forms, as
+/// required when S8C1T (8-bit C1 transmission) is in effect. Every `ESC X` with X in 0x40..0x5F becomes
+/// the single byte X + 0x40 -- e.g. `ESC [` -> CSI (0x9B), `ESC P` -> DCS (0x90), `ESC \` -> ST (0x9C).
+/// A lone trailing ESC, or an ESC followed by a byte outside 0x40..0x5F, is passed through unchanged.
+/// @param sevenBit A reply string that uses 7-bit (ESC-introduced) C1 controls.
+/// @return The reply with its C1 introducers folded to single 8-bit bytes.
+[[nodiscard]] std::string foldC1ControlsToEightBit(std::string_view sevenBit);
+
 // Mandates what execution mode the terminal will take to process VT sequences.
 //
 enum class ExecutionMode : uint8_t
@@ -265,6 +273,10 @@ class Terminal
         virtual FontDef getFontDef() { return {}; }
         virtual void setFontDef(FontDef const& /*fontSpec*/) {}
         virtual void copyToClipboard(std::string_view /*data*/) {}
+        /// Returns the current clipboard contents, for an OSC 52 read (`OSC 52 ; Pc ; ? ST`). The base
+        /// implementation returns nothing; only a frontend that permits clipboard reading answers. Reads
+        /// are additionally gated by Settings::allowClipboardRead. @see Terminal::requestClipboardRead.
+        virtual std::string getClipboard() { return {}; }
         virtual void openDocument(std::string_view /*fileOrUrl*/) = 0;
         virtual void inspect() {}
         virtual void notify(std::string_view /*title*/, std::string_view /*body*/) {}
@@ -276,8 +288,33 @@ class Terminal
         virtual void onSelectionCompleted() {}
         virtual void requestWindowResize(LineCount, ColumnCount) {}
         virtual void requestWindowResize(Width, Height) {}
+
+        /// The application asked the window manager to iconify (minimize) the window, or to restore it.
+        /// @see XTWINOPS `CSI 2 t` and `CSI 1 t`.
+        virtual void requestWindowIconify(bool /*iconify*/) {}
+
+        /// The application asked to move the window's top-left corner. @see XTWINOPS `CSI 3 ; x ; y t`.
+        ///
+        /// A window manager may refuse, or place the window elsewhere; whatever it does, the frontend
+        /// reports the outcome back through Terminal::setWindowState() rather than the terminal assuming
+        /// the move took.
+        virtual void requestWindowMove(WindowPosition /*position*/) {}
+
+        /// The application asked to maximize the window, or to restore it. @see XTWINOPS `CSI 9 ; Ps t`.
+        ///
+        /// Which size that lands on -- and which size to come back to -- is the frontend's to decide;
+        /// @see WindowSizeStack, which every frontend shares rather than deciding it anew.
+        virtual void requestWindowMaximize(WindowMaximize /*how*/) {}
+
+        /// The application asked for full screen, or out of it. @see XTWINOPS `CSI 10 ; Ps t`.
+        virtual void requestWindowFullScreen(WindowFullScreen /*how*/) {}
+
         virtual void requestShowHostWritableStatusLine() {}
         virtual void setWindowTitle(std::string_view /*title*/) {}
+
+        /// The application set the icon (or tab) title, via `OSC 0` or `OSC 1`.
+        virtual void setIconTitle(std::string_view /*title*/) {}
+
         virtual void setTabName(std::string_view /*title*/) {}
         /// The application assigned a window-frame color (DECAC item 2), which the GUI maps to the
         /// tab background color. A color the user picked themselves outranks it and stays visible.
@@ -353,6 +390,39 @@ class Terminal
     /// Does not change the maximum terminal identity reported by DA1/DA2.
     void setOperatingLevel(VTType level) noexcept;
     VTType operatingLevel() const noexcept { return _operatingLevel; }
+
+    /// Enables or disables a single xterm title-mode feature (XTSMTITLE / XTRMTITLE).
+    /// @param feature The feature to change.
+    /// @param enabled true to enable, false to disable.
+    void setTitleModeFeature(TitleModeFeature feature, bool enabled) noexcept
+    {
+        _titleModes.set(static_cast<size_t>(feature), enabled);
+    }
+    /// @return Whether the given title-mode feature is currently enabled.
+    [[nodiscard]] bool isTitleModeEnabled(TitleModeFeature feature) const noexcept
+    {
+        return _titleModes.test(static_cast<size_t>(feature));
+    }
+    /// Resets all title-mode features to their default (all disabled), as xterm's DEF_TITLE_MODES.
+    void resetTitleModes() noexcept { _titleModes.reset(); }
+
+    /// Decodes an OSC 0/1/2 title argument per the current title modes: when TitleModeFeature::SetHex is
+    /// enabled the argument is a hex string decoded to raw bytes, otherwise it is used verbatim.
+    /// @param raw The title argument as received.
+    /// @return The decoded title to store.
+    [[nodiscard]] std::string decodeTitle(std::string_view raw) const;
+
+    /// Encodes a title for a query report (`CSI 20 t` / `CSI 21 t`) per the current title modes: when
+    /// TitleModeFeature::QueryHex is enabled the title is hex-encoded (lowercase), otherwise verbatim.
+    /// @param title The stored title.
+    /// @return The title as it should appear in the report.
+    [[nodiscard]] std::string encodeTitleForReport(std::string_view title) const;
+
+    /// Enters or leaves VT52 compatibility mode by switching the parser to (or from) the VT52 escape
+    /// grammar. Entered by resetting DECANM (`CSI ? 2 l`), left by `ESC <`. Leaving VT52 enters ANSI
+    /// mode at the VT100 level (VT52 is level-less, so there is no prior level to restore).
+    void setVT52Mode(bool enable) noexcept;
+    [[nodiscard]] bool isVT52Mode() const noexcept { return _parser.isVT52Mode(); }
 
     void setC1TransmissionMode(ControlTransmissionMode mode) noexcept { _c1TransmissionMode = mode; }
     ControlTransmissionMode c1TransmissionMode() const noexcept { return _c1TransmissionMode; }
@@ -635,6 +705,35 @@ class Terminal
     [[nodiscard]] constexpr ImageSize cellPixelSize() const noexcept { return _cellPixelSize; }
     constexpr void setCellPixelSize(ImageSize cellPixelSize) { _cellPixelSize = cellPixelSize; }
 
+    /// @return Where and how the window sits on the screen, as the frontend last reported it.
+    [[nodiscard]] constexpr WindowState const& windowState() const noexcept { return _windowState; }
+
+    /// The frontend reports that the window moved, was iconified, or landed on a different screen.
+    constexpr void setWindowState(WindowState state) noexcept { _windowState = state; }
+
+    /// @return The size of the screen the window is on, in pixels.
+    ///
+    /// Falls back to the window's own size when the frontend has no screen to speak of: a headless
+    /// terminal is exactly as large as the display it does not have, which is a more useful answer to
+    /// `CSI 15 t` than zero, and keeps "maximize" (a resize to the screen's size) meaningful.
+    [[nodiscard]] ImageSize screenPixelSize() const noexcept
+    {
+        auto const screen = _windowState.screenPixelSize;
+        return (unbox(screen.width) != 0 && unbox(screen.height) != 0) ? screen : pixelSize();
+    }
+
+    /// @return The size of the screen the window is on, in character cells.
+    [[nodiscard]] PageSize screenPageSize() const noexcept
+    {
+        auto const screen = screenPixelSize();
+        auto const cell = cellPixelSize();
+        if (unbox(cell.width) == 0 || unbox(cell.height) == 0)
+            return totalPageSize();
+
+        return PageSize { .lines = LineCount::cast_from(unbox(screen.height) / unbox(cell.height)),
+                          .columns = ColumnCount::cast_from(unbox(screen.width) / unbox(cell.width)) };
+    }
+
     /// Retrieves the time point this terminal instance has been spawned.
     [[nodiscard]] std::chrono::steady_clock::time_point currentTime() const noexcept { return _currentTime; }
 
@@ -688,6 +787,14 @@ class Terminal
     /// Important! In case a status line is currently visible, the status line count is being
     /// accumulated into the screen size, too.
     void resizeScreen(PageSize totalPageSize, std::optional<ImageSize> pixels = std::nullopt);
+
+    /// Resizes the terminal screen to @p totalPageSize without changing the cell size, and drops the
+    /// selection.
+    ///
+    /// This is what a sequence that changes the page size on its own authority wants (DECCOLM, and RIS
+    /// undoing it): the cells keep their size, the child is still told a pixel geometry, and the
+    /// selection -- which is anchored to columns the new page may not have -- goes away.
+    void resizeScreenKeepingCellSize(PageSize totalPageSize);
 
     void clearScreen();
 
@@ -744,6 +851,25 @@ class Terminal
 
     /// Writes a given VT-sequence to screen.
     void writeToScreen(std::string_view vtStream);
+
+    /// Echoes @p bytes onto our own screen, as SRM (reset) asks for.
+    ///
+    /// The bytes cannot always be parsed on the spot: flushInput() is also reached from *inside* the
+    /// parser, by every sequence handler that replies, and the parser is not safe to re-enter. Those
+    /// bytes are deferred to processPendingLocalEcho() instead, which runs once the parse has unwound.
+    /// This is what xterm does with its deferred area. @see Terminal::flushInput().
+    void echoLocally(std::string_view bytes);
+
+    /// Parses the local echo that echoLocally() deferred while the parser was running.
+    ///
+    /// Requires _stateMutex to be held and the parser to not be running on this thread.
+    void processPendingLocalEcho();
+
+    /// Parses @p vtStream into the current screen, splitting it across PTY buffer objects as needed.
+    ///
+    /// Requires _stateMutex to be held. Marks the parser as running for as long as it is on the stack,
+    /// so that a reply issued from a sequence handler defers its echo rather than re-entering here.
+    void parseFragmentChunked(std::string_view vtStream);
 
     /// Writes a given VT-sequence to screen - but without acquiring the lock (must be already acquired).
     void writeToScreenInternal(std::string_view vtStream);
@@ -953,6 +1079,16 @@ class Terminal
     bool isAlternateScreen() const noexcept { return _currentScreenType == ScreenType::Alternate; }
     ScreenType screenType() const noexcept { return _currentScreenType; }
     void setScreen(ScreenType screenType);
+
+    /// Enters or leaves the alternate screen buffer for one of the DEC private modes 47, 1047 or 1049,
+    /// following the cursor-carry and clear policy that alternateScreenBehavior() describes for @p mode.
+    /// Modelled on xterm's ToAlternate / FromAlternate: the cursor is a terminal-level entity, so modes
+    /// 47 and 1047 carry it across the switch (it does not move), while mode 1049 lets each page keep
+    /// its own cursor as an implicit DECSC/DECRC.
+    /// @param mode   One of DECMode::UseAlternateScreen (47), OptionalAltScreen (1047) or
+    ///               ExtendedAltScreen (1049); other modes violate the precondition.
+    /// @param enable true to switch to the alternate buffer, false to switch back to the primary.
+    void setAlternateScreen(DECMode mode, bool enable);
 
     Screen& screenForType(ScreenType type) noexcept
     {
@@ -1247,6 +1383,14 @@ class Terminal
     [[nodiscard]] FontDef getFontDef();
     void setFontDef(FontDef const& fontDef);
     void copyToClipboard(std::string_view data);
+
+    /// Answers an OSC 52 clipboard read (`OSC 52 ; Pc ; ? ST`) by replying with the current clipboard,
+    /// base64-encoded, as `OSC 52 ; Pc ; <base64> ST`. Does nothing when Settings::allowClipboardRead is
+    /// false (the default), so an application cannot read the clipboard unless the user opts in.
+    /// @param pc The selection parameter from the request; an empty Pc is reported back as "s0", xterm's
+    ///           default selection.
+    void requestClipboardRead(std::string_view pc);
+
     void openDocument(std::string_view data);
     void inspect();
     void notify(std::string_view title, std::string_view body);
@@ -1271,6 +1415,18 @@ class Terminal
 
     void requestWindowResize(PageSize);
     void requestWindowResize(ImageSize);
+
+    /// Asks the frontend to iconify (minimize) the window, or to restore it. @see XTWINOPS.
+    void requestWindowIconify(bool iconify);
+
+    /// Asks the frontend to move the window's top-left corner. @see XTWINOPS.
+    void requestWindowMove(WindowPosition position);
+
+    /// Asks the frontend to maximize the window, or to restore it. @see XTWINOPS.
+    void requestWindowMaximize(WindowMaximize how);
+
+    /// Asks the frontend for full screen, or out of it. @see XTWINOPS.
+    void requestWindowFullScreen(WindowFullScreen how);
     void setApplicationkeypadMode(bool enabled);
     void setBracketedPaste(bool enabled);
     void setCursorStyle(CursorDisplay display, CursorShape shape);
@@ -1342,12 +1498,48 @@ class Terminal
     void refreshHints();
     // }}} hint mode
 
-    void saveWindowTitle();
-    void restoreWindowTitle();
+    /// Sets the icon (or tab) title, as `OSC 0` and `OSC 1` do.
+    void setIconTitle(std::string_view title);
+
+    /// @return The icon (or tab) title, as reported by `CSI 20 t`.
+    [[nodiscard]] std::string const& iconTitle() const noexcept;
+
+    /// Pushes the named titles onto the title stack, as one entry. @see XTPUSHTITLE (`CSI 22 ; Ps t`).
+    void saveTitles(TitleKinds kinds);
+
+    /// Pops one entry off the title stack and restores the named titles from it.
+    /// @see XTPOPTITLE (`CSI 23 ; Ps t`), and SavedTitles for why one stack rather than two.
+    ///
+    /// An empty stack leaves both titles alone, as in xterm: popping more than was pushed is not an
+    /// error, it simply has nothing to restore.
+    void restoreTitles(TitleKinds kinds);
+
     void setTerminalProfile(std::string const& configProfileName);
     void useApplicationCursorKeys(bool enabled);
     void softReset();
     void hardReset();
+
+    /// The checksum extension (XTCHECKSUM) DECRQCRA currently computes with.
+    ///
+    /// Terminal-wide rather than per-screen: an application that selects an extension and then
+    /// switches to the alternate screen must still get the checksums it asked for.
+    [[nodiscard]] ChecksumFlags checksumExtension() const noexcept { return _checksumExtension; }
+    void setChecksumExtension(ChecksumFlags flags) noexcept { _checksumExtension = flags; }
+
+    /// The User-Preferred Supplemental Set (UPSS), as assigned by DECAUPSS and reported by DECRQUPSS.
+    ///
+    /// Terminal-wide rather than per-cursor, for the same reason as checksumExtension() above: the
+    /// G-set designations live on the cursor, so a UPSS kept there would be lost to DECSC/DECRC and
+    /// to every alternate-screen switch. UPSS is a user preference, not cursor state.
+    [[nodiscard]] UserPreferredSupplementalSet userPreferredSupplementalSet() const noexcept
+    {
+        return _userPreferredSupplementalSet;
+    }
+    void setUserPreferredSupplementalSet(UserPreferredSupplementalSet const& upss) noexcept
+    {
+        _userPreferredSupplementalSet = upss;
+    }
+
     void forceRedraw(std::function<void()> const& artificialSleep);
     void discardImage(Image const&);
     void markCellDirty(CellLocation position) noexcept;
@@ -1459,6 +1651,14 @@ class Terminal
     [[nodiscard]] gsl::span<Function const> activeSequences() const noexcept
     {
         return _supportedVTSequences.activeSequences();
+    }
+
+    /// The complete VT sequence table, independent of the current operating level. A sequence that is in
+    /// here but not in activeSequences() is a real capability of the terminal that is merely gated out at
+    /// the present conformance level (set by DECSCL) -- recognised, but deliberately inert.
+    [[nodiscard]] gsl::span<Function const> allSequences() const noexcept
+    {
+        return _supportedVTSequences.allSequences();
     }
 
     // {{{ VT parser related
@@ -1849,7 +2049,18 @@ class Terminal
     std::vector<std::unique_ptr<Screen>> _pages; ///< 16 pages: page 0 = primary, page 15 = alt screen
     PageIndex _cursorPage { 0 };                 ///< Page where cursor/VT output goes
     PageIndex _displayedPage { 0 };              ///< Page shown to user (== _cursorPage when DECPCCM set)
-    PageIndex _savedCursorPage { 0 };            ///< Page index saved by DECSC
+    /// Which slot of _savedCursorPage the current screen uses: 1 for the alternate page, 0 for any
+    /// primary page. Keyed on page identity, not _currentScreenType, so a primary VT420 page reached
+    /// via PPA/NP/PP still resolves to the primary slot.
+    [[nodiscard]] size_t savedCursorPageSlot() const noexcept
+    {
+        return _cursorPage == AlternateScreenPageIndex ? 1 : 0;
+    }
+
+    /// DECSC-saved cursor page, kept separately per screen (index 0 = primary, 1 = alternate) so the
+    /// two screens' saved cursors never cross. Defaults are each screen's own page, so a DECRC with no
+    /// prior DECSC stays put.
+    std::array<PageIndex, 2> _savedCursorPage { PageIndex { 0 }, AlternateScreenPageIndex };
     Screen _hostWritableStatusLineScreen;
     Screen _indicatorStatusScreen;
     gsl::not_null<Screen*> _currentScreen;
@@ -1896,6 +2107,10 @@ class Terminal
     /// contains the pixel size of a single cell, or area(cellPixelSize_) == 0 if unknown.
     ImageSize _cellPixelSize;
 
+    /// Where and how the window sits on the screen. Owned by the frontend, which pushes it in; the
+    /// terminal only reports it back. @see setWindowState().
+    WindowState _windowState {};
+
     ColorPalette _defaultColorPalette;
     ColorPalette _colorPalette;
     std::vector<ColorPalette> _savedColorPalettes;
@@ -1907,9 +2122,17 @@ class Terminal
     VTType _operatingLevel = VTType::VT525;
     ControlTransmissionMode _c1TransmissionMode = ControlTransmissionMode::S7C1T;
 
+    /// xterm title-mode features (XTSMTITLE / XTRMTITLE), one bit per TitleModeFeature. Default is all
+    /// clear (xterm's DEF_TITLE_MODES), i.e. plain UTF-8 title set and query.
+    std::bitset<TitleModeFeatureCount> _titleModes {};
+
     std::unordered_map<int, std::string> _macros;
     std::queue<std::string> _pendingMacroInvocations;
     int _macroRecursionDepth = 0;
+
+    /// Local echo (SRM, reset) that was produced while the parser was running, and so could not be
+    /// parsed on the spot. Written and drained only under _stateMutex. @see echoLocally().
+    std::string _pendingLocalEcho;
 
     std::unordered_map<int, std::string> _userDefinedKeys;
     bool _udkLocked = false;
@@ -1950,6 +2173,14 @@ class Terminal
     CursorDisplay _cursorDisplay = CursorDisplay::Steady;
     CursorShape _cursorShape = CursorShape::Block;
 
+    /// XTCHECKSUM state; reset to Settings::checksumExtension by DECSTR and RIS alike.
+    ChecksumFlags _checksumExtension = _settings.checksumExtension;
+
+    /// UPSS state (DECAUPSS/DECRQUPSS); reset to Settings::userPreferredSupplementalSet by DECSTR
+    /// and RIS alike, matching xterm -- whose ReallyReset() restores the charsets unconditionally,
+    /// i.e. on a soft reset as well as a hard one.
+    UserPreferredSupplementalSet _userPreferredSupplementalSet = _settings.userPreferredSupplementalSet;
+
     std::string _currentWorkingDirectory = {};
 
     unsigned _maxImageRegisterCount = 256;
@@ -1962,7 +2193,12 @@ class Terminal
     HyperlinkStorage _hyperlinks {};
 
     std::string _windowTitle {};
-    std::stack<std::string> _savedWindowTitles {};
+
+    /// The icon (or tab) title. Set by `OSC 0` and `OSC 1`, reported by `CSI 20 t`.
+    std::string _iconTitle {};
+
+    /// The title stack, deepest entry first. @see SavedTitles, saveTitles(), restoreTitles().
+    std::vector<SavedTitles> _savedTitles {};
 
     std::optional<std::string> _tabName {};
 

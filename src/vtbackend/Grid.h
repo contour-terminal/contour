@@ -618,11 +618,13 @@ class Grid
     [[nodiscard]] CellProxy at(LineOffset line, ColumnOffset column) noexcept;
     [[nodiscard]] CellProxy at(LineOffset line, ColumnOffset column) const noexcept;
 
-    // page view API
-    [[nodiscard]] gsl::span<Line> pageAtScrollOffset(ScrollOffset scrollOffset);
-    [[nodiscard]] gsl::span<Line const> pageAtScrollOffset(ScrollOffset scrollOffset) const;
-    [[nodiscard]] gsl::span<Line> mainPage();
-    [[nodiscard]] gsl::span<Line const> mainPage() const;
+    // Page view API
+    //
+    // There is deliberately NO accessor handing out a contiguous span over the page. `_lines` is a
+    // ring whose rotation moves an index, not the data, so once enough lines have scrolled into
+    // history the logical page straddles the ring's physical end. A `span{&_lines[0], pageSize}`
+    // therefore walks straight off the underlying vector -- a real out-of-bounds write that ASan
+    // caught in DECALN. Iterate with `lineAt(LineOffset)`, which goes through the ring's indexing.
 
     [[nodiscard]] LogicalLines logicalLines()
     {
@@ -738,6 +740,16 @@ class Grid
     void rotateBuffersLeft(LineCount count) noexcept { _lines.rotate_left(unbox<size_t>(count)); }
 
     void rotateBuffersRight(LineCount count) noexcept { _lines.rotate_right(unbox<size_t>(count)); }
+
+    /// Resets the topmost @p count lines of the main page to blank.
+    ///
+    /// Always index the page through `lineAt()` like this rather than over a contiguous span: the
+    /// callers below run right after a rotation, which is precisely when the logical page is most
+    /// likely to straddle the ring's physical end.
+    ///
+    /// @param count             How many lines from the top of the page to reset.
+    /// @param defaultAttributes The attributes the blanked cells take on.
+    void resetPageLines(LineCount count, GraphicsAttributes defaultAttributes) noexcept;
     // }}}
 
     // private fields

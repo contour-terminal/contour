@@ -14,6 +14,7 @@
 #include <vtpty/MockPty.h>
 
 #include <crispy/assert.h>
+#include <crispy/base64.h>
 #include <crispy/escape.h>
 #include <crispy/utils.h>
 
@@ -55,6 +56,34 @@ namespace vtbackend
 
 namespace // {{{ helpers
 {
+    /// Non-zero while this thread is inside VTParser::parseFragment().
+    ///
+    /// The parser is a state machine that is not safe to re-enter. A sequence handler that replies
+    /// reaches Terminal::flushInput() (Screen::reportColorPaletteUpdate(), Screen::replyGipStatus(),
+    /// ... all reply and flush), and with SRM reset that echoes -- which parses. Parsing there would
+    /// clobber the state machine half-way through the sequence being dispatched, and would take the
+    /// non-recursive _stateMutex that writeToScreen() already holds. xterm guards the identical hazard
+    /// with ParseState::check_recur and defers the bytes instead -- "Defer parsing when parser is
+    /// already running as the parser is not safe to reenter" (xterm-406, charproc.c, doparsing()).
+    ///
+    /// Thread-local rather than a member because the question is "is *this thread* parsing": a GUI
+    /// thread echoing a keystroke while the parser thread happens to be parsing must echo, not defer.
+    ///
+    /// @see Terminal::echoLocally(), Terminal::processPendingLocalEcho().
+    thread_local int tlParseDepth = 0;
+
+    /// Marks this thread as being inside the VT parser for as long as it is alive.
+    struct ParseDepthGuard
+    {
+        ParseDepthGuard() noexcept { ++tlParseDepth; }
+        ~ParseDepthGuard() { --tlParseDepth; }
+
+        ParseDepthGuard(ParseDepthGuard const&) = delete;
+        ParseDepthGuard& operator=(ParseDepthGuard const&) = delete;
+        ParseDepthGuard(ParseDepthGuard&&) = delete;
+        ParseDepthGuard& operator=(ParseDepthGuard&&) = delete;
+    };
+
     std::optional<std::string> resolveExistingLocalPath(std::string const& cwd,
                                                         std::string const& home,
                                                         std::string const& match)
@@ -204,6 +233,12 @@ Terminal::Terminal(Events& eventListener,
         static_cast<unsigned>(unbox(_settings.mouseWheelScrollMultiplier)));
 
     // TODO(should be this instead?): hardReset();
+
+    // SRM, set: the terminal does *not* echo what it sends -- the host does. This is the default every
+    // VT terminal ships with, and it has to be said out loud: the mode register starts at all zeroes,
+    // and a *reset* SRM means local echo is on. @see flushInput().
+    setMode(AnsiMode::SendReceive, true);
+
     setMode(DECMode::AutoWrap, true);
     setMode(DECMode::AutoRepeat, true);
     setMode(DECMode::SixelCursorNextToGraphic, true);
@@ -358,11 +393,17 @@ bool Terminal::processInputOnce()
         // This is critical to ensure buffer_fragment in TrivialLineBuffer holds
         // the correct buffer reference.
         _parsingBuffer = ptyReadResult->buffer;
-        _parser.parseFragment(buf);
+        {
+            auto const parseGuard = ParseDepthGuard {};
+            _parser.parseFragment(buf);
+        }
         _parsingBuffer.reset();
 
         // Process any macros that were queued by DECINVM during the parse.
         processPendingMacros();
+
+        // Process any local echo (SRM) that a reply deferred during the parse.
+        processPendingLocalEcho();
     }
 
     if (!_modes.enabled(DECMode::BatchedRendering))
@@ -1429,30 +1470,86 @@ void Terminal::flushInput()
     if (_inputGenerator.peek().empty())
         return;
 
+    // Own the bytes before anything is allowed to touch the generator again: peek() returns a view into
+    // InputGenerator::_pendingSequence, and both steps below invalidate it. consume() may clear that
+    // string outright, and the local echo parses these bytes -- a query among them replies, which appends
+    // to that very string and reallocates it, leaving the view dangling. @see echoLocally().
+    auto const input = std::string(_inputGenerator.peek());
+
     // XXX Should be the only location that does write to the PTY's stdin to avoid race conditions.
-    auto const input = _inputGenerator.peek();
     auto const rv = _pty->write(input);
-    if (rv > 0)
-        _inputGenerator.consume(rv);
+    if (rv <= 0)
+        return;
+
+    _inputGenerator.consume(rv);
+
+    // SRM, reset: the terminal echoes everything it sends. This is the "local echo" a host that does not
+    // echo for itself relies on, and it is off by default -- SRM is set, and the host echoes.
+    //
+    // Echoed here, at the one point where anything reaches the host, which is also where xterm echoes
+    // (unparseputc()). That means a *reply* is echoed too, which looks surprising until you remember what
+    // the mode says: it is about what the terminal sends, not about what the user typed.
+    //
+    // Echoed *after* the send, and only as much as was actually sent: echoing can itself produce a reply,
+    // whose flush would re-send anything still pending here.
+    if (!isModeEnabled(AnsiMode::SendReceive))
+        echoLocally(std::string_view(input).substr(0, static_cast<size_t>(rv)));
+}
+
+void Terminal::echoLocally(std::string_view bytes)
+{
+    if (bytes.empty())
+        return;
+
+    if (tlParseDepth > 0)
+    {
+        // The parser is running on this thread and is not safe to re-enter, so hand the bytes to the
+        // barrier that runs once it has unwound. _pendingLocalEcho is only ever touched from inside a
+        // parse or from the drain that follows it, both under _stateMutex.
+        _pendingLocalEcho += bytes;
+        return;
+    }
+
+    writeToScreen(bytes);
+}
+
+void Terminal::processPendingLocalEcho()
+{
+    // A drain step parses, and parsing can reply, and a reply flushes and thus echoes again -- which
+    // lands back in _pendingLocalEcho, because parseFragmentChunked() holds the parse depth above zero.
+    // Loop until it stops growing, as xterm's main parse loop does with its deferred area.
+    while (!_pendingLocalEcho.empty())
+    {
+        auto const bytes = std::exchange(_pendingLocalEcho, std::string {});
+        parseFragmentChunked(bytes);
+    }
+}
+
+void Terminal::parseFragmentChunked(string_view vtStream)
+{
+    auto const parseGuard = ParseDepthGuard {};
+
+    while (!vtStream.empty())
+    {
+        if (_currentPtyBuffer->bytesAvailable() < 64 && _currentPtyBuffer->bytesAvailable() < vtStream.size())
+            _currentPtyBuffer = _ptyBufferPool.allocateBufferObject();
+        auto const chunk = vtStream.substr(0, std::min(vtStream.size(), _currentPtyBuffer->bytesAvailable()));
+        vtStream.remove_prefix(chunk.size());
+        // Set parsingBuffer to ensure buffer_fragment holds the correct buffer reference.
+        _parsingBuffer = _currentPtyBuffer;
+        _parser.parseFragment(_currentPtyBuffer->writeAtEnd(chunk));
+        _parsingBuffer.reset();
+    }
 }
 
 void Terminal::writeToScreen(string_view vtStream)
 {
     {
         auto const l = std::lock_guard { *this };
-        while (!vtStream.empty())
-        {
-            if (_currentPtyBuffer->bytesAvailable() < 64
-                && _currentPtyBuffer->bytesAvailable() < vtStream.size())
-                _currentPtyBuffer = _ptyBufferPool.allocateBufferObject();
-            auto const chunk =
-                vtStream.substr(0, std::min(vtStream.size(), _currentPtyBuffer->bytesAvailable()));
-            vtStream.remove_prefix(chunk.size());
-            // Set parsingBuffer to ensure buffer_fragment holds the correct buffer reference.
-            _parsingBuffer = _currentPtyBuffer;
-            _parser.parseFragment(_currentPtyBuffer->writeAtEnd(chunk));
-            _parsingBuffer.reset();
-        }
+        parseFragmentChunked(vtStream);
+
+        // Any local echo the parse deferred (a sequence that replied) is safe to parse now.
+        processPendingLocalEcho();
     }
 
     if (!_modes.enabled(DECMode::BatchedRendering))
@@ -1882,6 +1979,25 @@ SmoothScrollResult Terminal::applySmoothScrollPixelDelta(float pixelDelta)
     return SmoothScrollResult::Applied;
 }
 
+void Terminal::resizeScreenKeepingCellSize(PageSize totalPageSize)
+{
+    totalPageSize = clampedTotalPageSize(totalPageSize);
+
+    // Derive the pixel size from the cell size we already have, rather than passing none at all: without
+    // a pixel size UnixPty::resizeScreen() leaves ws_xpixel/ws_ypixel at zero, and TIOCSWINSZ hands the
+    // child a window with no pixel geometry -- withdrawing what sixel-capable applications size their
+    // images from. resizeScreen() divides this back out by the same main-page size, so the cell size comes
+    // out unchanged, which is what a column-count switch wants: the cells keep their size, the page its
+    // width in cells.
+    auto const pixels = cellPixelSize() * (totalPageSize - statusLineHeight());
+
+    resizeScreen(totalPageSize, pixels);
+
+    // A selection is anchored to columns that a narrower page no longer has; renderSelection() would walk
+    // it against the new grid. Every other resizeScreen() caller drops it too (@see contour::applyResize).
+    clearSelection();
+}
+
 void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
 {
     // The total page must leave room for at least one main-display line ON TOP of the visible status
@@ -2200,6 +2316,20 @@ void Terminal::copyToClipboard(string_view data)
     _eventListener.copyToClipboard(data);
 }
 
+void Terminal::requestClipboardRead(string_view pc)
+{
+    // Reading the clipboard is opt-in: an application that could read it unbidden could exfiltrate
+    // whatever the user last copied. When disabled, stay silent (as xterm does when the operation is
+    // not permitted) rather than reveal even that a clipboard exists.
+    if (!_settings.allowClipboardRead)
+        return;
+
+    auto const content = _eventListener.getClipboard();
+    // An empty Pc is reported back as xterm's default selection, "s0".
+    auto const selection = pc.empty() ? string_view { "s0" } : pc;
+    reply("\033]52;{};{}\033\\", selection, crispy::base64::encode(content.begin(), content.end()));
+}
+
 void Terminal::openDocument(string_view data)
 {
     _eventListener.openDocument(data);
@@ -2503,13 +2633,54 @@ void Terminal::focusTerminalWindow()
     _eventListener.focusTerminalWindow();
 }
 
+std::string foldC1ControlsToEightBit(std::string_view sevenBit)
+{
+    // A single-pass state machine: hold back each ESC and decide when its following byte arrives.
+    // `ESC X` with X in 0x40..0x5F is a 7-bit C1 control and folds to the single byte X + 0x40; anything
+    // else (a lone trailing ESC, or ESC before a non-C1 byte) is emitted verbatim.
+    std::string out;
+    out.reserve(sevenBit.size());
+    auto pendingEsc = false;
+    for (auto const ch: sevenBit)
+    {
+        auto const byte = static_cast<unsigned char>(ch);
+        if (pendingEsc)
+        {
+            pendingEsc = false;
+            if (byte >= 0x40 && byte <= 0x5F)
+            {
+                out.push_back(static_cast<char>(byte + 0x40));
+                continue;
+            }
+            out.push_back('\033'); // the ESC we held back was not a C1 introducer
+        }
+        if (byte == 0x1B)
+            pendingEsc = true; // hold the ESC; the next byte decides whether it is a C1 control
+        else
+            out.push_back(ch);
+    }
+    if (pendingEsc)
+        out.push_back('\033'); // a lone ESC at the very end
+    return out;
+}
+
 void Terminal::reply(string_view text)
 {
     // this is invoked from within the terminal thread.
     // most likely that's not the main thread, which will however write
     // the actual input events.
     // TODO: introduce new mutex to guard terminal writes.
-    _inputGenerator.generateRaw(text);
+
+    // Under S8C1T the terminal transmits its C1 control introducers as single 8-bit bytes (CSI -> 0x9B,
+    // DCS -> 0x90, ST -> 0x9C, ...). 8-bit C1 transmission is a VT200+ capability, so it applies only
+    // while operating at VT level 2 or above: a terminal that has dropped back to VT100 level -- e.g.
+    // after a VT52 round-trip, where setVT52Mode() resets the operating level -- replies in 7-bit even
+    // if S8C1T was selected earlier. This is xterm's rule and is exactly what vttest's post-VT52 check
+    // expects.
+    if (_c1TransmissionMode == ControlTransmissionMode::S8C1T && conformanceLevelOf(_operatingLevel) >= 2)
+        _inputGenerator.generateRaw(foldC1ControlsToEightBit(text));
+    else
+        _inputGenerator.generateRaw(text);
 
     auto const* syncReply = getenv("CONTOUR_SYNC_PTY_OUTPUT");
 
@@ -2525,6 +2696,26 @@ void Terminal::requestWindowResize(PageSize size)
 void Terminal::requestWindowResize(ImageSize size)
 {
     _eventListener.requestWindowResize(size.width, size.height);
+}
+
+void Terminal::requestWindowIconify(bool iconify)
+{
+    _eventListener.requestWindowIconify(iconify);
+}
+
+void Terminal::requestWindowMove(WindowPosition position)
+{
+    _eventListener.requestWindowMove(position);
+}
+
+void Terminal::requestWindowMaximize(WindowMaximize how)
+{
+    _eventListener.requestWindowMaximize(how);
+}
+
+void Terminal::requestWindowFullScreen(WindowFullScreen how)
+{
+    _eventListener.requestWindowFullScreen(how);
 }
 
 void Terminal::setApplicationkeypadMode(bool enabled)
@@ -2608,6 +2799,31 @@ std::string Terminal::resolvedWindowTitle() const
     return _windowTitle;
 }
 
+std::string Terminal::decodeTitle(std::string_view raw) const
+{
+    // Under SetHex the OSC title argument is a hex string (xterm's title mode 0). A malformed hex string
+    // (odd length or a non-hex digit) leaves fromHexString empty; fall back to the raw bytes then, as
+    // there is nothing better to decode.
+    if (isTitleModeEnabled(TitleModeFeature::SetHex))
+        if (auto decoded = crispy::fromHexString(raw); decoded.has_value())
+            return std::move(*decoded);
+    return std::string { raw };
+}
+
+std::string Terminal::encodeTitleForReport(std::string_view title) const
+{
+    if (!isTitleModeEnabled(TitleModeFeature::QueryHex))
+        return std::string { title };
+
+    // xterm's title mode 1 reports the label as lowercase hexadecimal, one byte at a time (masking to a
+    // byte so high UTF-8 bytes encode as e.g. "c3a9", not a sign-extended value).
+    std::string hex;
+    hex.reserve(title.size() * 2);
+    for (auto const ch: title)
+        hex += std::format("{:02x}", static_cast<unsigned>(static_cast<unsigned char>(ch)));
+    return hex;
+}
+
 void Terminal::setTabName(string_view title)
 {
     // Parser-thread path (SETTABNAME escape sequence, OSC 30): writeToScreen() already holds _stateMutex
@@ -2635,19 +2851,61 @@ std::optional<std::string> Terminal::resolvedTabName() const
     return std::nullopt;
 }
 
-void Terminal::saveWindowTitle()
+void Terminal::setIconTitle(string_view title)
 {
-    _savedWindowTitles.push(_windowTitle);
+    // Written lock-free for the same reason setWindowTitle() is: every caller reaches this from the
+    // parser thread, inside writeToScreen()'s _stateMutex hold.
+    _iconTitle = title;
+    _eventListener.setIconTitle(title);
 }
 
-void Terminal::restoreWindowTitle()
+std::string const& Terminal::iconTitle() const noexcept
 {
-    if (!_savedWindowTitles.empty())
-    {
-        _windowTitle = _savedWindowTitles.top();
-        _savedWindowTitles.pop();
-        setWindowTitle(_windowTitle);
-    }
+    return _iconTitle;
+}
+
+void Terminal::saveTitles(TitleKinds kinds)
+{
+    // A push onto a full stack discards the oldest entry, rather than letting an application grow the
+    // stack without bound.
+    if (_savedTitles.size() >= MaxSavedTitles)
+        _savedTitles.erase(_savedTitles.begin());
+
+    _savedTitles.push_back(SavedTitles {
+        .icon = kinds.test(TitleKind::Icon) ? std::optional { _iconTitle } : std::nullopt,
+        .window = kinds.test(TitleKind::Window) ? std::optional { _windowTitle } : std::nullopt,
+    });
+}
+
+void Terminal::restoreTitles(TitleKinds kinds)
+{
+    if (_savedTitles.empty())
+        return;
+
+    // One entry comes off the stack, whatever it holds -- so pushing both titles and then popping only
+    // the icon's leaves nothing behind for a later pop of the window's.
+    auto const top = _savedTitles.back();
+    _savedTitles.pop_back();
+
+    // An entry that does not carry the title we were asked for sends us looking further down the stack
+    // for the nearest entry that does. That is what makes "push the icon's, push the window's, pop both"
+    // restore both, rather than only the window's. @see xterm's TryHigher().
+    auto const deeper = [this](auto SavedTitles::* title) -> std::optional<std::string> {
+        for (auto const& entry: _savedTitles | std::views::reverse)
+            if ((entry.*title).has_value())
+                return entry.*title;
+        return std::nullopt;
+    };
+
+    if (kinds.test(TitleKind::Icon))
+        if (auto const title = top.icon.has_value() ? top.icon : deeper(&SavedTitles::icon);
+            title.has_value())
+            setIconTitle(*title);
+
+    if (kinds.test(TitleKind::Window))
+        if (auto const title = top.window.has_value() ? top.window : deeper(&SavedTitles::window);
+            title.has_value())
+            setWindowTitle(*title);
 }
 
 void Terminal::setTerminalProfile(string const& configProfileName)
@@ -2674,6 +2932,12 @@ void Terminal::setMode(AnsiMode mode, bool enable)
             popStatusDisplay();
     }
 
+    // LNM has two halves. The output half (LF also returns the carriage) reads the mode bit in
+    // Screen::linefeed(); the input half (Return sends CR LF) lives in the input generator, which
+    // has no view of the mode register and must therefore be told.
+    if (mode == AnsiMode::AutomaticNewLine)
+        _inputGenerator.setAutomaticNewLineMode(enable);
+
     _modes.set(mode, enable);
 }
 
@@ -2692,7 +2956,10 @@ void Terminal::setMode(DECMode mode, bool enable)
 
     switch (mode)
     {
-        case DECMode::AutoWrap: _currentScreen->cursor().autoWrap = enable; break;
+        // AutoWrap (DECAWM) is a terminal mode with no per-cursor copy: it is stored in _modes below and
+        // read via isModeEnabled(). Keeping it out of the Cursor struct is what makes DECSC/DECRC leave
+        // it alone -- autowrap is not cursor state (DEC STD 070), unlike DECOM.
+        case DECMode::AutoWrap: break;
         case DECMode::LeftRightMargin:
             // Resetting DECLRMM also resets the horizontal margins back to screen size.
             if (!enable)
@@ -2734,10 +3001,26 @@ void Terminal::setMode(DECMode mode, bool enable)
             if (_statusDisplayType == StatusDisplayType::HostWritable)
                 _hostWritableStatusLineScreen.clearScreen();
 
-            // Erases all data in page memory
-            clearScreen();
+            // Erases all data in page memory -- unless DECNCSM (No Clearing Screen on Column change)
+            // is set, in which case a column-width change preserves the page (VT500 behaviour).
+            if (!isModeEnabled(DECMode::NoClearScreenOnColumnChange))
+                clearScreen();
 
-            requestWindowResize(PageSize { totalPageSize().lines, columns });
+            // DECCOLM is authoritative and synchronous. An application switches to 132 columns and
+            // immediately draws to the new width in the same output burst (vttest's cursor-movement test
+            // is the canonical example: it addresses the box border at absolute column 132 right after
+            // the switch). Resize the grid here — on the parser thread, under the state lock
+            // writeToScreen() already holds — so that drawing lands on the new width. The window is asked
+            // to follow below, best-effort. Relying on the window resize alone (as this once did) resizes
+            // the grid a GUI round-trip later, by which time the application has already drawn onto the
+            // old, narrower page.
+            resizeScreenKeepingCellSize(PageSize { totalPageSize().lines, columns });
+
+            // The frontend is handed the USABLE (main-page) line count, not the total: it adds the
+            // status-line height back itself (as it does for XTWINOPS `CSI 8 t`). Passing
+            // totalPageSize().lines here double-counts the status line, growing the window one row on
+            // every DECCOLM when the indicator status line is shown.
+            requestWindowResize(PageSize { pageSize().lines, columns });
         }
         break;
         case DECMode::BatchedRendering:
@@ -2760,16 +3043,12 @@ void Terminal::setMode(DECMode mode, bool enable)
             for (auto& category: logstore::get())
                 category.get().enable(enable);
             break;
-        case DECMode::UseAlternateScreen:
-            if (enable)
-            {
-                // Copy the originating page's margins to the alternate screen page,
-                // because xterm alt screen traditionally inherits the primary screen's margins.
-                _pageMargins[AlternateScreenPageIndex.value] = currentPageMargin();
-                setScreen(ScreenType::Alternate);
-            }
-            else
-                setScreen(ScreenType::Primary);
+        case DECMode::UseAlternateScreen: // DECSET 47
+        case DECMode::OptionalAltScreen:  // DECSET 1047
+        case DECMode::ExtendedAltScreen:  // DECSET 1049
+            // The three alternate-screen modes differ only in their cursor-carry and clear policy,
+            // which alternateScreenBehavior() describes as data. @see Terminal::setAlternateScreen.
+            setAlternateScreen(mode, enable);
             break;
         case DECMode::UseApplicationCursorKeys:
             useApplicationCursorKeys(enable);
@@ -2829,22 +3108,16 @@ void Terminal::setMode(DECMode mode, bool enable)
             else
                 _currentScreen->restoreCursor();
             break;
-        case DECMode::ExtendedAltScreen:
-            if (enable)
-            {
-                setMode(DECMode::UseAlternateScreen, true);
-                clearScreen();
-            }
-            else
-            {
-                setMode(DECMode::UseAlternateScreen, false);
-                // NB: The cursor position doesn't need to be restored,
-                // because it's local to the screen buffer.
-            }
-            break;
         case DECMode::PageCursorCoupling:
             if (enable && _displayedPage != _cursorPage)
                 _displayedPage = _cursorPage;
+            break;
+        case DECMode::DesignateCharsetUSASCII:
+            // DEC private mode 2 is DECANM: reset (`CSI ? 2 l`) enters VT52. The set form (`CSI ? 2 h`,
+            // select ANSI) is a no-op -- it can only ever be received in ANSI mode, since VT52 has no
+            // CSI grammar, so it must NOT drop the operating level. VT52 is left only by `ESC <`.
+            if (!enable)
+                setVT52Mode(true);
             break;
         case DECMode::ApplicationKeypad: setApplicationkeypadMode(enable); break;
         case DECMode::AutoRepeat: break;
@@ -2896,6 +3169,50 @@ void Terminal::clearScreen()
     pageAt(_cursorPage).clearScreen();
 }
 
+void Terminal::setAlternateScreen(DECMode mode, bool enable)
+{
+    // Modes 47, 1047 and 1049 all switch between the primary and alternate screen buffers; they differ
+    // only in whether they carry the cursor across, and whether they erase the alternate page on the
+    // way in or out. That policy is data (alternateScreenBehavior), so the switch below is a single
+    // path, modelled on xterm's ToAlternate / FromAlternate (charproc.c).
+    auto const behavior = alternateScreenBehavior(mode);
+    Require(behavior.has_value());
+
+    if (enable && !isAlternateScreen())
+    {
+        // xterm's ToAlternate: switch in, carrying the cursor across (it is terminal-level, not
+        // per-buffer, so it does not move), then optionally erase the alternate page. The alternate
+        // page inherits the primary's margins, as xterm's alternate screen traditionally does.
+        _pageMargins[AlternateScreenPageIndex.value] = currentPageMargin();
+        auto const carried = _currentScreen->cursor();
+        setScreen(ScreenType::Alternate);
+        if (behavior->carryCursor)
+            _currentScreen->cursor() = carried;
+        if (behavior->clearOnEnter)
+            clearScreen();
+    }
+    else if (!enable && isAlternateScreen())
+    {
+        // xterm's FromAlternate: optionally erase the alternate page first (ED 2 leaves the cursor put),
+        // then switch back, carrying the cursor across.
+        if (behavior->clearOnExit)
+            clearScreen();
+        auto const carried = _currentScreen->cursor();
+        setScreen(ScreenType::Primary);
+        if (behavior->carryCursor)
+            _currentScreen->cursor() = carried;
+    }
+
+    // Modes 47, 1047 and 1049 are three views of one piece of state -- whether the alternate screen
+    // buffer is in use -- so DECRQM must report all three consistently, no matter which one switched
+    // (xterm keys every one off screen->whichBuf). Mirror the resulting buffer state onto all three
+    // bits; the trailing _modes.set(mode, enable) in setMode() then agrees with it.
+    auto const onAlternate = isAlternateScreen();
+    for (auto const altMode:
+         { DECMode::UseAlternateScreen, DECMode::OptionalAltScreen, DECMode::ExtendedAltScreen })
+        _modes.set(altMode, onAlternate);
+}
+
 void Terminal::moveCursorTo(LineOffset line, ColumnOffset column)
 {
     _currentScreen->moveCursorTo(line, column);
@@ -2910,7 +3227,11 @@ void Terminal::softReset()
     _currentScreen->resetSavedCursorState();        // DECSC (Save cursor state)
     setMode(DECMode::VisibleCursor, true);          // DECTCEM (Text cursor enable)
     setMode(DECMode::Origin, false);                // DECOM
-    setMode(AnsiMode::KeyboardAction, false);       // KAM
+    // DECLRMM (left/right margin mode). DEC STD 070 lists it among the modes DECSTR resets; turning it
+    // off here also restores the horizontal margins to full width and swaps DECSLRM back out for SCOSC
+    // (see setMode's LeftRightMargin case), so a later DECSLRM is inert until DECLRMM is set again.
+    setMode(DECMode::LeftRightMargin, false); // DECLRMM
+    setMode(AnsiMode::KeyboardAction, false); // KAM
 
     // DECAWM. The VT510 manual has DECSTR RESET autowrap, and every terminal in the field declines to:
     // xterm restores the bit to the value it was configured with rather than clearing it, foot turns
@@ -2921,8 +3242,22 @@ void Terminal::softReset()
     // the one they started with. Restored, like TextReflow just above it, rather than cleared.
     setMode(DECMode::AutoWrap, true);
 
-    setMode(AnsiMode::Insert, false);                  // IRM
+    setMode(AnsiMode::Insert, false); // IRM
+
+    // SRM, set: the terminal does *not* echo what it sends. This is the default every VT terminal ships
+    // with -- the host echoes -- and it must be set explicitly, because the mode register starts at all
+    // zeroes and a reset SRM means local echo is on.
+    setMode(AnsiMode::SendReceive, true);
+
     setMode(DECMode::UseApplicationCursorKeys, false); // DECCKM (Cursor keys)
+
+    // Reverse wraparound, both forms. A soft reset puts an xterm private mode back to the value the
+    // terminal was configured with, and neither is configurable here, so both go off. Leaving them on
+    // would let one application's choice outlive it: a backspace at the left margin would keep walking
+    // backwards into the line above long after whoever asked for that had gone.
+    setMode(DECMode::ReverseWraparound, false);
+    setMode(DECMode::ReverseWraparoundExtended, false);
+
     setTopBottomMargin({}, boxed_cast<LineOffset>(_settings.pageSize.lines) - LineOffset(1));       // DECSTBM
     setLeftRightMargin({}, boxed_cast<ColumnOffset>(_settings.pageSize.columns) - ColumnOffset(1)); // DECRLM
 
@@ -2940,10 +3275,24 @@ void Terminal::softReset()
     setMode(DECMode::ApplicationKeypad, false); // DECNKM
     setMode(DECMode::AutoRepeat, true);         // DECARM
     setMode(DECMode::BackarrowKey, false);      // DECBKM
-    // DECSCA is reset by setGraphicsRendition(GraphicsRendition::Reset) above.
+
+    // XTCHECKSUM goes back to what the terminal was configured with, not to zero -- matching xterm,
+    // which restores its `checksumExtension` resource here. A test suite that configures the
+    // extension up front would otherwise lose it to the first DECSTR it sends.
+    _checksumExtension = _settings.checksumExtension;
+
+    // DECSCA is reset by setGraphicsRendition(GraphicsRendition::Reset) above. The character-protection
+    // *mode* (DEC/ISO) is separate screen state, so clear it too -- xterm's ReallyReset zeroes
+    // protected_mode unconditionally, i.e. on a soft reset as well as a hard one.
+    _currentScreen->resetProtection();
+
+    // UPSS goes back to what the terminal was configured with. xterm restores the charsets from
+    // ReallyReset() unconditionally -- i.e. on DECSTR as well as RIS -- so a soft reset restores UPSS
+    // just as it restores XTCHECKSUM above.
+    _userPreferredSupplementalSet = _settings.userPreferredSupplementalSet;
+
     // TODO: DECNRCM (National replacement character set)
     // TODO: GL, GR (G0, G1, G2, G3)
-    // TODO: DECAUPSS (Assign user preference supplemental set)
     // TODO: DECSASD (Select active status display)
     // TODO: DECKPM (Keyboard position mode)
     // TODO: DECPCTERM (PCTerm mode)
@@ -2976,12 +3325,45 @@ void Terminal::setUnderlineColor(Color color)
 void Terminal::hardReset()
 {
     // TODO: make use of _factorySettings
+
+    // xterm returns a DECCOLM 132-column switch to 80 columns on RIS, but only when 80/132 switching was
+    // allowed AND the terminal is currently in 132 columns. Crucially this is checked BEFORE the modes
+    // are reset -- older xterm cleared the mode first and could then no longer tell it had been in 132
+    // columns, which is exactly what esctest RISTests.test_RIS_ResetDECCOLM guards against. 80 is the
+    // DECCOLM-off width by definition (DECRESET(DECCOLM) resizes to it), not an arbitrary constant.
+    auto const wasIn132Columns =
+        isModeEnabled(DECMode::AllowColumns80to132) && isModeEnabled(DECMode::Columns132);
+
     setScreen(ScreenType::Primary);
 
     // Ensure that the alternate screen buffer is having the correct size, as well.
     applyPageSizeToMainDisplay(ScreenType::Alternate);
 
+    if (wasIn132Columns)
+    {
+        // Authoritative, synchronous grid resize (as DECCOLM itself is), then ask the window to follow.
+        resizeScreenKeepingCellSize(PageSize { totalPageSize().lines, ColumnCount(80) });
+        requestWindowResize(PageSize { pageSize().lines, ColumnCount(80) });
+    }
+
+    // RIS leaves VT52 and returns to the configured conformance level. VT52 has no ANSI grammar, so
+    // `ESC <` is the only sequence that can leave it: a program that dies in VT52 leaves a terminal that
+    // nothing the host sends can recover, and a hard reset -- what the user's Reset action reaches -- must
+    // therefore restore the ANSI parser.
+    //
+    // The parser is left directly rather than through setVT52Mode(false), because that carries the `ESC <`
+    // rule of landing at VT100 (VT52 being level-less, it has no level to restore). RIS is a reset to the
+    // power-on state, so it restores the level the terminal was configured with, undoing any DECSCL.
+    _parser.setVT52Mode(false);
+    setOperatingLevel(_factorySettings.terminalId);
+
     _modes = Modes {};
+
+    // SRM, set: the terminal does *not* echo what it sends -- the host does. The mode register was just
+    // cleared to all zeroes, and a *reset* SRM means local echo is on, so leaving it here would echo every
+    // keystroke on top of the shell's own echo for the rest of the session. @see flushInput(), softReset().
+    setMode(AnsiMode::SendReceive, true);
+
     setMode(DECMode::AutoWrap, true);
     setMode(DECMode::AutoRepeat, true);
     setMode(DECMode::SixelCursorNextToGraphic, true);
@@ -2992,6 +3374,13 @@ void Terminal::hardReset()
 
     for (auto const& [mode, frozen]: _settings.frozenModes)
         freezeMode(mode, frozen);
+
+    _checksumExtension = _settings.checksumExtension;                       // XTCHECKSUM
+    _userPreferredSupplementalSet = _settings.userPreferredSupplementalSet; // DECAUPSS
+
+    // RIS restores the title modes to their default (xterm resets title_modes only on a full reset, not
+    // on DECSTR). @see resetTitleModes, TitleModeFeature.
+    resetTitleModes();
 
     // Reset all pages.
     for (auto& page: _pages)
@@ -3038,6 +3427,7 @@ void Terminal::hardReset()
     setStatusDisplay(_factorySettings.statusDisplayType);
 
     _inputGenerator.reset();
+    _pendingLocalEcho.clear();
 }
 
 void Terminal::forceRedraw(std::function<void()> const& artificialSleep)
@@ -3134,13 +3524,21 @@ void Terminal::setPage(PageIndex target, bool moveCursorHome)
 
 void Terminal::saveCursorPage()
 {
-    _savedCursorPage = _cursorPage;
+    // Per-screen: the primary and alternate screens keep their own saved cursor page, exactly as they
+    // keep their own saved cursor (Screen::_savedCursor). Sharing one slot would let a DECSC on one
+    // screen clobber the other's saved page -- and, because the alternate screen is modelled as a page,
+    // drag a later DECRC across the primary/alternate boundary, which is DECSET 47/1049's job, not
+    // DECSC/DECRC's. xterm likewise keeps saved-cursor state separate per screen. The slot is keyed on
+    // the page identity (is this THE alternate page?), not _currentScreenType, so a primary VT420 page
+    // reached via PPA/NP/PP still uses the primary slot.
+    _savedCursorPage[savedCursorPageSlot()] = _cursorPage;
 }
 
 void Terminal::restoreCursorPage()
 {
-    if (_savedCursorPage != _cursorPage)
-        setPage(_savedCursorPage, false);
+    auto const saved = _savedCursorPage[savedCursorPageSlot()];
+    if (saved != _cursorPage)
+        setPage(saved, false);
 }
 
 void Terminal::setScreen(ScreenType type)
@@ -3282,6 +3680,17 @@ void Terminal::setOperatingLevel(VTType level) noexcept
     _supportedVTSequences.reset(level);
 }
 
+void Terminal::setVT52Mode(bool enable) noexcept
+{
+    _parser.setVT52Mode(enable);
+    if (!enable)
+        // Leaving VT52 (ESC <) enters ANSI mode at the base VT100 level, not the level held before
+        // entering VT52: VT52 is a pre-ANSI, level-less mode, so there is no level to restore. A real
+        // VT500 therefore no longer recognises VT300+ sequences (DECSCL, DECRQSS, S8C1T) after a VT52
+        // round-trip -- which is exactly what vttest checks, and what xterm's CASE_VT52_FINISH does.
+        setOperatingLevel(VTType::VT100);
+}
+
 void Terminal::defineMacro(int id, bool deleteAll, std::string body)
 {
     if (deleteAll)
@@ -3324,7 +3733,10 @@ void Terminal::processPendingMacros()
         // can reference it through the buffer management system.
         auto const chunk = _currentPtyBuffer->writeAtEnd(std::string_view { body });
         _parsingBuffer = _currentPtyBuffer;
-        _parser.parseFragment(chunk);
+        {
+            auto const parseGuard = ParseDepthGuard {};
+            _parser.parseFragment(chunk);
+        }
         _parsingBuffer.reset();
 
         --_macroRecursionDepth;
@@ -4029,6 +4441,7 @@ std::string to_string(DECMode mode)
         case DECMode::UseApplicationCursorKeys: return "UseApplicationCursorKeys";
         case DECMode::DesignateCharsetUSASCII: return "DesignateCharsetUSASCII";
         case DECMode::Columns132: return "Columns132";
+        case DECMode::NoClearScreenOnColumnChange: return "NoClearScreenOnColumnChange";
         case DECMode::SmoothScroll: return "SmoothScroll";
         case DECMode::ReverseVideo: return "ReverseVideo";
         case DECMode::MouseProtocolX10: return "MouseProtocolX10";
@@ -4049,6 +4462,8 @@ std::string to_string(DECMode mode)
         case DECMode::AllowColumns80to132: return "AllowColumns80to132";
         case DECMode::DebugLogging: return "DebugLogging";
         case DECMode::UseAlternateScreen: return "UseAlternateScreen";
+        case DECMode::OptionalAltScreen: return "OptionalAltScreen";
+        case DECMode::MoreFix: return "MoreFix";
         case DECMode::PageCursorCoupling: return "PageCursorCoupling";
         case DECMode::ApplicationKeypad: return "ApplicationKeypad";
         case DECMode::AutoRepeat: return "AutoRepeat";
@@ -4070,6 +4485,29 @@ std::string to_string(DECMode mode)
         case DECMode::SixelCursorNextToGraphic: return "SixelCursorNextToGraphic";
         case DECMode::ReportColorPaletteUpdated: return "ReportColorPaletteUpdated";
         case DECMode::SemanticBlockProtocol: return "SemanticBlockProtocol";
+        case DECMode::PrintFormFeed: return "PrintFormFeed";
+        case DECMode::HebrewKeyboardMapping: return "HebrewKeyboardMapping";
+        case DECMode::NationalReplacementCharacterSet: return "NationalReplacementCharacterSet";
+        case DECMode::HorizontalCursorCoupling: return "HorizontalCursorCoupling";
+        case DECMode::RightToLeftMode: return "RightToLeftMode";
+        case DECMode::HebrewEncodingMode: return "HebrewEncodingMode";
+        case DECMode::GreekKeyboardMapping: return "GreekKeyboardMapping";
+        case DECMode::VerticalCursorCoupling: return "VerticalCursorCoupling";
+        case DECMode::KeyboardUsageMode: return "KeyboardUsageMode";
+        case DECMode::TransmitRateLimiting: return "TransmitRateLimiting";
+        case DECMode::KeyPositionMode: return "KeyPositionMode";
+        case DECMode::RightToLeftCopyMode: return "RightToLeftCopyMode";
+        case DECMode::CRTSaveMode: return "CRTSaveMode";
+        case DECMode::AutoResizeMode: return "AutoResizeMode";
+        case DECMode::ModemControlMode: return "ModemControlMode";
+        case DECMode::AutoAnswerbackMode: return "AutoAnswerbackMode";
+        case DECMode::ConcealAnswerbackMode: return "ConcealAnswerbackMode";
+        case DECMode::NullMode: return "NullMode";
+        case DECMode::HalfDuplexMode: return "HalfDuplexMode";
+        case DECMode::SecondaryKeyboardLanguageMode: return "SecondaryKeyboardLanguageMode";
+        case DECMode::OverscanMode: return "OverscanMode";
+        case DECMode::ReverseWraparound: return "ReverseWraparound";
+        case DECMode::ReverseWraparoundExtended: return "ReverseWraparoundExtended";
         case DECMode::Win32InputMode: return "Win32InputMode";
         case DECMode::DECModeCount: break;
     }

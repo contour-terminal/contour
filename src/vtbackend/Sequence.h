@@ -6,11 +6,14 @@
 #include <gsl/pointers>
 #include <gsl/span>
 
+#include <array>
 #include <cassert>
 #include <concepts>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
 
 #include <boxed-cpp/boxed.hpp>
 
@@ -38,6 +41,16 @@ class SequenceParameters
         return (_subParameterTest & (1 << index)) != 0;
     }
 
+    /// @return Whether parameter @p index was given, but empty -- as the first one of `CSI ; 5 H` is.
+    ///
+    /// An omitted parameter is stored as the value zero, so without this the two cannot be told apart.
+    /// Most sequences do not care, because zero *is* their default; XTWINOPS is the one that does, where
+    /// an omitted dimension keeps the window's current size and a zero one grows it to the display's.
+    [[nodiscard]] constexpr bool isOmitted(size_t index) const noexcept
+    {
+        return index < _count && (_omittedTest & (1 << index)) != 0;
+    }
+
     /// Returns the number of sub-params for a given non-sub param.
     [[nodiscard]] constexpr size_t subParameterCount(size_t index) const noexcept
     {
@@ -56,6 +69,7 @@ class SequenceParameters
     {
         _values[0] = 0;
         _subParameterTest = 0;
+        _omittedTest = AllOmitted;
         _count = 0;
     }
 
@@ -98,8 +112,13 @@ class SequenceParameters
 
   private:
     friend class SequenceParameterBuilder;
+
+    /// Every parameter starts out omitted, and stops being so the moment a digit lands on it.
+    static constexpr uint16_t AllOmitted = 0xFFFF;
+
     Storage _values {};
     uint16_t _subParameterTest = 0;
+    uint16_t _omittedTest = AllOmitted;
     size_t _count = 0;
 };
 
@@ -124,6 +143,7 @@ class SequenceParameterBuilder
     {
         _parameters->clear();
         _currentParameter = _parameters->_values.begin();
+        _currentIndex = 0;
     }
 
     void nextParameter()
@@ -131,6 +151,7 @@ class SequenceParameterBuilder
         if (std::next(_currentParameter) != _parameters->_values.end())
         {
             ++_currentParameter;
+            ++_currentIndex;
             *_currentParameter = 0;
             _parameters->_subParameterTest >>= 1;
         }
@@ -141,13 +162,22 @@ class SequenceParameterBuilder
         if (std::next(_currentParameter) != _parameters->_values.end())
         {
             ++_currentParameter;
+            ++_currentIndex;
             *_currentParameter = 0;
             _parameters->_subParameterTest = (_parameters->_subParameterTest >> 1) | (1 << 15);
         }
     }
 
+    /// Records that the parameter being built carries a value, and is therefore not an omitted one.
+    constexpr void markPresent() noexcept
+    {
+        if (_currentIndex < std::tuple_size_v<Storage>)
+            _parameters->_omittedTest &= static_cast<uint16_t>(~(1u << _currentIndex));
+    }
+
     constexpr void multiplyBy10AndAdd(uint8_t value) noexcept
     {
+        markPresent();
         unsigned const newValue = (*_currentParameter * 10) + value;
         if (newValue > 0xFFFF)
             *_currentParameter = 0xFFFF;
@@ -162,7 +192,11 @@ class SequenceParameterBuilder
         multiplyBy10AndAdd(static_cast<uint8_t>(value % 10));
     }
 
-    constexpr void set(uint16_t value) noexcept { *_currentParameter = value; }
+    constexpr void set(uint16_t value) noexcept
+    {
+        markPresent();
+        *_currentParameter = value;
+    }
 
     [[nodiscard]] constexpr bool isSubParameter(size_t index) const noexcept
     {
@@ -190,6 +224,10 @@ class SequenceParameterBuilder
   private:
     gsl::not_null<SequenceParameters*> _parameters;
     Storage::iterator _currentParameter;
+
+    /// Index of @c _currentParameter, kept alongside the iterator so that the omitted-parameter mask can
+    /// be addressed without recomputing a distance on every digit.
+    size_t _currentIndex = 0;
 };
 
 /**
@@ -302,24 +340,54 @@ class Sequence
     [[nodiscard]] char leaderSymbol() const noexcept { return _leaderSymbol; }
     [[nodiscard]] char finalChar() const noexcept { return _finalChar; }
 
+    /// @return The value of parameter @p parameterIndex, or std::nullopt if it was never given.
+    ///
+    /// A parameter is "never given" both when it lies past the end of the list -- `CSI H` names no row --
+    /// and when it was given empty: `CSI ; 5 H` names no row either. ECMA-48 makes no distinction
+    /// between the two, and neither does this.
     template <typename T = unsigned>
     [[nodiscard]] std::optional<T> param_opt(size_t parameterIndex) const noexcept
     {
-        if (parameterIndex < _parameters.count())
-        {
-            if constexpr (boxed::is_boxed<T>)
-                return { T::cast_from(_parameters.at(parameterIndex)) };
-            else
-                return { static_cast<T>(_parameters.at(parameterIndex)) };
-        }
-        else
+        if (parameterIndex >= _parameters.count() || _parameters.isOmitted(parameterIndex))
             return std::nullopt;
+
+        if constexpr (boxed::is_boxed<T>)
+            return { T::cast_from(_parameters.at(parameterIndex)) };
+        else
+            return { static_cast<T>(_parameters.at(parameterIndex)) };
     }
 
     template <typename T = unsigned>
     [[nodiscard]] T param_or(size_t parameterIndex, T defaultValue) const noexcept
     {
         return param_opt<T>(parameterIndex).value_or(defaultValue);
+    }
+
+    /// Reads a parameter whose values start at one -- a coordinate, or a count of something.
+    ///
+    /// Such a parameter takes its default value in two cases, and the caller must not be made to tell
+    /// them apart:
+    ///
+    ///   - It was never given: `CSI H` names no row at all.
+    ///   - It was given empty: `CSI ; 5 H` names no row either, but the parser stores an omitted
+    ///     parameter as the value zero and counts it, so param_or() would hand back that zero rather
+    ///     than the default.
+    ///
+    /// Folding zero onto the default covers both, and is what DEC's terminals and xterm
+    /// (`if (param < 1) param = 1`) do anyway: there is no row zero and no column zero, so a sequence
+    /// naming one is naming the default. Reading such a parameter with param_or() instead invites the
+    /// caller to compute `param - 1` and underflow into a negative offset.
+    ///
+    /// @param parameterIndex Zero-based index of the parameter.
+    /// @param defaultValue   Value to use when the parameter is omitted, empty, or zero.
+    /// @return The parameter's value, or @p defaultValue.
+    template <typename T = unsigned>
+    [[nodiscard]] T param_positive_or(size_t parameterIndex, T defaultValue) const noexcept
+    {
+        auto const value = param_opt<T>(parameterIndex);
+        if (!value.has_value() || *value == T {})
+            return defaultValue;
+        return *value;
     }
 
     template <typename T = unsigned>

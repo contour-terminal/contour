@@ -7,8 +7,11 @@
 
 #include <contour/CaptureScreen.h>
 
+#include <vtbackend/Functions.h>
+
 #include <catch2/catch_test_macros.hpp>
 
+#include <cctype>
 #include <cstring>
 #include <sstream>
 #include <string>
@@ -60,7 +63,68 @@ class CannedTransport final: public contour::CaptureTransport
     std::size_t _readOffset = 0;
 };
 
+/// Resolves the first private (`>`-led) CSI of @p request against the engine's real function table.
+///
+/// The `>` skips past the `CSI 18 t` screen-size handshake the client sends first; the capture request is
+/// the only private-leader sequence it emits.
+///
+/// Pinning the request as a literal string is not enough on its own: it says the client still sends what
+/// it always sent, not that the engine still answers it. The opcode moved out from under the client once
+/// already -- XTCAPTURE gained a ',' intermediate, the bare form became xterm's XTSMTITLE, and
+/// `contour capture` silently set title modes and captured nothing while every string-literal test kept
+/// passing. Looking the request up here is what ties the two together.
+vtbackend::Function const* resolveCsi(std::string_view request)
+{
+    auto const start = request.find("\033[>");
+    if (start == std::string_view::npos)
+        return nullptr;
+
+    auto i = start + 2;
+    auto const isBetween = [&](char lo, char hi) {
+        return i < request.size() && lo <= request[i] && request[i] <= hi;
+    };
+
+    auto leader = '\0';
+    if (isBetween(0x3C, 0x3F))
+        leader = request[i++];
+
+    auto argc = 1;
+    for (; i < request.size() && (std::isdigit(static_cast<unsigned char>(request[i])) || request[i] == ';');
+         ++i)
+        if (request[i] == ';')
+            ++argc;
+
+    auto intermediate = '\0';
+    if (isBetween(0x20, 0x2F))
+        intermediate = request[i++];
+
+    if (i >= request.size())
+        return nullptr;
+
+    // allFunctions(), not allFunctionsArray(): select() binary-searches, so it needs the sorted table.
+    // It is returned BY VALUE, and select() hands back a pointer into whatever span it was given -- so the
+    // table has to outlive this call, not be a temporary that dies with the full expression.
+    static auto const functions = vtbackend::allFunctions();
+    return vtbackend::selectControl(leader, argc, intermediate, request[i], functions);
+}
+
 } // namespace
+
+TEST_CASE("captureScreen: the request it sends is the one the engine calls XTCAPTURE", "[capture]")
+{
+    auto transport = CannedTransport { "\033^314;x\033\\"
+                                       "\033^314;\033\\" };
+    auto settings = contour::CaptureSettings {};
+    settings.timeout = 1.0;
+    settings.lineCount = vtbackend::LineCount(2);
+
+    auto out = std::ostringstream {};
+    REQUIRE(contour::captureScreen(settings, transport, out));
+
+    auto const* const resolved = resolveCsi(transport.requests);
+    REQUIRE(resolved != nullptr);
+    CHECK(*resolved == vtbackend::XTCAPTURE);
+}
 
 TEST_CASE("captureScreen: a full capture round-trip lands the payload in the output", "[capture]")
 {
@@ -74,8 +138,9 @@ TEST_CASE("captureScreen: a full capture round-trip lands the payload in the out
     auto out = std::ostringstream {};
     CHECK(contour::captureScreen(settings, transport, out));
     CHECK(out.str() == "hello capture\n");
-    // The request must carry the physical-lines flag and the line count.
-    CHECK(transport.requests.find("\033[>0;2t") != std::string::npos);
+    // The request must carry the physical-lines flag and the line count, under the ',' intermediate that
+    // distinguishes XTCAPTURE from xterm's XTSMTITLE. @see vtbackend/Functions.h, XTCAPTURE.
+    CHECK(transport.requests.find("\033[>0;2,t") != std::string::npos);
 }
 
 TEST_CASE("captureScreen: words mode splits the payload one word per line", "[capture]")
@@ -89,7 +154,7 @@ TEST_CASE("captureScreen: words mode splits the payload one word per line", "[ca
     auto out = std::ostringstream {};
     CHECK(contour::captureScreen(settings, transport, out));
     CHECK(out.str() == "alpha\nbeta\n");
-    CHECK(transport.requests.find("\033[>1;0t") != std::string::npos); // logical-lines flag
+    CHECK(transport.requests.find("\033[>1;0,t") != std::string::npos); // logical-lines flag
 }
 
 TEST_CASE("captureScreen: an unanswered capture request times out cleanly", "[capture]")

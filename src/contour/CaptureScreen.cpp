@@ -259,7 +259,7 @@ namespace
             }
             else if (rv == 0)
             {
-                cerr << "Time out. VTE did not respond to CAPTURE `CSI > Ps ; Ps t`.\r\n";
+                cerr << "Time out. VTE did not respond to CAPTURE `CSI > Ps ; Ps , t`.\r\n";
                 return false;
             }
 
@@ -306,7 +306,10 @@ bool captureScreen(CaptureSettings const& settings, CaptureTransport& transport,
                             settings.outputFile);
 
     // request screen capture
-    if (transport.write(std::format("\033[>{};{}t", settings.logicalLines ? '1' : '0', settings.lineCount))
+    //
+    // The ',' intermediate is what distinguishes XTCAPTURE from xterm's XTSMTITLE, which owns the bare
+    // `CSI > Ps ; Ps t` this used to send. @see vtbackend/Functions.h, XTCAPTURE.
+    if (transport.write(std::format("\033[>{};{},t", settings.logicalLines ? '1' : '0', settings.lineCount))
         < 0)
     {
         cerr << "Could not request screen capture.\r\n";

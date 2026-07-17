@@ -9,6 +9,7 @@ add_subdirectory(text_shaper)
 add_subdirectory(vtpty)
 add_subdirectory(vtparser)
 add_subdirectory(vtbackend)
+add_subdirectory(vtconformance)
 add_subdirectory(vtmux)
 add_subdirectory(vtrasterizer)
 

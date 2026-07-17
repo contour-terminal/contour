@@ -3,6 +3,7 @@
 #include <vtbackend/DesktopNotification.h>
 #include <vtbackend/InputGenerator.h>
 #include <vtbackend/MessageParser.h>
+#include <vtbackend/RectangularAreaChecksum.h>
 #include <vtbackend/Screen.h>
 #include <vtbackend/SixelParser.h>
 #include <vtbackend/SoAClusterWriter.h>
@@ -163,8 +164,8 @@ namespace // {{{ helper
                 sgrAddSub(static_cast<unsigned>(colorValue));
             }
         }
-        else if (isDefaultColor(sgr.foregroundColor))
-            sgrAdd(39);
+        // A default foreground is already implied by the leading `0` (reset) DECRQSS prepends, so it is
+        // not spelled out -- xterm's SGR report lists only the attributes that actually differ.
         else if (isBrightColor(sgr.foregroundColor))
             sgrAdd(90 + static_cast<unsigned>(getBrightColor(sgr.foregroundColor)));
         else if (isRGBColor(sgr.foregroundColor))
@@ -189,8 +190,7 @@ namespace // {{{ helper
                 sgrAddSub(static_cast<unsigned>(colorValue));
             }
         }
-        else if (isDefaultColor(sgr.backgroundColor))
-            sgrAdd(49);
+        // As with the foreground: a default background is implied by the reset and left unspoken.
         else if (isBrightColor(sgr.backgroundColor))
             sgrAdd(100 + getBrightColor(sgr.backgroundColor));
         else if (isRGBColor(sgr.backgroundColor))
@@ -476,6 +476,7 @@ void Screen::hardReset()
     _grid.reset();
     _cursor = {};
     _lastCursorPosition = {};
+    resetProtection();
     updateCursorIterator();
 }
 
@@ -592,7 +593,7 @@ void Screen::writeText(string_view text, size_t cellCount)
             {
                 _cursor.position.column += ColumnOffset::cast_from(written);
             }
-            else if (_cursor.autoWrap)
+            else if (_terminal->isModeEnabled(DECMode::AutoWrap))
             {
                 _cursor.position.column = ColumnOffset::cast_from(static_cast<int>(startCol + written) - 1);
                 _cursor.wrapPending = true;
@@ -707,14 +708,20 @@ void Screen::writeTextEnd()
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
     // Do not log individual characters, as we already logged the whole string above
-    if (_pendingCharTraceLog.empty())
-        return;
+    if (!_pendingCharTraceLog.empty())
+    {
+        if (vtTraceSequenceLog)
+            vtTraceSequenceLog()("[{}] text: \"{}\"", _name, _pendingCharTraceLog);
 
-    if (vtTraceSequenceLog)
-        vtTraceSequenceLog()("[{}] text: \"{}\"", _name, _pendingCharTraceLog);
-
-    _pendingCharTraceLog.clear();
+        _pendingCharTraceLog.clear();
+    }
 #endif
+
+    // Writing text wraps lines and scrolls the page, so a text run is held to the same invariants a
+    // sequence is. Verified once per run rather than once per codepoint: the invariants describe the
+    // page, not any single cell, and checking them per codepoint would make a debug build unusable.
+    // Compiled out unless CONTOUR_VERIFY_STATE.
+    _terminal->verifyState();
 }
 
 void Screen::writeTextFromExternal(std::string_view text)
@@ -730,7 +737,8 @@ void Screen::writeTextFromExternal(std::string_view text)
 
 void Screen::crlfIfWrapPending()
 {
-    if (_cursor.wrapPending && _cursor.autoWrap) // && !_terminal->isModeEnabled(DECMode::TextReflow))
+    if (_cursor.wrapPending
+        && _terminal->isModeEnabled(DECMode::AutoWrap)) // && !_terminal->isModeEnabled(DECMode::TextReflow))
     {
         bool const lineWrappable = currentLine().wrappable();
         crlf();
@@ -887,7 +895,11 @@ void Screen::clearAndAdvance(int oldWidth, int newWidth) noexcept
 {
     bool const cursorInsideMargin =
         _terminal->isModeEnabled(DECMode::LeftRightMargin) && isCursorInsideMargins();
-    auto const cellsAvailable = cursorInsideMargin ? *(margin().horizontal.to - _cursor.position.column) - 1
+    // Columns strictly to the right of the cursor that are still writable. Inside the left/right band
+    // the last writable column is the right margin itself, so it is `to - column`; on the full page it
+    // is the last page column, `(columns - 1) - column`. The band form once carried an extra `- 1`,
+    // which made autowrap fire one column early -- the char destined for the right margin wrapped instead.
+    auto const cellsAvailable = cursorInsideMargin ? *(margin().horizontal.to - _cursor.position.column)
                                                    : *pageSize().columns - *_cursor.position.column - 1;
 
     auto const sgr = newWidth > 1 ? _cursor.graphicsRendition.with(CellFlag::WideCharContinuation)
@@ -898,7 +910,7 @@ void Screen::clearAndAdvance(int oldWidth, int newWidth) noexcept
 
     if (newWidth == std::min(newWidth, cellsAvailable))
         _cursor.position.column += ColumnOffset::cast_from(newWidth);
-    else if (_cursor.autoWrap)
+    else if (_terminal->isModeEnabled(DECMode::AutoWrap))
         _cursor.wrapPending = true;
 }
 
@@ -1006,21 +1018,34 @@ void Screen::moveCursorTo(LineOffset line, ColumnOffset column)
 
 void Screen::linefeed(ColumnOffset newColumn)
 {
+    // Where the cursor *is* decides whether this scrolls -- asked before the carriage-return half of the
+    // line feed moves it. Under LNM (and on the stdout fast pipe) newColumn is the left margin, which would
+    // snap the cursor into the band and make the test below vacuously true. xterm keeps the same order:
+    // xtermIndex() reads screen->cur_col, and CASE_VMOT applies CarriageReturn only afterwards.
+    auto const scrollsOnIndex = isCursorInsideHorizontalMargins();
+
     _cursor.wrapPending = false;
     _cursor.position.column = newColumn;
     if (unbox(historyLineCount()) > 0)
         _terminal->addLineOffsetToJumpHistory(LineOffset { 1 });
     if (*realCursorPosition().line == *margin().vertical.to)
     {
-        // TODO(perf) if we know that we text is following this LF
-        // (i.e. parser state will be ground state),
-        // then invoke scrollUpUninitialized instead
-        // and make sure the subsequent text write will
-        // possibly also reset remaining grid cells in that line
-        // if the incoming text did not write to the full line
-        scrollUp(LineCount(1), _cursor.graphicsRendition, margin());
+        // A line feed only scrolls when the cursor is within the left/right margins. Outside that band
+        // (DECLRMM on, cursor left of the left margin or right of the right margin) it neither scrolls
+        // nor advances past the bottom margin -- xterm's `!ScrnIsColInMargins` guard in xtermIndex(),
+        // whose CursorDown() then clamps to the bottom margin, leaving the cursor where it was.
+        if (scrollsOnIndex)
+        {
+            // TODO(perf) if we know that we text is following this LF
+            // (i.e. parser state will be ground state),
+            // then invoke scrollUpUninitialized instead
+            // and make sure the subsequent text write will
+            // possibly also reset remaining grid cells in that line
+            // if the incoming text did not write to the full line
+            scrollUp(LineCount(1), _cursor.graphicsRendition, margin());
+        }
     }
-    else
+    else if (*realCursorPosition().line + 1 < *pageSize().lines)
     {
         // using moveCursorTo() would embrace code reusage,
         // but due to the fact that it's fully recalculating iterators,
@@ -1029,6 +1054,14 @@ void Screen::linefeed(ColumnOffset newColumn)
         _cursor.position.line++;
         updateCursorIterator();
     }
+    // Otherwise the cursor is on the last line of the page but *outside* the scrolling region, so
+    // there is neither anything to scroll nor anywhere to move: a line feed there does nothing.
+    //
+    // The page bound is what makes this safe. Only a cursor exactly on the bottom *margin* scrolls,
+    // so a cursor below the region used to be incremented unconditionally — and every further line
+    // feed walked it further off the end of the page. That is reachable from any application: set a
+    // scrolling region, put the cursor below it, and hold down Return. verifyState() catches it in a
+    // debug build; in a release build it is simply a cursor pointing outside the grid.
 }
 
 void Screen::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
@@ -1063,7 +1096,13 @@ void Screen::unscroll(LineCount n)
 void Screen::setCurrentColumn(ColumnOffset n)
 {
     auto const col = _cursor.originMode ? margin().horizontal.from + n : n;
-    auto const clampedCol = std::min(col, boxed_cast<ColumnOffset>(pageSize().columns) - 1);
+    setCurrentAbsoluteColumn(col);
+}
+
+void Screen::setCurrentAbsoluteColumn(ColumnOffset column)
+{
+    auto const clampedCol =
+        std::clamp(column, ColumnOffset(0), boxed_cast<ColumnOffset>(pageSize().columns) - 1);
     _cursor.wrapPending = false;
     _cursor.position.column = clampedCol;
 }
@@ -1108,8 +1147,8 @@ void Screen::linefeed()
 
 void Screen::backspace()
 {
-    if (_cursor.position.column.value)
-        _cursor.position.column--;
+    // BS and CUB are the same movement, and xterm implements them with the same function.
+    moveCursorBackward(ColumnCount(1));
 }
 
 void Screen::setScrollSpeed(int speed)
@@ -1149,6 +1188,14 @@ void Screen::deviceStatusReport()
 void Screen::reportCursorPosition()
 {
     reply("\033[{};{}R", logicalCursorPosition().line + 1, logicalCursorPosition().column + 1);
+}
+
+void Screen::reportMacroSpaceChecksum(unsigned requestId)
+{
+    // DECCKSR. There is no macro memory to checksum, so the checksum of it is zero -- but the reply
+    // still carries back the id it was asked with, which is how an application with several requests in
+    // flight tells the answers apart.
+    reply("\033P{}!~0000\033\\", requestId);
 }
 
 void Screen::reportColorPaletteUpdate()
@@ -1216,18 +1263,21 @@ void Screen::reportCursorInformation()
     // Pgl: GL charset table index (0=G0, 1=G1, 2=G2, 3=G3)
     auto const pgl = static_cast<int>(charsets.selectedTable());
 
-    // Pgr: GR charset table index (GR not tracked; default to G2 per VT standard)
-    auto const pgr = 2;
+    // Pgr: GR charset table index (0=G0, 1=G1, 2=G2, 3=G3; defaults to G2 per the VT standard)
+    auto const pgr = static_cast<int>(charsets.selectedTableGR());
 
-    // Scss: character set size for each G-set (0x40 base)
-    // Bit N = G(N-1) size: 0=94-char, 1=96-char. All supported charsets are 94-char.
-    auto const scss = static_cast<char>(0x40);
+    // Scss: per-G-set character set size (base 0x40; bit g is set when G(g) holds a 96-charset).
+    auto scssBits = 0x40;
+    for (auto const gSet: { CharsetTable::G0, CharsetTable::G1, CharsetTable::G2, CharsetTable::G3 })
+        if (charsets.is96Charset(gSet))
+            scssBits |= 1 << static_cast<int>(gSet);
+    auto const scss = static_cast<char>(scssBits);
 
     // Sdesig: SCS designation final characters for G0 through G3
-    auto const sdesig = std::string { charsetDesignation(charsets.charsetIdOf(CharsetTable::G0)),
-                                      charsetDesignation(charsets.charsetIdOf(CharsetTable::G1)),
-                                      charsetDesignation(charsets.charsetIdOf(CharsetTable::G2)),
-                                      charsetDesignation(charsets.charsetIdOf(CharsetTable::G3)) };
+    auto const sdesig = std::string { charsets.designationOf(CharsetTable::G0),
+                                      charsets.designationOf(CharsetTable::G1),
+                                      charsets.designationOf(CharsetTable::G2),
+                                      charsets.designationOf(CharsetTable::G3) };
 
     reply("\033P1$u{};{};{};{};{};{};{};{};{};{}\033\\",
           line,
@@ -1311,6 +1361,14 @@ void Screen::sendTerminalId()
 
 void Screen::clearToEndOfScreen()
 {
+    // Under ISO protection a regular ED must spare the ISO-guarded cells -- which is the selective
+    // erase sparing CharacterProtectedISO, so delegate rather than duplicate the per-cell skip logic.
+    if (eraseSkipsProtectedCells())
+    {
+        selectiveEraseToEndOfScreen(CellFlag::CharacterProtectedISO);
+        return;
+    }
+
     clearToEndOfLine();
 
     for (auto const lineOffset: iota(unbox(_cursor.position.line) + 1, unbox(pageSize().lines)))
@@ -1322,6 +1380,12 @@ void Screen::clearToEndOfScreen()
 
 void Screen::clearToBeginOfScreen()
 {
+    if (eraseSkipsProtectedCells())
+    {
+        selectiveEraseToBeginOfScreen(CellFlag::CharacterProtectedISO);
+        return;
+    }
+
     clearToBeginOfLine();
 
     for (auto const lineOffset: iota(0, *_cursor.position.line))
@@ -1333,10 +1397,21 @@ void Screen::clearToBeginOfScreen()
 
 void Screen::clearScreen()
 {
+    // Under ISO protection the guarded cells must stay put, so we cannot scroll the page into
+    // history; erase the non-ISO-guarded cells in place instead (matching xterm's ED 2 under protection).
+    if (eraseSkipsProtectedCells())
+    {
+        selectiveEraseScreen(CellFlag::CharacterProtectedISO);
+        return;
+    }
+
     // Instead of *just* clearing the screen, and thus, losing potential important content,
     // we scroll up by RowCount number of lines, so move it all into history, so the user can scroll
     // up in case the content is still needed.
-    scrollUp(_grid.pageSize().lines);
+    //
+    // ED 2 erases the WHOLE screen regardless of any DECSTBM/DECSLRM scrolling region (the region is
+    // ignored -- xterm), so scroll the full page into history, not just the current margin band.
+    scrollUp(_grid.pageSize().lines, Terminal::makeDefaultMargin(_grid.pageSize()));
 }
 // }}}
 
@@ -1351,6 +1426,16 @@ void Screen::eraseCharacters(ColumnCount n)
     auto const columnsAvailable = pageSize().columns - boxed_cast<ColumnCount>(realCursorPosition().column);
     auto const clampedN = unbox<long>(clamp(n, ColumnCount(1), columnsAvailable));
 
+    // Under ISO protection the ISO-guarded cells within the run must survive, so route through the
+    // selective erase sparing CharacterProtectedISO, exactly as ED/EL do.
+    if (eraseSkipsProtectedCells())
+    {
+        auto const endColumn = ColumnOffset::cast_from(_cursor.position.column.value + clampedN);
+        selectiveErase(
+            _cursor.position.line, _cursor.position.column, endColumn, CellFlag::CharacterProtectedISO);
+        return;
+    }
+
     auto& line = currentLine();
     for (int i = 0; i < clampedN; ++i)
         line.useCellAt(_cursor.position.column + i).reset(_cursor.graphicsRendition);
@@ -1358,28 +1443,31 @@ void Screen::eraseCharacters(ColumnCount n)
 
 // {{{ DECSEL
 
-void Screen::selectiveEraseToEndOfLine()
+void Screen::selectiveEraseToEndOfLine(CellFlag protectedFlag)
 {
     if (isFullHorizontalMargins() && _cursor.position.column.value == 0)
-        selectiveEraseLine(_cursor.position.line);
+        selectiveEraseLine(_cursor.position.line, protectedFlag);
     else
-        selectiveErase(
-            _cursor.position.line, _cursor.position.column, ColumnOffset::cast_from(pageSize().columns));
+        selectiveErase(_cursor.position.line,
+                       _cursor.position.column,
+                       ColumnOffset::cast_from(pageSize().columns),
+                       protectedFlag);
 }
 
-void Screen::selectiveEraseToBeginOfLine()
+void Screen::selectiveEraseToBeginOfLine(CellFlag protectedFlag)
 {
     if (isFullHorizontalMargins() && _cursor.position.column.value == pageSize().columns.value)
-        selectiveEraseLine(_cursor.position.line);
+        selectiveEraseLine(_cursor.position.line, protectedFlag);
     else
-        selectiveErase(_cursor.position.line, ColumnOffset(0), _cursor.position.column + 1);
+        selectiveErase(_cursor.position.line, ColumnOffset(0), _cursor.position.column + 1, protectedFlag);
 }
 
-void Screen::selectiveEraseLine(LineOffset line)
+void Screen::selectiveEraseLine(LineOffset line, CellFlag protectedFlag)
 {
-    if (containsProtectedCharacters(line, ColumnOffset(0), ColumnOffset::cast_from(pageSize().columns)))
+    if (containsProtectedCharacters(
+            line, ColumnOffset(0), ColumnOffset::cast_from(pageSize().columns), protectedFlag))
     {
-        selectiveErase(line, ColumnOffset(0), ColumnOffset::cast_from(pageSize().columns));
+        selectiveErase(line, ColumnOffset(0), ColumnOffset::cast_from(pageSize().columns), protectedFlag);
         return;
     }
 
@@ -1395,12 +1483,12 @@ void Screen::selectiveEraseLine(LineOffset line)
     _terminal->markRegionDirty(area);
 }
 
-void Screen::selectiveErase(LineOffset line, ColumnOffset begin, ColumnOffset end)
+void Screen::selectiveErase(LineOffset line, ColumnOffset begin, ColumnOffset end, CellFlag protectedFlag)
 {
     for (auto col = begin; col < end; ++col)
     {
         auto cell = at(line, col);
-        if (!cell.isFlagEnabled(CellFlag::CharacterProtected))
+        if (!cell.isFlagEnabled(protectedFlag))
             cell.reset(_cursor.graphicsRendition);
     }
 
@@ -1413,12 +1501,15 @@ void Screen::selectiveErase(LineOffset line, ColumnOffset begin, ColumnOffset en
     _terminal->markRegionDirty(area);
 }
 
-bool Screen::containsProtectedCharacters(LineOffset line, ColumnOffset begin, ColumnOffset end) const
+bool Screen::containsProtectedCharacters(LineOffset line,
+                                         ColumnOffset begin,
+                                         ColumnOffset end,
+                                         CellFlag protectedFlag) const
 {
     for (auto col = begin; col < end; ++col)
     {
         auto cell = at(line, col);
-        if (cell.isFlagEnabled(CellFlag::CharacterProtected))
+        if (cell.isFlagEnabled(protectedFlag))
             return true;
     }
     return false;
@@ -1426,38 +1517,43 @@ bool Screen::containsProtectedCharacters(LineOffset line, ColumnOffset begin, Co
 // }}}
 // {{{ DECSED
 
-void Screen::selectiveEraseToEndOfScreen()
+void Screen::selectiveEraseToEndOfScreen(CellFlag protectedFlag)
 {
-    selectiveEraseToEndOfLine();
+    selectiveEraseToEndOfLine(protectedFlag);
 
     auto const lineStart = unbox(_cursor.position.line) + 1;
     auto const lineEnd = unbox(pageSize().lines);
 
     for (auto const lineOffset: iota(lineStart, lineEnd))
-        selectiveEraseLine(LineOffset::cast_from(lineOffset));
+        selectiveEraseLine(LineOffset::cast_from(lineOffset), protectedFlag);
 }
 
-void Screen::selectiveEraseToBeginOfScreen()
+void Screen::selectiveEraseToBeginOfScreen(CellFlag protectedFlag)
 {
-    selectiveEraseToBeginOfLine();
+    selectiveEraseToBeginOfLine(protectedFlag);
 
     for (auto const lineOffset: iota(0, *_cursor.position.line))
-        selectiveEraseLine(LineOffset::cast_from(lineOffset));
+        selectiveEraseLine(LineOffset::cast_from(lineOffset), protectedFlag);
 }
 
-void Screen::selectiveEraseScreen()
+void Screen::selectiveEraseScreen(CellFlag protectedFlag)
 {
     for (auto const lineOffset: iota(0, *pageSize().lines))
-        selectiveEraseLine(LineOffset::cast_from(lineOffset));
+        selectiveEraseLine(LineOffset::cast_from(lineOffset), protectedFlag);
 }
 // }}}
 // {{{ DECSERA
 
-void Screen::selectiveEraseArea(Rect area)
+/// Erases the cells of @p area that are not guarded by @p protectedFlag.
+///
+/// @param area The area to erase, as zero-based offsets already resolved against origin mode and
+///             clamped to the page. @see impl::readRectangularArea().
+/// @param protectedFlag The protection flag that spares a cell (DEC by default; ISO for regular erases).
+void Screen::selectiveEraseArea(Rect area, CellFlag protectedFlag)
 {
-    auto const [top, left, bottom, right] = applyOriginMode(area).clampTo(_settings->pageSize);
-    assert(unbox(right) <= unbox(pageSize().columns));
-    assert(unbox(bottom) <= unbox(pageSize().lines));
+    auto const [top, left, bottom, right] = area;
+    Require(unbox(right) < unbox(pageSize().columns));
+    Require(unbox(bottom) < unbox(pageSize().lines));
 
     if (top.value > bottom.value || left.value > right.value)
         return;
@@ -1467,7 +1563,7 @@ void Screen::selectiveEraseArea(Rect area)
         for (int x = left.value; x <= right.value; ++x)
         {
             auto cell = grid().lineAt(LineOffset::cast_from(y)).useCellAt(ColumnOffset::cast_from(x));
-            if (!cell.isFlagEnabled(CellFlag::CharacterProtected))
+            if (!cell.isFlagEnabled(protectedFlag))
             {
                 cell.writeTextOnly(L' ', 1);
                 cell.setHyperlink(HyperlinkId(0));
@@ -1481,6 +1577,12 @@ void Screen::selectiveEraseArea(Rect area)
 
 void Screen::clearToEndOfLine()
 {
+    if (eraseSkipsProtectedCells())
+    {
+        selectiveEraseToEndOfLine(CellFlag::CharacterProtectedISO);
+        return;
+    }
+
     if (isFullHorizontalMargins() && _cursor.position.column.value == 0)
     {
         currentLine().reset(currentLine().flags(), _cursor.graphicsRendition);
@@ -1508,6 +1610,12 @@ void Screen::clearToEndOfLine()
 
 void Screen::clearToBeginOfLine()
 {
+    if (eraseSkipsProtectedCells())
+    {
+        selectiveEraseToBeginOfLine(CellFlag::CharacterProtectedISO);
+        return;
+    }
+
     auto& currentLineRef = _grid.lineAt(_cursor.position.line);
     if (currentLineRef.isBlankWithFillAttrs(_cursor.graphicsRendition))
         return;
@@ -1525,6 +1633,12 @@ void Screen::clearToBeginOfLine()
 
 void Screen::clearLine()
 {
+    if (eraseSkipsProtectedCells())
+    {
+        selectiveEraseLine(_cursor.position.line, CellFlag::CharacterProtectedISO);
+        return;
+    }
+
     currentLine().reset(currentLine().flags(), _cursor.graphicsRendition);
 
     auto const line = _cursor.position.line;
@@ -1538,13 +1652,18 @@ void Screen::clearLine()
 
 void Screen::moveCursorToNextLine(LineCount n)
 {
-    moveCursorTo(logicalCursorPosition().line + n.as<LineOffset>(), ColumnOffset(0));
+    // CNL is cursor-down followed by a carriage return (xterm's CursorNextLine). moveCursorDown() clamps
+    // at the bottom margin (or the page edge when the cursor starts below the region), and the carriage
+    // return snaps to the left margin -- so CNL never scrolls and never leaves the scroll region.
+    moveCursorDown(n);
+    moveCursorToBeginOfLine();
 }
 
 void Screen::moveCursorToPrevLine(LineCount n)
 {
-    auto const sanitizedN = std::min(n.as<LineOffset>(), logicalCursorPosition().line);
-    moveCursorTo(logicalCursorPosition().line - sanitizedN, ColumnOffset(0));
+    // CPL is the mirror of CNL: cursor-up clamped at the top margin, then a carriage return.
+    moveCursorUp(n);
+    moveCursorToBeginOfLine();
 }
 
 void Screen::insertCharacters(ColumnCount n)
@@ -1664,18 +1783,28 @@ void Screen::copyArea(Rect sourceArea, int page, CellLocation targetTopLeft, int
     auto& srcGrid = _terminal->pageAt(sourcePageIndex).grid();
     auto& dstGrid = _terminal->pageAt(targetPageIndex).grid();
 
+    // The copy is truncated at the target page's edge: an area that would not fit copies only the part
+    // that does. Copying every cell the source names would run the write past the end of a line.
+    auto const targetPageSize = dstGrid.pageSize();
+    auto const height =
+        std::min(*sourceArea.bottom - *sourceArea.top + 1, unbox(targetPageSize.lines) - *targetTopLeft.line);
+    auto const width = std::min(*sourceArea.right - *sourceArea.left + 1,
+                                unbox(targetPageSize.columns) - *targetTopLeft.column);
+    if (height <= 0 || width <= 0)
+        return;
+
     auto const [x0, xInc, xEnd] = [&]() {
         if (samePage && *targetTopLeft.column > *sourceArea.left) // moving right on same page
-            return std::tuple { *sourceArea.right - *sourceArea.left, -1, -1 };
+            return std::tuple { width - 1, -1, -1 };
         else
-            return std::tuple { 0, +1, *sourceArea.right - *sourceArea.left + 1 };
+            return std::tuple { 0, +1, width };
     }();
 
     auto const [y0, yInc, yEnd] = [&]() {
         if (samePage && *targetTopLeft.line > *sourceArea.top) // moving down on same page
-            return std::tuple { *sourceArea.bottom - *sourceArea.top, -1, -1 };
+            return std::tuple { height - 1, -1, -1 };
         else
-            return std::tuple { 0, +1, *sourceArea.bottom - *sourceArea.top + 1 };
+            return std::tuple { 0, +1, height };
     }();
 
     for (auto y = y0; y != yEnd; y += yInc)
@@ -1752,6 +1881,24 @@ void Screen::requestDisplayedExtent()
     reply("\033[{};{};1;1;{}\"w", *ps.lines, *ps.columns, _terminal->displayedPageNumber());
 }
 
+void Screen::requestUserPreferredSupplementalSet()
+{
+    // DECRQUPSS: reply with a DECAUPSS-shaped DCS Ps ! u D...D ST.
+    //
+    // Ps is re-derived from the set's own size rather than echoed from whatever was last assigned --
+    // it describes the set, so it cannot be anything else. Matches xterm, which encodes the reply's
+    // Ps from the charset it is reporting.
+    //
+    // Written 7-bit; Terminal::reply folds the C1 controls to 8-bit under S8C1T.
+    auto const& upss = _terminal->userPreferredSupplementalSet();
+    auto designator = std::string {};
+    if (upss.intermediate != '\0')
+        designator += upss.intermediate;
+    designator += upss.final;
+
+    reply("\033P{}!u{}\033\\", upss.is96 ? '1' : '0', designator);
+}
+
 void Screen::eraseArea(int top, int left, int bottom, int right)
 {
     assert(right <= unbox(pageSize().columns));
@@ -1800,14 +1947,28 @@ void Screen::deleteLines(LineCount n)
 
 void Screen::deleteCharacters(ColumnCount n)
 {
-    if (isCursorInsideMargins() && *n != 0)
+    // DCH works outside the top/bottom scrolling margin (xterm patch 316); it is confined only by the
+    // left/right margins (DECLRMM). So gate on the horizontal margins, not isCursorInsideMargins()
+    // (which would also require the cursor to be within the vertical margin).
+    if (isCursorInsideHorizontalMargins() && *n != 0)
         deleteChars(realCursorPosition().line, realCursorPosition().column, n);
 }
 
 void Screen::deleteChars(LineOffset lineOffset, ColumnOffset column, ColumnCount columnsToDelete)
 {
     auto& line = _grid.lineAt(lineOffset);
-    auto& storage = line.storage();
+
+    // Deleting from a blank line with matching fill attrs is a no-op: shifting "all default cells" left
+    // by N still leaves all default cells, and the cleared range was already default. This is not only
+    // an optimization -- DECDC deletes a column from *every* line within the vertical margin, so
+    // without it a single `CSI ' ~` on a fresh page would materialize every blank line on it.
+    if (line.isBlankWithFillAttrs(_cursor.graphicsRendition))
+        return;
+
+    // A blank line's SoA arrays are empty; writing through them without materializing first reads and
+    // writes past the end of every one of them. insertChars() has always done this; its sibling never
+    // did.
+    auto& storage = line.materializedStorage();
     auto const leftCol = column.as<size_t>();
     auto const rightCol = static_cast<size_t>(*margin().horizontal.to + 1);
     auto const n =
@@ -1905,12 +2066,87 @@ void Screen::moveCursorForward(ColumnCount n)
 
 void Screen::moveCursorBackward(ColumnCount n)
 {
-    // even if you move to 80th of 80 columns, it'll first write a char and THEN flag wrap pending
-    if (margin().horizontal.contains(_cursor.position.column))
-        _cursor.position.column = margin().horizontal.clamp(_cursor.position.column - n.as<ColumnOffset>());
-    else
-        _cursor.position.column = clampedColumn(_cursor.position.column + boxed_cast<ColumnOffset>(n));
+    // A port of xterm's CursorBack(), which is what both BS and CUB do.
+    //
+    // Three things make this more than a subtraction:
+    //
+    //   - The cursor stops at the *left margin*, not at the screen's edge -- unless it already sits
+    //     left of the margin, in which case the margin is not holding it and the edge is its bound.
+    //   - Reverse wraparound (DEC mode 45, and 1045 for the unlimited variant) carries the cursor to
+    //     the right margin of the line above. Both are inert without DECAWM: a terminal that does not
+    //     wrap forward has no wrap to reverse. The plain one only follows a line the text actually
+    //     wrapped onto; the extended one follows any line, and comes round at the bottom of the
+    //     scrolling region when it walks off the top.
+    //   - A cursor in the wrap-pending position is not *past* the right margin -- it still sits on the
+    //     last column -- so the first step merely clears that flag rather than moving anywhere.
+    auto const autoWrap = _terminal->isModeEnabled(DECMode::AutoWrap);
+    auto const reverseWrap = autoWrap && _terminal->isModeEnabled(DECMode::ReverseWraparound);
+    auto const reverseWrapExtended = autoWrap && _terminal->isModeEnabled(DECMode::ReverseWraparoundExtended);
+
+    auto const top = margin().vertical.from;
+    auto const bottom = margin().vertical.to;
+    auto const right = margin().horizontal.to;
+    auto const left =
+        _cursor.position.column < margin().horizontal.from ? ColumnOffset(0) : margin().horizontal.from;
+
+    auto line = _cursor.position.line;
+    auto column = _cursor.position.column;
+    auto count = unbox(n);
+
+    // A count of zero moves nowhere -- it only clears the wrap-pending flag.
+    if (count > 0)
+    {
+        if ((reverseWrap || reverseWrapExtended) && _cursor.wrapPending)
+            --count;
+        else
+            --column;
+    }
+
+    while (count > 0)
+    {
+        if (column < left)
+        {
+            if (reverseWrapExtended)
+            {
+                // Off the top of the scrolling region, the unlimited form comes round at the bottom.
+                if (line == top)
+                    line = bottom + LineOffset(1);
+            }
+            else if (!reverseWrap)
+            {
+                column = left;
+                break;
+            }
+            else if (!_grid.lineAt(line).wrapped())
+            {
+                // The plain form only reverses a wrap that actually happened, and the flag for it lives
+                // on the *continuation* line -- the one the cursor is leaving. (xterm marks the line
+                // that wrapped; Contour marks the line that continues it. Same fact, one line apart.)
+                column = left;
+                break;
+            }
+
+            // There is no line above the first one to wrap onto.
+            if (line == LineOffset(0))
+            {
+                column = left;
+                break;
+            }
+
+            --line;
+            column = right;
+        }
+
+        if (--count <= 0)
+            break;
+
+        --column;
+    }
+
+    _cursor.position.line = clampedLine(line);
+    _cursor.position.column = clampedColumn(column);
     _cursor.wrapPending = false;
+    updateCursorIterator();
 }
 
 void Screen::moveCursorToColumn(ColumnOffset column)
@@ -1920,7 +2156,14 @@ void Screen::moveCursorToColumn(ColumnOffset column)
 
 void Screen::moveCursorToBeginOfLine()
 {
-    setCurrentColumn(ColumnOffset(0));
+    // A port of xterm's CarriageReturn(). The cursor snaps to the left margin, which is the left edge
+    // of the page unless DECLRMM narrowed it. The one exception is a cursor already left of the margin:
+    // that is only reachable outside origin mode (absolute addressing may place it there), and since the
+    // margin is not holding it, it falls to the screen's left edge instead.
+    auto const left = margin().horizontal.from;
+    auto const target = (_cursor.originMode || _cursor.position.column >= left) ? left : ColumnOffset(0);
+    _cursor.wrapPending = false;
+    _cursor.position.column = target;
 }
 
 void Screen::moveCursorToLine(LineOffset n)
@@ -1932,6 +2175,14 @@ void Screen::moveCursorToNextTab()
 {
     // TODO: I guess something must remember when a \t was added, for proper move-back?
     // TODO: respect HTS/TBC
+
+    // DECSET 41 (MoreFix, xterm's curses hack): when the line has just been filled to the right margin
+    // (a wrap is pending) and a TAB arrives, honour the pending wrap first -- moving to the next line --
+    // and then tab from its left margin. Without it (the default), the pending wrap waits for the next
+    // printable character and the TAB is swallowed at the right margin.
+    // @see esctest DECSETTests.test_DECSET_MoreFix.
+    if (_terminal->isModeEnabled(DECMode::MoreFix))
+        crlfIfWrapPending();
 
     static_assert(TabWidth > ColumnCount(0));
 
@@ -2053,36 +2304,45 @@ void Screen::cursorBackwardTab(TabStopCount count)
     if (!count)
         return;
 
+    // Every target below is a real column -- a tab stop as HTS recorded it, or the page's first column --
+    // so all of them are placed with setCurrentAbsoluteColumn(). Going through moveCursorToColumn() would
+    // add the left margin to them again under origin mode, landing the cursor past the tab stop.
     if (!_terminal->tabs().empty())
     {
         for (unsigned k = 0; k < unbox<unsigned>(count); ++k)
         {
+            // HTS records tab stops as real columns (@see Screen::horizontalTabSet), so the cursor is
+            // compared as one too -- under origin mode its logical column would be measured from the left
+            // margin and pick the wrong stop.
             auto const i = std::find_if(
                 rbegin(_terminal->tabs()), rend(_terminal->tabs()), [&](ColumnOffset tabPos) -> bool {
-                    return tabPos < logicalCursorPosition().column;
+                    return tabPos < realCursorPosition().column;
                 });
             if (i != rend(_terminal->tabs()))
             {
                 // prev tab found -> move to prev tab
-                moveCursorToColumn(*i);
+                setCurrentAbsoluteColumn(*i);
             }
             else
             {
-                moveCursorToColumn(margin().horizontal.from);
+                // No earlier tab stop: CBT ignores the left/right margin (xterm), so fall back to the
+                // first column, not the left margin.
+                setCurrentAbsoluteColumn(ColumnOffset(0));
                 break;
             }
         }
     }
     else if (TabWidth.value)
     {
-        // default tab settings
+        // Default tab settings. CBT ignores the left/right margin (xterm), so set the target column
+        // directly -- moveCursorBackward() would stop at the left margin.
         if (*_cursor.position.column < *TabWidth)
-            moveCursorToBeginOfLine();
+            setCurrentAbsoluteColumn(ColumnOffset(0));
         else
         {
             auto const m = (*_cursor.position.column + 1) % *TabWidth;
             auto const n = m ? (*count - 1) * *TabWidth + m : *count * *TabWidth + m;
-            moveCursorBackward(ColumnCount(n - 1));
+            setCurrentAbsoluteColumn(ColumnOffset(std::max(0, *_cursor.position.column - (n - 1))));
         }
     }
     else
@@ -2094,7 +2354,9 @@ void Screen::cursorBackwardTab(TabStopCount count)
 
 void Screen::index()
 {
-    if (*realCursorPosition().line == *margin().vertical.to)
+    // Index scrolls only at the bottom margin *and* within the left/right margins; outside that band
+    // moveCursorDown() clamps at the bottom margin, so the cursor neither scrolls nor walks past it.
+    if (*realCursorPosition().line == *margin().vertical.to && isCursorInsideHorizontalMargins())
         scrollUp(LineCount(1));
     else
         moveCursorDown(LineCount(1));
@@ -2102,7 +2364,10 @@ void Screen::index()
 
 void Screen::reverseIndex()
 {
-    if (unbox(realCursorPosition().line) == unbox(margin().vertical.from))
+    // Reverse index mirrors index() at the top margin: it reverse-scrolls only within the left/right
+    // margins, and outside that band moveCursorUp() clamps at the top margin.
+    if (unbox(realCursorPosition().line) == unbox(margin().vertical.from)
+        && isCursorInsideHorizontalMargins())
         scrollDown(LineCount(1));
     else
         moveCursorUp(LineCount(1));
@@ -2110,10 +2375,17 @@ void Screen::reverseIndex()
 
 void Screen::backIndex()
 {
+    // DECBI, a port of xterm's xtermColIndex(toLeft): sitting on the left margin it scrolls the margined
+    // region right by one column -- but only while the cursor also lies within the vertical margins, as
+    // xterm's xtermColScroll requires -- and anywhere else it simply moves the cursor back one column
+    // (no autowrap). The previous body left the scroll a TODO and, worse, moved the cursor *forward*.
     if (realCursorPosition().column == margin().horizontal.from)
-        ; // TODO: scrollRight(1);
+    {
+        if (margin().vertical.contains(realCursorPosition().line))
+            scrollRight(ColumnCount(1));
+    }
     else
-        moveCursorForward(ColumnCount(1));
+        moveCursorBackward(ColumnCount(1));
 }
 
 void Screen::forwardIndex()
@@ -2158,16 +2430,18 @@ enum class ModeResponse : uint8_t
 
 void Screen::requestAnsiMode(unsigned int mode)
 {
-    auto const modeResponse = [&](auto mode) -> ModeResponse {
+    auto const modeResponse = [&]() -> ModeResponse {
         if (isValidAnsiMode(mode))
-        {
-            if (_terminal->isModeEnabled(static_cast<AnsiMode>(mode)))
-                return ModeResponse::Set;
-            else
-                return ModeResponse::Reset;
-        }
+            return _terminal->isModeEnabled(static_cast<AnsiMode>(mode)) ? ModeResponse::Set
+                                                                         : ModeResponse::Reset;
+
+        // A mode the standard defines and this terminal has hard-wired off is *not* an unrecognized
+        // one. @see PermanentlyResetAnsiModes.
+        if (isPermanentlyResetAnsiMode(mode))
+            return ModeResponse::PermanentlyReset;
+
         return ModeResponse::NotRecognized;
-    }(mode);
+    }();
 
     reply("\033[{};{}$y", mode, static_cast<unsigned>(modeResponse));
 }
@@ -2175,14 +2449,19 @@ void Screen::requestAnsiMode(unsigned int mode)
 void Screen::requestDECMode(unsigned int mode)
 {
     auto const modeResponse = [this, mode]() -> ModeResponse {
+        // A mode Contour recognises but hard-wires off answers 4 (PermanentlyReset), not 2 (Reset):
+        // the distinction tells the host the mode can never be turned on here. @see
+        // PermanentlyResetDECModes.
+        if (isPermanentlyResetDECMode(mode))
+            return ModeResponse::PermanentlyReset;
         auto const modeEnum = fromDECModeNum(mode);
         if (modeEnum.has_value())
         {
-            auto const modeEnum = fromDECModeNum(mode);
-            if (_terminal->isModeEnabled(modeEnum.value()))
-                return ModeResponse::Set;
-            else
-                return ModeResponse::Reset;
+            // A mode above the terminal's operating level is not recognised here (DECNCSM only at
+            // VT500 / level 5), matching how DECSCL gates level-specific features.
+            if (conformanceLevelOf(_terminal->operatingLevel()) < minimumConformanceLevel(modeEnum.value()))
+                return ModeResponse::NotRecognized;
+            return _terminal->isModeEnabled(modeEnum.value()) ? ModeResponse::Set : ModeResponse::Reset;
         }
         return ModeResponse::NotRecognized;
     }();
@@ -2201,11 +2480,13 @@ void Screen::screenAlignmentPattern()
     // and moves the cursor to the home position
     moveCursorTo({}, {});
 
-    // fills the complete screen area with a test pattern
-    for (auto& line: _grid.mainPage())
-    {
-        line.fill(_grid.defaultLineFlags(), GraphicsAttributes {}, U'E', 1);
-    }
+    // Fills the complete screen area with a test pattern.
+    //
+    // Indexed line by line rather than over a contiguous span: the grid's line storage is a ring, so
+    // once lines have scrolled into history the page wraps its physical end and a span would run off
+    // the buffer.
+    for (auto const line: std::views::iota(0, *pageSize().lines))
+        _grid.lineAt(LineOffset(line)).fill(_grid.defaultLineFlags(), GraphicsAttributes {}, U'E', 1);
 }
 
 void Screen::applicationKeypadMode(bool enable)
@@ -2219,14 +2500,24 @@ bool Screen::tryHandleSCS(Sequence const& seq)
     if (intermediates.empty())
         return false;
 
-    // First intermediate selects the G-set: ( = G0, ) = G1, * = G2, + = G3
-    auto const gSet = [&]() -> std::optional<CharsetTable> {
+    // First intermediate selects the G-set and its size:
+    //   94-charset designators:  ( = G0, ) = G1, * = G2, + = G3
+    //   96-charset designators:        - = G1, . = G2, / = G3   (G0 cannot hold a 96-charset)
+    struct GSetDesignation
+    {
+        CharsetTable table;
+        bool is96;
+    };
+    auto const gSet = [&]() -> std::optional<GSetDesignation> {
         switch (intermediates[0])
         {
-            case '(': return CharsetTable::G0;
-            case ')': return CharsetTable::G1;
-            case '*': return CharsetTable::G2;
-            case '+': return CharsetTable::G3;
+            case '(': return GSetDesignation { CharsetTable::G0, false };
+            case ')': return GSetDesignation { CharsetTable::G1, false };
+            case '*': return GSetDesignation { CharsetTable::G2, false };
+            case '+': return GSetDesignation { CharsetTable::G3, false };
+            case '-': return GSetDesignation { CharsetTable::G1, true };
+            case '.': return GSetDesignation { CharsetTable::G2, true };
+            case '/': return GSetDesignation { CharsetTable::G3, true };
             default: return std::nullopt;
         }
     }();
@@ -2245,41 +2536,68 @@ bool Screen::tryHandleSCS(Sequence const& seq)
         return result;
     }();
 
+    // `<` designates the User-Preferred Supplemental Set (xterm's nrc_DEC_UPSS). It is unlike every
+    // other designator in naming no fixed set: it resolves to whatever DECAUPSS last assigned.
+    //
+    // This is also the one sanctioned way for G0 to hold a 96-character set. DEC STD 070 tells
+    // applications not to assume they may designate a 96-charset into G0, "but that it is possible to
+    // do this using UPSS" (quoted in xterm's misc.c, above decode_upss) -- so the slot's own syntax
+    // does not decide the size here; the resolved set's does.
+    //
+    // A VT320-era designator, so a terminal operating below that level does not recognise it and the
+    // designation is ignored -- silently, exactly as an unknown designator is below.
+    if (designator == "<")
+    {
+        if (conformanceLevelOf(_terminal->operatingLevel()) >= conformanceLevelOf(VTType::VT320))
+            _cursor.charsets.selectUserPreferred(gSet->table, _terminal->userPreferredSupplementalSet());
+        return true;
+    }
+
     // Try to map the designator to a standard charset first
     auto const standardCharset = [&]() -> std::optional<CharsetId> {
-        if (designator.size() == 1)
+        if (designator.size() != 1)
+            return std::nullopt;
+        if (gSet->is96)
         {
+            // 96-character sets (invoked into GR). Only ISO Latin-1 supplemental ('A') is defined here.
             switch (designator[0])
             {
-                case '0': return CharsetId::Special;
-                case 'A': return CharsetId::British;
-                case 'B': return CharsetId::USASCII;
-                case 'C': return CharsetId::Finnish;
-                case '4': return CharsetId::Dutch;
-                case 'E': return CharsetId::NorwegianDanish;
-                case 'R': return CharsetId::French;
-                case 'Q': return CharsetId::FrenchCanadian;
-                case 'K': return CharsetId::German;
-                case 'Z': return CharsetId::Spanish;
-                case 'H': return CharsetId::Swedish;
-                case '=': return CharsetId::Swiss;
-                case '>': return CharsetId::Technical;
-                default: break;
+                case 'A': return CharsetId::ISOLatin1Supplemental;
+                default: return std::nullopt;
             }
         }
-        return std::nullopt;
+        switch (designator[0])
+        {
+            case '0': return CharsetId::Special;
+            case 'A': return CharsetId::British;
+            case 'B': return CharsetId::USASCII;
+            case 'C': return CharsetId::Finnish;
+            case '4': return CharsetId::Dutch;
+            case 'E': return CharsetId::NorwegianDanish;
+            case 'R': return CharsetId::French;
+            case 'Q': return CharsetId::FrenchCanadian;
+            case 'K': return CharsetId::German;
+            case 'Z': return CharsetId::Spanish;
+            case 'H': return CharsetId::Swedish;
+            case '=': return CharsetId::Swiss;
+            case '>': return CharsetId::Technical;
+            default: return std::nullopt;
+        }
     }();
 
     if (standardCharset)
     {
-        designateCharset(*gSet, *standardCharset);
+        if (gSet->is96)
+            _cursor.charsets.select96(gSet->table, *standardCharset);
+        else
+            designateCharset(gSet->table, *standardCharset);
         return true;
     }
 
     // For DRCS designators: look up the font number from the Terminal's designator map.
     if (auto const fontNumber = _terminal->drcsDesignatorToFont(designator); fontNumber.has_value())
     {
-        _cursor.charsets.selectDRCS(*gSet, *fontNumber);
+        _cursor.charsets.selectDRCS(gSet->table, *fontNumber);
         return true;
     }
 
@@ -2431,54 +2749,62 @@ void Screen::renderImage(shared_ptr<Image const> image,
         moveCursorToColumn(topLeft.column);
 }
 
+namespace
+{
+    /// Resolves @p color to the concrete color a query must be answered with.
+    ///
+    /// A dynamic color need not name a color of its own: it may be configured to follow the cell's own
+    /// foreground or background instead, which is how a selection inverts rather than tints. A query
+    /// still has to be answered with one concrete color, so resolve those to the page's default
+    /// foreground and background -- the colors the overwhelming majority of cells carry.
+    [[nodiscard]] RGBColor resolveCellColor(CellRGBColor const& color, ColorPalette const& palette) noexcept
+    {
+        if (holds_alternative<CellForegroundColor>(color))
+            return palette.defaultForeground;
+        if (holds_alternative<CellBackgroundColor>(color))
+            return palette.defaultBackground;
+        return get<RGBColor>(color);
+    }
+} // namespace
+
 void Screen::requestDynamicColor(DynamicColorName name)
 {
-    auto const color = [&]() -> optional<RGBColor> {
+    auto const& palette = _terminal->colorPalette();
+
+    auto const color = [&]() -> RGBColor {
         switch (name)
         {
-            case DynamicColorName::DefaultForegroundColor: return _terminal->colorPalette().defaultForeground;
-            case DynamicColorName::DefaultBackgroundColor: return _terminal->colorPalette().defaultBackground;
-            case DynamicColorName::TextCursorColor:
-                if (holds_alternative<CellForegroundColor>(_terminal->colorPalette().cursor.color))
-                    return _terminal->colorPalette().defaultForeground;
-                else if (holds_alternative<CellBackgroundColor>(_terminal->colorPalette().cursor.color))
-                    return _terminal->colorPalette().defaultBackground;
-                else
-                    return get<RGBColor>(_terminal->colorPalette().cursor.color);
-            case DynamicColorName::MouseForegroundColor: return _terminal->colorPalette().mouseForeground;
-            case DynamicColorName::MouseBackgroundColor: return _terminal->colorPalette().mouseBackground;
+            case DynamicColorName::DefaultForegroundColor: return palette.defaultForeground;
+            case DynamicColorName::DefaultBackgroundColor: return palette.defaultBackground;
+            case DynamicColorName::TextCursorColor: return resolveCellColor(palette.cursor.color, palette);
+            case DynamicColorName::MouseForegroundColor: return palette.mouseForeground;
+            case DynamicColorName::MouseBackgroundColor: return palette.mouseBackground;
             case DynamicColorName::HighlightForegroundColor:
-                if (holds_alternative<RGBColor>(_terminal->colorPalette().selection.foreground))
-                    return get<RGBColor>(_terminal->colorPalette().selection.foreground);
-                else
-                    return nullopt;
+                return resolveCellColor(palette.selection.foreground, palette);
             case DynamicColorName::HighlightBackgroundColor:
-                if (holds_alternative<RGBColor>(_terminal->colorPalette().selection.background))
-                    return get<RGBColor>(_terminal->colorPalette().selection.background);
-                else
-                    return nullopt;
+                return resolveCellColor(palette.selection.background, palette);
         }
-        return nullopt; // should never happen
+        crispy::unreachable();
     }();
 
-    if (color.has_value())
-    {
-        reply("\033]{};{}\033\\", setDynamicColorCommand(name), setDynamicColorValue(color.value()));
-    }
+    // Every query is answered. Falling silent -- as the highlight colors used to, whenever they were
+    // following the cell's own color rather than naming one -- leaves the application reading some
+    // later sequence's reply in place of the one it is waiting for.
+    reply("\033]{};{}\033\\", setDynamicColorCommand(name), colorSpecification(color));
 }
 
 void Screen::requestPixelSize(RequestPixelSize area)
 {
     switch (area)
     {
-        case RequestPixelSize::WindowArea: [[fallthrough]]; // TODO
-        case RequestPixelSize::TextArea: {
-            // Result is CSI  4 ;  height ;  width t
+        case RequestPixelSize::WindowArea: [[fallthrough]]; // Contour draws no chrome of its own.
+        case RequestPixelSize::TextArea:
             reply("\033[4;{};{}t", _terminal->pixelSize().height, _terminal->pixelSize().width);
             break;
-        }
+        case RequestPixelSize::ScreenArea:
+            reply("\033[5;{};{}t", _terminal->screenPixelSize().height, _terminal->screenPixelSize().width);
+            break;
         case RequestPixelSize::CellArea:
-            // Result is CSI  6 ;  height ;  width t
             reply("\033[6;{};{}t", _terminal->cellPixelSize().height, _terminal->cellPixelSize().width);
             break;
     }
@@ -2488,10 +2814,16 @@ void Screen::requestCharacterSize(RequestPixelSize area)
 {
     switch (area)
     {
+        case RequestPixelSize::WindowArea: [[fallthrough]]; // Contour draws no chrome of its own.
         case RequestPixelSize::TextArea: reply("\033[8;{};{}t", pageSize().lines, pageSize().columns); break;
-        case RequestPixelSize::WindowArea:
-            reply("\033[9;{};{}t", pageSize().lines, pageSize().columns);
+        case RequestPixelSize::ScreenArea: {
+            // `CSI 19 t` asks how large the *screen* is, in characters -- how big the window could grow,
+            // not how big it currently is. Answering with the page size, as this used to, tells every
+            // application that the window is already maximized.
+            auto const screen = _terminal->screenPageSize();
+            reply("\033[9;{};{}t", screen.lines, screen.columns);
             break;
+        }
         case RequestPixelSize::CellArea:
             Guarantee(false
                       && "Screen.requestCharacterSize: Doesn't make sense, and cannot be called, therefore, "
@@ -2550,9 +2882,11 @@ void Screen::requestStatusString(RequestStatusString value)
                 errorLog()("Requesting device status for {} not with line count < 24 is undefined.");
                 return nullopt;
             case RequestStatusString::DECSTBM:
-                return std::format("{};{}r", 1 + *margin().vertical.from, *margin().vertical.to);
+                // Both bounds are stored 0-based and inclusive, so both convert back to 1-based with +1.
+                // The `to` used to be reported raw, one short of the value DECSTBM was given.
+                return std::format("{};{}r", 1 + *margin().vertical.from, 1 + *margin().vertical.to);
             case RequestStatusString::DECSLRM:
-                return std::format("{};{}s", 1 + *margin().horizontal.from, *margin().horizontal.to);
+                return std::format("{};{}s", 1 + *margin().horizontal.from, 1 + *margin().horizontal.to);
             case RequestStatusString::DECSCPP:
                 // EXTENSION: Usually DECSCPP only knows about 80 and 132, but we take any.
                 return std::format("{}|$", pageSize().columns);
@@ -2563,6 +2897,13 @@ void Screen::requestStatusString(RequestStatusString value)
                 auto const isProtected = _cursor.graphicsRendition.flags & CellFlag::CharacterProtected;
                 return std::format("{}\"q", isProtected ? 1 : 2);
             }
+            case RequestStatusString::DECSACE:
+                // Ps=2 is rectangle mode; anything else (0 or 1) is stream. xterm reports the raw value,
+                // but the 0-vs-1 distinction has no effect, so reporting stream as 0 is faithful enough.
+                return std::format("{}*x", _rectangularAttributeMode ? 2 : 0);
+            case RequestStatusString::DECELF: return std::format("{}+q", _enableLocalFunctions);
+            case RequestStatusString::DECLFKC: return std::format("{}*}}", _localFunctionKeyControl);
+            case RequestStatusString::DECSMKR: return std::format("{}+r", _modifierKeyReporting);
             case RequestStatusString::DECSASD:
                 switch (_terminal->activeStatusDisplay())
                 {
@@ -2860,25 +3201,92 @@ namespace impl
 {
     namespace
     {
+        /// Reads the rectangular area a DEC rectangular-area sequence names: Pt, Pl, Pb and Pr, the four
+        /// parameters starting at @p firstParameter.
+        ///
+        /// Six sequences name an area this way -- DECCARA, DECRARA, DECCRA, DECERA, DECFRA and DECSERA
+        /// -- and each carried its own copy of this arithmetic, no two of them agreeing. One clamped
+        /// the bottom-right corner but not the top-left, one clamped neither, one guarded the top-left
+        /// against going negative and the rest did not. The one that did not is where esctest aborted
+        /// the engine: `CSI ; ; 2 ; 2 ; ; 5 ; 5 ; 1 $ v` names no source corner, and no source corner
+        /// minus one is column -1.
+        ///
+        /// The coordinates are one-based, and each takes its default when omitted, empty or zero: the
+        /// origin for the top-left corner, the page's edge for the bottom-right. They are relative to
+        /// the origin, which origin mode (DECOM) moves to the scrolling region's top-left corner. A
+        /// coordinate naming a cell beyond the page names the page's edge instead, as the VT520 manual
+        /// requires.
+        ///
+        /// @param seq            The sequence to read from.
+        /// @param firstParameter Index of Pt; Pl, Pb and Pr follow it.
+        /// @param origin         Top-left corner coordinates are relative to. @see Screen::origin().
+        /// @param page           Size of the page the area lives on.
+        /// @return The area, as zero-based offsets into @p page.
+        [[nodiscard]] Rect readRectangularArea(Sequence const& seq,
+                                               size_t firstParameter,
+                                               CellLocation origin,
+                                               PageSize page) noexcept
+        {
+            auto const lines = static_cast<unsigned>(unbox(page.lines));
+            auto const columns = static_cast<unsigned>(unbox(page.columns));
+
+            // One-based, relative to the origin, and never past the page's edge.
+            auto const resolve = [&](size_t index, unsigned fallback, unsigned limit) {
+                return std::min(seq.param_positive_or(index, fallback), limit);
+            };
+
+            auto const top = resolve(firstParameter + 0, 1, lines);
+            auto const left = resolve(firstParameter + 1, 1, columns);
+            auto const bottom = resolve(firstParameter + 2, lines, lines);
+            auto const right = resolve(firstParameter + 3, columns, columns);
+
+            // Zero-based, and translated onto the page.
+            auto const line = static_cast<unsigned>(unbox(origin.line));
+            auto const column = static_cast<unsigned>(unbox(origin.column));
+
+            return Rect { .top = Top::cast_from(std::min(top - 1 + line, lines - 1)),
+                          .left = Left::cast_from(std::min(left - 1 + column, columns - 1)),
+                          .bottom = Bottom::cast_from(std::min(bottom - 1 + line, lines - 1)),
+                          .right = Right::cast_from(std::min(right - 1 + column, columns - 1)) };
+        }
+
+        /// The ANSI modes the engine actually acts on, and therefore accepts.
+        ///
+        /// SRM (12) is deliberately absent. Its bit would be stored and faithfully reported back by
+        /// DECRQM, but nothing acts on it -- the terminal never echoes locally -- so accepting
+        /// `CSI 12 l` would advertise a capability Contour does not have. Leaving it Unsupported keeps
+        /// the gap visible to the conformance harness instead of quietly papering over it.
+        ///
+        /// Adding a mode is adding a row.
+        constexpr auto SupportedAnsiModes = std::array {
+            AnsiMode::KeyboardAction,   // KAM -- gates input, see Terminal::allowInput()
+            AnsiMode::Insert,           // IRM
+            AnsiMode::SendReceive,      // SRM -- local echo, see Terminal::flushInput()
+            AnsiMode::AutomaticNewLine, // LNM
+        };
+
         ApplyResult setAnsiMode(Sequence const& seq, size_t modeIndex, bool enable, Terminal& term)
         {
-            switch (seq.param(modeIndex))
-            {
-                case 2: // (AM) Keyboard Action Mode
-                    return ApplyResult::Unsupported;
-                case 4: // (IRM) Insert Mode
-                    term.setMode(AnsiMode::Insert, enable);
-                    return ApplyResult::Ok;
-                case 12: // (SRM) Send/Receive Mode
-                case 20: // (LNM) Automatic Newline
-                default: return ApplyResult::Unsupported;
-            }
+            auto const modeNumber = seq.param(modeIndex);
+            if (!isValidAnsiMode(modeNumber))
+                return ApplyResult::Unsupported;
+
+            auto const mode = static_cast<AnsiMode>(modeNumber);
+            if (std::ranges::find(SupportedAnsiModes, mode) == SupportedAnsiModes.end())
+                return ApplyResult::Unsupported;
+
+            term.setMode(mode, enable);
+            return ApplyResult::Ok;
         }
 
         ApplyResult setModeDEC(Sequence const& seq, size_t modeIndex, bool enable, Terminal& term)
         {
             if (auto const modeOpt = fromDECModeNum(seq.param(modeIndex)); modeOpt.has_value())
             {
+                // Ignore a mode above the terminal's operating level (DECNCSM only at VT500 / level 5),
+                // so a lower-level terminal neither enables nor reports it.
+                if (conformanceLevelOf(term.operatingLevel()) < minimumConformanceLevel(modeOpt.value()))
+                    return ApplyResult::Ok;
                 term.setMode(modeOpt.value(), enable);
                 return ApplyResult::Ok;
             }
@@ -3133,15 +3541,75 @@ namespace impl
             }
         }
 
+        /// One DECDSR (`CSI ? Ps n`) request whose answer never changes.
+        ///
+        /// A terminal with no printer, no user-defined keys, no macro memory and no session multiplexer
+        /// still has to *say so*, in the words the standard gives it. Most of DECDSR is exactly that: a
+        /// fixed answer to a fixed question. The two that are not -- the cursor's position, and the
+        /// checksum of a macro memory that does not exist -- are handled apart from this table.
+        ///
+        /// Adding a report is adding a row.
+        struct DeviceStatusReport
+        {
+            unsigned request; ///< The Ps that asks for it.
+            std::string_view reply;
+            std::string_view comment;
+        };
+
+        constexpr auto DeviceStatusReports = std::array {
+            DeviceStatusReport { .request = 15, .reply = "\033[?13n", .comment = "Printer port: no printer" },
+            DeviceStatusReport {
+                .request = 25, .reply = "\033[?20n", .comment = "User-defined keys: unlocked" },
+            DeviceStatusReport { .request = 26,
+                                 .reply = "\033[?27;0;0;5n",
+                                 .comment = "Keyboard: language unknown, ready, PCXAL" },
+            DeviceStatusReport {
+                .request = 53, .reply = "\033[?50n", .comment = "Locator: none, until DECELR is honoured" },
+            DeviceStatusReport { .request = 55,
+                                 .reply = "\033[?50n",
+                                 .comment = "Locator, xterm's spelling of the same question" },
+            DeviceStatusReport { .request = 56, .reply = "\033[?57;0n", .comment = "Locator type: unknown" },
+            DeviceStatusReport { .request = 62,
+                                 .reply = "\033[0*{",
+                                 .comment = "DECMSR: no macro space, because there are no macros" },
+            DeviceStatusReport { .request = 75,
+                                 .reply = "\033[?70n",
+                                 .comment = "Data integrity: no errors. There is no link to have any." },
+            DeviceStatusReport {
+                .request = 85, .reply = "\033[?83n", .comment = "Sessions: not configured for multiple" },
+        };
+
+        /// DECDSR -- `CSI ? Ps n`, the device status reports.
         ApplyResult DSR(Sequence const& seq, Screen& screen)
         {
-            switch (seq.param(0))
+            auto const request = seq.param_or(0, 0u);
+
+            switch (request)
             {
+                case 6:
+                    // DECXCPR: the cursor's position, and the page it is on.
+                    screen.reportExtendedCursorPosition();
+                    return ApplyResult::Ok;
+                case 63:
+                    // DECCKSR: the checksum of the macro memory. There are no macros, so it is zero --
+                    // but the reply still carries back the id the request was tagged with, so that an
+                    // application issuing several can tell the answers apart.
+                    screen.reportMacroSpaceChecksum(seq.param_or(1, 0u));
+                    return ApplyResult::Ok;
                 case ColorPaletteUpdateDsrRequestId:
                     screen.reportColorPaletteUpdate();
                     return ApplyResult::Ok;
-                default: return ApplyResult::Unsupported;
+                default: break;
             }
+
+            // `auto const`, not `auto const*`: libstdc++'s array iterator is a raw pointer but MSVC's
+            // is a class type. @see setDynamicColorCommand in primitives.h.
+            auto const report = std::ranges::find(DeviceStatusReports, request, &DeviceStatusReport::request);
+            if (report == DeviceStatusReports.end())
+                return ApplyResult::Unsupported;
+
+            screen.reply(report->reply);
+            return ApplyResult::Ok;
         }
 
         ApplyResult DECRQPSR(Sequence const& seq, Screen& screen)
@@ -3222,85 +3690,166 @@ namespace impl
             return crispy::splitKeyValuePairs(s, ':');
         }
 
-        ApplyResult setOrRequestDynamicColor(Sequence const& seq, Screen& screen, DynamicColorName name)
+        /// OSC 10..19 -- sets or queries the dynamic colors, starting at the one the sequence names.
+        ///
+        /// One sequence carries one specification per color, walking upward from @p firstName: a plain
+        /// `OSC 10 ; fg ; bg ST` sets the foreground *and* the background. An empty specification skips
+        /// its color, "?" queries it, and any other is an X11 color specification to set it to.
+        ///
+        /// A query is answered with the OSC command of the color it reports rather than the one the
+        /// sequence began at, which is what makes `OSC 10 ; ? ; ? ST` answer with an OSC 10 *and* an
+        /// OSC 11. Contour used to read the entire payload as one specification, so that sequence
+        /// parsed as the color "?;?", failed, and was answered with nothing at all -- leaving the
+        /// application to read some later sequence's reply in place of the two it was waiting for.
+        ///
+        /// @see xterm's ChangeColorsRequest() in misc.c.
+        ApplyResult setOrRequestDynamicColor(Sequence const& seq, Screen& screen, DynamicColorName firstName)
         {
-            auto const& value = seq.intermediateCharacters();
-            if (value == "?")
-                screen.requestDynamicColor(name);
-            else if (auto color = vtbackend::parseColor(value); color.has_value())
-                screen.setDynamicColor(name, color.value());
-            else
-                return ApplyResult::Invalid;
+            auto command = setDynamicColorCommand(firstName);
+            auto result = ApplyResult::Ok;
 
-            return ApplyResult::Ok;
-        }
+            crispy::split(
+                std::string_view { seq.intermediateCharacters() }, ';', [&](std::string_view specification) {
+                    auto const name = getChangeDynamicColorCommand(command);
+                    if (command > LastDynamicColorCommand)
+                        return false; // Ran past OSC 19; there is no color left to address.
+                    ++command;
 
-        bool queryOrSetColorPalette(string_view text,
-                                    std::function<void(uint8_t)> queryColor,
-                                    std::function<void(uint8_t, RGBColor)> setColor)
-        {
-            // Sequence := [Param (';' Param)*]
-            // Param    := Index ';' Query | Set
-            // Index    := DIGIT+
-            // Query    := ?'
-            // Set      := 'rgb:' Hex8 '/' Hex8 '/' Hex8
-            // Hex8     := [0-9A-Za-z] [0-9A-Za-z]
-            // DIGIT    := [0-9]
-            int index = -1;
-            return crispy::split(text, ';', [&](string_view value) {
-                if (index < 0)
-                {
-                    index = crispy::to_integer<10, int>(value).value_or(-1);
-                    if (!(0 <= index && index <= 0xFF))
+                    // An empty specification skips its color, as does one naming a color we do not model.
+                    if (specification.empty() || !name.has_value())
+                        return true;
+
+                    if (specification == "?"sv)
+                        screen.requestDynamicColor(*name);
+                    else if (auto const color = vtbackend::parseColor(specification); color.has_value())
+                        screen.setDynamicColor(*name, color.value());
+                    else
+                    {
+                        // As in xterm, the first specification we cannot parse ends the sequence.
+                        result = ApplyResult::Invalid;
                         return false;
-                }
-                else if (value == "?"sv)
-                {
-                    queryColor((uint8_t) index);
-                    index = -1;
-                }
-                else if (auto const color = vtbackend::parseColor(value))
-                {
-                    setColor((uint8_t) index, color.value());
-                    index = -1;
-                }
-                else
-                    return false;
+                    }
 
-                return true;
-            });
+                    return true;
+                });
+
+            return result;
         }
 
-        ApplyResult RCOLPAL(Sequence const& seq, Terminal& terminal)
+        /// How a color-palette sequence names a color, and how it reports one back.
+        ///
+        /// `OSC 4` and `OSC 5` are the same sequence twice over -- pairs of index and specification,
+        /// answered in kind -- differing only in which colors an index reaches. So they share an
+        /// implementation, and this is all that separates them.
+        struct ColorPaletteSelector
+        {
+            /// The OSC command, which is also what a report is tagged with: 4 or 5.
+            unsigned command;
+
+            /// Maps the index an application names to the palette slot the color lives in.
+            std::optional<size_t> (*slotOf)(unsigned index) noexcept;
+
+            /// How many indices this selector reaches, i.e. what a reset with no index at all covers.
+            unsigned indexCount;
+        };
+
+        constexpr auto IndexedColorSelector =
+            ColorPaletteSelector { .command = 4,
+                                   .slotOf = &paletteSlotOfColorIndex,
+                                   .indexCount =
+                                       static_cast<unsigned>(IndexedColorCount + SpecialColorCount) };
+        constexpr auto SpecialColorSelector =
+            ColorPaletteSelector { .command = 5,
+                                   .slotOf = &paletteSlotOfSpecialColor,
+                                   .indexCount = static_cast<unsigned>(SpecialColorCount) };
+
+        /// `OSC 4` / `OSC 5` -- sets or queries palette colors, as index/specification pairs.
+        ///
+        /// As in xterm, the first pair that cannot be read ends the sequence: a bad index or an
+        /// unparseable specification stops the walk rather than skipping to the next pair.
+        ///
+        /// @see xterm's ChangeAnsiColorRequest() in misc.c.
+        ApplyResult setOrRequestColorPalette(Sequence const& seq,
+                                             Terminal& terminal,
+                                             ColorPaletteSelector const& selector)
+        {
+            // The index the application named, kept as it gave it: a report echoes that index, not the
+            // slot we happen to keep the color in.
+            auto pending = std::optional<std::pair<unsigned, size_t>> {};
+
+            auto const ok =
+                crispy::split(std::string_view { seq.intermediateCharacters() }, ';', [&](string_view value) {
+                    if (!pending.has_value())
+                    {
+                        auto const index = crispy::to_integer<10, unsigned>(value);
+                        if (!index.has_value())
+                            return false;
+
+                        auto const slot = selector.slotOf(*index);
+                        if (!slot.has_value())
+                            return false;
+
+                        pending = std::pair { *index, *slot };
+                        return true;
+                    }
+
+                    auto const [index, slot] = *pending;
+
+                    if (value == "?"sv)
+                        terminal.reply("\033]{};{};{}\033\\",
+                                       selector.command,
+                                       index,
+                                       colorSpecification(terminal.colorPalette().palette.at(slot)));
+                    else if (auto const color = vtbackend::parseColor(value); color.has_value())
+                        terminal.colorPalette().palette.at(slot) = color.value();
+                    else
+                        return false;
+
+                    pending = std::nullopt;
+                    return true;
+                });
+
+            return ok ? ApplyResult::Ok : ApplyResult::Invalid;
+        }
+
+        /// `OSC 104` / `OSC 105` -- resets palette colors to the ones the terminal was configured with.
+        ///
+        /// With no index at all, every index the selector reaches is reset -- and only those. What the
+        /// sequence can *address* is what it can reset: `OSC 104` covers the indexed colors plus the
+        /// special ones (xterm walks its whole `Acolors` the same way), `OSC 105` only the special ones.
+        ///
+        /// Notably that is not the same as the whole ColorPalette. The dynamic colors -- default
+        /// foreground/background, cursor, mouse, selection -- share the struct but are addressed by
+        /// `OSC 10`..`19` and reset by `OSC 110`..`119` (xterm keeps them apart as `Tcolors`). Resetting
+        /// them here would withdraw a background an application set with `OSC 11` that nothing asked to
+        /// reset. Otherwise the indices are a ';'-separated list.
+        ApplyResult resetColorPalette(Sequence const& seq,
+                                      Terminal& terminal,
+                                      ColorPaletteSelector const& selector)
         {
             if (seq.intermediateCharacters().empty())
             {
-                terminal.colorPalette() = terminal.defaultColorPalette();
+                for (auto const index: std::views::iota(0u, selector.indexCount))
+                    if (auto const slot = selector.slotOf(index); slot.has_value())
+                        terminal.colorPalette().palette.at(*slot) =
+                            terminal.defaultColorPalette().palette.at(*slot);
                 return ApplyResult::Ok;
             }
 
-            auto const index = crispy::to_integer<10, uint8_t>(seq.intermediateCharacters());
-            if (!index.has_value())
-                return ApplyResult::Invalid;
+            auto const ok =
+                crispy::split(std::string_view { seq.intermediateCharacters() }, ';', [&](string_view value) {
+                    auto const index = crispy::to_integer<10, unsigned>(value);
+                    if (!index.has_value())
+                        return false;
 
-            terminal.colorPalette().palette[*index] = terminal.defaultColorPalette().palette[*index];
+                    auto const slot = selector.slotOf(*index);
+                    if (!slot.has_value())
+                        return false;
 
-            return ApplyResult::Ok;
-        }
-
-        ApplyResult SETCOLPAL(Sequence const& seq, Terminal& terminal)
-        {
-            bool const ok = queryOrSetColorPalette(
-                seq.intermediateCharacters(),
-                [&](uint8_t index) {
-                    auto const color = terminal.colorPalette().palette.at(index);
-                    terminal.reply("\033]4;{};rgb:{:04x}/{:04x}/{:04x}\033\\",
-                                   index,
-                                   static_cast<uint16_t>(color.red) << 8 | color.red,
-                                   static_cast<uint16_t>(color.green) << 8 | color.green,
-                                   static_cast<uint16_t>(color.blue) << 8 | color.blue);
-                },
-                [&](uint8_t index, RGBColor color) { terminal.colorPalette().palette.at(index) = color; });
+                    terminal.colorPalette().palette.at(*slot) =
+                        terminal.defaultColorPalette().palette.at(*slot);
+                    return true;
+                });
 
             return ok ? ApplyResult::Ok : ApplyResult::Invalid;
         }
@@ -3390,16 +3939,18 @@ namespace impl
 
         ApplyResult clipboard(Sequence const& seq, Terminal& terminal)
         {
-            // Only setting clipboard contents is supported, not reading.
+            // OSC 52: `OSC 52 ; Pc ; Pd ST`. Pd is base64 data to store, or "?" to read the clipboard
+            // back. Contour models the clipboard ('c') and the default/empty selection.
             auto const& params = seq.intermediateCharacters();
-            if (auto const splits = crispy::split(params, ';');
-                splits.size() == 2 && (splits[0] == "c" || splits[0].empty()))
-            {
-                terminal.copyToClipboard(crispy::base64::decode(splits[1]));
-                return ApplyResult::Ok;
-            }
-            else
+            auto const splits = crispy::split(params, ';');
+            if (splits.size() != 2 || !(splits[0] == "c" || splits[0].empty()))
                 return ApplyResult::Invalid;
+
+            if (splits[1] == "?")
+                terminal.requestClipboardRead(splits[0]); // read (gated by Settings::allowClipboardRead)
+            else
+                terminal.copyToClipboard(crispy::base64::decode(splits[1]));
+            return ApplyResult::Ok;
         }
 
         ApplyResult NOTIFY(Sequence const& seq, Screen& screen)
@@ -3474,6 +4025,98 @@ namespace impl
             return ApplyResult::Ok;
         }
 
+        /// The confidence tests DECTST can be asked to run, and what each means here.
+        ///
+        /// Adding a test is adding a row. @see documentation::DECTST.
+        struct ConfidenceTest
+        {
+            unsigned id;
+
+            /// Whether running it resets the terminal.
+            ///
+            /// True only for the power-up self test: it is a *power-up*, and that is the one effect of
+            /// any of these tests a program can observe. The rest loop data back through an RS-232
+            /// port, a printer port, a modem's control lines or a parallel port -- hardware a software
+            /// terminal does not have, so there is nothing to drive and nothing that can fail.
+            bool resetsTerminal;
+        };
+
+        constexpr auto ConfidenceTests = std::array {
+            ConfidenceTest { .id = 0, .resetsTerminal = true },  // all tests -- includes the power-up one
+            ConfidenceTest { .id = 1, .resetsTerminal = true },  // power-up self test
+            ConfidenceTest { .id = 2, .resetsTerminal = false }, // RS-232 data loopback
+            ConfidenceTest { .id = 3, .resetsTerminal = false }, // printer port loopback
+            ConfidenceTest { .id = 4, .resetsTerminal = false }, // speed select and speed indicator
+            ConfidenceTest { .id = 5, .resetsTerminal = false }, // reserved -- no action
+            ConfidenceTest { .id = 6, .resetsTerminal = false }, // RS-232 modem control line loopback
+            ConfidenceTest { .id = 7, .resetsTerminal = false }, // EIA-423 port loopback
+            ConfidenceTest { .id = 8, .resetsTerminal = false }, // parallel port loopback
+            ConfidenceTest { .id = 9, .resetsTerminal = false }, // repeat (loop on) the other tests
+        };
+
+        /// The Ps1 values that mean "invoke the tests named by the rest of the parameters".
+        ///
+        /// Two, because the sequence changed shape between generations: a VT100 invokes with 2, a VT510
+        /// and later with 4. Both are honoured -- a terminal reporting VT525 is still driven by
+        /// VT100-era software, and vttest sends the VT100 form to every terminal it meets.
+        constexpr auto ConfidenceTestInvokeOpcodes = std::array { 2U, 4U };
+
+        /// DECTST: runs the built-in confidence tests.
+        ///
+        /// Every test passes -- there is no hardware here to fail one -- and a failure would be
+        /// reported by drawing a diagnostic code rather than by replying, so a terminal that passes
+        /// writes nothing. @see documentation::DECTST.
+        ApplyResult invokeConfidenceTest(Sequence const& seq, Terminal& terminal)
+        {
+            auto const invoke = seq.param_or(0, 0U);
+            if (std::ranges::find(ConfidenceTestInvokeOpcodes, invoke) == ConfidenceTestInvokeOpcodes.end())
+                return ApplyResult::Invalid;
+
+            // No test named means no test run: DECTST invokes what it is asked for, and `CSI 2 y` asks
+            // for nothing. (Ps2 defaults to 0 -- "all tests" -- only when it is present and empty.)
+            auto reset = false;
+            for (auto const i: std::views::iota(size_t { 1 }, seq.parameterCount()))
+            {
+                auto const requested = seq.param_or(i, 0U);
+                // `auto const`, not `auto const*`: libstdc++'s array iterator is a raw pointer but
+                // MSVC's is a class type. @see setDynamicColorCommand in primitives.h.
+                auto const test = std::ranges::find(
+                    ConfidenceTests, requested, [](ConfidenceTest const& t) { return t.id; });
+                if (test == ConfidenceTests.end())
+                    return ApplyResult::Invalid;
+                reset = reset || test->resetsTerminal;
+            }
+
+            // Deferred to after the whole string is validated, so that an invalid test later in the
+            // string cannot leave the terminal half-reset by an earlier valid one.
+            if (reset)
+                terminal.hardReset();
+
+            return ApplyResult::Ok;
+        }
+
+        ApplyResult setTitleModes(Sequence const& seq, Terminal& terminal, bool enable)
+        {
+            // XTSMTITLE (`CSI > Ps t`, enable) and XTRMTITLE (`CSI > Ps T`, disable): each parameter names
+            // a title-mode feature (0..3); an out-of-range parameter is ignored, matching xterm's
+            // ValidTitleMode() guard. With no parameters at all, xterm resets every title mode to its
+            // default (all disabled) -- for XTSMTITLE and XTRMTITLE alike.
+            if (seq.parameterCount() == 0)
+            {
+                terminal.resetTitleModes();
+                return ApplyResult::Ok;
+            }
+
+            for (auto const i: std::views::iota(size_t { 0 }, seq.parameterCount()))
+            {
+                auto const value = seq.param<unsigned>(i);
+                if (value < TitleModeFeatureCount)
+                    terminal.setTitleModeFeature(static_cast<TitleModeFeature>(value), enable);
+            }
+
+            return ApplyResult::Ok;
+        }
+
         ApplyResult HYPERLINK(Sequence const& seq, Screen& screen)
         {
             auto const& value = seq.intermediateCharacters();
@@ -3522,85 +4165,130 @@ namespace impl
             return ApplyResult::Ok;
         }
 
+        /// XTWINOPS (`CSI Ps ; Ps ; Ps t`) -- the window manipulation and window report operations.
+        ///
+        /// The operation is named by the *first* parameter, and each operation reads the parameters that
+        /// follow it. Dispatching on the parameter *count* first -- as this used to -- reads
+        /// `CSI 4 ; 100 t` (resize to a height of 100 pixels) as "resize to the display's size", because
+        /// that sequence happens to carry two parameters rather than three.
+        ///
+        /// @see xterm's ctlseqs, "Window manipulation".
         ApplyResult WINDOWMANIP(Sequence const& seq, Terminal& terminal)
         {
-            if (seq.parameterCount() == 3)
+            // "Omitted parameters reuse the current height or width. Zero parameters use the display's
+            // height or width." -- xterm's ctlseqs. So a dimension has three readings, not two, and the
+            // display's size reaches the terminal only through the frontend. @see Terminal::windowState().
+            auto const dimension = [&](size_t index, unsigned current, unsigned display) {
+                auto const value = seq.param_opt<unsigned>(index);
+                if (!value.has_value())
+                    return current;
+                return *value != 0 ? *value : display;
+            };
+
+            switch (seq.param_or(0, 0))
             {
-                switch (seq.param(0))
-                {
-                    case 4: // resize in pixel units
-                        terminal.requestWindowResize(ImageSize { Width(seq.param(2)), Height(seq.param(1)) });
-                        break;
-                    case 8: // resize in cell units
-                        terminal.requestWindowResize(PageSize { LineCount::cast_from(seq.param(1)),
-                                                                ColumnCount::cast_from(seq.param(2)) });
-                        break;
-                    case 22: terminal.saveWindowTitle(); break;
-                    case 23: terminal.restoreWindowTitle(); break;
-                    default: return ApplyResult::Unsupported;
+                case 1: // De-iconify.
+                    terminal.requestWindowIconify(false);
+                    return ApplyResult::Ok;
+                case 2: // Iconify.
+                    terminal.requestWindowIconify(true);
+                    return ApplyResult::Ok;
+                case 3: // Move the window's top-left corner to [x, y].
+                    terminal.requestWindowMove(
+                        WindowPosition { .x = seq.param_or<int>(1, 0), .y = seq.param_or<int>(2, 0) });
+                    return ApplyResult::Ok;
+                case 4: { // Resize the text area, in pixels.
+                    auto const current = terminal.pixelSize();
+                    auto const display = terminal.screenPixelSize();
+                    terminal.requestWindowResize(ImageSize {
+                        Width::cast_from(dimension(2, unbox(current.width), unbox(display.width))),
+                        Height::cast_from(dimension(1, unbox(current.height), unbox(display.height))),
+                    });
+                    return ApplyResult::Ok;
                 }
-                return ApplyResult::Ok;
-            }
-            else if (seq.parameterCount() == 2 || seq.parameterCount() == 1)
-            {
-                switch (seq.param(0))
-                {
-                    case 4:
-                    case 8:
-                        // this means, resize to full display size
-                        // TODO: just create a dedicated callback for fulscreen resize!
-                        terminal.requestWindowResize(ImageSize {});
-                        return ApplyResult::Ok;
-                    case 14:
-                        if (seq.parameterCount() == 2 && seq.param(1) == 2)
-                            terminal.primaryScreen().requestPixelSize(
-                                RequestPixelSize::WindowArea); // CSI 14 ; 2 t
-                        else
-                            terminal.primaryScreen().requestPixelSize(RequestPixelSize::TextArea); // CSI 14 t
-                        return ApplyResult::Ok;
-                    case 16:
-                        terminal.primaryScreen().requestPixelSize(RequestPixelSize::CellArea);
-                        return ApplyResult::Ok;
-                    case 18:
-                        terminal.primaryScreen().requestCharacterSize(RequestPixelSize::TextArea);
-                        return ApplyResult::Ok;
-                    case 19:
-                        terminal.primaryScreen().requestCharacterSize(RequestPixelSize::WindowArea);
-                        return ApplyResult::Ok;
-                    case 22: {
-                        switch (seq.param_or(1, 0))
-                        {
-                            case 0:
-                                // CSI 22 ; 0 t | save icon & window title
-                                terminal.saveWindowTitle();
-                                return ApplyResult::Ok;
-                            case 1:
-                                // CSI 22 ; 1 t | save icon title
-                                return ApplyResult::Unsupported;
-                            case 2:
-                                // CSI 22 ; 2 t | save window title
-                                terminal.saveWindowTitle();
-                                return ApplyResult::Ok;
-                            default: return ApplyResult::Unsupported;
-                        }
-                    }
-                    case 23: {
-                        switch (seq.param_or(1, 0))
-                        {
-                            case 0:
-                                terminal.restoreWindowTitle();
-                                break; // CSI 22 ; 0 t | save icon & window title
-                            case 1: return ApplyResult::Unsupported;      // CSI 22 ; 1 t | save icon title
-                            case 2: terminal.restoreWindowTitle(); break; // CSI 22 ; 2 t | save window title
-                            default: return ApplyResult::Unsupported;
-                        }
+                case 8: { // Resize the text area, in characters.
+                    auto const current = terminal.pageSize();
+                    auto const display = terminal.screenPageSize();
+                    terminal.requestWindowResize(PageSize {
+                        .lines =
+                            LineCount::cast_from(dimension(1, unbox(current.lines), unbox(display.lines))),
+                        .columns = ColumnCount::cast_from(
+                            dimension(2, unbox(current.columns), unbox(display.columns))),
+                    });
+                    return ApplyResult::Ok;
+                }
+                case 9: // Maximize the window, or restore it.
+                    if (auto const how = windowMaximizeOf(seq.param_or(1, 0)); how.has_value())
+                    {
+                        terminal.requestWindowMaximize(*how);
                         return ApplyResult::Ok;
                     }
-                    default: return ApplyResult::Invalid;
-                }
+                    return ApplyResult::Invalid;
+                case 10: // Full screen, or out of it.
+                    if (auto const how = windowFullScreenOf(seq.param_or(1, 0)); how.has_value())
+                    {
+                        terminal.requestWindowFullScreen(*how);
+                        return ApplyResult::Ok;
+                    }
+                    return ApplyResult::Invalid;
+                case 11: // Report whether the window is iconified.
+                    terminal.reply("\033[{}t", terminal.windowState().iconified ? 2 : 1);
+                    return ApplyResult::Ok;
+                case 13: // Report the window's position.
+                    terminal.reply("\033[3;{};{}t",
+                                   terminal.windowState().position.x,
+                                   terminal.windowState().position.y);
+                    return ApplyResult::Ok;
+                case 14: // Report the text area's size in pixels; `CSI 14 ; 2 t` the window's.
+                    terminal.primaryScreen().requestPixelSize(
+                        seq.param_or(1, 0) == 2 ? RequestPixelSize::WindowArea : RequestPixelSize::TextArea);
+                    return ApplyResult::Ok;
+                case 15: // Report the screen's size in pixels.
+                    terminal.primaryScreen().requestPixelSize(RequestPixelSize::ScreenArea);
+                    return ApplyResult::Ok;
+                case 16: // Report the cell's size in pixels.
+                    terminal.primaryScreen().requestPixelSize(RequestPixelSize::CellArea);
+                    return ApplyResult::Ok;
+                case 18: // Report the text area's size in characters.
+                    terminal.primaryScreen().requestCharacterSize(RequestPixelSize::TextArea);
+                    return ApplyResult::Ok;
+                case 19: // Report the screen's size in characters.
+                    terminal.primaryScreen().requestCharacterSize(RequestPixelSize::ScreenArea);
+                    return ApplyResult::Ok;
+                case 20: // Report the icon's title, as OSC L <title> ST.
+                    // The title is hex-encoded when the QueryHex title mode is active (XTSMTITLE).
+                    terminal.reply("\033]L{}\033\\", terminal.encodeTitleForReport(terminal.iconTitle()));
+                    return ApplyResult::Ok;
+                case 21: // Report the window's title, as OSC l <title> ST.
+                    terminal.reply("\033]l{}\033\\", terminal.encodeTitleForReport(terminal.windowTitle()));
+                    return ApplyResult::Ok;
+                case 22: // XTPUSHTITLE
+                    if (auto const kinds = titleKindsOf(seq.param_or(1, 0)); kinds.has_value())
+                    {
+                        terminal.saveTitles(*kinds);
+                        return ApplyResult::Ok;
+                    }
+                    return ApplyResult::Invalid;
+                case 23: // XTPOPTITLE
+                    if (auto const kinds = titleKindsOf(seq.param_or(1, 0)); kinds.has_value())
+                    {
+                        terminal.restoreTitles(*kinds);
+                        return ApplyResult::Ok;
+                    }
+                    return ApplyResult::Invalid;
+                default:
+                    // DECSLPP: an operation of 24 or more sets the page's length to that many lines. It
+                    // shares its final byte with XTWINOPS, and xterm resolves the collision exactly here
+                    // -- by the value of the first parameter.
+                    if (auto const lines = seq.param_or(0, 0); lines >= 24)
+                    {
+                        terminal.requestWindowResize(
+                            PageSize { .lines = LineCount::cast_from(lines),
+                                       .columns = terminal.totalPageSize().columns });
+                        return ApplyResult::Ok;
+                    }
+                    return ApplyResult::Unsupported;
             }
-            else
-                return ApplyResult::Unsupported;
         }
 
         ApplyResult XTSMGRAPHICS(Sequence const& seq, Screen& screen)
@@ -3685,12 +4373,12 @@ void Screen::executeControlCode(char controlCode)
         case TAB.finalSymbol: moveCursorToNextTab(); break;
         case LF.finalSymbol: linefeed(); break;
         case VT.finalSymbol:
-            // Even though VT means Vertical Tab, it seems that xterm is doing an IND instead.
+            // VT (Vertical Tab) and FF (Form Feed) are treated exactly like LF: xterm routes all three
+            // through its index-with-optional-newline path, so they index and -- in linefeed mode (LNM)
+            // -- also return the carriage. linefeed() is that shared path; a bare index() would skip
+            // LNM's carriage return (as well as linefeed()'s BCE scroll and below-region page clamp).
             [[fallthrough]];
-        case FF.finalSymbol:
-            // Even though FF means Form Feed, it seems that xterm is doing an IND instead.
-            index();
-            break;
+        case FF.finalSymbol: linefeed(); break;
         case LS1.finalSymbol: // (SO)
             // Invokes G1 character set into GL. G1 is designated by a select-character-set (SCS) sequence.
             _cursor.charsets.lockingShift(CharsetTable::G1);
@@ -3707,6 +4395,11 @@ void Screen::executeControlCode(char controlCode)
             //     VTParserLog()("Unsupported C0 sequence: {}", crispy::escape((uint8_t) controlCode));
             break;
     }
+
+    // A control code moves the cursor and scrolls the page just as a sequence does -- LF below a
+    // scrolling region once walked the cursor clean off the page -- so it is held to the same
+    // invariants. Compiled out unless CONTOUR_VERIFY_STATE.
+    _terminal->verifyState();
 }
 
 void Screen::saveCursor()
@@ -3725,9 +4418,11 @@ void Screen::restoreCursor()
 
 void Screen::restoreCursor(Cursor const& savedCursor)
 {
+    // DECRC restores cursor state -- position, SGR, charsets, origin mode (DECOM), and the last-column
+    // (wrap-pending) flag -- but NOT the autowrap mode (DECAWM): that is a terminal mode, not cursor
+    // state (DEC STD 070), so a DECRC after a DECRESET DECAWM leaves autowrap off. Matches xterm.
     _cursor = savedCursor;
     _cursor.position = clampCoordinate(_cursor.position);
-    _terminal->setMode(DECMode::AutoWrap, savedCursor.autoWrap);
     _terminal->setMode(DECMode::Origin, savedCursor.originMode);
     updateCursorIterator();
     verifyState();
@@ -3760,6 +4455,15 @@ void Screen::processSequence(Sequence const& seq)
         applyAndLog(*funcSpec, seq);
     else if (seq.category() == FunctionCategory::ESC && tryHandleSCS(seq))
         ; // Handled as SCS designation (e.g., DRCS two-byte designators)
+    else if (auto const sel = seq.selector();
+             std::ranges::any_of(_terminal->allSequences(),
+                                 [&sel](Function const& fn) noexcept { return compare(sel, fn) == 0; }))
+        ; // Recognised sequence, but gated out at the current operating level (set by DECSCL): a
+          // terminal operating below a sequence's conformance level silently ignores it -- exactly as a
+          // real VT220 ignores a VT300 query. It is NOT unknown, so it must not be logged as such; doing
+          // so would report correct level-gating as an "ignored sequence" diagnostic. A linear scan is
+          // required here because the full table is only partially sorted (activeSequences() is sorted
+          // for select()'s binary search; the gated remainder is not), and this path is cold anyway.
     else if (vtParserLog)
         vtParserLog()("Unknown VT sequence: {}", seq);
 }
@@ -4192,19 +4896,20 @@ void Screen::applyAndLog(Function const& function, Sequence const& seq)
     auto const result = apply(function, seq);
     switch (result)
     {
-        case ApplyResult::Invalid: {
-            vtParserLog()("Invalid VT sequence: {}", seq);
-            break;
-        }
-        case ApplyResult::Unsupported: {
-            vtParserLog()("Unsupported VT sequence: {}", seq);
-            break;
-        }
-        case ApplyResult::Ok: {
-            _terminal->verifyState();
-            break;
-        }
+        case ApplyResult::Invalid: vtParserLog()("Invalid VT sequence: {}", seq); break;
+        case ApplyResult::Unsupported: vtParserLog()("Unsupported VT sequence: {}", seq); break;
+        case ApplyResult::Ok: break;
     }
+
+    // Verify after *every* sequence, not only after one that reported Ok.
+    //
+    // A handler validates its parameters as it goes, so a sequence can mutate the screen and only then
+    // decide it is Unsupported or Invalid -- and such a sequence used to escape the check entirely. The
+    // damage it did then surfaced later, on whichever innocent sequence happened to come next, which is
+    // exactly how a DECSNLS that resized the wrong axis got blamed on a DSR that cannot move a cursor.
+    //
+    // Compiled out unless CONTOUR_VERIFY_STATE, so it costs a release build nothing.
+    _terminal->verifyState();
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -4219,8 +4924,10 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case BS: backspace(); break;
         case TAB: moveCursorToNextTab(); break;
         case LF: linefeed(); break;
+        // VT and FF index like LF, and in linefeed mode (LNM) they too perform a carriage return.
+        // Route them through linefeed() so they honour LNM (and smooth scroll) exactly as LF does.
         case VT: [[fallthrough]];
-        case FF: index(); break;
+        case FF: linefeed(); break;
         case CR: moveCursorToBeginOfLine(); break;
 
         // ESC
@@ -4260,6 +4967,26 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case SCS_G3_USASCII: designateCharset(CharsetTable::G3, CharsetId::USASCII); break;
         case SCS_G3_BRITISH: designateCharset(CharsetTable::G3, CharsetId::British); break;
         case DECALN: screenAlignmentPattern(); break;
+        // S7C1T/S8C1T select 7- or 8-bit C1 transmission, but only from VT200 upward: at VT100 a real
+        // VT500 ignores them -- xterm's `vtXX_level >= 2` guard.
+        case S7C1T:
+            if (_terminal->operatingLevel() != VTType::VT100)
+                _terminal->setC1TransmissionMode(ControlTransmissionMode::S7C1T);
+            break;
+        case S8C1T:
+            if (_terminal->operatingLevel() != VTType::VT100)
+                _terminal->setC1TransmissionMode(ControlTransmissionMode::S8C1T);
+            break;
+        case DOCS_DEFAULT:
+        case DOCS_UTF8:
+            // Designate Other Coding System (ESC % @ selects ISO 8859-1, ESC % G selects UTF-8).
+            // Contour's parser is always UTF-8, so both are accepted as no-ops for decoding: UTF-8 is
+            // already the mode, and honouring the ISO 8859-1 default would need a Latin-1 decode path
+            // Contour deliberately omits (remapping decoded codepoints would corrupt them -- see the
+            // charset/UTF-8 constraint). Accepting them keeps applications that set their encoding at
+            // startup (vttest) out of the unknown-sequence log.
+            break;
+        case DECID: sendDeviceAttributes(); break; // ESC Z: identify, answered like DA1
         case DECBI: backIndex(); break;
         case DECDHL_Top:
             configureCurrentLineSize({ LineFlag::DoubleWidth, LineFlag::DoubleHeightTop });
@@ -4280,50 +5007,132 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case DECSC: saveCursor(); break;
         case HTS: horizontalTabSet(); break;
         case IND: index(); break;
-        case NEL: moveCursorToNextLine(LineCount(1)); break;
+        case NEL:
+            // Next Line is an index followed by a carriage return (xterm inlines the same pair). Both
+            // now respect the left/right margins, so NEL scrolls only within the band -- and never when
+            // the cursor sits outside it -- and returns the cursor to the left margin.
+            index();
+            moveCursorToBeginOfLine();
+            break;
         case RI: reverseIndex(); break;
         case RIS: _terminal->hardReset(); break;
         case SS2: singleShiftSelect(CharsetTable::G2); break;
         case SS3: singleShiftSelect(CharsetTable::G3); break;
+        case LS2: _cursor.charsets.lockingShift(CharsetTable::G2); break;
+        case LS3: _cursor.charsets.lockingShift(CharsetTable::G3); break;
+        case LS1R: _cursor.charsets.lockingShiftGR(CharsetTable::G1); break;
+        case LS2R: _cursor.charsets.lockingShiftGR(CharsetTable::G2); break;
+        case LS3R: _cursor.charsets.lockingShiftGR(CharsetTable::G3); break;
+        case SPA:
+            // Start of Protected Area (ISO 6429): guard cells written from here on with the ISO flag,
+            // and arm ISO protection so the regular ED/EL/ECH spare those cells.
+            _isoProtectionActive = true;
+            _cursor.graphicsRendition.flags.enable(CellFlag::CharacterProtectedISO);
+            break;
+        case EPA:
+            // End of Protected Area: stop guarding newly written cells. ISO protection itself stays
+            // armed until a reset (matching xterm), so already-guarded cells keep surviving erases.
+            _cursor.graphicsRendition.flags.disable(CellFlag::CharacterProtectedISO);
+            break;
+
+        // VT52 -- the legacy single-character escape grammar, dispatched only while the parser is in
+        // VT52 mode (DECANM reset). Cursor moves and erases reuse the ANSI primitives.
+        case VT52_CUU: moveCursorUp(LineCount(1)); break;
+        case VT52_CUD: moveCursorDown(LineCount(1)); break;
+        case VT52_CUF: moveCursorForward(ColumnCount(1)); break;
+        case VT52_CUB: moveCursorBackward(ColumnCount(1)); break;
+        case VT52_HOME: moveCursorTo(LineOffset(0), ColumnOffset(0)); break;
+        case VT52_RI: reverseIndex(); break;
+        case VT52_ED: clearToEndOfScreen(); break;
+        case VT52_EL: clearToEndOfLine(); break;
+        case VT52_CUP: {
+            // ESC Y row col -- 1-based coordinates decoded by the parser; clamp to the page.
+            auto const line = std::min(seq.param_or(0, 1) - 1, unbox<int>(pageSize().lines) - 1);
+            auto const column = std::min(seq.param_or(1, 1) - 1, unbox<int>(pageSize().columns) - 1);
+            moveCursorTo(LineOffset(std::max(0, line)), ColumnOffset(std::max(0, column)));
+            break;
+        }
+        case VT52_GRAPHICS_ON:
+            // Enter graphics mode: show the DEC special-graphics glyphs (xterm's SO). Designate G1 to
+            // the special set and shift GL to it; VT52 exit / reset restores ASCII.
+            designateCharset(CharsetTable::G1, CharsetId::Special);
+            _cursor.charsets.lockingShift(CharsetTable::G1);
+            break;
+        case VT52_GRAPHICS_OFF:
+            // Exit graphics mode: shift GL back to G0 (xterm's SI).
+            _cursor.charsets.lockingShift(CharsetTable::G0);
+            break;
+        case VT52_DECID: reply("\033/Z"); break; // VT52 identify response.
+        case VT52_DECKPAM: applicationKeypadMode(true); break;
+        case VT52_DECKPNM: applicationKeypadMode(false); break;
+        case VT52_ANSI:
+            _terminal->setVT52Mode(false);
+            break; // ESC < leaves VT52 for ANSI.
 
         // CSI
         case ANSISYSSC: restoreCursor(); break;
         case CBT:
-            cursorBackwardTab(TabStopCount::cast_from(seq.param_or(0, Sequence::Parameter { 1 })));
+            cursorBackwardTab(TabStopCount::cast_from(seq.param_positive_or(0, Sequence::Parameter { 1 })));
             break;
-        case CHA: moveCursorToColumn(seq.param_or<ColumnOffset>(0, ColumnOffset { 1 }) - 1); break;
+        case CHA: moveCursorToColumn(seq.param_positive_or<ColumnOffset>(0, ColumnOffset { 1 }) - 1); break;
         case CHT:
-            cursorForwardTab(TabStopCount::cast_from(seq.param_or(0, Sequence::Parameter { 1 })));
+            cursorForwardTab(TabStopCount::cast_from(seq.param_positive_or(0, Sequence::Parameter { 1 })));
             break;
         case CNL:
-            moveCursorToNextLine(LineCount::cast_from(seq.param_or(0, Sequence::Parameter { 1 })));
+            moveCursorToNextLine(LineCount::cast_from(seq.param_positive_or(0, Sequence::Parameter { 1 })));
             break;
         case CPL:
-            moveCursorToPrevLine(LineCount::cast_from(seq.param_or(0, Sequence::Parameter { 1 })));
+            moveCursorToPrevLine(LineCount::cast_from(seq.param_positive_or(0, Sequence::Parameter { 1 })));
             break;
         case ANSIDSR: return impl::ANSIDSR(seq, *this);
         case DSR: return impl::DSR(seq, *this);
-        case CUB: moveCursorBackward(seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
-        case CUD: moveCursorDown(seq.param_or<LineCount>(0, LineCount { 1 })); break;
-        case CUF: moveCursorForward(seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
+        case CUB: moveCursorBackward(seq.param_positive_or<ColumnCount>(0, ColumnCount { 1 })); break;
+        case CUD: moveCursorDown(seq.param_positive_or<LineCount>(0, LineCount { 1 })); break;
+        case CUF: moveCursorForward(seq.param_positive_or<ColumnCount>(0, ColumnCount { 1 })); break;
         case CUP:
-            moveCursorTo(LineOffset::cast_from(seq.param_or<int>(0, 1) - 1),
-                         ColumnOffset::cast_from(seq.param_or<int>(1, 1) - 1));
+            moveCursorTo(LineOffset::cast_from(seq.param_positive_or<int>(0, 1) - 1),
+                         ColumnOffset::cast_from(seq.param_positive_or<int>(1, 1) - 1));
             break;
-        case CUU: moveCursorUp(seq.param_or<LineCount>(0, LineCount { 1 })); break;
+        case CUU: moveCursorUp(seq.param_positive_or<LineCount>(0, LineCount { 1 })); break;
         case DA1: sendDeviceAttributes(); break;
         case DA2: sendTerminalId(); break;
         case DA3:
             // terminal identification, 4 hex codes
             reply("\033P!|C0000000\033\\");
             break;
-        case DCH: deleteCharacters(seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
+        case DECREQTPARM: {
+            // DECREPTPARM: CSI Psol ; Ppar ; Pnbits ; Pxspeed ; Prspeed ; Pclkmul ; Pflags x
+            //
+            // Psol echoes the request's Ps back, offset by 2. The rest describe a serial line that
+            // has not existed for decades, so -- like every other terminal -- we report the same
+            // fiction: no parity, eight bits, 38400 baud each way.
+            auto constexpr NoParity = 1;
+            auto constexpr EightBits = 1;
+            auto constexpr Baud38400 = 128;
+            auto constexpr ClockMultiplier = 1;
+            auto constexpr StpFlags = 0;
+
+            auto const ps = seq.param_or(0, 0);
+            if (ps != 0 && ps != 1)
+                return ApplyResult::Invalid;
+
+            reply("\033[{};{};{};{};{};{};{}x",
+                  ps + 2,
+                  NoParity,
+                  EightBits,
+                  Baud38400,
+                  Baud38400,
+                  ClockMultiplier,
+                  StpFlags);
+            break;
+        }
+        case DCH: deleteCharacters(seq.param_positive_or<ColumnCount>(0, ColumnCount { 1 })); break;
         case DECCARA: {
-            auto const origin = this->origin();
-            auto const top = LineOffset(seq.param_or(0, *origin.line + 1) - 1);
-            auto const left = ColumnOffset(seq.param_or(1, *origin.column + 1) - 1);
-            auto const bottom = LineOffset(seq.param_or(2, *pageSize().lines) - 1);
-            auto const right = ColumnOffset(seq.param_or(3, *pageSize().columns) - 1);
+            auto const area = impl::readRectangularArea(seq, 0, origin(), pageSize());
+            auto const top = LineOffset::cast_from(area.top);
+            auto const left = ColumnOffset::cast_from(area.left);
+            auto const bottom = LineOffset::cast_from(area.bottom);
+            auto const right = ColumnOffset::cast_from(area.right);
             if (_rectangularAttributeMode)
             {
                 for (auto row = top; row <= bottom; ++row)
@@ -4350,11 +5159,11 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         }
         break;
         case DECRARA: {
-            auto const origin = this->origin();
-            auto const top = LineOffset(seq.param_or(0, *origin.line + 1) - 1);
-            auto const left = ColumnOffset(seq.param_or(1, *origin.column + 1) - 1);
-            auto const bottom = LineOffset(seq.param_or(2, *pageSize().lines) - 1);
-            auto const right = ColumnOffset(seq.param_or(3, *pageSize().columns) - 1);
+            auto const area = impl::readRectangularArea(seq, 0, origin(), pageSize());
+            auto const top = LineOffset::cast_from(area.top);
+            auto const left = ColumnOffset::cast_from(area.left);
+            auto const bottom = LineOffset::cast_from(area.bottom);
+            auto const right = ColumnOffset::cast_from(area.right);
             // Build a bitmask of CellFlags to toggle from the SGR params at position 4+
             auto flagsToToggle = CellFlags {};
             for (size_t i = 4; i < seq.parameterCount(); ++i)
@@ -4398,60 +5207,31 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         }
         break;
         case DECCRA: {
-            // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
-            // DECCRA is not affected by the page margins.
-            auto const origin = this->origin();
-            auto const top = Top(seq.param_or(0, *origin.line + 1) - 1);
-            auto const left = Left(seq.param_or(1, *origin.column + 1) - 1);
-            auto const bottom = Bottom(seq.param_or(2, *pageSize().lines) - 1);
-            auto const right = Right(seq.param_or(3, *pageSize().columns) - 1);
-            auto const page = seq.param_or(4, 0);
+            // The coordinates are affected by origin mode (DECOM), but not by the page margins.
+            auto const sourceArea = impl::readRectangularArea(seq, 0, origin(), pageSize());
+            auto const sourcePage = seq.param_or(4, 0);
 
-            auto const targetTop = LineOffset(seq.param_or(5, *origin.line + 1) - 1);
-            auto const targetLeft = ColumnOffset(seq.param_or(6, *origin.column + 1) - 1);
-            auto const targetTopLeft = CellLocation { .line = targetTop, .column = targetLeft };
+            // The destination is named by its top-left corner alone; its extent is the source's.
+            auto const target = impl::readRectangularArea(seq, 5, origin(), pageSize());
+            auto const targetTopLeft = CellLocation { .line = LineOffset::cast_from(target.top),
+                                                      .column = ColumnOffset::cast_from(target.left) };
             auto const targetPage = seq.param_or(7, 0);
 
-            copyArea(Rect { .top = top, .left = left, .bottom = bottom, .right = right },
-                     page,
-                     targetTopLeft,
-                     targetPage);
+            copyArea(sourceArea, sourcePage, targetTopLeft, targetPage);
         }
         break;
         case DECERA: {
-            // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
-            auto const origin = this->origin();
-            auto const top = seq.param_or(0, *origin.line + 1) - 1;
-            auto const left = seq.param_or(1, *origin.column + 1) - 1;
-
-            // If the value of Pt, Pl, Pb, or Pr exceeds the width or height of the active page, then the
-            // value is treated as the width or height of that page.
-            auto const size = pageSize();
-            auto const bottom = std::min(seq.param_or(2, unbox(size.lines)), unbox(size.lines)) - 1;
-            auto const right = std::min(seq.param_or(3, unbox(size.columns)), unbox(size.columns)) - 1;
-
-            eraseArea(top, left, bottom, right);
+            auto const area = impl::readRectangularArea(seq, 0, origin(), pageSize());
+            eraseArea(unbox(area.top), unbox(area.left), unbox(area.bottom), unbox(area.right));
         }
         break;
         case DECFRA: {
             auto const ch = seq.param_or(0, Sequence::Parameter { 0 });
-            // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
-            auto const origin = this->origin();
-            auto const top = seq.param_or(1, origin.line);
-            auto const left = seq.param_or(2, origin.column);
-
-            // If the value of Pt, Pl, Pb, or Pr exceeds the width or height of the active page, then the
-            // value is treated as the width or height of that page.
-            auto const size = pageSize();
-            auto const bottom = std::min(seq.param_or(3, unbox(size.lines)), unbox(size.lines));
-            auto const right = std::min(seq.param_or(4, unbox(size.columns)), unbox(size.columns));
-
-            // internal indices starts at 0, for DECFRA they start from 1
-            // we need to adjust it and then make sure they are in bounds
-            fillArea(ch, std::max(0, unbox(top) - 1), std::max(0, unbox(left) - 1), bottom - 1, right - 1);
+            auto const area = impl::readRectangularArea(seq, 1, origin(), pageSize());
+            fillArea(ch, unbox(area.top), unbox(area.left), unbox(area.bottom), unbox(area.right));
         }
         break;
-        case DECDC: deleteColumns(seq.param_or(0, ColumnCount(1))); break;
+        case DECDC: deleteColumns(seq.param_positive_or(0, ColumnCount(1))); break;
         case DECELR: _terminal->setLocatorMode(seq.param_or(0, 0), seq.param_or(1, 0)); break;
         case DECSLE: {
             auto params = std::vector<int> {};
@@ -4461,14 +5241,20 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             break;
         }
         case DECRQLP: _terminal->requestLocatorPosition(); break;
-        case DECIC: insertColumns(seq.param_or(0, ColumnCount(1))); break;
+        case DECIC: insertColumns(seq.param_positive_or(0, ColumnCount(1))); break;
         case DECINVM: _terminal->invokeMacro(seq.param_or(0, 0)); break;
         case DECSACE:
             // Ps=0 or 1 → stream mode, Ps=2 → rectangle mode
             _rectangularAttributeMode = (seq.param_or(0, 1) == 2);
             break;
+        // VT525 keyboard settings Contour remembers and reports through DECRQSS, but does not act on.
+        case DECELF: _enableLocalFunctions = seq.param_or(0, 0); break;
+        case DECLFKC: _localFunctionKeyControl = seq.param_or(0, 0); break;
+        case DECSMKR: _modifierKeyReporting = seq.param_or(0, 0); break;
         case DECSCA: {
             auto const pc = seq.param_or(0, 0);
+            // DECSCA (DEC) protection is per-cell via CellFlag::CharacterProtected; only the selective
+            // erases (DECSED/DECSEL/DECSERA) spare it. It is independent of the ISO SPA/EPA guard.
             switch (pc)
             {
                 case 1:
@@ -4491,14 +5277,9 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             }
             return ApplyResult::Ok;
         }
-        case DECSERA: {
-            auto const top = seq.param_or(0, Top(1)) - 1;
-            auto const left = seq.param_or(1, Left(1)) - 1;
-            auto const bottom = seq.param_or(2, Bottom::cast_from(pageSize().lines)) - 1;
-            auto const right = seq.param_or(3, Right::cast_from(pageSize().columns)) - 1;
-            selectiveEraseArea(Rect { .top = top, .left = left, .bottom = bottom, .right = right });
+        case DECSERA:
+            selectiveEraseArea(impl::readRectangularArea(seq, 0, origin(), pageSize()));
             return ApplyResult::Ok;
-        }
         case DECSEL: {
             switch (seq.param_or(0, Sequence::Parameter { 0 }))
             {
@@ -4529,25 +5310,39 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             requestAnsiMode(seq.param(0));
             return ApplyResult::Ok;
         case DECRQCRA: {
-            // CSI Pid ; Pp ; Pt ; Pl ; Pb ; Pr $ y
+            // CSI Pid ; Pp ; Pt ; Pl ; Pb ; Pr * y
             auto const requestId = seq.param_or(0, 0);
-            // Pp is page number (ignored, we have one page)
-            auto const top = LineOffset(std::max(seq.param_or(2, 1), 1) - 1);
-            auto const left = ColumnOffset(std::max(seq.param_or(3, 1), 1) - 1);
-            auto const bottom =
-                LineOffset(std::min(seq.param_or(4, *pageSize().lines), *pageSize().lines) - 1);
-            auto const right =
-                ColumnOffset(std::min(seq.param_or(5, *pageSize().columns), *pageSize().columns) - 1);
-            uint16_t checksum = 0;
-            for (auto row = top; row <= bottom; ++row)
-                for (auto column = left; column <= right; ++column)
+            // Pp is the page number; Contour has a single page, so it is echoed and ignored. The
+            // rectangle (Pt;Pl;Pb;Pr, at parameter index 2) is read like every other rectangular-area
+            // sequence: one-based, relative to the origin -- so in origin mode (DECOM) it is measured
+            // from the scroll region's top-left, not the page's -- and clamped to the page edge.
+            auto const area = impl::readRectangularArea(seq, 2, origin(), pageSize());
+            auto const top = LineOffset::cast_from(area.top);
+            auto const left = ColumnOffset::cast_from(area.left);
+            auto const bottom = LineOffset::cast_from(area.bottom);
+            auto const right = ColumnOffset::cast_from(area.right);
+
+            auto checksum = RectangularAreaChecksum { _terminal->checksumExtension() };
+            // A cell holds at most one base codepoint plus its combining marks; sized generously so
+            // no realistic grapheme cluster is truncated, and without allocating per cell.
+            auto codepoints = std::array<char32_t, 16> {};
+            for (auto const row: std::views::iota(*top, *bottom + 1))
+            {
+                for (auto const column: std::views::iota(*left, *right + 1))
                 {
-                    auto const& cell = at(row, column);
-                    auto const text = cell.toUtf8();
-                    for (auto const ch: text)
-                        checksum += static_cast<uint16_t>(static_cast<uint8_t>(ch));
+                    auto const cell = at(LineOffset(row), ColumnOffset(column));
+                    auto const count = std::min(cell.codepointCount(), codepoints.size());
+                    for (auto const i: std::views::iota(size_t { 0 }, count))
+                        codepoints[i] = cell.codepoint(i);
+                    checksum.addCell(ChecksumCell {
+                        .codepoints = std::span { codepoints.data(), count },
+                        .flags = cell.flags(),
+                    });
                 }
-            reply("\033P{}!~{:04X}\033\\", requestId, checksum);
+                checksum.endOfLine();
+            }
+
+            reply("\033P{}!~{:04X}\033\\", requestId, checksum.result());
             return ApplyResult::Ok;
         }
         case DECRQPSR: return impl::DECRQPSR(seq, *this);
@@ -4572,8 +5367,16 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
 
             selectConformanceLevel(*vtType);
 
-            // DECSCL implies a soft reset (per DEC spec)
+            // DECSCL resets the terminal. The DEC manuals disagree on how much: the VT300/VT420/VT520
+            // programmer manuals call it a hard reset (RIS), while the VT220 manual and DEC STD 070 (which
+            // document levels 1-4 in detail) call it a soft reset. Contour takes the middle reading that
+            // matches both the observable RIS effects a conformance suite checks -- the screen is erased,
+            // the saved cursor returns to the origin, and insert mode (IRM) is cleared -- and xterm's
+            // caution: it is a soft reset (so hardware-capability modes such as DECSET(?40) allow-80-to-132
+            // are left alone, which a mere conformance-level change has no business resetting) *plus* a
+            // screen erase. @see esctest DECSCLTests.test_DECSCL_RISOnChange.
             _terminal->softReset();
+            clearScreen();
 
             // Set C1 transmission mode: Ps2=1 → 7-bit, Ps2=0 or 2 → 8-bit
             // (For level 61/VT100, C1 mode is always 7-bit)
@@ -4593,16 +5396,34 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
                 if (*cursor().position.column >= columnCount)
                     cursor().position.column = ColumnOffset::cast_from(columnCount) - 1;
 
-                _terminal->requestWindowResize(
-                    PageSize { _terminal->totalPageSize().lines,
-                               ColumnCount::cast_from(columnCount ? columnCount : 80) });
+                // The usable (main-page) line count, not the total: the frontend adds the status-line
+                // height back itself (see DECCOLM / XTWINOPS `CSI 8 t`). Passing the total double-counts
+                // the status line.
+                _terminal->requestWindowResize(PageSize {
+                    _terminal->pageSize().lines, ColumnCount::cast_from(columnCount ? columnCount : 80) });
                 return ApplyResult::Ok;
             }
             else
                 return ApplyResult::Invalid;
-        case DECSNLS:
-            _terminal->resizeScreen(PageSize { pageSize().lines, seq.param<ColumnCount>(0) });
+        case DECSNLS: {
+            // DECSNLS selects the number of LINES per screen; the column count is left alone.
+            //
+            // It used to take its parameter as a column count and resize the columns instead — so
+            // `CSI 24 * |` silently narrowed an 80-column page to 24. And it resized the screen
+            // directly rather than asking the frontend, which is the terminal reaching around the
+            // window that owns its size. DECSCPP and DECCOLM both go through requestWindowResize();
+            // so does xterm, which answers DECSNLS with `RequestResize(xw, value, -1, True)` — rows
+            // to `value`, columns untouched.
+            auto const lines = seq.param_or(0, 0);
+            if (lines == 0)
+                return ApplyResult::Ok; // Omitted or zero: no change, as in xterm.
+            if (lines < 1 || lines > 255)
+                return ApplyResult::Invalid;
+
+            _terminal->requestWindowResize(
+                PageSize { LineCount::cast_from(lines), _terminal->totalPageSize().columns });
             return ApplyResult::Ok;
+        }
         case DECSLRM: {
             if (!_terminal->isModeEnabled(DECMode::LeftRightMargin))
                 return ApplyResult::Invalid;
@@ -4632,15 +5453,16 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
                 return ApplyResult::Invalid;
             _terminal->softReset();
             break;
-        case DECXCPR: reportExtendedCursorPosition(); break;
+        case DECTST: return impl::invokeConfidenceTest(seq, *_terminal);
         case NP: nextPage(seq.param_or(0, 1)); break;
         case PP: previousPage(seq.param_or(0, 1)); break;
         case PPA: pagePositionAbsolute(seq.param_or(0, 1)); break;
         case PPR: pagePositionRelative(seq.param_or(0, 1)); break;
         case PPB: pagePositionBackward(seq.param_or(0, 1)); break;
         case DECRQDE: requestDisplayedExtent(); break;
-        case DL: deleteLines(seq.param_or(0, LineCount(1))); break;
-        case ECH: eraseCharacters(seq.param_or(0, ColumnCount(1))); break;
+        case DECRQUPSS: requestUserPreferredSupplementalSet(); break;
+        case DL: deleteLines(seq.param_positive_or(0, LineCount(1))); break;
+        case ECH: eraseCharacters(seq.param_positive_or(0, ColumnCount(1))); break;
         case ED:
             if (seq.parameterCount() == 0)
                 clearToEndOfScreen();
@@ -4663,22 +5485,26 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             }
             break;
         case EL: return impl::EL(seq, *this);
-        case HPA: moveCursorToColumn(seq.param<ColumnOffset>(0) - 1); break;
-        case HPR: moveCursorForward(seq.param<ColumnCount>(0)); break;
+        case HPA: moveCursorToColumn(seq.param_positive_or<ColumnOffset>(0, ColumnOffset { 1 }) - 1); break;
+        case HPR: moveCursorForward(seq.param_positive_or<ColumnCount>(0, ColumnCount { 1 })); break;
         case HVP:
-            moveCursorTo(seq.param_or(0, LineOffset(1)) - 1, seq.param_or(1, ColumnOffset(1)) - 1);
+            moveCursorTo(seq.param_positive_or(0, LineOffset(1)) - 1,
+                         seq.param_positive_or(1, ColumnOffset(1)) - 1);
             break; // YES, it's like a CUP!
-        case ICH: insertCharacters(seq.param_or(0, ColumnCount { 1 })); break;
-        case IL: insertLines(seq.param_or(0, LineCount { 1 })); break;
+        case ICH: insertCharacters(seq.param_positive_or(0, ColumnCount { 1 })); break;
+        case IL: insertLines(seq.param_positive_or(0, LineCount { 1 })); break;
         case REP:
-            if (_terminal->parser().precedingGraphicCharacter())
+            if (auto const precedingChar = _terminal->parser().precedingGraphicCharacter())
             {
-                auto const requestedCount = seq.param<size_t>(0);
-                auto const availableColumns =
-                    (margin().horizontal.to - cursor().position.column).template as<size_t>();
-                auto const effectiveCount = std::min(requestedCount, availableColumns);
-                for (size_t i = 0; i < effectiveCount; i++)
-                    writeText(_terminal->parser().precedingGraphicCharacter());
+                // REP repeats the last graphic character through the normal text path, so autowrap, the
+                // left/right margins and scrolling at the bottom margin all apply. Clamping the count to
+                // the current line -- as this once did -- defeated every one of them: past the right
+                // margin the repeats must wrap to the left margin of the next line, not stop dead.
+                // REP's parameter is a one-based count, so `CSI b` and `CSI 0 b` both repeat once --
+                // xterm folds both with one_if_default(). param_or() would take an explicit zero
+                // literally and repeat nothing.
+                auto const count = seq.param_positive_or<size_t>(0, 1);
+                crispy::for_each(crispy::times(count), [&](auto) { writeText(precedingChar); });
             }
             break;
         case RM: {
@@ -4690,7 +5516,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             return r;
         }
         case SCOSC: saveCursor(); break;
-        case SD: scrollDown(seq.param_or<LineCount>(0, LineCount { 1 })); break;
+        case SD: scrollDown(seq.param_positive_or<LineCount>(0, LineCount { 1 })); break;
         case UNSCROLL: unscroll(seq.param_or<LineCount>(0, LineCount(1))); break;
         case SBQUERY: handleSemanticBlockQuery(seq); break;
         case SETMARK:
@@ -4712,9 +5538,10 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         }
         case SL: scrollLeft(seq.param_or<ColumnCount>(0, ColumnCount(1))); break;
         case SR: scrollRight(seq.param_or<ColumnCount>(0, ColumnCount(1))); break;
-        case SU: scrollUp(seq.param_or<LineCount>(0, LineCount(1))); break;
+        case SU: scrollUp(seq.param_positive_or<LineCount>(0, LineCount(1))); break;
         case TBC: return impl::TBC(seq, *this);
-        case VPA: moveCursorToLine(seq.param_or<LineOffset>(0, LineOffset { 1 }) - 1); break;
+        case VPA: moveCursorToLine(seq.param_positive_or<LineOffset>(0, LineOffset { 1 }) - 1); break;
+        case VPR: moveCursorDown(seq.param_positive_or<LineCount>(0, LineCount { 1 })); break;
         case WINMANIP: return impl::WINDOWMANIP(seq, *_terminal);
         case XTRESTORE: return impl::restoreDECModes(seq, *_terminal);
         case XTSAVE: return impl::saveDECModes(seq, *_terminal);
@@ -4828,7 +5655,10 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
                     _terminal->pushColorPalette(seq.param<size_t>(i));
             return ApplyResult::Ok;
         case XTREPORTCOLORS: _terminal->reportColorPaletteStack(); return ApplyResult::Ok;
-        case XTCHECKSUM: _checksumExtension = seq.param_or(0, 0); break;
+        case XTCHECKSUM:
+            _terminal->setChecksumExtension(
+                ChecksumFlags::from_value(static_cast<uint8_t>(seq.param_or(0, 0))));
+            break;
         case XTSMGRAPHICS: return impl::XTSMGRAPHICS(seq, *this);
         case XTVERSION:
             reply("\033P>|{} {}\033\\", LIBTERMINAL_NAME, LIBTERMINAL_VERSION_STRING);
@@ -4901,19 +5731,30 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             return ApplyResult::Ok;
         }
         // OSC
-        case SETTITLE:
-            //(not supported) ChangeIconTitle(seq.intermediateCharacters());
-            _terminal->setWindowTitle(seq.intermediateCharacters());
+        case SETTITLE: {
+            // OSC 0 sets *both* titles; OSC 1 the icon's alone, OSC 2 the window's alone. The argument is
+            // hex-decoded first when the SetHex title mode is active (XTSMTITLE). @see Terminal::decodeTitle.
+            auto const title = _terminal->decodeTitle(seq.intermediateCharacters());
+            _terminal->setIconTitle(title);
+            _terminal->setWindowTitle(title);
             return ApplyResult::Ok;
-        case SETICON: return ApplyResult::Ok; // NB: Silently ignore!
-        case SETWINTITLE: _terminal->setWindowTitle(seq.intermediateCharacters()); break;
+        }
+        case SETICON: _terminal->setIconTitle(_terminal->decodeTitle(seq.intermediateCharacters())); break;
+        case SETWINTITLE:
+            _terminal->setWindowTitle(_terminal->decodeTitle(seq.intermediateCharacters()));
+            break;
         case SETTABNAME: _terminal->setTabName(seq.intermediateCharacters()); break;
         case SETXPROP: return ApplyResult::Unsupported;
-        case SETCOLPAL: return impl::SETCOLPAL(seq, *_terminal);
-        case RCOLPAL: return impl::RCOLPAL(seq, *_terminal);
+        case SETCOLPAL: return impl::setOrRequestColorPalette(seq, *_terminal, impl::IndexedColorSelector);
+        case SETSPECIALCOLPAL:
+            return impl::setOrRequestColorPalette(seq, *_terminal, impl::SpecialColorSelector);
+        case RCOLPAL: return impl::resetColorPalette(seq, *_terminal, impl::IndexedColorSelector);
+        case RCOLSPECIALPAL: return impl::resetColorPalette(seq, *_terminal, impl::SpecialColorSelector);
         case SETCWD: return impl::SETCWD(seq, *this);
         case HYPERLINK: return impl::HYPERLINK(seq, *this);
         case XTCAPTURE: return impl::CAPTURE(seq, *_terminal);
+        case XTSMTITLE: return impl::setTitleModes(seq, *_terminal, true);
+        case XTRMTITLE: return impl::setTitleModes(seq, *_terminal, false);
         case COLORFG:
             return impl::setOrRequestDynamicColor(seq, *this, DynamicColorName::DefaultForegroundColor);
         case COLORBG:
@@ -4924,6 +5765,10 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             return impl::setOrRequestDynamicColor(seq, *this, DynamicColorName::MouseForegroundColor);
         case COLORMOUSEBG:
             return impl::setOrRequestDynamicColor(seq, *this, DynamicColorName::MouseBackgroundColor);
+        case COLORHIGHLIGHTFG:
+            return impl::setOrRequestDynamicColor(seq, *this, DynamicColorName::HighlightForegroundColor);
+        case COLORHIGHLIGHTBG:
+            return impl::setOrRequestDynamicColor(seq, *this, DynamicColorName::HighlightBackgroundColor);
         case SETFONT: return impl::setFont(seq, *_terminal);
         case SETFONTALL: return impl::setAllFont(seq, *_terminal);
         case CLIPBOARD: return impl::clipboard(seq, *_terminal);
@@ -4943,6 +5788,15 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case SEMA: processShellIntegration(seq); break;
 
         // hooks
+        case DECAUPSS:
+            // Ps names the set's size and has only two readings. A third value names nothing, so the
+            // sequence is rejected outright and deliberately left un-hooked: SequenceBuilder::put
+            // discards a DCS payload when no hook is installed, so the designator cannot reach the
+            // screen as text.
+            if (auto const ps = seq.param_or(0, 0); ps != 0 && ps != 1)
+                return ApplyResult::Invalid;
+            _terminal->hookParser(hookDECAUPSS(seq));
+            break;
         case DECDLD: _terminal->hookParser(hookDECDLD(seq)); break;
         case DECDMAC: _terminal->hookParser(hookDECDMAC(seq)); break;
         case DECSIXEL: _terminal->hookParser(hookSixel(seq)); break;
@@ -5063,9 +5917,11 @@ unique_ptr<ParserExtension> Screen::hookDECRQSS(Sequence const& /*seq*/)
 {
     return make_unique<SimpleStringCollector>([this](string_view data) {
         auto const s = [](string_view dataString) -> optional<RequestStatusString> {
-            auto const mappings = array<pair<string_view, RequestStatusString>, 11> {
+            auto const mappings = array<pair<string_view, RequestStatusString>, 15> {
                 pair { "m", RequestStatusString::SGR },       pair { "\"p", RequestStatusString::DECSCL },
                 pair { " q", RequestStatusString::DECSCUSR }, pair { "\"q", RequestStatusString::DECSCA },
+                pair { "*x", RequestStatusString::DECSACE },  pair { "+q", RequestStatusString::DECELF },
+                pair { "*}", RequestStatusString::DECLFKC },  pair { "+r", RequestStatusString::DECSMKR },
                 pair { "r", RequestStatusString::DECSTBM },   pair { "s", RequestStatusString::DECSLRM },
                 pair { "t", RequestStatusString::DECSLPP },   pair { "$|", RequestStatusString::DECSCPP },
                 pair { "$}", RequestStatusString::DECSASD },  pair { "$~", RequestStatusString::DECSSDT },
@@ -5081,6 +5937,43 @@ unique_ptr<ParserExtension> Screen::hookDECRQSS(Sequence const& /*seq*/)
             requestStatusString(s.value());
 
         // TODO: handle batching
+    });
+}
+
+unique_ptr<ParserExtension> Screen::hookDECAUPSS(Sequence const& seq)
+{
+    // DECAUPSS — Assign User-Preferred Supplemental Set
+    // DCS Ps ! u D...D ST
+    //
+    // Ps is the set's *size* (0 = 94-character, 1 = 96-character), not a free parameter: it must agree
+    // with the designator that follows, so `DCS 0 ! u A ST` is US ASCII while `DCS 1 ! u A ST` is ISO
+    // Latin-1 -- the same designator naming two different sets. A disagreeing Ps names no set at all.
+    //
+    // param_or (not param_positive_or): zero is a legitimate value here, and is also the default.
+    auto const is96 = seq.param_or(0, 0) == 1;
+
+    return make_unique<SimpleStringCollector>([this, is96](string_view data) {
+        // The designator is either a lone final byte ("A") or an intermediate plus a final ("%5").
+        auto const upss = [&]() -> std::optional<UserPreferredSupplementalSet> {
+            switch (data.size())
+            {
+                case 1: return findUserPreferredSupplementalSet('\0', data[0], is96);
+                case 2: return findUserPreferredSupplementalSet(data[0], data[1], is96);
+                default: return std::nullopt;
+            }
+        }();
+
+        // A set DEC introduced above the terminal's operating level is not assignable here -- the
+        // DEC/ISO Greek, Hebrew, Turkish and Cyrillic sets are VT500-era, finer-grained than the VT320
+        // gate DECAUPSS itself carries. Gate on conformanceLevelOf(), never on VTType ordering:
+        // VTType's values are the DA2 encoding and are not level-ordered (VT330 = 18, VT340 = 19, but
+        // VT320 = 24).
+        if (!upss.has_value()
+            || conformanceLevelOf(_terminal->operatingLevel())
+                   < conformanceLevelOf(upss->minimumConformanceLevel))
+            return; // Names no set we can honour: leave UPSS as it was.
+
+        _terminal->setUserPreferredSupplementalSet(*upss);
     });
 }
 
@@ -5237,12 +6130,16 @@ optional<CellLocation> Screen::searchReverse(std::u32string_view searchText, Cel
     return nullopt;
 }
 
+bool Screen::isCursorInsideHorizontalMargins() const noexcept
+{
+    return !_terminal->isModeEnabled(DECMode::LeftRightMargin)
+           || margin().horizontal.contains(_cursor.position.column);
+}
+
 bool Screen::isCursorInsideMargins() const noexcept
 {
     bool const insideVerticalMargin = margin().vertical.contains(_cursor.position.line);
-    bool const insideHorizontalMargin = !_terminal->isModeEnabled(DECMode::LeftRightMargin)
-                                        || margin().horizontal.contains(_cursor.position.column);
-    return insideVerticalMargin && insideHorizontalMargin;
+    return insideVerticalMargin && isCursorInsideHorizontalMargins();
 }
 
 unique_ptr<ParserExtension> Screen::hookGoodImageProtocol(Sequence const&)

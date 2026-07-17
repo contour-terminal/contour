@@ -1,0 +1,186 @@
+@geometry 24x80
+@screen Primary
+@cursor line=23 column=14 visible=yes
+@modes IRM=off SRM=on LNM=off DECCKM=off DECCOLM=off DECSCLM=off DECSCNM=off DECOM=off DECAWM=on DECARM=off DECTCEM=on DECNKM=off DECBKM=off DECLRMM=off
+---- text --------------------------------------------------
+01|There␣are␣64␣color␣combinations·················································
+02|8x8␣matrix␣of␣foreground/background␣colors,␣bright␣*off*························
+03|········black···red·····green···yellow··blue····magenta·cyan····white···········
+04|black···Hello···Hello···Hello···Hello···Hello···Hello···Hello···Hello···········
+05|red·····Hello···Hello···Hello···Hello···Hello···Hello···Hello···Hello···········
+06|green···Hello···Hello···Hello···Hello···Hello···Hello···Hello···Hello···········
+07|yellow··Hello···Hello···Hello···Hello···Hello···Hello···Hello···Hello···········
+08|blue····Hello···Hello···Hello···Hello···Hello···Hello···Hello···Hello···········
+09|magenta·Hello···Hello···Hello···Hello···Hello···Hello···Hello···Hello···········
+10|cyan····Hello···Hello···Hello···Hello···Hello···Hello···Hello···Hello···········
+11|white···Hello···Hello···Hello···Hello···Hello···Hello···Hello···Hello···········
+12|················································································
+13|8x8␣matrix␣of␣foreground/background␣colors,␣bright␣*on*·························
+14|········black···red·····green···yellow··blue····magenta·cyan····white···········
+15|black···Hello···Hello···Hello···Hello···Hello···Hello···Hello···Hello···········
+16|red·····Hello···Hello···Hello···Hello···Hello···Hello···Hello···Hello···········
+17|green···Hello···Hello···Hello···Hello···Hello···Hello···Hello···Hello···········
+18|yellow··Hello···Hello···Hello···Hello···Hello···Hello···Hello···Hello···········
+19|blue····Hello···Hello···Hello···Hello···Hello···Hello···Hello···Hello···········
+20|magenta·Hello···Hello···Hello···Hello···Hello···Hello···Hello···Hello···········
+21|cyan····Hello···Hello···Hello···Hello···Hello···Hello···Hello···Hello···········
+22|white···Hello···Hello···Hello···Hello···Hello···Hello···Hello···Hello···········
+23|Push␣<RETURN>···································································
+24|················································································
+---- attributes --------------------------------------------
+01|................................................................................
+02|................................................................................
+03|................................................................................
+04|........AAAAA...BBBBB...CCCCC...DDDDD...EEEEE...FFFFF...GGGGG...HHHHH...........
+05|........IIIII...JJJJJ...KKKKK...LLLLL...MMMMM...NNNNN...OOOOO...PPPPP...........
+06|........QQQQQ...RRRRR...SSSSS...TTTTT...UUUUU...VVVVV...WWWWW...XXXXX...........
+07|........YYYYY...ZZZZZ...aaaaa...bbbbb...ccccc...ddddd...eeeee...fffff...........
+08|........ggggg...hhhhh...iiiii...jjjjj...kkkkk...lllll...mmmmm...nnnnn...........
+09|........ooooo...ppppp...qqqqq...rrrrr...sssss...ttttt...uuuuu...vvvvv...........
+10|........wwwww...xxxxx...yyyyy...zzzzz...00000...11111...22222...33333...........
+11|........44444...55555...66666...77777...88888...99999...?????...?????...........
+12|................................................................................
+13|....................................................??..........................
+14|................................................................................
+15|........?????...?????...?????...?????...?????...?????...?????...?????...........
+16|........?????...?????...?????...?????...?????...?????...?????...?????...........
+17|........?????...?????...?????...?????...?????...?????...?????...?????...........
+18|........?????...?????...?????...?????...?????...?????...?????...?????...........
+19|........?????...?????...?????...?????...?????...?????...?????...?????...........
+20|........?????...?????...?????...?????...?????...?????...?????...?????...........
+21|........?????...?????...?????...?????...?????...?????...?????...?????...........
+22|........?????...?????...?????...?????...?????...?????...?????...?????...........
+23|................................................................................
+24|................................................................................
+---- legend ------------------------------------------------
+. = default
+A = fg=0 bg=0
+B = fg=1 bg=0
+C = fg=2 bg=0
+D = fg=3 bg=0
+E = fg=4 bg=0
+F = fg=5 bg=0
+G = fg=6 bg=0
+H = fg=7 bg=0
+I = fg=0 bg=1
+J = fg=1 bg=1
+K = fg=2 bg=1
+L = fg=3 bg=1
+M = fg=4 bg=1
+N = fg=5 bg=1
+O = fg=6 bg=1
+P = fg=7 bg=1
+Q = fg=0 bg=2
+R = fg=1 bg=2
+S = fg=2 bg=2
+T = fg=3 bg=2
+U = fg=4 bg=2
+V = fg=5 bg=2
+W = fg=6 bg=2
+X = fg=7 bg=2
+Y = fg=0 bg=3
+Z = fg=1 bg=3
+a = fg=2 bg=3
+b = fg=3 bg=3
+c = fg=4 bg=3
+d = fg=5 bg=3
+e = fg=6 bg=3
+f = fg=7 bg=3
+g = fg=0 bg=4
+h = fg=1 bg=4
+i = fg=2 bg=4
+j = fg=3 bg=4
+k = fg=4 bg=4
+l = fg=5 bg=4
+m = fg=6 bg=4
+n = fg=7 bg=4
+o = fg=0 bg=5
+p = fg=1 bg=5
+q = fg=2 bg=5
+r = fg=3 bg=5
+s = fg=4 bg=5
+t = fg=5 bg=5
+u = fg=6 bg=5
+v = fg=7 bg=5
+w = fg=0 bg=6
+x = fg=1 bg=6
+y = fg=2 bg=6
+z = fg=3 bg=6
+0 = fg=4 bg=6
+1 = fg=5 bg=6
+2 = fg=6 bg=6
+3 = fg=7 bg=6
+4 = fg=0 bg=7
+5 = fg=1 bg=7
+6 = fg=2 bg=7
+7 = fg=3 bg=7
+8 = fg=4 bg=7
+9 = fg=5 bg=7
+? = fg=6 bg=7
+? = fg=7 bg=7
+? = Bold
+? = Bold fg=0 bg=0
+? = Bold fg=1 bg=0
+? = Bold fg=2 bg=0
+? = Bold fg=3 bg=0
+? = Bold fg=4 bg=0
+? = Bold fg=5 bg=0
+? = Bold fg=6 bg=0
+? = Bold fg=7 bg=0
+? = Bold fg=0 bg=1
+? = Bold fg=1 bg=1
+? = Bold fg=2 bg=1
+? = Bold fg=3 bg=1
+? = Bold fg=4 bg=1
+? = Bold fg=5 bg=1
+? = Bold fg=6 bg=1
+? = Bold fg=7 bg=1
+? = Bold fg=0 bg=2
+? = Bold fg=1 bg=2
+? = Bold fg=2 bg=2
+? = Bold fg=3 bg=2
+? = Bold fg=4 bg=2
+? = Bold fg=5 bg=2
+? = Bold fg=6 bg=2
+? = Bold fg=7 bg=2
+? = Bold fg=0 bg=3
+? = Bold fg=1 bg=3
+? = Bold fg=2 bg=3
+? = Bold fg=3 bg=3
+? = Bold fg=4 bg=3
+? = Bold fg=5 bg=3
+? = Bold fg=6 bg=3
+? = Bold fg=7 bg=3
+? = Bold fg=0 bg=4
+? = Bold fg=1 bg=4
+? = Bold fg=2 bg=4
+? = Bold fg=3 bg=4
+? = Bold fg=4 bg=4
+? = Bold fg=5 bg=4
+? = Bold fg=6 bg=4
+? = Bold fg=7 bg=4
+? = Bold fg=0 bg=5
+? = Bold fg=1 bg=5
+? = Bold fg=2 bg=5
+? = Bold fg=3 bg=5
+? = Bold fg=4 bg=5
+? = Bold fg=5 bg=5
+? = Bold fg=6 bg=5
+? = Bold fg=7 bg=5
+? = Bold fg=0 bg=6
+? = Bold fg=1 bg=6
+? = Bold fg=2 bg=6
+? = Bold fg=3 bg=6
+? = Bold fg=4 bg=6
+? = Bold fg=5 bg=6
+? = Bold fg=6 bg=6
+? = Bold fg=7 bg=6
+? = Bold fg=0 bg=7
+? = Bold fg=1 bg=7
+? = Bold fg=2 bg=7
+? = Bold fg=3 bg=7
+? = Bold fg=4 bg=7
+? = Bold fg=5 bg=7
+? = Bold fg=6 bg=7
+? = Bold fg=7 bg=7
+---- lineflags ---------------------------------------------

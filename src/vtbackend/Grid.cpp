@@ -196,37 +196,12 @@ CellProxy Grid::at(LineOffset line, ColumnOffset column) const noexcept
     return const_cast<Grid&>(*this).at(line, column);
 }
 
-gsl::span<Line> Grid::pageAtScrollOffset(ScrollOffset scrollOffset)
+void Grid::resetPageLines(LineCount count, GraphicsAttributes defaultAttributes) noexcept
 {
-    Require(unbox<LineCount>(scrollOffset) <= historyLineCount());
-
-    int const offset = -*scrollOffset;
-    Line* startLine = &_lines[offset];
-    auto const count = unbox<size_t>(_pageSize.lines);
-
-    return gsl::span<Line> { startLine, count };
+    for (auto const line: std::views::iota(0, *count))
+        lineAt(LineOffset(line)).reset(defaultLineFlags(), defaultAttributes);
 }
 
-gsl::span<Line const> Grid::pageAtScrollOffset(ScrollOffset scrollOffset) const
-{
-    Require(unbox<LineCount>(scrollOffset) <= historyLineCount());
-
-    int const offset = -*scrollOffset;
-    Line const* startLine = &_lines[offset];
-    auto const count = unbox<size_t>(_pageSize.lines);
-
-    return gsl::span<Line const> { startLine, count };
-}
-
-gsl::span<Line const> Grid::mainPage() const
-{
-    return pageAtScrollOffset({});
-}
-
-gsl::span<Line> Grid::mainPage()
-{
-    return pageAtScrollOffset({});
-}
 // }}}
 // {{{ Grid impl: Line access
 std::string Grid::lineText(LineOffset lineOffset) const
@@ -479,9 +454,7 @@ void Grid::scrollDown(LineCount vN, GraphicsAttributes const& defaultAttributes,
     if (fullHorizontal && fullVertical)
     {
         rotateBuffersRight(n);
-
-        for (Line& line: mainPage().subspan(0, unbox<size_t>(n)))
-            line.reset(defaultLineFlags(), defaultAttributes);
+        resetPageLines(n, defaultAttributes);
         return;
     }
 
@@ -498,7 +471,11 @@ void Grid::scrollDown(LineCount vN, GraphicsAttributes const& defaultAttributes,
     {
         if (n <= margin.vertical.length())
         {
-            for (LineOffset line = margin.vertical.to; line >= margin.vertical.to - *n; --line)
+            // Shift every line that has somewhere to go: targets [from+n, to], each pulling from n rows
+            // above. The lower bound is from+n, not to-n -- with a full-height vertical margin the latter
+            // only touches the bottom n+1 (often blank) rows and never moves the content down at all.
+            // Iterate downward so each source is read before it is overwritten as a later target.
+            for (LineOffset line = margin.vertical.to; line >= margin.vertical.from + *n; --line)
             {
                 auto const& srcLine = lineAt(line - *n);
                 auto& dstLine = lineAt(line);
@@ -546,8 +523,7 @@ void Grid::unscroll(LineCount n, GraphicsAttributes const& defaultAttributes)
     if (*remaining > 0)
     {
         rotateBuffersRight(remaining);
-        for (auto& line: mainPage().subspan(0, unbox<size_t>(remaining)))
-            line.reset(defaultLineFlags(), defaultAttributes);
+        resetPageLines(remaining, defaultAttributes);
     }
     verifyState();
 }

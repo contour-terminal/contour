@@ -85,11 +85,20 @@ enum class HorizontalTabClear : uint8_t
 ///  Input: CSI 14 t (for text area size)
 ///  Input: CSI 14; 2 t (for full window size)
 /// Output: CSI 14 ; width ; height ; t
+/// The area an XTWINOPS report is asked about.
 enum class RequestPixelSize : uint8_t // TODO: rename RequestPixelSize to RequestArea?
 {
+    /// A single character cell. `CSI 16 t`.
     CellArea,
+
+    /// The grid of cells the application writes to. `CSI 14 t`, `CSI 18 t`.
     TextArea,
+
+    /// The window, including whatever chrome the frontend draws around the text area. `CSI 14 ; 2 t`.
     WindowArea,
+
+    /// The screen the window is displayed on -- xterm's "display". `CSI 15 t`, `CSI 19 t`.
+    ScreenArea,
 };
 
 /// DECRQSS - Request Status String
@@ -99,6 +108,10 @@ enum class RequestStatusString : uint8_t
     DECSCL,
     DECSCUSR,
     DECSCA,
+    DECSACE,
+    DECELF,
+    DECLFKC,
+    DECSMKR,
     DECSTBM,
     DECSLRM,
     DECSLPP,
@@ -108,13 +121,20 @@ enum class RequestStatusString : uint8_t
     DECSSDT,
 };
 
-inline std::string setDynamicColorValue(
-    RGBColor const& color) // TODO: yet another helper. maybe SemanticsUtils static class?
+/// Renders @p color as the X11 color specification a color query is answered with.
+///
+/// Each of Contour's 8-bit channels is widened to the 16 bits X11 specifies by repeating its byte, so
+/// 0xAB is reported as "abab" -- exactly as xterm reports a color it was given as "rgb:ab/ab/ab".
+///
+/// The digits are lower-case, as xterm's are: an application comparing the answer to the specification
+/// it sent (as esctest does, and as any round-tripping application would) reads upper-case digits as a
+/// different color.
+[[nodiscard]] inline std::string colorSpecification(RGBColor const& color)
 {
-    auto const r = static_cast<unsigned>(static_cast<float>(color.red) / 255.0f * 0xFFFF);
-    auto const g = static_cast<unsigned>(static_cast<float>(color.green) / 255.0f * 0xFFFF);
-    auto const b = static_cast<unsigned>(static_cast<float>(color.blue) / 255.0f * 0xFFFF);
-    return std::format("rgb:{:04X}/{:04X}/{:04X}", r, g, b);
+    auto const widen = [](uint8_t channel) {
+        return (static_cast<unsigned>(channel) << 8) | channel;
+    };
+    return std::format("rgb:{:04x}/{:04x}/{:04x}", widen(color.red), widen(color.green), widen(color.blue));
 }
 
 enum class ApplyResult : uint8_t
@@ -214,22 +234,31 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void clearScreen();
     void setMark();
 
+    // Erase, sparing cells that carry @p protectedFlag. The default (CharacterProtected) is DEC/DECSCA
+    // protection, so the DECSEL/DECSED/DECSERA handlers erase selectively with no argument. The regular
+    // ED/EL/ECH erases pass CharacterProtectedISO to spare ISO 6429 (SPA/EPA) guarded cells instead.
+
     // DECSEL
-    void selectiveEraseToBeginOfLine();
-    void selectiveEraseToEndOfLine();
-    void selectiveEraseLine(LineOffset line);
+    void selectiveEraseToBeginOfLine(CellFlag protectedFlag = CellFlag::CharacterProtected);
+    void selectiveEraseToEndOfLine(CellFlag protectedFlag = CellFlag::CharacterProtected);
+    void selectiveEraseLine(LineOffset line, CellFlag protectedFlag = CellFlag::CharacterProtected);
 
     // DECSED
-    void selectiveEraseToBeginOfScreen();
-    void selectiveEraseToEndOfScreen();
-    void selectiveEraseScreen();
+    void selectiveEraseToBeginOfScreen(CellFlag protectedFlag = CellFlag::CharacterProtected);
+    void selectiveEraseToEndOfScreen(CellFlag protectedFlag = CellFlag::CharacterProtected);
+    void selectiveEraseScreen(CellFlag protectedFlag = CellFlag::CharacterProtected);
 
-    void selectiveEraseArea(Rect area);
+    void selectiveEraseArea(Rect area, CellFlag protectedFlag = CellFlag::CharacterProtected);
 
-    void selectiveErase(LineOffset line, ColumnOffset begin, ColumnOffset end);
-    [[nodiscard]] bool containsProtectedCharacters(LineOffset line,
-                                                   ColumnOffset begin,
-                                                   ColumnOffset end) const;
+    void selectiveErase(LineOffset line,
+                        ColumnOffset begin,
+                        ColumnOffset end,
+                        CellFlag protectedFlag = CellFlag::CharacterProtected);
+    [[nodiscard]] bool containsProtectedCharacters(
+        LineOffset line,
+        ColumnOffset begin,
+        ColumnOffset end,
+        CellFlag protectedFlag = CellFlag::CharacterProtected) const;
 
     void eraseCharacters(ColumnCount n);  // ECH
     void insertCharacters(ColumnCount n); // ICH
@@ -241,12 +270,13 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void copyArea(Rect sourceArea, int page, CellLocation targetTopLeft, int targetPage);
 
     // DEC Multi-Page Navigation (VT420)
-    void nextPage(int count);             ///< NP — Move to next page(s), cursor to home.
-    void previousPage(int count);         ///< PP — Move to previous page(s), cursor to home.
-    void pagePositionAbsolute(int page);  ///< PPA — Move to absolute page, preserve cursor.
-    void pagePositionRelative(int count); ///< PPR — Move forward by count pages, preserve cursor.
-    void pagePositionBackward(int count); ///< PPB — Move backward by count pages, preserve cursor.
-    void requestDisplayedExtent();        ///< DECRQDE — Report displayed page extent.
+    void nextPage(int count);                   ///< NP — Move to next page(s), cursor to home.
+    void previousPage(int count);               ///< PP — Move to previous page(s), cursor to home.
+    void pagePositionAbsolute(int page);        ///< PPA — Move to absolute page, preserve cursor.
+    void pagePositionRelative(int count);       ///< PPR — Move forward by count pages, preserve cursor.
+    void pagePositionBackward(int count);       ///< PPB — Move backward by count pages, preserve cursor.
+    void requestDisplayedExtent();              ///< DECRQDE — Report displayed page extent.
+    void requestUserPreferredSupplementalSet(); ///< DECRQUPSS — Report the User-Preferred Supplemental Set.
 
     void eraseArea(int top, int left, int bottom, int right);
 
@@ -278,9 +308,13 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void index();        // IND
     void reverseIndex(); // RI
 
-    void setScrollSpeed(int speed);      // DECSSCLS
-    void deviceStatusReport();           // DSR
-    void reportCursorPosition();         // CPR
+    void setScrollSpeed(int speed); // DECSSCLS
+    void deviceStatusReport();      // DSR
+    void reportCursorPosition();    // CPR
+
+    /// DECCKSR (`CSI ? 63 ; Pid n`) -- the checksum of the macro memory.
+    /// @param requestId The id the request was tagged with, carried back in the reply.
+    void reportMacroSpaceChecksum(unsigned requestId);
     void reportExtendedCursorPosition(); // DECXCPR
     void reportCursorInformation();      // DECCIR
     void reportColorPaletteUpdate();
@@ -396,6 +430,15 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     [[nodiscard]] bool isCursorInsideMargins() const noexcept;
 
+    /// Tests whether the cursor sits within the active left/right margins.
+    ///
+    /// This mirrors xterm's `!(IsLeftRightMode && !ScrnIsColInMargins)` guard: when DECLRMM is off the
+    /// horizontal margins span the whole page, so this is trivially true; when DECLRMM is on it reports
+    /// whether the cursor column lies within the margin band. Vertical scrolling is confined to that
+    /// band, so IND/RI/LF and friends consult this before deciding to scroll.
+    /// @return true if the cursor column is within the horizontal margins.
+    [[nodiscard]] bool isCursorInsideHorizontalMargins() const noexcept;
+
     [[nodiscard]] constexpr CellLocation realCursorPosition() const noexcept { return _cursor.position; }
 
     [[nodiscard]] constexpr CellLocation logicalCursorPosition() const noexcept
@@ -440,20 +483,6 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
             return column;
         else
             return column + margin().horizontal.from;
-    }
-
-    [[nodiscard]] Rect applyOriginMode(Rect area) const noexcept
-    {
-        if (!_cursor.originMode)
-            return area;
-
-        auto const top = Top::cast_from(area.top.value + margin().vertical.from.value);
-        auto const left = Left::cast_from(area.top.value + margin().horizontal.from.value);
-        auto const bottom = Bottom::cast_from(area.bottom.value + margin().vertical.from.value);
-        auto const right = Right::cast_from(area.right.value + margin().horizontal.from.value);
-        // TODO: Should this automatically clamp to margin's botom/right values?
-
-        return Rect { .top = top, .left = left, .bottom = bottom, .right = right };
     }
 
     /// Clamps given coordinates, respecting DECOM (Origin Mode).
@@ -686,6 +715,12 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void fail(std::string const& message) const;
 
     void hardReset();
+
+    /// Clears any active ISO 6429 (SPA/EPA) guarded-area protection. Called from both the hard reset
+    /// (RIS) and the soft reset (DECSTR), mirroring xterm's unconditional reset of `protected_mode`.
+    /// The per-cell DECSCA flag is cleared separately, by the SGR reset. @see SPA, EPA, DECSCA.
+    void resetProtection() noexcept { _isoProtectionActive = false; }
+
     void applyPageSizeToMainDisplay(PageSize pageSize);
 
     void saveCursor();
@@ -729,8 +764,16 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Sets the current column to given logical column number.
     void setCurrentColumn(ColumnOffset n);
 
+    /// Places the cursor at the absolute @p column, clamped to the page.
+    ///
+    /// Unlike setCurrentColumn(), this does not apply origin mode: it is for callers that have already
+    /// computed a real column (a tab stop, the page's first column), which must not have the left margin
+    /// added to it a second time. @see cursorBackwardTab().
+    void setCurrentAbsoluteColumn(ColumnOffset column);
+
     [[nodiscard]] std::unique_ptr<ParserExtension> hookSTP(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookSixel(Sequence const& seq);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookDECAUPSS(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECDLD(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECDMAC(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRQSS(Sequence const& seq);
@@ -780,8 +823,21 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Controls whether DECCARA/DECRARA operate on the full rectangle (true) or stream (false).
     bool _rectangularAttributeMode = true;
 
-    /// XTCHECKSUM extension flags for DECRQCRA checksum computation.
-    int _checksumExtension = 0;
+    /// Whether ISO 6429 guarded-area protection (SPA/EPA) is in effect. Set by SPA, and left set by
+    /// EPA (which only stops guarding *new* cells); cleared only by a reset. @see resetProtection.
+    bool _isoProtectionActive = false;
+
+    /// Whether the regular erases (ED/EL/ECH) must spare CellFlag::CharacterProtectedISO cells.
+    /// True only while ISO protection is active; when false those erases take their fast paths. DECSCA
+    /// (CellFlag::CharacterProtected) is honoured by the selective erases instead, never here.
+    [[nodiscard]] bool eraseSkipsProtectedCells() const noexcept { return _isoProtectionActive; }
+
+    // VT525 keyboard settings that Contour has nothing to act on but must still remember and report
+    // through DECRQSS: it stores the parameter it was given and hands it back verbatim. @see DECELF,
+    // DECLFKC and DECSMKR in requestStatusString(). TODO: wire these to real keyboard behaviour.
+    int _enableLocalFunctions = 0;    ///< DECELF (`CSI Pn + q`).
+    int _localFunctionKeyControl = 0; ///< DECLFKC (`CSI Pn * }`).
+    int _modifierKeyReporting = 0;    ///< DECSMKR (`CSI Pn + r`).
 };
 
 inline void Screen::scrollUp(LineCount n, Margin margin)
@@ -807,6 +863,10 @@ struct std::formatter<vtbackend::RequestStatusString>: formatter<std::string_vie
             case vtbackend::RequestStatusString::DECSCL: name = "DECSCL"; break;
             case vtbackend::RequestStatusString::DECSCUSR: name = "DECSCUSR"; break;
             case vtbackend::RequestStatusString::DECSCA: name = "DECSCA"; break;
+            case vtbackend::RequestStatusString::DECSACE: name = "DECSACE"; break;
+            case vtbackend::RequestStatusString::DECELF: name = "DECELF"; break;
+            case vtbackend::RequestStatusString::DECLFKC: name = "DECLFKC"; break;
+            case vtbackend::RequestStatusString::DECSMKR: name = "DECSMKR"; break;
             case vtbackend::RequestStatusString::DECSTBM: name = "DECSTBM"; break;
             case vtbackend::RequestStatusString::DECSLRM: name = "DECSLRM"; break;
             case vtbackend::RequestStatusString::DECSLPP: name = "DECSLPP"; break;

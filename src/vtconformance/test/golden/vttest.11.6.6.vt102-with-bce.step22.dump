@@ -1,0 +1,73 @@
+@geometry 24x80
+@screen Primary
+@cursor line=23 column=32 visible=yes
+@modes IRM=off SRM=on LNM=off DECCKM=off DECCOLM=off DECSCLM=off DECSCNM=on DECOM=off DECAWM=on DECARM=off DECTCEM=on DECNKM=off DECBKM=off DECLRMM=off
+---- text --------------------------------------------------
+01|···················Graphic␣rendition␣test␣pattern:······························
+02|················································································
+03|················································································
+04|vanilla································bold·····································
+05|················································································
+06|·····underline······························bold␣underline······················
+07|················································································
+08|blink··································bold␣blink·······························
+09|················································································
+10|·····underline␣blink························bold␣underline␣blink················
+11|················································································
+12|negative·······························bold␣negative····························
+13|················································································
+14|·····underline␣negative·····················bold␣underline␣negative·············
+15|················································································
+16|blink␣negative·························bold␣blink␣negative······················
+17|················································································
+18|·····underline␣blink␣negative···············bold␣underline␣blink␣negative·······
+19|················································································
+20|················································································
+21|················································································
+22|················································································
+23|Light␣background.␣Push␣<RETURN>·················································
+24|················································································
+---- attributes --------------------------------------------
+01|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+02|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+03|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+04|.......AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+05|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+06|AAAAACCCCCCCCCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADDDDDDDDDDDDDDAAAAAAAAAAAAAAAAAAAAAA
+07|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+08|EEEEEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFFFFFFFFFFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+09|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+10|AAAAAGGGGGGGGGGGGGGGAAAAAAAAAAAAAAAAAAAAAAAAHHHHHHHHHHHHHHHHHHHHAAAAAAAAAAAAAAAA
+11|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+12|IIIIIIIIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJJJJJJJJJJJJJAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+13|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+14|AAAAAKKKKKKKKKKKKKKKKKKAAAAAAAAAAAAAAAAAAAAALLLLLLLLLLLLLLLLLLLLLLLAAAAAAAAAAAAA
+15|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+16|MMMMMMMMMMMMMMAAAAAAAAAAAAAAAAAAAAAAAAANNNNNNNNNNNNNNNNNNNAAAAAAAAAAAAAAAAAAAAAA
+17|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+18|AAAAAOOOOOOOOOOOOOOOOOOOOOOOOAAAAAAAAAAAAAAAPPPPPPPPPPPPPPPPPPPPPPPPPPPPPAAAAAAA
+19|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+20|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+21|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+22|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+23|................................................................................
+24|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+---- legend ------------------------------------------------
+. = default
+A = fg=3 bg=4
+B = Bold
+C = Underline
+D = Bold Underline
+E = Blinking
+F = Bold Blinking
+G = Underline Blinking
+H = Bold Underline Blinking
+I = Inverse
+J = Bold Inverse
+K = Underline Inverse
+L = Bold Underline Inverse
+M = Blinking Inverse
+N = Bold Blinking Inverse
+O = Underline Blinking Inverse
+P = Bold Underline Blinking Inverse
+---- lineflags ---------------------------------------------

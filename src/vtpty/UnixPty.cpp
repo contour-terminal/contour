@@ -282,7 +282,15 @@ optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
     auto const rv = static_cast<int>(::read(fd, target, n));
     if (rv < 0)
     {
-        if (errno != EAGAIN && errno != EINTR)
+        // EAGAIN and EINTR mean "nothing to read right now". EIO means the far end is gone: a PTY
+        // master whose last slave has closed reports that as EIO rather than a zero-length read, so it
+        // is this layer's end-of-file and not a failure. Logging it as one puts an error in the log on
+        // every normal child exit -- and made the VT conformance report differ between runs, depending
+        // on whether the final read landed before or after the child was reaped.
+        //
+        // Callers do not need to distinguish: they already read `errno` themselves, and every value
+        // other than EAGAIN/EINTR means the same thing to them (closed). @see Terminal::processInputOnce.
+        if (errno != EAGAIN && errno != EINTR && errno != EIO)
             errorLog()("{} read failed: {}", fd == _masterFd ? "master" : "stdout-fastpipe", strerror(errno));
         return nullopt;
     }

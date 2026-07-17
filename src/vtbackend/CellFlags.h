@@ -3,37 +3,73 @@
 
 #include <crispy/flags.h>
 
+#include <array>
 #include <cstdint>
 #include <format>
+#include <string_view>
+
+/// The single source for every cell flag: one row each, naming the flag and giving its bit.
+///
+/// The `CellFlag` enumeration, the enumerable `CellFlagList`, and the `std::formatter` below are all
+/// generated from this table, so **adding a flag is adding one row here** and cannot leave any of the
+/// three behind.
+///
+/// That is not a hypothetical. These were three hand-maintained lists until `CharacterProtectedISO`
+/// was added, and the third rotted the same day: the VT conformance screen dump kept its own copy of
+/// the flags to iterate, silently omitted the new one, and its protected-area goldens could therefore
+/// not tell a protected cell from an unprotected one -- the dump recorded two visibly different cells
+/// as the same rendition.
+#define VTBACKEND_CELL_FLAGS(_)                                                                   \
+    /* SGR renditions, in SGR order where there is one. */                                        \
+    _(Bold, 0)                                                                                    \
+    _(Faint, 1)                                                                                   \
+    _(Italic, 2)                                                                                  \
+    _(Underline, 3)                                                                               \
+    _(Blinking, 4)                                                                                \
+    _(Inverse, 5)                                                                                 \
+    _(Hidden, 6)                                                                                  \
+    _(CrossedOut, 7)                                                                              \
+    _(DoublyUnderlined, 8)                                                                        \
+    _(CurlyUnderlined, 9)                                                                         \
+    _(DottedUnderline, 10)                                                                        \
+    _(DashedUnderline, 11)                                                                        \
+    _(Framed, 12)                                                                                 \
+    _(Encircled, 13)                                                                              \
+    _(Overline, 14)                                                                               \
+    _(RapidBlinking, 15)                                                                          \
+    /* DECSCA (DEC) protection: spared by the SELECTIVE erases (DECSED, DECSEL). */               \
+    _(CharacterProtected, 16)                                                                     \
+    /* Structural, not a rendition: this cell continues a wide character to its left. */          \
+    _(WideCharContinuation, 17)                                                                   \
+    /* SPA/EPA (ISO 6429) protection: spared by the REGULAR erases (ED, EL). A separate flag from \
+       CharacterProtected because the two are honoured by opposite erase families. */             \
+    _(CharacterProtectedISO, 18)
 
 namespace vtbackend
 {
 
+/// A single visual or structural attribute of a cell. @see VTBACKEND_CELL_FLAGS for the table these
+/// enumerators are generated from, and for what each one means.
 enum class CellFlag : uint32_t
 {
     None = 0,
 
-    Bold = (1 << 0),
-    Faint = (1 << 1),
-    Italic = (1 << 2),
-    Underline = (1 << 3),
-    Blinking = (1 << 4),
-    Inverse = (1 << 5),
-    Hidden = (1 << 6),
-    CrossedOut = (1 << 7),
-    DoublyUnderlined = (1 << 8),
-    CurlyUnderlined = (1 << 9),
-    DottedUnderline = (1 << 10),
-    DashedUnderline = (1 << 11),
-    Framed = (1 << 12),
-    Encircled = (1 << 13),
-    Overline = (1 << 14),
-    RapidBlinking = (1 << 15),
-    CharacterProtected = (1 << 16),   // Character is protected by selective erase operations.
-    WideCharContinuation = (1 << 17), // Cell is a continuation of a wide char.
+#define VTBACKEND_CELL_FLAG_ENUMERATOR(Name, Bit) Name = (1U << (Bit)),
+    VTBACKEND_CELL_FLAGS(VTBACKEND_CELL_FLAG_ENUMERATOR)
+#undef VTBACKEND_CELL_FLAG_ENUMERATOR
 };
 
 using CellFlags = crispy::flags<CellFlag>;
+
+/// Every `CellFlag`, in declaration order, excluding `None`.
+///
+/// The formatter below *names* one flag; this *enumerates* them, which naming cannot do. Any code that
+/// must visit every flag reads this rather than writing the list out again.
+inline constexpr auto CellFlagList = std::array {
+#define VTBACKEND_CELL_FLAG_ROW(Name, Bit) CellFlag::Name,
+    VTBACKEND_CELL_FLAGS(VTBACKEND_CELL_FLAG_ROW)
+#undef VTBACKEND_CELL_FLAG_ROW
+};
 
 /// All underline-variant flags. Grouped here, next to the flag definitions, so a new underline style
 /// is added in one place; consumers that treat "any underline" uniformly (e.g. DECATC color mapping)
@@ -56,24 +92,10 @@ struct std::formatter<vtbackend::CellFlag>: std::formatter<std::string_view>
         switch (value)
         {
             case vtbackend::CellFlag::None: s = std::string_view("None"); break;
-            case vtbackend::CellFlag::Bold: s = std::string_view("Bold"); break;
-            case vtbackend::CellFlag::Faint: s = std::string_view("Faint"); break;
-            case vtbackend::CellFlag::Italic: s = std::string_view("Italic"); break;
-            case vtbackend::CellFlag::Underline: s = std::string_view("Underline"); break;
-            case vtbackend::CellFlag::Blinking: s = std::string_view("Blinking"); break;
-            case vtbackend::CellFlag::RapidBlinking: s = std::string_view("RapidBlinking"); break;
-            case vtbackend::CellFlag::Inverse: s = std::string_view("Inverse"); break;
-            case vtbackend::CellFlag::Hidden: s = std::string_view("Hidden"); break;
-            case vtbackend::CellFlag::CrossedOut: s = std::string_view("CrossedOut"); break;
-            case vtbackend::CellFlag::DoublyUnderlined: s = std::string_view("DoublyUnderlined"); break;
-            case vtbackend::CellFlag::CurlyUnderlined: s = std::string_view("CurlyUnderlined"); break;
-            case vtbackend::CellFlag::DottedUnderline: s = std::string_view("DottedUnderline"); break;
-            case vtbackend::CellFlag::DashedUnderline: s = std::string_view("DashedUnderline"); break;
-            case vtbackend::CellFlag::Framed: s = std::string_view("Framed"); break;
-            case vtbackend::CellFlag::Encircled: s = std::string_view("Encircled"); break;
-            case vtbackend::CellFlag::Overline: s = std::string_view("Overline"); break;
-            case vtbackend::CellFlag::CharacterProtected: s = std::string_view("CharacterProtected"); break;
-            case vtbackend::CellFlag::WideCharContinuation: s = std::string_view("WideCharContinuation"); break;
+#define VTBACKEND_CELL_FLAG_CASE(Name, Bit) \
+            case vtbackend::CellFlag::Name: s = std::string_view(#Name); break;
+            VTBACKEND_CELL_FLAGS(VTBACKEND_CELL_FLAG_CASE)
+#undef VTBACKEND_CELL_FLAG_CASE
         }
         // clang-format on
 

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vtbackend/Terminal.h>
+#include <vtbackend/WindowSizeStack.h>
 
 #include <vtpty/MockPty.h>
 
@@ -82,9 +83,89 @@ class MockTerm: public Terminal::NullEvents
             terminal.processInputOnce();
     }
 
+    /// The frontend's half of a resize the application asked for (DECCOLM, DECSCPP, DECSNLS,
+    /// `CSI 8 ; h ; w t`).
+    ///
+    /// A frontend that silently refuses to resize is not a frontend, and a mock that refuses makes
+    /// every sequence that resizes the page untestable.
+    ///
+    /// Applied on the spot, so a sequence's effect lands where the application put it. Deferring it
+    /// would make the resize land wherever the input happened to be split into reads, and the same
+    /// byte stream would then produce different screens on different runs.
+    ///
+    /// The line count names the USABLE main-page area, exactly as the real frontend
+    /// (`TerminalDisplay::resizeWindow`) receives it: the status-line height is added back here to form
+    /// the total `resizeScreen()` applies. Recording the usable request keeps `requestedPageSize`
+    /// comparable to what the sequence asked for (XTWINOPS `CSI 8 t`, DECCOLM, DECSCPP all pass usable).
+    void requestWindowResize(LineCount lines, ColumnCount columns) override
+    {
+        requestedPageSize = PageSize { .lines = lines, .columns = columns };
+        if (refuseWindowResize)
+            return;
+        terminal.resizeScreen(PageSize { .lines = lines + terminal.statusLineHeight(), .columns = columns });
+    }
+
+    /// The size most recently requested by the application.
+    std::optional<PageSize> requestedPageSize;
+
+    /// When set, the request is recorded but NOT applied — modelling a frontend that cannot honour it
+    /// (window maximized/fullscreen, a tiling WM, or the resize still in-flight on the GUI thread). Lets
+    /// a test prove a sequence resizes the grid on its own authority rather than via the frontend.
+    bool refuseWindowResize = false;
+
+    /// The frontend's half of XTWINOPS's iconify and move.
+    ///
+    /// A window manager may refuse either, so the terminal never assumes the request took: the frontend
+    /// applies it and reports the outcome back. This mock always obliges, which is the simplest frontend
+    /// that is still honest about the direction the state flows in.
+    void requestWindowIconify(bool iconify) override
+    {
+        auto state = terminal.windowState();
+        state.iconified = iconify;
+        terminal.setWindowState(state);
+    }
+
+    void requestWindowMove(WindowPosition position) override
+    {
+        auto state = terminal.windowState();
+        state.position = position;
+        terminal.setWindowState(state);
+    }
+
+    /// A resize named in pixels. A window is only ever a whole number of cells across, so the pixels are
+    /// divided by the cell's size -- which is why a frontend with no font cannot honour this at all.
+    void requestWindowResize(Width width, Height height) override
+    {
+        auto const cell = terminal.cellPixelSize();
+        if (unbox(cell.width) == 0 || unbox(cell.height) == 0)
+            return;
+
+        requestWindowResize(LineCount::cast_from(unbox(height) / unbox(cell.height)),
+                            ColumnCount::cast_from(unbox(width) / unbox(cell.width)));
+    }
+
+    void requestWindowMaximize(WindowMaximize how) override
+    {
+        if (auto const size = windowSizeStack.maximize(how, terminal.pageSize(), terminal.screenPageSize()))
+            requestWindowResize(size->lines, size->columns);
+    }
+
+    void requestWindowFullScreen(WindowFullScreen how) override
+    {
+        if (auto const size = windowSizeStack.fullScreen(how, terminal.pageSize(), terminal.screenPageSize()))
+            requestWindowResize(size->lines, size->columns);
+    }
+
+    /// Remembers the size to restore a maximized or full-screen window to. @see WindowSizeStack.
+    WindowSizeStack windowSizeStack;
+
     void writeToScreen(std::u32string_view text) { writeToScreen(unicode::convert_to<char>(text)); }
 
     std::string windowTitle;
+
+    /// The icon (or tab) title most recently set by the application, via OSC 0 or OSC 1.
+    std::string iconTitle;
+
     Terminal terminal;
 
     std::string clipboardData;
@@ -98,7 +179,11 @@ class MockTerm: public Terminal::NullEvents
     // Events overrides
     void setWindowTitle(std::string_view title) override { windowTitle = title; }
 
+    void setIconTitle(std::string_view title) override { iconTitle = title; }
+
     void copyToClipboard(std::string_view data) override { clipboardData = data; }
+
+    std::string getClipboard() override { return clipboardData; }
 
     void setWindowFrameColor(RGBColor color) override
     {
@@ -121,11 +206,23 @@ class MockTerm: public Terminal::NullEvents
         settings.maxHistoryLineCount = maxHistoryLineCount;
         settings.ptyReadBufferSize = ptyReadBufferSize;
         settings.goodImageProtocol = true;
+        settings.allowClipboardRead = true; // let tests exercise OSC 52 clipboard reads
         return settings;
     }
 
     std::string const& replyData() const noexcept { return mockPty().stdinBuffer(); }
     void resetReplyData() noexcept { mockPty().stdinBuffer().clear(); }
+
+    /// Discards every reply queued so far, so that a test can assert on what follows and nothing else.
+    ///
+    /// Note that this is *not* resetReplyData(): a reply is queued in the terminal's input generator --
+    /// where terminal.peekInput() reads it -- and only reaches the PTY's stdin buffer once it is
+    /// flushed. Clearing one does not clear the other.
+    void discardPendingReplies()
+    {
+        terminal.flushInput();
+        mockPty().stdinBuffer().clear();
+    }
 
     void requestCaptureBuffer(LineCount lines, bool logical) override
     {

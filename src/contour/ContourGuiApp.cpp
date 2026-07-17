@@ -19,6 +19,7 @@
 #include <crispy/logstore.h>
 #include <crispy/utils.h>
 
+#include <QtCore/QEventLoop>
 #include <QtCore/QProcess>
 #include <QtQml/qqmlextensionplugin.h>
 #if !defined(__APPLE__) && !defined(_WIN32)
@@ -36,6 +37,7 @@
 #include <QtQuick/QSGRendererInterface>
 #include <QtWidgets/QApplication>
 
+#include <atomic>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -566,10 +568,12 @@ int ContourGuiApp::terminalGuiAction()
     // This triggers the expensive FFmpeg/VDPAU/VA-API/Vulkan driver probing
     // without blocking the main thread. When done, we signal QML via
     // multimediaReady so the bell Loader activates only after the probe completes.
-    auto multimediaWarmupThread = std::thread([this] {
+    auto multimediaWarmedUp = std::atomic<bool> { false };
+    auto multimediaWarmupThread = std::thread([this, &multimediaWarmedUp] {
         QMediaDevices::audioOutputs();
         QMetaObject::invokeMethod(
             &_sessionManager, [this] { _sessionManager.setMultimediaReady(true); }, Qt::QueuedConnection);
+        multimediaWarmedUp.store(true, std::memory_order_release);
     });
 
     // Spawn initial window.
@@ -585,7 +589,23 @@ int ContourGuiApp::terminalGuiAction()
     auto const loopResult = QApplication::exec();
     auto const rv = exitCodeFor(_exitStatus, loopResult);
 
-    // Ensure the multimedia warmup thread has finished before destroying Qt objects.
+    // Ensure the multimedia warmup thread has finished before destroying Qt objects -- but keep serving
+    // this thread's event queue while waiting, rather than blocking straight into join().
+    //
+    // QMediaDevices::audioOutputs() is not self-contained on a worker thread: underneath, Qt's
+    // QPlatformAudioDevices::create() posts a *blocking* QMetaObject::invokeMethod back to the main
+    // thread and waits on it. So once exec() has returned, a bare join() deadlocks by construction --
+    // the warmup thread waits for an event loop that is gone, while the main thread waits for the warmup
+    // thread. That is not hypothetical: it is reachable whenever the app quits before the probe finishes
+    // (`contour execute sh -c "exit 0"` is the extreme case), and in practice the process did not even
+    // hang to be noticed -- PipeWire's own loop thread crashed on the half-built device monitor first.
+    //
+    // Pumping until the probe reports done gives the blocking invoke someone to answer it, so the probe
+    // completes and the join is immediate. When the probe wins the race (the normal case) the flag is
+    // already set and this degenerates to the plain join it was before.
+    while (!multimediaWarmedUp.load(std::memory_order_acquire))
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+
     if (multimediaWarmupThread.joinable())
         multimediaWarmupThread.join();
 
