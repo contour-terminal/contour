@@ -217,6 +217,7 @@ in the first column:
 | `foot`              | <https://codeberg.org/dnkl/foot>                     |
 | `ghostty`           | <https://github.com/ghostty-org/ghostty>             |
 | `wezterm`           | <https://github.com/wez/wezterm>                     |
+| `mintty`            | <https://github.com/mintty/mintty>                   |
 
 Set the variable however your environment prefers. For a Claude Code checkout, the least intrusive
 place is the (git-ignored) `.claude/settings.local.json`, which injects it into the tool sandbox:
