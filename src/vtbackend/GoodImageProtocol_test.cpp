@@ -183,6 +183,48 @@ TEST_CASE("GoodImageProtocol.Oneshot.Render", "[GIP]")
     REQUIRE(fragment != nullptr);
 }
 
+TEST_CASE("GoodImageProtocol.Oneshot.RejectsBodyShorterThanGeometry", "[GIP]")
+{
+    // The renderer uploads the DECLARED geometry to the GPU and reads width * height * 4 bytes from the
+    // pixmap, so an image whose body does not fill its geometry is read off the end of the heap
+    // allocation. The upload path has always validated this; the oneshot path reached the very same
+    // Image without it.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    auto const shortBody = makeRGBA(2, 2, 0xFF, 0x00, 0x00, 0xFF); // 16 bytes...
+
+    // ...declared as a 64x64 RGBA image: 16 KB of pixels that were never sent.
+    mock.writeToScreen(gipOneshot("f=3,w=64,h=64,c=4,r=2", shortBody));
+
+    auto const& cell = mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0));
+    CHECK(cell.imageFragment() == nullptr); // nothing was placed, so nothing can be uploaded
+}
+
+TEST_CASE("GoodImageProtocol.Oneshot.RejectsBodyLongerThanGeometry", "[GIP]")
+{
+    // The other side of the same invariant: an over-long body means the sender and this terminal do not
+    // agree on the geometry, and guessing which of the two is right would draw garbage either way.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    auto const longBody = makeRGBA(8, 8, 0xFF, 0x00, 0x00, 0xFF);
+
+    mock.writeToScreen(gipOneshot("f=3,w=2,h=2,c=4,r=2", longBody));
+
+    auto const& cell = mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0));
+    CHECK(cell.imageFragment() == nullptr);
+}
+
+TEST_CASE("GoodImageProtocol.Oneshot.AcceptsRgbBodyAtThreeBytesPerPixel", "[GIP]")
+{
+    // The consistency check is per-format, not a hardcoded 4: GIP's `f=2` really is three bytes per
+    // pixel, and holding it to an RGBA stride would reject every valid RGB image.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    auto body = std::vector<uint8_t>(2 * 2 * 3, 0x7F);
+
+    mock.writeToScreen(gipOneshot("f=2,w=2,h=2,c=4,r=2", body));
+
+    auto const& cell = mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0));
+    CHECK(cell.imageFragment() != nullptr);
+}
+
 // ==================== Release Tests ====================
 
 TEST_CASE("GoodImageProtocol.Release.ByName", "[GIP]")

@@ -606,14 +606,18 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
 
     auto cursorOpt = optional<vtbackend::RenderCursor> { std::nullopt };
 
-    // Wraps a render pass: begins image/text frames, invokes the content callback, then ends both frames.
+    // One frame, however many passes it takes: the image renderer stamps its LRU against the frame, so
+    // opening it per pass would let a later pass evict what an earlier one already scheduled.
+    _imageRenderer.beginFrame();
+
+    // Wraps a render pass: begins image/text passes, invokes the content callback, then ends both.
     auto const renderPass = [&](bool withPressure, auto&& content) {
-        _imageRenderer.beginFrame();
+        _imageRenderer.beginPass();
         _textRenderer.beginFrame();
         _textRenderer.setPressure(withPressure);
         content();
         _textRenderer.endFrame();
-        _imageRenderer.endFrame();
+        _imageRenderer.endPass();
     };
 
     auto const primaryPressure = pressure && terminal.isPrimaryScreen();

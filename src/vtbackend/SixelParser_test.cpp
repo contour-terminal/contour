@@ -394,6 +394,27 @@ TEST_CASE("SixelParser.setAndUseColor", "[sixel]")
     }
 }
 
+TEST_CASE("SixelParser.saturates out-of-range HLS color parameters", "[sixel]")
+{
+    // These parameters come straight off the wire with no bound on their magnitude, and hsl2rgb() of an
+    // out-of-range value converts a double far outside 0..255 to uint8_t -- which is undefined, and
+    // aborts a sanitizer build on nothing worse than a garbled sixel. Each saturates at the top of the
+    // range the VT340 defines for it, exactly as the RGB parameters do.
+    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
+    auto ib = sixelImageBuilder(ImageSize { Width(1), Height(6) }, DefaultColor);
+    auto sp = SixelParser { ib };
+
+    // Hue, lightness and saturation each far beyond their range -- the digits alone overflow the
+    // parameter accumulator's 32 bits.
+    sp.parseFragment("#1;1;4000000000;4000000000;4000000000");
+    sp.parseFragment("#1~");
+    sp.done();
+
+    // Lightness saturates at 100%, which is white whatever the hue and saturation resolve to.
+    CHECK(ib.at(CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) })
+          == RGBAColor { 255, 255, 255, 255 });
+}
+
 TEST_CASE("SixelParser.rewind", "[sixel]")
 {
     auto constexpr PinColors = std::array<RGBAColor, 4> {

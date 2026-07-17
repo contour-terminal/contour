@@ -30,6 +30,46 @@ enum class ImageFormat : uint8_t
     PNG,
 };
 
+/// Number of bytes each pixel occupies in a raw pixmap of the given format.
+///
+/// @param format Image format; must be a raw format (RGB or RGBA). Self-describing or unresolved
+///               formats (PNG, Auto) carry no fixed stride and yield 0.
+/// @return Bytes per pixel, or 0 if @p format is not a raw pixmap format.
+[[nodiscard]] constexpr uint32_t bytesPerPixel(ImageFormat format) noexcept
+{
+    switch (format)
+    {
+        case ImageFormat::RGB: return 3;
+        case ImageFormat::RGBA: return 4;
+        case ImageFormat::Auto:
+        case ImageFormat::PNG: break;
+    }
+    return 0;
+}
+
+/// Tests whether a raw pixmap is exactly as long as its declared geometry claims.
+///
+/// Every path that turns wire data into an Image must pass this before uploading: the renderer
+/// uploads the declared geometry to the GPU and reads `height * width * 4` bytes from the buffer,
+/// so a pixmap shorter than its geometry is read out of bounds.
+///
+/// @param format    Image format. PNG is self-describing and always passes; Auto must be resolved first.
+/// @param size      Declared image dimensions in pixels.
+/// @param dataSize  Length of the pixmap buffer, in bytes.
+/// @return true if the buffer matches @p size exactly (or @p format is self-describing).
+[[nodiscard]] constexpr bool isConsistentPixmap(ImageFormat format, ImageSize size, size_t dataSize) noexcept
+{
+    if (format == ImageFormat::PNG)
+        return true; // self-describing: the decoder validates it
+    if (format == ImageFormat::Auto)
+        return false; // must be resolved to a concrete format before it can be checked
+    if (*size.width <= 0 || *size.height <= 0)
+        return false;
+    auto const expected =
+        static_cast<size_t>(*size.width) * static_cast<size_t>(*size.height) * bytesPerPixel(format);
+    return dataSize == expected;
+}
+
 // clang-format off
 namespace detail { struct ImageId {}; }
 using ImageId = boxed::boxed<uint32_t, detail::ImageId>; // unique numerical image identifier

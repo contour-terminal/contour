@@ -10,6 +10,7 @@
 #include <crispy/point.h>
 #include <crispy/size.h>
 
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -49,6 +50,7 @@ class ImageRenderer: public Renderable, public TextRendererEvents
                   size_t textureBudgetBytes = DefaultTextureBudgetBytes);
 
     void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
+    void detachRenderTarget() noexcept override;
     void clearCache() override;
 
     /// Reconfigures the slicing properties of existing images.
@@ -62,15 +64,47 @@ class ImageRenderer: public Renderable, public TextRendererEvents
 
     void inspect(std::ostream& output) const override;
 
+    /// Opens a new frame: advances what the LRU stamps against, and drops the textures the backend
+    /// failed to create.
+    ///
+    /// Call once per frame, before its first pass. A frame may be drawn in several passes (smooth
+    /// scrolling draws the main display and the status line separately), and an image any of them drew
+    /// must outrank one merely resident -- its quads are already scheduled and name their texture, so
+    /// releasing it would drop it from the very frame it is visible in.
     void beginFrame();
-    void endFrame();
+
+    /// Opens one pass within the current frame.
+    void beginPass();
+
+    /// Closes one pass, flushing the quads it emitted.
+    void endPass();
 
     void onBeforeRenderingText() override;
     void onAfterRenderingText() override;
 
   private:
     /// The texture holding @p rasterizedImage's pixels, creating and uploading it on first sight.
-    atlas::ImageTextureId textureFor(vtbackend::RasterizedImage const& rasterizedImage);
+    ///
+    /// @return The texture's id, or nullopt when the image cannot be uploaded at all -- which is to say
+    ///         its pixmap does not match the geometry it declares. Such an image has nothing to sample
+    ///         and never will, so the caller must not draw it.
+    [[nodiscard]] std::optional<atlas::ImageTextureId> textureFor(
+        vtbackend::RasterizedImage const& rasterizedImage);
+
+    /// Forgets the textures the backend failed to create, freeing what they charged to the budget.
+    void dropFailedTextures();
+
+    /// Paints the part of a cell the image does not reach, in the image's gap colour.
+    ///
+    /// @param pos       the cell's top-left, in item pixels.
+    /// @param placement where the image lands within the cell.
+    /// @param color     the gap colour: the background colour current when the image was placed.
+    /// @param aboveText which side of the text the fill belongs on -- the image's own side, since the
+    ///                  gap is part of its composite.
+    void fillGap(crispy::point pos,
+                 vtbackend::FragmentPlacement const& placement,
+                 vtbackend::RGBAColor color,
+                 bool aboveText);
 
     /// Hands @p quads to the backend and empties them.
     void flushQuads(std::vector<atlas::RenderImageQuad>& quads);

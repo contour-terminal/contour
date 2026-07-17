@@ -276,6 +276,27 @@ namespace detail
              .height = vtbackend::Height::cast_from(std::max(0, height)) };
 }
 
+/// A device-pixel extent expressed in the unit reported to applications.
+///
+/// For extents that are not a page of cells -- the image-canvas ceiling, above all. Every pixel figure an
+/// application is told must be in one unit, or it cannot compare them: a ceiling left in device pixels
+/// while the window reports logical tells the application it may draw an image twice the size of the
+/// screen it is on. FLOORED for the same reason reportedCellSize() is: a report of available space is an
+/// availability, and rounding one up promises space that is not there.
+/// @param devicePx Extent in device pixels.
+/// @param scale    Device pixels per reported pixel to divide out; 1.0 reports device pixels as-is.
+/// @return The extent to report.
+[[nodiscard]] constexpr vtbackend::ImageSize reportedPixels(vtbackend::ImageSize devicePx,
+                                                            double scale) noexcept
+{
+    if (!(scale > 0.0))
+        return devicePx; // a degenerate scale reports what the renderer uses, rather than nothing
+    return { .width =
+                 vtbackend::Width::cast_from(detail::floorUnscaled(unbox<double>(devicePx.width), scale)),
+             .height =
+                 vtbackend::Height::cast_from(detail::floorUnscaled(unbox<double>(devicePx.height), scale)) };
+}
+
 /// Fits a grid into a device-pixel area: page = clamp(pageSizeForPixels(...)), margin placement computed
 /// against the CLAMPED page so the renderer and the terminal can never disagree (below-minimum windows
 /// previously computed margins for a page the terminal then silently enlarged).

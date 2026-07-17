@@ -1519,7 +1519,7 @@ constexpr StringLiteral PixelReportingWeb {
     "\n"
     "Applications derive the cell size by dividing a reported extent by the grid and size image\n"
     "canvases from it, so on a scaled display this decides how large an image an application draws\n"
-    "into a given area. Valid values (ignore-case):\n"
+    "into a given area.\n"
     "\n"
     "A report is only usable if that division is exact, and Contour's cell is the font's advance in\n"
     "**device** pixels — at a fractional scale it has no exact logical counterpart (17 / 1.75 =\n"

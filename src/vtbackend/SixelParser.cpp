@@ -168,6 +168,25 @@ namespace
     {
         return action == SixelParser::Action::Ignore || action == SixelParser::Action::Undefined;
     }
+
+    /// @return true if every state treats all ten digits identically.
+    ///
+    /// What licenses the digit-run fast path in parse(): it consults the table for the FIRST digit of a
+    /// run and then scans the rest by isDigit() alone, which is only sound while '0'..'9' share one cell
+    /// in every state. A table change that gave one digit its own transition would silently make that
+    /// run take the wrong branch, so it is asserted here rather than left as a comment.
+    consteval bool theHotRunsAreFoldable() noexcept
+    {
+        auto const table = SixelParser::Table::get();
+        return std::ranges::all_of(std::views::iota(size_t { 0 }, SixelParser::StateCount), [&](size_t s) {
+            return std::ranges::all_of(std::views::iota(uint8_t { '1' }, uint8_t { '9' + 1 }),
+                                       [&](uint8_t d) {
+                                           return table.transitions[s][d] == table.transitions[s]['0']
+                                                  && table.events[s][d] == table.events[s]['0'];
+                                       });
+        });
+    }
+    static_assert(theHotRunsAreFoldable(), "The digit-run fast path requires '0'..'9' to share a cell.");
 } // namespace
 
 void SixelParser::parse(char value)
@@ -301,10 +320,15 @@ void SixelParser::submitColor()
                 // Pz 	0 to 100 percent 	Saturation
                 //
                 // (Hue angle seems to be shifted by 120 deg in other Sixel implementations.)
-                auto const h = static_cast<double>(_params[2]) - 120.0;
+                //
+                // Saturated for the same reason the RGB branch above is: these parameters arrive off the
+                // wire unclamped, and hsl2rgb() of an out-of-range value converts a double far outside
+                // 0..255 to uint8_t, which is undefined. Each saturates at the top of the range the
+                // VT340 defines for it.
+                auto const h = static_cast<double>(std::min(_params[2], 360u)) - 120.0;
                 auto const hc = (h < 0 ? 360 + h : h) / 360.0;
-                auto const sc = static_cast<double>(_params[4]) / 100.0;
-                auto const ls = static_cast<double>(_params[3]) / 100.0;
+                auto const sc = static_cast<double>(std::min(_params[4], 100u)) / 100.0;
+                auto const ls = static_cast<double>(std::min(_params[3], 100u)) / 100.0;
                 auto const rgb = hsl2rgb(hc, sc, ls);
                 _events.setColor(index, rgb);
                 break;

@@ -203,6 +203,15 @@ class TerminalDisplay: public QQuickItem
     ///                      not the terminal's current one.
     [[nodiscard]] vtbackend::ImageSize reportedPixelSize(vtbackend::PageSize totalPageSize) const;
 
+    /// Device pixels per reported pixel: the divisor taking a device-pixel extent into the unit
+    /// `pixel_reporting` selects.
+    ///
+    /// The one place that decides that unit. Anything an application is told a pixel count in must pass
+    /// through here -- an extent left in device pixels while the rest reports logical is not a smaller
+    /// number, it is a number in a unit the application does not know it is reading.
+    /// @return 1.0 when reporting device pixels, the content scale when reporting logical ones.
+    [[nodiscard]] double reportedPixelScale() const;
+
     void resizeTerminalToDisplaySize();
 
     // (user requested) actions

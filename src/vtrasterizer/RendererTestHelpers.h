@@ -11,6 +11,7 @@
 #include <ostream>
 #include <ranges>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace vtrasterizer
@@ -59,6 +60,29 @@ class MockImageTextureBackend: public vtrasterizer::atlas::ImageTextureBackend
     void renderImageQuad(vtrasterizer::atlas::RenderImageQuad param) override
     {
         quadCommands.emplace_back(param);
+        drawOrder.emplace_back(param);
+    }
+
+    void renderImageGap(vtrasterizer::atlas::RenderImageGap param) override
+    {
+        gapCommands.emplace_back(param);
+        drawOrder.emplace_back(param);
+    }
+
+    std::vector<vtrasterizer::atlas::RenderImageGap> gapCommands;
+
+    /// Quads and gap fills as issued, interleaved -- what composites is the ORDER, so a test that only
+    /// counted them could not tell a gap drawn over the image from one drawn under it.
+    std::vector<std::variant<vtrasterizer::atlas::RenderImageQuad, vtrasterizer::atlas::RenderImageGap>>
+        drawOrder;
+
+    /// Ids the next takeFailedImageTextures() call reports, standing in for a backend that could not
+    /// create the texture (out of GPU memory, no RHI yet).
+    std::vector<vtrasterizer::atlas::ImageTextureId> failedImageTextures;
+
+    [[nodiscard]] std::vector<vtrasterizer::atlas::ImageTextureId> takeFailedImageTextures() override
+    {
+        return std::exchange(failedImageTextures, {});
     }
 };
 

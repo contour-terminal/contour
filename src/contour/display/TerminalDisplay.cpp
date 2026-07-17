@@ -1431,9 +1431,15 @@ vtbackend::ImageSize TerminalDisplay::reportedPixelSize(vtbackend::PageSize tota
     // Logical stays available for comparing against such a terminal at an equal canvas size. It is exact
     // only where the scale divides both cell axes evenly (e.g. 1.0, or 20x40 at 2.0), and letterboxes by
     // the floor error otherwise.
-    auto const scale =
-        _session->profile().pixelReporting.value() == config::PixelReporting::Device ? 1.0 : contentScale();
-    return geometry::reportedPixelsForPage(totalPageSize, _renderer->publishedCellSize(), scale);
+    return geometry::reportedPixelsForPage(
+        totalPageSize, _renderer->publishedCellSize(), reportedPixelScale());
+}
+
+double TerminalDisplay::reportedPixelScale() const
+{
+    assert(_session);
+    return _session->profile().pixelReporting.value() == config::PixelReporting::Device ? 1.0
+                                                                                        : contentScale();
 }
 
 vtbackend::ImageSize TerminalDisplay::cellSize() const

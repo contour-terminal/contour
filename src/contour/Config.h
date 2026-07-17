@@ -83,8 +83,8 @@ enum class ScrollBarPosition : uint8_t
 /// decides how large a sixel an application draws into a given area.
 enum class PixelReporting : uint8_t
 {
-    Logical, //!< Report logical pixels: what every other terminal reports (default).
-    Device,  //!< Report device pixels: images land 1:1 on the display's own pixels.
+    Logical, //!< Report logical pixels: what every other terminal reports.
+    Device,  //!< Report device pixels: images land 1:1 on the display's own pixels (default).
 };
 
 /// Where the GUI tab strip (tab bar) is placed within the window.

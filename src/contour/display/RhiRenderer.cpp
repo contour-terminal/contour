@@ -517,6 +517,11 @@ void RhiRenderer::destroyImageTexture(atlas::DestroyImageTexture param)
     _scheduledExecutions.imageDestroys.emplace_back(param);
 }
 
+std::vector<atlas::ImageTextureId> RhiRenderer::takeFailedImageTextures()
+{
+    return std::exchange(_failedImageTextures, {});
+}
+
 vtrasterizer::atlas::ImageTextureBackend& RhiRenderer::imageScheduler()
 {
     return *this;
@@ -698,16 +703,19 @@ void RhiRenderer::executeCreateImageTexture(QRhiResourceUpdateBatch& updates,
                                             atlas::CreateImageTexture& param)
 {
     if (_rhi == nullptr)
+    {
+        _failedImageTextures.push_back(param.id);
         return;
+    }
 
     auto const pixelSize = QSize(unbox<int>(param.size.width), unbox<int>(param.size.height));
-    auto resources =
-        ImageTextureResources { .texture = {}, .swapchain = {}, .offscreen = {}, .size = param.size };
+    auto resources = ImageTextureResources { .texture = {}, .swapchain = {}, .offscreen = {} };
 
     resources.texture.reset(_rhi->newTexture(QRhiTexture::RGBA8, pixelSize, 1, {}));
     if (!resources.texture->create())
     {
         errorLog()("Failed to create RHI image texture of size {}.", param.size);
+        _failedImageTextures.push_back(param.id);
         return;
     }
 
@@ -775,6 +783,23 @@ void RhiRenderer::recordImagePass(std::vector<ImageQuadBatch> const& batches)
         if (batch.buffer.empty())
             continue;
 
+        if (!batch.texture)
+        {
+            // A run of gap fills: the rect pipeline's geometry, but recorded HERE so it composites in
+            // issue order with the quads around it rather than with the background.
+            auto const firstRectVertex =
+                static_cast<quint32>(_frameRectVertices.size() / rhilayout::RectVertexFloats);
+            _frameRectVertices.reserve(_frameRectVertices.size() + batch.buffer.size());
+            _frameRectVertices.insert(_frameRectVertices.end(), batch.buffer.begin(), batch.buffer.end());
+            _frameDrawItems.push_back(FrameDrawItem {
+                .pass = FramePass::Rect,
+                .firstVertex = firstRectVertex,
+                .vertexCount = static_cast<quint32>(batch.buffer.size() / rhilayout::RectVertexFloats),
+                .scissor = _innerScissor,
+            });
+            continue;
+        }
+
         // Images ride the text pass's vertex buffer: identical layout, so the only thing that makes
         // this a separate draw is which texture binding 1 names.
         auto const firstVertex =
@@ -786,7 +811,7 @@ void RhiRenderer::recordImagePass(std::vector<ImageQuadBatch> const& batches)
             .firstVertex = firstVertex,
             .vertexCount = static_cast<quint32>(batch.buffer.size() / rhilayout::TextVertexFloats),
             .scissor = _innerScissor,
-            .imageTexture = batch.texture,
+            .imageTexture = *batch.texture,
         });
     }
 }
@@ -1054,30 +1079,60 @@ void RhiRenderer::executeUploadTile(QRhiResourceUpdateBatch& updates, atlas::Upl
                           QRhiTextureUploadDescription(QRhiTextureUploadEntry(0, 0, desc)));
 }
 
+namespace
+{
+    /// Appends one solid-colour rectangle in the rect pipeline's vertex layout.
+    /// @param out    buffer to append the six vertices to.
+    /// @param ix     left, in item pixels.
+    /// @param iy     top, in item pixels.
+    /// @param width  rectangle width.
+    /// @param height rectangle height.
+    /// @param color  fill colour.
+    void appendRectVertices(
+        std::vector<float>& out, int ix, int iy, Width width, Height height, RGBAColor color)
+    {
+        auto const x = static_cast<float>(ix);
+        auto const y = static_cast<float>(iy);
+        auto const z = ZAxisDepths::BackgroundSGR;
+        auto const r = unbox<float>(width);
+        auto const s = unbox<float>(height);
+        auto const [cr, cg, cb, ca] = atlas::normalize(color);
+
+        // clang-format off
+        float const vertices[6 * 7] = {
+            // first triangle
+            x,     y + s, z, cr, cg, cb, ca,
+            x,     y,     z, cr, cg, cb, ca,
+            x + r, y,     z, cr, cg, cb, ca,
+
+            // second triangle
+            x,     y + s, z, cr, cg, cb, ca,
+            x + r, y,     z, cr, cg, cb, ca,
+            x + r, y + s, z, cr, cg, cb, ca
+        };
+        // clang-format on
+
+        crispy::copy(vertices, back_inserter(out));
+    }
+} // namespace
+
 void RhiRenderer::renderRectangle(int ix, int iy, Width width, Height height, RGBAColor color)
 {
-    auto const x = static_cast<float>(ix);
-    auto const y = static_cast<float>(iy);
-    auto const z = ZAxisDepths::BackgroundSGR;
-    auto const r = unbox<float>(width);
-    auto const s = unbox<float>(height);
-    auto const [cr, cg, cb, ca] = atlas::normalize(color);
+    appendRectVertices(_rectBuffer, ix, iy, width, height, color);
+}
 
-    // clang-format off
-    float const vertices[6 * 7] = {
-        // first triangle
-        x,     y + s, z, cr, cg, cb, ca,
-        x,     y,     z, cr, cg, cb, ca,
-        x + r, y,     z, cr, cg, cb, ca,
+void RhiRenderer::renderImageGap(atlas::RenderImageGap param)
+{
+    // Into the image list rather than the rect buffer, keeping its place among the quads: the rect pass
+    // is recorded before the text one, so a fill issued there could never occlude the text an
+    // above-the-text image is meant to cover.
+    auto& batches =
+        param.aboveText ? _scheduledExecutions.imageQuadsAboveText : _scheduledExecutions.imageQuadsBelowText;
+    if (batches.empty() || batches.back().texture.has_value())
+        batches.emplace_back(ImageQuadBatch { .texture = std::nullopt, .buffer = {} });
 
-        // second triangle
-        x,     y + s, z, cr, cg, cb, ca,
-        x + r, y,     z, cr, cg, cb, ca,
-        x + r, y + s, z, cr, cg, cb, ca
-    };
-    // clang-format on
-
-    crispy::copy(vertices, back_inserter(_rectBuffer));
+    appendRectVertices(
+        batches.back().buffer, param.x, param.y, param.size.width, param.size.height, param.color);
 }
 
 void RhiRenderer::setScissorRect(int x, int y, int width, int height)
