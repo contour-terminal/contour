@@ -123,12 +123,23 @@ namespace
     constexpr auto Vt420ScreenKeys = std::array { "11"sv, "3"sv, "8"sv, "*"sv, "0"sv, "0"sv, "0"sv, "0"sv };
 
     // 11.7's Protected-Area item is a submenu too (nonvt100.c:631-634 -> tst_SPA), so chapter 11's
-    // rule bites here as well: `*` dispatches it, it prompts, and the driver walks back out. It is the
-    // ONLY other one -- every other item reachable by a `*` in this table is a direct test, checked
-    // against vttest's menu tables. The rule is not "chapter 11 is special", it is "`*` cannot cross a
-    // submenu".
+    // rule bites here as well: `*` dispatches it, it prompts, and the driver walks back out. The rule
+    // is not "chapter 11 is special", it is "`*` cannot cross a submenu".
     constexpr auto Iso6429ProtectedKeys =
         std::array { "11"sv, "7"sv, "1"sv, "*"sv, "0"sv, "0"sv, "0"sv, "0"sv };
+
+    // ... and 11.2.5's User-Preferred Supplemental Set item is the third (tst_upss, charsets.c:986).
+    // Vt320ReportKeys' `*` dispatches it, it prompts for its own menu input, the driver answers `0`,
+    // and it walks straight back out -- running only the `reset_upss()` on its way out (charsets.c:1015)
+    // and never reaching tst_DECRQUPSS. So this item needs a scenario of its own.
+    //
+    // It does NOT get a `*`, and that is the point of the rule rather than an exception to it: item 1
+    // of the UPSS submenu is `tst_characters`, which waits on real key presses for its soft-character
+    // item, so a `*` here would wall up before reaching anything. The DECRQUPSS item is addressed
+    // directly instead: 11 -> 2 (VT320) -> 5 (Reports) -> 5 (UPSS) -> 4 (Test DECRQUPSS), then one `0`
+    // per menu level to unwind -- UPSS, Reports, VT320, chapter 11, main.
+    constexpr auto Vt320UpssKeys =
+        std::array { "11"sv, "2"sv, "5"sv, "5"sv, "4"sv, "0"sv, "0"sv, "0"sv, "0"sv, "0"sv };
 
     constexpr auto Vt520CursorKeys = std::array { "11"sv, "4"sv, "2"sv, "*"sv, "0"sv, "0"sv, "0"sv, "0"sv };
     constexpr auto Vt520ReportKeys = std::array { "11"sv, "4"sv, "5"sv, "*"sv, "0"sv, "0"sv, "0"sv, "0"sv };
@@ -304,6 +315,13 @@ namespace
         Scenario { .id = "vttest.11.2.5.vt320-reports",
                    .title = "Test of VT320 reporting functions",
                    .keys = Vt320ReportKeys,
+                   .kind = ScenarioKind::SelfChecking,
+                   .minimumLevel = VTType::VT320,
+                   .driveMode = DriveMode::Live },
+        // The DECRQUPSS item Vt320ReportKeys' `*` cannot reach. @see Vt320UpssKeys.
+        Scenario { .id = "vttest.11.2.5.5.vt320-upss",
+                   .title = "Test of the User-Preferred Supplemental Set (DECRQUPSS)",
+                   .keys = Vt320UpssKeys,
                    .kind = ScenarioKind::SelfChecking,
                    .minimumLevel = VTType::VT320,
                    .driveMode = DriveMode::Live },

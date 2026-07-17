@@ -102,6 +102,7 @@ constexpr inline auto DECREQTPARM = FunctionDocumentation {
 constexpr inline auto DECRQM = FunctionDocumentation { .mnemonic = "DECRQM", .comment = "Request DEC-mode" };
 constexpr inline auto DECRQM_ANSI = FunctionDocumentation { .mnemonic = "DECRQM_ANSI", .comment = "Request ANSI-mode" }; // NOLINT
 constexpr inline auto DECRQPSR = FunctionDocumentation { .mnemonic = "DECRQPSR", .comment = "Request presentation state report" };
+constexpr inline auto DECRQUPSS = FunctionDocumentation { .mnemonic = "DECRQUPSS", .comment = "Request User-Preferred Supplemental Set", .description = "Reports the current User-Preferred Supplemental Set as a DECAUPSS-shaped DCS. The reported `Ps` is the set's own size, not whatever was last sent." };
 constexpr inline auto DECSASD = FunctionDocumentation { .mnemonic = "DECSASD", .comment = "Select Active Status Display" };
 constexpr inline auto DECSCA = FunctionDocumentation { .mnemonic = "DECSCA", .comment = "Select Character Protection Attribute" };
 constexpr inline auto DECSCL = FunctionDocumentation { .mnemonic = "DECSCL", .comment = "Set conformance level (DECSCL), VT220 and up." };
@@ -189,6 +190,7 @@ constexpr inline auto XTSMGRAPHICS = FunctionDocumentation { .mnemonic = "XTSMGR
 constexpr inline auto XTVERSION = FunctionDocumentation { .mnemonic = "XTVERSION", .comment = "Report xterm version" };
 
 // DCS
+constexpr inline auto DECAUPSS = FunctionDocumentation { .mnemonic = "DECAUPSS", .comment = "Assign User-Preferred Supplemental Set", .parameters = "Ps", .description = "Names the supplemental character set GR maps to by default, and that the `<` SCS designator resolves to. `Ps` is the set's size (0 = 94-character, 1 = 96-character) rather than a free parameter, so a `Ps` disagreeing with the designator names no set. Contour decodes UTF-8, so the designation is tracked and reported but never re-maps decoded codepoints." };
 constexpr inline auto DECRQSS = FunctionDocumentation { .mnemonic = "DECRQSS", .comment = "Request Status String" };
 constexpr inline auto DECSIXEL = FunctionDocumentation { .mnemonic = "DECSIXEL", .comment = "Sixel Graphics Image" };
 constexpr inline auto STP = FunctionDocumentation { .mnemonic = "STP", .comment = "Set Terminal Profile" };
@@ -744,6 +746,7 @@ constexpr inline auto DECREQTPARM = detail::CSI(std::nullopt, 0, 1, std::nullopt
 constexpr inline auto DECRQM      = detail::CSI('?', 1, 1, '$', 'p', VTType::VT320, documentation::DECRQM);
 constexpr inline auto DECRQM_ANSI = detail::CSI(std::nullopt, 1, 1, '$', 'p', VTType::VT320, documentation::DECRQM_ANSI);// NOLINT
 constexpr inline auto DECRQPSR    = detail::CSI(std::nullopt, 1, 1, '$', 'w', VTType::VT320, documentation::DECRQPSR);
+constexpr inline auto DECRQUPSS   = detail::CSI(std::nullopt, 0, 0, '&', 'u', VTType::VT320, documentation::DECRQUPSS);
 constexpr inline auto DECSASD     = detail::CSI(std::nullopt, 0, 1, '$', '}', VTType::VT420, documentation::DECSASD);
 constexpr inline auto DECSCA      = detail::CSI(std::nullopt, 0, 1, '"', 'q', VTType::VT240, documentation::DECSCA);
 constexpr inline auto DECSCL      = detail::CSI(std::nullopt, 1, 2, '"', 'p', VTType::VT220, documentation::DECSCL);
@@ -817,6 +820,7 @@ constexpr inline auto PPB             = detail::CSI(std::nullopt, 0, 1, ' ', 'R'
 constexpr inline auto DECRQDE         = detail::CSI(std::nullopt, 0, 0, '"', 'v', VTType::VT420, documentation::DECRQDE);
 
 // DCS functions
+constexpr inline auto DECAUPSS    = detail::DCS(std::nullopt, 0, 1, '!', 'u', VTType::VT320, documentation::DECAUPSS);
 constexpr inline auto DECDLD      = detail::DCS(std::nullopt, 0, 8, std::nullopt, '{', VTType::VT220, documentation::DECDLD);
 constexpr inline auto DECDMAC     = detail::DCS(std::nullopt, 0, 3, '!', 'z', VTType::VT420, documentation::DECDMAC);
 constexpr inline auto DECRQSS     = detail::DCS(std::nullopt, 0, 0, '$', 'q', VTType::VT420, documentation::DECRQSS);
@@ -1073,8 +1077,10 @@ constexpr static auto allFunctionsArray() noexcept
         PPR,
         PPB,
         DECRQDE,
+        DECRQUPSS,
 
         // DCS
+        DECAUPSS,
         DECDLD,
         DECDMAC,
         DECUDK,

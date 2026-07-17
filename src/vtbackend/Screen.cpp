@@ -1274,10 +1274,10 @@ void Screen::reportCursorInformation()
     auto const scss = static_cast<char>(scssBits);
 
     // Sdesig: SCS designation final characters for G0 through G3
-    auto const sdesig = std::string { charsetDesignation(charsets.charsetIdOf(CharsetTable::G0)),
-                                      charsetDesignation(charsets.charsetIdOf(CharsetTable::G1)),
-                                      charsetDesignation(charsets.charsetIdOf(CharsetTable::G2)),
-                                      charsetDesignation(charsets.charsetIdOf(CharsetTable::G3)) };
+    auto const sdesig = std::string { charsets.designationOf(CharsetTable::G0),
+                                      charsets.designationOf(CharsetTable::G1),
+                                      charsets.designationOf(CharsetTable::G2),
+                                      charsets.designationOf(CharsetTable::G3) };
 
     reply("\033P1$u{};{};{};{};{};{};{};{};{};{}\033\\",
           line,
@@ -1879,6 +1879,24 @@ void Screen::requestDisplayedExtent()
     // Phe = page height, Pwe = page width, Pp = displayed page number (1-based).
     auto const ps = pageSize();
     reply("\033[{};{};1;1;{}\"w", *ps.lines, *ps.columns, _terminal->displayedPageNumber());
+}
+
+void Screen::requestUserPreferredSupplementalSet()
+{
+    // DECRQUPSS: reply with a DECAUPSS-shaped DCS Ps ! u D...D ST.
+    //
+    // Ps is re-derived from the set's own size rather than echoed from whatever was last assigned --
+    // it describes the set, so it cannot be anything else. Matches xterm, which encodes the reply's
+    // Ps from the charset it is reporting.
+    //
+    // Written 7-bit; Terminal::reply folds the C1 controls to 8-bit under S8C1T.
+    auto const& upss = _terminal->userPreferredSupplementalSet();
+    auto designator = std::string {};
+    if (upss.intermediate != '\0')
+        designator += upss.intermediate;
+    designator += upss.final;
+
+    reply("\033P{}!u{}\033\\", upss.is96 ? '1' : '0', designator);
 }
 
 void Screen::eraseArea(int top, int left, int bottom, int right)
@@ -2517,6 +2535,23 @@ bool Screen::tryHandleSCS(Sequence const& seq)
         result += seq.finalChar();
         return result;
     }();
+
+    // `<` designates the User-Preferred Supplemental Set (xterm's nrc_DEC_UPSS). It is unlike every
+    // other designator in naming no fixed set: it resolves to whatever DECAUPSS last assigned.
+    //
+    // This is also the one sanctioned way for G0 to hold a 96-character set. DEC STD 070 tells
+    // applications not to assume they may designate a 96-charset into G0, "but that it is possible to
+    // do this using UPSS" (quoted in xterm's misc.c, above decode_upss) -- so the slot's own syntax
+    // does not decide the size here; the resolved set's does.
+    //
+    // A VT320-era designator, so a terminal operating below that level does not recognise it and the
+    // designation is ignored -- silently, exactly as an unknown designator is below.
+    if (designator == "<")
+    {
+        if (conformanceLevelOf(_terminal->operatingLevel()) >= conformanceLevelOf(VTType::VT320))
+            _cursor.charsets.selectUserPreferred(gSet->table, _terminal->userPreferredSupplementalSet());
+        return true;
+    }
 
     // Try to map the designator to a standard charset first
     auto const standardCharset = [&]() -> std::optional<CharsetId> {
@@ -5425,6 +5460,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case PPR: pagePositionRelative(seq.param_or(0, 1)); break;
         case PPB: pagePositionBackward(seq.param_or(0, 1)); break;
         case DECRQDE: requestDisplayedExtent(); break;
+        case DECRQUPSS: requestUserPreferredSupplementalSet(); break;
         case DL: deleteLines(seq.param_positive_or(0, LineCount(1))); break;
         case ECH: eraseCharacters(seq.param_positive_or(0, ColumnCount(1))); break;
         case ED:
@@ -5752,6 +5788,15 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case SEMA: processShellIntegration(seq); break;
 
         // hooks
+        case DECAUPSS:
+            // Ps names the set's size and has only two readings. A third value names nothing, so the
+            // sequence is rejected outright and deliberately left un-hooked: SequenceBuilder::put
+            // discards a DCS payload when no hook is installed, so the designator cannot reach the
+            // screen as text.
+            if (auto const ps = seq.param_or(0, 0); ps != 0 && ps != 1)
+                return ApplyResult::Invalid;
+            _terminal->hookParser(hookDECAUPSS(seq));
+            break;
         case DECDLD: _terminal->hookParser(hookDECDLD(seq)); break;
         case DECDMAC: _terminal->hookParser(hookDECDMAC(seq)); break;
         case DECSIXEL: _terminal->hookParser(hookSixel(seq)); break;
@@ -5892,6 +5937,43 @@ unique_ptr<ParserExtension> Screen::hookDECRQSS(Sequence const& /*seq*/)
             requestStatusString(s.value());
 
         // TODO: handle batching
+    });
+}
+
+unique_ptr<ParserExtension> Screen::hookDECAUPSS(Sequence const& seq)
+{
+    // DECAUPSS — Assign User-Preferred Supplemental Set
+    // DCS Ps ! u D...D ST
+    //
+    // Ps is the set's *size* (0 = 94-character, 1 = 96-character), not a free parameter: it must agree
+    // with the designator that follows, so `DCS 0 ! u A ST` is US ASCII while `DCS 1 ! u A ST` is ISO
+    // Latin-1 -- the same designator naming two different sets. A disagreeing Ps names no set at all.
+    //
+    // param_or (not param_positive_or): zero is a legitimate value here, and is also the default.
+    auto const is96 = seq.param_or(0, 0) == 1;
+
+    return make_unique<SimpleStringCollector>([this, is96](string_view data) {
+        // The designator is either a lone final byte ("A") or an intermediate plus a final ("%5").
+        auto const upss = [&]() -> std::optional<UserPreferredSupplementalSet> {
+            switch (data.size())
+            {
+                case 1: return findUserPreferredSupplementalSet('\0', data[0], is96);
+                case 2: return findUserPreferredSupplementalSet(data[0], data[1], is96);
+                default: return std::nullopt;
+            }
+        }();
+
+        // A set DEC introduced above the terminal's operating level is not assignable here -- the
+        // DEC/ISO Greek, Hebrew, Turkish and Cyrillic sets are VT500-era, finer-grained than the VT320
+        // gate DECAUPSS itself carries. Gate on conformanceLevelOf(), never on VTType ordering:
+        // VTType's values are the DA2 encoding and are not level-ordered (VT330 = 18, VT340 = 19, but
+        // VT320 = 24).
+        if (!upss.has_value()
+            || conformanceLevelOf(_terminal->operatingLevel())
+                   < conformanceLevelOf(upss->minimumConformanceLevel))
+            return; // Names no set we can honour: leave UPSS as it was.
+
+        _terminal->setUserPreferredSupplementalSet(*upss);
     });
 }
 

@@ -42,22 +42,6 @@ invalid: CSI 2 g
 # ANSI mode would be papering over the driver-visible fact that vttest asked for something undefined.
 unknown: ESC <
 
-# DECAUPSS -- a real VT320 feature Contour does not implement. NOT intentional; tracked.
-#
-# `DCS Ps ! u D...D ST` assigns the User-Preferred Supplemental Set, the 96-character set GR maps to.
-# vttest sends `DCS 0 ! u % 5 ST` (DEC Supplemental Graphic) from its VT320 reporting chapter, and then
-# asks for it back with DECRQUPSS (`CSI & u`, charsets.c:898). Contour has neither.
-#
-# This gap was invisible until 2026-07-16 because the chapter that exercises it never ran: chapter 11's
-# `*` cannot reach its sub-chapters, so `vttest.11.2.5` tested nothing while `vttest.11.2.vt320` gated
-# the build. @see docs/internals/vt-conformance.md -- `*` runs every menu ITEM, and an item need not be a test.
-#
-# Contour decodes UTF-8, so GR mapping is a no-op for rendering (see the charset notes in the roadmap):
-# implementing UPSS means tracking the state faithfully and reporting it, as DECCIR already does for
-# the charsets it knows -- not remapping codepoints, which would corrupt Latin-1. Listed so the gate is
-# honest about it rather than silent.
-unknown: DCS ! u
-
 # ERM (Erasure Mode, ANSI mode 6) -- INTENTIONAL, and at parity with xterm.
 #
 # ECMA-48 gives ERM two states: reset (PROTECT) erases only unprotected positions, set (ALL) erases

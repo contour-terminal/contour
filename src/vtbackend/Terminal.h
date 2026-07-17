@@ -1526,6 +1526,20 @@ class Terminal
     [[nodiscard]] ChecksumFlags checksumExtension() const noexcept { return _checksumExtension; }
     void setChecksumExtension(ChecksumFlags flags) noexcept { _checksumExtension = flags; }
 
+    /// The User-Preferred Supplemental Set (UPSS), as assigned by DECAUPSS and reported by DECRQUPSS.
+    ///
+    /// Terminal-wide rather than per-cursor, for the same reason as checksumExtension() above: the
+    /// G-set designations live on the cursor, so a UPSS kept there would be lost to DECSC/DECRC and
+    /// to every alternate-screen switch. UPSS is a user preference, not cursor state.
+    [[nodiscard]] UserPreferredSupplementalSet userPreferredSupplementalSet() const noexcept
+    {
+        return _userPreferredSupplementalSet;
+    }
+    void setUserPreferredSupplementalSet(UserPreferredSupplementalSet const& upss) noexcept
+    {
+        _userPreferredSupplementalSet = upss;
+    }
+
     void forceRedraw(std::function<void()> const& artificialSleep);
     void discardImage(Image const&);
     void markCellDirty(CellLocation position) noexcept;
@@ -2161,6 +2175,11 @@ class Terminal
 
     /// XTCHECKSUM state; reset to Settings::checksumExtension by DECSTR and RIS alike.
     ChecksumFlags _checksumExtension = _settings.checksumExtension;
+
+    /// UPSS state (DECAUPSS/DECRQUPSS); reset to Settings::userPreferredSupplementalSet by DECSTR
+    /// and RIS alike, matching xterm -- whose ReallyReset() restores the charsets unconditionally,
+    /// i.e. on a soft reset as well as a hard one.
+    UserPreferredSupplementalSet _userPreferredSupplementalSet = _settings.userPreferredSupplementalSet;
 
     std::string _currentWorkingDirectory = {};
 

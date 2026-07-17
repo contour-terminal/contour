@@ -3285,9 +3285,14 @@ void Terminal::softReset()
     // *mode* (DEC/ISO) is separate screen state, so clear it too -- xterm's ReallyReset zeroes
     // protected_mode unconditionally, i.e. on a soft reset as well as a hard one.
     _currentScreen->resetProtection();
+
+    // UPSS goes back to what the terminal was configured with. xterm restores the charsets from
+    // ReallyReset() unconditionally -- i.e. on DECSTR as well as RIS -- so a soft reset restores UPSS
+    // just as it restores XTCHECKSUM above.
+    _userPreferredSupplementalSet = _settings.userPreferredSupplementalSet;
+
     // TODO: DECNRCM (National replacement character set)
     // TODO: GL, GR (G0, G1, G2, G3)
-    // TODO: DECAUPSS (Assign user preference supplemental set)
     // TODO: DECSASD (Select active status display)
     // TODO: DECKPM (Keyboard position mode)
     // TODO: DECPCTERM (PCTerm mode)
@@ -3370,7 +3375,8 @@ void Terminal::hardReset()
     for (auto const& [mode, frozen]: _settings.frozenModes)
         freezeMode(mode, frozen);
 
-    _checksumExtension = _settings.checksumExtension; // XTCHECKSUM
+    _checksumExtension = _settings.checksumExtension;                       // XTCHECKSUM
+    _userPreferredSupplementalSet = _settings.userPreferredSupplementalSet; // DECAUPSS
 
     // RIS restores the title modes to their default (xterm resets title_modes only on a full reset, not
     // on DECSTR). @see resetTitleModes, TitleModeFeature.

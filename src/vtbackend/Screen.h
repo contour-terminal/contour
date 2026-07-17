@@ -270,12 +270,13 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void copyArea(Rect sourceArea, int page, CellLocation targetTopLeft, int targetPage);
 
     // DEC Multi-Page Navigation (VT420)
-    void nextPage(int count);             ///< NP — Move to next page(s), cursor to home.
-    void previousPage(int count);         ///< PP — Move to previous page(s), cursor to home.
-    void pagePositionAbsolute(int page);  ///< PPA — Move to absolute page, preserve cursor.
-    void pagePositionRelative(int count); ///< PPR — Move forward by count pages, preserve cursor.
-    void pagePositionBackward(int count); ///< PPB — Move backward by count pages, preserve cursor.
-    void requestDisplayedExtent();        ///< DECRQDE — Report displayed page extent.
+    void nextPage(int count);                   ///< NP — Move to next page(s), cursor to home.
+    void previousPage(int count);               ///< PP — Move to previous page(s), cursor to home.
+    void pagePositionAbsolute(int page);        ///< PPA — Move to absolute page, preserve cursor.
+    void pagePositionRelative(int count);       ///< PPR — Move forward by count pages, preserve cursor.
+    void pagePositionBackward(int count);       ///< PPB — Move backward by count pages, preserve cursor.
+    void requestDisplayedExtent();              ///< DECRQDE — Report displayed page extent.
+    void requestUserPreferredSupplementalSet(); ///< DECRQUPSS — Report the User-Preferred Supplemental Set.
 
     void eraseArea(int top, int left, int bottom, int right);
 
@@ -772,6 +773,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     [[nodiscard]] std::unique_ptr<ParserExtension> hookSTP(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookSixel(Sequence const& seq);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookDECAUPSS(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECDLD(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECDMAC(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRQSS(Sequence const& seq);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vtbackend/Charset.h>
 #include <vtbackend/ColorPalette.h>
 #include <vtbackend/InputGenerator.h> // Modifier
 #include <vtbackend/RectangularAreaChecksum.h>
@@ -80,6 +81,13 @@ struct Settings
     /// need a terminal whose checksums they can interpret (esctest, for one, cannot pass any
     /// terminal that leaves this at its default), yet neither suite ever sends XTCHECKSUM itself.
     ChecksumFlags checksumExtension {};
+
+    /// The User-Preferred Supplemental Set (UPSS) the terminal starts with, and returns to on a soft
+    /// or hard reset. DEC Supplemental Graphic is the DEC power-up default.
+    ///
+    /// This mirrors xterm's `DFT_UPSS`/`preferLatin1` pair: xterm lets a resource pick between DEC
+    /// Supplemental Graphic and ISO Latin-1, and so does this.
+    UserPreferredSupplementalSet userPreferredSupplementalSet = DefaultUserPreferredSupplementalSet;
 
     std::chrono::milliseconds cursorBlinkInterval = std::chrono::milliseconds { 500 };
     RefreshRate refreshRate = { 30.0 };

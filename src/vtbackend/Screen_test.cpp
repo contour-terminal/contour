@@ -5468,6 +5468,280 @@ TEST_CASE("SCS 96-charset designation (ESC - / . / / )", "[screen]")
     CHECK_FALSE(charsets.is96Charset(CharsetTable::G0));
 }
 
+// {{{ UPSS (DECAUPSS / DECRQUPSS)
+
+TEST_CASE("DECRQUPSS reports DEC Supplemental Graphic before any DECAUPSS", "[screen]")
+{
+    // The power-up default is DEC Supplemental Graphic, matching xterm's DFT_UPSS and vttest's own
+    // reset_upss(). Ps=0 because it is a 94-character set.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen("\033[&u"); // DECRQUPSS
+    CHECK(e(mock.terminal.peekInput()) == e("\033P0!u%5\033\\"));
+}
+
+TEST_CASE("DECAUPSS round-trips every set in the table", "[screen]")
+{
+    // Data-driven over UpssTable itself: a new set is a new row, not a new test case. Each row must
+    // survive assignment and come back byte-identical, with Ps re-derived from the set's own size.
+    //
+    // Contour reports back what was assigned rather than forcing ASCII as xterm does in UTF-8 mode --
+    // a deliberate divergence. Contour tracks charset designations faithfully and reports them (as
+    // DECCIR already does) without re-mapping decoded codepoints; answering "US ASCII" to an
+    // application that just assigned DEC Supplemental Graphic would be a lie about state it set.
+    for (auto const& entry: UpssTable)
+    {
+        auto designator = std::string {};
+        if (entry.intermediate != '\0')
+            designator += entry.intermediate;
+        designator += entry.final;
+
+        auto const ps = entry.is96 ? '1' : '0';
+        INFO(std::format("UPSS designator '{}' at Ps={}", designator, ps));
+
+        // VT525 so that even the VT500-era sets are assignable.
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen("\033[65;1\"p"); // DECSCL -> VT level 5
+        mock.writeToScreen(std::format("\033P{}!u{}\033\\", ps, designator));
+        mock.terminal.flushInput(); // drain whatever DECSCL produced
+
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e(std::format("\033P{}!u{}\033\\", ps, designator)));
+    }
+}
+
+TEST_CASE("DECAUPSS Ps names the set's size, not a free parameter", "[screen]")
+{
+    // The sharpest edge in DECAUPSS: Ps is the character-set size, so the *same* designator names two
+    // different sets depending on it, and a Ps that disagrees with the designator names none at all.
+    // xterm's decode_upss skips any table row whose size differs from Ps.
+
+    SECTION("'A' at Ps=0 is US ASCII (94), not ISO Latin-1")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen("\033P0!uA\033\\");
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e("\033P0!uA\033\\"));
+    }
+
+    SECTION("'A' at Ps=1 is ISO Latin-1 (96), not US ASCII")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen("\033P1!uA\033\\");
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e("\033P1!uA\033\\"));
+    }
+
+    SECTION("a size that disagrees with the designator assigns nothing")
+    {
+        // '%5' is a 94-character set, so Ps=1 names no set. UPSS must be left alone -- NOT coerced to
+        // the 94-character reading of the same designator.
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen("\033P1!uA\033\\"); // establish a non-default UPSS first
+        mock.terminal.flushInput();
+
+        mock.writeToScreen("\033P1!u%5\033\\"); // mismatched: %5 is 94-character
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e("\033P1!uA\033\\")); // unchanged
+    }
+}
+
+TEST_CASE("DECAUPSS treats an omitted Ps as zero", "[screen]")
+{
+    // An omitted parameter is stored as 0 *and counted*, so a handler reading it must not fold zero
+    // onto a default -- here zero is itself the meaningful value (94-character), which is why this
+    // reads param_or() rather than param_positive_or().
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen("\033P1!uA\033\\"); // move UPSS off the default (ISO Latin-1, 96)
+    mock.terminal.flushInput();
+
+    mock.writeToScreen("\033P!u>\033\\"); // no Ps at all: must read as Ps=0 -> DEC Technical (94)
+    mock.writeToScreen("\033[&u");
+    CHECK(e(mock.terminal.peekInput()) == e("\033P0!u>\033\\"));
+}
+
+TEST_CASE("DECAUPSS ignores a designator that names no set", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen("\033P0!uZZ\033\\"); // names nothing
+    mock.writeToScreen("\033[&u");
+    CHECK(e(mock.terminal.peekInput()) == e("\033P0!u%5\033\\")); // still the default
+}
+
+TEST_CASE("DECAUPSS gates a set on the conformance level DEC introduced it at", "[screen]")
+{
+    // Two tiers of gating. DECAUPSS itself is VT320+, handled by its Function tag. But the DEC/ISO
+    // Greek, Hebrew, Turkish and Cyrillic sets are VT500-era, which is finer than that tag can express
+    // and so is checked per row.
+    //
+    // Note DECSCL resets the terminal, so UPSS must be assigned *after* it, never before.
+
+    SECTION("a VT500 set is refused at VT320")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen("\033[63;1\"p"); // DECSCL -> VT level 3 (VT320)
+        mock.terminal.flushInput();
+
+        mock.writeToScreen("\033P0!u\"?\033\\"); // DEC Greek: VT500-era
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e("\033P0!u%5\033\\")); // unchanged
+    }
+
+    SECTION("the same set is accepted at VT525")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen("\033[65;1\"p"); // DECSCL -> VT level 5
+        mock.terminal.flushInput();
+
+        mock.writeToScreen("\033P0!u\"?\033\\");
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e("\033P0!u\"?\033\\"));
+    }
+
+    SECTION("DECRQUPSS itself is unrecognised below VT320")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen("\033[61\"p"); // DECSCL -> VT level 1 (VT100)
+        mock.terminal.flushInput();
+
+        mock.writeToScreen("\033[&u");
+        CHECK(mock.terminal.peekInput().empty()); // a VT100 does not answer DECRQUPSS
+    }
+}
+
+TEST_CASE("UPSS survives a screen switch and a cursor save/restore", "[screen]")
+{
+    // UPSS is a terminal-wide user preference, not cursor state. The G-set designations live on the
+    // cursor, so a UPSS kept there would be destroyed by DECSC/DECRC and by every alternate-screen
+    // switch -- the same reason XTCHECKSUM is terminal-level.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen("\033P1!uA\033\\"); // ISO Latin-1
+    mock.terminal.flushInput();
+
+    SECTION("across the alternate screen")
+    {
+        mock.writeToScreen("\033[?1049h"); // to alt
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e("\033P1!uA\033\\"));
+        mock.terminal.flushInput();
+
+        mock.writeToScreen("\033[?1049l"); // back to primary
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e("\033P1!uA\033\\"));
+    }
+
+    SECTION("across DECSC/DECRC")
+    {
+        mock.writeToScreen("\0337"); // DECSC
+        mock.writeToScreen("\033P0!u>\033\\");
+        mock.writeToScreen("\0338"); // DECRC must not roll UPSS back
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e("\033P0!u>\033\\"));
+    }
+}
+
+TEST_CASE("UPSS returns to its configured value on both kinds of reset", "[screen]")
+{
+    // xterm restores the charsets from ReallyReset() unconditionally, i.e. on DECSTR as well as RIS,
+    // so both resets must put UPSS back.
+
+    SECTION("soft reset (DECSTR)")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen("\033P1!uA\033\\");
+        mock.terminal.flushInput();
+
+        mock.writeToScreen("\033[!p"); // DECSTR
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e("\033P0!u%5\033\\"));
+    }
+
+    SECTION("hard reset (RIS)")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen("\033P1!uA\033\\");
+        mock.terminal.flushInput();
+
+        mock.writeToScreen("\033c"); // RIS
+        mock.writeToScreen("\033[&u");
+        CHECK(e(mock.terminal.peekInput()) == e("\033P0!u%5\033\\"));
+    }
+}
+
+TEST_CASE("SCS designator '<' designates the User-Preferred Supplemental Set", "[screen]")
+{
+    // '<' is unlike every other designator: it names no fixed set, but resolves to whatever DECAUPSS
+    // last assigned (xterm's nrc_DEC_UPSS).
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto const& charsets = mock.terminal.primaryScreen().cursor().charsets;
+
+    SECTION("DECCIR reports '<', not the set it resolves to")
+    {
+        // Sdesig must round-trip the designation the application made. The resolved set is not what
+        // was designated, and is not recoverable back to '<'.
+        mock.writeToScreen("\033(<");
+        CHECK(charsets.isUserPreferred(CharsetTable::G0));
+
+        mock.writeToScreen(DECRQPSR(1));
+        // Sdesig = "<BBB": G0 holds UPSS, G1..G3 are still USASCII.
+        CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;1;1;@;@;@;0;2;@;<BBB\033\\"));
+    }
+
+    SECTION("it is the sanctioned way for G0 to hold a 96-character set")
+    {
+        // DEC STD 070 tells applications not to assume they may designate a 96-charset into G0, "but
+        // that it is possible to do this using UPSS" -- so the slot's syntax does not decide the size
+        // here; the resolved set's does. Scss' G0 bit must therefore be set.
+        mock.writeToScreen("\033P1!uA\033\\"); // UPSS = ISO Latin-1, a 96-character set
+        mock.terminal.flushInput();
+        mock.writeToScreen("\033(<");
+
+        CHECK(charsets.is96Charset(CharsetTable::G0));
+
+        mock.writeToScreen(DECRQPSR(1));
+        // Scss 0x40|1 = 'A': G0 holds a 96-charset.
+        CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;1;1;@;@;@;0;2;A;<BBB\033\\"));
+    }
+
+    SECTION("a later designation clears the UPSS marker")
+    {
+        // The flag records a property of the *designation*, so anything that re-designates the G-set
+        // must clear it -- otherwise DECCIR keeps reporting '<' for a set that is no longer UPSS.
+        mock.writeToScreen("\033(<");
+        REQUIRE(charsets.isUserPreferred(CharsetTable::G0));
+
+        mock.writeToScreen("\033(B"); // designate G0 = USASCII
+        CHECK_FALSE(charsets.isUserPreferred(CharsetTable::G0));
+
+        mock.writeToScreen(DECRQPSR(1));
+        CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;1;1;@;@;@;0;2;@;BBBB\033\\"));
+    }
+
+    SECTION("every G-set can hold it")
+    {
+        mock.writeToScreen("\033)<");
+        mock.writeToScreen("\033*<");
+        mock.writeToScreen("\033+<");
+        CHECK(charsets.isUserPreferred(CharsetTable::G1));
+        CHECK(charsets.isUserPreferred(CharsetTable::G2));
+        CHECK(charsets.isUserPreferred(CharsetTable::G3));
+    }
+
+    SECTION("below VT320 the designator is not recognised")
+    {
+        mock.writeToScreen("\033[61\"p"); // DECSCL -> VT level 1
+        mock.terminal.flushInput();
+
+        mock.writeToScreen("\033(<");
+        CHECK_FALSE(charsets.isUserPreferred(CharsetTable::G0));
+    }
+}
+
+// }}} UPSS
+
 // TODO: Sixel: image that exceeds available lines
 
 // TODO: SetForegroundColor
