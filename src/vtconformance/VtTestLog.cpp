@@ -51,6 +51,17 @@ namespace
         VerdictPattern { "No communication errors"sv, true },
         VerdictPattern { "Not expected"sv, false },
         VerdictPattern { "Unknown response"sv, false },
+        // vttest also reports a reply it could not identify as the bare, lower-case word `unknown` --
+        // a *different* string from "Unknown response" above, and its own kind of failure: the
+        // terminal answered, but with something the test could not name. Two tests end that way, both
+        // by falling through a lookup: tst_DECRQUPSS when parse_upss_name() matches no charset
+        // (charsets.c:913), and the VT220 keyboard-language report on an unrecognised code
+        // (vt220.c:104).
+        //
+        // Matched with its `result ` prefix attached rather than on its own: `unknown` is an ordinary
+        // English word that appears in vttest's prose, and a bare needle would let a chapter's own
+        // narration cast a verdict. @see ResultNotePrefix.
+        VerdictPattern { "result unknown"sv, false },
         VerdictPattern { "failed"sv, false },
         VerdictPattern { "Communication errors"sv, false },
         VerdictPattern { "-- OK"sv, true },
