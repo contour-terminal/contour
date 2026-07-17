@@ -995,6 +995,16 @@ class Terminal
     ScreenType screenType() const noexcept { return _currentScreenType; }
     void setScreen(ScreenType screenType);
 
+    /// Enters or leaves the alternate screen buffer for one of the DEC private modes 47, 1047 or 1049,
+    /// following the cursor-carry and clear policy that alternateScreenBehavior() describes for @p mode.
+    /// Modelled on xterm's ToAlternate / FromAlternate: the cursor is a terminal-level entity, so modes
+    /// 47 and 1047 carry it across the switch (it does not move), while mode 1049 lets each page keep
+    /// its own cursor as an implicit DECSC/DECRC.
+    /// @param mode   One of DECMode::UseAlternateScreen (47), OptionalAltScreen (1047) or
+    ///               ExtendedAltScreen (1049); other modes violate the precondition.
+    /// @param enable true to switch to the alternate buffer, false to switch back to the primary.
+    void setAlternateScreen(DECMode mode, bool enable);
+
     Screen& screenForType(ScreenType type) noexcept
     {
         switch (type)
@@ -1906,7 +1916,18 @@ class Terminal
     std::vector<std::unique_ptr<Screen>> _pages; ///< 16 pages: page 0 = primary, page 15 = alt screen
     PageIndex _cursorPage { 0 };                 ///< Page where cursor/VT output goes
     PageIndex _displayedPage { 0 };              ///< Page shown to user (== _cursorPage when DECPCCM set)
-    PageIndex _savedCursorPage { 0 };            ///< Page index saved by DECSC
+    /// Which slot of _savedCursorPage the current screen uses: 1 for the alternate page, 0 for any
+    /// primary page. Keyed on page identity, not _currentScreenType, so a primary VT420 page reached
+    /// via PPA/NP/PP still resolves to the primary slot.
+    [[nodiscard]] size_t savedCursorPageSlot() const noexcept
+    {
+        return _cursorPage == AlternateScreenPageIndex ? 1 : 0;
+    }
+
+    /// DECSC-saved cursor page, kept separately per screen (index 0 = primary, 1 = alternate) so the
+    /// two screens' saved cursors never cross. Defaults are each screen's own page, so a DECRC with no
+    /// prior DECSC stays put.
+    std::array<PageIndex, 2> _savedCursorPage { PageIndex { 0 }, AlternateScreenPageIndex };
     Screen _hostWritableStatusLineScreen;
     Screen _indicatorStatusScreen;
     gsl::not_null<Screen*> _currentScreen;

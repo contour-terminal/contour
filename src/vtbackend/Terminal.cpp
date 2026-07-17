@@ -2941,16 +2941,12 @@ void Terminal::setMode(DECMode mode, bool enable)
             for (auto& category: logstore::get())
                 category.get().enable(enable);
             break;
-        case DECMode::UseAlternateScreen:
-            if (enable)
-            {
-                // Copy the originating page's margins to the alternate screen page,
-                // because xterm alt screen traditionally inherits the primary screen's margins.
-                _pageMargins[AlternateScreenPageIndex.value] = currentPageMargin();
-                setScreen(ScreenType::Alternate);
-            }
-            else
-                setScreen(ScreenType::Primary);
+        case DECMode::UseAlternateScreen: // DECSET 47
+        case DECMode::OptionalAltScreen:  // DECSET 1047
+        case DECMode::ExtendedAltScreen:  // DECSET 1049
+            // The three alternate-screen modes differ only in their cursor-carry and clear policy,
+            // which alternateScreenBehavior() describes as data. @see Terminal::setAlternateScreen.
+            setAlternateScreen(mode, enable);
             break;
         case DECMode::UseApplicationCursorKeys:
             useApplicationCursorKeys(enable);
@@ -3069,6 +3065,50 @@ void Terminal::setLeftRightMargin(optional<ColumnOffset> left, optional<ColumnOf
 void Terminal::clearScreen()
 {
     pageAt(_cursorPage).clearScreen();
+}
+
+void Terminal::setAlternateScreen(DECMode mode, bool enable)
+{
+    // Modes 47, 1047 and 1049 all switch between the primary and alternate screen buffers; they differ
+    // only in whether they carry the cursor across, and whether they erase the alternate page on the
+    // way in or out. That policy is data (alternateScreenBehavior), so the switch below is a single
+    // path, modelled on xterm's ToAlternate / FromAlternate (charproc.c).
+    auto const behavior = alternateScreenBehavior(mode);
+    Require(behavior.has_value());
+
+    if (enable && !isAlternateScreen())
+    {
+        // xterm's ToAlternate: switch in, carrying the cursor across (it is terminal-level, not
+        // per-buffer, so it does not move), then optionally erase the alternate page. The alternate
+        // page inherits the primary's margins, as xterm's alternate screen traditionally does.
+        _pageMargins[AlternateScreenPageIndex.value] = currentPageMargin();
+        auto const carried = _currentScreen->cursor();
+        setScreen(ScreenType::Alternate);
+        if (behavior->carryCursor)
+            _currentScreen->cursor() = carried;
+        if (behavior->clearOnEnter)
+            clearScreen();
+    }
+    else if (!enable && isAlternateScreen())
+    {
+        // xterm's FromAlternate: optionally erase the alternate page first (ED 2 leaves the cursor put),
+        // then switch back, carrying the cursor across.
+        if (behavior->clearOnExit)
+            clearScreen();
+        auto const carried = _currentScreen->cursor();
+        setScreen(ScreenType::Primary);
+        if (behavior->carryCursor)
+            _currentScreen->cursor() = carried;
+    }
+
+    // Modes 47, 1047 and 1049 are three views of one piece of state -- whether the alternate screen
+    // buffer is in use -- so DECRQM must report all three consistently, no matter which one switched
+    // (xterm keys every one off screen->whichBuf). Mirror the resulting buffer state onto all three
+    // bits; the trailing _modes.set(mode, enable) in setMode() then agrees with it.
+    auto const onAlternate = isAlternateScreen();
+    for (auto const altMode:
+         { DECMode::UseAlternateScreen, DECMode::OptionalAltScreen, DECMode::ExtendedAltScreen })
+        _modes.set(altMode, onAlternate);
 }
 
 void Terminal::moveCursorTo(LineOffset line, ColumnOffset column)
@@ -3372,13 +3412,21 @@ void Terminal::setPage(PageIndex target, bool moveCursorHome)
 
 void Terminal::saveCursorPage()
 {
-    _savedCursorPage = _cursorPage;
+    // Per-screen: the primary and alternate screens keep their own saved cursor page, exactly as they
+    // keep their own saved cursor (Screen::_savedCursor). Sharing one slot would let a DECSC on one
+    // screen clobber the other's saved page -- and, because the alternate screen is modelled as a page,
+    // drag a later DECRC across the primary/alternate boundary, which is DECSET 47/1049's job, not
+    // DECSC/DECRC's. xterm likewise keeps saved-cursor state separate per screen. The slot is keyed on
+    // the page identity (is this THE alternate page?), not _currentScreenType, so a primary VT420 page
+    // reached via PPA/NP/PP still uses the primary slot.
+    _savedCursorPage[savedCursorPageSlot()] = _cursorPage;
 }
 
 void Terminal::restoreCursorPage()
 {
-    if (_savedCursorPage != _cursorPage)
-        setPage(_savedCursorPage, false);
+    auto const saved = _savedCursorPage[savedCursorPageSlot()];
+    if (saved != _cursorPage)
+        setPage(saved, false);
 }
 
 void Terminal::setScreen(ScreenType type)
@@ -4302,6 +4350,7 @@ std::string to_string(DECMode mode)
         case DECMode::AllowColumns80to132: return "AllowColumns80to132";
         case DECMode::DebugLogging: return "DebugLogging";
         case DECMode::UseAlternateScreen: return "UseAlternateScreen";
+        case DECMode::OptionalAltScreen: return "OptionalAltScreen";
         case DECMode::MoreFix: return "MoreFix";
         case DECMode::PageCursorCoupling: return "PageCursorCoupling";
         case DECMode::ApplicationKeypad: return "ApplicationKeypad";

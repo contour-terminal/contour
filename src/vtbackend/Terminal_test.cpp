@@ -4086,6 +4086,25 @@ TEST_CASE("Terminal.selectAll.completesInInsertMode", "[terminal]")
     REQUIRE(mock.terminal.selectionAvailable());
     CHECK(mock.terminal.isSelectionComplete());
 }
+
+TEST_CASE("Terminal.DECMode.numberMappingRoundTrips", "[terminal]")
+{
+    using namespace vtbackend;
+
+    // The DECMode<->number mapping is single-sourced in DECModeNumbers; SM/RM and DECRQM/DECRPM read it
+    // in opposite directions. Guard that every row round-trips both ways, so a mode added to the table
+    // is always both settable AND reportable -- never one without the other.
+    for (auto const& [mode, number]: DECModeNumbers)
+    {
+        CHECK(toDECModeNum(mode) == number);
+        CHECK(fromDECModeNum(number) == mode);
+    }
+
+    // A number with no row is simply unrecognised, in either query.
+    CHECK(fromDECModeNum(38) == std::nullopt); // DECTEK, not implemented
+    CHECK(fromDECModeNum(44) == std::nullopt); // margin bell, not implemented
+    CHECK_FALSE(isValidDECMode(38));
+}
 // }}}
 
 // NOLINTEND(misc-const-correctness)

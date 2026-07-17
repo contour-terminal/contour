@@ -688,6 +688,14 @@ enum class DECMode : std::uint8_t
     SaveCursor = 10,
     ExtendedAltScreen = 11,
 
+    /// DECSET 1047 -- Optional Alternate Screen Buffer (xterm).
+    ///
+    /// Behaves like mode 47 (@ref UseAlternateScreen) on entry -- the alternate page is NOT erased and
+    /// the cursor is carried across continuously -- but on exit it erases the alternate page first
+    /// (xterm's FromAlternate-with-clear). @see alternateScreenBehavior. The ordinal (69) is only this
+    /// mode's index into the DEC-mode bitset; it is unrelated to the DEC mode number 1047.
+    OptionalAltScreen = 69,
+
     /// DECNKM — Numeric Keypad Mode (VT320).
     ///
     /// When set, the numeric keypad generates application sequences (same as DECKPAM).
@@ -969,7 +977,46 @@ enum class DECMode : std::uint8_t
     }
 }
 
+/// How one of the "alternate screen buffer" DEC private modes (47, 1047, 1049) behaves when the
+/// application switches into and out of the alternate page.
+///
+/// xterm implements the three as points in this small space (charproc.c: ToAlternate / FromAlternate
+/// and the srm_*ALTBUF* cases). Describing them as data keeps the switch itself a single code path,
+/// rather than three near-duplicate handlers -- adding a fourth alternate-screen variant would be a
+/// new row here, not new control flow.
+struct AlternateScreenBehavior
+{
+    /// Whether the cursor is carried across the switch so that it appears not to move (modes 47 and
+    /// 1047). xterm's cursor is a terminal-level entity -- SwitchBufs swaps only the line storage, never
+    /// the cursor -- so it is continuous across the buffer swap. When false (mode 1049), each page keeps
+    /// its own cursor, which serves as an implicit DECSC/DECRC: the main cursor waits untouched on the
+    /// main page while the application works on the alternate one.
+    bool carryCursor;
+
+    /// Whether the alternate page is erased when entering it (mode 1049 clears; 47 and 1047 keep it).
+    bool clearOnEnter;
+
+    /// Whether the alternate page is erased when leaving it (mode 1047 clears; 47 and 1049 keep it --
+    /// 1049 relies on its clear-on-enter instead).
+    bool clearOnExit;
 };
+
+/// Maps an alternate-screen DEC private mode to its entry/exit behavior, or std::nullopt for any other
+/// mode. @see AlternateScreenBehavior, Terminal::setAlternateScreen.
+/// @param mode The DEC private mode to classify.
+/// @return The behavior for modes 47/1047/1049, otherwise std::nullopt.
+[[nodiscard]] constexpr std::optional<AlternateScreenBehavior> alternateScreenBehavior(DECMode mode) noexcept
+{
+    switch (mode)
+    {
+            // clang-format off
+        case DECMode::UseAlternateScreen: return AlternateScreenBehavior { .carryCursor = true,  .clearOnEnter = false, .clearOnExit = false }; // 47
+        case DECMode::OptionalAltScreen:  return AlternateScreenBehavior { .carryCursor = true,  .clearOnEnter = false, .clearOnExit = true  }; // 1047
+        case DECMode::ExtendedAltScreen:  return AlternateScreenBehavior { .carryCursor = false, .clearOnEnter = true,  .clearOnExit = false }; // 1049
+        // clang-format on
+        default: return std::nullopt;
+    }
+}
 
 /// OSC color-setting related commands that can be grouped into one
 enum class DynamicColorName : uint8_t
@@ -1033,167 +1080,113 @@ constexpr bool isValidAnsiMode(unsigned int mode) noexcept
 std::string to_string(AnsiMode mode);
 std::string to_string(DECMode mode);
 
+/// One row of the @ref DECModeNumbers table: a @ref DECMode and the DEC private mode number it is
+/// spelled as on the wire (the `Ps` in `CSI ? Ps h`).
+struct DECModeNumbering
+{
+    DECMode mode;    ///< The internal mode enumerator.
+    unsigned number; ///< Its DEC private mode number.
+};
+
+/// The bijection between a @ref DECMode and its DEC private mode number, shared by SM/RM,
+/// DECSET/DECRST and DECRQM/DECRPM. Both @ref toDECModeNum and @ref fromDECModeNum read this single
+/// table, so adding a mode is one new row and the two directions can never fall out of sync.
+///
+/// Unmapped numbers a real terminal recognises but Contour does not yet implement include 38 (enter
+/// Tektronix mode, DECTEK) and 44 (turn on margin bell); they intentionally have no row.
+constexpr inline auto DECModeNumbers = std::to_array<DECModeNumbering>({
+    { DECMode::UseApplicationCursorKeys, 1 },
+    { DECMode::DesignateCharsetUSASCII, 2 },
+    { DECMode::Columns132, 3 },
+    { DECMode::NoClearScreenOnColumnChange, 95 },
+    { DECMode::SmoothScroll, 4 },
+    { DECMode::ReverseVideo, 5 },
+    { DECMode::Origin, 6 },
+    { DECMode::AutoWrap, 7 },
+    { DECMode::AutoRepeat, 8 },
+    { DECMode::MouseProtocolX10, 9 },
+    { DECMode::ShowToolbar, 10 },
+    { DECMode::BlinkingCursor, 12 },
+    { DECMode::PrinterExtend, 19 },
+    { DECMode::VisibleCursor, 25 },
+    { DECMode::ShowScrollbar, 30 },
+    { DECMode::AllowColumns80to132, 40 },
+    { DECMode::DebugLogging, 46 },
+    { DECMode::UseAlternateScreen, 47 },
+    { DECMode::OptionalAltScreen, 1047 },
+    { DECMode::MoreFix, 41 },
+    { DECMode::PageCursorCoupling, 64 },
+    { DECMode::ApplicationKeypad, 66 },
+    { DECMode::BackarrowKey, 67 },
+    { DECMode::LeftRightMargin, 69 },
+    { DECMode::MouseProtocolNormalTracking, 1000 },
+    { DECMode::MouseProtocolHighlightTracking, 1001 },
+    { DECMode::MouseProtocolButtonTracking, 1002 },
+    { DECMode::MouseProtocolAnyEventTracking, 1003 },
+    { DECMode::SaveCursor, 1048 },
+    { DECMode::ExtendedAltScreen, 1049 },
+    { DECMode::BracketedPaste, 2004 },
+    { DECMode::FocusTracking, 1004 },
+    { DECMode::NoSixelScrolling, 80 },
+    { DECMode::UsePrivateColorRegisters, 1070 },
+    { DECMode::MouseExtended, 1005 },
+    { DECMode::MouseSGR, 1006 },
+    { DECMode::MouseURXVT, 1015 },
+    { DECMode::MouseSGRPixels, 1016 },
+    { DECMode::MouseAlternateScroll, 1007 },
+    { DECMode::MousePassiveTracking, 2029 },
+    { DECMode::ReportGridCellSelection, 2030 },
+    { DECMode::ReportColorPaletteUpdated, 2031 },
+    { DECMode::SemanticBlockProtocol, 2034 },
+    { DECMode::PrintFormFeed, 18 },
+    { DECMode::HebrewKeyboardMapping, 35 },
+    { DECMode::NationalReplacementCharacterSet, 42 },
+    { DECMode::HorizontalCursorCoupling, 60 },
+    { DECMode::RightToLeftMode, 34 },
+    { DECMode::HebrewEncodingMode, 36 },
+    { DECMode::GreekKeyboardMapping, 57 },
+    { DECMode::VerticalCursorCoupling, 61 },
+    { DECMode::KeyboardUsageMode, 68 },
+    { DECMode::TransmitRateLimiting, 73 },
+    { DECMode::KeyPositionMode, 81 },
+    { DECMode::RightToLeftCopyMode, 96 },
+    { DECMode::CRTSaveMode, 97 },
+    { DECMode::AutoResizeMode, 98 },
+    { DECMode::ModemControlMode, 99 },
+    { DECMode::AutoAnswerbackMode, 100 },
+    { DECMode::ConcealAnswerbackMode, 101 },
+    { DECMode::NullMode, 102 },
+    { DECMode::HalfDuplexMode, 103 },
+    { DECMode::SecondaryKeyboardLanguageMode, 104 },
+    { DECMode::OverscanMode, 106 },
+    { DECMode::ReverseWraparound, 45 },
+    { DECMode::ReverseWraparoundExtended, 1045 },
+    { DECMode::BatchedRendering, 2026 },
+    { DECMode::Unicode, 2027 },
+    { DECMode::TextReflow, 2028 },
+    { DECMode::SixelCursorNextToGraphic, 8452 },
+    { DECMode::Win32InputMode, 9001 },
+});
+
+/// @return The DEC private mode number for @p m, or its raw ordinal when it has no assigned number.
 constexpr unsigned toDECModeNum(DECMode m) noexcept
 {
-    switch (m)
-    {
-        case DECMode::UseApplicationCursorKeys: return 1;
-        case DECMode::DesignateCharsetUSASCII: return 2;
-        case DECMode::Columns132: return 3;
-        case DECMode::NoClearScreenOnColumnChange: return 95;
-        case DECMode::SmoothScroll: return 4;
-        case DECMode::ReverseVideo: return 5;
-        case DECMode::Origin: return 6;
-        case DECMode::AutoWrap: return 7;
-        case DECMode::AutoRepeat: return 8;
-        case DECMode::MouseProtocolX10: return 9;
-        case DECMode::ShowToolbar: return 10;
-        case DECMode::BlinkingCursor: return 12;
-        case DECMode::PrinterExtend: return 19;
-        case DECMode::VisibleCursor: return 25;
-        case DECMode::ShowScrollbar: return 30;
-        case DECMode::AllowColumns80to132: return 40;
-        case DECMode::DebugLogging: return 46;
-        case DECMode::UseAlternateScreen: return 47;
-        case DECMode::MoreFix: return 41;
-        case DECMode::PageCursorCoupling: return 64;
-        case DECMode::ApplicationKeypad: return 66;
-        case DECMode::BackarrowKey: return 67;
-        case DECMode::LeftRightMargin: return 69;
-        case DECMode::MouseProtocolNormalTracking: return 1000;
-        case DECMode::MouseProtocolHighlightTracking: return 1001;
-        case DECMode::MouseProtocolButtonTracking: return 1002;
-        case DECMode::MouseProtocolAnyEventTracking: return 1003;
-        case DECMode::SaveCursor: return 1048;
-        case DECMode::ExtendedAltScreen: return 1049;
-        case DECMode::BracketedPaste: return 2004;
-        case DECMode::FocusTracking: return 1004;
-        case DECMode::NoSixelScrolling: return 80;
-        case DECMode::UsePrivateColorRegisters: return 1070;
-        case DECMode::MouseExtended: return 1005;
-        case DECMode::MouseSGR: return 1006;
-        case DECMode::MouseURXVT: return 1015;
-        case DECMode::MouseSGRPixels: return 1016;
-        case DECMode::MouseAlternateScroll: return 1007;
-        case DECMode::MousePassiveTracking: return 2029;
-        case DECMode::ReportGridCellSelection: return 2030;
-        case DECMode::ReportColorPaletteUpdated: return 2031;
-        case DECMode::SemanticBlockProtocol: return 2034;
-        case DECMode::PrintFormFeed: return 18;
-        case DECMode::HebrewKeyboardMapping: return 35;
-        case DECMode::NationalReplacementCharacterSet: return 42;
-        case DECMode::HorizontalCursorCoupling: return 60;
-        case DECMode::RightToLeftMode: return 34;
-        case DECMode::HebrewEncodingMode: return 36;
-        case DECMode::GreekKeyboardMapping: return 57;
-        case DECMode::VerticalCursorCoupling: return 61;
-        case DECMode::KeyboardUsageMode: return 68;
-        case DECMode::TransmitRateLimiting: return 73;
-        case DECMode::KeyPositionMode: return 81;
-        case DECMode::RightToLeftCopyMode: return 96;
-        case DECMode::CRTSaveMode: return 97;
-        case DECMode::AutoResizeMode: return 98;
-        case DECMode::ModemControlMode: return 99;
-        case DECMode::AutoAnswerbackMode: return 100;
-        case DECMode::ConcealAnswerbackMode: return 101;
-        case DECMode::NullMode: return 102;
-        case DECMode::HalfDuplexMode: return 103;
-        case DECMode::SecondaryKeyboardLanguageMode: return 104;
-        case DECMode::OverscanMode: return 106;
-        case DECMode::ReverseWraparound: return 45;
-        case DECMode::ReverseWraparoundExtended: return 1045;
-        case DECMode::BatchedRendering: return 2026;
-        case DECMode::Unicode: return 2027;
-        case DECMode::TextReflow: return 2028;
-        case DECMode::SixelCursorNextToGraphic: return 8452;
-        case DECMode::Win32InputMode: return 9001;
-        case DECMode::DECModeCount: break;
-    }
+    // A range-based scan rather than std::ranges::find: std::array's iterator is a raw pointer on
+    // libstdc++/libc++ but a wrapper class on MSVC, so binding the result to a typed local is not
+    // portable across standard libraries.
+    for (auto const& row: DECModeNumbers)
+        if (row.mode == m)
+            return row.number;
     return static_cast<unsigned>(m);
 }
 
+/// @return The @ref DECMode a DEC private mode number denotes, or std::nullopt when unrecognised.
 constexpr std::optional<DECMode> fromDECModeNum(unsigned int modeNum) noexcept
 {
-    switch (modeNum)
-    {
-        case 1: return DECMode::UseApplicationCursorKeys;
-        case 2: return DECMode::DesignateCharsetUSASCII;
-        case 3: return DECMode::Columns132;
-        case 95: return DECMode::NoClearScreenOnColumnChange;
-        case 4: return DECMode::SmoothScroll;
-        case 5: return DECMode::ReverseVideo;
-        case 6: return DECMode::Origin;
-        case 7: return DECMode::AutoWrap;
-        case 8: return DECMode::AutoRepeat;
-        case 9: return DECMode::MouseProtocolX10;
-        case 10: return DECMode::ShowToolbar;
-        case 12: return DECMode::BlinkingCursor;
-        case 19: return DECMode::PrinterExtend;
-        case 25: return DECMode::VisibleCursor;
-        case 30: return DECMode::ShowScrollbar;
-        // TODO: Ps = 3 5  -> Enable font-shifting functions (rxvt).
-        // IGNORE? Ps = 3 8  -> Enter Tektronix Mode (DECTEK), VT240, xterm.
-        case 40: return DECMode::AllowColumns80to132;
-        // IGNORE: Ps = 4 1  -> more(1) fix (see curses resource).
-        // TODO: Ps = 4 2  -> Enable National Replacement Character sets (DECNRCM), VT220.
-        // TODO: Ps = 4 4  -> Turn On Margin Bell, xterm.
-        // TODO: Ps = 4 5  -> Reverse-wraparound Mode, xterm.
-        case 46: return DECMode::DebugLogging;
-        case 47: return DECMode::UseAlternateScreen;
-        case 41: return DECMode::MoreFix;
-        case 64: return DECMode::PageCursorCoupling;
-        case 66: return DECMode::ApplicationKeypad;
-        case 67: return DECMode::BackarrowKey;
-        case 69: return DECMode::LeftRightMargin;
-        case 80: return DECMode::NoSixelScrolling;
-        case 1000: return DECMode::MouseProtocolNormalTracking;
-        case 1001: return DECMode::MouseProtocolHighlightTracking;
-        case 1002: return DECMode::MouseProtocolButtonTracking;
-        case 1003: return DECMode::MouseProtocolAnyEventTracking;
-        case 1004: return DECMode::FocusTracking;
-        case 1005: return DECMode::MouseExtended;
-        case 1006: return DECMode::MouseSGR;
-        case 1007: return DECMode::MouseAlternateScroll;
-        case 1015: return DECMode::MouseURXVT;
-        case 1016: return DECMode::MouseSGRPixels;
-        case 1048: return DECMode::SaveCursor;
-        case 1049: return DECMode::ExtendedAltScreen;
-        case 1070: return DECMode::UsePrivateColorRegisters;
-        case 2004: return DECMode::BracketedPaste;
-        case 2026: return DECMode::BatchedRendering;
-        case 2027: return DECMode::Unicode;
-        case 2028: return DECMode::TextReflow;
-        case 2029: return DECMode::MousePassiveTracking;
-        case 2030: return DECMode::ReportGridCellSelection;
-        case 2031: return DECMode::ReportColorPaletteUpdated;
-        case 2034: return DECMode::SemanticBlockProtocol;
-        case 18: return DECMode::PrintFormFeed;
-        case 35: return DECMode::HebrewKeyboardMapping;
-        case 42: return DECMode::NationalReplacementCharacterSet;
-        case 60: return DECMode::HorizontalCursorCoupling;
-        case 34: return DECMode::RightToLeftMode;
-        case 36: return DECMode::HebrewEncodingMode;
-        case 57: return DECMode::GreekKeyboardMapping;
-        case 61: return DECMode::VerticalCursorCoupling;
-        case 68: return DECMode::KeyboardUsageMode;
-        case 73: return DECMode::TransmitRateLimiting;
-        case 81: return DECMode::KeyPositionMode;
-        case 96: return DECMode::RightToLeftCopyMode;
-        case 97: return DECMode::CRTSaveMode;
-        case 98: return DECMode::AutoResizeMode;
-        case 99: return DECMode::ModemControlMode;
-        case 100: return DECMode::AutoAnswerbackMode;
-        case 101: return DECMode::ConcealAnswerbackMode;
-        case 102: return DECMode::NullMode;
-        case 103: return DECMode::HalfDuplexMode;
-        case 104: return DECMode::SecondaryKeyboardLanguageMode;
-        case 106: return DECMode::OverscanMode;
-        case 45: return DECMode::ReverseWraparound;
-        case 1045: return DECMode::ReverseWraparoundExtended;
-        case 8452: return DECMode::SixelCursorNextToGraphic;
-        case 9001: return DECMode::Win32InputMode;
-        default: return std::nullopt;
-    }
+    for (auto const& row: DECModeNumbers)
+        if (row.number == modeNum)
+            return row.mode;
+    return std::nullopt;
 }
 
 constexpr bool isValidDECMode(unsigned int mode) noexcept

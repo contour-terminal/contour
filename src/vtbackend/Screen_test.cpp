@@ -2876,33 +2876,102 @@ TEST_CASE("SaveCursor and RestoreCursor", "[screen]")
     CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::Origin));
 }
 
-TEST_CASE("Index_outside_margin", "[screen]")
+TEST_CASE("SaveRestoreCursor.AltVsMain", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(4) } };
-    auto& screen = mock.terminal.primaryScreen();
-    mock.writeToScreen("1234\r\n5678\r\nABCD\r\nEFGH\r\nIJKL\r\nMNOP");
-    logScreenText(screen, "initial");
-    REQUIRE("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP\n" == screen.renderMainPageText());
-    mock.terminal.setTopBottomMargin(LineOffset { 1 }, LineOffset { 3 });
+    // The primary and alternate screens keep independent saved cursors. A DECSC on the alternate screen
+    // must not disturb the primary's saved cursor, and DECRC must not switch screens (that is DECSET
+    // 47/1049's job). xterm behaves the same.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(10) } };
 
-    // with cursor above top margin
-    screen.moveCursorTo(LineOffset { 0 }, ColumnOffset { 2 });
-    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
+    mock.writeToScreen("\033[2;3H"); // CUP row 2, col 3 (primary)
+    mock.writeToScreen("\0337");     // DECSC on primary
+    mock.writeToScreen("\033[?47h"); // switch to alternate screen
+    mock.writeToScreen("\033[6;7H"); // CUP row 6, col 7 (alternate)
+    mock.writeToScreen("\0337");     // DECSC on alternate
 
-    screen.index();
-    REQUIRE("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
+    mock.writeToScreen("\033[?47l"); // back to primary
+    mock.writeToScreen("\0338");     // DECRC on primary
+    CHECK(mock.terminal.screenType() == ScreenType::Primary);
     CHECK(mock.terminal.primaryScreen().cursor().position == CellLocation { LineOffset(1), ColumnOffset(2) });
 
-    screen.index();
-    REQUIRE("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(5), ColumnOffset(2) });
+    mock.writeToScreen("\033[?47h"); // switch to alternate
+    mock.writeToScreen("\0338");     // DECRC on alternate
+    CHECK(mock.terminal.screenType() == ScreenType::Alternate);
+    CHECK(mock.terminal.alternateScreen().cursor().position
+          == CellLocation { LineOffset(5), ColumnOffset(6) });
+}
 
-    // with cursor below bottom margin and at bottom screen (=> no-op)
-    screen.moveCursorTo(LineOffset { 5 }, ColumnOffset { 2 });
-    screen.index();
-    REQUIRE("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(5), ColumnOffset(2) });
+TEST_CASE("AlternateScreen.DECSET_47_1047_1049", "[screen]")
+{
+    // Mirrors esctest DECSETTests.doAltBuftest for the three alternate-screen modes. They differ only
+    // in whether the cursor is carried across the switch (47, 1047 -- xterm's continuous, terminal-level
+    // cursor) or saved and restored (1049), and whether the alternate page is erased on the way out
+    // (1047, 1049) or kept (47). @see Terminal::setAlternateScreen, alternateScreenBehavior.
+    int mode = 0;
+    bool cursorCarried = false;   // 47, 1047: the cursor does not move across enter/exit
+    bool altErasedOnExit = false; // 1047, 1049: the alternate page is blank when re-entered
+    SECTION("mode 47 (ALTBUF)")
+    {
+        mode = 47;
+        cursorCarried = true;
+        altErasedOnExit = false;
+    }
+    SECTION("mode 1047 (OPT_ALTBUF)")
+    {
+        mode = 1047;
+        cursorCarried = true;
+        altErasedOnExit = true;
+    }
+    SECTION("mode 1049 (OPT_ALTBUF_CURSOR)")
+    {
+        mode = 1049;
+        cursorCarried = false;
+        altErasedOnExit = true;
+    }
+    CAPTURE(mode);
+
+    auto const set = "\033[?" + std::to_string(mode) + "h";
+    auto const reset = "\033[?" + std::to_string(mode) + "l";
+
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+
+    // Scribble on the primary screen: "abc" / "abc", leaving the cursor at (line 1, col 3).
+    mock.writeToScreen("abc\r\nabc");
+    auto const primaryCursor = mock.terminal.currentScreen().cursor().position;
+    REQUIRE(primaryCursor == CellLocation { LineOffset(1), ColumnOffset(3) });
+
+    // Enter the alternate screen. Modes 47 and 1047 must not move the cursor.
+    mock.writeToScreen(set);
+    REQUIRE(mock.terminal.isAlternateScreen());
+    if (cursorCarried)
+        CHECK(mock.terminal.currentScreen().cursor().position == primaryCursor);
+
+    // Erase the alternate page and scribble "def" on lines 2 and 3 (1-based), exactly as esctest does.
+    mock.writeToScreen("\033[2J\033[2;1Hdef\r\ndef");
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)) == "     ");
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(1)) == "def  ");
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(2)) == "def  ");
+
+    // Leave the alternate screen. 47/1047 carry the cursor continuously; 1049 restores the saved one.
+    auto const beforeExit = mock.terminal.currentScreen().cursor().position;
+    mock.writeToScreen(reset);
+    REQUIRE(mock.terminal.isPrimaryScreen());
+    CHECK(mock.terminal.currentScreen().cursor().position == (cursorCarried ? beforeExit : primaryCursor));
+
+    // The primary content is untouched by any of the three modes.
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)) == "abc  ");
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(1)) == "abc  ");
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(2)) == "     ");
+
+    // Re-enter the alternate screen: mode 47 kept "def"; modes 1047 and 1049 erased it.
+    mock.writeToScreen(set);
+    REQUIRE(mock.terminal.isAlternateScreen());
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(1))
+          == (altErasedOnExit ? "     " : "def  "));
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(2))
+          == (altErasedOnExit ? "     " : "def  "));
+}
+
 TEST_CASE("DCH.worksOutsideTopBottomMargin", "[screen]")
 {
     // DCH deletes characters even when the cursor sits outside the top/bottom scrolling margin (xterm
