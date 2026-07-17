@@ -5299,15 +5299,8 @@ void Screen::handleGipUpload(Message message)
                             && (*resolvedFormat == ImageFormat::PNG || (*size.width > 0 && *size.height > 0));
 
     // Validate RGB/RGBA data size: body must equal width * height * bytes-per-pixel.
-    auto const validDataSize = [&]() -> bool {
-        if (!validImage || !resolvedFormat.has_value())
-            return false;
-        if (*resolvedFormat == ImageFormat::PNG)
-            return true; // PNG is self-describing
-        auto const bpp = (*resolvedFormat == ImageFormat::RGBA) ? 4u : 3u;
-        auto const expectedSize = static_cast<size_t>(*size.width) * *size.height * bpp;
-        return message.body().size() == expectedSize;
-    }();
+    auto const validDataSize = validImage && resolvedFormat.has_value()
+                               && isConsistentPixmap(*resolvedFormat, size, message.body().size());
 
     if (validName && validImage && validDataSize)
     {
@@ -5400,12 +5393,31 @@ std::optional<Image::Data> Screen::decodePng(std::span<uint8_t const> data, Imag
 {
     if (!_terminal->imageDecoder())
         return std::nullopt;
-    return _terminal->imageDecoder()(ImageFormat::PNG, data, size);
+    auto decoded = _terminal->imageDecoder()(ImageFormat::PNG, data, size);
+
+    // The decoder is an injected dependency, so its output is as untrusted as wire data: the renderer
+    // uploads `size` to the GPU verbatim and would read past a buffer that does not match it.
+    if (decoded.has_value() && !isConsistentPixmap(ImageFormat::RGBA, size, decoded->size()))
+    {
+        errorLog()(
+            "Rejecting decoded PNG: {} bytes do not match the decoded size {}.", decoded->size(), size);
+        return std::nullopt;
+    }
+    return decoded;
 }
 
 void Screen::uploadImage(string name, ImageFormat format, ImageSize imageSize, Image::Data&& pixmap)
 {
     assert(format != ImageFormat::Auto && "Auto must be resolved before upload");
+    if (!isConsistentPixmap(format, imageSize, pixmap.size()))
+    {
+        errorLog()("Rejecting image {}: {} pixmap of {} bytes does not match declared size {}.",
+                   name,
+                   format,
+                   pixmap.size(),
+                   imageSize);
+        return;
+    }
     if (format == ImageFormat::PNG)
     {
         auto decodedSize = imageSize;
@@ -5463,6 +5475,17 @@ bool Screen::renderImage(ImageFormat format,
     assert(format != ImageFormat::Auto && "Auto must be resolved before render");
     auto constexpr PixelOffset = PixelCoordinate {};
     auto constexpr PixelSize = ImageSize {};
+
+    // The renderer uploads the declared geometry to the GPU verbatim, reading width * height * 4 bytes
+    // from this buffer -- a pixmap that does not match its geometry would be read out of bounds.
+    if (!isConsistentPixmap(format, imageSize, pixmap.size()))
+    {
+        errorLog()("Rejecting image: {} pixmap of {} bytes does not match declared size {}.",
+                   format,
+                   pixmap.size(),
+                   imageSize);
+        return false;
+    }
 
     auto const topLeft = _cursor.position;
 
