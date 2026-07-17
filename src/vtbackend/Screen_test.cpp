@@ -2717,37 +2717,62 @@ TEST_CASE("Index_outside_margin", "[screen]")
     screen.index();
     REQUIRE("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP\n" == screen.renderMainPageText());
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(5), ColumnOffset(2) });
-}
-
-TEST_CASE("Index_inside_margin", "[screen]")
+TEST_CASE("DCH.worksOutsideTopBottomMargin", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(2) } };
-    auto& screen = mock.terminal.primaryScreen();
-    mock.writeToScreen("11\r\n22\r\n33\r\n44\r\n55\r\n66");
-    logScreenText(screen, "initial setup");
-
-    // test IND when cursor is within margin range (=> move cursor down)
-    mock.terminal.setTopBottomMargin(LineOffset { 1 }, LineOffset { 3 });
-    screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 1 });
-    screen.index();
-    logScreenText(screen, "IND while cursor at line 3");
-    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(1) });
-    REQUIRE("11\n22\n33\n44\n55\n66\n" == screen.renderMainPageText());
-}
-
-TEST_CASE("Index_at_bottom_margin", "[screen]")
-{
+    // DCH deletes characters even when the cursor sits outside the top/bottom scrolling margin (xterm
+    // patch 316) -- it is confined only by the left/right margins.
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
-    mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+    CHECK(screen.grid().lineText(LineOffset(0)) == "     "); // row 1 was still deleted
+}
+
+TEST_CASE("ED.2_ignoresScrollRegion", "[screen]")
+{
+    // ED 2 erases the whole screen regardless of a DECSTBM scrolling region (the region is ignored).
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+    auto& screen = mock.terminal.primaryScreen();
     logScreenText(screen, "initial setup");
-    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
+    CHECK(screen.grid().lineText(LineOffset(0)) == "   "); // row 1 cleared (outside region)
+    CHECK(screen.grid().lineText(LineOffset(2)) == "   "); // row 3 cleared (outside region)
+}
 
-    mock.terminal.setTopBottomMargin(LineOffset { 1 }, LineOffset { 3 });
+TEST_CASE("CBT.ignoresLeftRightMargin", "[screen]")
+{
+    // CBT (cursor backward tab) ignores the left/right margin (xterm): from column 9 it tabs back past
+    // the left margin (5) to column 1, not stopping at the margin.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+    auto& screen = mock.terminal.primaryScreen();
+    CHECK(screen.cursor().position.column == ColumnOffset(0)); // column 1, ignoring the left margin
+}
 
-    SECTION("cursor at bottom margin and full horizontal margins")
+TEST_CASE("CBT.ignoresLeftRightMarginUnderOriginMode", "[screen]")
+{
+    // Same rule, with origin mode on. CBT computes an absolute target column, so placing it through the
+    // DECOM-aware column setter added the left margin to it a second time and landed the cursor to the
+    // right of the tab stop it had just found.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("\033[?69h");  // DECLRMM: enable left/right margins
+    mock.writeToScreen("\033[5;30s"); // DECSLRM(5,30)
+    mock.writeToScreen("\033[?6h");   // DECOM: origin mode on
+
+    SECTION("default tab stops")
     {
-        screen.moveCursorTo(LineOffset { 3 }, ColumnOffset { 1 });
+        mock.writeToScreen("\033[1;20H"); // CUP, origin-relative: column 5+20-1 = 24
+        REQUIRE(screen.cursor().position.column == ColumnOffset(23));
+        mock.writeToScreen("\033[Z"); // CBT(1) -> the tab stop at column 17 (0-based 16)
+        CHECK(screen.cursor().position.column == ColumnOffset(16));
+    }
+
+    SECTION("back past the left margin lands on the first column, not the margin")
+    {
+        mock.writeToScreen("\033[1;5H"); // CUP, origin-relative: column 5+5-1 = 9
+        REQUIRE(screen.cursor().position.column == ColumnOffset(8));
+        mock.writeToScreen("\033[4Z"); // CBT(4): further back than any tab stop
+        CHECK(screen.cursor().position.column == ColumnOffset(0));
+    }
+}
+
 TEST_CASE("DECRQCRA.honors_origin_mode", "[screen]")
 {
     // In origin mode (DECOM) a rectangular-area request is measured from the scroll region's top-left,

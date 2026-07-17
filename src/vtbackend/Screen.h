@@ -724,6 +724,13 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Sets the current column to given logical column number.
     void setCurrentColumn(ColumnOffset n);
 
+    /// Places the cursor at the absolute @p column, clamped to the page.
+    ///
+    /// Unlike setCurrentColumn(), this does not apply origin mode: it is for callers that have already
+    /// computed a real column (a tab stop, the page's first column), which must not have the left margin
+    /// added to it a second time. @see cursorBackwardTab().
+    void setCurrentAbsoluteColumn(ColumnOffset column);
+
     [[nodiscard]] std::unique_ptr<ParserExtension> hookSTP(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookSixel(Sequence const& seq);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECDLD(Sequence const& seq);

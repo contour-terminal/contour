@@ -1073,7 +1073,13 @@ void Screen::unscroll(LineCount n)
 void Screen::setCurrentColumn(ColumnOffset n)
 {
     auto const col = _cursor.originMode ? margin().horizontal.from + n : n;
-    auto const clampedCol = std::min(col, boxed_cast<ColumnOffset>(pageSize().columns) - 1);
+    setCurrentAbsoluteColumn(col);
+}
+
+void Screen::setCurrentAbsoluteColumn(ColumnOffset column)
+{
+    auto const clampedCol =
+        std::clamp(column, ColumnOffset(0), boxed_cast<ColumnOffset>(pageSize().columns) - 1);
     _cursor.wrapPending = false;
     _cursor.position.column = clampedCol;
 }
@@ -1346,7 +1352,10 @@ void Screen::clearScreen()
     // Instead of *just* clearing the screen, and thus, losing potential important content,
     // we scroll up by RowCount number of lines, so move it all into history, so the user can scroll
     // up in case the content is still needed.
-    scrollUp(_grid.pageSize().lines);
+    //
+    // ED 2 erases the WHOLE screen regardless of any DECSTBM/DECSLRM scrolling region (the region is
+    // ignored -- xterm), so scroll the full page into history, not just the current margin band.
+    scrollUp(_grid.pageSize().lines, Terminal::makeDefaultMargin(_grid.pageSize()));
 }
 // }}}
 
@@ -1829,7 +1838,10 @@ void Screen::deleteLines(LineCount n)
 
 void Screen::deleteCharacters(ColumnCount n)
 {
-    if (isCursorInsideMargins() && *n != 0)
+    // DCH works outside the top/bottom scrolling margin (xterm patch 316); it is confined only by the
+    // left/right margins (DECLRMM). So gate on the horizontal margins, not isCursorInsideMargins()
+    // (which would also require the cursor to be within the vertical margin).
+    if (isCursorInsideHorizontalMargins() && *n != 0)
         deleteChars(realCursorPosition().line, realCursorPosition().column, n);
 }
 
@@ -2175,36 +2187,45 @@ void Screen::cursorBackwardTab(TabStopCount count)
     if (!count)
         return;
 
+    // Every target below is a real column -- a tab stop as HTS recorded it, or the page's first column --
+    // so all of them are placed with setCurrentAbsoluteColumn(). Going through moveCursorToColumn() would
+    // add the left margin to them again under origin mode, landing the cursor past the tab stop.
     if (!_terminal->tabs().empty())
     {
         for (unsigned k = 0; k < unbox<unsigned>(count); ++k)
         {
+            // HTS records tab stops as real columns (@see Screen::horizontalTabSet), so the cursor is
+            // compared as one too -- under origin mode its logical column would be measured from the left
+            // margin and pick the wrong stop.
             auto const i = std::find_if(
                 rbegin(_terminal->tabs()), rend(_terminal->tabs()), [&](ColumnOffset tabPos) -> bool {
-                    return tabPos < logicalCursorPosition().column;
+                    return tabPos < realCursorPosition().column;
                 });
             if (i != rend(_terminal->tabs()))
             {
                 // prev tab found -> move to prev tab
-                moveCursorToColumn(*i);
+                setCurrentAbsoluteColumn(*i);
             }
             else
             {
-                moveCursorToColumn(margin().horizontal.from);
+                // No earlier tab stop: CBT ignores the left/right margin (xterm), so fall back to the
+                // first column, not the left margin.
+                setCurrentAbsoluteColumn(ColumnOffset(0));
                 break;
             }
         }
     }
     else if (TabWidth.value)
     {
-        // default tab settings
+        // Default tab settings. CBT ignores the left/right margin (xterm), so set the target column
+        // directly -- moveCursorBackward() would stop at the left margin.
         if (*_cursor.position.column < *TabWidth)
-            moveCursorToBeginOfLine();
+            setCurrentAbsoluteColumn(ColumnOffset(0));
         else
         {
             auto const m = (*_cursor.position.column + 1) % *TabWidth;
             auto const n = m ? (*count - 1) * *TabWidth + m : *count * *TabWidth + m;
-            moveCursorBackward(ColumnCount(n - 1));
+            setCurrentAbsoluteColumn(ColumnOffset(std::max(0, *_cursor.position.column - (n - 1))));
         }
     }
     else
