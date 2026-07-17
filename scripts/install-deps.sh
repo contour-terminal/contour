@@ -104,7 +104,12 @@ fetch_and_unpack_boxed() {
 
 fetch_and_unpack_libunicode() {
     if test x$LIBUNICODE_SRC_DIR = x; then
-        local libunicode_version="0.9.0"
+        # Single source of truth: the version lives in cmake/ContourThirdParties.cmake
+        # (LIBUNICODE_MINIMAL_VERSION). Hard-coding it here too would let the vendored source drift
+        # below the CMake requirement, which then fails to configure.
+        local libunicode_version
+        libunicode_version=$(sed -n 's/^set(LIBUNICODE_MINIMAL_VERSION "\([0-9.]*\)".*/\1/p' \
+            "$SYSDEPS_BASE_DIR/../cmake/ContourThirdParties.cmake")
         fetch_and_unpack \
             libunicode-$libunicode_version \
             libunicode-$libunicode_version.tar.gz \
