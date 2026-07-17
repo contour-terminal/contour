@@ -28,6 +28,7 @@ enum class FunctionCategory : uint8_t
     CSI = 2,
     OSC = 3,
     DCS = 4,
+    VT52 = 5, ///< VT52-mode single-character escape commands (their own grammar; see FunctionCategory).
 };
 
 // VT sequence documentation in markdown format
@@ -238,6 +239,7 @@ struct Function
         {
             case FunctionCategory::C0: break;
             case FunctionCategory::ESC: result += "\033"; break;
+            case FunctionCategory::VT52: result += "\033"; break; // a VT52 command is ESC + final byte.
             case FunctionCategory::CSI: result += "\033["; break;
             case FunctionCategory::OSC: result += "\033]"; break;
             case FunctionCategory::DCS: result += "\033P"; break;
@@ -405,6 +407,22 @@ namespace detail // {{{
                           .minimumParameters = 0,
                           .maximumParameters = 0,
                           .conformanceLevel = vt,
+                          .extension = VTExtension::None,
+                          .documentation = documentation };
+    }
+
+    constexpr auto VT52(char finalCharacter,
+                        uint8_t argc0,
+                        uint8_t argc1,
+                        FunctionDocumentation documentation) noexcept
+    {
+        return Function { .category = FunctionCategory::VT52,
+                          .leader = 0,
+                          .intermediate = 0,
+                          .finalSymbol = finalCharacter,
+                          .minimumParameters = argc0,
+                          .maximumParameters = argc1,
+                          .conformanceLevel = VTType::VT100,
                           .extension = VTExtension::None,
                           .documentation = documentation };
     }
@@ -600,6 +618,24 @@ constexpr inline auto LS3     = detail::ESC(std::nullopt, 'o', VTType::VT220, { 
 constexpr inline auto LS1R    = detail::ESC(std::nullopt, '~', VTType::VT220, { .mnemonic = "LS1R", .comment = "Locking Shift 1 Right; Maps G1 into GR." });
 constexpr inline auto LS2R    = detail::ESC(std::nullopt, '}', VTType::VT220, { .mnemonic = "LS2R", .comment = "Locking Shift 2 Right; Maps G2 into GR." });
 constexpr inline auto LS3R    = detail::ESC(std::nullopt, '|', VTType::VT220, { .mnemonic = "LS3R", .comment = "Locking Shift 3 Right; Maps G3 into GR." });
+
+// VT52 — the legacy single-character escape grammar, active only in VT52 mode (DECANM reset). These
+// share ESC finals with ANSI functions (e.g. ESC H = home vs HTS), hence their own FunctionCategory.
+constexpr inline auto VT52_CUU        = detail::VT52('A', 0, 0, { .mnemonic = "VT52_CUU", .comment = "VT52: Cursor Up." }); // NOLINT
+constexpr inline auto VT52_CUD        = detail::VT52('B', 0, 0, { .mnemonic = "VT52_CUD", .comment = "VT52: Cursor Down." }); // NOLINT
+constexpr inline auto VT52_CUF        = detail::VT52('C', 0, 0, { .mnemonic = "VT52_CUF", .comment = "VT52: Cursor Right." }); // NOLINT
+constexpr inline auto VT52_CUB        = detail::VT52('D', 0, 0, { .mnemonic = "VT52_CUB", .comment = "VT52: Cursor Left." }); // NOLINT
+constexpr inline auto VT52_GRAPHICS_ON  = detail::VT52('F', 0, 0, { .mnemonic = "VT52_GRAPHICS_ON", .comment = "VT52: Enter graphics mode." }); // NOLINT
+constexpr inline auto VT52_GRAPHICS_OFF = detail::VT52('G', 0, 0, { .mnemonic = "VT52_GRAPHICS_OFF", .comment = "VT52: Exit graphics mode." }); // NOLINT
+constexpr inline auto VT52_HOME       = detail::VT52('H', 0, 0, { .mnemonic = "VT52_HOME", .comment = "VT52: Cursor to home (row 1, column 1)." }); // NOLINT
+constexpr inline auto VT52_RI         = detail::VT52('I', 0, 0, { .mnemonic = "VT52_RI", .comment = "VT52: Reverse line feed." }); // NOLINT
+constexpr inline auto VT52_ED         = detail::VT52('J', 0, 0, { .mnemonic = "VT52_ED", .comment = "VT52: Erase to end of screen." }); // NOLINT
+constexpr inline auto VT52_EL         = detail::VT52('K', 0, 0, { .mnemonic = "VT52_EL", .comment = "VT52: Erase to end of line." }); // NOLINT
+constexpr inline auto VT52_CUP        = detail::VT52('Y', 2, 2, { .mnemonic = "VT52_CUP", .comment = "VT52: Direct cursor address (ESC Y row col)." }); // NOLINT
+constexpr inline auto VT52_DECID      = detail::VT52('Z', 0, 0, { .mnemonic = "VT52_DECID", .comment = "VT52: Identify (responds ESC / Z)." }); // NOLINT
+constexpr inline auto VT52_DECKPAM    = detail::VT52('=', 0, 0, { .mnemonic = "VT52_DECKPAM", .comment = "VT52: Enter alternate keypad mode." }); // NOLINT
+constexpr inline auto VT52_DECKPNM    = detail::VT52('>', 0, 0, { .mnemonic = "VT52_DECKPNM", .comment = "VT52: Exit alternate keypad mode." }); // NOLINT
+constexpr inline auto VT52_ANSI       = detail::VT52('<', 0, 0, { .mnemonic = "VT52_ANSI", .comment = "VT52: Leave VT52, return to ANSI mode." }); // NOLINT
 
 // CSI
 constexpr inline auto ArgsMax = 127; // this is the maximum number that fits into 7 bits.
@@ -845,6 +881,21 @@ constexpr static auto allFunctionsArray() noexcept
         LS1R,
         LS2R,
         LS3R,
+        VT52_CUU,
+        VT52_CUD,
+        VT52_CUF,
+        VT52_CUB,
+        VT52_GRAPHICS_ON,
+        VT52_GRAPHICS_OFF,
+        VT52_HOME,
+        VT52_RI,
+        VT52_ED,
+        VT52_EL,
+        VT52_CUP,
+        VT52_DECID,
+        VT52_DECKPAM,
+        VT52_DECKPNM,
+        VT52_ANSI,
 
         // CSI
         ANSISYSSC,
@@ -1171,6 +1222,10 @@ struct std::formatter<vtbackend::FunctionCategory>: std::formatter<std::string_v
                 name = "ESC";
                 break;
                 ;
+            case FunctionCategory::VT52:
+                name = "VT52";
+                break;
+                ;
             case FunctionCategory::CSI:
                 name = "CSI";
                 break;
@@ -1200,6 +1255,7 @@ struct std::formatter<vtbackend::Function>: std::formatter<std::string>
                 value = std::format("{}", crispy::escape(static_cast<uint8_t>(f.finalSymbol)));
                 break;
             case vtbackend::FunctionCategory::ESC:
+            case vtbackend::FunctionCategory::VT52:
                 value = std::format("{} {} {}",
                                     f.category,
                                     f.intermediate ? f.intermediate : ' ',

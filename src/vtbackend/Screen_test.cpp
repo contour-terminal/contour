@@ -1427,6 +1427,62 @@ TEST_CASE("DECSED-2: lines without protected characters are erased correctly", "
 }
 // }}}
 
+    mock.writeToScreen("ab\033[1\"qc\033[0\"q");  // a, b, DECSCA(1), protected c, DECSCA(0)
+    REQUIRE(e(mainPageText(screen)) == "   \\n"); // c erased too
+    mock.writeToScreen("\033[!p");                // DECSTR (soft reset)
+    mock.writeToScreen("\033[H\033[J");           // CUP home, ED to end
+        mock.writeToScreen("a\033Vb\033W"); // a, SPA, ISO-guarded b, EPA
+        mock.writeToScreen("\033[?2J");     // DECSED 2 (selective erase display)
+        mock.writeToScreen("\033[?2K"); // DECSEL 2 (selective erase line)
+// {{{ VT52 mode
+TEST_CASE("VT52: enter, cursor movement, and leave", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[?2l"); // DECANM reset: enter VT52
+    REQUIRE(mock.terminal.isVT52Mode());
+
+    // ESC Y row col -- direct cursor address; each coordinate byte is value + 0x20.
+    mock.writeToScreen("\033Y\x23\x25"); // row 0x23-0x20=3, col 0x25-0x20=5
+    REQUIRE(screen.cursor().position == CellLocation { LineOffset(3), ColumnOffset(5) });
+
+    mock.writeToScreen("\033H"); // ESC H -- home (must be cursor-home in VT52, not HTS)
+    REQUIRE(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(0) });
+
+    mock.writeToScreen("\033B\033B\033C"); // down, down, right
+    REQUIRE(screen.cursor().position == CellLocation { LineOffset(2), ColumnOffset(1) });
+
+    mock.writeToScreen("\033A\033D"); // up, left (ESC D is cursor-left in VT52, not IND)
+    REQUIRE(screen.cursor().position == CellLocation { LineOffset(1), ColumnOffset(0) });
+
+    mock.writeToScreen("\033<"); // ESC < -- leave VT52
+    REQUIRE_FALSE(mock.terminal.isVT52Mode());
+    REQUIRE(mock.terminal.operatingLevel() == VTType::VT100); // VT52 exit enters ANSI at VT100
+
+    // Back in ANSI mode, CSI cursor movement works again.
+    mock.writeToScreen("\033[3;4H");
+    REQUIRE(screen.cursor().position == CellLocation { LineOffset(2), ColumnOffset(3) });
+}
+
+TEST_CASE("VT52: identify responds with ESC / Z", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(4) } };
+    mock.writeToScreen("\033[?2l\033Z"); // enter VT52, then ESC Z (identify)
+    REQUIRE(mock.terminal.peekInput() == "\033/Z");
+}
+
+TEST_CASE("VT52: erase to end of line and screen", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(4) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("abcd\033[?2l");  // fill row 0, enter VT52
+    mock.writeToScreen("\033Y\x20\x22"); // ESC Y: row 0, col 2
+    mock.writeToScreen("\033K");         // ESC K -- erase to end of line
+    REQUIRE(screen.grid().lineText(LineOffset(0)) == "ab  ");
+}
+// }}}
+
 // {{{ DECSERA
 TEST_CASE("DECSERA-all-defaults", "[screen]")
 {

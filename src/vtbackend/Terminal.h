@@ -362,6 +362,12 @@ class Terminal
     void setOperatingLevel(VTType level) noexcept;
     VTType operatingLevel() const noexcept { return _operatingLevel; }
 
+    /// Enters or leaves VT52 compatibility mode by switching the parser to (or from) the VT52 escape
+    /// grammar. Entered by resetting DECANM (`CSI ? 2 l`), left by `ESC <`. Leaving VT52 enters ANSI
+    /// mode at the VT100 level (VT52 is level-less, so there is no prior level to restore).
+    void setVT52Mode(bool enable) noexcept;
+    [[nodiscard]] bool isVT52Mode() const noexcept { return _parser.isVT52Mode(); }
+
     void setC1TransmissionMode(ControlTransmissionMode mode) noexcept { _c1TransmissionMode = mode; }
     ControlTransmissionMode c1TransmissionMode() const noexcept { return _c1TransmissionMode; }
 

@@ -2905,22 +2905,16 @@ void Terminal::setMode(DECMode mode, bool enable)
             else
                 _currentScreen->restoreCursor();
             break;
-        case DECMode::ExtendedAltScreen:
-            if (enable)
-            {
-                setMode(DECMode::UseAlternateScreen, true);
-                clearScreen();
-            }
-            else
-            {
-                setMode(DECMode::UseAlternateScreen, false);
-                // NB: The cursor position doesn't need to be restored,
-                // because it's local to the screen buffer.
-            }
-            break;
         case DECMode::PageCursorCoupling:
             if (enable && _displayedPage != _cursorPage)
                 _displayedPage = _cursorPage;
+            break;
+        case DECMode::DesignateCharsetUSASCII:
+            // DEC private mode 2 is DECANM: reset (`CSI ? 2 l`) enters VT52. The set form (`CSI ? 2 h`,
+            // select ANSI) is a no-op -- it can only ever be received in ANSI mode, since VT52 has no
+            // CSI grammar, so it must NOT drop the operating level. VT52 is left only by `ESC <`.
+            if (!enable)
+                setVT52Mode(true);
             break;
         case DECMode::ApplicationKeypad: setApplicationkeypadMode(enable); break;
         case DECMode::AutoRepeat: break;
@@ -3387,6 +3381,17 @@ void Terminal::setOperatingLevel(VTType level) noexcept
 {
     _operatingLevel = level;
     _supportedVTSequences.reset(level);
+}
+
+void Terminal::setVT52Mode(bool enable) noexcept
+{
+    _parser.setVT52Mode(enable);
+    if (!enable)
+        // Leaving VT52 (ESC <) enters ANSI mode at the base VT100 level, not the level held before
+        // entering VT52: VT52 is a pre-ANSI, level-less mode, so there is no level to restore. A real
+        // VT500 therefore no longer recognises VT300+ sequences (DECSCL, DECRQSS, S8C1T) after a VT52
+        // round-trip -- which is exactly what vttest checks, and what xterm's CASE_VT52_FINISH does.
+        setOperatingLevel(VTType::VT100);
 }
 
 void Terminal::defineMacro(int id, bool deleteAll, std::string body)

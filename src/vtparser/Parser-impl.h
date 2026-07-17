@@ -457,8 +457,13 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkDcsPassThrough(char cons
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
 void Parser<EventListener, TraceStateChanges>::processOnceViaStateMachine(uint8_t ch)
 {
-    auto const s = static_cast<size_t>(_state);
     ParserTable static constexpr Table = ParserTable::get();
+
+    // VT52 has its own escape grammar. processVT52() consumes the byte when it is part of a VT52
+    // command (ESC, the command letter, or the ESC Y coordinates); a byte it does not consume (a
+    // printable or a C0 control in VT52 ground) falls through to the normal Ground handling below.
+    if (_vt52Mode && processVT52(ch))
+        return;
 
     // Inside a string body an 8-bit ST (0x9C) terminates the string, but only at a UTF-8 character
     // boundary: string content may be UTF-8, and 0x9C is a valid continuation byte (e.g. the middle
@@ -511,11 +516,65 @@ void Parser<EventListener, TraceStateChanges>::processOnceViaStateMachine(uint8_
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
+bool Parser<EventListener, TraceStateChanges>::processVT52(uint8_t ch)
+{
+    switch (_vt52State)
+    {
+        case Vt52State::Ground:
+            if (ch == 0x1B) // ESC begins a VT52 command.
+            {
+                _vt52State = Vt52State::Escape;
+                return true;
+            }
+            return false; // printable text or a C0 control: handle it as in ANSI ground.
+        case Vt52State::Escape:
+            if (ch == 'Y') // ESC Y <row> <col>: direct cursor address.
+            {
+                _vt52State = Vt52State::CursorRow;
+                return true;
+            }
+            if (ch >= 0x20 && ch <= 0x2F) // ESC <space..slash>: an unimplemented 2-byte VT52 sequence.
+            {
+                _vt52State = Vt52State::Ignore;
+                return true;
+            }
+            // Every other byte is a complete single-character VT52 command (including '<' to leave
+            // VT52). Unknown ones are dispatched too; the handler treats them as no-ops.
+            _eventListener.dispatchVT52(static_cast<char>(ch), 0, 0);
+            _vt52State = Vt52State::Ground;
+            return true;
+        case Vt52State::CursorRow:
+            _vt52CursorRow = ch;
+            _vt52State = Vt52State::CursorColumn;
+            return true;
+        case Vt52State::CursorColumn: {
+            // Each coordinate byte encodes value + 0x20; recover the 1-based row/column. A byte below
+            // 0x20 is out of range and clamps to the first row/column.
+            auto const row =
+                1u + (_vt52CursorRow >= 0x20 ? static_cast<unsigned>(_vt52CursorRow - 0x20) : 0u);
+            auto const column = 1u + (ch >= 0x20 ? static_cast<unsigned>(ch - 0x20) : 0u);
+            _eventListener.dispatchVT52('Y', row, column);
+            _vt52State = Vt52State::Ground;
+            return true;
+        }
+        case Vt52State::Ignore: // swallow the second byte of the unimplemented sequence.
+            _vt52State = Vt52State::Ground;
+            return true;
+    }
+    return false;
+}
+
+template <ParserEventsConcept EventListener, bool TraceStateChanges>
 auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, char const* end) noexcept
     -> std::tuple<ProcessKind, size_t>
 {
     auto const* input = begin;
     if (_state != State::Ground)
+        return { ProcessKind::FallbackToFSM, 0 };
+
+    // In VT52 mode, once an ESC has been seen the following byte(s) form a VT52 command, not text, so
+    // they must go through the state machine (processVT52) rather than the bulk text scanner.
+    if (_vt52State != Vt52State::Ground)
         return { ProcessKind::FallbackToFSM, 0 };
 
     // If we have pending incomplete UTF-8 from a previous parse call, fall back to FSM.

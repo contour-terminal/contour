@@ -119,6 +119,24 @@ class SequenceBuilder
         handleSequence();
     }
 
+    void dispatchVT52(char finalChar, unsigned line, unsigned column)
+    {
+        // VT52 commands do not pass through the ANSI Escape state, whose entry would Clear the
+        // sequence, so reset it here or a previous sequence's parameters would leak in.
+        clear();
+        _sequence.setCategory(FunctionCategory::VT52);
+        _sequence.setFinalChar(finalChar);
+        // The direct cursor address (ESC Y) is the only VT52 command with parameters; carry its
+        // 1-based row and column so the handler reads them like any other CSI parameter.
+        if (finalChar == 'Y')
+        {
+            _parameterBuilder.set(static_cast<Sequence::Parameter>(line));
+            _parameterBuilder.nextParameter();
+            _parameterBuilder.set(static_cast<Sequence::Parameter>(column));
+        }
+        handleSequence();
+    }
+
     void startOSC() { _sequence.setCategory(FunctionCategory::OSC); }
 
     void putOSC(char ch)

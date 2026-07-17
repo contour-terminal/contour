@@ -4654,6 +4654,39 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case LS1R: _cursor.charsets.lockingShiftGR(CharsetTable::G1); break;
         case LS2R: _cursor.charsets.lockingShiftGR(CharsetTable::G2); break;
         case LS3R: _cursor.charsets.lockingShiftGR(CharsetTable::G3); break;
+        // VT52 -- the legacy single-character escape grammar, dispatched only while the parser is in
+        // VT52 mode (DECANM reset). Cursor moves and erases reuse the ANSI primitives.
+        case VT52_CUU: moveCursorUp(LineCount(1)); break;
+        case VT52_CUD: moveCursorDown(LineCount(1)); break;
+        case VT52_CUF: moveCursorForward(ColumnCount(1)); break;
+        case VT52_CUB: moveCursorBackward(ColumnCount(1)); break;
+        case VT52_HOME: moveCursorTo(LineOffset(0), ColumnOffset(0)); break;
+        case VT52_RI: reverseIndex(); break;
+        case VT52_ED: clearToEndOfScreen(); break;
+        case VT52_EL: clearToEndOfLine(); break;
+        case VT52_CUP: {
+            // ESC Y row col -- 1-based coordinates decoded by the parser; clamp to the page.
+            auto const line = std::min(seq.param_or(0, 1) - 1, unbox<int>(pageSize().lines) - 1);
+            auto const column = std::min(seq.param_or(1, 1) - 1, unbox<int>(pageSize().columns) - 1);
+            moveCursorTo(LineOffset(std::max(0, line)), ColumnOffset(std::max(0, column)));
+            break;
+        }
+        case VT52_GRAPHICS_ON:
+            // Enter graphics mode: show the DEC special-graphics glyphs (xterm's SO). Designate G1 to
+            // the special set and shift GL to it; VT52 exit / reset restores ASCII.
+            designateCharset(CharsetTable::G1, CharsetId::Special);
+            _cursor.charsets.lockingShift(CharsetTable::G1);
+            break;
+        case VT52_GRAPHICS_OFF:
+            // Exit graphics mode: shift GL back to G0 (xterm's SI).
+            _cursor.charsets.lockingShift(CharsetTable::G0);
+            break;
+        case VT52_DECID: reply("\033/Z"); break; // VT52 identify response.
+        case VT52_DECKPAM: applicationKeypadMode(true); break;
+        case VT52_DECKPNM: applicationKeypadMode(false); break;
+        case VT52_ANSI:
+            _terminal->setVT52Mode(false);
+            break; // ESC < leaves VT52 for ANSI.
 
         // CSI
         case ANSISYSSC: restoreCursor(); break;
