@@ -1348,6 +1348,14 @@ class Terminal
     void useApplicationCursorKeys(bool enabled);
     void softReset();
     void hardReset();
+
+    /// The checksum extension (XTCHECKSUM) DECRQCRA currently computes with.
+    ///
+    /// Terminal-wide rather than per-screen: an application that selects an extension and then
+    /// switches to the alternate screen must still get the checksums it asked for.
+    [[nodiscard]] ChecksumFlags checksumExtension() const noexcept { return _checksumExtension; }
+    void setChecksumExtension(ChecksumFlags flags) noexcept { _checksumExtension = flags; }
+
     void forceRedraw(std::function<void()> const& artificialSleep);
     void discardImage(Image const&);
     void markCellDirty(CellLocation position) noexcept;
@@ -1949,6 +1957,9 @@ class Terminal
 
     CursorDisplay _cursorDisplay = CursorDisplay::Steady;
     CursorShape _cursorShape = CursorShape::Block;
+
+    /// XTCHECKSUM state; reset to Settings::checksumExtension by DECSTR and RIS alike.
+    ChecksumFlags _checksumExtension = _settings.checksumExtension;
 
     std::string _currentWorkingDirectory = {};
 

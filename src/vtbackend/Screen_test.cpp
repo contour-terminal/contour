@@ -5877,7 +5877,12 @@ TEST_CASE("DECALN: page that wraps the history ring is still filled in bounds", 
 
 // }}} DECALN Tests
 
+// {{{ DECRQCRA / XTCHECKSUM Tests
 
+// The expected checksums below are what xterm-406 answers for the same screen and the same
+// XTCHECKSUM flags, measured by driving a real xterm headlessly. See RectangularAreaChecksum_test.cpp
+// for the flag-by-flag breakdown; these tests are about the sequence reaching the algorithm at all,
+// and about the state the algorithm reads.
 
 TEST_CASE("DECRQCRA: reports the checksum of a rectangular area", "[screen]")
 {
@@ -5937,6 +5942,92 @@ TEST_CASE("DECRQCRA: reports the checksum of a rectangular area", "[screen]")
     }
 }
 
+TEST_CASE("XTCHECKSUM: selects how DECRQCRA computes its checksum", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+
+    auto const request = [&](std::string_view sequence) -> std::string {
+        mock.mockPty().stdinBuffer().clear();
+        mock.writeToScreen(sequence);
+        mock.terminal.flushInput();
+        return mock.replyData();
+    };
+    auto const checksumOfFirstCell = [&] {
+        return request("\033[1;1;1;1;1;1*y");
+    };
+
+    mock.writeToScreen("\033[1ma"); // bold 'a' at 1,1
+
+    SECTION("the default is DEC-compatible: negated, with attributes folded in")
+    {
+        REQUIRE(mock.terminal.checksumExtension() == vtbackend::ChecksumFlags {});
+        CHECK(checksumOfFirstCell() == "\033P1!~FF1F\033\\");
+    }
+
+    SECTION("bit 0 reports the plain sum")
+    {
+        mock.writeToScreen("\033[1#y");
+        CHECK(checksumOfFirstCell() == "\033P1!~00E1\033\\");
+    }
+
+    SECTION("bit 1 leaves the video attributes out")
+    {
+        mock.writeToScreen("\033[2#y");
+        CHECK(checksumOfFirstCell() == "\033P1!~FF9F\033\\");
+    }
+
+    SECTION("bit 3 counts cells that were never written to")
+    {
+        mock.writeToScreen("\033[8#y");
+        CHECK(request("\033[1;1;3;1;3;1*y") == "\033P1!~FFE0\033\\"); // an untouched cell reads blank
+    }
+
+    SECTION("bits combine")
+    {
+        // The combination the conformance suites need: undrawn cells read as blanks, and a cell's
+        // attributes stay out of its value.
+        mock.writeToScreen("\033[10#y");
+        CHECK(checksumOfFirstCell() == "\033P1!~FF9F\033\\");
+        CHECK(request("\033[1;1;3;1;3;1*y") == "\033P1!~FFE0\033\\");
+    }
+
+    SECTION("an omitted parameter selects the DEC-compatible default")
+    {
+        mock.writeToScreen("\033[1#y");
+        REQUIRE(mock.terminal.checksumExtension() != vtbackend::ChecksumFlags {});
+        mock.writeToScreen("\033[#y");
+        CHECK(mock.terminal.checksumExtension() == vtbackend::ChecksumFlags {});
+    }
+}
+
+TEST_CASE("XTCHECKSUM: a reset restores the configured extension, not zero", "[screen]")
+{
+    // xterm restores its `checksumExtension` resource on reset rather than clearing it, and Contour
+    // mirrors that via Settings. It matters: esctest sends DECSTR before every single test, so a
+    // reset-to-zero would throw the harness's configuration away on the first one.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+    auto const configured = vtbackend::ChecksumFlags { vtbackend::ChecksumFlag::NoAttributes }
+                            | vtbackend::ChecksumFlag::IncludeUndrawn;
+    mock.terminal.settings().checksumExtension = configured;
+
+    mock.writeToScreen("\033[1#y"); // the application selects something else
+    REQUIRE(mock.terminal.checksumExtension()
+            == vtbackend::ChecksumFlags { vtbackend::ChecksumFlag::Positive });
+
+    SECTION("DECSTR (soft reset) restores it")
+    {
+        mock.writeToScreen("\033[!p");
+        CHECK(mock.terminal.checksumExtension() == configured);
+    }
+
+    SECTION("RIS (hard reset) restores it")
+    {
+        mock.writeToScreen("\033c");
+        CHECK(mock.terminal.checksumExtension() == configured);
+    }
+}
+
+// }}} DECRQCRA / XTCHECKSUM Tests
 
 // {{{ One-based parameters: omitted, empty and zero all mean "the default"
 

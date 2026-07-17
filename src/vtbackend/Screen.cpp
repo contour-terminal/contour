@@ -4564,6 +4564,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             auto const bottom = LineOffset::cast_from(area.bottom);
             auto const right = ColumnOffset::cast_from(area.right);
 
+            auto checksum = RectangularAreaChecksum { _terminal->checksumExtension() };
             // A cell holds at most one base codepoint plus its combining marks; sized generously so
             // no realistic grapheme cluster is truncated, and without allocating per cell.
             auto codepoints = std::array<char32_t, 16> {};
@@ -4870,7 +4871,10 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
                     _terminal->pushColorPalette(seq.param<size_t>(i));
             return ApplyResult::Ok;
         case XTREPORTCOLORS: _terminal->reportColorPaletteStack(); return ApplyResult::Ok;
-        case XTCHECKSUM: _checksumExtension = seq.param_or(0, 0); break;
+        case XTCHECKSUM:
+            _terminal->setChecksumExtension(
+                ChecksumFlags::from_value(static_cast<uint8_t>(seq.param_or(0, 0))));
+            break;
         case XTSMGRAPHICS: return impl::XTSMGRAPHICS(seq, *this);
         case XTVERSION:
             reply("\033P>|{} {}\033\\", LIBTERMINAL_NAME, LIBTERMINAL_VERSION_STRING);

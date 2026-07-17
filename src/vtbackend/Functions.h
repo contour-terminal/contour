@@ -194,6 +194,7 @@ constexpr inline auto DECSACE = FunctionDocumentation { .mnemonic = "DECSACE", .
 constexpr inline auto DECRQCRA = FunctionDocumentation { .mnemonic = "DECRQCRA", .comment = "Request Checksum of Rectangular Area" };
 constexpr inline auto XTCHECKSUM = FunctionDocumentation { .mnemonic = "XTCHECKSUM", .comment = "Select checksum extension" };
 constexpr inline auto DECRQCRA = FunctionDocumentation { .mnemonic = "DECRQCRA", .comment = "Request Checksum of Rectangular Area", .parameters = "Pid;Pp;Pt;Pl;Pb;Pr", .description = "Reports a 16-bit checksum of the characters in the given rectangle, as `DCS Pid ! ~ xxxx ST`. Pid is echoed back to correlate the answer with the request, Pp is the page (Contour has a single page). Pt;Pl;Pb;Pr is the rectangle, defaulting to the whole page.\n\nBy default the value reported is the two's complement of the sum of the cells' character values, with the video attributes folded in and cells that were never written to left out entirely. XTCHECKSUM selects deviations from that.", .examples = "CSI 1 ; 1 ; 1 ; 1 ; 1 ; 1 * y" };
+constexpr inline auto XTCHECKSUM = FunctionDocumentation { .mnemonic = "XTCHECKSUM", .comment = "Select checksum extension", .parameters = "Ps", .description = "Selects how DECRQCRA computes its checksum. Ps is a bit mask; a zero (the default) is DEC-compatible, and each bit switches one aspect off:\n\n* 1: do not negate the result.\n* 2: do not fold the video attributes in.\n* 4: count blank cells rather than omitting them.\n* 8: count cells never written to (as blanks) rather than skipping them.\n* 16: report the codepoint as-is rather than mapping it into the DEC charset.\n\nThe selection survives a soft reset (DECSTR) and a hard reset (RIS), both of which restore it to the value the terminal was configured with.", .examples = "CSI 10 # y" };
 constexpr inline auto SL = FunctionDocumentation { .mnemonic = "SL", .comment = "Scroll Left" };
 constexpr inline auto SR = FunctionDocumentation { .mnemonic = "SR", .comment = "Scroll Right" };
 constexpr inline auto MODIFYOTHERKEYS = FunctionDocumentation { .mnemonic = "MODIFYOTHERKEYS", .comment = "Modify Other Keys mode" };
@@ -675,7 +676,7 @@ constexpr inline auto XTREPORTCOLORS = detail::CSI(std::nullopt, 0, 0, '#', 'R',
 constexpr inline auto XTRESTORE   = detail::CSI('?', 0, ArgsMax, std::nullopt, 'r', VTExtension::XTerm, documentation::XTRESTORE);
 constexpr inline auto XTSAVE      = detail::CSI('?', 0, ArgsMax, std::nullopt, 's', VTExtension::XTerm, documentation::XTSAVE);
 constexpr inline auto XTSHIFTESCAPE=detail::CSI('>', 0, 1, std::nullopt, 's', VTExtension::XTerm, documentation::XTSHIFTESCAPE);
-constexpr inline auto XTCHECKSUM  = detail::CSI(std::nullopt, 1, 1, '#', 'y', VTExtension::XTerm, documentation::XTCHECKSUM);
+constexpr inline auto XTCHECKSUM  = detail::CSI(std::nullopt, 0, 1, '#', 'y', VTExtension::XTerm, documentation::XTCHECKSUM);
 constexpr inline auto XTSMGRAPHICS= detail::CSI('?', 2, 4, std::nullopt, 'S', VTExtension::XTerm, documentation::XTSMGRAPHICS);
 constexpr inline auto XTVERSION   = detail::CSI('>', 0, 1, std::nullopt, 'q', VTExtension::XTerm, documentation::XTVERSION);
 constexpr inline auto MODIFYOTHERKEYS = detail::CSI('>', 0, 1, std::nullopt, 'm', VTExtension::XTerm, documentation::MODIFYOTHERKEYS);

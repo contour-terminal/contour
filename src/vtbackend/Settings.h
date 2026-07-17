@@ -2,6 +2,7 @@
 
 #include <vtbackend/ColorPalette.h>
 #include <vtbackend/InputGenerator.h> // Modifier
+#include <vtbackend/RectangularAreaChecksum.h>
 #include <vtbackend/VTType.h>
 #include <vtbackend/primitives.h>
 
@@ -66,6 +67,14 @@ struct Settings
     std::chrono::milliseconds cursorMotionAnimationDuration { 80 };
 
     bool usePrivateColorRegisters = false;
+
+    /// The checksum extension (XTCHECKSUM) the terminal starts with, and returns to on a soft or
+    /// hard reset. Zero -- the default -- is DEC-compatible.
+    ///
+    /// This mirrors xterm's `checksumExtension` resource. It exists because the conformance suites
+    /// need a terminal whose checksums they can interpret (esctest, for one, cannot pass any
+    /// terminal that leaves this at its default), yet neither suite ever sends XTCHECKSUM itself.
+    ChecksumFlags checksumExtension {};
 
     std::chrono::milliseconds cursorBlinkInterval = std::chrono::milliseconds { 500 };
     RefreshRate refreshRate = { 30.0 };

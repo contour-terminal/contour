@@ -2940,7 +2940,12 @@ void Terminal::softReset()
     setMode(DECMode::ApplicationKeypad, false); // DECNKM
     setMode(DECMode::AutoRepeat, true);         // DECARM
     setMode(DECMode::BackarrowKey, false);      // DECBKM
-    // DECSCA is reset by setGraphicsRendition(GraphicsRendition::Reset) above.
+
+    // XTCHECKSUM goes back to what the terminal was configured with, not to zero -- matching xterm,
+    // which restores its `checksumExtension` resource here. A test suite that configures the
+    // extension up front would otherwise lose it to the first DECSTR it sends.
+    _checksumExtension = _settings.checksumExtension;
+
     // TODO: DECNRCM (National replacement character set)
     // TODO: GL, GR (G0, G1, G2, G3)
     // TODO: DECAUPSS (Assign user preference supplemental set)
@@ -2992,6 +2997,8 @@ void Terminal::hardReset()
 
     for (auto const& [mode, frozen]: _settings.frozenModes)
         freezeMode(mode, frozen);
+
+    _checksumExtension = _settings.checksumExtension; // XTCHECKSUM
 
     // Reset all pages.
     for (auto& page: _pages)
