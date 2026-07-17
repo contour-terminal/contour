@@ -298,7 +298,7 @@ void SixelParser::submitColor()
                 // (Hue angle seems to be shifted by 120 deg in other Sixel implementations.)
                 auto const h = static_cast<double>(_params[2]) - 120.0;
                 auto const hc = (h < 0 ? 360 + h : h) / 360.0;
-                auto const sc = static_cast<double>(_params[3]) / 100.0;
+                auto const sc = static_cast<double>(_params[4]) / 100.0;
                 auto const ls = static_cast<double>(_params[3]) / 100.0;
                 auto const rgb = hsl2rgb(hc, sc, ls);
                 _events.setColor(index, rgb);

@@ -24,6 +24,22 @@ SixelImageBuilder sixelImageBuilder(ImageSize size, RGBAColor defaultColor)
     return ib;
 }
 
+/// Selects a colour, paints a single pixel with it, and reads that pixel back.
+///
+/// The colour registers are not observable directly, so what a definition actually meant can only be
+/// seen in a pixel it painted.
+/// @param colorDefinition a '#' colour-definition fragment, carrying no pixel data of its own.
+/// @return the colour the painted pixel carries.
+RGBColor paintOnePixelWith(std::string_view colorDefinition)
+{
+    auto ib = sixelImageBuilder(ImageSize { Width(4), Height(4) }, RGBAColor { 0, 0, 0, 0xFF });
+    auto sp = SixelParser { ib };
+    sp.parseFragment(colorDefinition);
+    sp.parseFragment("@"); // bit 0: paints pixel (0, 0) with the register just selected
+    sp.done();
+    return ib.at(CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) }).rgb();
+}
+
 // {{{ State table properties
 //
 // The table is constexpr, so these cost nothing at runtime and fail the build rather than a test
@@ -596,6 +612,17 @@ TEST_CASE("SixelParser.finalize_compacts_rows", "[sixel]")
                 y < 6 ? ByIndex.at(static_cast<size_t>(x)) : ByIndex.at(static_cast<size_t>(2 - x));
             CHECK(ib.at(CellLocation { .line = LineOffset(y), .column = ColumnOffset(x) }) == expected);
         }
+}
+
+TEST_CASE("SixelParser.hls_saturation_is_its_own_parameter", "[sixel]")
+{
+    // `#Pc;1;Ph;Pl;Ps` is hue, lightness, saturation -- three distinct slots. Reading saturation
+    // from the lightness slot made Ps unobservable: both streams below painted the same washed-out
+    // red regardless of what saturation they asked for.
+    //
+    // Hue 120 is the red axis (the parser shifts hue by 120 degrees), lightness 50%.
+    CHECK(paintOnePixelWith("#0;1;120;50;100") == RGBColor { 0xFF, 0x00, 0x00 }); // saturated -> red
+    CHECK(paintOnePixelWith("#0;1;120;50;0") == RGBColor { 0x7F, 0x7F, 0x7F });   // none -> mid grey
 }
 
 TEST_CASE("SixelParser.sixelAspectVertical", "[sixel]")
