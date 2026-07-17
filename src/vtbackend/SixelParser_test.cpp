@@ -614,6 +614,31 @@ TEST_CASE("SixelParser.finalize_compacts_rows", "[sixel]")
         }
 }
 
+TEST_CASE("SixelParser.at_of_an_image_that_never_painted", "[sixel]")
+{
+    // Storage is allocated lazily, on the first paint. A stream may define colours and never paint,
+    // or paint only blank sixels -- the buffer is then still empty while _size holds its constructed
+    // 1x1 sentinel, so at() may not index it and may not use _size as a modulus either.
+    auto constexpr DefaultColor = RGBAColor { 0x11, 0x22, 0x33, 0xFF };
+
+    auto const payload = GENERATE("#0;2;0;0;0", // defines a colour register, paints nothing
+                                  "???",        // blank sixels: cursor movement only
+                                  "!100?",      // a blank run: likewise
+                                  "");          // nothing at all
+    INFO(std::format("payload='{}'", payload));
+
+    auto ib = SixelImageBuilder(ImageSize { Width(640), Height(480) },
+                                1,
+                                1,
+                                DefaultColor,
+                                std::make_shared<SixelColorPalette>(16, 256));
+    auto sp = SixelParser { ib };
+    sp.parseFragment(std::string_view { payload });
+
+    REQUIRE(ib.data().empty());
+    CHECK(ib.at(CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) }) == DefaultColor);
+}
+
 TEST_CASE("SixelParser.hls_saturation_is_its_own_parameter", "[sixel]")
 {
     // `#Pc;1;Ph;Pl;Ps` is hue, lightness, saturation -- three distinct slots. Reading saturation

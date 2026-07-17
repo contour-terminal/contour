@@ -412,10 +412,19 @@ void SixelImageBuilder::clear(RGBAColor fillColor)
 
 RGBAColor SixelImageBuilder::at(CellLocation coord) const noexcept
 {
-    auto const line = unbox(coord.line) % unbox(_size.height);
-    auto const col = unbox(coord.column) % unbox(_size.width);
-    auto const base = (line * _stride * 4) + (col * 4);
-    const auto* const color = &_buffer[base];
+    // Bounded by the storage rather than by _size: the two agree only once something has painted.
+    // A stream that paints nothing leaves _size at its constructed 1x1 sentinel with no buffer
+    // behind it, and a raster declaring a zero dimension leaves the geometry at zero -- neither may
+    // be indexed, and neither may be a modulus. For any pixel inside the image the two moduli agree,
+    // because reserve() backs every paint and _stride is the row pitch _buffer is actually laid out
+    // in.
+    if (_stride == 0 || _allocatedHeight == 0)
+        return _fillColor;
+
+    auto const line = static_cast<size_t>(coord.line.as<unsigned>() % _allocatedHeight);
+    auto const col = static_cast<size_t>(coord.column.as<unsigned>() % _stride);
+    auto const base = ((line * _stride) + col) * 4;
+    auto const* const color = &_buffer[base];
     return RGBAColor { color[0], color[1], color[2], color[3] };
 }
 
