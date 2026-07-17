@@ -3085,7 +3085,10 @@ void Terminal::softReset()
     _currentScreen->resetSavedCursorState();        // DECSC (Save cursor state)
     setMode(DECMode::VisibleCursor, true);          // DECTCEM (Text cursor enable)
     setMode(DECMode::Origin, false);                // DECOM
-    setMode(AnsiMode::KeyboardAction, false);       // KAM
+    // DECLRMM (left/right margin mode). DEC STD 070 lists it among the modes DECSTR resets; turning it
+    // off here also restores the horizontal margins to full width and swaps DECSLRM back out for SCOSC
+    // (see setMode's LeftRightMargin case), so a later DECSLRM is inert until DECLRMM is set again.
+    setMode(DECMode::LeftRightMargin, false); // DECLRMM
     setMode(AnsiMode::KeyboardAction, false); // KAM
 
     // DECAWM. The VT510 manual has DECSTR RESET autowrap, and every terminal in the field declines to:

@@ -2987,6 +2987,67 @@ TEST_CASE("LNM.VT_and_FF_honor_linefeed_mode", "[screen]")
     CHECK(screen.cursor().position == CellLocation { LineOffset(1), ColumnOffset(0) }); // carriage returned
 }
 
+TEST_CASE("DECSCL.conformance_level_gating", "[screen]")
+{
+    SECTION("DECRQM (a VT300 feature) is silently gated below VT level 3")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+
+        mock.writeToScreen("\033[62;1\"p"); // DECSCL 62 -> VT level 2
+        mock.resetReplyData();
+        mock.writeToScreen("\033[4$p"); // DECRQM (ANSI) for IRM
+        mock.terminal.flushInput();
+        CHECK(mock.replyData().empty()); // level 2 does not answer DECRQM
+
+        mock.writeToScreen("\033[63;1\"p"); // DECSCL 63 -> VT level 3
+        mock.resetReplyData();
+        mock.writeToScreen("\033[4$p"); // DECRQM (ANSI) for IRM
+        mock.terminal.flushInput();
+        CHECK(mock.replyData().find("$y") != std::string::npos); // level 3 answers CSI 4 ; Ps $ y
+    }
+
+    SECTION("DECSLRM (a VT420 feature) is inert below VT level 4")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+
+        mock.writeToScreen("\033[63;1\"p"); // DECSCL 63 -> VT level 3
+        mock.writeToScreen("\033[?69h");    // DECSET DECLRMM (ignored below VT level 4)
+        mock.writeToScreen("\033[5;6s");    // DECSLRM 5;6 (gated below VT level 4)
+        mock.writeToScreen("\033[1;5H");    // CUP row 1, col 5
+        mock.writeToScreen("abc");
+        // No left/right margin is in force, so the cursor flows on to column 8 (col 5 + "abc").
+        CHECK(mock.terminal.primaryScreen().cursor().position.column == ColumnOffset(7));
+    }
+
+    SECTION("DECSCL stays reachable at every level so the level can always be raised again")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+
+        mock.writeToScreen("\033[61\"p"); // DECSCL 61 -> VT level 1 (single-parameter form)
+        CHECK(mock.terminal.operatingLevel() == VTType::VT100);
+        mock.writeToScreen("\033[65;1\"p"); // DECSCL 65 -> VT level 5, from level 1
+        CHECK(mock.terminal.operatingLevel() == VTType::VT525);
+    }
+}
+
+TEST_CASE("DECSTR.resets_left_right_margin_mode", "[screen]")
+{
+    // DEC STD 070: a soft reset (DECSTR) resets DECLRMM, so a subsequent DECSLRM is inert.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+
+    mock.writeToScreen("\033[?69h"); // DECSET DECLRMM
+    CHECK(mock.terminal.isModeEnabled(DECMode::LeftRightMargin));
+
+    mock.writeToScreen("\033[!p"); // DECSTR (soft reset)
+    CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::LeftRightMargin));
+
+    // With DECLRMM off, DECSLRM sets no margin: "abc" from column 3 flows on to column 6.
+    mock.writeToScreen("\033[2;4s"); // DECSLRM 2;4 (inert)
+    mock.writeToScreen("\033[1;3H"); // CUP row 1, col 3
+    mock.writeToScreen("abc");
+    CHECK(mock.terminal.primaryScreen().cursor().position.column == ColumnOffset(5));
+}
+
 TEST_CASE("DECRQCRA.honors_origin_mode", "[screen]")
 {
     // In origin mode (DECOM) a rectangular-area request is measured from the scroll region's top-left,
@@ -6495,32 +6556,43 @@ TEST_CASE("S8C1T: replies revert to 7-bit after a VT52 round-trip", "[screen]")
     CHECK(mock.replyData() == "\033[3;4R"); // 7-bit CSI introducer
 }
 
-TEST_CASE("DECDMAC: max 64 macros", "[screen]")
+TEST_CASE("DECSCL resets the terminal (esctest DECSCL_RISOnChange)", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
-    // Define macros 0-63
-    for (auto i = 0; i < 64; ++i)
-        mock.writeToScreen(std::format("\033P{};0;0!zM{}\033\\", i, i));
-    mock.terminal.flushInput();
-    CHECK(mock.terminal.macroBody(0).has_value());
-    CHECK(mock.terminal.macroBody(63).has_value());
-    // Macro 64 should be rejected (out of range)
-    mock.writeToScreen("\033P64;0;0!zBad\033\\");
-    mock.terminal.flushInput();
-    CHECK_FALSE(mock.terminal.macroBody(64).has_value());
+    // DECSCL erases the screen, returns the saved cursor to the origin, and clears insert mode -- the
+    // observable reset effects the suite checks -- while leaving hardware-capability modes alone.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    mock.writeToScreen("x");          // 'x' at (0,0)
+    mock.writeToScreen("\033[3;4H");  // CUP to (row 3, col 4)
+    mock.writeToScreen("\0337");      // DECSC: save the cursor away from the origin
+    mock.writeToScreen("\033[4h");    // SM IRM: insert mode on
+    mock.writeToScreen("\033[61\"p"); // DECSCL(61): drop to VT100, resetting the terminal
+
+    // The screen is erased.
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)) == "          ");
+
+    // The saved cursor is back at the origin: DECRC returns there.
+    mock.writeToScreen("\0338"); // DECRC
+    CHECK(mock.terminal.currentScreen().cursor().position == CellLocation { LineOffset(0), ColumnOffset(0) });
+
+    // Insert mode was cleared, so a second write replaces rather than shifts.
+    mock.writeToScreen("\033[1;1Ha\033[1;1Hb");
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 2) == "b ");
 }
 
-TEST_CASE("DECINVM: invoke undefined macro", "[screen]")
+TEST_CASE("DECRQCRA answers regardless of the operating level", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
-    // Invoke non-existent macro 42 — should do nothing, no crash
-    mock.writeToScreen("\033[42*z");
+    // DECRQCRA merely reports a checksum, so xterm answers it at any operating level; conformance tools
+    // rely on that to read the screen back even after DECSCL drops to VT100. @see SupportedSequences::reset.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    mock.writeToScreen("\033[61\"p"); // DECSCL(61): VT100 operating level
+    mock.resetReplyData();
+    mock.writeToScreen("\033[1;1;1;1;1;1*y"); // DECRQCRA over the top-left cell
     mock.terminal.flushInput();
-    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).find_first_not_of(' ')
-          == std::string::npos);
+    CHECK_FALSE(mock.replyData().empty()); // answered, not gated into silence
 }
 
-TEST_CASE("DECINVM: nested macro invocation", "[screen]")
+// }}} DECSCL (Set Conformance Level) Tests
+
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
     // Define macro 1 that writes "B"

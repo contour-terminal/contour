@@ -964,6 +964,7 @@ enum class DECMode : std::uint8_t
     switch (mode)
     {
         case DECMode::NoClearScreenOnColumnChange: return 5; // DECNCSM: VT510+
+        case DECMode::LeftRightMargin: return 4;             // DECLRMM / DECSLRM: VT420+
         default: return 1;
     }
 }

@@ -4334,6 +4334,15 @@ void Screen::processSequence(Sequence const& seq)
         applyAndLog(*funcSpec, seq);
     else if (seq.category() == FunctionCategory::ESC && tryHandleSCS(seq))
         ; // Handled as SCS designation (e.g., DRCS two-byte designators)
+    else if (auto const sel = seq.selector();
+             std::ranges::any_of(_terminal->allSequences(),
+                                 [&sel](Function const& fn) noexcept { return compare(sel, fn) == 0; }))
+        ; // Recognised sequence, but gated out at the current operating level (set by DECSCL): a
+          // terminal operating below a sequence's conformance level silently ignores it -- exactly as a
+          // real VT220 ignores a VT300 query. It is NOT unknown, so it must not be logged as such; doing
+          // so would report correct level-gating as an "ignored sequence" diagnostic. A linear scan is
+          // required here because the full table is only partially sorted (activeSequences() is sorted
+          // for select()'s binary search; the gated remainder is not), and this path is cold anyway.
     else if (vtParserLog)
         vtParserLog()("Unknown VT sequence: {}", seq);
 }
@@ -5236,8 +5245,16 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
 
             selectConformanceLevel(*vtType);
 
-            // DECSCL implies a soft reset (per DEC spec)
+            // DECSCL resets the terminal. The DEC manuals disagree on how much: the VT300/VT420/VT520
+            // programmer manuals call it a hard reset (RIS), while the VT220 manual and DEC STD 070 (which
+            // document levels 1-4 in detail) call it a soft reset. Contour takes the middle reading that
+            // matches both the observable RIS effects a conformance suite checks -- the screen is erased,
+            // the saved cursor returns to the origin, and insert mode (IRM) is cleared -- and xterm's
+            // caution: it is a soft reset (so hardware-capability modes such as DECSET(?40) allow-80-to-132
+            // are left alone, which a mere conformance-level change has no business resetting) *plus* a
+            // screen erase. @see esctest DECSCLTests.test_DECSCL_RISOnChange.
             _terminal->softReset();
+            clearScreen();
 
             // Set C1 transmission mode: Ps2=1 → 7-bit, Ps2=0 or 2 → 8-bit
             // (For level 61/VT100, C1 mode is always 7-bit)

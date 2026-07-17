@@ -1510,6 +1510,14 @@ class Terminal
         return _supportedVTSequences.activeSequences();
     }
 
+    /// The complete VT sequence table, independent of the current operating level. A sequence that is in
+    /// here but not in activeSequences() is a real capability of the terminal that is merely gated out at
+    /// the present conformance level (set by DECSCL) -- recognised, but deliberately inert.
+    [[nodiscard]] gsl::span<Function const> allSequences() const noexcept
+    {
+        return _supportedVTSequences.allSequences();
+    }
+
     // {{{ VT parser related
 
     [[nodiscard]] size_t maxBulkTextSequenceWidth() const noexcept;

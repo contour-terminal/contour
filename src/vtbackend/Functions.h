@@ -739,10 +739,12 @@ constexpr inline auto DECLFKC     = detail::CSI(std::nullopt, 0, 1, '*', '}', VT
 constexpr inline auto DECSMKR     = detail::CSI(std::nullopt, 0, 1, '+', 'r', VTType::VT420, documentation::DECSMKR);
 constexpr inline auto DECRM       = detail::CSI('?', 1, ArgsMax, std::nullopt, 'l', VTType::VT100, documentation::DECRM);
 constexpr inline auto DECREQTPARM = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'x', VTType::VT100, documentation::DECREQTPARM);
+constexpr inline auto DECRQM      = detail::CSI('?', 1, 1, '$', 'p', VTType::VT320, documentation::DECRQM);
+constexpr inline auto DECRQM_ANSI = detail::CSI(std::nullopt, 1, 1, '$', 'p', VTType::VT320, documentation::DECRQM_ANSI);// NOLINT
 constexpr inline auto DECRQPSR    = detail::CSI(std::nullopt, 1, 1, '$', 'w', VTType::VT320, documentation::DECRQPSR);
 constexpr inline auto DECSASD     = detail::CSI(std::nullopt, 0, 1, '$', '}', VTType::VT420, documentation::DECSASD);
 constexpr inline auto DECSCA      = detail::CSI(std::nullopt, 0, 1, '"', 'q', VTType::VT240, documentation::DECSCA);
-constexpr inline auto DECSCL      = detail::CSI(std::nullopt, 2, 2, '"', 'p', VTType::VT220, documentation::DECSCL);
+constexpr inline auto DECSCL      = detail::CSI(std::nullopt, 1, 2, '"', 'p', VTType::VT220, documentation::DECSCL);
 constexpr inline auto DECSCPP     = detail::CSI(std::nullopt, 0, 1, '$', '|', VTType::VT100, documentation::DECSCPP);
 constexpr inline auto DECSCUSR    = detail::CSI(std::nullopt, 0, 1, ' ', 'q', VTType::VT520, documentation::DECSCUSR);
 constexpr inline auto DECSED      = detail::CSI('?', 0, 1, std::nullopt, 'J', VTType::VT240, documentation::DECSED);
@@ -1149,12 +1151,26 @@ class SupportedSequences
 
     CRISPY_CONSTEXPR void reset(VTType vt) noexcept
     {
-        // Partition the array such that first half contains all sequences with VTType less than or
-        // equal to given VTTYpe.
-        auto* itr =
-            std::partition(begin(),
-                           _supportedSequences.data() + _supportedSequences.size(),
-                           [vt](const Function& value) noexcept { return value.conformanceLevel <= vt; });
+        // Partition the array so the first half holds every sequence available at the given operating
+        // level (conformanceLevel <= vt). Two sequences are always kept available regardless of level:
+        //
+        //  * DECSCL is the very sequence that *sets* the operating level, so gating it by the level it
+        //    controls would be a trap -- `DECSCL 61` (drop to VT100) would deactivate DECSCL itself,
+        //    leaving no way to ever raise the level again. xterm likewise keys DECSCL off terminal_id.
+        //
+        //  * DECRQCRA merely *reports* a checksum of the screen; xterm answers it at any operating level
+        //    (its checksum handler is not level-gated), and conformance tools rely on it to read the
+        //    screen back even after dropping to VT100. Unlike a feature-enabling sequence, answering a
+        //    read request at a lower level corrupts no state -- and unlike DECRQM (which stays gated, as
+        //    esctest's Level2DoesntSupportDECRQM requires), it is a pure measurement.
+        //
+        // Contour's hardware identity is VT525, so both are genuine capabilities at every level.
+        auto* itr = std::partition(begin(),
+                                   _supportedSequences.data() + _supportedSequences.size(),
+                                   [vt](const Function& value) noexcept {
+                                       return value.conformanceLevel <= vt || value.id() == DECSCL.id()
+                                              || value.id() == DECRQCRA.id();
+                                   });
 
         _lastIndex = std::distance(begin(), itr);
         gsl::span<Function> availableDefinition(begin(), _lastIndex);
