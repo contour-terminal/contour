@@ -15,6 +15,7 @@
 
 #include <QtCore/QPointer>
 #include <QtDBus/QDBusVariant>
+#include <QtGui/QPalette>
 #include <QtGui/QScreen>
 #include <QtQml/QQmlApplicationEngine>
 
@@ -187,6 +188,15 @@ class ContourGuiApp: public QObject, public ContourApp
     std::optional<vtpty::Process::ExecInfo> _cliCommand;
 
     vtbackend::ColorPreference _colorPreference = vtbackend::ColorPreference::Dark;
+
+    /// The OS-provided application palette captured just before the first forced (dark/light) GUI
+    /// theme is applied, so @c GuiTheme::System can restore it. Only meaningful while
+    /// @c _guiPaletteOverridden is @c true (see @c applyGuiTheme).
+    QPalette _guiSystemPalette;
+
+    /// Whether a forced (dark/light) GUI theme currently overrides the OS application palette. Guards
+    /// the one-time capture of @c _guiSystemPalette and its restoration when returning to System.
+    bool _guiPaletteOverridden = false;
 
     std::unique_ptr<QQmlApplicationEngine> _qmlEngine;
 };

@@ -1594,6 +1594,31 @@ TEST_CASE("GuiTheme: qtColorSchemeFor maps each theme to a Qt color-scheme overr
     CHECK(qtColorSchemeFor(GuiTheme::Light) == Qt::ColorScheme::Light);
 }
 
+TEST_CASE("GuiTheme: buildThemePalette forces a legible dark/light chrome palette", "[config]")
+{
+    using contour::buildThemePalette;
+
+    // The explicit palette is what actually recolors the chrome on platform themes (KDE/GNOME) that
+    // own the palette and ignore QStyleHints::setColorScheme. Assert the two schemes differ and each
+    // keeps the window text readable against its own window fill (the failure mode of the old seam
+    // was a palette that never changed at all).
+    auto const dark = buildThemePalette(Qt::ColorScheme::Dark);
+    auto const light = buildThemePalette(Qt::ColorScheme::Light);
+
+    // Dark: light text on a dark window; Light: dark text on a light window.
+    CHECK(dark.color(QPalette::Window).lightnessF() < 0.5);
+    CHECK(dark.color(QPalette::WindowText).lightnessF() > 0.5);
+    CHECK(light.color(QPalette::Window).lightnessF() > 0.5);
+    CHECK(light.color(QPalette::WindowText).lightnessF() < 0.5);
+
+    // The two schemes must genuinely differ — the whole point of an explicit palette.
+    CHECK(dark.color(QPalette::Window) != light.color(QPalette::Window));
+    CHECK(dark.color(QPalette::Base) != light.color(QPalette::Base));
+
+    // The disabled group is themed too, so greyed-out chrome stays visibly distinct from enabled text.
+    CHECK(dark.color(QPalette::Disabled, QPalette::Text) != dark.color(QPalette::Normal, QPalette::Text));
+}
+
 TEST_CASE("Config: tab_bar_position and tab_bar_visibility parse each value (ignore-case)", "[config]")
 {
     using contour::config::TabBarPosition;

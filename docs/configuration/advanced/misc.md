@@ -64,8 +64,9 @@ The value is case-insensitive; an unrecognized value keeps the default (`system`
 
 !!! note
 
-    Forcing a GUI theme requires Qt 6.8 or newer. On older Qt builds the GUI always follows the
-    operating system's color scheme, as if `theme: system`.
+    Switching back from a forced `dark`/`light` theme to `system` restores the OS palette, but the
+    GUI chrome no longer tracks live OS light/dark switches until the terminal is restarted. Starting
+    up in `system` mode tracks live OS switches as usual.
 
 ```yml
 theme: system

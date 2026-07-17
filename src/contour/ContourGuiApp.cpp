@@ -235,27 +235,50 @@ void ContourGuiApp::onExit(TerminalSession& session)
 #endif
 }
 
-void ContourGuiApp::applyGuiTheme([[maybe_unused]] config::GuiTheme theme)
+void ContourGuiApp::applyGuiTheme(config::GuiTheme theme)
 {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
     // qtColorSchemeFor() is the pure decision (see GuiTheme.h): a forced scheme for dark/light,
-    // std::nullopt for system. setColorScheme regenerates the application palette, which the pinned
-    // Fusion style and every QML SystemPalette follow live, so all chrome recolors without
-    // touching any component.
-    if (auto const scheme = qtColorSchemeFor(theme))
+    // std::nullopt for system.
+    auto const scheme = qtColorSchemeFor(theme);
+
+    // Force the chrome palette explicitly. This is the load-bearing step: QStyleHints::setColorScheme
+    // does NOT regenerate QGuiApplication::palette() on platforms whose platform-theme plugin owns the
+    // palette (KDE Plasma, GNOME, …), so relying on it alone leaves the chrome uncolored on the Linux
+    // desktop. Setting the application palette via setPalette does recolor it, and every QML
+    // SystemPalette follows — so all chrome recolors without touching any component.
+    if (scheme)
     {
+        // Capture the OS palette once, before the first override, so System can later restore it.
+        if (!_guiPaletteOverridden)
+        {
+            _guiSystemPalette = QGuiApplication::palette();
+            _guiPaletteOverridden = true;
+        }
         displayLog()("Applying GUI theme override: {}", theme);
-        QGuiApplication::styleHints()->setColorScheme(*scheme);
+        QGuiApplication::setPalette(buildThemePalette(*scheme));
+    }
+    else if (_guiPaletteOverridden)
+    {
+        // Returning to System after a prior dark/light override: restore the captured OS palette.
+        // Note: once an explicit palette has been set, Qt no longer auto-tracks live OS theme
+        // switches for the chrome until the next restart (the documented System-mode tradeoff).
+        displayLog()("Applying GUI theme: system (restore OS palette)");
+        QGuiApplication::setPalette(_guiSystemPalette);
+        _guiPaletteOverridden = false;
     }
     else
-    {
         displayLog()("Applying GUI theme: system (follow OS color scheme)");
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+    // Also drive QStyleHints so QStyleHints::colorScheme() reports the pinned scheme: Qt Quick
+    // Controls internals and the platforms that DO regenerate their own palette (Windows/macOS) honor
+    // it. On the palette-owning Linux platform themes this is inert on its own — hence the explicit
+    // setPalette above. Setting the scheme emits no colorSchemeChanged to the terminal grid unless the
+    // reported scheme actually changes, and the grid handler is gated to System mode regardless.
+    if (scheme)
+        QGuiApplication::styleHints()->setColorScheme(*scheme);
+    else
         QGuiApplication::styleHints()->unsetColorScheme();
-    }
-#else
-    // QStyleHints::setColorScheme / unsetColorScheme require Qt 6.8. On older Qt the GUI chrome
-    // follows the OS color scheme unconditionally, i.e. as if theme: system.
-    displayLog()("GUI theme override requires Qt 6.8; GUI follows the OS color scheme.");
 #endif
 }
 
