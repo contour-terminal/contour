@@ -91,13 +91,25 @@ class MockTerm: public Terminal::NullEvents
     /// Applied on the spot, so a sequence's effect lands where the application put it. Deferring it
     /// would make the resize land wherever the input happened to be split into reads, and the same
     /// byte stream would then produce different screens on different runs.
+    ///
+    /// The line count names the USABLE main-page area, exactly as the real frontend
+    /// (`TerminalDisplay::resizeWindow`) receives it: the status-line height is added back here to form
+    /// the total `resizeScreen()` applies. Recording the usable request keeps `requestedPageSize`
+    /// comparable to what the sequence asked for (XTWINOPS `CSI 8 t`, DECCOLM, DECSCPP all pass usable).
     void requestWindowResize(LineCount lines, ColumnCount columns) override
     {
         requestedPageSize = PageSize { .lines = lines, .columns = columns };
+        if (refuseWindowResize)
+            return;
     }
 
     /// The size most recently requested by the application.
     std::optional<PageSize> requestedPageSize;
+
+    /// When set, the request is recorded but NOT applied — modelling a frontend that cannot honour it
+    /// (window maximized/fullscreen, a tiling WM, or the resize still in-flight on the GUI thread). Lets
+    /// a test prove a sequence resizes the grid on its own authority rather than via the frontend.
+    bool refuseWindowResize = false;
 
     void writeToScreen(std::u32string_view text) { writeToScreen(unicode::convert_to<char>(text)); }
 

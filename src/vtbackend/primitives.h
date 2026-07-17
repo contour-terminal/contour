@@ -799,8 +799,26 @@ enum class DECMode : std::uint8_t
     /// comes back round at the bottom.
     ReverseWraparoundExtended = 50,
 
+
+    /// DECNCSM (95) -- No Clearing Screen on Column change. When set, DECCOLM (80<->132) does not
+    /// erase page memory; reset (the default) clears the screen on a column-width change (VT100
+    /// behaviour).
+    NoClearScreenOnColumnChange = 68,
     /// Sentinel value for sizing the mode bitset. Must remain the last entry.
     DECModeCount = 45
+/// The minimum ANSI conformance level (1..5, matching conformanceLevelOf(VTType)) at which a DEC
+/// private mode is recognised. Below it, DECRQM answers "not recognised" and DECSET/DECRST ignore the
+/// mode -- how a real VT gates level-specific features (DECNCSM is a VT500 / level-5 feature). Data
+/// driven: a mode gains a floor by adding a case; everything else is available from VT100 (level 1).
+[[nodiscard]] constexpr int minimumConformanceLevel(DECMode mode) noexcept
+{
+    switch (mode)
+    {
+        case DECMode::NoClearScreenOnColumnChange: return 5; // DECNCSM: VT510+
+        default: return 1;
+    }
+}
+
 };
 
 /// OSC color-setting related commands that can be grouped into one
@@ -872,6 +890,7 @@ constexpr unsigned toDECModeNum(DECMode m) noexcept
         case DECMode::UseApplicationCursorKeys: return 1;
         case DECMode::DesignateCharsetUSASCII: return 2;
         case DECMode::Columns132: return 3;
+        case DECMode::NoClearScreenOnColumnChange: return 95;
         case DECMode::SmoothScroll: return 4;
         case DECMode::ReverseVideo: return 5;
         case DECMode::Origin: return 6;
@@ -928,6 +947,7 @@ constexpr std::optional<DECMode> fromDECModeNum(unsigned int modeNum) noexcept
         case 1: return DECMode::UseApplicationCursorKeys;
         case 2: return DECMode::DesignateCharsetUSASCII;
         case 3: return DECMode::Columns132;
+        case 95: return DECMode::NoClearScreenOnColumnChange;
         case 4: return DECMode::SmoothScroll;
         case 5: return DECMode::ReverseVideo;
         case 6: return DECMode::Origin;

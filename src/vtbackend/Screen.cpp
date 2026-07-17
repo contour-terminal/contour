@@ -2350,10 +2350,10 @@ void Screen::requestDECMode(unsigned int mode)
         if (modeEnum.has_value())
         {
             auto const modeEnum = fromDECModeNum(mode);
-            if (_terminal->isModeEnabled(modeEnum.value()))
-                return ModeResponse::Set;
-            else
-                return ModeResponse::Reset;
+            // A mode above the terminal's operating level is not recognised here (DECNCSM only at
+            // VT500 / level 5), matching how DECSCL gates level-specific features.
+            if (conformanceLevelOf(_terminal->operatingLevel()) < minimumConformanceLevel(modeEnum.value()))
+                return ModeResponse::NotRecognized;
         }
         return ModeResponse::NotRecognized;
     }();
@@ -3101,6 +3101,10 @@ namespace impl
         {
             if (auto const modeOpt = fromDECModeNum(seq.param(modeIndex)); modeOpt.has_value())
             {
+                // Ignore a mode above the terminal's operating level (DECNCSM only at VT500 / level 5),
+                // so a lower-level terminal neither enables nor reports it.
+                if (conformanceLevelOf(term.operatingLevel()) < minimumConformanceLevel(modeOpt.value()))
+                    return ApplyResult::Ok;
                 term.setMode(modeOpt.value(), enable);
                 return ApplyResult::Ok;
             }
@@ -4802,9 +4806,9 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
                 if (*cursor().position.column >= columnCount)
                     cursor().position.column = ColumnOffset::cast_from(columnCount) - 1;
 
-                _terminal->requestWindowResize(
-                    PageSize { _terminal->totalPageSize().lines,
-                               ColumnCount::cast_from(columnCount ? columnCount : 80) });
+                // The usable (main-page) line count, not the total: the frontend adds the status-line
+                // height back itself (see DECCOLM / XTWINOPS `CSI 8 t`). Passing the total double-counts
+                // the status line.
                 return ApplyResult::Ok;
             }
             else

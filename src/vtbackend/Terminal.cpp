@@ -1882,6 +1882,25 @@ SmoothScrollResult Terminal::applySmoothScrollPixelDelta(float pixelDelta)
     return SmoothScrollResult::Applied;
 }
 
+void Terminal::resizeScreenKeepingCellSize(PageSize totalPageSize)
+{
+    totalPageSize = clampedTotalPageSize(totalPageSize);
+
+    // Derive the pixel size from the cell size we already have, rather than passing none at all: without
+    // a pixel size UnixPty::resizeScreen() leaves ws_xpixel/ws_ypixel at zero, and TIOCSWINSZ hands the
+    // child a window with no pixel geometry -- withdrawing what sixel-capable applications size their
+    // images from. resizeScreen() divides this back out by the same main-page size, so the cell size comes
+    // out unchanged, which is what a column-count switch wants: the cells keep their size, the page its
+    // width in cells.
+    auto const pixels = cellPixelSize() * (totalPageSize - statusLineHeight());
+
+    resizeScreen(totalPageSize, pixels);
+
+    // A selection is anchored to columns that a narrower page no longer has; renderSelection() would walk
+    // it against the new grid. Every other resizeScreen() caller drops it too (@see contour::applyResize).
+    clearSelection();
+}
+
 void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
 {
     // The total page must leave room for at least one main-display line ON TOP of the visible status
@@ -2734,10 +2753,26 @@ void Terminal::setMode(DECMode mode, bool enable)
             if (_statusDisplayType == StatusDisplayType::HostWritable)
                 _hostWritableStatusLineScreen.clearScreen();
 
-            // Erases all data in page memory
-            clearScreen();
+            // Erases all data in page memory -- unless DECNCSM (No Clearing Screen on Column change)
+            // is set, in which case a column-width change preserves the page (VT500 behaviour).
+            if (!isModeEnabled(DECMode::NoClearScreenOnColumnChange))
+                clearScreen();
 
-            requestWindowResize(PageSize { totalPageSize().lines, columns });
+            // DECCOLM is authoritative and synchronous. An application switches to 132 columns and
+            // immediately draws to the new width in the same output burst (vttest's cursor-movement test
+            // is the canonical example: it addresses the box border at absolute column 132 right after
+            // the switch). Resize the grid here — on the parser thread, under the state lock
+            // writeToScreen() already holds — so that drawing lands on the new width. The window is asked
+            // to follow below, best-effort. Relying on the window resize alone (as this once did) resizes
+            // the grid a GUI round-trip later, by which time the application has already drawn onto the
+            // old, narrower page.
+            resizeScreenKeepingCellSize(PageSize { totalPageSize().lines, columns });
+
+            // The frontend is handed the USABLE (main-page) line count, not the total: it adds the
+            // status-line height back itself (as it does for XTWINOPS `CSI 8 t`). Passing
+            // totalPageSize().lines here double-counts the status line, growing the window one row on
+            // every DECCOLM when the indicator status line is shown.
+            requestWindowResize(PageSize { pageSize().lines, columns });
         }
         break;
         case DECMode::BatchedRendering:
@@ -2989,10 +3024,26 @@ void Terminal::setUnderlineColor(Color color)
 void Terminal::hardReset()
 {
     // TODO: make use of _factorySettings
+
+    // xterm returns a DECCOLM 132-column switch to 80 columns on RIS, but only when 80/132 switching was
+    // allowed AND the terminal is currently in 132 columns. Crucially this is checked BEFORE the modes
+    // are reset -- older xterm cleared the mode first and could then no longer tell it had been in 132
+    // columns, which is exactly what esctest RISTests.test_RIS_ResetDECCOLM guards against. 80 is the
+    // DECCOLM-off width by definition (DECRESET(DECCOLM) resizes to it), not an arbitrary constant.
+    auto const wasIn132Columns =
+        isModeEnabled(DECMode::AllowColumns80to132) && isModeEnabled(DECMode::Columns132);
+
     setScreen(ScreenType::Primary);
 
     // Ensure that the alternate screen buffer is having the correct size, as well.
     applyPageSizeToMainDisplay(ScreenType::Alternate);
+
+    if (wasIn132Columns)
+    {
+        // Authoritative, synchronous grid resize (as DECCOLM itself is), then ask the window to follow.
+        resizeScreenKeepingCellSize(PageSize { totalPageSize().lines, ColumnCount(80) });
+        requestWindowResize(PageSize { pageSize().lines, ColumnCount(80) });
+    }
 
     _modes = Modes {};
     setMode(DECMode::AutoWrap, true);
@@ -4044,6 +4095,7 @@ std::string to_string(DECMode mode)
         case DECMode::UseApplicationCursorKeys: return "UseApplicationCursorKeys";
         case DECMode::DesignateCharsetUSASCII: return "DesignateCharsetUSASCII";
         case DECMode::Columns132: return "Columns132";
+        case DECMode::NoClearScreenOnColumnChange: return "NoClearScreenOnColumnChange";
         case DECMode::SmoothScroll: return "SmoothScroll";
         case DECMode::ReverseVideo: return "ReverseVideo";
         case DECMode::MouseProtocolX10: return "MouseProtocolX10";

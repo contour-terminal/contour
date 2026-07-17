@@ -936,6 +936,12 @@ bool WindowController::applyContentDrivenResize(display::TerminalDisplay& reques
     if (osWindow->visibility() == QQuickWindow::Visibility::FullScreen
         || osWindow->visibility() == QQuickWindow::Visibility::Maximized)
     {
+        // The window cannot resize while pinned to the screen. The application's column change (DECCOLM)
+        // is NOT lost by refusing here: DECCOLM resizes the grid authoritatively on its own (see
+        // Terminal::setMode(Columns132)), so the terminal is already the requested width and renders
+        // correctly inside the maximized window. Leaving maximized to fit the window is a UX refinement
+        // tracked separately — it needs Wayland-correct unmaximize/resize ordering (a naive
+        // resize()-after-showNormal() is a fatal xdg-shell protocol error).
         displayLog()("Refusing content-driven window resize while fullscreen/maximized.");
         return false;
     }

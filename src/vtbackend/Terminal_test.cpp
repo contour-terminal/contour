@@ -625,6 +625,135 @@ TEST_CASE("Terminal.clampedTotalPageSize", "[terminal]")
     }
 }
 
+TEST_CASE("Terminal.DECCOLM.doesNotDoubleCountStatusLine", "[terminal]")
+{
+    using namespace vtbackend;
+
+    // DECCOLM changes only the column count. The line count it hands the frontend must be the USABLE
+    // main-page count: the frontend adds the status-line height back itself (exactly as it does for
+    // XTWINOPS `CSI 8 t`). Passing the *total* double-counts the status line, so the window grows one
+    // row on every DECCOLM whenever the indicator status line is shown (29 -> 30 -> 31). Regression for
+    // that, driven through the same requestWindowResize()/resizeScreen() path as the real frontend.
+    auto mc = MockTerm { PageSize { LineCount(24), ColumnCount(80) } };
+    mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+    REQUIRE(mc.terminal.statusLineHeight() == LineCount(1));
+
+    auto const usableBefore = mc.terminal.pageSize().lines; // main page only; excludes the status line
+
+    // Allow 80<->132, then switch to 132 columns.
+    mc.writeToScreen("\033[?40h\033[?3h");
+
+    REQUIRE(mc.requestedPageSize.has_value());
+    CHECK(mc.requestedPageSize->columns == ColumnCount(132));
+    // The request names the USABLE line count, unchanged — NOT the total (usable + status line).
+    CHECK(mc.requestedPageSize->lines == usableBefore);
+
+    // The main page did not creep: only the columns changed.
+    CHECK(mc.terminal.pageSize().lines == usableBefore);
+    CHECK(mc.terminal.pageSize().columns == ColumnCount(132));
+
+    // A second DECCOLM (back to 80 columns) still does not creep the line count.
+    mc.writeToScreen("\033[?3l");
+    CHECK(mc.terminal.pageSize().lines == usableBefore);
+    CHECK(mc.terminal.pageSize().columns == ColumnCount(80));
+}
+
+TEST_CASE("Terminal.DECSCPP.doesNotDoubleCountStatusLine", "[terminal]")
+{
+    using namespace vtbackend;
+
+    // DECSCPP (`CSI Ps $ |`) selects 80/132 columns per page and shares DECCOLM's frontend contract: the
+    // USABLE line count is passed and the frontend adds the status-line height back. Passing the total
+    // double-counts it. Same regression as DECCOLM, different sequence.
+    auto mc = MockTerm { PageSize { LineCount(24), ColumnCount(80) } };
+    mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+    REQUIRE(mc.terminal.statusLineHeight() == LineCount(1));
+
+    auto const usableBefore = mc.terminal.pageSize().lines;
+
+    mc.writeToScreen("\033[132$|");
+    REQUIRE(mc.requestedPageSize.has_value());
+    CHECK(mc.requestedPageSize->columns == ColumnCount(132));
+    CHECK(mc.requestedPageSize->lines == usableBefore);
+    CHECK(mc.terminal.pageSize().lines == usableBefore);
+    CHECK(mc.terminal.pageSize().columns == ColumnCount(132));
+}
+
+TEST_CASE("Terminal.DECCOLM.resizesGridSynchronously", "[terminal]")
+{
+    using namespace vtbackend;
+
+    // DECCOLM must resize the grid authoritatively and synchronously with sequence processing, so that
+    // an application which switches to 132 columns and immediately draws to the new width — vttest's
+    // cursor-movement test addresses its box border at absolute column 132 right after the switch —
+    // lands its cells on the new width, even when the frontend cannot resize the window yet. Model that
+    // frontend with refuseWindowResize: the grid must be 132 wide right after DECCOLM regardless.
+    auto mc = MockTerm { PageSize { LineCount(24), ColumnCount(80) } };
+    mc.refuseWindowResize = true;
+
+    mc.writeToScreen("\033[?40h\033[?3h"); // allow 80<->132, then DECCOLM 132
+    // Authoritative: the grid is 132 wide now, not one GUI round-trip later.
+    REQUIRE(mc.terminal.pageSize().columns == ColumnCount(132));
+
+    // Absolute addressing to the far right lands on the new width: a marker at column 132 is at
+    // column-offset 131. On the old 80-column grid it would have clamped to column 80.
+    mc.writeToScreen("\033[1;132HX");
+    CHECK(mc.terminal.currentScreen().at(LineOffset(0), ColumnOffset(131)).toUtf8() == "X");
+
+    // And back to 80 columns, synchronously.
+    mc.writeToScreen("\033[?3l");
+    CHECK(mc.terminal.pageSize().columns == ColumnCount(80));
+}
+
+TEST_CASE("Terminal.RIS.resetsDECCOLM", "[terminal]")
+{
+    using namespace vtbackend;
+
+    // esctest RISTests.test_RIS_ResetDECCOLM: RIS returns a DECCOLM 132-column switch to 80 columns,
+    // provided 80/132 switching was allowed and the terminal is currently in 132 columns. The check must
+    // precede the mode reset (older xterm reset the mode first and could no longer tell).
+    SECTION("RIS returns a 132-column DECCOLM switch to 80")
+    {
+        auto mc = MockTerm { PageSize { LineCount(24), ColumnCount(80) } };
+        mc.writeToScreen("\033[?40h\033[?3h"); // allow 80<->132, then DECCOLM 132
+        REQUIRE(mc.terminal.pageSize().columns == ColumnCount(132));
+        mc.writeToScreen("\033c"); // RIS
+        CHECK(mc.terminal.pageSize().columns == ColumnCount(80));
+    }
+
+    SECTION("RIS leaves an 80-column terminal at 80 (no spurious resize)")
+    {
+        auto mc = MockTerm { PageSize { LineCount(24), ColumnCount(80) } };
+        mc.writeToScreen("\033c"); // RIS with no DECCOLM in effect
+        CHECK(mc.terminal.pageSize().columns == ColumnCount(80));
+    }
+}
+
+TEST_CASE("Terminal.DECNCSM", "[terminal]")
+{
+    using namespace vtbackend;
+
+    // DECNCSM (DEC private mode 95): when set, DECCOLM (80<->132) preserves page memory; when reset
+    // (the default), a column-width change clears the screen (VT100 behaviour).
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(80) } };
+    mc.writeToScreen("\033[?40h"); // allow the 80<->132 switch
+
+    SECTION("default (reset): DECCOLM clears the screen")
+    {
+        mc.writeToScreen("HELLO");
+        mc.writeToScreen("\033[?3h"); // DECCOLM -> 132
+        CHECK(mc.terminal.primaryScreen().grid().lineText(LineOffset(0)).find('H') == std::string::npos);
+    }
+
+    SECTION("DECNCSM set: DECCOLM preserves the screen")
+    {
+        mc.writeToScreen("\033[?95h"); // DECNCSM
+        mc.writeToScreen("HELLO");
+        mc.writeToScreen("\033[?3h"); // DECCOLM -> 132
+        CHECK(mc.terminal.primaryScreen().grid().lineText(LineOffset(0)).substr(0, 5) == "HELLO");
+    }
+}
+
 TEST_CASE("Terminal.SynchronizedOutput", "[terminal]")
 {
     constexpr auto BatchOn = "\033[?2026h"sv;

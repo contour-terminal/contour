@@ -689,6 +689,14 @@ class Terminal
     /// accumulated into the screen size, too.
     void resizeScreen(PageSize totalPageSize, std::optional<ImageSize> pixels = std::nullopt);
 
+    /// Resizes the terminal screen to @p totalPageSize without changing the cell size, and drops the
+    /// selection.
+    ///
+    /// This is what a sequence that changes the page size on its own authority wants (DECCOLM, and RIS
+    /// undoing it): the cells keep their size, the child is still told a pixel geometry, and the
+    /// selection -- which is anchored to columns the new page may not have -- goes away.
+    void resizeScreenKeepingCellSize(PageSize totalPageSize);
+
     void clearScreen();
 
     void setMouseProtocolBypassModifiers(Modifiers value) { _settings.mouseProtocolBypassModifiers = value; }
