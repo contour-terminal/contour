@@ -1669,18 +1669,28 @@ void Screen::copyArea(Rect sourceArea, int page, CellLocation targetTopLeft, int
     auto& srcGrid = _terminal->pageAt(sourcePageIndex).grid();
     auto& dstGrid = _terminal->pageAt(targetPageIndex).grid();
 
+    // The copy is truncated at the target page's edge: an area that would not fit copies only the part
+    // that does. Copying every cell the source names would run the write past the end of a line.
+    auto const targetPageSize = dstGrid.pageSize();
+    auto const height =
+        std::min(*sourceArea.bottom - *sourceArea.top + 1, unbox(targetPageSize.lines) - *targetTopLeft.line);
+    auto const width = std::min(*sourceArea.right - *sourceArea.left + 1,
+                                unbox(targetPageSize.columns) - *targetTopLeft.column);
+    if (height <= 0 || width <= 0)
+        return;
+
     auto const [x0, xInc, xEnd] = [&]() {
         if (samePage && *targetTopLeft.column > *sourceArea.left) // moving right on same page
-            return std::tuple { *sourceArea.right - *sourceArea.left, -1, -1 };
+            return std::tuple { width - 1, -1, -1 };
         else
-            return std::tuple { 0, +1, *sourceArea.right - *sourceArea.left + 1 };
+            return std::tuple { 0, +1, width };
     }();
 
     auto const [y0, yInc, yEnd] = [&]() {
         if (samePage && *targetTopLeft.line > *sourceArea.top) // moving down on same page
-            return std::tuple { *sourceArea.bottom - *sourceArea.top, -1, -1 };
+            return std::tuple { height - 1, -1, -1 };
         else
-            return std::tuple { 0, +1, *sourceArea.bottom - *sourceArea.top + 1 };
+            return std::tuple { 0, +1, height };
     }();
 
     for (auto y = y0; y != yEnd; y += yInc)

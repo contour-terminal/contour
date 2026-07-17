@@ -3849,6 +3849,33 @@ TEST_CASE("DECCRA.DownLeft.intersecting", "[screen]")
     CHECK(resultText == expectedText);
 }
 
+TEST_CASE("DECCRA.trailing semicolon", "[screen]")
+{
+    // The form vttest actually sends: esc.c:732 is `"%d;%d;%d;%d;%d;%d;%d;%d;$v"` -- eight values and
+    // then a trailing `;`. ECMA-48 5.4.1 makes that a ninth, empty parameter taking its default, and an
+    // omitted parameter is counted here, so DECCRA arrived with nine and matched nothing at all: the
+    // whole copy was silently dropped as an unknown sequence. A terminal must ignore parameters it does
+    // not use. Every other test in this file writes the eight-parameter form, which is why none caught
+    // it -- and vttest's chapter 11.3.6 could not, because its `*` walked straight past the test.
+    auto mock = screenForDECRA();
+    auto& screen = mock.terminal.primaryScreen();
+    REQUIRE(screen.renderMainPageText()
+            == "ABCDEF\n"
+               "abcdef\n"
+               "123456\n"
+               "GHIJKL\n"
+               "ghijkl\n");
+
+    mock.writeToScreen("\033[4;3;5;6;0;3;2;0;$v"); // note the trailing ';'
+
+    CHECK(screen.renderMainPageText()
+          == "ABCDEF\n"
+             "abcdef\n"
+             "1IJKL6\n"
+             "GijklL\n"
+             "ghijkl\n");
+}
+
 TEST_CASE("DECCRA.Right.intersecting", "[screen]")
 {
     // Moves a rectangular area by one column to the right.
@@ -6225,3 +6252,22 @@ TEST_CASE("A rectangular area is relative to the origin", "[screen]")
 }
 
 // }}} Rectangular areas
+
+TEST_CASE("DECCRA truncates a copy at the page's edge", "[screen]")
+{
+    // An area that would not fit copies only the part that does. Copying every cell the source named
+    // ran the write past the end of a line -- the engine asserted, and a release build would have
+    // corrupted memory.
+    auto mock = MockTerm { PageSize { LineCount(8), ColumnCount(8) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[1;1H");
+    mock.writeToScreen("abcdefgh\r\nijklmnop\r\nqrstuvwx\r\nyz012345\r\n"
+                       "ABCDEFGH\r\nIJKLMNOP\r\nQRSTUVWX\r\nYZ6789!@");
+
+    // Copy the 3x3 area at 2,2 to 7,7 -- where only its top-left 2x2 corner still fits on the page.
+    mock.writeToScreen("\033[2;2;4;4;1;7;7;1$v");
+
+    CHECK(screen.grid().lineText(LineOffset(6)) == "QRSTUVjk");
+    CHECK(screen.grid().lineText(LineOffset(7)) == "YZ6789rs");
+}

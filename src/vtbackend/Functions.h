@@ -609,7 +609,13 @@ constexpr inline auto DCH         = detail::CSI(std::nullopt, 0, 1, std::nullopt
 constexpr inline auto DECAC       = detail::CSI(std::nullopt, 1, 3, ',', '|', VTType::VT525, documentation::DECAC);
 constexpr inline auto DECATC      = detail::CSI(std::nullopt, 0, 3, ',', '}', VTType::VT525, documentation::DECATC);
 constexpr inline auto DECCARA     = detail::CSI(std::nullopt, 5, ArgsMax, '$', 'r', VTType::VT420, documentation::DECCARA);
-constexpr inline auto DECCRA      = detail::CSI(std::nullopt, 0, 8, '$', 'v', VTType::VT420, documentation::DECCRA);
+// Nine, not the eight DECCRA defines: a trailing `;` supplies a ninth, omitted parameter, and ECMA-48
+// 5.4.1 makes that legal -- a parameter string is sub-strings separated by `;`, so a trailing one is an
+// empty sub-string taking its default. vttest writes DECCRA exactly that way (esc.c:732,
+// `"%d;%d;%d;%d;%d;%d;%d;%d;$v"`), and an omitted parameter is counted here, so the sequence arrives
+// with nine and matched nothing at all. The handler reads parameters 0..7 by name and never looks at a
+// ninth; a terminal must ignore parameters it does not use.
+constexpr inline auto DECCRA      = detail::CSI(std::nullopt, 0, 9, '$', 'v', VTType::VT420, documentation::DECCRA);
 constexpr inline auto DECDC       = detail::CSI(std::nullopt, 0, 1, '\'', '~', VTType::VT420, documentation::DECDC);
 constexpr inline auto DECELR      = detail::CSI(std::nullopt, 0, 2, '\'', 'z', VTType::VT320, documentation::DECELR);
 constexpr inline auto DECSLE      = detail::CSI(std::nullopt, 0, ArgsMax, '\'', '{', VTType::VT320, documentation::DECSLE);
