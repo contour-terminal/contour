@@ -1946,7 +1946,14 @@ void Screen::moveCursorToColumn(ColumnOffset column)
 
 void Screen::moveCursorToBeginOfLine()
 {
-    setCurrentColumn(ColumnOffset(0));
+    // A port of xterm's CarriageReturn(). The cursor snaps to the left margin, which is the left edge
+    // of the page unless DECLRMM narrowed it. The one exception is a cursor already left of the margin:
+    // that is only reachable outside origin mode (absolute addressing may place it there), and since the
+    // margin is not holding it, it falls to the screen's left edge instead.
+    auto const left = margin().horizontal.from;
+    auto const target = (_cursor.originMode || _cursor.position.column >= left) ? left : ColumnOffset(0);
+    _cursor.wrapPending = false;
+    _cursor.position.column = target;
 }
 
 void Screen::moveCursorToLine(LineOffset n)

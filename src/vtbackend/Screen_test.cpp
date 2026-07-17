@@ -2286,6 +2286,49 @@ TEST_CASE("MoveCursorToBeginOfLine", "[screen]")
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(0) });
 }
 
+TEST_CASE("CarriageReturn_honours_left_margin", "[screen]")
+{
+    // xterm's CarriageReturn: with DECLRMM on, CR snaps to the left margin when the cursor is at or
+    // right of it, and to the screen's left edge when the cursor is left of it (only reachable in
+    // non-origin mode). In origin mode it always snaps to the left margin.
+    // Mirrors esctest CRTests.test_CR_* with left/right margins [4..9] (1-based cols 5..10).
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(12) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.terminal.setMode(DECMode::LeftRightMargin, true);
+    mock.terminal.setLeftRightMargin(ColumnOffset { 4 }, ColumnOffset { 9 });
+
+    SECTION("right of the left margin: snaps to the left margin")
+    {
+        screen.moveCursorTo(LineOffset { 0 }, ColumnOffset { 5 });
+        screen.moveCursorToBeginOfLine();
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(4) });
+    }
+
+    SECTION("at the left margin: stays put")
+    {
+        screen.moveCursorTo(LineOffset { 0 }, ColumnOffset { 4 });
+        screen.moveCursorToBeginOfLine();
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(4) });
+    }
+
+    SECTION("left of the left margin (non-origin): falls to the screen edge")
+    {
+        screen.moveCursorTo(LineOffset { 0 }, ColumnOffset { 3 });
+        screen.moveCursorToBeginOfLine();
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
+    }
+
+    SECTION("origin mode: always snaps to the left margin")
+    {
+        mock.terminal.setMode(DECMode::Origin, true);
+        // In origin mode addressing is margin-relative, so logical column 3 is absolute column 7.
+        screen.moveCursorTo(LineOffset { 0 }, ColumnOffset { 3 });
+        REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(7) });
+        screen.moveCursorToBeginOfLine();
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(4) });
+    }
+}
+
 TEST_CASE("MoveCursorTo", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
