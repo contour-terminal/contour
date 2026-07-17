@@ -1,4 +1,4 @@
-## C++ Coding Guidelines
+# C++ Coding Guidelines
 
 - Prefer C++23: `constexpr`, `std::ranges`, `std::format`, `std::expected`, structured bindings
 - C-style loops are forbidden; use range-based for loops exclusively
