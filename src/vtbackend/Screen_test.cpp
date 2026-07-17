@@ -6271,3 +6271,22 @@ TEST_CASE("DECCRA truncates a copy at the page's edge", "[screen]")
     CHECK(screen.grid().lineText(LineOffset(6)) == "QRSTUVjk");
     CHECK(screen.grid().lineText(LineOffset(7)) == "YZ6789rs");
 }
+
+TEST_CASE("DECDC deletes a column from every line, including the blank ones", "[screen]")
+{
+    // DECDC deletes a column from every line within the vertical margin -- most of which, on a page
+    // that has just been written to, are still blank. A blank line's SoA arrays are empty, and
+    // deleteChars() wrote through them without materializing them first. insertChars() had always
+    // guarded against that; its sibling never did.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(7) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[1;1H");
+    mock.writeToScreen("abcdefg\r\nABCDEFG");
+    mock.writeToScreen("\033[1;2H"); // column 2, with lines 3..5 still blank
+    mock.writeToScreen("\033['~");   // DECDC, default parameter: delete one column
+
+    CHECK(screen.grid().lineText(LineOffset(0)) == "acdefg ");
+    CHECK(screen.grid().lineText(LineOffset(1)) == "ACDEFG ");
+    CHECK(screen.grid().lineText(LineOffset(4)) == "       ");
+}

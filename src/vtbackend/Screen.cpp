@@ -1822,7 +1822,18 @@ void Screen::deleteCharacters(ColumnCount n)
 void Screen::deleteChars(LineOffset lineOffset, ColumnOffset column, ColumnCount columnsToDelete)
 {
     auto& line = _grid.lineAt(lineOffset);
-    auto& storage = line.storage();
+
+    // Deleting from a blank line with matching fill attrs is a no-op: shifting "all default cells" left
+    // by N still leaves all default cells, and the cleared range was already default. This is not only
+    // an optimization -- DECDC deletes a column from *every* line within the vertical margin, so
+    // without it a single `CSI ' ~` on a fresh page would materialize every blank line on it.
+    if (line.isBlankWithFillAttrs(_cursor.graphicsRendition))
+        return;
+
+    // A blank line's SoA arrays are empty; writing through them without materializing first reads and
+    // writes past the end of every one of them. insertChars() has always done this; its sibling never
+    // did.
+    auto& storage = line.materializedStorage();
     auto const leftCol = column.as<size_t>();
     auto const rightCol = static_cast<size_t>(*margin().horizontal.to + 1);
     auto const n =
