@@ -242,8 +242,9 @@ constexpr inline auto DECRQDE = FunctionDocumentation { .mnemonic = "DECRQDE", .
 // CSI additions
 constexpr inline auto DECRARA = FunctionDocumentation { .mnemonic = "DECRARA", .comment = "Reverse Attributes in Rectangular Area" };
 constexpr inline auto DECSACE = FunctionDocumentation { .mnemonic = "DECSACE", .comment = "Select Attribute Change Extent" };
-constexpr inline auto DECRQCRA = FunctionDocumentation { .mnemonic = "DECRQCRA", .comment = "Request Checksum of Rectangular Area" };
-constexpr inline auto XTCHECKSUM = FunctionDocumentation { .mnemonic = "XTCHECKSUM", .comment = "Select checksum extension" };
+constexpr inline auto DECELF = FunctionDocumentation { .mnemonic = "DECELF", .comment = "Enable Local Functions", .parameters = "Pn", .description = "Selects which local functions (copy, print, etc.) the keyboard may invoke. Contour has no such local functions, so the value is remembered and reported back through DECRQSS but not acted on." };
+constexpr inline auto DECLFKC = FunctionDocumentation { .mnemonic = "DECLFKC", .comment = "Local Function Key Control", .parameters = "Pn", .description = "Controls how the local function keys behave. Remembered and reported through DECRQSS, but not acted on -- Contour has no local function keys." };
+constexpr inline auto DECSMKR = FunctionDocumentation { .mnemonic = "DECSMKR", .comment = "Select Modifier Key Reporting", .parameters = "Pn", .description = "Selects the auto-repeat / modifier-key reporting mode of the keyboard. Remembered and reported through DECRQSS, but not acted on." };
 constexpr inline auto DECRQCRA = FunctionDocumentation { .mnemonic = "DECRQCRA", .comment = "Request Checksum of Rectangular Area", .parameters = "Pid;Pp;Pt;Pl;Pb;Pr", .description = "Reports a 16-bit checksum of the characters in the given rectangle, as `DCS Pid ! ~ xxxx ST`. Pid is echoed back to correlate the answer with the request, Pp is the page (Contour has a single page). Pt;Pl;Pb;Pr is the rectangle, defaulting to the whole page.\n\nBy default the value reported is the two's complement of the sum of the cells' character values, with the video attributes folded in and cells that were never written to left out entirely. XTCHECKSUM selects deviations from that.", .examples = "CSI 1 ; 1 ; 1 ; 1 ; 1 ; 1 * y" };
 constexpr inline auto XTCHECKSUM = FunctionDocumentation { .mnemonic = "XTCHECKSUM", .comment = "Select checksum extension", .parameters = "Ps", .description = "Selects how DECRQCRA computes its checksum. Ps is a bit mask; a zero (the default) is DEC-compatible, and each bit switches one aspect off:\n\n* 1: do not negate the result.\n* 2: do not fold the video attributes in.\n* 4: count blank cells rather than omitting them.\n* 8: count cells never written to (as blanks) rather than skipping them.\n* 16: report the codepoint as-is rather than mapping it into the DEC charset.\n\nThe selection survives a soft reset (DECSTR) and a hard reset (RIS), both of which restore it to the value the terminal was configured with.", .examples = "CSI 10 # y" };
 constexpr inline auto SL = FunctionDocumentation { .mnemonic = "SL", .comment = "Scroll Left" };
@@ -733,8 +734,10 @@ constexpr inline auto DECPS       = detail::CSI(std::nullopt, 3, 18, ',', '~', V
 constexpr inline auto DECRARA     = detail::CSI(std::nullopt, 5, ArgsMax, '$', 't', VTType::VT420, documentation::DECRARA);
 constexpr inline auto DECRQCRA    = detail::CSI(std::nullopt, 0, 6, '*', 'y', VTType::VT420, documentation::DECRQCRA);
 constexpr inline auto DECSACE     = detail::CSI(std::nullopt, 0, 1, '*', 'x', VTType::VT420, documentation::DECSACE);
+constexpr inline auto DECELF      = detail::CSI(std::nullopt, 0, 1, '+', 'q', VTType::VT420, documentation::DECELF);
+constexpr inline auto DECLFKC     = detail::CSI(std::nullopt, 0, 1, '*', '}', VTType::VT420, documentation::DECLFKC);
+constexpr inline auto DECSMKR     = detail::CSI(std::nullopt, 0, 1, '+', 'r', VTType::VT420, documentation::DECSMKR);
 constexpr inline auto DECRM       = detail::CSI('?', 1, ArgsMax, std::nullopt, 'l', VTType::VT100, documentation::DECRM);
-constexpr inline auto DECRQM      = detail::CSI('?', 1, 1, '$', 'p', VTType::VT100, documentation::DECRQM);
 constexpr inline auto DECREQTPARM = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'x', VTType::VT100, documentation::DECREQTPARM);
 constexpr inline auto DECRQPSR    = detail::CSI(std::nullopt, 1, 1, '$', 'w', VTType::VT320, documentation::DECRQPSR);
 constexpr inline auto DECSASD     = detail::CSI(std::nullopt, 0, 1, '$', '}', VTType::VT420, documentation::DECSASD);
@@ -984,6 +987,9 @@ constexpr static auto allFunctionsArray() noexcept
         DECREQTPARM,
         DECRQCRA,
         DECSACE,
+        DECELF,
+        DECLFKC,
+        DECSMKR,
         DECSCA,
         DECSED,
         DECSERA,

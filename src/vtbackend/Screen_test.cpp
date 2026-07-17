@@ -3459,6 +3459,108 @@ TEST_CASE("CursorPreviousLine", "[screen]")
     }
 }
 
+TEST_CASE("DECRQSS reports the scroll-region margins", "[screen]")
+{
+    // DECRQSS replies DCS 1 $ r <setting> ST. The margins are stored 0-based and inclusive, so both
+    // bounds convert back to the 1-based values the sequence was given. Mirrors esctest
+    // test_DECRQSS_DECSTBM and test_DECRQSS_DECSLRM.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    SECTION("DECSTBM top;bottom")
+    {
+        mock.writeToScreen("\033[5;6r");      // DECSTBM 5;6
+        mock.writeToScreen("\033P$qr\033\\"); // DECRQSS "r"
+        CHECK("\033P1$r5;6r\033\\" == mock.terminal.peekInput());
+    }
+
+    SECTION("DECSLRM left;right")
+    {
+        mock.writeToScreen("\033[?69h");      // DECSET DECLRMM
+        mock.writeToScreen("\033[3;4s");      // DECSLRM 3;4
+        mock.writeToScreen("\033P$qs\033\\"); // DECRQSS "s"
+        CHECK("\033P1$r3;4s\033\\" == mock.terminal.peekInput());
+    }
+}
+
+TEST_CASE("DECRQSS reports the current SGR", "[screen]")
+{
+    // The SGR report leads with a 0 (reset) and then lists only the attributes that differ from the
+    // default -- default colours are implied by the reset, not spelled out. Mirrors esctest
+    // test_DECRQSS_SGR.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+
+    SECTION("a single attribute, default colours omitted")
+    {
+        mock.writeToScreen("\033[1m");        // SGR bold
+        mock.writeToScreen("\033P$qm\033\\"); // DECRQSS "m"
+        CHECK("\033P1$r0;1m\033\\" == mock.terminal.peekInput());
+    }
+
+    SECTION("several attributes")
+    {
+        mock.writeToScreen("\033[1;3m");      // SGR bold + italic
+        mock.writeToScreen("\033P$qm\033\\"); // DECRQSS "m"
+        CHECK("\033P1$r0;1;3m\033\\" == mock.terminal.peekInput());
+    }
+}
+
+TEST_CASE("DECRQSS reports the attribute change extent (DECSACE)", "[screen]")
+{
+    // DECSACE selects stream vs rectangle for DECCARA/DECRARA; DECRQSS "*x" reports it. Mirrors esctest
+    // test_DECRQSS_DECSACE, which had no mapping at all.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+
+    SECTION("stream mode reports 0")
+    {
+        mock.writeToScreen("\033[0*x");        // DECSACE 0 (stream)
+        mock.writeToScreen("\033P$q*x\033\\"); // DECRQSS "*x"
+        CHECK("\033P1$r0*x\033\\" == mock.terminal.peekInput());
+    }
+
+    SECTION("rectangle mode reports 2")
+    {
+        mock.writeToScreen("\033[2*x");        // DECSACE 2 (rectangle)
+        mock.writeToScreen("\033P$q*x\033\\"); // DECRQSS "*x"
+        CHECK("\033P1$r2*x\033\\" == mock.terminal.peekInput());
+    }
+}
+
+TEST_CASE("DECRQSS reports the VT525 keyboard settings", "[screen]")
+{
+    // DECELF (CSI Pn +q), DECLFKC (CSI Pn *}) and DECSMKR (CSI Pn +r) are keyboard settings Contour
+    // remembers and hands back verbatim through DECRQSS, though nothing acts on them. Mirrors esctest
+    // test_DECRQSS_DECELF/DECLFKC/DECSMKR (which had no mapping at all).
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+
+    SECTION("DECELF")
+    {
+        mock.writeToScreen("\033[0+q");        // DECELF 0
+        mock.writeToScreen("\033P$q+q\033\\"); // DECRQSS "+q"
+        CHECK("\033P1$r0+q\033\\" == mock.terminal.peekInput());
+    }
+
+    SECTION("DECLFKC")
+    {
+        mock.writeToScreen("\033[0*}");        // DECLFKC 0
+        mock.writeToScreen("\033P$q*}\033\\"); // DECRQSS "*}"
+        CHECK("\033P1$r0*}\033\\" == mock.terminal.peekInput());
+    }
+
+    SECTION("DECSMKR")
+    {
+        mock.writeToScreen("\033[0+r");        // DECSMKR 0
+        mock.writeToScreen("\033P$q+r\033\\"); // DECRQSS "+r"
+        CHECK("\033P1$r0+r\033\\" == mock.terminal.peekInput());
+    }
+
+    SECTION("a non-default value is remembered and reported")
+    {
+        mock.writeToScreen("\033[2+r");        // DECSMKR 2
+        mock.writeToScreen("\033P$q+r\033\\"); // DECRQSS "+r"
+        CHECK("\033P1$r2+r\033\\" == mock.terminal.peekInput());
+    }
+}
+
 TEST_CASE("Eight-bit C1 controls on input", "[screen]")
 {
     // A raw byte in 0x80..0x9F that begins a character is a C1 control, exactly the 8-bit form of the

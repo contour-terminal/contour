@@ -99,6 +99,10 @@ enum class RequestStatusString : uint8_t
     DECSCL,
     DECSCUSR,
     DECSCA,
+    DECSACE,
+    DECELF,
+    DECLFKC,
+    DECSMKR,
     DECSTBM,
     DECSLRM,
     DECSLPP,
@@ -817,6 +821,12 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// (CellFlag::CharacterProtected) is honoured by the selective erases instead, never here.
     [[nodiscard]] bool eraseSkipsProtectedCells() const noexcept { return _isoProtectionActive; }
 
+    // VT525 keyboard settings that Contour has nothing to act on but must still remember and report
+    // through DECRQSS: it stores the parameter it was given and hands it back verbatim. @see DECELF,
+    // DECLFKC and DECSMKR in requestStatusString(). TODO: wire these to real keyboard behaviour.
+    int _enableLocalFunctions = 0;    ///< DECELF (`CSI Pn + q`).
+    int _localFunctionKeyControl = 0; ///< DECLFKC (`CSI Pn * }`).
+    int _modifierKeyReporting = 0;    ///< DECSMKR (`CSI Pn + r`).
 };
 
 inline void Screen::scrollUp(LineCount n, Margin margin)
@@ -842,6 +852,10 @@ struct std::formatter<vtbackend::RequestStatusString>: formatter<std::string_vie
             case vtbackend::RequestStatusString::DECSCL: name = "DECSCL"; break;
             case vtbackend::RequestStatusString::DECSCUSR: name = "DECSCUSR"; break;
             case vtbackend::RequestStatusString::DECSCA: name = "DECSCA"; break;
+            case vtbackend::RequestStatusString::DECSACE: name = "DECSACE"; break;
+            case vtbackend::RequestStatusString::DECELF: name = "DECELF"; break;
+            case vtbackend::RequestStatusString::DECLFKC: name = "DECLFKC"; break;
+            case vtbackend::RequestStatusString::DECSMKR: name = "DECSMKR"; break;
             case vtbackend::RequestStatusString::DECSTBM: name = "DECSTBM"; break;
             case vtbackend::RequestStatusString::DECSLRM: name = "DECSLRM"; break;
             case vtbackend::RequestStatusString::DECSLPP: name = "DECSLPP"; break;

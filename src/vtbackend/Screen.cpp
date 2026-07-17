@@ -164,8 +164,8 @@ namespace // {{{ helper
                 sgrAddSub(static_cast<unsigned>(colorValue));
             }
         }
-        else if (isDefaultColor(sgr.foregroundColor))
-            sgrAdd(39);
+        // A default foreground is already implied by the leading `0` (reset) DECRQSS prepends, so it is
+        // not spelled out -- xterm's SGR report lists only the attributes that actually differ.
         else if (isBrightColor(sgr.foregroundColor))
             sgrAdd(90 + static_cast<unsigned>(getBrightColor(sgr.foregroundColor)));
         else if (isRGBColor(sgr.foregroundColor))
@@ -190,8 +190,7 @@ namespace // {{{ helper
                 sgrAddSub(static_cast<unsigned>(colorValue));
             }
         }
-        else if (isDefaultColor(sgr.backgroundColor))
-            sgrAdd(49);
+        // As with the foreground: a default background is implied by the reset and left unspoken.
         else if (isBrightColor(sgr.backgroundColor))
             sgrAdd(100 + getBrightColor(sgr.backgroundColor));
         else if (isRGBColor(sgr.backgroundColor))
@@ -2836,9 +2835,11 @@ void Screen::requestStatusString(RequestStatusString value)
                 errorLog()("Requesting device status for {} not with line count < 24 is undefined.");
                 return nullopt;
             case RequestStatusString::DECSTBM:
-                return std::format("{};{}r", 1 + *margin().vertical.from, *margin().vertical.to);
+                // Both bounds are stored 0-based and inclusive, so both convert back to 1-based with +1.
+                // The `to` used to be reported raw, one short of the value DECSTBM was given.
+                return std::format("{};{}r", 1 + *margin().vertical.from, 1 + *margin().vertical.to);
             case RequestStatusString::DECSLRM:
-                return std::format("{};{}s", 1 + *margin().horizontal.from, *margin().horizontal.to);
+                return std::format("{};{}s", 1 + *margin().horizontal.from, 1 + *margin().horizontal.to);
             case RequestStatusString::DECSCPP:
                 // EXTENSION: Usually DECSCPP only knows about 80 and 132, but we take any.
                 return std::format("{}|$", pageSize().columns);
@@ -2849,6 +2850,13 @@ void Screen::requestStatusString(RequestStatusString value)
                 auto const isProtected = _cursor.graphicsRendition.flags & CellFlag::CharacterProtected;
                 return std::format("{}\"q", isProtected ? 1 : 2);
             }
+            case RequestStatusString::DECSACE:
+                // Ps=2 is rectangle mode; anything else (0 or 1) is stream. xterm reports the raw value,
+                // but the 0-vs-1 distinction has no effect, so reporting stream as 0 is faithful enough.
+                return std::format("{}*x", _rectangularAttributeMode ? 2 : 0);
+            case RequestStatusString::DECELF: return std::format("{}+q", _enableLocalFunctions);
+            case RequestStatusString::DECLFKC: return std::format("{}*}}", _localFunctionKeyControl);
+            case RequestStatusString::DECSMKR: return std::format("{}+r", _modifierKeyReporting);
             case RequestStatusString::DECSASD:
                 switch (_terminal->activeStatusDisplay())
                 {
@@ -5108,6 +5116,10 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             // Ps=0 or 1 → stream mode, Ps=2 → rectangle mode
             _rectangularAttributeMode = (seq.param_or(0, 1) == 2);
             break;
+        // VT525 keyboard settings Contour remembers and reports through DECRQSS, but does not act on.
+        case DECELF: _enableLocalFunctions = seq.param_or(0, 0); break;
+        case DECLFKC: _localFunctionKeyControl = seq.param_or(0, 0); break;
+        case DECSMKR: _modifierKeyReporting = seq.param_or(0, 0); break;
         case DECSCA: {
             auto const pc = seq.param_or(0, 0);
             // DECSCA (DEC) protection is per-cell via CellFlag::CharacterProtected; only the selective
@@ -5748,9 +5760,11 @@ unique_ptr<ParserExtension> Screen::hookDECRQSS(Sequence const& /*seq*/)
 {
     return make_unique<SimpleStringCollector>([this](string_view data) {
         auto const s = [](string_view dataString) -> optional<RequestStatusString> {
-            auto const mappings = array<pair<string_view, RequestStatusString>, 11> {
+            auto const mappings = array<pair<string_view, RequestStatusString>, 15> {
                 pair { "m", RequestStatusString::SGR },       pair { "\"p", RequestStatusString::DECSCL },
                 pair { " q", RequestStatusString::DECSCUSR }, pair { "\"q", RequestStatusString::DECSCA },
+                pair { "*x", RequestStatusString::DECSACE },  pair { "+q", RequestStatusString::DECELF },
+                pair { "*}", RequestStatusString::DECLFKC },  pair { "+r", RequestStatusString::DECSMKR },
                 pair { "r", RequestStatusString::DECSTBM },   pair { "s", RequestStatusString::DECSLRM },
                 pair { "t", RequestStatusString::DECSLPP },   pair { "$|", RequestStatusString::DECSCPP },
                 pair { "$}", RequestStatusString::DECSASD },  pair { "$~", RequestStatusString::DECSSDT },
