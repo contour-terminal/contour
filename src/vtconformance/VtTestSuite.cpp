@@ -292,9 +292,11 @@ namespace
         // straight back out: seventeen of chapter 11's twenty sub-chapters tested nothing while their
         // parents gated the build. The first one added, 11.3.6, found DECCRA broken on its first run.
         //
-        // These are SelfChecking: each prints its own verdicts, which the transcript carries. They do
-        // not gate yet; they are new ground and their failures want
-        // reading before they break anyone's build.
+        // These are SelfChecking: each prints its own verdicts, which the transcript carries. Most do
+        // not gate yet; they are new ground and their failures want reading before they break anyone's
+        // build. That is a statement about how well their verdicts are understood, not about how
+        // reliably they run -- so a scenario graduates to gating once its verdicts have been read, one
+        // at a time. 11.2.5.5 is the first to do so.
         Scenario { .id = "vttest.11.2.2.vt320-cursor",
                    .title = "Test of VT320 cursor-movement",
                    .keys = Vt320CursorKeys,
@@ -320,12 +322,22 @@ namespace
                    .minimumLevel = VTType::VT320,
                    .driveMode = DriveMode::Live },
         // The DECRQUPSS item Vt320ReportKeys' `*` cannot reach. @see Vt320UpssKeys.
+        //
+        // It gates, unlike its siblings above, because the reason they do not does not apply: it drives
+        // exactly one test, which prints exactly one verdict, and that verdict has been read. It names
+        // the set -- "DEC Supplemental Graphic (94 characters)" -- which vttest prints only after
+        // parsing our reply and matching the designator against its own charset table at the size our
+        // Ps claimed (parse_upss_name, charsets.c:751). A terminal that stayed silent, answered a
+        // malformed DCS, or reported a set it was never assigned gets "unknown" instead, and this fails.
+        // Checked by breaking the reply on purpose and watching it go red, which is the only way to
+        // know a green check means anything.
         Scenario { .id = "vttest.11.2.5.5.vt320-upss",
                    .title = "Test of the User-Preferred Supplemental Set (DECRQUPSS)",
                    .keys = Vt320UpssKeys,
                    .kind = ScenarioKind::SelfChecking,
                    .minimumLevel = VTType::VT320,
-                   .driveMode = DriveMode::Live },
+                   .driveMode = DriveMode::Live,
+                   .gatesBuild = true },
         Scenario { .id = "vttest.11.2.6.vt320-screen",
                    .title = "Test of VT320 screen-display functions",
                    .keys = Vt320ScreenKeys,
