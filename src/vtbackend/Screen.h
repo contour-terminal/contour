@@ -85,11 +85,20 @@ enum class HorizontalTabClear : uint8_t
 ///  Input: CSI 14 t (for text area size)
 ///  Input: CSI 14; 2 t (for full window size)
 /// Output: CSI 14 ; width ; height ; t
+/// The area an XTWINOPS report is asked about.
 enum class RequestPixelSize : uint8_t // TODO: rename RequestPixelSize to RequestArea?
 {
+    /// A single character cell. `CSI 16 t`.
     CellArea,
+
+    /// The grid of cells the application writes to. `CSI 14 t`, `CSI 18 t`.
     TextArea,
+
+    /// The window, including whatever chrome the frontend draws around the text area. `CSI 14 ; 2 t`.
     WindowArea,
+
+    /// The screen the window is displayed on -- xterm's "display". `CSI 15 t`, `CSI 19 t`.
+    ScreenArea,
 };
 
 /// DECRQSS - Request Status String

@@ -8209,6 +8209,295 @@ TEST_CASE("DECDC deletes a column from every line, including the blank ones", "[
     CHECK(screen.grid().lineText(LineOffset(4)) == "       ");
 }
 
+// {{{ Titles: the icon's and the window's are independent
+
+TEST_CASE("The icon and window titles are set independently", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(4) } };
+
+    SECTION("OSC 0 sets both")
+    {
+        mock.writeToScreen("\033]0;both\033\\");
+        CHECK(mock.iconTitle == "both");
+        CHECK(mock.windowTitle == "both");
+    }
+
+    SECTION("OSC 1 sets the icon's alone")
+    {
+        mock.writeToScreen("\033]2;window\033\\");
+        mock.writeToScreen("\033]1;icon\033\\");
+        CHECK(mock.iconTitle == "icon");
+        CHECK(mock.windowTitle == "window"); // OSC 1 used to be silently ignored entirely
+    }
+
+    SECTION("OSC 2 sets the window's alone")
+    {
+        mock.writeToScreen("\033]1;icon\033\\");
+        mock.writeToScreen("\033]2;window\033\\");
+        CHECK(mock.iconTitle == "icon");
+        CHECK(mock.windowTitle == "window");
+    }
+}
+
+TEST_CASE("A title is reported with its own OSC", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(4) } };
+
+    mock.writeToScreen("\033]1;the-icon\033\\");
+    mock.writeToScreen("\033]2;the-window\033\\");
+    mock.resetReplyData();
+
+    mock.writeToScreen("\033[20t"); // report the icon's title
+    mock.writeToScreen("\033[21t"); // report the window's title
+    INFO(mock.terminal.peekInput());
+    REQUIRE(e(mock.terminal.peekInput())
+            == e("\033]Lthe-icon\033\\"
+                 "\033]lthe-window\033\\"));
+}
+
+TEST_CASE("XTPUSHTITLE and XTPOPTITLE share one stack of optional pairs", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(4) } };
+
+    SECTION("push both, pop only the icon's")
+    {
+        mock.writeToScreen("\033]0;first\033\\"); // both titles
+        mock.writeToScreen("\033[22;0t");         // push both
+        mock.writeToScreen("\033]0;x\033\\");     // both titles again
+
+        mock.writeToScreen("\033[23;1t"); // pop the icon's alone
+        CHECK(mock.iconTitle == "first");
+        CHECK(mock.windowTitle == "x"); // the window's is left where the application put it
+
+        // The pop took the one entry off the stack, whatever it held -- so there is nothing left for a
+        // pop of the window's to restore. Two independent stacks would wrongly restore "first" here.
+        mock.writeToScreen("\033[23;2t");
+        CHECK(mock.windowTitle == "x");
+    }
+
+    SECTION("push both, pop only the window's")
+    {
+        mock.writeToScreen("\033]0;first\033\\");
+        mock.writeToScreen("\033[22;0t");
+        mock.writeToScreen("\033]0;x\033\\");
+
+        mock.writeToScreen("\033[23;2t"); // pop the window's alone
+        CHECK(mock.iconTitle == "x");
+        CHECK(mock.windowTitle == "first");
+
+        mock.writeToScreen("\033[23;1t"); // nothing left on the stack
+        CHECK(mock.iconTitle == "x");
+    }
+
+    SECTION("push both, pop both")
+    {
+        mock.writeToScreen("\033]0;first\033\\");
+        mock.writeToScreen("\033[22;0t");
+        mock.writeToScreen("\033]0;x\033\\");
+
+        mock.writeToScreen("\033[23;0t");
+        CHECK(mock.iconTitle == "first");
+        CHECK(mock.windowTitle == "first");
+    }
+
+    SECTION("push the icon's, push the window's, pop both")
+    {
+        // The popped entry carries only the window's title, so the icon's is looked for further down the
+        // stack -- and found in the entry below. Both are restored.
+        mock.writeToScreen("\033]2;win\033\\");
+        mock.writeToScreen("\033]1;ico\033\\");
+        mock.writeToScreen("\033[22;1t"); // push the icon's alone
+        mock.writeToScreen("\033[22;2t"); // push the window's alone
+
+        mock.writeToScreen("\033]2;y\033\\");
+        mock.writeToScreen("\033]1;z\033\\");
+
+        mock.writeToScreen("\033[23;0t"); // pop both
+        CHECK(mock.iconTitle == "ico");
+        CHECK(mock.windowTitle == "win");
+    }
+
+    SECTION("a stack, not a single slot")
+    {
+        mock.writeToScreen("\033]1;a\033\\");
+        mock.writeToScreen("\033[22;1t");
+        mock.writeToScreen("\033]1;b\033\\");
+        mock.writeToScreen("\033[22;1t");
+        mock.writeToScreen("\033]1;z\033\\");
+
+        mock.writeToScreen("\033[23;1t");
+        CHECK(mock.iconTitle == "b"); // last in, first out
+        mock.writeToScreen("\033[23;1t");
+        CHECK(mock.iconTitle == "a");
+    }
+
+    SECTION("popping an empty stack leaves the titles alone")
+    {
+        mock.writeToScreen("\033]0;kept\033\\");
+        mock.writeToScreen("\033[23;0t");
+        CHECK(mock.iconTitle == "kept");
+        CHECK(mock.windowTitle == "kept");
+    }
+
+    SECTION("the stack is bounded")
+    {
+        // An unbounded stack is a memory-growth lever for anything that can write to the terminal.
+        for (auto const i: std::views::iota(0u, 20u))
+        {
+            mock.writeToScreen(std::format("\033]1;t{}\033\\", i));
+            mock.writeToScreen("\033[22;1t");
+        }
+
+        // Only the last MaxSavedTitles pushes survive; the oldest were discarded.
+        mock.writeToScreen("\033[23;1t");
+        CHECK(mock.iconTitle == "t19");
+    }
+}
+
+// }}} Titles
+
+// {{{ XTWINOPS dispatches on the operation, not the parameter count
+
+TEST_CASE("XTWINOPS reads its operation from the first parameter", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    SECTION("a resize with two parameters is still a resize")
+    {
+        // `CSI 4 ; h ; w t` carries three parameters and `CSI 8 ; h t` two. Dispatching on the
+        // parameter count -- as this used to -- read the latter as "resize to the display's size".
+        mock.writeToScreen("\033[8;5;12t");
+        REQUIRE(mock.requestedPageSize.has_value());
+        CHECK(*mock.requestedPageSize == PageSize { LineCount(5), ColumnCount(12) });
+    }
+
+    SECTION("an omitted dimension keeps the current one")
+    {
+        // "Omitted parameters reuse the current height or width." -- xterm's ctlseqs.
+        mock.writeToScreen("\033[8;;7t"); // set the columns, keep the lines
+        REQUIRE(mock.requestedPageSize.has_value());
+        CHECK(*mock.requestedPageSize == PageSize { LineCount(10), ColumnCount(7) });
+    }
+
+    SECTION("an omitted width keeps the current one")
+    {
+        mock.writeToScreen("\033[8;3t"); // set the lines, keep the columns
+        REQUIRE(mock.requestedPageSize.has_value());
+        CHECK(*mock.requestedPageSize == PageSize { LineCount(3), ColumnCount(20) });
+    }
+}
+
+// }}} XTWINOPS
+
+TEST_CASE("XTWINOPS reports the window's place on the screen", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.terminal.setCellPixelSize(ImageSize { Width(8), Height(16) });
+
+    SECTION("the window's position is what the frontend last reported")
+    {
+        mock.terminal.setWindowState(
+            WindowState { .position = WindowPosition { .x = 40, .y = 25 }, .iconified = false });
+        mock.writeToScreen("\033[13t");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[3;40;25t"));
+    }
+
+    SECTION("a move asks the frontend, and the frontend reports back")
+    {
+        mock.writeToScreen("\033[3;12;34t");
+        mock.discardPendingReplies();
+        mock.writeToScreen("\033[13t");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[3;12;34t"));
+    }
+
+    SECTION("iconified or not")
+    {
+        mock.writeToScreen("\033[11t");
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[1t")); // not iconified
+        mock.discardPendingReplies();
+
+        mock.writeToScreen("\033[2t"); // iconify
+        mock.writeToScreen("\033[11t");
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[2t"));
+        mock.discardPendingReplies();
+
+        mock.writeToScreen("\033[1t"); // de-iconify
+        mock.writeToScreen("\033[11t");
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[1t"));
+    }
+
+    SECTION("the screen's size in pixels and in characters")
+    {
+        mock.terminal.setWindowState(
+            WindowState { .screenPixelSize = ImageSize { Width(800), Height(480) } });
+
+        mock.writeToScreen("\033[15t"); // the screen, in pixels
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[5;480;800t"));
+        mock.discardPendingReplies();
+
+        // 800/8 = 100 columns, 480/16 = 30 lines. Reporting the *page* size here -- as this used to --
+        // tells every application that the window is already as large as the screen.
+        mock.writeToScreen("\033[19t");
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[9;30;100t"));
+        mock.discardPendingReplies();
+
+        // The text area is still the page.
+        mock.writeToScreen("\033[18t");
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[8;10;20t"));
+    }
+
+    SECTION("a terminal with no screen is exactly as large as the one it does not have")
+    {
+        // The frontend reported no screen, so the window's own size stands in for it -- an honest
+        // answer, and one that keeps a resize-to-the-display meaningful.
+        mock.writeToScreen("\033[15t");
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[5;160;160t")); // 10*16 by 20*8
+    }
+}
+
+TEST_CASE("XTWINOPS resizes to the display when a dimension is zero", "[screen]")
+{
+    // "Omitted parameters reuse the current height or width. Zero parameters use the display's height
+    // or width." -- xterm's ctlseqs. A dimension has three readings, not two.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.terminal.setCellPixelSize(ImageSize { Width(8), Height(16) });
+    mock.terminal.setWindowState(WindowState { .screenPixelSize = ImageSize { Width(800), Height(480) } });
+
+    SECTION("zero lines means the display's height")
+    {
+        mock.writeToScreen("\033[8;0;12t");
+        REQUIRE(mock.requestedPageSize.has_value());
+        CHECK(*mock.requestedPageSize == PageSize { LineCount(30), ColumnCount(12) });
+    }
+
+    SECTION("zero columns means the display's width")
+    {
+        mock.writeToScreen("\033[8;5;0t");
+        REQUIRE(mock.requestedPageSize.has_value());
+        CHECK(*mock.requestedPageSize == PageSize { LineCount(5), ColumnCount(100) });
+    }
+
+    SECTION("an omitted dimension still keeps the current one")
+    {
+        mock.writeToScreen("\033[8;;12t");
+        REQUIRE(mock.requestedPageSize.has_value());
+        CHECK(*mock.requestedPageSize == PageSize { LineCount(10), ColumnCount(12) });
+    }
+}
+
+TEST_CASE("DECSLPP sets the page's length", "[screen]")
+{
+    // DECSLPP shares its final byte with XTWINOPS; xterm tells them apart by the first parameter, which
+    // for DECSLPP is the line count and therefore always 24 or more.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    mock.writeToScreen("\033[42t");
+    REQUIRE(mock.requestedPageSize.has_value());
+    CHECK(*mock.requestedPageSize == PageSize { LineCount(42), ColumnCount(20) });
+}
+
 // {{{ Special colors (OSC 5 / OSC 105)
 
 TEST_CASE("OSC.5 addresses the special colors", "[screen]")

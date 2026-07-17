@@ -4,6 +4,8 @@
 #include <vtpty/ImageSize.h>
 #include <vtpty/PageSize.h>
 
+#include <crispy/flags.h>
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -1014,6 +1016,134 @@ struct AlternateScreenBehavior
         case DECMode::OptionalAltScreen:  return AlternateScreenBehavior { .carryCursor = true,  .clearOnEnter = false, .clearOnExit = true  }; // 1047
         case DECMode::ExtendedAltScreen:  return AlternateScreenBehavior { .carryCursor = false, .clearOnEnter = true,  .clearOnExit = false }; // 1049
         // clang-format on
+        default: return std::nullopt;
+    }
+}
+
+/// The top-left corner of a window, in screen pixels.
+///
+/// Signed, because a window manager may place a window partly off the screen, and because a terminal
+/// must report back whatever position it was actually given rather than a clamped fiction.
+struct WindowPosition
+{
+    int x = 0;
+    int y = 0;
+
+    constexpr bool operator==(WindowPosition const&) const noexcept = default;
+};
+
+/// Where and how the terminal's window sits on the user's screen.
+///
+/// A terminal engine has no window, no screen and no window manager -- all of this is the frontend's to
+/// know, and the frontend pushes it in as it changes. Nothing here is inferred: a frontend that has no
+/// real window (a test harness, a headless session) states what it has, rather than having a fiction
+/// invented on its behalf.
+struct WindowState
+{
+    /// The window's top-left corner, in screen pixels. Reported by XTWINOPS `CSI 13 t`.
+    WindowPosition position {};
+
+    /// The size of the screen the window is on, in pixels. Reported by XTWINOPS `CSI 15 t`.
+    ///
+    /// An empty size means the frontend has no screen to speak of, in which case the window's own size
+    /// stands in for it -- an honest answer for a headless terminal, which is exactly as large as the
+    /// display it does not have. @see Terminal::screenPixelSize().
+    ImageSize screenPixelSize {};
+
+    /// Whether the window is iconified (minimized). Reported by XTWINOPS `CSI 11 t`.
+    bool iconified = false;
+};
+
+/// What a maximize request asks of the window manager. @see XTWINOPS (`CSI 9 ; Ps t`).
+enum class WindowMaximize : uint8_t
+{
+    Restore,      ///< `Ps = 0`: put the window back to the size it had before it was maximized.
+    Both,         ///< `Ps = 1`: maximize along both axes.
+    Vertically,   ///< `Ps = 2`
+    Horizontally, ///< `Ps = 3`
+};
+
+/// @return What the selector @p ps of `CSI 9 ; Ps t` asks for, or std::nullopt if it asks for nothing.
+constexpr std::optional<WindowMaximize> windowMaximizeOf(unsigned ps) noexcept
+{
+    switch (ps)
+    {
+        case 0: return WindowMaximize::Restore;
+        case 1: return WindowMaximize::Both;
+        case 2: return WindowMaximize::Vertically;
+        case 3: return WindowMaximize::Horizontally;
+        default: return std::nullopt;
+    }
+}
+
+/// What a full-screen request asks of the window manager. @see XTWINOPS (`CSI 10 ; Ps t`).
+enum class WindowFullScreen : uint8_t
+{
+    Exit,   ///< `Ps = 0`
+    Enter,  ///< `Ps = 1`
+    Toggle, ///< `Ps = 2`
+};
+
+/// @return What the selector @p ps of `CSI 10 ; Ps t` asks for, or std::nullopt if it asks for nothing.
+constexpr std::optional<WindowFullScreen> windowFullScreenOf(unsigned ps) noexcept
+{
+    switch (ps)
+    {
+        case 0: return WindowFullScreen::Exit;
+        case 1: return WindowFullScreen::Enter;
+        case 2: return WindowFullScreen::Toggle;
+        default: return std::nullopt;
+    }
+}
+
+/// One of the two titles a terminal carries.
+///
+/// They are independent, and each has a save stack of its own: `OSC 1` sets the icon's title alone,
+/// `CSI 22 ; 1 t` pushes the icon's title alone, and `CSI 23 ; 2 t` pops the window's alone. A single
+/// shared title, or a single shared stack, cannot express that.
+enum class TitleKind : uint8_t
+{
+    /// The icon (or tab) title. Set by `OSC 1`, reported by `CSI 20 t` as `OSC L <title> ST`.
+    Icon = 1 << 0,
+
+    /// The window title. Set by `OSC 2`, reported by `CSI 21 t` as `OSC l <title> ST`.
+    Window = 1 << 1,
+};
+
+/// A set of titles a single XTPUSHTITLE, XTPOPTITLE or `OSC 0` acts on.
+using TitleKinds = crispy::flags<TitleKind>;
+
+/// One entry of the title stack: the titles a single XTPUSHTITLE saved.
+///
+/// Either may be absent, because `CSI 22 ; 1 t` saves the icon's title alone and `CSI 22 ; 2 t` the
+/// window's alone. There is one stack, not one per title: a pop takes an entry off it whatever that
+/// entry holds, so pushing both and popping only the icon leaves nothing behind for a later pop of the
+/// window. A pop that needs a title the entry does not carry looks further *down* the stack for the
+/// nearest entry that does, which is what makes "push the icon's, push the window's, pop both" restore
+/// both. @see xterm's xtermPopTitle() and its TryHigher().
+struct SavedTitles
+{
+    std::optional<std::string> icon;
+    std::optional<std::string> window;
+};
+
+/// How deep the title stack goes, matching xterm's MAX_SAVED_TITLES.
+///
+/// Bounded on purpose: an unbounded stack is a memory-growth lever for any application that can write
+/// to the terminal. A push onto a full stack discards the oldest entry.
+constexpr auto MaxSavedTitles = size_t { 10 };
+
+/// The titles the selector @p ps of XTPUSHTITLE / XTPOPTITLE (`CSI 22 / 23 ; Ps t`) names.
+///
+/// @param ps The selector: 0 both, 1 the icon's title, 2 the window's.
+/// @return The titles named, or std::nullopt if @p ps names none.
+constexpr std::optional<TitleKinds> titleKindsOf(unsigned ps) noexcept
+{
+    switch (ps)
+    {
+        case 0: return TitleKinds { TitleKind::Icon } | TitleKind::Window;
+        case 1: return TitleKinds { TitleKind::Icon };
+        case 2: return TitleKinds { TitleKind::Window };
         default: return std::nullopt;
     }
 }

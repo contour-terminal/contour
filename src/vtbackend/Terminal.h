@@ -284,8 +284,33 @@ class Terminal
         virtual void onSelectionCompleted() {}
         virtual void requestWindowResize(LineCount, ColumnCount) {}
         virtual void requestWindowResize(Width, Height) {}
+
+        /// The application asked the window manager to iconify (minimize) the window, or to restore it.
+        /// @see XTWINOPS `CSI 2 t` and `CSI 1 t`.
+        virtual void requestWindowIconify(bool /*iconify*/) {}
+
+        /// The application asked to move the window's top-left corner. @see XTWINOPS `CSI 3 ; x ; y t`.
+        ///
+        /// A window manager may refuse, or place the window elsewhere; whatever it does, the frontend
+        /// reports the outcome back through Terminal::setWindowState() rather than the terminal assuming
+        /// the move took.
+        virtual void requestWindowMove(WindowPosition /*position*/) {}
+
+        /// The application asked to maximize the window, or to restore it. @see XTWINOPS `CSI 9 ; Ps t`.
+        ///
+        /// Which size that lands on -- and which size to come back to -- is the frontend's to decide;
+        /// @see WindowSizeStack, which every frontend shares rather than deciding it anew.
+        virtual void requestWindowMaximize(WindowMaximize /*how*/) {}
+
+        /// The application asked for full screen, or out of it. @see XTWINOPS `CSI 10 ; Ps t`.
+        virtual void requestWindowFullScreen(WindowFullScreen /*how*/) {}
+
         virtual void requestShowHostWritableStatusLine() {}
         virtual void setWindowTitle(std::string_view /*title*/) {}
+
+        /// The application set the icon (or tab) title, via `OSC 0` or `OSC 1`.
+        virtual void setIconTitle(std::string_view /*title*/) {}
+
         virtual void setTabName(std::string_view /*title*/) {}
         /// The application assigned a window-frame color (DECAC item 2), which the GUI maps to the
         /// tab background color. A color the user picked themselves outranks it and stays visible.
@@ -648,6 +673,35 @@ class Terminal
 
     [[nodiscard]] constexpr ImageSize cellPixelSize() const noexcept { return _cellPixelSize; }
     constexpr void setCellPixelSize(ImageSize cellPixelSize) { _cellPixelSize = cellPixelSize; }
+
+    /// @return Where and how the window sits on the screen, as the frontend last reported it.
+    [[nodiscard]] constexpr WindowState const& windowState() const noexcept { return _windowState; }
+
+    /// The frontend reports that the window moved, was iconified, or landed on a different screen.
+    constexpr void setWindowState(WindowState state) noexcept { _windowState = state; }
+
+    /// @return The size of the screen the window is on, in pixels.
+    ///
+    /// Falls back to the window's own size when the frontend has no screen to speak of: a headless
+    /// terminal is exactly as large as the display it does not have, which is a more useful answer to
+    /// `CSI 15 t` than zero, and keeps "maximize" (a resize to the screen's size) meaningful.
+    [[nodiscard]] ImageSize screenPixelSize() const noexcept
+    {
+        auto const screen = _windowState.screenPixelSize;
+        return (unbox(screen.width) != 0 && unbox(screen.height) != 0) ? screen : pixelSize();
+    }
+
+    /// @return The size of the screen the window is on, in character cells.
+    [[nodiscard]] PageSize screenPageSize() const noexcept
+    {
+        auto const screen = screenPixelSize();
+        auto const cell = cellPixelSize();
+        if (unbox(cell.width) == 0 || unbox(cell.height) == 0)
+            return totalPageSize();
+
+        return PageSize { .lines = LineCount::cast_from(unbox(screen.height) / unbox(cell.height)),
+                          .columns = ColumnCount::cast_from(unbox(screen.width) / unbox(cell.width)) };
+    }
 
     /// Retrieves the time point this terminal instance has been spawned.
     [[nodiscard]] std::chrono::steady_clock::time_point currentTime() const noexcept { return _currentTime; }
@@ -1322,6 +1376,18 @@ class Terminal
 
     void requestWindowResize(PageSize);
     void requestWindowResize(ImageSize);
+
+    /// Asks the frontend to iconify (minimize) the window, or to restore it. @see XTWINOPS.
+    void requestWindowIconify(bool iconify);
+
+    /// Asks the frontend to move the window's top-left corner. @see XTWINOPS.
+    void requestWindowMove(WindowPosition position);
+
+    /// Asks the frontend to maximize the window, or to restore it. @see XTWINOPS.
+    void requestWindowMaximize(WindowMaximize how);
+
+    /// Asks the frontend for full screen, or out of it. @see XTWINOPS.
+    void requestWindowFullScreen(WindowFullScreen how);
     void setApplicationkeypadMode(bool enabled);
     void setBracketedPaste(bool enabled);
     void setCursorStyle(CursorDisplay display, CursorShape shape);
@@ -1393,8 +1459,22 @@ class Terminal
     void refreshHints();
     // }}} hint mode
 
-    void saveWindowTitle();
-    void restoreWindowTitle();
+    /// Sets the icon (or tab) title, as `OSC 0` and `OSC 1` do.
+    void setIconTitle(std::string_view title);
+
+    /// @return The icon (or tab) title, as reported by `CSI 20 t`.
+    [[nodiscard]] std::string const& iconTitle() const noexcept;
+
+    /// Pushes the named titles onto the title stack, as one entry. @see XTPUSHTITLE (`CSI 22 ; Ps t`).
+    void saveTitles(TitleKinds kinds);
+
+    /// Pops one entry off the title stack and restores the named titles from it.
+    /// @see XTPOPTITLE (`CSI 23 ; Ps t`), and SavedTitles for why one stack rather than two.
+    ///
+    /// An empty stack leaves both titles alone, as in xterm: popping more than was pushed is not an
+    /// error, it simply has nothing to restore.
+    void restoreTitles(TitleKinds kinds);
+
     void setTerminalProfile(std::string const& configProfileName);
     void useApplicationCursorKeys(bool enabled);
     void softReset();
@@ -1974,6 +2054,10 @@ class Terminal
     /// contains the pixel size of a single cell, or area(cellPixelSize_) == 0 if unknown.
     ImageSize _cellPixelSize;
 
+    /// Where and how the window sits on the screen. Owned by the frontend, which pushes it in; the
+    /// terminal only reports it back. @see setWindowState().
+    WindowState _windowState {};
+
     ColorPalette _defaultColorPalette;
     ColorPalette _colorPalette;
     std::vector<ColorPalette> _savedColorPalettes;
@@ -2047,7 +2131,12 @@ class Terminal
     HyperlinkStorage _hyperlinks {};
 
     std::string _windowTitle {};
-    std::stack<std::string> _savedWindowTitles {};
+
+    /// The icon (or tab) title. Set by `OSC 0` and `OSC 1`, reported by `CSI 20 t`.
+    std::string _iconTitle {};
+
+    /// The title stack, deepest entry first. @see SavedTitles, saveTitles(), restoreTitles().
+    std::vector<SavedTitles> _savedTitles {};
 
     std::optional<std::string> _tabName {};
 

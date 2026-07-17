@@ -47,6 +47,7 @@ set(vtbackend_HEADERS
     StatusLineBuilder.h
     Terminal.h
     VTType.h
+    WindowSizeStack.h
     VTWriter.h
     Viewport.h
     ViInputHandler.h
@@ -154,6 +155,7 @@ if(LIBTERMINAL_TESTING)
         Image_test.cpp
         Sequence_test.cpp
         StatusLineBuilder_test.cpp
+        WindowSizeStack_test.cpp
         Terminal_test.cpp
         ShellIntegration_test.cpp
         LineSoA_test.cpp

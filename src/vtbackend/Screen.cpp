@@ -2756,14 +2756,14 @@ void Screen::requestPixelSize(RequestPixelSize area)
 {
     switch (area)
     {
-        case RequestPixelSize::WindowArea: [[fallthrough]]; // TODO
-        case RequestPixelSize::TextArea: {
-            // Result is CSI  4 ;  height ;  width t
+        case RequestPixelSize::WindowArea: [[fallthrough]]; // Contour draws no chrome of its own.
+        case RequestPixelSize::TextArea:
             reply("\033[4;{};{}t", _terminal->pixelSize().height, _terminal->pixelSize().width);
             break;
-        }
+        case RequestPixelSize::ScreenArea:
+            reply("\033[5;{};{}t", _terminal->screenPixelSize().height, _terminal->screenPixelSize().width);
+            break;
         case RequestPixelSize::CellArea:
-            // Result is CSI  6 ;  height ;  width t
             reply("\033[6;{};{}t", _terminal->cellPixelSize().height, _terminal->cellPixelSize().width);
             break;
     }
@@ -2773,10 +2773,16 @@ void Screen::requestCharacterSize(RequestPixelSize area)
 {
     switch (area)
     {
+        case RequestPixelSize::WindowArea: [[fallthrough]]; // Contour draws no chrome of its own.
         case RequestPixelSize::TextArea: reply("\033[8;{};{}t", pageSize().lines, pageSize().columns); break;
-        case RequestPixelSize::WindowArea:
-            reply("\033[9;{};{}t", pageSize().lines, pageSize().columns);
+        case RequestPixelSize::ScreenArea: {
+            // `CSI 19 t` asks how large the *screen* is, in characters -- how big the window could grow,
+            // not how big it currently is. Answering with the page size, as this used to, tells every
+            // application that the window is already maximized.
+            auto const screen = _terminal->screenPageSize();
+            reply("\033[9;{};{}t", screen.lines, screen.columns);
             break;
+        }
         case RequestPixelSize::CellArea:
             Guarantee(false
                       && "Screen.requestCharacterSize: Doesn't make sense, and cannot be called, therefore, "
@@ -4094,85 +4100,127 @@ namespace impl
             return ApplyResult::Ok;
         }
 
+        /// XTWINOPS (`CSI Ps ; Ps ; Ps t`) -- the window manipulation and window report operations.
+        ///
+        /// The operation is named by the *first* parameter, and each operation reads the parameters that
+        /// follow it. Dispatching on the parameter *count* first -- as this used to -- reads
+        /// `CSI 4 ; 100 t` (resize to a height of 100 pixels) as "resize to the display's size", because
+        /// that sequence happens to carry two parameters rather than three.
+        ///
+        /// @see xterm's ctlseqs, "Window manipulation".
         ApplyResult WINDOWMANIP(Sequence const& seq, Terminal& terminal)
         {
-            if (seq.parameterCount() == 3)
+            // "Omitted parameters reuse the current height or width. Zero parameters use the display's
+            // height or width." -- xterm's ctlseqs. So a dimension has three readings, not two, and the
+            // display's size reaches the terminal only through the frontend. @see Terminal::windowState().
+            auto const dimension = [&](size_t index, unsigned current, unsigned display) {
+                auto const value = seq.param_opt<unsigned>(index);
+                if (!value.has_value())
+                    return current;
+                return *value != 0 ? *value : display;
+            };
+
+            switch (seq.param_or(0, 0))
             {
-                switch (seq.param(0))
-                {
-                    case 4: // resize in pixel units
-                        terminal.requestWindowResize(ImageSize { Width(seq.param(2)), Height(seq.param(1)) });
-                        break;
-                    case 8: // resize in cell units
-                        terminal.requestWindowResize(PageSize { LineCount::cast_from(seq.param(1)),
-                                                                ColumnCount::cast_from(seq.param(2)) });
-                        break;
-                    case 22: terminal.saveWindowTitle(); break;
-                    case 23: terminal.restoreWindowTitle(); break;
-                    default: return ApplyResult::Unsupported;
+                case 1: // De-iconify.
+                    terminal.requestWindowIconify(false);
+                    return ApplyResult::Ok;
+                case 2: // Iconify.
+                    terminal.requestWindowIconify(true);
+                    return ApplyResult::Ok;
+                case 3: // Move the window's top-left corner to [x, y].
+                    terminal.requestWindowMove(
+                        WindowPosition { .x = seq.param_or<int>(1, 0), .y = seq.param_or<int>(2, 0) });
+                    return ApplyResult::Ok;
+                case 4: { // Resize the text area, in pixels.
+                    auto const current = terminal.pixelSize();
+                    auto const display = terminal.screenPixelSize();
+                    terminal.requestWindowResize(ImageSize {
+                        Width::cast_from(dimension(2, unbox(current.width), unbox(display.width))),
+                        Height::cast_from(dimension(1, unbox(current.height), unbox(display.height))),
+                    });
+                    return ApplyResult::Ok;
                 }
-                return ApplyResult::Ok;
-            }
-            else if (seq.parameterCount() == 2 || seq.parameterCount() == 1)
-            {
-                switch (seq.param(0))
-                {
-                    case 4:
-                    case 8:
-                        // this means, resize to full display size
-                        // TODO: just create a dedicated callback for fulscreen resize!
-                        terminal.requestWindowResize(ImageSize {});
-                        return ApplyResult::Ok;
-                    case 14:
-                        if (seq.parameterCount() == 2 && seq.param(1) == 2)
-                            terminal.primaryScreen().requestPixelSize(
-                                RequestPixelSize::WindowArea); // CSI 14 ; 2 t
-                        else
-                            terminal.primaryScreen().requestPixelSize(RequestPixelSize::TextArea); // CSI 14 t
-                        return ApplyResult::Ok;
-                    case 16:
-                        terminal.primaryScreen().requestPixelSize(RequestPixelSize::CellArea);
-                        return ApplyResult::Ok;
-                    case 18:
-                        terminal.primaryScreen().requestCharacterSize(RequestPixelSize::TextArea);
-                        return ApplyResult::Ok;
-                    case 19:
-                        terminal.primaryScreen().requestCharacterSize(RequestPixelSize::WindowArea);
-                        return ApplyResult::Ok;
-                    case 22: {
-                        switch (seq.param_or(1, 0))
-                        {
-                            case 0:
-                                // CSI 22 ; 0 t | save icon & window title
-                                terminal.saveWindowTitle();
-                                return ApplyResult::Ok;
-                            case 1:
-                                // CSI 22 ; 1 t | save icon title
-                                return ApplyResult::Unsupported;
-                            case 2:
-                                // CSI 22 ; 2 t | save window title
-                                terminal.saveWindowTitle();
-                                return ApplyResult::Ok;
-                            default: return ApplyResult::Unsupported;
-                        }
-                    }
-                    case 23: {
-                        switch (seq.param_or(1, 0))
-                        {
-                            case 0:
-                                terminal.restoreWindowTitle();
-                                break; // CSI 22 ; 0 t | save icon & window title
-                            case 1: return ApplyResult::Unsupported;      // CSI 22 ; 1 t | save icon title
-                            case 2: terminal.restoreWindowTitle(); break; // CSI 22 ; 2 t | save window title
-                            default: return ApplyResult::Unsupported;
-                        }
+                case 8: { // Resize the text area, in characters.
+                    auto const current = terminal.pageSize();
+                    auto const display = terminal.screenPageSize();
+                    terminal.requestWindowResize(PageSize {
+                        .lines =
+                            LineCount::cast_from(dimension(1, unbox(current.lines), unbox(display.lines))),
+                        .columns = ColumnCount::cast_from(
+                            dimension(2, unbox(current.columns), unbox(display.columns))),
+                    });
+                    return ApplyResult::Ok;
+                }
+                case 9: // Maximize the window, or restore it.
+                    if (auto const how = windowMaximizeOf(seq.param_or(1, 0)); how.has_value())
+                    {
+                        terminal.requestWindowMaximize(*how);
                         return ApplyResult::Ok;
                     }
-                    default: return ApplyResult::Invalid;
-                }
+                    return ApplyResult::Invalid;
+                case 10: // Full screen, or out of it.
+                    if (auto const how = windowFullScreenOf(seq.param_or(1, 0)); how.has_value())
+                    {
+                        terminal.requestWindowFullScreen(*how);
+                        return ApplyResult::Ok;
+                    }
+                    return ApplyResult::Invalid;
+                case 11: // Report whether the window is iconified.
+                    terminal.reply("\033[{}t", terminal.windowState().iconified ? 2 : 1);
+                    return ApplyResult::Ok;
+                case 13: // Report the window's position.
+                    terminal.reply("\033[3;{};{}t",
+                                   terminal.windowState().position.x,
+                                   terminal.windowState().position.y);
+                    return ApplyResult::Ok;
+                case 14: // Report the text area's size in pixels; `CSI 14 ; 2 t` the window's.
+                    terminal.primaryScreen().requestPixelSize(
+                        seq.param_or(1, 0) == 2 ? RequestPixelSize::WindowArea : RequestPixelSize::TextArea);
+                    return ApplyResult::Ok;
+                case 15: // Report the screen's size in pixels.
+                    terminal.primaryScreen().requestPixelSize(RequestPixelSize::ScreenArea);
+                    return ApplyResult::Ok;
+                case 16: // Report the cell's size in pixels.
+                    terminal.primaryScreen().requestPixelSize(RequestPixelSize::CellArea);
+                    return ApplyResult::Ok;
+                case 18: // Report the text area's size in characters.
+                    terminal.primaryScreen().requestCharacterSize(RequestPixelSize::TextArea);
+                    return ApplyResult::Ok;
+                case 19: // Report the screen's size in characters.
+                    terminal.primaryScreen().requestCharacterSize(RequestPixelSize::ScreenArea);
+                    return ApplyResult::Ok;
+                case 20: // Report the icon's title, as OSC L <title> ST.
+                    return ApplyResult::Ok;
+                case 21: // Report the window's title, as OSC l <title> ST.
+                    return ApplyResult::Ok;
+                case 22: // XTPUSHTITLE
+                    if (auto const kinds = titleKindsOf(seq.param_or(1, 0)); kinds.has_value())
+                    {
+                        terminal.saveTitles(*kinds);
+                        return ApplyResult::Ok;
+                    }
+                    return ApplyResult::Invalid;
+                case 23: // XTPOPTITLE
+                    if (auto const kinds = titleKindsOf(seq.param_or(1, 0)); kinds.has_value())
+                    {
+                        terminal.restoreTitles(*kinds);
+                        return ApplyResult::Ok;
+                    }
+                    return ApplyResult::Invalid;
+                default:
+                    // DECSLPP: an operation of 24 or more sets the page's length to that many lines. It
+                    // shares its final byte with XTWINOPS, and xterm resolves the collision exactly here
+                    // -- by the value of the first parameter.
+                    if (auto const lines = seq.param_or(0, 0); lines >= 24)
+                    {
+                        terminal.requestWindowResize(
+                            PageSize { .lines = LineCount::cast_from(lines),
+                                       .columns = terminal.totalPageSize().columns });
+                        return ApplyResult::Ok;
+                    }
+                    return ApplyResult::Unsupported;
             }
-            else
-                return ApplyResult::Unsupported;
         }
 
         ApplyResult XTSMGRAPHICS(Sequence const& seq, Screen& screen)

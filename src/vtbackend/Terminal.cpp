@@ -2683,6 +2683,26 @@ void Terminal::requestWindowResize(ImageSize size)
     _eventListener.requestWindowResize(size.width, size.height);
 }
 
+void Terminal::requestWindowIconify(bool iconify)
+{
+    _eventListener.requestWindowIconify(iconify);
+}
+
+void Terminal::requestWindowMove(WindowPosition position)
+{
+    _eventListener.requestWindowMove(position);
+}
+
+void Terminal::requestWindowMaximize(WindowMaximize how)
+{
+    _eventListener.requestWindowMaximize(how);
+}
+
+void Terminal::requestWindowFullScreen(WindowFullScreen how)
+{
+    _eventListener.requestWindowFullScreen(how);
+}
+
 void Terminal::setApplicationkeypadMode(bool enabled)
 {
     _inputGenerator.setApplicationKeypadMode(enabled);
@@ -2791,19 +2811,61 @@ std::optional<std::string> Terminal::resolvedTabName() const
     return std::nullopt;
 }
 
-void Terminal::saveWindowTitle()
+void Terminal::setIconTitle(string_view title)
 {
-    _savedWindowTitles.push(_windowTitle);
+    // Written lock-free for the same reason setWindowTitle() is: every caller reaches this from the
+    // parser thread, inside writeToScreen()'s _stateMutex hold.
+    _iconTitle = title;
+    _eventListener.setIconTitle(title);
 }
 
-void Terminal::restoreWindowTitle()
+std::string const& Terminal::iconTitle() const noexcept
 {
-    if (!_savedWindowTitles.empty())
-    {
-        _windowTitle = _savedWindowTitles.top();
-        _savedWindowTitles.pop();
-        setWindowTitle(_windowTitle);
-    }
+    return _iconTitle;
+}
+
+void Terminal::saveTitles(TitleKinds kinds)
+{
+    // A push onto a full stack discards the oldest entry, rather than letting an application grow the
+    // stack without bound.
+    if (_savedTitles.size() >= MaxSavedTitles)
+        _savedTitles.erase(_savedTitles.begin());
+
+    _savedTitles.push_back(SavedTitles {
+        .icon = kinds.test(TitleKind::Icon) ? std::optional { _iconTitle } : std::nullopt,
+        .window = kinds.test(TitleKind::Window) ? std::optional { _windowTitle } : std::nullopt,
+    });
+}
+
+void Terminal::restoreTitles(TitleKinds kinds)
+{
+    if (_savedTitles.empty())
+        return;
+
+    // One entry comes off the stack, whatever it holds -- so pushing both titles and then popping only
+    // the icon's leaves nothing behind for a later pop of the window's.
+    auto const top = _savedTitles.back();
+    _savedTitles.pop_back();
+
+    // An entry that does not carry the title we were asked for sends us looking further down the stack
+    // for the nearest entry that does. That is what makes "push the icon's, push the window's, pop both"
+    // restore both, rather than only the window's. @see xterm's TryHigher().
+    auto const deeper = [this](auto SavedTitles::* title) -> std::optional<std::string> {
+        for (auto const& entry: _savedTitles | std::views::reverse)
+            if ((entry.*title).has_value())
+                return entry.*title;
+        return std::nullopt;
+    };
+
+    if (kinds.test(TitleKind::Icon))
+        if (auto const title = top.icon.has_value() ? top.icon : deeper(&SavedTitles::icon);
+            title.has_value())
+            setIconTitle(*title);
+
+    if (kinds.test(TitleKind::Window))
+        if (auto const title = top.window.has_value() ? top.window : deeper(&SavedTitles::window);
+            title.has_value())
+            setWindowTitle(*title);
 }
 
 void Terminal::setTerminalProfile(string const& configProfileName)
