@@ -2385,6 +2385,40 @@ TEST_CASE("NEL_indexes_and_returns_to_margin", "[screen]")
     }
 }
 
+TEST_CASE("SD_respects_left_right_margin", "[screen]")
+{
+    // SD (CSI Ps T) scrolls only the margined region down. With DECLRMM on it must confine the scroll
+    // to the left/right band. Mirrors esctest test_SD_RespectsLeftRightScrollRegion.
+    //
+    // The page is deliberately taller than the content: with a full-height vertical margin the region
+    // top (0) differs from the bottom, so the copy loop's lower bound (from+n vs. to-n) matters -- the
+    // 5x5 case where they coincide once hid a bug that left the mid-region lines unscrolled.
+    auto mock = MockTerm { PageSize { LineCount(7), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("abcde\r\nfghij\r\nklmno\r\npqrst\r\nuvwxy");
+    mock.writeToScreen("\033[?69h"); // DECSET DECLRMM
+    mock.writeToScreen("\033[2;4s"); // DECSLRM 2;4
+    mock.writeToScreen("\033[2;3H"); // CUP row 2, col 3
+    mock.writeToScreen("\033[2T");   // SD 2
+    CHECK("a   e\nf   j\nkbcdo\npghit\nulmny\n qrs \n vwx \n" == screen.renderMainPageText());
+}
+
+TEST_CASE("IL_over_region_clears_the_band", "[screen]")
+{
+    // IL scrolls the region below the cursor down via scrollDown(). Inserting more lines than the
+    // region is tall must clear its left/right band, not leave the mid-region lines behind (the same
+    // scrollDown loop-bound bug the SD test guards). Mirrors esctest test_IL_RespectsScrollRegion_Over.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("abcde\r\nfGHIj\r\nkLMNo\r\npQRSt\r\nuvwxy");
+    mock.writeToScreen("\033[?69h"); // DECSET DECLRMM
+    mock.writeToScreen("\033[2;4s"); // DECSLRM 2;4
+    mock.writeToScreen("\033[2;4r"); // DECSTBM 2;4
+    mock.writeToScreen("\033[2;3H"); // CUP row 2, col 3
+    mock.writeToScreen("\033[99L");  // IL 99
+    CHECK("abcde\nf   j\nk   o\np   t\nuvwxy\n" == screen.renderMainPageText());
+}
+
 TEST_CASE("DECBI_back_index", "[screen]")
 {
     // DECBI (ESC 6): on the left margin it scrolls the margined region right by one column; anywhere
@@ -2683,6 +2717,65 @@ TEST_CASE("DECRQCRA.honors_origin_mode", "[screen]")
     CHECK(originReply != mock.replyData());
 }
 
+TEST_CASE("Index_outside_margin", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(4) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("1234\r\n5678\r\nABCD\r\nEFGH\r\nIJKL\r\nMNOP");
+    logScreenText(screen, "initial");
+    REQUIRE("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP\n" == screen.renderMainPageText());
+    mock.terminal.setTopBottomMargin(LineOffset { 1 }, LineOffset { 3 });
+
+    // with cursor above top margin
+    screen.moveCursorTo(LineOffset { 0 }, ColumnOffset { 2 });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
+
+    screen.index();
+    REQUIRE("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP\n" == screen.renderMainPageText());
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
+
+    // with cursor below bottom margin and above bottom screen (=> only moves cursor one down)
+    screen.moveCursorTo(LineOffset { 4 }, ColumnOffset { 2 });
+    screen.index();
+    REQUIRE("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP\n" == screen.renderMainPageText());
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(5), ColumnOffset(2) });
+
+    // with cursor below bottom margin and at bottom screen (=> no-op)
+    screen.moveCursorTo(LineOffset { 5 }, ColumnOffset { 2 });
+    screen.index();
+    REQUIRE("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP\n" == screen.renderMainPageText());
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(5), ColumnOffset(2) });
+}
+
+TEST_CASE("Index_inside_margin", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(2) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("11\r\n22\r\n33\r\n44\r\n55\r\n66");
+    logScreenText(screen, "initial setup");
+
+    // test IND when cursor is within margin range (=> move cursor down)
+    mock.terminal.setTopBottomMargin(LineOffset { 1 }, LineOffset { 3 });
+    screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 1 });
+    screen.index();
+    logScreenText(screen, "IND while cursor at line 3");
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(1) });
+    REQUIRE("11\n22\n33\n44\n55\n66\n" == screen.renderMainPageText());
+}
+
+TEST_CASE("Index_at_bottom_margin", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+    logScreenText(screen, "initial setup");
+    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
+
+    mock.terminal.setTopBottomMargin(LineOffset { 1 }, LineOffset { 3 });
+
+    SECTION("cursor at bottom margin and full horizontal margins")
+    {
+        screen.moveCursorTo(LineOffset { 3 }, ColumnOffset { 1 });
         screen.index();
         logScreenText(screen, "IND while cursor at bottom margin");
         REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(1) });
@@ -2701,6 +2794,96 @@ TEST_CASE("DECRQCRA.honors_origin_mode", "[screen]")
         screen.index();
         CHECK("12345\n6BCD0\nAGHIE\nF   J\nKLMNO\n" == screen.renderMainPageText());
         REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(1) });
+    }
+}
+
+TEST_CASE("VerticalScroll_confined_to_left_right_margins", "[screen]")
+{
+    // With DECLRMM on, vertical motion scrolls only when the cursor is within the left/right margins.
+    // Outside that band the cursor neither scrolls the page nor walks past the top/bottom margin.
+    // This mirrors esctest's test_{IND,RI,LF,FF,VT}_MovesDoesNotScrollOutsideLeftRight.
+    auto setup = [](auto& mock) {
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+        mock.terminal.setTopBottomMargin(LineOffset { 1 }, LineOffset { 3 });
+        mock.terminal.setMode(DECMode::LeftRightMargin, true);
+        mock.terminal.setLeftRightMargin(ColumnOffset { 1 }, ColumnOffset { 3 });
+        return &screen;
+    };
+    auto constexpr Untouched = "12345\n67890\nABCDE\nFGHIJ\nKLMNO\n";
+
+    SECTION("IND at bottom margin, right of the right margin: no scroll, no move")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+        auto* screen = setup(mock);
+        screen->moveCursorTo(LineOffset { 3 }, ColumnOffset { 4 }); // bottom margin, right of band
+        screen->index();
+        CHECK(Untouched == screen->renderMainPageText());
+        CHECK(screen->logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(4) });
+    }
+
+    SECTION("IND at bottom margin, left of the left margin: no scroll, no move")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+        auto* screen = setup(mock);
+        screen->moveCursorTo(LineOffset { 3 }, ColumnOffset { 0 }); // bottom margin, left of band
+        screen->index();
+        CHECK(Untouched == screen->renderMainPageText());
+        CHECK(screen->logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(0) });
+    }
+
+    SECTION("IND above bottom margin, outside band: moves down without scrolling")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+        auto* screen = setup(mock);
+        screen->moveCursorTo(LineOffset { 2 }, ColumnOffset { 4 });
+        screen->index();
+        CHECK(Untouched == screen->renderMainPageText());
+        CHECK(screen->logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(4) });
+    }
+
+    SECTION("RI at top margin, outside band: no reverse scroll, no move")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+        auto* screen = setup(mock);
+        screen->moveCursorTo(LineOffset { 1 }, ColumnOffset { 4 }); // top margin, right of band
+        screen->reverseIndex();
+        CHECK(Untouched == screen->renderMainPageText());
+        CHECK(screen->logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(4) });
+    }
+
+    SECTION("LF (control byte) at bottom margin, outside band: no scroll, no move")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+        auto* screen = setup(mock);
+        screen->moveCursorTo(LineOffset { 3 }, ColumnOffset { 4 });
+        mock.writeToScreen("\n");
+        CHECK(Untouched == screen->renderMainPageText());
+        CHECK(screen->logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(4) });
+    }
+
+    SECTION("FF and VT (control bytes) at bottom margin, outside band: no scroll, no move")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+        auto* screen = setup(mock);
+        screen->moveCursorTo(LineOffset { 3 }, ColumnOffset { 4 });
+        mock.writeToScreen("\f"); // FF -> IND
+        CHECK(Untouched == screen->renderMainPageText());
+        CHECK(screen->logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(4) });
+        mock.writeToScreen("\v"); // VT -> IND
+        CHECK(Untouched == screen->renderMainPageText());
+        CHECK(screen->logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(4) });
+    }
+
+    SECTION("IND inside the band still scrolls, confined to the band")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+        auto* screen = setup(mock);
+        screen->moveCursorTo(LineOffset { 3 }, ColumnOffset { 1 }); // bottom margin, inside band
+        screen->index();
+        // Only columns 1..3 of the scrolling region 1..3 move up; the margins stay put.
+        CHECK("12345\n6BCD0\nAGHIE\nF   J\nKLMNO\n" == screen->renderMainPageText());
+        CHECK(screen->logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(1) });
     }
 }
 

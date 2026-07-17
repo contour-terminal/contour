@@ -1014,12 +1014,17 @@ void Screen::linefeed(ColumnOffset newColumn)
     if (*realCursorPosition().line == *margin().vertical.to)
     {
         // TODO(perf) if we know that we text is following this LF
-        // (i.e. parser state will be ground state),
-        // then invoke scrollUpUninitialized instead
-        // and make sure the subsequent text write will
-        // possibly also reset remaining grid cells in that line
-        // if the incoming text did not write to the full line
-        scrollUp(LineCount(1), _cursor.graphicsRendition, margin());
+        // A line feed only scrolls when the cursor is within the left/right margins. Outside that band
+        // (DECLRMM on, cursor left of the left margin or right of the right margin) it neither scrolls
+        {
+            // TODO(perf) if we know that we text is following this LF
+            // (i.e. parser state will be ground state),
+            // then invoke scrollUpUninitialized instead
+            // and make sure the subsequent text write will
+            // possibly also reset remaining grid cells in that line
+            // if the incoming text did not write to the full line
+            scrollUp(LineCount(1), _cursor.graphicsRendition, margin());
+        }
     }
     else
     {
@@ -2132,7 +2137,9 @@ void Screen::cursorBackwardTab(TabStopCount count)
 
 void Screen::index()
 {
-    if (*realCursorPosition().line == *margin().vertical.to)
+    // Index scrolls only at the bottom margin *and* within the left/right margins; outside that band
+    // moveCursorDown() clamps at the bottom margin, so the cursor neither scrolls nor walks past it.
+    if (*realCursorPosition().line == *margin().vertical.to && isCursorInsideHorizontalMargins())
         scrollUp(LineCount(1));
     else
         moveCursorDown(LineCount(1));
@@ -2140,7 +2147,10 @@ void Screen::index()
 
 void Screen::reverseIndex()
 {
-    if (unbox(realCursorPosition().line) == unbox(margin().vertical.from))
+    // Reverse index mirrors index() at the top margin: it reverse-scrolls only within the left/right
+    // margins, and outside that band moveCursorUp() clamps at the top margin.
+    if (unbox(realCursorPosition().line) == unbox(margin().vertical.from)
+        && isCursorInsideHorizontalMargins())
         scrollDown(LineCount(1));
     else
         moveCursorUp(LineCount(1));
@@ -5329,12 +5339,16 @@ optional<CellLocation> Screen::searchReverse(std::u32string_view searchText, Cel
     return nullopt;
 }
 
+bool Screen::isCursorInsideHorizontalMargins() const noexcept
+{
+    return !_terminal->isModeEnabled(DECMode::LeftRightMargin)
+           || margin().horizontal.contains(_cursor.position.column);
+}
+
 bool Screen::isCursorInsideMargins() const noexcept
 {
     bool const insideVerticalMargin = margin().vertical.contains(_cursor.position.line);
-    bool const insideHorizontalMargin = !_terminal->isModeEnabled(DECMode::LeftRightMargin)
-                                        || margin().horizontal.contains(_cursor.position.column);
-    return insideVerticalMargin && insideHorizontalMargin;
+    return insideVerticalMargin && isCursorInsideHorizontalMargins();
 }
 
 unique_ptr<ParserExtension> Screen::hookGoodImageProtocol(Sequence const&)

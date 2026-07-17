@@ -471,7 +471,11 @@ void Grid::scrollDown(LineCount vN, GraphicsAttributes const& defaultAttributes,
     {
         if (n <= margin.vertical.length())
         {
-            for (LineOffset line = margin.vertical.to; line >= margin.vertical.to - *n; --line)
+            // Shift every line that has somewhere to go: targets [from+n, to], each pulling from n rows
+            // above. The lower bound is from+n, not to-n -- with a full-height vertical margin the latter
+            // only touches the bottom n+1 (often blank) rows and never moves the content down at all.
+            // Iterate downward so each source is read before it is overwritten as a later target.
+            for (LineOffset line = margin.vertical.to; line >= margin.vertical.from + *n; --line)
             {
                 auto const& srcLine = lineAt(line - *n);
                 auto& dstLine = lineAt(line);

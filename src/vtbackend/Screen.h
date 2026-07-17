@@ -396,6 +396,15 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     [[nodiscard]] bool isCursorInsideMargins() const noexcept;
 
+    /// Tests whether the cursor sits within the active left/right margins.
+    ///
+    /// This mirrors xterm's `!(IsLeftRightMode && !ScrnIsColInMargins)` guard: when DECLRMM is off the
+    /// horizontal margins span the whole page, so this is trivially true; when DECLRMM is on it reports
+    /// whether the cursor column lies within the margin band. Vertical scrolling is confined to that
+    /// band, so IND/RI/LF and friends consult this before deciding to scroll.
+    /// @return true if the cursor column is within the horizontal margins.
+    [[nodiscard]] bool isCursorInsideHorizontalMargins() const noexcept;
+
     [[nodiscard]] constexpr CellLocation realCursorPosition() const noexcept { return _cursor.position; }
 
     [[nodiscard]] constexpr CellLocation logicalCursorPosition() const noexcept
