@@ -4769,18 +4769,17 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case ICH: insertCharacters(seq.param_positive_or(0, ColumnCount { 1 })); break;
         case IL: insertLines(seq.param_positive_or(0, LineCount { 1 })); break;
         case REP:
-            if (_terminal->parser().precedingGraphicCharacter())
+            if (auto const precedingChar = _terminal->parser().precedingGraphicCharacter())
             {
-                auto const requestedCount = seq.param<size_t>(0);
-                auto const availableColumns =
-                    (margin().horizontal.to - cursor().position.column).template as<size_t>();
-                auto const effectiveCount = std::min(requestedCount, availableColumns);
-                for (size_t i = 0; i < effectiveCount; i++)
-                    writeText(_terminal->parser().precedingGraphicCharacter());
+                // REP repeats the last graphic character through the normal text path, so autowrap, the
+                // left/right margins and scrolling at the bottom margin all apply. Clamping the count to
+                // the current line -- as this once did -- defeated every one of them: past the right
+                // margin the repeats must wrap to the left margin of the next line, not stop dead.
                 // REP's parameter is a one-based count, so `CSI b` and `CSI 0 b` both repeat once --
                 // xterm folds both with one_if_default(). param_or() would take an explicit zero
                 // literally and repeat nothing.
                 auto const count = seq.param_positive_or<size_t>(0, 1);
+                crispy::for_each(crispy::times(count), [&](auto) { writeText(precedingChar); });
             }
             break;
         case RM: {

@@ -5346,15 +5346,32 @@ TEST_CASE("REP.after_bulk_text", "[screen]")
     CHECK(screen.grid().lineText(LineOffset(0)) == "Hello||||           ");
 }
 
-TEST_CASE("REP.respects_margin", "[screen]")
+TEST_CASE("REP.wraps_at_left_right_margin", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(5) } };
+    // REP repeats through the normal text path, so past the right margin it autowraps to the left
+    // margin of the next line rather than stopping. Mirrors esctest test_REP_RespectsLeftRightMargins.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("\033[?69h"); // DECSET DECLRMM
+    mock.writeToScreen("\033[2;4s"); // DECSLRM 2;4
+    mock.writeToScreen("\033[1;2H"); // CUP row 1, col 2 (the left margin)
+    mock.writeToScreen("a");         // 'a' at the left margin
+    mock.writeToScreen("\033[3b");   // REP 3
+    // Two more fill the band on row 1; the third wraps to the left margin of row 2.
+    CHECK(" aaa \n a   \n" == screen.renderMainPageText());
+}
 
-    // "A" at column 0, then repeat 10 times. Clamped to available columns.
-    mock.writeToScreen("A\033[10b");
-
-    CHECK(screen.grid().lineText(LineOffset(0)) == "AAAA ");
+TEST_CASE("REP.scrolls_at_bottom_margin", "[screen]")
+{
+    // At the bottom margin REP's autowrap scrolls the region, exactly as ordinary text would.
+    // Mirrors esctest test_REP_RespectsTopBottomMargins.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(6) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("\033[2;4r"); // DECSTBM 2;4 -> rows 2..4 (offsets 1..3)
+    mock.writeToScreen("\033[4;4H"); // CUP row 4 (bottom margin), col 4
+    mock.writeToScreen("a");
+    mock.writeToScreen("\033[3b"); // REP 3: fills the row's tail, then wraps + scrolls the region up
+    CHECK("      \n      \n   aaa\na     \n      \n" == screen.renderMainPageText());
 }
 
 TEST_CASE("REP.no_preceding_char", "[screen]")
