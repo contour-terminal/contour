@@ -914,8 +914,9 @@ enum class DECMode : std::uint8_t
     // is a real, distinct mode, so Contour remembers and reports its state (SM/RM toggle it, DECRQM
     // reports Set/Reset) -- but nothing here acts on the bit yet. This is deliberately a step above the
     // "PermanentlyReset" block above (modes 45..48): those can *never* mean anything here, whereas these
-    // are on the roadmap to gain real behaviour. As each is implemented, move its handling out of the
+    // are meant to gain real behaviour. As each is implemented, move its handling out of the
     // "toggle only" default and this comment shrinks.
+    // @see docs/internals/vt-conformance.md -- what is left, and why.
     //
     // The bidirectional pair is the priority: RightToLeftMode and
     // HebrewEncodingMode are the entry points for real bidirectional/Hebrew support, not mere toggles.

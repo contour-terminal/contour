@@ -201,7 +201,8 @@ namespace
         // asks the user to press keys and watch them render in the downloaded font. A headless engine
         // has no keyboard, so the chapter cannot be driven as a whole today. Unlocking its other
         // items (VT100 charsets, VT220 locking shifts, single shifts) needs per-item scenarios rather
-        // than `*`; the roadmap tracks that. Reported as skipped, never as passed.
+        // than `*` -- @see vttest.11.2.5.5 and vttest.11.7.1 for that shape. Reported as skipped,
+        // never as passed.
         Scenario { .id = "vttest.03.character-sets",
                    .title = "Test of character sets",
                    .keys = CharacterSetKeys,

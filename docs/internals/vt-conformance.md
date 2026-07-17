@@ -94,6 +94,81 @@ each with its justification. The suite fails on a **new** gap, and also reports 
 reproduce so they can be removed. A gap must be a deliberate, documented decision — an intentional
 divergence or an unimplemented sequence — never a shrug.
 
+## Which goldens have been reviewed
+
+Recorded is not reviewed, so which is which has to be written down or it is lost — a reviewed golden
+is indistinguishable from a recorded one by inspection. This is that record. It is not a pass count;
+the suite prints those.
+
+Every chapter below is driven by the causal barrier, so nothing here is blocked on the driver any
+more: what is left is the *judging*, and it is per chapter and per screen. All 143 goldens across the
+18 visual scenarios have been reviewed.
+
+| Chapter | Goldens | What the review turned on |
+|---|---|---|
+| 01 cursor movements | 6 | Each screen states its own verdict. The E-frame is centred to the exact half-cell (rows 9–16, cols 11–70) at both 80 and 132 columns. |
+| 02 screen features | 15 | Judged from each screen's own caption, *not* by counting `holdit()` call sites — the column-mode test holds inside a loop, so one call site is four runtime holds. step09 had frozen a driver bug. |
+| 04 double-sized | 6 | `decstbm(8,24)` then 12×`ri()` leaves "exactly half of the box", and does: five lines at 20–24, the last a `DoubleHeightTop` whose partner fell off the region edge. |
+| 07 VT52 mode | 3 | `tst_vt52` has exactly three holds. Two files on disk had been captured at a non-hold and were deleted. |
+| 08 VT102 features | 14 | *"The right column should be staggered by one"* — the letter runs' right edges step by exactly −1 down all 24 rows. A first pass misread a −2; that was the measurement, not the screen. |
+| 09 known bugs | 28 | The chapter's point is that a modern terminal has none of them, and Contour has none. `bug_e` is the sharpest: a real VT100 clamps to column ≤66 on a double-wide line; Contour puts the X at exactly 100. |
+| 11.5 ISO-6429 cursor | 9 | The same box drawn five ways, so they check each other. VPA's is 41 wide and **right** to be: `tst_VPA` walks its bottom edge with `print_str("\b*\b")`, which steps left before drawing. |
+| 11.6 ISO-6429 colours | 57 | Rebuilt from 15 after the toggle bug. 33 of 11.6.6's 35 text planes are byte-identical to an already-reviewed screen, so that review transfers; the 2 that differ do so by one line of prose. |
+| 11.7 ISO-6429 other | 6 | REP is a real conformance judgement and Contour takes the standard side: vttest allows 11 `+`s as undefined behaviour, the golden shows 2. |
+
+**Check a screen against the claim it makes, never against a rule generalised from its neighbour.**
+11.6.4/11.6.5 state *"no cells with the default foreground or background"* in words; 11.6.6 never
+claims it and correctly has default cells.
+
+Chapters 03, 05, 11.1, 11.3.4 and 11.8 have no goldens: they are skipped, and a golden of a
+half-driven screen is worse than none.
+
+## What is left, and why
+
+The gap files say which sequences are unimplemented. This is for the decisions that outlive them.
+
+- **Bidirectional text is a toggle, and the toggle is a no-op.** `RightToLeftMode` (DECRLM, 34),
+  `HebrewEncodingMode` (DECHEM, 36) and `RightToLeftCopyMode` (DECRLCM, 96) are settable and reported
+  honestly by DECRQM — SM/RM toggle them, DECRQM answers Set/Reset — but **nothing reads the bit**.
+  They are the entry points for real right-to-left and Hebrew support, which is a wanted feature
+  rather than a checkbox, and they are the priority of their group. The rendering half of the problem
+  is a separate and larger one; see `docs/internals/text-stack.md`, which does not address BiDi
+  either. They are part of a block of seventeen VT525 keyboard, national and hardware modes in
+  `primitives.h`'s `DECMode` that are honest toggles today, each carrying its own `TODO`. Reporting a
+  mode's state truthfully while not acting on it is deliberate: it is a step above the
+  `PermanentlyReset` modes, which can never mean anything here.
+- **The `*` table has not been audited against vttest's menu tables.** The rule above — `*` cannot
+  cross a submenu — was applied where it was found (11.7's protected-area item, 11.2.5's UPSS item),
+  not proven across the table. Every remaining `*` is a claim that none of its items is a submenu, a
+  cross-link or a toggle, and that claim is unverified. Both known instances were found by *reading*
+  vttest's source, never by a failing run: that is the only way this class shows up.
+- **Two vttest fixes are worth upstreaming.** Its `-l` log is opened without a buffering mode, so a
+  killed vttest leaves a transcript short of the verdicts it produced — and a short transcript reports
+  fewer failures, which reads as success. (The runner detects that already, via vttest's parting
+  `That's all, folks!`; the fix removes the failure mode rather than catching it.) And its DECCRA
+  carries a trailing `;` (`esc.c:732`), which ECMA-48 makes a ninth, empty parameter — legal, but not
+  what DECCRA is, and it is what hid a real Contour bug for as long as the chapter never ran.
+- **The screen dump's legend alphabet runs out at 62 renditions.** `ScreenDump.cpp` hands out
+  `A-Za-z0-9`; 11.6.2's colour test-pattern has 128 renditions, so 66 collapse onto `?`. It degrades
+  gracefully — the legend is itself part of the compared dump and lists renditions in first-appearance
+  order, so a changed rendition *set*, and any swap that moves a first appearance, are both still
+  caught. The dump is blind only to a swap between two repeat occurrences of two overflow renditions.
+  Widening the alphabet past ASCII makes the attribute plane multi-byte, which is real cost against a
+  narrow gap.
+- **There is no VT-semantics coverage ratchet.** `allFunctions()` is already a machine-readable
+  registry of every implemented sequence with its conformance level; it could be the denominator, with
+  a data-driven corpus as the numerator and a build failure when a sequence lands without a test. Key
+  it on `Function::id()`, **not** on the mnemonic — mnemonics are not unique. `ANSIDSR` (`CSI n`) and
+  `DSR` (`CSI ? n`) both report `mnemonic == "DSR"`.
+- **DECRQSS is not gated on the operating level.** After a VT52 round-trip drops the terminal to
+  VT100, a real VT100 does not recognise DECRQSS (a VT300+ request) and stays silent; Contour still
+  answers. vttest tolerates either and answering is harmless.
+- **DECCOLM while maximized does not un-maximize.** The grid is authoritative and renders correctly
+  inside the pinned frame, so this is a UX preference rather than a rendering bug. Resizing after
+  `showNormal()` — even deferred — commits a surface geometry that does not match the still-maximized
+  configure, which is a *fatal* xdg-shell protocol error. Refusing is what foot and kitty do too. It
+  needs a proper unmaximize/ack/resize handshake, and is arguably X11-only.
+
 ## Diagnose by the failure *set*, not the count
 
 Repeatedly, a large number of failures has turned out to be one defect. Count *desyncs* and look at
@@ -103,12 +178,16 @@ Repeatedly, a large number of failures has turned out to be one defect. Count *d
 
 Most defects found in this area were not missing checks. They were checks that ran, reported green,
 and whose structure guaranteed they could not see the thing they named: a verdict oracle that read one
-of the two forms its program emits; a gating flag that only judged scenarios already gating; `*` on a
-submenu; a hand-copied list of cell flags that never learnt about a new one, leaving the
-protected-area goldens unable to tell a protected cell from an unprotected one.
+of the two record types its program emits, and then another that read the record but dropped the
+verdict inside it; a gating flag that only judged scenarios already gating; `*` on a submenu; a
+hand-copied list of cell flags that never learnt about a new one, leaving the protected-area goldens
+unable to tell a protected cell from an unprotected one.
 
 When a conformance check passes, ask what it would take for it to fail. If there is no such input, it
-is measuring nothing.
+is measuring nothing. **Answer that by measuring, not by reading**: break the thing on purpose and
+watch the check go red. A scenario driving DECRQUPSS passed just as happily against a terminal
+answering deliberate nonsense, because the one verdict vttest emitted was a string the oracle did not
+match — and nothing about the passing run said so.
 
 ## Reference sources
 

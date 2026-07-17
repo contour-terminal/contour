@@ -45,7 +45,7 @@ constexpr auto Patience = 30s;
 // The barrier in every test here is causal: the child exits, or it says something. None waits out a
 // fixed silence -- a test that fails when the code under it gets slower was measuring the wrong thing.
 //
-// It does NOT fix these four under `clang-coverage`, and the roadmap used to claim it would. They still
+// It does NOT fix these four under `clang-coverage`. They still
 // die there, with SIGILL, and the cause is the fork rather than the clock: every test in this module
 // that spawns no child passes under instrumentation (TerminalEngine's 8, and the 23 pure ones), and
 // every one that forks dies. The fork path carries the parent's gcov state through login(), chdir(),
