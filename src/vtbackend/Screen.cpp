@@ -4289,28 +4289,28 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         // CSI
         case ANSISYSSC: restoreCursor(); break;
         case CBT:
-            cursorBackwardTab(TabStopCount::cast_from(seq.param_or(0, Sequence::Parameter { 1 })));
+            cursorBackwardTab(TabStopCount::cast_from(seq.param_positive_or(0, Sequence::Parameter { 1 })));
             break;
-        case CHA: moveCursorToColumn(seq.param_or<ColumnOffset>(0, ColumnOffset { 1 }) - 1); break;
+        case CHA: moveCursorToColumn(seq.param_positive_or<ColumnOffset>(0, ColumnOffset { 1 }) - 1); break;
         case CHT:
-            cursorForwardTab(TabStopCount::cast_from(seq.param_or(0, Sequence::Parameter { 1 })));
+            cursorForwardTab(TabStopCount::cast_from(seq.param_positive_or(0, Sequence::Parameter { 1 })));
             break;
         case CNL:
-            moveCursorToNextLine(LineCount::cast_from(seq.param_or(0, Sequence::Parameter { 1 })));
+            moveCursorToNextLine(LineCount::cast_from(seq.param_positive_or(0, Sequence::Parameter { 1 })));
             break;
         case CPL:
-            moveCursorToPrevLine(LineCount::cast_from(seq.param_or(0, Sequence::Parameter { 1 })));
+            moveCursorToPrevLine(LineCount::cast_from(seq.param_positive_or(0, Sequence::Parameter { 1 })));
             break;
         case ANSIDSR: return impl::ANSIDSR(seq, *this);
         case DSR: return impl::DSR(seq, *this);
-        case CUB: moveCursorBackward(seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
-        case CUD: moveCursorDown(seq.param_or<LineCount>(0, LineCount { 1 })); break;
-        case CUF: moveCursorForward(seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
+        case CUB: moveCursorBackward(seq.param_positive_or<ColumnCount>(0, ColumnCount { 1 })); break;
+        case CUD: moveCursorDown(seq.param_positive_or<LineCount>(0, LineCount { 1 })); break;
+        case CUF: moveCursorForward(seq.param_positive_or<ColumnCount>(0, ColumnCount { 1 })); break;
         case CUP:
-            moveCursorTo(LineOffset::cast_from(seq.param_or<int>(0, 1) - 1),
-                         ColumnOffset::cast_from(seq.param_or<int>(1, 1) - 1));
+            moveCursorTo(LineOffset::cast_from(seq.param_positive_or<int>(0, 1) - 1),
+                         ColumnOffset::cast_from(seq.param_positive_or<int>(1, 1) - 1));
             break;
-        case CUU: moveCursorUp(seq.param_or<LineCount>(0, LineCount { 1 })); break;
+        case CUU: moveCursorUp(seq.param_positive_or<LineCount>(0, LineCount { 1 })); break;
         case DA1: sendDeviceAttributes(); break;
         case DA2: sendTerminalId(); break;
         case DA3:
@@ -4318,9 +4318,8 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             reply("\033P!|C0000000\033\\");
             break;
         case DCH: deleteCharacters(seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
+        case DCH: deleteCharacters(seq.param_positive_or<ColumnCount>(0, ColumnCount { 1 })); break;
         case DECCARA: {
-            auto const origin = this->origin();
-            auto const top = LineOffset(seq.param_or(0, *origin.line + 1) - 1);
             auto const left = ColumnOffset(seq.param_or(1, *origin.column + 1) - 1);
             auto const bottom = LineOffset(seq.param_or(2, *pageSize().lines) - 1);
             auto const right = ColumnOffset(seq.param_or(3, *pageSize().columns) - 1);
@@ -4451,7 +4450,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             fillArea(ch, std::max(0, unbox(top) - 1), std::max(0, unbox(left) - 1), bottom - 1, right - 1);
         }
         break;
-        case DECDC: deleteColumns(seq.param_or(0, ColumnCount(1))); break;
+        case DECDC: deleteColumns(seq.param_positive_or(0, ColumnCount(1))); break;
         case DECELR: _terminal->setLocatorMode(seq.param_or(0, 0), seq.param_or(1, 0)); break;
         case DECSLE: {
             auto params = std::vector<int> {};
@@ -4461,7 +4460,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             break;
         }
         case DECRQLP: _terminal->requestLocatorPosition(); break;
-        case DECIC: insertColumns(seq.param_or(0, ColumnCount(1))); break;
+        case DECIC: insertColumns(seq.param_positive_or(0, ColumnCount(1))); break;
         case DECINVM: _terminal->invokeMacro(seq.param_or(0, 0)); break;
         case DECSACE:
             // Ps=0 or 1 → stream mode, Ps=2 → rectangle mode
@@ -4639,8 +4638,8 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case PPR: pagePositionRelative(seq.param_or(0, 1)); break;
         case PPB: pagePositionBackward(seq.param_or(0, 1)); break;
         case DECRQDE: requestDisplayedExtent(); break;
-        case DL: deleteLines(seq.param_or(0, LineCount(1))); break;
-        case ECH: eraseCharacters(seq.param_or(0, ColumnCount(1))); break;
+        case DL: deleteLines(seq.param_positive_or(0, LineCount(1))); break;
+        case ECH: eraseCharacters(seq.param_positive_or(0, ColumnCount(1))); break;
         case ED:
             if (seq.parameterCount() == 0)
                 clearToEndOfScreen();
@@ -4663,13 +4662,14 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             }
             break;
         case EL: return impl::EL(seq, *this);
-        case HPA: moveCursorToColumn(seq.param<ColumnOffset>(0) - 1); break;
-        case HPR: moveCursorForward(seq.param<ColumnCount>(0)); break;
+        case HPA: moveCursorToColumn(seq.param_positive_or<ColumnOffset>(0, ColumnOffset { 1 }) - 1); break;
+        case HPR: moveCursorForward(seq.param_positive_or<ColumnCount>(0, ColumnCount { 1 })); break;
         case HVP:
-            moveCursorTo(seq.param_or(0, LineOffset(1)) - 1, seq.param_or(1, ColumnOffset(1)) - 1);
+            moveCursorTo(seq.param_positive_or(0, LineOffset(1)) - 1,
+                         seq.param_positive_or(1, ColumnOffset(1)) - 1);
             break; // YES, it's like a CUP!
-        case ICH: insertCharacters(seq.param_or(0, ColumnCount { 1 })); break;
-        case IL: insertLines(seq.param_or(0, LineCount { 1 })); break;
+        case ICH: insertCharacters(seq.param_positive_or(0, ColumnCount { 1 })); break;
+        case IL: insertLines(seq.param_positive_or(0, LineCount { 1 })); break;
         case REP:
             if (_terminal->parser().precedingGraphicCharacter())
             {
@@ -4679,6 +4679,10 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
                 auto const effectiveCount = std::min(requestedCount, availableColumns);
                 for (size_t i = 0; i < effectiveCount; i++)
                     writeText(_terminal->parser().precedingGraphicCharacter());
+                // REP's parameter is a one-based count, so `CSI b` and `CSI 0 b` both repeat once --
+                // xterm folds both with one_if_default(). param_or() would take an explicit zero
+                // literally and repeat nothing.
+                auto const count = seq.param_positive_or<size_t>(0, 1);
             }
             break;
         case RM: {
@@ -4690,7 +4694,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             return r;
         }
         case SCOSC: saveCursor(); break;
-        case SD: scrollDown(seq.param_or<LineCount>(0, LineCount { 1 })); break;
+        case SD: scrollDown(seq.param_positive_or<LineCount>(0, LineCount { 1 })); break;
         case UNSCROLL: unscroll(seq.param_or<LineCount>(0, LineCount(1))); break;
         case SBQUERY: handleSemanticBlockQuery(seq); break;
         case SETMARK:
@@ -4712,9 +4716,10 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         }
         case SL: scrollLeft(seq.param_or<ColumnCount>(0, ColumnCount(1))); break;
         case SR: scrollRight(seq.param_or<ColumnCount>(0, ColumnCount(1))); break;
-        case SU: scrollUp(seq.param_or<LineCount>(0, LineCount(1))); break;
+        case SU: scrollUp(seq.param_positive_or<LineCount>(0, LineCount(1))); break;
         case TBC: return impl::TBC(seq, *this);
-        case VPA: moveCursorToLine(seq.param_or<LineOffset>(0, LineOffset { 1 }) - 1); break;
+        case VPA: moveCursorToLine(seq.param_positive_or<LineOffset>(0, LineOffset { 1 }) - 1); break;
+        case VPR: moveCursorDown(seq.param_positive_or<LineCount>(0, LineCount { 1 })); break;
         case WINMANIP: return impl::WINDOWMANIP(seq, *_terminal);
         case XTRESTORE: return impl::restoreDECModes(seq, *_terminal);
         case XTSAVE: return impl::saveDECModes(seq, *_terminal);

@@ -4803,6 +4803,33 @@ TEST_CASE("REP.basic_ascii", "[screen]")
     CHECK(screen.grid().lineText(LineOffset(0)) == "||||||||||          ");
 }
 
+TEST_CASE("REP.omitted_parameter_repeats_once", "[screen]")
+{
+    // REP's parameter defaults to 1, so `CSI b` on its own is legal. It was declared as requiring at
+    // least one parameter, though, so a bare `CSI b` matched no function at all and was silently
+    // dropped. vttest sends it.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(8) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("X\033[b");
+
+    CHECK(screen.grid().lineText(LineOffset(0)) == "XX      ");
+}
+
+TEST_CASE("REP.explicit_zero_repeats_once", "[screen]")
+{
+    // REP's parameter is a one-based count, so an explicit zero means the same as an omitted one --
+    // xterm folds both with one_if_default(). Taken literally it repeated nothing and swallowed the
+    // character, which is what param_or() did here while every sibling sequence had moved on to
+    // param_positive_or().
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(8) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("X\033[0b");
+
+    CHECK(screen.grid().lineText(LineOffset(0)) == "XX      ");
+}
+
 TEST_CASE("REP.after_bulk_text", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
@@ -5790,3 +5817,113 @@ TEST_CASE("DECDLD: switching away from DRCS uses normal font", "[screen]")
 
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
 // }}} DEC Multi-Page Support Tests
+
+// {{{ One-based parameters: omitted, empty and zero all mean "the default"
+
+TEST_CASE("An omitted one-based parameter takes its default", "[screen]")
+{
+    // The parser stores an omitted parameter as the value zero *and counts it*, so `CSI ; 5 H` used to
+    // read a row of 0 rather than the default of 1 -- and every handler that computes `param - 1` then
+    // underflowed into a negative offset. There is no row zero and no column zero, so a sequence naming
+    // one is naming the default, exactly as xterm's `if (param < 1) param = 1` has it.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    SECTION("CUP with an omitted row")
+    {
+        mock.writeToScreen("\033[3;3H"); // somewhere other than the home position
+        mock.writeToScreen("\033[;4H");
+        CHECK(screen.cursor().position == CellLocation { .line = LineOffset(0), .column = ColumnOffset(3) });
+    }
+
+    SECTION("CUP with an omitted column")
+    {
+        mock.writeToScreen("\033[3;3H");
+        mock.writeToScreen("\033[4;H");
+        CHECK(screen.cursor().position == CellLocation { .line = LineOffset(3), .column = ColumnOffset(0) });
+    }
+
+    SECTION("CUP with explicit zeroes")
+    {
+        mock.writeToScreen("\033[3;3H");
+        mock.writeToScreen("\033[0;0H");
+        CHECK(screen.cursor().position == CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
+    }
+
+    SECTION("HVP with an omitted row")
+    {
+        mock.writeToScreen("\033[3;3H");
+        mock.writeToScreen("\033[;4f");
+        CHECK(screen.cursor().position == CellLocation { .line = LineOffset(0), .column = ColumnOffset(3) });
+    }
+
+    SECTION("CHA and VPA with a zero")
+    {
+        mock.writeToScreen("\033[3;3H");
+        mock.writeToScreen("\033[0G"); // CHA
+        CHECK(screen.cursor().position.column == ColumnOffset(0));
+        mock.writeToScreen("\033[0d"); // VPA
+        CHECK(screen.cursor().position.line == LineOffset(0));
+    }
+
+    SECTION("HPA without a parameter at all")
+    {
+        // HPA read its parameter with param(), which asserts when none was given.
+        mock.writeToScreen("\033[3;3H");
+        mock.writeToScreen("\033[`");
+        CHECK(screen.cursor().position.column == ColumnOffset(0));
+    }
+
+    SECTION("HPR without a parameter at all")
+    {
+        mock.writeToScreen("\033[1;1H");
+        mock.writeToScreen("\033[a");
+        CHECK(screen.cursor().position.column == ColumnOffset(1));
+    }
+}
+
+TEST_CASE("A zero count moves or edits by one", "[screen]")
+{
+    // A count of zero is a count of one, for the same reason: `CSI 0 A` is `CSI A`.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    SECTION("CUU, CUD, CUF, CUB")
+    {
+        mock.writeToScreen("\033[3;3H");
+        mock.writeToScreen("\033[0A");
+        CHECK(screen.cursor().position.line == LineOffset(1));
+        mock.writeToScreen("\033[0B");
+        CHECK(screen.cursor().position.line == LineOffset(2));
+        mock.writeToScreen("\033[0C");
+        CHECK(screen.cursor().position.column == ColumnOffset(3));
+        mock.writeToScreen("\033[0D");
+        CHECK(screen.cursor().position.column == ColumnOffset(2));
+    }
+
+    SECTION("ICH inserts one cell")
+    {
+        mock.writeToScreen("ABCDE");
+        mock.writeToScreen("\033[1;1H");
+        mock.writeToScreen("\033[0@");
+        CHECK(screen.grid().lineText(LineOffset(0)) == " ABCD");
+    }
+
+    SECTION("DCH deletes one cell")
+    {
+        mock.writeToScreen("ABCDE");
+        mock.writeToScreen("\033[1;1H");
+        mock.writeToScreen("\033[0P");
+        CHECK(screen.grid().lineText(LineOffset(0)) == "BCDE ");
+    }
+
+    SECTION("ECH erases one cell")
+    {
+        mock.writeToScreen("ABCDE");
+        mock.writeToScreen("\033[1;1H");
+        mock.writeToScreen("\033[0X");
+        CHECK(screen.grid().lineText(LineOffset(0)) == " BCDE");
+    }
+}
+
+// }}} One-based parameters
