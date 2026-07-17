@@ -803,6 +803,7 @@ jobs:
             out/gcc-debug/src/vtbackend/vtbackend_test
             out/gcc-debug/src/vtbackend/bench-headless
             out/gcc-debug/src/vtrasterizer/vtrasterizer_test
+            out/gcc-debug/src/vtconformance/vtconformance-run
             test/images
           retention-days: 1
   # }}}
@@ -965,6 +966,63 @@ jobs:
       - name: "test: vtrasterizer (via valgrind)"
         run: valgrind --error-exitcode=64 ./out/gcc-debug/src/vtrasterizer/vtrasterizer_test
   # }}}
+  # {{{ Ubuntu 24.04: VT conformance (esctest gates, vttest is advisory)
+  test_ubuntu2404_conformance:
+    name: "Run VT conformance suites"
+    runs-on: ubuntu-24.04
+    needs: [ubuntu_2404_cc_matrix]
+    steps:
+      # A full checkout, not a sparse one: the ratchet files the gate is judged against
+      # (src/vtconformance/test/*.txt) and the golden dumps live in the source tree.
+      - uses: actions/checkout@v4
+      - name: "download artifact"
+        uses: actions/download-artifact@v4
+        with:
+          name: contour-ubuntu2404-tests
+      - name: "update APT database"
+        run: sudo ./scripts/apt-update.sh
+      - name: "fix harness permissions"
+        run: find . -name 'vtconformance-run' -exec chmod 0755 {} \;
+      - name: "install dependencies"
+        run: ./scripts/ci-install-run-deps.sh python3
+      - name: "install vttest"
+        run: ./scripts/ci/vttest-install.sh
+      - name: "fetch esctest"
+        run: ./scripts/fetch-esctest.sh
+      # Deliberately WITHOUT --skip-if-missing. The ctest registration keeps that flag, because a
+      # contributor without the suites installed should not have a red build -- but in CI a suite that
+      # cannot be found has measured nothing, and must fail rather than quietly report success. That
+      # silent skip is exactly the hole this job closes: the ratchets existed for months while nothing
+      # in CI ever ran them.
+      - name: "conformance: esctest (gating)"
+        run: |
+          ./out/gcc-debug/src/vtconformance/vtconformance-run run \
+              --suite esctest \
+              --suite-dir "$PWD/out/esctest2/esctest" \
+              --known-gaps "$PWD/src/vtconformance/test/esctest-known-gaps.txt" \
+              --known-failures "$PWD/src/vtconformance/test/esctest-known-failures.txt" \
+              --work-dir "$PWD/out/esctest-work"
+      # vttest gates per scenario (see Scenario::gatesBuild): its self-checking chapters replay a
+      # recorded command file and are reproducible, so they break the build; its visual chapters are
+      # still screen-driven and judged against unreviewed goldens, so they report only.
+      - name: "conformance: vttest"
+        run: |
+          ./out/gcc-debug/src/vtconformance/vtconformance-run run \
+              --suite vttest \
+              --golden-dir "$PWD/src/vtconformance/test/golden" \
+              --known-gaps "$PWD/src/vtconformance/test/known-gaps.txt" \
+              --command-dir "$PWD/src/vtconformance/test/cmd" \
+              --work-dir "$PWD/out/vttest-work"
+      - name: "upload conformance transcripts"
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: contour-conformance-transcripts
+          path: |
+            out/esctest-work
+            out/vttest-work
+          retention-days: 3
+  # }}}
   # {{{ Ubuntu 24.04: Test bench-headless
   test_ubuntu2404_bench_headless:
     strategy:
@@ -1007,16 +1065,21 @@ jobs:
       - ubuntu_2404_cc_matrix
       - test_ubuntu2404_valgrind
       - test_ubuntu2404_bench_headless
+      - test_ubuntu2404_conformance
     steps:
       - name: Print matrix status
         run: |
           echo "Result (CC matrix)        : ${{ needs.ubuntu_2404_cc_matrix.result }}"
           echo "Result (packaging matrix) : ${{ needs.package_for_Ubuntu.result }}"
+          echo "Result (conformance)      : ${{ needs.test_ubuntu2404_conformance.result }}"
       - name: Check build matrix status
         if: ${{ needs.ubuntu_2404_cc_matrix.result != 'success' && needs.ubuntu_2404_cc_matrix.result != 'skipped' }}
         run: exit 1
       - name: Check package_for_Ubuntu matrix status
         if: ${{ needs.package_for_Ubuntu.result != 'success' && needs.package_for_Ubuntu.result != 'skipped' }}
+        run: exit 1
+      - name: Check conformance status
+        if: ${{ needs.test_ubuntu2404_conformance.result != 'success' && needs.test_ubuntu2404_conformance.result != 'skipped' }}
         run: exit 1
       - name: "Delete artifact: contour-ubuntu2404-tests"
         uses: geekyeggo/delete-artifact@v5

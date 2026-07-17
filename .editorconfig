@@ -16,3 +16,18 @@ indent_size = 2
 
 [.github/**/*.yml]
 indent_size = 2
+
+# Recorded data, in vttest's own format, replayed back into it byte for byte.
+#
+# vttest logs every byte as `"%c "` or `"<%d> "` (put_char, esc.c), so the space before each newline is
+# part of the recording rather than a typo, and its log format IS its command-file format. Trimming it
+# would edit data this project did not author, and every re-record would put it straight back -- the
+# check would fail forever. The screen dumps next door are excluded from check-spelling for the same
+# reason: they are evidence, not source.
+#
+# `end_of_line` is unset for the same reason and not a different one: vttest prints a literal CR of its
+# own (its `not_impl` stub emits "Sorry, test not implemented:\r"), so a couple of these lines really do
+# end CRLF while the rest end LF. That mix is what vttest wrote, so it is what the recording says.
+[src/vtconformance/test/cmd/*.cmd]
+trim_trailing_whitespace = false
+end_of_line = unset

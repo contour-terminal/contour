@@ -1,2 +1,12 @@
 # Desktop files contain translations in various languages
 \.desktop$
+
+# Recorded conformance data, not prose.
+#
+# The goldens are screen dumps -- a VT test suite's output, cell by cell, which is where runs of
+# `eeeeeeee` and `aaaaaaaaaa` come from -- and the command files are vttest's own transcripts, byte-
+# encoded. Neither is written by anyone; both are recorded by `--bless` / `--bless-command-files` and
+# re-recorded whenever behaviour changes deliberately. Spell-checking them would mean maintaining a
+# dictionary of a terminal's test patterns, and every re-bless could break the spelling gate.
+^src/vtconformance/test/golden/.*\.dump$
+^src/vtconformance/test/cmd/.*\.cmd$

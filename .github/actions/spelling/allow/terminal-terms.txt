@@ -1,3 +1,4 @@
+Acolors
 acsc
 ANSIDSR
 ANSISYSSC
@@ -109,6 +110,7 @@ DECTABSR
 DECTCEM
 DECTEK
 DECXCPR
+doparsing
 DSRs
 ESC
 EXTRABLACK
@@ -121,6 +123,7 @@ Guake
 HPR
 HVP
 LNM
+marg
 MODIFYOTHERKEYS
 NEL
 OSC
@@ -141,6 +144,7 @@ RCOLPAL
 RIS
 satt
 Satt
+Scrn
 sdesig
 Sdesig
 SETCOLPAL
@@ -163,11 +167,15 @@ Smulx
 srend
 Srend
 stty
+Tcolors
 Tektronix
 TEs
 TMUX
+tput
 undercurl
+unparseputc
 UTF
+VMOT
 VTEs
 WHEELDOWN
 WHEELUP
