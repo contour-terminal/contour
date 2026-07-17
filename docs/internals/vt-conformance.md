@@ -72,8 +72,8 @@ answer, one line per dispatch: `Note: choice 11.6.1: Disable color-switching`.
 A golden dump is captured, then **blessed**. The distinction that matters:
 
 - **Recorded** — captured, pins today's behaviour, *not yet judged correct*.
-- **Reviewed** — judged against vttest's own source, the reference terminals in
-  `~/usr/src/terminals/`, and the DEC manuals.
+- **Reviewed** — judged against vttest's own source, the reference terminals under
+  `$CONTOUR_VT_REFERENCE_SOURCES` (see [Reference sources](#reference-sources)), and the DEC manuals.
 
 **Both gate.** "Is this screen correct?" and "should a change to it be visible?" are different
 questions, and a recorded golden answers the second perfectly well. If a frozen screen later proves
@@ -191,10 +191,40 @@ match — and nothing about the passing run said so.
 
 ## Reference sources
 
-Cross-check any sequence's semantics against **both** the terminal source trees under
-`~/usr/src/terminals/` **and** a primary DEC manual — reading the source alone is not enough, and
-scattered web summaries are not sources. xterm's `ctlseqs.txt` is the canonical sequence catalog;
-DEC STD 070 and the VT520/VT525 Programmer Information manual are the standards. Note where terminals
-*diverge or punt* — that is usually where the interesting decision is. **xterm is the only reference
-that must be measured rather than read** (run it under Xvfb): for some sequences its manual, its
-source and its actual output disagree.
+Cross-check any sequence's semantics against **both** the established terminal source trees **and** a
+primary DEC manual — reading the source alone is not enough, and scattered web summaries are not
+sources. xterm's `ctlseqs.txt` is the canonical sequence catalog; DEC STD 070 and the VT520/VT525
+Programmer Information manual are the standards. Note where terminals *diverge or punt* — that is
+usually where the interesting decision is. **xterm is the only reference that must be measured rather
+than read** (run it under Xvfb): for some sequences its manual, its source and its actual output
+disagree.
+
+### Where the source trees live
+
+The trees are **not** vendored into this repository — they are large third-party checkouts. Clone the
+ones you need from their upstreams and point `$CONTOUR_VT_REFERENCE_SOURCES` at the directory that
+holds them; tooling and the guidance in `AGENT.md` resolve every tree relative to that variable, so
+no personal path is ever committed. Any layout works as long as each tree keeps the subdirectory name
+in the first column:
+
+| Subdir              | Upstream                                             |
+| ------------------- | ---------------------------------------------------- |
+| `xterm`             | <https://invisible-island.net/xterm/> (or the `xterm-snapshots` tarballs / <https://github.com/ThomasDickey/xterm-snapshots>) |
+| `xterm.js`          | <https://github.com/xtermjs/xterm.js>                |
+| `windows-terminal`  | <https://github.com/microsoft/terminal>              |
+| `kitty`             | <https://github.com/kovidgoyal/kitty>                |
+| `konsole`           | <https://invent.kde.org/utilities/konsole>           |
+| `foot`              | <https://codeberg.org/dnkl/foot>                     |
+| `ghostty`           | <https://github.com/ghostty-org/ghostty>             |
+| `wezterm`           | <https://github.com/wez/wezterm>                     |
+
+Set the variable however your environment prefers. For a Claude Code checkout, the least intrusive
+place is the (git-ignored) `.claude/settings.local.json`, which injects it into the tool sandbox:
+
+```json
+{
+  "env": { "CONTOUR_VT_REFERENCE_SOURCES": "/absolute/path/to/your/terminals" }
+}
+```
+
+Then, e.g. `grep -rniE "DECATC" "$CONTOUR_VT_REFERENCE_SOURCES/xterm/"`.
