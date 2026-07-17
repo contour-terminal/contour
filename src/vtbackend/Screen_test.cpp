@@ -6396,6 +6396,53 @@ TEST_CASE("DECALN: page that wraps the history ring is still filled in bounds", 
 }
 
 // }}} DECALN Tests
+TEST_CASE("LF outside the left/right margins does not scroll", "[screen]")
+{
+    // A line feed only scrolls when the cursor is inside the left/right margins -- xterm's
+    // `!ScrnIsColInMargins` guard in xtermIndex(). The catch is LNM: the carriage-return half of the line
+    // feed moves the cursor to the left margin, i.e. INTO the band, so asking the guard *after* the move
+    // made it vacuously true and scrolled the top line of the region away. xterm reads screen->cur_col
+    // first and applies CarriageReturn only afterwards (CASE_VMOT).
+    //
+    // The page is deliberately taller than the scroll region, so a scroll cannot be mistaken for the
+    // cursor simply walking down the page.
+    // The marker sits INSIDE the horizontal margins: a scroll here moves the rectangle bounded by the
+    // margins, so a marker outside them would survive either way and the test would prove nothing.
+    auto const setup = [](auto& mock) {
+        mock.writeToScreen("\033[1;3r");   // DECSTBM: scroll region over lines 1..3
+        mock.writeToScreen("\033[?69h");   // DECLRMM: enable left/right margins
+        mock.writeToScreen("\033[10;20s"); // DECSLRM(10,20)
+        mock.writeToScreen("\033[20h");    // LNM: LF also returns the carriage
+        mock.writeToScreen("\033[1;10Htop");
+    };
+
+    SECTION("right of the right margin: no scroll")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) } };
+        auto& screen = mock.terminal.primaryScreen();
+        setup(mock);
+
+        mock.writeToScreen("\033[3;30H"); // bottom margin line, right of the right margin
+        mock.writeToScreen("\n");
+
+        CHECK(screen.grid().lineText(LineOffset(0)).contains("top"));
+        // Neither scrolled nor advanced past the bottom margin; the carriage still returned to the margin.
+        CHECK(screen.cursor().position == CellLocation { LineOffset(2), ColumnOffset(9) });
+    }
+
+    SECTION("inside the margins: scrolls, as it must")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) } };
+        auto& screen = mock.terminal.primaryScreen();
+        setup(mock);
+
+        mock.writeToScreen("\033[3;15H"); // bottom margin line, inside the margins
+        mock.writeToScreen("\n");
+
+        CHECK_FALSE(screen.grid().lineText(LineOffset(0)).contains("top"));
+    }
+}
+
 
 // {{{ DECRQCRA / XTCHECKSUM Tests
 
@@ -6548,6 +6595,112 @@ TEST_CASE("XTCHECKSUM: a reset restores the configured extension, not zero", "[s
 }
 
 // }}} DECRQCRA / XTCHECKSUM Tests
+
+// {{{ DECSNLS Tests
+
+TEST_CASE("DECSNLS: selects the number of lines per screen", "[screen]")
+{
+    // DECSNLS used to read its parameter as a *column* count, so `CSI 24 * |` silently narrowed an
+    // 80-column page to 24 columns and left the line count alone -- the exact opposite of what the
+    // sequence means. esctest found it by crashing the engine: narrowing the page reflows it, which
+    // walked the cursor off the bottom.
+    auto mock = MockTerm { PageSize { LineCount(25), ColumnCount(80) } };
+
+    SECTION("it sets the lines, and leaves the columns alone")
+    {
+        mock.writeToScreen("\033[24*|");
+        CHECK(mock.terminal.pageSize().lines == LineCount(24));
+        CHECK(mock.terminal.pageSize().columns == ColumnCount(80));
+    }
+
+    SECTION("an omitted parameter changes nothing")
+    {
+        mock.writeToScreen("\033[*|");
+        CHECK(mock.terminal.pageSize().lines == LineCount(25));
+        CHECK(mock.terminal.pageSize().columns == ColumnCount(80));
+    }
+
+    SECTION("a zero parameter changes nothing")
+    {
+        mock.writeToScreen("\033[0*|");
+        CHECK(mock.terminal.pageSize().lines == LineCount(25));
+    }
+
+    SECTION("DECRQSS reports back what was selected")
+    {
+        // esctest asserts exactly this round trip.
+        mock.writeToScreen("\033[24*|");
+        mock.mockPty().stdinBuffer().clear();
+        mock.writeToScreen("\033P$q*|\033\\");
+        mock.terminal.flushInput();
+        CHECK(mock.replyData() == "\033P1$r24*|\033\\");
+    }
+
+    SECTION("the cursor stays inside the page when it shrinks")
+    {
+        mock.writeToScreen("\033[25;1H"); // the last line of a 25-line page
+        REQUIRE(mock.terminal.primaryScreen().cursor().position.line == LineOffset(24));
+
+        mock.writeToScreen("\033[10*|");
+
+        CHECK(mock.terminal.pageSize().lines == LineCount(10));
+        CHECK(*mock.terminal.primaryScreen().cursor().position.line
+              < *mock.terminal.primaryScreen().pageSize().lines);
+    }
+}
+
+// }}} DECSNLS Tests
+
+// {{{ Line feed below the scrolling region
+
+TEST_CASE("LF below the scrolling region stops at the last line of the page", "[screen]")
+{
+    // Only a cursor sitting exactly on the bottom margin scrolls. A cursor *below* the scrolling
+    // region has nothing to scroll -- but it used to be moved down anyway, with nothing stopping it
+    // at the last line of the page, so every further line feed walked it further off the end. Any
+    // application can reach it: set a scrolling region, put the cursor below it, hold down Return.
+    //
+    // Found by esctest, which aborted the engine on it.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[1;2r"); // DECSTBM: scrolling region is lines 1..2
+    mock.writeToScreen("\033[5;1H"); // cursor to the last line of the page, below the region
+    REQUIRE(screen.cursor().position.line == LineOffset(4));
+
+    SECTION("a line feed there does nothing")
+    {
+        mock.writeToScreen("\n");
+        CHECK(screen.cursor().position.line == LineOffset(4));
+    }
+
+    SECTION("and it stays put however many arrive")
+    {
+        for ([[maybe_unused]] auto const _: std::views::iota(0, 10))
+            mock.writeToScreen("\n");
+
+        CHECK(screen.cursor().position.line == LineOffset(4));
+        CHECK(*screen.cursor().position.line < *screen.pageSize().lines);
+    }
+
+    SECTION("the region itself still scrolls")
+    {
+        // The guard must not break the normal case: on the bottom margin, LF scrolls the region.
+        mock.writeToScreen("\033[1;1HA\033[2;1HB");
+        mock.writeToScreen("\033[2;1H\n"); // on the bottom margin -> scroll the region up
+        CHECK(screen.cursor().position.line == LineOffset(1));
+        CHECK(screen.grid().lineAt(LineOffset(0)).toUtf8() == "B    ");
+    }
+
+    SECTION("a line feed inside the page but below the region still moves down")
+    {
+        mock.writeToScreen("\033[3;1H"); // line 3: below the region, not the last line
+        mock.writeToScreen("\n");
+        CHECK(screen.cursor().position.line == LineOffset(3));
+    }
+}
+
+// }}} Line feed below the scrolling region
 
 // {{{ One-based parameters: omitted, empty and zero all mean "the default"
 

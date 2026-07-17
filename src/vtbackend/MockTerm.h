@@ -82,6 +82,23 @@ class MockTerm: public Terminal::NullEvents
             terminal.processInputOnce();
     }
 
+    /// The frontend's half of a resize the application asked for (DECCOLM, DECSCPP, DECSNLS,
+    /// `CSI 8 ; h ; w t`).
+    ///
+    /// A frontend that silently refuses to resize is not a frontend, and a mock that refuses makes
+    /// every sequence that resizes the page untestable.
+    ///
+    /// Applied on the spot, so a sequence's effect lands where the application put it. Deferring it
+    /// would make the resize land wherever the input happened to be split into reads, and the same
+    /// byte stream would then produce different screens on different runs.
+    void requestWindowResize(LineCount lines, ColumnCount columns) override
+    {
+        requestedPageSize = PageSize { .lines = lines, .columns = columns };
+    }
+
+    /// The size most recently requested by the application.
+    std::optional<PageSize> requestedPageSize;
+
     void writeToScreen(std::u32string_view text) { writeToScreen(unicode::convert_to<char>(text)); }
 
     std::string windowTitle;

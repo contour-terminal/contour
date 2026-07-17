@@ -1011,15 +1011,23 @@ void Screen::moveCursorTo(LineOffset line, ColumnOffset column)
 
 void Screen::linefeed(ColumnOffset newColumn)
 {
+    // Where the cursor *is* decides whether this scrolls -- asked before the carriage-return half of the
+    // line feed moves it. Under LNM (and on the stdout fast pipe) newColumn is the left margin, which would
+    // snap the cursor into the band and make the test below vacuously true. xterm keeps the same order:
+    // xtermIndex() reads screen->cur_col, and CASE_VMOT applies CarriageReturn only afterwards.
+    auto const scrollsOnIndex = isCursorInsideHorizontalMargins();
+
     _cursor.wrapPending = false;
     _cursor.position.column = newColumn;
     if (unbox(historyLineCount()) > 0)
         _terminal->addLineOffsetToJumpHistory(LineOffset { 1 });
     if (*realCursorPosition().line == *margin().vertical.to)
     {
-        // TODO(perf) if we know that we text is following this LF
         // A line feed only scrolls when the cursor is within the left/right margins. Outside that band
         // (DECLRMM on, cursor left of the left margin or right of the right margin) it neither scrolls
+        // nor advances past the bottom margin -- xterm's `!ScrnIsColInMargins` guard in xtermIndex(),
+        // whose CursorDown() then clamps to the bottom margin, leaving the cursor where it was.
+        if (scrollsOnIndex)
         {
             // TODO(perf) if we know that we text is following this LF
             // (i.e. parser state will be ground state),
@@ -1030,7 +1038,7 @@ void Screen::linefeed(ColumnOffset newColumn)
             scrollUp(LineCount(1), _cursor.graphicsRendition, margin());
         }
     }
-    else
+    else if (*realCursorPosition().line + 1 < *pageSize().lines)
     {
         // using moveCursorTo() would embrace code reusage,
         // but due to the fact that it's fully recalculating iterators,
@@ -1039,6 +1047,14 @@ void Screen::linefeed(ColumnOffset newColumn)
         _cursor.position.line++;
         updateCursorIterator();
     }
+    // Otherwise the cursor is on the last line of the page but *outside* the scrolling region, so
+    // there is neither anything to scroll nor anywhere to move: a line feed there does nothing.
+    //
+    // The page bound is what makes this safe. Only a cursor exactly on the bottom *margin* scrolls,
+    // so a cursor below the region used to be incremented unconditionally — and every further line
+    // feed walked it further off the end of the page. That is reachable from any application: set a
+    // scrolling region, put the cursor below it, and hold down Return. verifyState() catches it in a
+    // debug build; in a release build it is simply a cursor pointing outside the grid.
 }
 
 void Screen::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
@@ -4793,9 +4809,25 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             }
             else
                 return ApplyResult::Invalid;
-        case DECSNLS:
-            _terminal->resizeScreen(PageSize { pageSize().lines, seq.param<ColumnCount>(0) });
+        case DECSNLS: {
+            // DECSNLS selects the number of LINES per screen; the column count is left alone.
+            //
+            // It used to take its parameter as a column count and resize the columns instead — so
+            // `CSI 24 * |` silently narrowed an 80-column page to 24. And it resized the screen
+            // directly rather than asking the frontend, which is the terminal reaching around the
+            // window that owns its size. DECSCPP and DECCOLM both go through requestWindowResize();
+            // so does xterm, which answers DECSNLS with `RequestResize(xw, value, -1, True)` — rows
+            // to `value`, columns untouched.
+            auto const lines = seq.param_or(0, 0);
+            if (lines == 0)
+                return ApplyResult::Ok; // Omitted or zero: no change, as in xterm.
+            if (lines < 1 || lines > 255)
+                return ApplyResult::Invalid;
+
+            _terminal->requestWindowResize(
+                PageSize { LineCount::cast_from(lines), _terminal->totalPageSize().columns });
             return ApplyResult::Ok;
+        }
         case DECSLRM: {
             if (!_terminal->isModeEnabled(DECMode::LeftRightMargin))
                 return ApplyResult::Invalid;
