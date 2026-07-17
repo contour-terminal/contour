@@ -2329,6 +2329,62 @@ TEST_CASE("CarriageReturn_honours_left_margin", "[screen]")
     }
 }
 
+TEST_CASE("NEL_indexes_and_returns_to_margin", "[screen]")
+{
+    // NEL (ESC E) is an index followed by a carriage return: it moves down (scrolling within the
+    // scroll region when it hits the bottom margin) and returns to the left margin.
+    SECTION("basic: moves down and to the start of the line")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+        screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 4 });
+        mock.writeToScreen("\033E"); // NEL
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(0) });
+        CHECK("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
+    }
+
+    SECTION("scrolls when it hits the bottom of the page")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("111\r\n222\r\n333");
+        screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 2 }); // last line
+        mock.writeToScreen("\033E");                               // NEL scrolls
+        CHECK("222\n333\n   \n" == screen.renderMainPageText());
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(0) });
+    }
+
+    SECTION("outside the left/right band: no scroll, returns to the left margin")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+        mock.terminal.setTopBottomMargin(LineOffset { 1 }, LineOffset { 3 });
+        mock.terminal.setMode(DECMode::LeftRightMargin, true);
+        mock.terminal.setLeftRightMargin(ColumnOffset { 1 }, ColumnOffset { 3 });
+        screen.moveCursorTo(LineOffset { 3 }, ColumnOffset { 4 }); // bottom margin, right of band
+        mock.writeToScreen("\033E");
+        // No scroll (cursor was outside the band); CR snaps to the left margin (column offset 1).
+        CHECK("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(1) });
+    }
+
+    SECTION("inside the band scrolls within it, returning to the left margin")
+    {
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+        mock.terminal.setTopBottomMargin(LineOffset { 1 }, LineOffset { 3 });
+        mock.terminal.setMode(DECMode::LeftRightMargin, true);
+        mock.terminal.setLeftRightMargin(ColumnOffset { 1 }, ColumnOffset { 3 });
+        screen.moveCursorTo(LineOffset { 3 }, ColumnOffset { 2 }); // bottom margin, inside band
+        mock.writeToScreen("\033E");
+        CHECK("12345\n6BCD0\nAGHIE\nF   J\nKLMNO\n" == screen.renderMainPageText());
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(1) });
+    }
+}
+
 TEST_CASE("MoveCursorTo", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };

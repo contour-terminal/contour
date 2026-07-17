@@ -4364,7 +4364,13 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case DECSC: saveCursor(); break;
         case HTS: horizontalTabSet(); break;
         case IND: index(); break;
-        case NEL: moveCursorToNextLine(LineCount(1)); break;
+        case NEL:
+            // Next Line is an index followed by a carriage return (xterm inlines the same pair). Both
+            // now respect the left/right margins, so NEL scrolls only within the band -- and never when
+            // the cursor sits outside it -- and returns the cursor to the left margin.
+            index();
+            moveCursorToBeginOfLine();
+            break;
         case RI: reverseIndex(); break;
         case RIS: _terminal->hardReset(); break;
         case SS2: singleShiftSelect(CharsetTable::G2); break;
