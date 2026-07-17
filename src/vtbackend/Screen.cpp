@@ -2148,10 +2148,17 @@ void Screen::reverseIndex()
 
 void Screen::backIndex()
 {
+    // DECBI, a port of xterm's xtermColIndex(toLeft): sitting on the left margin it scrolls the margined
+    // region right by one column -- but only while the cursor also lies within the vertical margins, as
+    // xterm's xtermColScroll requires -- and anywhere else it simply moves the cursor back one column
+    // (no autowrap). The previous body left the scroll a TODO and, worse, moved the cursor *forward*.
     if (realCursorPosition().column == margin().horizontal.from)
-        ; // TODO: scrollRight(1);
+    {
+        if (margin().vertical.contains(realCursorPosition().line))
+            scrollRight(ColumnCount(1));
+    }
     else
-        moveCursorForward(ColumnCount(1));
+        moveCursorBackward(ColumnCount(1));
 }
 
 void Screen::forwardIndex()

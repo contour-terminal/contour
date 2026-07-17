@@ -2385,6 +2385,64 @@ TEST_CASE("NEL_indexes_and_returns_to_margin", "[screen]")
     }
 }
 
+TEST_CASE("DECBI_back_index", "[screen]")
+{
+    // DECBI (ESC 6): on the left margin it scrolls the margined region right by one column; anywhere
+    // else it moves the cursor back one column without wrapping. Mirrors esctest DECBITests.
+    SECTION("basic: moves the cursor back one column")
+    {
+        auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(6) } };
+        auto& screen = mock.terminal.primaryScreen();
+        screen.moveCursorTo(LineOffset { 5 }, ColumnOffset { 4 });
+        mock.writeToScreen("\0336"); // DECBI
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(5), ColumnOffset(3) });
+    }
+
+    SECTION("does not wrap at the left edge")
+    {
+        auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(6) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("\033[2;1H"); // row 2, col 1
+        screen.moveCursorTo(LineOffset { 1 }, ColumnOffset { 0 });
+        mock.writeToScreen("\0336");
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(0) });
+    }
+
+    SECTION("left of the left margin: moves back toward the screen edge")
+    {
+        auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(12) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.terminal.setMode(DECMode::LeftRightMargin, true);
+        mock.terminal.setLeftRightMargin(ColumnOffset { 2 }, ColumnOffset { 4 });
+        screen.moveCursorTo(LineOffset { 0 }, ColumnOffset { 1 }); // left of the left margin
+        mock.writeToScreen("\0336");
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
+    }
+
+    SECTION("on the left margin, inside the region: scrolls the region right")
+    {
+        auto mock = MockTerm { PageSize { LineCount(7), ColumnCount(6) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("\033[3;2Habcde");
+        mock.writeToScreen("\033[4;2Hfghij");
+        mock.writeToScreen("\033[5;2Hklmno");
+        mock.writeToScreen("\033[6;2Hpqrst");
+        mock.writeToScreen("\033[7;2Huvwxy");
+        mock.terminal.setMode(DECMode::LeftRightMargin, true);
+        mock.terminal.setLeftRightMargin(ColumnOffset { 2 }, ColumnOffset { 4 }); // DECSLRM 3;5
+        mock.terminal.setTopBottomMargin(LineOffset { 3 }, LineOffset { 5 });     // DECSTBM 4;6
+        screen.moveCursorTo(LineOffset { 4 }, ColumnOffset { 2 });                // on the left margin
+        mock.writeToScreen("\0336");
+        // Columns 2..4 of rows 3..5 shift right one; column 5 (outside the band) is untouched.
+        CHECK(" f ghj" == screen.grid().lineText(LineOffset(3)));
+        CHECK(" k lmo" == screen.grid().lineText(LineOffset(4)));
+        CHECK(" p qrt" == screen.grid().lineText(LineOffset(5)));
+        CHECK(" abcde" == screen.grid().lineText(LineOffset(2))); // above the region: unchanged
+        CHECK(" uvwxy" == screen.grid().lineText(LineOffset(6))); // below the region: unchanged
+        CHECK(screen.realCursorPosition() == CellLocation { LineOffset(4), ColumnOffset(2) });
+    }
+}
+
 TEST_CASE("CNL_CPL_clamp_to_scroll_region_and_left_margin", "[screen]")
 {
     // CNL (CSI E) and CPL (CSI F) are cursor down/up followed by a carriage return. They clamp at the
