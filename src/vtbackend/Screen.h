@@ -108,13 +108,20 @@ enum class RequestStatusString : uint8_t
     DECSSDT,
 };
 
-inline std::string setDynamicColorValue(
-    RGBColor const& color) // TODO: yet another helper. maybe SemanticsUtils static class?
+/// Renders @p color as the X11 color specification a color query is answered with.
+///
+/// Each of Contour's 8-bit channels is widened to the 16 bits X11 specifies by repeating its byte, so
+/// 0xAB is reported as "abab" -- exactly as xterm reports a color it was given as "rgb:ab/ab/ab".
+///
+/// The digits are lower-case, as xterm's are: an application comparing the answer to the specification
+/// it sent (as esctest does, and as any round-tripping application would) reads upper-case digits as a
+/// different color.
+[[nodiscard]] inline std::string colorSpecification(RGBColor const& color)
 {
-    auto const r = static_cast<unsigned>(static_cast<float>(color.red) / 255.0f * 0xFFFF);
-    auto const g = static_cast<unsigned>(static_cast<float>(color.green) / 255.0f * 0xFFFF);
-    auto const b = static_cast<unsigned>(static_cast<float>(color.blue) / 255.0f * 0xFFFF);
-    return std::format("rgb:{:04X}/{:04X}/{:04X}", r, g, b);
+    auto const widen = [](uint8_t channel) {
+        return (static_cast<unsigned>(channel) << 8) | channel;
+    };
+    return std::format("rgb:{:04x}/{:04x}/{:04x}", widen(color.red), widen(color.green), widen(color.blue));
 }
 
 enum class ApplyResult : uint8_t

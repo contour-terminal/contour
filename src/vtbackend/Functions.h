@@ -153,6 +153,8 @@ constexpr inline auto CLIPBOARD = FunctionDocumentation { .mnemonic = "CLIPBOARD
 constexpr inline auto COLORBG = FunctionDocumentation { .mnemonic = "COLORBG", .comment = "Change or request text background color." };
 constexpr inline auto COLORCURSOR = FunctionDocumentation { .mnemonic = "COLORCURSOR", .comment = "Change text cursor color to Pt." };
 constexpr inline auto COLORFG = FunctionDocumentation { .mnemonic = "COLORFG", .comment = "Change or request text foreground color." };
+constexpr inline auto COLORHIGHLIGHTBG = FunctionDocumentation { .mnemonic = "COLORHIGHLIGHTBG", .comment = "Change or request highlight background color." };
+constexpr inline auto COLORHIGHLIGHTFG = FunctionDocumentation { .mnemonic = "COLORHIGHLIGHTFG", .comment = "Change or request highlight foreground color." };
 constexpr inline auto COLORMOUSEBG = FunctionDocumentation { .mnemonic = "COLORMOUSEBG", .comment = "Change mouse background color." };
 constexpr inline auto COLORMOUSEFG = FunctionDocumentation { .mnemonic = "COLORMOUSEFG", .comment = "Change mouse foreground color." };
 constexpr inline auto COLORSPECIAL = FunctionDocumentation { .mnemonic = "COLORSPECIAL", .comment = "Enable/disable Special Color Number c." };
@@ -710,6 +712,8 @@ constexpr inline auto CLIPBOARD         = detail::OSC(52, VTExtension::XTerm, do
 constexpr inline auto COLORBG           = detail::OSC(11, VTExtension::XTerm, documentation::COLORBG);
 constexpr inline auto COLORCURSOR       = detail::OSC(12, VTExtension::XTerm, documentation::COLORCURSOR);
 constexpr inline auto COLORFG           = detail::OSC(10, VTExtension::XTerm, documentation::COLORFG);
+constexpr inline auto COLORHIGHLIGHTBG  = detail::OSC(17, VTExtension::XTerm, documentation::COLORHIGHLIGHTBG);
+constexpr inline auto COLORHIGHLIGHTFG  = detail::OSC(19, VTExtension::XTerm, documentation::COLORHIGHLIGHTFG);
 constexpr inline auto COLORMOUSEBG      = detail::OSC(14, VTExtension::XTerm, documentation::COLORMOUSEBG);
 constexpr inline auto COLORMOUSEFG      = detail::OSC(13, VTExtension::XTerm, documentation::COLORMOUSEFG);
 constexpr inline auto COLORSPECIAL      = detail::OSC(106, VTExtension::XTerm, documentation::COLORSPECIAL);
@@ -940,6 +944,8 @@ constexpr static auto allFunctionsArray() noexcept
         COLORCURSOR,
         COLORMOUSEFG,
         COLORMOUSEBG,
+        COLORHIGHLIGHTFG,
+        COLORHIGHLIGHTBG,
         SEMA,
         SETFONT,
         SETFONTALL,

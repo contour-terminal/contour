@@ -4095,6 +4095,158 @@ TEST_CASE("OSC.4")
         INFO(mock.terminal.peekInput());
         REQUIRE(e(mock.terminal.peekInput()) == e("\033]4;7;rgb:a0a0/b0b0/c0c0\033\\"));
     }
+
+    SECTION("set color via format rgb:RRRR/GGGG/BBBB")
+    {
+        // The four-digit form is the one Contour itself reports back, and the one applications
+        // overwhelmingly send. It used to be rejected outright, leaving the palette untouched.
+        mock.writeToScreen("\033]4;7;rgb:abab/cdcd/efef\033\\");
+        mock.writeToScreen("\033]4;7;?\033\\");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033]4;7;rgb:abab/cdcd/efef\033\\"));
+    }
+
+    SECTION("several index/specification pairs in one sequence")
+    {
+        mock.writeToScreen("\033]4;0;rgb:f0f0/f0f0/f0f0;1;rgb:f0f0/0000/0000\033\\");
+        mock.writeToScreen("\033]4;0;?;1;?\033\\");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput())
+                == e("\033]4;0;rgb:f0f0/f0f0/f0f0\033\\"
+                     "\033]4;1;rgb:f0f0/0000/0000\033\\"));
+    }
+}
+
+TEST_CASE("OSC.10-19")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(2) } };
+
+    SECTION("set and query the foreground")
+    {
+        mock.writeToScreen("\033]10;rgb:f0f0/f0f0/f0f0\033\\");
+        mock.writeToScreen("\033]10;?\033\\");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033]10;rgb:f0f0/f0f0/f0f0\033\\"));
+    }
+
+    SECTION("one sequence walks upward through the colors")
+    {
+        // OSC 10 with two specifications sets the foreground *and* the background.
+        mock.writeToScreen("\033]10;rgb:f0f0/f0f0/f0f0;rgb:f0f0/0000/0000\033\\");
+        mock.writeToScreen("\033]10;?;?\033\\");
+        INFO(mock.terminal.peekInput());
+
+        // Each answer is tagged with the OSC command of the color it reports, not with the one the
+        // sequence began at. Contour used to read "?;?" as a single color specification, fail to parse
+        // it, and answer with nothing at all.
+        REQUIRE(e(mock.terminal.peekInput())
+                == e("\033]10;rgb:f0f0/f0f0/f0f0\033\\"
+                     "\033]11;rgb:f0f0/0000/0000\033\\"));
+    }
+
+    SECTION("a sequence may begin at any color")
+    {
+        mock.writeToScreen("\033]11;rgb:0101/0202/0303;rgb:0404/0505/0606\033\\");
+        mock.writeToScreen("\033]11;?;?\033\\");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput())
+                == e("\033]11;rgb:0101/0202/0303\033\\"  // background
+                     "\033]12;rgb:0404/0505/0606\033\\") // cursor
+        );
+    }
+
+    SECTION("an empty specification skips its color")
+    {
+        mock.writeToScreen("\033]10;rgb:0f0f/0f0f/0f0f\033\\");
+        mock.writeToScreen("\033]10;;rgb:f0f0/0000/0000\033\\");
+        mock.writeToScreen("\033]10;?;?\033\\");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput())
+                == e("\033]10;rgb:0f0f/0f0f/0f0f\033\\"  // untouched
+                     "\033]11;rgb:f0f0/0000/0000\033\\") // set by the second specification
+        );
+    }
+
+    SECTION("a color we do not model still consumes its specification")
+    {
+        // Specifications 6, 7 and 9 address xterm's Tektronix colors (OSC 15, 16 and 18), which Contour
+        // does not model. They must still be consumed, so that the eighth lands on OSC 17 -- the
+        // highlight background -- and the tenth on OSC 19 -- the highlight foreground -- rather than
+        // shifting onto some earlier color. An eleventh specification runs past OSC 19 and addresses
+        // nothing at all.
+        mock.writeToScreen("\033]10;rgb:0101/0101/0101;rgb:0202/0202/0202;rgb:0303/0303/0303"
+                           ";rgb:0404/0404/0404;rgb:0505/0505/0505;rgb:0606/0606/0606"
+                           ";rgb:0707/0707/0707;rgb:0808/0808/0808;rgb:0909/0909/0909"
+                           ";rgb:0a0a/0a0a/0a0a;rgb:0b0b/0b0b/0b0b\033\\");
+
+        auto const& palette = mock.terminal.colorPalette();
+        CHECK(palette.defaultForeground == RGBColor { 0x01, 0x01, 0x01 });  // OSC 10
+        CHECK(palette.defaultBackground == RGBColor { 0x02, 0x02, 0x02 });  // OSC 11
+        CHECK(get<RGBColor>(palette.cursor.color) == RGBColor { 3, 3, 3 }); // OSC 12
+        CHECK(palette.mouseForeground == RGBColor { 0x04, 0x04, 0x04 });    // OSC 13
+        CHECK(palette.mouseBackground == RGBColor { 0x05, 0x05, 0x05 });    // OSC 14
+                                                                            // OSC 15, 16: Tektronix
+        CHECK(get<RGBColor>(palette.selection.background)                   // OSC 17
+              == RGBColor { 0x08, 0x08, 0x08 });                            //
+                                                                            // OSC 18: Tektronix
+        CHECK(get<RGBColor>(palette.selection.foreground)                   // OSC 19
+              == RGBColor { 0x0A, 0x0A, 0x0A });                            //
+    }
+
+    SECTION("a malformed specification ends the sequence")
+    {
+        mock.writeToScreen("\033]10;rgb:0b0b/0b0b/0b0b\033\\");
+        mock.resetReplyData();
+
+        // As in xterm, the first specification that cannot be parsed stops the walk, so the background
+        // is left alone -- but the foreground set before it stands.
+        mock.writeToScreen("\033]10;not-a-color;rgb:0c0c/0c0c/0c0c\033\\");
+        mock.writeToScreen("\033]10;?\033\\");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033]10;rgb:0b0b/0b0b/0b0b\033\\"));
+    }
+
+    SECTION("the highlight colors are addressable in their own right")
+    {
+        // OSC 17 and OSC 19 could be reached by walking up from OSC 10, but not named directly: only
+        // their reset counterparts (OSC 117 and OSC 119) were ever registered, so a highlight color
+        // could be reset but never set.
+        mock.writeToScreen("\033]17;rgb:1111/2222/3333\033\\");
+        mock.writeToScreen("\033]19;rgb:4444/5555/6666\033\\");
+        mock.writeToScreen("\033]17;?\033\\");
+        mock.writeToScreen("\033]19;?\033\\");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput())
+                == e("\033]17;rgb:1111/2222/3333\033\\"
+                     "\033]19;rgb:4444/5555/6666\033\\"));
+    }
+
+    SECTION("a color following the cell's own color is still reported")
+    {
+        // The highlight foreground follows the cell's foreground by default rather than naming a color
+        // of its own. A query must still be answered -- silence would leave the application reading
+        // some later sequence's reply in place of this one.
+        mock.writeToScreen("\033]10;rgb:1212/3434/5656\033\\"); // the default foreground
+        mock.resetReplyData();
+
+        mock.writeToScreen("\033]19;?\033\\");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033]19;rgb:1212/3434/5656\033\\"));
+    }
+
+    SECTION("resetting a highlight color restores the configured one")
+    {
+        mock.writeToScreen("\033]17;rgb:1111/2222/3333\033\\");
+        mock.writeToScreen("\033]117\033\\"); // RCOLORHIGHLIGHTBG
+        mock.resetReplyData();
+
+        mock.writeToScreen("\033]17;?\033\\");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput())
+                == e(std::format("\033]17;{}\033\\",
+                                 colorSpecification(get<RGBColor>(
+                                     mock.terminal.defaultColorPalette().selection.background)))));
+    }
 }
 
 TEST_CASE("XTGETTCAP")
@@ -6936,6 +7088,26 @@ TEST_CASE("DECDC deletes a column from every line, including the blank ones", "[
     CHECK(screen.grid().lineText(LineOffset(1)) == "ACDEFG ");
     CHECK(screen.grid().lineText(LineOffset(4)) == "       ");
 }
+    SECTION("OSC 104 with no index resets every index it can address")
+        mock.writeToScreen("\033]5;0;rgb:f0f0/f0f0/f0f0\033\\");
+        // OSC 4 addresses the special colors too (256..260), so a bare OSC 104 reaches them -- as xterm
+        // walks its whole Acolors.
+        CHECK(mock.terminal.colorPalette().specialColor(SpecialColor::Bold) == original);
+    }
+
+    SECTION("OSC 104 does not reset the dynamic colors")
+    {
+        // The dynamic colors share the ColorPalette but are addressed by OSC 10..19 and reset by
+        // OSC 110..119 -- xterm keeps them in a separate Tcolors for exactly this reason. Assigning the
+        // whole palette here withdrew a background the application set with OSC 11 and nothing asked to
+        // reset: a themed shell lost its background to any stray `tput oc`.
+        mock.writeToScreen("\033]11;rgb:1e1e/1e1e/2e2e\033\\");
+        auto const chosenBackground = mock.terminal.colorPalette().defaultBackground;
+        REQUIRE(chosenBackground != mock.terminal.defaultColorPalette().defaultBackground);
+
+        mock.writeToScreen("\033]104\033\\");
+
+        CHECK(mock.terminal.colorPalette().defaultBackground == chosenBackground);
 
 // {{{ Backspace, margins and reverse wraparound
 

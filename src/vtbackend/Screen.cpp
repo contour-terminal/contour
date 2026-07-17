@@ -2604,40 +2604,48 @@ void Screen::renderImage(shared_ptr<Image const> image,
         moveCursorToColumn(topLeft.column);
 }
 
+namespace
+{
+    /// Resolves @p color to the concrete color a query must be answered with.
+    ///
+    /// A dynamic color need not name a color of its own: it may be configured to follow the cell's own
+    /// foreground or background instead, which is how a selection inverts rather than tints. A query
+    /// still has to be answered with one concrete color, so resolve those to the page's default
+    /// foreground and background -- the colors the overwhelming majority of cells carry.
+    [[nodiscard]] RGBColor resolveCellColor(CellRGBColor const& color, ColorPalette const& palette) noexcept
+    {
+        if (holds_alternative<CellForegroundColor>(color))
+            return palette.defaultForeground;
+        if (holds_alternative<CellBackgroundColor>(color))
+            return palette.defaultBackground;
+        return get<RGBColor>(color);
+    }
+} // namespace
+
 void Screen::requestDynamicColor(DynamicColorName name)
 {
-    auto const color = [&]() -> optional<RGBColor> {
+    auto const& palette = _terminal->colorPalette();
+
+    auto const color = [&]() -> RGBColor {
         switch (name)
         {
-            case DynamicColorName::DefaultForegroundColor: return _terminal->colorPalette().defaultForeground;
-            case DynamicColorName::DefaultBackgroundColor: return _terminal->colorPalette().defaultBackground;
-            case DynamicColorName::TextCursorColor:
-                if (holds_alternative<CellForegroundColor>(_terminal->colorPalette().cursor.color))
-                    return _terminal->colorPalette().defaultForeground;
-                else if (holds_alternative<CellBackgroundColor>(_terminal->colorPalette().cursor.color))
-                    return _terminal->colorPalette().defaultBackground;
-                else
-                    return get<RGBColor>(_terminal->colorPalette().cursor.color);
-            case DynamicColorName::MouseForegroundColor: return _terminal->colorPalette().mouseForeground;
-            case DynamicColorName::MouseBackgroundColor: return _terminal->colorPalette().mouseBackground;
+            case DynamicColorName::DefaultForegroundColor: return palette.defaultForeground;
+            case DynamicColorName::DefaultBackgroundColor: return palette.defaultBackground;
+            case DynamicColorName::TextCursorColor: return resolveCellColor(palette.cursor.color, palette);
+            case DynamicColorName::MouseForegroundColor: return palette.mouseForeground;
+            case DynamicColorName::MouseBackgroundColor: return palette.mouseBackground;
             case DynamicColorName::HighlightForegroundColor:
-                if (holds_alternative<RGBColor>(_terminal->colorPalette().selection.foreground))
-                    return get<RGBColor>(_terminal->colorPalette().selection.foreground);
-                else
-                    return nullopt;
+                return resolveCellColor(palette.selection.foreground, palette);
             case DynamicColorName::HighlightBackgroundColor:
-                if (holds_alternative<RGBColor>(_terminal->colorPalette().selection.background))
-                    return get<RGBColor>(_terminal->colorPalette().selection.background);
-                else
-                    return nullopt;
+                return resolveCellColor(palette.selection.background, palette);
         }
-        return nullopt; // should never happen
+        crispy::unreachable();
     }();
 
-    if (color.has_value())
-    {
-        reply("\033]{};{}\033\\", setDynamicColorCommand(name), setDynamicColorValue(color.value()));
-    }
+    // Every query is answered. Falling silent -- as the highlight colors used to, whenever they were
+    // following the cell's own color rather than naming one -- leaves the application reading some
+    // later sequence's reply in place of the one it is waiting for.
+    reply("\033]{};{}\033\\", setDynamicColorCommand(name), colorSpecification(color));
 }
 
 void Screen::requestPixelSize(RequestPixelSize area)
@@ -3448,20 +3456,52 @@ namespace impl
             return crispy::splitKeyValuePairs(s, ':');
         }
 
-        ApplyResult setOrRequestDynamicColor(Sequence const& seq, Screen& screen, DynamicColorName name)
+        /// OSC 10..19 -- sets or queries the dynamic colors, starting at the one the sequence names.
+        ///
+        /// One sequence carries one specification per color, walking upward from @p firstName: a plain
+        /// `OSC 10 ; fg ; bg ST` sets the foreground *and* the background. An empty specification skips
+        /// its color, "?" queries it, and any other is an X11 color specification to set it to.
+        ///
+        /// A query is answered with the OSC command of the color it reports rather than the one the
+        /// sequence began at, which is what makes `OSC 10 ; ? ; ? ST` answer with an OSC 10 *and* an
+        /// OSC 11. Contour used to read the entire payload as one specification, so that sequence
+        /// parsed as the color "?;?", failed, and was answered with nothing at all -- leaving the
+        /// application to read some later sequence's reply in place of the two it was waiting for.
+        ///
+        /// @see xterm's ChangeColorsRequest() in misc.c.
+        ApplyResult setOrRequestDynamicColor(Sequence const& seq, Screen& screen, DynamicColorName firstName)
         {
-            auto const& value = seq.intermediateCharacters();
-            if (value == "?")
-                screen.requestDynamicColor(name);
-            else if (auto color = vtbackend::parseColor(value); color.has_value())
-                screen.setDynamicColor(name, color.value());
-            else
-                return ApplyResult::Invalid;
+            auto command = setDynamicColorCommand(firstName);
+            auto result = ApplyResult::Ok;
 
-            return ApplyResult::Ok;
+            crispy::split(
+                std::string_view { seq.intermediateCharacters() }, ';', [&](std::string_view specification) {
+                    auto const name = getChangeDynamicColorCommand(command);
+                    if (command > LastDynamicColorCommand)
+                        return false; // Ran past OSC 19; there is no color left to address.
+                    ++command;
+
+                    // An empty specification skips its color, as does one naming a color we do not model.
+                    if (specification.empty() || !name.has_value())
+                        return true;
+
+                    if (specification == "?"sv)
+                        screen.requestDynamicColor(*name);
+                    else if (auto const color = vtbackend::parseColor(specification); color.has_value())
+                        screen.setDynamicColor(*name, color.value());
+                    else
+                    {
+                        // As in xterm, the first specification we cannot parse ends the sequence.
+                        result = ApplyResult::Invalid;
+                        return false;
+                    }
+
+                    return true;
+                });
+
+            return result;
         }
 
-        bool queryOrSetColorPalette(string_view text,
                                     std::function<void(uint8_t)> queryColor,
                                     std::function<void(uint8_t, RGBColor)> setColor)
         {
@@ -3478,6 +3518,16 @@ namespace impl
                 {
                     index = crispy::to_integer<10, int>(value).value_or(-1);
                     if (!(0 <= index && index <= 0xFF))
+
+            /// How many indices this selector reaches, i.e. what a reset with no index at all covers.
+            unsigned indexCount;
+            ColorPaletteSelector { .command = 4,
+                                   .slotOf = &paletteSlotOfColorIndex,
+                                   .indexCount =
+                                       static_cast<unsigned>(IndexedColorCount + SpecialColorCount) };
+            ColorPaletteSelector { .command = 5,
+                                   .slotOf = &paletteSlotOfSpecialColor,
+                                   .indexCount = static_cast<unsigned>(SpecialColorCount) };
                         return false;
                 }
                 else if (value == "?"sv)
@@ -3498,14 +3548,25 @@ namespace impl
         }
 
         ApplyResult RCOLPAL(Sequence const& seq, Terminal& terminal)
+        /// With no index at all, every index the selector reaches is reset -- and only those. What the
+        /// sequence can *address* is what it can reset: `OSC 104` covers the indexed colors plus the
+        /// special ones (xterm walks its whole `Acolors` the same way), `OSC 105` only the special ones.
+        ///
+        /// Notably that is not the same as the whole ColorPalette. The dynamic colors -- default
+        /// foreground/background, cursor, mouse, selection -- share the struct but are addressed by
+        /// `OSC 10`..`19` and reset by `OSC 110`..`119` (xterm keeps them apart as `Tcolors`). Resetting
+        /// them here would withdraw a background an application set with `OSC 11` that nothing asked to
+        /// reset. Otherwise the indices are a ';'-separated list.
         {
             if (seq.intermediateCharacters().empty())
             {
-                terminal.colorPalette() = terminal.defaultColorPalette();
+                for (auto const index: std::views::iota(0u, selector.indexCount))
+                    if (auto const slot = selector.slotOf(index); slot.has_value())
+                        terminal.colorPalette().palette.at(*slot) =
+                            terminal.defaultColorPalette().palette.at(*slot);
                 return ApplyResult::Ok;
             }
 
-            auto const index = crispy::to_integer<10, uint8_t>(seq.intermediateCharacters());
             if (!index.has_value())
                 return ApplyResult::Invalid;
 
@@ -5161,6 +5222,10 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             return impl::setOrRequestDynamicColor(seq, *this, DynamicColorName::MouseForegroundColor);
         case COLORMOUSEBG:
             return impl::setOrRequestDynamicColor(seq, *this, DynamicColorName::MouseBackgroundColor);
+        case COLORHIGHLIGHTFG:
+            return impl::setOrRequestDynamicColor(seq, *this, DynamicColorName::HighlightForegroundColor);
+        case COLORHIGHLIGHTBG:
+            return impl::setOrRequestDynamicColor(seq, *this, DynamicColorName::HighlightBackgroundColor);
         case SETFONT: return impl::setFont(seq, *_terminal);
         case SETFONTALL: return impl::setAllFont(seq, *_terminal);
         case CLIPBOARD: return impl::clipboard(seq, *_terminal);

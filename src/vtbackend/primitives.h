@@ -4,7 +4,10 @@
 #include <vtpty/ImageSize.h>
 #include <vtpty/PageSize.h>
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <ostream>
@@ -1007,34 +1010,55 @@ constexpr bool isValidDECMode(unsigned int mode) noexcept
     return fromDECModeNum(mode).has_value();
 }
 
-constexpr DynamicColorName getChangeDynamicColorCommand(unsigned value)
+/// Lowest OSC command addressing a dynamic color (xterm's OSC 10).
+constexpr auto FirstDynamicColorCommand = unsigned { 10 };
+
+/// The dynamic color each of OSC 10..19 addresses, indexed by `command - FirstDynamicColorCommand`.
+///
+/// The three slots Contour does not model -- xterm's Tektronix colors, OSC 15, 16 and 18 -- are
+/// present but empty on purpose. One `OSC 10 ; spec ; spec ; ... ST` walks these slots one at a time,
+/// so a slot omitted from the table would silently shift every later specification of such a sequence
+/// onto the wrong color.
+constexpr auto DynamicColorCommands = std::array<std::optional<DynamicColorName>, 10> {
+    DynamicColorName::DefaultForegroundColor,   // OSC 10
+    DynamicColorName::DefaultBackgroundColor,   // OSC 11
+    DynamicColorName::TextCursorColor,          // OSC 12
+    DynamicColorName::MouseForegroundColor,     // OSC 13
+    DynamicColorName::MouseBackgroundColor,     // OSC 14
+    std::nullopt,                               // OSC 15: Tektronix foreground
+    std::nullopt,                               // OSC 16: Tektronix background
+    DynamicColorName::HighlightBackgroundColor, // OSC 17
+    std::nullopt,                               // OSC 18: Tektronix cursor
+    DynamicColorName::HighlightForegroundColor, // OSC 19
+};
+
+/// Highest OSC command addressing a dynamic color (xterm's OSC 19).
+constexpr auto LastDynamicColorCommand =
+    FirstDynamicColorCommand + static_cast<unsigned>(DynamicColorCommands.size()) - 1;
+
+/// @param command The OSC command number, e.g. 11 for the default background color.
+/// @return The dynamic color @p command addresses, or std::nullopt if it addresses no color Contour
+///         models -- including any command outside OSC 10..19.
+constexpr std::optional<DynamicColorName> getChangeDynamicColorCommand(unsigned command) noexcept
 {
-    switch (value)
-    {
-        case 10: return DynamicColorName::DefaultForegroundColor;
-        case 11: return DynamicColorName::DefaultBackgroundColor;
-        case 12: return DynamicColorName::TextCursorColor;
-        case 13: return DynamicColorName::MouseForegroundColor;
-        case 14: return DynamicColorName::MouseBackgroundColor;
-        case 19: return DynamicColorName::HighlightForegroundColor;
-        case 17: return DynamicColorName::HighlightBackgroundColor;
-        default: return DynamicColorName::DefaultForegroundColor;
-    }
+    if (command < FirstDynamicColorCommand || command > LastDynamicColorCommand)
+        return std::nullopt;
+
+    return DynamicColorCommands[command - FirstDynamicColorCommand];
 }
 
-constexpr unsigned setDynamicColorCommand(DynamicColorName name)
+/// @param name The dynamic color.
+/// @return The OSC command number addressing @p name, e.g. 11 for the default background color.
+constexpr unsigned setDynamicColorCommand(DynamicColorName name) noexcept
 {
-    switch (name)
-    {
-        case DynamicColorName::DefaultForegroundColor: return 10;
-        case DynamicColorName::DefaultBackgroundColor: return 11;
-        case DynamicColorName::TextCursorColor: return 12;
-        case DynamicColorName::MouseForegroundColor: return 13;
-        case DynamicColorName::MouseBackgroundColor: return 14;
-        case DynamicColorName::HighlightForegroundColor: return 19;
-        case DynamicColorName::HighlightBackgroundColor: return 17;
-        default: return 0;
-    }
+    // The iterator is deliberately not bound to a named variable. libstdc++'s `std::array` iterator
+    // *is* a raw pointer, so `auto const*` compiles there -- and clang-tidy's readability-qualified-auto
+    // asks for exactly that -- while MSVC's is a class type and rejects it. Naming nothing satisfies
+    // both.
+    return FirstDynamicColorCommand
+           + static_cast<unsigned>(
+               std::ranges::distance(DynamicColorCommands.begin(),
+                                     std::ranges::find(DynamicColorCommands, std::optional { name })));
 }
 
 struct SearchResult
