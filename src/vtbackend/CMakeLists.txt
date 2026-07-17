@@ -141,6 +141,7 @@ if(LIBTERMINAL_TESTING)
         Color_test.cpp
         CommandBlocks_test.cpp
         GoodImageProtocol_test.cpp
+        XtSmGraphics_test.cpp
         InputGenerator_test.cpp
         Selector_test.cpp
         Functions_test.cpp

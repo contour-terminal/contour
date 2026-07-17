@@ -245,11 +245,6 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     setFlag(Flag::ItemAcceptsInputMethod, imeEnabled);
     displayLog()("IME enabled: {}", imeEnabled);
 
-    {
-        auto const timer = ScopedTimer(startupLog, "Session start");
-        _session->start();
-    }
-
     // NB: The window frame is owned by QML now. main.qml makes the window frameless on the platforms
     // that use the custom client-side TitleBar (the tab strip + window controls). The profile's
     // show_title_bar setting controls the *custom* bar's visibility (not the native frame, which
@@ -284,6 +279,18 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     }
 
     _session->attachDisplay(*this); // NB: Requires Renderer to be instanciated to retrieve grid metrics.
+
+    // Only now fork the child, and deliberately so: attachDisplay() above is what first tells the PTY
+    // its pixel size, and that needs the Renderer's grid metrics, which need the font. Starting before
+    // it meant openpty() baked ws_xpixel = 0 into the winsize the child was born with, and the real
+    // size only arrived afterwards as a SIGWINCH. An application that reads TIOCGWINSZ once at startup
+    // -- img2sixel, chafa, termbench-pro's image-bench -- never sees that correction and falls back to
+    // guessing a cell size. UnixPty::resizeScreen() stashes a size reported before start() precisely so
+    // this ordering works.
+    {
+        auto const timer = ScopedTimer(startupLog, "Session start");
+        _session->start();
+    }
 
     // Reconcile a session re-bound onto a display that is ALREADY rendering (a new tab, or switching to a
     // background tab) to the INCOMING session's own state — the single TerminalDisplay/_renderer is reused
@@ -524,11 +531,7 @@ void TerminalDisplay::onScreenChanged()
     if (_session != nullptr && window() != nullptr && window()->screen() != nullptr)
     {
         _session->terminal().setRefreshRate(refreshRate());
-        auto const dpr = contentScale();
-        auto const screenSize = window()->screen()->size() * dpr;
-        auto const maxImageSize =
-            ImageSize { Width::cast_from(screenSize.width()), Height::cast_from(screenSize.height()) };
-        _session->terminal().setMaxImageSize(maxImageSize, maxImageSize);
+        _session->updateImageCanvasCeiling();
     }
 }
 
@@ -1405,6 +1408,32 @@ vtbackend::ImageSize TerminalDisplay::pixelSize() const
         _session->terminal().totalPageSize(),
         _renderer->publishedCellSize(),
         geometry::scaled(toGeometryMargins(_session->profile().margins.value()), contentScale()));
+}
+
+vtbackend::ImageSize TerminalDisplay::reportedPixelSize(vtbackend::PageSize totalPageSize) const
+{
+    assert(_session);
+    // Report the unit the cell is an integer in -- for this renderer, device pixels.
+    //
+    // An application divides a reported extent by the grid to recover the cell, so the report is only
+    // usable if that division is exact. Our cell is the font's advance in device pixels (an int), and
+    // at a fractional scale it has no exact logical counterpart: 17 / 1.75 = 9.714. Dividing the scale
+    // out floors each axis on its own, which does not merely shrink the report -- it changes the cell's
+    // ASPECT RATIO (17x39 -> 9x22 loses 7.4% of the width but 1.3% of the height). A full-page image
+    // sized from that cell is then aspect-fitted (ImageResize::ResizeToFit) into the device grid, and
+    // its std::min() honors the less-damaged axis and letterboxes the other -- a ~6% gap down one side.
+    //
+    // Device reporting makes the round-trip exact, so the fit scale is 1.0 and the image lands 1:1 at
+    // the display's own resolution. Konsole reports logical for the same reason in reverse: its cell is
+    // QFontMetrics::horizontalAdvance(), an int in LOGICAL pixels (it ignores the scale when drawing
+    // images, so they blur but never mis-size). The unit is not the principle; exactness is.
+    //
+    // Logical stays available for comparing against such a terminal at an equal canvas size. It is exact
+    // only where the scale divides both cell axes evenly (e.g. 1.0, or 20x40 at 2.0), and letterboxes by
+    // the floor error otherwise.
+    auto const scale =
+        _session->profile().pixelReporting.value() == config::PixelReporting::Device ? 1.0 : contentScale();
+    return geometry::reportedPixelsForPage(totalPageSize, _renderer->publishedCellSize(), scale);
 }
 
 vtbackend::ImageSize TerminalDisplay::cellSize() const

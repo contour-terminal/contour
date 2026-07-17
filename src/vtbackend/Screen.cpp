@@ -2762,6 +2762,7 @@ void Screen::smGraphics(XtSmGraphics::Item item, XtSmGraphics::Action action, Xt
 
     constexpr auto NumberOfColorRegistersItem = 1;
     constexpr auto SixelItem = 2;
+    constexpr auto ReGISItem = 3;
 
     constexpr auto Success = 0;
     constexpr auto Failure = 3;
@@ -2809,30 +2810,34 @@ void Screen::smGraphics(XtSmGraphics::Item item, XtSmGraphics::Action action, Xt
             switch (action)
             {
                 case Action::Read: {
-                    auto const viewportSize = _terminal->pixelSize();
-                    reply("\033[?{};{};{};{}S",
-                          SixelItem,
-                          Success,
-                          std::min(viewportSize.width, _terminal->maxImageSize().width),
-                          std::min(viewportSize.height, _terminal->maxImageSize().height));
+                    // Report the area images are actually painted into. Screen::pageSize() is the
+                    // main page: Terminal::pixelSize() would span totalPageSize(), which includes
+                    // the indicator status line, so an application honouring this reply would
+                    // overshoot the grid by one row.
+                    auto const paintableSize = _terminal->cellPixelSize() * pageSize();
+                    auto const size = vtpty::min(paintableSize, _terminal->maxImageSize());
+                    reply("\033[?{};{};{};{}S", SixelItem, Success, size.width, size.height);
                 }
                 break;
-                case Action::ReadLimit:
-                    reply("\033[?{};{};{};{}S",
-                          SixelItem,
-                          Success,
-                          _settings->maxImageSize.width,
-                          _settings->maxImageSize.height);
-                    break;
-                case Action::ResetToDefault:
-                    // The limit is the default at the same time.
-                    _terminal->setMaxImageSize(_settings->maxImageSize);
-                    break;
+                case Action::ReadLimit: {
+                    auto const ceiling = _terminal->imageCanvasCeiling();
+                    reply("\033[?{};{};{};{}S", SixelItem, Success, ceiling.width, ceiling.height);
+                }
+                break;
+                case Action::ResetToDefault: {
+                    // Following the ceiling IS the default, so this drops the negotiated size rather
+                    // than pinning today's ceiling as one -- the ceiling moves with the display, and
+                    // a reset must not freeze the canvas at whatever monitor happened to be current.
+                    // Reply, as NumberOfColorRegisters does: an application that issues this and
+                    // waits would otherwise hang.
+                    auto const size = _terminal->resetEffectiveImageCanvasSize();
+                    reply("\033[?{};{};{};{}S", SixelItem, Success, size.width, size.height);
+                }
+                break;
                 case Action::SetToValue:
                     if (holds_alternative<ImageSize>(value))
                     {
-                        auto const size = std::min(get<ImageSize>(value), _settings->maxImageSize);
-                        _terminal->setMaxImageSize(size);
+                        auto const size = _terminal->setEffectiveImageCanvasSize(get<ImageSize>(value));
                         reply("\033[?{};{};{};{}S", SixelItem, Success, size.width, size.height);
                     }
                     else
@@ -2841,7 +2846,10 @@ void Screen::smGraphics(XtSmGraphics::Item item, XtSmGraphics::Action action, Xt
             }
             break;
 
-        case Item::ReGISGraphicsGeometry: // Surely, we don't do ReGIS just yet. :-)
+        case Item::ReGISGraphicsGeometry:
+            // Contour implements no ReGIS. Answering failure is the honest reply; staying silent
+            // hangs any application that waits for one.
+            reply("\033[?{};{};{}S", ReGISItem, Failure, 0);
             break;
     }
 }
@@ -4987,23 +4995,7 @@ unique_ptr<ParserExtension> Screen::hookSixel(Sequence const& seq)
     auto const pa = seq.param_or(0, 1);
     auto const pb = seq.param_or(1, 2);
 
-    auto const aspectVertical = [](int pA) {
-        switch (pA)
-        {
-            case 9:
-            case 8:
-            case 7: return 1;
-            case 6:
-            case 5: return 2;
-            case 4:
-            case 3: return 3;
-            case 2: return 5;
-            case 1:
-            case 0: return 2;
-            default: return 1;
-        }
-    }(pa);
-
+    auto const aspectVertical = sixelAspectVertical(pa);
     auto const aspectHorizontal = 1;
     auto const transparentBackground = pb == 1;
 

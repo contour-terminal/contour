@@ -259,6 +259,68 @@ namespace
 } // namespace
 #endif
 
+FragmentPlacement RasterizedImage::fragmentPlacement(CellLocation pos, ImageSize targetCellSize) const
+{
+    // Deliberately mirrors fragment()'s setup: the two must agree on which source texel a target
+    // pixel comes from, or swapping a CPU resample for a GPU one would move the image.
+    auto const cellSize = targetCellSize.area() > 0 ? targetCellSize : _cellSize;
+    auto const gridSize = ImageSize {
+        .width = Width::cast_from(unbox<int>(_cellSpan.columns) * unbox<int>(cellSize.width)),
+        .height = Height::cast_from(unbox<int>(_cellSpan.lines) * unbox<int>(cellSize.height)),
+    };
+
+    auto const subWidth =
+        _imageSubSize.width.value > 0 ? unbox<int>(_imageSubSize.width) : unbox<int>(_image->width());
+    auto const subHeight =
+        _imageSubSize.height.value > 0 ? unbox<int>(_imageSubSize.height) : unbox<int>(_image->height());
+    auto const subOffsetX = static_cast<int>(_imageOffset.x.value);
+    auto const subOffsetY = static_cast<int>(_imageOffset.y.value);
+    auto const imageWidth = unbox<int>(_image->width());
+    auto const imageHeight = unbox<int>(_image->height());
+    auto const effectiveImageSize = ImageSize { Width(subWidth), Height(subHeight) };
+    auto const targetSize = computeTargetSize(_resizePolicy, effectiveImageSize, gridSize);
+    auto const paramWidth = unbox<int>(targetSize.width);
+    auto const paramHeight = unbox<int>(targetSize.height);
+    auto const [xOffset, yOffset] = computeTargetTopLeftOffset(_alignmentPolicy, targetSize, gridSize);
+
+    if (paramWidth <= 0 || paramHeight <= 0 || imageWidth <= 0 || imageHeight <= 0)
+        return {};
+
+    auto const cellX = unbox<int>(pos.column) * unbox<int>(cellSize.width);
+    auto const cellY = unbox<int>(pos.line) * unbox<int>(cellSize.height);
+
+    // Intersect the cell with the image's target region, in grid pixels.
+    auto const left = std::max(cellX, xOffset);
+    auto const top = std::max(cellY, yOffset);
+    auto const right = std::min(cellX + unbox<int>(cellSize.width), xOffset + paramWidth);
+    auto const bottom = std::min(cellY + unbox<int>(cellSize.height), yOffset + paramHeight);
+
+    if (left >= right || top >= bottom)
+        return {}; // wholly in the gap
+
+    // The very map fragment() applies per pixel, evaluated at the rectangle's edges instead.
+    auto const sourceEdge = [](int target, int offset, int extent, int subOffset, int subExtent) {
+        return static_cast<double>(subOffset) + ((static_cast<double>(target - offset) * subExtent) / extent);
+    };
+    auto const sourceLeft = sourceEdge(left, xOffset, paramWidth, subOffsetX, subWidth);
+    auto const sourceRight = sourceEdge(right, xOffset, paramWidth, subOffsetX, subWidth);
+    auto const sourceTop = sourceEdge(top, yOffset, paramHeight, subOffsetY, subHeight);
+    auto const sourceBottom = sourceEdge(bottom, yOffset, paramHeight, subOffsetY, subHeight);
+
+    return FragmentPlacement {
+        .hasImage = true,
+        .targetX = left - cellX,
+        .targetY = top - cellY,
+        .targetSize = ImageSize { Width::cast_from(right - left), Height::cast_from(bottom - top) },
+        .sourceX = static_cast<float>(sourceLeft / imageWidth),
+        .sourceY = static_cast<float>(sourceTop / imageHeight),
+        .sourceWidth = static_cast<float>((sourceRight - sourceLeft) / imageWidth),
+        .sourceHeight = static_cast<float>((sourceBottom - sourceTop) / imageHeight),
+        .coversCell = left == cellX && top == cellY && right == cellX + unbox<int>(cellSize.width)
+                      && bottom == cellY + unbox<int>(cellSize.height),
+    };
+}
+
 Image::Data RasterizedImage::fragment(CellLocation pos, ImageSize targetCellSize) const
 {
     auto const cellSize = targetCellSize.area() > 0 ? targetCellSize : _cellSize;

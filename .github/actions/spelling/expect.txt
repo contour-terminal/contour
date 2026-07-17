@@ -22,12 +22,14 @@ blitted
 BLval
 bpp
 BRval
+callgrind
 capslock
 cbrt
 CCCC
 CCCCC
 CCCCCC
 CDEFGH
+chafa
 circleval
 claude
 COLSx
@@ -95,6 +97,8 @@ invokables
 isakbm
 journalctl
 keysym
+letterbox
+letterboxes
 libcuda
 libva
 LMENU
@@ -187,6 +191,7 @@ repointed
 repointing
 repoints
 REPORTFAULT
+resampler
 retargeted
 retargets
 rewatch
@@ -209,6 +214,7 @@ splitz
 srb
 srgb
 Subresource
+subresource
 subspan
 supersampled
 swapchain
@@ -217,6 +223,7 @@ tabcolor
 tabinherit
 tablabel
 templ
+texels
 TOCTOU
 togglestatusline
 tpz
@@ -232,6 +239,7 @@ unflipped
 ungrabbable
 unparents
 unregisters
+unresampled
 unscroll
 unstartable
 unsyncs
@@ -251,6 +259,7 @@ weston
 WXYZ
 xad
 Xorg
+xtsmgraphics
 XWayland
 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 zzzznotacommand

@@ -713,6 +713,19 @@ class Parser
     };
 
     std::tuple<ProcessKind, size_t> parseBulkText(char const* begin, char const* end) noexcept;
+
+    /// Hands a whole run of DCS payload bytes to the handler in one call.
+    ///
+    /// The counterpart of parseBulkText() for device control strings. Without it every byte of a
+    /// DCS payload -- a sixel image is megabytes of them -- walks the state machine individually
+    /// just to be handed on unchanged, which costs more than decoding it.
+    ///
+    /// @param begin First byte to consider.
+    /// @param end   One past the last byte.
+    /// @return ContinueBulk and the run's length, or FallbackToFSM when the next byte is not plain
+    ///         payload (a terminator, or anything the state machine must act on).
+    std::tuple<ProcessKind, size_t> parseBulkDcsPassThrough(char const* begin, char const* end) noexcept;
+
     void processOnceViaStateMachine(uint8_t ch);
 
     void handle(ActionClass actionClass, Action action, uint8_t codepoint);

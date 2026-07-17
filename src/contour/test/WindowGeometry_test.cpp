@@ -51,6 +51,58 @@ static_assert(pageSizeForPixels(imageSize(800, 600), imageSize(10, 20), Margins 
 static_assert(requiredPixelsForPage(pageSize(30, 80), imageSize(10, 20), Margins {}) == imageSize(800, 600));
 static_assert(resolveContentScale(144.0, 2.0, std::nullopt) == 1.5);
 
+// What applications are told a cell is. An application recovers the cell by dividing a reported extent
+// by the grid (`ws_ypixel / ws_row`), so a report is only usable where that division is exact.
+static_assert(reportedCellSize(imageSize(10, 20), 1.0) == imageSize(10, 20));
+static_assert(reportedCellSize(imageSize(20, 40), 2.0) == imageSize(10, 20));
+static_assert(reportedCellSize(imageSize(19, 44), 1.75) == imageSize(10, 25));
+// Scale 1.0 -- PixelReporting::Device -- reports the renderer's own cell untouched. Since that cell IS
+// the font's advance in device pixels, this is the one setting that round-trips for every font.
+static_assert(reportedCellSize(imageSize(19, 44), 1.0) == imageSize(19, 44));
+static_assert(reportedCellSize(imageSize(17, 39), 1.0) == imageSize(17, 39));
+// FLOOR, not ceil: a report of available space must never promise more than exists.
+static_assert(reportedCellSize(imageSize(19, 44), 2.0) == imageSize(9, 22));
+// A cell never floors to nothing, or the report could not be divided back into one.
+static_assert(reportedCellSize(imageSize(1, 1), 4.0) == imageSize(1, 1));
+// A degenerate scale reports what the renderer uses rather than collapsing.
+static_assert(reportedCellSize(imageSize(10, 20), 0.0) == imageSize(10, 20));
+
+/// Whether reporting @p cell under @p scale keeps the cell's ASPECT RATIO, compared exactly by
+/// cross-multiplication rather than by dividing.
+///
+/// This is the property that decides whether a full-screen image has a gap. An application sizes its
+/// canvas from the REPORTED cell, but RasterizedImage::fragmentPlacement aspect-fits that canvas
+/// (ImageResize::ResizeToFit) into the grid measured in DEVICE cells. When the two aspects disagree,
+/// ResizeToFit's std::min() honors whichever axis lost less to the floor and letterboxes the other.
+/// @param cell  Cell size in device pixels, as the renderer works in.
+/// @param scale Device pixels per logical pixel to divide out; 1.0 reports device pixels as-is.
+/// @return Whether the reported cell is similar to @p cell.
+[[nodiscard]] constexpr bool preservesAspect(ImageSize cell, double scale) noexcept
+{
+    auto const reported = reportedCellSize(cell, scale);
+    return unbox<int>(cell.width) * unbox<int>(reported.height)
+           == unbox<int>(cell.height) * unbox<int>(reported.width);
+}
+
+// Device reporting is exact, so the aspect survives for EVERY cell: the fit scale is 1.0 and the image
+// lands 1:1, gapless on both axes. This is why Device is the default.
+static_assert(preservesAspect(imageSize(17, 39), 1.0));
+static_assert(preservesAspect(imageSize(19, 44), 1.0));
+static_assert(preservesAspect(imageSize(11, 25), 1.0));
+// Logical reporting survives only where the scale divides both axes evenly.
+static_assert(preservesAspect(imageSize(20, 40), 2.0));
+// ... and at a fractional scale it does not, which IS the ~6% gap down the right of a full-screen
+// sixel: 17/1.75 = 9.714 -> 9 loses 7.4% of the width, but 39/1.75 = 22.29 -> 22 loses only 1.3% of
+// the height, so min() fills the height and letterboxes the width. No rounding mode fixes this --
+// only reporting the unit the cell is an integer in does.
+static_assert(!preservesAspect(imageSize(17, 39), 1.75));
+static_assert(!preservesAspect(imageSize(19, 44), 1.75));
+
+// The report divides back to exactly the cell it was built from -- which is the whole contract, since
+// Terminal::resizeScreen recovers the cell size by dividing this by the page.
+static_assert(reportedPixelsForPage(pageSize(30, 80), imageSize(10, 20), 1.0) == imageSize(800, 600));
+static_assert(reportedPixelsForPage(pageSize(30, 80), imageSize(20, 40), 2.0) == imageSize(800, 600));
+
 // Compile-time proof of window/pane-preserving font-zoom monotonicity: at FIXED pixels, a larger cell
 // (bigger font) yields fewer columns/lines than the base, and a smaller cell yields more. See the
 // runtime case "WindowGeometry.pageSizeForPixels.cellSizeMonotonicity".
@@ -155,6 +207,63 @@ TEST_CASE("WindowGeometry.pageSizeForPixels.cellSizeMonotonicity", "[contour][ge
     CHECK(smaller.lines >= base.lines);
     CHECK(smaller.columns >= base.columns);
     CHECK((smaller.lines > base.lines || smaller.columns > base.columns)); // strictly larger somewhere
+}
+
+TEST_CASE("WindowGeometry.reportedPixelsForPage.dividesBackToTheCell", "[contour][geometry]")
+{
+    // Terminal::resizeScreen recovers the cell size as `pixels / totalPageSize`, and applications
+    // then size an image canvas from it. So the ONE property this report must have is that the
+    // division comes back exact -- anything else is reported as cell-size error and multiplies out
+    // into a wrongly-sized image. Swept across the scales a real display produces.
+    auto const scale = GENERATE(1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0);
+    auto const cellW = GENERATE(6, 8, 10, 13, 19, 25);
+    auto const cellH = GENERATE(12, 17, 21, 25, 44);
+    auto const cols = GENERATE(1, 80, 143, 240);
+    auto const lines = GENERATE(1, 24, 62, 63);
+    CAPTURE(scale, cellW, cellH, cols, lines);
+
+    auto const page = pageSize(lines, cols);
+    auto const reported = reportedPixelsForPage(page, imageSize(cellW, cellH), scale);
+    auto const expectedCell = reportedCellSize(imageSize(cellW, cellH), scale);
+
+    // This is the division Terminal::resizeScreen performs.
+    CHECK(reported / page == expectedCell);
+}
+
+TEST_CASE("WindowGeometry.reportedPixelsForPage.excludesMargins", "[contour][geometry]")
+{
+    // requiredPixelsForPage() adds margins because it sizes a WINDOW. Telling an application that
+    // same number makes the margins read as extra cell size, because resizeScreen() recovers the
+    // cell by dividing by the page -- which is what attachDisplay() did.
+    auto const page = pageSize(24, 80);
+    auto const cell = imageSize(10, 20);
+
+    SECTION("the report is cells and nothing else")
+    {
+        CHECK(reportedPixelsForPage(page, cell, 1.0) == imageSize(800, 480));
+        CHECK(reportedPixelsForPage(page, cell, 1.0) / page == cell);
+    }
+
+    SECTION("small margins are absorbed by the division, which is why this went unnoticed")
+    {
+        // 814/80 == 10 and 490/24 == 20: the remainder is smaller than one cell, so truncation eats
+        // it. This is the common case and it is why passing a window size here looked harmless.
+        auto const margins = Margins { .horizontal = 7, .vertical = 5 };
+        CHECK(requiredPixelsForPage(page, cell, margins) == imageSize(814, 490));
+        CHECK(requiredPixelsForPage(page, cell, margins) / page == cell);
+    }
+
+    SECTION("a margin worth a whole cell row is not absorbed")
+    {
+        // Once 2*margin reaches the axis's cell count the remainder is a whole cell and the reported
+        // cell grows. Lines are the exposed axis -- there are far fewer of them than columns -- so a
+        // 12px vertical margin on 24 lines is enough: 20*24 + 24 = 504, and 504/24 == 21.
+        auto const margins = Margins { .horizontal = 0, .vertical = 12 };
+        CHECK(requiredPixelsForPage(page, cell, margins) == imageSize(800, 504));
+        CHECK(requiredPixelsForPage(page, cell, margins) / page != cell);
+        // Which is the whole point of reporting from the cell rather than from the window.
+        CHECK(reportedPixelsForPage(page, cell, 1.0) / page == cell);
+    }
 }
 
 TEST_CASE("WindowGeometry.fitPageToPixels.clampContract", "[contour][geometry]")

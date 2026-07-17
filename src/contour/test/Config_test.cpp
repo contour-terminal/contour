@@ -1202,6 +1202,7 @@ TEST_CASE("Config: generated default config round-trips through the loader", "[c
     // assert the rendered document actually carries the keys below).
     CHECK(profile->tabBarPosition.value() == defaults.profile().tabBarPosition.value());
     CHECK(profile->tabBarVisibility.value() == defaults.profile().tabBarVisibility.value());
+    CHECK(rendered.find("pixel_reporting:") != std::string::npos);
     CHECK(rendered.find("tab_bar_position:") != std::string::npos);
     CHECK(rendered.find("tab_bar_visibility:") != std::string::npos);
 }
@@ -1334,7 +1335,7 @@ profiles:
     CHECK_FALSE(cwd.empty());
 }
 
-TEST_CASE("Config: image max size parses from YAML", "[config]")
+TEST_CASE("Config: deprecated image max size keys are accepted and ignored", "[config]")
 {
     QTemporaryDir dir;
     auto const config = loadFromYaml(dir, R"(
@@ -1342,15 +1343,17 @@ default_profile: main
 images:
     max_width: 640
     max_height: 480
+    sixel_scrolling: false
 profiles:
     main:
         shell: /bin/sh
 )"sv);
 
-    // images: max_width/max_height feed the maxImageSize (0 means "screen default", so a non-zero
-    // value exercises the loadFromEntry(ImageSize) branch).
-    CHECK(config.images.value().maxImageSize.width == vtbackend::Width(640));
-    CHECK(config.images.value().maxImageSize.height == vtbackend::Height(480));
+    // max_width/max_height no longer exist: the image canvas is derived from the screen. They must
+    // still parse, so configurations carrying them keep loading -- including their neighbours in the
+    // same section, which is what would break if the keys made the section fail. The loader warns
+    // about them so the setting does not just quietly stop meaning something.
+    CHECK_FALSE(config.images.value().sixelScrolling);
 }
 
 TEST_CASE("Config: text_outline accepts the scalar thickness-only form", "[config]")
@@ -1429,6 +1432,77 @@ profiles:
     CHECK(profile->modeInsert.value().cursor.cursorShape == vtbackend::CursorShape::Rectangle);
     CHECK(profile->blinkStyle.value() == vtbackend::BlinkStyle::Linger);
     CHECK(profile->screenTransitionStyle.value() == vtbackend::ScreenTransitionStyle::Classic);
+}
+
+TEST_CASE("Config: pixel_reporting parses each value (ignore-case)", "[config]")
+{
+    using contour::config::PixelReporting;
+
+    SECTION("default is Device, the unit the cell is an integer in")
+    {
+        // Not a preference: the cell is the font's advance in device pixels, so only a device-pixel
+        // report divides back to it exactly. Reporting logical floors each axis on its own, changing
+        // the cell's aspect ratio, and a full-page image is then letterboxed by the difference.
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+        auto const* profile = config.profile("main");
+        REQUIRE(profile != nullptr);
+        CHECK(profile->pixelReporting.value() == PixelReporting::Device);
+    }
+
+    SECTION("device")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        pixel_reporting: Device
+)"sv);
+        auto const* profile = config.profile("main");
+        REQUIRE(profile != nullptr);
+        CHECK(profile->pixelReporting.value() == PixelReporting::Device);
+    }
+
+    SECTION("lower-case logical")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        pixel_reporting: logical
+)"sv);
+        auto const* profile = config.profile("main");
+        REQUIRE(profile != nullptr);
+        CHECK(profile->pixelReporting.value() == PixelReporting::Logical);
+    }
+}
+
+TEST_CASE("Config: an invalid pixel_reporting value falls back to the default", "[config]")
+{
+    using contour::config::PixelReporting;
+
+    QTemporaryDir dir;
+    // Unlike the tab_bar_* readers this one also errorLog()s: a typo here leaves the user looking at
+    // the oversized image the setting exists to fix, with nothing to connect the two.
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        pixel_reporting: Physical
+)"sv);
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK(profile->pixelReporting.value() == PixelReporting::Device);
 }
 
 TEST_CASE("Config: tab_bar_position and tab_bar_visibility parse each value (ignore-case)", "[config]")
@@ -1749,8 +1823,7 @@ profiles:
         shell: /bin/sh
 )"sv);
 
-    CHECK(unbox(config.images.value().maxImageSize.width) == 640);
-    CHECK(unbox(config.images.value().maxImageSize.height) == 480);
+    // max_width/max_height are deprecated no-ops; the neighbouring keys must still load.
     CHECK(config.images.value().sixelScrolling == false);
 }
 

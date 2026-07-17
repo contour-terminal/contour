@@ -699,6 +699,7 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child, TerminalProfile&
         loadFromEntry(child, "bell", where.bell);
         loadFromEntry(child, "wm_class", where.wmClass);
         loadFromEntry(child, "tab_label", where.tabLabel);
+        loadFromEntry(child, "pixel_reporting", where.pixelReporting);
         loadFromEntry(child, "tab_bar_position", where.tabBarPosition);
         loadFromEntry(child, "tab_bar_visibility", where.tabBarVisibility);
         loadFromEntry(child, "option_as_alt", where.optionKeyAsAlt);
@@ -1633,11 +1634,19 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     {
         loadFromEntry(child, "sixel_scrolling", where.sixelScrolling);
         loadFromEntry(child, "sixel_register_count", where.maxImageColorRegisters);
-        uint width = 0;
-        loadFromEntry(child, "max_width", width);
-        uint height = 0;
-        loadFromEntry(child, "max_height", height);
-        where.maxImageSize = { .width = vtpty::Width { width }, .height = vtpty::Height { height } };
+
+        // max_width/max_height are deprecated: the image canvas is derived from the screen. The
+        // keys still parse so existing configurations keep loading, but a silently ignored setting
+        // is worse than a removed one -- the user has no way to learn it stopped meaning anything.
+        // Warn on presence rather than on value: writing an explicit 0 is just as much a statement
+        // about a key that no longer exists.
+        for (auto const* deprecatedKey: { "max_width", "max_height" })
+            if (child[deprecatedKey])
+                errorLog()("Config entry images.{} is deprecated and has no effect. The maximum image "
+                           "size is derived from the screen size. Remove the entry to silence this "
+                           "warning.",
+                           deprecatedKey);
+
         loadFromEntry(child, "good_image_protocol", where.goodImageProtocol);
     }
 }
@@ -1971,6 +1980,31 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         auto opt = parseModifierKey(child.as<std::string>());
         if (opt.has_value())
             where = opt.value();
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, PixelReporting& where)
+{
+    // Case-insensitive. Unlike the other enum readers this reports an unrecognized value: the whole
+    // point of the setting is to correct a visibly wrong image size, so a typo that silently leaves
+    // the default would leave the user staring at the very symptom they were trying to fix.
+    auto parseReporting = [&](std::string const& key) -> std::optional<PixelReporting> {
+        auto const literal = crispy::toLower(key);
+        logger()("Loading entry: {}, value {}", entry, literal);
+        if (literal == "logical")
+            return PixelReporting::Logical;
+        if (literal == "device")
+            return PixelReporting::Device;
+        return std::nullopt;
+    };
+
+    if (auto const child = node[entry])
+    {
+        auto const rawValue = child.as<std::string>();
+        if (auto const opt = parseReporting(rawValue))
+            where = opt.value();
+        else
+            errorLog()("Unknown pixel_reporting value '{}'; keeping {}.", rawValue, where);
     }
 }
 

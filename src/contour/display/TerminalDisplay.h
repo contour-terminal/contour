@@ -193,6 +193,16 @@ class TerminalDisplay: public QQuickItem
     [[nodiscard]] vtbackend::ImageSize pixelSize() const;
     [[nodiscard]] vtbackend::ImageSize cellSize() const;
 
+    /// The pixel size to tell applications about for a page of @p totalPageSize.
+    ///
+    /// The one place that answers "what is a cell, as far as an application is concerned": every
+    /// Terminal::resizeScreen() caller goes through here. Deliberately NOT pixelSize() -- that adds
+    /// margins because it sizes a window, and resizeScreen() divides what it is given by the page to
+    /// recover the cell, so margins in that number come back as cell-size error.
+    /// @param totalPageSize The page the report is for; callers mid-resize must pass the NEW page,
+    ///                      not the terminal's current one.
+    [[nodiscard]] vtbackend::ImageSize reportedPixelSize(vtbackend::PageSize totalPageSize) const;
+
     void resizeTerminalToDisplaySize();
 
     // (user requested) actions

@@ -149,6 +149,11 @@ class SequenceBuilder
         if (_hookedParser)
             _hookedParser->pass(ch);
     }
+    void put(std::string_view bytes)
+    {
+        if (_hookedParser)
+            _hookedParser->pass(bytes);
+    }
     void unhook()
     {
         if (_hookedParser)

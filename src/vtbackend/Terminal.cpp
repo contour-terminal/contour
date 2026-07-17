@@ -172,7 +172,6 @@ Terminal::Terminal(Events& eventListener,
                                                          .to = _settings.pageSize.columns.as<ColumnOffset>()
                                                                - ColumnOffset(1) } },
     _maxSixelColorRegisters { _settings.maxImageRegisterCount },
-    _effectiveImageCanvasSize { _settings.maxImageSize },
     _sixelColorPalette { std::make_shared<SixelColorPalette>(_maxSixelColorRegisters,
                                                              _maxSixelColorRegisters) },
     _imagePool { [this](Image const* image) { discardImage(*image); } },
@@ -1917,14 +1916,22 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
     _atomicTotalPageSize.store(totalPageSize, std::memory_order_release);
     _currentMousePosition = clampToScreen(_currentMousePosition);
     if (pixels)
-        setCellPixelSize(pixels.value() / mainDisplayPageSize);
+        // Divide the total page's pixels by the total page. Dividing by mainDisplayPageSize would
+        // mix bases -- `pixels` spans the status line, mainDisplayPageSize does not -- inflating the
+        // cell height. forceRedraw() feeds cellPixelSize() * totalPageSize back through here, so
+        // that error compounded by roughly a pixel per call.
+        setCellPixelSize(pixels.value() / totalPageSize);
 
     // Reset margins for all pages to defaults on resize.
     _pageMargins.fill(makeDefaultMargin(mainDisplayPageSize));
 
     applyPageSizeToCurrentBuffer();
 
-    _pty->resizeScreen(mainDisplayPageSize, pixels);
+    // Report the main page in both units. ws_row already excluded the status line, so passing the
+    // full display's pixels alongside it made ws_ypixel/ws_row disagree with the real cell height --
+    // and that division is exactly how applications derive cell size to size an image canvas.
+    _pty->resizeScreen(mainDisplayPageSize,
+                       pixels ? std::optional { cellPixelSize() * mainDisplayPageSize } : std::nullopt);
 
     // Adjust Normal-mode's cursor in order to avoid drift when growing/shrinking in main page line count.
     if (mainDisplayPageSize.lines > oldMainDisplayPageSize.lines)
@@ -3036,13 +3043,22 @@ void Terminal::hardReset()
 void Terminal::forceRedraw(std::function<void()> const& artificialSleep)
 {
     auto const totalPageSize = _settings.pageSize;
-    auto const pageSizeInPixels = cellPixelSize() * totalPageSize;
     auto const tmpPageSize = PageSize { totalPageSize.lines, totalPageSize.columns + ColumnCount(1) };
 
-    resizeScreen(tmpPageSize, pageSizeInPixels);
+    // Read the cell size once, up front: resizeScreen() re-derives it from what it is handed, so
+    // asking again in between would return whatever the first call concluded.
+    auto const cellSize = cellPixelSize();
+
+    // Each resize carries the pixel size OF THE PAGE IT NAMES. resizeScreen() derives the cell size
+    // as pixels/page, so handing the real page's pixels to the one-column-wider page derived a cell
+    // width of cellW*columns/(columns+1) and pushed that to the child. A program that reads
+    // TIOCGWINSZ on the resulting SIGWINCH -- which is exactly what img2sixel and chafa do -- then
+    // sized its image canvas from a cell a pixel too narrow per column, and the second resize below
+    // issues no third SIGWINCH to correct one that already read the first.
+    resizeScreen(tmpPageSize, cellSize * tmpPageSize);
     if (artificialSleep)
         artificialSleep();
-    resizeScreen(totalPageSize, pageSizeInPixels);
+    resizeScreen(totalPageSize, cellSize * totalPageSize);
 }
 
 void Terminal::finalizeScreenTransition() noexcept

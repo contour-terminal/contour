@@ -5,7 +5,11 @@
 #include <crispy/algorithm.h>
 #include <crispy/times.h>
 
+#include <algorithm>
 #include <array>
+#include <ranges>
+#include <span>
+#include <vector>
 
 using crispy::times;
 
@@ -16,8 +20,8 @@ using std::optional;
 namespace vtrasterizer
 {
 
-ImageRenderer::ImageRenderer(GridMetrics const& gridMetrics, ImageSize cellSize):
-    Renderable { gridMetrics }, _cellSize { cellSize }
+ImageRenderer::ImageRenderer(GridMetrics const& gridMetrics, ImageSize cellSize, size_t textureBudgetBytes):
+    Renderable { gridMetrics }, _cellSize { cellSize }, _textureBudgetBytes { textureBudgetBytes }
 {
 }
 
@@ -34,104 +38,173 @@ void ImageRenderer::setCellSize(ImageSize cellSize)
     // TODO: recompute rasterized images slices here?
 }
 
-void ImageRenderer::renderImage(crispy::point pos, vtbackend::ImageFragment const& fragment)
+namespace
 {
-    AtlasTileAttributes const* tileAttributes = getOrCreateCachedTileAttributes(fragment);
-    if (!tileAttributes)
+    /// Widens packed 24-bit RGB to 32-bit RGBA with an opaque alpha.
+    ///
+    /// An Image keeps whatever the protocol sent -- GIP's `f=2` really is three bytes per pixel --
+    /// while the GPU wants a four-byte format (RGB8 is not a texture format the RHI can rely on).
+    /// @param rgb Packed RGB, three bytes per pixel.
+    /// @return The same pixels as RGBA, four bytes per pixel.
+    [[nodiscard]] vtbackend::Image::Data widenToRgba(std::span<uint8_t const> rgb)
+    {
+        auto rgba = vtbackend::Image::Data(rgb.size() / 3 * 4);
+        for (auto const pixel: std::views::iota(size_t { 0 }, rgb.size() / 3))
+        {
+            rgba[(pixel * 4) + 0] = rgb[(pixel * 3) + 0];
+            rgba[(pixel * 4) + 1] = rgb[(pixel * 3) + 1];
+            rgba[(pixel * 4) + 2] = rgb[(pixel * 3) + 2];
+            rgba[(pixel * 4) + 3] = 0xFF;
+        }
+        return rgba;
+    }
+} // namespace
+
+atlas::ImageTextureId ImageRenderer::textureFor(vtbackend::RasterizedImage const& rasterizedImage)
+{
+    // Keyed on the image, not on the rasterization: cell size and policies change where the image is
+    // sampled, never what the texture holds.
+    auto const& image = rasterizedImage.image();
+    auto const imageId = image.id().value;
+    if (auto const known = _imageTextures.find(imageId); known != _imageTextures.end())
+    {
+        known->second.lastUsedFrame = _frameCounter;
+        return known->second.id;
+    }
+
+    auto const id = atlas::ImageTextureId { _nextImageTextureId++ };
+    // Whatever the protocol sent, the texture is RGBA8 -- widenToRgba() below makes sure of it.
+    auto const bytes = static_cast<size_t>(image.size().area()) * 4;
+    _imageTextures.emplace(imageId,
+                           ImageTextureEntry { .id = id, .bytes = bytes, .lastUsedFrame = _frameCounter });
+    _residentBytes += bytes;
+    imageScheduler().createImageTexture(atlas::CreateImageTexture {
+        .id = id,
+        .size = image.size(),
+        .format = atlas::Format::RGBA,
+        .data = image.format() == vtbackend::ImageFormat::RGB ? widenToRgba(image.data()) : image.data(),
+    });
+    evictToBudget();
+    return id;
+}
+
+void ImageRenderer::evictToBudget()
+{
+    if (_residentBytes <= _textureBudgetBytes)
         return;
 
-    auto const tile = createRenderTile(atlas::RenderTile::X { pos.x },
-                                       atlas::RenderTile::Y { pos.y },
-                                       vtbackend::RGBAColor::White,
-                                       *tileAttributes);
+    // Only what this frame did not draw may go; see the declaration.
+    auto candidates = std::vector<uint32_t> {};
+    for (auto const& [imageId, entry]: _imageTextures)
+        if (entry.lastUsedFrame != _frameCounter)
+            candidates.push_back(imageId);
 
-    // Route to below-text or above-text queue based on the image layer.
-    auto const layer = fragment.rasterizedImage().layer();
-    if (layer == vtbackend::ImageLayer::Below)
-        _pendingRenderTilesBelowText.emplace_back(tile);
+    std::ranges::sort(
+        candidates, {}, [this](uint32_t imageId) { return _imageTextures.at(imageId).lastUsedFrame; });
+
+    for (auto const imageId: candidates)
+    {
+        if (_residentBytes <= _textureBudgetBytes)
+            break;
+        // Exactly what a pool removal does: release the texture and forget the mapping, so the next
+        // sight of this image uploads it again.
+        discardImage(vtbackend::ImageId { imageId });
+    }
+}
+
+void ImageRenderer::renderImage(crispy::point pos, vtbackend::ImageFragment const& fragment)
+{
+    auto const& rasterizedImage = fragment.rasterizedImage();
+    auto const placement = rasterizedImage.fragmentPlacement(fragment.offset(), _cellSize);
+    if (!placement.hasImage)
+        return; // the cell lies wholly in the alignment gap
+
+    auto const quad = atlas::RenderImageQuad {
+        .texture = textureFor(rasterizedImage),
+        .x = pos.x + placement.targetX,
+        .y = pos.y + placement.targetY,
+        .targetSize = placement.targetSize,
+        .source = atlas::NormalizedTileLocation { .x = placement.sourceX,
+                                                  .y = placement.sourceY,
+                                                  .width = placement.sourceWidth,
+                                                  .height = placement.sourceHeight },
+        .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+        .aboveText = rasterizedImage.layer() != vtbackend::ImageLayer::Below,
+    };
+
+    // Deliberately mirrors the previous routing, including that ImageLayer::Replace lands above the
+    // text: this change is about how an image reaches the GPU, not about what composites over what.
+    if (quad.aboveText)
+        _pendingQuadsAboveText.emplace_back(quad);
     else
-        _pendingRenderTilesAboveText.emplace_back(tile);
+        _pendingQuadsBelowText.emplace_back(quad);
+}
+
+void ImageRenderer::flushQuads(std::vector<atlas::RenderImageQuad>& quads)
+{
+    // Quads arrive per cell and in order, so a run along one line is contiguous in this vector.
+    // Coalescing is left to the backend, which is where the run becomes a draw call.
+    for (auto const& quad: quads)
+        imageScheduler().renderImageQuad(quad);
+    quads.clear();
 }
 
 void ImageRenderer::onBeforeRenderingText()
 {
-    // Render images that should go below text (ImageLayer::Below).
-    for (auto const& tile: _pendingRenderTilesBelowText)
-        textureScheduler().renderTile(tile);
-    _pendingRenderTilesBelowText.clear();
+    flushQuads(_pendingQuadsBelowText);
 }
 
 void ImageRenderer::onAfterRenderingText()
 {
-    // We render here the images that should go above text.
-
-    for (auto const& tile: _pendingRenderTilesAboveText)
-        textureScheduler().renderTile(tile);
-
-    _pendingRenderTilesAboveText.clear();
+    flushQuads(_pendingQuadsAboveText);
 }
 
 void ImageRenderer::beginFrame()
 {
-    if (!SoftRequire(_pendingRenderTilesBelowText.empty()))
-        _pendingRenderTilesBelowText.clear();
-    if (!SoftRequire(_pendingRenderTilesAboveText.empty()))
-        _pendingRenderTilesAboveText.clear();
+    // Stamps what textureFor() touches from here on. That is what tells an image this frame draws --
+    // whose quads already name its texture, so it may not be released -- from one merely resident.
+    ++_frameCounter;
+
+    if (!SoftRequire(_pendingQuadsBelowText.empty()))
+        _pendingQuadsBelowText.clear();
+    if (!SoftRequire(_pendingQuadsAboveText.empty()))
+        _pendingQuadsAboveText.clear();
 }
 
 void ImageRenderer::endFrame()
 {
-    // Flush any remaining tiles that were not rendered during the text pass.
-    if (!_pendingRenderTilesBelowText.empty())
-    {
-        for (auto const& tile: _pendingRenderTilesBelowText)
-            textureScheduler().renderTile(tile);
-        _pendingRenderTilesBelowText.clear();
-    }
-    if (!_pendingRenderTilesAboveText.empty())
-    {
-        for (auto const& tile: _pendingRenderTilesAboveText)
-            textureScheduler().renderTile(tile);
-        _pendingRenderTilesAboveText.clear();
-    }
+    // Flush anything the text pass did not pick up (a frame with images but no text).
+    flushQuads(_pendingQuadsBelowText);
+    flushQuads(_pendingQuadsAboveText);
 }
 
-Renderable::AtlasTileAttributes const* ImageRenderer::getOrCreateCachedTileAttributes(
-    vtbackend::ImageFragment const& fragment)
+void ImageRenderer::discardImage(vtbackend::ImageId imageId)
 {
-    // using crispy::StrongHash;
-    // auto const hash = StrongHash::compute(fragment.rasterizedImage().image().id().value)
-    //                   * fragment.offset().column.value * fragment.offset().line.value
-    //                   * fragment.rasterizedImage().cellSize().width.value
-    //                   * fragment.rasterizedImage().cellSize().height.value;
-    auto const key = ImageFragmentKey { .imageId = fragment.rasterizedImage().image().id(),
-                                        .offset = fragment.offset(),
-                                        .size = _cellSize };
-    auto const hash = crispy::strong_hash::compute(key);
-
-    return textureAtlas().get_or_try_emplace(
-        hash, [&](atlas::TileLocation tileLocation) -> optional<TextureAtlas::TileCreateData> {
-            return createTileData(tileLocation,
-                                  fragment.rasterizedImage().fragment(fragment.offset(), _cellSize),
-                                  atlas::Format::RGBA,
-                                  _cellSize,
-                                  _cellSize,
-                                  RenderTileAttributes::X { 0 },
-                                  RenderTileAttributes::Y { 0 },
-                                  FRAGMENT_SELECTOR_IMAGE_BGRA);
-        });
-}
-
-void ImageRenderer::discardImage(vtbackend::ImageId /*imageId*/)
-{
-    // We currently don't really discard.
-    // Because the GPU texture atlas is resource-guarded by an LRU hashtable.
+    auto const known = _imageTextures.find(imageId.value);
+    if (known == _imageTextures.end())
+        return;
+    imageScheduler().destroyImageTexture(atlas::DestroyImageTexture { .id = known->second.id });
+    _residentBytes -= known->second.bytes;
+    _imageTextures.erase(known);
 }
 
 void ImageRenderer::clearCache()
 {
-    // We currently don't really clean up anything.
-    // Because the GPU texture atlas is resource-guarded by an LRU hashtable.
+    // Release the textures, not merely the mapping that names them.
+    //
+    // "The textures belong to the render target, so a new one starts with none of them" is only true
+    // of the setRenderTarget() caller. The other one, Renderer::updateFontMetrics(), clears on a
+    // render target that is still very much alive: dropping the ids alone stranded one whole-image
+    // texture per cached image on the GPU with nothing left able to name it, so every font-size step
+    // leaked the full resident set and re-uploaded it.
+    //
+    // Issuing the destroys is right for the setRenderTarget() caller too: they reach a target that
+    // never had these ids, whose backend ignores them, while the textures of the target being
+    // replaced die with it.
+    for (auto const& [imageId, entry]: _imageTextures)
+        imageScheduler().destroyImageTexture(atlas::DestroyImageTexture { .id = entry.id });
+    _imageTextures.clear();
+    _residentBytes = 0;
 }
 
 void ImageRenderer::inspect(std::ostream& /*output*/) const

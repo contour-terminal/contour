@@ -72,7 +72,11 @@ class MockTerm: public Terminal::NullEvents
 
     void writeToScreen(std::string_view text)
     {
-        vtpty::ptyOutLog()("writeToScreen: {}", crispy::escape(text));
+        // Guard the log: crispy::escape() is a function argument, so it runs whether or not the sink
+        // is enabled -- and it std::format()s one string per byte. On a 3 MB sixel frame that was
+        // 42% of the whole profile, entirely for a message nobody asked for.
+        if (vtpty::ptyOutLog)
+            vtpty::ptyOutLog()("writeToScreen: {}", crispy::escape(text));
         mockPty().appendStdOutBuffer(text);
         while (mockPty().isStdoutDataAvailable())
             terminal.processInputOnce();

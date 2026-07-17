@@ -42,6 +42,12 @@ namespace
     {
         auto const m = textShaper.metrics(font);
 
+        // The font's own advance, unrounded. Snapping this to a whole logical pixel -- so that the
+        // cell size could be reported to applications exactly -- was tried and reverted: at a
+        // fractional content scale the quantum is the scale's numerator, so at 1.75 (= 7/4) the cell
+        // must be a multiple of 7 device pixels and a 17px advance becomes 21. That is 4px of dead
+        // space on every column, and it looks it. Text spacing is not negotiable for the sake of an
+        // image canvas measured in whole cells.
         gm.cellSize.width = vtbackend::Width::cast_from(m.advance);
         gm.cellSize.height = vtbackend::Height::cast_from(m.lineHeight);
         gm.baseline = m.lineHeight - m.ascender;

@@ -45,10 +45,10 @@ constexpr bool operator!=(ImageSize a, ImageSize b) noexcept
     return !(a == b);
 }
 
-constexpr bool operator<(ImageSize a, ImageSize b) noexcept
-{
-    return a.width < b.width || (a.width == b.width && a.height < b.height);
-}
+// NB: There is deliberately no operator< for ImageSize. A lexicographic order reads like a
+// component-wise comparison at the call site, so `std::min(requested, limit)` silently clamps only
+// the width -- min({100, 999999}, {1920, 1080}) yields {100, 999999}. Use the component-wise min()
+// and max() below to clamp a size against a limit.
 
 /// Component-wise subtraction, saturating at zero.
 ///
@@ -82,11 +82,16 @@ inline ImageSize operator*(ImageSize a, double scalar) noexcept
                        .height = Height::cast_from(std::ceil(double(*a.height) * scalar)) };
 }
 
+/// Component-wise minimum: each axis is clamped independently.
+///
+/// This, not std::min, is how a size is clamped against a limit -- see the note on the absent
+/// operator< above.
 constexpr ImageSize min(ImageSize a, ImageSize b) noexcept
 {
     return ImageSize { .width = std::min(a.width, b.width), .height = std::min(a.height, b.height) };
 }
 
+/// Component-wise maximum: each axis is grown independently.
 constexpr ImageSize max(ImageSize a, ImageSize b) noexcept
 {
     return ImageSize { .width = std::max(a.width, b.width), .height = std::max(a.height, b.height) };

@@ -15,11 +15,14 @@ for rendering Sixel graphics.
 
 ### Maximum image size
 
-Sets the maximum width and height in pixels of an image to be accepted.
+The maximum width and height in pixels of an image to be accepted is derived from the size of the
+screen the window is on, and updates when the window moves to another screen.
 
-A value of 0 defaults to system screen pixel width/height.
+Applications can query it, and lower it for themselves, via `XTSMGRAPHICS`
+(`CSI ? 2 ; 4 S` reads the maximum, `CSI ? 2 ; 3 ; <width> ; <height> S` sets it).
 
-Default: `0` (that is: current screen size).
+!!! note
 
-    max_width: 0
-    max_height: 0
+    `max_width` and `max_height` are **deprecated and ignored**. They are still accepted, so existing
+    configurations keep loading, but no longer have any effect. Their default of `0` already meant
+    "use the screen size", so only configurations that set an explicit cap change behaviour.

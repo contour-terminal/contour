@@ -175,6 +175,21 @@ constexpr StringLiteral TabLabelConfig {
     "{comment} Split tabs show \"Multiple panes\" instead.\n"
 };
 
+constexpr StringLiteral PixelReportingConfig {
+    "{comment} The unit pixel sizes are reported to applications in (ignore-case).\n"
+    "{comment} Applications divide a reported extent by the grid to learn the cell size, and size\n"
+    "{comment} image canvases (sixel, for one) from it -- so the report is only usable if that\n"
+    "{comment} division is exact. The cell is the font's advance in DEVICE pixels:\n"
+    "{comment}   Device  = exact; images land 1:1 on the display's own pixels, gapless and sharp,\n"
+    "{comment}             at the cost of an application drawing scale-times more pixels per\n"
+    "{comment}             axis (default).\n"
+    "{comment}   Logical = the canvas size a terminal with an integral logical cell reports, for\n"
+    "{comment}             comparing the two on equal terms. At a fractional scale the cell has no\n"
+    "{comment}             exact logical form, and a full-page image is letterboxed by a few percent.\n"
+    "pixel_reporting: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral TabBarPositionConfig {
     "{comment} Where the GUI tab strip (tab bar) is placed within the window (ignore-case):\n"
     "{comment}   Top    = above the terminal content (default).\n"
@@ -968,14 +983,6 @@ constexpr StringLiteral ImagesConfig {
     "graphics.\n"
     "    sixel_register_count: {}\n"
     "\n"
-    "    {comment} maximum width in pixels of an image to be accepted (0 defaults to system screen pixel "
-    "width) "
-    "\n"
-    "    max_width: {}\n"
-    "    {comment} maximum height in pixels of an image to be accepted (0 defaults to system screen pixel "
-    "height)\n"
-    "    max_height: {}\n"
-    "\n"
     "    {comment} Enable or disable Good Image Protocol (GIP) support (disabled by default).\n"
     "    good_image_protocol: {}\n"
 };
@@ -1340,8 +1347,9 @@ constexpr StringLiteral LiveWeb { "option determines whether the instance should
 
 constexpr StringLiteral ImagesWeb {
     "section contains configuration options related to inline images. It includes options like "
-    "`sixel_scrolling`, `sixel_register_count`, `max_width`, `max_height`, and `good_image_protocol` to "
-    "control various aspects of image rendering and limits."
+    "`sixel_scrolling`, `sixel_register_count`, and `good_image_protocol` to control various aspects of "
+    "image rendering. The maximum image size is derived from the screen size; `max_width` and "
+    "`max_height` are deprecated and ignored."
 };
 
 constexpr StringLiteral ProfilesWeb { "All profiles inside configuration files share parent node `profiles`. "
@@ -1501,6 +1509,33 @@ constexpr StringLiteral TabLabelWeb {
     "may itself contain the "
     "same placeholders (so renaming a tab to `{{WindowTitle}}` tracks its title). A tab holding a split is "
     "shown as `Multiple panes`.\n"
+    "\n"
+};
+
+constexpr StringLiteral PixelReportingWeb {
+    "\n"
+    "Selects the unit Contour reports pixel sizes to applications in, via `TIOCGWINSZ`\n"
+    "(`ws_xpixel`/`ws_ypixel`), `CSI 14 t`, `CSI 16 t` and `XTSMGRAPHICS`.\n"
+    "\n"
+    "Applications derive the cell size by dividing a reported extent by the grid and size image\n"
+    "canvases from it, so on a scaled display this decides how large an image an application draws\n"
+    "into a given area. Valid values (ignore-case):\n"
+    "\n"
+    "A report is only usable if that division is exact, and Contour's cell is the font's advance in\n"
+    "**device** pixels — at a fractional scale it has no exact logical counterpart (17 / 1.75 =\n"
+    "9.714). Valid values (ignore-case):\n"
+    "\n"
+    "- `Device` — report device pixels. The division is exact, so an image lands 1:1 on the display's\n"
+    "  own pixels and is never resampled — gapless and sharp. The cost is that the application draws\n"
+    "  as many times more pixels per axis as the display is scaled by. This is the default.\n"
+    "- `Logical` — report logical pixels, matching the canvas size a terminal whose cell is integral\n"
+    "  in logical pixels (Konsole, for one) would report, which is useful when comparing the two on\n"
+    "  equal terms. Exact only where the scale divides both cell axes evenly (an unscaled display,\n"
+    "  or a 20x40 cell at scale 2). Otherwise each axis is floored on its own, which changes the\n"
+    "  cell's aspect ratio, and a full-page image is letterboxed by the difference — a few percent\n"
+    "  of unpainted space down one side.\n"
+    "\n"
+    "On an unscaled display the two are identical.\n"
     "\n"
 };
 
@@ -2052,6 +2087,7 @@ using InsertAfterYank = DocumentationEntry<InsertAfterYankConfig, InsertAfterYan
 using CopyLastMarkRangeOffset = DocumentationEntry<CopyLastMarkRangeOffsetConfig, CopyLastMarkRangeOffsetWeb>;
 using WMClass = DocumentationEntry<WMClassConfig, WMClassWeb>;
 using TabLabel = DocumentationEntry<TabLabelConfig, TabLabelWeb>;
+using PixelReporting = DocumentationEntry<PixelReportingConfig, PixelReportingWeb>;
 using TabBarPosition = DocumentationEntry<TabBarPositionConfig, TabBarPositionWeb>;
 using TabBarVisibility = DocumentationEntry<TabBarVisibilityConfig, TabBarVisibilityWeb>;
 using Margins = DocumentationEntry<MarginsConfig, MarginsWeb>;

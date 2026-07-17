@@ -152,6 +152,17 @@ namespace detail
         auto const truncated = static_cast<int>(unscaled);
         return unscaled > static_cast<double>(truncated) ? truncated + 1 : truncated;
     }
+
+    /// floor(value / scale) for non-negative value and positive scale, in constexpr-friendly form.
+    ///
+    /// The availability-side counterpart of ceilUnscaled(), and it adds the slack rather than
+    /// subtracting it for the same reason floorScaled() does: an accidental `n - 1e-16` must still
+    /// floor to n.
+    [[nodiscard]] constexpr int floorUnscaled(double value, double scale) noexcept
+    {
+        auto const unscaled = std::max(0.0, value / scale) + RoundingSlack;
+        return static_cast<int>(unscaled); // truncation == floor for non-negative values
+    }
 } // namespace detail
 
 /// Scales symmetric margins from logical to device pixels.
@@ -219,6 +230,48 @@ namespace detail
         (unbox<int>(cellSize.width) * unbox<int>(totalPageSize.columns)) + (2 * marginsDevicePx.horizontal);
     auto const height =
         (unbox<int>(cellSize.height) * unbox<int>(totalPageSize.lines)) + (2 * marginsDevicePx.vertical);
+    return { .width = vtbackend::Width::cast_from(std::max(0, width)),
+             .height = vtbackend::Height::cast_from(std::max(0, height)) };
+}
+
+/// Cell size (device pixels) -> the cell size applications are told about.
+///
+/// Applications derive their cell size as `ws_ypixel / ws_row` and size an image canvas from it, so this
+/// is what decides how large a sixel an application draws. FLOORED, because a report of available space
+/// is an availability (see the law in this header's overview): a cell rounded up would have the
+/// application draw past the area it was promised.
+/// @param cellDevicePx Cell size in device pixels, as the renderer works in.
+/// @param scale        Device pixels per logical pixel to divide out; 1.0 reports device pixels as-is.
+/// @return The cell size to report, at least 1x1 -- a zero cell would make the report undivisible.
+[[nodiscard]] constexpr vtbackend::ImageSize reportedCellSize(vtbackend::ImageSize cellDevicePx,
+                                                              double scale) noexcept
+{
+    if (!(scale > 0.0))
+        return cellDevicePx; // a degenerate scale reports what the renderer uses, rather than nothing
+    auto const unscale = [scale](auto value) {
+        return std::max(1, detail::floorUnscaled(unbox<double>(value), scale));
+    };
+    return { .width = vtbackend::Width::cast_from(unscale(cellDevicePx.width)),
+             .height = vtbackend::Height::cast_from(unscale(cellDevicePx.height)) };
+}
+
+/// The pixel size to report to applications for a page of @p totalPageSize.
+///
+/// Excludes margins deliberately, and that is the point: `Terminal::resizeScreen` derives the cell size
+/// by dividing this by the page, so anything that is not a whole number of cells comes back as cell-size
+/// error. requiredPixelsForPage() -- which *does* add margins -- is for sizing a window, not for telling
+/// an application what a cell is; passing that here inflates the reported cell by the margins.
+/// @param totalPageSize Total page size (main page + status line).
+/// @param cellDevicePx  Cell size in device pixels.
+/// @param scale         Device pixels per logical pixel; 1.0 reports device pixels as-is.
+/// @return The extent to report, exactly `reportedCellSize(cellDevicePx, scale) * totalPageSize`.
+[[nodiscard]] constexpr vtbackend::ImageSize reportedPixelsForPage(vtbackend::PageSize totalPageSize,
+                                                                   vtbackend::ImageSize cellDevicePx,
+                                                                   double scale) noexcept
+{
+    auto const cell = reportedCellSize(cellDevicePx, scale);
+    auto const width = unbox<int>(cell.width) * unbox<int>(totalPageSize.columns);
+    auto const height = unbox<int>(cell.height) * unbox<int>(totalPageSize.lines);
     return { .width = vtbackend::Width::cast_from(std::max(0, width)),
              .height = vtbackend::Height::cast_from(std::max(0, height)) };
 }

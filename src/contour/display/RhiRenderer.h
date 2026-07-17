@@ -59,7 +59,10 @@ struct RhiPipeline
     QRhiResourcePtr<QRhiBuffer> uniformBuffer; ///< Dynamic std140 uniform buffer (shared by both stages).
 };
 
-class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer::atlas::AtlasBackend
+class RhiRenderer final:
+    public vtrasterizer::RenderTarget,
+    public vtrasterizer::atlas::AtlasBackend,
+    public vtrasterizer::atlas::ImageTextureBackend
 {
     using ImageSize = vtbackend::ImageSize;
 
@@ -148,6 +151,12 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
     void configureAtlas(ConfigureAtlas atlas) override;
     void uploadTile(UploadTile tile) override;
     void renderTile(RenderTile tile) override;
+
+    // ImageTextureBackend implementation
+    void createImageTexture(vtrasterizer::atlas::CreateImageTexture param) override;
+    void destroyImageTexture(vtrasterizer::atlas::DestroyImageTexture param) override;
+    void renderImageQuad(vtrasterizer::atlas::RenderImageQuad param) override;
+    vtrasterizer::atlas::ImageTextureBackend& imageScheduler() override;
 
     // RenderTarget implementation
     void setRenderSize(vtbackend::ImageSize targetSurfaceSize) override;
@@ -398,6 +407,40 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
     void executeConfigureAtlas(ConfigureAtlas const& param);
     void executeUploadTile(QRhiResourceUpdateBatch& updates, UploadTile const& param);
 
+    /// One run of quads sampling a single image texture.
+    ///
+    /// A run rather than a quad, because a full-screen image is thousands of quads that all sample
+    /// the same texture: one draw item per run instead of one per cell.
+    struct ImageQuadBatch
+    {
+        vtrasterizer::atlas::ImageTextureId texture {};
+        std::vector<float> buffer;
+    };
+
+    /// Creates the texture for one whole image and queues its pixel upload.
+    ///
+    /// The binding sets are left to refreshImageShaderResources(), which is what keeps them agreeing
+    /// with pipelines whose uniform buffers outlive no image.
+    void executeCreateImageTexture(QRhiResourceUpdateBatch& updates,
+                                   vtrasterizer::atlas::CreateImageTexture& param);
+
+    /// Builds the shader-resource set one image quad is drawn with.
+    /// @param texture the image's texture; named by binding 1.
+    /// @param uniformBuffer the drawing pipeline's uniform buffer; named by binding 0.
+    /// @return the new set, or nullptr if it could not be created.
+    [[nodiscard]] QRhiShaderResourceBindings* createImageSrb(QRhiTexture* texture, QRhiBuffer* uniformBuffer);
+
+    /// Rebuilds every image binding set that does not name the uniform buffer its pipeline now owns.
+    ///
+    /// Cheap and idempotent: a set that already names the right buffer is left alone, so the common
+    /// frame does no work at all. Must run outside a render pass, and after the pipeline whose
+    /// buffer the sets name has been created.
+    /// @param offscreen refresh the screenshot sets rather than the swapchain sets.
+    void refreshImageShaderResources(bool offscreen);
+
+    /// Appends one draw item per image-texture run of @p batches to the frame.
+    void recordImagePass(std::vector<ImageQuadBatch> const& batches);
+
     // -------------------------------------------------------------------------------------------
     // private data members
     //
@@ -421,12 +464,23 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
         std::optional<vtrasterizer::atlas::ConfigureAtlas> configureAtlas = std::nullopt;
         std::vector<vtrasterizer::atlas::UploadTile> uploadTiles {};
         RenderBatch renderBatch {};
+        std::vector<vtrasterizer::atlas::CreateImageTexture> imageCreates {};
+        std::vector<vtrasterizer::atlas::DestroyImageTexture> imageDestroys {};
+        /// Image quads that composite under the text, and over it. Two lists rather than a layer tag
+        /// per quad: the pass order [rect][image-below][text][image-above] is what expresses z here,
+        /// since every vertex sits at the same depth and only draw order composites.
+        std::vector<ImageQuadBatch> imageQuadsBelowText {};
+        std::vector<ImageQuadBatch> imageQuadsAboveText {};
 
         void clear()
         {
             configureAtlas.reset();
             uploadTiles.clear();
             renderBatch.clear();
+            imageCreates.clear();
+            imageDestroys.clear();
+            imageQuadsBelowText.clear();
+            imageQuadsAboveText.clear();
         }
     };
 
@@ -488,8 +542,9 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
     /// One queued draw call captured during the prepare phase, replayed in recordDraws().
     enum class FramePass : uint8_t
     {
-        Rect, ///< Background/filled-rect pipeline.
-        Text, ///< Text/glyph pipeline (samples the atlas).
+        Rect,  ///< Background/filled-rect pipeline.
+        Text,  ///< Text/glyph pipeline (samples the atlas).
+        Image, ///< Text pipeline, but sampling one whole-image texture instead of the atlas.
     };
     struct FrameDrawItem
     {
@@ -497,7 +552,40 @@ class RhiRenderer final: public vtrasterizer::RenderTarget, public vtrasterizer:
         quint32 firstVertex = 0;            ///< First vertex (into the pass's per-frame vertex buffer).
         quint32 vertexCount = 0;            ///< Number of vertices to draw.
         std::optional<ScissorRect> scissor; ///< Transient inner scissor for this draw (raw; pre node-clip).
+        /// For FramePass::Image: which image texture this draw samples. Images share the text
+        /// pipeline and its vertex layout — only the bound texture differs — so the pass carries the
+        /// texture rather than owning a pipeline of its own.
+        vtrasterizer::atlas::ImageTextureId imageTexture {};
     };
+
+    /// One image's shader-resource set, together with the uniform buffer it names.
+    ///
+    /// A set names two things with very different lifetimes: binding 1 is the image's own texture,
+    /// which lives exactly as long as the image, and binding 0 is the drawing pipeline's uniform
+    /// buffer, which does not. createPipeline() replaces that buffer whenever the QRhi or the
+    /// render-pass descriptor changes, and the screenshot pipelines do not exist at all until the
+    /// first capture -- so a set built once and kept is eventually either stale or absent.
+    /// Recording what the set was built against is what lets it be rebuilt exactly when it must be.
+    struct ImageShaderResources
+    {
+        QRhiResourcePtr<QRhiShaderResourceBindings> srb;
+        /// The uniform buffer @c srb names at binding 0. Not owned, and never dereferenced -- only
+        /// compared against the buffer the pipeline currently owns.
+        QRhiBuffer* uniformBuffer = nullptr;
+    };
+
+    /// GPU resources backing one whole image.
+    ///
+    /// Two binding sets, because the on-screen and off-screen (screenshot) pipelines feed different
+    /// uniform buffers: binding 0 must name the right one, binding 1 this image's texture.
+    struct ImageTextureResources
+    {
+        QRhiResourcePtr<QRhiTexture> texture;
+        ImageShaderResources swapchain; ///< Bound when drawing into the swapchain.
+        ImageShaderResources offscreen; ///< Bound when replaying into the screenshot target.
+        vtbackend::ImageSize size;
+    };
+    std::unordered_map<uint32_t, ImageTextureResources> _imageTextures;
 
     std::vector<float> _frameRectVertices;      ///< Accumulated rect-pass vertices for the current frame.
     std::vector<float> _frameTextVertices;      ///< Accumulated text-pass vertices for the current frame.

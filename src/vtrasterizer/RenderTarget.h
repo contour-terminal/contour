@@ -6,6 +6,7 @@
 #include <vtbackend/primitives.h>
 
 #include <vtrasterizer/GridMetrics.h>
+#include <vtrasterizer/ImageTextureBackend.h>
 #include <vtrasterizer/TextureAtlas.h>
 #include <vtrasterizer/shared_defines.h>
 
@@ -108,6 +109,11 @@ class RenderTarget
     virtual void setMargin(PageMargin margin) = 0;
 
     virtual atlas::AtlasBackend& textureScheduler() = 0;
+
+    /// Schedules whole-image textures, as opposed to textureScheduler()'s fixed-size tiles.
+    ///
+    /// Commands issued here and through textureScheduler() composite in the order they were issued.
+    virtual atlas::ImageTextureBackend& imageScheduler() = 0;
 
     /// Fills a rectangular area with the given solid color.
     virtual void renderRectangle(int x, int y, Width, Height, RGBAColor color) = 0;
@@ -237,6 +243,12 @@ class Renderable
     }
 
     [[nodiscard]] atlas::AtlasBackend& textureScheduler() noexcept { return *_textureScheduler; }
+
+    [[nodiscard]] atlas::ImageTextureBackend& imageScheduler() noexcept
+    {
+        assert(_renderTarget);
+        return _renderTarget->imageScheduler();
+    }
 
     /// Sets the sub-cell Y pixel offset used for smooth scrolling.
     ///
