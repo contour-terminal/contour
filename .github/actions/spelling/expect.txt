@@ -321,6 +321,7 @@ Pcmw
 Pcn
 Pcss
 PCXAL
+pdfs
 Pdt
 Pflags
 Pfn
@@ -409,10 +410,12 @@ rhi
 rhilayout
 rhysd
 RISOn
+rni
 rrrgggbbb
 RRRR
 rrrrggggbbbb
 RWin
+sanitizers
 SATM
 SBQUERY
 scrn
@@ -445,6 +448,7 @@ Sxbp
 tabcolor
 tabinherit
 tablabel
+tarballs
 Tek
 templ
 texels
@@ -495,8 +499,10 @@ Vjk
 VPR
 VSRM
 vtconformance
+vtdocs
 VTID
 vtmux
+vtparse
 vttest
 vwx
 vzd
@@ -509,6 +515,7 @@ WXYZ
 xad
 xargs
 Xcms
+xefefef
 Xlib
 Xorg
 XParse
