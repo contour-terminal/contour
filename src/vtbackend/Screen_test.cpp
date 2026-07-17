@@ -172,6 +172,34 @@ TEST_CASE("writeText.bulk.A.3", "[screen]")
     CHECK(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(4) });
 }
 
+// vttest chapter 2 (screen features) page 1: writing 2*cols '*' with autowrap ON fills two lines by
+// wrapping; writing 2*cols '*' with autowrap OFF fills one line (the last column overwrites in place,
+// no wrap). All three lines must be identical, full lines of '*' -- "three identical lines of *'s
+// completely filling the top of the screen without any empty lines between."
+TEST_CASE("writeText.autowrap.threeIdenticalFullLines", "[screen]")
+{
+    auto constexpr Cols = 10;
+    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(Cols) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // Write the stars one at a time, as vttest does (a tprintf per '*'), so the incremental
+    // deferred-wrap path is exercised rather than the bulk fast path.
+    auto const writeStars = [&](int n) {
+        for (auto i = 0; i < n; ++i)
+            mock.writeToScreen("*");
+    };
+
+    mock.writeToScreen("\033[H\033[?7h"); // cursor home, autowrap ON
+    writeStars(2 * Cols);                 // -> rows 1 and 2 by wrapping
+    mock.writeToScreen("\033[?7l");       // autowrap OFF
+    mock.writeToScreen("\033[3;1H");      // cursor to row 3
+    writeStars(2 * Cols);                 // -> row 3 only (last column overwrites, no wrap)
+    mock.writeToScreen("\033[?7h");       // autowrap ON
+
+    auto const full = std::string(Cols, '*');
+    CHECK(screen.grid().lineText(LineOffset(3)) == std::string(Cols, ' ')); // row 4 stays empty
+}
+
 // Text does not fully fill current line.
 TEST_CASE("writeText.bulk.B", "[screen]")
 {
@@ -2417,6 +2445,35 @@ TEST_CASE("IL_over_region_clears_the_band", "[screen]")
     mock.writeToScreen("\033[2;3H"); // CUP row 2, col 3
     mock.writeToScreen("\033[99L");  // IL 99
     CHECK("abcde\nf   j\nk   o\np   t\nuvwxy\n" == screen.renderMainPageText());
+}
+
+TEST_CASE("Autowrap_within_left_right_margin", "[screen]")
+{
+    // Text written inside the left/right band wraps at the right margin -- not one column early. The
+    // right margin is the last writable column; a char destined for it must land there, and only the
+    // *next* char wraps. Regression for the off-by-one in clearAndAdvance().
+    SECTION("autowrap on: the right-margin char lands, then the next wraps to the left margin")
+    {
+        auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(6) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("\033[?69h"); // DECSET DECLRMM
+        mock.writeToScreen("\033[2;4s"); // DECSLRM 2;4 -> band cols 1..3
+        mock.writeToScreen("\033[1;2H"); // CUP to the left margin
+        mock.writeToScreen("xyzw");      // x y z fill the band; w wraps to the next line's left margin
+        CHECK(" xyz  \n w    \n" == screen.renderMainPageText());
+    }
+
+    SECTION("autowrap off: writes pile up on the right margin")
+    {
+        auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(6) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("\033[?69h"); // DECSET DECLRMM
+        mock.writeToScreen("\033[2;4s"); // DECSLRM 2;4
+        mock.writeToScreen("\033[?7l");  // DECRESET DECAWM (autowrap off)
+        mock.writeToScreen("\033[1;2H"); // CUP to the left margin
+        mock.writeToScreen("xyzw");      // w overwrites the right-margin cell; nothing wraps
+        CHECK(" xyw  \n      \n" == screen.renderMainPageText());
+    }
 }
 
 TEST_CASE("DECBI_back_index", "[screen]")

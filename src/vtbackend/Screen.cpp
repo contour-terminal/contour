@@ -888,7 +888,11 @@ void Screen::clearAndAdvance(int oldWidth, int newWidth) noexcept
 {
     bool const cursorInsideMargin =
         _terminal->isModeEnabled(DECMode::LeftRightMargin) && isCursorInsideMargins();
-    auto const cellsAvailable = cursorInsideMargin ? *(margin().horizontal.to - _cursor.position.column) - 1
+    // Columns strictly to the right of the cursor that are still writable. Inside the left/right band
+    // the last writable column is the right margin itself, so it is `to - column`; on the full page it
+    // is the last page column, `(columns - 1) - column`. The band form once carried an extra `- 1`,
+    // which made autowrap fire one column early -- the char destined for the right margin wrapped instead.
+    auto const cellsAvailable = cursorInsideMargin ? *(margin().horizontal.to - _cursor.position.column)
                                                    : *pageSize().columns - *_cursor.position.column - 1;
 
     auto const sgr = newWidth > 1 ? _cursor.graphicsRendition.with(CellFlag::WideCharContinuation)
