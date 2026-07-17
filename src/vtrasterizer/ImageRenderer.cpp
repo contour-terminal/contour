@@ -151,8 +151,19 @@ void ImageRenderer::discardImage(vtbackend::ImageId imageId)
 
 void ImageRenderer::clearCache()
 {
-    // The textures belong to the render target; a new one starts with none of them, so only the
-    // id mapping has to go. Issuing destroys here would name resources of a target that is gone.
+    // Release the textures, not merely the mapping that names them.
+    //
+    // "The textures belong to the render target, so a new one starts with none of them" is only true
+    // of the setRenderTarget() caller. The other one, Renderer::updateFontMetrics(), clears on a
+    // render target that is still very much alive: dropping the ids alone stranded one whole-image
+    // texture per cached image on the GPU with nothing left able to name it, so every font-size step
+    // leaked the full resident set and re-uploaded it.
+    //
+    // Issuing the destroys is right for the setRenderTarget() caller too: they reach a target that
+    // never had these ids, whose backend ignores them, while the textures of the target being
+    // replaced die with it.
+    for (auto const& [imageId, textureId]: _imageTextureIds)
+        imageScheduler().destroyImageTexture(atlas::DestroyImageTexture { .id = textureId });
     _imageTextureIds.clear();
 }
 

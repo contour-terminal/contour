@@ -180,6 +180,33 @@ TEST_CASE("ImageRenderer.widens a 24-bit RGB image for upload", "[image][rendere
     CHECK(creates.front().data[3] == 0xFF);
 }
 
+TEST_CASE("ImageRenderer.clearCache releases the textures", "[image][renderer]")
+{
+    // "The textures belong to the render target, so a new one starts with none of them" holds only
+    // for the setRenderTarget() caller. Renderer::updateFontMetrics() clears on a target that is
+    // still very much alive: dropping the ids alone stranded one texture per cached image on the GPU
+    // with nothing left able to name it, so every font-size step leaked the whole resident set.
+    auto renderTarget = MockRenderTarget {};
+    auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
+    auto imageRenderer = ImageRenderer { testGridMetrics, CellSize };
+    imageRenderer.setRenderTarget(renderTarget, directMappingAllocator);
+
+    auto const image = makeImage(GridSize { .lines = LineCount(1), .columns = ColumnCount(2) });
+    renderRow(imageRenderer, image, 2);
+
+    auto& backend = renderTarget.getMockImageBackend();
+    REQUIRE(backend.createCommands.size() == 1);
+
+    imageRenderer.clearCache();
+
+    REQUIRE(backend.destroyCommands.size() == 1);
+    CHECK(backend.destroyCommands.front().id == backend.createCommands.front().id);
+
+    // The mapping went with it, so the image uploads again rather than naming a destroyed texture.
+    renderRow(imageRenderer, image, 2);
+    CHECK(backend.createCommands.size() == 2);
+}
+
 TEST_CASE("ImageRenderer.discardImage releases the texture", "[image][renderer]")
 {
     auto renderTarget = MockRenderTarget {};
