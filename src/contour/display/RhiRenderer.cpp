@@ -608,6 +608,12 @@ void RhiRenderer::execute(std::chrono::steady_clock::time_point now)
     for (auto const& destroy: _scheduledExecutions.imageDestroys)
         _imageTextures.erase(destroy.id.value);
 
+    // Give every image a binding set naming the text pipeline's *current* uniform buffer: the ones
+    // just created have none yet, and a pipeline rebuild (a new QRhi or render-pass descriptor, as a
+    // move to another screen produces) replaced the buffer the existing ones name. Outside a render
+    // pass, and before any image quad is recorded.
+    refreshImageShaderResources(/*offscreen*/ false);
+
     // Append this step's vertex geometry + draw items (with the active inner scissor). The order
     // here IS the z-order: every vertex sits at the same depth, so only draw order composites.
     recordRectPass();
@@ -696,7 +702,7 @@ void RhiRenderer::executeCreateImageTexture(QRhiResourceUpdateBatch& updates,
 
     auto const pixelSize = QSize(unbox<int>(param.size.width), unbox<int>(param.size.height));
     auto resources =
-        ImageTextureResources { .texture = {}, .srb = {}, .screenshotSrb = {}, .size = param.size };
+        ImageTextureResources { .texture = {}, .swapchain = {}, .offscreen = {}, .size = param.size };
 
     resources.texture.reset(_rhi->newTexture(QRhiTexture::RGBA8, pixelSize, 1, {}));
     if (!resources.texture->create())
@@ -710,36 +716,56 @@ void RhiRenderer::executeCreateImageTexture(QRhiResourceUpdateBatch& updates,
     subresource.setDataStride(unbox<quint32>(param.size.width) * 4);
     updates.uploadTexture(resources.texture.get(), QRhiTextureUploadDescription({ 0, 0, subresource }));
 
-    // Binding 1 names this image instead of the atlas; binding 0 must name the uniform buffer of
-    // whichever pipeline ends up drawing, hence one set per pipeline.
-    auto const makeSrb = [&](QRhiBuffer* uniformBuffer) -> QRhiShaderResourceBindings* {
-        auto* srb = _rhi->newShaderResourceBindings();
-        srb->setBindings(
-            { QRhiShaderResourceBinding::uniformBuffer(0,
-                                                       QRhiShaderResourceBinding::VertexStage
-                                                           | QRhiShaderResourceBinding::FragmentStage,
-                                                       uniformBuffer),
-              QRhiShaderResourceBinding::sampledTexture(1,
-                                                        QRhiShaderResourceBinding::FragmentStage,
-                                                        resources.texture.get(),
-                                                        _atlasSampler.get()) });
-        if (!srb->create())
-        {
-            errorLog()("Failed to create RHI image shader resource bindings.");
-            delete srb;
-            return nullptr;
-        }
-        return srb;
-    };
-
-    // The atlas sampler is Nearest + ClampToEdge, which is exactly what the CPU resampler this
-    // replaces did (it truncates the source coordinate). Anything else would move pixels.
-    if (_textPipeline.uniformBuffer)
-        resources.srb.reset(makeSrb(_textPipeline.uniformBuffer.get()));
-    if (_screenshotTextPipeline.uniformBuffer)
-        resources.screenshotSrb.reset(makeSrb(_screenshotTextPipeline.uniformBuffer.get()));
-
+    // The binding sets are deliberately not built here. Both name a pipeline's uniform buffer, and
+    // neither pipeline need exist yet -- the screenshot one is not built until the first capture --
+    // so building them at creation time is what left images invisible in screenshots and, once a
+    // pipeline was rebuilt underneath them, naming freed memory.
     _imageTextures.insert_or_assign(param.id.value, std::move(resources));
+}
+
+QRhiShaderResourceBindings* RhiRenderer::createImageSrb(QRhiTexture* texture, QRhiBuffer* uniformBuffer)
+{
+    Require(_rhi != nullptr);
+
+    // Binding 1 names this image instead of the atlas; binding 0 names the uniform buffer of
+    // whichever pipeline ends up drawing. The atlas sampler is Nearest + ClampToEdge, which is
+    // exactly what the CPU resampler this replaces did (it truncates the source coordinate).
+    // Anything else would move pixels.
+    auto* srb = _rhi->newShaderResourceBindings();
+    srb->setBindings({ QRhiShaderResourceBinding::uniformBuffer(
+                           0,
+                           QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage,
+                           uniformBuffer),
+                       QRhiShaderResourceBinding::sampledTexture(
+                           1, QRhiShaderResourceBinding::FragmentStage, texture, _atlasSampler.get()) });
+    if (!srb->create())
+    {
+        errorLog()("Failed to create RHI image shader resource bindings.");
+        delete srb;
+        return nullptr;
+    }
+    return srb;
+}
+
+void RhiRenderer::refreshImageShaderResources(bool offscreen)
+{
+    if (_rhi == nullptr || _atlasSampler == nullptr)
+        return;
+
+    auto const& pipeline = offscreen ? _screenshotTextPipeline : _textPipeline;
+    auto* const uniformBuffer = pipeline.uniformBuffer.get();
+    if (uniformBuffer == nullptr)
+        return; // the pipeline that would draw these does not exist yet; nothing to name
+
+    for (auto& [imageId, resources]: _imageTextures)
+    {
+        auto& set = offscreen ? resources.offscreen : resources.swapchain;
+        if (set.srb != nullptr && set.uniformBuffer == uniformBuffer)
+            continue; // already names the buffer that will be bound
+
+        set.srb.reset(createImageSrb(resources.texture.get(), uniformBuffer));
+        set.uniformBuffer = set.srb != nullptr ? uniformBuffer : nullptr;
+    }
 }
 
 void RhiRenderer::recordImagePass(std::vector<ImageQuadBatch> const& batches)
@@ -857,8 +883,8 @@ void RhiRenderer::replayDrawItems(QRhiCommandBuffer* cb, QSize targetPixelSize, 
             auto const resources = _imageTextures.find(item.imageTexture.value);
             if (resources == _imageTextures.end())
                 return nullptr;
-            auto const& srb = offscreen ? resources->second.screenshotSrb : resources->second.srb;
-            return srb.get();
+            auto const& set = offscreen ? resources->second.offscreen : resources->second.swapchain;
+            return set.srb.get();
         }();
         if (shaderResources == nullptr)
             continue; // the texture went away before its quads were drawn
@@ -1204,6 +1230,13 @@ void RhiRenderer::recordScreenshotPass(QRhi* rhi, QRhiCommandBuffer* cb)
     auto const size = _renderTargetSize;
     if (!ensureScreenshotTarget(rhi, size))
         return;
+
+    // Only now do the screenshot pipelines exist, so only now can an image name their uniform
+    // buffer: every image created before this capture has no offscreen set at all, and a capture at
+    // a new size just rebuilt the pipelines under whatever sets an earlier one left behind. Without
+    // this the replay below silently skips every image quad and captures a picture with no images
+    // in it. Outside the pass, which beginPass() below opens.
+    refreshImageShaderResources(/*offscreen*/ true);
 
     // The offscreen target is ITEM-sized, so the replayed draws need an item-local transform: the
     // rasterizer's device-pixel, top-left-origin item vertices map directly onto the target via a plain

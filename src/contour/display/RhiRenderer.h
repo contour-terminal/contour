@@ -417,9 +417,26 @@ class RhiRenderer final:
         std::vector<float> buffer;
     };
 
-    /// Creates the texture and binding sets for one whole image, and queues its pixel upload.
+    /// Creates the texture for one whole image and queues its pixel upload.
+    ///
+    /// The binding sets are left to refreshImageShaderResources(), which is what keeps them agreeing
+    /// with pipelines whose uniform buffers outlive no image.
     void executeCreateImageTexture(QRhiResourceUpdateBatch& updates,
                                    vtrasterizer::atlas::CreateImageTexture& param);
+
+    /// Builds the shader-resource set one image quad is drawn with.
+    /// @param texture the image's texture; named by binding 1.
+    /// @param uniformBuffer the drawing pipeline's uniform buffer; named by binding 0.
+    /// @return the new set, or nullptr if it could not be created.
+    [[nodiscard]] QRhiShaderResourceBindings* createImageSrb(QRhiTexture* texture, QRhiBuffer* uniformBuffer);
+
+    /// Rebuilds every image binding set that does not name the uniform buffer its pipeline now owns.
+    ///
+    /// Cheap and idempotent: a set that already names the right buffer is left alone, so the common
+    /// frame does no work at all. Must run outside a render pass, and after the pipeline whose
+    /// buffer the sets name has been created.
+    /// @param offscreen refresh the screenshot sets rather than the swapchain sets.
+    void refreshImageShaderResources(bool offscreen);
 
     /// Appends one draw item per image-texture run of @p batches to the frame.
     void recordImagePass(std::vector<ImageQuadBatch> const& batches);
@@ -541,6 +558,22 @@ class RhiRenderer final:
         vtrasterizer::atlas::ImageTextureId imageTexture {};
     };
 
+    /// One image's shader-resource set, together with the uniform buffer it names.
+    ///
+    /// A set names two things with very different lifetimes: binding 1 is the image's own texture,
+    /// which lives exactly as long as the image, and binding 0 is the drawing pipeline's uniform
+    /// buffer, which does not. createPipeline() replaces that buffer whenever the QRhi or the
+    /// render-pass descriptor changes, and the screenshot pipelines do not exist at all until the
+    /// first capture -- so a set built once and kept is eventually either stale or absent.
+    /// Recording what the set was built against is what lets it be rebuilt exactly when it must be.
+    struct ImageShaderResources
+    {
+        QRhiResourcePtr<QRhiShaderResourceBindings> srb;
+        /// The uniform buffer @c srb names at binding 0. Not owned, and never dereferenced -- only
+        /// compared against the buffer the pipeline currently owns.
+        QRhiBuffer* uniformBuffer = nullptr;
+    };
+
     /// GPU resources backing one whole image.
     ///
     /// Two binding sets, because the on-screen and off-screen (screenshot) pipelines feed different
@@ -548,8 +581,8 @@ class RhiRenderer final:
     struct ImageTextureResources
     {
         QRhiResourcePtr<QRhiTexture> texture;
-        QRhiResourcePtr<QRhiShaderResourceBindings> srb;
-        QRhiResourcePtr<QRhiShaderResourceBindings> screenshotSrb;
+        ImageShaderResources swapchain; ///< Bound when drawing into the swapchain.
+        ImageShaderResources offscreen; ///< Bound when replaying into the screenshot target.
         vtbackend::ImageSize size;
     };
     std::unordered_map<uint32_t, ImageTextureResources> _imageTextures;
