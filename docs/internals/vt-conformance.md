@@ -142,7 +142,7 @@ The gap files say which sequences are unimplemented. This is for the decisions t
   not proven across the table. Every remaining `*` is a claim that none of its items is a submenu, a
   cross-link or a toggle, and that claim is unverified. Both known instances were found by *reading*
   vttest's source, never by a failing run: that is the only way this class shows up.
-- **Two vttest fixes are worth upstreaming.** Its `-l` log is opened without a buffering mode, so a
+- **Two vttest fixes are worth sending upstream.** Its `-l` log is opened without a buffering mode, so a
   killed vttest leaves a transcript short of the verdicts it produced — and a short transcript reports
   fewer failures, which reads as success. (The runner detects that already, via vttest's parting
   `That's all, folks!`; the fix removes the failure mode rather than catching it.) And its DECCRA

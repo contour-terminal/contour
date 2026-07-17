@@ -126,6 +126,7 @@ LNM
 marg
 MODIFYOTHERKEYS
 NEL
+nrc
 OSC
 pgl
 Pgl
@@ -133,6 +134,7 @@ pgr
 Pgr
 precmd
 preexec
+ptyx
 RCOLORBG
 RCOLORCURSOR
 RCOLORFG
@@ -174,6 +176,7 @@ TMUX
 tput
 undercurl
 unparseputc
+upss
 UTF
 VMOT
 VTEs
