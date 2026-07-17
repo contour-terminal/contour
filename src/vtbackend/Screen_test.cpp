@@ -7114,6 +7114,87 @@ TEST_CASE("SRM turns local echo on and off", "[screen]")
     }
 }
 
+TEST_CASE("SRM: echoing input that queries keeps the send buffer intact", "[screen]")
+{
+    // The echo parses the bytes being sent, and a query among them replies -- which appends to the very
+    // std::string the bytes are being read from, reallocating it. Sending them afterwards read freed
+    // memory. The bytes are owned across the echo now; ASan is what fails this if it regresses.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+
+    mock.writeToScreen("\033[12l"); // SRM reset -> local echo
+    mock.terminal.sendRawInput("\033[6n");
+
+    // What was typed reached the host, and the DSR the echo executed queued its answer behind it.
+    CHECK(mock.replyData() == "\033[6n");
+    mock.terminal.flushInput();
+    CHECK(mock.replyData() == "\033[6n\033[1;1R");
+}
+
+TEST_CASE("SRM: a reply issued from inside the parser is echoed, not deadlocked", "[screen]")
+{
+    // A reply can be issued from *inside* the parser -- DSR 996 is answered by
+    // Screen::reportColorPaletteUpdate(), which flushes on the spot -- and with SRM reset that flush
+    // echoes, which parses. Parsing there would re-enter the parser mid-sequence and take the
+    // non-recursive state lock the parse already holds. The echo is deferred to a barrier instead.
+    // A regression hangs this test rather than failing it.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[12l");   // SRM reset -> local echo
+    mock.writeToScreen("\033[?996n"); // DSR: report the color palette, answered from inside the parser
+
+    CHECK(mock.replyData().starts_with("\033[?997;"));
+
+    // And the terminal is still usable afterwards: the deferred echo drained and the parser is at rest.
+    mock.writeToScreen("ok");
+    CHECK(screen.grid().lineText(LineOffset(0)) == "ok                  ");
+}
+
+TEST_CASE("RIS restores SRM", "[screen]")
+{
+    // hardReset() clears the whole mode register, and a *reset* SRM means local echo is ON -- so RIS
+    // leaving it cleared echoed every keystroke on top of the shell's own echo, forever after.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[12l");
+    REQUIRE_FALSE(mock.terminal.isModeEnabled(AnsiMode::SendReceive));
+
+    mock.writeToScreen("\033c"); // RIS
+    CHECK(mock.terminal.isModeEnabled(AnsiMode::SendReceive));
+
+    mock.sendCharSequence("abc");
+    CHECK(screen.grid().lineText(LineOffset(0)) == "     "); // the host echoes again, not us
+}
+
+TEST_CASE("A hard reset leaves VT52", "[screen]")
+{
+    // VT52 has no ANSI grammar, so `ESC <` is the only sequence that leaves it -- not even RIS gets
+    // through, as the section below pins. A program that dies in VT52 therefore leaves a terminal that
+    // nothing the host sends can recover, and the user's Reset action (which calls hardReset() under the
+    // lock, @see TerminalSession::operator()(actions::ClearHistoryAndReset)) is the only way out. It must
+    // restore the ANSI parser, and restore the configured level while it is at it.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[?2l"); // DECANM reset: enter VT52
+    REQUIRE(mock.terminal.isVT52Mode());
+
+    // RIS cannot do it: there is no RIS in the VT52 grammar, so the sequence never reaches hardReset().
+    mock.writeToScreen("\033c");
+    REQUIRE(mock.terminal.isVT52Mode());
+
+    crispy::locked(mock.terminal, [&]() { mock.terminal.hardReset(); });
+    CHECK_FALSE(mock.terminal.isVT52Mode());
+
+    // Unlike `ESC <`, which lands at VT100, RIS restores the level the terminal was configured with.
+    CHECK(mock.terminal.operatingLevel() == VTType::VT525);
+
+    // And the ANSI grammar answers again.
+    mock.writeToScreen("\033[3;4H");
+    CHECK(screen.cursor().position == CellLocation { LineOffset(2), ColumnOffset(3) });
+}
+
 TEST_CASE("DECRQM answers for a mode it knows but can never turn on", "[screen]")
 {
     // 0 says "I have never heard of this mode"; 4 says "I know exactly what you mean, and it can never

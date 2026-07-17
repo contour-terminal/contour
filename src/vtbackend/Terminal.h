@@ -767,6 +767,25 @@ class Terminal
     /// Writes a given VT-sequence to screen.
     void writeToScreen(std::string_view vtStream);
 
+    /// Echoes @p bytes onto our own screen, as SRM (reset) asks for.
+    ///
+    /// The bytes cannot always be parsed on the spot: flushInput() is also reached from *inside* the
+    /// parser, by every sequence handler that replies, and the parser is not safe to re-enter. Those
+    /// bytes are deferred to processPendingLocalEcho() instead, which runs once the parse has unwound.
+    /// This is what xterm does with its deferred area. @see Terminal::flushInput().
+    void echoLocally(std::string_view bytes);
+
+    /// Parses the local echo that echoLocally() deferred while the parser was running.
+    ///
+    /// Requires _stateMutex to be held and the parser to not be running on this thread.
+    void processPendingLocalEcho();
+
+    /// Parses @p vtStream into the current screen, splitting it across PTY buffer objects as needed.
+    ///
+    /// Requires _stateMutex to be held. Marks the parser as running for as long as it is on the stack,
+    /// so that a reply issued from a sequence handler defers its echo rather than re-entering here.
+    void parseFragmentChunked(std::string_view vtStream);
+
     /// Writes a given VT-sequence to screen - but without acquiring the lock (must be already acquired).
     void writeToScreenInternal(std::string_view vtStream);
 
@@ -1940,6 +1959,10 @@ class Terminal
     std::unordered_map<int, std::string> _macros;
     std::queue<std::string> _pendingMacroInvocations;
     int _macroRecursionDepth = 0;
+
+    /// Local echo (SRM, reset) that was produced while the parser was running, and so could not be
+    /// parsed on the spot. Written and drained only under _stateMutex. @see echoLocally().
+    std::string _pendingLocalEcho;
 
     std::unordered_map<int, std::string> _userDefinedKeys;
     bool _udkLocked = false;

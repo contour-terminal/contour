@@ -55,6 +55,34 @@ namespace vtbackend
 
 namespace // {{{ helpers
 {
+    /// Non-zero while this thread is inside VTParser::parseFragment().
+    ///
+    /// The parser is a state machine that is not safe to re-enter. A sequence handler that replies
+    /// reaches Terminal::flushInput() (Screen::reportColorPaletteUpdate(), Screen::replyGipStatus(),
+    /// ... all reply and flush), and with SRM reset that echoes -- which parses. Parsing there would
+    /// clobber the state machine half-way through the sequence being dispatched, and would take the
+    /// non-recursive _stateMutex that writeToScreen() already holds. xterm guards the identical hazard
+    /// with ParseState::check_recur and defers the bytes instead -- "Defer parsing when parser is
+    /// already running as the parser is not safe to reenter" (xterm-406, charproc.c, doparsing()).
+    ///
+    /// Thread-local rather than a member because the question is "is *this thread* parsing": a GUI
+    /// thread echoing a keystroke while the parser thread happens to be parsing must echo, not defer.
+    ///
+    /// @see Terminal::echoLocally(), Terminal::processPendingLocalEcho().
+    thread_local int tlParseDepth = 0;
+
+    /// Marks this thread as being inside the VT parser for as long as it is alive.
+    struct ParseDepthGuard
+    {
+        ParseDepthGuard() noexcept { ++tlParseDepth; }
+        ~ParseDepthGuard() { --tlParseDepth; }
+
+        ParseDepthGuard(ParseDepthGuard const&) = delete;
+        ParseDepthGuard& operator=(ParseDepthGuard const&) = delete;
+        ParseDepthGuard(ParseDepthGuard&&) = delete;
+        ParseDepthGuard& operator=(ParseDepthGuard&&) = delete;
+    };
+
     std::optional<std::string> resolveExistingLocalPath(std::string const& cwd,
                                                         std::string const& home,
                                                         std::string const& match)
@@ -204,6 +232,12 @@ Terminal::Terminal(Events& eventListener,
         static_cast<unsigned>(unbox(_settings.mouseWheelScrollMultiplier)));
 
     // TODO(should be this instead?): hardReset();
+
+    // SRM, set: the terminal does *not* echo what it sends -- the host does. This is the default every
+    // VT terminal ships with, and it has to be said out loud: the mode register starts at all zeroes,
+    // and a *reset* SRM means local echo is on. @see flushInput().
+    setMode(AnsiMode::SendReceive, true);
+
     setMode(DECMode::AutoWrap, true);
     setMode(DECMode::AutoRepeat, true);
     setMode(DECMode::SixelCursorNextToGraphic, true);
@@ -358,11 +392,17 @@ bool Terminal::processInputOnce()
         // This is critical to ensure buffer_fragment in TrivialLineBuffer holds
         // the correct buffer reference.
         _parsingBuffer = ptyReadResult->buffer;
-        _parser.parseFragment(buf);
+        {
+            auto const parseGuard = ParseDepthGuard {};
+            _parser.parseFragment(buf);
+        }
         _parsingBuffer.reset();
 
         // Process any macros that were queued by DECINVM during the parse.
         processPendingMacros();
+
+        // Process any local echo (SRM) that a reply deferred during the parse.
+        processPendingLocalEcho();
     }
 
     if (!_modes.enabled(DECMode::BatchedRendering))
@@ -1429,30 +1469,86 @@ void Terminal::flushInput()
     if (_inputGenerator.peek().empty())
         return;
 
+    // Own the bytes before anything is allowed to touch the generator again: peek() returns a view into
+    // InputGenerator::_pendingSequence, and both steps below invalidate it. consume() may clear that
+    // string outright, and the local echo parses these bytes -- a query among them replies, which appends
+    // to that very string and reallocates it, leaving the view dangling. @see echoLocally().
+    auto const input = std::string(_inputGenerator.peek());
+
     // XXX Should be the only location that does write to the PTY's stdin to avoid race conditions.
-    auto const input = _inputGenerator.peek();
     auto const rv = _pty->write(input);
-    if (rv > 0)
-        _inputGenerator.consume(rv);
+    if (rv <= 0)
+        return;
+
+    _inputGenerator.consume(rv);
+
+    // SRM, reset: the terminal echoes everything it sends. This is the "local echo" a host that does not
+    // echo for itself relies on, and it is off by default -- SRM is set, and the host echoes.
+    //
+    // Echoed here, at the one point where anything reaches the host, which is also where xterm echoes
+    // (unparseputc()). That means a *reply* is echoed too, which looks surprising until you remember what
+    // the mode says: it is about what the terminal sends, not about what the user typed.
+    //
+    // Echoed *after* the send, and only as much as was actually sent: echoing can itself produce a reply,
+    // whose flush would re-send anything still pending here.
+    if (!isModeEnabled(AnsiMode::SendReceive))
+        echoLocally(std::string_view(input).substr(0, static_cast<size_t>(rv)));
+}
+
+void Terminal::echoLocally(std::string_view bytes)
+{
+    if (bytes.empty())
+        return;
+
+    if (tlParseDepth > 0)
+    {
+        // The parser is running on this thread and is not safe to re-enter, so hand the bytes to the
+        // barrier that runs once it has unwound. _pendingLocalEcho is only ever touched from inside a
+        // parse or from the drain that follows it, both under _stateMutex.
+        _pendingLocalEcho += bytes;
+        return;
+    }
+
+    writeToScreen(bytes);
+}
+
+void Terminal::processPendingLocalEcho()
+{
+    // A drain step parses, and parsing can reply, and a reply flushes and thus echoes again -- which
+    // lands back in _pendingLocalEcho, because parseFragmentChunked() holds the parse depth above zero.
+    // Loop until it stops growing, as xterm's main parse loop does with its deferred area.
+    while (!_pendingLocalEcho.empty())
+    {
+        auto const bytes = std::exchange(_pendingLocalEcho, std::string {});
+        parseFragmentChunked(bytes);
+    }
+}
+
+void Terminal::parseFragmentChunked(string_view vtStream)
+{
+    auto const parseGuard = ParseDepthGuard {};
+
+    while (!vtStream.empty())
+    {
+        if (_currentPtyBuffer->bytesAvailable() < 64 && _currentPtyBuffer->bytesAvailable() < vtStream.size())
+            _currentPtyBuffer = _ptyBufferPool.allocateBufferObject();
+        auto const chunk = vtStream.substr(0, std::min(vtStream.size(), _currentPtyBuffer->bytesAvailable()));
+        vtStream.remove_prefix(chunk.size());
+        // Set parsingBuffer to ensure buffer_fragment holds the correct buffer reference.
+        _parsingBuffer = _currentPtyBuffer;
+        _parser.parseFragment(_currentPtyBuffer->writeAtEnd(chunk));
+        _parsingBuffer.reset();
+    }
 }
 
 void Terminal::writeToScreen(string_view vtStream)
 {
     {
         auto const l = std::lock_guard { *this };
-        while (!vtStream.empty())
-        {
-            if (_currentPtyBuffer->bytesAvailable() < 64
-                && _currentPtyBuffer->bytesAvailable() < vtStream.size())
-                _currentPtyBuffer = _ptyBufferPool.allocateBufferObject();
-            auto const chunk =
-                vtStream.substr(0, std::min(vtStream.size(), _currentPtyBuffer->bytesAvailable()));
-            vtStream.remove_prefix(chunk.size());
-            // Set parsingBuffer to ensure buffer_fragment holds the correct buffer reference.
-            _parsingBuffer = _currentPtyBuffer;
-            _parser.parseFragment(_currentPtyBuffer->writeAtEnd(chunk));
-            _parsingBuffer.reset();
-        }
+        parseFragmentChunked(vtStream);
+
+        // Any local echo the parse deferred (a sequence that replied) is safe to parse now.
+        processPendingLocalEcho();
     }
 
     if (!_modes.enabled(DECMode::BatchedRendering))
@@ -3001,7 +3097,13 @@ void Terminal::softReset()
     // the one they started with. Restored, like TextReflow just above it, rather than cleared.
     setMode(DECMode::AutoWrap, true);
 
-    setMode(AnsiMode::Insert, false);                  // IRM
+    setMode(AnsiMode::Insert, false); // IRM
+
+    // SRM, set: the terminal does *not* echo what it sends. This is the default every VT terminal ships
+    // with -- the host echoes -- and it must be set explicitly, because the mode register starts at all
+    // zeroes and a reset SRM means local echo is on.
+    setMode(AnsiMode::SendReceive, true);
+
     setMode(DECMode::UseApplicationCursorKeys, false); // DECCKM (Cursor keys)
 
     // Reverse wraparound, both forms. A soft reset puts an xterm private mode back to the value the
@@ -3094,7 +3196,24 @@ void Terminal::hardReset()
         requestWindowResize(PageSize { pageSize().lines, ColumnCount(80) });
     }
 
+    // RIS leaves VT52 and returns to the configured conformance level. VT52 has no ANSI grammar, so
+    // `ESC <` is the only sequence that can leave it: a program that dies in VT52 leaves a terminal that
+    // nothing the host sends can recover, and a hard reset -- what the user's Reset action reaches -- must
+    // therefore restore the ANSI parser.
+    //
+    // The parser is left directly rather than through setVT52Mode(false), because that carries the `ESC <`
+    // rule of landing at VT100 (VT52 being level-less, it has no level to restore). RIS is a reset to the
+    // power-on state, so it restores the level the terminal was configured with, undoing any DECSCL.
+    _parser.setVT52Mode(false);
+    setOperatingLevel(_factorySettings.terminalId);
+
     _modes = Modes {};
+
+    // SRM, set: the terminal does *not* echo what it sends -- the host does. The mode register was just
+    // cleared to all zeroes, and a *reset* SRM means local echo is on, so leaving it here would echo every
+    // keystroke on top of the shell's own echo for the rest of the session. @see flushInput(), softReset().
+    setMode(AnsiMode::SendReceive, true);
+
     setMode(DECMode::AutoWrap, true);
     setMode(DECMode::AutoRepeat, true);
     setMode(DECMode::SixelCursorNextToGraphic, true);
@@ -3153,6 +3272,7 @@ void Terminal::hardReset()
     setStatusDisplay(_factorySettings.statusDisplayType);
 
     _inputGenerator.reset();
+    _pendingLocalEcho.clear();
 }
 
 void Terminal::forceRedraw(std::function<void()> const& artificialSleep)
@@ -3450,7 +3570,10 @@ void Terminal::processPendingMacros()
         // can reference it through the buffer management system.
         auto const chunk = _currentPtyBuffer->writeAtEnd(std::string_view { body });
         _parsingBuffer = _currentPtyBuffer;
-        _parser.parseFragment(chunk);
+        {
+            auto const parseGuard = ParseDepthGuard {};
+            _parser.parseFragment(chunk);
+        }
         _parsingBuffer.reset();
 
         --_macroRecursionDepth;
@@ -4198,6 +4321,10 @@ std::string to_string(DECMode mode)
         case DECMode::SixelCursorNextToGraphic: return "SixelCursorNextToGraphic";
         case DECMode::ReportColorPaletteUpdated: return "ReportColorPaletteUpdated";
         case DECMode::SemanticBlockProtocol: return "SemanticBlockProtocol";
+        case DECMode::PrintFormFeed: return "PrintFormFeed";
+        case DECMode::HebrewKeyboardMapping: return "HebrewKeyboardMapping";
+        case DECMode::NationalReplacementCharacterSet: return "NationalReplacementCharacterSet";
+        case DECMode::HorizontalCursorCoupling: return "HorizontalCursorCoupling";
         case DECMode::RightToLeftMode: return "RightToLeftMode";
         case DECMode::HebrewEncodingMode: return "HebrewEncodingMode";
         case DECMode::GreekKeyboardMapping: return "GreekKeyboardMapping";
