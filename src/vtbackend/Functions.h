@@ -696,7 +696,7 @@ constexpr inline auto VT52_ANSI       = detail::VT52('<', 0, 0, { .mnemonic = "V
 constexpr inline auto ArgsMax = 127; // this is the maximum number that fits into 7 bits.
 
 // CSI functions
-constexpr inline auto ANSIDSR     = detail::CSI(std::nullopt, 1, 1, std::nullopt, 'n', VTType::VT100, documentation::DSR);
+constexpr inline auto ANSIDSR     = detail::CSI(std::nullopt, 1, 1, std::nullopt, 'n', VTType::VT100, documentation::ANSIDSR);
 constexpr inline auto ANSISYSSC   = detail::CSI(std::nullopt, 0, 0, std::nullopt, 'u', VTType::VT100, documentation::ANSISYSSC);
 constexpr inline auto CBT         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'Z', VTType::VT100, documentation::CBT);
 constexpr inline auto CHA         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'G', VTType::VT100, documentation::CHA);
