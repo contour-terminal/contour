@@ -149,6 +149,7 @@ if(LIBTERMINAL_TESTING)
         HintModeHandler_test.cpp
         Line_test.cpp
         MessageParser_test.cpp
+        RectangularAreaChecksum_test.cpp
         Screen_test.cpp
         Image_test.cpp
         Sequence_test.cpp

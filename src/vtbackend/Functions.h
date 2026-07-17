@@ -193,6 +193,7 @@ constexpr inline auto DECRARA = FunctionDocumentation { .mnemonic = "DECRARA", .
 constexpr inline auto DECSACE = FunctionDocumentation { .mnemonic = "DECSACE", .comment = "Select Attribute Change Extent" };
 constexpr inline auto DECRQCRA = FunctionDocumentation { .mnemonic = "DECRQCRA", .comment = "Request Checksum of Rectangular Area" };
 constexpr inline auto XTCHECKSUM = FunctionDocumentation { .mnemonic = "XTCHECKSUM", .comment = "Select checksum extension" };
+constexpr inline auto DECRQCRA = FunctionDocumentation { .mnemonic = "DECRQCRA", .comment = "Request Checksum of Rectangular Area", .parameters = "Pid;Pp;Pt;Pl;Pb;Pr", .description = "Reports a 16-bit checksum of the characters in the given rectangle, as `DCS Pid ! ~ xxxx ST`. Pid is echoed back to correlate the answer with the request, Pp is the page (Contour has a single page). Pt;Pl;Pb;Pr is the rectangle, defaulting to the whole page.\n\nBy default the value reported is the two's complement of the sum of the cells' character values, with the video attributes folded in and cells that were never written to left out entirely. XTCHECKSUM selects deviations from that.", .examples = "CSI 1 ; 1 ; 1 ; 1 ; 1 ; 1 * y" };
 constexpr inline auto SL = FunctionDocumentation { .mnemonic = "SL", .comment = "Scroll Left" };
 constexpr inline auto SR = FunctionDocumentation { .mnemonic = "SR", .comment = "Scroll Right" };
 constexpr inline auto MODIFYOTHERKEYS = FunctionDocumentation { .mnemonic = "MODIFYOTHERKEYS", .comment = "Modify Other Keys mode" };
@@ -618,7 +619,7 @@ constexpr inline auto DECIC       = detail::CSI(std::nullopt, 0, 1, '\'', '}', V
 constexpr inline auto DECINVM     = detail::CSI(std::nullopt, 0, 1, '*', 'z', VTType::VT420, documentation::DECINVM);
 constexpr inline auto DECPS       = detail::CSI(std::nullopt, 3, 18, ',', '~', VTType::VT520, documentation::DECPS);
 constexpr inline auto DECRARA     = detail::CSI(std::nullopt, 5, ArgsMax, '$', 't', VTType::VT420, documentation::DECRARA);
-constexpr inline auto DECRQCRA    = detail::CSI(std::nullopt, 2, 6, '$', 'y', VTType::VT420, documentation::DECRQCRA);
+constexpr inline auto DECRQCRA    = detail::CSI(std::nullopt, 0, 6, '*', 'y', VTType::VT420, documentation::DECRQCRA);
 constexpr inline auto DECSACE     = detail::CSI(std::nullopt, 0, 1, '*', 'x', VTType::VT420, documentation::DECSACE);
 constexpr inline auto DECRM       = detail::CSI('?', 1, ArgsMax, std::nullopt, 'l', VTType::VT100, documentation::DECRM);
 constexpr inline auto DECRQM      = detail::CSI('?', 1, 1, '$', 'p', VTType::VT100, documentation::DECRQM);

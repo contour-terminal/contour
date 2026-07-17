@@ -3,6 +3,7 @@
 #include <vtbackend/DesktopNotification.h>
 #include <vtbackend/InputGenerator.h>
 #include <vtbackend/MessageParser.h>
+#include <vtbackend/RectangularAreaChecksum.h>
 #include <vtbackend/Screen.h>
 #include <vtbackend/SixelParser.h>
 #include <vtbackend/SoAClusterWriter.h>
@@ -4551,25 +4552,38 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             requestAnsiMode(seq.param(0));
             return ApplyResult::Ok;
         case DECRQCRA: {
-            // CSI Pid ; Pp ; Pt ; Pl ; Pb ; Pr $ y
+            // CSI Pid ; Pp ; Pt ; Pl ; Pb ; Pr * y
             auto const requestId = seq.param_or(0, 0);
-            // Pp is page number (ignored, we have one page)
-            auto const top = LineOffset(std::max(seq.param_or(2, 1), 1) - 1);
-            auto const left = ColumnOffset(std::max(seq.param_or(3, 1), 1) - 1);
-            auto const bottom =
-                LineOffset(std::min(seq.param_or(4, *pageSize().lines), *pageSize().lines) - 1);
-            auto const right =
-                ColumnOffset(std::min(seq.param_or(5, *pageSize().columns), *pageSize().columns) - 1);
-            uint16_t checksum = 0;
-            for (auto row = top; row <= bottom; ++row)
-                for (auto column = left; column <= right; ++column)
+            // Pp is the page number; Contour has a single page, so it is echoed and ignored. The
+            // rectangle (Pt;Pl;Pb;Pr, at parameter index 2) is read like every other rectangular-area
+            // sequence: one-based, relative to the origin -- so in origin mode (DECOM) it is measured
+            // from the scroll region's top-left, not the page's -- and clamped to the page edge.
+            auto const area = impl::readRectangularArea(seq, 2, origin(), pageSize());
+            auto const top = LineOffset::cast_from(area.top);
+            auto const left = ColumnOffset::cast_from(area.left);
+            auto const bottom = LineOffset::cast_from(area.bottom);
+            auto const right = ColumnOffset::cast_from(area.right);
+
+            // A cell holds at most one base codepoint plus its combining marks; sized generously so
+            // no realistic grapheme cluster is truncated, and without allocating per cell.
+            auto codepoints = std::array<char32_t, 16> {};
+            for (auto const row: std::views::iota(*top, *bottom + 1))
+            {
+                for (auto const column: std::views::iota(*left, *right + 1))
                 {
-                    auto const& cell = at(row, column);
-                    auto const text = cell.toUtf8();
-                    for (auto const ch: text)
-                        checksum += static_cast<uint16_t>(static_cast<uint8_t>(ch));
+                    auto const cell = at(LineOffset(row), ColumnOffset(column));
+                    auto const count = std::min(cell.codepointCount(), codepoints.size());
+                    for (auto const i: std::views::iota(size_t { 0 }, count))
+                        codepoints[i] = cell.codepoint(i);
+                    checksum.addCell(ChecksumCell {
+                        .codepoints = std::span { codepoints.data(), count },
+                        .flags = cell.flags(),
+                    });
                 }
-            reply("\033P{}!~{:04X}\033\\", requestId, checksum);
+                checksum.endOfLine();
+            }
+
+            reply("\033P{}!~{:04X}\033\\", requestId, checksum.result());
             return ApplyResult::Ok;
         }
         case DECRQPSR: return impl::DECRQPSR(seq, *this);

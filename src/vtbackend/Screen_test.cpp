@@ -2448,6 +2448,32 @@ TEST_CASE("Index_at_bottom_margin", "[screen]")
     SECTION("cursor at bottom margin and full horizontal margins")
     {
         screen.moveCursorTo(LineOffset { 3 }, ColumnOffset { 1 });
+TEST_CASE("DECRQCRA.honors_origin_mode", "[screen]")
+{
+    // In origin mode (DECOM) a rectangular-area request is measured from the scroll region's top-left,
+    // not the page's, so DECRQCRA(1,1) reads the origin cell rather than the absolute top-left.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(10) } };
+
+    mock.writeToScreen("\033[5;5HX"); // CUP(5,5) + 'X'
+    mock.writeToScreen("\033[5;7r");  // DECSTBM 5;7
+    mock.writeToScreen("\033[?69h");  // DECSET DECLRMM
+    mock.writeToScreen("\033[5;7s");  // DECSLRM 5;7 -> origin at (5,5)
+    mock.writeToScreen("\033[?6h");   // DECSET DECOM
+
+    mock.resetReplyData();
+    mock.writeToScreen("\033[1;1;1;1;1;1*y"); // DECRQCRA rect (1,1,1,1), origin-relative -> cell (5,5)='X'
+    mock.terminal.flushInput();
+    auto const originReply = mock.replyData();
+    CHECK_FALSE(originReply.empty());
+
+    // The identical request outside origin mode addresses absolute (1,1), a blank cell -> other checksum.
+    mock.writeToScreen("\033[?6l"); // DECRESET DECOM
+    mock.resetReplyData();
+    mock.writeToScreen("\033[1;1;1;1;1;1*y");
+    mock.terminal.flushInput();
+    CHECK(originReply != mock.replyData());
+}
+
         screen.index();
         logScreenText(screen, "IND while cursor at bottom margin");
         REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(1) });
@@ -5850,6 +5876,67 @@ TEST_CASE("DECALN: page that wraps the history ring is still filled in bounds", 
 }
 
 // }}} DECALN Tests
+
+
+
+TEST_CASE("DECRQCRA: reports the checksum of a rectangular area", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+
+    auto const request = [&](std::string_view sequence) -> std::string {
+        mock.mockPty().stdinBuffer().clear();
+        mock.writeToScreen(sequence);
+        mock.terminal.flushInput();
+        return mock.replyData();
+    };
+
+    mock.writeToScreen("ab");
+
+    SECTION("the final byte is `* y`, not `$ y`")
+    {
+        // Regression. DECRQCRA was registered with a '$' intermediate -- which is DECRPM's, a reply
+        // form no terminal ever parses -- so the implementation was unreachable: every application
+        // asking for a checksum, esctest included, waited for an answer that could not come.
+        CHECK(request("\033[1;1;1;1;1;1*y") == "\033P1!~FF9F\033\\");
+
+        // And the old spelling is not DECRQCRA, so it must draw no reply at all.
+        CHECK(request("\033[1;1;1;1;1;1$y").empty());
+    }
+
+    SECTION("the request id is echoed back, so answers can be correlated")
+    {
+        CHECK(request("\033[42;1;1;1;1;1*y") == "\033P42!~FF9F\033\\");
+    }
+
+    SECTION("a rectangle spanning several cells sums them")
+    {
+        CHECK(request("\033[1;1;1;1;1;2*y") == "\033P1!~FF3D\033\\"); // -( 'a' + 'b' )
+    }
+
+    SECTION("an omitted rectangle covers the whole page")
+    {
+        // The two written cells count; the rest of the page was never written to and drops out.
+        CHECK(request("\033[1*y") == "\033P1!~FF3D\033\\");
+    }
+
+    SECTION("cells never written to contribute nothing")
+    {
+        CHECK(request("\033[1;1;3;1;3;5*y") == "\033P1!~0000\033\\");
+    }
+
+    SECTION("a written space is not an empty cell")
+    {
+        mock.writeToScreen("\033[2;1H "); // an explicit space on row 2
+        CHECK(request("\033[1;1;2;1;2;1*y") == "\033P1!~FFE0\033\\");
+    }
+
+    SECTION("video attributes are folded into the value")
+    {
+        mock.writeToScreen("\033[2;1H\033[1ma");                      // bold 'a'
+        CHECK(request("\033[1;1;2;1;2;1*y") == "\033P1!~FF1F\033\\"); // -( 'a' + 0x80 )
+    }
+}
+
 
 // {{{ One-based parameters: omitted, empty and zero all mean "the default"
 
