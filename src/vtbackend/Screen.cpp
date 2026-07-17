@@ -708,14 +708,20 @@ void Screen::writeTextEnd()
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
     // Do not log individual characters, as we already logged the whole string above
-    if (_pendingCharTraceLog.empty())
-        return;
+    if (!_pendingCharTraceLog.empty())
+    {
+        if (vtTraceSequenceLog)
+            vtTraceSequenceLog()("[{}] text: \"{}\"", _name, _pendingCharTraceLog);
 
-    if (vtTraceSequenceLog)
-        vtTraceSequenceLog()("[{}] text: \"{}\"", _name, _pendingCharTraceLog);
-
-    _pendingCharTraceLog.clear();
+        _pendingCharTraceLog.clear();
+    }
 #endif
+
+    // Writing text wraps lines and scrolls the page, so a text run is held to the same invariants a
+    // sequence is. Verified once per run rather than once per codepoint: the invariants describe the
+    // page, not any single cell, and checking them per codepoint would make a debug build unusable.
+    // Compiled out unless CONTOUR_VERIFY_STATE.
+    _terminal->verifyState();
 }
 
 void Screen::writeTextFromExternal(std::string_view text)
@@ -4354,6 +4360,11 @@ void Screen::executeControlCode(char controlCode)
             //     VTParserLog()("Unsupported C0 sequence: {}", crispy::escape((uint8_t) controlCode));
             break;
     }
+
+    // A control code moves the cursor and scrolls the page just as a sequence does -- LF below a
+    // scrolling region once walked the cursor clean off the page -- so it is held to the same
+    // invariants. Compiled out unless CONTOUR_VERIFY_STATE.
+    _terminal->verifyState();
 }
 
 void Screen::saveCursor()
@@ -4850,19 +4861,20 @@ void Screen::applyAndLog(Function const& function, Sequence const& seq)
     auto const result = apply(function, seq);
     switch (result)
     {
-        case ApplyResult::Invalid: {
-            vtParserLog()("Invalid VT sequence: {}", seq);
-            break;
-        }
-        case ApplyResult::Unsupported: {
-            vtParserLog()("Unsupported VT sequence: {}", seq);
-            break;
-        }
-        case ApplyResult::Ok: {
-            _terminal->verifyState();
-            break;
-        }
+        case ApplyResult::Invalid: vtParserLog()("Invalid VT sequence: {}", seq); break;
+        case ApplyResult::Unsupported: vtParserLog()("Unsupported VT sequence: {}", seq); break;
+        case ApplyResult::Ok: break;
     }
+
+    // Verify after *every* sequence, not only after one that reported Ok.
+    //
+    // A handler validates its parameters as it goes, so a sequence can mutate the screen and only then
+    // decide it is Unsupported or Invalid -- and such a sequence used to escape the check entirely. The
+    // damage it did then surfaced later, on whichever innocent sequence happened to come next, which is
+    // exactly how a DECSNLS that resized the wrong axis got blamed on a DSR that cannot move a cursor.
+    //
+    // Compiled out unless CONTOUR_VERIFY_STATE, so it costs a release build nothing.
+    _terminal->verifyState();
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
