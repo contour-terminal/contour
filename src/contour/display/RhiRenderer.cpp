@@ -709,8 +709,7 @@ void RhiRenderer::executeCreateImageTexture(QRhiResourceUpdateBatch& updates,
     }
 
     auto const pixelSize = QSize(unbox<int>(param.size.width), unbox<int>(param.size.height));
-    auto resources =
-        ImageTextureResources { .texture = {}, .swapchain = {}, .offscreen = {}, .size = param.size };
+    auto resources = ImageTextureResources { .texture = {}, .swapchain = {}, .offscreen = {} };
 
     resources.texture.reset(_rhi->newTexture(QRhiTexture::RGBA8, pixelSize, 1, {}));
     if (!resources.texture->create())

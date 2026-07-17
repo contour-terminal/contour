@@ -591,7 +591,6 @@ class RhiRenderer final:
         QRhiResourcePtr<QRhiTexture> texture;
         ImageShaderResources swapchain; ///< Bound when drawing into the swapchain.
         ImageShaderResources offscreen; ///< Bound when replaying into the screenshot target.
-        vtbackend::ImageSize size;
     };
     std::unordered_map<uint32_t, ImageTextureResources> _imageTextures;
 

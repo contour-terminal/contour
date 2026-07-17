@@ -168,6 +168,25 @@ namespace
     {
         return action == SixelParser::Action::Ignore || action == SixelParser::Action::Undefined;
     }
+
+    /// @return true if every state treats all ten digits identically.
+    ///
+    /// What licenses the digit-run fast path in parse(): it consults the table for the FIRST digit of a
+    /// run and then scans the rest by isDigit() alone, which is only sound while '0'..'9' share one cell
+    /// in every state. A table change that gave one digit its own transition would silently make that
+    /// run take the wrong branch, so it is asserted here rather than left as a comment.
+    consteval bool theHotRunsAreFoldable() noexcept
+    {
+        auto const table = SixelParser::Table::get();
+        return std::ranges::all_of(std::views::iota(size_t { 0 }, SixelParser::StateCount), [&](size_t s) {
+            return std::ranges::all_of(std::views::iota(uint8_t { '1' }, uint8_t { '9' + 1 }),
+                                       [&](uint8_t d) {
+                                           return table.transitions[s][d] == table.transitions[s]['0']
+                                                  && table.events[s][d] == table.events[s]['0'];
+                                       });
+        });
+    }
+    static_assert(theHotRunsAreFoldable(), "The digit-run fast path requires '0'..'9' to share a cell.");
 } // namespace
 
 void SixelParser::parse(char value)
