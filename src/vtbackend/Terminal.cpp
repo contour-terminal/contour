@@ -2784,6 +2784,31 @@ std::string Terminal::resolvedWindowTitle() const
     return _windowTitle;
 }
 
+std::string Terminal::decodeTitle(std::string_view raw) const
+{
+    // Under SetHex the OSC title argument is a hex string (xterm's title mode 0). A malformed hex string
+    // (odd length or a non-hex digit) leaves fromHexString empty; fall back to the raw bytes then, as
+    // there is nothing better to decode.
+    if (isTitleModeEnabled(TitleModeFeature::SetHex))
+        if (auto decoded = crispy::fromHexString(raw); decoded.has_value())
+            return std::move(*decoded);
+    return std::string { raw };
+}
+
+std::string Terminal::encodeTitleForReport(std::string_view title) const
+{
+    if (!isTitleModeEnabled(TitleModeFeature::QueryHex))
+        return std::string { title };
+
+    // xterm's title mode 1 reports the label as lowercase hexadecimal, one byte at a time (masking to a
+    // byte so high UTF-8 bytes encode as e.g. "c3a9", not a sign-extended value).
+    std::string hex;
+    hex.reserve(title.size() * 2);
+    for (auto const ch: title)
+        hex += std::format("{:02x}", static_cast<unsigned>(static_cast<unsigned char>(ch)));
+    return hex;
+}
+
 void Terminal::setTabName(string_view title)
 {
     // Parser-thread path (SETTABNAME escape sequence, OSC 30): writeToScreen() already holds _stateMutex
@@ -3331,6 +3356,10 @@ void Terminal::hardReset()
         freezeMode(mode, frozen);
 
     _checksumExtension = _settings.checksumExtension; // XTCHECKSUM
+
+    // RIS restores the title modes to their default (xterm resets title_modes only on a full reset, not
+    // on DECSTR). @see resetTitleModes, TitleModeFeature.
+    resetTitleModes();
 
     // Reset all pages.
     for (auto& page: _pages)

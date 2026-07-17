@@ -387,6 +387,33 @@ class Terminal
     void setOperatingLevel(VTType level) noexcept;
     VTType operatingLevel() const noexcept { return _operatingLevel; }
 
+    /// Enables or disables a single xterm title-mode feature (XTSMTITLE / XTRMTITLE).
+    /// @param feature The feature to change.
+    /// @param enabled true to enable, false to disable.
+    void setTitleModeFeature(TitleModeFeature feature, bool enabled) noexcept
+    {
+        _titleModes.set(static_cast<size_t>(feature), enabled);
+    }
+    /// @return Whether the given title-mode feature is currently enabled.
+    [[nodiscard]] bool isTitleModeEnabled(TitleModeFeature feature) const noexcept
+    {
+        return _titleModes.test(static_cast<size_t>(feature));
+    }
+    /// Resets all title-mode features to their default (all disabled), as xterm's DEF_TITLE_MODES.
+    void resetTitleModes() noexcept { _titleModes.reset(); }
+
+    /// Decodes an OSC 0/1/2 title argument per the current title modes: when TitleModeFeature::SetHex is
+    /// enabled the argument is a hex string decoded to raw bytes, otherwise it is used verbatim.
+    /// @param raw The title argument as received.
+    /// @return The decoded title to store.
+    [[nodiscard]] std::string decodeTitle(std::string_view raw) const;
+
+    /// Encodes a title for a query report (`CSI 20 t` / `CSI 21 t`) per the current title modes: when
+    /// TitleModeFeature::QueryHex is enabled the title is hex-encoded (lowercase), otherwise verbatim.
+    /// @param title The stored title.
+    /// @return The title as it should appear in the report.
+    [[nodiscard]] std::string encodeTitleForReport(std::string_view title) const;
+
     /// Enters or leaves VT52 compatibility mode by switching the parser to (or from) the VT52 escape
     /// grammar. Entered by resetting DECANM (`CSI ? 2 l`), left by `ESC <`. Leaving VT52 enters ANSI
     /// mode at the VT100 level (VT52 is level-less, so there is no prior level to restore).
@@ -2068,6 +2095,10 @@ class Terminal
     VTType _terminalId = VTType::VT525;
     VTType _operatingLevel = VTType::VT525;
     ControlTransmissionMode _c1TransmissionMode = ControlTransmissionMode::S7C1T;
+
+    /// xterm title-mode features (XTSMTITLE / XTRMTITLE), one bit per TitleModeFeature. Default is all
+    /// clear (xterm's DEF_TITLE_MODES), i.e. plain UTF-8 title set and query.
+    std::bitset<TitleModeFeatureCount> _titleModes {};
 
     std::unordered_map<int, std::string> _macros;
     std::queue<std::string> _pendingMacroInvocations;

@@ -175,6 +175,8 @@ constexpr inline auto VPR = FunctionDocumentation {
 };
 constexpr inline auto WINMANIP = FunctionDocumentation { .mnemonic = "WINMANIP", .comment = "Window Manipulation" };
 constexpr inline auto XTCAPTURE = FunctionDocumentation { .mnemonic = "XTCAPTURE", .comment = "Report screen buffer capture." };
+constexpr inline auto XTSMTITLE = FunctionDocumentation { .mnemonic = "XTSMTITLE", .comment = "Set title mode features (hex/UTF-8 title encoding)." };
+constexpr inline auto XTRMTITLE = FunctionDocumentation { .mnemonic = "XTRMTITLE", .comment = "Reset title mode features (hex/UTF-8 title encoding)." };
 constexpr inline auto XTPOPCOLORS = FunctionDocumentation { .mnemonic = "XTPOPCOLORS", .comment = "Pops the color palette from the palette's saved-stack." };
 constexpr inline auto XTPUSHCOLORS = FunctionDocumentation { .mnemonic = "XTPUSHCOLORS", .comment = "Pushes the color palette onto the palette's saved-stack." };
 constexpr inline auto SGRRESTORE = FunctionDocumentation { .mnemonic = "SGRRESTORE", .comment = "Restores video attributes." };
@@ -784,7 +786,14 @@ constexpr inline auto TBC         = detail::CSI(std::nullopt, 0, 1, std::nullopt
 constexpr inline auto VPA         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'd', VTType::VT100, documentation::VPA);
 constexpr inline auto VPR         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'e', VTType::VT100, documentation::VPR);
 constexpr inline auto WINMANIP    = detail::CSI(std::nullopt, 1, 3, std::nullopt, 't', VTExtension::XTerm, documentation::WINMANIP);
-constexpr inline auto XTCAPTURE   = detail::CSI('>', 0, 2, std::nullopt, 't', VTExtension::Contour, documentation::XTCAPTURE);
+// XTCAPTURE is a Contour extension. It historically used the bare `CSI > Ps ; Ps t`, which is xterm's
+// standard XTSMTITLE opcode -- a genuine collision. XTSMTITLE (below) now owns the bare form, and the
+// capture is namespaced by a ',' intermediate (which XTSMTITLE never carries): `CSI > Ps ; Ps , t`.
+constexpr inline auto XTCAPTURE   = detail::CSI('>', 0, 2, ',', 't', VTExtension::Contour, documentation::XTCAPTURE);
+// XTSMTITLE / XTRMTITLE: xterm Set/Reset Title Mode features. Each parameter (0..3) is a title-mode
+// feature; no parameter resets all title modes to their default. @see TitleModeFeature.
+constexpr inline auto XTSMTITLE   = detail::CSI('>', 0, ArgsMax, std::nullopt, 't', VTExtension::XTerm, documentation::XTSMTITLE);
+constexpr inline auto XTRMTITLE   = detail::CSI('>', 0, ArgsMax, std::nullopt, 'T', VTExtension::XTerm, documentation::XTRMTITLE);
 constexpr inline auto XTPOPCOLORS    = detail::CSI(std::nullopt, 0, ArgsMax, '#', 'Q', VTExtension::XTerm, documentation::XTPOPCOLORS);
 constexpr inline auto XTPUSHCOLORS   = detail::CSI(std::nullopt, 0, ArgsMax, '#', 'P', VTExtension::XTerm, documentation::XTPUSHCOLORS);
 constexpr inline auto SGRRESTORE  = detail::CSI(std::nullopt, 0, 0, '#', '}', VTExtension::XTerm, documentation:: SGRRESTORE);
@@ -958,6 +967,8 @@ constexpr static auto allFunctionsArray() noexcept
         // CSI
         ANSISYSSC,
         XTCAPTURE,
+        XTSMTITLE,
+        XTRMTITLE,
         CBT,
         CHA,
         CHT,

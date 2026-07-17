@@ -4052,6 +4052,28 @@ namespace impl
             return ApplyResult::Ok;
         }
 
+        ApplyResult setTitleModes(Sequence const& seq, Terminal& terminal, bool enable)
+        {
+            // XTSMTITLE (`CSI > Ps t`, enable) and XTRMTITLE (`CSI > Ps T`, disable): each parameter names
+            // a title-mode feature (0..3); an out-of-range parameter is ignored, matching xterm's
+            // ValidTitleMode() guard. With no parameters at all, xterm resets every title mode to its
+            // default (all disabled) -- for XTSMTITLE and XTRMTITLE alike.
+            if (seq.parameterCount() == 0)
+            {
+                terminal.resetTitleModes();
+                return ApplyResult::Ok;
+            }
+
+            for (auto const i: std::views::iota(size_t { 0 }, seq.parameterCount()))
+            {
+                auto const value = seq.param<unsigned>(i);
+                if (value < TitleModeFeatureCount)
+                    terminal.setTitleModeFeature(static_cast<TitleModeFeature>(value), enable);
+            }
+
+            return ApplyResult::Ok;
+        }
+
         ApplyResult HYPERLINK(Sequence const& seq, Screen& screen)
         {
             auto const& value = seq.intermediateCharacters();
@@ -4191,8 +4213,11 @@ namespace impl
                     terminal.primaryScreen().requestCharacterSize(RequestPixelSize::ScreenArea);
                     return ApplyResult::Ok;
                 case 20: // Report the icon's title, as OSC L <title> ST.
+                    // The title is hex-encoded when the QueryHex title mode is active (XTSMTITLE).
+                    terminal.reply("\033]L{}\033\\", terminal.encodeTitleForReport(terminal.iconTitle()));
                     return ApplyResult::Ok;
                 case 21: // Report the window's title, as OSC l <title> ST.
+                    terminal.reply("\033]l{}\033\\", terminal.encodeTitleForReport(terminal.windowTitle()));
                     return ApplyResult::Ok;
                 case 22: // XTPUSHTITLE
                     if (auto const kinds = titleKindsOf(seq.param_or(1, 0)); kinds.has_value())
@@ -5656,12 +5681,18 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             return ApplyResult::Ok;
         }
         // OSC
-        case SETTITLE:
-            //(not supported) ChangeIconTitle(seq.intermediateCharacters());
-            _terminal->setWindowTitle(seq.intermediateCharacters());
+        case SETTITLE: {
+            // OSC 0 sets *both* titles; OSC 1 the icon's alone, OSC 2 the window's alone. The argument is
+            // hex-decoded first when the SetHex title mode is active (XTSMTITLE). @see Terminal::decodeTitle.
+            auto const title = _terminal->decodeTitle(seq.intermediateCharacters());
+            _terminal->setIconTitle(title);
+            _terminal->setWindowTitle(title);
             return ApplyResult::Ok;
-        case SETICON: return ApplyResult::Ok; // NB: Silently ignore!
-        case SETWINTITLE: _terminal->setWindowTitle(seq.intermediateCharacters()); break;
+        }
+        case SETICON: _terminal->setIconTitle(_terminal->decodeTitle(seq.intermediateCharacters())); break;
+        case SETWINTITLE:
+            _terminal->setWindowTitle(_terminal->decodeTitle(seq.intermediateCharacters()));
+            break;
         case SETTABNAME: _terminal->setTabName(seq.intermediateCharacters()); break;
         case SETXPROP: return ApplyResult::Unsupported;
         case SETCOLPAL: return impl::setOrRequestColorPalette(seq, *_terminal, impl::IndexedColorSelector);
@@ -5672,6 +5703,8 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case SETCWD: return impl::SETCWD(seq, *this);
         case HYPERLINK: return impl::HYPERLINK(seq, *this);
         case XTCAPTURE: return impl::CAPTURE(seq, *_terminal);
+        case XTSMTITLE: return impl::setTitleModes(seq, *_terminal, true);
+        case XTRMTITLE: return impl::setTitleModes(seq, *_terminal, false);
         case COLORFG:
             return impl::setOrRequestDynamicColor(seq, *this, DynamicColorName::DefaultForegroundColor);
         case COLORBG:

@@ -6662,15 +6662,88 @@ TEST_CASE("DECRQCRA answers regardless of the operating level", "[screen]")
 
 // }}} DECSCL (Set Conformance Level) Tests
 
+// {{{ XTSMTITLE / XTRMTITLE (Set/Reset Title Modes) Tests
+
+TEST_CASE("XTSMTITLE: hex/UTF-8 title set and query modes", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
-    // Define macro 1 that writes "B"
-    mock.writeToScreen("\033P1;0;0!zB\033\\");
-    mock.terminal.flushInput();
-    // Define macro 0 that writes "A", invokes macro 1, then writes "C"
-    mock.writeToScreen("\033P0;0;0!zA\033[1*zC\033\\");
-    mock.terminal.flushInput();
-    // Invoke macro 0
+    // Mirrors esctest SMTitleTests. XTSMTITLE (CSI > Ps t) enables and XTRMTITLE (CSI > Ps T) disables
+    // the four title-mode features: 0=set-hex, 1=query-hex, 2=set-utf8, 3=query-utf8.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+
+    SECTION("SetHex + QueryUTF8: a hex OSC argument decodes; the report stays plain")
+    {
+        mock.writeToScreen("\033[>2;1T");        // RM_Title(SET_UTF8, QUERY_HEX): disable
+        mock.writeToScreen("\033[>0;3t");        // SM_Title(SET_HEX, QUERY_UTF8): enable
+        mock.writeToScreen("\033]2;6162\033\\"); // OSC 2: window title = hex "6162" -> "ab"
+        mock.terminal.flushInput();
+        CHECK(mock.terminal.windowTitle() == "ab");
+
+        mock.resetReplyData();
+        mock.writeToScreen("\033[21t"); // report window title
+        mock.terminal.flushInput();
+        CHECK(mock.replyData() == "\033]lab\033\\"); // plain UTF-8
+    }
+
+    SECTION("SetUTF8 + QueryHex: a plain OSC argument is stored; the report is hex")
+    {
+        mock.writeToScreen("\033[>0;3T");      // RM_Title(SET_HEX, QUERY_UTF8): disable
+        mock.writeToScreen("\033[>2;1t");      // SM_Title(SET_UTF8, QUERY_HEX): enable
+        mock.writeToScreen("\033]2;ab\033\\"); // OSC 2: window title = "ab" (plain)
+        mock.terminal.flushInput();
+        CHECK(mock.terminal.windowTitle() == "ab");
+
+        mock.resetReplyData();
+        mock.writeToScreen("\033[21t");
+        mock.terminal.flushInput();
+        CHECK(mock.replyData() == "\033]l6162\033\\"); // hex
+    }
+
+    SECTION("the icon title honours the same modes")
+    {
+        mock.writeToScreen("\033[>0;1t");        // enable SetHex + QueryHex
+        mock.writeToScreen("\033]1;6162\033\\"); // OSC 1: icon title = hex "6162" -> "ab"
+        mock.terminal.flushInput();
+        CHECK(mock.terminal.iconTitle() == "ab");
+
+        mock.resetReplyData();
+        mock.writeToScreen("\033[20t"); // report icon title
+        mock.terminal.flushInput();
+        CHECK(mock.replyData() == "\033]L6162\033\\");
+    }
+
+    SECTION("XTRMTITLE with no parameter resets every title mode to default")
+    {
+        mock.writeToScreen("\033[>0;1t"); // enable SetHex + QueryHex
+        REQUIRE(mock.terminal.isTitleModeEnabled(TitleModeFeature::SetHex));
+        REQUIRE(mock.terminal.isTitleModeEnabled(TitleModeFeature::QueryHex));
+        mock.writeToScreen("\033[>T"); // reset all
+        mock.terminal.flushInput();
+        CHECK_FALSE(mock.terminal.isTitleModeEnabled(TitleModeFeature::SetHex));
+        CHECK_FALSE(mock.terminal.isTitleModeEnabled(TitleModeFeature::QueryHex));
+    }
+
+    SECTION("RIS resets all title modes (esctest RIS.test_RIS_ResetTitleMode)")
+    {
+        mock.writeToScreen("\033[>0;1t"); // enable SetHex + QueryHex
+        REQUIRE(mock.terminal.isTitleModeEnabled(TitleModeFeature::SetHex));
+        mock.writeToScreen("\033c"); // RIS
+        mock.terminal.flushInput();
+        CHECK_FALSE(mock.terminal.isTitleModeEnabled(TitleModeFeature::SetHex));
+        CHECK_FALSE(mock.terminal.isTitleModeEnabled(TitleModeFeature::QueryHex));
+    }
+
+    SECTION("XTSMTITLE owns the bare `CSI > Ps t` opcode (single non-zero parameter)")
+    {
+        // The bare `CSI > Ps t` is now XTSMTITLE, not the relocated XTCAPTURE. A single non-zero mode
+        // parameter is honoured; `CSI > 0 t` alone is not exercised because Contour's parser conflates a
+        // lone explicit 0 with an omitted parameter (esctest always sends two parameters).
+        mock.writeToScreen("\033[>1t"); // enable QueryHex only
+        mock.terminal.flushInput();
+        CHECK(mock.terminal.isTitleModeEnabled(TitleModeFeature::QueryHex));
+        CHECK_FALSE(mock.terminal.isTitleModeEnabled(TitleModeFeature::SetHex));
+    }
+}
+
 TEST_CASE("DECSET 41 (MoreFix): a tab honours a pending wrap", "[screen]")
 {
     // esctest DECSETTests.test_DECSET_MoreFix. Fill the line to the right margin (so a wrap is pending),
@@ -6701,6 +6774,8 @@ TEST_CASE("DECSET 41 (MoreFix): a tab honours a pending wrap", "[screen]")
         CHECK(mock.terminal.currentScreen().cursor().position.line == LineOffset(1));
     }
 }
+
+// }}} XTSMTITLE / XTRMTITLE (Set/Reset Title Modes) Tests
 
     mock.writeToScreen("\033[0*z");
     mock.terminal.flushInput();

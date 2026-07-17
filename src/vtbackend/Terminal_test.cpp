@@ -513,7 +513,9 @@ TEST_CASE("Terminal.CaptureScreenBuffer")
     REQUIRE("6\n7\n8\n9\n10" == actualScreen1);
     logScreenText(mock.terminal, "fini");
 
-    mock.writeToScreen(std::format("\033[>{};{}t", NoLogicalLines, NumberOfLinesToCapture));
+    // XTCAPTURE now carries a ',' intermediate (`CSI > Ps ; Ps , t`) so the bare `CSI > Ps t` can be
+    // the standard xterm XTSMTITLE. @see Functions.h XTCAPTURE / XTSMTITLE.
+    mock.writeToScreen(std::format("\033[>{};{},t", NoLogicalLines, NumberOfLinesToCapture));
     mock.terminal.flushInput();
     logScreenText(mock.terminal, "after flush");
 

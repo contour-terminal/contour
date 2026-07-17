@@ -556,6 +556,22 @@ enum class ControlTransmissionMode : uint8_t
     S8C1T, // 8-bit controls
 };
 
+/// xterm title-mode features, toggled by XTSMTITLE (`CSI > Ps t`) and XTRMTITLE (`CSI > Ps T`).
+///
+/// Each `Ps` names one independent flag controlling how window/icon title strings are encoded on the
+/// wire. The value is also the bit index into the terminal's title-mode set. Contour is natively UTF-8,
+/// so the two UTF-8 features are inert (the string is already UTF-8); only the hex features transform.
+enum class TitleModeFeature : uint8_t
+{
+    SetHex = 0,    ///< OSC 0/1/2 title arguments arrive hex-encoded and are decoded to bytes.
+    QueryHex = 1,  ///< Title query reports (`CSI 20 t` / `CSI 21 t`) emit the title hex-encoded.
+    SetUTF8 = 2,   ///< OSC title arguments are UTF-8 (Contour's native encoding; inert).
+    QueryUTF8 = 3, ///< Title query reports use UTF-8 (Contour's native encoding; inert).
+};
+
+/// The number of title-mode features, and the size of the terminal's title-mode bitset.
+constexpr inline size_t TitleModeFeatureCount = 4;
+
 enum class GraphicsRendition : uint8_t
 {
     Reset = 0, //!< Reset any rendition (style as well as foreground / background coloring).
