@@ -279,10 +279,20 @@ PageSize ConPty::pageSize() const noexcept
 
 void ConPty::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
 {
-    if (!_slave)
-        return;
-
     (void) pixels; // TODO Can we pass that information, too?
+
+    if (!_slave)
+    {
+        // Not started yet: remember the size rather than drop it, so start() creates the
+        // pseudoconsole at it. attachDisplay() is what first tells a PTY its size, and it now runs
+        // before start() -- dropping the size here left the child born at whatever the constructor
+        // was handed (the profile's configured terminal size), so the shell's first prompt, and any
+        // program launched before the first window-geometry change, wrapped at the wrong column.
+        // UnixPty stashes the same way; only the pixel half is ConPTY's to ignore.
+        ptyLog()("Recording pre-start terminal size: {}x{}", cells.columns, cells.lines);
+        _size = cells;
+        return;
+    }
 
     COORD coords;
     coords.X = unbox<unsigned short>(cells.columns);
