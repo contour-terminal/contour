@@ -2859,15 +2859,17 @@ TEST_CASE("SaveCursor and RestoreCursor", "[screen]")
     mock.terminal.setMode(DECMode::AutoWrap, false);
     mock.terminal.currentScreen().saveCursor();
 
-    // mutate the cursor's position, autowrap and origin flags
+    // mutate the cursor's position and the origin/autowrap modes
     screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 2 });
     mock.terminal.setMode(DECMode::AutoWrap, true);
     mock.terminal.setMode(DECMode::Origin, true);
 
-    // restore cursor and see if the changes have been reverted
+    // Restore: position and origin mode (DECOM) revert, because DECOM is cursor state. Autowrap
+    // (DECAWM) does NOT revert -- it is a terminal mode, not cursor state (DEC STD 070 / xterm), so
+    // DECRC leaves it as it currently stands (ON here).
     mock.terminal.currentScreen().restoreCursor();
     CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
-    CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::AutoWrap));
+    CHECK(mock.terminal.isModeEnabled(DECMode::AutoWrap)); // stays ON: DECRC does not restore autowrap
     CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::Origin));
 }
 
@@ -2953,6 +2955,17 @@ TEST_CASE("CBT.ignoresLeftRightMarginUnderOriginMode", "[screen]")
         mock.writeToScreen("\033[4Z"); // CBT(4): further back than any tab stop
         CHECK(screen.cursor().position.column == ColumnOffset(0));
     }
+}
+
+TEST_CASE("LNM.VT_and_FF_honor_linefeed_mode", "[screen]")
+{
+    // In linefeed mode (LNM), VT and FF -- like LF -- return the carriage after indexing.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    CHECK(screen.cursor().position == CellLocation { LineOffset(1), ColumnOffset(4) }); // column kept
+
+    CHECK(screen.cursor().position == CellLocation { LineOffset(1), ColumnOffset(0) }); // carriage returned
 }
 
 TEST_CASE("DECRQCRA.honors_origin_mode", "[screen]")
@@ -6313,6 +6326,37 @@ TEST_CASE("DECINVM: nested macro invocation", "[screen]")
     mock.writeToScreen("\033P0;0;0!zA\033[1*zC\033\\");
     mock.terminal.flushInput();
     // Invoke macro 0
+TEST_CASE("DECSET 41 (MoreFix): a tab honours a pending wrap", "[screen]")
+{
+    // esctest DECSETTests.test_DECSET_MoreFix. Fill the line to the right margin (so a wrap is pending),
+    // then TAB. With MoreFix on the tab honours the pending wrap and lands on the next line's first tab
+    // stop; without it (the default) the tab is swallowed at the right margin and the wrap waits.
+    SECTION("MoreFix ON: the tab wraps to the next line's first tab stop")
+    {
+        auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(10) } };
+        mock.writeToScreen("\033[?7h");   // DECSET DECAWM (autowrap)
+        mock.writeToScreen("\033[?41h");  // DECSET MoreFix
+        mock.writeToScreen("xxxxxxxxxx"); // fill 10 columns -> cursor at the right margin, wrap pending
+        REQUIRE(mock.terminal.currentScreen().cursor().position
+                == CellLocation { LineOffset(0), ColumnOffset(9) });
+        mock.writeToScreen("\t"); // TAB: honour the pending wrap, then tab from the left margin
+        CHECK(mock.terminal.currentScreen().cursor().position
+              == CellLocation { LineOffset(1), ColumnOffset(8) });
+    }
+
+    SECTION("MoreFix OFF (default): the tab is swallowed at the right margin")
+    {
+        auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(10) } };
+        mock.writeToScreen("\033[?7h");   // DECSET DECAWM
+        mock.writeToScreen("xxxxxxxxxx"); // fill 10 columns
+        mock.writeToScreen("\t");         // TAB is swallowed at the right margin
+        CHECK(mock.terminal.currentScreen().cursor().position
+              == CellLocation { LineOffset(0), ColumnOffset(9) });
+        mock.writeToScreen("2"); // only now does the pending wrap execute
+        CHECK(mock.terminal.currentScreen().cursor().position.line == LineOffset(1));
+    }
+}
+
     mock.writeToScreen("\033[0*z");
     mock.terminal.flushInput();
     // Macro 0 body outputs "A" then "C" (deferred macro 1 runs after), then macro 1 outputs "B"
@@ -6920,6 +6964,23 @@ TEST_CASE("DECALN: page that wraps the history ring is still filled in bounds", 
 }
 
 // }}} DECALN Tests
+
+// {{{ ANSI Mode Tests
+
+TEST_CASE("LNM: set makes LF also return the carriage", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+
+    // Without LNM, a bare LF only moves down: the second line keeps the column.
+    mock.writeToScreen("ab\ncd");
+    CHECK(mock.terminal.primaryScreen().renderMainPageText() == "ab   \n  cd \n     \n");
+
+    auto other = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+    other.writeToScreen("\033[20h"); // LNM set
+    other.writeToScreen("ab\ncd");
+    CHECK(other.terminal.primaryScreen().renderMainPageText() == "ab   \ncd   \n     \n");
+}
+
 TEST_CASE("LF outside the left/right margins does not scroll", "[screen]")
 {
     // A line feed only scrolls when the cursor is inside the left/right margins -- xterm's
@@ -6967,6 +7028,199 @@ TEST_CASE("LF outside the left/right margins does not scroll", "[screen]")
     }
 }
 
+TEST_CASE("LNM: set makes the Return key send CR LF", "[screen]")
+{
+    // LNM has two halves, and vttest exercises both. The output half is above; this is the input
+    // half, which lives in the input generator and so must be told about the mode explicitly.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+
+    mock.sendKeyEvent(Key::Enter);
+    mock.terminal.flushInput();
+    CHECK(mock.replyData() == "\r");
+
+    mock.writeToScreen("\033[20h"); // LNM set
+    mock.terminal.flushInput();
+    mock.mockPty().stdinBuffer().clear();
+
+    mock.sendKeyEvent(Key::Enter);
+    mock.terminal.flushInput();
+    CHECK(mock.replyData() == "\r\n");
+
+    mock.writeToScreen("\033[20l"); // LNM reset
+    mock.terminal.flushInput();
+    mock.mockPty().stdinBuffer().clear();
+
+    mock.sendKeyEvent(Key::Enter);
+    mock.terminal.flushInput();
+    CHECK(mock.replyData() == "\r");
+}
+
+TEST_CASE("KAM: set locks the keyboard out", "[screen]")
+{
+    // KAM was implemented all along -- Terminal::allowInput() reads it -- but `CSI 2 h` was rejected
+    // as unsupported, so nothing could ever turn it on.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+
+    mock.writeToScreen("\033[2h"); // KAM set: keyboard locked
+    mock.terminal.flushInput();
+    mock.mockPty().stdinBuffer().clear();
+
+    mock.sendCharEvent('x');
+    mock.terminal.flushInput();
+    CHECK(mock.replyData().empty());
+
+    mock.writeToScreen("\033[2l"); // KAM reset: keyboard unlocked
+    mock.terminal.flushInput();
+
+    mock.sendCharEvent('x');
+    mock.terminal.flushInput();
+    CHECK(mock.replyData() == "x");
+}
+
+TEST_CASE("SRM turns local echo on and off", "[screen]")
+{
+    // SRM is *set* by default -- the host echoes, and the terminal does not. Reset it and the terminal
+    // echoes everything it sends, which is what a host with no echo of its own relies on.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    SECTION("set by default, so nothing is echoed")
+    {
+        CHECK(mock.terminal.isModeEnabled(AnsiMode::SendReceive));
+
+        mock.sendCharSequence("abc");
+        CHECK(mock.replyData() == "abc");                        // sent to the host...
+        CHECK(screen.grid().lineText(LineOffset(0)) == "     "); // ...and not to the screen
+    }
+
+    SECTION("reset, so the terminal echoes what it sends")
+    {
+        mock.writeToScreen("\033[12l");
+        CHECK_FALSE(mock.terminal.isModeEnabled(AnsiMode::SendReceive));
+
+        mock.sendCharSequence("abc");
+        CHECK(mock.replyData() == "abc");                        // still sent to the host...
+        CHECK(screen.grid().lineText(LineOffset(0)) == "abc  "); // ...and now to the screen as well
+    }
+
+    SECTION("set again, and the echo stops")
+    {
+        mock.writeToScreen("\033[12l");
+        mock.writeToScreen("\033[12h");
+        CHECK(mock.terminal.isModeEnabled(AnsiMode::SendReceive));
+
+        mock.sendCharSequence("abc");
+        CHECK(screen.grid().lineText(LineOffset(0)) == "     ");
+    }
+}
+
+TEST_CASE("DECRQM answers for a mode it knows but can never turn on", "[screen]")
+{
+    // 0 says "I have never heard of this mode"; 4 says "I know exactly what you mean, and it can never
+    // be on here". They are different claims, and Contour used to make the first when it meant the
+    // second -- disclaiming knowledge of a dozen modes ECMA-48 defines.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+
+    SECTION("a mode Contour implements reports its live state")
+    {
+        mock.writeToScreen("\033[4$p"); // IRM
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[4;2$y"));
+        mock.discardPendingReplies();
+
+        mock.writeToScreen("\033[4h");
+        mock.writeToScreen("\033[4$p");
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[4;1$y"));
+    }
+
+    SECTION("a mode Contour knows but hard-wires off reports permanently reset")
+    {
+        mock.writeToScreen("\033[1$p"); // GATM
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[1;4$y"));
+        mock.discardPendingReplies();
+
+        mock.writeToScreen("\033[19$p"); // EBM
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[19;4$y"));
+    }
+
+    SECTION("a mode Contour has never heard of reports not recognized")
+    {
+        mock.writeToScreen("\033[123$p");
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033[123;0$y"));
+    }
+}
+
+TEST_CASE("DECRQM reports a DEC mode the terminal remembers but cannot act on", "[screen]")
+{
+    // A terminal that faithfully remembers what it was told is not lying; it would only be lying if it
+    // claimed an effect. Contour has no printer, but it can still say whether DECPFF is set.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+
+    mock.writeToScreen("\033[?18$p"); // DECPFF
+    REQUIRE(e(mock.terminal.peekInput()) == e("\033[?18;2$y"));
+    mock.discardPendingReplies();
+
+    mock.writeToScreen("\033[?18h");
+    mock.writeToScreen("\033[?18$p");
+    REQUIRE(e(mock.terminal.peekInput()) == e("\033[?18;1$y"));
+    mock.discardPendingReplies();
+
+    mock.writeToScreen("\033[?18l");
+    mock.writeToScreen("\033[?18$p");
+    REQUIRE(e(mock.terminal.peekInput()) == e("\033[?18;2$y"));
+}
+
+TEST_CASE("DECRQM answers 4 for a DEC mode that can never turn on", "[screen]")
+{
+    // DECHCCM (horizontal cursor coupling) is meaningless on a page that never scrolls horizontally, so
+    // Contour reports PermanentlyReset (4) rather than Reset (2) -- "I know it, and it cannot be on
+    // here". Mirrors esctest test_DECRQM_DEC_DECHCCM.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+
+    mock.writeToScreen("\033[?60$p"); // DECRQM DECHCCM
+    CHECK(e(mock.terminal.peekInput()) == e("\033[?60;4$y"));
+}
+
+TEST_CASE("VT525 keyboard/national modes are settable toggles", "[screen]")
+{
+    // These VT525 DEC private modes are not yet acted on, but Contour remembers and reports their
+    // state: SM/RM toggle the bit and DECRQM answers Set (1) / Reset (2), rather than pretending the
+    // mode is unknown (0). RightToLeftMode (DECRLM, 34) and HebrewEncodingMode (DECHEM, 36) are the
+    // entry points for real bidirectional/Hebrew support. Mirrors
+    // esctest's doModifiableDecTest for these modes.
+    auto togglesCleanly = [](unsigned decNumber) {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        // Reset -> DECRQM reports 2.
+        mock.writeToScreen(std::format("\033[?{}l\033[?{}$p", decNumber, decNumber));
+        CHECK(e(mock.terminal.peekInput()) == e(std::format("\033[?{};2$y", decNumber)));
+        mock.discardPendingReplies();
+        // Set -> DECRQM reports 1.
+        mock.writeToScreen(std::format("\033[?{}h\033[?{}$p", decNumber, decNumber));
+        CHECK(e(mock.terminal.peekInput()) == e(std::format("\033[?{};1$y", decNumber)));
+    };
+
+    SECTION("DECRLM (34, right-to-left)")
+    {
+        togglesCleanly(34);
+    }
+    SECTION("DECHEM (36, Hebrew encoding)")
+    {
+        togglesCleanly(36);
+    }
+    SECTION("DECVCCM (61, vertical cursor coupling)")
+    {
+        togglesCleanly(61);
+    }
+    SECTION("DECAAM (100, auto answerback)")
+    {
+        togglesCleanly(100);
+    }
+    SECTION("DECOSCNM (106, overscan)")
+    {
+        togglesCleanly(106);
+    }
+}
+
+// }}} ANSI Mode Tests
 
 // {{{ DECRQCRA / XTCHECKSUM Tests
 

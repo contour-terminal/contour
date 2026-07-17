@@ -2734,6 +2734,12 @@ void Terminal::setMode(AnsiMode mode, bool enable)
             popStatusDisplay();
     }
 
+    // LNM has two halves. The output half (LF also returns the carriage) reads the mode bit in
+    // Screen::linefeed(); the input half (Return sends CR LF) lives in the input generator, which
+    // has no view of the mode register and must therefore be told.
+    if (mode == AnsiMode::AutomaticNewLine)
+        _inputGenerator.setAutomaticNewLineMode(enable);
+
     _modes.set(mode, enable);
 }
 
@@ -2752,7 +2758,10 @@ void Terminal::setMode(DECMode mode, bool enable)
 
     switch (mode)
     {
-        case DECMode::AutoWrap: _currentScreen->cursor().autoWrap = enable; break;
+        // AutoWrap (DECAWM) is a terminal mode with no per-cursor copy: it is stored in _modes below and
+        // read via isModeEnabled(). Keeping it out of the Cursor struct is what makes DECSC/DECRC leave
+        // it alone -- autowrap is not cursor state (DEC STD 070), unlike DECOM.
+        case DECMode::AutoWrap: break;
         case DECMode::LeftRightMargin:
             // Resetting DECLRMM also resets the horizontal margins back to screen size.
             if (!enable)
@@ -2981,6 +2990,7 @@ void Terminal::softReset()
     setMode(DECMode::VisibleCursor, true);          // DECTCEM (Text cursor enable)
     setMode(DECMode::Origin, false);                // DECOM
     setMode(AnsiMode::KeyboardAction, false);       // KAM
+    setMode(AnsiMode::KeyboardAction, false); // KAM
 
     // DECAWM. The VT510 manual has DECSTR RESET autowrap, and every terminal in the field declines to:
     // xterm restores the bit to the value it was configured with rather than clearing it, foot turns
@@ -4166,6 +4176,7 @@ std::string to_string(DECMode mode)
         case DECMode::AllowColumns80to132: return "AllowColumns80to132";
         case DECMode::DebugLogging: return "DebugLogging";
         case DECMode::UseAlternateScreen: return "UseAlternateScreen";
+        case DECMode::MoreFix: return "MoreFix";
         case DECMode::PageCursorCoupling: return "PageCursorCoupling";
         case DECMode::ApplicationKeypad: return "ApplicationKeypad";
         case DECMode::AutoRepeat: return "AutoRepeat";
@@ -4187,6 +4198,23 @@ std::string to_string(DECMode mode)
         case DECMode::SixelCursorNextToGraphic: return "SixelCursorNextToGraphic";
         case DECMode::ReportColorPaletteUpdated: return "ReportColorPaletteUpdated";
         case DECMode::SemanticBlockProtocol: return "SemanticBlockProtocol";
+        case DECMode::RightToLeftMode: return "RightToLeftMode";
+        case DECMode::HebrewEncodingMode: return "HebrewEncodingMode";
+        case DECMode::GreekKeyboardMapping: return "GreekKeyboardMapping";
+        case DECMode::VerticalCursorCoupling: return "VerticalCursorCoupling";
+        case DECMode::KeyboardUsageMode: return "KeyboardUsageMode";
+        case DECMode::TransmitRateLimiting: return "TransmitRateLimiting";
+        case DECMode::KeyPositionMode: return "KeyPositionMode";
+        case DECMode::RightToLeftCopyMode: return "RightToLeftCopyMode";
+        case DECMode::CRTSaveMode: return "CRTSaveMode";
+        case DECMode::AutoResizeMode: return "AutoResizeMode";
+        case DECMode::ModemControlMode: return "ModemControlMode";
+        case DECMode::AutoAnswerbackMode: return "AutoAnswerbackMode";
+        case DECMode::ConcealAnswerbackMode: return "ConcealAnswerbackMode";
+        case DECMode::NullMode: return "NullMode";
+        case DECMode::HalfDuplexMode: return "HalfDuplexMode";
+        case DECMode::SecondaryKeyboardLanguageMode: return "SecondaryKeyboardLanguageMode";
+        case DECMode::OverscanMode: return "OverscanMode";
         case DECMode::ReverseWraparound: return "ReverseWraparound";
         case DECMode::ReverseWraparoundExtended: return "ReverseWraparoundExtended";
         case DECMode::Win32InputMode: return "Win32InputMode";

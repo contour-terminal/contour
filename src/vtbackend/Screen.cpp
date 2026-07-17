@@ -594,7 +594,7 @@ void Screen::writeText(string_view text, size_t cellCount)
             {
                 _cursor.position.column += ColumnOffset::cast_from(written);
             }
-            else if (_cursor.autoWrap)
+            else if (_terminal->isModeEnabled(DECMode::AutoWrap))
             {
                 _cursor.position.column = ColumnOffset::cast_from(static_cast<int>(startCol + written) - 1);
                 _cursor.wrapPending = true;
@@ -904,7 +904,7 @@ void Screen::clearAndAdvance(int oldWidth, int newWidth) noexcept
 
     if (newWidth == std::min(newWidth, cellsAvailable))
         _cursor.position.column += ColumnOffset::cast_from(newWidth);
-    else if (_cursor.autoWrap)
+    else if (_terminal->isModeEnabled(DECMode::AutoWrap))
         _cursor.wrapPending = true;
 }
 
@@ -2144,6 +2144,14 @@ void Screen::moveCursorToNextTab()
     // TODO: I guess something must remember when a \t was added, for proper move-back?
     // TODO: respect HTS/TBC
 
+    // DECSET 41 (MoreFix, xterm's curses hack): when the line has just been filled to the right margin
+    // (a wrap is pending) and a TAB arrives, honour the pending wrap first -- moving to the next line --
+    // and then tab from its left margin. Without it (the default), the pending wrap waits for the next
+    // printable character and the TAB is swallowed at the right margin.
+    // @see esctest DECSETTests.test_DECSET_MoreFix.
+    if (_terminal->isModeEnabled(DECMode::MoreFix))
+        crlfIfWrapPending();
+
     static_assert(TabWidth > ColumnCount(0));
 
     auto columnsToAdvance = ColumnCount(0);
@@ -2390,16 +2398,18 @@ enum class ModeResponse : uint8_t
 
 void Screen::requestAnsiMode(unsigned int mode)
 {
-    auto const modeResponse = [&](auto mode) -> ModeResponse {
+    auto const modeResponse = [&]() -> ModeResponse {
         if (isValidAnsiMode(mode))
-        {
-            if (_terminal->isModeEnabled(static_cast<AnsiMode>(mode)))
-                return ModeResponse::Set;
-            else
-                return ModeResponse::Reset;
-        }
+            return _terminal->isModeEnabled(static_cast<AnsiMode>(mode)) ? ModeResponse::Set
+                                                                         : ModeResponse::Reset;
+
+        // A mode the standard defines and this terminal has hard-wired off is *not* an unrecognized
+        // one. @see PermanentlyResetAnsiModes.
+        if (isPermanentlyResetAnsiMode(mode))
+            return ModeResponse::PermanentlyReset;
+
         return ModeResponse::NotRecognized;
-    }(mode);
+    }();
 
     reply("\033[{};{}$y", mode, static_cast<unsigned>(modeResponse));
 }
@@ -2407,14 +2417,19 @@ void Screen::requestAnsiMode(unsigned int mode)
 void Screen::requestDECMode(unsigned int mode)
 {
     auto const modeResponse = [this, mode]() -> ModeResponse {
+        // A mode Contour recognises but hard-wires off answers 4 (PermanentlyReset), not 2 (Reset):
+        // the distinction tells the host the mode can never be turned on here. @see
+        // PermanentlyResetDECModes.
+        if (isPermanentlyResetDECMode(mode))
+            return ModeResponse::PermanentlyReset;
         auto const modeEnum = fromDECModeNum(mode);
         if (modeEnum.has_value())
         {
-            auto const modeEnum = fromDECModeNum(mode);
             // A mode above the terminal's operating level is not recognised here (DECNCSM only at
             // VT500 / level 5), matching how DECSCL gates level-specific features.
             if (conformanceLevelOf(_terminal->operatingLevel()) < minimumConformanceLevel(modeEnum.value()))
                 return ModeResponse::NotRecognized;
+            return _terminal->isModeEnabled(modeEnum.value()) ? ModeResponse::Set : ModeResponse::Reset;
         }
         return ModeResponse::NotRecognized;
     }();
@@ -3171,19 +3186,33 @@ namespace impl
                           .right = Right::cast_from(std::min(right - 1 + column, columns - 1)) };
         }
 
+        /// The ANSI modes the engine actually acts on, and therefore accepts.
+        ///
+        /// SRM (12) is deliberately absent. Its bit would be stored and faithfully reported back by
+        /// DECRQM, but nothing acts on it -- the terminal never echoes locally -- so accepting
+        /// `CSI 12 l` would advertise a capability Contour does not have. Leaving it Unsupported keeps
+        /// the gap visible to the conformance harness instead of quietly papering over it.
+        ///
+        /// Adding a mode is adding a row.
+        constexpr auto SupportedAnsiModes = std::array {
+            AnsiMode::KeyboardAction,   // KAM -- gates input, see Terminal::allowInput()
+            AnsiMode::Insert,           // IRM
+            AnsiMode::SendReceive,      // SRM -- local echo, see Terminal::flushInput()
+            AnsiMode::AutomaticNewLine, // LNM
+        };
+
         ApplyResult setAnsiMode(Sequence const& seq, size_t modeIndex, bool enable, Terminal& term)
         {
-            switch (seq.param(modeIndex))
-            {
-                case 2: // (AM) Keyboard Action Mode
-                    return ApplyResult::Unsupported;
-                case 4: // (IRM) Insert Mode
-                    term.setMode(AnsiMode::Insert, enable);
-                    return ApplyResult::Ok;
-                case 12: // (SRM) Send/Receive Mode
-                case 20: // (LNM) Automatic Newline
-                default: return ApplyResult::Unsupported;
-            }
+            auto const modeNumber = seq.param(modeIndex);
+            if (!isValidAnsiMode(modeNumber))
+                return ApplyResult::Unsupported;
+
+            auto const mode = static_cast<AnsiMode>(modeNumber);
+            if (std::ranges::find(SupportedAnsiModes, mode) == SupportedAnsiModes.end())
+                return ApplyResult::Unsupported;
+
+            term.setMode(mode, enable);
+            return ApplyResult::Ok;
         }
 
         ApplyResult setModeDEC(Sequence const& seq, size_t modeIndex, bool enable, Terminal& term)
@@ -4081,12 +4110,12 @@ void Screen::executeControlCode(char controlCode)
         case TAB.finalSymbol: moveCursorToNextTab(); break;
         case LF.finalSymbol: linefeed(); break;
         case VT.finalSymbol:
-            // Even though VT means Vertical Tab, it seems that xterm is doing an IND instead.
+            // VT (Vertical Tab) and FF (Form Feed) are treated exactly like LF: xterm routes all three
+            // through its index-with-optional-newline path, so they index and -- in linefeed mode (LNM)
+            // -- also return the carriage. linefeed() is that shared path; a bare index() would skip
+            // LNM's carriage return (as well as linefeed()'s BCE scroll and below-region page clamp).
             [[fallthrough]];
-        case FF.finalSymbol:
-            // Even though FF means Form Feed, it seems that xterm is doing an IND instead.
-            index();
-            break;
+        case FF.finalSymbol: linefeed(); break;
         case LS1.finalSymbol: // (SO)
             // Invokes G1 character set into GL. G1 is designated by a select-character-set (SCS) sequence.
             _cursor.charsets.lockingShift(CharsetTable::G1);
@@ -4121,9 +4150,11 @@ void Screen::restoreCursor()
 
 void Screen::restoreCursor(Cursor const& savedCursor)
 {
+    // DECRC restores cursor state -- position, SGR, charsets, origin mode (DECOM), and the last-column
+    // (wrap-pending) flag -- but NOT the autowrap mode (DECAWM): that is a terminal mode, not cursor
+    // state (DEC STD 070), so a DECRC after a DECRESET DECAWM leaves autowrap off. Matches xterm.
     _cursor = savedCursor;
     _cursor.position = clampCoordinate(_cursor.position);
-    _terminal->setMode(DECMode::AutoWrap, savedCursor.autoWrap);
     _terminal->setMode(DECMode::Origin, savedCursor.originMode);
     updateCursorIterator();
     verifyState();
@@ -4615,8 +4646,10 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case BS: backspace(); break;
         case TAB: moveCursorToNextTab(); break;
         case LF: linefeed(); break;
+        // VT and FF index like LF, and in linefeed mode (LNM) they too perform a carriage return.
+        // Route them through linefeed() so they honour LNM (and smooth scroll) exactly as LF does.
         case VT: [[fallthrough]];
-        case FF: index(); break;
+        case FF: linefeed(); break;
         case CR: moveCursorToBeginOfLine(); break;
 
         // ESC

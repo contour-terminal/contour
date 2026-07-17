@@ -433,6 +433,15 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
     void setBackarrowKeyMode(bool enable) { _backarrowKey = enable; }
     [[nodiscard]] bool backarrowKey() const noexcept { return _backarrowKey; }
 
+    /// Enables or disables LNM (Line Feed / New Line Mode), the input half.
+    ///
+    /// When enabled, the Return key sends CR LF.
+    /// When disabled (default), it sends CR alone.
+    ///
+    /// The output half lives in `Screen::linefeed()`, where LNM makes LF also return the carriage.
+    void setAutomaticNewLineMode(bool enable) { _automaticNewLine = enable; }
+    [[nodiscard]] bool automaticNewLine() const noexcept { return _automaticNewLine; }
+
     [[nodiscard]] std::string_view peek() const noexcept { return std::string_view(_pendingSequence); }
 
     [[nodiscard]] std::string take() noexcept
@@ -447,6 +456,7 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
         _cursorKeysMode = KeyMode::Normal;
         _numpadKeysMode = KeyMode::Normal;
         _backarrowKey = false;
+        _automaticNewLine = false;
     }
 
   protected:
@@ -480,6 +490,7 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
 
     KeyMode _cursorKeysMode = KeyMode::Normal;
     KeyMode _numpadKeysMode = KeyMode::Normal;
+    bool _automaticNewLine = false;
     bool _backarrowKey = false;
     std::string _pendingSequence {};
 };
@@ -574,6 +585,10 @@ class InputGenerator
     void setApplicationKeypadMode(bool enable);
 
     void setBackarrowKeyMode(bool enable);
+
+    /// Enables or disables LNM (Line Feed / New Line Mode) for the Return key. @see
+    /// KeyboardInputGenerator::setAutomaticNewLineMode.
+    void setAutomaticNewLineMode(bool enable);
 
     [[nodiscard]] bool normalCursorKeys() const noexcept
     {

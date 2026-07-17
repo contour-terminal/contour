@@ -238,7 +238,8 @@ bool StandardKeyboardInputGenerator::generateKey(Key key,
             append(hasAlt ? "\033\033" : "\033");
             break;
         }
-        case Key::Enter: append(select(chord, { .std = "\r" })); break;
+        // LNM (ANSI mode 20): with New Line mode set, Return sends CR LF rather than CR alone.
+        case Key::Enter: append(select(chord, { .std = _automaticNewLine ? "\r\n" : "\r" })); break;
         case Key::Tab:
         {
             // Explicit Tab/Backtab handling with Alt prefix support.
@@ -1003,6 +1004,12 @@ void InputGenerator::setBackarrowKeyMode(bool enable)
 {
     _keyboardInputGenerator.setBackarrowKeyMode(enable);
     inputLog()("set backarrow key mode: {}", enable);
+}
+
+void InputGenerator::setAutomaticNewLineMode(bool enable)
+{
+    _keyboardInputGenerator.setAutomaticNewLineMode(enable);
+    inputLog()("set automatic new line mode: {}", enable);
 }
 
 bool InputGenerator::generate(char32_t characterEvent,

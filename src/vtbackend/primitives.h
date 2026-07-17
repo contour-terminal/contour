@@ -623,6 +623,54 @@ enum class AnsiMode : uint8_t
     AutomaticNewLine = 20, // LNM
 };
 
+/// The ANSI modes ECMA-48 defines that this terminal recognizes but has hard-wired *off*.
+///
+/// DECRQM must answer 4 (permanently reset) for these, and not 0 (not recognized). The two are
+/// different claims, and applications rely on the difference: 0 says "I have never heard of this mode",
+/// 4 says "I know exactly what you mean, and it can never be on here". A terminal that answers 0 for a
+/// mode the standard defines is disclaiming knowledge it has.
+///
+/// None of these has any bearing on a terminal that is not a printing VT with guarded areas and
+/// selectable transfer semantics -- which is to say, on any terminal built in the last forty years.
+/// They are listed so that Contour can say so precisely, rather than by silence.
+///
+/// Adding a mode is adding a row.
+constexpr auto PermanentlyResetAnsiModes = std::array<unsigned, 12> {
+    1,  // GATM -- guarded area transfer
+    5,  // SRTM -- status reporting transfer
+    7,  // VEM  -- vertical editing
+    10, // HEM  -- horizontal editing
+    11, // PUM  -- positioning unit
+    13, // FEAM -- format effector action
+    14, // FETM -- format effector transfer
+    15, // MATM -- multiple area transfer
+    16, // TTM  -- transfer termination
+    17, // SATM -- selected area transfer
+    18, // TSM  -- tabulation stop
+    19, // EBM  -- editing boundary
+};
+
+/// @return Whether @p mode is an ANSI mode this terminal knows of but can never turn on.
+constexpr bool isPermanentlyResetAnsiMode(unsigned mode) noexcept
+{
+    return std::ranges::find(PermanentlyResetAnsiModes, mode) != PermanentlyResetAnsiModes.end();
+}
+
+/// DEC private modes this terminal recognises but can never turn on, so DECRQM answers
+/// PermanentlyReset (4) -- "I know exactly what you mean, and it can never be on here" -- rather than
+/// Reset (2) or NotRecognized (0).
+///
+/// Adding a mode is adding a row.
+constexpr auto PermanentlyResetDECModes = std::array<unsigned, 1> {
+    60, // DECHCCM -- horizontal cursor coupling. Contour's page never scrolls horizontally.
+};
+
+/// @return Whether @p mode is a DEC private mode this terminal knows of but can never turn on.
+constexpr bool isPermanentlyResetDECMode(unsigned mode) noexcept
+{
+    return std::ranges::find(PermanentlyResetDECModes, mode) != PermanentlyResetDECModes.end();
+}
+
 enum class DECMode : std::uint8_t
 {
     UseApplicationCursorKeys = 0,
@@ -789,6 +837,38 @@ enum class DECMode : std::uint8_t
     Win32InputMode = 44,
     // }}}
 
+    // {{{ Modes the terminal remembers and reports, but which have nothing here to act on.
+    //
+    // DECRQM's contract is to report a mode's *state*, and SM/RM's is to change it. A terminal that
+    // faithfully remembers what it was told is not lying; it would only be lying if it claimed an
+    // effect. These four describe a printing VT with a national keyboard and a page memory Contour
+    // does not have -- so there is nothing for them to do here, and saying "I have never heard of
+    // that mode" would be the less truthful answer.
+
+    /// DECPFF (18) -- Print Form Feed. Contour has no printer.
+    PrintFormFeed = 45,
+
+    /// DECHEBM (35) -- Hebrew/N-A Keyboard Mapping. Contour has no keyboard mapping of its own.
+    HebrewKeyboardMapping = 46,
+
+    /// DECNRCM (42) -- National Replacement Character Set.
+    ///
+    /// Remembered and reported, but not yet acted on: the 96-character sets and the GR register it
+    /// selects between are not implemented. When they are, this stops being inert.
+    NationalReplacementCharacterSet = 47,
+
+    /// DECHCCM (60) -- Horizontal Cursor Coupling. Contour's page never scrolls horizontally.
+    HorizontalCursorCoupling = 48,
+    // }}}
+
+    /// more(1) fix (41), xterm's -- a curses workaround, aka the "curses hack".
+    ///
+    /// When set, a horizontal tab arriving while a wrap is pending (the line was just filled to the
+    /// right margin) honours the pending wrap first -- moving to the next line -- and then tabs. When
+    /// reset (the default), the tab is swallowed at the right margin and the pending wrap waits for the
+    /// next printable character. @see Screen::moveCursorToNextTab.
+    MoreFix = 70,
+
     /// Reverse wraparound (45), xterm's.
     ///
     /// With it -- and DECAWM -- a backspace at the left margin moves to the right margin of the line
@@ -802,13 +882,79 @@ enum class DECMode : std::uint8_t
     /// comes back round at the bottom.
     ReverseWraparoundExtended = 50,
 
+    // {{{ VT525 keyboard / national / hardware modes -- settable, but not yet acted on.
+    //
+    // TODO: These are the DEC private modes a VT525 defines that Contour does not yet *implement*. Each
+    // is a real, distinct mode, so Contour remembers and reports its state (SM/RM toggle it, DECRQM
+    // reports Set/Reset) -- but nothing here acts on the bit yet. This is deliberately a step above the
+    // "PermanentlyReset" block above (modes 45..48): those can *never* mean anything here, whereas these
+    // are on the roadmap to gain real behaviour. As each is implemented, move its handling out of the
+    // "toggle only" default and this comment shrinks.
+    //
+    // The bidirectional pair is the priority: RightToLeftMode and
+    // HebrewEncodingMode are the entry points for real bidirectional/Hebrew support, not mere toggles.
+
+    /// DECRLM (34) -- Right-to-Left Mode. TODO: drive bidirectional layout; the priority of this group.
+    RightToLeftMode = 51,
+
+    /// DECHEM (36) -- Hebrew Encoding Mode. TODO: pair with DECRLM for real Hebrew/bidirectional text.
+    HebrewEncodingMode = 52,
+
+    /// DECNAKB (57) -- Greek/N-A Keyboard Mapping. TODO: keyboard layout selection.
+    GreekKeyboardMapping = 53,
+
+    /// DECVCCM (61) -- Vertical Cursor Coupling. TODO: couple the displayed page to vertical scrolling.
+    VerticalCursorCoupling = 54,
+
+    /// DECKBUM (68) -- Keyboard Usage Mode (typewriter vs. data processing keys). TODO: keyboard layer.
+    KeyboardUsageMode = 55,
+
+    /// DECXRLM (73) -- Transmit Rate Limiting. TODO: throttle host transmission (largely a no-op on a pty).
+    TransmitRateLimiting = 56,
+
+    /// DECKPM (81) -- Key Position Mode (report key position vs. character). TODO: key reporting layer.
+    KeyPositionMode = 57,
+
+    /// DECRLCM (96) -- Right-to-Left Copy. TODO: rides with RightToLeftMode's bidirectional support.
+    RightToLeftCopyMode = 58,
+
+    /// DECCRTSM (97) -- CRT Save Mode (screen blanking). TODO: display-power policy, a frontend concern.
+    CRTSaveMode = 59,
+
+    /// DECARSM (98) -- Auto Resize Mode. TODO: auto-resize the page on DECSLPP/DECSCPP.
+    AutoResizeMode = 60,
+
+    /// DECMCM (99) -- Modem Control Mode. TODO: modem signalling; largely inert on a pty.
+    ModemControlMode = 61,
+
+    /// DECAAM (100) -- Auto Answerback Mode. TODO: send the answerback message on connect.
+    AutoAnswerbackMode = 62,
+
+    /// DECCANSM (101) -- Conceal Answerback Message. TODO: hide the answerback from the display.
+    ConcealAnswerbackMode = 63,
+
+    /// DECNULM (102) -- Null Mode (how a received NUL is treated). TODO: discard vs. pass NUL.
+    NullMode = 64,
+
+    /// DECHDPXM (103) -- Half Duplex Mode. TODO: half- vs. full-duplex; inert on a pty.
+    HalfDuplexMode = 65,
+
+    /// DECESKM (104) -- Enable Secondary Keyboard Language. TODO: secondary keyboard layout.
+    SecondaryKeyboardLanguageMode = 66,
+
+    /// DECOSCNM (106) -- Overscan Mode (border colour region). TODO: overscan/border rendering.
+    OverscanMode = 67,
 
     /// DECNCSM (95) -- No Clearing Screen on Column change. When set, DECCOLM (80<->132) does not
     /// erase page memory; reset (the default) clears the screen on a column-width change (VT100
     /// behaviour).
     NoClearScreenOnColumnChange = 68,
+    // }}}
+
     /// Sentinel value for sizing the mode bitset. Must remain the last entry.
-    DECModeCount = 45
+    DECModeCount = 71
+};
+
 /// The minimum ANSI conformance level (1..5, matching conformanceLevelOf(VTType)) at which a DEC
 /// private mode is recognised. Below it, DECRQM answers "not recognised" and DECSET/DECRST ignore the
 /// mode -- how a real VT gates level-specific features (DECNCSM is a VT500 / level-5 feature). Data
@@ -908,6 +1054,7 @@ constexpr unsigned toDECModeNum(DECMode m) noexcept
         case DECMode::AllowColumns80to132: return 40;
         case DECMode::DebugLogging: return 46;
         case DECMode::UseAlternateScreen: return 47;
+        case DECMode::MoreFix: return 41;
         case DECMode::PageCursorCoupling: return 64;
         case DECMode::ApplicationKeypad: return 66;
         case DECMode::BackarrowKey: return 67;
@@ -931,6 +1078,27 @@ constexpr unsigned toDECModeNum(DECMode m) noexcept
         case DECMode::ReportGridCellSelection: return 2030;
         case DECMode::ReportColorPaletteUpdated: return 2031;
         case DECMode::SemanticBlockProtocol: return 2034;
+        case DECMode::PrintFormFeed: return 18;
+        case DECMode::HebrewKeyboardMapping: return 35;
+        case DECMode::NationalReplacementCharacterSet: return 42;
+        case DECMode::HorizontalCursorCoupling: return 60;
+        case DECMode::RightToLeftMode: return 34;
+        case DECMode::HebrewEncodingMode: return 36;
+        case DECMode::GreekKeyboardMapping: return 57;
+        case DECMode::VerticalCursorCoupling: return 61;
+        case DECMode::KeyboardUsageMode: return 68;
+        case DECMode::TransmitRateLimiting: return 73;
+        case DECMode::KeyPositionMode: return 81;
+        case DECMode::RightToLeftCopyMode: return 96;
+        case DECMode::CRTSaveMode: return 97;
+        case DECMode::AutoResizeMode: return 98;
+        case DECMode::ModemControlMode: return 99;
+        case DECMode::AutoAnswerbackMode: return 100;
+        case DECMode::ConcealAnswerbackMode: return 101;
+        case DECMode::NullMode: return 102;
+        case DECMode::HalfDuplexMode: return 103;
+        case DECMode::SecondaryKeyboardLanguageMode: return 104;
+        case DECMode::OverscanMode: return 106;
         case DECMode::ReverseWraparound: return 45;
         case DECMode::ReverseWraparoundExtended: return 1045;
         case DECMode::BatchedRendering: return 2026;
@@ -971,6 +1139,7 @@ constexpr std::optional<DECMode> fromDECModeNum(unsigned int modeNum) noexcept
         // TODO: Ps = 4 5  -> Reverse-wraparound Mode, xterm.
         case 46: return DECMode::DebugLogging;
         case 47: return DECMode::UseAlternateScreen;
+        case 41: return DECMode::MoreFix;
         case 64: return DECMode::PageCursorCoupling;
         case 66: return DECMode::ApplicationKeypad;
         case 67: return DECMode::BackarrowKey;
@@ -997,6 +1166,27 @@ constexpr std::optional<DECMode> fromDECModeNum(unsigned int modeNum) noexcept
         case 2030: return DECMode::ReportGridCellSelection;
         case 2031: return DECMode::ReportColorPaletteUpdated;
         case 2034: return DECMode::SemanticBlockProtocol;
+        case 18: return DECMode::PrintFormFeed;
+        case 35: return DECMode::HebrewKeyboardMapping;
+        case 42: return DECMode::NationalReplacementCharacterSet;
+        case 60: return DECMode::HorizontalCursorCoupling;
+        case 34: return DECMode::RightToLeftMode;
+        case 36: return DECMode::HebrewEncodingMode;
+        case 57: return DECMode::GreekKeyboardMapping;
+        case 61: return DECMode::VerticalCursorCoupling;
+        case 68: return DECMode::KeyboardUsageMode;
+        case 73: return DECMode::TransmitRateLimiting;
+        case 81: return DECMode::KeyPositionMode;
+        case 96: return DECMode::RightToLeftCopyMode;
+        case 97: return DECMode::CRTSaveMode;
+        case 98: return DECMode::AutoResizeMode;
+        case 99: return DECMode::ModemControlMode;
+        case 100: return DECMode::AutoAnswerbackMode;
+        case 101: return DECMode::ConcealAnswerbackMode;
+        case 102: return DECMode::NullMode;
+        case 103: return DECMode::HalfDuplexMode;
+        case 104: return DECMode::SecondaryKeyboardLanguageMode;
+        case 106: return DECMode::OverscanMode;
         case 45: return DECMode::ReverseWraparound;
         case 1045: return DECMode::ReverseWraparoundExtended;
         case 8452: return DECMode::SixelCursorNextToGraphic;

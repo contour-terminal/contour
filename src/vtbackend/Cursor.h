@@ -15,7 +15,6 @@ namespace vtbackend
 struct Cursor
 {
     CellLocation position { .line = LineOffset(0), .column = ColumnOffset(0) };
-    bool autoWrap = true; // false;
     bool originMode = false;
     bool wrapPending = false;
     GraphicsAttributes graphicsRendition {};
