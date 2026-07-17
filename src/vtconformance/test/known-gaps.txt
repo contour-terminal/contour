@@ -1,0 +1,75 @@
+# VT sequences Contour does not yet honour, as reported by the conformance harness.
+#
+# This file is a RATCHET, not a suppression list:
+#   * a diagnostic that is NOT listed here fails the build (a new gap);
+#   * an entry here that no longer occurs ALSO fails the build (a stale gap).
+#
+# So the list can only shrink, and it cannot quietly stop describing reality.
+# Regenerate with: vtconformance run --suite=vttest --update-known-gaps
+
+# TBC (Tabulation Clear) with Ps=1 and Ps=2 -- INTENTIONAL, and shared with every real terminal.
+#
+# ECMA-48 gives TBC six parameters, but Ps=1 (clear the LINE tabulation stop at the active line) and
+# Ps=2 (clear every character tabulation stop in the active LINE) are per-line and vertical tab stops,
+# which DEC's terminals never had: the VT manuals define only Ps=0 and Ps=3. xterm agrees, and says so
+# by construction -- charproc.c:4287-4294 handles `<= 0` and `== 3` and lets everything else fall
+# through untouched.
+#
+# vttest sends both anyway, and is explicit about what it expects: main.c:649-650 is
+# `tbc(1); tbc(2);  /* no-op */`, sandwiched between the HTS/TBC(0) calls that set up the tab stops
+# the test then checks. They must not disturb those stops -- and they do not, which is why chapter 02
+# renders correctly. Contour ignores them exactly as xterm does; the only difference is that it also
+# tells the harness it did, which is what puts them here rather than in a silent void.
+#
+# Implementing them would mean inventing per-line tab stops that no DEC terminal, and no terminal
+# anyone tests against, has ever had. Listed as gaps because that is honest, not because it is a bug.
+invalid: CSI 1 g
+invalid: CSI 2 g
+
+# `ESC <` arriving in ANSI mode -- INTENTIONAL, and vttest's own bookkeeping puts it there.
+#
+# `ESC <` means "exit VT52 mode" and is defined only *inside* VT52 mode; xterm's ctlseqs.txt lists it
+# in the VT52 section and nowhere else. Contour honours it there (VT52_ANSI, Screen.cpp:4991) and
+# reports it as unknown anywhere else, which is what this entry records.
+#
+# vttest sends one spuriously. set_level() only emits `esc("<")` when its own `cur_level` says the
+# terminal is in VT52 (setup.c:426-428) -- but vt52.c:220 leaves VT52 by calling `esc("<")` DIRECTLY,
+# without telling set_level(). So `cur_level` stays 0, and the next set_level(5) believes it is still
+# in VT52 and emits `ESC <` a second time, into a terminal that left VT52 long since. The log shows
+# exactly that: enter at 1258, leave at 1261, and leave again at 1284 with nothing in between.
+#
+# Nothing is broken by it -- the sequence is a no-op either way -- and a terminal that accepted it in
+# ANSI mode would be papering over the driver-visible fact that vttest asked for something undefined.
+unknown: ESC <
+
+# DECAUPSS -- a real VT320 feature Contour does not implement. NOT intentional; tracked.
+#
+# `DCS Ps ! u D...D ST` assigns the User-Preferred Supplemental Set, the 96-character set GR maps to.
+# vttest sends `DCS 0 ! u % 5 ST` (DEC Supplemental Graphic) from its VT320 reporting chapter, and then
+# asks for it back with DECRQUPSS (`CSI & u`, charsets.c:898). Contour has neither.
+#
+# This gap was invisible until 2026-07-16 because the chapter that exercises it never ran: chapter 11's
+# `*` cannot reach its sub-chapters, so `vttest.11.2.5` tested nothing while `vttest.11.2.vt320` gated
+# the build. @see docs/internals/vt-conformance.md -- `*` runs every menu ITEM, and an item need not be a test.
+#
+# Contour decodes UTF-8, so GR mapping is a no-op for rendering (see the charset notes in the roadmap):
+# implementing UPSS means tracking the state faithfully and reporting it, as DECCIR already does for
+# the charsets it knows -- not remapping codepoints, which would corrupt Latin-1. Listed so the gate is
+# honest about it rather than silent.
+unknown: DCS ! u
+
+# ERM (Erasure Mode, ANSI mode 6) -- INTENTIONAL, and at parity with xterm.
+#
+# ECMA-48 gives ERM two states: reset (PROTECT) erases only unprotected positions, set (ALL) erases
+# everything regardless. Contour implements the protection itself -- SPA/EPA and DECSCA, on two
+# separate cell flags because the two are honoured by opposite erase families -- and always honours
+# it, which is exactly ERM's reset default. What is missing is only the ability to turn that off.
+#
+# xterm does not implement it either: ansi_modes() (charproc.c:7392-7404) handles 2 (KAM), 4 (IRM),
+# 12 (SRM) and 20 (LNM), and nothing else. vttest offers it as a toggle in its protected-area menu
+# (nonvt100.c:572-576) rather than as an assertion, so nothing fails for want of it.
+#
+# Invisible until 2026-07-16 for the same reason as UPSS: the test that sends it is behind a submenu
+# that `*` could not reach. @see docs/internals/vt-conformance.md.
+unsupported: CSI 6 h
+unsupported: CSI 6 l

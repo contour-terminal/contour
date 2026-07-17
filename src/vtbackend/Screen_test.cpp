@@ -6808,6 +6808,150 @@ TEST_CASE("OSC 52: clipboard write and gated read", "[screen]")
 
 // }}} XTSMTITLE / XTRMTITLE (Set/Reset Title Modes) Tests
 
+TEST_CASE("OSC 110/111 reset dynamic colors to the default palette", "[screen]")
+{
+    // The mechanism esctest ResetSpecialColorTests.test_ResetSpecialColor_Dynamic exercises: OSC 110
+    // (reset foreground) and OSC 111 (reset background) restore the dynamic color to the terminal's
+    // default palette, undoing any OSC 10 / OSC 11 override.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    SECTION("OSC 110 resets the foreground")
+    {
+        mock.writeToScreen("\033]10;?\033\\"); // query the default foreground
+        mock.terminal.flushInput();
+        auto const original = mock.replyData();
+        REQUIRE(original.find("]10;rgb:") != std::string::npos);
+
+        mock.resetReplyData();
+        mock.writeToScreen("\033]10;#aaaabbbbcccc\033\\"); // override it
+        mock.writeToScreen("\033]10;?\033\\");
+        mock.terminal.flushInput();
+        REQUIRE(mock.replyData() == "\033]10;rgb:aaaa/bbbb/cccc\033\\");
+
+        mock.resetReplyData();
+        mock.writeToScreen("\033]110\033\\");  // reset foreground to default
+        mock.writeToScreen("\033]10;?\033\\"); // query again
+        mock.terminal.flushInput();
+        CHECK(mock.replyData() == original);
+    }
+
+    SECTION("OSC 111 resets the background")
+    {
+        mock.writeToScreen("\033]11;?\033\\");
+        mock.terminal.flushInput();
+        auto const original = mock.replyData();
+        REQUIRE(original.find("]11;rgb:") != std::string::npos);
+
+        mock.resetReplyData();
+        mock.writeToScreen("\033]11;#112233445566\033\\");
+        mock.writeToScreen("\033]111\033\\"); // reset background to default
+        mock.writeToScreen("\033]11;?\033\\");
+        mock.terminal.flushInput();
+        CHECK(mock.replyData() == original);
+    }
+}
+
+// {{{ DECDMAC / DECINVM (Text Macros) Tests
+
+TEST_CASE("DECDMAC: define and invoke simple text macro", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 0 with plain text "Hello"
+    mock.writeToScreen("\033P0;0;0!zHello\033\\");
+    mock.terminal.flushInput();
+    // Invoke macro 0
+    mock.writeToScreen("\033[0*z");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 5) == "Hello");
+}
+
+TEST_CASE("DECDMAC: define macro with VT sequences", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 1 with SGR bold + text "Bold"
+    mock.writeToScreen("\033P1;0;0!z\033[1mBold\033\\");
+    mock.terminal.flushInput();
+    // Invoke macro 1
+    mock.writeToScreen("\033[1*z");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 4) == "Bold");
+}
+
+TEST_CASE("DECDMAC: hex-encoded macro (Pen=1)", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 2 with hex encoding: "Hi" = 0x48 0x69
+    mock.writeToScreen("\033P2;0;1!z4869\033\\");
+    mock.terminal.flushInput();
+    // Invoke macro 2
+    mock.writeToScreen("\033[2*z");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 2) == "Hi");
+}
+
+TEST_CASE("DECDMAC: delete all macros (Pdt=1)", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 0
+    mock.writeToScreen("\033P0;0;0!zFirst\033\\");
+    mock.terminal.flushInput();
+    // Define macro 5 with delete-all (Pdt=1)
+    mock.writeToScreen("\033P5;1;0!zSecond\033\\");
+    mock.terminal.flushInput();
+    CHECK_FALSE(mock.terminal.macroBody(0).has_value());
+    CHECK(mock.terminal.macroBody(5).has_value());
+}
+
+TEST_CASE("DECDMAC: overwrite existing macro", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 0 with "Old"
+    mock.writeToScreen("\033P0;0;0!zOld\033\\");
+    mock.terminal.flushInput();
+    // Redefine macro 0 with "New"
+    mock.writeToScreen("\033P0;0;0!zNew\033\\");
+    mock.terminal.flushInput();
+    // Invoke macro 0
+    mock.writeToScreen("\033[0*z");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 3) == "New");
+}
+
+TEST_CASE("DECDMAC: max 64 macros", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macros 0-63
+    for (auto i = 0; i < 64; ++i)
+        mock.writeToScreen(std::format("\033P{};0;0!zM{}\033\\", i, i));
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.macroBody(0).has_value());
+    CHECK(mock.terminal.macroBody(63).has_value());
+    // Macro 64 should be rejected (out of range)
+    mock.writeToScreen("\033P64;0;0!zBad\033\\");
+    mock.terminal.flushInput();
+    CHECK_FALSE(mock.terminal.macroBody(64).has_value());
+}
+
+TEST_CASE("DECINVM: invoke undefined macro", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Invoke non-existent macro 42 — should do nothing, no crash
+    mock.writeToScreen("\033[42*z");
+    mock.terminal.flushInput();
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).find_first_not_of(' ')
+          == std::string::npos);
+}
+
+TEST_CASE("DECINVM: nested macro invocation", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    // Define macro 1 that writes "B"
+    mock.writeToScreen("\033P1;0;0!zB\033\\");
+    mock.terminal.flushInput();
+    // Define macro 0 that writes "A", invokes macro 1, then writes "C"
+    mock.writeToScreen("\033P0;0;0!zA\033[1*zC\033\\");
+    mock.terminal.flushInput();
+    // Invoke macro 0
     mock.writeToScreen("\033[0*z");
     mock.terminal.flushInput();
     // Macro 0 body outputs "A" then "C" (deferred macro 1 runs after), then macro 1 outputs "B"

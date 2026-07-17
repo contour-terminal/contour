@@ -1,0 +1,31 @@
+# VT sequences Contour does not yet honour, as reported by the conformance harness.
+#
+# This file is a RATCHET, not a suppression list:
+#   * a diagnostic that is NOT listed here fails the build (a new gap);
+#   * an entry here that no longer occurs ALSO fails the build (a stale gap).
+#
+# So the list can only shrink, and it cannot quietly stop describing reality.
+# Regenerate with: vtconformance run --suite=vttest --update-known-gaps
+
+invalid: OSC 10 CIELab:1/1/1
+invalid: OSC 10 CIELuv:1/1/1
+invalid: OSC 10 CIEXYZ:1/1/1
+invalid: OSC 10 CIEuvY:1/1/1
+invalid: OSC 10 CIExyY:1/1/1
+invalid: OSC 10 TekHVC:1/1/1
+invalid: OSC 4 0;CIELab:1/1/1
+invalid: OSC 4 0;CIELuv:1/1/1
+invalid: OSC 4 0;CIEXYZ:1/1/1
+invalid: OSC 4 0;CIEuvY:1/1/1
+invalid: OSC 4 0;CIExyY:1/1/1
+invalid: OSC 4 0;TekHVC:1/1/1
+invalid: OSC 4 256;CIELab:1/1/1
+invalid: OSC 4 256;CIELuv:1/1/1
+invalid: OSC 4 256;CIEXYZ:1/1/1
+invalid: OSC 4 256;CIEuvY:1/1/1
+invalid: OSC 4 256;CIExyY:1/1/1
+invalid: OSC 4 256;TekHVC:1/1/1
+parser-error: Parser error: Unknown action for state/input pair.
+unknown: CSI 12;2 $ y
+unknown: DCS z
+unsupported: CSI ? 3 J

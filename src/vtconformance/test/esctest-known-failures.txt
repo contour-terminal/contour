@@ -1,0 +1,54 @@
+# esctest cases Contour does not pass yet.
+#
+# A RATCHET, under the same rule as the ignored-sequence list:
+#   * a test that fails and is NOT listed here fails the build (a regression);
+#   * an entry here that now passes ALSO fails the build (a stale entry).
+#
+# Regenerate with: vtconformance run --suite=esctest --update-known-failures
+#
+# Entries are grouped by WHY they fail. The "intentional gap" groups are decisions, not TODOs:
+# reversing them would make Contour less correct, not more. The "to fix" group is genuine work.
+
+# --- Intentional gap: X11 Xcms device-dependent colour spaces --------------------------------------
+# These assert byte-exact sRGB values produced by libX11's Xcms pipeline for the CIE* / RGBI / TekHVC
+# colour specs (e.g. `CIEXYZ:0.5/0.5/0.5` -> `dddd/b5b5/a0a0`, `rgbi:0.5/0.5/0.5` -> `c1c1/bbbb/bbbb`).
+# The unequal channels from equal input prove the values come from libX11's built-in per-channel
+# phosphor-gamma characterisation tables, not any portable standard -- there is no "X screen" to
+# characterise off X11. xterm passes only because it delegates to XParseColor/Xlib; the entire modern
+# terminal ecosystem (foot, wezterm, kitty, ghostty, xterm.js, konsole, windows-terminal) declines to
+# implement CIE colour spaces. A reference terminal honours the documented portable colour formats
+# (rgb:, #hex), not one library's colour-management internals. See docs/internals/vt-conformance.md.
+ChangeColorTests.test_ChangeColor_CIELab
+ChangeColorTests.test_ChangeColor_CIELuv
+ChangeColorTests.test_ChangeColor_CIEXYZ
+ChangeColorTests.test_ChangeColor_CIEuvY
+ChangeColorTests.test_ChangeColor_CIExyY
+ChangeColorTests.test_ChangeColor_RGBI
+ChangeColorTests.test_ChangeColor_TekHVC
+ChangeDynamicColorTests.test_ChangeDynamicColor_CIELab
+ChangeDynamicColorTests.test_ChangeDynamicColor_CIELuv
+ChangeDynamicColorTests.test_ChangeDynamicColor_CIEXYZ
+ChangeDynamicColorTests.test_ChangeDynamicColor_CIEuvY
+ChangeDynamicColorTests.test_ChangeDynamicColor_CIExyY
+ChangeDynamicColorTests.test_ChangeDynamicColor_RGBI
+ChangeDynamicColorTests.test_ChangeDynamicColor_TekHVC
+ChangeSpecialColorTests.test_ChangeSpecialColor_CIELab
+ChangeSpecialColorTests.test_ChangeSpecialColor_CIELuv
+ChangeSpecialColorTests.test_ChangeSpecialColor_CIEXYZ
+ChangeSpecialColorTests.test_ChangeSpecialColor_CIEuvY
+ChangeSpecialColorTests.test_ChangeSpecialColor_CIExyY
+ChangeSpecialColorTests.test_ChangeSpecialColor_RGBI
+ChangeSpecialColorTests.test_ChangeSpecialColor_TekHVC
+
+# --- Intentional gap: xterm-specific device-attribute identity -------------------------------------
+# The DA test demands xterm's exact primary-DA feature list including printer port (2) and ReGIS
+# locator (16); Contour implements neither and must not advertise them (Screen.cpp emits "no printer").
+# The DA2 test demands xterm's model code (64) and firmware-version range; Contour honestly reports its
+# own identity and version. Advertising capabilities it lacks would be a lie, not conformance.
+DA2Tests.test_DA2_0
+DA2Tests.test_DA2_NoParameter
+DATests.test_DA_0
+DATests.test_DA_NoParameter
+
+# --- To fix: genuine gaps/bugs -------------------------------------------------------------------
+# (none) — every remaining failure below is an intentional gap, not a bug to fix.
