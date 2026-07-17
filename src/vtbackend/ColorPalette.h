@@ -61,9 +61,67 @@ enum class ColorLookupTable : uint8_t
     AnsiSgr,   //!< DECSTGLT 3 (power-up default): SGR color parameters drive text color.
 };
 
+/// The five colors an application may assign to text carrying a particular attribute.
+///
+/// xterm calls these the "special" colors. They are addressed by `OSC 5 ; n ; spec`, and equivalently by
+/// `OSC 4` at an index just past the last indexed color, and reset by `OSC 105`.
+enum class SpecialColor : uint8_t
+{
+    Bold = 0,      ///< xterm's COLOR_BD
+    Underline = 1, ///< COLOR_UL
+    Blink = 2,     ///< COLOR_BL
+    Reverse = 3,   ///< COLOR_RV
+    Italic = 4,    ///< COLOR_IT
+};
+
+/// How many special colors there are. @see SpecialColor.
+constexpr auto SpecialColorCount = size_t { 5 };
+
+/// The number of indexed colors -- the ones `OSC 4` addresses directly, and the count XTGETTCAP's `Co`
+/// reports. An application computes the index of a special color by adding to this.
+constexpr auto IndexedColorCount = size_t { 256 };
+
+/// Where the palette keeps Contour's own dim colors. No escape sequence reaches these.
+constexpr auto DimColorOffset = IndexedColorCount;
+
+/// Where the palette keeps the special colors.
+///
+/// *Not* right after the indexed ones, where xterm puts them: Contour's dim colors already sit there.
+/// The two layouts cannot share an offset, so the translation from the index an application names to the
+/// slot the color lives in is stated once -- in paletteSlotOfColorIndex() -- rather than being baked
+/// into the array's shape and silently colliding.
+constexpr auto SpecialColorOffset = IndexedColorCount + 8;
+
+/// Maps the color index an application names in `OSC 4` to the palette slot that color lives in.
+///
+/// @param index The color index, 0..255 for an indexed color and 256..260 for a special one.
+/// @return The palette slot, or std::nullopt if @p index names no color at all.
+constexpr std::optional<size_t> paletteSlotOfColorIndex(unsigned index) noexcept
+{
+    if (index < IndexedColorCount)
+        return index;
+
+    if (index < IndexedColorCount + SpecialColorCount)
+        return SpecialColorOffset + (index - IndexedColorCount);
+
+    return std::nullopt;
+}
+
+/// Maps the special-color number an application names in `OSC 5` to the palette slot it lives in.
+///
+/// @param index The special color number, 0..4. @see SpecialColor.
+/// @return The palette slot, or std::nullopt if @p index names no special color.
+constexpr std::optional<size_t> paletteSlotOfSpecialColor(unsigned index) noexcept
+{
+    if (index < SpecialColorCount)
+        return SpecialColorOffset + index;
+
+    return std::nullopt;
+}
+
 struct ColorPalette
 {
-    using Palette = std::array<RGBColor, 256 + 8>;
+    using Palette = std::array<RGBColor, SpecialColorOffset + SpecialColorCount>;
 
     /// Indicates whether or not bright colors are being allowed
     /// for indexed colors between 0..7 and mode set to ColorMode::Bright.
@@ -95,7 +153,13 @@ struct ColorPalette
     [[nodiscard]] RGBColor dimColor(size_t index) const noexcept
     {
         assert(index < 8);
-        return palette[256 + index];
+        return palette[DimColorOffset + index];
+    }
+
+    /// @return The color assigned to text carrying the attribute @p which. @see SpecialColor.
+    [[nodiscard]] RGBColor specialColor(SpecialColor which) const noexcept
+    {
+        return palette[SpecialColorOffset + static_cast<size_t>(which)];
     }
 
     [[nodiscard]] RGBColor indexedColor(size_t index) const noexcept

@@ -7088,8 +7088,90 @@ TEST_CASE("DECDC deletes a column from every line, including the blank ones", "[
     CHECK(screen.grid().lineText(LineOffset(1)) == "ACDEFG ");
     CHECK(screen.grid().lineText(LineOffset(4)) == "       ");
 }
-    SECTION("OSC 104 with no index resets every index it can address")
+
+// {{{ Special colors (OSC 5 / OSC 105)
+
+TEST_CASE("OSC.5 addresses the special colors", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(4) } };
+
+    SECTION("set and query")
+    {
+        mock.writeToScreen("\033]5;0;rgb:f0f0/f0f0/f0f0\033\\"); // bold
+        mock.writeToScreen("\033]5;4;rgb:1010/2020/3030\033\\"); // italic
+        mock.discardPendingReplies();
+
+        mock.writeToScreen("\033]5;0;?\033\\");
+        mock.writeToScreen("\033]5;4;?\033\\");
+        INFO(mock.terminal.peekInput());
+        REQUIRE(e(mock.terminal.peekInput())
+                == e("\033]5;0;rgb:f0f0/f0f0/f0f0\033\\"
+                     "\033]5;4;rgb:1010/2020/3030\033\\"));
+
+        CHECK(mock.terminal.colorPalette().specialColor(SpecialColor::Bold) == RGBColor { 0xF0, 0xF0, 0xF0 });
+        CHECK(mock.terminal.colorPalette().specialColor(SpecialColor::Italic)
+              == RGBColor { 0x10, 0x20, 0x30 });
+    }
+
+    SECTION("OSC 4 reaches the same colors, just past the indexed ones")
+    {
+        // An application may name a special color either way: `OSC 5 ; 0` and `OSC 4 ; 256` are the same
+        // color. A report echoes the index it was given, in the form it was given.
+        mock.writeToScreen("\033]4;256;rgb:aaaa/bbbb/cccc\033\\");
+        mock.discardPendingReplies();
+
+        mock.writeToScreen("\033]5;0;?\033\\");
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033]5;0;rgb:aaaa/bbbb/cccc\033\\"));
+        mock.discardPendingReplies();
+
+        mock.writeToScreen("\033]4;256;?\033\\");
+        REQUIRE(e(mock.terminal.peekInput()) == e("\033]4;256;rgb:aaaa/bbbb/cccc\033\\"));
+    }
+
+    SECTION("an index past the last special color names nothing")
+    {
+        mock.writeToScreen("\033]5;5;rgb:0000/0000/0000\033\\");
+        CHECK(mock.terminal.peekInput().empty());
+    }
+
+    SECTION("the dim colors are not reachable, and are not overwritten")
+    {
+        // Contour keeps its own dim colors where xterm keeps its special ones. Naming special color 0
+        // must not land on a dim color.
+        auto const dimBefore = mock.terminal.colorPalette().dimColor(0);
         mock.writeToScreen("\033]5;0;rgb:f0f0/f0f0/f0f0\033\\");
+        CHECK(mock.terminal.colorPalette().dimColor(0) == dimBefore);
+    }
+}
+
+TEST_CASE("OSC.105 resets the special colors", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(4) } };
+    auto const original = mock.terminal.defaultColorPalette().specialColor(SpecialColor::Bold);
+
+    SECTION("one color")
+    {
+        mock.writeToScreen("\033]5;0;rgb:f0f0/f0f0/f0f0\033\\");
+        mock.writeToScreen("\033]105;0\033\\");
+        CHECK(mock.terminal.colorPalette().specialColor(SpecialColor::Bold) == original);
+    }
+
+    SECTION("all of them, when no index is given")
+    {
+        mock.writeToScreen("\033]5;0;rgb:f0f0/f0f0/f0f0\033\\");
+        mock.writeToScreen("\033]5;4;rgb:f0f0/f0f0/f0f0\033\\");
+        mock.writeToScreen("\033]105\033\\");
+        CHECK(mock.terminal.colorPalette().specialColor(SpecialColor::Bold) == original);
+        CHECK(mock.terminal.colorPalette().specialColor(SpecialColor::Italic)
+              == mock.terminal.defaultColorPalette().specialColor(SpecialColor::Italic));
+    }
+
+    SECTION("OSC 104 with no index resets every index it can address")
+    {
+        mock.writeToScreen("\033]4;3;rgb:f0f0/f0f0/f0f0\033\\");
+        mock.writeToScreen("\033]5;0;rgb:f0f0/f0f0/f0f0\033\\");
+        mock.writeToScreen("\033]104\033\\");
+        CHECK(mock.terminal.colorPalette().palette[3] == mock.terminal.defaultColorPalette().palette[3]);
         // OSC 4 addresses the special colors too (256..260), so a bare OSC 104 reaches them -- as xterm
         // walks its whole Acolors.
         CHECK(mock.terminal.colorPalette().specialColor(SpecialColor::Bold) == original);
@@ -7108,6 +7190,10 @@ TEST_CASE("DECDC deletes a column from every line, including the blank ones", "[
         mock.writeToScreen("\033]104\033\\");
 
         CHECK(mock.terminal.colorPalette().defaultBackground == chosenBackground);
+    }
+}
+
+// }}} Special colors
 
 // {{{ Backspace, margins and reverse wraparound
 

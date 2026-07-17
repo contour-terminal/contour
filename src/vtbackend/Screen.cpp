@@ -3502,52 +3502,84 @@ namespace impl
             return result;
         }
 
-                                    std::function<void(uint8_t)> queryColor,
-                                    std::function<void(uint8_t, RGBColor)> setColor)
+        /// How a color-palette sequence names a color, and how it reports one back.
+        ///
+        /// `OSC 4` and `OSC 5` are the same sequence twice over -- pairs of index and specification,
+        /// answered in kind -- differing only in which colors an index reaches. So they share an
+        /// implementation, and this is all that separates them.
+        struct ColorPaletteSelector
         {
-            // Sequence := [Param (';' Param)*]
-            // Param    := Index ';' Query | Set
-            // Index    := DIGIT+
-            // Query    := ?'
-            // Set      := 'rgb:' Hex8 '/' Hex8 '/' Hex8
-            // Hex8     := [0-9A-Za-z] [0-9A-Za-z]
-            // DIGIT    := [0-9]
-            int index = -1;
-            return crispy::split(text, ';', [&](string_view value) {
-                if (index < 0)
-                {
-                    index = crispy::to_integer<10, int>(value).value_or(-1);
-                    if (!(0 <= index && index <= 0xFF))
+            /// The OSC command, which is also what a report is tagged with: 4 or 5.
+            unsigned command;
+
+            /// Maps the index an application names to the palette slot the color lives in.
+            std::optional<size_t> (*slotOf)(unsigned index) noexcept;
 
             /// How many indices this selector reaches, i.e. what a reset with no index at all covers.
             unsigned indexCount;
+        };
+
+        constexpr auto IndexedColorSelector =
             ColorPaletteSelector { .command = 4,
                                    .slotOf = &paletteSlotOfColorIndex,
                                    .indexCount =
                                        static_cast<unsigned>(IndexedColorCount + SpecialColorCount) };
+        constexpr auto SpecialColorSelector =
             ColorPaletteSelector { .command = 5,
                                    .slotOf = &paletteSlotOfSpecialColor,
                                    .indexCount = static_cast<unsigned>(SpecialColorCount) };
-                        return false;
-                }
-                else if (value == "?"sv)
-                {
-                    queryColor((uint8_t) index);
-                    index = -1;
-                }
-                else if (auto const color = vtbackend::parseColor(value))
-                {
-                    setColor((uint8_t) index, color.value());
-                    index = -1;
-                }
-                else
-                    return false;
 
-                return true;
-            });
+        /// `OSC 4` / `OSC 5` -- sets or queries palette colors, as index/specification pairs.
+        ///
+        /// As in xterm, the first pair that cannot be read ends the sequence: a bad index or an
+        /// unparseable specification stops the walk rather than skipping to the next pair.
+        ///
+        /// @see xterm's ChangeAnsiColorRequest() in misc.c.
+        ApplyResult setOrRequestColorPalette(Sequence const& seq,
+                                             Terminal& terminal,
+                                             ColorPaletteSelector const& selector)
+        {
+            // The index the application named, kept as it gave it: a report echoes that index, not the
+            // slot we happen to keep the color in.
+            auto pending = std::optional<std::pair<unsigned, size_t>> {};
+
+            auto const ok =
+                crispy::split(std::string_view { seq.intermediateCharacters() }, ';', [&](string_view value) {
+                    if (!pending.has_value())
+                    {
+                        auto const index = crispy::to_integer<10, unsigned>(value);
+                        if (!index.has_value())
+                            return false;
+
+                        auto const slot = selector.slotOf(*index);
+                        if (!slot.has_value())
+                            return false;
+
+                        pending = std::pair { *index, *slot };
+                        return true;
+                    }
+
+                    auto const [index, slot] = *pending;
+
+                    if (value == "?"sv)
+                        terminal.reply("\033]{};{};{}\033\\",
+                                       selector.command,
+                                       index,
+                                       colorSpecification(terminal.colorPalette().palette.at(slot)));
+                    else if (auto const color = vtbackend::parseColor(value); color.has_value())
+                        terminal.colorPalette().palette.at(slot) = color.value();
+                    else
+                        return false;
+
+                    pending = std::nullopt;
+                    return true;
+                });
+
+            return ok ? ApplyResult::Ok : ApplyResult::Invalid;
         }
 
-        ApplyResult RCOLPAL(Sequence const& seq, Terminal& terminal)
+        /// `OSC 104` / `OSC 105` -- resets palette colors to the ones the terminal was configured with.
+        ///
         /// With no index at all, every index the selector reaches is reset -- and only those. What the
         /// sequence can *address* is what it can reset: `OSC 104` covers the indexed colors plus the
         /// special ones (xterm walks its whole `Acolors` the same way), `OSC 105` only the special ones.
@@ -3557,6 +3589,9 @@ namespace impl
         /// `OSC 10`..`19` and reset by `OSC 110`..`119` (xterm keeps them apart as `Tcolors`). Resetting
         /// them here would withdraw a background an application set with `OSC 11` that nothing asked to
         /// reset. Otherwise the indices are a ';'-separated list.
+        ApplyResult resetColorPalette(Sequence const& seq,
+                                      Terminal& terminal,
+                                      ColorPaletteSelector const& selector)
         {
             if (seq.intermediateCharacters().empty())
             {
@@ -3567,27 +3602,20 @@ namespace impl
                 return ApplyResult::Ok;
             }
 
-            if (!index.has_value())
-                return ApplyResult::Invalid;
+            auto const ok =
+                crispy::split(std::string_view { seq.intermediateCharacters() }, ';', [&](string_view value) {
+                    auto const index = crispy::to_integer<10, unsigned>(value);
+                    if (!index.has_value())
+                        return false;
 
-            terminal.colorPalette().palette[*index] = terminal.defaultColorPalette().palette[*index];
+                    auto const slot = selector.slotOf(*index);
+                    if (!slot.has_value())
+                        return false;
 
-            return ApplyResult::Ok;
-        }
-
-        ApplyResult SETCOLPAL(Sequence const& seq, Terminal& terminal)
-        {
-            bool const ok = queryOrSetColorPalette(
-                seq.intermediateCharacters(),
-                [&](uint8_t index) {
-                    auto const color = terminal.colorPalette().palette.at(index);
-                    terminal.reply("\033]4;{};rgb:{:04x}/{:04x}/{:04x}\033\\",
-                                   index,
-                                   static_cast<uint16_t>(color.red) << 8 | color.red,
-                                   static_cast<uint16_t>(color.green) << 8 | color.green,
-                                   static_cast<uint16_t>(color.blue) << 8 | color.blue);
-                },
-                [&](uint8_t index, RGBColor color) { terminal.colorPalette().palette.at(index) = color; });
+                    terminal.colorPalette().palette.at(*slot) =
+                        terminal.defaultColorPalette().palette.at(*slot);
+                    return true;
+                });
 
             return ok ? ApplyResult::Ok : ApplyResult::Invalid;
         }
@@ -5207,8 +5235,11 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case SETWINTITLE: _terminal->setWindowTitle(seq.intermediateCharacters()); break;
         case SETTABNAME: _terminal->setTabName(seq.intermediateCharacters()); break;
         case SETXPROP: return ApplyResult::Unsupported;
-        case SETCOLPAL: return impl::SETCOLPAL(seq, *_terminal);
-        case RCOLPAL: return impl::RCOLPAL(seq, *_terminal);
+        case SETCOLPAL: return impl::setOrRequestColorPalette(seq, *_terminal, impl::IndexedColorSelector);
+        case SETSPECIALCOLPAL:
+            return impl::setOrRequestColorPalette(seq, *_terminal, impl::SpecialColorSelector);
+        case RCOLPAL: return impl::resetColorPalette(seq, *_terminal, impl::IndexedColorSelector);
+        case RCOLSPECIALPAL: return impl::resetColorPalette(seq, *_terminal, impl::SpecialColorSelector);
         case SETCWD: return impl::SETCWD(seq, *this);
         case HYPERLINK: return impl::HYPERLINK(seq, *this);
         case XTCAPTURE: return impl::CAPTURE(seq, *_terminal);
