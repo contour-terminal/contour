@@ -134,6 +134,63 @@ TEST_CASE("XtSmGraphics.SixelGeometry.ResetToDefault replies and restores the ce
     CHECK(mock.terminal.peekInput() == "\033[?2;0;640;480S\033[?2;0;1920;1080S"sv);
 }
 
+TEST_CASE("XtSmGraphics.SixelGeometry.the ceiling drives the canvas until an application negotiates",
+          "[screen][xtsmgraphics]")
+{
+    // The frontend sets the ceiling after construction, so the canvas must follow it rather than sit
+    // at whatever the settings were born with.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(11) } };
+    configure(mock, ImageSize { Width(1920), Height(1080) });
+    CHECK(mock.terminal.maxImageSize() == ImageSize { Width(1920), Height(1080) });
+
+    mock.terminal.setImageCanvasCeiling(ImageSize { Width(800), Height(600) });
+    CHECK(mock.terminal.maxImageSize() == ImageSize { Width(800), Height(600) });
+}
+
+TEST_CASE("XtSmGraphics.SixelGeometry.a ceiling change keeps what an application negotiated",
+          "[screen][xtsmgraphics]")
+{
+    // setImageCanvasCeiling() fires whenever the display changes -- a window dragged to another
+    // monitor, a session re-attached to a display on a tab switch or split rebuild. Resetting the
+    // effective size there raised the canvas back to the full monitor behind the application's back,
+    // so images were accepted at a size it never asked for and a later read replied with a value
+    // contradicting the one it had cached.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(11) } };
+    configure(mock, ImageSize { Width(1920), Height(1080) });
+
+    mock.writeToScreen("\033[?2;3;640;480S");
+    REQUIRE(mock.terminal.maxImageSize() == ImageSize { Width(640), Height(480) });
+
+    SECTION("a larger ceiling leaves it alone")
+    {
+        mock.terminal.setImageCanvasCeiling(ImageSize { Width(3840), Height(2160) });
+        CHECK(mock.terminal.maxImageSize() == ImageSize { Width(640), Height(480) });
+    }
+
+    SECTION("a smaller ceiling still caps it")
+    {
+        mock.terminal.setImageCanvasCeiling(ImageSize { Width(320), Height(200) });
+        CHECK(mock.terminal.maxImageSize() == ImageSize { Width(320), Height(200) });
+    }
+
+    SECTION("a ceiling that shrinks and grows again restores what was asked for")
+    {
+        // The request is the application's standing wish and the ceiling only ever caps it. Keeping
+        // the clamped result instead would make a ceiling that happened to be small at the moment
+        // the request arrived permanent.
+        mock.terminal.setImageCanvasCeiling(ImageSize { Width(320), Height(200) });
+        mock.terminal.setImageCanvasCeiling(ImageSize { Width(1920), Height(1080) });
+        CHECK(mock.terminal.maxImageSize() == ImageSize { Width(640), Height(480) });
+    }
+
+    SECTION("a reset returns to following the ceiling, not to today's ceiling")
+    {
+        mock.writeToScreen("\033[?2;2S");
+        mock.terminal.setImageCanvasCeiling(ImageSize { Width(3840), Height(2160) });
+        CHECK(mock.terminal.maxImageSize() == ImageSize { Width(3840), Height(2160) });
+    }
+}
+
 TEST_CASE("XtSmGraphics.ReGISGeometry always answers failure", "[screen][xtsmgraphics]")
 {
     // Contour implements no ReGIS. Failure is the honest answer; silence hangs the caller.

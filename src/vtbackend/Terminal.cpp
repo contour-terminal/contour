@@ -172,7 +172,6 @@ Terminal::Terminal(Events& eventListener,
                                                          .to = _settings.pageSize.columns.as<ColumnOffset>()
                                                                - ColumnOffset(1) } },
     _maxSixelColorRegisters { _settings.maxImageRegisterCount },
-    _effectiveImageCanvasSize { _settings.maxImageSize },
     _sixelColorPalette { std::make_shared<SixelColorPalette>(_maxSixelColorRegisters,
                                                              _maxSixelColorRegisters) },
     _imagePool { [this](Image const* image) { discardImage(*image); } },

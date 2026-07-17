@@ -2825,9 +2825,12 @@ void Screen::smGraphics(XtSmGraphics::Item item, XtSmGraphics::Action action, Xt
                 }
                 break;
                 case Action::ResetToDefault: {
-                    // The ceiling is the default at the same time. Reply, as NumberOfColorRegisters
-                    // does: an application that issues this and waits would otherwise hang.
-                    auto const size = _terminal->setEffectiveImageCanvasSize(_terminal->imageCanvasCeiling());
+                    // Following the ceiling IS the default, so this drops the negotiated size rather
+                    // than pinning today's ceiling as one -- the ceiling moves with the display, and
+                    // a reset must not freeze the canvas at whatever monitor happened to be current.
+                    // Reply, as NumberOfColorRegisters does: an application that issues this and
+                    // waits would otherwise hang.
+                    auto const size = _terminal->resetEffectiveImageCanvasSize();
                     reply("\033[?{};{};{};{}S", SixelItem, Success, size.width, size.height);
                 }
                 break;
