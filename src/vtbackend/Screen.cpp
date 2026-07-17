@@ -1248,12 +1248,15 @@ void Screen::reportCursorInformation()
     // Pgl: GL charset table index (0=G0, 1=G1, 2=G2, 3=G3)
     auto const pgl = static_cast<int>(charsets.selectedTable());
 
-    // Pgr: GR charset table index (GR not tracked; default to G2 per VT standard)
-    auto const pgr = 2;
+    // Pgr: GR charset table index (0=G0, 1=G1, 2=G2, 3=G3; defaults to G2 per the VT standard)
+    auto const pgr = static_cast<int>(charsets.selectedTableGR());
 
-    // Scss: character set size for each G-set (0x40 base)
-    // Bit N = G(N-1) size: 0=94-char, 1=96-char. All supported charsets are 94-char.
-    auto const scss = static_cast<char>(0x40);
+    // Scss: per-G-set character set size (base 0x40; bit g is set when G(g) holds a 96-charset).
+    auto scssBits = 0x40;
+    for (auto const gSet: { CharsetTable::G0, CharsetTable::G1, CharsetTable::G2, CharsetTable::G3 })
+        if (charsets.is96Charset(gSet))
+            scssBits |= 1 << static_cast<int>(gSet);
+    auto const scss = static_cast<char>(scssBits);
 
     // Sdesig: SCS designation final characters for G0 through G3
     auto const sdesig = std::string { charsetDesignation(charsets.charsetIdOf(CharsetTable::G0)),
@@ -2392,14 +2395,24 @@ bool Screen::tryHandleSCS(Sequence const& seq)
     if (intermediates.empty())
         return false;
 
-    // First intermediate selects the G-set: ( = G0, ) = G1, * = G2, + = G3
-    auto const gSet = [&]() -> std::optional<CharsetTable> {
+    // First intermediate selects the G-set and its size:
+    //   94-charset designators:  ( = G0, ) = G1, * = G2, + = G3
+    //   96-charset designators:        - = G1, . = G2, / = G3   (G0 cannot hold a 96-charset)
+    struct GSetDesignation
+    {
+        CharsetTable table;
+        bool is96;
+    };
+    auto const gSet = [&]() -> std::optional<GSetDesignation> {
         switch (intermediates[0])
         {
-            case '(': return CharsetTable::G0;
-            case ')': return CharsetTable::G1;
-            case '*': return CharsetTable::G2;
-            case '+': return CharsetTable::G3;
+            case '(': return GSetDesignation { CharsetTable::G0, false };
+            case ')': return GSetDesignation { CharsetTable::G1, false };
+            case '*': return GSetDesignation { CharsetTable::G2, false };
+            case '+': return GSetDesignation { CharsetTable::G3, false };
+            case '-': return GSetDesignation { CharsetTable::G1, true };
+            case '.': return GSetDesignation { CharsetTable::G2, true };
+            case '/': return GSetDesignation { CharsetTable::G3, true };
             default: return std::nullopt;
         }
     }();
@@ -2420,39 +2433,49 @@ bool Screen::tryHandleSCS(Sequence const& seq)
 
     // Try to map the designator to a standard charset first
     auto const standardCharset = [&]() -> std::optional<CharsetId> {
-        if (designator.size() == 1)
+        if (designator.size() != 1)
+            return std::nullopt;
+        if (gSet->is96)
         {
+            // 96-character sets (invoked into GR). Only ISO Latin-1 supplemental ('A') is defined here.
             switch (designator[0])
             {
-                case '0': return CharsetId::Special;
-                case 'A': return CharsetId::British;
-                case 'B': return CharsetId::USASCII;
-                case 'C': return CharsetId::Finnish;
-                case '4': return CharsetId::Dutch;
-                case 'E': return CharsetId::NorwegianDanish;
-                case 'R': return CharsetId::French;
-                case 'Q': return CharsetId::FrenchCanadian;
-                case 'K': return CharsetId::German;
-                case 'Z': return CharsetId::Spanish;
-                case 'H': return CharsetId::Swedish;
-                case '=': return CharsetId::Swiss;
-                case '>': return CharsetId::Technical;
-                default: break;
+                case 'A': return CharsetId::ISOLatin1Supplemental;
+                default: return std::nullopt;
             }
         }
-        return std::nullopt;
+        switch (designator[0])
+        {
+            case '0': return CharsetId::Special;
+            case 'A': return CharsetId::British;
+            case 'B': return CharsetId::USASCII;
+            case 'C': return CharsetId::Finnish;
+            case '4': return CharsetId::Dutch;
+            case 'E': return CharsetId::NorwegianDanish;
+            case 'R': return CharsetId::French;
+            case 'Q': return CharsetId::FrenchCanadian;
+            case 'K': return CharsetId::German;
+            case 'Z': return CharsetId::Spanish;
+            case 'H': return CharsetId::Swedish;
+            case '=': return CharsetId::Swiss;
+            case '>': return CharsetId::Technical;
+            default: return std::nullopt;
+        }
     }();
 
     if (standardCharset)
     {
-        designateCharset(*gSet, *standardCharset);
+        if (gSet->is96)
+            _cursor.charsets.select96(gSet->table, *standardCharset);
+        else
+            designateCharset(gSet->table, *standardCharset);
         return true;
     }
 
     // For DRCS designators: look up the font number from the Terminal's designator map.
     if (auto const fontNumber = _terminal->drcsDesignatorToFont(designator); fontNumber.has_value())
     {
-        _cursor.charsets.selectDRCS(*gSet, *fontNumber);
+        _cursor.charsets.selectDRCS(gSet->table, *fontNumber);
         return true;
     }
 
@@ -4585,6 +4608,15 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             if (_terminal->operatingLevel() != VTType::VT100)
                 _terminal->setC1TransmissionMode(ControlTransmissionMode::S8C1T);
             break;
+        case DOCS_DEFAULT:
+        case DOCS_UTF8:
+            // Designate Other Coding System (ESC % @ selects ISO 8859-1, ESC % G selects UTF-8).
+            // Contour's parser is always UTF-8, so both are accepted as no-ops for decoding: UTF-8 is
+            // already the mode, and honouring the ISO 8859-1 default would need a Latin-1 decode path
+            // Contour deliberately omits (remapping decoded codepoints would corrupt them -- see the
+            // charset/UTF-8 constraint). Accepting them keeps applications that set their encoding at
+            // startup (vttest) out of the unknown-sequence log.
+            break;
         case DECID: sendDeviceAttributes(); break; // ESC Z: identify, answered like DA1
         case DECBI: backIndex(); break;
         case DECDHL_Top:
@@ -4617,6 +4649,11 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case RIS: _terminal->hardReset(); break;
         case SS2: singleShiftSelect(CharsetTable::G2); break;
         case SS3: singleShiftSelect(CharsetTable::G3); break;
+        case LS2: _cursor.charsets.lockingShift(CharsetTable::G2); break;
+        case LS3: _cursor.charsets.lockingShift(CharsetTable::G3); break;
+        case LS1R: _cursor.charsets.lockingShiftGR(CharsetTable::G1); break;
+        case LS2R: _cursor.charsets.lockingShiftGR(CharsetTable::G2); break;
+        case LS3R: _cursor.charsets.lockingShiftGR(CharsetTable::G3); break;
 
         // CSI
         case ANSISYSSC: restoreCursor(); break;

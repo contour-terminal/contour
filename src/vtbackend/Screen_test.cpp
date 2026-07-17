@@ -4861,6 +4861,84 @@ TEST_CASE("LS1 and LS0", "[screen]")
     REQUIRE(trimmedTextScreenshot(mock) == "ab▒␉ab");
 }
 
+TEST_CASE("LS2 and LS3 (locking shift into GL)", "[screen]")
+{
+    auto mock = MockTerm { ColumnCount(8), LineCount(4) };
+    auto const& charsets = mock.terminal.primaryScreen().cursor().charsets;
+
+    // Designate G2 and G3 to DEC Special so the locking shift has something observable.
+    mock.writeToScreen("\033*0"); // SCS G2 = DEC Special
+    mock.writeToScreen("\033+0"); // SCS G3 = DEC Special
+    REQUIRE(charsets.isSelected(CharsetTable::G2, CharsetId::Special));
+    REQUIRE(charsets.isSelected(CharsetTable::G3, CharsetId::Special));
+    REQUIRE(charsets.selectedTable() == CharsetTable::G0); // GL starts at G0
+
+    // LS2 (ESC n): invoke G2 into GL.
+    mock.writeToScreen("\033n");
+    CHECK(charsets.selectedTable() == CharsetTable::G2);
+    CHECK(charsets.isSelected(CharsetId::Special));
+
+    // LS3 (ESC o): invoke G3 into GL.
+    mock.writeToScreen("\033o");
+    CHECK(charsets.selectedTable() == CharsetTable::G3);
+    CHECK(charsets.isSelected(CharsetId::Special));
+
+    // LS0 (SI): back to G0 (USASCII).
+    mock.writeToScreen("\x0F");
+    CHECK(charsets.selectedTable() == CharsetTable::G0);
+    CHECK(charsets.isSelected(CharsetId::USASCII));
+}
+
+TEST_CASE("LS1R LS2R LS3R (locking shift into GR)", "[screen]")
+{
+    auto mock = MockTerm { ColumnCount(8), LineCount(4) };
+    auto const& charsets = mock.terminal.primaryScreen().cursor().charsets;
+
+    // GR defaults to G2 per the VT standard.
+    REQUIRE(charsets.selectedTableGR() == CharsetTable::G2);
+
+    // LS1R (ESC ~): invoke G1 into GR.
+    mock.writeToScreen("\033~");
+    CHECK(charsets.selectedTableGR() == CharsetTable::G1);
+
+    // LS3R (ESC |): invoke G3 into GR.
+    mock.writeToScreen("\033|");
+    CHECK(charsets.selectedTableGR() == CharsetTable::G3);
+
+    // LS2R (ESC }): invoke G2 into GR (back to the default slot).
+    mock.writeToScreen("\033}");
+    CHECK(charsets.selectedTableGR() == CharsetTable::G2);
+
+    // GR locking shifts must not disturb GL.
+    CHECK(charsets.selectedTable() == CharsetTable::G0);
+}
+
+TEST_CASE("SCS 96-charset designation (ESC - / . / / )", "[screen]")
+{
+    auto mock = MockTerm { ColumnCount(8), LineCount(4) };
+    auto const& charsets = mock.terminal.primaryScreen().cursor().charsets;
+
+    // 96-charsets go into G1, G2, G3 (never G0). Only ISO Latin-1 supplemental ('A') is defined.
+    mock.writeToScreen("\033-A"); // designate G1 = ISO Latin-1 supplemental
+    CHECK(charsets.charsetIdOf(CharsetTable::G1) == CharsetId::ISOLatin1Supplemental);
+    CHECK(charsets.is96Charset(CharsetTable::G1));
+
+    mock.writeToScreen("\033.A"); // designate G2
+    CHECK(charsets.charsetIdOf(CharsetTable::G2) == CharsetId::ISOLatin1Supplemental);
+    CHECK(charsets.is96Charset(CharsetTable::G2));
+
+    mock.writeToScreen("\033/A"); // designate G3
+    CHECK(charsets.charsetIdOf(CharsetTable::G3) == CharsetId::ISOLatin1Supplemental);
+    CHECK(charsets.is96Charset(CharsetTable::G3));
+
+    // A subsequent 94-charset designation clears the 96-charset flag for that G-set.
+    mock.writeToScreen("\033)B"); // designate G1 = USASCII (94-charset)
+    CHECK(charsets.charsetIdOf(CharsetTable::G1) == CharsetId::USASCII);
+    CHECK_FALSE(charsets.is96Charset(CharsetTable::G1));
+    // G0 stays a 94-charset throughout (it cannot hold a 96-charset).
+    CHECK_FALSE(charsets.is96Charset(CharsetTable::G0));
+}
+
 // TODO: Sixel: image that exceeds available lines
 
 // TODO: SetForegroundColor
@@ -5103,6 +5181,30 @@ TEST_CASE("DECCIR.gl_charset_after_locking_shift", "[screen]")
 
     // Pgl=1 (G1 in GL)
     CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;1;1;@;@;@;1;2;@;BBBB\033\\"));
+}
+
+TEST_CASE("DECCIR.gr_charset_after_locking_shift", "[screen]")
+{
+    // Verify Pgr reports the GR register after LS3R maps G3 into GR (default is G2).
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen("\033|"); // LS3R → map G3 into GR
+    mock.writeToScreen(DECRQPSR(1));
+
+    // Pgr=3 (G3 in GR); Pgl stays 0.
+    CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;1;1;@;@;@;0;3;@;BBBB\033\\"));
+}
+
+TEST_CASE("DECCIR.scss_reports_96_charset", "[screen]")
+{
+    // Verify Scss sets the per-G-set size bit and Sdesig reports 'A' when a 96-charset is designated.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen("\033-A"); // designate G1 = ISO Latin-1 supplemental (96-charset)
+    mock.writeToScreen(DECRQPSR(1));
+
+    // Scss = 0x40 | (1 << 1) = 0x42 = 'B'; Sdesig G1 = 'A' (Latin-1). Pgl=0, Pgr=2 (defaults).
+    CHECK(e(mock.terminal.peekInput()) == e("\033P1$u1;1;1;@;@;@;0;2;B;BABB\033\\"));
 }
 
 // }}} DECCIR

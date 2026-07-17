@@ -534,6 +534,11 @@ constexpr inline auto LS0 = detail::C0('\x0F', "LS0", "Shift In; Maps G0 into GL
 constexpr inline auto DECALN  = detail::ESC('#', '8', VTType::VT100, { .mnemonic = "DECALN", .comment = "Screen Alignment Pattern"});
 constexpr inline auto S7C1T   = detail::ESC(' ', 'F', VTType::VT220, { .mnemonic = "S7C1T", .comment = "Select 7-bit C1 Control Transmission" }); // NOLINT
 constexpr inline auto S8C1T   = detail::ESC(' ', 'G', VTType::VT220, { .mnemonic = "S8C1T", .comment = "Select 8-bit C1 Control Transmission" }); // NOLINT
+// Designate Other Coding System (DOCS): `ESC % @` selects the ISO 8859-1 default, `ESC % G` selects
+// UTF-8. Contour's parser is always UTF-8, so both are accepted as no-ops for decoding; registering
+// them keeps applications that set their encoding at startup (vttest) out of the unknown-sequence log.
+constexpr inline auto DOCS_DEFAULT = detail::ESC('%', '@', VTType::VT100, { .mnemonic = "DOCS_DEFAULT", .comment = "Select default (ISO 8859-1) character set" });
+constexpr inline auto DOCS_UTF8    = detail::ESC('%', 'G', VTType::VT100, { .mnemonic = "DOCS_UTF8", .comment = "Select UTF-8 character set" });
 constexpr inline auto DECID   = detail::ESC(std::nullopt, 'Z', VTType::VT100, { .mnemonic = "DECID", .comment = "Identify Terminal" }); // NOLINT
 constexpr inline auto DECBI   = detail::ESC(std::nullopt, '6', VTType::VT100, { .mnemonic = "DECBI", .comment = "Back Index"});
 constexpr inline auto DECDHL_Bottom = detail::ESC('#', '4', VTType::VT100, { .mnemonic = "DECDHL_Bottom", .comment = "Double-Height Line (Bottom Half)" });
@@ -588,6 +593,13 @@ constexpr inline auto SCS_G3_USASCII       = detail::ESC('+', 'B', VTType::VT220
 constexpr inline auto SCS_G3_BRITISH       = detail::ESC('+', 'A', VTType::VT220, { .mnemonic = "SCS_G3_BRITISH", .comment = "Set G3 to British" }); // NOLINT
 constexpr inline auto SS2     = detail::ESC(std::nullopt, 'N', VTType::VT220, { .mnemonic = "SS2", .comment = "Single Shift Select (G2 Character Set)"});
 constexpr inline auto SS3     = detail::ESC(std::nullopt, 'O', VTType::VT220, { .mnemonic = "SS3", .comment = "Single Shift Select (G3 Character Set)"});
+
+// Locking shifts — invoke a G-set persistently into GL or GR.
+constexpr inline auto LS2     = detail::ESC(std::nullopt, 'n', VTType::VT220, { .mnemonic = "LS2", .comment = "Locking Shift 2; Maps G2 into GL." });
+constexpr inline auto LS3     = detail::ESC(std::nullopt, 'o', VTType::VT220, { .mnemonic = "LS3", .comment = "Locking Shift 3; Maps G3 into GL." });
+constexpr inline auto LS1R    = detail::ESC(std::nullopt, '~', VTType::VT220, { .mnemonic = "LS1R", .comment = "Locking Shift 1 Right; Maps G1 into GR." });
+constexpr inline auto LS2R    = detail::ESC(std::nullopt, '}', VTType::VT220, { .mnemonic = "LS2R", .comment = "Locking Shift 2 Right; Maps G2 into GR." });
+constexpr inline auto LS3R    = detail::ESC(std::nullopt, '|', VTType::VT220, { .mnemonic = "LS3R", .comment = "Locking Shift 3 Right; Maps G3 into GR." });
 
 // CSI
 constexpr inline auto ArgsMax = 127; // this is the maximum number that fits into 7 bits.
@@ -776,6 +788,8 @@ constexpr static auto allFunctionsArray() noexcept
         DECALN,
         S7C1T,
         S8C1T,
+        DOCS_DEFAULT,
+        DOCS_UTF8,
         DECID,
         DECBI,
         DECDHL_Bottom,
@@ -826,6 +840,11 @@ constexpr static auto allFunctionsArray() noexcept
         SCS_G3_BRITISH,
         SS2,
         SS3,
+        LS2,
+        LS3,
+        LS1R,
+        LS2R,
+        LS3R,
 
         // CSI
         ANSISYSSC,

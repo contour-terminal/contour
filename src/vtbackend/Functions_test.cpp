@@ -96,6 +96,20 @@ TEST_CASE("Functions.DCS_GIP", "[Functions]")
     CHECK(*f == GIP);
 }
 
+TEST_CASE("Functions.DOCS", "[Functions]")
+{
+    // ESC % @ (ISO 8859-1 default) and ESC % G (UTF-8) are the Designate Other Coding System sequences
+    // vttest emits at startup. Contour is UTF-8-native and accepts both as no-ops, but they must resolve
+    // to a registered function so they are not logged as "Unknown VT sequence".
+    SupportedSequences const availableSequences;
+    auto const* def = vtbackend::selectEscape('%', '@', availableSequences.activeSequences());
+    REQUIRE(def);
+    CHECK(*def == DOCS_DEFAULT);
+    auto const* utf8 = vtbackend::selectEscape('%', 'G', availableSequences.activeSequences());
+    REQUIRE(utf8);
+    CHECK(*utf8 == DOCS_UTF8);
+}
+
 TEST_CASE("Functions.EnableAndDisable", "[Functions]")
 {
     SupportedSequences availableSequences;

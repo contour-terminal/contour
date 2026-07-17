@@ -25,7 +25,9 @@ enum class CharsetId : std::uint8_t
     Swedish,
     Swiss,
     USASCII,
-    Technical
+    Technical,
+
+    ISOLatin1Supplemental // 96-character set, designated via ESC - A / ESC . A / ESC / A
 };
 
 enum class CharsetTable : std::uint8_t
@@ -60,6 +62,7 @@ constexpr char charsetDesignation(CharsetId id) noexcept
         case CharsetId::Swiss: return '=';
         case CharsetId::Technical: return '>';
         case CharsetId::USASCII: return 'B';
+        case CharsetId::ISOLatin1Supplemental: return 'A';
     }
     return 'B'; // fallback to USASCII
 }
@@ -106,11 +109,21 @@ class CharsetMapping
 
     constexpr void singleShift(CharsetTable table) noexcept { _tableForNextGraphic = table; }
 
+    /// Invokes @p table into GL (the left graphic half, codes 0x20..0x7F), persisting until the next
+    /// locking shift. This is LS0 (SI), LS1 (SO), LS2 (ESC n) and LS3 (ESC o).
     constexpr void lockingShift(CharsetTable table) noexcept
     {
         _selectedTable = table;
         _tableForNextGraphic = table;
     }
+
+    /// Invokes @p table into GR (the right graphic half, codes 0xA0..0xFF), persisting until the next
+    /// GR locking shift. This is LS1R (ESC ~), LS2R (ESC }) and LS3R (ESC |).
+    ///
+    /// @note Contour decodes its input as UTF-8, so bytes 0xA0..0xFF are UTF-8 continuation/lead bytes
+    /// rather than 8-bit GR graphics; the GR register is therefore tracked faithful state (reported by
+    /// DECCIR) but does not re-map decoded codepoints, which would corrupt Latin-1 text.
+    constexpr void lockingShiftGR(CharsetTable table) noexcept { _selectedTableGR = table; }
 
     [[nodiscard]] bool isSelected(CharsetTable table, CharsetId id) const noexcept
     {
@@ -122,12 +135,30 @@ class CharsetMapping
         return isSelected(_tableForNextGraphic, id);
     }
 
-    /// Selects a given designated character set into the table G0, G1, G2, or G3.
+    /// Selects a given 94-character set into the table G0, G1, G2, or G3.
     void select(CharsetTable table, CharsetId id) noexcept
     {
         _tables[static_cast<std::size_t>(table)] = charsetMap(id);
         _charsetIds[static_cast<std::size_t>(table)] = id;
         _drcsFontNumber[static_cast<std::size_t>(table)].reset();
+        _is96Charset[static_cast<std::size_t>(table)] = false;
+    }
+
+    /// Selects a given 96-character set into the table G1, G2, or G3 (G0 cannot hold a 96-charset).
+    ///
+    /// @note A 96-charset occupies positions 0x20..0x7F and is designed to be invoked into GR; because
+    /// Contour decodes input as UTF-8 the GR half never carries 8-bit graphics, so this mainly makes the
+    /// designation observable through DECCIR (Scss size bits, Sdesig final byte).
+    void select96(CharsetTable table, CharsetId id) noexcept
+    {
+        select(table, id);
+        _is96Charset[static_cast<std::size_t>(table)] = true;
+    }
+
+    /// @returns whether the given G-set table currently holds a 96-character set.
+    [[nodiscard]] constexpr bool is96Charset(CharsetTable table) const noexcept
+    {
+        return _is96Charset[static_cast<std::size_t>(table)];
     }
 
     /// Selects a DRCS font into the given G-set table.
@@ -154,6 +185,9 @@ class CharsetMapping
     /// @returns the G-set table currently mapped to GL (the active locking shift).
     [[nodiscard]] constexpr CharsetTable selectedTable() const noexcept { return _selectedTable; }
 
+    /// @returns the G-set table currently mapped to GR (defaults to G2, per the VT standard).
+    [[nodiscard]] constexpr CharsetTable selectedTableGR() const noexcept { return _selectedTableGR; }
+
     /// @returns the G-set table used for the next graphic character (differs from selectedTable() after
     /// SS2/SS3).
     [[nodiscard]] constexpr CharsetTable tableForNextGraphic() const noexcept { return _tableForNextGraphic; }
@@ -167,12 +201,14 @@ class CharsetMapping
   private:
     CharsetTable _tableForNextGraphic = CharsetTable::G0;
     CharsetTable _selectedTable = CharsetTable::G0;
+    CharsetTable _selectedTableGR = CharsetTable::G2;
 
     using Tables = std::array<CharsetMap const*, 4>;
     Tables _tables;
     std::array<CharsetId, 4> _charsetIds = {
         CharsetId::USASCII, CharsetId::USASCII, CharsetId::USASCII, CharsetId::USASCII
     };
+    std::array<bool, 4> _is96Charset = {};
     std::array<std::optional<int>, 4> _drcsFontNumber = {};
 };
 

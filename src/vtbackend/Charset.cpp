@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/Charset.h>
 
+#include <ranges>
+
 namespace vtbackend
 {
 
@@ -352,6 +354,20 @@ constexpr CharsetMap createTechnicalCharset() noexcept
     return result;
 }
 
+/// ISO Latin-1 supplemental (right-hand) graphic set — a 96-character set.
+///
+///     ESC - A (into G1) / ESC . A (into G2) / ESC / A (into G3)
+///
+/// Positions 0x20..0x7E map to U+00A0..U+00FE (the GR half of ISO 8859-1). Position 0x7F is
+/// unreachable through the GL path (which only maps codes < 0x7F), so it is left blank.
+constexpr CharsetMap createISOLatin1SupplementalCharset() noexcept
+{
+    CharsetMap result {};
+    for (auto const position: std::views::iota(std::size_t { 0x20 }, std::size_t { 0x7F }))
+        result[position] = static_cast<char32_t>(position + 0x80);
+    return result;
+}
+
 CharsetMap const* charsetMap(CharsetId id) noexcept
 {
     static auto const british = createBritishCharset();
@@ -367,6 +383,7 @@ CharsetMap const* charsetMap(CharsetId id) noexcept
     static auto const swiss = createSwissCharset();
     static auto const technical = createTechnicalCharset();
     static auto const usascii = usasciiCharset();
+    static auto const isoLatin1Supplemental = createISOLatin1SupplementalCharset();
 
     switch (id)
     {
@@ -383,6 +400,7 @@ CharsetMap const* charsetMap(CharsetId id) noexcept
         case CharsetId::Swiss: return &swiss;
         case CharsetId::Technical: return &technical;
         case CharsetId::USASCII: return &usascii;
+        case CharsetId::ISOLatin1Supplemental: return &isoLatin1Supplemental;
     }
 
     return nullptr;
