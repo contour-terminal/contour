@@ -5,9 +5,11 @@
 #include <crispy/algorithm.h>
 #include <crispy/times.h>
 
+#include <algorithm>
 #include <array>
 #include <ranges>
 #include <span>
+#include <vector>
 
 using crispy::times;
 
@@ -18,8 +20,8 @@ using std::optional;
 namespace vtrasterizer
 {
 
-ImageRenderer::ImageRenderer(GridMetrics const& gridMetrics, ImageSize cellSize):
-    Renderable { gridMetrics }, _cellSize { cellSize }
+ImageRenderer::ImageRenderer(GridMetrics const& gridMetrics, ImageSize cellSize, size_t textureBudgetBytes):
+    Renderable { gridMetrics }, _cellSize { cellSize }, _textureBudgetBytes { textureBudgetBytes }
 {
 }
 
@@ -64,18 +66,50 @@ atlas::ImageTextureId ImageRenderer::textureFor(vtbackend::RasterizedImage const
     // sampled, never what the texture holds.
     auto const& image = rasterizedImage.image();
     auto const imageId = image.id().value;
-    if (auto const known = _imageTextureIds.find(imageId); known != _imageTextureIds.end())
-        return known->second;
+    if (auto const known = _imageTextures.find(imageId); known != _imageTextures.end())
+    {
+        known->second.lastUsedFrame = _frameCounter;
+        return known->second.id;
+    }
 
     auto const id = atlas::ImageTextureId { _nextImageTextureId++ };
-    _imageTextureIds.emplace(imageId, id);
+    // Whatever the protocol sent, the texture is RGBA8 -- widenToRgba() below makes sure of it.
+    auto const bytes = static_cast<size_t>(image.size().area()) * 4;
+    _imageTextures.emplace(imageId,
+                           ImageTextureEntry { .id = id, .bytes = bytes, .lastUsedFrame = _frameCounter });
+    _residentBytes += bytes;
     imageScheduler().createImageTexture(atlas::CreateImageTexture {
         .id = id,
         .size = image.size(),
         .format = atlas::Format::RGBA,
         .data = image.format() == vtbackend::ImageFormat::RGB ? widenToRgba(image.data()) : image.data(),
     });
+    evictToBudget();
     return id;
+}
+
+void ImageRenderer::evictToBudget()
+{
+    if (_residentBytes <= _textureBudgetBytes)
+        return;
+
+    // Only what this frame did not draw may go; see the declaration.
+    auto candidates = std::vector<uint32_t> {};
+    for (auto const& [imageId, entry]: _imageTextures)
+        if (entry.lastUsedFrame != _frameCounter)
+            candidates.push_back(imageId);
+
+    std::ranges::sort(
+        candidates, {}, [this](uint32_t imageId) { return _imageTextures.at(imageId).lastUsedFrame; });
+
+    for (auto const imageId: candidates)
+    {
+        if (_residentBytes <= _textureBudgetBytes)
+            break;
+        // Exactly what a pool removal does: release the texture and forget the mapping, so the next
+        // sight of this image uploads it again.
+        discardImage(vtbackend::ImageId { imageId });
+    }
 }
 
 void ImageRenderer::renderImage(crispy::point pos, vtbackend::ImageFragment const& fragment)
@@ -127,6 +161,10 @@ void ImageRenderer::onAfterRenderingText()
 
 void ImageRenderer::beginFrame()
 {
+    // Stamps what textureFor() touches from here on. That is what tells an image this frame draws --
+    // whose quads already name its texture, so it may not be released -- from one merely resident.
+    ++_frameCounter;
+
     if (!SoftRequire(_pendingQuadsBelowText.empty()))
         _pendingQuadsBelowText.clear();
     if (!SoftRequire(_pendingQuadsAboveText.empty()))
@@ -142,11 +180,12 @@ void ImageRenderer::endFrame()
 
 void ImageRenderer::discardImage(vtbackend::ImageId imageId)
 {
-    auto const known = _imageTextureIds.find(imageId.value);
-    if (known == _imageTextureIds.end())
+    auto const known = _imageTextures.find(imageId.value);
+    if (known == _imageTextures.end())
         return;
-    imageScheduler().destroyImageTexture(atlas::DestroyImageTexture { .id = known->second });
-    _imageTextureIds.erase(known);
+    imageScheduler().destroyImageTexture(atlas::DestroyImageTexture { .id = known->second.id });
+    _residentBytes -= known->second.bytes;
+    _imageTextures.erase(known);
 }
 
 void ImageRenderer::clearCache()
@@ -162,9 +201,10 @@ void ImageRenderer::clearCache()
     // Issuing the destroys is right for the setRenderTarget() caller too: they reach a target that
     // never had these ids, whose backend ignores them, while the textures of the target being
     // replaced die with it.
-    for (auto const& [imageId, textureId]: _imageTextureIds)
-        imageScheduler().destroyImageTexture(atlas::DestroyImageTexture { .id = textureId });
-    _imageTextureIds.clear();
+    for (auto const& [imageId, entry]: _imageTextures)
+        imageScheduler().destroyImageTexture(atlas::DestroyImageTexture { .id = entry.id });
+    _imageTextures.clear();
+    _residentBytes = 0;
 }
 
 void ImageRenderer::inspect(std::ostream& /*output*/) const

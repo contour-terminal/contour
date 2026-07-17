@@ -24,13 +24,17 @@ auto const testGridMetrics = GridMetrics { .pageSize = PageSize { LineCount(24),
                                            .underline = { .position = 17, .thickness = 1 } };
 
 /// A rasterized image spanning @p cellSpan cells at exactly one image pixel per target pixel.
-std::shared_ptr<RasterizedImage> makeImage(GridSize cellSpan, ImageLayer layer = ImageLayer::Replace)
+/// @param cellSpan how many cells the image covers.
+/// @param layer which side of the text it composites on.
+/// @param imageId its vtbackend image id; distinct ids are distinct images to the renderer's cache.
+std::shared_ptr<RasterizedImage> makeImage(GridSize cellSpan,
+                                           ImageLayer layer = ImageLayer::Replace,
+                                           ImageId imageId = ImageId(1))
 {
     auto const imageSize = ImageSize { Width::cast_from(unbox(cellSpan.columns) * unbox(CellSize.width)),
                                        Height::cast_from(unbox(cellSpan.lines) * unbox(CellSize.height)) };
     auto data = Image::Data(imageSize.area() * 4, 0x7F);
-    auto image =
-        std::make_shared<Image>(ImageId(1), ImageFormat::RGBA, std::move(data), imageSize, [](auto) {});
+    auto image = std::make_shared<Image>(imageId, ImageFormat::RGBA, std::move(data), imageSize, [](auto) {});
 
     return std::make_shared<RasterizedImage>(std::move(image),
                                              ImageAlignment::TopStart,
@@ -178,6 +182,97 @@ TEST_CASE("ImageRenderer.widens a 24-bit RGB image for upload", "[image][rendere
     CHECK(creates.front().data[1] == 0x22);
     CHECK(creates.front().data[2] == 0x33);
     CHECK(creates.front().data[3] == 0xFF);
+}
+
+TEST_CASE("ImageRenderer.bounds resident texture memory", "[image][renderer]")
+{
+    // The tile atlas this replaced was a fixed-size allocation, so image memory was bounded by
+    // construction. One texture per image is bounded by nothing but how many images are alive, and an
+    // image lives as long as a grid cell references it -- so a session scrolled through hundreds of
+    // sixel frames pinned one full-resolution texture per frame with no ceiling at all.
+    auto constexpr Span = GridSize { .lines = LineCount(1), .columns = ColumnCount(1) };
+    auto constexpr ImageBytes = size_t { 10 * 20 * 4 }; // one cell at 4 bytes per pixel
+
+    auto renderTarget = MockRenderTarget {};
+    auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
+    // A budget of two images, so the third must evict the first.
+    auto imageRenderer = ImageRenderer { testGridMetrics, CellSize, 2 * ImageBytes };
+    imageRenderer.setRenderTarget(renderTarget, directMappingAllocator);
+
+    auto& backend = renderTarget.getMockImageBackend();
+
+    // Three images, each drawn in its own frame: by the third, the first is the least recently used.
+    for (auto const index: std::views::iota(1u, 4u))
+        renderRow(imageRenderer, makeImage(Span, ImageLayer::Replace, ImageId(index)), 1);
+
+    REQUIRE(backend.createCommands.size() == 3);
+    REQUIRE(backend.destroyCommands.size() == 1);
+    CHECK(backend.destroyCommands.front().id == backend.createCommands.front().id); // the oldest went
+}
+
+TEST_CASE("ImageRenderer.never evicts an image the current frame draws", "[image][renderer]")
+{
+    // Eviction runs while the frame is still being built, and this frame's quads already name their
+    // texture by id -- releasing one would drop it from the very frame it is visible in, and it would
+    // be re-uploaded next frame only to be dropped again. A working set over budget must overshoot
+    // rather than thrash.
+    auto constexpr Span = GridSize { .lines = LineCount(1), .columns = ColumnCount(1) };
+    auto constexpr ImageBytes = size_t { 10 * 20 * 4 };
+
+    auto renderTarget = MockRenderTarget {};
+    auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
+    auto imageRenderer = ImageRenderer { testGridMetrics, CellSize, ImageBytes }; // room for one
+    imageRenderer.setRenderTarget(renderTarget, directMappingAllocator);
+
+    // Three distinct images within ONE frame, all over budget together.
+    auto const images = std::array {
+        makeImage(Span, ImageLayer::Replace, ImageId(1)),
+        makeImage(Span, ImageLayer::Replace, ImageId(2)),
+        makeImage(Span, ImageLayer::Replace, ImageId(3)),
+    };
+
+    imageRenderer.beginFrame();
+    for (auto const [index, image]: crispy::views::enumerate(images))
+    {
+        // Each image spans one cell, so the fragment names offset (0,0) WITHIN ITS OWN image; only
+        // where it lands on the grid differs. An offset outside the image is an alignment gap, which
+        // renderImage() drops before it ever asks for a texture.
+        auto const fragment =
+            ImageFragment { image, CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) } };
+        imageRenderer.renderImage(
+            crispy::point { .x = static_cast<int>(index) * unbox<int>(CellSize.width), .y = 0 }, fragment);
+    }
+    imageRenderer.endFrame();
+
+    auto& backend = renderTarget.getMockImageBackend();
+    CHECK(backend.createCommands.size() == 3);
+    CHECK(backend.destroyCommands.empty()); // all three are drawn by this frame: none may go
+
+    // Once a later frame draws none of them, the budget applies again.
+    renderRow(imageRenderer, makeImage(Span, ImageLayer::Replace, ImageId(4)), 1);
+    CHECK(backend.destroyCommands.size() == 3);
+}
+
+TEST_CASE("ImageRenderer.re-uploads an evicted image when it is seen again", "[image][renderer]")
+{
+    // Eviction is a cache miss, not a loss: the mapping is dropped so the next sight uploads again.
+    auto constexpr Span = GridSize { .lines = LineCount(1), .columns = ColumnCount(1) };
+    auto constexpr ImageBytes = size_t { 10 * 20 * 4 };
+
+    auto renderTarget = MockRenderTarget {};
+    auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
+    auto imageRenderer = ImageRenderer { testGridMetrics, CellSize, ImageBytes }; // room for one
+    imageRenderer.setRenderTarget(renderTarget, directMappingAllocator);
+
+    auto const first = makeImage(Span, ImageLayer::Replace, ImageId(1));
+    renderRow(imageRenderer, first, 1);
+    renderRow(imageRenderer, makeImage(Span, ImageLayer::Replace, ImageId(2)), 1); // evicts the first
+
+    auto& backend = renderTarget.getMockImageBackend();
+    REQUIRE(backend.destroyCommands.size() == 1);
+
+    renderRow(imageRenderer, first, 1);
+    CHECK(backend.createCommands.size() == 3); // uploaded again rather than silently missing
 }
 
 TEST_CASE("ImageRenderer.clearCache releases the textures", "[image][renderer]")
