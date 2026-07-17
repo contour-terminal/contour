@@ -94,6 +94,18 @@ class ImageRenderer: public Renderable, public TextRendererEvents
     /// Forgets the textures the backend failed to create, freeing what they charged to the budget.
     void dropFailedTextures();
 
+    /// Paints the part of a cell the image does not reach, in the image's gap colour.
+    ///
+    /// @param pos       the cell's top-left, in item pixels.
+    /// @param placement where the image lands within the cell.
+    /// @param color     the gap colour: the background colour current when the image was placed.
+    /// @param aboveText which side of the text the fill belongs on -- the image's own side, since the
+    ///                  gap is part of its composite.
+    void fillGap(crispy::point pos,
+                 vtbackend::FragmentPlacement const& placement,
+                 vtbackend::RGBAColor color,
+                 bool aboveText);
+
     /// Hands @p quads to the backend and empties them.
     void flushQuads(std::vector<atlas::RenderImageQuad>& quads);
 

@@ -165,12 +165,62 @@ void ImageRenderer::evictToBudget()
     }
 }
 
+void ImageRenderer::fillGap(crispy::point pos,
+                            vtbackend::FragmentPlacement const& placement,
+                            vtbackend::RGBAColor color,
+                            bool aboveText)
+{
+    if (placement.hasImage && placement.coversCell)
+        return; // the image reaches every edge: there is no gap left to fill
+
+    auto const cellWidth = unbox<int>(_cellSize.width);
+    auto const cellHeight = unbox<int>(_cellSize.height);
+
+    auto const emit = [&](int x, int y, int width, int height) {
+        if (width <= 0 || height <= 0)
+            return;
+        imageScheduler().renderImageGap(
+            atlas::RenderImageGap { .x = pos.x + x,
+                                    .y = pos.y + y,
+                                    .size = vtbackend::ImageSize { vtbackend::Width::cast_from(width),
+                                                                   vtbackend::Height::cast_from(height) },
+                                    .color = color,
+                                    .aboveText = aboveText });
+    };
+
+    if (!placement.hasImage)
+    {
+        emit(0, 0, cellWidth, cellHeight); // wholly in the gap
+        return;
+    }
+
+    // The four bands around the covered rectangle. Each is skipped when empty, so an image meeting one
+    // edge of the cell costs only the bands it does not.
+    auto const coveredWidth = unbox<int>(placement.targetSize.width);
+    auto const coveredHeight = unbox<int>(placement.targetSize.height);
+    auto const coveredRight = placement.targetX + coveredWidth;
+    auto const coveredBottom = placement.targetY + coveredHeight;
+
+    emit(0, 0, cellWidth, placement.targetY);                                       // above
+    emit(0, coveredBottom, cellWidth, cellHeight - coveredBottom);                  // below
+    emit(0, placement.targetY, placement.targetX, coveredHeight);                   // left
+    emit(coveredRight, placement.targetY, cellWidth - coveredRight, coveredHeight); // right
+}
+
 void ImageRenderer::renderImage(crispy::point pos, vtbackend::ImageFragment const& fragment)
 {
     auto const& rasterizedImage = fragment.rasterizedImage();
     auto const placement = rasterizedImage.fragmentPlacement(fragment.offset(), _cellSize);
+    auto const aboveText = rasterizedImage.layer() != vtbackend::ImageLayer::Below;
+
+    // Whatever of the cell the image does not reach is the alignment gap, and the gap is painted --
+    // opaquely, in the background colour that was current when the image was placed. The CPU path this
+    // replaced got that for free: it built a CELL-SIZED tile and wrote the gap colour into every pixel
+    // outside the image, so the upload covered the whole cell either way.
+    fillGap(pos, placement, rasterizedImage.defaultColor(), aboveText);
+
     if (!placement.hasImage)
-        return; // the cell lies wholly in the alignment gap
+        return; // the cell lies wholly in the alignment gap: the fill above is all of it
 
     auto const texture = textureFor(rasterizedImage);
     if (!texture)

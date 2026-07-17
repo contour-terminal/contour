@@ -60,6 +60,22 @@ struct RenderImageQuad
     bool aboveText = true;
 };
 
+/// Command: fill a rectangle with a solid colour, ordered among the image quads.
+///
+/// The alignment gap around an image belongs to the image's own composite, not to the cell background
+/// beneath it: an image drawn above the text used to occlude that text out to the edge of its cells,
+/// because the whole cell was painted. A fill issued through the background path could not do that -- it
+/// composites before the text, whichever order it was issued in.
+struct RenderImageGap
+{
+    int x {}; ///< target left, in item pixels
+    int y {}; ///< target top, in item pixels
+    vtbackend::ImageSize size;
+    vtbackend::RGBAColor color;
+    /// Which side of the text pass this fill belongs on; see RenderImageQuad::aboveText.
+    bool aboveText = true;
+};
+
 /// Draws whole images, as opposed to AtlasBackend's fixed-size tiles.
 ///
 /// This is deliberately a sibling of AtlasBackend rather than a growth of it. An image is not a
@@ -85,6 +101,9 @@ class ImageTextureBackend
 
     /// Queues one quad sampling an image texture.
     virtual void renderImageQuad(RenderImageQuad param) = 0;
+
+    /// Queues one solid fill, composited in issue order with the quads of the same side.
+    virtual void renderImageGap(RenderImageGap param) = 0;
 
     /// Takes the ids whose creation failed since the last call, emptying the list.
     ///

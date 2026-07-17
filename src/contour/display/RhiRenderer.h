@@ -156,6 +156,7 @@ class RhiRenderer final:
     void createImageTexture(vtrasterizer::atlas::CreateImageTexture param) override;
     void destroyImageTexture(vtrasterizer::atlas::DestroyImageTexture param) override;
     void renderImageQuad(vtrasterizer::atlas::RenderImageQuad param) override;
+    void renderImageGap(vtrasterizer::atlas::RenderImageGap param) override;
     [[nodiscard]] std::vector<vtrasterizer::atlas::ImageTextureId> takeFailedImageTextures() override;
     vtrasterizer::atlas::ImageTextureBackend& imageScheduler() override;
 
@@ -412,9 +413,15 @@ class RhiRenderer final:
     ///
     /// A run rather than a quad, because a full-screen image is thousands of quads that all sample
     /// the same texture: one draw item per run instead of one per cell.
+    /// One run of image geometry, in issue order within its side of the text.
+    ///
+    /// Either a run of quads sampling @c texture, or -- when @c texture is unset -- a run of solid gap
+    /// fills drawn with the rect pipeline. Both live in one ordered list because both composite by draw
+    /// order alone (every vertex sits at the same depth), so a gap fill can only occlude what precedes
+    /// it if it keeps its place among the quads.
     struct ImageQuadBatch
     {
-        vtrasterizer::atlas::ImageTextureId texture {};
+        std::optional<vtrasterizer::atlas::ImageTextureId> texture;
         std::vector<float> buffer;
     };
 
