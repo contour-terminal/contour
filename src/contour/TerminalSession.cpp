@@ -2705,8 +2705,14 @@ void TerminalSession::updateImageCanvasCeiling()
         return;
 
     auto const screenSize = _display->window()->screen()->size();
-    auto const ceiling =
+    auto const devicePixels =
         geometry::availableDevicePixels(screenSize.width(), screenSize.height(), _display->contentScale());
+
+    // In the unit every other pixel report uses: XTSMGRAPHICS answers this ceiling alongside a canvas
+    // size the application reads in reported pixels, and it sizes an image against both. Leaving the
+    // ceiling in device pixels on a scaled display would let it through an image the reported grid has
+    // no room for -- one that then overflows the page and scrolls the screen instead of fitting it.
+    auto const ceiling = geometry::reportedPixels(devicePixels, _display->reportedPixelScale());
 
     auto const _ = std::scoped_lock { _terminal };
     _terminal.setImageCanvasCeiling(ceiling);
