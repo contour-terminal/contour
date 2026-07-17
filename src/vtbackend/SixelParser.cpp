@@ -273,9 +273,14 @@ void SixelParser::submitColor()
     else if (_paramCount == 5)
     {
         auto constexpr ConvertValue = [](unsigned value) {
-            // converts a color from range 0..100 to 0..255
-            return static_cast<uint8_t>(static_cast<int>((static_cast<float>(value) * 255.0f) / 100.0f)
-                                        % 256);
+            // Converts a color from range 0..100 to 0..255, saturating at full intensity.
+            //
+            // The parameter comes straight off the wire unclamped, so '#0;2;99999999999999999999;0;0'
+            // reaches here as a wrapped value near 2^32: scaling that as a float lands outside int's
+            // range, and the conversion is undefined before the old '% 256' ever got to tame it.
+            // Integer math over a saturated value cannot overflow -- 100 * 255 is 25500 -- and 0..100
+            // is the only range the VT340 defines, so anything above it is full intensity.
+            return static_cast<uint8_t>((std::min(value, 100u) * 255u) / 100u);
         };
         auto const index = _params[0];
         auto const colorSpace = _params[1] == 2 ? Colorspace::RGB : Colorspace::HSL;

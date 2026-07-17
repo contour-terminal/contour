@@ -625,6 +625,16 @@ TEST_CASE("SixelParser.hls_saturation_is_its_own_parameter", "[sixel]")
     CHECK(paintOnePixelWith("#0;1;120;50;0") == RGBColor { 0x7F, 0x7F, 0x7F });   // none -> mid grey
 }
 
+TEST_CASE("SixelParser.rgb_parameters_saturate", "[sixel]")
+{
+    // Colour parameters are unclamped on the wire and fold with wraparound, so a stream can hand the
+    // 0..100 conversion a value near 2^32. Scaling that through a float landed outside int's range,
+    // which is undefined before the conversion's own '% 256' could tame it.
+    CHECK(paintOnePixelWith("#0;2;100;0;0") == RGBColor { 0xFF, 0x00, 0x00 });
+    CHECK(paintOnePixelWith("#0;2;200;0;0") == RGBColor { 0xFF, 0x00, 0x00 });
+    CHECK(paintOnePixelWith("#0;2;99999999999999999999;0;0") == RGBColor { 0xFF, 0x00, 0x00 });
+}
+
 TEST_CASE("SixelParser.sixelAspectVertical", "[sixel]")
 {
     STATIC_CHECK(sixelAspectVertical(0) == 2);
