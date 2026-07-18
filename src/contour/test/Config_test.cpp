@@ -82,6 +82,32 @@ profiles:
     CHECK(config.reflowOnResize.value() == false);
 }
 
+TEST_CASE("Config: the shell environment identifies the terminal", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    auto const& env = profile->shell.value().env;
+
+    // TERM only names a terminfo capability set, which several terminals share; TERM_PROGRAM is how
+    // an application learns WHICH terminal it is talking to. Python wcwidth's wcstwidth() selects
+    // its per-terminal width correction table by exactly this variable, so an absent or stale value
+    // silently costs correctness in every application that uses it.
+    REQUIRE(env.contains("TERM_PROGRAM"));
+    CHECK(env.at("TERM_PROGRAM") == "contour");
+
+    REQUIRE(env.contains("TERM_PROGRAM_VERSION"));
+    CHECK(env.at("TERM_PROGRAM_VERSION") == CONTOUR_VERSION_STRING);
+    CHECK_FALSE(env.at("TERM_PROGRAM_VERSION").empty());
+}
+
 TEST_CASE("Config: profile knobs load from YAML", "[config]")
 {
     QTemporaryDir dir;

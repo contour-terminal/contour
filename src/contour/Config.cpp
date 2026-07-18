@@ -2353,6 +2353,19 @@ void YAMLConfigReader::defaultSettings(vtpty::Process::ExecInfo& shell)
 
     if (shell.env.find("COLORTERM") == shell.env.end())
         shell.env["COLORTERM"] = "truecolor";
+
+    // TERM_PROGRAM / TERM_PROGRAM_VERSION are the de-facto way an application identifies WHICH
+    // terminal it is talking to, as opposed to TERM, which only names a terminfo capability set --
+    // several terminals share `xterm-256color`, so TERM cannot distinguish them.
+    //
+    // This matters beyond cosmetics: Python wcwidth's wcstwidth() selects its per-terminal character
+    // width correction table by TERM_PROGRAM. Without it Contour is simply invisible to that
+    // ecosystem, and applications relying on it fall back to a generic measurement.
+    //
+    // Set unconditionally rather than only-if-absent: an inherited value would name the OUTER
+    // terminal, and answering "I am the terminal you are not talking to" is worse than not answering.
+    shell.env["TERM_PROGRAM"] = "contour";
+    shell.env["TERM_PROGRAM_VERSION"] = CONTOUR_VERSION_STRING;
 }
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
