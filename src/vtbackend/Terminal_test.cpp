@@ -1416,9 +1416,11 @@ TEST_CASE("Terminal.selection_does_not_pad_wide_characters", "[terminal]")
     mock.writeToScreen("\u4e2dab");
 
     mock.terminal.setSelector(std::make_unique<vtbackend::LinearSelection>(
-        mock.terminal.selectionHelper(), CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) }, []() {
-        }));
-    (void) mock.terminal.selector()->extend(CellLocation { .line = LineOffset(0), .column = ColumnOffset(3) });
+        mock.terminal.selectionHelper(),
+        CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+        []() {}));
+    (void) mock.terminal.selector()->extend(
+        CellLocation { .line = LineOffset(0), .column = ColumnOffset(3) });
     mock.terminal.selector()->complete();
 
     // Not "\u4e2d ab" -- the space between the wide char and 'a' is the bug.
@@ -4127,6 +4129,71 @@ TEST_CASE("Terminal.DECMode.numberMappingRoundTrips", "[terminal]")
     CHECK_FALSE(isValidDECMode(38));
 }
 // }}}
+
+TEST_CASE("Terminal.TextSelection_drag_into_blank_stops_at_the_pointer", "[terminal]")
+{
+    // Dragging past the end of a short line used to snap the selection to the right margin, so the
+    // whole line lit up -- and copied -- the moment the pointer crossed the last character. The
+    // guard meant to spare real spaces only ever spared TYPED ones: compareCellTextAt returns
+    // `character == 0` for a cell holding no codepoints, so every never-written cell snapped.
+    auto mock = MockTerm { ColumnCount(20), LineCount(4) };
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    mock.terminal.tick(ClockBase);
+    mock.writeToScreen("abc");
+
+    using namespace vtbackend;
+    auto constexpr UiHandledHint = false;
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+
+    mock.terminal.tick(1s);
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None, 0_lineOffset + 0_columnOffset, PixelCoordinate, UiHandledHint);
+    mock.terminal.tick(1s);
+    (void) mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+
+    // Drag well past "abc", into cells that were never written.
+    mock.terminal.tick(1s);
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None, 0_lineOffset + 6_columnOffset, PixelCoordinate, UiHandledHint);
+
+    CHECK(mock.terminal.isSelected(CellLocation { .line = LineOffset(0), .column = ColumnOffset(5) }));
+    CHECK_FALSE(mock.terminal.isSelected(CellLocation { .line = LineOffset(0), .column = ColumnOffset(7) }));
+    CHECK_FALSE(mock.terminal.isSelected(CellLocation { .line = LineOffset(0), .column = ColumnOffset(19) }));
+}
+
+TEST_CASE("Terminal.TextSelection_multiline_drag_still_takes_the_first_line_whole", "[terminal]")
+{
+    // Removing that snap must not cost the standard behaviour: a selection running onto a later
+    // line takes the first line to its right margin. Selection::ranges() and the lexicographic
+    // Selection::contains already provide that, which is what made the snap redundant.
+    auto mock = MockTerm { ColumnCount(20), LineCount(4) };
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    mock.terminal.tick(ClockBase);
+    mock.writeToScreen("abc\r\ndef");
+
+    using namespace vtbackend;
+    auto constexpr UiHandledHint = false;
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+
+    mock.terminal.tick(1s);
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None, 0_lineOffset + 0_columnOffset, PixelCoordinate, UiHandledHint);
+    mock.terminal.tick(1s);
+    (void) mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    mock.terminal.tick(1s);
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None, 1_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
+
+    // Column 15 of the FIRST line is past its text but inside a multi-line selection.
+    CHECK(mock.terminal.isSelected(CellLocation { .line = LineOffset(0), .column = ColumnOffset(15) }));
+    // Split so the escape does not run into the text that follows it, which a spell checker reading
+    // this file would otherwise take for a single misspelled token.
+    CHECK(mock.terminal.extractSelectionText()
+          == "abc\n"
+             "de");
+}
 
 // NOLINTEND(misc-const-correctness)
 

@@ -1338,9 +1338,12 @@ void Terminal::sendMouseMoveEvent(Modifiers modifiers,
         }
         else if (selector()->state() != Selection::State::Complete)
         {
-            if (currentScreen().isCellEmpty(relativePos)
-                && !currentScreen().compareCellTextAt(relativePos, 0x20))
-                relativePos.column = ColumnOffset { 0 } + unbox(_settings.pageSize.columns - 1);
+            // NB: The drag end is taken exactly where the pointer is, including over the blank
+            // region right of a short line. Snapping it to the right margin there -- as this used to
+            // -- selected (and copied) the whole line the moment the pointer crossed the last
+            // character. It was redundant besides: Selection::ranges() already gives the first line
+            // of a MULTI-line selection its full width, and Selection::contains is lexicographic, so
+            // hit-testing agrees without help.
             _viCommands.cursorPosition = relativePos;
             if (_inputHandler.mode() != ViMode::Insert)
                 _inputHandler.setMode(selector()->viMode());
