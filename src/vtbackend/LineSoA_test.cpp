@@ -387,6 +387,24 @@ TEST_CASE("CellProxy.resetWithAttrs", "[CellProxy]")
 }
 
 TEST_CASE("CellProxy.appendCharacter", "[CellProxy]")
+TEST_CASE("LineSoA.appendCodepointToCluster.width_never_reaches_zero", "[LineSoA]")
+{
+    // unicode::grapheme_cluster_width answers 0 for a cluster made only of zero-width codepoints.
+    // A cell always occupies at least one column, and a width of 0 additionally drove the shrink
+    // path's erase range onto the head cell itself, blanking the very text it was revising.
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(10));
+
+    auto cell = CellProxy(line, 0);
+    cell.write(GraphicsAttributes {}, U'́', 1); // a combining mark as the cluster BASE
+    auto const delta = cell.appendCharacter(U'̂');
+
+    CHECK(line.widths[0] >= 1);
+    CHECK(delta >= 0);
+    CHECK(cell.codepointCount() == 2);
+    CHECK(cell.codepoint(0) == U'́');
+}
+
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(10));

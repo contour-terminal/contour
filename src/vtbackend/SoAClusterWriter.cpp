@@ -171,6 +171,10 @@ namespace
                     }
                     else if (delta < 0)
                     {
+                        // The released columns start one past the head at the earliest: a cluster is
+                        // never narrower than one column, which appendCodepointToCluster guarantees
+                        // by clamping the recomputed width. Were the width allowed to reach 0 this
+                        // loop would start ON the head and erase the very cluster it is revising.
                         auto const oldWidth = newWidth - static_cast<size_t>(delta);
                         for (auto c = targetCol + newWidth; c < targetCol + oldWidth && c < maxCols; ++c)
                             writeCellToSoA(

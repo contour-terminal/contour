@@ -280,7 +280,13 @@ int appendCodepointToCluster(LineSoA& line, size_t col, char32_t codepoint, Clus
     if (policy == ClusterWidthPolicy::FirstCodepoint)
         return 0;
 
-    auto const newWidth = unicode::grapheme_cluster_width(std::u32string_view(buffer.data(), count));
+    // A cluster always occupies at least one column. grapheme_cluster_width answers 0 for a cluster
+    // made only of zero-width codepoints -- a lone combining mark, ZWSP, a bare ZWJ -- and the base
+    // codepoint was stored under exactly this clamp by writeNonAsciiToSoA. Without it here the width
+    // both violates the "1 or 2 columns" invariant LineSoA.h documents and drives the shrink path's
+    // erase range onto the head cell itself, wiping the text the revision was meant to keep.
+    auto const newWidth =
+        std::max(1u, unicode::grapheme_cluster_width(std::u32string_view(buffer.data(), count)));
     line.widths[col] = static_cast<uint8_t>(newWidth);
 
     return static_cast<int>(newWidth) - static_cast<int>(oldWidth);
