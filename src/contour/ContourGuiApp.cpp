@@ -39,6 +39,7 @@
 #include <QtQuick/QSGRendererInterface>
 #include <QtWidgets/QApplication>
 
+#include <algorithm>
 #include <atomic>
 #include <filesystem>
 #include <iostream>
@@ -636,9 +637,28 @@ int ContourGuiApp::terminalGuiAction()
     // This triggers the expensive FFmpeg/VDPAU/VA-API/Vulkan driver probing
     // without blocking the main thread. When done, we signal QML via
     // multimediaReady so the bell Loader activates only after the probe completes.
+    //
+    // Skipped entirely when no profile can ever ring an audible bell -- and that is a CRASH fix, not
+    // a speed one. The probe brings up a PipeWire client and its monitor threads, and those race with
+    // Qt Multimedia's teardown when the process exits before they have settled. It surfaces as a
+    // SIGSEGV inside PipeWire's own protocol thread rather than anywhere in Contour, which is why the
+    // event-pumping join below -- which correctly fixes the *deadlock* -- does not fix this.
+    //
+    // Measured against a five-second session (`contour <config> ucs-detect`), which is short enough
+    // to lose the race reliably: 3 crashes in 7 runs with the probe running, 0 in 7 without it.
+    //
+    // Profiles are checked rather than just the default one, because a profile can be switched to at
+    // runtime. A profile that DOES have an audible bell still runs the probe and can still lose the
+    // race; that part is an upstream Qt Multimedia/PipeWire teardown issue, and is far less likely in
+    // a session that lives longer than its own startup.
+    auto const anyProfileHasAudibleBell =
+        std::ranges::any_of(_config.profiles.value(),
+                            [](auto const& profile) { return profile.second.bell.value().sound != "off"; });
+
     auto multimediaWarmedUp = std::atomic<bool> { false };
-    auto multimediaWarmupThread = std::thread([this, &multimediaWarmedUp] {
-        QMediaDevices::audioOutputs();
+    auto multimediaWarmupThread = std::thread([this, &multimediaWarmedUp, anyProfileHasAudibleBell] {
+        if (anyProfileHasAudibleBell)
+            QMediaDevices::audioOutputs();
         QMetaObject::invokeMethod(
             &_sessionManager, [this] { _sessionManager.setMultimediaReady(true); }, Qt::QueuedConnection);
         multimediaWarmedUp.store(true, std::memory_order_release);
