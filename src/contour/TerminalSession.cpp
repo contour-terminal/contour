@@ -1076,8 +1076,19 @@ void TerminalSession::requestWindowResize(Width width, Height height)
     });
 }
 
-void TerminalSession::addToAccumulatedScroll(crispy::point pixelDelta, crispy::point angleDelta) noexcept
+void TerminalSession::addToAccumulatedScroll(crispy::point pixelDelta,
+                                             crispy::point angleDelta,
+                                             vtbackend::ScrollPhase phase) noexcept
 {
+    // Drop incidental sideways drift before it can accumulate into a whole column step. Filtering here
+    // rather than at the binding lookup keeps it in ONE place and fixes the mouse-reporting path too: an
+    // application receiving phantom horizontal wheel reports during a vertical scroll is equally wrong.
+    if (!_horizontalWheelGesture.acceptsHorizontal(pixelDelta, angleDelta, phase))
+    {
+        pixelDelta.x = 0;
+        angleDelta.x = 0;
+    }
+
     if (angleDelta && !pixelDelta)
         _accumulatedPixelScroll = {};
     else
@@ -1376,9 +1387,20 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
     // The user's mappings did not claim this button, so fall back to the built-in ones. They are consulted
     // second on purpose: an explicit binding in the user's config always wins (see
     // builtinFallbackMouseMappings for why a plain default could not reach an existing user at all).
-    if (auto const* actions = config::apply(
-            config::builtinFallbackMouseMappings(), button, sanitizedModifier, matchModeFlags()))
+    if (auto const* actions =
+            config::applyBuiltinFallback(_config, button, sanitizedModifier, matchModeFlags()))
         executeAllActions(*actions);
+}
+
+bool TerminalSession::applyFallbackMouseBinding(MouseButton button)
+{
+    auto const noModifiers = Modifiers { vtbackend::Modifier::None };
+    auto const* actions = config::applyBuiltinFallback(_config, button, noModifiers, matchModeFlags());
+    if (actions == nullptr)
+        return false;
+
+    executeAllActions(*actions);
+    return true;
 }
 
 void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,

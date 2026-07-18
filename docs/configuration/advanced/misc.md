@@ -44,6 +44,29 @@ Default: `true`
 
     reflow_on_resize: true
 
+# Switch tabs on horizontal wheel
+
+Whether a horizontal mouse wheel tilt — or a horizontal two-finger trackpad swipe — over the tab
+strip or the terminal switches to the previous/next tab.
+
+Default: `true`
+
+    tab_switch_on_horizontal_wheel: true
+
+Precedence is the same gate that decides whether you may select text with the mouse:
+
+* An application that has requested mouse reporting (`vim`, `tmux`, `htop`, …) keeps receiving the
+  horizontal wheel. Hold the bypass modifier (`bypass_mouse_protocol_modifiers`, Shift by default)
+  to switch tabs anyway.
+* An explicit `WheelLeft` / `WheelRight` entry in your `input_mapping` section always wins over this
+  built-in behaviour, so you can rebind the gesture to anything else.
+
+!!! note
+
+    A long vertical trackpad scroll usually drifts a little sideways. Contour ignores the horizontal
+    component of a gesture that started out vertical, so scrolling through output never switches tabs
+    by accident.
+
 # GUI theme
 
 Selects the light/dark appearance of the GUI chrome — the title bar, tab strip, command palette,

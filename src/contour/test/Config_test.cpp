@@ -2105,32 +2105,188 @@ TEST_CASE("Config: command_palette_recent_count", "[config][palette]")
     }
 }
 
+TEST_CASE("config.tab_switch_on_horizontal_wheel", "[config]")
+{
+    QTemporaryDir dir;
+
+    SECTION("defaults to true")
+    {
+        CHECK(contour::config::Config {}.tabSwitchOnHorizontalWheel.value());
+    }
+
+    SECTION("loads false")
+    {
+        auto const config = loadFromYaml(dir,
+                                         "tab_switch_on_horizontal_wheel: false\n"
+                                         "profiles:\n  main:\n    shell: \"/bin/bash\"\n");
+        CHECK_FALSE(config.tabSwitchOnHorizontalWheel.value());
+    }
+
+    SECTION("round-trips through the generated config")
+    {
+        // The writer is the reflection walk in createForGlobal(), so this pins that the new entry is
+        // actually emitted -- a field it skipped would silently reset on every GUI-driven save.
+        auto config = contour::config::Config {};
+        config.tabSwitchOnHorizontalWheel = false;
+        auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+        REQUIRE(written.find("tab_switch_on_horizontal_wheel") != std::string::npos);
+
+        auto const reloaded = loadFromYaml(dir, written);
+        CHECK_FALSE(reloaded.tabSwitchOnHorizontalWheel.value());
+    }
+}
+
+TEST_CASE("config.parseMouseButton accepts the horizontal wheel", "[config]")
+{
+    QTemporaryDir dir;
+
+    SECTION("WheelLeft and WheelRight are bindable, case-insensitively")
+    {
+        auto const config = loadFromYaml(dir,
+                                         "input_mapping:\n"
+                                         "    - { mods: [], mouse: WheelRight, action: SwitchToTabLeft }\n"
+                                         "    - { mods: [], mouse: wheelleft,  action: SwitchToTabRight }\n"
+                                         "profiles:\n  main:\n    shell: \"/bin/bash\"\n");
+
+        auto const& mouseMappings = config.inputMappings.value().mouseMappings;
+        auto const bound = [&](vtbackend::MouseButton button) {
+            return std::ranges::any_of(mouseMappings, [button](auto const& m) { return m.input == button; });
+        };
+        CHECK(bound(vtbackend::MouseButton::WheelRight));
+        CHECK(bound(vtbackend::MouseButton::WheelLeft));
+    }
+}
+
 TEST_CASE("config.builtinFallbackMouseMappings", "[config]")
 {
     auto const& fallbacks = contour::config::builtinFallbackMouseMappings();
 
+    auto const rowFor = [&fallbacks](vtbackend::MouseButton button) {
+        auto const it = std::ranges::find_if(
+            fallbacks, [button](auto const& row) { return row.mapping.input == button; });
+        REQUIRE(it != fallbacks.end());
+        return it;
+    };
+
     SECTION("the right button opens the context menu")
     {
-        REQUIRE(fallbacks.size() == 1);
-        auto const& mapping = fallbacks.front();
+        auto const& row = *rowFor(vtbackend::MouseButton::Right);
 
-        CHECK(mapping.input == vtbackend::MouseButton::Right);
-        CHECK(mapping.modifiers == vtbackend::Modifiers { vtbackend::Modifier::None });
-        REQUIRE(mapping.binding.size() == 1);
-        CHECK(std::holds_alternative<contour::actions::OpenContextMenu>(mapping.binding.front()));
+        CHECK(row.mapping.modifiers == vtbackend::Modifiers { vtbackend::Modifier::None });
+        REQUIRE(row.mapping.binding.size() == 1);
+        CHECK(std::holds_alternative<contour::actions::OpenContextMenu>(row.mapping.binding.front()));
+        CHECK(row.enabled(contour::config::Config {}));
+    }
+
+    SECTION("the horizontal wheel switches tabs")
+    {
+        auto const& left = *rowFor(vtbackend::MouseButton::WheelLeft);
+        auto const& right = *rowFor(vtbackend::MouseButton::WheelRight);
+
+        REQUIRE(left.mapping.binding.size() == 1);
+        CHECK(std::holds_alternative<contour::actions::SwitchToTabLeft>(left.mapping.binding.front()));
+        REQUIRE(right.mapping.binding.size() == 1);
+        CHECK(std::holds_alternative<contour::actions::SwitchToTabRight>(right.mapping.binding.front()));
+
+        // Modifiers{None} is load-bearing, not incidental: sendWheelEvent() transposes the wheel axes
+        // while Alt is held, so Alt+vertical wheel arrives on the HORIZONTAL axis. Carrying Alt, it must
+        // not match these rows, or Alt+scroll would switch tabs instead of changing opacity.
+        CHECK(left.mapping.modifiers == vtbackend::Modifiers { vtbackend::Modifier::None });
+        CHECK(right.mapping.modifiers == vtbackend::Modifiers { vtbackend::Modifier::None });
+    }
+
+    SECTION("the horizontal-wheel rows follow tab_switch_on_horizontal_wheel")
+    {
+        auto enabledConfig = contour::config::Config {};
+        enabledConfig.tabSwitchOnHorizontalWheel = true;
+        auto disabledConfig = contour::config::Config {};
+        disabledConfig.tabSwitchOnHorizontalWheel = false;
+
+        for (auto const button: { vtbackend::MouseButton::WheelLeft, vtbackend::MouseButton::WheelRight })
+        {
+            auto const& row = *rowFor(button);
+            CHECK(row.enabled(enabledConfig));
+            CHECK_FALSE(row.enabled(disabledConfig));
+        }
+
+        // ... and the context menu stays reachable either way.
+        CHECK(rowFor(vtbackend::MouseButton::Right)->enabled(disabledConfig));
     }
 
     SECTION("it is a FALLBACK, not a default")
     {
-        // This is the whole point of the table, so it is pinned rather than left to a comment: the right
-        // button must NOT be in the default mouseMappings. Loading an `input_mapping:` section replaces
+        // This is the whole point of the table, so it is pinned rather than left to a comment: these
+        // buttons must NOT be in the default mouseMappings. Loading an `input_mapping:` section replaces
         // those wholesale, and the contour.yml Contour generates on first run writes every one of them
-        // out — so a right-click binding placed there would be shadowed away by the config file of every
-        // user who already has one, forever.
+        // out — so a binding placed there would be shadowed away by the config file of every user who
+        // already has one, forever.
         auto const defaults = contour::config::Config {}.inputMappings.value().mouseMappings;
-        auto const bindsRight = std::ranges::any_of(
-            defaults, [](auto const& mapping) { return mapping.input == vtbackend::MouseButton::Right; });
-        CHECK_FALSE(bindsRight);
+        for (auto const button: { vtbackend::MouseButton::Right,
+                                  vtbackend::MouseButton::WheelLeft,
+                                  vtbackend::MouseButton::WheelRight })
+        {
+            auto const bound = std::ranges::any_of(
+                defaults, [button](auto const& mapping) { return mapping.input == button; });
+            CHECK_FALSE(bound);
+        }
+    }
+}
+
+TEST_CASE("config.applyBuiltinFallback", "[config]")
+{
+    auto const modeFlags = uint8_t { 0 };
+    auto const noModifiers = vtbackend::Modifiers { vtbackend::Modifier::None };
+
+    SECTION("a horizontal wheel notch resolves to a tab switch")
+    {
+        auto const config = contour::config::Config {};
+
+        auto const* left = contour::config::applyBuiltinFallback(
+            config, vtbackend::MouseButton::WheelLeft, noModifiers, modeFlags);
+        REQUIRE(left != nullptr);
+        REQUIRE(left->size() == 1);
+        CHECK(std::holds_alternative<contour::actions::SwitchToTabLeft>(left->front()));
+
+        auto const* right = contour::config::applyBuiltinFallback(
+            config, vtbackend::MouseButton::WheelRight, noModifiers, modeFlags);
+        REQUIRE(right != nullptr);
+        CHECK(std::holds_alternative<contour::actions::SwitchToTabRight>(right->front()));
+    }
+
+    SECTION("a disabled row matches nothing")
+    {
+        auto config = contour::config::Config {};
+        config.tabSwitchOnHorizontalWheel = false;
+
+        CHECK(contour::config::applyBuiltinFallback(
+                  config, vtbackend::MouseButton::WheelLeft, noModifiers, modeFlags)
+              == nullptr);
+        CHECK(contour::config::applyBuiltinFallback(
+                  config, vtbackend::MouseButton::WheelRight, noModifiers, modeFlags)
+              == nullptr);
+
+        // The gate is per-row: the ungated context menu is unaffected.
+        CHECK(contour::config::applyBuiltinFallback(
+                  config, vtbackend::MouseButton::Right, noModifiers, modeFlags)
+              != nullptr);
+    }
+
+    SECTION("a modifier that is not None never matches")
+    {
+        auto const config = contour::config::Config {};
+        auto const alt = vtbackend::Modifiers { vtbackend::Modifier::Alt };
+
+        CHECK(contour::config::applyBuiltinFallback(config, vtbackend::MouseButton::WheelLeft, alt, modeFlags)
+              == nullptr);
+    }
+
+    SECTION("an unbound button matches nothing")
+    {
+        auto const config = contour::config::Config {};
+
+        CHECK(contour::config::applyBuiltinFallback(
+                  config, vtbackend::MouseButton::Middle, noModifiers, modeFlags)
+              == nullptr);
     }
 }
 

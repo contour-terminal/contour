@@ -326,6 +326,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/ContentScale_test.cpp
             test/ExitCode_test.cpp
             test/Helper_test.cpp
+            test/HorizontalWheelGesture_test.cpp
             test/ImeQueryRect_test.cpp
             test/KeyboardRouting_test.cpp
             test/MainWindowQml_test.cpp

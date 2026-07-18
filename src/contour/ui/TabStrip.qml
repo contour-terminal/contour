@@ -111,6 +111,26 @@ Row {
             z: 2
         }
 
+        // Horizontal wheel over the tabs switches tabs. A MouseArea rather than a WheelHandler: both
+        // axes are needed in one callback (the vertical one tells a sideways gesture from the sideways
+        // drift of a vertical one), and acceptedButtons: Qt.NoButton leaves every click, hover and drag
+        // in the TabItem delegates below completely untouched.
+        //
+        // Scoped to this Item, which is sized to the tabs' content width -- so the gesture works over the
+        // tabs themselves and does not swallow the wheel over the "+" button beside them.
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.NoButton
+            z: 1
+            onWheel: (wheel) => {
+                // Null-guarded like the bindings above: the C++ controller is destroyed while this QML
+                // tree is still alive during window teardown.
+                if (root.controller)
+                    root.controller.dispatchTabStripWheel(wheel.angleDelta.x, wheel.angleDelta.y)
+                wheel.accepted = true
+            }
+        }
+
         DropArea {
             id: dropArea
             anchors.fill: parent

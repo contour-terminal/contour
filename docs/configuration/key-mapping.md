@@ -35,6 +35,6 @@ or in case of standard characters, just the character.
 
  Mouse buttons can be one of the following self-explanatory ones:
 
-   `Left, Middle, Right, WheelUp, WheelDown`
+   `Left, Middle, Right, WheelUp, WheelDown, WheelLeft, WheelRight`
 
 

@@ -43,6 +43,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include <chrono>
+#include <concepts>
 #include <cstdint>
 #include <exception>
 #include <expected>
@@ -60,6 +61,7 @@
 #include <system_error>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 
 #include <reflection-cpp/reflection.hpp>
@@ -145,6 +147,29 @@ struct InputMappings
     std::vector<MouseInputMapping> mouseMappings;
 };
 
+struct Config;
+
+/// Enables a fallback row unconditionally. @see FallbackMouseMapping::enabled.
+[[nodiscard]] inline bool alwaysEnabled(Config const& /*config*/) noexcept
+{
+    return true;
+}
+
+/// A built-in fallback mouse mapping, together with the global-config predicate that enables it.
+///
+/// The predicate is a COLUMN rather than an `if` at the consultation site: a default that only applies
+/// when some option is on is then one more row here, and applyBuiltinFallback() stays the only place
+/// that knows gating exists at all.
+struct FallbackMouseMapping
+{
+    MouseInputMapping mapping;
+    /// Whether this row takes part in matching. Defaults to always.
+    ///
+    /// A plain function pointer, not std::function: it keeps the table a `static const` literal with
+    /// no allocation, on a path walked for every mouse press the application did not claim.
+    bool (*enabled)(Config const&) noexcept = alwaysEnabled;
+};
+
 /// Mouse mappings that apply when the user's `input_mapping:` does not claim the button itself.
 ///
 /// A new DEFAULT cannot reach an existing user: loading an `input_mapping:` section REPLACES the built-in
@@ -155,7 +180,7 @@ struct InputMappings
 /// button in their config continues to win, because that one is found first.
 ///
 /// @return The fallback mappings, in match order.
-[[nodiscard]] std::vector<MouseInputMapping> const& builtinFallbackMouseMappings();
+[[nodiscard]] std::vector<FallbackMouseMapping> const& builtinFallbackMouseMappings();
 
 namespace helper
 {
@@ -197,14 +222,20 @@ namespace helper
 ///
 /// @p modifiers is a chord: lock keys cannot appear in it by construction, so bindings match
 /// regardless of the CapsLock/NumLock state.
-template <typename Input>
-std::vector<actions::Action> const* apply(
-    std::vector<vtbackend::InputBinding<Input, ActionList>> const& mappings,
-    Input input,
-    vtbackend::Modifiers modifiers,
-    uint8_t actualModeFlags)
+///
+/// @p mappings is any range of bindings, not just a vector, so a filtered view over a gated table can
+/// be matched without materialising it. The returned pointer aliases an element of @p mappings, so
+/// that range must outlive the result — which it does for the static tables all callers pass.
+template <typename Input, std::ranges::input_range Mappings>
+    requires std::same_as<std::ranges::range_value_t<Mappings>, vtbackend::InputBinding<Input, ActionList>>
+std::vector<actions::Action> const* apply(Mappings&& mappings,
+                                          Input input,
+                                          vtbackend::Modifiers modifiers,
+                                          uint8_t actualModeFlags)
 {
-    for (vtbackend::InputBinding<Input, ActionList> const& mapping: mappings)
+    // Forwarded rather than taken by const&: std::views::filter is not const-iterable, so a filtered
+    // view over the gated fallback table could not be walked through a const reference.
+    for (vtbackend::InputBinding<Input, ActionList> const& mapping: std::forward<Mappings>(mappings))
     {
         if (mapping.modifiers == modifiers && mapping.input == input
             && helper::testMatchMode(actualModeFlags, mapping.modes))
@@ -214,6 +245,17 @@ std::vector<actions::Action> const* apply(
     }
     return nullptr;
 }
+
+/// Matches @p button against the built-in fallback rows that @p config enables.
+///
+/// The counterpart to apply() for @ref builtinFallbackMouseMappings: the caller states *what* was
+/// pressed, never *which* defaults are currently switched on.
+///
+/// @return The bound actions, or nullptr when no enabled row matches.
+[[nodiscard]] ActionList const* applyBuiltinFallback(Config const& config,
+                                                     vtbackend::MouseButton button,
+                                                     vtbackend::Modifiers modifiers,
+                                                     uint8_t actualModeFlags);
 
 struct CursorConfig
 {
@@ -1052,6 +1094,7 @@ struct Config
     };
     ConfigEntry<bool, documentation::SpawnNewProcess> spawnNewProcess { false };
     ConfigEntry<bool, documentation::ReflowOnResize> reflowOnResize { true };
+    ConfigEntry<bool, documentation::TabSwitchOnHorizontalWheel> tabSwitchOnHorizontalWheel { true };
     ConfigEntry<bool, documentation::GuiConfigLocked> guiConfigLocked { false };
     ConfigEntry<contour::config::GuiTheme, documentation::Theme> theme { contour::config::GuiTheme::System };
     ConfigEntry<vtbackend::Modifiers, documentation::BypassMouseProtocolModifiers>

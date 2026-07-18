@@ -6,6 +6,7 @@
 #include <contour/ColorConversion.h>
 #include <contour/Config.h>
 #include <contour/ContextMenu.h>
+#include <contour/HorizontalWheelGesture.h>
 #if defined(__linux__)
     #include <contour/FreeDesktopNotifier.h>
 #endif
@@ -191,7 +192,19 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return true;
     }
 
-    void addToAccumulatedScroll(crispy::point pixelDelta, crispy::point angleDelta) noexcept;
+    /// Accumulates a wheel event towards whole-cell scroll steps.
+    ///
+    /// The horizontal component is dropped unless @ref HorizontalWheelGesture judges it intentional, so
+    /// the sideways drift of a long vertical trackpad scroll never becomes a WheelLeft/WheelRight press
+    /// in the first place — neither for the tab-switch fallback binding nor for an application that
+    /// asked for mouse reporting.
+    ///
+    /// @param pixelDelta Pixel-precise delta (trackpads), or {0,0}.
+    /// @param angleDelta Angle delta (wheels), or {0,0}.
+    /// @param phase      The gesture phase the windowing system reported.
+    void addToAccumulatedScroll(crispy::point pixelDelta,
+                                crispy::point angleDelta,
+                                vtbackend::ScrollPhase phase) noexcept;
     std::tuple<vtbackend::LineOffset, vtbackend::ColumnOffset> consumeScroll() noexcept;
 
     QString title() const;
@@ -310,6 +323,18 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     config::Config const& config() const noexcept { return _config; }
     config::TerminalProfile const& profile() const noexcept { return _profile; }
+
+    /// Resolves @p button through the BUILT-IN fallback mouse mappings alone and runs what it binds.
+    ///
+    /// For input that arrives over the window chrome (the tab strip) rather than the grid: there is no
+    /// cell under the pointer, so neither the terminal's mouse protocol nor the user's own
+    /// `input_mapping:` entries — which may bind cell-relative actions like FollowHyperlink — can
+    /// meaningfully apply. Going straight to the fallback table is what keeps the tab-switch binding and
+    /// its config gate defined in exactly one place rather than restated for the strip.
+    ///
+    /// @param button The button to resolve, matched with no modifiers.
+    /// @return true when an enabled fallback row matched and its actions ran.
+    bool applyFallbackMouseBinding(vtbackend::MouseButton button);
 
     vtpty::Pty& pty() noexcept { return _terminal.device(); }
     vtbackend::Terminal& terminal() noexcept { return _terminal; }
@@ -673,6 +698,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     crispy::point _accumulatedPixelScroll;
     crispy::point _accumulatedAngleScroll;
+    HorizontalWheelGesture _horizontalWheelGesture;
 
     vtbackend::Terminal _terminal;
     bool _terminatedAndWaitingForKeyPress = false;

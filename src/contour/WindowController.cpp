@@ -19,6 +19,7 @@
 #include <QtGui/QScreen>
 #include <QtQml/QQmlEngine>
 
+#include <cstdlib>
 #include <ranges>
 #include <utility>
 
@@ -321,6 +322,33 @@ void WindowController::activateTab(int index)
     // exclusive views of the same region, so activating any tab dismisses the settings page.
     setSettingsActive(false);
     _manager.activateTab(_windowId, index);
+}
+
+void WindowController::dispatchTabStripWheel(int angleDeltaX, int angleDeltaY)
+{
+    auto* session = activeSession();
+    if (session == nullptr)
+        return;
+
+    // QML's WheelEvent exposes no gesture phase, so every event is judged as a discrete notch. That is
+    // the right reading for a wheel tilt; a phase-less trackpad driver reporting both axes at once is
+    // declined rather than guessed at.
+    auto const angleDelta = crispy::point { .x = angleDeltaX, .y = angleDeltaY };
+    if (!_tabStripWheelGesture.acceptsHorizontal({}, angleDelta, vtbackend::ScrollPhase::NoPhase))
+        return;
+
+    // Same 40-unit step consumeScroll() uses for the grid, so one notch means one tab wherever the
+    // pointer happens to be.
+    auto constexpr AngleStepSize = 8 * 5;
+    _tabStripWheelAccumulator += angleDeltaX;
+    auto const steps = _tabStripWheelAccumulator / AngleStepSize;
+    if (steps == 0)
+        return;
+    _tabStripWheelAccumulator -= steps * AngleStepSize;
+
+    auto const button = steps > 0 ? vtbackend::MouseButton::WheelRight : vtbackend::MouseButton::WheelLeft;
+    for ([[maybe_unused]] auto const _: std::views::iota(0, std::abs(steps)))
+        session->applyFallbackMouseBinding(button);
 }
 
 void WindowController::moveTab(int fromIndex, int toIndex)

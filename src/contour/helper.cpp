@@ -310,7 +310,7 @@ namespace
         }
 
         // Existing line-based scrolling (unchanged)
-        session.addToAccumulatedScroll(pixelDelta, angleDelta);
+        session.addToAccumulatedScroll(pixelDelta, angleDelta, scrollPhase);
         auto const [linesScroll, columnsScroll] = session.consumeScroll();
 
         inputLog()("[{}] Accumulate scroll with by value {} pixelDelta / {} angleDelta, {} lines, {} columns "

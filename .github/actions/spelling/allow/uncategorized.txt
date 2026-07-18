@@ -975,6 +975,7 @@ tldp
 tonsky
 topdir
 trackpad
+trackpads
 transitioning
 trapni
 trivialbuffer

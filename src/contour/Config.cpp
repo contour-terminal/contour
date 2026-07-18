@@ -66,24 +66,56 @@ namespace fs = std::filesystem;
 namespace contour::config
 {
 
-std::vector<MouseInputMapping> const& builtinFallbackMouseMappings()
+std::vector<FallbackMouseMapping> const& builtinFallbackMouseMappings()
 {
-    // The right mouse button opens the terminal's context menu. It is a fallback rather than a default
-    // (see the declaration for why): every contour.yml written before this existed enumerates the default
-    // mouse mappings without it, and would otherwise shadow it away.
+    // These are fallbacks rather than defaults (see the declaration for why): every contour.yml written
+    // before they existed enumerates the default mouse mappings without them, and would otherwise shadow
+    // them away.
     //
-    // Nothing else is needed to get the behaviour right. TerminalSession::sendMousePressEvent consults
+    // Nothing else is needed to get the precedence right. TerminalSession::sendMousePressEvent consults
     // this table only AFTER vtbackend has declined the press, so an application that asked for the mouse
-    // (vim, tmux) still receives its right-click and no menu opens; and only after the bypass modifier has
-    // been stripped, so Shift+Right opens the menu even then. That is the same gate that already decides
-    // whether the user may select cells with the mouse — reused, not restated.
-    static auto const mappings = std::vector<MouseInputMapping> {
-        MouseInputMapping { .modes { vtbackend::MatchModes {} },
-                            .modifiers { vtbackend::Modifiers { vtbackend::Modifier::None } },
-                            .input = vtbackend::MouseButton::Right,
-                            .binding = { { actions::OpenContextMenu {} } } },
+    // (vim, tmux) still receives its right-click and its horizontal wheel; and only after the bypass
+    // modifier has been stripped, so Shift+Right opens the menu and Shift+wheel switches tabs even then.
+    // That is the same gate that already decides whether the user may select cells with the mouse —
+    // reused, not restated.
+    //
+    // The horizontal-wheel rows match Modifiers{None} deliberately: sendWheelEvent() transposes the wheel
+    // axes while Alt is held (see helper.cpp, transposed()), so Alt+vertical wheel arrives here on the
+    // horizontal axis. Carrying Alt, it cannot match these rows, and the Alt+wheel opacity bindings keep
+    // working untouched.
+    static auto const mappings = std::vector<FallbackMouseMapping> {
+        FallbackMouseMapping { .mapping = { .modes { vtbackend::MatchModes {} },
+                                            .modifiers { vtbackend::Modifiers { vtbackend::Modifier::None } },
+                                            .input = vtbackend::MouseButton::Right,
+                                            .binding = { { actions::OpenContextMenu {} } } } },
+        FallbackMouseMapping {
+            .mapping = { .modes { vtbackend::MatchModes {} },
+                         .modifiers { vtbackend::Modifiers { vtbackend::Modifier::None } },
+                         .input = vtbackend::MouseButton::WheelLeft,
+                         .binding = { { actions::SwitchToTabLeft {} } } },
+            .enabled =
+                [](Config const& config) noexcept { return config.tabSwitchOnHorizontalWheel.value(); } },
+        FallbackMouseMapping {
+            .mapping = { .modes { vtbackend::MatchModes {} },
+                         .modifiers { vtbackend::Modifiers { vtbackend::Modifier::None } },
+                         .input = vtbackend::MouseButton::WheelRight,
+                         .binding = { { actions::SwitchToTabRight {} } } },
+            .enabled =
+                [](Config const& config) noexcept { return config.tabSwitchOnHorizontalWheel.value(); } },
     };
     return mappings;
+}
+
+ActionList const* applyBuiltinFallback(Config const& config,
+                                       vtbackend::MouseButton button,
+                                       vtbackend::Modifiers modifiers,
+                                       uint8_t actualModeFlags)
+{
+    auto enabledMappings =
+        builtinFallbackMouseMappings()
+        | std::views::filter([&config](FallbackMouseMapping const& row) { return row.enabled(config); })
+        | std::views::transform(&FallbackMouseMapping::mapping);
+    return apply(enabledMappings, button, modifiers, actualModeFlags);
 }
 
 namespace
@@ -444,6 +476,7 @@ void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
             overrides.loadFromEntry("command_palette_recent_count", config.commandPaletteRecentCount);
             overrides.loadFromEntry("spawn_new_process", config.spawnNewProcess);
             overrides.loadFromEntry("reflow_on_resize", config.reflowOnResize);
+            overrides.loadFromEntry("tab_switch_on_horizontal_wheel", config.tabSwitchOnHorizontalWheel);
             overrides.loadFromEntry("theme", config.theme);
             overrides.loadFromEntry("early_exit_threshold", config.earlyExitThreshold);
         }
@@ -640,6 +673,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("early_exit_threshold", c.earlyExitThreshold);
         loadFromEntry("spawn_new_process", c.spawnNewProcess);
         loadFromEntry("reflow_on_resize", c.reflowOnResize);
+        loadFromEntry("tab_switch_on_horizontal_wheel", c.tabSwitchOnHorizontalWheel);
         loadFromEntry("gui_config_locked", c.guiConfigLocked);
         loadFromEntry("theme", c.theme);
         loadFromEntry("experimental", c.experimentalFeatures);
@@ -2334,6 +2368,8 @@ std::optional<vtbackend::MouseButton> YAMLConfigReader::parseMouseButton(YAML::N
     auto constexpr static Mappings = std::array {
         std::pair { "WHEELUP"sv, vtbackend::MouseButton::WheelUp },
         std::pair { "WHEELDOWN"sv, vtbackend::MouseButton::WheelDown },
+        std::pair { "WHEELLEFT"sv, vtbackend::MouseButton::WheelLeft },
+        std::pair { "WHEELRIGHT"sv, vtbackend::MouseButton::WheelRight },
         std::pair { "LEFT"sv, vtbackend::MouseButton::Left },
         std::pair { "MIDDLE"sv, vtbackend::MouseButton::Middle },
         std::pair { "RIGHT"sv, vtbackend::MouseButton::Right },

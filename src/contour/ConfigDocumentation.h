@@ -692,6 +692,18 @@ constexpr StringLiteral ReflowOnResizeConfig {
     "reflow_on_resize: {}\n"
 };
 
+constexpr StringLiteral TabSwitchOnHorizontalWheelConfig {
+    "\n"
+    "{comment} Whether a horizontal mouse wheel tilt (or a horizontal trackpad swipe) over the tab\n"
+    "{comment} strip or the terminal switches to the previous/next tab.\n"
+    "{comment}\n"
+    "{comment} An application that has asked for mouse reporting (vim, tmux, ...) keeps receiving the\n"
+    "{comment} horizontal wheel; hold the bypass modifier (see bypass_mouse_protocol_modifiers) to\n"
+    "{comment} switch tabs anyway. An explicit WheelLeft/WheelRight entry in input_mapping wins over\n"
+    "{comment} this built-in behaviour.\n"
+    "tab_switch_on_horizontal_wheel: {}\n"
+};
+
 constexpr StringLiteral GuiConfigLockedConfig {
     "\n"
     "{comment} When set to true, the in-app graphical settings page is opened read-only and Contour\n"
@@ -866,7 +878,7 @@ constexpr StringLiteral InputMappingsConfig {
     "{comment} or in case of standard characters, just the character.\n"
     "{comment}\n"
     "{comment} Mouse buttons can be one of the following self-explanatory ones:\n"
-    "{comment}   Left, Middle, Right, WheelUp, WheelDown\n"
+    "{comment}   Left, Middle, Right, WheelUp, WheelDown, WheelLeft, WheelRight\n"
     "{comment}\n"
     "{comment} Actions:\n"
     "{comment} - CancelSelection   Cancels currently active selection, if any.\n"
@@ -1330,6 +1342,14 @@ constexpr StringLiteral SpawnNewProcessWeb { "flag determines whether a new proc
 constexpr StringLiteral ReflowOnResizeWeb {
     "option controls whether or not the lines in the terminal should be reflowed when a resize event occurs. "
     "The default value is `true`."
+};
+
+constexpr StringLiteral TabSwitchOnHorizontalWheelWeb {
+    "option controls whether a horizontal mouse wheel tilt (or a horizontal trackpad swipe) over the tab "
+    "strip or the terminal switches to the previous/next tab. An application that has requested mouse "
+    "reporting keeps receiving the horizontal wheel; holding the bypass modifier switches tabs anyway. An "
+    "explicit `WheelLeft`/`WheelRight` entry in `input_mapping` takes precedence. The default value is "
+    "`true`."
 };
 
 constexpr StringLiteral GuiConfigLockedWeb {
@@ -2246,6 +2266,8 @@ using CommandPaletteRecentCount =
 using PTYReadBufferSize = DocumentationEntry<PTYReadBufferSizeConfig, PTYReadBufferSizeWeb>;
 using PTYBufferObjectSize = DocumentationEntry<PTYBufferObjectSizeConfig, PTYBufferObjectSizeWeb>;
 using ReflowOnResize = DocumentationEntry<ReflowOnResizeConfig, ReflowOnResizeWeb>;
+using TabSwitchOnHorizontalWheel =
+    DocumentationEntry<TabSwitchOnHorizontalWheelConfig, TabSwitchOnHorizontalWheelWeb>;
 using GuiConfigLocked = DocumentationEntry<GuiConfigLockedConfig, GuiConfigLockedWeb>;
 using Theme = DocumentationEntry<ThemeConfig, ThemeWeb>;
 using ColorSchemes = DocumentationEntry<ColorSchemesConfig, Dummy>;

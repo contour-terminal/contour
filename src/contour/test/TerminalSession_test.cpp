@@ -38,6 +38,7 @@
 #include <format>
 #include <fstream>
 #include <memory>
+#include <ranges>
 
 using namespace std::string_literals;
 
@@ -1361,10 +1362,52 @@ TEST_CASE("TerminalSession: accumulated angle scroll consumes into line/column s
 
     // angle-only delta with no pixel delta takes the "reset pixel accumulation" branch.
     session->addToAccumulatedScroll(crispy::point { .x = 0, .y = 0 },
-                                    crispy::point { .x = 0, .y = 8 * 5 * 3 });
+                                    crispy::point { .x = 0, .y = 8 * 5 * 3 },
+                                    vtbackend::ScrollPhase::NoPhase);
     auto const [lines, columns] = session->consumeScroll();
     CHECK(lines.value != 0);
     CHECK(columns.value == 0);
+}
+
+TEST_CASE("TerminalSession: sideways drift of a vertical scroll never becomes a column step",
+          "[contour][session][wheel]")
+{
+    // End-to-end for the drift guard: the horizontal component is dropped at accumulation, so it can
+    // never reach the WheelLeft/WheelRight fallback binding no matter how long the scroll runs.
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+
+    auto constexpr Step = 8 * 5; // one angle notch, per consumeScroll()
+
+    session->addToAccumulatedScroll(
+        crispy::point {}, crispy::point { .x = 0, .y = -Step }, vtbackend::ScrollPhase::Begin);
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 20))
+        session->addToAccumulatedScroll(
+            crispy::point {}, crispy::point { .x = Step, .y = -1 }, vtbackend::ScrollPhase::Update);
+
+    auto const [lines, columns] = session->consumeScroll();
+    CHECK(columns.value == 0);
+    CHECK(lines.value != 0);
+}
+
+TEST_CASE("TerminalSession: a deliberate sideways swipe does produce column steps",
+          "[contour][session][wheel]")
+{
+    // The counterpart to the drift guard: a gesture that is horizontal from the outset must still get
+    // through, or the feature would never fire at all.
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+
+    auto constexpr Step = 8 * 5;
+
+    session->addToAccumulatedScroll(
+        crispy::point {}, crispy::point { .x = Step, .y = 0 }, vtbackend::ScrollPhase::Begin);
+    session->addToAccumulatedScroll(
+        crispy::point {}, crispy::point { .x = Step, .y = 0 }, vtbackend::ScrollPhase::Update);
+
+    auto const [lines, columns] = session->consumeScroll();
+    CHECK(columns.value != 0);
+    CHECK(lines.value == 0);
 }
 
 TEST_CASE("TerminalSession: openDocument routes through the injected external launcher",

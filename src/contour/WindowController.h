@@ -3,6 +3,7 @@
 
 #include <contour/CommandCatalog.h>
 #include <contour/CommandPaletteModel.h>
+#include <contour/HorizontalWheelGesture.h>
 #include <contour/display/TerminalDisplay.h>
 
 #include <vtbackend/Color.h>
@@ -124,6 +125,16 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// `createNewTab()` call site (the "+" button) working.
     Q_INVOKABLE void createNewTab(QString const& profileName = {});
     Q_INVOKABLE void activateTab(int index);
+    /// Routes a wheel event that occurred over the tab strip.
+    ///
+    /// Horizontal notches resolve through the same built-in fallback mouse mappings the terminal grid
+    /// consults (@see TerminalSession::applyFallbackMouseBinding), so the tab-switch behaviour and its
+    /// config gate live in exactly one table. The vertical component is ignored: the strip does not
+    /// scroll.
+    ///
+    /// @param angleDeltaX Horizontal angle delta, in the same units Qt reports (120 per notch).
+    /// @param angleDeltaY Vertical angle delta, used only to tell a sideways gesture from a vertical one.
+    Q_INVOKABLE void dispatchTabStripWheel(int angleDeltaX, int angleDeltaY);
     Q_INVOKABLE void moveTab(int fromIndex, int toIndex);
     /// The raw id of the window this controller adapts, so a QML drag payload can name its source
     /// window and a DropArea can target the destination window across the shared engine.
@@ -548,6 +559,12 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
 
     TerminalSessionManager& _manager;
     vtmux::WindowId _windowId;
+
+    // Wheel state for the tab strip. Separate from the grid's (which lives on TerminalSession) so a
+    // gesture over the strip is judged on its own, and so the accumulator does not jump when the
+    // pointer crosses between strip and grid mid-scroll.
+    HorizontalWheelGesture _tabStripWheelGesture;
+    int _tabStripWheelAccumulator = 0;
 
     // {{{ Command palette
     // The sources this window's palette draws from, held by value and in PRECEDENCE order (see
