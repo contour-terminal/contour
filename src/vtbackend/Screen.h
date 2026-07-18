@@ -11,6 +11,7 @@
 #include <vtbackend/Hyperlink.h>
 #include <vtbackend/Image.h>
 #include <vtbackend/MessageParser.h>
+#include <vtbackend/PromptRegion.h>
 #include <vtbackend/Sequence.h>
 #include <vtbackend/VTType.h>
 
@@ -624,6 +625,18 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     ///
     /// @return The block, or nullopt when the scrollback holds no finished command.
     [[nodiscard]] std::optional<CommandBlockText> lastCommandBlock() const;
+
+    /// Where the shell's LIVE prompt sits in the grid — the one the user is typing at right now.
+    ///
+    /// The complement of lastCommandBlock(): that one reconstructs a FINISHED command, which is opened by
+    /// an OSC 133;D and therefore can never be the prompt currently being typed into. Reads the OSC 133
+    /// marks alone, so no shell needs to opt into DEC mode 2034 for this to work.
+    ///
+    /// Does NOT take the terminal lock — the caller holds it, the same contract lastCommandBlock() has.
+    ///
+    /// @return The span, or why there is no live prompt (a command is running, no shell integration, or
+    ///         the prompt scrolled out of reach).
+    [[nodiscard]] std::expected<LivePromptSpan, PromptRegionError> livePromptSpan() const;
 
     void scrollUp(LineCount n) { scrollUp(n, margin()); }
     void scrollDown(LineCount n) { scrollDown(n, margin()); }

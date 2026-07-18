@@ -2211,6 +2211,16 @@ std::optional<CommandBlockText> Terminal::lastCommandBlock() const
     return primaryScreen().lastCommandBlock();
 }
 
+std::expected<LivePromptSpan, PromptRegionError> Terminal::livePromptSpan() const
+{
+    // An alt-screen application owns the whole page and paints no shell prompt into it, so the primary
+    // screen's marks — which are still there, waiting below — say nothing about where the caret now is.
+    if (isAlternateScreen())
+        return std::unexpected(PromptRegionError::NoPromptMark);
+
+    return primaryScreen().livePromptSpan();
+}
+
 string Terminal::extractLastMarkRange() const
 {
     // -1 because we always want to start extracting one line above the cursor by default.

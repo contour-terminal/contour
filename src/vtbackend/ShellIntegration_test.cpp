@@ -802,3 +802,118 @@ TEST_CASE("ShellIntegration.LineFlags formatter names PromptEnd")
 }
 
 // }}}
+
+// {{{ livePromptSpan — the grid-coordinate view of the live prompt
+
+TEST_CASE("ShellIntegration.livePromptSpan reports a fresh prompt")
+{
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    mc.writeToScreen("\033]133;A\033\\");
+    mc.writeToScreen("$ ");
+    mc.writeToScreen("\033]133;B\033\\");
+
+    auto const span = mc.terminal.livePromptSpan();
+
+    REQUIRE(span.has_value());
+    CHECK(span->firstLine == LineOffset(0));
+    CHECK(span->lastLine == LineOffset(0));
+    REQUIRE(span->inputBegin.has_value());
+    CHECK(*span->inputBegin == ColumnOffset(2));
+}
+
+TEST_CASE("ShellIntegration.livePromptSpan spans a reflowed multi-line prompt")
+{
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    mc.writeToScreen("\033]133;A\033\\");
+    mc.writeToScreen("line one of prompt\r\n");
+    mc.writeToScreen("> ");
+    mc.writeToScreen("\033]133;B\033\\");
+
+    auto const before = mc.terminal.livePromptSpan();
+    REQUIRE(before.has_value());
+    CHECK(before->firstLine == LineOffset(0));
+    CHECK(before->lastLine == LineOffset(1));
+
+    // Narrowing splits the first prompt line in two; the span must still cover the whole prompt, which is
+    // now one physical line taller.
+    mc.terminal.resizeScreen(PageSize { LineCount(10), ColumnCount(10) });
+
+    auto const after = mc.terminal.livePromptSpan();
+    REQUIRE(after.has_value());
+    CHECK(*after->inputBegin == ColumnOffset(2));
+    CHECK(after->lastLine - after->firstLine == LineOffset(2));
+}
+
+TEST_CASE("ShellIntegration.livePromptSpan declines while a command is running")
+{
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    mc.writeToScreen("\033]133;A\033\\");
+    mc.writeToScreen("$ ");
+    mc.writeToScreen("\033]133;B\033\\");
+    mc.writeToScreen("ls\r\n");
+    mc.writeToScreen("\033]133;C\033\\");
+    mc.writeToScreen("a-file\r\n");
+
+    auto const span = mc.terminal.livePromptSpan();
+
+    REQUIRE_FALSE(span.has_value());
+    CHECK(span.error() == PromptRegionError::InCommandOutput);
+}
+
+TEST_CASE("ShellIntegration.livePromptSpan reports a prompt again once the command finished")
+{
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    mc.writeToScreen("\033]133;A\033\\");
+    mc.writeToScreen("$ ");
+    mc.writeToScreen("\033]133;B\033\\");
+    mc.writeToScreen("ls\r\n");
+    mc.writeToScreen("\033]133;C\033\\");
+    mc.writeToScreen("a-file\r\n");
+    mc.writeToScreen("\033]133;D;0\033\\");
+    // ... and the shell paints its next prompt.
+    mc.writeToScreen("\033]133;A\033\\");
+    mc.writeToScreen("$ ");
+    mc.writeToScreen("\033]133;B\033\\");
+
+    auto const span = mc.terminal.livePromptSpan();
+
+    REQUIRE(span.has_value());
+    CHECK(span->firstLine == LineOffset(2));
+    REQUIRE(span->inputBegin.has_value());
+    CHECK(*span->inputBegin == ColumnOffset(2));
+}
+
+TEST_CASE("ShellIntegration.livePromptSpan reports no integration for a plain shell")
+{
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mc.writeToScreen("$ ");
+
+    auto const span = mc.terminal.livePromptSpan();
+
+    REQUIRE_FALSE(span.has_value());
+    CHECK(span.error() == PromptRegionError::NoPromptMark);
+}
+
+TEST_CASE("ShellIntegration.livePromptSpan is silent on the alternate screen")
+{
+    // An alt-screen application owns the page. The primary screen's marks are still there below, but they
+    // say nothing about where the caret is now.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    mc.writeToScreen("\033]133;A\033\\");
+    mc.writeToScreen("$ ");
+    mc.writeToScreen("\033]133;B\033\\");
+    REQUIRE(mc.terminal.livePromptSpan().has_value());
+
+    mc.writeToScreen("\033[?1049h"); // enter alt screen
+
+    auto const span = mc.terminal.livePromptSpan();
+    REQUIRE_FALSE(span.has_value());
+    CHECK(span.error() == PromptRegionError::NoPromptMark);
+}
+
+// }}}

@@ -4562,7 +4562,9 @@ namespace
     /// before the scan had looked at a single flag, when the scan wants the handful of lines above the
     /// cursor that hold the last command. So it climbs exactly as far as it is asked to, and keeps nothing
     /// but the line it is standing on: the scan is a single forward pass, so nothing older is ever needed.
-    class GridCommandBlockLines final: public CommandBlockLineSource
+    // Implements BOTH line sources: the two scans walk the same lazy, reflow-safe climb over logical
+    // lines, differing only in what they ask about each one. One hasLineAt() override satisfies both.
+    class GridCommandBlockLines final: public CommandBlockLineSource, public PromptRegionLineSource
     {
       public:
         /// @param grid The grid to walk. Must outlive this source.
@@ -4578,6 +4580,23 @@ namespace
         [[nodiscard]] bool hasLineAt(size_t index) const override { return seekTo(index); }
 
         [[nodiscard]] LineFlags flagsAt(size_t index) const override { return headAt(index).flags(); }
+
+        [[nodiscard]] LogicalLineMarks marksAt(size_t index) const override
+        {
+            auto const& head = headAt(index);
+            return { .flags = head.flags(),
+                     .promptEndOffset = head.promptEndOffset(),
+                     .commandEndOffset = head.commandEndOffset() };
+        }
+
+        /// The physical lines the logical line @p index is chopped into.
+        ///
+        /// Public so a caller that scanned by INDEX can translate the result back into grid coordinates;
+        /// the scan itself never deals in physical lines.
+        [[nodiscard]] std::pair<LineOffset, LineOffset> physicalExtentOf(size_t index) const
+        {
+            return extentOf(index);
+        }
 
         [[nodiscard]] std::string textAt(size_t index) const override
         {
@@ -4831,6 +4850,33 @@ std::optional<CommandBlockText> Screen::lastCommandBlock() const
     if (blocks.empty())
         return std::nullopt;
     return std::move(blocks.front());
+}
+
+std::expected<LivePromptSpan, PromptRegionError> Screen::livePromptSpan() const
+{
+    auto const cursorLine = cursor().position.line;
+
+    return findLivePromptRegion(GridCommandBlockLines { _grid, cursorLine }, MaxPromptScanLines)
+        .transform([&](PromptRegion const& region) {
+            // Back from logical-line INDICES into grid coordinates, over a FRESH walk: the source climbs
+            // lazily and only forwards, so it cannot be asked about an index it has already passed.
+            auto translator = GridCommandBlockLines { _grid, cursorLine };
+
+            // Ascending order, for that same reason. The prompt ends on the line ;B landed on — the
+            // cursor's own line when the shell emitted no ;B at all.
+            auto const inputIndex = region.inputBegin.has_value() ? region.inputBeginIndex : 0;
+            [[maybe_unused]] auto const inputReachable = translator.hasLineAt(inputIndex);
+            auto const lastLine = translator.physicalExtentOf(inputIndex).second;
+
+            [[maybe_unused]] auto const startReachable = translator.hasLineAt(region.startIndex);
+            auto const firstLine = translator.physicalExtentOf(region.startIndex).first;
+
+            return LivePromptSpan {
+                .firstLine = firstLine,
+                .lastLine = lastLine,
+                .inputBegin = region.inputBegin,
+            };
+        });
 }
 
 void Screen::setMark()

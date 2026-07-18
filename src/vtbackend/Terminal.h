@@ -1354,6 +1354,16 @@ class Terminal
     /// @return The block, or nullopt when the scrollback holds no finished command.
     [[nodiscard]] std::optional<CommandBlockText> lastCommandBlock() const;
 
+    /// Where the shell's LIVE prompt sits — the one the user is typing at right now.
+    ///
+    /// Unlike lastCommandBlock(), this is answered for the screen actually on display: while an alt-screen
+    /// application (vim, less) is up there is no shell prompt to speak of, and saying so is the point.
+    ///
+    /// Does NOT take the lock — the caller holds it, the same contract lastCommandBlock() has.
+    ///
+    /// @return The span, or why there is no live prompt.
+    [[nodiscard]] std::expected<LivePromptSpan, PromptRegionError> livePromptSpan() const;
+
     HyperlinkStorage& hyperlinks() noexcept { return _hyperlinks; }
     HyperlinkStorage const& hyperlinks() const noexcept { return _hyperlinks; }
 
