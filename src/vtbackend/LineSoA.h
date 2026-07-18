@@ -7,6 +7,7 @@
 #include <vtbackend/Hyperlink.h>
 #include <vtbackend/Image.h>
 #include <vtbackend/LineFlags.h>
+#include <vtbackend/TextScale.h>
 #include <vtbackend/primitives.h>
 
 #include <crispy/AlignedAllocator.h>
@@ -77,6 +78,13 @@ struct LineSoA
 
     /// Hyperlink ID per cell.
     AlignedVector<HyperlinkId> hyperlinks;
+
+    /// Fractional scale and alignment per cell, packed as `n:4 | d:4 | v:2 | h:2`.
+    /// @see vtbackend::packTextScaleExtras
+    ///
+    /// Cold on purpose: `scale` above is read on every erase, selection and render, while these are
+    /// zero for all but a vanishing fraction of cells. 0 means "ordinary", so a zeroed line is right.
+    AlignedVector<uint16_t> textScaleExtras;
 
     // --- Grapheme cluster overflow ---
 

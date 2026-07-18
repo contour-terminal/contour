@@ -2,9 +2,9 @@
 #pragma once
 
 #include <contour/Actions.h>
+#include <contour/ConfigDocumentation.h>
 
 #include <vtrasterizer/GlyphScaling.h>
-#include <contour/ConfigDocumentation.h>
 
 #if defined(CONTOUR_FRONTEND_GUI)
     #include <contour/display/ShaderConfig.h>

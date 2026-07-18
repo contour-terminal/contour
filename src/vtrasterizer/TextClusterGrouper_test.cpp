@@ -166,7 +166,7 @@ struct EventRecorder final: public TextClusterGrouper::Events
                          TextStyle style,
                          vtbackend::RGBColor color,
                          vtbackend::LineFlags flags,
-                         uint8_t scale) override
+                         vtbackend::CellScale const& scale) override
     {
         (void) scale;
         events.emplace_back(TextClusterGroup {

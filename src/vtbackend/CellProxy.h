@@ -88,6 +88,12 @@ class BasicCellProxy
     /// text.
     [[nodiscard]] uint8_t scale() const noexcept { return _line->scales[_col]; }
 
+    /// The full sizing of this cell: the block scale plus the fraction and alignment.
+    [[nodiscard]] CellScale textScale() const noexcept
+    {
+        return unpackTextScale(_line->scales[_col], _line->textScaleExtras[_col]);
+    }
+
     [[nodiscard]] CellFlags flags() const noexcept { return _line->sgr[_col].flags; }
 
     [[nodiscard]] bool isFlagEnabled(CellFlags testFlags) const noexcept
@@ -165,6 +171,7 @@ class BasicCellProxy
         _line->codepoints[_col] = 0;
         _line->widths[_col] = 1;
         _line->scales[_col] = 1;
+        _line->textScaleExtras[_col] = 0;
         _line->sgr[_col] = GraphicsAttributes {};
         _line->hyperlinks[_col] = {};
         _line->clusterSize[_col] = 0;
@@ -181,6 +188,7 @@ class BasicCellProxy
         _line->codepoints[_col] = 0;
         _line->widths[_col] = 1;
         _line->scales[_col] = 1;
+        _line->textScaleExtras[_col] = 0;
         _line->sgr[_col] = attrs;
         _line->hyperlinks[_col] = {};
         _line->clusterSize[_col] = 0;
@@ -217,6 +225,7 @@ class BasicCellProxy
         else
             _line->widths[_col] = 1;
         _line->scales[_col] = 1;
+        _line->textScaleExtras[_col] = 0;
 
         clearReplacedImageFragment(_line->imageFragments, static_cast<uint16_t>(_col));
     }
@@ -226,6 +235,15 @@ class BasicCellProxy
         requires(!IsConst)
     {
         _line->scales[_col] = s;
+        invalidateTrivialIfNeeded();
+    }
+
+    /// Sets the whole sizing of this cell: the block scale plus the fraction and alignment.
+    void setTextScale(CellScale const& cellScale) noexcept
+        requires(!IsConst)
+    {
+        _line->scales[_col] = cellScale.scale;
+        _line->textScaleExtras[_col] = packTextScaleExtras(cellScale);
         invalidateTrivialIfNeeded();
     }
 

@@ -4809,6 +4809,22 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
     return ApplyResult::Unsupported;
 }
 
+namespace
+{
+    /// The per-cell sizing a parsed `OSC 66` request asks for.
+    ///
+    /// The block's extent in cells comes from `s` alone; `n`/`d`/`v`/`h` change only how the glyph is
+    /// drawn inside it, which is why they travel together but are stored apart.
+    [[nodiscard]] CellScale cellScaleOf(text_sizing::Request const& request) noexcept
+    {
+        return CellScale { .scale = request.scale,
+                           .numerator = request.numerator,
+                           .denominator = request.denominator,
+                           .verticalAlignment = request.verticalAlignment,
+                           .horizontalAlignment = request.horizontalAlignment };
+    }
+} // namespace
+
 ApplyResult Screen::processTextSizing(std::string_view payload)
 {
     auto const parsed = text_sizing::parseRequest(payload);
@@ -4826,7 +4842,7 @@ ApplyResult Screen::processTextSizing(std::string_view payload)
     {
         auto const columns = static_cast<uint8_t>(
             std::min<unsigned>(request.columnsFor(0), std::numeric_limits<uint8_t>::max()));
-        writeSizedText(unicode::convert_to<char32_t>(request.text), columns, request.scale);
+        writeSizedText(unicode::convert_to<char32_t>(request.text), columns, cellScaleOf(request));
         return ApplyResult::Ok;
     }
 
@@ -4837,7 +4853,7 @@ ApplyResult Screen::processTextSizing(std::string_view payload)
         auto const natural = unicode::grapheme_cluster_width(cluster);
         auto const columns = static_cast<uint8_t>(
             std::min<unsigned>(request.columnsFor(natural), std::numeric_limits<uint8_t>::max()));
-        writeSizedText(cluster, columns, request.scale);
+        writeSizedText(cluster, columns, cellScaleOf(request));
     }
     return ApplyResult::Ok;
 }
@@ -4898,7 +4914,7 @@ void Screen::eraseMulticellBlockAt(CellLocation position)
     }
 }
 
-void Screen::writeSizedText(std::u32string_view codepoints, uint8_t columns, uint8_t scale)
+void Screen::writeSizedText(std::u32string_view codepoints, uint8_t columns, CellScale const& cellScale)
 {
     if (columns == 0)
         return;
@@ -4931,7 +4947,7 @@ void Screen::writeSizedText(std::u32string_view codepoints, uint8_t columns, uin
     // This is the same rule the ordinary write path applies to the single cell it touches. @see
     // writeText. A block covers up to MaxWidth * MaxScale columns and MaxScale rows, so the walk is
     // bounded by the protocol, and it is reached only on an `OSC 66` write.
-    for (auto const row: std::views::iota(0, static_cast<int>(std::max<uint8_t>(scale, 1))))
+    for (auto const row: std::views::iota(0, static_cast<int>(std::max<uint8_t>(cellScale.scale, 1))))
     {
         auto const lineOffset = _cursor.position.line + LineOffset::cast_from(row);
         if (lineOffset >= boxed_cast<LineOffset>(pageSize().lines))
@@ -4954,20 +4970,20 @@ void Screen::writeSizedText(std::u32string_view codepoints, uint8_t columns, uin
     // appendCharacter re-measures the cluster from its codepoints, which would undo the size the
     // application explicitly asked for -- so the width is restored afterwards, not before.
     cell.setWidth(columns);
-    cell.setScale(scale);
+    cell.setTextScale(cellScale);
 
     auto const sgr = _cursor.graphicsRendition.with(CellFlag::WideCharContinuation);
     for (uint8_t i = 1; i < columns; ++i)
     {
         auto continuation = line.useCellAt(_cursor.position.column + ColumnOffset::cast_from(i));
         continuation.reset(sgr, _cursor.hyperlink);
-        continuation.setScale(scale);
+        continuation.setTextScale(cellScale);
     }
 
     // A scaled block is `scale` cells TALL as well as `columns` wide -- the first thing in this grid
     // that occupies more than one line. The rows beneath are claimed so that nothing else can be
     // written into them and so that erasing any part of the block finds the whole of it.
-    for (uint8_t row = 1; row < scale; ++row)
+    for (uint8_t row = 1; row < cellScale.scale; ++row)
     {
         auto const lineOffset = _cursor.position.line + LineOffset::cast_from(row);
         if (lineOffset >= boxed_cast<LineOffset>(pageSize().lines))
@@ -4977,7 +4993,7 @@ void Screen::writeSizedText(std::u32string_view codepoints, uint8_t columns, uin
         {
             auto continuation = below.useCellAt(_cursor.position.column + ColumnOffset::cast_from(i));
             continuation.reset(sgr.with(CellFlag::MulticellContinuation), _cursor.hyperlink);
-            continuation.setScale(scale);
+            continuation.setTextScale(cellScale);
         }
     }
 

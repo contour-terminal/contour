@@ -403,6 +403,8 @@ repointed
 repointing
 repoints
 REPORTFAULT
+rerasterize
+rerasterizing
 resampler
 resizable
 retargeted

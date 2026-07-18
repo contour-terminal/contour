@@ -6,6 +6,7 @@
 #include <vtbackend/Grid.h>
 #include <vtbackend/Image.h>
 #include <vtbackend/Line.h>
+#include <vtbackend/TextScale.h>
 #include <vtbackend/primitives.h>
 
 #include <vtrasterizer/RenderTarget.h>
@@ -68,9 +69,9 @@ struct RenderCell
     RenderAttributes attributes;
     uint8_t width = 1;
 
-    /// How many cells tall this cell's glyph is drawn (kitty text sizing protocol, `OSC 66` `s=`).
-    /// 1 for ordinary text.
-    uint8_t scale = 1;
+    /// How this cell's glyph is sized and placed (kitty text sizing protocol, `OSC 66`).
+    /// Ordinary text leaves it at its default.
+    CellScale scale {};
 
     bool groupStart = false;
     bool groupEnd = false;

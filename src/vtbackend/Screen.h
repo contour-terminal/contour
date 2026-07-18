@@ -230,7 +230,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void eraseMulticellBlockAt(CellLocation position);
 
     /// Writes @p text as a single cell block @p columns wide and @p scale cells tall.
-    void writeSizedText(std::u32string_view codepoints, uint8_t columns, uint8_t scale);
+    void writeSizedText(std::u32string_view codepoints, uint8_t columns, CellScale const& cellScale);
 
     /// Dispatches one OSC 1337 payload to the iTerm2 extension it names.
     void processITerm2(std::string_view payload);

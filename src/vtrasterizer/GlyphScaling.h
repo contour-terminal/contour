@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/TextScale.h>
 #include <vtbackend/primitives.h>
 
+#include <array>
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <string_view>
@@ -33,24 +36,35 @@ enum class GlyphScalingMethod : uint8_t
     Rerasterize,
 };
 
-/// A geometric adjustment to a rasterized tile: how much larger to draw it, and where.
+/// A geometric adjustment to a rasterized tile: how much larger to draw it.
 ///
 /// Expressed as a multiplier rather than an absolute size so that a strategy does not need to know
-/// the cell size, which is what keeps this header free of the renderer.
+/// the cell size, which is what keeps this header free of the renderer. It is fractional because
+/// `OSC 66`'s `n`/`d` ask for sizes that are not whole multiples of a cell.
 struct GlyphScaleAdjustment
 {
-    /// Multiplier applied to the tile's target width and to its x offset.
-    unsigned widthFactor = 1;
+    /// Multiplier applied to the tile's target size and to its x offset, on both axes.
+    double factor = 1.0;
 
-    /// Multiplier applied to the tile's target height.
-    unsigned heightFactor = 1;
-
-    /// Whether the caller must rasterize the glyph afresh at `pointSize * widthFactor` rather than
-    /// reuse the tile it already has.
+    /// Whether the caller must rasterize the glyph afresh at `pointSize * factor` rather than reuse
+    /// the tile it already has.
     bool requiresRerasterization = false;
+
+    /// @return whether this leaves the tile exactly as it was -- the ordinary-text case.
+    [[nodiscard]] constexpr bool isIdentity() const noexcept
+    {
+        return !requiresRerasterization && factor == 1.0;
+    }
 };
 
-/// Decides how a glyph is enlarged. @see GlyphScalingMethod.
+/// Where a glyph's tile is drawn relative to the position ordinary text would take.
+struct GlyphPenOffset
+{
+    int dx = 0;
+    int dy = 0;
+};
+
+/// Decides how a glyph is enlarged and where it sits. @see GlyphScalingMethod.
 ///
 /// Injected rather than selected inline so that a second strategy is a new implementation and a new
 /// row in the method table, not an edit to every place a glyph is drawn.
@@ -59,22 +73,97 @@ class GlyphScaler
   public:
     virtual ~GlyphScaler() = default;
 
-    /// @param scale the block's scale in cells, 1..7. A scale of 1 must yield no adjustment.
-    [[nodiscard]] virtual GlyphScaleAdjustment adjustmentFor(uint8_t scale) const noexcept = 0;
+    /// @param cellScale the block's sizing. Ordinary text must yield an identity adjustment.
+    [[nodiscard]] virtual GlyphScaleAdjustment adjustmentFor(
+        vtbackend::CellScale const& cellScale) const noexcept = 0;
+
+    /// Where the tile goes, relative to where ordinary text of the same glyph would be drawn.
+    ///
+    /// The renderer's pen is the bottom of the block's FIRST row, and ordinary placement subtracts
+    /// the baseline and the glyph's top bearing at 1x. A block `scale` cells tall wants its glyph's
+    /// baseline `f * B` above the block's BOTTOM, where `f` is the drawn factor:
+    ///
+    ///     drawn  = pen.y - B - t + f*t
+    ///     wanted = pen.y + (s-1)*H - f*B
+    ///     dy     = (s-1)*H - (f-1)*(B + t)
+    ///
+    /// A fraction leaves slack -- `(s - f)` cells on each axis -- and `v`/`h` say where in that slack
+    /// the glyph sits. The formula above lands it at the bottom, so top and centre shift back up.
+    ///
+    /// @param cellScale     the block's sizing; ordinary text must yield {0, 0}.
+    /// @param cellWidth     one ordinary cell's width in pixels.
+    /// @param cellHeight    one ordinary cell's height in pixels (`H`).
+    /// @param baseline      the baseline's offset above the cell bottom (`B`).
+    /// @param glyphBearingY the glyph's ink top above its baseline (`t`), as the tile reports it.
+    [[nodiscard]] virtual GlyphPenOffset penOffsetFor(vtbackend::CellScale const& cellScale,
+                                                      int cellWidth,
+                                                      int cellHeight,
+                                                      int baseline,
+                                                      int glyphBearingY) const noexcept = 0;
 
     [[nodiscard]] virtual GlyphScalingMethod method() const noexcept = 0;
+
+  protected:
+    /// The part of the offset both strategies share: the slack a fraction leaves, distributed by
+    /// `v` and `h`.
+    ///
+    /// Data-driven so a third alignment is a row, not a third branch on each axis. The block is
+    /// measured as `scale` cells on both axes, which is exact for the one-cell-wide glyphs a
+    /// fractional block is written with.
+    [[nodiscard]] static constexpr GlyphPenOffset alignmentOffset(vtbackend::CellScale const& cellScale,
+                                                                  int cellWidth,
+                                                                  int cellHeight) noexcept
+    {
+        if (!cellScale.hasFraction())
+            return {};
+
+        auto const scale = static_cast<double>(cellScale.scale != 0 ? cellScale.scale : 1);
+        auto const slack = scale - cellScale.drawFactor();
+
+        // 0 = top/left, 1 = bottom/right, 2 = centered -- indexed by the protocol's own value.
+        constexpr auto Share = std::array { 0.0, 1.0, 0.5 };
+        auto const vertical =
+            Share[cellScale.verticalAlignment < Share.size() ? cellScale.verticalAlignment : 0];
+        auto const horizontal =
+            Share[cellScale.horizontalAlignment < Share.size() ? cellScale.horizontalAlignment : 0];
+
+        // dy is measured from the BOTTOM-aligned placement the formulas above produce, so the
+        // vertical share counts backwards: share 1.0 (bottom) moves nothing.
+        return GlyphPenOffset {
+            .dx = static_cast<int>(std::lround(slack * horizontal * static_cast<double>(cellWidth))),
+            .dy = static_cast<int>(std::lround(-slack * (1.0 - vertical) * static_cast<double>(cellHeight))),
+        };
+    }
 };
 
 /// Enlarges by drawing the ordinary-size tile into a larger rectangle. @see GlyphScalingMethod.
 class StretchingGlyphScaler final: public GlyphScaler
 {
   public:
-    [[nodiscard]] GlyphScaleAdjustment adjustmentFor(uint8_t scale) const noexcept override
+    [[nodiscard]] GlyphScaleAdjustment adjustmentFor(
+        vtbackend::CellScale const& cellScale) const noexcept override
     {
-        auto const factor = static_cast<unsigned>(scale ? scale : 1);
-        return GlyphScaleAdjustment { .widthFactor = factor,
-                                      .heightFactor = factor,
-                                      .requiresRerasterization = false };
+        return GlyphScaleAdjustment { .factor = cellScale.drawFactor(), .requiresRerasterization = false };
+    }
+
+    /// The tile is the ORDINARY-size raster magnified, so its bearing is still the 1x one and grows
+    /// with the tile -- which is why `t` appears here. @see GlyphScaler::penOffsetFor.
+    [[nodiscard]] GlyphPenOffset penOffsetFor(vtbackend::CellScale const& cellScale,
+                                              int cellWidth,
+                                              int cellHeight,
+                                              int baseline,
+                                              int glyphBearingY) const noexcept override
+    {
+        if (cellScale.isOrdinary())
+            return {};
+
+        auto const scale = static_cast<double>(cellScale.scale != 0 ? cellScale.scale : 1);
+        auto const factor = cellScale.drawFactor();
+        auto const dy = ((scale - 1.0) * static_cast<double>(cellHeight))
+                        - ((factor - 1.0) * static_cast<double>(baseline + glyphBearingY));
+
+        auto const alignment = alignmentOffset(cellScale, cellWidth, cellHeight);
+        return GlyphPenOffset { .dx = alignment.dx, .dy = static_cast<int>(std::lround(dy)) + alignment.dy };
     }
 
     [[nodiscard]] GlyphScalingMethod method() const noexcept override { return GlyphScalingMethod::Stretch; }
@@ -84,14 +173,34 @@ class StretchingGlyphScaler final: public GlyphScaler
 class RerasterizingGlyphScaler final: public GlyphScaler
 {
   public:
-    [[nodiscard]] GlyphScaleAdjustment adjustmentFor(uint8_t scale) const noexcept override
+    [[nodiscard]] GlyphScaleAdjustment adjustmentFor(
+        vtbackend::CellScale const& cellScale) const noexcept override
     {
-        auto const factor = static_cast<unsigned>(scale ? scale : 1);
-        // The factors are still reported so a caller can size the glyph request, but the tile that
+        auto const factor = cellScale.drawFactor();
+        // The factor is still reported so a caller can size the glyph request, but the tile that
         // comes back is ALREADY at the final size -- stretching it again would double the scaling.
-        return GlyphScaleAdjustment { .widthFactor = factor,
-                                      .heightFactor = factor,
-                                      .requiresRerasterization = factor > 1 };
+        return GlyphScaleAdjustment { .factor = factor, .requiresRerasterization = factor != 1.0 };
+    }
+
+    /// The tile came back from the font at `factor x` the point size, so its bearing is ALREADY
+    /// scaled and must not be counted again -- which drops the `t` term.
+    /// @see GlyphScaler::penOffsetFor.
+    [[nodiscard]] GlyphPenOffset penOffsetFor(vtbackend::CellScale const& cellScale,
+                                              int cellWidth,
+                                              int cellHeight,
+                                              int baseline,
+                                              int /*glyphBearingY*/) const noexcept override
+    {
+        if (cellScale.isOrdinary())
+            return {};
+
+        auto const scale = static_cast<double>(cellScale.scale != 0 ? cellScale.scale : 1);
+        auto const factor = cellScale.drawFactor();
+        auto const dy = ((scale - 1.0) * static_cast<double>(cellHeight))
+                        - ((factor - 1.0) * static_cast<double>(baseline));
+
+        auto const alignment = alignmentOffset(cellScale, cellWidth, cellHeight);
+        return GlyphPenOffset { .dx = alignment.dx, .dy = static_cast<int>(std::lround(dy)) + alignment.dy };
     }
 
     [[nodiscard]] GlyphScalingMethod method() const noexcept override

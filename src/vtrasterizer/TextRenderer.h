@@ -21,11 +21,10 @@
 #include <crispy/point.h>
 #include <crispy/size.h>
 
-#include <gsl/pointers>
-
 #include <libunicode/convert.h>
 #include <libunicode/run_segmenter.h>
 
+#include <gsl/pointers>
 #include <gsl/span>
 #include <gsl/span_ext>
 
@@ -107,7 +106,7 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
                          TextStyle style,
                          vtbackend::RGBColor color,
                          vtbackend::LineFlags flags,
-                         uint8_t scale) override;
+                         vtbackend::CellScale const& scale) override;
 
     bool renderBoxDrawingCell(vtbackend::CellLocation position,
                               char32_t codepoint,
@@ -127,9 +126,13 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
                                     gsl::span<unsigned> clusters,
                                     TextStyle style);
 
+    /// @param blockScale How many cells tall the block this glyph belongs to is (`OSC 66` `s=`).
+    ///                   Bounds the oversize clamps below, which would otherwise squash a glyph
+    ///                   rasterized for a tall block back down to a single cell.
     AtlasTileAttributes const* getOrCreateRasterizedMetadata(crispy::strong_hash const& hash,
                                                              text::glyph_key const& glyphKey,
-                                                             unicode::PresentationStyle presentationStyle);
+                                                             unicode::PresentationStyle presentationStyle,
+                                                             uint8_t blockScale = 1);
 
     /**
      * Creates (and rasterizes) a single glyph and returns its
@@ -139,12 +142,13 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
         atlas::TileLocation tileLocation,
         text::glyph_key const& glyphKey,
         unicode::PresentationStyle presentation,
-        crispy::strong_hash const& hash);
+        crispy::strong_hash const& hash,
+        uint8_t blockScale = 1);
 
-    std::optional<TextureAtlas::TileCreateData> createRasterizedGlyph(
-        atlas::TileLocation tileLocation,
-        text::glyph_key const& glyphKey,
-        unicode::PresentationStyle presentation);
+    std::optional<TextureAtlas::TileCreateData> createRasterizedGlyph(atlas::TileLocation tileLocation,
+                                                                      text::glyph_key const& glyphKey,
+                                                                      unicode::PresentationStyle presentation,
+                                                                      uint8_t blockScale = 1);
 
     void restrictToTileSize(TextureAtlas::TileCreateData& tileCreateData);
 

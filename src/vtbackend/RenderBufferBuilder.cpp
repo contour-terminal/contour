@@ -256,7 +256,7 @@ RenderCell RenderBufferBuilder::makeRenderCell(ColorPalette const& colorPalette,
     renderCell.position.line = line;
     renderCell.position.column = column;
     renderCell.width = screenCell.width();
-    renderCell.scale = screenCell.scale();
+    renderCell.scale = screenCell.textScale();
 
     if (screenCell.codepointCount() != 0)
     {

@@ -7,76 +7,200 @@
 #include <catch2/catch_test_macros.hpp>
 
 using namespace vtrasterizer;
+using vtbackend::CellScale;
+
+namespace
+{
+// One representative cell geometry, named so the arithmetic below reads as arithmetic.
+constexpr auto H = 22; // cell height
+constexpr auto W = 10; // cell width
+constexpr auto B = 4;  // baseline above the cell bottom
+constexpr auto T = 14; // glyph ink top above its baseline
+
+[[nodiscard]] constexpr CellScale whole(uint8_t scale) noexcept
+{
+    return CellScale { .scale = scale };
+}
+
+[[nodiscard]] constexpr CellScale fractional(uint8_t scale,
+                                             uint8_t numerator,
+                                             uint8_t denominator,
+                                             uint8_t verticalAlignment = 0,
+                                             uint8_t horizontalAlignment = 0) noexcept
+{
+    return CellScale { .scale = scale,
+                       .numerator = numerator,
+                       .denominator = denominator,
+                       .verticalAlignment = verticalAlignment,
+                       .horizontalAlignment = horizontalAlignment };
+}
+} // namespace
+
+TEST_CASE("CellScale.drawFactor", "[glyphscaling]")
+{
+    // The block's extent in cells comes from `s`; the fraction changes only how large the glyph is
+    // DRAWN. An IMPROPER fraction is not a shrink and is ignored -- kitty's effective_scale agrees.
+    CHECK(whole(1).drawFactor() == 1.0);
+    CHECK(whole(3).drawFactor() == 3.0);
+    CHECK(fractional(3, 1, 3).drawFactor() == 1.0); // 3 * 1/3 -- ordinary size in a 3-cell block
+    CHECK(fractional(4, 1, 2).drawFactor() == 2.0);
+    CHECK(fractional(3, 3, 3).drawFactor() == 3.0); // n == d: not a shrink
+    CHECK(fractional(3, 4, 3).drawFactor() == 3.0); // n > d: not a shrink
+    CHECK(fractional(3, 1, 0).drawFactor() == 3.0); // d == 0: no fraction asked for
+}
+
+TEST_CASE("CellScale.isOrdinary", "[glyphscaling]")
+{
+    // The predicate every hot path leans on: ordinary text must be recognisable without arithmetic.
+    CHECK(CellScale {}.isOrdinary());
+    CHECK(whole(1).isOrdinary());
+    CHECK_FALSE(whole(2).isOrdinary());
+    CHECK_FALSE(fractional(1, 1, 2).isOrdinary());
+}
+
+TEST_CASE("CellScale.extras_round_trip_through_the_cold_column", "[glyphscaling]")
+{
+    // The fraction and alignment are packed into one 16-bit word beside the hot `scale` byte. A
+    // packing that did not round-trip would silently reshape text on the next reflow.
+    for (uint8_t n = 0; n <= 15; ++n)
+        for (uint8_t d = 0; d <= 15; ++d)
+        {
+            auto const original = fractional(3, n, d, 2, 1);
+            auto const restored =
+                vtbackend::unpackTextScale(original.scale, vtbackend::packTextScaleExtras(original));
+            CHECK(restored == original);
+        }
+
+    // Zero is "ordinary", so a zeroed line needs no initialisation pass to be correct.
+    CHECK(vtbackend::unpackTextScale(1, 0) == CellScale {});
+}
 
 TEST_CASE("GlyphScaling.stretching.scale_of_one_changes_nothing", "[glyphscaling]")
 {
     // Ordinary text is the overwhelming majority of what a terminal draws, so the unscaled case must
     // cost nothing and must not perturb the tile it was given.
     auto const scaler = StretchingGlyphScaler {};
-    auto const adjustment = scaler.adjustmentFor(1);
-    CHECK(adjustment.widthFactor == 1);
-    CHECK(adjustment.heightFactor == 1);
-    CHECK_FALSE(adjustment.requiresRerasterization);
+    CHECK(scaler.adjustmentFor(whole(1)).isIdentity());
+    CHECK(scaler.adjustmentFor(whole(1)).factor == 1.0);
+    CHECK_FALSE(scaler.adjustmentFor(whole(1)).requiresRerasterization);
 }
 
-TEST_CASE("GlyphScaling.stretching.scales_both_axes", "[glyphscaling]")
+TEST_CASE("GlyphScaling.stretching.scales_by_the_draw_factor", "[glyphscaling]")
 {
-    // A scaled block is `s` cells wide AND `s` cells tall, so the glyph grows on both axes.
     auto const scaler = StretchingGlyphScaler {};
     for (uint8_t scale = 2; scale <= 7; ++scale)
     {
         INFO("scale " << static_cast<int>(scale));
-        auto const adjustment = scaler.adjustmentFor(scale);
-        CHECK(adjustment.widthFactor == scale);
-        CHECK(adjustment.heightFactor == scale);
+        CHECK(scaler.adjustmentFor(whole(scale)).factor == static_cast<double>(scale));
+        CHECK_FALSE(scaler.adjustmentFor(whole(scale)).requiresRerasterization);
     }
-}
-
-TEST_CASE("GlyphScaling.stretching.never_rerasterizes", "[glyphscaling]")
-{
-    // The whole point of this strategy: it reuses the tile already in the atlas, so it costs nothing
-    // at rasterization time and adds no atlas entries however many scales are in use.
-    auto const scaler = StretchingGlyphScaler {};
-    for (uint8_t scale = 1; scale <= 7; ++scale)
-        CHECK_FALSE(scaler.adjustmentFor(scale).requiresRerasterization);
-
+    // A fraction shrinks the DRAWN size without touching the block.
+    CHECK(scaler.adjustmentFor(fractional(3, 1, 3)).factor == 1.0);
     CHECK(scaler.method() == GlyphScalingMethod::Stretch);
 }
 
-TEST_CASE("GlyphScaling.stretching.treats_a_zero_scale_as_one", "[glyphscaling]")
-{
-    // Scale is 1..7 by the protocol and validated on the way in, but a strategy that divides the
-    // renderer's geometry by it must not be the thing that breaks if a zero ever reaches it.
-    auto const scaler = StretchingGlyphScaler {};
-    auto const adjustment = scaler.adjustmentFor(0);
-    CHECK(adjustment.widthFactor == 1);
-    CHECK(adjustment.heightFactor == 1);
-}
-
-TEST_CASE("GlyphScaling.rerasterizing.scale_of_one_does_not_rerasterize", "[glyphscaling]")
+TEST_CASE("GlyphScaling.rerasterizing.rerasterizes_only_when_the_size_actually_changes", "[glyphscaling]")
 {
     // Unscaled text must take the ordinary path, including the direct-mapped fast path for ASCII,
-    // which serves tiles reserved at the base size and cannot answer a re-rasterized request.
+    // which serves tiles reserved at the base size and cannot answer a re-rasterized request. A
+    // fraction that lands back on 1.0 is the same case and must not rasterize either.
     auto const scaler = RerasterizingGlyphScaler {};
-    auto const adjustment = scaler.adjustmentFor(1);
-    CHECK(adjustment.widthFactor == 1);
-    CHECK_FALSE(adjustment.requiresRerasterization);
+    CHECK_FALSE(scaler.adjustmentFor(whole(1)).requiresRerasterization);
+    CHECK_FALSE(scaler.adjustmentFor(fractional(3, 1, 3)).requiresRerasterization);
+    CHECK(scaler.adjustmentFor(whole(2)).requiresRerasterization);
+    CHECK(scaler.adjustmentFor(fractional(4, 1, 2)).requiresRerasterization);
+    CHECK(scaler.method() == GlyphScalingMethod::Rerasterize);
 }
 
-TEST_CASE("GlyphScaling.rerasterizing.asks_for_a_new_raster_when_scaled", "[glyphscaling]")
+TEST_CASE("GlyphScaling.penOffset.ordinary_text_is_never_moved", "[glyphscaling]")
 {
+    // Whatever this arithmetic says for a block, it must be exactly zero for ordinary text, or every
+    // glyph on screen shifts.
+    auto const stretching = StretchingGlyphScaler {};
+    auto const rerasterizing = RerasterizingGlyphScaler {};
+
+    for (auto const* scaler:
+         { static_cast<GlyphScaler const*>(&stretching), static_cast<GlyphScaler const*>(&rerasterizing) })
+    {
+        CHECK(scaler->penOffsetFor(CellScale {}, W, H, B, T).dx == 0);
+        CHECK(scaler->penOffsetFor(CellScale {}, W, H, B, T).dy == 0);
+        CHECK(scaler->penOffsetFor(whole(1), W, H, B, T).dy == 0);
+    }
+}
+
+TEST_CASE("GlyphScaling.penOffset.stretching_moves_by_the_internal_leading", "[glyphscaling]")
+{
+    // With no fraction the drawn factor equals the scale, and the offset collapses to
+    // (s-1) * (H - B - t) -- the cell's internal leading, once per extra row.
+    auto const scaler = StretchingGlyphScaler {};
+    constexpr auto Leading = H - B - T; // 4
+
+    CHECK(scaler.penOffsetFor(whole(2), W, H, B, T).dy == Leading);
+    CHECK(scaler.penOffsetFor(whole(3), W, H, B, T).dy == 2 * Leading);
+    CHECK(scaler.penOffsetFor(whole(7), W, H, B, T).dy == 6 * Leading);
+}
+
+TEST_CASE("GlyphScaling.penOffset.rerasterizing_drops_the_bearing_term", "[glyphscaling]")
+{
+    // A re-rasterized tile came back from the font at `factor x` the point size, so its reported
+    // bearing is ALREADY scaled. Counting it again would double it, which is why the offset does not
+    // depend on the glyph at all.
     auto const scaler = RerasterizingGlyphScaler {};
-    for (uint8_t scale = 2; scale <= 7; ++scale)
+
+    CHECK(scaler.penOffsetFor(whole(2), W, H, B, T).dy == H - B);
+    CHECK(scaler.penOffsetFor(whole(2), W, H, B, 40).dy == H - B); // same for a much taller glyph
+    CHECK(scaler.penOffsetFor(whole(4), W, H, B, T).dy == 3 * (H - B));
+}
+
+TEST_CASE("GlyphScaling.penOffset.lands_the_baseline_on_the_block", "[glyphscaling]")
+{
+    // The property the arithmetic exists for, stated end to end: after the offset, the drawn baseline
+    // must sit `f * B` above the block's BOTTOM.
+    auto const scaler = StretchingGlyphScaler {};
+    constexpr auto PenY = 100; // bottom of the block's first row
+
+    for (uint8_t scale = 1; scale <= 7; ++scale)
     {
         INFO("scale " << static_cast<int>(scale));
-        auto const adjustment = scaler.adjustmentFor(scale);
-        CHECK(adjustment.requiresRerasterization);
-        // The factors still report the size asked for, so the caller can scale the glyph request --
-        // but the tile that comes back is already final, and stretching it again would double it.
-        CHECK(adjustment.widthFactor == scale);
-        CHECK(adjustment.heightFactor == scale);
+        auto const cellScale = whole(scale);
+        auto const factor = cellScale.drawFactor();
+        auto const tileTop = PenY - B - T + scaler.penOffsetFor(cellScale, W, H, B, T).dy;
+        auto const drawnBaseline = tileTop + static_cast<int>(factor * T);
+        auto const wantedBaseline = PenY + ((scale - 1) * H) - static_cast<int>(factor * B);
+        CHECK(drawnBaseline == wantedBaseline);
     }
-    CHECK(scaler.method() == GlyphScalingMethod::Rerasterize);
+}
+
+TEST_CASE("GlyphScaling.penOffset.alignment_places_a_fractional_glyph_in_its_block", "[glyphscaling]")
+{
+    // A fraction leaves slack -- (s - f) cells on each axis -- and v/h say where in it the glyph
+    // sits. `s=3:n=1:d=3` draws at ordinary size inside a 3-cell block, leaving 2 cells of slack.
+    auto const scaler = StretchingGlyphScaler {};
+    constexpr auto Slack = 2; // cells: scale 3 - drawn 1
+
+    // Horizontal: 0 = left (flush, no shift), 1 = right, 2 = centered.
+    CHECK(scaler.penOffsetFor(fractional(3, 1, 3, 0, 0), W, H, B, T).dx == 0);
+    CHECK(scaler.penOffsetFor(fractional(3, 1, 3, 0, 1), W, H, B, T).dx == Slack * W);
+    CHECK(scaler.penOffsetFor(fractional(3, 1, 3, 0, 2), W, H, B, T).dx == Slack * W / 2);
+
+    // Vertical is measured from the bottom-aligned placement the baseline formula produces, so
+    // bottom moves nothing, top moves up by the whole slack, and centre by half of it.
+    auto const bottom = scaler.penOffsetFor(fractional(3, 1, 3, 1, 0), W, H, B, T).dy;
+    auto const top = scaler.penOffsetFor(fractional(3, 1, 3, 0, 0), W, H, B, T).dy;
+    auto const centered = scaler.penOffsetFor(fractional(3, 1, 3, 2, 0), W, H, B, T).dy;
+
+    CHECK(top == bottom - (Slack * H));
+    CHECK(centered == bottom - (Slack * H / 2));
+}
+
+TEST_CASE("GlyphScaling.penOffset.a_fraction_that_cancels_draws_like_ordinary_text", "[glyphscaling]")
+{
+    // `s=3:n=1:d=3` draws at exactly ordinary size. Top-aligned in its block, the glyph must land
+    // precisely where unscaled text on that row would -- no fractional drift.
+    auto const scaler = StretchingGlyphScaler {};
+    auto const offset = scaler.penOffsetFor(fractional(3, 1, 3, 0, 0), W, H, B, T);
+    CHECK(offset.dx == 0);
+    CHECK(offset.dy == 0);
 }
 
 TEST_CASE("GlyphScaling.method_names_round_trip", "[glyphscaling]")

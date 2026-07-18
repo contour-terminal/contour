@@ -31,7 +31,7 @@ class TextClusterGrouper
                                      TextStyle style,
                                      vtbackend::RGBColor color,
                                      vtbackend::LineFlags flags,
-                                     uint8_t scale) = 0;
+                                     vtbackend::CellScale const& scale) = 0;
 
         virtual bool renderBoxDrawingCell(vtbackend::CellLocation position,
                                           char32_t codepoint,
@@ -56,7 +56,7 @@ class TextClusterGrouper
                     vtbackend::RGBColor foregroundColor,
                     TextStyle style,
                     vtbackend::LineFlags flags,
-                    uint8_t scale = 1);
+                    vtbackend::CellScale const& scale = {});
 
     void renderLine(std::u32string_view text,
                     vtbackend::LineOffset lineOffset,
@@ -74,7 +74,7 @@ class TextClusterGrouper
                                       TextStyle style,
                                       vtbackend::RGBColor color,
                                       vtbackend::LineFlags flags,
-                                      uint8_t scale);
+                                      vtbackend::CellScale const& scale);
 
     void flushTextClusterGroup();
 
@@ -110,7 +110,7 @@ class TextClusterGrouper
 
     /// The scale the current group is being drawn at. Part of the group's identity: a cell drawn at
     /// a different size cannot share a shaping run with its neighbours.
-    uint8_t _scale = 1;
+    vtbackend::CellScale _scale {};
 
     bool _forceUpdateInitialPenPosition = false;
 };

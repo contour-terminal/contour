@@ -557,3 +557,32 @@ TEST_CASE("TextSizing.a_neighbouring_block_survives", "[textsizing]")
     CHECK(screen.at(LineOffset(0), ColumnOffset(4)).codepoints() == U"B");
     CHECK(screen.at(LineOffset(0), ColumnOffset(4)).width() == 4);
 }
+
+TEST_CASE("TextSizing.the_cell_carries_the_whole_sizing", "[textsizing]")
+{
+    // The renderer sizes and places a glyph from the cell's CellScale, so everything the request
+    // asked for has to survive the write -- not just the block scale.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(6), ColumnCount(20) } };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033]66;s=3:w=1:n=1:d=3:v=2:h=1;x\a"sv);
+
+    auto const cellScale = screen.at(LineOffset(0), ColumnOffset(0)).textScale();
+    CHECK(cellScale.scale == 3);
+    CHECK(cellScale.numerator == 1);
+    CHECK(cellScale.denominator == 3);
+    CHECK(cellScale.verticalAlignment == 2);
+    CHECK(cellScale.horizontalAlignment == 1);
+    CHECK(cellScale.drawFactor() == 1.0); // 3 * 1/3 -- ordinary size inside a 3-cell block
+
+    // A plain scaled block carries no fraction, so it draws at its full scale.
+    mock.writeToScreen("\033[2;1H\033]66;s=2;A\a"sv);
+    auto const plain = screen.at(LineOffset(1), ColumnOffset(0)).textScale();
+    CHECK(plain.scale == 2);
+    CHECK_FALSE(plain.hasFraction());
+    CHECK(plain.drawFactor() == 2.0);
+
+    // Ordinary text must come back as ordinary, whatever was written before it.
+    mock.writeToScreen("\033[3;1Hz"sv);
+    CHECK(screen.at(LineOffset(2), ColumnOffset(0)).textScale().isOrdinary());
+}

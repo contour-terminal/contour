@@ -65,7 +65,7 @@ void TextClusterGrouper::renderCell(vtbackend::CellLocation position,
                                     vtbackend::RGBColor foregroundColor,
                                     TextStyle style,
                                     vtbackend::LineFlags flags,
-                                    uint8_t scale)
+                                    vtbackend::CellScale const& scale)
 {
     if (_forceUpdateInitialPenPosition)
     {
@@ -97,10 +97,9 @@ void TextClusterGrouper::appendCellTextToClusterGroup(std::u32string_view codepo
                                                       TextStyle style,
                                                       vtbackend::RGBColor color,
                                                       vtbackend::LineFlags flags,
-                                                      uint8_t scale)
+                                                      vtbackend::CellScale const& scale)
 {
-    bool const attribsChanged =
-        color != _color || style != _style || flags != _lineFlags || scale != _scale;
+    bool const attribsChanged = color != _color || style != _style || flags != _lineFlags || scale != _scale;
     bool const cellIsEmpty = codepoints.empty() || codepoints[0] == 0x20;
     bool const textStartsNewCluster = _cellCount == 0 && !cellIsEmpty;
 
