@@ -636,6 +636,28 @@ TEST_CASE("TextSizing.a_drag_inside_one_row_of_blocks_stays_on_one_line", "[text
 
     // The pointer slips one row down while still over the same blocks.
     mock.terminal.sendMouseMoveEvent(
+TEST_CASE("TextSizing.copying_a_block_carries_its_scale", "[textsizing]")
+{
+    // DECCRA copies the continuation flags along with the rest of the cell's attributes. Dropping
+    // the scale but keeping those flags orphans the rows beneath: the renderer finds a block of
+    // height 1 whose origin is above them and redraws the head's text on each, and
+    // eraseMulticellBlockAt -- which also reads the scale -- never reaches them to clean up.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(8), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033]66;s=2;A\a"sv);
+    REQUIRE(screen.at(LineOffset(0), ColumnOffset(0)).textScale().scale == 2);
+
+    // Copy the 2x2 region at the top-left down to line 5.
+    mock.writeToScreen("\033[1;1;2;2;1;5;1;1$v"sv);
+
+    auto const head = screen.at(LineOffset(4), ColumnOffset(0));
+    CHECK(head.textScale().scale == 2);
+    CHECK(head.codepoints() == U"A");
+    // The row beneath stays a continuation of a block that is still two rows tall.
+    CHECK(screen.at(LineOffset(5), ColumnOffset(0)).textScale().scale == 2);
+}
+
         Modifier::None, CellLocation { .line = LineOffset(1), .column = ColumnOffset(3) }, Pixels, UiHandled);
 
     // Still a single-line selection: the caption on row 0 is NOT swept in.

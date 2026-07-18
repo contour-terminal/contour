@@ -561,6 +561,30 @@ TEST_CASE("AppendChar.abandoned_width_revision_restores_the_head_cell", "[screen
     CHECK(screen.at(LineOffset(0), ColumnOffset(4)).codepoints() == U"ℹ️");
 }
 
+TEST_CASE("Screen.copyArea_does_not_remeasure_cluster_widths", "[screen]")
+{
+    // DECCRA reproduces cells; it does not re-write them. Re-measuring the cluster would apply
+    // whatever policy is in force NOW to text written under the policy of the time, so a cluster
+    // stored one column wide would silently claim its neighbour -- which holds live text, and has no
+    // continuation cell to mark it as taken.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.terminal.setMode(DECMode::Unicode, false);
+    mock.writeToScreen(U"ℹ"); // stored one column wide under FirstCodepoint
+    mock.writeToScreen(U"️");
+    mock.writeToScreen(U"X");
+    REQUIRE(screen.at(LineOffset(0), ColumnOffset(0)).width() == 1);
+    REQUIRE(screen.at(LineOffset(0), ColumnOffset(1)).codepoints() == U"X");
+
+    // DECCRA: copy the 1x2 region at the top-left down to line 3.
+    mock.writeToScreen("\033[1;1;1;2;1;3;1;1$v"sv);
+
+    CHECK(screen.at(LineOffset(2), ColumnOffset(0)).width() == 1);
+    CHECK(screen.at(LineOffset(2), ColumnOffset(0)).codepoints() == U"ℹ️");
+    CHECK(screen.at(LineOffset(2), ColumnOffset(1)).codepoints() == U"X");
+}
+
 TEST_CASE("AppendChar.emoji_VS16_i", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(5) } };

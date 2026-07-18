@@ -1951,13 +1951,27 @@ void Screen::copyArea(Rect sourceArea, int page, CellLocation targetTopLeft, int
             {
                 targetCell.write(attrs, sourceCell.codepoint(0), sourceCell.width(), sourceCell.hyperlink());
                 for (size_t ci = 1; ci < sourceCell.codepointCount(); ++ci)
-                    (void) targetCell.appendCharacter(sourceCell.codepoint(ci));
+                    // A copy reproduces the source cell; it does not re-measure it. The source's
+                    // width is whatever the policy in force when it was WRITTEN decided, so
+                    // re-measuring here would rewrite it under a policy the application may have
+                    // since reset -- claiming a neighbouring column that holds live text, with no
+                    // continuation cell to mark it. FirstCodepoint keeps the codepoints and leaves
+                    // the width alone.
+                    (void) targetCell.appendCharacter(sourceCell.codepoint(ci),
+                                                      ClusterWidthPolicy::FirstCodepoint);
             }
             else
             {
                 targetCell.reset(attrs, sourceCell.hyperlink());
             }
         }
+
+            // Both write() and reset() clear the sizing, but `attrs` still carries
+            // MulticellContinuation to the rows a scaled block reaches into. Copying the flags
+            // without the scale leaves those rows orphaned: RenderBufferBuilder sees a block of
+            // height 1 whose origin is above them and redraws the head's text on each, and
+            // eraseMulticellBlockAt -- also reading the scale -- never reaches them to clean up.
+            targetCell.setTextScale(sourceCell.textScale());
     }
 }
 
