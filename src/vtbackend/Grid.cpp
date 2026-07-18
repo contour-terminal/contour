@@ -44,6 +44,7 @@ namespace detail
     /// Splits a logical line (stored as a LineSoA) into fixed-width Line objects.
     /// @param baseFlags The logical line's flags; only its head keeps the semantic marks among them.
     /// @param commandEndOffset The logical line's command-end offset, likewise carried by the head alone.
+    /// @param promptEndOffset The logical line's prompt-end offset, likewise carried by the head alone.
     /// @returns number of inserted lines.
     LineCount addNewWrappedLines(Lines& targetLines,
                                  ColumnCount newColumnCount,
@@ -51,6 +52,7 @@ namespace detail
                                  size_t usedColumns,
                                  LineFlags baseFlags,
                                  ColumnOffset commandEndOffset,
+                                 ColumnOffset promptEndOffset,
                                  bool initialNoWrap)
     {
         auto const newCols = unbox<size_t>(newColumnCount);
@@ -70,7 +72,10 @@ namespace detail
                                      std::move(chunk),
                                      newColumnCount);
             if (isHead)
+            {
                 targetLines.back().setCommandEndOffset(commandEndOffset);
+                targetLines.back().setPromptEndOffset(promptEndOffset);
+            }
             ++i;
         };
 
@@ -671,6 +676,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
             size_t logicalLineUsed = 0;
             LineFlags logicalLineFlags = LineFlag::None;
             ColumnOffset logicalLineCommandEndOffset {};
+            ColumnOffset logicalLinePromptEndOffset {};
 
             auto const appendToLogicalLine = [&logicalLineBuffer, &logicalLineUsed](Line const& line) {
                 auto const cols = unbox<size_t>(line.size());
@@ -689,7 +695,8 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                                            &logicalLineBuffer,
                                            &logicalLineUsed,
                                            &logicalLineFlags,
-                                           &logicalLineCommandEndOffset]() {
+                                           &logicalLineCommandEndOffset,
+                                           &logicalLinePromptEndOffset]() {
                 if (logicalLineUsed > 0)
                 {
                     detail::addNewWrappedLines(grownLines,
@@ -698,6 +705,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                                                logicalLineUsed,
                                                logicalLineFlags,
                                                logicalLineCommandEndOffset,
+                                               logicalLinePromptEndOffset,
                                                true);
                     initializeLineSoA(logicalLineBuffer, ColumnCount(0));
                     logicalLineUsed = 0;
@@ -726,6 +734,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                         appendToLogicalLine(line);
                         logicalLineFlags = line.flags().without(LineFlag::Wrapped);
                         logicalLineCommandEndOffset = line.commandEndOffset();
+                        logicalLinePromptEndOffset = line.promptEndOffset();
                     }
                 }
             }
@@ -819,6 +828,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                                                                                  wrappedUsed,
                                                                                  previousFlags,
                                                                                  ColumnOffset(0),
+                                                                                 ColumnOffset(0),
                                                                                  false);
                         numLinesWritten += numLinesInserted;
                         previousFlags = line.inheritableFlags();
@@ -851,6 +861,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                                                               std::move(wrappedColumns),
                                                               wrappedUsed,
                                                               previousFlags,
+                                                              ColumnOffset(0),
                                                               ColumnOffset(0),
                                                               false);
             }

@@ -8,26 +8,56 @@
 #include <format>
 #include <string>
 #include <string_view>
-#include <utility>
+
+/// The single source for every line flag: one row each, naming the flag and giving its bit.
+///
+/// The `LineFlag` enumeration, the enumerable `LineFlagList`, and the `std::formatter` below are all
+/// generated from this table, so **adding a flag is adding one row here** and cannot leave any of the
+/// three behind. This mirrors VTBACKEND_CELL_FLAGS in CellFlags.h, which was converted for exactly this
+/// reason after a hand-maintained copy of the flags rotted the day a flag was added.
+#define VTBACKEND_LINE_FLAGS(_)                                                                    \
+    /* Structural: whether this line may reflow, and whether it continues the one above. */        \
+    _(Wrappable, 0)                                                                                \
+    _(Wrapped, 1)                                                                                  \
+    /* Semantic marks. A prompt starts here (OSC 133;A, or the deprecated SETMARK). */             \
+    _(Marked, 2)                                                                                   \
+    /* Command output begins (OSC 133;C). */                                                       \
+    _(OutputStart, 3)                                                                              \
+    /* Double-width / double-height renditions (DECDWL, DECDHL). */                                \
+    _(DoubleWidth, 4)                                                                              \
+    _(DoubleHeightTop, 5)                                                                          \
+    _(DoubleHeightBottom, 6)                                                                       \
+    /* Command finished (OSC 133;D); the column it stopped at is Line::commandEndOffset(). */      \
+    _(CommandEnd, 7)                                                                               \
+    /* The shell's prompt finished printing and user input begins (OSC 133;B); the column it ended \
+       at is Line::promptEndOffset(). */                                                           \
+    _(PromptEnd, 8)
 
 namespace vtbackend
 {
 
-/// Flags associated with a terminal line.
-enum class LineFlag : uint8_t
+/// Flags associated with a terminal line. @see VTBACKEND_LINE_FLAGS for the table these enumerators are
+/// generated from, and for what each one means.
+enum class LineFlag : uint16_t
 {
-    None = 0x0000,
-    Wrappable = 0x0001,
-    Wrapped = 0x0002,
-    Marked = 0x0004,
-    OutputStart = 0x0008, ///< Command output begins (from OSC 133;C)
-    DoubleWidth = 0x0010,
-    DoubleHeightTop = 0x0020,
-    DoubleHeightBottom = 0x0040,
-    CommandEnd = 0x0080, ///< Command finished (from OSC 133;D)
+    None = 0,
+
+#define VTBACKEND_LINE_FLAG_ENUMERATOR(Name, Bit) Name = (1U << (Bit)),
+    VTBACKEND_LINE_FLAGS(VTBACKEND_LINE_FLAG_ENUMERATOR)
+#undef VTBACKEND_LINE_FLAG_ENUMERATOR
 };
 
 using LineFlags = crispy::flags<LineFlag>;
+
+/// Every `LineFlag`, in declaration order, excluding `None`.
+///
+/// The formatter below *names* one flag; this *enumerates* them, which naming cannot do. Any code that
+/// must visit every flag reads this rather than writing the list out again.
+inline constexpr auto LineFlagList = std::array {
+#define VTBACKEND_LINE_FLAG_ROW(Name, Bit) LineFlag::Name,
+    VTBACKEND_LINE_FLAGS(VTBACKEND_LINE_FLAG_ROW)
+#undef VTBACKEND_LINE_FLAG_ROW
+};
 
 /// Flags that describe the LOGICAL line, and therefore belong to its first physical line alone.
 ///
@@ -37,7 +67,7 @@ using LineFlags = crispy::flags<LineFlag>;
 /// them onto the continuations would turn one prompt into several the moment the window is widened, which
 /// is precisely what findMarkerUpwards() and the command-block scan would then walk into.
 constexpr inline auto HeadOnlyLineFlags =
-    LineFlags { LineFlag::Marked, LineFlag::OutputStart, LineFlag::CommandEnd };
+    LineFlags { LineFlag::Marked, LineFlag::OutputStart, LineFlag::CommandEnd, LineFlag::PromptEnd };
 
 } // namespace vtbackend
 
@@ -46,26 +76,19 @@ struct std::formatter<vtbackend::LineFlags>: formatter<std::string>
 {
     auto format(const vtbackend::LineFlags flags, auto& ctx) const
     {
-        static const std::array<std::pair<vtbackend::LineFlags, std::string_view>, 8> nameMap = {
-            std::pair { vtbackend::LineFlag::Wrappable, std::string_view("Wrappable") },
-            std::pair { vtbackend::LineFlag::Wrapped, std::string_view("Wrapped") },
-            std::pair { vtbackend::LineFlag::Marked, std::string_view("Marked") },
-            std::pair { vtbackend::LineFlag::OutputStart, std::string_view("OutputStart") },
-            std::pair { vtbackend::LineFlag::DoubleWidth, std::string_view("DoubleWidth") },
-            std::pair { vtbackend::LineFlag::DoubleHeightTop, std::string_view("DoubleHeightTop") },
-            std::pair { vtbackend::LineFlag::DoubleHeightBottom, std::string_view("DoubleHeightBottom") },
-            std::pair { vtbackend::LineFlag::CommandEnd, std::string_view("CommandEnd") },
-        };
         std::string s;
-        for (auto const& mapping: nameMap)
-        {
-            if ((mapping.first & flags) != vtbackend::LineFlag::None)
-            {
-                if (!s.empty())
-                    s += ",";
-                s += mapping.second;
-            }
-        }
+        auto const append = [&s, flags](vtbackend::LineFlags flag, std::string_view name) {
+            if ((flag & flags) == vtbackend::LineFlag::None)
+                return;
+            if (!s.empty())
+                s += ",";
+            s += name;
+        };
+
+#define VTBACKEND_LINE_FLAG_APPEND(Name, Bit) append(vtbackend::LineFlag::Name, #Name);
+        VTBACKEND_LINE_FLAGS(VTBACKEND_LINE_FLAG_APPEND)
+#undef VTBACKEND_LINE_FLAG_APPEND
+
         return formatter<std::string>::format(s, ctx);
     }
 };

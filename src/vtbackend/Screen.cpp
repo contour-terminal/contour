@@ -4869,6 +4869,19 @@ void Screen::processShellIntegration(Sequence const& seq)
             break;
         }
         case 'B': {
+            // Recorded unconditionally, for the reason given at ;C below.
+            //
+            // Along with WHERE the prompt stopped. The shell emits ;B the moment it has finished painting
+            // and hands the line over, so the cursor stands exactly on the border between what the shell
+            // wrote and what the user is about to type. That border is the only thing that can tell an
+            // accessibility client — or anything else asking about the LIVE prompt — where the prompt
+            // area ends, and it cannot be recovered afterwards: once the user types, the two are the same
+            // run of cells.
+            auto const cursorPosition = cursor().position;
+            auto& head = _grid.lineAt(_grid.logicalLineHead(cursorPosition.line));
+            head.setFlag(LineFlag::PromptEnd, true);
+            head.setPromptEndOffset(_grid.logicalColumnOf(cursorPosition));
+
             _terminal->shellIntegration().promptEnd();
             break;
         }
