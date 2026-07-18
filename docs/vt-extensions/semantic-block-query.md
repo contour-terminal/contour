@@ -4,6 +4,14 @@ This extension provides a discoverable, machine-readable query mechanism that re
 JSON blocks of semantic command data from the terminal. It is designed for programmatic consumers
 such as AI agents, accessibility tools, and automation scripts.
 
+!!! note
+
+    Contour's own [accessibility support](../accessibility.md) — reporting the caret and the live prompt
+    region to the operating system — does **not** go through this protocol and does not require mode 2034.
+    It reads the [OSC 133](osc-133-shell-integration.md) line marks directly, because those are terminal
+    memory and are recorded for every shell that emits them. This extension is for *external* consumers
+    that want the command history as structured data.
+
 ## Prerequisites
 
 This feature requires [OSC 133 shell integration](osc-133-shell-integration.md) to be active
