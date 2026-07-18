@@ -216,6 +216,26 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Places @p image at the cursor, sized per the command's `c=`/`r=` or derived from its pixels.
     void renderKittyImage(kitty_graphics::Command const& command, std::shared_ptr<Image const> const& image);
 
+    /// Validates the transmission parameters of @p command against what this terminal implements.
+    /// @return the wire status to answer with, or nullopt when the command is acceptable.
+    ///
+    /// Shared by the transmission path and by `a=q`, which exists precisely to let an application
+    /// discover what a transmission would do without performing one.
+    [[nodiscard]] static std::optional<std::string_view> validateKittyTransmission(
+        kitty_graphics::Command const& command) noexcept;
+
+    /// Handles a kitty graphics `a=d`, honouring the case of its `d=` target: a lower-case target
+    /// removes placements only, an upper-case one additionally frees the transmitted image data.
+    void deleteKittyGraphics(kitty_graphics::Command const& command);
+
+    /// Removes the on-screen placements of @p image, or of every kitty image when it is null,
+    /// leaving the text sharing those cells untouched.
+    void removeKittyPlacements(std::shared_ptr<Image const> const& image);
+
+    /// Drops all kitty graphics and clipboard protocol state. Called on RIS, which must not leave a
+    /// half-open transmission for the next application to inherit.
+    void resetKittyState() noexcept;
+
     /// Handles one `OSC 22` (kitty pointer shape protocol) request.
     [[nodiscard]] ApplyResult processPointerShape(std::string_view payload);
 

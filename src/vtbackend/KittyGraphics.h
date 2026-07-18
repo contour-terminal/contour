@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <string>
@@ -8,6 +9,21 @@
 
 namespace vtbackend::kitty_graphics
 {
+
+/// Largest payload one chunked transmission (`m=1`) may accumulate, in base64 bytes.
+///
+/// The chunk stream is attacker-controlled: every byte a remote host writes to the terminal ends up
+/// here, and a stream that never sends its `m=0` terminator would otherwise grow until the process
+/// is killed -- taking every pane in the window with it. 32 MiB of base64 decodes to roughly a
+/// 2500x2500 RGBA image, far beyond what a terminal is asked to show.
+inline constexpr size_t MaxChunkedPayloadSize = 32 * 1024 * 1024;
+
+/// Largest total size, in decoded bytes, of the images held for later display.
+///
+/// Bounds the other half of the same attack: ids are 32-bit, so without a quota an application can
+/// park 2^32 distinct images in the terminal. A transmission that would exceed this is refused with
+/// `ENOSPC` rather than silently evicting an image the application still intends to place.
+inline constexpr size_t MaxStoredImageBytes = 128 * 1024 * 1024;
 
 /// What the application is asking the terminal to do.
 ///

@@ -305,6 +305,17 @@ class BasicCellProxy
         _line->trivial = false; // Images require per-cell rendering (RenderLine has no image support)
     }
 
+    /// Removes this cell's image fragment while leaving its text and rendition untouched.
+    ///
+    /// Deleting an image *placement* is not the same as clearing the cell: the kitty graphics
+    /// protocol lets an application drop a placement and keep whatever text shares those cells.
+    void clearImageFragment() noexcept
+        requires(!IsConst)
+    {
+        if (_line->imageFragments)
+            _line->imageFragments->erase(static_cast<uint16_t>(_col));
+    }
+
     void setGraphicsRendition(GraphicsRendition sgr) noexcept
         requires(!IsConst)
     {

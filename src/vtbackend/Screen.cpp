@@ -483,6 +483,7 @@ void Screen::hardReset()
     _cursor = {};
     _lastCursorPosition = {};
     resetProtection();
+    resetKittyState();
     updateCursorIterator();
 }
 
@@ -957,8 +958,8 @@ void Screen::applyClusterWidthChange(int delta) noexcept
     {
         abandon();
         return;
-
     }
+
     if (delta > 0)
     {
         // Growing must not run past the right margin (or the page edge). Rather than reflow a cell
@@ -1964,7 +1965,6 @@ void Screen::copyArea(Rect sourceArea, int page, CellLocation targetTopLeft, int
             {
                 targetCell.reset(attrs, sourceCell.hyperlink());
             }
-        }
 
             // Both write() and reset() clear the sizing, but `attrs` still carries
             // MulticellContinuation to the rows a scaled block reaches into. Copying the flags
@@ -1972,6 +1972,7 @@ void Screen::copyArea(Rect sourceArea, int page, CellLocation targetTopLeft, int
             // height 1 whose origin is above them and redraws the head's text on each, and
             // eraseMulticellBlockAt -- also reading the scale -- never reaches them to clean up.
             targetCell.setTextScale(sourceCell.textScale());
+        }
     }
 }
 
@@ -4962,7 +4963,6 @@ void Screen::writeSizedText(std::u32string_view codepoints, uint8_t columns, Cel
     if (columns == 0)
         return;
 
-    // A block wider than the line can never be placed, so it is dropped rather than clipped -- a
     // This is a second entry point into writing text, parallel to writeTextInternal, so it owes the
     // same prologue: a wrap deferred by the PREVIOUS character is still outstanding and has to be
     // taken first. Skipping it let a one-column block overwrite the character sitting in the last
@@ -4973,6 +4973,7 @@ void Screen::writeSizedText(std::u32string_view codepoints, uint8_t columns, Cel
     // as a hard newline.
     crlfIfWrapPending();
 
+    // A block wider than the line can never be placed, so it is dropped rather than clipped -- a
     // clipped block is a different size from the one the application asked for. kitty drops it too.
     auto const lineWidth = lastWritableColumn() - margin().horizontal.from + 1;
     if (ColumnOffset::cast_from(columns) > lineWidth)
@@ -5128,6 +5129,95 @@ void Screen::replyKittyGraphics(kitty_graphics::Command const& command, std::str
         reply("\033_Gi={};{}\033\\", command.imageId, status);
 }
 
+std::optional<std::string_view> Screen::validateKittyTransmission(
+    kitty_graphics::Command const& command) noexcept
+{
+    using namespace kitty_graphics;
+
+    // A raw pixel transmission has no header to carry its dimensions, so the control data must. PNG
+    // is exempt: the file states its own size. Checked here rather than in the parser because a
+    // continuation chunk legitimately carries no dimensions -- only the reassembled command has them.
+    if (command.format != Format::Png && (command.pixelWidth == 0 || command.pixelHeight == 0))
+        return "EINVAL:missing image dimensions";
+
+    if (command.medium != Medium::Direct)
+        // Reading a path or a shared-memory object the application names would let it point the
+        // terminal at any file the user can read. Not implemented deliberately.
+        return "ENOTSUP:only direct transmission is supported";
+
+    if (command.compression != Compression::None)
+        return "ENOTSUP:compressed payloads are not supported";
+
+    return std::nullopt;
+}
+
+void Screen::removeKittyPlacements(std::shared_ptr<Image const> const& image)
+{
+    // Placements are not tracked separately: a placement IS the image fragments sitting in the cells
+    // it covers. Dropping one therefore means clearing those fragments, and only those -- the text
+    // sharing the cells is not the placement's to erase.
+    for (auto const line: std::views::iota(0, *pageSize().lines))
+    {
+        for (auto const column: std::views::iota(0, *pageSize().columns))
+        {
+            auto cell = at(LineOffset(line), ColumnOffset(column));
+            auto const fragment = cell.imageFragment();
+            if (!fragment)
+                continue;
+            if (image && fragment->rasterizedImage().imagePointer() != image)
+                continue;
+            cell.clearImageFragment();
+            _terminal->markCellDirty(
+                CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) });
+        }
+    }
+}
+
+void Screen::deleteKittyGraphics(kitty_graphics::Command const& command)
+{
+    // The CASE of `d=` decides how far the delete reaches: lower case removes placements and leaves
+    // the transmitted data resident, upper case additionally frees it. Ignoring the distinction broke
+    // the protocol's standard redraw idiom -- `a=d,d=a` to clear placements, then `a=p,i=1` to place
+    // the image already transmitted -- because the data the re-placement needs had been destroyed.
+    auto const freesData = static_cast<bool>(std::isupper(static_cast<unsigned char>(command.deleteTarget)));
+    auto const target = static_cast<char>(std::tolower(static_cast<unsigned char>(command.deleteTarget)));
+
+    // 'i' names one image, by id; 'a' (and everything Contour does not implement, such as the
+    // positional targets) clears every placement.
+    auto const image = [&]() -> std::shared_ptr<Image const> {
+        if (target != 'i' || command.imageId == 0)
+            return {};
+        auto const it = _kittyImages.find(command.imageId);
+        return it != _kittyImages.end() ? it->second : nullptr;
+    }();
+
+    if (target == 'i' && command.imageId != 0 && !image)
+        return; // Nothing transmitted under that id; nothing placed from it either.
+
+    removeKittyPlacements(image);
+
+    if (!freesData)
+        return;
+
+    if (target == 'i' && command.imageId != 0)
+        _kittyImages.erase(command.imageId);
+    else
+        _kittyImages.clear();
+}
+
+void Screen::resetKittyState() noexcept
+{
+    // RIS must not leave a half-open transmission behind: the next application's first graphics
+    // command would be swallowed as a continuation chunk of the dead one, taking that command's
+    // format and dimensions instead of its own. The same applies to a clipboard write left open, and
+    // to images Terminal::hardReset() has already dropped from the image pool.
+    _kittyChunkedPayload.clear();
+    _kittyChunkedCommand.reset();
+    _kittyImages.clear();
+    _kittyClipboardWrite.clear();
+    _kittyClipboardWriteOpen = false;
+}
+
 void Screen::processKittyGraphics(std::string_view body)
 {
     using namespace kitty_graphics;
@@ -5145,6 +5235,19 @@ void Screen::processKittyGraphics(std::string_view body)
     // that has to be stitched onto it before anything can be decided.
     if (_kittyChunkedCommand)
     {
+        // A chunk stream that never terminates is otherwise an unbounded allocation driven straight
+        // from the wire. Abandon the whole transmission rather than truncate it: a partial image
+        // decoded against its declared dimensions is not an image.
+        if (_kittyChunkedPayload.size() + command.payload.size() > MaxChunkedPayloadSize)
+        {
+            auto const abandoned = *_kittyChunkedCommand;
+            _kittyChunkedCommand.reset();
+            _kittyChunkedPayload.clear();
+            _kittyChunkedPayload.shrink_to_fit();
+            replyKittyGraphics(abandoned, "EINVAL:image transmission too large");
+            return;
+        }
+
         _kittyChunkedPayload += command.payload;
         if (command.moreChunksFollow)
             return;
@@ -5167,14 +5270,13 @@ void Screen::processKittyGraphics(std::string_view body)
     {
         case Action::Query:
             // A query must be validated exactly as a transmission would be -- answering OK to a
-            // command we could not actually honour is worse than answering the error.
-            replyKittyGraphics(command, "OK");
+            // command we could not actually honour is worse than answering the error. An application
+            // probes with `a=q` precisely so that it can fall back; telling it yes and then failing
+            // the real transmission leaves it with nothing to fall back to.
+            replyKittyGraphics(command, validateKittyTransmission(command).value_or("OK"));
             return;
         case Action::Delete:
-            if (command.imageId != 0)
-                _kittyImages.erase(command.imageId);
-            else
-                _kittyImages.clear();
+            deleteKittyGraphics(command);
             replyKittyGraphics(command, "OK");
             return;
         case Action::Put: {
@@ -5199,25 +5301,9 @@ void Screen::processKittyGraphics(std::string_view body)
             return;
     }
 
-    // A raw pixel transmission has no header to carry its dimensions, so the control data must. PNG
-    // is exempt: the file states its own size. Checked here rather than in the parser because a
-    // continuation chunk legitimately carries no dimensions -- only the reassembled command has them.
-    if (command.format != Format::Png && (command.pixelWidth == 0 || command.pixelHeight == 0))
+    if (auto const rejection = validateKittyTransmission(command))
     {
-        replyKittyGraphics(command, "EINVAL:missing image dimensions");
-        return;
-    }
-
-    if (command.medium != Medium::Direct)
-    {
-        // Reading a path or a shared-memory object the application names would let it point the
-        // terminal at any file the user can read. Not implemented deliberately.
-        replyKittyGraphics(command, "ENOTSUP:only direct transmission is supported");
-        return;
-    }
-    if (command.compression != Compression::None)
-    {
-        replyKittyGraphics(command, "ENOTSUP:compressed payloads are not supported");
+        replyKittyGraphics(command, *rejection);
         return;
     }
 
@@ -5257,7 +5343,21 @@ void Screen::processKittyGraphics(std::string_view body)
     }
 
     if (command.imageId != 0)
+    {
+        // Ids are 32-bit, so without a quota an application can park billions of decoded images in
+        // the terminal. Refusing is preferable to evicting: the whole point of storing an image is
+        // that a later `a=p` can place it, and silently dropping one turns that into ENOENT.
+        auto const stored = std::accumulate(
+            _kittyImages.begin(), _kittyImages.end(), size_t { 0 }, [&](size_t sum, auto const& entry) {
+                return entry.first == command.imageId ? sum : sum + entry.second->data().size();
+            });
+        if (stored + image->data().size() > MaxStoredImageBytes)
+        {
+            replyKittyGraphics(command, "ENOSPC:image storage quota exceeded");
+            return;
+        }
         _kittyImages[command.imageId] = image;
+    }
 
     if (command.action == Action::TransmitAndDisplay)
         renderKittyImage(command, image);
