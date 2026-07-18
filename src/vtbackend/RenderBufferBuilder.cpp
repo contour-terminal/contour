@@ -257,6 +257,7 @@ RenderCell RenderBufferBuilder::makeRenderCell(ColorPalette const& colorPalette,
     renderCell.position.column = column;
     renderCell.width = screenCell.width();
     renderCell.sizing.scale = screenCell.textScale();
+    renderCell.sizing.columns = std::max<uint8_t>(1, screenCell.width());
 
     if (screenCell.codepointCount() != 0)
     {
@@ -710,12 +711,24 @@ void RenderBufferBuilder::renderCell(ConstCellProxy screenCell, LineOffset line,
             emitted.codepoints = head.codepoints();
             emitted.width = head.width();
             emitted.sizing.scale = head.textScale();
+            emitted.sizing.columns = std::max<uint8_t>(1, head.width());
             emitted.sizing.band = static_cast<uint8_t>(unbox(gridPosition.line) - unbox(block->origin.line));
         }
     }
 
     if (column == ColumnOffset(0))
         _output->cells.back().groupStart = true;
+
+    // Every block is its own shaping group. Neighbouring blocks share a sizing, so the grouper would
+    // otherwise run them together -- and the renderer, handed one group holding several blocks'
+    // clusters, has no way to tell where one block's glyphs end and the next one's begin. Shaping
+    // advances cannot answer it either: a Devanagari conjunct is several glyphs with advances of
+    // their own inside a SINGLE cell.
+    if (!_output->cells.back().sizing.scale.isOrdinary())
+    {
+        _output->cells.back().groupStart = true;
+        _output->cells.back().groupEnd = true;
+    }
 
     matchSearchPattern(screenCell);
 }

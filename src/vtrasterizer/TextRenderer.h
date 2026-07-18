@@ -126,6 +126,43 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
                                     gsl::span<unsigned> clusters,
                                     TextStyle style);
 
+    /// One text-sizing block's raster, sized to whole cells so that cutting it into atlas tiles is
+    /// exact. @see buildBlockCanvas.
+    struct BlockCanvas
+    {
+        vtbackend::ImageSize size {};
+        atlas::Format format {};
+        uint32_t fragmentShaderSelector {};
+        size_t components {};
+        std::vector<uint8_t> bitmap {};
+    };
+
+    /// Draws one row of a scaled block, one cell-sized tile per column.
+    ///
+    /// Separate from the ordinary path because it is a different shape of work, and must stay so:
+    /// unscaled text is the overwhelming majority of what a terminal draws and must not pay for any
+    /// of this.
+    void renderBlockGroup(text::shape_result const& glyphPositions,
+                          crispy::point pen,
+                          vtbackend::RGBColor color,
+                          vtbackend::GlyphSizing const& sizing,
+                          GlyphScaleAdjustment adjustment);
+
+    /// @param cluster one grapheme cluster: a base glyph followed by its zero-advance marks. They
+    ///                share one canvas, or a Devanagari conjunct is torn into its pieces.
+    std::optional<BlockCanvas> buildBlockCanvas(std::span<text::glyph_position const> cluster,
+                                                vtbackend::CellScale const& cellScale,
+                                                GlyphScaleAdjustment adjustment,
+                                                int cellsAtOneX);
+
+    std::optional<TextureAtlas::TileCreateData> createBlockTile(BlockCanvas const* canvas,
+                                                                atlas::TileLocation tileLocation,
+                                                                uint32_t column,
+                                                                uint32_t band);
+
+    std::optional<text::rasterized_glyph> rasterizeAtBlockSize(text::glyph_key const& glyphKey,
+                                                               GlyphScaleAdjustment adjustment);
+
     /// @param blockScale How many cells tall the block this glyph belongs to is (`OSC 66` `s=`).
     ///                   Bounds the oversize clamps below, which would otherwise squash a glyph
     ///                   rasterized for a tall block back down to a single cell.

@@ -203,6 +203,71 @@ TEST_CASE("GlyphScaling.penOffset.a_fraction_that_cancels_draws_like_ordinary_te
     CHECK(offset.dy == 0);
 }
 
+TEST_CASE("GlyphScaling.blockPlacement.canvas_is_whole_cells", "[glyphscaling]")
+{
+    // The canvas is cut into cell-sized tiles, so a canvas that is not a whole number of cells
+    // would yield a ragged last tile on every block.
+    for (uint8_t scale = 1; scale <= 7; ++scale)
+        for (auto const cells: { 1, 2 })
+        {
+            INFO("scale " << static_cast<int>(scale) << " x " << cells << " cells");
+            auto const placement = blockPlacementFor(whole(scale), W, H, B, cells, 0, 0);
+            CHECK(unbox<int>(placement.canvasSize.width) == scale * cells * W);
+            CHECK(unbox<int>(placement.canvasSize.height) == scale * H);
+        }
+}
+
+TEST_CASE("GlyphScaling.blockPlacement.lands_the_baseline_on_the_block", "[glyphscaling]")
+{
+    // The property the arithmetic exists for: the drawn baseline must sit `f * B` above the
+    // block's BOTTOM. Stated against the canvas, whose bottom is its height.
+    for (uint8_t scale = 1; scale <= 7; ++scale)
+    {
+        INFO("scale " << static_cast<int>(scale));
+        auto const cellScale = whole(scale);
+        auto const factor = cellScale.drawFactor();
+
+        // A raster of bearing T -- its ink top T above the baseline. Its top lands at originY, so
+        // the baseline is originY + T.
+        auto const placement = blockPlacementFor(cellScale, W, H, B, 1, 0, static_cast<int>(factor * T));
+        auto const drawnBaseline = placement.originY + static_cast<int>(factor * T);
+        auto const wantedBaseline = unbox<int>(placement.canvasSize.height) - static_cast<int>(factor * B);
+
+        CHECK(drawnBaseline == wantedBaseline);
+    }
+}
+
+TEST_CASE("GlyphScaling.blockPlacement.ordinary_text_sits_where_it_always_did", "[glyphscaling]")
+{
+    // scale 1 must reduce to a one-cell canvas with the ordinary baseline, or every unscaled glyph
+    // on screen moves.
+    auto const placement = blockPlacementFor(whole(1), W, H, B, 1, 3, T);
+    CHECK(placement.canvasSize == vtbackend::ImageSize { vtbackend::Width(W), vtbackend::Height(H) });
+    CHECK(placement.originX == 3);         // the bearing, unmodified
+    CHECK(placement.originY == H - B - T); // ink top = baseline - bearing
+}
+
+TEST_CASE("GlyphScaling.blockPlacement.alignment_places_a_fractional_glyph", "[glyphscaling]")
+{
+    // `s=3:n=1:d=3` draws at ordinary size inside a 3-cell block, leaving 2 cells of slack on each
+    // axis. v/h choose where in that slack it sits.
+    constexpr auto Slack = 2;
+
+    auto const topLeft = blockPlacementFor(fractional(3, 1, 3, 0, 0), W, H, B, 1, 0, T);
+    auto const bottomRight = blockPlacementFor(fractional(3, 1, 3, 1, 1), W, H, B, 1, 0, T);
+    auto const centered = blockPlacementFor(fractional(3, 1, 3, 2, 2), W, H, B, 1, 0, T);
+
+    // Top-left is flush with the canvas origin, and lands exactly where ordinary text would.
+    CHECK(topLeft.originX == 0);
+    CHECK(topLeft.originY == H - B - T);
+
+    CHECK(bottomRight.originX == topLeft.originX + (Slack * W));
+    CHECK(bottomRight.originY == topLeft.originY + (Slack * H));
+
+    CHECK(centered.originX == topLeft.originX + (Slack * W / 2));
+    CHECK(centered.originY == topLeft.originY + (Slack * H / 2));
+}
+
 TEST_CASE("GlyphScaling.method_names_round_trip", "[glyphscaling]")
 {
     // The config reader parses these names and the settings pane formats them; a method that

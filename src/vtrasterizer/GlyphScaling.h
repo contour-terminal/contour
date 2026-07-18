@@ -64,6 +64,83 @@ struct GlyphPenOffset
     int dy = 0;
 };
 
+/// How the protocol's `v`/`h` distribute the slack a fraction leaves: 0 = top/left, 1 =
+/// bottom/right, 2 = centered, indexed by the protocol's own value.
+///
+/// A table rather than a switch so that a third alignment is a row, and so that both the vertical
+/// and horizontal axes read from one definition.
+[[nodiscard]] constexpr double alignmentShare(uint8_t alignment) noexcept
+{
+    constexpr auto Share = std::array { 0.0, 1.0, 0.5 };
+    return Share[alignment < Share.size() ? alignment : 0];
+}
+
+/// Where a glyph's raster sits inside the canvas of its text-sizing block, and how big that canvas
+/// is.
+///
+/// A block is rasterized once into a canvas `scale` cells tall and then cut into cell-sized tiles,
+/// because the atlas stores nothing larger than one cell. Deciding the placement here -- rather than
+/// by shifting the pen when the tile is drawn -- is what lets every row of the block draw its own
+/// tile at its own cell with no further arithmetic, and therefore what lets a block whose head has
+/// scrolled off the viewport be clipped instead of lost.
+///
+/// kitty computes the same placement in calculate_regions_for_line() and apply_horizontal_alignment().
+struct BlockPlacement
+{
+    /// Whole cells on both axes: `scale * numCells` wide by `scale` tall.
+    vtbackend::ImageSize canvasSize {};
+
+    /// Top-left of the glyph's raster within the canvas. May be negative, or beyond the canvas:
+    /// a glyph on its baseline routinely overhangs, and the overhang is clipped away.
+    int originX = 0;
+    int originY = 0;
+};
+
+/// @param cellScale     the block's sizing.
+/// @param cellWidth     one ordinary cell's width in pixels.
+/// @param cellHeight    one ordinary cell's height in pixels.
+/// @param baseline      the baseline's offset above one ordinary cell's bottom.
+/// @param numCells      how many cells wide the block's content is at 1x (2 for a wide glyph).
+/// @param glyphBearingX the raster's left bearing, at the size it was ACTUALLY rasterized.
+/// @param glyphBearingY the raster's ink top above its baseline, at the size it was ACTUALLY
+///                      rasterized. Both bearings are the final-size ones: a caller that magnifies
+///                      an ordinary raster must scale them to match before asking.
+[[nodiscard]] inline BlockPlacement blockPlacementFor(vtbackend::CellScale const& cellScale,
+                                                      int cellWidth,
+                                                      int cellHeight,
+                                                      int baseline,
+                                                      int numCells,
+                                                      int glyphBearingX,
+                                                      int glyphBearingY) noexcept
+{
+    auto const scale = static_cast<double>(cellScale.scale != 0 ? cellScale.scale : 1);
+    auto const factor = cellScale.drawFactor();
+    auto const cells = std::max(1, numCells);
+
+    auto const canvasSize = vtbackend::ImageSize {
+        vtbackend::Width::cast_from(static_cast<int>(std::lround(scale)) * cells * cellWidth),
+        vtbackend::Height::cast_from(static_cast<int>(std::lround(scale)) * cellHeight),
+    };
+
+    // The drawn box is `factor` cells on each axis; a proper fraction leaves the rest as slack, and
+    // v/h say where in it the box sits.
+    auto const slack = scale - factor;
+    auto const boxTop = slack * static_cast<double>(cellHeight) * alignmentShare(cellScale.verticalAlignment);
+    auto const boxLeft = slack * static_cast<double>(cells) * static_cast<double>(cellWidth)
+                         * alignmentShare(cellScale.horizontalAlignment);
+
+    // The baseline sits `factor * baseline` above the drawn box's bottom, and the ink's top is its
+    // bearing above the baseline.
+    auto const boxBottom = boxTop + (factor * static_cast<double>(cellHeight));
+    auto const baselineY = boxBottom - (factor * static_cast<double>(baseline));
+
+    return BlockPlacement {
+        .canvasSize = canvasSize,
+        .originX = static_cast<int>(std::lround(boxLeft)) + glyphBearingX,
+        .originY = static_cast<int>(std::lround(baselineY)) - glyphBearingY,
+    };
+}
+
 /// Decides how a glyph is enlarged and where it sits. @see GlyphScalingMethod.
 ///
 /// Injected rather than selected inline so that a second strategy is a new implementation and a new
@@ -120,12 +197,8 @@ class GlyphScaler
         auto const scale = static_cast<double>(cellScale.scale != 0 ? cellScale.scale : 1);
         auto const slack = scale - cellScale.drawFactor();
 
-        // 0 = top/left, 1 = bottom/right, 2 = centered -- indexed by the protocol's own value.
-        constexpr auto Share = std::array { 0.0, 1.0, 0.5 };
-        auto const vertical =
-            Share[cellScale.verticalAlignment < Share.size() ? cellScale.verticalAlignment : 0];
-        auto const horizontal =
-            Share[cellScale.horizontalAlignment < Share.size() ? cellScale.horizontalAlignment : 0];
+        auto const vertical = alignmentShare(cellScale.verticalAlignment);
+        auto const horizontal = alignmentShare(cellScale.horizontalAlignment);
 
         // dy is measured from the BOTTOM-aligned placement the formulas above produce, so the
         // vertical share counts backwards: share 1.0 (bottom) moves nothing.

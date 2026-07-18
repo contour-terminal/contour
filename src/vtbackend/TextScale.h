@@ -93,6 +93,14 @@ struct GlyphSizing
     /// Row within the block; 0 is the head row, which is where the text lives.
     uint8_t band = 0;
 
+    /// How many cells the block spans horizontally -- `scale * width`, as the backend claimed them.
+    ///
+    /// The renderer would otherwise have to infer it from the shaper's advances, which cannot be
+    /// done: a Devanagari conjunct such as `क्नि` shapes into several glyphs that HarfBuzz reorders
+    /// and gives advances of their own, so counting them yields more cells than the one the block
+    /// occupies. The backend already knows the answer; carrying it is what keeps a cluster whole.
+    uint8_t columns = 1;
+
     constexpr bool operator==(GlyphSizing const&) const noexcept = default;
 };
 
