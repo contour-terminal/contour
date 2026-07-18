@@ -976,10 +976,21 @@ enum class DECMode : std::uint8_t
     /// erase page memory; reset (the default) clears the screen on a column-width change (VT100
     /// behaviour).
     NoClearScreenOnColumnChange = 68,
+
+    /// In-band window resize notifications (DEC mode 2048).
+    ///
+    /// While set, the terminal reports its size to the application on the same channel the
+    /// application reads everything else on, as `CSI 48 ; rows ; cols ; height ; width t`. That is
+    /// worth having because the alternative -- SIGWINCH plus an ioctl -- is unavailable to anything
+    /// reading the terminal over a pipe, a socket or an ssh multiplexer.
+    ///
+    /// One report is sent the moment the mode is set, so an application never has to ask separately
+    /// for the size it starts with.
+    InBandWindowResize = 71,
     // }}}
 
     /// Sentinel value for sizing the mode bitset. Must remain the last entry.
-    DECModeCount = 71
+    DECModeCount = 72
 };
 
 /// The minimum ANSI conformance level (1..5, matching conformanceLevelOf(VTType)) at which a DEC
@@ -1285,6 +1296,7 @@ constexpr inline auto DECModeNumbers = std::to_array<DECModeNumbering>({
     { DECMode::ReportGridCellSelection, 2030 },
     { DECMode::ReportColorPaletteUpdated, 2031 },
     { DECMode::SemanticBlockProtocol, 2034 },
+    { DECMode::InBandWindowResize, 2048 },
     { DECMode::PrintFormFeed, 18 },
     { DECMode::HebrewKeyboardMapping, 35 },
     { DECMode::NationalReplacementCharacterSet, 42 },

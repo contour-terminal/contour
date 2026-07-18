@@ -1568,6 +1568,11 @@ class Terminal
     void markCellDirty(CellLocation position) noexcept;
     void markRegionDirty(Rect area) noexcept;
     void synchronizedOutput(bool enabled);
+
+    /// Reports the current page size in band, as `CSI 48 ; rows ; cols ; height ; width t`.
+    ///
+    /// A no-op unless DEC mode 2048 is set. Sent on every resize, and once when the mode is enabled.
+    void reportInBandWindowResize();
     void onBufferScrolled(LineCount n) noexcept;
 
     void onViewportChanged();

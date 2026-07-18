@@ -2059,7 +2059,29 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
 
     _viCommands.cursorPosition = clampToScreen(_viCommands.cursorPosition);
 
+    reportInBandWindowResize();
+
     verifyState();
+}
+
+void Terminal::reportInBandWindowResize()
+{
+    if (!_modes.enabled(DECMode::InBandWindowResize))
+        return;
+
+    // `CSI 48 ; rows ; cols ; height ; width t`. Cell counts first, pixels second -- the opposite of
+    // the order XTWINOPS reports them in, which is easy to get backwards.
+    //
+    // The size reported is the MAIN page, not the total: the status line is the terminal's own
+    // furniture and is not addressable by the application, so counting it would tell the application
+    // it has a row it cannot use.
+    auto const size = pageSize();
+    auto const pixels = cellPixelSize() * size;
+    reply("\033[48;{};{};{};{}t",
+          size.lines.value,
+          size.columns.value,
+          pixels.height.value,
+          pixels.width.value);
 }
 
 void Terminal::verifyState()
@@ -3036,6 +3058,15 @@ void Terminal::setMode(DECMode mode, bool enable)
         case DECMode::BatchedRendering:
             if (_modes.enabled(DECMode::BatchedRendering) != enable)
                 synchronizedOutput(enable);
+            break;
+        case DECMode::InBandWindowResize:
+            // Report once on enabling, so an application never has to ask separately for the size it
+            // starts with. The mode has to be recorded first -- reportInBandWindowResize() checks it.
+            if (enable && !_modes.enabled(DECMode::InBandWindowResize))
+            {
+                _modes.set(DECMode::InBandWindowResize, true);
+                reportInBandWindowResize();
+            }
             break;
         case DECMode::TextReflow:
             if (_settings.primaryScreen.allowReflowOnResize && isPrimaryScreen())
@@ -4494,6 +4525,7 @@ std::string to_string(DECMode mode)
         case DECMode::TextReflow: return "TextReflow";
         case DECMode::SixelCursorNextToGraphic: return "SixelCursorNextToGraphic";
         case DECMode::ReportColorPaletteUpdated: return "ReportColorPaletteUpdated";
+        case DECMode::InBandWindowResize: return "InBandWindowResize";
         case DECMode::SemanticBlockProtocol: return "SemanticBlockProtocol";
         case DECMode::PrintFormFeed: return "PrintFormFeed";
         case DECMode::HebrewKeyboardMapping: return "HebrewKeyboardMapping";

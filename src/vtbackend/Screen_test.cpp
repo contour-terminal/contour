@@ -3863,6 +3863,44 @@ TEST_CASE("ReportExtendedCursorPosition", "[screen]")
     }
 }
 
+TEST_CASE("InBandWindowResize", "[screen]")
+{
+    // DEC mode 2048. The point of it is that an application learns the terminal's size on the same
+    // channel it reads everything else on -- SIGWINCH plus an ioctl is unavailable to anything
+    // reading over a pipe, a socket or an ssh multiplexer.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.terminal.setCellPixelSize(ImageSize { Width(9), Height(18) });
+
+    SECTION("reports once on being enabled")
+    {
+        mock.writeToScreen(std::format("\033[?{}h", toDECModeNum(DECMode::InBandWindowResize)));
+        // rows, cols, then pixel height and width -- the opposite order to XTWINOPS.
+        CHECK(mock.terminal.peekInput() == "\033[48;10;20;180;180t");
+    }
+
+    SECTION("reports again on every resize")
+    {
+        mock.writeToScreen(std::format("\033[?{}h", toDECModeNum(DECMode::InBandWindowResize)));
+        mock.terminal.resizeScreen(PageSize { LineCount(24), ColumnCount(80) });
+        // Both reports are still queued: the one from enabling, then the one from the resize.
+        CHECK(mock.terminal.peekInput() == "\033[48;10;20;180;180t\033[48;24;80;432;720t");
+    }
+
+    SECTION("stays silent while the mode is reset")
+    {
+        mock.terminal.resizeScreen(PageSize { LineCount(24), ColumnCount(80) });
+        CHECK(mock.terminal.peekInput().empty());
+    }
+
+    SECTION("is reported as a supported, changeable mode")
+    {
+        auto const modeNum = toDECModeNum(DECMode::InBandWindowResize);
+        mock.writeToScreen(std::format("\033[?{}$p", modeNum));
+        // Ps=2 is "reset but supported"; ucs-detect reads exactly this to decide the mode exists.
+        CHECK(mock.terminal.peekInput() == std::format("\033[?{};2$y", modeNum));
+    }
+}
+
 TEST_CASE("RequestMode", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
