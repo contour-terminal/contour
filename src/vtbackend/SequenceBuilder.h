@@ -180,9 +180,22 @@ class SequenceBuilder
             _hookedParser.reset();
         }
     }
-    void startAPC() {}
-    void putAPC(char) {}
-    void dispatchAPC() {}
+    void startAPC() { _apcBuffer.clear(); }
+
+    void putAPC(char ch)
+    {
+        // Bounded like OSC is: an APC body is attacker-controlled, and the kitty graphics protocol
+        // chunks anything large anyway (`m=1`), so a single unbounded body is never legitimate.
+        if (_apcBuffer.size() < Sequence::MaxOscLength)
+            _apcBuffer.push_back(ch);
+    }
+
+    void dispatchAPC()
+    {
+        _handler.processAPC(_apcBuffer);
+        _apcBuffer.clear();
+        clear();
+    }
     void startPM() {}
     void putPM(char) {}
     void dispatchPM() {}
@@ -206,6 +219,7 @@ class SequenceBuilder
     }
 
     Sequence _sequence {};
+    std::string _apcBuffer {};
     SequenceParameterBuilder _parameterBuilder;
     IncrementInstructionCounter _incrementInstructionCounter;
     Handler _handler;

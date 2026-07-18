@@ -436,6 +436,12 @@ class SequenceHandler
 
     virtual void executeControlCode(char controlCode) = 0;
     virtual void processSequence(Sequence const& sequence) = 0;
+
+    /// Handles an APC (Application Program Command) body, without its introducer or terminator.
+    ///
+    /// APC has no shared grammar the way CSI and OSC do -- each application-defined protocol carries
+    /// its own -- so it is dispatched as a raw body rather than through the function table.
+    virtual void processAPC(std::string_view body) = 0;
     virtual void writeText(char32_t codepoint) = 0;
     virtual void writeText(std::string_view codepoints, size_t cellCount) = 0;
     virtual void writeTextEnd() = 0;
@@ -445,6 +451,7 @@ template <typename T>
 concept SequenceHandlerConcept = requires(T t) {
     { t.executeControlCode('\x00') } -> std::same_as<void>;
     { t.processSequence(Sequence {}) } -> std::same_as<void>;
+    { t.processAPC(std::string_view {}) } -> std::same_as<void>;
     { t.writeText(U'a') } -> std::same_as<void>;
     { t.writeText("a", size_t(1)) } -> std::same_as<void>;
     { t.writeTextEnd() } -> std::same_as<void>;

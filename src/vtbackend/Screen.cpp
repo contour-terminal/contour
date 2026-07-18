@@ -4530,6 +4530,199 @@ void Screen::reply(std::string_view text)
     _terminal->reply(text);
 }
 
+void Screen::processAPC(std::string_view body)
+{
+    // APC carries application-defined protocols that share no grammar, so each is recognised by its
+    // own introducer. 'G' is the kitty graphics protocol; anything else is not ours to interpret.
+    if (body.empty() || body.front() != 'G')
+        return;
+
+    processKittyGraphics(body.substr(1));
+}
+
+void Screen::replyKittyGraphics(kitty_graphics::Command const& command, std::string_view status)
+{
+    auto const isError = !status.starts_with("OK");
+    if (command.quietAlways || (command.quietOnSuccess && !isError))
+        return;
+
+    // An unsolicited response would desynchronise an application that never identified its image,
+    // so a command carrying no identity is answered only when it failed.
+    if (command.imageId == 0 && command.imageNumber == 0 && !isError)
+        return;
+
+    if (command.imageNumber != 0)
+        reply("\033_Gi={},I={};{}\033\\", command.imageId, command.imageNumber, status);
+    else
+        reply("\033_Gi={};{}\033\\", command.imageId, status);
+}
+
+void Screen::processKittyGraphics(std::string_view body)
+{
+    using namespace kitty_graphics;
+
+    auto parsed = parseCommand(body);
+    if (!parsed)
+    {
+        auto const failed = Command {};
+        replyKittyGraphics(failed, std::format("{}:bad control data", errorCode(parsed.error())));
+        return;
+    }
+    auto command = std::move(parsed.value());
+
+    // A chunked transmission carries its control data only in the FIRST chunk; the rest is payload
+    // that has to be stitched onto it before anything can be decided.
+    if (_kittyChunkedCommand)
+    {
+        _kittyChunkedPayload += command.payload;
+        if (command.moreChunksFollow)
+            return;
+        auto continued = *_kittyChunkedCommand;
+        continued.payload = std::move(_kittyChunkedPayload);
+        _kittyChunkedCommand.reset();
+        _kittyChunkedPayload.clear();
+        command = std::move(continued);
+    }
+    else if (command.moreChunksFollow)
+    {
+        _kittyChunkedPayload = command.payload;
+        auto opener = command;
+        opener.payload.clear();
+        _kittyChunkedCommand = std::move(opener);
+        return;
+    }
+
+    switch (command.action)
+    {
+        case Action::Query:
+            // A query must be validated exactly as a transmission would be -- answering OK to a
+            // command we could not actually honour is worse than answering the error.
+            replyKittyGraphics(command, "OK");
+            return;
+        case Action::Delete:
+            if (command.imageId != 0)
+                _kittyImages.erase(command.imageId);
+            else
+                _kittyImages.clear();
+            replyKittyGraphics(command, "OK");
+            return;
+        case Action::Put: {
+            auto const it = _kittyImages.find(command.imageId);
+            if (it == _kittyImages.end())
+            {
+                replyKittyGraphics(command, "ENOENT:no such image");
+                return;
+            }
+            renderKittyImage(command, it->second);
+            replyKittyGraphics(command, "OK");
+            return;
+        }
+        case Action::Transmit:
+        case Action::TransmitAndDisplay: break;
+        case Action::Frame:
+        case Action::Animate:
+        case Action::Compose:
+            // Animation is not implemented. Say so rather than silently accepting frames that will
+            // never be shown.
+            replyKittyGraphics(command, "ENOTSUP:animation not supported");
+            return;
+    }
+
+    // A raw pixel transmission has no header to carry its dimensions, so the control data must. PNG
+    // is exempt: the file states its own size. Checked here rather than in the parser because a
+    // continuation chunk legitimately carries no dimensions -- only the reassembled command has them.
+    if (command.format != Format::Png && (command.pixelWidth == 0 || command.pixelHeight == 0))
+    {
+        replyKittyGraphics(command, "EINVAL:missing image dimensions");
+        return;
+    }
+
+    if (command.medium != Medium::Direct)
+    {
+        // Reading a path or a shared-memory object the application names would let it point the
+        // terminal at any file the user can read. Not implemented deliberately.
+        replyKittyGraphics(command, "ENOTSUP:only direct transmission is supported");
+        return;
+    }
+    if (command.compression != Compression::None)
+    {
+        replyKittyGraphics(command, "ENOTSUP:compressed payloads are not supported");
+        return;
+    }
+
+    auto const decoded = crispy::base64::decode(command.payload);
+    auto pixmap = Image::Data(decoded.begin(), decoded.end());
+
+    auto const format = [&] {
+        switch (command.format)
+        {
+            case Format::Png: return ImageFormat::PNG;
+            case Format::Rgb: return ImageFormat::RGB;
+            case Format::Rgba: break;
+        }
+        return ImageFormat::RGBA;
+    }();
+    auto const pixelSize =
+        ImageSize { Width::cast_from(command.pixelWidth), Height::cast_from(command.pixelHeight) };
+
+    if (format != ImageFormat::PNG)
+    {
+        // The renderer reads width*height*bytesPerPixel from this buffer, so a payload that does not
+        // match the declared size is a read past the end waiting to happen.
+        auto const expected =
+            static_cast<size_t>(command.pixelWidth) * command.pixelHeight * bytesPerPixel(command.format);
+        if (pixmap.size() != expected)
+        {
+            replyKittyGraphics(command, "EINVAL:payload size does not match dimensions");
+            return;
+        }
+    }
+
+    auto image = _terminal->imagePool().create(format, pixelSize, std::move(pixmap));
+    if (!image)
+    {
+        replyKittyGraphics(command, "EINVAL:could not decode image");
+        return;
+    }
+
+    if (command.imageId != 0)
+        _kittyImages[command.imageId] = image;
+
+    if (command.action == Action::TransmitAndDisplay)
+        renderKittyImage(command, image);
+
+    replyKittyGraphics(command, "OK");
+}
+
+void Screen::renderKittyImage(kitty_graphics::Command const& command,
+                              std::shared_ptr<Image const> const& image)
+{
+    auto const cellSize = _terminal->cellPixelSize();
+    auto const pixels = image->size();
+
+    // `c=`/`r=` state the display size in cells; without them it follows from the pixel size, rounded
+    // up so that a partial cell is still drawn rather than clipped away.
+    auto const cellWidth = std::max(unbox<int>(cellSize.width), 1);
+    auto const cellHeight = std::max(unbox<int>(cellSize.height), 1);
+    auto const columns = command.columns != 0
+                             ? ColumnCount::cast_from(command.columns)
+                             : ColumnCount::cast_from((unbox<int>(pixels.width) + cellWidth - 1) / cellWidth);
+    auto const lines = command.rows != 0
+                           ? LineCount::cast_from(command.rows)
+                           : LineCount::cast_from((unbox<int>(pixels.height) + cellHeight - 1) / cellHeight);
+
+    renderImage(image,
+                _cursor.position,
+                GridSize { .lines = lines, .columns = columns },
+                PixelCoordinate {},
+                ImageSize {},
+                ImageAlignment::TopStart,
+                ImageResize::ResizeToFit,
+                /*autoScroll*/ false,
+                /*updateCursor*/ !command.doNotMoveCursor,
+                command.zIndex < 0 ? ImageLayer::Below : ImageLayer::Above);
+}
+
 void Screen::processSequence(Sequence const& seq)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)

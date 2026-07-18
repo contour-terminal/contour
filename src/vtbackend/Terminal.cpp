@@ -1601,6 +1601,8 @@ struct SimpleSequenceHandler
         targetScreen.processSequence(seq);
     }
 
+    void processAPC(std::string_view body) { targetScreen.processAPC(body); }
+
     void writeText(char32_t codepoint) { targetScreen.writeText(codepoint); }
 
     void writeText(std::string_view chars, size_t /*cellCount*/)
@@ -4403,6 +4405,13 @@ void TraceHandler::executeControlCode(char controlCode)
 void TraceHandler::processSequence(Sequence const& sequence)
 {
     _pendingSequences.emplace_back(sequence);
+}
+
+void TraceHandler::processAPC(std::string_view body)
+{
+    // Tracing steps through sequences one at a time; an APC body has no Sequence representation, so
+    // it is forwarded rather than queued -- there is nothing to single-step through.
+    _terminal->activeDisplay().processAPC(body);
 }
 
 void TraceHandler::writeText(char32_t codepoint)

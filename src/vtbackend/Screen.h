@@ -10,6 +10,7 @@
 #include <vtbackend/Grid.h>
 #include <vtbackend/Hyperlink.h>
 #include <vtbackend/Image.h>
+#include <vtbackend/KittyGraphics.h>
 #include <vtbackend/MessageParser.h>
 #include <vtbackend/PromptRegion.h>
 #include <vtbackend/Sequence.h>
@@ -201,6 +202,19 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void writeTextEnd() override;
     void executeControlCode(char controlCode) override;
     void processSequence(Sequence const& seq) override;
+    void processAPC(std::string_view body) override;
+
+  private:
+    /// Handles one kitty graphics command (the APC body after its leading 'G').
+    void processKittyGraphics(std::string_view body);
+
+    /// Answers a kitty graphics command, unless it asked to be left alone (`q=`).
+    void replyKittyGraphics(kitty_graphics::Command const& command, std::string_view status);
+
+    /// Places @p image at the cursor, sized per the command's `c=`/`r=` or derived from its pixels.
+    void renderKittyImage(kitty_graphics::Command const& command, std::shared_ptr<Image const> const& image);
+
+  public:
     // }}}
 
     void writeTextFromExternal(std::string_view text);
@@ -858,6 +872,14 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     Cursor _cursor {};
     Cursor _savedCursor {};
+
+    /// Payload accumulated across a chunked kitty graphics transmission (`m=1`), plus the command
+    /// that opened it -- the continuation chunks carry no control data of their own.
+    std::string _kittyChunkedPayload {};
+    std::optional<kitty_graphics::Command> _kittyChunkedCommand {};
+
+    /// Images transmitted by a kitty graphics command but not yet displayed, keyed by their `i=` id.
+    std::unordered_map<uint32_t, std::shared_ptr<Image const>> _kittyImages {};
 
     GraphicsAttributes _savedGraphicsRenditions {};
 

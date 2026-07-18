@@ -215,6 +215,7 @@ class TraceHandler: public SequenceHandler
 
     void executeControlCode(char controlCode) override;
     void processSequence(Sequence const& sequence) override;
+    void processAPC(std::string_view body) override;
     void writeText(char32_t codepoint) override;
     void writeText(std::string_view codepoints, size_t cellCount) override;
     void writeTextEnd() override;
@@ -2241,6 +2242,7 @@ class Terminal
         {
             terminal.sequenceHandler().processSequence(sequence);
         }
+        void processAPC(std::string_view body) { terminal.sequenceHandler().processAPC(body); }
         void writeText(char32_t codepoint) { terminal.sequenceHandler().writeText(codepoint); }
         void writeText(std::string_view codepoints, size_t cellCount)
         {
