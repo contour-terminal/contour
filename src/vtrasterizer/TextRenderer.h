@@ -163,13 +163,9 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     std::optional<text::rasterized_glyph> rasterizeAtBlockSize(text::glyph_key const& glyphKey,
                                                                GlyphScaleAdjustment adjustment);
 
-    /// @param blockScale How many cells tall the block this glyph belongs to is (`OSC 66` `s=`).
-    ///                   Bounds the oversize clamps below, which would otherwise squash a glyph
-    ///                   rasterized for a tall block back down to a single cell.
     AtlasTileAttributes const* getOrCreateRasterizedMetadata(crispy::strong_hash const& hash,
                                                              text::glyph_key const& glyphKey,
-                                                             unicode::PresentationStyle presentationStyle,
-                                                             uint8_t blockScale = 1);
+                                                             unicode::PresentationStyle presentationStyle);
 
     /**
      * Creates (and rasterizes) a single glyph and returns its
@@ -179,13 +175,12 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
         atlas::TileLocation tileLocation,
         text::glyph_key const& glyphKey,
         unicode::PresentationStyle presentation,
-        crispy::strong_hash const& hash,
-        uint8_t blockScale = 1);
+        crispy::strong_hash const& hash);
 
-    std::optional<TextureAtlas::TileCreateData> createRasterizedGlyph(atlas::TileLocation tileLocation,
-                                                                      text::glyph_key const& glyphKey,
-                                                                      unicode::PresentationStyle presentation,
-                                                                      uint8_t blockScale = 1);
+    std::optional<TextureAtlas::TileCreateData> createRasterizedGlyph(
+        atlas::TileLocation tileLocation,
+        text::glyph_key const& glyphKey,
+        unicode::PresentationStyle presentation);
 
     void restrictToTileSize(TextureAtlas::TileCreateData& tileCreateData);
 

@@ -1010,8 +1010,7 @@ void TextRenderer::renderBlockGroup(text::shape_result const& glyphPositions,
 Renderable::AtlasTileAttributes const* TextRenderer::getOrCreateRasterizedMetadata(
     strong_hash const& hash,
     text::glyph_key const& glyphKey,
-    unicode::PresentationStyle presentationStyle,
-    uint8_t blockScale)
+    unicode::PresentationStyle presentationStyle)
 {
     // clang-format off
     return textureAtlas().get_or_try_emplace(
@@ -1019,7 +1018,7 @@ Renderable::AtlasTileAttributes const* TextRenderer::getOrCreateRasterizedMetada
         [&](atlas::TileLocation tileLocation)
         -> optional<TextureAtlas::TileCreateData>
         {
-            return createSlicedRasterizedGlyph(tileLocation, glyphKey, presentationStyle, hash, blockScale);
+            return createSlicedRasterizedGlyph(tileLocation, glyphKey, presentationStyle, hash);
         }
     );
     // clang-format on
@@ -1028,10 +1027,10 @@ Renderable::AtlasTileAttributes const* TextRenderer::getOrCreateRasterizedMetada
 auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
                                                text::glyph_key const& glyphKey,
                                                unicode::PresentationStyle presentation,
-                                               strong_hash const& hash,
-                                               uint8_t blockScale) -> optional<TextureAtlas::TileCreateData>
+                                               strong_hash const& hash)
+    -> optional<TextureAtlas::TileCreateData>
 {
-    auto result = createRasterizedGlyph(tileLocation, glyphKey, presentation, blockScale);
+    auto result = createRasterizedGlyph(tileLocation, glyphKey, presentation);
     if (!result)
         return result;
 
@@ -1106,8 +1105,8 @@ auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
 
 auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
                                          text::glyph_key const& glyphKey,
-                                         unicode::PresentationStyle presentation,
-                                         uint8_t blockScale) -> optional<TextureAtlas::TileCreateData>
+                                         unicode::PresentationStyle presentation)
+    -> optional<TextureAtlas::TileCreateData>
 {
     auto theGlyphOpt = _textShaper.rasterize(
         glyphKey, _fontDescriptions.renderMode, _fontDescriptions.textOutline.thickness);
@@ -1127,20 +1126,15 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     // FIXME: this `2` is a hack of my bad knowledge. FIXME.
     // As I only know of emoji being colored fonts, and those take up 2 cell with units.
 
-    // Everything a glyph is measured against below is the box it is allowed to occupy. For ordinary
-    // text that is one cell; for a text-sizing block (`OSC 66` `s=`) it is `blockScale` cells on both
-    // axes, because the glyph was deliberately rasterized at `blockScale x` the point size.
-    //
-    // Bounding these by the CELL rather than the block is what made the `rerasterize` scaling method
-    // a no-op: it re-hinted the outline at the larger size and the clamp immediately squashed it back
-    // to a single cell, so the crisp path cost a rasterization and bought nothing.
-    auto const scaleBound = static_cast<int>(std::max<uint8_t>(blockScale, 1));
+    // Everything a glyph is measured against below is the box it is allowed to occupy: one cell.
+    // A text-sizing block does not come through here at all -- it is rasterized into a block canvas
+    // and cut into cell-sized tiles. @see buildBlockCanvas.
 
     // Scale bitmap down overflowing in diemensions
     auto const emojiBoundingBox =
-        ImageSize { vtbackend::Width(_gridMetrics.cellSize.width.value * numCells * scaleBound),
-                    vtbackend::Height::cast_from(
-                        (unbox<int>(_gridMetrics.cellSize.height) - _gridMetrics.baseline) * scaleBound) };
+        ImageSize { vtbackend::Width(_gridMetrics.cellSize.width.value * numCells),
+                    vtbackend::Height::cast_from(unbox<int>(_gridMetrics.cellSize.height)
+                                                 - _gridMetrics.baseline) };
     if (glyph.format == text::bitmap_format::rgba)
     {
         if (glyph.bitmapSize.height
@@ -1169,20 +1163,24 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
         glyph.position.x = unbox<int>(emojiBoundingBox.width - glyph.bitmapSize.width) / 2;
         // Center vertically within the full box height, accounting for the baseline offset.
         glyph.position.y =
-            ((unbox<int>(_gridMetrics.cellSize.height) * scaleBound) + glyph.bitmapSize.height.as<int>()) / 2
-            - (_gridMetrics.baseline * scaleBound);
+            (unbox<int>(_gridMetrics.cellSize.height) + glyph.bitmapSize.height.as<int>()) / 2
+            - _gridMetrics.baseline;
     }
-    else if (glyph.bitmapSize.height
-             > vtbackend::Height::cast_from(unbox<double>(_gridMetrics.cellSize.height) * scaleBound * 1.1))
+    else if (glyph.bitmapSize.height > _gridMetrics.cellSize.height)
     {
         // Scale down vertically oversized non-RGBA glyphs (e.g. Nerd Font icons in alpha_mask format)
         // to fit within the box, preventing invalid cropping math downstream.
+        //
+        // The bound is the cell EXACTLY. It used to allow a further 10%, which meant a glyph up to
+        // 1.1 cells tall passed through unscaled and was uploaded into a tile one cell tall --
+        // overwriting the rows of the tile beneath it in the atlas, and so replacing part of an
+        // unrelated glyph. Nothing about text sizing is needed to hit that; a tall Nerd Font icon
+        // does it.
+        //
         // NOTE: Width overflow is intentionally NOT checked here, because horizontally oversized glyphs
         // (e.g. programming ligatures) are kept wide and handled by createSlicedRasterizedGlyph(),
         // which slices them into multiple tiles when they exceed the atlas tile size.
-        auto const cellBoundingBox =
-            ImageSize { vtbackend::Width::cast_from(unbox<int>(_gridMetrics.cellSize.width) * scaleBound),
-                        vtbackend::Height::cast_from(unbox<int>(_gridMetrics.cellSize.height) * scaleBound) };
+        auto const cellBoundingBox = _gridMetrics.cellSize;
         auto const originalPosition = glyph.position;
         if (rasterizerLog)
             rasterizerLog()("Scaling oversized non-RGBA glyph of {}+{} down to box {}.",
@@ -1198,10 +1196,9 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
             rasterizerLog()(" ==> scaled: {}/{}, factor {}", glyph, cellBoundingBox, scaleFactor);
     }
 
-    // The crop below asks "does this glyph overflow the box it may occupy" -- so its baseline and
-    // height are the BOX's, which for a text-sizing block is `blockScale` cells, not one.
-    auto const boxBaseline = _gridMetrics.baseline * scaleBound;
-    auto const boxHeight = _gridMetrics.cellSize.height.as<int>() * scaleBound;
+    // The crop below asks "does this glyph overflow the box it may occupy" -- one cell.
+    auto const boxBaseline = _gridMetrics.baseline;
+    auto const boxHeight = _gridMetrics.cellSize.height.as<int>();
 
     // y-position relative to box-bottom of glyphs top.
     auto yMax = boxBaseline + glyph.position.y;
