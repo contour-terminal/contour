@@ -740,6 +740,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     //
     vtbackend::ScreenType _currentScreenType = vtbackend::ScreenType::Primary;
     vtbackend::CellLocation _currentMousePosition = vtbackend::CellLocation {};
+
+    /// The shape the application last asked for via `OSC 22`, or nullopt while it has asked for
+    /// none. GUI-thread state: written from the lambda setPointerShape() posts, so that restoring
+    /// the shape never reads the pointer-shape stack the parser thread owns.
+    std::optional<MouseCursorShape> _applicationPointerShape;
     bool _allowKeyMappings = true;
     std::unique_ptr<Audio> _audio;
     std::vector<int> _musicalNotesBuffer;

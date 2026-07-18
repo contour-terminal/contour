@@ -734,8 +734,13 @@ void TerminalSession::setPointerShape(std::string_view cssName)
     if (!shape || !_display)
         return;
 
-    // The event arrives on the parser thread; the cursor belongs to the GUI thread.
-    postToObject(_display, [display = _display, shape = *shape]() { display->setMouseCursorShape(shape); });
+    // The event arrives on the parser thread; the cursor belongs to the GUI thread. The remembered
+    // shape is written here rather than read back off the terminal later, so that the GUI thread
+    // never touches the pointer-shape stack the parser thread mutates.
+    postToObject(_display, [this, display = _display, shape = *shape]() {
+        _applicationPointerShape = shape;
+        display->setMouseCursorShape(shape);
+    });
 }
 
 void TerminalSession::copyToClipboard(std::string_view data)
@@ -2527,6 +2532,17 @@ void TerminalSession::setDefaultCursor()
 {
     if (!_display)
         return;
+
+    // An `OSC 22` shape outranks the screen-type default: the application asked for it and nothing
+    // has withdrawn it. This is reached from every mouse move and every focus change, so without the
+    // check a requested shape survived exactly one mouse move before reverting -- which looks from
+    // the outside like OSC 22 not working at all. RIS withdraws the shape by asking for the default
+    // one, and it also returns to the primary screen, whose default this already is.
+    if (_applicationPointerShape)
+    {
+        _display->setMouseCursorShape(*_applicationPointerShape);
+        return;
+    }
 
     using Type = vtbackend::ScreenType;
     switch (_terminal.screenType())

@@ -3493,6 +3493,13 @@ void Terminal::hardReset()
     _imagePool.clear();
     _tabs.clear();
 
+    // A pointer shape is application state like any other, so RIS withdraws it: a program that dies
+    // holding a hand cursor must not leave the user with one. The stack keeps its bottom entry -- the
+    // terminal's own default -- exactly as popPointerShape does.
+    _pointerShapes.erase(std::next(_pointerShapes.begin()), _pointerShapes.end());
+    _pointerShapes.back() = std::string(pointer_shape::DefaultName);
+    _eventListener.setPointerShape(_pointerShapes.back());
+
     resetColorPalette();
 
     // A hard reset (RIS) clears the application-assigned window-frame/tab color (DECAC item 2). The
