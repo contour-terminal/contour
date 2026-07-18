@@ -103,6 +103,7 @@ nav:
     - List of features: features.md
     - Font ligatures: demo/font-ligatures.md
     - Images: demo/images.md
+    - ReGIS vector graphics: demo/regis-graphics.md
     - Input method editor (IME): demo/ime.md
     - Line marks: demo/line-marks.md
     - Status line: demo/statusline.md

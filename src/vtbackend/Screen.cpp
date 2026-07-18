@@ -11,6 +11,10 @@
 #include <vtbackend/VTType.h>
 #include <vtbackend/VTWriter.h>
 #include <vtbackend/logging.h>
+#include <vtbackend/regis/ReGISContext.h>
+#include <vtbackend/regis/ReGISParser.h>
+#include <vtbackend/regis/ReGISRasterizer.h>
+#include <vtbackend/regis/ReGISTextRasterizer.h>
 
 #include <crispy/App.h>
 #include <crispy/Comparison.h>
@@ -1322,9 +1326,10 @@ void Screen::sendDeviceAttributes()
               | DeviceAttributes::CaptureScreenBuffer | DeviceAttributes::Columns132
               | DeviceAttributes::HorizontalScrolling | DeviceAttributes::NationalReplacementCharacterSets
               | DeviceAttributes::RectangularEditing | DeviceAttributes::SelectiveErase
-              | DeviceAttributes::SixelGraphics | DeviceAttributes::SoftCharacterSet
-              | DeviceAttributes::StatusDisplay | DeviceAttributes::TechnicalCharacters
-              | DeviceAttributes::TextMacros | DeviceAttributes::UserDefinedKeys | DeviceAttributes::Windowing
+              | DeviceAttributes::RegisGraphics | DeviceAttributes::SixelGraphics
+              | DeviceAttributes::SoftCharacterSet | DeviceAttributes::StatusDisplay
+              | DeviceAttributes::TechnicalCharacters | DeviceAttributes::TextMacros
+              | DeviceAttributes::UserDefinedKeys | DeviceAttributes::Windowing
               | DeviceAttributes::ClipboardExtension;
     if (_terminal->settings().goodImageProtocol)
         da = da | DeviceAttributes::GoodImageProtocol;
@@ -3187,11 +3192,29 @@ void Screen::smGraphics(XtSmGraphics::Item item, XtSmGraphics::Action action, Xt
             }
             break;
 
-        case Item::ReGISGraphicsGeometry:
-            // Contour implements no ReGIS. Answering failure is the honest reply; staying silent
-            // hangs any application that waits for one.
-            reply("\033[?{};{};{}S", ReGISItem, Failure, 0);
+        case Item::ReGISGraphicsGeometry: {
+            // ReGIS draws into the VT340 addressing space (default 800x480 pixels), which Contour
+            // rasterizes and scales into the grid. This is the logical geometry an application reasons
+            // in -- the internal supersampled buffer is not reported. Unlike the Sixel canvas the
+            // geometry is fixed rather than negotiable: read/limit/reset report the fixed size, while a
+            // request to set it to a different value is rejected rather than falsely acknowledged.
+            auto constexpr RegisCanvasSize =
+                ImageSize { Width(regis::DefaultAddressWidth), Height(regis::DefaultAddressHeight) };
+            switch (action)
+            {
+                case Action::Read:
+                case Action::ReadLimit:
+                case Action::ResetToDefault:
+                    reply("\033[?{};{};{};{}S",
+                          ReGISItem,
+                          Success,
+                          RegisCanvasSize.width,
+                          RegisCanvasSize.height);
+                    break;
+                case Action::SetToValue: reply("\033[?{};{};{}S", ReGISItem, Failure, 0); break;
+            }
             break;
+        }
     }
 }
 // }}}
@@ -5800,6 +5823,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case DECDLD: _terminal->hookParser(hookDECDLD(seq)); break;
         case DECDMAC: _terminal->hookParser(hookDECDMAC(seq)); break;
         case DECSIXEL: _terminal->hookParser(hookSixel(seq)); break;
+        case REGIS: _terminal->hookParser(hookReGIS(seq)); break;
         case STP: _terminal->hookParser(hookSTP(seq)); break;
         case DECRQSS: _terminal->hookParser(hookDECRQSS(seq)); break;
         case DECUDK: _terminal->hookParser(hookDECUDK(seq)); break;
@@ -5868,6 +5892,100 @@ unique_ptr<ParserExtension> Screen::hookSixel(Sequence const& seq)
             sixelImage(_sixelImageBuilder->size(), std::move(_sixelImageBuilder->data()));
         }
     });
+}
+
+unique_ptr<ParserExtension> Screen::hookReGIS(Sequence const& seq)
+{
+    // ReGIS state persists across DCS strings, so the interpreter context and canvas live on the
+    // Screen and are created once, lazily. A fresh, lightweight parser references them each hook.
+    if (!_regisContext)
+    {
+        // Render the canvas at a supersampled resolution so ReGIS text and graphics stay crisp when
+        // the fixed 800x480 logical addressing space is scaled up to the display. The context carries
+        // the factor and the matching (supersampled) canvasSize -- both preserved across resets -- so
+        // userToPixel maps logical coordinates onto the larger buffer automatically.
+        auto const canvasSize = ImageSize { Width(regis::DefaultAddressWidth * regis::RegisSupersample),
+                                            Height(regis::DefaultAddressHeight * regis::RegisSupersample) };
+        _regisContext = make_unique<regis::ReGISContext>();
+        _regisContext->supersample = regis::RegisSupersample;
+        _regisContext->canvasSize = canvasSize;
+        _regisCanvas = make_unique<regis::ReGISRasterizer>(canvasSize);
+        _regisEvents = make_unique<regis::CallbackReGISEvents>(
+            [this](string_view data) { reply(data); },
+            [this]() -> std::optional<std::pair<int, int>> {
+                // Report the current mouse position for the ReGIS interactive locator R(P(I)):
+                // grid cell -> canvas pixel -> ReGIS user coordinates.
+                auto const gridPosition = _terminal->currentMouseGridPosition();
+                if (!gridPosition || !_regisContext || !_regisCanvas)
+                    return std::nullopt;
+                auto const columns = unbox<double>(pageSize().columns);
+                auto const lines = unbox<double>(pageSize().lines);
+                if (columns <= 0 || lines <= 0)
+                    return std::nullopt;
+                auto const canvasWidth = unbox<double>(_regisCanvas->size().width);
+                auto const canvasHeight = unbox<double>(_regisCanvas->size().height);
+                auto const pixel = crispy::point {
+                    .x = static_cast<int>((unbox<double>(gridPosition->column) / columns) * canvasWidth),
+                    .y = static_cast<int>((unbox<double>(gridPosition->line) / lines) * canvasHeight),
+                };
+                auto const [userX, userY] = _regisContext->pixelToUser(pixel);
+                return std::pair<int, int> { static_cast<int>(std::lround(userX)),
+                                             static_cast<int>(std::lround(userY)) };
+            });
+    }
+    // Use the embedded font unless the display injected a text_shaper-backed rasterizer.
+    if (!_regisTextRasterizer)
+        _regisTextRasterizer = make_shared<regis::EmbeddedReGISTextRasterizer>();
+
+    // Pass the rasterizer as a shared_ptr (not a raw reference): the parser persists across PTY read
+    // chunks, and a session rebind may reassign _regisTextRasterizer between them; shared ownership
+    // keeps the in-flight referent alive.
+    auto parser = make_unique<regis::ReGISParser>(
+        *_regisContext, *_regisCanvas, _regisTextRasterizer, *_regisEvents, [this]() { commitReGIS(); });
+
+    // Pmode 1 or 3 resets the graphics state and clears the canvas; 0 and 2 resume the persistent
+    // context (position, colours, write controls and addressing window carry over).
+    auto const pMode = seq.param_or(0, 0);
+    if (pMode == 1 || pMode == 3)
+    {
+        _regisContext->reset();
+        _regisCanvas->eraseTo(RGBAColor { 0 }); // transparent
+        // Ensure the cleared canvas is published even if this DCS string draws nothing, so a
+        // reset-only reset erases the previously committed graphics from the grid.
+        parser->notifyCanvasCleared();
+    }
+
+    return parser;
+}
+
+void Screen::commitReGIS()
+{
+    if (!_regisCanvas)
+        return;
+    // The canvas persists across DCS strings, so publish a copy and leave the original intact for
+    // subsequent drawing to build upon. One copy is unavoidable here: uploadImage() takes ownership
+    // of the pixels while the canvas must retain them. The uploaded images are not leaked -- the
+    // ImagePool is an LRU cache that evicts superseded ReGIS frames -- so the per-commit cost is the
+    // single buffer copy, not unbounded growth.
+    auto pixels = _regisCanvas->data();
+    regisImage(_regisCanvas->size(), std::move(pixels));
+}
+
+void Screen::regisImage(ImageSize pixelSize, Image::Data&& rgbaData)
+{
+    // ReGIS graphics are a full-screen plane: scale the canvas across the whole page and place it
+    // above the text, so drawn pixels overlay the cells and transparent areas reveal them.
+    auto const imageRef = uploadImage(ImageFormat::RGBA, pixelSize, std::move(rgbaData));
+    renderImage(imageRef,
+                CellLocation {},
+                GridSize { .lines = pageSize().lines, .columns = pageSize().columns },
+                PixelCoordinate {},
+                pixelSize,
+                ImageAlignment::TopStart,
+                ImageResize::ResizeToFit,
+                /*autoScroll*/ false,
+                /*updateCursor*/ false,
+                ImageLayer::Above);
 }
 
 unique_ptr<ParserExtension> Screen::hookSTP(Sequence const& /*seq*/)

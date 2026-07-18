@@ -41,8 +41,10 @@ ChangeSpecialColorTests.test_ChangeSpecialColor_RGBI
 ChangeSpecialColorTests.test_ChangeSpecialColor_TekHVC
 
 # --- Intentional gap: xterm-specific device-attribute identity -------------------------------------
-# The DA test demands xterm's exact primary-DA feature list including printer port (2) and ReGIS
+# The DA test demands xterm's exact primary-DA feature list including printer port (2) and the DEC
 # locator (16); Contour implements neither and must not advertise them (Screen.cpp emits "no printer").
+# ReGIS graphics (3) IS now implemented and advertised, so that part of the list matches xterm; the
+# test still fails only because of the printer/locator features Contour honestly lacks.
 # The DA2 test demands xterm's model code (64) and firmware-version range; Contour honestly reports its
 # own identity and version. Advertising capabilities it lacks would be a lie, not conformance.
 DA2Tests.test_DA2_0

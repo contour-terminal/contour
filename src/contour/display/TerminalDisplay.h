@@ -12,6 +12,7 @@
 #include <vtbackend/Metrics.h>
 #include <vtbackend/primitives.h>
 
+#include <vtrasterizer/ReGISFontRasterizer.h>
 #include <vtrasterizer/Renderer.h>
 
 #include <crispy/deferred.h>
@@ -279,6 +280,9 @@ class TerminalDisplay: public QQuickItem
     void onScrollBarValueChanged(int value);
     void onRefreshRateChanged();
     void applyFontDPI();
+    /// (Re)builds the ReGIS text rasterizer from the active profile's font when the font or DPI has
+    /// changed, and injects it into the bound session's terminal.
+    void updateReGISTextRasterizer();
     void onScreenChanged();
     void doDumpState();
 
@@ -427,6 +431,11 @@ class TerminalDisplay: public QQuickItem
     /// then (and in tests): contentScale() falls back to the window DPR.
     ForcedFontDpiProvider const* _forcedFontDpiProvider = nullptr;
     std::unique_ptr<vtrasterizer::Renderer> _renderer;
+    std::shared_ptr<vtrasterizer::ReGISFontRasterizer> _regisTextRasterizer;
+    /// The font description and DPI @ref _regisTextRasterizer was built with, so it is rebuilt only
+    /// when they change (a font-family change or profile switch), not on every session rebind.
+    text::font_description _regisTextRasterizerFont {};
+    text::DPI _regisTextRasterizerDpi {};
     bool _renderingPressure = false;
     /// The RHI render target. Owned here; released on the render thread (its GPU resources must be)
     /// via destroyRenderer() / CleanupJob, or by ~TerminalDisplay's RAII on a bare-window teardown.

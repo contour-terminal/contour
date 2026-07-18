@@ -4,6 +4,7 @@
 #include <crispy/defines.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <format>
@@ -115,6 +116,82 @@ constexpr RGBColor operator""_rgb(unsigned long long value)
 {
     return RGBColor { static_cast<uint32_t>(value) };
 }
+
+namespace detail
+{
+    /// HSL hue-to-channel helper; all arguments are normalized to [0, 1].
+    /// See http://en.wikipedia.org/wiki/HSL_color_space.
+    constexpr double hue2rgb(double p, double q, double t) noexcept
+    {
+        if (t < 0)
+            t += 1;
+        if (t > 1)
+            t -= 1;
+        if (t < 1. / 6)
+            return p + ((q - p) * 6 * t);
+        if (t < 1. / 2)
+            return q;
+        if (t < 2. / 3)
+            return p + ((q - p) * (2. / 3 - t) * 6);
+        return p;
+    }
+} // namespace detail
+
+/// Converts a normalized HSL colour to RGB.
+/// @param h,s,l Hue, saturation and lightness, each normalized to [0, 1].
+/// @return The converted RGB colour.
+constexpr RGBColor hslToRgb(double h, double s, double l) noexcept
+{
+    if (s == 0)
+    {
+        auto const grayscale = static_cast<uint8_t>(l * 255.);
+        return RGBColor { grayscale, grayscale, grayscale };
+    }
+    auto const q = l < 0.5 ? l * (1 + s) : l + s - (l * s);
+    auto const p = (2 * l) - q;
+    return RGBColor { static_cast<uint8_t>(detail::hue2rgb(p, q, h + (1. / 3)) * 255),
+                      static_cast<uint8_t>(detail::hue2rgb(p, q, h) * 255),
+                      static_cast<uint8_t>(detail::hue2rgb(p, q, h - (1. / 3)) * 255) };
+}
+
+/// Converts a DEC HLS colour to RGB, as used by both the Sixel and ReGIS colour introducers.
+///
+/// DEC places blue at hue 0 deg; the -120 deg offset rotates that onto the standard HSL wheel so both
+/// graphics protocols render identical colours. The parameters arrive off the wire unclamped and are
+/// saturated to their defined ranges first (converting an out-of-range double to @c uint8_t is UB).
+/// @param hueDeg Hue angle in degrees (0..360).
+/// @param lightnessPct Lightness as a percentage (0..100).
+/// @param saturationPct Saturation as a percentage (0..100).
+/// @return The converted RGB colour.
+constexpr RGBColor decHlsToRgb(unsigned hueDeg, unsigned lightnessPct, unsigned saturationPct) noexcept
+{
+    auto const shifted = static_cast<double>(std::min(hueDeg, 360u)) - 120.0;
+    auto const h = (shifted < 0 ? 360.0 + shifted : shifted) / 360.0;
+    auto const s = static_cast<double>(std::min(saturationPct, 100u)) / 100.0;
+    auto const l = static_cast<double>(std::min(lightnessPct, 100u)) / 100.0;
+    return hslToRgb(h, s, l);
+}
+
+/// The VT340 default 16-colour palette, shared by the Sixel and ReGIS graphics subsystems.
+/// (https://www.vt100.net/docs/vt3xx-gp/chapter2.html#S2.4)
+constexpr inline std::array<RGBColor, 16> VT340DefaultColorPalette = {
+    RGBColor { 0, 0, 0 },       //  0: black
+    RGBColor { 51, 51, 204 },   //  1: blue
+    RGBColor { 204, 33, 33 },   //  2: red
+    RGBColor { 51, 204, 51 },   //  3: green
+    RGBColor { 204, 51, 204 },  //  4: magenta
+    RGBColor { 51, 204, 204 },  //  5: cyan
+    RGBColor { 204, 204, 51 },  //  6: yellow
+    RGBColor { 135, 135, 135 }, //  7: gray 50%
+    RGBColor { 66, 66, 66 },    //  8: gray 25%
+    RGBColor { 84, 84, 153 },   //  9: less saturated blue
+    RGBColor { 153, 66, 66 },   // 10: less saturated red
+    RGBColor { 84, 153, 84 },   // 11: less saturated green
+    RGBColor { 153, 84, 153 },  // 12: less saturated magenta
+    RGBColor { 84, 153, 153 },  // 13: less saturated cyan
+    RGBColor { 153, 153, 84 },  // 14: less saturated yellow
+    RGBColor { 204, 204, 204 }, // 15: gray 75%
+};
 
 struct RGBColorPair
 {

@@ -280,6 +280,11 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
 
     _session->attachDisplay(*this); // NB: Requires Renderer to be instanciated to retrieve grid metrics.
 
+    // Render ReGIS text through the real font engine: (re)build a text_shaper-backed rasterizer from
+    // the now-bound session's profile font and inject it. Rebuilding when the font or DPI differs keeps
+    // a tab switch or config reload from rendering ReGIS text in a stale typeface.
+    updateReGISTextRasterizer();
+
     // Only now fork the child, and deliberately so: attachDisplay() above is what first tells the PTY
     // its pixel size, and that needs the Renderer's grid metrics, which need the font. Starting before
     // it meant openpty() baked ws_xpixel = 0 into the winsize the child was born with, and the real
@@ -1717,8 +1722,27 @@ void TerminalDisplay::setFonts(vtrasterizer::FontDescriptions fontDescriptions)
         // re-derive geometry against the new cell size now; doing the recompute without the apply would
         // use the *stale* cell size.
         applyStagedFontReconfigNow();
+        // Rebuild the ReGIS text rasterizer against the new font so ReGIS text follows the reload.
+        updateReGISTextRasterizer();
         // logDisplayInfo();
     }
+}
+
+void TerminalDisplay::updateReGISTextRasterizer()
+{
+    if (!_session)
+        return;
+    auto const dpi = fontDPI();
+    auto const font = sanitizeFontDescription(profile().fonts.value(), dpi).regular;
+    // Rebuild only when the font or DPI actually changed -- a fresh shaper is not free, and a tab
+    // switch between same-font profiles should reuse the existing instance.
+    if (!_regisTextRasterizer || _regisTextRasterizerFont != font || _regisTextRasterizerDpi != dpi)
+    {
+        _regisTextRasterizer = std::make_shared<vtrasterizer::ReGISFontRasterizer>(dpi, font);
+        _regisTextRasterizerFont = font;
+        _regisTextRasterizerDpi = dpi;
+    }
+    _session->terminal().setReGISTextRasterizer(_regisTextRasterizer);
 }
 
 bool TerminalDisplay::setFontSize(text::font_size newFontSize)

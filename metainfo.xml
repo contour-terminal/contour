@@ -107,6 +107,7 @@
     <release version="0.7.0" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Adds ReGIS vector graphics (DCS p), DEC's VT330/VT340 graphics language: lines, circles, arcs, interpolated curves, filled polygons, shading, text, colour registers with HLS/RGB specs, position reports, the interactive locator, and macrographs. ReGIS is now advertised in the primary Device Attributes (feature 3) and answered by XTSMGRAPHICS.</li>
           <li>Fixes DECALN (ESC # 8) writing outside the grid once the screen had scrolled</li>
           <li>Fixes the six rectangular-area sequences (DECCRA, DECFRA, DECERA, DECSERA, DECRQCRA, DECSACE) disagreeing on how to read their coordinates: an omitted one-based parameter was stored as zero and then decremented, addressing outside the grid</li>
           <li>Fixes DECRQCRA (CSI Ps * y) answering the wrong final byte and the wrong checksum, and ignoring origin mode (DECOM)</li>

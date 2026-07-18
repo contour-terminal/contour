@@ -9,5 +9,10 @@ if(LIBTERMINAL_TESTING)
         add_executable(drcs-demo drcs-demo.cpp)
 
         add_executable(multi-page-demo multi-page-demo.cpp)
+
+        add_executable(regis-primitives regis-primitives.cpp)
+        add_executable(regis-plot2d regis-plot2d.cpp)
+        add_executable(regis-animation regis-animation.cpp)
+        add_executable(regis-plot3d regis-plot3d.cpp)
     endif()
 endif()

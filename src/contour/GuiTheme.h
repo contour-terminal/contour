@@ -49,7 +49,7 @@ namespace detail
     /// Core palette roles applied to every color group. Values follow Qt's canonical Fusion
     /// light/dark palettes so the pinned Fusion style and every QML @c SystemPalette recolor
     /// consistently across platforms. Adding a role themed by the forced theme is a new row here.
-    constexpr std::array themePaletteRows {
+    constexpr std::array ThemePaletteRows {
         // clang-format off
         ThemePaletteRow { QPalette::Window,          0xefefef, 0x353535 },
         ThemePaletteRow { QPalette::WindowText,      0x000000, 0xffffff },
@@ -70,7 +70,7 @@ namespace detail
 
     /// Overrides applied to the @c QPalette::Disabled group only, so greyed-out chrome stays legible
     /// (and visibly disabled) in both themes.
-    constexpr std::array themeDisabledRows {
+    constexpr std::array ThemeDisabledRows {
         detail::ThemePaletteRow { QPalette::WindowText, 0x7f7f7f, 0x7f7f7f },
         detail::ThemePaletteRow { QPalette::Text, 0x7f7f7f, 0x7f7f7f },
         detail::ThemePaletteRow { QPalette::ButtonText, 0x7f7f7f, 0x7f7f7f },
@@ -84,7 +84,7 @@ namespace detail
 /// regenerate @c QGuiApplication::palette(), so the chrome never recolors. Setting this palette
 /// explicitly via @c QGuiApplication::setPalette does, and every QML @c SystemPalette follows it.
 ///
-/// The colors come from @c detail::themePaletteRows / @c themeDisabledRows (data-driven), so this
+/// The colors come from @c detail::ThemePaletteRows / @c ThemeDisabledRows (data-driven), so this
 /// function is a pure interpreter of that table and is unit-tested headlessly.
 ///
 /// @param scheme The color scheme to force (@c Qt::ColorScheme::Dark or @c Light).
@@ -97,9 +97,9 @@ namespace detail
     };
 
     auto palette = QPalette {};
-    for (auto const& row: detail::themePaletteRows)
+    for (auto const& row: detail::ThemePaletteRows)
         palette.setColor(row.role, pick(row));
-    for (auto const& row: detail::themeDisabledRows)
+    for (auto const& row: detail::ThemeDisabledRows)
         palette.setColor(QPalette::Disabled, row.role, pick(row));
     return palette;
 }
