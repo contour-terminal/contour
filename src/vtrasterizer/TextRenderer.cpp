@@ -1006,9 +1006,7 @@ void TextRenderer::renderBlockGroup(text::shape_result const& glyphPositions,
 }
 
 Renderable::AtlasTileAttributes const* TextRenderer::getOrCreateRasterizedMetadata(
-    strong_hash const& hash,
-    text::glyph_key const& glyphKey,
-    unicode::PresentationStyle presentationStyle)
+    strong_hash const& hash, text::glyph_key const& glyphKey, unicode::PresentationStyle presentationStyle)
 {
     // clang-format off
     return textureAtlas().get_or_try_emplace(
@@ -1129,10 +1127,10 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     // and cut into cell-sized tiles. @see buildBlockCanvas.
 
     // Scale bitmap down overflowing in diemensions
-    auto const emojiBoundingBox =
-        ImageSize { vtbackend::Width(_gridMetrics.cellSize.width.value * numCells),
-                    vtbackend::Height::cast_from(unbox<int>(_gridMetrics.cellSize.height)
-                                                 - _gridMetrics.baseline) };
+    auto const emojiBoundingBox = ImageSize {
+        vtbackend::Width(_gridMetrics.cellSize.width.value * numCells),
+        vtbackend::Height::cast_from(unbox<int>(_gridMetrics.cellSize.height) - _gridMetrics.baseline)
+    };
     if (glyph.format == text::bitmap_format::rgba)
     {
         if (glyph.bitmapSize.height
@@ -1160,9 +1158,8 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
         // Center horizontally within the emoji bounding box (numCells * cellWidth).
         glyph.position.x = unbox<int>(emojiBoundingBox.width - glyph.bitmapSize.width) / 2;
         // Center vertically within the full box height, accounting for the baseline offset.
-        glyph.position.y =
-            (unbox<int>(_gridMetrics.cellSize.height) + glyph.bitmapSize.height.as<int>()) / 2
-            - _gridMetrics.baseline;
+        glyph.position.y = (unbox<int>(_gridMetrics.cellSize.height) + glyph.bitmapSize.height.as<int>()) / 2
+                           - _gridMetrics.baseline;
     }
     else if (glyph.bitmapSize.height > _gridMetrics.cellSize.height)
     {
@@ -1187,9 +1184,16 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
                             cellBoundingBox);
         auto [scaledGlyph, scaleFactor] = text::scale(glyph, cellBoundingBox);
         glyph = std::move(scaledGlyph);
-        // Restore baseline-relative positioning instead of emoji-style centering.
+        // Restore baseline-relative positioning instead of emoji-style centering -- on BOTH axes.
+        // The bearing is the font's statement of where the ink sits relative to the pen, so scaling
+        // it by the same factor as the raster is what keeps the glyph where the font put it.
+        // Overwriting x with a centering value instead shifted every glyph coming through here by
+        // (cellWidth - inkWidth)/2 minus its true left side bearing, so a column of box-drawing or
+        // powerline glyphs stopped lining up with the text beside it. That went unnoticed while the
+        // height bound carried a 10% tolerance, because only badly oversized icons reached it;
+        // bounding by the cell exactly brings ordinary glyphs down this path too.
         glyph.position.y = static_cast<int>(static_cast<float>(originalPosition.y) / scaleFactor);
-        glyph.position.x = (unbox<int>(cellBoundingBox.width) - glyph.bitmapSize.width.as<int>()) / 2;
+        glyph.position.x = static_cast<int>(static_cast<float>(originalPosition.x) / scaleFactor);
         if (rasterizerLog)
             rasterizerLog()(" ==> scaled: {}/{}, factor {}", glyph, cellBoundingBox, scaleFactor);
     }
