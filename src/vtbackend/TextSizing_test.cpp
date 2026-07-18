@@ -265,7 +265,11 @@ TEST_CASE("TextSizing.selection_yields_the_text_once", "[textsizing]")
 {
     // The whole point of the continuation-skip in SelectionRenderer: a six-column block must copy as
     // its text, not its text followed by five spaces.
-    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(1), ColumnCount(10) } };
+    //
+    // Two lines, not one: an `s=2` block needs two rows, and a page that cannot hold it drops it
+    // whole (as kitty does) -- which would leave this asserting on an empty screen rather than on
+    // the selection behaviour it is about.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(2), ColumnCount(10) } };
     mock.writeToScreen("\033]66;s=2:w=3;X\a"sv);
     mock.writeToScreen("z"sv);
 
@@ -322,18 +326,44 @@ TEST_CASE("TextSizing.writing_below_a_block_destroys_all_of_it", "[textsizing]")
     CHECK(screen.at(LineOffset(1), ColumnOffset(1)).codepoints() == U"y");
 }
 
-TEST_CASE("TextSizing.a_block_does_not_claim_rows_past_the_page", "[textsizing]")
+TEST_CASE("TextSizing.a_block_with_no_room_below_scrolls_rather_than_being_clipped", "[textsizing]")
 {
-    // A tall block on the last line has nowhere to grow into; claiming past the page would be a
-    // write out of bounds.
+    // A block is indivisible on BOTH axes, so one written with too few rows beneath it scrolls the
+    // page to make room -- it is never written short. kitty does the same in
+    // handle_fixed_width_multicell_command().
+    //
+    // This is the ordinary case, not a corner: a terminal that has printed anything sits on its last
+    // line, so nearly every block a real program writes arrives with no room below it. Clipping left
+    // only the head row, and the head row draws band 0 -- the TOP slice of the glyph -- so all that
+    // reached the screen was a sliver of the glyph's top edge.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(10) }, LineCount(10) };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("one\r\ntwo\r\nthree\r\nfour"sv); // fills the page; cursor on the last line
+    mock.writeToScreen("\r\n\033]66;s=2;X\a"sv);
+
+    // The block landed whole, with its continuation row beneath it...
+    auto const head = screen.at(LineOffset(2), ColumnOffset(0));
+    CHECK(head.codepoints() == U"X");
+    CHECK(head.scale() == 2);
+    CHECK(screen.at(LineOffset(3), ColumnOffset(0)).isFlagEnabled(CellFlag::MulticellContinuation));
+
+    // ...and the page scrolled to find that room, taking the oldest line into history.
+    CHECK(screen.grid().lineText(LineOffset(0)) == "three     ");
+}
+
+TEST_CASE("TextSizing.a_block_taller_than_the_page_is_dropped", "[textsizing]")
+{
+    // Scrolling cannot help a block taller than the scroll region itself, and a clipped block is a
+    // different size from the one the application asked for -- so it is dropped whole, as kitty's
+    // `height > max_height` guard does.
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(2), ColumnCount(10) } };
     auto& screen = mock.terminal.primaryScreen();
 
-    mock.writeToScreen("\033[2;1H"sv); // last line
     mock.writeToScreen("\033]66;s=4;X\a"sv);
 
-    CHECK(screen.at(LineOffset(1), ColumnOffset(0)).width() == 4);
-    CHECK(screen.at(LineOffset(1), ColumnOffset(0)).scale() == 4);
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).codepoints().empty());
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).scale() == 1);
 }
 
 TEST_CASE("TextSizing.multicellBlockAt_finds_the_block_from_any_of_its_cells", "[textsizing]")
@@ -680,6 +710,60 @@ TEST_CASE("TextSizing.a_block_stays_a_block_once_scrolled_into_history", "[texts
     CHECK(block->origin.line == *headLine);
     CHECK(block->rows == 4);
     CHECK(screen.at(block->origin).codepoints() == U"X");
+}
+
+TEST_CASE("TextSizing.every_row_of_a_visible_block_is_emitted_with_its_band", "[textsizing]")
+{
+    // The plain, unscrolled case the demo shows: a block sitting on screen must reach the renderer
+    // as `scale` rows, each naming its own band. The scrolled case below covers the harder variant,
+    // but it was passing while the ordinary one was never asserted at all.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(6), ColumnCount(20) } };
+    auto constexpr ClockBase = std::chrono::steady_clock::time_point {};
+    mock.terminal.tick(ClockBase);
+
+    mock.writeToScreen("\033]66;s=2;X\a"sv);
+
+    mock.terminal.tick(ClockBase + std::chrono::milliseconds(100));
+    mock.terminal.ensureFreshRenderBuffer();
+    auto const buffer = mock.terminal.renderBuffer();
+
+    auto bands = std::set<int> {};
+    for (auto const& cell: buffer.get().cells)
+        if (cell.codepoints == U"X")
+        {
+            INFO("cell at line " << cell.position.line.value << " column " << cell.position.column.value);
+            CHECK(cell.sizing.scale.scale == 2);
+            bands.insert(static_cast<int>(cell.sizing.band));
+        }
+
+    INFO("emitted bands: " << bands.size());
+    CHECK(bands == std::set<int> { 0, 1 });
+}
+
+TEST_CASE("TextSizing.a_block_written_after_the_page_scrolled_still_emits_every_band", "[textsizing]")
+{
+    // The demo's real situation, and the one an unscrolled test cannot reach: by the time a block is
+    // written, the page has already scrolled, so its lines live at a different place in the ring
+    // buffer than the first screenful did. Every row must still resolve back to its head.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(6), ColumnCount(20) }, LineCount(50) };
+    auto constexpr ClockBase = std::chrono::steady_clock::time_point {};
+    mock.terminal.tick(ClockBase);
+
+    for (auto const i: std::views::iota(0, 12))
+        mock.writeToScreen("filler" + std::to_string(i) + "\r\n");
+    mock.writeToScreen("\033]66;s=2;X\a"sv);
+
+    mock.terminal.tick(ClockBase + std::chrono::milliseconds(100));
+    mock.terminal.ensureFreshRenderBuffer();
+    auto const buffer = mock.terminal.renderBuffer();
+
+    auto bands = std::set<int> {};
+    for (auto const& cell: buffer.get().cells)
+        if (cell.codepoints == U"X")
+            bands.insert(static_cast<int>(cell.sizing.band));
+
+    INFO("emitted bands: " << bands.size());
+    CHECK(bands == std::set<int> { 0, 1 });
 }
 
 TEST_CASE("TextSizing.a_block_whose_head_scrolled_above_the_viewport_still_draws", "[textsizing]")

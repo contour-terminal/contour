@@ -4944,6 +4944,40 @@ void Screen::writeSizedText(std::u32string_view codepoints, uint8_t columns, Cel
     if (codepoints.empty())
         return;
 
+    // A block `scale` cells tall needs that many rows BELOW the cursor. When they are not there the
+    // page SCROLLS to make room, exactly as it would for text running off the bottom -- the block is
+    // not clipped.
+    //
+    // This is the overwhelmingly common case, not an edge case: a terminal that has been printing
+    // sits on its last line, so every block written by a program that has produced any output at all
+    // arrives with no room beneath it. Clipping it left only the head row, and the head row is band
+    // 0 -- the TOP slice of the glyph -- so all that reached the screen was a sliver of the glyph's
+    // top edge, on one row, while the rest of the block did not exist to be drawn.
+    //
+    // kitty does the same in handle_fixed_width_multicell_command() (screen.c): it scrolls by the
+    // shortfall and walks the cursor back up by as much.
+    auto const height = LineCount::cast_from(std::max<uint8_t>(cellScale.scale, 1));
+    if (height > LineCount(1))
+    {
+        // Taller than the scroll region can ever be: there is nowhere to put it, so it is dropped
+        // whole rather than clipped -- a clipped block is a different size from the one asked for.
+        if (height > margin().vertical.length())
+            return;
+
+        auto const available =
+            LineCount::cast_from(margin().vertical.to - _cursor.position.line) + LineCount(1);
+        if (height > available)
+        {
+            auto const shortfall = height - available;
+            scrollUp(shortfall);
+            // The cursor follows its content up. `currentLine()` reads a CACHED pointer, so moving
+            // the cursor without refreshing it would write the block into the line the cursor used
+            // to be on.
+            _cursor.position.line -= LineOffset::cast_from(shortfall);
+            updateCursorIterator();
+        }
+    }
+
     // The cells this block is about to claim may already belong to blocks on screen -- a run that
     // wrapped lands on the very row the previous run's blocks reach down into. Each of those is
     // destroyed WHOLE before this one takes their space; overwriting only the cells that overlap
