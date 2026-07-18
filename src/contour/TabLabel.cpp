@@ -37,4 +37,20 @@ std::string expandTabLabel(std::string_view tmpl, TabLabelContext const& ctx)
     return result;
 }
 
+std::string abbreviateHomePath(std::string_view path, std::string_view home)
+{
+    if (home.empty() || !path.starts_with(home))
+        return std::string { path };
+
+    // The home directory itself.
+    if (path.size() == home.size())
+        return "~";
+
+    // Only a whole component matches: without this, a home of "/home/bob" would turn "/home/bobby" into
+    // "~by" -- a path that reads as real and points somewhere else entirely.
+    if (path[home.size()] != '/')
+        return std::string { path };
+
+    return "~" + std::string { path.substr(home.size()) };
+}
 } // namespace contour

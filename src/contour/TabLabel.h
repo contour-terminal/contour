@@ -39,4 +39,17 @@ struct TabLabelContext
 /// @return The expanded label.
 [[nodiscard]] std::string expandTabLabel(std::string_view tmpl, TabLabelContext const& ctx);
 
+/// Replaces a leading home directory with `~`, the way a shell prompt writes a path.
+///
+/// Purely presentational, for the tab hover tooltip: a caller that wants a path to ACT on wants the real
+/// one, which is why this is not done at the source.
+///
+/// Only a whole path component matches, so a sibling directory whose name merely starts with the home
+/// path (`/home/bobby` against a home of `/home/bob`) is left alone rather than mangled into `~by`.
+///
+/// @param path The absolute path to abbreviate.
+/// @param home The user's home directory. An empty value abbreviates nothing.
+/// @return @p path with the home prefix replaced by `~`, or @p path unchanged.
+[[nodiscard]] std::string abbreviateHomePath(std::string_view path, std::string_view home);
+
 } // namespace contour

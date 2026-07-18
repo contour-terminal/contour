@@ -14,6 +14,7 @@
 #include <contour/WindowController.h>
 #include <contour/helper.h>
 
+#include <QtCore/QDir>
 #include <QtGui/QCursor>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>
@@ -322,6 +323,22 @@ void WindowController::activateTab(int index)
     // exclusive views of the same region, so activating any tab dismisses the settings page.
     setSettingsActive(false);
     _manager.activateTab(_windowId, index);
+}
+
+QString WindowController::tabWorkingDirectory(int index) const
+{
+    auto* tab = tabAtRow(index);
+    if (tab == nullptr)
+        return {};
+
+    auto* session = _manager.sessionForId(tab->activePane()->session());
+    if (session == nullptr)
+        return {};
+
+    // Abbreviated as a shell prompt writes it. Purely presentational, which is why it happens here and
+    // not at the source: a caller that wants a path to act on wants the real one.
+    return QString::fromStdString(
+        abbreviateHomePath(session->displayWorkingDirectory(), QDir::homePath().toStdString()));
 }
 
 void WindowController::dispatchTabStripWheel(int angleDeltaX, int angleDeltaY)

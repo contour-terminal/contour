@@ -247,6 +247,13 @@ namespace
 
         auto& terminal = session.terminal();
 
+        // BEFORE any of the early returns below: a purely horizontal swipe carries no vertical motion, so
+        // the smooth-scroll path treats its Begin and End as zero-delta phase events and consumes them.
+        // The horizontal gesture would then never see its own boundaries — and having spent its one
+        // navigation step, no later swipe could ever switch a tab again. (Holding a modifier skips the
+        // smooth-scroll path entirely, which is why the bug looked like "it only works with Shift".)
+        session.noteScrollPhase(scrollPhase);
+
         // Discard OS-generated momentum events when our own momentum scrolling is active.
         if (scrollPhase == vtbackend::ScrollPhase::Momentum && terminal.isMomentumScrollActive())
             return;

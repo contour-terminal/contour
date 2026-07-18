@@ -235,3 +235,16 @@ TEST_CASE("a DevicePixelRatioChange event reaches the scale-settlement handler",
     auto event = QEvent(QEvent::DevicePixelRatioChange);
     CHECK_NOTHROW(QCoreApplication::sendEvent(&window, &event));
 }
+
+TEST_CASE("tabWorkingDirectory answers safely for rows that do not exist", "[contour][tabs]")
+{
+    // The tab hover tooltip calls this by row. A row can vanish between the hover starting and the
+    // tooltip opening (the tab closes underneath it), so an out-of-range row must be an empty answer
+    // rather than a walk off the model.
+    TestApp app;
+    ScopedController const controller { app.manager() };
+
+    CHECK(controller.controller->tabWorkingDirectory(-1).isEmpty());
+    CHECK(controller.controller->tabWorkingDirectory(0).isEmpty());
+    CHECK(controller.controller->tabWorkingDirectory(9999).isEmpty());
+}

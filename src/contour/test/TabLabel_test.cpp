@@ -9,6 +9,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+using contour::abbreviateHomePath;
 using contour::expandTabLabel;
 using contour::TabLabelContext;
 
@@ -106,3 +107,43 @@ TEST_CASE("expandTabLabel: unknown placeholders echo verbatim", "[contour][tabla
         CHECK(expandTabLabel("[{TabPosition}]", ctx) == "[5]");
     }
 }
+
+// {{{ abbreviateHomePath — the tab hover tooltip's working-directory line
+
+TEST_CASE("abbreviateHomePath.a path under home is abbreviated", "[contour][tablabel]")
+{
+    CHECK(abbreviateHomePath("/home/bob/projects/contour", "/home/bob") == "~/projects/contour");
+}
+
+TEST_CASE("abbreviateHomePath.the home directory itself is a bare tilde", "[contour][tablabel]")
+{
+    CHECK(abbreviateHomePath("/home/bob", "/home/bob") == "~");
+}
+
+TEST_CASE("abbreviateHomePath.a sibling that merely shares the prefix is untouched", "[contour][tablabel]")
+{
+    // Without a component-boundary check this becomes "~by": a path that reads as real and points
+    // somewhere else entirely.
+    CHECK(abbreviateHomePath("/home/bobby", "/home/bob") == "/home/bobby");
+    CHECK(abbreviateHomePath("/home/bobby/src", "/home/bob") == "/home/bobby/src");
+}
+
+TEST_CASE("abbreviateHomePath.a path outside home is untouched", "[contour][tablabel]")
+{
+    CHECK(abbreviateHomePath("/etc/contour", "/home/bob") == "/etc/contour");
+    CHECK(abbreviateHomePath("/", "/home/bob") == "/");
+}
+
+TEST_CASE("abbreviateHomePath.an unknown home abbreviates nothing", "[contour][tablabel]")
+{
+    // QDir::homePath() can come back empty; abbreviating against "" would turn every path into "~".
+    CHECK(abbreviateHomePath("/home/bob/src", "") == "/home/bob/src");
+}
+
+TEST_CASE("abbreviateHomePath.an empty path stays empty", "[contour][tablabel]")
+{
+    // Empty means "no working directory known", and the tooltip drops the line entirely.
+    CHECK(abbreviateHomePath("", "/home/bob").empty());
+}
+
+// }}}

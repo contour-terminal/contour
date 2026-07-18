@@ -74,6 +74,27 @@ class HorizontalWheelGesture
         return !_verticalLatched && horizontal >= vertical && delta.x != 0;
     }
 
+    /// Observes a gesture boundary, without judging any delta.
+    ///
+    /// Must be called for EVERY wheel event, including the ones a caller then handles by another route.
+    /// A purely horizontal swipe carries no vertical motion, so the smooth-scroll path treats its Begin
+    /// and End as zero-delta phase events and consumes them — and if those never reached this object, the
+    /// gesture would never end: the first swipe would claim the navigation step below and no later swipe
+    /// could ever claim another.
+    ///
+    /// @param phase The gesture phase the windowing system reported.
+    void notePhase(vtbackend::ScrollPhase phase) noexcept
+    {
+        switch (phase)
+        {
+            case vtbackend::ScrollPhase::Begin:
+            case vtbackend::ScrollPhase::End:
+            case vtbackend::ScrollPhase::NoPhase: reset(); break;
+            case vtbackend::ScrollPhase::Update:
+            case vtbackend::ScrollPhase::Momentum: break;
+        }
+    }
+
     /// Claims the one discrete NAVIGATION step this gesture is allowed, if it is still unclaimed.
     ///
     /// Scrolling is continuous; switching tabs is not, and the two must not share a step size. The scroll

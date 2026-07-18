@@ -205,6 +205,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void addToAccumulatedScroll(crispy::point pixelDelta,
                                 crispy::point angleDelta,
                                 vtbackend::ScrollPhase phase) noexcept;
+
+    /// Tells the horizontal-wheel gesture where a gesture begins and ends.
+    ///
+    /// Called for EVERY wheel event, before any of the paths that may consume one. @see
+    /// HorizontalWheelGesture::notePhase for why a gesture boundary must not be missed.
+    void noteScrollPhase(vtbackend::ScrollPhase phase) noexcept { _horizontalWheelGesture.notePhase(phase); }
     std::tuple<vtbackend::LineOffset, vtbackend::ColumnOffset> consumeScroll() noexcept;
 
     QString title() const;
@@ -349,6 +355,20 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// split pane — using the same logic, including the Windows fallback.
     /// @return The working directory path, or "." if unavailable.
     [[nodiscard]] std::string workingDirectory() const;
+
+    /// The working directory to SHOW the user, as opposed to the one to spawn a child in.
+    ///
+    /// Prefers what the shell reported over OSC 7, which is the only source that tracks a `cd` inside a
+    /// full-screen application and the only one that is right for a remote (SSH) session. Falls back to
+    /// the local process's directory — the one the session was started in — when the shell has reported
+    /// nothing yet.
+    ///
+    /// Distinct from workingDirectory() on purpose: that one answers "where should a new tab start",
+    /// must name a directory that exists on THIS machine, and says "." when it cannot tell. Neither is
+    /// something to put in front of a user.
+    ///
+    /// @return The directory, or an empty string when none can be determined.
+    [[nodiscard]] std::string displayWorkingDirectory() const;
 
     display::TerminalDisplay* display() noexcept { return _display; }
     display::TerminalDisplay const* display() const noexcept { return _display; }

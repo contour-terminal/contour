@@ -150,6 +150,9 @@ class MockTabController: public QAbstractListModel
     int canCloseWindowCalls = 0;
     Q_INVOKABLE void createNewTab() {}
     Q_INVOKABLE void activateTab(int) {}
+    /// Mirrors WindowController::tabWorkingDirectory: what TabItem's hover tooltip asks for the
+    /// working-directory line. Answering empty means "nothing known", which suppresses that line.
+    Q_INVOKABLE [[nodiscard]] QString tabWorkingDirectory(int) const { return {}; }
     Q_INVOKABLE void moveTab(int, int) {}
     Q_INVOKABLE [[nodiscard]] quint64 windowIdValue() const noexcept { return 1; }
     Q_INVOKABLE void moveTabIntoThisWindow(quint64, int, int) {}

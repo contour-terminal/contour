@@ -125,6 +125,15 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// `createNewTab()` call site (the "+" button) working.
     Q_INVOKABLE void createNewTab(QString const& profileName = {});
     Q_INVOKABLE void activateTab(int index);
+    /// The working directory of the tab at @p index, for its hover tooltip.
+    ///
+    /// Queried on demand rather than carried as a model role: the directory changes with every `cd`, and
+    /// a role would have to emit dataChanged for each one to stay honest. A tooltip is only read when it
+    /// opens, so asking then is both simpler and always current.
+    ///
+    /// @param index The tab's row.
+    /// @return The directory, or an empty string when none can be determined.
+    Q_INVOKABLE [[nodiscard]] QString tabWorkingDirectory(int index) const;
     /// Routes a wheel event that occurred over the tab strip.
     ///
     /// Horizontal notches resolve through the same built-in fallback mouse mappings the terminal grid

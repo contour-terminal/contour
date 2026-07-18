@@ -260,3 +260,43 @@ TEST_CASE("HorizontalWheelGesture.reset releases the navigation latch", "[contou
 }
 
 // }}}
+
+TEST_CASE("HorizontalWheelGesture.every swipe earns a step when only phases are observed", "[contour][wheel]")
+{
+    // The regression this guards: a purely horizontal swipe carries no vertical motion, so the
+    // smooth-scroll path consumes its Begin and End as zero-delta phase events and acceptsHorizontal()
+    // never sees them. If the gesture learned its boundaries only from acceptsHorizontal(), the first
+    // swipe would claim the navigation step and NO later swipe could ever claim another -- which looked
+    // like "switching tabs only works while Shift is held", because a modifier skips that path entirely.
+    auto gesture = HorizontalWheelGesture {};
+
+    for (auto swipe = 0; swipe < 5; ++swipe)
+    {
+        // Only the phase is observed for Begin/End, exactly as the smooth-scroll path leaves it.
+        gesture.notePhase(ScrollPhase::Begin);
+
+        REQUIRE(pixels(gesture, -40, 0, ScrollPhase::Update));
+        CHECK(gesture.consumeNavigationStep());
+        // ... and the rest of that same swipe still yields nothing more.
+        REQUIRE(pixels(gesture, -40, 0, ScrollPhase::Update));
+        CHECK_FALSE(gesture.consumeNavigationStep());
+
+        gesture.notePhase(ScrollPhase::End);
+    }
+}
+
+TEST_CASE("HorizontalWheelGesture.notePhase does not end a gesture mid-swipe", "[contour][wheel]")
+{
+    // Update and Momentum are not boundaries: treating them as such would hand every event its own
+    // navigation step and put the over-sensitivity straight back.
+    auto gesture = HorizontalWheelGesture {};
+
+    gesture.notePhase(ScrollPhase::Begin);
+    REQUIRE(pixels(gesture, -40, 0, ScrollPhase::Update));
+    CHECK(gesture.consumeNavigationStep());
+
+    gesture.notePhase(ScrollPhase::Update);
+    CHECK_FALSE(gesture.consumeNavigationStep());
+    gesture.notePhase(ScrollPhase::Momentum);
+    CHECK_FALSE(gesture.consumeNavigationStep());
+}

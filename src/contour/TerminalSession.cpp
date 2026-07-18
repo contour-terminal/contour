@@ -2600,6 +2600,30 @@ std::string TerminalSession::workingDirectory() const
     return "."s;
 }
 
+std::string TerminalSession::displayWorkingDirectory() const
+{
+    // OSC 7 first: it is the shell speaking, so it tracks a `cd` made inside a full-screen application
+    // and it is the only source that can be right for a remote session. Reported as a file:// URL.
+    auto cwdUrl = std::string {};
+    {
+        auto const lock = scoped_lock { _terminal };
+        cwdUrl = _terminal.currentWorkingDirectory();
+    }
+    if (!cwdUrl.empty())
+        if (auto path = vtbackend::extractPathFromFileUrl(cwdUrl); !path.empty())
+            return path;
+
+    // Nothing reported (no shell integration, or not yet): fall back to where the session was started.
+    // Unlike workingDirectory() this is NOT filtered for local existence — a path worth SHOWING need not
+    // be one a child could be spawned in.
+#if !defined(_WIN32)
+    if (auto const* ptyProcess = dynamic_cast<vtpty::Process const*>(&_terminal.device()))
+        return ptyProcess->workingDirectory();
+#endif
+
+    return {};
+}
+
 void TerminalSession::spawnNewTerminal(string const& profileName)
 {
     auto const wd = workingDirectory();
