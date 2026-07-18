@@ -982,6 +982,7 @@ trivialbuffer
 truecolor
 tsl
 ucd
+uia
 uild
 ultimatively
 ultrablack

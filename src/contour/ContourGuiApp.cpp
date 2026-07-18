@@ -10,6 +10,7 @@
 #include <contour/SettingsController.h>
 #include <contour/WindowController.h>
 #include <contour/display/ContentScale.h>
+#include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
 
 #include <vtpty/Process.h>
@@ -596,6 +597,11 @@ int ContourGuiApp::terminalGuiAction()
     QGuiApplication::setWindowIcon(QIcon(":/contour/logo-256.png"));
 
     QSurfaceFormat::setDefaultFormat(display::createSurfaceFormat());
+
+    // Hands out the accessibility interface for the terminal item, so OS magnifiers and screen readers
+    // can follow the caret. Installed here rather than from a static initializer: the ordering against
+    // the application object matters, and the factory must be in place before the first item is created.
+    display::TerminalAccessible::installFactory();
 
     ensureTermInfoFile();
 

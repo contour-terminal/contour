@@ -186,6 +186,19 @@ class TerminalDisplay: public QQuickItem
     void closeDisplay();
     void post(std::function<void()> fn);
 
+    /// Tells assistive technology where the caret is, if it moved somewhere worth announcing.
+    ///
+    /// GUI THREAD ONLY: the terminal-side notification posts here rather than deciding in place, because
+    /// that notification arrives with the terminal's state mutex already held.
+    void reportAccessibleCaret();
+
+    /// Forgets what was last announced about the caret, so the next report is made afresh.
+    ///
+    /// Call when something other than the caret invalidated the client's picture — focus leaving this
+    /// pane, most importantly, since a pane that regains focus at an unchanged position would otherwise
+    /// stay silent while the client still points at the pane it left.
+    void resetAccessibleCaret();
+
     // Attributes
     [[nodiscard]] vtbackend::RefreshRate refreshRate() const;
     text::DPI fontDPI() const noexcept;
@@ -401,8 +414,15 @@ class TerminalDisplay: public QQuickItem
 
     void statsSummary();
 
+  public:
+    /// A snapshot of the grid's device-pixel geometry (cell size, page margin).
+    ///
+    /// Public so the accessibility interface can map cells to screen rectangles. Returned BY VALUE, and
+    /// callers should take one copy per query: two separate reads could straddle a concurrent font apply
+    /// and mix a new cell size with an old margin.
     [[nodiscard]] vtrasterizer::GridMetrics gridMetrics() const noexcept { return _renderer->gridMetrics(); }
 
+  private:
     /// Flags the screen as dirty.
     ///
     /// @returns boolean indicating whether the screen was clean before and made dirty (true), false

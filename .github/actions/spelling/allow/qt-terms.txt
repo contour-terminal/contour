@@ -5,6 +5,7 @@ itemAt
 Key_Exclam
 popupType
 QAbstract
+QAccessible
 QApplication
 QAudio
 QByte

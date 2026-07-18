@@ -3,6 +3,7 @@
 #include <contour/ContourGuiApp.h>
 #include <contour/ExternalLauncher.h>
 #include <contour/TerminalSession.h>
+#include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/helper.h>
 
@@ -1498,6 +1499,31 @@ void TerminalSession::playSound(vtbackend::Sequence::Parameters const& params)
 void TerminalSession::cursorPositionChanged()
 {
     QGuiApplication::inputMethod()->update(Qt::ImCursorRectangle);
+
+    // Kept, not replaced, by the accessibility path below: on Windows, Magnifier frequently follows the
+    // IME rectangle rather than a UIA text range.
+
+    // Nobody is listening: the whole path costs one relaxed atomic load. Read through our own flag rather
+    // than QAccessible::isActive(), which reads a Qt-internal static with no memory ordering — and this
+    // runs on the TERMINAL thread.
+    if (!display::TerminalAccessible::isActive())
+        return;
+
+    // This fires once per frame AND twice a second from the cursor blink (the render buffer's cursor is
+    // simply absent while blinked off), so collapse repeats to at most one pending post.
+    if (_caretUpdatePending.test_and_set(std::memory_order_acq_rel))
+        return;
+
+    // NOTHING about the terminal is read here. refreshRenderBuffer() reaches this callback with the state
+    // mutex ALREADY HELD on one of its two paths, and that mutex is a plain non-recursive std::mutex — so
+    // reading terminal state at this point would self-deadlock on one path and not the other, which is
+    // the worst kind of hang to diagnose. The decision is made on the GUI thread instead.
+    if (auto* display = _display)
+        display->post([this]() {
+            _caretUpdatePending.clear(std::memory_order_release);
+            if (auto* target = _display)
+                target->reportAccessibleCaret();
+        });
 }
 // }}}
 // {{{ Actions

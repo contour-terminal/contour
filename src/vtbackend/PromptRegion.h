@@ -113,6 +113,8 @@ struct LivePromptSpan
     LineOffset firstLine;                   ///< The first physical line of the prompt.
     LineOffset lastLine;                    ///< Its last physical line.
     std::optional<ColumnOffset> inputBegin; ///< Logical column where the user's input begins, if known.
+
+    [[nodiscard]] bool operator==(LivePromptSpan const&) const noexcept = default;
 };
 
 } // namespace vtbackend

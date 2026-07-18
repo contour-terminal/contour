@@ -707,6 +707,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     std::unique_ptr<QFileSystemWatcher> _configFileChangeWatcher;
 
     std::atomic<bool> _terminating { false };
+
+    /// Guards against piling up caret-report posts. Set on the terminal thread when one is queued and
+    /// cleared on the GUI thread when it runs, so a cursor that moves faster than the GUI thread drains
+    /// its queue coalesces into one report rather than a backlog.
+    std::atomic_flag _caretUpdatePending = ATOMIC_FLAG_INIT;
     std::thread::id _mainLoopThreadID {};
     std::unique_ptr<std::thread> _screenUpdateThread;
 
