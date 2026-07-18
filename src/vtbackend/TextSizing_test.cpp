@@ -617,25 +617,25 @@ TEST_CASE("TextSizing.the_cell_carries_the_whole_sizing", "[textsizing]")
     CHECK(screen.at(LineOffset(2), ColumnOffset(0)).textScale().isOrdinary());
 }
 
-TEST_CASE("TextSizing.a_drag_inside_one_row_of_blocks_stays_on_one_line", "[textsizing]")
+TEST_CASE("TextSizing.a_block_takes_a_deferred_wrap_before_placing_itself", "[textsizing]")
 {
-    // A scale>1 block is two screen rows tall but reads as one line of text. Dragging along it, the
-    // pointer strays into the row below; without the clamp that one-row wobble becomes a two-line
-    // selection, which takes the first line to its right margin and swallows the caption after it.
-    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(6), ColumnCount(20) } };
-    mock.writeToScreen("\033]66;s=2;ab\a  cap"sv); // blocks at cols 0-3, caption at cols 4+
+    // writeSizedText is a second entry point into writing text, parallel to the ordinary path, so it
+    // owes the same prologue: a wrap deferred by the previous character is still outstanding. Its own
+    // relocation test compares the BLOCK's extent against the margin, and a one-column block always
+    // fits -- so without the prologue the block overwrote the character in the last column, and left
+    // wrapPending set so every following block clobbered the same cell.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(5) } };
+    auto const& screen = mock.terminal.primaryScreen();
 
-    using namespace vtbackend;
-    auto constexpr UiHandled = false;
-    auto constexpr Pixels = vtbackend::PixelCoordinate {};
+    mock.writeToScreen("abcde"sv); // fills the line; cursor parks at the last column
+    REQUIRE(screen.cursor().wrapPending);
 
-    mock.terminal.tick(std::chrono::steady_clock::time_point {});
-    mock.terminal.sendMouseMoveEvent(
-        Modifier::None, CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) }, Pixels, UiHandled);
-    (void) mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, Pixels, UiHandled);
+    mock.writeToScreen("\033]66;s=1;X\a"sv);
 
-    // The pointer slips one row down while still over the same blocks.
-    mock.terminal.sendMouseMoveEvent(
+    CHECK(screen.at(LineOffset(0), ColumnOffset(4)).codepoints() == U"e");
+    CHECK(screen.at(LineOffset(1), ColumnOffset(0)).codepoints() == U"X");
+}
+
 TEST_CASE("TextSizing.copying_a_block_carries_its_scale", "[textsizing]")
 {
     // DECCRA copies the continuation flags along with the rest of the cell's attributes. Dropping
@@ -658,6 +658,25 @@ TEST_CASE("TextSizing.copying_a_block_carries_its_scale", "[textsizing]")
     CHECK(screen.at(LineOffset(5), ColumnOffset(0)).textScale().scale == 2);
 }
 
+TEST_CASE("TextSizing.a_drag_inside_one_row_of_blocks_stays_on_one_line", "[textsizing]")
+{
+    // A scale>1 block is two screen rows tall but reads as one line of text. Dragging along it, the
+    // pointer strays into the row below; without the clamp that one-row wobble becomes a two-line
+    // selection, which takes the first line to its right margin and swallows the caption after it.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(6), ColumnCount(20) } };
+    mock.writeToScreen("\033]66;s=2;ab\a  cap"sv); // blocks at cols 0-3, caption at cols 4+
+
+    using namespace vtbackend;
+    auto constexpr UiHandled = false;
+    auto constexpr Pixels = vtbackend::PixelCoordinate {};
+
+    mock.terminal.tick(std::chrono::steady_clock::time_point {});
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None, CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) }, Pixels, UiHandled);
+    (void) mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, Pixels, UiHandled);
+
+    // The pointer slips one row down while still over the same blocks.
+    mock.terminal.sendMouseMoveEvent(
         Modifier::None, CellLocation { .line = LineOffset(1), .column = ColumnOffset(3) }, Pixels, UiHandled);
 
     // Still a single-line selection: the caption on row 0 is NOT swept in.

@@ -4963,6 +4963,16 @@ void Screen::writeSizedText(std::u32string_view codepoints, uint8_t columns, Cel
         return;
 
     // A block wider than the line can never be placed, so it is dropped rather than clipped -- a
+    // This is a second entry point into writing text, parallel to writeTextInternal, so it owes the
+    // same prologue: a wrap deferred by the PREVIOUS character is still outstanding and has to be
+    // taken first. Skipping it let a one-column block overwrite the character sitting in the last
+    // column -- the relocation test below compares the block's own extent against the margin and a
+    // one-column block always fits -- and left wrapPending set, so every following block clobbered
+    // that same cell. Wider blocks did move, but via linefeed(), which does not mark the line
+    // Wrappable|Wrapped the way a real deferred wrap does, so reflow and selection then treated it
+    // as a hard newline.
+    crlfIfWrapPending();
+
     // clipped block is a different size from the one the application asked for. kitty drops it too.
     auto const lineWidth = lastWritableColumn() - margin().horizontal.from + 1;
     if (ColumnOffset::cast_from(columns) > lineWidth)
@@ -5042,11 +5052,11 @@ void Screen::writeSizedText(std::u32string_view codepoints, uint8_t columns, Cel
     auto cell = line.useCellAt(_cursor.position.column);
     cell.write(_cursor.graphicsRendition, codepoints[0], columns, _cursor.hyperlink);
     for (size_t i = 1; i < codepoints.size(); ++i)
-        (void) cell.appendCharacter(codepoints[i]);
+        // The application stated this block's width explicitly; re-measuring the cluster would
+        // silently overrule it. FirstCodepoint takes the codepoints and leaves the width write()
+        // already set alone.
+        (void) cell.appendCharacter(codepoints[i], ClusterWidthPolicy::FirstCodepoint);
 
-    // appendCharacter re-measures the cluster from its codepoints, which would undo the size the
-    // application explicitly asked for -- so the width is restored afterwards, not before.
-    cell.setWidth(columns);
     cell.setTextScale(cellScale);
 
     auto const sgr = _cursor.graphicsRendition.with(CellFlag::WideCharContinuation);
