@@ -2355,6 +2355,31 @@ void Terminal::setFontDef(FontDef const& fontDef)
     _eventListener.setFontDef(fontDef);
 }
 
+void Terminal::setPointerShape(std::string shape)
+{
+    _pointerShapes.back() = std::move(shape);
+    _eventListener.setPointerShape(_pointerShapes.back());
+}
+
+void Terminal::pushPointerShape(std::string shape)
+{
+    // Bounded so that an application looping on push cannot grow this without limit. Past the cap the
+    // newest shape still takes effect; only the ability to restore that many levels is lost.
+    constexpr auto MaxDepth = size_t { 16 };
+    if (_pointerShapes.size() >= MaxDepth)
+        _pointerShapes.back() = std::move(shape);
+    else
+        _pointerShapes.push_back(std::move(shape));
+    _eventListener.setPointerShape(_pointerShapes.back());
+}
+
+void Terminal::popPointerShape()
+{
+    if (_pointerShapes.size() > 1)
+        _pointerShapes.pop_back();
+    _eventListener.setPointerShape(_pointerShapes.back());
+}
+
 void Terminal::copyToClipboard(string_view data)
 {
     _eventListener.copyToClipboard(data);

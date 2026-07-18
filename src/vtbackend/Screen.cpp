@@ -4655,6 +4655,61 @@ void Screen::renderITerm2InlineImage(std::string_view arguments)
                        ImageLayer::Above);
 }
 
+ApplyResult Screen::processPointerShape(std::string_view payload)
+{
+    using namespace pointer_shape;
+
+    if (payload.empty())
+        return ApplyResult::Invalid;
+
+    auto const operation = static_cast<Operation>(payload.front());
+    auto const names = payload.substr(1);
+
+    switch (operation)
+    {
+        case Operation::Query: {
+            // Answer one value per queried name: `1` for a shape we can display, `0` for one we
+            // cannot, and the actual CSS name for the three introspection pseudo-names. Answering
+            // `1` for a shape we would not actually show would be a lie an application acts on.
+            auto answers = std::string {};
+            for (auto const& name: crispy::split(names, ','))
+            {
+                if (!answers.empty())
+                    answers += ',';
+                if (isSupportedName(name))
+                    answers += '1';
+                else if (name == "__current__")
+                    answers += _terminal->pointerShape();
+                else if (name == "__default__" || name == "__grabbed__")
+                    answers += DefaultName;
+                else
+                    answers += '0';
+            }
+            reply("\033]22;{}\033\\", answers);
+            return ApplyResult::Ok;
+        }
+
+        case Operation::Set:
+        case Operation::Push: {
+            // A list is pushed left to right, so the last name given ends up current.
+            for (auto const& name: crispy::split(names, ','))
+            {
+                if (!isSupportedName(name))
+                    continue;
+                if (operation == Operation::Push)
+                    _terminal->pushPointerShape(std::string(name));
+                else
+                    _terminal->setPointerShape(std::string(name));
+            }
+            return ApplyResult::Ok;
+        }
+
+        case Operation::Pop: _terminal->popPointerShape(); return ApplyResult::Ok;
+    }
+
+    return ApplyResult::Invalid;
+}
+
 ApplyResult Screen::processKittyClipboard(std::string_view payload)
 {
     using namespace kitty_clipboard;
@@ -6535,6 +6590,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case ITERM2: processITerm2(seq.intermediateCharacters()); return ApplyResult::Ok;
         case TEXTSIZING: return processTextSizing(seq.intermediateCharacters());
         case KITTYCLIPBOARD: return processKittyClipboard(seq.intermediateCharacters());
+        case POINTERSHAPE: return processPointerShape(seq.intermediateCharacters());
         case DESKTOPNOTIFY: return impl::DESKTOPNOTIFY(seq, *_terminal);
         case DUMPSTATE: inspect(); break;
         case SEMA: processShellIntegration(seq); break;

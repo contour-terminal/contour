@@ -401,6 +401,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     vtbackend::FontDef getFontDef() override;
     void setFontDef(vtbackend::FontDef const& fontDef) override;
     void copyToClipboard(std::string_view data) override;
+    void setPointerShape(std::string_view cssName) override;
     void openDocument(std::string_view /*fileOrUrl*/) override;
     void inspect() override;
     void notify(std::string_view title, std::string_view content) override;

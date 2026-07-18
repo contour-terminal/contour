@@ -275,6 +275,10 @@ class Terminal
         virtual FontDef getFontDef() { return {}; }
         virtual void setFontDef(FontDef const& /*fontSpec*/) {}
         virtual void copyToClipboard(std::string_view /*data*/) {}
+
+        /// The application asked for a different mouse pointer shape, by CSS name (`OSC 22`).
+        /// @see vtbackend::pointer_shape::SupportedNames.
+        virtual void setPointerShape(std::string_view /*cssName*/) {}
         /// Returns the current clipboard contents, for an OSC 52 read (`OSC 52 ; Pc ; ? ST`). The base
         /// implementation returns nothing; only a frontend that permits clipboard reading answers. Reads
         /// are additionally gated by Settings::allowClipboardRead. @see Terminal::requestClipboardRead.
@@ -346,6 +350,7 @@ class Terminal
         FontDef getFontDef() override { return {}; }
         void setFontDef(FontDef const& /*fontSpec*/) override {}
         void copyToClipboard(std::string_view /*data*/) override {}
+        void setPointerShape(std::string_view /*cssName*/) override {}
         void openDocument(std::string_view /*fileOrUrl*/) override {}
         void inspect() override {}
         void notify(std::string_view /*title*/, std::string_view /*body*/) override {}
@@ -1411,6 +1416,22 @@ class Terminal
     void setFontDef(FontDef const& fontDef);
     void copyToClipboard(std::string_view data);
 
+    // {{{ Mouse pointer shape (OSC 22)
+    /// @return the CSS name of the shape currently in effect.
+    [[nodiscard]] std::string const& pointerShape() const noexcept { return _pointerShapes.back(); }
+
+    /// Replaces the current shape without touching what is beneath it.
+    void setPointerShape(std::string shape);
+
+    /// Pushes a shape, remembering the one beneath so a later pop can restore it.
+    void pushPointerShape(std::string shape);
+
+    /// Discards the current shape, revealing the one beneath. The bottom of the stack is the
+    /// terminal's own default and is never popped -- an application that pops more than it pushed
+    /// must not be able to leave the terminal with no shape at all.
+    void popPointerShape();
+    // }}}
+
     /// Answers an OSC 52 clipboard read (`OSC 52 ; Pc ; ? ST`) by replying with the current clipboard,
     /// base64-encoded, as `OSC 52 ; Pc ; <base64> ST`. Does nothing when Settings::allowClipboardRead is
     /// false (the default), so an application cannot read the clipboard unless the user opts in.
@@ -2190,6 +2211,10 @@ class Terminal
     std::optional<ImageSize> _negotiatedImageCanvasSize;
     std::shared_ptr<SixelColorPalette> _sixelColorPalette;
     ImagePool _imagePool;
+
+    /// The mouse pointer shape stack (`OSC 22`), innermost last. Never empty: the bottom entry is
+    /// the terminal's default.
+    std::vector<std::string> _pointerShapes { std::string(pointer_shape::DefaultName) };
     ImageDecoderCallback _imageDecoder;
 
     std::vector<ColumnOffset> _tabs;

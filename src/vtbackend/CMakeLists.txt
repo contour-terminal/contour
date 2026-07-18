@@ -28,6 +28,7 @@ set(vtbackend_HEADERS
     HintModeHandler.h
     Hyperlink.h
     KittyClipboard.h
+    PointerShape.h
     KittyGraphics.h
     TextSizing.h
     Image.h
@@ -174,6 +175,7 @@ if(LIBTERMINAL_TESTING)
         MessageParser_test.cpp
         RectangularAreaChecksum_test.cpp
         KittyClipboard_test.cpp
+        PointerShape_test.cpp
         KittyGraphics_test.cpp
         TextSizing_test.cpp
         Screen_test.cpp

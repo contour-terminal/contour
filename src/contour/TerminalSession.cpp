@@ -714,6 +714,29 @@ void TerminalSession::applyPendingFontChange(bool allow, bool remember)
     _display->setFonts(newFonts);
 }
 
+void TerminalSession::setPointerShape(std::string_view cssName)
+{
+    // OSC 22 speaks CSS pointer names; the display speaks its own enum. The mapping is the whole
+    // binding between the two, and only names vtbackend advertises as supported can arrive here.
+    auto const shape = [cssName]() -> std::optional<MouseCursorShape> {
+        if (cssName == "text")
+            return MouseCursorShape::IBeam;
+        if (cssName == "pointer")
+            return MouseCursorShape::PointingHand;
+        if (cssName == "default")
+            return MouseCursorShape::Arrow;
+        if (cssName == "none")
+            return MouseCursorShape::Hidden;
+        return std::nullopt;
+    }();
+
+    if (!shape || !_display)
+        return;
+
+    // The event arrives on the parser thread; the cursor belongs to the GUI thread.
+    postToObject(_display, [display = _display, shape = *shape]() { display->setMouseCursorShape(shape); });
+}
+
 void TerminalSession::copyToClipboard(std::string_view data)
 {
     if (!_display)

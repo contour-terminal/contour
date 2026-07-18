@@ -216,6 +216,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Places @p image at the cursor, sized per the command's `c=`/`r=` or derived from its pixels.
     void renderKittyImage(kitty_graphics::Command const& command, std::shared_ptr<Image const> const& image);
 
+    /// Handles one `OSC 22` (kitty pointer shape protocol) request.
+    [[nodiscard]] ApplyResult processPointerShape(std::string_view payload);
+
     /// Handles one `OSC 5522` (kitty clipboard protocol) packet.
     [[nodiscard]] ApplyResult processKittyClipboard(std::string_view payload);
 
