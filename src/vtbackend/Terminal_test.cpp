@@ -4195,6 +4195,54 @@ TEST_CASE("Terminal.TextSelection_multiline_drag_still_takes_the_first_line_whol
              "de");
 }
 
+TEST_CASE("Terminal.selection_of_a_trivial_line_survives_a_scrolled_viewport", "[terminal]")
+{
+    // The renderer asks two questions about selection at two granularities: isSelected(CellLocation)
+    // colours a cell, and isSelected(LineOffset) decides whether a line may take the trivial fast
+    // path -- which draws it uniformly and never consults the per-cell test at all.
+    //
+    // Both overloads take GRID coordinates, but renderTrivialLine used to hand the coarse one a
+    // SCREEN offset. Unscrolled the two coincide, so this only appears once the viewport moves: a
+    // selected line asked about the wrong line, answered "not selected", and rendered unhighlighted.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(20) }, LineCount(30) };
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    mock.terminal.tick(ClockBase);
+
+    for (auto const i: std::views::iota(0, 20))
+        mock.writeToScreen("line" + std::to_string(i) + "\r\n");
+
+    // Scroll back further than text_sizing::MaxScale. The coarse test looks back that many lines
+    // for a tall block reaching down into this one, and that look-back would otherwise mask a small
+    // coordinate error by accident -- a scroll of 2 still lands inside it.
+    mock.terminal.viewport().scrollUp(LineCount(9));
+    auto const selectedGridLine = LineOffset(-9);
+
+    auto const anchor = CellLocation { .line = selectedGridLine, .column = ColumnOffset(0) };
+    mock.terminal.setSelector(
+        std::make_unique<vtbackend::LinearSelection>(mock.terminal.selectionHelper(), anchor, []() {}));
+    (void) mock.terminal.selector()->extend(
+        CellLocation { .line = selectedGridLine, .column = ColumnOffset(3) });
+    mock.terminal.selector()->complete();
+
+    mock.terminal.tick(ClockBase + 100ms);
+    mock.terminal.ensureFreshRenderBuffer();
+    auto const buffer = mock.terminal.renderBuffer();
+
+    // A selected line must NOT have been emitted as a uniform trivial line...
+    auto const trivialAtScreenLine0 =
+        std::ranges::any_of(buffer.get().lines, [](vtbackend::RenderLine const& line) {
+            return line.lineOffset == LineOffset(0);
+        });
+    CHECK_FALSE(trivialAtScreenLine0);
+
+    // ...it must have dropped to the per-cell path, where the selection colour is applied.
+    auto const cellsAtScreenLine0 =
+        std::ranges::count_if(buffer.get().cells, [](vtbackend::RenderCell const& cell) {
+            return cell.position.line == LineOffset(0);
+        });
+    CHECK(cellsAtScreenLine0 > 0);
+}
+
 // NOLINTEND(misc-const-correctness)
 
 TEST_CASE("Terminal.passive mouse tracking declines the event so the UI may act on it")

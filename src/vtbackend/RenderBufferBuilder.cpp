@@ -403,13 +403,18 @@ void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
     // because it's not really draining performance.
     // A vi yank/motion highlight range (like a selection) recolors part of the line, so a trivial
     // line intersecting it must drop to the per-cell path where makeColorsForCell() applies the
-    // yankHighlight. _highlightRange lives in grid coordinates, so translate this screen line first
-    // (matching how makeColorsForCell() queries isHighlighted() with grid coordinates).
+    // yankHighlight.
+    //
+    // BOTH the selection and the highlight live in grid coordinates, so this screen line is
+    // translated once and the translated value used for both. Passing the untranslated line to the
+    // selection test asked about the wrong line whenever the viewport was scrolled back, which sent
+    // selected trivial lines down the fast path and left them unhighlighted -- while the per-cell
+    // test right beside it (makeColorsForCell) had the coordinates right all along.
     auto const gridLine =
         _terminal->viewport()
             .translateScreenToGridCoordinate(CellLocation { .line = lineOffset, .column = ColumnOffset(0) })
             .line;
-    bool const canRenderViaSimpleLine = (!_terminal->isSelected(lineOffset) || !_includeSelection)
+    bool const canRenderViaSimpleLine = (!_terminal->isSelected(gridLine) || !_includeSelection)
                                         && !gridLineContainsCursor(lineOffset)
                                         && !_terminal->isHighlighted(gridLine);
 
