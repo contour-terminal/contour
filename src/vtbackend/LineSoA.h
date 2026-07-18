@@ -23,7 +23,18 @@ template <typename T>
 using AlignedVector = crispy::aligned_vector<T>;
 
 /// Maximum number of codepoints in a grapheme cluster (matches CompactCell::MaxCodepoints).
-inline constexpr uint8_t MaxGraphemeClusterSize = 7;
+///
+/// Sized by the longest grapheme cluster real text produces, not by a round number. The RGI emoji
+/// set reaches ten codepoints -- 👨🏻‍❤️‍💋‍👨🏻 (kiss: man, man, with skin tones) is
+/// `U+1F468 U+1F3FB ZWJ U+2764 U+FE0F ZWJ U+1F48B ZWJ U+1F468 U+1F3FB` -- and a tag-sequence flag
+/// reaches seven. A cap of 7 truncated the ten-codepoint family, which then split into two wide
+/// cells and advanced the cursor four columns instead of two; jquast's ucs-detect counted 43 such
+/// sequences.
+///
+/// 16 leaves headroom above the longest currently-defined sequence. Raising it costs nothing in
+/// layout: only @c clusterPool grows in the worst case, and no element type changes.
+inline constexpr uint8_t MaxGraphemeClusterSize = 16;
+static_assert(MaxGraphemeClusterSize <= 255, "clusterSize is a uint8_t");
 
 /// Structure-of-Arrays storage for one terminal line.
 ///

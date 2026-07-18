@@ -589,6 +589,40 @@ TEST_CASE("AppendChar.emoji_zwj_1", "[screen]")
     CHECK(U"\U0001F926\U0001F3FC\u200D\u2642\uFE0F   " == s32);
 }
 
+TEST_CASE("AppendChar.emoji_zwj_ten_codepoints", "[screen]")
+{
+    // 👨🏻‍❤️‍💋‍👨🏻 kiss: man, man, light skin tone -- ten codepoints, the longest cluster the
+    // RGI emoji set produces. It used to exceed MaxGraphemeClusterSize and be silently truncated to seven,
+    // which is what this case pins.
+    //
+    // Truncation is not merely cosmetic. Driven through a real PTY, the overflow also split the
+    // sequence into two wide cells and advanced the cursor four columns instead of two; jquast's
+    // ucs-detect counted 43 such sequences, and raising the cap took its ZWJ score from 93.29% to
+    // 96.26%. That end-to-end effect is NOT reproduced here -- writing the cluster in one call to
+    // writeToScreen keeps the cursor at two columns even when truncated -- so this case guards the
+    // capacity, not the advance.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(6) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.terminal.setMode(DECMode::AutoWrap, false);
+
+    auto const emoji =
+        u32string_view { U"\U0001F468\U0001F3FB‍❤️‍\U0001F48B‍\U0001F468\U0001F3FB" };
+    REQUIRE(emoji.size() == 10);
+    mock.writeToScreen(unicode::convert_to<char>(emoji));
+
+    auto const& c0 = screen.at(LineOffset(0), ColumnOffset(0));
+    CHECK(c0.codepoints() == emoji);
+    CHECK(c0.width() == 2);
+
+    // The whole sequence is ONE cluster: column 1 is its continuation, and nothing was written beyond.
+    CHECK(screen.at(LineOffset(0), ColumnOffset(2)).empty());
+    CHECK(screen.at(LineOffset(0), ColumnOffset(3)).empty());
+
+    // The cursor advanced two columns, not four.
+    CHECK(screen.cursor().position.column == ColumnOffset(2));
+}
+
 TEST_CASE("AppendChar.emoji_1", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
