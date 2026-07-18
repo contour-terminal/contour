@@ -237,6 +237,7 @@ constexpr inline auto SETTABNAME = FunctionDocumentation { .mnemonic = "SETTABNA
 constexpr inline auto CONEMU = FunctionDocumentation { .mnemonic = "CONEMU", .comment = "ConEmu-style notification or progress indicator" };
 constexpr inline auto DESKTOPNOTIFY = FunctionDocumentation { .mnemonic = "DESKTOPNOTIFY", .comment = "Kitty Desktop Notification." };
 constexpr inline auto ITERM2 = FunctionDocumentation { .mnemonic = "ITERM2", .comment = "iTerm2 proprietary extensions: inline images (File=) and capability reporting (Capabilities)." };
+constexpr inline auto TEXTSIZING = FunctionDocumentation { .mnemonic = "TEXTSIZING", .comment = "Kitty text sizing protocol: sized/scaled text.", .parameters = "metadata ; text" };
 
 // DEC Multi-Page Navigation (VT420)
 constexpr inline auto NP = FunctionDocumentation { .mnemonic = "NP", .comment = "Next Page", .parameters = "Pn", .description = "Moves the cursor to the home position on one of the following pages in page memory." };
@@ -869,6 +870,7 @@ constexpr inline auto SETWINTITLE       = detail::OSC(2, VTExtension::XTerm, doc
 constexpr inline auto SETXPROP          = detail::OSC(3, VTExtension::XTerm, documentation::SETXPROP);
 constexpr inline auto DESKTOPNOTIFY    = detail::OSC(99, VTExtension::Unknown, documentation::DESKTOPNOTIFY);
 constexpr inline auto ITERM2           = detail::OSC(1337, VTExtension::Unknown, documentation::ITERM2);
+constexpr inline auto TEXTSIZING       = detail::OSC(66, VTExtension::Unknown, documentation::TEXTSIZING);
 
 // NOLINTEND(readability-identifier-naming)
 // clang-format on
@@ -1131,6 +1133,7 @@ constexpr static auto allFunctionsArray() noexcept
         NOTIFY,
         DESKTOPNOTIFY,
         ITERM2,
+        TEXTSIZING,
         DUMPSTATE,
     };
     return funcs;

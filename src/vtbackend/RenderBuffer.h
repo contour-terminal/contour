@@ -68,6 +68,10 @@ struct RenderCell
     RenderAttributes attributes;
     uint8_t width = 1;
 
+    /// How many cells tall this cell's glyph is drawn (kitty text sizing protocol, `OSC 66` `s=`).
+    /// 1 for ordinary text.
+    uint8_t scale = 1;
+
     bool groupStart = false;
     bool groupEnd = false;
 };

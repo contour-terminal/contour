@@ -82,6 +82,47 @@ profiles:
     CHECK(config.reflowOnResize.value() == false);
 }
 
+TEST_CASE("Config: text scaling method loads from YAML", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+text_scaling_method: rerasterize
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+    CHECK(config.textScalingMethod.value() == vtrasterizer::GlyphScalingMethod::Rerasterize);
+}
+
+TEST_CASE("Config: text scaling method defaults to stretch", "[config]")
+{
+    // Stretch is the default because it costs nothing to rasterize and adds no atlas entries, which
+    // matters most in the case scaled text is used for: large text scrolling past the viewport.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+    CHECK(config.textScalingMethod.value() == vtrasterizer::GlyphScalingMethod::Stretch);
+}
+
+TEST_CASE("Config: an invalid text scaling method keeps the default", "[config]")
+{
+    // A typo in a visible rendering setting must not silently select something else.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+text_scaling_method: crispy-please
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+    CHECK(config.textScalingMethod.value() == vtrasterizer::GlyphScalingMethod::Stretch);
+}
+
 TEST_CASE("Config: the shell environment identifies the terminal", "[config]")
 {
     QTemporaryDir dir;

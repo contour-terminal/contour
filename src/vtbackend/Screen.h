@@ -14,6 +14,7 @@
 #include <vtbackend/MessageParser.h>
 #include <vtbackend/PromptRegion.h>
 #include <vtbackend/Sequence.h>
+#include <vtbackend/TextSizing.h>
 #include <vtbackend/VTType.h>
 
 #include <vtparser/ParserExtension.h>
@@ -214,6 +215,16 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Places @p image at the cursor, sized per the command's `c=`/`r=` or derived from its pixels.
     void renderKittyImage(kitty_graphics::Command const& command, std::shared_ptr<Image const> const& image);
 
+    /// Lays out one `OSC 66` (kitty text sizing) request.
+    [[nodiscard]] ApplyResult processTextSizing(std::string_view payload);
+
+    /// Erases the whole multi-cell block that @p position belongs to, however many rows and columns
+    /// it covers, and wherever within it @p position happens to be.
+    void eraseMulticellBlockAt(CellLocation position);
+
+    /// Writes @p text as a single cell block @p columns wide and @p scale cells tall.
+    void writeSizedText(std::u32string_view codepoints, uint8_t columns, uint8_t scale);
+
     /// Dispatches one OSC 1337 payload to the iTerm2 extension it names.
     void processITerm2(std::string_view payload);
 
@@ -225,6 +236,12 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
   public:
     // }}}
+
+    /// @return the multi-cell block covering @p position, or nullopt when that cell stands alone.
+    ///
+    /// One authority for "which cells belong together", so that everything treating a block as
+    /// indivisible -- erasing it, highlighting it -- agrees on its extent.
+    [[nodiscard]] std::optional<MulticellBlock> multicellBlockAt(CellLocation position) const noexcept;
 
     void writeTextFromExternal(std::string_view text);
 

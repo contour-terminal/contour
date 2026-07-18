@@ -2171,6 +2171,16 @@ namespace
                 text += '\n';
                 currentLine.clear();
             }
+            // A cell that only continues the one to its left carries no text of its own -- its
+            // codepoint is 0 -- so without this it would fall into the empty-cell branch below and
+            // copy as a SPACE. Selecting 中a would yield "中 a", and a six-column text-sizing block
+            // would trail five spaces. kitty skips such cells outright; so do we.
+            if (cell.isFlagEnabled(CellFlag::WideCharContinuation))
+            {
+                lastColumn = pos.column;
+                return;
+            }
+
             if (cell.empty())
                 currentLine += ' ';
             else
@@ -4246,6 +4256,56 @@ optional<CellLocation> Terminal::searchReverse(CellLocation searchPosition)
 
     screenUpdated();
     return matchLocation;
+}
+
+bool Terminal::isSelected(CellLocation coord) const noexcept
+{
+    if (!_selection || _selection->state() == Selection::State::Waiting)
+        return false;
+
+    if (_selection->contains(coord))
+        return true;
+
+    // The cell itself is outside the selection -- but if it belongs to a block whose other cells are
+    // inside, it is selected too. kitty expands its selection mask over a block's whole rectangle
+    // (apply_selection / xrange_for_iteration_with_multicells) for the same reason.
+    //
+    // Reached only while a selection is live, and only for cells the selection did not already
+    // cover, so ordinary text pays a grid lookup that a trivial line answers immediately.
+    auto const block = currentScreen().multicellBlockAt(coord);
+    if (!block)
+        return false;
+
+    for (auto const row: std::views::iota(0, block->rows))
+        for (auto const column: std::views::iota(0, block->columns))
+            if (_selection->contains(
+                    CellLocation { .line = block->origin.line + LineOffset::cast_from(row),
+                                   .column = block->origin.column + ColumnOffset::cast_from(column) }))
+                return true;
+
+    return false;
+}
+
+bool Terminal::isSelected(LineOffset line) const noexcept
+{
+    if (!_selection || _selection->state() == Selection::State::Waiting)
+        return false;
+
+    if (_selection->containsLine(line))
+        return true;
+
+    // A block whose head sits on a selected line above reaches down into this one, and the whole
+    // block is selected. Saying "no" here would send this line down the trivial fast path, which
+    // renders it uniformly and never consults the per-cell test that knows about the block -- so the
+    // highlight would stop at the block's first row.
+    //
+    // A block spans at most text_sizing::MaxScale lines, which bounds the look-back. Answering "yes"
+    // for a line that turns out to hold no block only costs it the per-cell path for one frame.
+    for (auto const above: std::views::iota(1, static_cast<int>(text_sizing::MaxScale)))
+        if (_selection->containsLine(line - LineOffset::cast_from(above)))
+            return true;
+
+    return false;
 }
 
 bool Terminal::isHighlighted(CellLocation cell) const noexcept // NOLINT(bugprone-exception-escape)

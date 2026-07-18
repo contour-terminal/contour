@@ -9,6 +9,7 @@
 #include <vtrasterizer/CursorRenderer.h>
 #include <vtrasterizer/DecorationRenderer.h>
 #include <vtrasterizer/Decorator.h>
+#include <vtrasterizer/GlyphScaling.h>
 #include <vtrasterizer/GridMetrics.h>
 #include <vtrasterizer/ImageRenderer.h>
 #include <vtrasterizer/RenderTarget.h>
@@ -65,7 +66,8 @@ class Renderer
              crispy::lru_capacity atlasTileCount,
              bool atlasDirectMapping,
              Decorator hyperlinkNormal,
-             Decorator hyperlinkHover);
+             Decorator hyperlinkHover,
+             GlyphScalingMethod textScalingMethod = GlyphScalingMethod::Stretch);
 
     /// Returns the live cell size from the grid metrics.
     ///

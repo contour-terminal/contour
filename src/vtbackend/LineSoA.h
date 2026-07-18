@@ -61,6 +61,12 @@ struct LineSoA
     /// East Asian Width display width per cell (1 or 2 columns).
     AlignedVector<uint8_t> widths;
 
+    /// Per-cell vertical scale in cells, from the kitty text sizing protocol (`OSC 66` `s=`).
+    ///
+    /// 1 for ordinary text, which is why an all-zero line is still materialized to 1. Kept beside
+    /// `widths` rather than folded into CellFlags because it is a 1..7 magnitude, not a flag.
+    AlignedVector<uint8_t> scales;
+
     // --- Tier 2: Warm — SGR "pen" attributes, always read/written together ---
 
     /// Graphics attributes per cell (foreground, background, underline color + flags).

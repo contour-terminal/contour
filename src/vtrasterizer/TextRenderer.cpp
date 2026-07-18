@@ -253,7 +253,8 @@ TextRenderer::TextRenderer(GridMetrics const& gridMetrics,
                            text::shaper& textShaper,
                            FontDescriptions& fontDescriptions,
                            FontKeys const& fontKeys,
-                           TextRendererEvents& eventHandler):
+                           TextRendererEvents& eventHandler,
+                           GlyphScaler const& glyphScaler):
     Renderable { gridMetrics },
     _textClusterGrouper { *this },
     _textRendererEvents { eventHandler },
@@ -263,8 +264,18 @@ TextRenderer::TextRenderer(GridMetrics const& gridMetrics,
                                                    crispy::lru_capacity { TextShapingCacheSize },
                                                    "Text shaping cache") },
     _textShaper { textShaper },
-    _boxDrawingRenderer { gridMetrics }
+    _boxDrawingRenderer { gridMetrics },
+    _glyphScaler { &glyphScaler }
 {
+}
+
+GlyphScaler const& TextRenderer::defaultGlyphScaler() noexcept
+{
+    // Stretching is the default because it costs nothing at rasterization time and nothing extra in
+    // the atlas, which matters most in the case scaled text is actually used for -- large text
+    // scrolling past the viewport. @see GlyphScalingMethod.
+    static auto const scaler = StretchingGlyphScaler {};
+    return scaler;
 }
 
 void TextRenderer::inspect(ostream& textOutput) const
@@ -442,7 +453,8 @@ void TextRenderer::renderCell(vtbackend::RenderCell const& cell)
                                    cell.codepoints,
                                    cell.attributes.foregroundColor,
                                    makeTextStyle(cell.attributes.flags),
-                                   cell.attributes.lineFlags);
+                                   cell.attributes.lineFlags,
+                                   cell.scale);
 
     if (cell.groupEnd)
         _textClusterGrouper.forceGroupEnd();
@@ -547,6 +559,30 @@ crispy::point adjustPenForLineFlags(vtbackend::LineFlags lineFlags,
     return pen;
 }
 
+/// Applies a glyph scale adjustment on top of whatever the line flags already did.
+///
+/// The two compose: a scaled cell on a double-width line is stretched by both. The mechanism is the
+/// same one DECDHL uses -- widen the tile's target rectangle and its x offset, leaving the source
+/// texture alone -- which is what makes the Stretch strategy free at rasterization time.
+Renderable::AtlasTileAttributes adjustTileAttributesForScale(
+    GlyphScaleAdjustment adjustment, Renderable::AtlasTileAttributes const& originalAttributes)
+{
+    if (adjustment.widthFactor <= 1 && adjustment.heightFactor <= 1)
+        return originalAttributes;
+
+    auto attributesCopy = originalAttributes;
+    auto const currentWidth = unbox(attributesCopy.metadata.targetSize.width);
+    auto const currentHeight = unbox(attributesCopy.metadata.targetSize.height);
+
+    attributesCopy.metadata.targetSize.width =
+        vtbackend::Width::cast_from(currentWidth * adjustment.widthFactor);
+    attributesCopy.metadata.targetSize.height =
+        vtbackend::Height::cast_from(currentHeight * adjustment.heightFactor);
+    attributesCopy.metadata.x.value *= static_cast<int>(adjustment.widthFactor);
+
+    return attributesCopy;
+}
+
 Renderable::AtlasTileAttributes adjustTileAttributesForLineFlags(
     vtbackend::LineFlags lineFlags, Renderable::AtlasTileAttributes const& originalAttributes)
 {
@@ -585,7 +621,8 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
                                    vtbackend::CellLocation initialPenPosition,
                                    TextStyle style,
                                    vtbackend::RGBColor color,
-                                   vtbackend::LineFlags lineFlags)
+                                   vtbackend::LineFlags lineFlags,
+                                   uint8_t scale)
 {
     if (codepoints.empty())
         return;
@@ -603,11 +640,25 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
     auto const advanceScale = lineFlags.test(LineFlag::DoubleWidth) ? 2 : 1;
     auto const cellWidth = unbox<int>(_gridMetrics.cellSize.width);
 
+    // How this group's glyphs are enlarged. Hoisted out of the loop: it is a property of the group,
+    // and both branches below need it.
+    auto const adjustment = _glyphScaler->adjustmentFor(scale);
+
     for (auto const& glyphPosition: glyphPositions)
     {
-        if (auto const* attributes = ensureRasterizedIfDirectMapped(glyphPosition.glyph))
+        // The direct-mapped fast path serves tiles reserved at the ORDINARY cell size, so it cannot
+        // answer a request for a re-rasterized glyph; such a glyph falls through to the general path
+        // and is rasterized at its own size.
+        auto const* const directMapped = adjustment.requiresRerasterization
+                                             ? nullptr
+                                             : ensureRasterizedIfDirectMapped(glyphPosition.glyph);
+        if (auto const* attributes = directMapped)
         {
-            auto const attributesCopy = adjustTileAttributesForLineFlags(lineFlags, *attributes);
+            auto const attributesCopy =
+                adjustment.requiresRerasterization
+                    ? adjustTileAttributesForLineFlags(lineFlags, *attributes)
+                    : adjustTileAttributesForScale(adjustment,
+                                                   adjustTileAttributesForLineFlags(lineFlags, *attributes));
             auto pen1 = applyGlyphPositionToPen(pen, attributesCopy, glyphPosition);
             pen1 = adjustPenForLineFlags(lineFlags,
                                          _gridMetrics,
@@ -623,13 +674,24 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
             continue;
         }
 
-        auto const hash = hashGlyphKeyAndPresentation(glyphPosition.glyph, glyphPosition.presentation);
+        // A re-rasterizing strategy asks the font for the glyph at `scale x` the point size, so the
+        // outline is re-hinted rather than magnified. The hash already folds in size.pt, so each
+        // (glyph, scale) pair lands in its own atlas tile without any change here.
+        auto scaledGlyph = glyphPosition.glyph;
+        if (adjustment.requiresRerasterization)
+            scaledGlyph.size.pt *= static_cast<double>(adjustment.heightFactor);
+
+        auto const hash = hashGlyphKeyAndPresentation(scaledGlyph, glyphPosition.presentation);
         AtlasTileAttributes const* attributes =
-            getOrCreateRasterizedMetadata(hash, glyphPosition.glyph, glyphPosition.presentation);
+            getOrCreateRasterizedMetadata(hash, scaledGlyph, glyphPosition.presentation);
 
         if (attributes)
         {
-            auto const attributesCopy = adjustTileAttributesForLineFlags(lineFlags, *attributes);
+            auto const attributesCopy =
+                adjustment.requiresRerasterization
+                    ? adjustTileAttributesForLineFlags(lineFlags, *attributes)
+                    : adjustTileAttributesForScale(adjustment,
+                                                   adjustTileAttributesForLineFlags(lineFlags, *attributes));
             auto pen1 = applyGlyphPositionToPen(pen, attributesCopy, glyphPosition);
             pen1 = adjustPenForLineFlags(lineFlags,
                                          _gridMetrics,
@@ -639,42 +701,31 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
 
             renderRasterizedGlyph(pen1, color, attributesCopy);
 
-            auto xOffset = unbox(textureAtlas().tileSize().width);
-            while (AtlasTileAttributes const* subAttribs = textureAtlas().try_get(hash * xOffset))
+            // A glyph wider than one atlas tile was sliced at rasterization time; the head tile was
+            // just drawn, and the remaining slices follow. They are parts of the SAME glyph, so
+            // every enlargement that applied to the head applies to them identically -- the line
+            // flags AND the cell scale.
+            //
+            // Each slice is placed where the previous one ENDED rather than at a re-derived
+            // multiple of the cell width. Stepping by the width actually drawn is what keeps the
+            // slices contiguous no matter how many multipliers are in play, and is why adding the
+            // scale here needed no offset arithmetic of its own.
+            auto const adjustSlice = [&](AtlasTileAttributes const& slice) {
+                auto const withLineFlags = adjustTileAttributesForLineFlags(lineFlags, slice);
+                return adjustment.requiresRerasterization
+                           ? withLineFlags
+                           : adjustTileAttributesForScale(adjustment, withLineFlags);
+            };
+
+            auto sliceX = pen1.x + unbox<int>(attributesCopy.metadata.targetSize.width);
+            auto sliceKey = unbox(textureAtlas().tileSize().width);
+            while (AtlasTileAttributes const* subAttribs = textureAtlas().try_get(hash * sliceKey))
             {
-                auto subAttribsCopy = *subAttribs;
-                auto const subWidth = unbox(subAttribsCopy.metadata.targetSize.width)
-                                          ? unbox(subAttribsCopy.metadata.targetSize.width)
-                                          : unbox(subAttribsCopy.bitmapSize.width);
-
-                if (lineFlags.test(LineFlag::DoubleHeightTop))
-                {
-                    subAttribsCopy.metadata.targetSize.width = vtbackend::Width::cast_from(subWidth * 2);
-                    subAttribsCopy.metadata.x.value *= 2;
-                    subAttribsCopy.metadata.normalizedLocation.height /= 2.0f;
-                }
-                else if (lineFlags.test(LineFlag::DoubleHeightBottom))
-                {
-                    subAttribsCopy.metadata.targetSize.width = vtbackend::Width::cast_from(subWidth * 2);
-                    subAttribsCopy.metadata.x.value *= 2;
-                    subAttribsCopy.metadata.normalizedLocation.y +=
-                        subAttribsCopy.metadata.normalizedLocation.height / 2.0f;
-                    subAttribsCopy.metadata.normalizedLocation.height /= 2.0f;
-                }
-                else if (lineFlags.test(LineFlag::DoubleWidth))
-                {
-                    subAttribsCopy.metadata.targetSize.width = vtbackend::Width::cast_from(subWidth * 2);
-                    subAttribsCopy.metadata.x.value *= 2;
-                }
-
-                auto const drawXOffset =
-                    lineFlags.test(LineFlag::DoubleWidth) ? (int(xOffset) * 2) : int(xOffset);
-
-                renderTile(atlas::RenderTile::X { pen1.x + drawXOffset },
-                           atlas::RenderTile::Y { pen1.y },
-                           color,
-                           subAttribsCopy);
-                xOffset += unbox(textureAtlas().tileSize().width);
+                auto const subAttribsCopy = adjustSlice(*subAttribs);
+                renderTile(
+                    atlas::RenderTile::X { sliceX }, atlas::RenderTile::Y { pen1.y }, color, subAttribsCopy);
+                sliceX += unbox<int>(subAttribsCopy.metadata.targetSize.width);
+                sliceKey += unbox(textureAtlas().tileSize().width);
             }
         }
 

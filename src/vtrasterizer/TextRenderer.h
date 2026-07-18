@@ -7,6 +7,7 @@
 
 #include <vtrasterizer/BoxDrawingRenderer.h>
 #include <vtrasterizer/FontDescriptions.h>
+#include <vtrasterizer/GlyphScaling.h>
 #include <vtrasterizer/RenderTarget.h>
 #include <vtrasterizer/TextClusterGrouper.h>
 #include <vtrasterizer/TextureAtlas.h>
@@ -19,6 +20,8 @@
 #include <crispy/StrongLRUHashtable.h>
 #include <crispy/point.h>
 #include <crispy/size.h>
+
+#include <gsl/pointers>
 
 #include <libunicode/convert.h>
 #include <libunicode/run_segmenter.h>
@@ -60,7 +63,11 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
                  text::shaper& textShaper,
                  FontDescriptions& fontDescriptions,
                  FontKeys const& fontKeys,
-                 TextRendererEvents& eventHandler);
+                 TextRendererEvents& eventHandler,
+                 GlyphScaler const& glyphScaler = defaultGlyphScaler());
+
+    /// The strategy used when no other is injected. @see GlyphScalingMethod.
+    [[nodiscard]] static GlyphScaler const& defaultGlyphScaler() noexcept;
 
     void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
     void setTextureAtlas(TextureAtlas& atlas) override;
@@ -99,7 +106,8 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
                          vtbackend::CellLocation initialPenPosition,
                          TextStyle style,
                          vtbackend::RGBColor color,
-                         vtbackend::LineFlags flags) override;
+                         vtbackend::LineFlags flags,
+                         uint8_t scale) override;
 
     bool renderBoxDrawingCell(vtbackend::CellLocation position,
                               char32_t codepoint,
@@ -184,6 +192,11 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     // sub-renderer
     //
     BoxDrawingRenderer _boxDrawingRenderer;
+
+    /// How a glyph is enlarged for a scaled text-sizing block. Injected so that a second strategy --
+    /// re-rasterizing at the larger point size for a crisper result -- is a new implementation
+    /// rather than an edit here. @see GlyphScaler.
+    gsl::not_null<GlyphScaler const*> _glyphScaler;
 };
 
 } // namespace vtrasterizer

@@ -2,6 +2,8 @@
 #pragma once
 
 #include <contour/Actions.h>
+
+#include <vtrasterizer/GlyphScaling.h>
 #include <contour/ConfigDocumentation.h>
 
 #if defined(CONTOUR_FRONTEND_GUI)
@@ -1097,6 +1099,12 @@ struct Config
     ConfigEntry<bool, documentation::TabSwitchOnHorizontalWheel> tabSwitchOnHorizontalWheel { true };
     ConfigEntry<bool, documentation::GuiConfigLocked> guiConfigLocked { false };
     ConfigEntry<contour::config::GuiTheme, documentation::Theme> theme { contour::config::GuiTheme::System };
+
+    /// How a glyph is enlarged for scaled text (kitty text sizing protocol, OSC 66).
+    /// @see vtrasterizer::GlyphScalingMethod for what each method costs.
+    ConfigEntry<vtrasterizer::GlyphScalingMethod, documentation::TextScalingMethod> textScalingMethod {
+        vtrasterizer::GlyphScalingMethod::Stretch
+    };
     ConfigEntry<vtbackend::Modifiers, documentation::BypassMouseProtocolModifiers>
         bypassMouseProtocolModifiers { vtbackend::Modifier::Shift };
     ConfigEntry<vtbackend::Modifiers, documentation::MouseBlockSelectionModifiers>
@@ -1344,6 +1352,9 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, crispy::strong_hashtable_size& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::MaxHistoryLineCount& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, crispy::lru_capacity& where);
+    void loadFromEntry(YAML::Node const& node,
+                       std::string const& entry,
+                       vtrasterizer::GlyphScalingMethod& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::CursorDisplay& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::BlinkStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::ScreenTransitionStyle& where);
@@ -2220,6 +2231,17 @@ struct std::formatter<contour::config::TabBarVisibility>: formatter<std::string_
             case contour::config::TabBarVisibility::Multiple: name = "Multiple"; break;
         }
         return formatter<std::string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtrasterizer::GlyphScalingMethod>: formatter<std::string_view>
+{
+    auto format(vtrasterizer::GlyphScalingMethod value, auto& ctx) const
+    {
+        // nameOf() is the single source of truth for these names -- the config reader parses the
+        // same strings, so a new method cannot be formatted one way and parsed another.
+        return formatter<std::string_view>::format(vtrasterizer::nameOf(value), ctx);
     }
 };
 

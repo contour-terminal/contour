@@ -20,8 +20,6 @@
 #include <crispy/Comparison.h>
 #include <crispy/algorithm.h>
 #include <crispy/base64.h>
-
-#include <charconv>
 #include <crispy/escape.h>
 #include <crispy/size.h>
 #include <crispy/times.h>
@@ -30,10 +28,12 @@
 #include <libunicode/convert.h>
 #include <libunicode/emoji_segmenter.h>
 #include <libunicode/grapheme_segmenter.h>
+#include <libunicode/utf8_grapheme_segmenter.h>
 #include <libunicode/word_segmenter.h>
 
 #include <algorithm>
 #include <cassert>
+#include <charconv>
 #include <cstring>
 #include <iostream>
 #include <iterator>
@@ -871,11 +871,21 @@ void Screen::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
         cell.reset();
 #endif
 
+    // A cell claimed by a scaled block on a line ABOVE belongs to that block; writing here destroys
+    // it, exactly as writing into a horizontal continuation does.
+    if (cell.isFlagEnabled(CellFlag::MulticellContinuation))
+        eraseMulticellBlockAt(_cursor.position);
+
     if (cell.isFlagEnabled(CellFlag::WideCharContinuation) && _cursor.position.column > ColumnOffset(0))
     {
-        // Erase the left half of the wide char.
-        auto prevCell = line.useCellAt(_cursor.position.column - 1);
-        prevCell.reset(_cursor.graphicsRendition);
+        // Writing into the middle of a multi-column cell destroys the whole cell, not just the
+        // column being written -- half a glyph is not a thing that can be drawn.
+        //
+        // This used to step back exactly ONE column, which is correct only because a wide character
+        // is exactly two columns. A text-sizing block (OSC 66) can be up to 49, and clearing its
+        // second column while leaving the head and the rest behind leaves a corrupt block. Walk back
+        // to the head and clear the entire run, as kitty's nuke_multicell_char_at() does.
+        eraseMulticellBlockAt(_cursor.position);
     }
 
     auto const oldWidth = cell.width();
@@ -4556,22 +4566,22 @@ void Screen::reportITerm2Capabilities()
     // Uw the Unicode version the width tables come from, and Ts a bitmask (1 = title stacks,
     // 2 = title setting).
     auto capabilities = std::string {};
-    capabilities += "T2";  // 24-bit colour, full sequences
-    capabilities += "Cw";  // clipboard writable (OSC 52)
-    capabilities += "Lr";  // DECSLRM
-    capabilities += "M";   // mouse
-    capabilities += "Sc7"; // DECSCUSR modes 1-6 plus reset
-    capabilities += "U";   // basic Unicode
+    capabilities += "T2";   // 24-bit colour, full sequences
+    capabilities += "Cw";   // clipboard writable (OSC 52)
+    capabilities += "Lr";   // DECSLRM
+    capabilities += "M";    // mouse
+    capabilities += "Sc7";  // DECSCUSR modes 1-6 plus reset
+    capabilities += "U";    // basic Unicode
     capabilities += "Uw17"; // width tables from Unicode 17
-    capabilities += "Ts3"; // title stacks and title setting
-    capabilities += "B";   // bracketed paste
-    capabilities += "F";   // focus reporting
-    capabilities += "Gs";  // strikethrough
-    capabilities += "Go";  // overline
-    capabilities += "Sy";  // synchronized output (mode 2026)
-    capabilities += "H";   // hyperlinks (OSC 8)
-    capabilities += "No";  // notifications (OSC 99)
-    capabilities += "Sx";  // sixel
+    capabilities += "Ts3";  // title stacks and title setting
+    capabilities += "B";    // bracketed paste
+    capabilities += "F";    // focus reporting
+    capabilities += "Gs";   // strikethrough
+    capabilities += "Go";   // overline
+    capabilities += "Sy";   // synchronized output (mode 2026)
+    capabilities += "H";    // hyperlinks (OSC 8)
+    capabilities += "No";   // notifications (OSC 99)
+    capabilities += "Sx";   // sixel
 
     reply("\033]1337;Capabilities={}\a", capabilities);
 }
@@ -4643,6 +4653,195 @@ void Screen::renderITerm2InlineImage(std::string_view arguments)
                        /*autoScroll*/ true,
                        /*updateCursor*/ true,
                        ImageLayer::Above);
+}
+
+ApplyResult Screen::processTextSizing(std::string_view payload)
+{
+    auto const parsed = text_sizing::parseRequest(payload);
+    if (!parsed)
+        return ApplyResult::Invalid;
+    auto const& request = *parsed;
+
+    if (request.text.empty())
+        return ApplyResult::Ok;
+
+    // An explicit `w` states the size the application wants regardless of what the text measures, so
+    // the whole run becomes ONE cell block of that width. Without it, each cluster the text would
+    // normally occupy becomes a `scale`-wide block of its own.
+    if (request.width != 0)
+    {
+        auto const columns = static_cast<uint8_t>(
+            std::min<unsigned>(request.columnsFor(0), std::numeric_limits<uint8_t>::max()));
+        writeSizedText(unicode::convert_to<char32_t>(request.text), columns, request.scale);
+        return ApplyResult::Ok;
+    }
+
+    // No explicit width: measure each grapheme cluster and scale it.
+    auto segmenter = unicode::utf8_grapheme_segmenter(request.text);
+    for (auto const& cluster: segmenter)
+    {
+        auto const natural = unicode::grapheme_cluster_width(cluster);
+        auto const columns = static_cast<uint8_t>(
+            std::min<unsigned>(request.columnsFor(natural), std::numeric_limits<uint8_t>::max()));
+        writeSizedText(cluster, columns, request.scale);
+    }
+    return ApplyResult::Ok;
+}
+
+std::optional<MulticellBlock> Screen::multicellBlockAt(CellLocation position) const noexcept
+{
+    // A line carrying a block is never trivial -- its cells hold continuation flags and a scale --
+    // so a trivial line answers "no block here" without touching per-cell storage it does not have.
+    auto const continuesInto = [this](CellLocation loc, CellFlag flag) noexcept {
+        auto const& line = grid().lineAt(loc.line);
+        return !line.isTrivialBuffer()
+               && ConstCellProxy(line.storage(), unbox<size_t>(loc.column)).isFlagEnabled(flag);
+    };
+
+    // Walk to the block's head: up while this cell continues a block above, then left while it
+    // continues one to its left. The axes are independent -- every column of a scaled block's
+    // second row carries the vertical flag.
+    auto origin = position;
+    while (origin.line > LineOffset(0) && continuesInto(origin, CellFlag::MulticellContinuation))
+        --origin.line;
+    while (origin.column > ColumnOffset(0) && continuesInto(origin, CellFlag::WideCharContinuation))
+        --origin.column;
+
+    auto const& headLine = grid().lineAt(origin.line);
+    if (headLine.isTrivialBuffer())
+        return std::nullopt;
+
+    auto const head = ConstCellProxy(headLine.storage(), unbox<size_t>(origin.column));
+    auto const columns = std::max(1, static_cast<int>(head.width()));
+    auto const rows = std::max(1, static_cast<int>(head.scale()));
+    if (columns == 1 && rows == 1)
+        return std::nullopt;
+
+    return MulticellBlock { .origin = origin, .columns = columns, .rows = rows };
+}
+
+void Screen::eraseMulticellBlockAt(CellLocation position)
+{
+    // Half a glyph is not a thing that can be drawn, so touching any part of a block destroys all of
+    // it. kitty's nuke_multicell_char_at() does the same.
+    auto const block = multicellBlockAt(position);
+    if (!block)
+        return;
+
+    for (auto const row: std::views::iota(0, block->rows))
+    {
+        auto const lineOffset = block->origin.line + LineOffset::cast_from(row);
+        if (lineOffset >= boxed_cast<LineOffset>(pageSize().lines))
+            break;
+        auto& target = grid().lineAt(lineOffset);
+        for (auto const i: std::views::iota(0, block->columns))
+        {
+            auto const column = block->origin.column + ColumnOffset::cast_from(i);
+            if (column > lastWritableColumn())
+                break;
+            target.useCellAt(column).reset(_cursor.graphicsRendition);
+        }
+    }
+}
+
+void Screen::writeSizedText(std::u32string_view codepoints, uint8_t columns, uint8_t scale)
+{
+    if (columns == 0)
+        return;
+
+    // A block wider than the line can never be placed, so it is dropped rather than clipped -- a
+    // clipped block is a different size from the one the application asked for. kitty drops it too.
+    auto const lineWidth = lastWritableColumn() - margin().horizontal.from + 1;
+    if (ColumnOffset::cast_from(columns) > lineWidth)
+        return;
+
+    // A block that merely does not fit *here* moves rather than splits. With autowrap it goes to the
+    // next line; without it, it is placed flush against the right edge, which is what kitty's
+    // move_cursor_past_multicell() does when DECAWM is off.
+    if (_cursor.position.column + ColumnOffset::cast_from(columns - 1) > lastWritableColumn())
+    {
+        if (_terminal->isModeEnabled(DECMode::AutoWrap))
+            linefeed(margin().horizontal.from);
+        else
+            _cursor.position.column = lastWritableColumn() - ColumnOffset::cast_from(columns - 1);
+    }
+
+    if (codepoints.empty())
+        return;
+
+    // The cells this block is about to claim may already belong to blocks on screen -- a run that
+    // wrapped lands on the very row the previous run's blocks reach down into. Each of those is
+    // destroyed WHOLE before this one takes their space; overwriting only the cells that overlap
+    // would leave the old block's head behind, still describing a body that is gone.
+    //
+    // This is the same rule the ordinary write path applies to the single cell it touches. @see
+    // writeText. A block covers up to MaxWidth * MaxScale columns and MaxScale rows, so the walk is
+    // bounded by the protocol, and it is reached only on an `OSC 66` write.
+    for (auto const row: std::views::iota(0, static_cast<int>(std::max<uint8_t>(scale, 1))))
+    {
+        auto const lineOffset = _cursor.position.line + LineOffset::cast_from(row);
+        if (lineOffset >= boxed_cast<LineOffset>(pageSize().lines))
+            break;
+        for (auto const i: std::views::iota(0, static_cast<int>(columns)))
+        {
+            auto const column = _cursor.position.column + ColumnOffset::cast_from(i);
+            if (column > lastWritableColumn())
+                break;
+            eraseMulticellBlockAt(CellLocation { .line = lineOffset, .column = column });
+        }
+    }
+
+    auto& line = currentLine();
+    auto cell = line.useCellAt(_cursor.position.column);
+    cell.write(_cursor.graphicsRendition, codepoints[0], columns, _cursor.hyperlink);
+    for (size_t i = 1; i < codepoints.size(); ++i)
+        (void) cell.appendCharacter(codepoints[i]);
+
+    // appendCharacter re-measures the cluster from its codepoints, which would undo the size the
+    // application explicitly asked for -- so the width is restored afterwards, not before.
+    cell.setWidth(columns);
+    cell.setScale(scale);
+
+    auto const sgr = _cursor.graphicsRendition.with(CellFlag::WideCharContinuation);
+    for (uint8_t i = 1; i < columns; ++i)
+    {
+        auto continuation = line.useCellAt(_cursor.position.column + ColumnOffset::cast_from(i));
+        continuation.reset(sgr, _cursor.hyperlink);
+        continuation.setScale(scale);
+    }
+
+    // A scaled block is `scale` cells TALL as well as `columns` wide -- the first thing in this grid
+    // that occupies more than one line. The rows beneath are claimed so that nothing else can be
+    // written into them and so that erasing any part of the block finds the whole of it.
+    for (uint8_t row = 1; row < scale; ++row)
+    {
+        auto const lineOffset = _cursor.position.line + LineOffset::cast_from(row);
+        if (lineOffset >= boxed_cast<LineOffset>(pageSize().lines))
+            break;
+        auto& below = grid().lineAt(lineOffset);
+        for (uint8_t i = 0; i < columns; ++i)
+        {
+            auto continuation = below.useCellAt(_cursor.position.column + ColumnOffset::cast_from(i));
+            continuation.reset(sgr.with(CellFlag::MulticellContinuation), _cursor.hyperlink);
+            continuation.setScale(scale);
+        }
+    }
+
+    _lastCursorPosition = _cursor.position;
+    _terminal->markCellDirty(_cursor.position);
+
+    // The cursor may not step past the last column -- verifyState() requires it to stay addressable.
+    // A block ending exactly at the edge therefore leaves the cursor on the edge with the wrap
+    // deferred, exactly as an ordinary write does. @see clearAndAdvance.
+    auto const landing = _cursor.position.column + ColumnOffset::cast_from(columns);
+    if (landing <= lastWritableColumn())
+        _cursor.position.column = landing;
+    else
+    {
+        _cursor.position.column = lastWritableColumn();
+        if (_terminal->isModeEnabled(DECMode::AutoWrap))
+            _cursor.wrapPending = true;
+    }
 }
 
 void Screen::processAPC(std::string_view body)
@@ -6248,6 +6447,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case CONEMU: return impl::CONEMU(seq, *this);
         case NOTIFY: return impl::NOTIFY(seq, *this);
         case ITERM2: processITerm2(seq.intermediateCharacters()); return ApplyResult::Ok;
+        case TEXTSIZING: return processTextSizing(seq.intermediateCharacters());
         case DESKTOPNOTIFY: return impl::DESKTOPNOTIFY(seq, *_terminal);
         case DUMPSTATE: inspect(); break;
         case SEMA: processShellIntegration(seq); break;

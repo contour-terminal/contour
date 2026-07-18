@@ -332,6 +332,18 @@ namespace
               },
               [](QVariant const& v) { return v.toString().toStdString(); },
               { "system", "dark", "light" } },
+            { "text_scaling_method",
+              "Scaled text quality",
+              "How a glyph is enlarged when an application asks for scaled text. Stretch is free but "
+              "softens at large sizes; rerasterize stays crisp at the cost of memory and rasterization.",
+              "enum",
+              // Reuse the std::formatter<GlyphScalingMethod>, which formats via nameOf() -- the same
+              // source of truth the config reader parses, so the two cannot drift apart.
+              [](config::Config const& c) {
+                  return QVariant(QString::fromStdString(std::format("{}", c.textScalingMethod.value())));
+              },
+              [](QVariant const& v) { return v.toString().toStdString(); },
+              { "stretch", "rerasterize" } },
         };
         return descriptors;
     }

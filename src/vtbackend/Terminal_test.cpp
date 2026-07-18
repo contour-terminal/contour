@@ -1406,6 +1406,25 @@ TEST_CASE("Terminal.UnderlineStyleClearing", "[terminal]")
     CHECK(!screen.at(LineOffset(0), ColumnOffset(11)).isFlagEnabled(CellFlag::Italic));
 }
 
+TEST_CASE("Terminal.selection_does_not_pad_wide_characters", "[terminal]")
+{
+    // A wide character occupies two cells: a head carrying the text, and a continuation whose
+    // codepoint is 0. Copying must yield the character ONCE. Treating the continuation as an empty
+    // cell turns it into a space, so every CJK selection comes back padded -- and a multi-column
+    // text-sizing block would trail one space per extra column.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(1), ColumnCount(6) } };
+    mock.writeToScreen("\u4e2dab");
+
+    mock.terminal.setSelector(std::make_unique<vtbackend::LinearSelection>(
+        mock.terminal.selectionHelper(), CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) }, []() {
+        }));
+    (void) mock.terminal.selector()->extend(CellLocation { .line = LineOffset(0), .column = ColumnOffset(3) });
+    mock.terminal.selector()->complete();
+
+    // Not "\u4e2d ab" -- the space between the wide char and 'a' is the bug.
+    CHECK(mock.terminal.extractSelectionText() == "\u4e2dab");
+}
+
 TEST_CASE("Terminal.CurlyUnderline", "[terminal]")
 {
     auto const now = chrono::steady_clock::now();

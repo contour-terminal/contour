@@ -217,6 +217,30 @@ constexpr bool operator<(CellLocation location, PageSize pageSize) noexcept
            && location.column < boxed_cast<ColumnOffset>(pageSize.columns);
 }
 
+/// A rectangle of cells that form one indivisible unit -- a wide character, or a block laid out by
+/// the kitty text sizing protocol (`OSC 66`).
+///
+/// Half a glyph is not a thing that can be drawn, so a block is erased, highlighted and copied as a
+/// whole. This names its extent so that everything enforcing that agrees on what "the whole" is.
+struct MulticellBlock
+{
+    /// The block's top-left cell -- the one that actually holds the text.
+    CellLocation origin;
+
+    /// How many columns the block spans, at least 1.
+    int columns = 1;
+
+    /// How many lines the block spans, at least 1.
+    int rows = 1;
+
+    /// @return whether @p position falls inside this block.
+    [[nodiscard]] constexpr bool contains(CellLocation position) const noexcept
+    {
+        return position.line >= origin.line && unbox(position.line) < unbox(origin.line) + rows
+               && position.column >= origin.column && unbox(position.column) < unbox(origin.column) + columns;
+    }
+};
+
 struct CellLocationRange
 {
     CellLocation first;

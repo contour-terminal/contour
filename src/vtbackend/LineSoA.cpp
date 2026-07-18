@@ -17,6 +17,7 @@ void initializeLineSoA(LineSoA& line, ColumnCount cols, GraphicsAttributes const
 
     line.codepoints.assign(n, char32_t { 0 });
     line.widths.assign(n, uint8_t { 1 });
+    line.scales.assign(n, uint8_t { 1 });
     line.sgr.assign(n, fillAttrs);
     line.hyperlinks.assign(n, HyperlinkId {});
     line.clusterSize.assign(n, uint8_t { 0 });
@@ -38,6 +39,7 @@ void initializeBlankLineSoA(LineSoA& line, GraphicsAttributes const& fillAttrs) 
     // resident set proportional to currently-used lines rather than high-water mark.
     AlignedVector<char32_t> {}.swap(line.codepoints);
     AlignedVector<uint8_t> {}.swap(line.widths);
+    AlignedVector<uint8_t> {}.swap(line.scales);
     AlignedVector<GraphicsAttributes> {}.swap(line.sgr);
     AlignedVector<HyperlinkId> {}.swap(line.hyperlinks);
     AlignedVector<uint8_t> {}.swap(line.clusterSize);
@@ -62,6 +64,7 @@ void resizeLineSoA(LineSoA& line, ColumnCount newCols, GraphicsAttributes const&
 
     line.codepoints.resize(n, char32_t { 0 });
     line.widths.resize(n, uint8_t { 1 });
+    line.scales.resize(n, uint8_t { 1 });
     line.sgr.resize(n, fillAttrs);
     line.hyperlinks.resize(n, HyperlinkId {});
     line.clusterSize.resize(n, uint8_t { 0 });
@@ -83,6 +86,7 @@ void clearRange(LineSoA& line, size_t from, size_t count, GraphicsAttributes con
 
     std::fill_n(line.codepoints.data() + from, count, char32_t { 0 });
     std::fill_n(line.widths.data() + from, count, uint8_t { 1 });
+    std::fill_n(line.scales.data() + from, count, uint8_t { 1 });
     std::fill_n(line.sgr.data() + from, count, attrs);
     std::fill_n(line.hyperlinks.data() + from, count, HyperlinkId {});
     std::fill_n(line.clusterSize.data() + from, count, uint8_t { 0 });
@@ -156,6 +160,7 @@ void copyColumns(LineSoA const& src, size_t srcCol, LineSoA& dst, size_t dstCol,
     // Bulk copy each SoA array (SIMD auto-vectorizable)
     std::copy_n(src.codepoints.data() + srcCol, count, dst.codepoints.data() + dstCol);
     std::copy_n(src.widths.data() + srcCol, count, dst.widths.data() + dstCol);
+    std::copy_n(src.scales.data() + srcCol, count, dst.scales.data() + dstCol);
     std::copy_n(src.sgr.data() + srcCol, count, dst.sgr.data() + dstCol);
     std::copy_n(src.hyperlinks.data() + srcCol, count, dst.hyperlinks.data() + dstCol);
     std::copy_n(src.clusterSize.data() + srcCol, count, dst.clusterSize.data() + dstCol);
@@ -206,6 +211,7 @@ void moveColumns(LineSoA& line, size_t srcCol, size_t dstCol, size_t count)
     // Use memmove for overlapping ranges (one per array)
     std::memmove(line.codepoints.data() + dstCol, line.codepoints.data() + srcCol, count * sizeof(char32_t));
     std::memmove(line.widths.data() + dstCol, line.widths.data() + srcCol, count * sizeof(uint8_t));
+    std::memmove(line.scales.data() + dstCol, line.scales.data() + srcCol, count * sizeof(uint8_t));
     std::memmove(line.sgr.data() + dstCol, line.sgr.data() + srcCol, count * sizeof(GraphicsAttributes));
     std::memmove(
         line.hyperlinks.data() + dstCol, line.hyperlinks.data() + srcCol, count * sizeof(HyperlinkId));

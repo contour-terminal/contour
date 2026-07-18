@@ -674,6 +674,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("spawn_new_process", c.spawnNewProcess);
         loadFromEntry("reflow_on_resize", c.reflowOnResize);
         loadFromEntry("tab_switch_on_horizontal_wheel", c.tabSwitchOnHorizontalWheel);
+        loadFromEntry("text_scaling_method", c.textScalingMethod);
         loadFromEntry("gui_config_locked", c.guiConfigLocked);
         loadFromEntry("theme", c.theme);
         loadFromEntry("experimental", c.experimentalFeatures);
@@ -2041,6 +2042,22 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
             where = opt.value();
         else
             errorLog()("Unknown pixel_reporting value '{}'; keeping {}.", rawValue, where);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtrasterizer::GlyphScalingMethod& where)
+{
+    // Case-insensitive, and an unrecognized value is reported rather than silently accepted -- a typo
+    // in a visible rendering setting should not pass unnoticed. Mirrors the GuiTheme reader.
+    if (auto const child = node[entry])
+    {
+        auto const rawValue = child.as<std::string>();
+        if (auto const method = vtrasterizer::methodFromName(crispy::toLower(rawValue)))
+            where = *method;
+        else
+            errorLog()("Invalid value for {}: '{}'. Expected 'stretch' or 'rerasterize'.", entry, rawValue);
     }
 }
 

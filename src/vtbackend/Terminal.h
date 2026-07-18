@@ -10,6 +10,7 @@
 #include <vtbackend/Hyperlink.h>
 #include <vtbackend/InputGenerator.h>
 #include <vtbackend/InputHandler.h>
+#include <vtbackend/PointerShape.h>
 #include <vtbackend/RenderBuffer.h>
 #include <vtbackend/Selector.h>
 #include <vtbackend/SemanticBlockTracker.h>
@@ -1299,17 +1300,19 @@ class Terminal
     }
 
     /// Tests whether given absolute coordinate is covered by a current selection.
-    bool isSelected(CellLocation coord) const noexcept
-    {
-        return _selection && _selection->state() != Selection::State::Waiting && _selection->contains(coord);
-    }
+    ///
+    /// A multi-cell block (a wide character, or an `OSC 66` text-sizing block) is indivisible: if any
+    /// of its cells is selected, all of them are. Highlighting half a glyph would show a selection
+    /// the user cannot have meant and cannot correct.
+    [[nodiscard]] bool isSelected(CellLocation coord) const noexcept;
 
     /// Tests whether given line offset is intersecting with selection.
-    bool isSelected(LineOffset line) const noexcept
-    {
-        return _selection && _selection->state() != Selection::State::Waiting
-               && _selection->containsLine(line);
-    }
+    ///
+    /// This is the COARSE test the renderer's trivial-line fast path consults: a line it calls
+    /// unselected is drawn uniformly and never asks isSelected(CellLocation) about any of its cells.
+    /// It must therefore agree with the per-cell test about blocks -- a tall block reaching down into
+    /// this line makes the line selected even when the selection's own range stops above it.
+    [[nodiscard]] bool isSelected(LineOffset line) const noexcept;
 
     /// Tests whether the given cell is covered by the active (vi yank/motion) highlight range.
     /// @param cell The absolute grid coordinate to test.

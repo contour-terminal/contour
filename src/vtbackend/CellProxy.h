@@ -84,6 +84,10 @@ class BasicCellProxy
 
     [[nodiscard]] uint8_t width() const noexcept { return _line->widths[_col]; }
 
+    /// Per-cell vertical scale in cells (kitty text sizing protocol, `OSC 66` `s=`); 1 for ordinary
+    /// text.
+    [[nodiscard]] uint8_t scale() const noexcept { return _line->scales[_col]; }
+
     [[nodiscard]] CellFlags flags() const noexcept { return _line->sgr[_col].flags; }
 
     [[nodiscard]] bool isFlagEnabled(CellFlags testFlags) const noexcept
@@ -160,6 +164,7 @@ class BasicCellProxy
         auto const oldClusterSize = _line->clusterSize[_col];
         _line->codepoints[_col] = 0;
         _line->widths[_col] = 1;
+        _line->scales[_col] = 1;
         _line->sgr[_col] = GraphicsAttributes {};
         _line->hyperlinks[_col] = {};
         _line->clusterSize[_col] = 0;
@@ -175,6 +180,7 @@ class BasicCellProxy
         auto const oldClusterSize = _line->clusterSize[_col];
         _line->codepoints[_col] = 0;
         _line->widths[_col] = 1;
+        _line->scales[_col] = 1;
         _line->sgr[_col] = attrs;
         _line->hyperlinks[_col] = {};
         _line->clusterSize[_col] = 0;
@@ -209,8 +215,17 @@ class BasicCellProxy
             _line->widths[_col] = static_cast<uint8_t>(std::max(1u, unicode::width(ch)));
         else
             _line->widths[_col] = 1;
+        _line->scales[_col] = 1;
 
         clearReplacedImageFragment(_line->imageFragments, static_cast<uint16_t>(_col));
+    }
+
+    /// Sets the per-cell vertical scale (kitty text sizing protocol).
+    void setScale(uint8_t s) noexcept
+        requires(!IsConst)
+    {
+        _line->scales[_col] = s;
+        invalidateTrivialIfNeeded();
     }
 
     void setWidth(uint8_t w) noexcept

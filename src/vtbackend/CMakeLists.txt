@@ -28,6 +28,7 @@ set(vtbackend_HEADERS
     HintModeHandler.h
     Hyperlink.h
     KittyGraphics.h
+    TextSizing.h
     Image.h
     InputBinding.h
     InputGenerator.h
@@ -87,6 +88,7 @@ set(vtbackend_SOURCES
     RenderBuffer.cpp
     RenderBufferBuilder.cpp
     KittyGraphics.cpp
+    TextSizing.cpp
     Screen.cpp
     SemanticBlockTracker.cpp
     Selector.cpp
@@ -170,6 +172,7 @@ if(LIBTERMINAL_TESTING)
         MessageParser_test.cpp
         RectangularAreaChecksum_test.cpp
         KittyGraphics_test.cpp
+        TextSizing_test.cpp
         Screen_test.cpp
         Image_test.cpp
         Sequence_test.cpp

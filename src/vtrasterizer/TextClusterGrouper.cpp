@@ -64,7 +64,8 @@ void TextClusterGrouper::renderCell(vtbackend::CellLocation position,
                                     std::u32string_view graphemeCluster,
                                     vtbackend::RGBColor foregroundColor,
                                     TextStyle style,
-                                    vtbackend::LineFlags flags)
+                                    vtbackend::LineFlags flags,
+                                    uint8_t scale)
 {
     if (_forceUpdateInitialPenPosition)
     {
@@ -89,15 +90,17 @@ void TextClusterGrouper::renderCell(vtbackend::CellLocation position,
         }
     }
 
-    appendCellTextToClusterGroup(graphemeCluster, style, foregroundColor, flags);
+    appendCellTextToClusterGroup(graphemeCluster, style, foregroundColor, flags, scale);
 }
 
 void TextClusterGrouper::appendCellTextToClusterGroup(std::u32string_view codepoints,
                                                       TextStyle style,
                                                       vtbackend::RGBColor color,
-                                                      vtbackend::LineFlags flags)
+                                                      vtbackend::LineFlags flags,
+                                                      uint8_t scale)
 {
-    bool const attribsChanged = color != _color || style != _style || flags != _lineFlags;
+    bool const attribsChanged =
+        color != _color || style != _style || flags != _lineFlags || scale != _scale;
     bool const cellIsEmpty = codepoints.empty() || codepoints[0] == 0x20;
     bool const textStartsNewCluster = _cellCount == 0 && !cellIsEmpty;
 
@@ -108,6 +111,7 @@ void TextClusterGrouper::appendCellTextToClusterGroup(std::u32string_view codepo
         _color = color;
         _style = style;
         _lineFlags = flags;
+        _scale = scale;
     }
 
     if (!cellIsEmpty)
@@ -135,7 +139,8 @@ void TextClusterGrouper::flushTextClusterGroup()
                                 _initialPenPosition,
                                 _style,
                                 _color,
-                                _lineFlags);
+                                _lineFlags,
+                                _scale);
     }
 
     resetAndMovePenForward(vtbackend::ColumnOffset::cast_from(_cellCount));

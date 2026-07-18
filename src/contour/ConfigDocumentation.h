@@ -712,6 +712,19 @@ constexpr StringLiteral GuiConfigLockedConfig {
     "gui_config_locked: {}\n"
 };
 
+constexpr StringLiteral TextScalingMethodConfig {
+    "\n"
+    "{comment} How a glyph is enlarged when an application asks for scaled text via the kitty text\n"
+    "{comment} sizing protocol (OSC 66), ignore-case:\n"
+    "{comment}   stretch     = magnify the glyph already rasterized at the ordinary cell size\n"
+    "{comment}                 (default). Costs nothing to rasterize and adds no texture atlas\n"
+    "{comment}                 entries, but softens as the scale grows.\n"
+    "{comment}   rerasterize = ask the font for the glyph at the larger size, so the outline is\n"
+    "{comment}                 re-hinted and stays crisp. Costs a rasterization and an atlas entry\n"
+    "{comment}                 per glyph and scale in use.\n"
+    "text_scaling_method: {}\n"
+};
+
 constexpr StringLiteral ThemeConfig {
     "\n"
     "{comment} Light/dark appearance of the GUI chrome (title bar, tab strip, command palette,\n"
@@ -1338,6 +1351,13 @@ constexpr StringLiteral EarlyExitThresholdWeb {
 
 constexpr StringLiteral SpawnNewProcessWeb { "flag determines whether a new process should be spawned when "
                                              "creating a new terminal. The default value is `false`." };
+
+constexpr StringLiteral TextScalingMethodWeb {
+    "How a glyph is enlarged for scaled text (kitty text sizing protocol, OSC 66). "
+    "`stretch` magnifies the ordinary-size glyph: free to rasterize, no extra atlas entries, but "
+    "softer at large scales. `rerasterize` asks the font for the glyph at the larger size: crisp at "
+    "any scale, at the cost of a rasterization and an atlas entry per glyph and scale."
+};
 
 constexpr StringLiteral ReflowOnResizeWeb {
     "option controls whether or not the lines in the terminal should be reflowed when a resize event occurs. "
@@ -2270,6 +2290,7 @@ using TabSwitchOnHorizontalWheel =
     DocumentationEntry<TabSwitchOnHorizontalWheelConfig, TabSwitchOnHorizontalWheelWeb>;
 using GuiConfigLocked = DocumentationEntry<GuiConfigLockedConfig, GuiConfigLockedWeb>;
 using Theme = DocumentationEntry<ThemeConfig, ThemeWeb>;
+using TextScalingMethod = DocumentationEntry<TextScalingMethodConfig, TextScalingMethodWeb>;
 using ColorSchemes = DocumentationEntry<ColorSchemesConfig, Dummy>;
 using Profiles = DocumentationEntry<ProfilesConfig, ProfilesWeb>;
 using DefaultProfiles = DocumentationEntry<StringLiteral { "default_profile: {}\n" }, DefaultProfilesWeb>;

@@ -272,7 +272,8 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
             _session->config().renderer.value().textureAtlasTileCount,
             _session->config().renderer.value().textureAtlasDirectMapping,
             _session->profile().hyperlinkDecoration.value().normal,
-            _session->profile().hyperlinkDecoration.value().hover);
+            _session->profile().hyperlinkDecoration.value().hover,
+            _session->config().textScalingMethod.value());
 
         // setup once with the renderer creation
         applyFontDPI();

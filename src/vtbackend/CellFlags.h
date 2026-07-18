@@ -43,7 +43,11 @@
     _(WideCharContinuation, 17)                                                                   \
     /* SPA/EPA (ISO 6429) protection: spared by the REGULAR erases (ED, EL). A separate flag from \
        CharacterProtected because the two are honoured by opposite erase families. */             \
-    _(CharacterProtectedISO, 18)
+    _(CharacterProtectedISO, 18)                                                                  \
+    /* Structural: this cell continues a text-sizing block (OSC 66) on the line ABOVE. Distinct   \
+       from WideCharContinuation, which only ever means "to the left" -- a scaled block is the    \
+       first thing in this grid that is taller than one line. */                                  \
+    _(MulticellContinuation, 19)
 
 namespace vtbackend
 {
