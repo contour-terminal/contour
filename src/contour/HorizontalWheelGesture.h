@@ -47,11 +47,20 @@ class HorizontalWheelGesture
         switch (phase)
         {
             case vtbackend::ScrollPhase::NoPhase:
+                // Each discrete notch is its own gesture: there is no phase to bound one, and a wheel
+                // tilt is already the user's unit of intent.
+                _navigationSpent = false;
                 // A discrete tilt reports one axis at a time; anything carrying both is a diagonal
                 // trackpad event from a driver that omits phases, which we decline rather than guess at.
                 return delta.x != 0 && delta.y == 0;
-            case vtbackend::ScrollPhase::Begin: _verticalLatched = false; break;
-            case vtbackend::ScrollPhase::End: _verticalLatched = false; return false;
+            case vtbackend::ScrollPhase::Begin:
+                _verticalLatched = false;
+                _navigationSpent = false;
+                break;
+            case vtbackend::ScrollPhase::End:
+                _verticalLatched = false;
+                _navigationSpent = false;
+                return false;
             case vtbackend::ScrollPhase::Update: break;
             case vtbackend::ScrollPhase::Momentum:
                 // Momentum is the tail of a gesture already judged: it inherits the latch and never sets
@@ -65,11 +74,35 @@ class HorizontalWheelGesture
         return !_verticalLatched && horizontal >= vertical && delta.x != 0;
     }
 
+    /// Claims the one discrete NAVIGATION step this gesture is allowed, if it is still unclaimed.
+    ///
+    /// Scrolling is continuous; switching tabs is not, and the two must not share a step size. The scroll
+    /// accumulator quantizes horizontal motion by CELL WIDTH — right for scrolling a wide line, and wildly
+    /// wrong for a discrete action, where a single ~150px flick becomes nearly twenty column steps and
+    /// therefore nearly twenty tab switches. A wheel notch is no better: it is three steps.
+    ///
+    /// So a navigation step is latched to **one per gesture** — one per swipe on a trackpad, one per notch
+    /// on a wheel — which is what a browser does with the very same gesture.
+    ///
+    /// @return true exactly once per gesture; false for every further event of it.
+    [[nodiscard]] bool consumeNavigationStep() noexcept
+    {
+        if (_navigationSpent)
+            return false;
+        _navigationSpent = true;
+        return true;
+    }
+
     /// Forgets the current gesture, so the next event is judged afresh.
-    void reset() noexcept { _verticalLatched = false; }
+    void reset() noexcept
+    {
+        _verticalLatched = false;
+        _navigationSpent = false;
+    }
 
   private:
     bool _verticalLatched = false;
+    bool _navigationSpent = false;
 };
 
 } // namespace contour

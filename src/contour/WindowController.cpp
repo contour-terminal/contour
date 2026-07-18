@@ -337,18 +337,22 @@ void WindowController::dispatchTabStripWheel(int angleDeltaX, int angleDeltaY)
     if (!_tabStripWheelGesture.acceptsHorizontal({}, angleDelta, vtbackend::ScrollPhase::NoPhase))
         return;
 
-    // Same 40-unit step consumeScroll() uses for the grid, so one notch means one tab wherever the
-    // pointer happens to be.
-    auto constexpr AngleStepSize = 8 * 5;
+    // One NOTCH is one tab. Deliberately NOT the 40-unit step consumeScroll() uses: that one quantizes
+    // continuous scrolling and a notch is three of them, so borrowing it would walk three tabs per detent.
+    auto constexpr AngleUnitsPerNotch = 120;
     _tabStripWheelAccumulator += angleDeltaX;
-    auto const steps = _tabStripWheelAccumulator / AngleStepSize;
-    if (steps == 0)
+    auto const notches = _tabStripWheelAccumulator / AngleUnitsPerNotch;
+    if (notches == 0)
         return;
-    _tabStripWheelAccumulator -= steps * AngleStepSize;
+    _tabStripWheelAccumulator -= notches * AngleUnitsPerNotch;
 
-    auto const button = steps > 0 ? vtbackend::MouseButton::WheelRight : vtbackend::MouseButton::WheelLeft;
-    for ([[maybe_unused]] auto const _: std::views::iota(0, std::abs(steps)))
-        session->applyFallbackMouseBinding(button);
+    // One switch per event even when several notches arrive coalesced: a gesture is a unit of intent, and
+    // it moves one tab, as a browser does with the same swipe.
+    if (!_tabStripWheelGesture.consumeNavigationStep())
+        return;
+
+    session->applyFallbackMouseBinding(notches > 0 ? vtbackend::MouseButton::WheelRight
+                                                   : vtbackend::MouseButton::WheelLeft);
 }
 
 void WindowController::moveTab(int fromIndex, int toIndex)

@@ -40,9 +40,20 @@ does **not** require [DEC mode 2034](vt-extensions/semantic-block-query.md).
 
 | Platform | Technology | Notes |
 |----------|-----------|-------|
-| Linux    | AT-SPI 2 | Works with Orca and with KDE Plasma's zoom (enable *follow focus* or *follow text caret*). |
+| Linux    | AT-SPI 2 | Works with Orca and with KDE Plasma's zoom — see the note below. |
 | Windows  | UI Automation | Works with Magnifier's *follow keyboard focus* / *text cursor* modes. |
 | macOS    | NSAccessibility | Qt maps the text interface to `AXTextArea`. Not verified. |
+
+!!! important "KDE Plasma: caret tracking is off by default"
+
+    Plasma's zoom (`Meta`+`+` / `Meta`+`-` / `Meta`+`0`) follows the **mouse pointer** out of the box and
+    ignores the text caret until you say otherwise. Turn on **Enable caret tracking** in
+    *System Settings → Accessibility → Screen Magnifier*; without it the zoom will not follow the cursor
+    in Contour — or in any other application — no matter what the application reports.
+
+    KWin consumes the AT-SPI `object:text-caret-moved` signal for this. If tracking still does not follow
+    after enabling the option, `KWIN_WAYLAND_ZOOM_FORCE_LEGACY_TEXT_CARET_TRACKING=1` forces KWin onto
+    that AT-SPI path rather than its newer one.
 
 Qt's own environment variables apply. In particular `QT_ACCESSIBILITY=0` disables accessibility for the
 process, and on Linux `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1` forces the AT-SPI bridge on even when no client

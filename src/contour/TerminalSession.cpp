@@ -1385,6 +1385,16 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
         return;
     }
 
+    // A horizontal notch reaching this point is about to become a DISCRETE navigation step (switching a
+    // tab), and the scroll quantization that produced it counts one step per cell width — so a single
+    // trackpad flick arrives here a dozen times over. Allow one per gesture.
+    //
+    // Only here, never earlier: an application that asked for the mouse consumed the press above and
+    // still receives every one of them, because horizontal scrolling inside an application IS continuous.
+    if ((button == MouseButton::WheelLeft || button == MouseButton::WheelRight)
+        && !_horizontalWheelGesture.consumeNavigationStep())
+        return;
+
     // The user's mappings did not claim this button, so fall back to the built-in ones. They are consulted
     // second on purpose: an explicit binding in the user's config always wins (see
     // builtinFallbackMouseMappings for why a plain default could not reach an existing user at all).

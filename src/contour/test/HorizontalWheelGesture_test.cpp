@@ -185,3 +185,78 @@ TEST_CASE("HorizontalWheelGesture.reset forgets the current gesture", "[contour]
 
     CHECK(pixels(gesture, 30, -5, ScrollPhase::Update));
 }
+
+// {{{ Navigation steps — switching a tab is discrete, scrolling is not
+
+TEST_CASE("HorizontalWheelGesture.a trackpad swipe is worth exactly one navigation step", "[contour][wheel]")
+{
+    // THE over-sensitivity fix. The scroll accumulator quantizes horizontal motion by CELL WIDTH, so a
+    // single ~150px flick produces well over a dozen column steps. Left ungated that was a dozen tab
+    // switches for one swipe; a browser moves one page for the same gesture.
+    auto gesture = HorizontalWheelGesture {};
+
+    REQUIRE(pixels(gesture, -30, 0, ScrollPhase::Begin));
+    CHECK(gesture.consumeNavigationStep());
+
+    // Every further event of the SAME gesture is refused, however long the swipe runs.
+    for (auto i = 0; i < 20; ++i)
+    {
+        REQUIRE(pixels(gesture, -30, 0, ScrollPhase::Update));
+        CHECK_FALSE(gesture.consumeNavigationStep());
+    }
+}
+
+TEST_CASE("HorizontalWheelGesture.momentum does not extend a swipe into more steps", "[contour][wheel]")
+{
+    // A flick glides on after the finger lifts. That glide is the same gesture, so it must not keep
+    // switching tabs.
+    auto gesture = HorizontalWheelGesture {};
+
+    REQUIRE(pixels(gesture, -40, 0, ScrollPhase::Begin));
+    CHECK(gesture.consumeNavigationStep());
+
+    REQUIRE(pixels(gesture, -30, 0, ScrollPhase::Momentum));
+    CHECK_FALSE(gesture.consumeNavigationStep());
+}
+
+TEST_CASE("HorizontalWheelGesture.a new swipe earns a new step", "[contour][wheel]")
+{
+    auto gesture = HorizontalWheelGesture {};
+
+    REQUIRE(pixels(gesture, -40, 0, ScrollPhase::Begin));
+    CHECK(gesture.consumeNavigationStep());
+    REQUIRE(pixels(gesture, -40, 0, ScrollPhase::Update));
+    CHECK_FALSE(gesture.consumeNavigationStep());
+
+    // Finger lifted and put down again: a fresh gesture, a fresh step.
+    pixels(gesture, 0, 0, ScrollPhase::End);
+    REQUIRE(pixels(gesture, -40, 0, ScrollPhase::Begin));
+    CHECK(gesture.consumeNavigationStep());
+}
+
+TEST_CASE("HorizontalWheelGesture.each discrete notch is worth its own step", "[contour][wheel]")
+{
+    // A wheel tilt has no gesture to bound it, and the detent is already the user's unit of intent — so
+    // unlike a swipe, every notch counts.
+    auto gesture = HorizontalWheelGesture {};
+
+    for (auto i = 0; i < 5; ++i)
+    {
+        REQUIRE(angle(gesture, 120, 0, ScrollPhase::NoPhase));
+        CHECK(gesture.consumeNavigationStep());
+    }
+}
+
+TEST_CASE("HorizontalWheelGesture.reset releases the navigation latch", "[contour][wheel]")
+{
+    auto gesture = HorizontalWheelGesture {};
+
+    REQUIRE(pixels(gesture, -40, 0, ScrollPhase::Begin));
+    CHECK(gesture.consumeNavigationStep());
+    CHECK_FALSE(gesture.consumeNavigationStep());
+
+    gesture.reset();
+    CHECK(gesture.consumeNavigationStep());
+}
+
+// }}}
