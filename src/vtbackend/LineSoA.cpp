@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/LineSoA.h>
 
+#include <libunicode/width.h>
+
 #include <algorithm>
 #include <cassert>
 #include <cstring>
@@ -232,21 +234,28 @@ int appendCodepointToCluster(LineSoA& line, size_t col, char32_t codepoint)
 {
     assert(!line.codepoints.empty());
     auto const currentSize = line.clusterSize[col];
-    if (currentSize >= MaxGraphemeClusterSize)
-        return 0;
 
-    if (currentSize == 1)
+    // The width rule is evaluated BEFORE the capacity check, deliberately. A variation selector
+    // arriving past the cap still decides how the cluster is presented, and dropping the codepoint
+    // must not also drop that decision -- otherwise cluster width would silently depend on how many
+    // codepoints happened to precede it.
+    auto const oldWidth = static_cast<unsigned>(line.widths[col]);
+    auto const newWidth = unicode::grapheme_cluster_width_append(oldWidth, codepoint);
+    line.widths[col] = static_cast<uint8_t>(newWidth);
+
+    if (currentSize < MaxGraphemeClusterSize)
     {
-        // First extra codepoint — record start index in pool
-        line.clusterPoolIndex[col] = static_cast<uint16_t>(line.clusterPool.size());
+        if (currentSize == 1)
+        {
+            // First extra codepoint — record start index in pool
+            line.clusterPoolIndex[col] = static_cast<uint16_t>(line.clusterPool.size());
+        }
+
+        line.clusterPool.push_back(codepoint);
+        line.clusterSize[col] = currentSize + 1;
     }
 
-    line.clusterPool.push_back(codepoint);
-    line.clusterSize[col] = currentSize + 1;
-
-    // Width change computation (currently always returns 0 unless AllowWidthChange is enabled)
-    // Mirrors CellUtil::computeWidthChange behavior
-    return 0;
+    return static_cast<int>(newWidth) - static_cast<int>(oldWidth);
 }
 
 void clearClusterExtras(LineSoA& line, size_t col)

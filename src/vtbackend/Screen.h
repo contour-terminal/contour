@@ -795,6 +795,18 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void writeCharToCurrentAndAdvance(char32_t codepoint) noexcept;
     void clearAndAdvance(int oldWidth, int newWidth) noexcept;
 
+    /// Claims or releases columns after a grapheme cluster's width was revised by a codepoint that
+    /// joined it late (a variation selector).
+    ///
+    /// Anchored on @c _lastCursorPosition -- the cluster head -- not on the cursor, which has already
+    /// moved past it. Does nothing unless the cursor still sits immediately after that head, so an
+    /// intervening cursor move or scroll cannot make this touch an unrelated cell.
+    void applyClusterWidthChange(int delta) noexcept;
+
+    /// @return The rightmost column that may still be written on the cursor's line: the right margin
+    ///         when the cursor is inside a DECLRMM band, otherwise the last page column.
+    [[nodiscard]] ColumnOffset lastWritableColumn() const noexcept;
+
     void scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin);
     void scrollUp(LineCount n, Margin margin);
     void scrollDown(LineCount n, Margin margin);

@@ -97,6 +97,13 @@ class BasicCellProxy
 
     [[nodiscard]] HyperlinkId hyperlink() const noexcept { return _line->hyperlinks[_col]; }
 
+    /// The cell's full graphics rendition.
+    ///
+    /// Needed when a cell must be styled to match ANOTHER cell rather than the current pen -- a wide
+    /// cluster's continuation cells, for instance, whose pen may have moved on between the base
+    /// codepoint and the variation selector that widened the cluster.
+    [[nodiscard]] GraphicsAttributes graphicsAttributes() const noexcept { return _line->sgr[_col]; }
+
     [[nodiscard]] std::shared_ptr<ImageFragment> imageFragment() const noexcept
     {
         if (_line->imageFragments)

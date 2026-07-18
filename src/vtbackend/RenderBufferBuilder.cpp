@@ -17,14 +17,15 @@ namespace vtbackend
 
 namespace
 {
+    /// Width of a grapheme cluster, in columns.
+    ///
+    /// This used to be a private copy of the rule that handled VS16 but not VS15, which meant the
+    /// renderer and the grid could disagree about how wide the same cluster was. Both now ask
+    /// libunicode.
     ColumnCount graphemeClusterWidth(std::u32string_view cluster) noexcept
     {
         assert(!cluster.empty());
-        auto baseWidth = ColumnCount::cast_from(unicode::width(cluster[0]));
-        for (size_t i = 1; i < cluster.size(); ++i)
-            if (auto const codepoint = cluster[i]; codepoint == 0xFE0F)
-                return ColumnCount(2);
-        return baseWidth;
+        return ColumnCount::cast_from(unicode::grapheme_cluster_width(cluster));
     }
 
     constexpr RGBColor makeRGBColor(RGBColorPair actualColors, CellRGBColor configuredColor) noexcept

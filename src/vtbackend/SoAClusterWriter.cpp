@@ -148,7 +148,35 @@ namespace
                            && line.sgr[targetCol].flags.contains(CellFlag::WideCharContinuation))
                         --targetCol;
 
-                    appendCodepointToCluster(line, targetCol, codepoint);
+                    // A variation selector can widen or narrow the cluster it joins, which moves the
+                    // write position. There is no cursor, no margin and no insert mode here -- only
+                    // the end of the line to stay inside of.
+                    auto const delta = appendCodepointToCluster(line, targetCol, codepoint);
+                    auto const newWidth = static_cast<size_t>(line.widths[targetCol]);
+
+                    if (delta > 0)
+                    {
+                        if (targetCol + newWidth <= maxCols)
+                        {
+                            fillWideCharContinuation(line,
+                                                     targetCol + newWidth - static_cast<size_t>(delta),
+                                                     static_cast<size_t>(delta),
+                                                     line.sgr[targetCol],
+                                                     line.hyperlinks[targetCol]);
+                            col += static_cast<size_t>(delta);
+                        }
+                        else
+                            // No room to grow: keep the cluster at the width it already occupies.
+                            line.widths[targetCol] = static_cast<uint8_t>(newWidth - delta);
+                    }
+                    else if (delta < 0)
+                    {
+                        auto const oldWidth = newWidth - static_cast<size_t>(delta);
+                        for (auto c = targetCol + newWidth; c < targetCol + oldWidth && c < maxCols; ++c)
+                            writeCellToSoA(
+                                line, c, U'\0', 1, line.sgr[targetCol], line.hyperlinks[targetCol]);
+                        col = std::max(startCol, col - static_cast<size_t>(-delta));
+                    }
                 }
             }
 

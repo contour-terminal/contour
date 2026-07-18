@@ -414,33 +414,31 @@ TEST_CASE("AppendChar.emoji_VS15_smiley", "[screen]")
     auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
     auto& screen = mock.terminal.primaryScreen();
 
-    // print letter-like symbol copyright sign with forced emoji presentation style.
+    // Print an emoji, then ask for its TEXT presentation with VS15. The cluster must narrow to one
+    // column and give the column back -- the emoji occupied two before the selector arrived.
     REQUIRE(*screen.logicalCursorPosition().column == 0);
     mock.writeToScreen(U"\U0001F600");
     REQUIRE(*screen.logicalCursorPosition().column == 2);
     mock.writeToScreen(U"\uFE0E");
-    REQUIRE(*screen.logicalCursorPosition().column == 2);
-    // ^^^ U+FE0E does *NOT* lower width to 1 (easier to implement)
+    REQUIRE(*screen.logicalCursorPosition().column == 1);
     mock.writeToScreen("X");
-    REQUIRE(*screen.logicalCursorPosition().column == 3);
+    REQUIRE(*screen.logicalCursorPosition().column == 2);
     logScreenText(screen);
 
-    // emoji
+    // emoji, demoted to text presentation
     auto const& c1 = screen.at(LineOffset(0), ColumnOffset(0));
     CHECK(c1.codepoints() == U"\U0001F600\uFE0E");
-    CHECK(c1.width() == 2);
+    CHECK(c1.width() == 1);
 
-    // unused cell
+    // The continuation cell the emoji used to own was released, and X took it.
     auto const& c2 = screen.at(LineOffset(0), ColumnOffset(1));
-    CHECK(c2.empty());
+    CHECK(c2.codepoints() == U"X");
     CHECK(c2.width() == 1);
-
-    // character after the emoji
-    auto const& c3 = screen.at(LineOffset(0), ColumnOffset(2));
-    CHECK(c3.codepoints() == U"X");
-    CHECK(c3.width() == 1);
+    CHECK_FALSE(c2.isFlagEnabled(CellFlag::WideCharContinuation));
 
     // tail
+    auto const& c3 = screen.at(LineOffset(0), ColumnOffset(2));
+    CHECK(c3.codepoints().empty());
     auto const& c4 = screen.at(LineOffset(0), ColumnOffset(3));
     CHECK(c4.codepoints().empty());
 }
@@ -454,7 +452,8 @@ TEST_CASE("AppendChar.emoji_VS16_copyright_sign", "[screen]")
     auto const& c2 = screen.at(LineOffset(0), ColumnOffset(2));
     auto const& c3 = screen.at(LineOffset(0), ColumnOffset(3));
 
-    // print letter-like symbol copyright sign with forced emoji presentation style.
+    // Print the letter-like copyright sign, then force its EMOJI presentation with VS16. The cluster
+    // must widen to two columns and claim the cell to its right.
     REQUIRE(screen.cursor().position.column.value == 0);
     mock.writeToScreen(U"\u00A9");
     REQUIRE(screen.cursor().position.column.value == 1);
@@ -462,20 +461,19 @@ TEST_CASE("AppendChar.emoji_VS16_copyright_sign", "[screen]")
     CHECK(c0.width() == 1);
     mock.writeToScreen(U"\uFE0F");
     CHECK(c0.codepointCount() == 2);
-    REQUIRE(screen.cursor().position.column.value == 1);
-    mock.writeToScreen("X");
     REQUIRE(screen.cursor().position.column.value == 2);
+    mock.writeToScreen("X");
+    REQUIRE(screen.cursor().position.column.value == 3);
 
     // double-width emoji with VS16
     CHECK(c0.codepoints() == U"\u00A9\uFE0F");
-    CHECK(c0.width() == 1);
+    CHECK(c0.width() == 2);
+
+    // the claimed continuation cell
+    CHECK(c1.isFlagEnabled(CellFlag::WideCharContinuation));
 
     // character after the emoji
-    CHECK(c1.codepoints() == U"X");
-    CHECK(c1.width() == 1);
-
-    // unused cell
-    CHECK(c2.empty());
+    CHECK(c2.codepoints() == U"X");
     CHECK(c2.width() == 1);
 
     CHECK(c3.codepoints().empty());
@@ -493,24 +491,22 @@ TEST_CASE("AppendChar.emoji_VS16_i", "[screen]")
     CHECK(c0.codepoints() == U"\u2139");
     CHECK(c0.width() == 1);
 
-    // append into last cell
+    // U+FE0F promotes the cluster to the emoji presentation, which is two columns wide.
     mock.writeToScreen(U"\uFE0F");
-    // XXX ^^^ later on U+FE0F *will* ensure width 2 if respective mode is enabled.
-    REQUIRE(screen.cursor().position.column.value == 1);
+    REQUIRE(screen.cursor().position.column.value == 2);
     CHECK(c0.codepoints() == U"\u2139\uFE0F");
-    CHECK(c0.width() == 1);
+    CHECK(c0.width() == 2);
 
-    // write into 3rd cell
+    // the claimed continuation cell
+    auto const& c1 = screen.at(LineOffset(0), ColumnOffset(1));
+    CHECK(c1.isFlagEnabled(CellFlag::WideCharContinuation));
+
     mock.writeToScreen("X");
 
-    // X-cell
-    auto const& c1 = screen.at(LineOffset(0), ColumnOffset(1));
-    CHECK(c1.codepoints() == U"X");
-    CHECK(c1.width() == 1);
-
-    // character after the emoji
+    // X lands after the now-two-column emoji, not beside it.
     auto const& c2 = screen.at(LineOffset(0), ColumnOffset(2));
-    CHECK(c2.empty());
+    CHECK(c2.codepoints() == U"X");
+    CHECK(c2.width() == 1);
 
     auto const& c3 = screen.at(LineOffset(0), ColumnOffset(3));
     CHECK(c3.empty());
@@ -591,9 +587,9 @@ TEST_CASE("AppendChar.emoji_zwj_1", "[screen]")
 
 TEST_CASE("AppendChar.emoji_zwj_ten_codepoints", "[screen]")
 {
-    // 👨🏻‍❤️‍💋‍👨🏻 kiss: man, man, light skin tone -- ten codepoints, the longest cluster the
-    // RGI emoji set produces. It used to exceed MaxGraphemeClusterSize and be silently truncated to seven,
-    // which is what this case pins.
+    // 👨🏻‍❤️‍💋‍👨🏻 kiss: man, man, light skin tone -- ten codepoints, the longest
+    // cluster the RGI emoji set produces. It used to exceed MaxGraphemeClusterSize and be silently truncated
+    // to seven, which is what this case pins.
     //
     // Truncation is not merely cosmetic. Driven through a real PTY, the overflow also split the
     // sequence into two wide cells and advanced the cursor four columns instead of two; jquast's

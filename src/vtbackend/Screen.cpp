@@ -697,8 +697,8 @@ void Screen::writeText(string_view text, size_t cellCount)
             }
             else
             {
-                auto const extendedWidth = usePreviousCell().appendCharacter(cp);
-                clearAndAdvance(0, extendedWidth);
+                auto const widthChange = usePreviousCell().appendCharacter(cp);
+                applyClusterWidthChange(widthChange);
                 _terminal->markCellDirty(_lastCursorPosition);
             }
 
@@ -842,8 +842,8 @@ void Screen::writeTextInternal(char32_t sourceCodepoint)
     }
     else
     {
-        auto const extendedWidth = usePreviousCell().appendCharacter(codepoint);
-        clearAndAdvance(0, extendedWidth);
+        auto const widthChange = usePreviousCell().appendCharacter(codepoint);
+        applyClusterWidthChange(widthChange);
         _terminal->markCellDirty(_lastCursorPosition);
     }
 
@@ -895,16 +895,90 @@ void Screen::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
     _terminal->markCellDirty(_cursor.position);
 }
 
-void Screen::clearAndAdvance(int oldWidth, int newWidth) noexcept
+void Screen::applyClusterWidthChange(int delta) noexcept
 {
+    if (delta == 0)
+        return;
+
+    // The cluster head is where the last write landed, NOT the cursor -- the cursor has already moved
+    // past it. Anchoring on _cursor.position here would claim or release the wrong columns.
+    auto const head = _lastCursorPosition;
+
+    // Only revise a cluster the cursor is still sitting immediately after. Anything else -- an
+    // intervening CUP, a scroll that moved the head, a resize -- means this is no longer a live
+    // cluster, and the "next" cell is not ours to take. In the normal sequential flow the cursor IS
+    // the next cell, so it is free by construction.
+    if (head.line != _cursor.position.line || head.line < LineOffset(0)
+        || head.line >= boxed_cast<LineOffset>(pageSize().lines) || head.column < ColumnOffset(0))
+        return;
+
+    auto& line = currentLine();
+    auto headCell = line.useCellAt(head.column);
+    auto const newWidth = static_cast<int>(headCell.width());
+    auto const oldWidth = newWidth - delta;
+
+    if (_cursor.position.column != head.column + ColumnOffset::cast_from(oldWidth))
+        return;
+
+    if (delta > 0)
+    {
+        // Growing must not run past the right margin (or the page edge). Rather than reflow a cell
+        // that is already committed -- which would invalidate damage tracking, selections and
+        // hyperlink spans -- abandon the promotion and leave the cluster at its original width.
+        if (head.column + ColumnOffset::cast_from(newWidth - 1) > lastWritableColumn())
+        {
+            headCell.setWidth(static_cast<uint8_t>(oldWidth));
+            return;
+        }
+
+        // Insert mode sized its shift from the first codepoint alone, so it is short by exactly the
+        // columns the cluster just gained.
+        if (_terminal->isModeEnabled(AnsiMode::Insert))
+            insertChars(head.line, ColumnCount::cast_from(delta));
+
+        // The continuation inherits the HEAD cell's pen, not the current one: the SGR may have
+        // changed between the base codepoint and the variation selector that widened it.
+        auto const sgr = headCell.graphicsAttributes().with(CellFlag::WideCharContinuation);
+        for (int i = oldWidth; i < newWidth; ++i)
+        {
+            line.useCellAt(head.column + ColumnOffset::cast_from(i)).reset(sgr, headCell.hyperlink());
+            _terminal->markCellDirty(head + ColumnOffset::cast_from(i));
+        }
+    }
+    else
+    {
+        // Shrinking releases the continuation cells the cluster no longer covers. The head cell's own
+        // rendition never carries WideCharContinuation, so it can be reused verbatim.
+        auto const sgr = headCell.graphicsAttributes();
+        for (int i = newWidth; i < oldWidth; ++i)
+        {
+            line.useCellAt(head.column + ColumnOffset::cast_from(i)).reset(sgr, headCell.hyperlink());
+            _terminal->markCellDirty(head + ColumnOffset::cast_from(i));
+        }
+
+        // A wide cluster sitting at the last column leaves wrapPending set. After demotion the cursor
+        // is no longer at the edge, and a stale flag would wrap the NEXT character spuriously.
+        _cursor.wrapPending = false;
+    }
+
+    _cursor.position.column += ColumnOffset::cast_from(delta);
+}
+
+ColumnOffset Screen::lastWritableColumn() const noexcept
+{
+    // Inside the left/right band the last writable column is the right margin itself; on the full
+    // page it is the last page column. The band form once carried an extra `- 1`, which made autowrap
+    // fire one column early -- the char destined for the right margin wrapped instead. Extracted so
+    // that the arithmetic exists exactly once.
     bool const cursorInsideMargin =
         _terminal->isModeEnabled(DECMode::LeftRightMargin) && isCursorInsideMargins();
-    // Columns strictly to the right of the cursor that are still writable. Inside the left/right band
-    // the last writable column is the right margin itself, so it is `to - column`; on the full page it
-    // is the last page column, `(columns - 1) - column`. The band form once carried an extra `- 1`,
-    // which made autowrap fire one column early -- the char destined for the right margin wrapped instead.
-    auto const cellsAvailable = cursorInsideMargin ? *(margin().horizontal.to - _cursor.position.column)
-                                                   : *pageSize().columns - *_cursor.position.column - 1;
+    return cursorInsideMargin ? margin().horizontal.to : boxed_cast<ColumnOffset>(pageSize().columns) - 1;
+}
+
+void Screen::clearAndAdvance(int oldWidth, int newWidth) noexcept
+{
+    // Columns strictly to the right of the cursor that are still writable.
+    auto const cellsAvailable = *(lastWritableColumn() - _cursor.position.column);
 
     auto const sgr = newWidth > 1 ? _cursor.graphicsRendition.with(CellFlag::WideCharContinuation)
                                   : _cursor.graphicsRendition;
