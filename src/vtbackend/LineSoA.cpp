@@ -7,6 +7,9 @@
 #include <array>
 #include <cassert>
 #include <cstring>
+#include <iterator>
+#include <limits>
+#include <ranges>
 
 namespace vtbackend
 {
@@ -244,6 +247,48 @@ size_t trimBlankRight(LineSoA const& line, size_t cols)
     return end;
 }
 
+namespace
+{
+    /// Highest pool size @c LineSoA::clusterPoolIndex (a uint16_t) can still address.
+    constexpr size_t ClusterPoolLimit = std::numeric_limits<uint16_t>::max();
+
+    /// Rebuilds @c clusterPool from the cells that actually reference it, dropping the runs abandoned
+    /// by earlier overwrites, and places @c tailCol's run last.
+    ///
+    /// The pool is append-only: @c clearClusterExtras deliberately does not compact, so every rewrite
+    /// of a cell carrying extra codepoints appends a fresh run and orphans the old one. A long-lived
+    /// line rewritten in place -- a status line, a spinner cycling emoji -- therefore grows the pool
+    /// without bound until @c clusterPoolIndex can no longer address it and silently wraps, at which
+    /// point cells read back an unrelated codepoint run.
+    ///
+    /// @param tailCol the column whose run must end up at the tail, because the caller is about to
+    ///                extend it with @c push_back.
+    void compactClusterPool(LineSoA& line, size_t tailCol)
+    {
+        auto compacted = std::vector<char32_t> {};
+        compacted.reserve(line.clusterPool.size());
+
+        auto const copyRun = [&](size_t col) {
+            auto const start = static_cast<size_t>(line.clusterPoolIndex[col]);
+            auto const extraCount = static_cast<size_t>(line.clusterSize[col] - 1);
+            line.clusterPoolIndex[col] = static_cast<uint16_t>(compacted.size());
+            compacted.insert(compacted.end(),
+                             std::next(line.clusterPool.begin(), static_cast<ptrdiff_t>(start)),
+                             std::next(line.clusterPool.begin(), static_cast<ptrdiff_t>(start + extraCount)));
+        };
+
+        for (auto const col: std::views::iota(size_t { 0 }, line.clusterSize.size()))
+            if (col != tailCol && line.clusterSize[col] > 1)
+                copyRun(col);
+
+        // Appending to a cluster assumes its run is at the tail of the pool, so tailCol goes last.
+        if (line.clusterSize[tailCol] > 1)
+            copyRun(tailCol);
+
+        line.clusterPool = std::move(compacted);
+    }
+} // namespace
+
 int appendCodepointToCluster(LineSoA& line, size_t col, char32_t codepoint, ClusterWidthPolicy policy)
 {
     assert(!line.codepoints.empty());
@@ -253,14 +298,23 @@ int appendCodepointToCluster(LineSoA& line, size_t col, char32_t codepoint, Clus
 
     if (currentSize < MaxGraphemeClusterSize)
     {
-        if (currentSize == 1)
-        {
-            // First extra codepoint — record start index in pool
-            line.clusterPoolIndex[col] = static_cast<uint16_t>(line.clusterPool.size());
-        }
+        // A run must start at an offset a uint16_t can address. Compacting first reclaims the runs
+        // abandoned by earlier overwrites; only if the LIVE extras genuinely fill the pool is the
+        // codepoint dropped, and no page width Contour supports can reach that.
+        if (line.clusterPool.size() + MaxGraphemeClusterSize > ClusterPoolLimit)
+            compactClusterPool(line, col);
 
-        line.clusterPool.push_back(codepoint);
-        line.clusterSize[col] = currentSize + 1;
+        if (line.clusterPool.size() < ClusterPoolLimit)
+        {
+            if (currentSize == 1)
+            {
+                // First extra codepoint — record start index in pool
+                line.clusterPoolIndex[col] = static_cast<uint16_t>(line.clusterPool.size());
+            }
+
+            line.clusterPool.push_back(codepoint);
+            line.clusterSize[col] = currentSize + 1;
+        }
     }
 
     // The cluster's width is recomputed over the WHOLE cluster rather than adjusted incrementally:
