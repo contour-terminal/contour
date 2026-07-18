@@ -32,6 +32,7 @@ class open_shaper: public shaper
                                                     font_size size) override;
 
     [[nodiscard]] font_metrics metrics(font_key key) const override;
+    [[nodiscard]] font_key resize_font(font_key key, font_size size) override;
 
     void shape(font_key font,
                std::u32string_view codepoints,

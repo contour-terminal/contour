@@ -125,6 +125,19 @@ class shaper
     [[nodiscard]] virtual font_metrics metrics(font_key key) const = 0;
 
     /**
+     * Returns the SAME face as @p key, loaded at @p size.
+     *
+     * A font_key already encodes its size -- load_font() takes one -- so a caller that wants a glyph
+     * rasterized larger cannot get there by editing glyph_key::size, which the rasterizer ignores.
+     * This is the way to ask for it, and it is what makes scaled text (`OSC 66`) crisp rather than
+     * magnified.
+     *
+     * The default returns @p key unchanged, which degrades to rasterizing at the original size --
+     * correct, merely not crisp -- on backends that have not implemented it.
+     */
+    [[nodiscard]] virtual font_key resize_font(font_key key, font_size /*size*/) { return key; }
+
+    /**
      * Shapes the given text @p text using the font face @p font.
      *
      * @param font     font_key identifying the font to use for text shaping.

@@ -1113,6 +1113,23 @@ optional<font_key> open_shaper::load_font(font_description const& description, f
     return fontKeyOpt;
 }
 
+font_key open_shaper::resize_font(font_key key, font_size size)
+{
+    auto const i = _d->fontKeyToHbFontInfoMapping.find(key);
+    if (i == _d->fontKeyToHbFontInfoMapping.end())
+        return key;
+
+    auto const& fontInfo = i->second;
+    if (fontInfo.size.pt == size.pt)
+        return key;
+
+    // The SAME source, re-opened at the new size. Going through getOrCreateKeyForFont keeps the
+    // one-key-per-(source, size, weight) invariant, so asking twice costs one FreeType face, and the
+    // fallback chain the primary owns is left alone -- only the face this glyph came from is resized.
+    auto const resized = _d->getOrCreateKeyForFont(fontInfo.primary, size, fontInfo.description.weight);
+    return resized.value_or(key);
+}
+
 font_metrics open_shaper::metrics(font_key key) const
 {
     Require(_d->fontKeyToHbFontInfoMapping.count(key) == 1);

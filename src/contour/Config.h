@@ -1106,7 +1106,7 @@ struct Config
     ConfigEntry<bool, documentation::GraphemeClustering> graphemeClustering { true };
 
     ConfigEntry<vtrasterizer::GlyphScalingMethod, documentation::TextScalingMethod> textScalingMethod {
-        vtrasterizer::GlyphScalingMethod::Stretch
+        vtrasterizer::GlyphScalingMethod::Rerasterize
     };
     ConfigEntry<vtbackend::Modifiers, documentation::BypassMouseProtocolModifiers>
         bypassMouseProtocolModifiers { vtbackend::Modifier::Shift };

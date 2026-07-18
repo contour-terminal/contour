@@ -108,29 +108,33 @@ profiles:
 
 TEST_CASE("Config: text scaling method loads from YAML", "[config]")
 {
+    // Asserted with `stretch` on purpose: it is the NON-default, so this fails if the key is ignored
+    // and the default silently answers instead.
     QTemporaryDir dir;
     auto const config = loadFromYaml(dir, R"(
 default_profile: main
-text_scaling_method: rerasterize
-profiles:
-    main:
-        shell: /bin/sh
-)"sv);
-    CHECK(config.textScalingMethod.value() == vtrasterizer::GlyphScalingMethod::Rerasterize);
-}
-
-TEST_CASE("Config: text scaling method defaults to stretch", "[config]")
-{
-    // Stretch is the default because it costs nothing to rasterize and adds no atlas entries, which
-    // matters most in the case scaled text is used for: large text scrolling past the viewport.
-    QTemporaryDir dir;
-    auto const config = loadFromYaml(dir, R"(
-default_profile: main
+text_scaling_method: stretch
 profiles:
     main:
         shell: /bin/sh
 )"sv);
     CHECK(config.textScalingMethod.value() == vtrasterizer::GlyphScalingMethod::Stretch);
+}
+
+TEST_CASE("Config: text scaling method defaults to rerasterize", "[config]")
+{
+    // Re-rasterizing is the default because scaled text is text an application asked to be LARGE, and
+    // a magnified bitmap is visibly soft at those sizes. Stretch remains the opt-in for the case it
+    // exists for: large text scrolling past the viewport, where the per-(glyph, scale) rasterization
+    // is paid repeatedly.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+    CHECK(config.textScalingMethod.value() == vtrasterizer::GlyphScalingMethod::Rerasterize);
 }
 
 TEST_CASE("Config: an invalid text scaling method keeps the default", "[config]")
@@ -144,7 +148,7 @@ profiles:
     main:
         shell: /bin/sh
 )"sv);
-    CHECK(config.textScalingMethod.value() == vtrasterizer::GlyphScalingMethod::Stretch);
+    CHECK(config.textScalingMethod.value() == vtrasterizer::GlyphScalingMethod::Rerasterize);
 }
 
 TEST_CASE("Config: the shell environment identifies the terminal", "[config]")

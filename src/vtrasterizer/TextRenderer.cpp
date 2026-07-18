@@ -276,7 +276,7 @@ GlyphScaler const& TextRenderer::defaultGlyphScaler() noexcept
     // encodes its size (shaper::load_font takes one), so FreeType never sees the change and returns
     // the ordinary-size raster. Making it real needs a font loaded per scale, as kitty caches in its
     // scaled_font_map. Until then this default keeps the two methods honest. @see GlyphScalingMethod.
-    static auto const scaler = StretchingGlyphScaler {};
+    static auto const scaler = RerasterizingGlyphScaler {};
     return scaler;
 }
 
@@ -689,7 +689,13 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
         // (glyph, scale) pair lands in its own atlas tile without any change here.
         auto scaledGlyph = glyphPosition.glyph;
         if (adjustment.requiresRerasterization)
+        {
+            // A font_key already encodes its size, so editing glyph_key::size alone changes our atlas
+            // hash and nothing else -- FreeType never sees it and hands back the ordinary raster. Ask
+            // the shaper for the SAME face at the larger size; that is what re-hints the outline.
             scaledGlyph.size.pt *= adjustment.factor;
+            scaledGlyph.font = _textShaper.resize_font(glyphPosition.glyph.font, scaledGlyph.size);
+        }
 
         auto const hash = hashGlyphKeyAndPresentation(scaledGlyph, glyphPosition.presentation);
         AtlasTileAttributes const* attributes =
