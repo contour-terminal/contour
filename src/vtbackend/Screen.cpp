@@ -20,6 +20,8 @@
 #include <crispy/Comparison.h>
 #include <crispy/algorithm.h>
 #include <crispy/base64.h>
+
+#include <charconv>
 #include <crispy/escape.h>
 #include <crispy/size.h>
 #include <crispy/times.h>
@@ -4530,6 +4532,119 @@ void Screen::reply(std::string_view text)
     _terminal->reply(text);
 }
 
+void Screen::processITerm2(std::string_view payload)
+{
+    // OSC 1337 carries several unrelated iTerm2 extensions, told apart by the text before the first
+    // '=' (or the whole payload, for the ones that take no argument).
+    if (payload == "Capabilities")
+    {
+        reportITerm2Capabilities();
+        return;
+    }
+
+    if (payload.starts_with("File="))
+        renderITerm2InlineImage(payload.substr(5));
+}
+
+void Screen::reportITerm2Capabilities()
+{
+    // Only what Contour genuinely does. Advertising a capability we do not have would make an
+    // application choose a path that then fails, which is worse than it choosing a lesser path.
+    //
+    // Codes and their value semantics are iTerm2's: T is a bitmask (2 = full 24-bit SGR sequences),
+    // Sc a bitmask of the DECSCUSR shapes understood (1 = modes 1-4, 2 = modes 5-6, 4 = reset),
+    // Uw the Unicode version the width tables come from, and Ts a bitmask (1 = title stacks,
+    // 2 = title setting).
+    auto capabilities = std::string {};
+    capabilities += "T2";  // 24-bit colour, full sequences
+    capabilities += "Cw";  // clipboard writable (OSC 52)
+    capabilities += "Lr";  // DECSLRM
+    capabilities += "M";   // mouse
+    capabilities += "Sc7"; // DECSCUSR modes 1-6 plus reset
+    capabilities += "U";   // basic Unicode
+    capabilities += "Uw17"; // width tables from Unicode 17
+    capabilities += "Ts3"; // title stacks and title setting
+    capabilities += "B";   // bracketed paste
+    capabilities += "F";   // focus reporting
+    capabilities += "Gs";  // strikethrough
+    capabilities += "Go";  // overline
+    capabilities += "Sy";  // synchronized output (mode 2026)
+    capabilities += "H";   // hyperlinks (OSC 8)
+    capabilities += "No";  // notifications (OSC 99)
+    capabilities += "Sx";  // sixel
+
+    reply("\033]1337;Capabilities={}\a", capabilities);
+}
+
+void Screen::renderITerm2InlineImage(std::string_view arguments)
+{
+    // `File=key=value;...:<base64 data>`. The colon separates the arguments from the payload.
+    auto const colon = arguments.find(':');
+    if (colon == std::string_view::npos)
+        return;
+
+    auto const keyValues = arguments.substr(0, colon);
+    auto const encoded = arguments.substr(colon + 1);
+
+    auto widthCells = 0u;
+    auto heightCells = 0u;
+    auto inlineImage = false;
+
+    for (size_t offset = 0; offset < keyValues.size();)
+    {
+        auto end = keyValues.find(';', offset);
+        if (end == std::string_view::npos)
+            end = keyValues.size();
+        auto const pair = keyValues.substr(offset, end - offset);
+        offset = end + 1;
+
+        auto const equals = pair.find('=');
+        if (equals == std::string_view::npos)
+            continue;
+        auto const key = pair.substr(0, equals);
+        auto const value = pair.substr(equals + 1);
+
+        // Only the cell-valued forms of width/height are honoured; the "10px" and "50%" forms would
+        // each need their own unit handling and are simply left at "derive from the image".
+        auto const cells = [](std::string_view text) -> unsigned {
+            auto result = 0u;
+            auto const* const last = text.data() + text.size();
+            auto const [ptr, ec] = std::from_chars(text.data(), last, result);
+            return (ec == std::errc {} && ptr == last) ? result : 0u;
+        };
+
+        if (key == "width")
+            widthCells = cells(value);
+        else if (key == "height")
+            heightCells = cells(value);
+        else if (key == "inline")
+            inlineImage = value == "1";
+    }
+
+    // Without inline=1 the payload is a file download, not something to draw. Contour does not save
+    // files an application sends, so there is nothing to do.
+    if (!inlineImage)
+        return;
+
+    auto const decoded = crispy::base64::decode(encoded);
+    if (decoded.empty())
+        return;
+
+    // iTerm2 sends whole image files rather than raw pixels, so the format is whatever the file is;
+    // PNG is the one Contour can decode.
+    auto pixmap = Image::Data(decoded.begin(), decoded.end());
+    (void) renderImage(ImageFormat::PNG,
+                       ImageSize {},
+                       std::move(pixmap),
+                       GridSize { .lines = LineCount::cast_from(heightCells),
+                                  .columns = ColumnCount::cast_from(widthCells) },
+                       ImageAlignment::TopStart,
+                       ImageResize::ResizeToFit,
+                       /*autoScroll*/ true,
+                       /*updateCursor*/ true,
+                       ImageLayer::Above);
+}
+
 void Screen::processAPC(std::string_view body)
 {
     // APC carries application-defined protocols that share no grammar, so each is recognised by its
@@ -6132,6 +6247,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case RCOLORHIGHLIGHTBG: resetDynamicColor(DynamicColorName::HighlightBackgroundColor); break;
         case CONEMU: return impl::CONEMU(seq, *this);
         case NOTIFY: return impl::NOTIFY(seq, *this);
+        case ITERM2: processITerm2(seq.intermediateCharacters()); return ApplyResult::Ok;
         case DESKTOPNOTIFY: return impl::DESKTOPNOTIFY(seq, *_terminal);
         case DUMPSTATE: inspect(); break;
         case SEMA: processShellIntegration(seq); break;

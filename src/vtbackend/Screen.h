@@ -214,6 +214,15 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Places @p image at the cursor, sized per the command's `c=`/`r=` or derived from its pixels.
     void renderKittyImage(kitty_graphics::Command const& command, std::shared_ptr<Image const> const& image);
 
+    /// Dispatches one OSC 1337 payload to the iTerm2 extension it names.
+    void processITerm2(std::string_view payload);
+
+    /// Answers `OSC 1337 ; Capabilities` with the features Contour actually has.
+    void reportITerm2Capabilities();
+
+    /// Draws an `OSC 1337 ; File=...` inline image.
+    void renderITerm2InlineImage(std::string_view arguments);
+
   public:
     // }}}
 

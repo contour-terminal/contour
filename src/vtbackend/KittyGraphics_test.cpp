@@ -193,3 +193,40 @@ TEST_CASE("KittyGraphics.non_kitty_APC_is_ignored", "[kitty]")
     mock.writeToScreen("\033_X payload\033\\"sv);
     CHECK(mock.terminal.peekInput().empty());
 }
+
+// -- iTerm2 (OSC 1337) --------------------------------------------------------------------------
+
+TEST_CASE("ITerm2.capabilities_are_reported", "[iterm2]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033]1337;Capabilities\a"sv);
+
+    auto const reply = std::string(mock.terminal.peekInput());
+    REQUIRE(reply.starts_with("\033]1337;Capabilities="));
+
+    // Every advertised capability must be one Contour actually has -- an application that believes
+    // a false advertisement takes a path that then fails.
+    CHECK(reply.find("Sx") != std::string::npos);  // sixel
+    CHECK(reply.find("Sy") != std::string::npos);  // synchronized output, DEC mode 2026
+    CHECK(reply.find("H") != std::string::npos);   // hyperlinks, OSC 8
+    CHECK(reply.find("Cw") != std::string::npos);  // clipboard writable, OSC 52
+    CHECK(reply.find("Lr") != std::string::npos);  // DECSLRM
+    CHECK(reply.find("No") != std::string::npos);  // notifications, OSC 99
+}
+
+TEST_CASE("ITerm2.a_download_is_not_drawn", "[iterm2]")
+{
+    // Without inline=1 the payload is a file transfer, not an image to display. Contour does not
+    // save files an application sends, so nothing should reach the grid.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.terminal.setCellPixelSize(ImageSize { Width(2), Height(2) });
+    mock.writeToScreen("\033]1337;File=name=eA==;size=4:AAAA\a"sv);
+    CHECK_FALSE(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment());
+}
+
+TEST_CASE("ITerm2.unknown_OSC_1337_verbs_are_ignored", "[iterm2]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033]1337;SetBadgeFormat=eA==\a"sv);
+    CHECK(mock.terminal.peekInput().empty());
+}
