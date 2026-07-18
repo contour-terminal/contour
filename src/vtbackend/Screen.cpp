@@ -929,22 +929,36 @@ void Screen::applyClusterWidthChange(int delta) noexcept
     // past it. Anchoring on _cursor.position here would claim or release the wrong columns.
     auto const head = _lastCursorPosition;
 
-    // Only revise a cluster the cursor is still sitting immediately after. Anything else -- an
-    // intervening CUP, a scroll that moved the head, a resize -- means this is no longer a live
-    // cluster, and the "next" cell is not ours to take. In the normal sequential flow the cursor IS
-    // the next cell, so it is free by construction.
-    if (head.line != _cursor.position.line || head.line < LineOffset(0)
-        || head.line >= boxed_cast<LineOffset>(pageSize().lines) || head.column < ColumnOffset(0))
+    // The head has to be addressable before its width can be read back, let alone put back.
+    if (head.line < LineOffset(0) || head.line >= boxed_cast<LineOffset>(pageSize().lines)
+        || head.column < ColumnOffset(0) || head.column >= boxed_cast<ColumnOffset>(pageSize().columns))
         return;
 
-    auto& line = currentLine();
+    auto& line = _grid.lineAt(head.line);
     auto headCell = line.useCellAt(head.column);
     auto const newWidth = static_cast<int>(headCell.width());
     auto const oldWidth = newWidth - delta;
 
-    if (_cursor.position.column != head.column + ColumnOffset::cast_from(oldWidth))
+    // appendCodepointToCluster has ALREADY committed the revised width to the head cell, so every
+    // path that declines to carry the change through has to put the old width back. Leaving it would
+    // let a cell claim a column that holds no continuation of it: the renderer draws the glyph across
+    // its neighbour, and eraseMulticellBlockAt later wipes both.
+    auto const abandon = [&]() noexcept {
+        headCell.setWidth(static_cast<uint8_t>(oldWidth));
+    };
+
+    // Only revise a cluster the cursor is still sitting immediately after. Anything else -- an
+    // intervening CUP, a scroll that moved the head, a resize, or a deferred wrap that has already
+    // carried the cursor to the next line -- means this is no longer a live cluster, and the "next"
+    // cell is not ours to take. In the normal sequential flow the cursor IS the next cell, so it is
+    // free by construction.
+    if (head.line != _cursor.position.line
+        || _cursor.position.column != head.column + ColumnOffset::cast_from(oldWidth))
+    {
+        abandon();
         return;
 
+    }
     if (delta > 0)
     {
         // Growing must not run past the right margin (or the page edge). Rather than reflow a cell
@@ -952,7 +966,7 @@ void Screen::applyClusterWidthChange(int delta) noexcept
         // hyperlink spans -- abandon the promotion and leave the cluster at its original width.
         if (head.column + ColumnOffset::cast_from(newWidth - 1) > lastWritableColumn())
         {
-            headCell.setWidth(static_cast<uint8_t>(oldWidth));
+            abandon();
             return;
         }
 
@@ -986,7 +1000,17 @@ void Screen::applyClusterWidthChange(int delta) noexcept
         _cursor.wrapPending = false;
     }
 
-    _cursor.position.column += ColumnOffset::cast_from(delta);
+    // Advancing past the last writable column is the deferred-wrap case, exactly as in
+    // clearAndAdvance: the cursor stays where it is and the wrap happens when the next character
+    // arrives. The grow guard above only proves the cluster ITSELF fits; a cluster ending flush
+    // against the last column still leaves the cursor one past it. Moving there unconditionally
+    // breaks the `column < pageSize().columns` invariant verifyState() asserts, and in a build
+    // without it the next write indexes the line's storage out of bounds.
+    auto const landing = _cursor.position.column + ColumnOffset::cast_from(delta);
+    if (landing <= lastWritableColumn())
+        _cursor.position.column = landing;
+    else if (_terminal->isModeEnabled(DECMode::AutoWrap))
+        _cursor.wrapPending = true;
 }
 
 ColumnOffset Screen::lastWritableColumn() const noexcept

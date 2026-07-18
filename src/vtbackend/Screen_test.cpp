@@ -488,8 +488,8 @@ TEST_CASE("AppendChar.width_revision_is_gated_on_mode_2027", "[screen]")
     auto& screen = mock.terminal.primaryScreen();
 
     mock.terminal.setMode(DECMode::Unicode, false);
-    mock.writeToScreen(U"\u2139");   // narrow on its own
-    mock.writeToScreen(U"\uFE0F");   // VS16: would widen it to 2 under mode 2027
+    mock.writeToScreen(U"\u2139"); // narrow on its own
+    mock.writeToScreen(U"\uFE0F"); // VS16: would widen it to 2 under mode 2027
     CHECK(screen.cursor().position.column == ColumnOffset(1));
     CHECK(screen.at(LineOffset(0), ColumnOffset(0)).width() == 1);
 
@@ -508,6 +508,57 @@ TEST_CASE("AppendChar.width_revision_resumes_when_2027_is_set_again", "[screen]"
     mock.writeToScreen(U"\u2139");
     mock.writeToScreen(U"\uFE0F");
     CHECK(screen.at(LineOffset(0), ColumnOffset(0)).width() == 2);
+}
+
+TEST_CASE("AppendChar.width_revision_at_right_edge_keeps_cursor_on_page", "[screen]")
+{
+    // A cluster promoted to two columns can end flush against the last column: the cluster itself
+    // fits, but the cursor that follows it does not. Advancing there unconditionally left the cursor
+    // one column past the page -- breaking the invariant verifyState() asserts, and indexing the
+    // line's storage out of bounds on the next write.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen(U"abc");
+    REQUIRE(screen.cursor().position.column == ColumnOffset(3));
+
+    mock.writeToScreen(U"ℹ"); // lands at column 3, cursor to 4
+    REQUIRE(screen.cursor().position.column == ColumnOffset(4));
+
+    mock.writeToScreen(U"️"); // widens it to columns 3..4 -- the cursor would land at 5
+    CHECK(screen.at(LineOffset(0), ColumnOffset(3)).width() == 2);
+    CHECK(screen.cursor().position.column == ColumnOffset(4));
+    CHECK(screen.cursor().wrapPending);
+
+    // The deferred wrap is what makes the promotion safe: the next character starts the next line
+    // rather than writing off the end of this one.
+    mock.writeToScreen(U"X");
+    CHECK(screen.cursor().position.line == LineOffset(1));
+    CHECK(screen.at(LineOffset(1), ColumnOffset(0)).codepoints() == U"X");
+}
+
+TEST_CASE("AppendChar.abandoned_width_revision_restores_the_head_cell", "[screen]")
+{
+    // The width is committed to the cell BEFORE the screen decides whether it can carry the
+    // promotion through. When a deferred wrap has already moved the cursor to the next line the
+    // cluster is no longer live, so the promotion is abandoned -- and the committed width has to go
+    // back with it, or the cell claims a column that holds no continuation of it.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen(U"abcd");
+    REQUIRE(screen.cursor().position.column == ColumnOffset(4));
+
+    mock.writeToScreen(U"ℹ"); // written at the last column; sets wrapPending
+    REQUIRE(screen.cursor().position.column == ColumnOffset(4));
+    REQUIRE(screen.cursor().wrapPending);
+
+    // The wrap fires first, so the head is now on the PREVIOUS line and cannot grow into a column
+    // that does not exist.
+    mock.writeToScreen(U"️");
+    CHECK(screen.cursor().position.line == LineOffset(1));
+    CHECK(screen.at(LineOffset(0), ColumnOffset(4)).width() == 1);
+    CHECK(screen.at(LineOffset(0), ColumnOffset(4)).codepoints() == U"ℹ️");
 }
 
 TEST_CASE("AppendChar.emoji_VS16_i", "[screen]")
