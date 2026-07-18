@@ -216,7 +216,28 @@ void forEachCodepoint(LineSoA const& line, size_t col, F f)
 
 /// Append a continuation codepoint to an existing grapheme cluster.
 /// @return Width change (0 in current implementation unless AllowWidthChange is enabled).
-int appendCodepointToCluster(LineSoA& line, size_t col, char32_t codepoint);
+/// Whether a grapheme cluster's width may be revised after its first codepoint.
+///
+/// DEC mode 2027 (`DECMode::Unicode`) is what an application uses to say it expects the terminal to
+/// measure whole clusters. With the mode reset, a terminal is expected to behave the older way: the
+/// first codepoint decides, and a variation selector arriving later changes nothing.
+enum class ClusterWidthPolicy : uint8_t
+{
+    /// Mode 2027 set: the whole cluster decides its width, so a late VS15/VS16 revises it.
+    ClusterAware,
+
+    /// Mode 2027 reset: the first codepoint decides and nothing later changes it.
+    FirstCodepoint,
+};
+
+/// Appends @p codepoint to the grapheme cluster at @p col.
+///
+/// @return by how many columns the cluster's width changed, which is always 0 under
+///         ClusterWidthPolicy::FirstCodepoint.
+int appendCodepointToCluster(LineSoA& line,
+                             size_t col,
+                             char32_t codepoint,
+                             ClusterWidthPolicy policy = ClusterWidthPolicy::ClusterAware);
 
 /// Clear cluster overflow data for a specific column.
 /// Note: this does not compact the pool; garbage entries remain until line reset.

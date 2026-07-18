@@ -1102,6 +1102,9 @@ struct Config
 
     /// How a glyph is enlarged for scaled text (kitty text sizing protocol, OSC 66).
     /// @see vtrasterizer::GlyphScalingMethod for what each method costs.
+    /// Whether DEC mode 2027 starts out set. @see vtbackend::ClusterWidthPolicy.
+    ConfigEntry<bool, documentation::GraphemeClustering> graphemeClustering { true };
+
     ConfigEntry<vtrasterizer::GlyphScalingMethod, documentation::TextScalingMethod> textScalingMethod {
         vtrasterizer::GlyphScalingMethod::Stretch
     };

@@ -212,6 +212,7 @@ namespace
         settings.highlightDoubleClickedWord = profile.highlightDoubleClickedWord.value();
         settings.highlightTimeout = profile.highlightTimeout.value();
         settings.frozenModes = profile.frozenModes.value();
+        settings.graphemeClustering = config.graphemeClustering.value();
 
         return settings;
     }

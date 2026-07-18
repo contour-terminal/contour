@@ -712,6 +712,16 @@ constexpr StringLiteral GuiConfigLockedConfig {
     "gui_config_locked: {}\n"
 };
 
+constexpr StringLiteral GraphemeClusteringConfig {
+    "\n"
+    "{comment} Whether DEC mode 2027 (grapheme clustering) starts out set.\n"
+    "{comment} While set, a codepoint arriving after the first may revise how many columns its\n"
+    "{comment} grapheme cluster occupies -- so U+FE0F widens its cluster to two and U+FE0E narrows\n"
+    "{comment} it to one. An application can still turn the mode on or off at runtime; this only\n"
+    "{comment} chooses what it finds.\n"
+    "grapheme_clustering: {}\n"
+};
+
 constexpr StringLiteral TextScalingMethodConfig {
     "\n"
     "{comment} How a glyph is enlarged when an application asks for scaled text via the kitty text\n"
@@ -1351,6 +1361,12 @@ constexpr StringLiteral EarlyExitThresholdWeb {
 
 constexpr StringLiteral SpawnNewProcessWeb { "flag determines whether a new process should be spawned when "
                                              "creating a new terminal. The default value is `false`." };
+
+constexpr StringLiteral GraphemeClusteringWeb {
+    "Whether DEC mode 2027 starts out set. While set, a late codepoint may revise its grapheme "
+    "cluster's width -- U+FE0F widens a cluster to two columns, U+FE0E narrows it to one. "
+    "Applications may still toggle the mode at runtime."
+};
 
 constexpr StringLiteral TextScalingMethodWeb {
     "How a glyph is enlarged for scaled text (kitty text sizing protocol, OSC 66). "
@@ -2291,6 +2307,7 @@ using TabSwitchOnHorizontalWheel =
 using GuiConfigLocked = DocumentationEntry<GuiConfigLockedConfig, GuiConfigLockedWeb>;
 using Theme = DocumentationEntry<ThemeConfig, ThemeWeb>;
 using TextScalingMethod = DocumentationEntry<TextScalingMethodConfig, TextScalingMethodWeb>;
+using GraphemeClustering = DocumentationEntry<GraphemeClusteringConfig, GraphemeClusteringWeb>;
 using ColorSchemes = DocumentationEntry<ColorSchemesConfig, Dummy>;
 using Profiles = DocumentationEntry<ProfilesConfig, ProfilesWeb>;
 using DefaultProfiles = DocumentationEntry<StringLiteral { "default_profile: {}\n" }, DefaultProfilesWeb>;

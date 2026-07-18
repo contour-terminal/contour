@@ -332,6 +332,13 @@ namespace
               },
               [](QVariant const& v) { return v.toString().toStdString(); },
               { "system", "dark", "light" } },
+            { "grapheme_clustering",
+              "Grapheme clustering",
+              "Whether DEC mode 2027 starts out set, letting a codepoint arriving after the first "
+              "revise its grapheme cluster's width. Applications may still toggle it at runtime.",
+              "bool",
+              [](config::Config const& c) { return QVariant(c.graphemeClustering.value()); },
+              [](QVariant const& v) { return v.toBool() ? "true" : "false"; } },
             { "text_scaling_method",
               "Scaled text quality",
               "How a glyph is enlarged when an application asks for scaled text. Stretch is free but "

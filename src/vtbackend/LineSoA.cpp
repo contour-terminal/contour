@@ -237,7 +237,7 @@ size_t trimBlankRight(LineSoA const& line, size_t cols)
     return end;
 }
 
-int appendCodepointToCluster(LineSoA& line, size_t col, char32_t codepoint)
+int appendCodepointToCluster(LineSoA& line, size_t col, char32_t codepoint, ClusterWidthPolicy policy)
 {
     assert(!line.codepoints.empty());
     auto const currentSize = line.clusterSize[col];
@@ -268,6 +268,11 @@ int appendCodepointToCluster(LineSoA& line, size_t col, char32_t codepoint)
         if (count < buffer.size())
             buffer[count++] = cp;
     });
+    // Under FirstCodepoint the codepoint still joins the cluster -- it is part of the text, and must
+    // round-trip through a copy -- but it may not change how many columns the cluster occupies.
+    if (policy == ClusterWidthPolicy::FirstCodepoint)
+        return 0;
+
     auto const newWidth = unicode::grapheme_cluster_width(std::u32string_view(buffer.data(), count));
     line.widths[col] = static_cast<uint8_t>(newWidth);
 

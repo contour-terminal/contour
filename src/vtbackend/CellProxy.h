@@ -199,10 +199,11 @@ class BasicCellProxy
         invalidateTrivialIfNeeded();
     }
 
-    [[nodiscard]] int appendCharacter(char32_t ch) noexcept
+    [[nodiscard]] int appendCharacter(char32_t ch,
+                                      ClusterWidthPolicy policy = ClusterWidthPolicy::ClusterAware) noexcept
         requires(!IsConst)
     {
-        return appendCodepointToCluster(*_line, _col, ch);
+        return appendCodepointToCluster(*_line, _col, ch, policy);
     }
 
     void setCharacter(char32_t ch) noexcept

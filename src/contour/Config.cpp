@@ -675,6 +675,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("reflow_on_resize", c.reflowOnResize);
         loadFromEntry("tab_switch_on_horizontal_wheel", c.tabSwitchOnHorizontalWheel);
         loadFromEntry("text_scaling_method", c.textScalingMethod);
+        loadFromEntry("grapheme_clustering", c.graphemeClustering);
         loadFromEntry("gui_config_locked", c.guiConfigLocked);
         loadFromEntry("theme", c.theme);
         loadFromEntry("experimental", c.experimentalFeatures);

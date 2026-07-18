@@ -848,6 +848,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Anchored on @c _lastCursorPosition -- the cluster head -- not on the cursor, which has already
     /// moved past it. Does nothing unless the cursor still sits immediately after that head, so an
     /// intervening cursor move or scroll cannot make this touch an unrelated cell.
+    /// @return whether a late codepoint may revise its cluster's width, per DEC mode 2027.
+    [[nodiscard]] ClusterWidthPolicy clusterWidthPolicy() const noexcept;
+
     void applyClusterWidthChange(int delta) noexcept;
 
     /// @return The rightmost column that may still be written on the cursor's line: the right margin

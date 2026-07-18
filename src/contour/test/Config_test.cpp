@@ -82,6 +82,30 @@ profiles:
     CHECK(config.reflowOnResize.value() == false);
 }
 
+TEST_CASE("Config: grapheme clustering defaults on and can be turned off", "[config]")
+{
+    // Mode 2027 is set at power-on by default; the setting only chooses what an application finds,
+    // and an application may still toggle the mode itself afterwards.
+    QTemporaryDir dir;
+    CHECK(loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+)"sv)
+              .graphemeClustering.value());
+
+    QTemporaryDir dir2;
+    CHECK_FALSE(loadFromYaml(dir2, R"(
+default_profile: main
+grapheme_clustering: false
+profiles:
+    main:
+        shell: /bin/sh
+)"sv)
+                    .graphemeClustering.value());
+}
+
 TEST_CASE("Config: text scaling method loads from YAML", "[config]")
 {
     QTemporaryDir dir;

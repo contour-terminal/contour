@@ -479,6 +479,37 @@ TEST_CASE("AppendChar.emoji_VS16_copyright_sign", "[screen]")
     CHECK(c3.codepoints().empty());
 }
 
+TEST_CASE("AppendChar.width_revision_is_gated_on_mode_2027", "[screen]")
+{
+    // DEC mode 2027 is how an application says it expects whole clusters to be measured. With it
+    // reset, the first codepoint decides and a variation selector arriving later changes nothing --
+    // the older behaviour applications that reset the mode are asking for.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.terminal.setMode(DECMode::Unicode, false);
+    mock.writeToScreen(U"\u2139");   // narrow on its own
+    mock.writeToScreen(U"\uFE0F");   // VS16: would widen it to 2 under mode 2027
+    CHECK(screen.cursor().position.column == ColumnOffset(1));
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).width() == 1);
+
+    // The codepoint still JOINED the cluster -- it is part of the text and must round-trip through a
+    // copy; it merely did not change how many columns the cluster occupies.
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).codepoints() == U"\u2139\uFE0F");
+}
+
+TEST_CASE("AppendChar.width_revision_resumes_when_2027_is_set_again", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.terminal.setMode(DECMode::Unicode, false);
+    mock.terminal.setMode(DECMode::Unicode, true);
+    mock.writeToScreen(U"\u2139");
+    mock.writeToScreen(U"\uFE0F");
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).width() == 2);
+}
+
 TEST_CASE("AppendChar.emoji_VS16_i", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(5) } };

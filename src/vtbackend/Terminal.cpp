@@ -243,7 +243,7 @@ Terminal::Terminal(Events& eventListener,
     setMode(DECMode::AutoRepeat, true);
     setMode(DECMode::SixelCursorNextToGraphic, true);
     setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
-    setMode(DECMode::Unicode, true);
+    setMode(DECMode::Unicode, _settings.graphemeClustering);
     setMode(DECMode::VisibleCursor, true);
     setMode(DECMode::PageCursorCoupling, true);
     setMode(DECMode::LeftRightMargin, false);
@@ -3446,7 +3446,7 @@ void Terminal::hardReset()
     setMode(DECMode::AutoRepeat, true);
     setMode(DECMode::SixelCursorNextToGraphic, true);
     setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
-    setMode(DECMode::Unicode, true);
+    setMode(DECMode::Unicode, _settings.graphemeClustering);
     setMode(DECMode::VisibleCursor, true);
     setMode(DECMode::PageCursorCoupling, true);
 
