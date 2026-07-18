@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/TextScale.h>
 #include <vtbackend/primitives.h>
+
+#include <crispy/StrongHash.h>
 
 #include <algorithm>
 #include <cmath>
@@ -206,6 +209,26 @@ inline void blitClipped(std::span<uint8_t> target,
 [[nodiscard]] constexpr uint32_t glyphTileSubKey(uint32_t column, uint32_t band) noexcept
 {
     return 1 + column + (band * 256);
+}
+
+/// The part of a block's atlas identity that does not come from its glyphs.
+///
+/// Everything that changes the PIXELS the block's tiles are cut from has to be in here, or two
+/// blocks share one atlas entry and whichever rasterizes first wins. That is easy to get wrong for
+/// @p cellsAtOneX in particular, because it is derived rather than given: it comes from the `w=` the
+/// application asked for, and buildBlockCanvas lays the glyph out against it -- the horizontal slack
+/// blockPlacementFor distributes is measured in those cells. Two blocks of the same cluster at the
+/// same scale but different `w=` therefore produce different canvases.
+///
+/// @param scale        the block's full sizing: its scale plus the fraction and alignment, all of
+///                     which change the pixels rather than merely the extent.
+/// @param cellsAtOneX  how many cells the block's content occupies at scale 1.
+[[nodiscard]] inline crispy::strong_hash blockCanvasHash(vtbackend::CellScale const& scale,
+                                                         uint32_t cellsAtOneX) noexcept
+{
+    // The `+ 1` guards keep a zero factor from collapsing the whole product.
+    return crispy::strong_hash::compute(static_cast<uint32_t>(scale.scale))
+           * (vtbackend::packTextScaleExtras(scale) + 1u) * (cellsAtOneX + 1u);
 }
 
 } // namespace vtrasterizer

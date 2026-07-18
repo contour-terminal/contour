@@ -974,11 +974,9 @@ void TextRenderer::renderBlockGroup(text::shape_result const& glyphPositions,
     auto const columns = static_cast<uint32_t>(std::max<uint8_t>(1, sizing.columns));
     auto const cellsAtOneX = std::max(1, static_cast<int>(columns) / blockScale);
 
-    // The scale is folded into the key so that two sizes of one cluster cannot serve each other's
-    // tiles, and the fraction/alignment with it: they change the pixels, not just the extent. Every
-    // glyph contributes, or two conjuncts sharing a base glyph would collide on one entry.
-    auto blockHash = strong_hash::compute(static_cast<uint32_t>(scale.scale))
-                     * (vtbackend::packTextScaleExtras(scale) + 1u);
+    // Everything that shapes the canvas is folded into the key by blockCanvasHash; every glyph
+    // contributes on top, or two conjuncts sharing a base glyph would collide on one entry.
+    auto blockHash = blockCanvasHash(scale, static_cast<uint32_t>(cellsAtOneX));
     for (auto const& glyphPosition: glyphPositions)
         blockHash = blockHash * hashGlyphKeyAndPresentation(glyphPosition.glyph, glyphPosition.presentation);
 

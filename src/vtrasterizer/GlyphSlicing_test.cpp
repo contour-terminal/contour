@@ -249,6 +249,45 @@ TEST_CASE("GlyphSlicing.magnify.keeps_rgba_channels_apart", "[glyphslicing]")
     }
 }
 
+TEST_CASE("GlyphSlicing.blockCanvasHash.separates_blocks_that_rasterize_differently", "[glyphslicing]")
+{
+    using vtbackend::CellScale;
+
+    // Two blocks whose canvases differ must not share an atlas entry: whichever rasterizes first
+    // would win it, and the other would draw its glyph at the wrong offset inside its own block.
+    auto const base = CellScale { .scale = 4, .numerator = 1, .denominator = 2, .horizontalAlignment = 1 };
+
+    SECTION("the cell span is part of the identity")
+    {
+        // Same cluster, same scale, different `w=`: blockPlacementFor takes the horizontal slack
+        // from the cell span, so the glyph sits at a different offset on the canvas.
+        CHECK(blockCanvasHash(base, 1) != blockCanvasHash(base, 2));
+    }
+
+    SECTION("the scale is part of the identity")
+    {
+        auto other = base;
+        other.scale = 2;
+        CHECK(blockCanvasHash(base, 1) != blockCanvasHash(other, 1));
+    }
+
+    SECTION("the fraction and alignment are part of the identity")
+    {
+        auto fraction = base;
+        fraction.denominator = 3;
+        CHECK(blockCanvasHash(base, 1) != blockCanvasHash(fraction, 1));
+
+        auto alignment = base;
+        alignment.horizontalAlignment = 2;
+        CHECK(blockCanvasHash(base, 1) != blockCanvasHash(alignment, 1));
+    }
+
+    SECTION("identical blocks share their entry")
+    {
+        CHECK(blockCanvasHash(base, 2) == blockCanvasHash(base, 2));
+    }
+}
+
 TEST_CASE("GlyphSlicing.subKey.is_unique_per_cell_and_never_zero", "[glyphslicing]")
 {
     // The sub-key multiplies the glyph's hash, so a zero would collapse every tile onto one entry;
