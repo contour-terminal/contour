@@ -65,3 +65,6 @@ urg
 vswhere
 winget
 zypper
+desynchronise
+lookbehind
+unhighlighted
