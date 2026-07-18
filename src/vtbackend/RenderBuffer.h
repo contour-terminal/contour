@@ -69,9 +69,9 @@ struct RenderCell
     RenderAttributes attributes;
     uint8_t width = 1;
 
-    /// How this cell's glyph is sized and placed (kitty text sizing protocol, `OSC 66`).
-    /// Ordinary text leaves it at its default.
-    CellScale scale {};
+    /// How this cell's glyph is sized and placed, and which row of its block it draws (kitty text
+    /// sizing protocol, `OSC 66`). Ordinary text leaves it at its default.
+    GlyphSizing sizing {};
 
     bool groupStart = false;
     bool groupEnd = false;

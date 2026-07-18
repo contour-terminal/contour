@@ -78,4 +78,22 @@ struct CellScale
                        .horizontalAlignment = static_cast<uint8_t>((extras >> 10) & 0x03) };
 }
 
+/// A cell's sizing together with WHICH row of its block this cell draws.
+///
+/// A block `scale` cells tall is rasterized once and then drawn one row at a time, so every row can
+/// clip to its own cell and -- crucially -- can draw itself. When only the head cell drew, a block
+/// whose head scrolled above the viewport vanished entirely instead of being clipped.
+///
+/// kitty carries the same datum as `multicell_y` on its RunFont, and compares it in
+/// run_fonts_are_equal() so each row of a block becomes its own shaping run.
+struct GlyphSizing
+{
+    CellScale scale {};
+
+    /// Row within the block; 0 is the head row, which is where the text lives.
+    uint8_t band = 0;
+
+    constexpr bool operator==(GlyphSizing const&) const noexcept = default;
+};
+
 } // namespace vtbackend

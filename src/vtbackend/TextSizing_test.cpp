@@ -651,3 +651,75 @@ TEST_CASE("TextSizing.copying_a_block_row_yields_no_blank_trailing_line", "[text
 
     CHECK(mock.terminal.extractSelectionText() == "ab");
 }
+
+TEST_CASE("TextSizing.a_block_stays_a_block_once_scrolled_into_history", "[textsizing]")
+{
+    // The renderer resolves a continuation row back to its head so that a block whose head has
+    // scrolled above the viewport still draws. That lookup has to keep working once the block is in
+    // the scrollback, which is exactly when it matters.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(5), ColumnCount(20) }, LineCount(50) };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033]66;s=4;X\a\r\n\r\n\r\n\r\n"sv);
+    for (auto const i: std::views::iota(0, 10))
+        mock.writeToScreen("filler" + std::to_string(i) + "\r\n");
+
+    // Find where the block ended up rather than predicting it, then ask from a row it merely reaches
+    // down into -- the lookup the renderer actually performs for a continuation row.
+    auto headLine = std::optional<LineOffset> {};
+    for (auto const line: std::views::iota(-static_cast<int>(screen.historyLineCount().value), 0))
+        if (screen.at(CellLocation { .line = LineOffset(line), .column = ColumnOffset(0) }).codepoints()
+            == U"X")
+            headLine = LineOffset(line);
+    REQUIRE(headLine.has_value());
+
+    auto const block = screen.multicellBlockAt(
+        CellLocation { .line = *headLine + LineOffset(2), .column = ColumnOffset(0) });
+
+    REQUIRE(block.has_value());
+    CHECK(block->origin.line == *headLine);
+    CHECK(block->rows == 4);
+    CHECK(screen.at(block->origin).codepoints() == U"X");
+}
+
+TEST_CASE("TextSizing.a_block_whose_head_scrolled_above_the_viewport_still_draws", "[textsizing]")
+{
+    // Only the head cell of a block used to draw anything, so scrolling the head above the viewport
+    // took the whole block with it instead of clipping it. Each row now resolves back to its head and
+    // draws that row's band, which is what keeps the visible part on screen.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(5), ColumnCount(20) }, LineCount(50) };
+    auto const& screen = mock.terminal.primaryScreen();
+    auto constexpr ClockBase = std::chrono::steady_clock::time_point {};
+    mock.terminal.tick(ClockBase);
+
+    mock.writeToScreen("\033]66;s=4;X\a\r\n\r\n\r\n\r\n"sv);
+    for (auto const i: std::views::iota(0, 10))
+        mock.writeToScreen("filler" + std::to_string(i) + "\r\n");
+
+    auto headLine = std::optional<LineOffset> {};
+    for (auto const line: std::views::iota(-static_cast<int>(screen.historyLineCount().value), 0))
+        if (screen.at(CellLocation { .line = LineOffset(line), .column = ColumnOffset(0) }).codepoints()
+            == U"X")
+            headLine = LineOffset(line);
+    REQUIRE(headLine.has_value());
+
+    // Scroll so the viewport's TOP row is the block's SECOND row: the head is off-screen above.
+    mock.terminal.viewport().scrollUp(LineCount(-(headLine->value + 1)));
+    REQUIRE(mock.terminal.viewport().scrollOffset().value == -(headLine->value + 1));
+
+    mock.terminal.tick(ClockBase + std::chrono::milliseconds(100));
+    mock.terminal.ensureFreshRenderBuffer();
+    auto const buffer = mock.terminal.renderBuffer();
+
+    // The head's glyph must be emitted for the visible rows, carrying the band each one is.
+    auto bands = std::vector<int> {};
+    for (auto const& cell: buffer.get().cells)
+        if (cell.codepoints == U"X")
+            bands.push_back(static_cast<int>(cell.sizing.band));
+
+    INFO("emitted bands: " << bands.size());
+    REQUIRE_FALSE(bands.empty());
+    // Rows 1..3 of the block are on screen; row 0 is not.
+    CHECK(std::ranges::find(bands, 0) == bands.end());
+    CHECK(std::ranges::find(bands, 1) != bands.end());
+}

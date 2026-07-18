@@ -256,7 +256,7 @@ RenderCell RenderBufferBuilder::makeRenderCell(ColorPalette const& colorPalette,
     renderCell.position.line = line;
     renderCell.position.column = column;
     renderCell.width = screenCell.width();
-    renderCell.scale = screenCell.textScale();
+    renderCell.sizing.scale = screenCell.textScale();
 
     if (screenCell.codepointCount() != 0)
     {
@@ -692,6 +692,27 @@ void RenderBufferBuilder::renderCell(ConstCellProxy screenCell, LineOffset line,
                                                bg,
                                                _baseLine + line,
                                                displayColumn));
+
+    // A row that a tall block reaches down into carries no text of its own, so nothing would be drawn
+    // there and the block would exist only as long as its HEAD row was on screen -- scroll the head
+    // above the viewport and the whole block vanished instead of being clipped. Give such a row the
+    // head's glyph and tell the renderer which band of the block it is; the renderer clips the raster
+    // to that row. Only the block's leftmost column on this row draws: the rest are covered by it,
+    // exactly as a wide glyph's continuation columns are.
+    if (screenCell.isFlagEnabled(CellFlag::MulticellContinuation))
+    {
+        auto const& screen = _terminal->currentScreen();
+        if (auto const block = screen.multicellBlockAt(gridPosition);
+            block && block->origin.column == gridPosition.column && block->origin.line < gridPosition.line)
+        {
+            auto const head = screen.at(block->origin);
+            auto& emitted = _output->cells.back();
+            emitted.codepoints = head.codepoints();
+            emitted.width = head.width();
+            emitted.sizing.scale = head.textScale();
+            emitted.sizing.band = static_cast<uint8_t>(unbox(gridPosition.line) - unbox(block->origin.line));
+        }
+    }
 
     if (column == ColumnOffset(0))
         _output->cells.back().groupStart = true;

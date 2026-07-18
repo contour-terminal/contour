@@ -456,7 +456,7 @@ void TextRenderer::renderCell(vtbackend::RenderCell const& cell)
                                    cell.attributes.foregroundColor,
                                    makeTextStyle(cell.attributes.flags),
                                    cell.attributes.lineFlags,
-                                   cell.scale);
+                                   cell.sizing);
 
     if (cell.groupEnd)
         _textClusterGrouper.forceGroupEnd();
@@ -619,13 +619,53 @@ Renderable::AtlasTileAttributes adjustTileAttributesForLineFlags(
     return attributesCopy;
 }
 
+/// Clips a tile about to be drawn to one screen row's band, in both texture space and height.
+///
+/// A block `scale` cells tall is one raster drawn across several rows. Each row draws its own band of
+/// it, so a block whose head has scrolled above the viewport is CLIPPED rather than lost -- when only
+/// the head cell drew, the whole block vanished with it. kitty cuts the same bands in
+/// calculate_regions_for_line().
+///
+/// @param attributes the tile, adjusted in place.
+/// @param tileTop    the tile's top in screen pixels; moved down to the visible part.
+/// @param bandTop    the row's top edge in screen pixels.
+/// @param bandBottom the row's bottom edge in screen pixels.
+/// @return false when the tile does not reach this band at all, and must not be drawn.
+[[nodiscard]] bool clipTileToBand(Renderable::AtlasTileAttributes& attributes,
+                                  int& tileTop,
+                                  int bandTop,
+                                  int bandBottom)
+{
+    auto const drawnHeight = unbox<int>(attributes.metadata.targetSize.height);
+    if (drawnHeight <= 0)
+        return true;
+
+    auto const tileBottom = tileTop + drawnHeight;
+    auto const visibleTop = std::max(tileTop, bandTop);
+    auto const visibleBottom = std::min(tileBottom, bandBottom);
+    if (visibleBottom <= visibleTop)
+        return false;
+    if (visibleTop == tileTop && visibleBottom == tileBottom)
+        return true;
+
+    auto const from = static_cast<float>(visibleTop - tileTop) / static_cast<float>(drawnHeight);
+    auto const to = static_cast<float>(visibleBottom - tileTop) / static_cast<float>(drawnHeight);
+
+    auto& location = attributes.metadata.normalizedLocation;
+    location.y += location.height * from;
+    location.height *= to - from;
+    attributes.metadata.targetSize.height = vtbackend::Height::cast_from(visibleBottom - visibleTop);
+    tileTop = visibleTop;
+    return true;
+}
+
 void TextRenderer::renderTextGroup(std::u32string_view codepoints,
                                    gsl::span<unsigned> clusters,
                                    vtbackend::CellLocation initialPenPosition,
                                    TextStyle style,
                                    vtbackend::RGBColor color,
                                    vtbackend::LineFlags lineFlags,
-                                   vtbackend::CellScale const& scale)
+                                   vtbackend::GlyphSizing const& sizing)
 {
     if (codepoints.empty())
         return;
@@ -638,6 +678,14 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
         getOrCreateCachedGlyphPositions(hash, codepoints, clusters, style);
     crispy::point pen = _gridMetrics.mapBottomLeft(initialPenPosition, _smoothScrollYOffset);
 
+    // Every row of a block draws its own band of one raster. The geometry below is expressed from the
+    // block's HEAD row, so step back up to it and remember this row's edges to clip against. Ordinary
+    // text is band 0 and scale 1: nothing moves and nothing is clipped.
+    auto const bandBottom = pen.y;
+    auto const bandTop = bandBottom - unbox<int>(_gridMetrics.cellSize.height);
+    auto const bandClipping = sizing.scale.scale > 1;
+    pen.y -= static_cast<int>(sizing.band) * unbox<int>(_gridMetrics.cellSize.height);
+
     using vtbackend::LineFlag;
 
     auto const advanceScale = lineFlags.test(LineFlag::DoubleWidth) ? 2 : 1;
@@ -645,6 +693,7 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
 
     // How this group's glyphs are enlarged. Hoisted out of the loop: it is a property of the group,
     // and both branches below need it.
+    auto const& scale = sizing.scale;
     auto const adjustment = _glyphScaler->adjustmentFor(scale);
 
     for (auto const& glyphPosition: glyphPositions)
@@ -676,7 +725,10 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
             pen1.x += penOffset.dx;
             pen1.y += penOffset.dy;
 
-            renderRasterizedGlyph(pen1, color, attributesCopy);
+            auto clippedAttributes = attributesCopy;
+            auto clippedY = pen1.y;
+            if (!bandClipping || clipTileToBand(clippedAttributes, clippedY, bandTop, bandBottom))
+                renderRasterizedGlyph(crispy::point { .x = pen1.x, .y = clippedY }, color, clippedAttributes);
 
             // Direct mapping only ever covers printable US-ASCII of the primary font, which occupies
             // exactly one cell. The advance is known, so the font is not consulted for it.
@@ -725,7 +777,13 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
             pen1.x += penOffset.dx;
             pen1.y += penOffset.dy;
 
-            renderRasterizedGlyph(pen1, color, attributesCopy);
+            {
+                auto clippedAttributes = attributesCopy;
+                auto clippedY = pen1.y;
+                if (!bandClipping || clipTileToBand(clippedAttributes, clippedY, bandTop, bandBottom))
+                    renderRasterizedGlyph(
+                        crispy::point { .x = pen1.x, .y = clippedY }, color, clippedAttributes);
+            }
 
             // A glyph wider than one atlas tile was sliced at rasterization time; the head tile was
             // just drawn, and the remaining slices follow. They are parts of the SAME glyph, so
@@ -747,10 +805,15 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
             auto sliceKey = unbox(textureAtlas().tileSize().width);
             while (AtlasTileAttributes const* subAttribs = textureAtlas().try_get(hash * sliceKey))
             {
-                auto const subAttribsCopy = adjustSlice(*subAttribs);
-                renderTile(
-                    atlas::RenderTile::X { sliceX }, atlas::RenderTile::Y { pen1.y }, color, subAttribsCopy);
-                sliceX += unbox<int>(subAttribsCopy.metadata.targetSize.width);
+                auto subAttribsCopy = adjustSlice(*subAttribs);
+                auto const sliceWidth = unbox<int>(subAttribsCopy.metadata.targetSize.width);
+                auto sliceY = pen1.y;
+                if (!bandClipping || clipTileToBand(subAttribsCopy, sliceY, bandTop, bandBottom))
+                    renderTile(atlas::RenderTile::X { sliceX },
+                               atlas::RenderTile::Y { sliceY },
+                               color,
+                               subAttribsCopy);
+                sliceX += sliceWidth;
                 sliceKey += unbox(textureAtlas().tileSize().width);
             }
         }

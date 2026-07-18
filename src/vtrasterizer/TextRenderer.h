@@ -106,7 +106,7 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
                          TextStyle style,
                          vtbackend::RGBColor color,
                          vtbackend::LineFlags flags,
-                         vtbackend::CellScale const& scale) override;
+                         vtbackend::GlyphSizing const& sizing) override;
 
     bool renderBoxDrawingCell(vtbackend::CellLocation position,
                               char32_t codepoint,

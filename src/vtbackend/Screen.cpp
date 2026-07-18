@@ -4871,8 +4871,13 @@ std::optional<MulticellBlock> Screen::multicellBlockAt(CellLocation position) co
     // Walk to the block's head: up while this cell continues a block above, then left while it
     // continues one to its left. The axes are independent -- every column of a scaled block's
     // second row carries the vertical flag.
+    // The walk stops at the first line the grid HAS, which is the top of the scrollback -- not at
+    // line 0. Grid lines run negative into history, so bounding at 0 made the walk a no-op for every
+    // block that had scrolled off the page: its continuation rows then reported themselves as heads,
+    // which is empty, and the block stopped being drawn or erased as a whole.
+    auto const topLine = -boxed_cast<LineOffset>(grid().historyLineCount());
     auto origin = position;
-    while (origin.line > LineOffset(0) && continuesInto(origin, CellFlag::MulticellContinuation))
+    while (origin.line > topLine && continuesInto(origin, CellFlag::MulticellContinuation))
         --origin.line;
     while (origin.column > ColumnOffset(0) && continuesInto(origin, CellFlag::WideCharContinuation))
         --origin.column;
