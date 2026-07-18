@@ -53,6 +53,7 @@ checkbox
 chown
 ciexyz
 circleval
+cjk
 claude
 COLORHIGHLIGHTBG
 COLORHIGHLIGHTFG
@@ -260,6 +261,7 @@ metapackages
 midlight
 mred
 mru
+multicell
 multiwindow
 MYPC
 myscheme

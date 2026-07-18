@@ -19,11 +19,20 @@ namespace text
 namespace mock_detail
 {
     static std::vector<font_description_and_source> registry;
-}
+
+    /// What resolve() answers with, regardless of the codepoints asked about.
+    static font_source_list coverage;
+} // namespace mock_detail
 
 void mock_font_locator::configure(std::vector<font_description_and_source> registry)
 {
     mock_detail::registry = std::move(registry);
+    mock_detail::coverage.clear();
+}
+
+void mock_font_locator::configureCoverage(font_source_list sources)
+{
+    mock_detail::coverage = std::move(sources);
 }
 
 font_source_list mock_font_locator::locate(font_description const& description)
@@ -70,7 +79,9 @@ font_source_list mock_font_locator::all()
 
 font_source_list mock_font_locator::resolve(gsl::span<const char32_t> /*codepoints*/)
 {
-    return {};
+    // A real locator answers by charset; a test says up front what the answer is, so that a case can
+    // decide whether the coverage lookup finds anything without needing real fonts on the machine.
+    return mock_detail::coverage;
 }
 
 } // namespace text

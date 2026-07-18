@@ -523,6 +523,13 @@ namespace
     {
         fallback_pass pass = fallback_pass::Preferred;
         size_t index = 0;
+
+        /// Whether the coverage-driven lookup has already been spent on this span.
+        ///
+        /// That lookup is the last resort, and it answers with a font chosen precisely because it
+        /// covers the codepoints -- so if shaping against it STILL comes back .notdef, asking again
+        /// would return the same font forever. One attempt per span, then the replacement glyph.
+        bool coverageTried = false;
     };
 
     /// Shapes @p codepoints with @p hbFont alone, applying no fallback.
@@ -655,6 +662,10 @@ struct open_shaper::private_open_shaper // {{{
     /// Survives clear_cache() since font descriptions map to the same font files
     /// regardless of DPI or font size changes.
     unordered_map<font_description, font_source_list> locateCache;
+
+    /// Cache for resolveByCoverage(), keyed by the first codepoint of an unresolvable span.
+    /// Holds negative answers too, so a codepoint no installed font covers is queried only once.
+    unordered_map<char32_t, optional<font_key>> coverageCache;
 
     // Blacklisted font files as we tried them already and failed.
     std::vector<std::string> blacklistedSources;
@@ -873,6 +884,46 @@ struct open_shaper::private_open_shaper // {{{
         }
     }
 
+    /// Asks the locator which font covers @p codepoints, once the fallback chain has been walked out.
+    ///
+    /// The chain is ordered by how well each font matches the font DESCRIPTION, which routinely buries
+    /// the only face holding a script far past any length worth walking eagerly -- on a stock Fedora
+    /// install the first CJK face sorts 83rd of 201 for a monospace description, while the chain limit
+    /// defaults to 16. Asking about the codepoint instead finds it in one query, which keeps the limit
+    /// a bound on how many fonts are tried BLINDLY rather than a bound on which scripts can render.
+    ///
+    /// @param fontInfo   The primary font, supplying the size and weight to load a candidate at.
+    /// @param codepoints The span that no font in the chain could render.
+    /// @return A font covering @p codepoints, or nullopt when the locator names none that loads.
+    [[nodiscard]] optional<font_key> resolveByCoverage(HbFontInfo const& fontInfo, u32string_view codepoints)
+    {
+        if (codepoints.empty() || !locator)
+            return nullopt;
+
+        // Keyed on the first codepoint: a run that reaches this path is overwhelmingly one script, and
+        // a fontconfig charset query is far too expensive to repeat per run. Negative answers are cached
+        // too -- a codepoint no font on the system covers must not re-query on every frame.
+        auto const cacheKey = codepoints.front();
+        if (auto const i = coverageCache.find(cacheKey); i != coverageCache.end())
+            return i->second;
+
+        auto resolved = optional<font_key> { nullopt };
+        for (auto const& source: locator->resolve(gsl::span(codepoints.data(), codepoints.size())))
+        {
+            resolved = getOrCreateKeyForFont(source, fontInfo.size, fontInfo.description.weight);
+            if (resolved.has_value())
+            {
+                textShapingLog()("Resolved U+{:04X} by coverage to font key:{}.",
+                                 static_cast<uint32_t>(cacheKey),
+                                 *resolved);
+                break;
+            }
+        }
+
+        coverageCache[cacheKey] = resolved;
+        return resolved;
+    }
+
     /// Shapes @p codepoints with @p shapingFont, then resolves each span that font cannot render against
     /// the rest of @p primaryFontInfo's fallback chain, appending the spliced glyphs to @p result.
     ///
@@ -939,8 +990,18 @@ struct open_shaper::private_open_shaper // {{{
             // A span mapping to no codepoints has nothing to re-shape; recursing on it would not
             // terminate.
             auto spanCursor = cursor;
-            auto const fallbackOpt =
-                segment.empty() ? nullopt : nextFallbackFont(primaryFontInfo, spanCursor);
+            auto fallbackOpt = segment.empty() ? nullopt : nextFallbackFont(primaryFontInfo, spanCursor);
+
+            // The chain is out of fonts, but "no font in the first N of a description-ordered list"
+            // is not the same as "no font on this system". Ask which one actually covers these
+            // codepoints before settling for the replacement glyph.
+            if (!fallbackOpt.has_value() && !segment.empty() && !spanCursor.coverageTried)
+            {
+                auto const missing = segment.codepointEnd - segment.codepointBegin;
+                fallbackOpt =
+                    resolveByCoverage(primaryFontInfo, codepoints.substr(segment.codepointBegin, missing));
+                spanCursor.coverageTried = true;
+            }
 
             if (!fallbackOpt.has_value())
             {

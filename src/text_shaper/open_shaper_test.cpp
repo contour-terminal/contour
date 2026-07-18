@@ -603,3 +603,50 @@ TEST_CASE("open_shaper.COLRv1", "[open_shaper]")
     CHECK(glyph.bitmapSize.height > vtbackend::Height(0));
     CHECK(glyph.bitmap.size() > 0);
 }
+
+TEST_CASE("open_shaper.coverage.resolves_a_codepoint_the_chain_cannot", "[open_shaper][fallback]")
+{
+    // The fallback chain is ordered by how well each font matches the DESCRIPTION, so the only face
+    // holding a script can sort far past any length worth walking eagerly -- on a stock Fedora install
+    // the first CJK face is 83rd of 201, against a chain limit of 16. Once the chain is exhausted the
+    // locator is asked which font actually covers the codepoint, and that answer is used.
+    auto coverageFont = bdf_font { "coverage", Monospaced, { { Snowman, 8 } } };
+
+    auto env = fallback_env { {
+        { .name = "primary", .monospace = Monospaced, .glyphs = { { U'A', 8 }, { Replacement, 8 } } },
+        { .name = "fallback", .monospace = Monospaced, .glyphs = { { U'A', 8 } } },
+    } };
+    mock_font_locator::configureCoverage({ coverageFont.source() });
+
+    auto const primary = env.key("primary");
+    auto const result = shapeCells(env.shaper(), primary, u32string { U'A', Snowman });
+    REQUIRE(result.size() == 2);
+
+    CHECK(result[0].glyph.font == primary);
+    // The snowman came from neither the primary nor its chain, and it is a real glyph, not .notdef.
+    CHECK(result[1].glyph.font != primary);
+    CHECK(result[1].glyph.index.value != 0);
+}
+
+TEST_CASE("open_shaper.coverage.is_spent_once_per_span", "[open_shaper][fallback]")
+{
+    // The coverage lookup answers with a font chosen BECAUSE it covers the codepoints. If shaping
+    // against that font still comes back .notdef, asking again would return the same font forever --
+    // so the attempt is spent once and the span then settles for the replacement glyph. This case
+    // hands it a font that does NOT have the snowman, which is what makes the guard observable: with
+    // the attempt unbounded it does not terminate.
+    auto uselessFont = bdf_font { "useless", Monospaced, { { U'B', 8 } } };
+
+    auto env = fallback_env { {
+        { .name = "primary", .monospace = Monospaced, .glyphs = { { U'A', 8 }, { Replacement, 8 } } },
+    } };
+    mock_font_locator::configureCoverage({ uselessFont.source() });
+
+    auto const primary = env.key("primary");
+    auto const replacement = env.shaper().shape(primary, Replacement);
+    REQUIRE(replacement.has_value());
+
+    auto const result = shapeCells(env.shaper(), primary, u32string { U'A', Snowman });
+    REQUIRE(result.size() == 2);
+    CHECK(result[1].glyph.index.value == replacement->glyph.index.value);
+}
