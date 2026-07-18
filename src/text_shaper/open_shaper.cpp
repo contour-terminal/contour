@@ -665,6 +665,9 @@ struct open_shaper::private_open_shaper // {{{
 
     /// Cache for resolveByCoverage(), keyed by the first codepoint of an unresolvable span.
     /// Holds negative answers too, so a codepoint no installed font covers is queried only once.
+    ///
+    /// Unlike @c locateCache this does NOT survive clear_cache(): its values are font_keys owned by
+    /// @c fontKeyToHbFontInfoMapping, not font files, and outliving that map would make them dangle.
     unordered_map<char32_t, optional<font_key>> coverageCache;
 
     // Blacklisted font files as we tried them already and failed.
@@ -1066,6 +1069,13 @@ void open_shaper::clear_cache()
                  _d->fontKeyToHbFontInfoMapping.size());
     _d->fontPathAndSizeToKeyMapping.clear();
     _d->fontKeyToHbFontInfoMapping.clear();
+    // coverageCache stores font_keys owned by the two maps just cleared. Keeping it would hand back
+    // keys that no longer resolve, and shapeRunWithFallback requires the lookup to succeed -- so the
+    // next frame drawing a coverage-resolved codepoint would abort the render thread. Font keys are
+    // never reissued (nextFontKey only ever counts up), so a stale key cannot even be mistaken for a
+    // live one. Unlike locateCache, this cache is NOT description-independent: it answers with a key,
+    // not a font file.
+    _d->coverageCache.clear();
 }
 
 optional<font_key> open_shaper::load_font(font_description const& description, font_size size)

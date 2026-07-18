@@ -628,6 +628,31 @@ TEST_CASE("open_shaper.coverage.resolves_a_codepoint_the_chain_cannot", "[open_s
     CHECK(result[1].glyph.index.value != 0);
 }
 
+TEST_CASE("open_shaper.coverage.cache_does_not_outlive_the_keys_it_stores", "[open_shaper][fallback]")
+{
+    // The coverage cache answers with a font_key, and those keys are owned by the maps clear_cache()
+    // empties. Surviving that call it would hand back a key nothing can resolve -- and the shaping
+    // path REQUIREs the lookup to succeed, so the next frame drawing that codepoint aborted. Any
+    // non-DPI font change reaches this: applyFontDescriptions() calls clear_cache().
+    auto coverageFont = bdf_font { "coverage", Monospaced, { { Snowman, 8 } } };
+
+    auto env = fallback_env { {
+        { .name = "primary", .monospace = Monospaced, .glyphs = { { U'A', 8 }, { Replacement, 8 } } },
+    } };
+    mock_font_locator::configureCoverage({ coverageFont.source() });
+
+    // Populate the coverage cache.
+    REQUIRE(shapeCells(env.shaper(), env.key("primary"), u32string { Snowman }).size() == 1);
+
+    env.shaper().clear_cache();
+
+    // Re-loading gives a fresh key; shaping the same codepoint must not reach for the stale one.
+    auto const primary = env.key("primary");
+    auto const result = shapeCells(env.shaper(), primary, u32string { U'A', Snowman });
+    REQUIRE(result.size() == 2);
+    CHECK(result[1].glyph.index.value != 0);
+}
+
 TEST_CASE("open_shaper.coverage.is_spent_once_per_span", "[open_shaper][fallback]")
 {
     // The coverage lookup answers with a font chosen BECAUSE it covers the codepoints. If shaping
