@@ -181,9 +181,10 @@ template <typename Cell>
 template <typename Cell>
 [[nodiscard]] inline int computeWidthChange(Cell const& cell, char32_t codepoint) noexcept
 {
-    auto const oldWidth = static_cast<unsigned>(cell.width());
-    auto const newWidth = unicode::grapheme_cluster_width_append(oldWidth, codepoint);
-    return static_cast<int>(newWidth) - static_cast<int>(oldWidth);
+    auto cluster = std::u32string(cell.codepoints());
+    cluster.push_back(codepoint);
+    auto const oldWidth = static_cast<int>(cell.width());
+    return static_cast<int>(unicode::grapheme_cluster_width(cluster)) - oldWidth;
 }
 
 template <typename Cell>

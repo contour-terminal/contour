@@ -4,6 +4,7 @@
 #include <libunicode/width.h>
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstring>
 
@@ -235,13 +236,7 @@ int appendCodepointToCluster(LineSoA& line, size_t col, char32_t codepoint)
     assert(!line.codepoints.empty());
     auto const currentSize = line.clusterSize[col];
 
-    // The width rule is evaluated BEFORE the capacity check, deliberately. A variation selector
-    // arriving past the cap still decides how the cluster is presented, and dropping the codepoint
-    // must not also drop that decision -- otherwise cluster width would silently depend on how many
-    // codepoints happened to precede it.
     auto const oldWidth = static_cast<unsigned>(line.widths[col]);
-    auto const newWidth = unicode::grapheme_cluster_width_append(oldWidth, codepoint);
-    line.widths[col] = static_cast<uint8_t>(newWidth);
 
     if (currentSize < MaxGraphemeClusterSize)
     {
@@ -254,6 +249,21 @@ int appendCodepointToCluster(LineSoA& line, size_t col, char32_t codepoint)
         line.clusterPool.push_back(codepoint);
         line.clusterSize[col] = currentSize + 1;
     }
+
+    // The cluster's width is recomputed over the WHOLE cluster rather than adjusted incrementally:
+    // the rules need lookbehind (a consonant widens its cluster only when a virama precedes it, and
+    // a ZWJ swallows whatever follows), which a per-codepoint delta cannot express.
+    //
+    // Copying into a stack buffer keeps this allocation-free -- a cluster is bounded by
+    // MaxGraphemeClusterSize -- and it only runs for continuation codepoints, never for ASCII.
+    std::array<char32_t, MaxGraphemeClusterSize> buffer {};
+    size_t count = 0;
+    forEachCodepoint(line, col, [&](char32_t cp) {
+        if (count < buffer.size())
+            buffer[count++] = cp;
+    });
+    auto const newWidth = unicode::grapheme_cluster_width(std::u32string_view(buffer.data(), count));
+    line.widths[col] = static_cast<uint8_t>(newWidth);
 
     return static_cast<int>(newWidth) - static_cast<int>(oldWidth);
 }
