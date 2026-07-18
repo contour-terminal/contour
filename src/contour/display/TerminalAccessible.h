@@ -113,7 +113,7 @@ class TerminalAccessible final: public QAccessibleObject, public QAccessibleText
     void removeSelection(int selectionIndex) override;
     void setSelection(int selectionIndex, int startOffset, int endOffset) override;
 
-    /// Declined: the caret belongs to the shell, not to us. Moving it would mean synthesising input.
+    /// Declined: the caret belongs to the shell, not to us. Moving it would mean synthesizing input.
     void setCursorPosition(int position) override;
 
     void scrollToSubstring(int startIndex, int endIndex) override;

@@ -28,6 +28,7 @@ Q_INVOKABLE
 QIO
 QJS
 QKey
+QLatin
 QMatrix
 QMedia
 QMessage

@@ -134,6 +134,7 @@ pgr
 Pgr
 precmd
 preexec
+promptregion
 ptyx
 RCOLORBG
 RCOLORCURSOR
@@ -182,6 +183,7 @@ VMOT
 VTEs
 WHEELDOWN
 WHEELLEFT
+wheelleft
 WHEELRIGHT
 WHEELUP
 WINDOWMANIP

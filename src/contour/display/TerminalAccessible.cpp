@@ -211,7 +211,7 @@ int TerminalAccessible::cursorPosition() const
 
 void TerminalAccessible::setCursorPosition(int /*position*/)
 {
-    // Declined. The caret is the shell's; placing it would mean synthesising keystrokes and guessing at
+    // Declined. The caret is the shell's; placing it would mean synthesizing keystrokes and guessing at
     // the application's idea of where it is.
 }
 
