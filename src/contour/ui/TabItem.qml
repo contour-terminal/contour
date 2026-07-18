@@ -90,7 +90,37 @@ Item {
         color: root.effectiveBackground
     }
 
-    HoverHandler { id: hover }
+    HoverHandler {
+        id: hover
+        // Built when the hover STARTS, not bound: the working directory changes with every `cd`, and a
+        // binding would have to be driven by a change signal the model does not emit. A tooltip is only
+        // read while it is open, so composing it on open is both simpler and always current.
+        onHoveredChanged: if (hovered) root.hoverTooltip = root.buildHoverTooltip()
+    }
+
+    // What the hover tooltip shows. Empty means "nothing worth saying", which suppresses it entirely.
+    property string hoverTooltip: ""
+
+    /// The full title (only when the tab is too narrow to show it) above the session's working directory.
+    ///
+    /// The directory is the point: with several tabs running full-screen applications, nothing on screen
+    /// says where any of them was started, and the tab label is usually the application's name.
+    function buildHoverTooltip() {
+        var lines = []
+        // A title the tab already shows in full adds nothing; repeating it is just noise.
+        if (label.truncated)
+            lines.push(root.tabTitle)
+        var cwd = root.controller ? root.controller.tabWorkingDirectory(root.tabIndex) : ""
+        if (cwd !== "")
+            lines.push(cwd)
+        return lines.join("\n")
+    }
+
+    ToolTip.text: root.hoverTooltip
+    // Suppressed while renaming: the editor covers the label, and the tooltip would sit over the field
+    // the user is typing into.
+    ToolTip.visible: hover.hovered && root.hoverTooltip !== "" && !renameLoader.active
+    ToolTip.delay: 600
 
     // --- Tab drag: reorder within the strip, move to another window, or tear out to a new window. ---
     // Uses an AUTOMATIC drag (Drag.dragType: Drag.Automatic): when Drag.active goes true it runs a real

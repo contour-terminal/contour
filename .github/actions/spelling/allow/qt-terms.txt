@@ -5,6 +5,7 @@ itemAt
 Key_Exclam
 popupType
 QAbstract
+QAccessible
 QApplication
 QAudio
 QByte
@@ -27,6 +28,7 @@ Q_INVOKABLE
 QIO
 QJS
 QKey
+QLatin
 QMatrix
 QMedia
 QMessage

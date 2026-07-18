@@ -104,6 +104,7 @@ class Line
     {
         _flags = flags;
         _commandEndOffset = {};
+        _promptEndOffset = {};
         if (isBlankWithFillAttrs(attributes))
             return;
         initializeBlankLineSoA(_storage, attributes);
@@ -113,6 +114,7 @@ class Line
     {
         _flags = flags;
         _commandEndOffset = {};
+        _promptEndOffset = {};
         _columns = count;
         if (isBlankWithFillAttrs(attributes))
             return;
@@ -127,6 +129,7 @@ class Line
     {
         _flags = flags;
         _commandEndOffset = {};
+        _promptEndOffset = {};
         if (codepoint == 0)
         {
             initializeBlankLineSoA(_storage, attributes);
@@ -282,6 +285,19 @@ class Line
     /// it never changes the line's content, so the border does not move.
     [[nodiscard]] ColumnOffset commandEndOffset() const noexcept { return _commandEndOffset; }
     void setCommandEndOffset(ColumnOffset offset) noexcept { _commandEndOffset = offset; }
+
+    /// Where on this LOGICAL line the shell's prompt stopped printing and the user's input begins — the
+    /// column OSC 133;B was emitted at. Meaningful only on a head carrying LineFlag::PromptEnd.
+    ///
+    /// The mirror image of commandEndOffset(): that one says where the PREVIOUS command's output stopped
+    /// on this line, this one says where the prompt did. Together they cut a line that a shell shares
+    /// between three owners — trailing output, prompt, typed command — into its parts.
+    ///
+    /// Counted from the start of the LOGICAL line for the same reason commandEndOffset() is: reflow
+    /// re-chops a logical line into different physical pieces but never changes its content, so a
+    /// logical column does not move when the window is resized.
+    [[nodiscard]] ColumnOffset promptEndOffset() const noexcept { return _promptEndOffset; }
+    void setPromptEndOffset(ColumnOffset offset) noexcept { _promptEndOffset = offset; }
 
     void setFlag(LineFlags flags, bool enable) noexcept
     {
@@ -447,6 +463,7 @@ class Line
     ColumnCount _columns {};
     LineFlags _flags {};
     ColumnOffset _commandEndOffset {};
+    ColumnOffset _promptEndOffset {};
 };
 
 } // namespace vtbackend

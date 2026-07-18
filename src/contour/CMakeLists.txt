@@ -124,6 +124,7 @@ if(CONTOUR_FRONTEND_GUI)
         SessionFactory.cpp
         SettingsController.cpp
         TerminalSession.cpp
+        display/TerminalAccessible.cpp
         TerminalSessionManager.cpp
         WindowController.cpp
         helper.cpp
@@ -325,8 +326,12 @@ if(CONTOUR_FRONTEND_GUI)
             test/DisplayRendering_test.cpp
             test/ContentScale_test.cpp
             test/ExitCode_test.cpp
+            test/CaretGeometry_test.cpp
+            test/CaretReportGate_test.cpp
             test/Helper_test.cpp
+            test/HorizontalWheelGesture_test.cpp
             test/ImeQueryRect_test.cpp
+            test/ViewportTextIndex_test.cpp
             test/KeyboardRouting_test.cpp
             test/MainWindowQml_test.cpp
             test/MultiWindow_test.cpp

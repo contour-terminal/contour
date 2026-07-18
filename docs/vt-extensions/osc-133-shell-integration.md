@@ -38,6 +38,17 @@ Sent after the shell prompt has finished printing and before user input begins.
 **Behavior:**
 
 * Notifies the terminal that the prompt has ended.
+* Marks the logical line the prompt ended on, together with the column the cursor stood at — the border
+  between what the shell painted and what the user is about to type.
+
+This border cannot be recovered after the fact: once the user starts typing, the prompt and the input are
+one run of cells. It is what lets Contour tell an accessibility client where the *prompt area* is (see
+[Accessibility](../accessibility.md)), and it is recorded whether or not
+[DEC mode 2034](semantic-block-query.md) is enabled — the line marks are terminal memory, not part of the
+semantic-block reader protocol.
+
+The column is counted across the whole *logical* line, so a window resize that re-wraps the line into
+different physical rows does not move it.
 
 #### C - Command Output Start
 

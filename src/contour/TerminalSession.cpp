@@ -3,6 +3,7 @@
 #include <contour/ContourGuiApp.h>
 #include <contour/ExternalLauncher.h>
 #include <contour/TerminalSession.h>
+#include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/helper.h>
 
@@ -1076,8 +1077,19 @@ void TerminalSession::requestWindowResize(Width width, Height height)
     });
 }
 
-void TerminalSession::addToAccumulatedScroll(crispy::point pixelDelta, crispy::point angleDelta) noexcept
+void TerminalSession::addToAccumulatedScroll(crispy::point pixelDelta,
+                                             crispy::point angleDelta,
+                                             vtbackend::ScrollPhase phase) noexcept
 {
+    // Drop incidental sideways drift before it can accumulate into a whole column step. Filtering here
+    // rather than at the binding lookup keeps it in ONE place and fixes the mouse-reporting path too: an
+    // application receiving phantom horizontal wheel reports during a vertical scroll is equally wrong.
+    if (!_horizontalWheelGesture.acceptsHorizontal(pixelDelta, angleDelta, phase))
+    {
+        pixelDelta.x = 0;
+        angleDelta.x = 0;
+    }
+
     if (angleDelta && !pixelDelta)
         _accumulatedPixelScroll = {};
     else
@@ -1373,12 +1385,33 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
         return;
     }
 
+    // A horizontal notch reaching this point is about to become a DISCRETE navigation step (switching a
+    // tab), and the scroll quantization that produced it counts one step per cell width — so a single
+    // trackpad flick arrives here a dozen times over. Allow one per gesture.
+    //
+    // Only here, never earlier: an application that asked for the mouse consumed the press above and
+    // still receives every one of them, because horizontal scrolling inside an application IS continuous.
+    if ((button == MouseButton::WheelLeft || button == MouseButton::WheelRight)
+        && !_horizontalWheelGesture.consumeNavigationStep())
+        return;
+
     // The user's mappings did not claim this button, so fall back to the built-in ones. They are consulted
     // second on purpose: an explicit binding in the user's config always wins (see
     // builtinFallbackMouseMappings for why a plain default could not reach an existing user at all).
-    if (auto const* actions = config::apply(
-            config::builtinFallbackMouseMappings(), button, sanitizedModifier, matchModeFlags()))
+    if (auto const* actions =
+            config::applyBuiltinFallback(_config, button, sanitizedModifier, matchModeFlags()))
         executeAllActions(*actions);
+}
+
+bool TerminalSession::applyFallbackMouseBinding(MouseButton button)
+{
+    auto const noModifiers = Modifiers { vtbackend::Modifier::None };
+    auto const* actions = config::applyBuiltinFallback(_config, button, noModifiers, matchModeFlags());
+    if (actions == nullptr)
+        return false;
+
+    executeAllActions(*actions);
+    return true;
 }
 
 void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
@@ -1476,6 +1509,31 @@ void TerminalSession::playSound(vtbackend::Sequence::Parameters const& params)
 void TerminalSession::cursorPositionChanged()
 {
     QGuiApplication::inputMethod()->update(Qt::ImCursorRectangle);
+
+    // Kept, not replaced, by the accessibility path below: on Windows, Magnifier frequently follows the
+    // IME rectangle rather than a UIA text range.
+
+    // Nobody is listening: the whole path costs one relaxed atomic load. Read through our own flag rather
+    // than QAccessible::isActive(), which reads a Qt-internal static with no memory ordering — and this
+    // runs on the TERMINAL thread.
+    if (!display::TerminalAccessible::isActive())
+        return;
+
+    // This fires once per frame AND twice a second from the cursor blink (the render buffer's cursor is
+    // simply absent while blinked off), so collapse repeats to at most one pending post.
+    if (_caretUpdatePending.test_and_set(std::memory_order_acq_rel))
+        return;
+
+    // NOTHING about the terminal is read here. refreshRenderBuffer() reaches this callback with the state
+    // mutex ALREADY HELD on one of its two paths, and that mutex is a plain non-recursive std::mutex — so
+    // reading terminal state at this point would self-deadlock on one path and not the other, which is
+    // the worst kind of hang to diagnose. The decision is made on the GUI thread instead.
+    if (auto* display = _display)
+        display->post([this]() {
+            _caretUpdatePending.clear(std::memory_order_release);
+            if (auto* target = _display)
+                target->reportAccessibleCaret();
+        });
 }
 // }}}
 // {{{ Actions
@@ -2540,6 +2598,30 @@ std::string TerminalSession::workingDirectory() const
         }
 #endif
     return "."s;
+}
+
+std::string TerminalSession::displayWorkingDirectory() const
+{
+    // OSC 7 first: it is the shell speaking, so it tracks a `cd` made inside a full-screen application
+    // and it is the only source that can be right for a remote session. Reported as a file:// URL.
+    auto cwdUrl = std::string {};
+    {
+        auto const lock = scoped_lock { _terminal };
+        cwdUrl = _terminal.currentWorkingDirectory();
+    }
+    if (!cwdUrl.empty())
+        if (auto path = vtbackend::extractPathFromFileUrl(cwdUrl); !path.empty())
+            return path;
+
+    // Nothing reported (no shell integration, or not yet): fall back to where the session was started.
+    // Unlike workingDirectory() this is NOT filtered for local existence — a path worth SHOWING need not
+    // be one a child could be spawned in.
+#if !defined(_WIN32)
+    if (auto const* ptyProcess = dynamic_cast<vtpty::Process const*>(&_terminal.device()))
+        return ptyProcess->workingDirectory();
+#endif
+
+    return {};
 }
 
 void TerminalSession::spawnNewTerminal(string const& profileName)

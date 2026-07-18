@@ -6,6 +6,7 @@
 #include <contour/ColorConversion.h>
 #include <contour/Config.h>
 #include <contour/ContextMenu.h>
+#include <contour/HorizontalWheelGesture.h>
 #if defined(__linux__)
     #include <contour/FreeDesktopNotifier.h>
 #endif
@@ -191,7 +192,25 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return true;
     }
 
-    void addToAccumulatedScroll(crispy::point pixelDelta, crispy::point angleDelta) noexcept;
+    /// Accumulates a wheel event towards whole-cell scroll steps.
+    ///
+    /// The horizontal component is dropped unless @ref HorizontalWheelGesture judges it intentional, so
+    /// the sideways drift of a long vertical trackpad scroll never becomes a WheelLeft/WheelRight press
+    /// in the first place — neither for the tab-switch fallback binding nor for an application that
+    /// asked for mouse reporting.
+    ///
+    /// @param pixelDelta Pixel-precise delta (trackpads), or {0,0}.
+    /// @param angleDelta Angle delta (wheels), or {0,0}.
+    /// @param phase      The gesture phase the windowing system reported.
+    void addToAccumulatedScroll(crispy::point pixelDelta,
+                                crispy::point angleDelta,
+                                vtbackend::ScrollPhase phase) noexcept;
+
+    /// Tells the horizontal-wheel gesture where a gesture begins and ends.
+    ///
+    /// Called for EVERY wheel event, before any of the paths that may consume one. @see
+    /// HorizontalWheelGesture::notePhase for why a gesture boundary must not be missed.
+    void noteScrollPhase(vtbackend::ScrollPhase phase) noexcept { _horizontalWheelGesture.notePhase(phase); }
     std::tuple<vtbackend::LineOffset, vtbackend::ColumnOffset> consumeScroll() noexcept;
 
     QString title() const;
@@ -311,6 +330,18 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     config::Config const& config() const noexcept { return _config; }
     config::TerminalProfile const& profile() const noexcept { return _profile; }
 
+    /// Resolves @p button through the BUILT-IN fallback mouse mappings alone and runs what it binds.
+    ///
+    /// For input that arrives over the window chrome (the tab strip) rather than the grid: there is no
+    /// cell under the pointer, so neither the terminal's mouse protocol nor the user's own
+    /// `input_mapping:` entries — which may bind cell-relative actions like FollowHyperlink — can
+    /// meaningfully apply. Going straight to the fallback table is what keeps the tab-switch binding and
+    /// its config gate defined in exactly one place rather than restated for the strip.
+    ///
+    /// @param button The button to resolve, matched with no modifiers.
+    /// @return true when an enabled fallback row matched and its actions ran.
+    bool applyFallbackMouseBinding(vtbackend::MouseButton button);
+
     vtpty::Pty& pty() noexcept { return _terminal.device(); }
     vtbackend::Terminal& terminal() noexcept { return _terminal; }
     vtbackend::Terminal const& terminal() const noexcept { return _terminal; }
@@ -324,6 +355,20 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// split pane — using the same logic, including the Windows fallback.
     /// @return The working directory path, or "." if unavailable.
     [[nodiscard]] std::string workingDirectory() const;
+
+    /// The working directory to SHOW the user, as opposed to the one to spawn a child in.
+    ///
+    /// Prefers what the shell reported over OSC 7, which is the only source that tracks a `cd` inside a
+    /// full-screen application and the only one that is right for a remote (SSH) session. Falls back to
+    /// the local process's directory — the one the session was started in — when the shell has reported
+    /// nothing yet.
+    ///
+    /// Distinct from workingDirectory() on purpose: that one answers "where should a new tab start",
+    /// must name a directory that exists on THIS machine, and says "." when it cannot tell. Neither is
+    /// something to put in front of a user.
+    ///
+    /// @return The directory, or an empty string when none can be determined.
+    [[nodiscard]] std::string displayWorkingDirectory() const;
 
     display::TerminalDisplay* display() noexcept { return _display; }
     display::TerminalDisplay const* display() const noexcept { return _display; }
@@ -673,6 +718,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     crispy::point _accumulatedPixelScroll;
     crispy::point _accumulatedAngleScroll;
+    HorizontalWheelGesture _horizontalWheelGesture;
 
     vtbackend::Terminal _terminal;
     bool _terminatedAndWaitingForKeyPress = false;
@@ -681,6 +727,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     std::unique_ptr<QFileSystemWatcher> _configFileChangeWatcher;
 
     std::atomic<bool> _terminating { false };
+
+    /// Guards against piling up caret-report posts. Set on the terminal thread when one is queued and
+    /// cleared on the GUI thread when it runs, so a cursor that moves faster than the GUI thread drains
+    /// its queue coalesces into one report rather than a backlog.
+    std::atomic_flag _caretUpdatePending = ATOMIC_FLAG_INIT;
     std::thread::id _mainLoopThreadID {};
     std::unique_ptr<std::thread> _screenUpdateThread;
 

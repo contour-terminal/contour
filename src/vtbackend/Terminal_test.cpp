@@ -4110,3 +4110,32 @@ TEST_CASE("Terminal.DECMode.numberMappingRoundTrips", "[terminal]")
 // }}}
 
 // NOLINTEND(misc-const-correctness)
+
+TEST_CASE("Terminal.passive mouse tracking declines the event so the UI may act on it")
+{
+    // "Passive" is the whole contract: the application WATCHES the mouse without claiming it, so the
+    // frontend stays free to act — which is what lets a horizontal wheel switch tabs with no modifier
+    // held while a passive-tracking shell is running.
+    auto const none = vtbackend::Modifiers {};
+    auto const pos = vtbackend::PixelCoordinate {};
+
+    SECTION("ordinary tracking claims the event")
+    {
+        auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+        mc.writeToScreen("\033[?1000h");
+        mc.terminal.flushInput();
+
+        CHECK(mc.terminal.sendMousePressEvent(none, vtbackend::MouseButton::WheelRight, pos, false).value);
+    }
+
+    SECTION("passive tracking does not")
+    {
+        auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+        mc.writeToScreen("\033[?1000h");
+        mc.writeToScreen("\033[?2029h"); // DECSET 2029: passive mouse tracking
+        mc.terminal.flushInput();
+
+        CHECK_FALSE(
+            mc.terminal.sendMousePressEvent(none, vtbackend::MouseButton::WheelRight, pos, false).value);
+    }
+}

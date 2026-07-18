@@ -1,6 +1,7 @@
 ABE
 ABX
 ACCENTPOLICY
+accerciser
 ACRYLICBLURBEHIND
 ALTSCREEN
 ARGN
@@ -13,6 +14,8 @@ Alacritty
 Applicationkeypad
 Aquuires
 Autmoc
+AXText
+AXTextArea
 BASEPATH
 BGRA
 BLURBEHIND
@@ -106,6 +109,7 @@ NDrop
 NOLINTNEXTLINE
 NOMINMAX
 NONINFRINGEMENT
+NSAccessibility
 NSURL
 NVIDIA
 NXT
@@ -148,6 +152,7 @@ Rmol
 Rougier
 SBottom
 SCOSC
+SDK
 SRPMS
 SRightt
 SUBLANG
@@ -160,6 +165,7 @@ TCSANOW
 TESTINGG
 TLDR
 TLeftt
+tooltip
 TRANSPARENTGRADIENT
 TTop
 Termius
@@ -975,12 +981,14 @@ tldp
 tonsky
 topdir
 trackpad
+trackpads
 transitioning
 trapni
 trivialbuffer
 truecolor
 tsl
 ucd
+uia
 uild
 ultimatively
 ultrablack

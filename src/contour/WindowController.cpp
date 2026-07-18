@@ -14,11 +14,13 @@
 #include <contour/WindowController.h>
 #include <contour/helper.h>
 
+#include <QtCore/QDir>
 #include <QtGui/QCursor>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>
 #include <QtQml/QQmlEngine>
 
+#include <cstdlib>
 #include <ranges>
 #include <utility>
 
@@ -321,6 +323,53 @@ void WindowController::activateTab(int index)
     // exclusive views of the same region, so activating any tab dismisses the settings page.
     setSettingsActive(false);
     _manager.activateTab(_windowId, index);
+}
+
+QString WindowController::tabWorkingDirectory(int index) const
+{
+    auto* tab = tabAtRow(index);
+    if (tab == nullptr)
+        return {};
+
+    auto* session = _manager.sessionForId(tab->activePane()->session());
+    if (session == nullptr)
+        return {};
+
+    // Abbreviated as a shell prompt writes it. Purely presentational, which is why it happens here and
+    // not at the source: a caller that wants a path to act on wants the real one.
+    return QString::fromStdString(
+        abbreviateHomePath(session->displayWorkingDirectory(), QDir::homePath().toStdString()));
+}
+
+void WindowController::dispatchTabStripWheel(int angleDeltaX, int angleDeltaY)
+{
+    auto* session = activeSession();
+    if (session == nullptr)
+        return;
+
+    // QML's WheelEvent exposes no gesture phase, so every event is judged as a discrete notch. That is
+    // the right reading for a wheel tilt; a phase-less trackpad driver reporting both axes at once is
+    // declined rather than guessed at.
+    auto const angleDelta = crispy::point { .x = angleDeltaX, .y = angleDeltaY };
+    if (!_tabStripWheelGesture.acceptsHorizontal({}, angleDelta, vtbackend::ScrollPhase::NoPhase))
+        return;
+
+    // One NOTCH is one tab. Deliberately NOT the 40-unit step consumeScroll() uses: that one quantizes
+    // continuous scrolling and a notch is three of them, so borrowing it would walk three tabs per detent.
+    auto constexpr AngleUnitsPerNotch = 120;
+    _tabStripWheelAccumulator += angleDeltaX;
+    auto const notches = _tabStripWheelAccumulator / AngleUnitsPerNotch;
+    if (notches == 0)
+        return;
+    _tabStripWheelAccumulator -= notches * AngleUnitsPerNotch;
+
+    // One switch per event even when several notches arrive coalesced: a gesture is a unit of intent, and
+    // it moves one tab, as a browser does with the same swipe.
+    if (!_tabStripWheelGesture.consumeNavigationStep())
+        return;
+
+    session->applyFallbackMouseBinding(notches > 0 ? vtbackend::MouseButton::WheelRight
+                                                   : vtbackend::MouseButton::WheelLeft);
 }
 
 void WindowController::moveTab(int fromIndex, int toIndex)

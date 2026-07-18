@@ -17,6 +17,7 @@
 #include <contour/TerminalSession.h>
 #include <contour/TerminalSessionManager.h>
 #include <contour/WindowController.h>
+#include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/test/GuiTestFixtures.h>
 
@@ -900,6 +901,45 @@ TEST_CASE("display: input-method events compose and query on the live display", 
     CHECK_NOTHROW(h.display->inputMethodQuery(Qt::ImFont));
     CHECK_NOTHROW(h.display->inputMethodQuery(Qt::ImAnchorRectangle));
     CHECK_NOTHROW(h.display->inputMethodQuery(Qt::ImEnabled));
+}
+
+TEST_CASE("display: the accessibility interface reports the caret", "[display][a11y]")
+{
+    // The event side cannot be asserted here: delivery needs an attached assistive client, and neither
+    // the offscreen platform nor CI has one. So this drives the interface DIRECTLY -- which is also what
+    // an AT-SPI or UIA bridge does once a client attaches. The decisions those events are built from are
+    // unit-tested without Qt at all (CaretReportGate_test, CaretGeometry_test, ViewportTextIndex_test).
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+
+    contour::display::TerminalAccessible::installFactory();
+
+    auto* accessible = QAccessible::queryAccessibleInterface(h.display);
+    REQUIRE(accessible != nullptr);
+    CHECK(accessible->role() == QAccessible::Terminal);
+    CHECK(accessible->isValid());
+
+    auto* textInterface =
+        static_cast<QAccessibleTextInterface*>(accessible->interface_cast(QAccessible::TextInterface));
+    REQUIRE(textInterface != nullptr);
+
+    // The caret offset tracks what the terminal was told to draw.
+    h.feedAndSettle("\033[1;1H"sv);
+    auto const atOrigin = textInterface->cursorPosition();
+    h.feedAndSettle("\033[3;5H"sv);
+    auto const moved = textInterface->cursorPosition();
+    CHECK(moved != atOrigin);
+
+    // characterRect is what a magnifier reads to place its viewport, so it must be a real, non-empty
+    // rectangle rather than a default-constructed one.
+    auto const caretRect = textInterface->characterRect(moved);
+    CHECK(caretRect.width() > 0);
+    CHECK(caretRect.height() > 0);
+
+    CHECK(textInterface->characterCount() > 0);
+    CHECK_NOTHROW(accessible->rect());
+    CHECK_NOTHROW(h.display->reportAccessibleCaret());
+    CHECK_NOTHROW(h.display->resetAccessibleCaret());
 }
 
 TEST_CASE("display: mouse press/move drive selection and the cursor shape on the live display",

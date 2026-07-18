@@ -19,6 +19,19 @@ import Contour.Terminal
 ContourTerminal {
     id: pane
 
+    // Puts this item into the ACCESSIBILITY TREE. Without an Accessible attached property QtQuick does
+    // not consider a plain QQuickItem accessible, so it never appears as a child of the window's
+    // interface -- and an assistive client walking the tree from the desktop root can never reach it,
+    // however complete the C++ QAccessibleInterface behind it is. (Querying the item directly still
+    // worked, which is exactly what made this easy to miss.)
+    //
+    // The role here only gets the item ADMITTED to the tree; the interface an AT actually talks to is
+    // the one contour::display::TerminalAccessible's factory hands out, which also carries the text
+    // interface a magnifier reads to follow the caret.
+    Accessible.role: Accessible.Terminal
+    Accessible.name: qsTr("Terminal")
+    Accessible.focusable: true
+
     // The TerminalSession this pane renders.
     // (Set by the caller: `session: node.session`.)
 

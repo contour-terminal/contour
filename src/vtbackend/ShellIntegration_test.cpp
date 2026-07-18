@@ -713,3 +713,207 @@ TEST_CASE("SemanticBlockProtocol.TokenChangesOnReEnable")
     mc.terminal.flushInput();
     CHECK(mc.replyData().find("\033P>1b") != std::string::npos);
 }
+
+// {{{ OSC 133;B — the prompt/input border
+
+TEST_CASE("ShellIntegration.OSC_133_B stamps PromptEnd on the logical head")
+{
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    mc.writeToScreen("\033]133;A\033\\");
+    mc.writeToScreen("$ ");
+    mc.writeToScreen("\033]133;B\033\\");
+
+    auto const& head = mc.terminal.primaryScreen().grid().lineAt(LineOffset(0));
+    CHECK(head.isFlagEnabled(LineFlag::PromptEnd));
+    // "$ " is two columns, so the user's input begins at logical column 2.
+    CHECK(head.promptEndOffset() == ColumnOffset(2));
+}
+
+TEST_CASE("ShellIntegration.OSC_133_B on a multi-line prompt marks the line it ended on")
+{
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    mc.writeToScreen("\033]133;A\033\\");
+    mc.writeToScreen("first\r\n");
+    mc.writeToScreen("> ");
+    mc.writeToScreen("\033]133;B\033\\");
+
+    auto const& grid = mc.terminal.primaryScreen().grid();
+    // ;A marked the line the prompt STARTED on...
+    CHECK(grid.lineAt(LineOffset(0)).isFlagEnabled(LineFlag::Marked));
+    CHECK_FALSE(grid.lineAt(LineOffset(0)).isFlagEnabled(LineFlag::PromptEnd));
+    // ...and ;B the line it ENDED on, which is a different logical line.
+    CHECK(grid.lineAt(LineOffset(1)).isFlagEnabled(LineFlag::PromptEnd));
+    CHECK(grid.lineAt(LineOffset(1)).promptEndOffset() == ColumnOffset(2));
+}
+
+TEST_CASE("ShellIntegration.PromptEnd survives reflow")
+{
+    // The offset is a LOGICAL column, so re-chopping the line into different physical pieces must not
+    // move it. Without the re-application in Grid::addNewWrappedLines the flag would survive on the head
+    // with a ZEROED offset, which reads as "the prompt ended at column 0" -- a silent, plausible lie.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    mc.writeToScreen("\033]133;A\033\\");
+    mc.writeToScreen("0123456789abcdef> "); // 18 columns of prompt, fits in 20
+    mc.writeToScreen("\033]133;B\033\\");
+
+    REQUIRE(mc.terminal.primaryScreen().grid().lineAt(LineOffset(0)).promptEndOffset() == ColumnOffset(18));
+
+    SECTION("narrowing splits the logical line")
+    {
+        mc.terminal.resizeScreen(PageSize { LineCount(10), ColumnCount(10) });
+
+        auto const& grid = mc.terminal.primaryScreen().grid();
+        // Splitting the line pushed the head up: reached through logicalLineHead rather than a fixed
+        // offset, exactly as production code finds it.
+        auto const headOffset = grid.logicalLineHead(mc.terminal.currentScreen().cursor().position.line);
+        auto const& head = grid.lineAt(headOffset);
+
+        CHECK(head.isFlagEnabled(LineFlag::PromptEnd));
+        CHECK(head.promptEndOffset() == ColumnOffset(18));
+
+        // The continuation must NOT claim to be a second prompt end.
+        CHECK_FALSE(grid.lineAt(headOffset + 1).isFlagEnabled(LineFlag::PromptEnd));
+        CHECK(grid.lineAt(headOffset + 1).isFlagEnabled(LineFlag::Wrapped));
+    }
+
+    SECTION("widening rejoins it")
+    {
+        mc.terminal.resizeScreen(PageSize { LineCount(10), ColumnCount(10) });
+        mc.terminal.resizeScreen(PageSize { LineCount(10), ColumnCount(40) });
+
+        auto const& grid = mc.terminal.primaryScreen().grid();
+        auto const headOffset = grid.logicalLineHead(mc.terminal.currentScreen().cursor().position.line);
+        auto const& head = grid.lineAt(headOffset);
+
+        CHECK(head.isFlagEnabled(LineFlag::PromptEnd));
+        CHECK(head.promptEndOffset() == ColumnOffset(18));
+    }
+}
+
+TEST_CASE("ShellIntegration.LineFlags formatter names PromptEnd")
+{
+    // The formatter is generated from VTBACKEND_LINE_FLAGS, so this also pins that a flag added to that
+    // table cannot be left out of its name list -- the hand-copied array this replaced could.
+    CHECK(std::format("{}", LineFlags { LineFlag::PromptEnd }) == "PromptEnd");
+    CHECK(std::format("{}", LineFlags { LineFlag::Marked, LineFlag::PromptEnd }) == "Marked,PromptEnd");
+}
+
+// }}}
+
+// {{{ livePromptSpan — the grid-coordinate view of the live prompt
+
+TEST_CASE("ShellIntegration.livePromptSpan reports a fresh prompt")
+{
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    mc.writeToScreen("\033]133;A\033\\");
+    mc.writeToScreen("$ ");
+    mc.writeToScreen("\033]133;B\033\\");
+
+    auto const span = mc.terminal.livePromptSpan();
+
+    REQUIRE(span.has_value());
+    CHECK(span->firstLine == LineOffset(0));
+    CHECK(span->lastLine == LineOffset(0));
+    REQUIRE(span->inputBegin.has_value());
+    CHECK(*span->inputBegin == ColumnOffset(2));
+}
+
+TEST_CASE("ShellIntegration.livePromptSpan spans a reflowed multi-line prompt")
+{
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    mc.writeToScreen("\033]133;A\033\\");
+    mc.writeToScreen("line one of prompt\r\n");
+    mc.writeToScreen("> ");
+    mc.writeToScreen("\033]133;B\033\\");
+
+    auto const before = mc.terminal.livePromptSpan();
+    REQUIRE(before.has_value());
+    CHECK(before->firstLine == LineOffset(0));
+    CHECK(before->lastLine == LineOffset(1));
+
+    // Narrowing splits the first prompt line in two; the span must still cover the whole prompt, which is
+    // now one physical line taller.
+    mc.terminal.resizeScreen(PageSize { LineCount(10), ColumnCount(10) });
+
+    auto const after = mc.terminal.livePromptSpan();
+    REQUIRE(after.has_value());
+    CHECK(*after->inputBegin == ColumnOffset(2));
+    CHECK(after->lastLine - after->firstLine == LineOffset(2));
+}
+
+TEST_CASE("ShellIntegration.livePromptSpan declines while a command is running")
+{
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    mc.writeToScreen("\033]133;A\033\\");
+    mc.writeToScreen("$ ");
+    mc.writeToScreen("\033]133;B\033\\");
+    mc.writeToScreen("ls\r\n");
+    mc.writeToScreen("\033]133;C\033\\");
+    mc.writeToScreen("a-file\r\n");
+
+    auto const span = mc.terminal.livePromptSpan();
+
+    REQUIRE_FALSE(span.has_value());
+    CHECK(span.error() == PromptRegionError::InCommandOutput);
+}
+
+TEST_CASE("ShellIntegration.livePromptSpan reports a prompt again once the command finished")
+{
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    mc.writeToScreen("\033]133;A\033\\");
+    mc.writeToScreen("$ ");
+    mc.writeToScreen("\033]133;B\033\\");
+    mc.writeToScreen("ls\r\n");
+    mc.writeToScreen("\033]133;C\033\\");
+    mc.writeToScreen("a-file\r\n");
+    mc.writeToScreen("\033]133;D;0\033\\");
+    // ... and the shell paints its next prompt.
+    mc.writeToScreen("\033]133;A\033\\");
+    mc.writeToScreen("$ ");
+    mc.writeToScreen("\033]133;B\033\\");
+
+    auto const span = mc.terminal.livePromptSpan();
+
+    REQUIRE(span.has_value());
+    CHECK(span->firstLine == LineOffset(2));
+    REQUIRE(span->inputBegin.has_value());
+    CHECK(*span->inputBegin == ColumnOffset(2));
+}
+
+TEST_CASE("ShellIntegration.livePromptSpan reports no integration for a plain shell")
+{
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mc.writeToScreen("$ ");
+
+    auto const span = mc.terminal.livePromptSpan();
+
+    REQUIRE_FALSE(span.has_value());
+    CHECK(span.error() == PromptRegionError::NoPromptMark);
+}
+
+TEST_CASE("ShellIntegration.livePromptSpan is silent on the alternate screen")
+{
+    // An alt-screen application owns the page. The primary screen's marks are still there below, but they
+    // say nothing about where the caret is now.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    mc.writeToScreen("\033]133;A\033\\");
+    mc.writeToScreen("$ ");
+    mc.writeToScreen("\033]133;B\033\\");
+    REQUIRE(mc.terminal.livePromptSpan().has_value());
+
+    mc.writeToScreen("\033[?1049h"); // enter alt screen
+
+    auto const span = mc.terminal.livePromptSpan();
+    REQUIRE_FALSE(span.has_value());
+    CHECK(span.error() == PromptRegionError::NoPromptMark);
+}
+
+// }}}

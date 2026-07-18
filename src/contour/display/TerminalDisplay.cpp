@@ -6,6 +6,7 @@
 #include <contour/display/ContentScale.h>
 #include <contour/display/ImeQueryRect.h>
 #include <contour/display/RhiRenderer.h>
+#include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/display/TerminalRenderNode.h>
 #include <contour/helper.h>
@@ -1251,6 +1252,11 @@ void TerminalDisplay::focusOutEvent(QFocusEvent* event)
     if (_session)
         if (auto* manager = _session->getTerminalManager())
             manager->clearFocusIfCurrent(_session);
+
+    // Whatever this pane last told an assistive client is now stale — the client is following some other
+    // pane. Forgetting it is what lets this pane re-announce itself on regaining focus, even if its caret
+    // never moved in the meantime.
+    resetAccessibleCaret();
 }
 
 #if QT_CONFIG(im)
@@ -1459,6 +1465,32 @@ vtbackend::ImageSize TerminalDisplay::cellSize() const
 void TerminalDisplay::post(std::function<void()> fn)
 {
     postToObject(this, std::move(fn));
+}
+
+namespace
+{
+    /// This display's accessibility interface, if one has been handed out and is still alive.
+    ///
+    /// Queried rather than held: the interface is created on demand by the factory and owned by Qt's
+    /// accessibility cache, so a stored pointer could outlive it.
+    TerminalAccessible* accessibleOf(TerminalDisplay* display)
+    {
+        if (!TerminalAccessible::isActive())
+            return nullptr;
+        return dynamic_cast<TerminalAccessible*>(QAccessible::queryAccessibleInterface(display));
+    }
+} // namespace
+
+void TerminalDisplay::reportAccessibleCaret()
+{
+    if (auto* accessible = accessibleOf(this))
+        accessible->reportCaret();
+}
+
+void TerminalDisplay::resetAccessibleCaret()
+{
+    if (auto* accessible = accessibleOf(this))
+        accessible->resetCaretGate();
 }
 
 vtbackend::FontDef TerminalDisplay::getFontDef()
