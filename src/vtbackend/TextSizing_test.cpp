@@ -586,3 +586,68 @@ TEST_CASE("TextSizing.the_cell_carries_the_whole_sizing", "[textsizing]")
     mock.writeToScreen("\033[3;1Hz"sv);
     CHECK(screen.at(LineOffset(2), ColumnOffset(0)).textScale().isOrdinary());
 }
+
+TEST_CASE("TextSizing.a_drag_inside_one_row_of_blocks_stays_on_one_line", "[textsizing]")
+{
+    // A scale>1 block is two screen rows tall but reads as one line of text. Dragging along it, the
+    // pointer strays into the row below; without the clamp that one-row wobble becomes a two-line
+    // selection, which takes the first line to its right margin and swallows the caption after it.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(6), ColumnCount(20) } };
+    mock.writeToScreen("\033]66;s=2;ab\a  cap"sv); // blocks at cols 0-3, caption at cols 4+
+
+    using namespace vtbackend;
+    auto constexpr UiHandled = false;
+    auto constexpr Pixels = vtbackend::PixelCoordinate {};
+
+    mock.terminal.tick(std::chrono::steady_clock::time_point {});
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None, CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) }, Pixels, UiHandled);
+    (void) mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, Pixels, UiHandled);
+
+    // The pointer slips one row down while still over the same blocks.
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None, CellLocation { .line = LineOffset(1), .column = ColumnOffset(3) }, Pixels, UiHandled);
+
+    // Still a single-line selection: the caption on row 0 is NOT swept in.
+    CHECK_FALSE(mock.terminal.isSelected(CellLocation { .line = LineOffset(0), .column = ColumnOffset(6) }));
+    CHECK(mock.terminal.isSelected(CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) }));
+    CHECK(mock.terminal.isSelected(CellLocation { .line = LineOffset(1), .column = ColumnOffset(0) }));
+}
+
+TEST_CASE("TextSizing.a_drag_that_leaves_the_blocks_still_selects_two_lines", "[textsizing]")
+{
+    // The clamp must release the moment the pointer is no longer over a block of the same shape, or
+    // a genuine multi-line selection could never be made from inside sized text.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(6), ColumnCount(20) } };
+    mock.writeToScreen("\033]66;s=2;ab\a\r\n\r\nplain"sv); // blocks rows 0-1, plain text on row 2
+
+    using namespace vtbackend;
+    auto constexpr UiHandled = false;
+    auto constexpr Pixels = vtbackend::PixelCoordinate {};
+
+    mock.terminal.tick(std::chrono::steady_clock::time_point {});
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None, CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) }, Pixels, UiHandled);
+    (void) mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, Pixels, UiHandled);
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None, CellLocation { .line = LineOffset(2), .column = ColumnOffset(3) }, Pixels, UiHandled);
+
+    CHECK(mock.terminal.isSelected(CellLocation { .line = LineOffset(2), .column = ColumnOffset(0) }));
+}
+
+TEST_CASE("TextSizing.copying_a_block_row_yields_no_blank_trailing_line", "[textsizing]")
+{
+    // A block's lower rows carry no text of their own. Selecting them must not copy as an empty
+    // trailing line -- kitty trims exactly those rows in flag_selection_to_extract_text().
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(6), ColumnCount(20) } };
+    mock.writeToScreen("\033]66;s=2;ab\a"sv);
+
+    auto const anchor = CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) };
+    mock.terminal.setSelector(
+        std::make_unique<vtbackend::LinearSelection>(mock.terminal.selectionHelper(), anchor, []() {}));
+    (void) mock.terminal.selector()->extend(
+        CellLocation { .line = LineOffset(1), .column = ColumnOffset(3) });
+    mock.terminal.selector()->complete();
+
+    CHECK(mock.terminal.extractSelectionText() == "ab");
+}

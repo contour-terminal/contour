@@ -1311,6 +1311,15 @@ class Terminal
     /// the user cannot have meant and cannot correct.
     [[nodiscard]] bool isSelected(CellLocation coord) const noexcept;
 
+    /// Keeps a drag that stays inside one row of tall blocks from becoming a multi-line selection.
+    ///
+    /// @param anchor  where the drag started.
+    /// @param pointer where the pointer is now.
+    /// @return @p pointer, with its line snapped back to @p anchor's while both are in the same
+    ///         block-row of equally shaped blocks.
+    [[nodiscard]] CellLocation clampDragWithinMulticellBlock(CellLocation anchor,
+                                                             CellLocation pointer) const noexcept;
+
     /// Tests whether given line offset is intersecting with selection.
     ///
     /// This is the COARSE test the renderer's trivial-line fast path consults: a line it calls

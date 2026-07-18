@@ -1344,6 +1344,7 @@ void Terminal::sendMouseMoveEvent(Modifiers modifiers,
             // character. It was redundant besides: Selection::ranges() already gives the first line
             // of a MULTI-line selection its full width, and Selection::contains is lexicographic, so
             // hit-testing agrees without help.
+            relativePos = clampDragWithinMulticellBlock(selector()->from(), relativePos);
             _viCommands.cursorPosition = relativePos;
             if (_inputHandler.mode() != ViMode::Insert)
                 _inputHandler.setMode(selector()->viMode());
@@ -2160,6 +2161,7 @@ namespace
         ColumnOffset lastColumn {};
         string text {};
         string currentLine {};
+        bool currentLineHasContent = false;
 
         SelectionRenderer(Terminal const& term, ColumnOffset rightPage): term(&term), rightPage(rightPage) {}
 
@@ -2167,34 +2169,51 @@ namespace
         {
             auto const isNewLine = pos.column < lastColumn || (pos.column == lastColumn && !text.empty());
             if (isNewLine && (!term->isLineWrapped(pos.line)))
-            {
                 // TODO: handle logical line in word-selection (don't include LF in wrapped lines)
-                trimSpaceRight(currentLine);
-                text += currentLine;
-                text += '\n';
-                currentLine.clear();
-            }
-            // A cell that only continues the one to its left carries no text of its own -- its
-            // codepoint is 0 -- so without this it would fall into the empty-cell branch below and
-            // copy as a SPACE. Selecting 中a would yield "中 a", and a six-column text-sizing block
-            // would trail five spaces. kitty skips such cells outright; so do we.
-            if (cell.isFlagEnabled(CellFlag::WideCharContinuation))
-            {
-                lastColumn = pos.column;
-                return;
-            }
+                flushLine();
 
+            lastColumn = pos.column;
+
+            // A cell that only CONTINUES another carries no text of its own -- horizontally, where its
+            // codepoint is 0, or vertically, where a tall block reaches down into the row. Without
+            // this they fall into the empty-cell branch below and copy as spaces: 中a would yield
+            // "中 a", and a six-column text-sizing block would trail five spaces.
+            if (cell.isFlagEnabled(CellFlag::WideCharContinuation)
+                || cell.isFlagEnabled(CellFlag::MulticellContinuation))
+                return;
+
+            currentLineHasContent = true;
             if (cell.empty())
                 currentLine += ' ';
             else
                 currentLine += cell.toUtf8();
-            lastColumn = pos.column;
+        }
+
+        /// Ends the line being built, dropping it entirely when it held nothing but continuation cells.
+        ///
+        /// Such a row is not a line of text -- it is the lower half of the blocks on the row above --
+        /// so emitting its break would copy a scaled word as "ab\n". kitty trims exactly these rows in
+        /// flag_selection_to_extract_text(). A genuinely BLANK selected line still counts as content,
+        /// because a blank line inside a selection is a line the user selected.
+        void flushLine()
+        {
+            if (currentLineHasContent)
+            {
+                // The break is a SEPARATOR between lines that carry content, not a terminator emitted
+                // when one ends -- otherwise a trailing continuation-only row, whose emptiness is only
+                // known after the break was already written, leaves "ab\n" behind.
+                if (!text.empty())
+                    text += '\n';
+                trimSpaceRight(currentLine);
+                text += currentLine;
+            }
+            currentLine.clear();
+            currentLineHasContent = false;
         }
 
         std::string finish()
         {
-            trimSpaceRight(currentLine);
-            text += currentLine;
+            flushLine();
             if (dynamic_cast<FullLineSelection const*>(term->selector()))
                 text += '\n';
             return std::move(text);
@@ -4284,6 +4303,33 @@ optional<CellLocation> Terminal::searchReverse(CellLocation searchPosition)
 
     screenUpdated();
     return matchLocation;
+}
+
+CellLocation Terminal::clampDragWithinMulticellBlock(CellLocation anchor, CellLocation pointer) const noexcept
+{
+    // A scale>1 block is several screen rows tall but reads as ONE line of text. Dragging along such
+    // a line, the pointer inevitably strays into the row below the one it started on -- and without
+    // this, that one-row wobble turns a single-line selection into a two-line one, which sweeps the
+    // first line to its right margin and swallows everything after the sized run.
+    //
+    // So while both ends sit in the SAME block-row of blocks of the same shape, the drag is treated
+    // as horizontal: the pointer's row is snapped back to the anchor's. It releases as soon as the
+    // pointer leaves those blocks, which is how a genuine multi-line selection is still made.
+    //
+    // kitty solves it the same way, in clamp_selection_input_to_multicell().
+    if (anchor.line == pointer.line)
+        return pointer;
+
+    auto const anchorBlock = currentScreen().multicellBlockAt(anchor);
+    if (!anchorBlock || anchorBlock->rows < 2)
+        return pointer;
+
+    auto const pointerBlock = currentScreen().multicellBlockAt(pointer);
+    if (!pointerBlock || pointerBlock->rows != anchorBlock->rows
+        || pointerBlock->origin.line != anchorBlock->origin.line)
+        return pointer;
+
+    return CellLocation { .line = anchor.line, .column = pointer.column };
 }
 
 bool Terminal::isSelected(CellLocation coord) const noexcept
