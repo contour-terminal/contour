@@ -1011,10 +1011,16 @@ enum class DECMode : std::uint8_t
     /// One report is sent the moment the mode is set, so an application never has to ask separately
     /// for the size it starts with.
     InBandWindowResize = 71,
+
+    /// Paste event notifications (DEC mode 5522), from the kitty clipboard protocol.
+    ///
+    /// While set, a paste is announced to the application with the MIME types the clipboard actually
+    /// holds, so a full-screen application can choose how to interpret it rather than guessing.
+    PasteMimeNotifications = 72,
     // }}}
 
     /// Sentinel value for sizing the mode bitset. Must remain the last entry.
-    DECModeCount = 72
+    DECModeCount = 73
 };
 
 /// The minimum ANSI conformance level (1..5, matching conformanceLevelOf(VTType)) at which a DEC
@@ -1321,6 +1327,7 @@ constexpr inline auto DECModeNumbers = std::to_array<DECModeNumbering>({
     { DECMode::ReportColorPaletteUpdated, 2031 },
     { DECMode::SemanticBlockProtocol, 2034 },
     { DECMode::InBandWindowResize, 2048 },
+    { DECMode::PasteMimeNotifications, 5522 },
     { DECMode::PrintFormFeed, 18 },
     { DECMode::HebrewKeyboardMapping, 35 },
     { DECMode::NationalReplacementCharacterSet, 42 },

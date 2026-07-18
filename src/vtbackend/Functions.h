@@ -238,6 +238,7 @@ constexpr inline auto CONEMU = FunctionDocumentation { .mnemonic = "CONEMU", .co
 constexpr inline auto DESKTOPNOTIFY = FunctionDocumentation { .mnemonic = "DESKTOPNOTIFY", .comment = "Kitty Desktop Notification." };
 constexpr inline auto ITERM2 = FunctionDocumentation { .mnemonic = "ITERM2", .comment = "iTerm2 proprietary extensions: inline images (File=) and capability reporting (Capabilities)." };
 constexpr inline auto TEXTSIZING = FunctionDocumentation { .mnemonic = "TEXTSIZING", .comment = "Kitty text sizing protocol: sized/scaled text.", .parameters = "metadata ; text" };
+constexpr inline auto KITTYCLIPBOARD = FunctionDocumentation { .mnemonic = "KITTYCLIPBOARD", .comment = "Kitty clipboard protocol: chunked, MIME-typed clipboard read/write.", .parameters = "metadata ; base64" };
 
 // DEC Multi-Page Navigation (VT420)
 constexpr inline auto NP = FunctionDocumentation { .mnemonic = "NP", .comment = "Next Page", .parameters = "Pn", .description = "Moves the cursor to the home position on one of the following pages in page memory." };
@@ -871,6 +872,7 @@ constexpr inline auto SETXPROP          = detail::OSC(3, VTExtension::XTerm, doc
 constexpr inline auto DESKTOPNOTIFY    = detail::OSC(99, VTExtension::Unknown, documentation::DESKTOPNOTIFY);
 constexpr inline auto ITERM2           = detail::OSC(1337, VTExtension::Unknown, documentation::ITERM2);
 constexpr inline auto TEXTSIZING       = detail::OSC(66, VTExtension::Unknown, documentation::TEXTSIZING);
+constexpr inline auto KITTYCLIPBOARD   = detail::OSC(5522, VTExtension::Unknown, documentation::KITTYCLIPBOARD);
 
 // NOLINTEND(readability-identifier-naming)
 // clang-format on
@@ -1134,6 +1136,7 @@ constexpr static auto allFunctionsArray() noexcept
         DESKTOPNOTIFY,
         ITERM2,
         TEXTSIZING,
+        KITTYCLIPBOARD,
         DUMPSTATE,
     };
     return funcs;

@@ -4655,6 +4655,92 @@ void Screen::renderITerm2InlineImage(std::string_view arguments)
                        ImageLayer::Above);
 }
 
+ApplyResult Screen::processKittyClipboard(std::string_view payload)
+{
+    using namespace kitty_clipboard;
+
+    auto const parsed = parsePacket(payload);
+    if (!parsed)
+        return ApplyResult::Invalid;
+    auto const& packet = *parsed;
+
+    auto const respond = [&](std::string_view status) {
+        reply("\033]5522;type={}:id={}\033\\", status, packet.id);
+    };
+
+    switch (packet.type)
+    {
+        case PacketType::Read: {
+            // Reading the clipboard lets an application exfiltrate whatever the user last copied,
+            // so it is gated by the same setting OSC 52 reads are.
+            if (!_terminal->settings().allowClipboardRead)
+            {
+                respond("EPERM");
+                return ApplyResult::Ok;
+            }
+
+            // The payload lists the MIME types the application will accept. If none of them is one
+            // this terminal can produce, say so rather than sending text under a type it did not ask
+            // for.
+            auto const requested = crispy::base64::decode(packet.payload);
+            auto accepted = false;
+            for (auto const& mimeType: crispy::split(requested, ' '))
+                if (isSupportedMimeType(mimeType))
+                    accepted = true;
+            if (!requested.empty() && !accepted)
+            {
+                respond("ENOSYS");
+                return ApplyResult::Ok;
+            }
+
+            _terminal->requestClipboardRead("c");
+            return ApplyResult::Ok;
+        }
+
+        case PacketType::Write:
+            // A write opens a transmission; the data arrives in the wdata packets that follow.
+            _kittyClipboardWrite.clear();
+            _kittyClipboardWriteOpen = true;
+            respond("OK");
+            return ApplyResult::Ok;
+
+        case PacketType::WriteAlias:
+            // Aliases map other MIME names onto one this terminal understands. Contour's clipboard
+            // is text, so there is nothing to map them onto and nothing to record.
+            return ApplyResult::Ok;
+
+        case PacketType::WriteData: {
+            if (!_kittyClipboardWriteOpen)
+                return ApplyResult::Invalid;
+
+            if (!isSupportedMimeType(packet.mimeType))
+            {
+                // Refuse rather than accept and drop: an application told its data was stored, which
+                // then reads back something else, is worse off than one told no.
+                _kittyClipboardWriteOpen = false;
+                _kittyClipboardWrite.clear();
+                respond("ENOSYS");
+                return ApplyResult::Ok;
+            }
+
+            // An empty chunk is the end-of-transmission marker.
+            if (packet.payload.empty())
+            {
+                _terminal->copyToClipboard(_kittyClipboardWrite);
+                _kittyClipboardWrite.clear();
+                _kittyClipboardWriteOpen = false;
+                respond("DONE");
+                return ApplyResult::Ok;
+            }
+
+            _kittyClipboardWrite += crispy::base64::decode(packet.payload);
+            return ApplyResult::Ok;
+        }
+    }
+
+    return ApplyResult::Unsupported;
+}
+
 ApplyResult Screen::processTextSizing(std::string_view payload)
 {
     auto const parsed = text_sizing::parseRequest(payload);
@@ -6448,6 +6534,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case NOTIFY: return impl::NOTIFY(seq, *this);
         case ITERM2: processITerm2(seq.intermediateCharacters()); return ApplyResult::Ok;
         case TEXTSIZING: return processTextSizing(seq.intermediateCharacters());
+        case KITTYCLIPBOARD: return processKittyClipboard(seq.intermediateCharacters());
         case DESKTOPNOTIFY: return impl::DESKTOPNOTIFY(seq, *_terminal);
         case DUMPSTATE: inspect(); break;
         case SEMA: processShellIntegration(seq); break;

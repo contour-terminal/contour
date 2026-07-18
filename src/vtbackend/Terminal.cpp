@@ -4595,6 +4595,7 @@ std::string to_string(DECMode mode)
         case DECMode::SixelCursorNextToGraphic: return "SixelCursorNextToGraphic";
         case DECMode::ReportColorPaletteUpdated: return "ReportColorPaletteUpdated";
         case DECMode::InBandWindowResize: return "InBandWindowResize";
+        case DECMode::PasteMimeNotifications: return "PasteMimeNotifications";
         case DECMode::SemanticBlockProtocol: return "SemanticBlockProtocol";
         case DECMode::PrintFormFeed: return "PrintFormFeed";
         case DECMode::HebrewKeyboardMapping: return "HebrewKeyboardMapping";

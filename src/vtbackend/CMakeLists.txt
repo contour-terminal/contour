@@ -27,6 +27,7 @@ set(vtbackend_HEADERS
     Grid.h
     HintModeHandler.h
     Hyperlink.h
+    KittyClipboard.h
     KittyGraphics.h
     TextSizing.h
     Image.h
@@ -87,6 +88,7 @@ set(vtbackend_SOURCES
     MockTerm.cpp
     RenderBuffer.cpp
     RenderBufferBuilder.cpp
+    KittyClipboard.cpp
     KittyGraphics.cpp
     TextSizing.cpp
     Screen.cpp
@@ -171,6 +173,7 @@ if(LIBTERMINAL_TESTING)
         Line_test.cpp
         MessageParser_test.cpp
         RectangularAreaChecksum_test.cpp
+        KittyClipboard_test.cpp
         KittyGraphics_test.cpp
         TextSizing_test.cpp
         Screen_test.cpp

@@ -10,6 +10,7 @@
 #include <vtbackend/Grid.h>
 #include <vtbackend/Hyperlink.h>
 #include <vtbackend/Image.h>
+#include <vtbackend/KittyClipboard.h>
 #include <vtbackend/KittyGraphics.h>
 #include <vtbackend/MessageParser.h>
 #include <vtbackend/PromptRegion.h>
@@ -214,6 +215,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     /// Places @p image at the cursor, sized per the command's `c=`/`r=` or derived from its pixels.
     void renderKittyImage(kitty_graphics::Command const& command, std::shared_ptr<Image const> const& image);
+
+    /// Handles one `OSC 5522` (kitty clipboard protocol) packet.
+    [[nodiscard]] ApplyResult processKittyClipboard(std::string_view payload);
 
     /// Lays out one `OSC 66` (kitty text sizing) request.
     [[nodiscard]] ApplyResult processTextSizing(std::string_view payload);
@@ -906,6 +910,11 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     /// Images transmitted by a kitty graphics command but not yet displayed, keyed by their `i=` id.
     std::unordered_map<uint32_t, std::shared_ptr<Image const>> _kittyImages {};
+
+    /// Clipboard data accumulated across the `wdata` packets of one kitty clipboard write, and
+    /// whether such a write is currently open. Data arriving without an opening `write` is refused.
+    std::string _kittyClipboardWrite {};
+    bool _kittyClipboardWriteOpen = false;
 
     GraphicsAttributes _savedGraphicsRenditions {};
 
