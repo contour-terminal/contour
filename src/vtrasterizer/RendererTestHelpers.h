@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <format>
 #include <optional>
 #include <ostream>
 #include <ranges>
@@ -22,23 +23,61 @@ namespace vtrasterizer
 /// Uploads are recorded alongside draws because the two only mean something together: a tile's
 /// pixels and the quads that sample it are scheduled separately, and the atlas is free to hand the
 /// same location to two different tiles within one frame.
+///
+/// The atlas is a fixed GRID: TextureAtlas spaces tile origins exactly @c tileSize apart, so a
+/// bitmap larger than one tile does not merely look wrong -- it is a write into the neighbouring
+/// tile, silently corrupting an unrelated glyph. This mock therefore enforces that bound the way
+/// the real backend cannot: RhiRenderer only logs the violation and uploads anyway.
+///
+/// Recording uploads without checking them is what let a regression that flooded the real renderer
+/// with hundreds of overflows pass the entire suite.
 class MockAtlasBackend: public vtrasterizer::atlas::AtlasBackend
 {
   public:
     std::vector<vtrasterizer::atlas::RenderTile> renderCommands;
     std::vector<vtrasterizer::atlas::UploadTile> uploadCommands;
 
-    [[nodiscard]] vtbackend::ImageSize atlasSize() const noexcept override
+    /// Indices into @c uploadCommands of uploads that did not fit the configured tile. Indices
+    /// rather than pointers: uploadCommands reallocates as it grows.
+    ///
+    /// These are asserted on as they arrive, so a test need not opt in; this is for tests that
+    /// want to name the violation.
+    std::vector<size_t> oversizedUploads;
+
+    [[nodiscard]] vtbackend::ImageSize atlasSize() const noexcept override { return _atlasSize; }
+
+    /// The tile size the atlas last configured, or a zero size if it never did.
+    [[nodiscard]] vtbackend::ImageSize tileSize() const noexcept { return _properties.tileSize; }
+
+    void configureAtlas(vtrasterizer::atlas::ConfigureAtlas atlas) override
     {
-        return vtbackend::ImageSize { vtbackend::Width(1024), vtbackend::Height(1024) };
+        _atlasSize = atlas.size;
+        _properties = atlas.properties;
     }
 
-    void configureAtlas(vtrasterizer::atlas::ConfigureAtlas) override {}
     void uploadTile(vtrasterizer::atlas::UploadTile tile) override
     {
+        // A backend that was never configured has no bound to enforce; some tests drive a
+        // Renderable directly without an atlas.
+        auto const configured =
+            unbox(_properties.tileSize.width) != 0 && unbox(_properties.tileSize.height) != 0;
+        auto const fits = !configured
+                          || (tile.bitmapSize.width <= _properties.tileSize.width
+                              && tile.bitmapSize.height <= _properties.tileSize.height);
+
+        INFO(std::format("tile {} vs atlas tile {}", tile.bitmapSize, _properties.tileSize));
+        CHECK(fits);
+
         uploadCommands.emplace_back(std::move(tile));
+        if (!fits)
+            oversizedUploads.emplace_back(uploadCommands.size() - 1);
     }
+
     void renderTile(vtrasterizer::atlas::RenderTile tile) override { renderCommands.emplace_back(tile); }
+
+  private:
+    vtbackend::ImageSize _atlasSize { vtbackend::Width(1024), vtbackend::Height(1024) };
+    vtrasterizer::atlas::AtlasProperties _properties {};
 };
 
 /// Records every whole-image command a Renderable schedules.

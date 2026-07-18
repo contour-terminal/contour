@@ -67,7 +67,9 @@ class Renderer
              bool atlasDirectMapping,
              Decorator hyperlinkNormal,
              Decorator hyperlinkHover,
-             GlyphScalingMethod textScalingMethod = GlyphScalingMethod::Stretch);
+             // Must match Config's `text_scaling_method` default. When these disagreed, every
+             // renderer test silently exercised the method the app does NOT ship.
+             GlyphScalingMethod textScalingMethod = GlyphScalingMethod::Rerasterize);
 
     /// Returns the live cell size from the grid metrics.
     ///

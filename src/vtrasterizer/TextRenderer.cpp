@@ -271,11 +271,11 @@ TextRenderer::TextRenderer(GridMetrics const& gridMetrics,
 
 GlyphScaler const& TextRenderer::defaultGlyphScaler() noexcept
 {
-    // Stretching is the default because it is the strategy that currently WORKS. Re-rasterizing
-    // still asks the font for a larger glyph by scaling `glyph_key.size.pt`, but a font_key already
-    // encodes its size (shaper::load_font takes one), so FreeType never sees the change and returns
-    // the ordinary-size raster. Making it real needs a font loaded per scale, as kitty caches in its
-    // scaled_font_map. Until then this default keeps the two methods honest. @see GlyphScalingMethod.
+    // Re-rasterizing, matching Config's `text_scaling_method` default: asking the font for the
+    // outline at the larger size re-hints it, where stretching magnifies an ordinary-size raster.
+    // This became real once shaper::resize_font gave a caller the same face at another size -- a
+    // font_key encodes its size, so scaling `glyph_key.size.pt` alone never reached FreeType.
+    // @see GlyphScalingMethod.
     static auto const scaler = RerasterizingGlyphScaler {};
     return scaler;
 }

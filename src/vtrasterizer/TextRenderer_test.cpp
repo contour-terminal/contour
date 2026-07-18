@@ -17,12 +17,14 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <ranges>
+#include <set>
 #include <string_view>
 #include <thread>
 
@@ -350,9 +352,13 @@ TEST_CASE("TextRenderer", "[renderer]")
     vtrasterizer::atlas::DirectMappingAllocator<vtrasterizer::RenderTileAttributes> allocator;
     renderer.setRenderTarget(renderTarget, allocator);
 
+    // The tile is one CELL, exactly as Renderer::configureTextureAtlas sets it in production. A
+    // roomier tile (this was 256x256, ~12x the cell) makes the atlas' central invariant
+    // untestable: tile origins are spaced one tile apart, so an oversized bitmap overwrites its
+    // neighbour, and nothing here could ever produce one large enough to notice.
     auto const atlasProperties =
         vtrasterizer::atlas::AtlasProperties { .format = vtrasterizer::atlas::Format::Red,
-                                               .tileSize = { Width(256), Height(256) },
+                                               .tileSize = gridMetrics.cellSize,
                                                .hashCount = { 1024 },
                                                .tileCount = { 4096 },
                                                .directMappingCount = 128 };
@@ -1383,9 +1389,13 @@ TEST_CASE("TextRenderer.fallback_run_stays_on_the_cell_grid", "[renderer][fallba
     vtrasterizer::atlas::DirectMappingAllocator<vtrasterizer::RenderTileAttributes> allocator;
     renderer.setRenderTarget(renderTarget, allocator);
 
+    // The tile is one CELL, exactly as Renderer::configureTextureAtlas sets it in production. A
+    // roomier tile (this was 256x256, ~12x the cell) makes the atlas' central invariant
+    // untestable: tile origins are spaced one tile apart, so an oversized bitmap overwrites its
+    // neighbour, and nothing here could ever produce one large enough to notice.
     auto const atlasProperties =
         vtrasterizer::atlas::AtlasProperties { .format = vtrasterizer::atlas::Format::Red,
-                                               .tileSize = { Width(256), Height(256) },
+                                               .tileSize = gridMetrics.cellSize,
                                                .hashCount = { 1024 },
                                                .tileCount = { 4096 },
                                                .directMappingCount = 128 };
