@@ -1300,8 +1300,8 @@ TEST_CASE("Config: generated default config round-trips through the loader", "[c
     // generated doc, and the loader must read the same key back. A typo in only one side would surface
     // here as a default-valued mismatch (which, for these two, would still equal the default — so also
     // assert the rendered document actually carries the keys below).
-    CHECK(profile->tabBarPosition.value() == defaults.profile().tabBarPosition.value());
-    CHECK(profile->tabBarVisibility.value() == defaults.profile().tabBarVisibility.value());
+    CHECK(reloaded.tabBarPosition.value() == defaults.tabBarPosition.value());
+    CHECK(reloaded.tabBarVisibility.value() == defaults.tabBarVisibility.value());
     // Guards the global `theme` writer<->reader key match: the std::formatter emits "system" into the
     // generated doc, and the loader must read the same key back.
     CHECK(reloaded.theme.value() == defaults.theme.value());
@@ -1725,9 +1725,9 @@ TEST_CASE("Config: every tab bar mode is described by its table", "[config]")
     using namespace contour::config;
 
     // The table is the single source the YAML reader, the config writer, the settings page and any
-    // menu offering these modes all read from. An enumerator missing a row would therefore be
-    // unwritable, unparseable and invisible at once -- so pin that every one of them has a row, and
-    // that a row's token survives the round trip the config file depends on.
+    // menu offering these modes all read from. An enumerator missing a row could therefore not be
+    // written, read back, or shown -- so pin that every one of them has a row, and that a row's token
+    // survives the round trip the config file depends on.
     auto const checkModes = [](auto&& modes, auto&& enumerators) {
         CHECK(modes.size() == enumerators.size());
         for (auto const mode: enumerators)
@@ -1766,16 +1766,14 @@ TEST_CASE("Config: tab_bar_position and tab_bar_visibility parse each value (ign
         QTemporaryDir dir;
         auto const config = loadFromYaml(dir, R"(
 default_profile: main
+tab_bar_position: Bottom
+tab_bar_visibility: Never
 profiles:
     main:
         shell: /bin/sh
-        tab_bar_position: Bottom
-        tab_bar_visibility: Never
 )"sv);
-        auto const* profile = config.profile("main");
-        REQUIRE(profile != nullptr);
-        CHECK(profile->tabBarPosition.value() == TabBarPosition::Bottom);
-        CHECK(profile->tabBarVisibility.value() == TabBarVisibility::Never);
+        CHECK(config.tabBarPosition.value() == TabBarPosition::Bottom);
+        CHECK(config.tabBarVisibility.value() == TabBarVisibility::Never);
     }
 
     SECTION("top + multiple, lower-case tokens prove case-insensitivity")
@@ -1783,16 +1781,14 @@ profiles:
         QTemporaryDir dir;
         auto const config = loadFromYaml(dir, R"(
 default_profile: main
+tab_bar_position: top
+tab_bar_visibility: multiple
 profiles:
     main:
         shell: /bin/sh
-        tab_bar_position: top
-        tab_bar_visibility: multiple
 )"sv);
-        auto const* profile = config.profile("main");
-        REQUIRE(profile != nullptr);
-        CHECK(profile->tabBarPosition.value() == TabBarPosition::Top);
-        CHECK(profile->tabBarVisibility.value() == TabBarVisibility::Multiple);
+        CHECK(config.tabBarPosition.value() == TabBarPosition::Top);
+        CHECK(config.tabBarVisibility.value() == TabBarVisibility::Multiple);
     }
 
     SECTION("always (the default) still parses explicitly")
@@ -1800,15 +1796,35 @@ profiles:
         QTemporaryDir dir;
         auto const config = loadFromYaml(dir, R"(
 default_profile: main
+tab_bar_visibility: Always
 profiles:
     main:
         shell: /bin/sh
-        tab_bar_visibility: Always
 )"sv);
-        auto const* profile = config.profile("main");
-        REQUIRE(profile != nullptr);
-        CHECK(profile->tabBarVisibility.value() == TabBarVisibility::Always);
+        CHECK(config.tabBarVisibility.value() == TabBarVisibility::Always);
     }
+}
+
+TEST_CASE("Config: tab_bar_* under a profile is no longer read", "[config]")
+{
+    using contour::config::TabBarPosition;
+    using contour::config::TabBarVisibility;
+
+    // The tab bar belongs to the window, so these keys moved from the profile to the top level. The
+    // move was a clean break: a profile-scoped key is not consulted, and not quietly promoted either.
+    // Pinned so that re-adding a profile-scoped reader is a deliberate act rather than an accident.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        tab_bar_position: Bottom
+        tab_bar_visibility: Never
+)"sv);
+    REQUIRE(config.profile("main") != nullptr);
+    CHECK(config.tabBarPosition.value() == TabBarPosition::Top);
+    CHECK(config.tabBarVisibility.value() == TabBarVisibility::Always);
 }
 
 TEST_CASE("Config: invalid tab_bar_* values fall back to the defaults", "[config]")
@@ -1821,16 +1837,14 @@ TEST_CASE("Config: invalid tab_bar_* values fall back to the defaults", "[config
     // or zero them out — the loadFromEntry overloads only write on a successful parse.
     auto const config = loadFromYaml(dir, R"(
 default_profile: main
+tab_bar_position: Sideways
+tab_bar_visibility: Sometimes
 profiles:
     main:
         shell: /bin/sh
-        tab_bar_position: Sideways
-        tab_bar_visibility: Sometimes
 )"sv);
-    auto const* profile = config.profile("main");
-    REQUIRE(profile != nullptr);
-    CHECK(profile->tabBarPosition.value() == TabBarPosition::Top);
-    CHECK(profile->tabBarVisibility.value() == TabBarVisibility::Always);
+    CHECK(config.tabBarPosition.value() == TabBarPosition::Top);
+    CHECK(config.tabBarVisibility.value() == TabBarVisibility::Always);
 }
 
 TEST_CASE("Config: git-drawings, arc and braille styles parse from YAML", "[config]")

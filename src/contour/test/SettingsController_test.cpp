@@ -292,20 +292,16 @@ TEST_CASE("SettingsController: a non-side-file color scheme cannot be deleted", 
     CHECK(fx.controller->deleteColorScheme("solarized") == false); // contour.yml inline
 }
 
-TEST_CASE("SettingsController: enum and integer profile fields round-trip", "[settings]")
+TEST_CASE("SettingsController: integer and bool profile fields round-trip", "[settings]")
 {
     auto fx = Fixture(BasicConfig);
     fx.controller->newProfile("main");
-    fx.controller->setProfileField("tab_bar_position", "Bottom");
-    fx.controller->setProfileField("tab_bar_visibility", "Never");
     fx.controller->setProfileField("slow_scrolling_time", 250);
     fx.controller->setProfileField("maximized", true);
     REQUIRE(fx.controller->saveProfileAs("work"));
 
     auto const* work = fx.cfg.findProfile("work");
     REQUIRE(work != nullptr);
-    CHECK(work->tabBarPosition.value() == config::TabBarPosition::Bottom);
-    CHECK(work->tabBarVisibility.value() == config::TabBarVisibility::Never);
     CHECK(work->smoothLineScrolling.value() == std::chrono::milliseconds(250));
     CHECK(work->maximized.value() == true);
 }
@@ -398,6 +394,43 @@ TEST_CASE("SettingsController: the global theme enum field round-trips with its 
 
     REQUIRE(fx.controller->setGlobalField("theme", "system"));
     CHECK(fx.cfg.theme.value() == config::GuiTheme::System);
+}
+
+TEST_CASE("SettingsController: the tab bar fields are global and offer their table's tokens", "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+
+    // The options come from contour/TabBarMode.h, so the page can only ever offer tokens the
+    // configuration reader accepts -- asserted against the table itself rather than a second literal
+    // list, which is the whole point of the table.
+    auto expected = QStringList {};
+    for (auto const& info: config::tabBarModes<config::TabBarVisibility>())
+        expected.push_back(QString::fromUtf8(info.token.data(), static_cast<qsizetype>(info.token.size())));
+
+    auto options = QStringList {};
+    auto type = QString {};
+    for (auto const& row: fx.controller->globalFields())
+        if (row.toMap().value("key").toString() == "tab_bar_visibility")
+        {
+            type = row.toMap().value("type").toString();
+            options = row.toMap().value("options").toStringList();
+        }
+    CHECK(type == "enum");
+    CHECK(options == expected);
+
+    REQUIRE(fx.controller->setGlobalField("tab_bar_visibility", "Multiple"));
+    CHECK(fx.cfg.tabBarVisibility.value() == config::TabBarVisibility::Multiple);
+
+    REQUIRE(fx.controller->setGlobalField("tab_bar_position", "Bottom"));
+    CHECK(fx.cfg.tabBarPosition.value() == config::TabBarPosition::Bottom);
+
+    // They are no longer profile fields at all.
+    auto profileKeys = QStringList {};
+    fx.controller->newProfile("main");
+    for (auto const& row: fx.controller->profileFields())
+        profileKeys.push_back(row.toMap().value("key").toString());
+    CHECK(!profileKeys.contains("tab_bar_position"));
+    CHECK(!profileKeys.contains("tab_bar_visibility"));
 }
 
 TEST_CASE("SettingsController: exposes the configured keybindings read-only", "[settings]")

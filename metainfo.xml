@@ -107,6 +107,9 @@
     <release version="0.7.0" urgency="medium" type="development">
       <description>
         <ul>
+          <li>BREAKING: `tab_bar_position` and `tab_bar_visibility` moved from a profile to the top level of contour.yml. A window shows one tab bar whichever profiles its tabs run, so the setting belongs to the application rather than to a profile. Move these two keys out of your `profiles:` block; a profile-scoped copy is no longer read</li>
+          <li>Fixes the tab bar placement and visibility settings appearing to do nothing until Contour was restarted</li>
+          <li>The settings page now opens on the global settings instead of an empty pane</li>
           <li>Fixes a tall glyph — a Nerd Font icon, a powerline separator — overwriting a neighbouring glyph in the texture atlas, and no longer shifts such a glyph sideways off its own bearing</li>
           <li>Fixes a hang and a crash on startup when probing the audio device, for profiles that cannot ring an audible bell</li>
           <li>Fixes the status line and non-displayed pages being drawn against whichever screen was current rather than the one being rendered, which took the cursor row and the cursor colour from the wrong page</li>

@@ -332,15 +332,26 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// @return True if the tab strip should be shown.
     [[nodiscard]] bool tabBarShouldShow() const noexcept;
 
-    /// Seeds this window's tab strip position from the profile's tab_bar_position setting.
+    /// Seeds this window's tab strip position from the global tab_bar_position setting.
     /// First-write-wins (see seedTitleBarVisible).
-    /// @param position The profile's tab_bar_position value.
+    /// @param position The configured tab_bar_position value.
     void seedTabBarPosition(config::TabBarPosition position);
 
-    /// Seeds this window's tab strip visibility mode from the profile's tab_bar_visibility setting.
+    /// Seeds this window's tab strip visibility mode from the global tab_bar_visibility setting.
     /// First-write-wins (see seedTitleBarVisible).
-    /// @param visibility The profile's tab_bar_visibility value.
+    /// @param visibility The configured tab_bar_visibility value.
     void seedTabBarVisibility(config::TabBarVisibility visibility);
+
+    /// Re-applies the configured tab strip placement and visibility to this window.
+    ///
+    /// Unlike the seed methods above this is NOT first-write-wins. It runs only on an explicit
+    /// configuration reload, where the user has just asked for the configured value to take effect --
+    /// so it supersedes a runtime override, which is what reloading a configuration means. Without it
+    /// the seed latch swallows the change and the setting appears to do nothing until restart.
+    ///
+    /// @param position   The configured tab_bar_position value.
+    /// @param visibility The configured tab_bar_visibility value.
+    void applyTabBarFromConfig(config::TabBarPosition position, config::TabBarVisibility visibility);
     // }}}
 
     /// This window's currently focused display (for window services + status-line targeting).

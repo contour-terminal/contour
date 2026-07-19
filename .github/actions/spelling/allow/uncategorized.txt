@@ -803,6 +803,7 @@ qtqml
 qtquick
 qtquickcontrols
 qtshadertools
+qtspeech
 qttools
 qtver
 qtwayland

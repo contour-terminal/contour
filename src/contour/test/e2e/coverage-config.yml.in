@@ -13,6 +13,8 @@ default_profile: main
 early_exit_threshold: 5
 reflow_on_resize: true
 live_config: false
+tab_bar_position: Bottom
+tab_bar_visibility: Multiple
 
 profiles:
     main:
@@ -20,8 +22,6 @@ profiles:
         arguments: []
         initial_working_directory: "~"
         show_title_bar: true
-        tab_bar_position: Bottom
-        tab_bar_visibility: Multiple
         dim_unfocused: 0.3
         size_indicator_on_resize: true
         fullscreen: false

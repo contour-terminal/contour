@@ -47,10 +47,12 @@ trap 'rm -rf "$OUT"' EXIT
 "$CONTOUR" documentation configuration profile > "$OUT/doc-config-profile.txt"
 "$CONTOUR" generate config to "$OUT/generated-config.yml"
 # The generated sample config must carry the tab-bar options (guards the reflection-driven
-# serialization + the doc-template keys against a silent regression).
+# serialization + the doc-template keys against a silent regression). Anchored to column 0: these
+# are GLOBAL settings, and a profile-scoped key is indented -- so an unanchored grep would keep
+# passing if they ever drifted back under `profiles:`, where nothing would read them.
 for key in tab_bar_position tab_bar_visibility; do
-    grep -q "$key:" "$OUT/generated-config.yml" \
-        || { echo "error: generated config is missing '$key:'" >&2; exit 1; }
+    grep -q "^$key:" "$OUT/generated-config.yml" \
+        || { echo "error: generated config is missing a global '$key:'" >&2; exit 1; }
 done
 "$CONTOUR" generate terminfo to "$OUT/generated.terminfo"
 "$CONTOUR" generate integration shell zsh to "$OUT/integration.zsh"

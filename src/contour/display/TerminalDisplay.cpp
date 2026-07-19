@@ -255,10 +255,12 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     if (auto* controller = windowController())
     {
         controller->seedTitleBarVisible(profile().showTitleBar.value());
-        // Tab-strip placement + visibility are window state seeded once from the profile, same
+        // Tab-strip placement + visibility are window state seeded once from the configuration, same
         // first-write-wins contract as the title bar (so a runtime state is never reset on rebind).
-        controller->seedTabBarPosition(profile().tabBarPosition.value());
-        controller->seedTabBarVisibility(profile().tabBarVisibility.value());
+        // They are global rather than per-profile: one window shows one tab bar, whichever profiles
+        // its tabs happen to run.
+        controller->seedTabBarPosition(_session->config().tabBarPosition.value());
+        controller->seedTabBarVisibility(_session->config().tabBarVisibility.value());
     }
 
     if (!_renderer)
@@ -423,12 +425,17 @@ void TerminalDisplay::handleWindowChanged(QQuickWindow* newWindow)
                 Qt::DirectConnection);
 
         // setSession() may have run before a window existed, in which case windowController() could not
-        // route to THIS window's controller (it matches by the display's OS window) and the profile's
-        // show_title_bar seed was dropped or mis-targeted a no-op. Re-seed now that the window exists;
-        // seedTitleBarVisible is first-write-wins per window, so an already-seeded window is unaffected.
+        // route to THIS window's controller (it matches by the display's OS window) and the chrome
+        // seeds were dropped or mis-targeted a no-op. Re-seed now that the window exists; all three are
+        // first-write-wins per window, so an already-seeded window is unaffected. The tab bar pair is
+        // seeded here too, not just the title bar: they are dropped by the very same race.
         if (_session != nullptr)
             if (auto* controller = windowController())
+            {
                 controller->seedTitleBarVisible(_session->profile().showTitleBar.value());
+                controller->seedTabBarPosition(_session->config().tabBarPosition.value());
+                controller->seedTabBarVisibility(_session->config().tabBarVisibility.value());
+            }
     }
     else
         displayLog()("Detaching widget {} from window.", (void*) this);

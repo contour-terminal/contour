@@ -495,8 +495,16 @@ void TerminalSessionManager::reloadAllSessions()
     // window reflects the change immediately instead of serving stale caches until it is reopened.
     for (auto& [windowId, controller]: _controllersByWindow)
         if (controller != nullptr)
+        {
             if (auto* settings = controller->settingsController(); settings != nullptr)
                 settings->refresh();
+
+            // The tab bar is window state, seeded first-write-wins so a session rebind cannot reset a
+            // runtime override. That latch also swallowed a reload, so changing tab_bar_visibility did
+            // nothing until restart. A reload is the one moment the configured value must win.
+            controller->applyTabBarFromConfig(_app.config().tabBarPosition.value(),
+                                              _app.config().tabBarVisibility.value());
+        }
 }
 
 void TerminalSessionManager::openContextMenu(TerminalSession* acting)

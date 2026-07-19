@@ -510,6 +510,8 @@ void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
             overrides.loadFromEntry("spawn_new_process", config.spawnNewProcess);
             overrides.loadFromEntry("reflow_on_resize", config.reflowOnResize);
             overrides.loadFromEntry("tab_switch_on_horizontal_wheel", config.tabSwitchOnHorizontalWheel);
+            overrides.loadFromEntry("tab_bar_position", config.tabBarPosition);
+            overrides.loadFromEntry("tab_bar_visibility", config.tabBarVisibility);
             overrides.loadFromEntry("theme", config.theme);
             overrides.loadFromEntry("early_exit_threshold", config.earlyExitThreshold);
         }
@@ -707,6 +709,8 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("spawn_new_process", c.spawnNewProcess);
         loadFromEntry("reflow_on_resize", c.reflowOnResize);
         loadFromEntry("tab_switch_on_horizontal_wheel", c.tabSwitchOnHorizontalWheel);
+        loadFromEntry("tab_bar_position", c.tabBarPosition);
+        loadFromEntry("tab_bar_visibility", c.tabBarVisibility);
         loadFromEntry("text_scaling_method", c.textScalingMethod);
         loadFromEntry("grapheme_clustering", c.graphemeClustering);
         loadFromEntry("gui_config_locked", c.guiConfigLocked);
@@ -771,8 +775,6 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child, TerminalProfile&
         loadFromEntry(child, "wm_class", where.wmClass);
         loadFromEntry(child, "tab_label", where.tabLabel);
         loadFromEntry(child, "pixel_reporting", where.pixelReporting);
-        loadFromEntry(child, "tab_bar_position", where.tabBarPosition);
-        loadFromEntry(child, "tab_bar_visibility", where.tabBarVisibility);
         loadFromEntry(child, "option_as_alt", where.optionKeyAsAlt);
         loadFromEntry(child, "margins", where.margins);
         loadFromEntry(child, "terminal_id", where.terminalId);

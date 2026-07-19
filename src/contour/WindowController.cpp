@@ -660,10 +660,32 @@ bool WindowController::tabBarShouldShow() const noexcept
     return true;
 }
 
+void WindowController::applyTabBarFromConfig(config::TabBarPosition position,
+                                             config::TabBarVisibility visibility)
+{
+    // Deliberately bypasses the seed latches rather than reusing them: a reload is the one moment the
+    // configured value must win over whatever this window is currently showing. Mark both as seeded so
+    // a later session rebind still does not clobber what was just applied.
+    _tabBarPositionSeeded = true;
+    if (_tabBarPosition != position)
+    {
+        _tabBarPosition = position;
+        emit tabBarPositionChanged();
+    }
+
+    _tabBarVisibilitySeeded = true;
+    if (_tabBarVisibility != visibility)
+    {
+        _tabBarVisibility = visibility;
+        emit tabBarVisibilityChanged();
+        emit tabBarShouldShowChanged();
+    }
+}
+
 void WindowController::seedTabBarPosition(config::TabBarPosition position)
 {
     // First-write-wins, mirroring seedTitleBarVisible: the seed arrives on every session rebind, but
-    // only the first (the window's initial profile value) takes effect.
+    // only the first (the window's initial configured value) takes effect.
     if (_tabBarPositionSeeded)
         return;
     _tabBarPositionSeeded = true;

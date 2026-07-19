@@ -679,10 +679,6 @@ struct TerminalProfile
 
     ConfigEntry<std::string, documentation::WMClass> wmClass { CONTOUR_APP_ID };
     ConfigEntry<std::string, documentation::TabLabel> tabLabel { "{WindowTitle}" };
-    ConfigEntry<TabBarPosition, documentation::TabBarPosition> tabBarPosition { TabBarPosition::Top };
-    ConfigEntry<TabBarVisibility, documentation::TabBarVisibility> tabBarVisibility {
-        TabBarVisibility::Always
-    };
     ConfigEntry<bool, documentation::OptionKeyAsAlt> optionKeyAsAlt { false };
 };
 
@@ -1107,6 +1103,13 @@ struct Config
     ConfigEntry<bool, documentation::SpawnNewProcess> spawnNewProcess { false };
     ConfigEntry<bool, documentation::ReflowOnResize> reflowOnResize { true };
     ConfigEntry<bool, documentation::TabSwitchOnHorizontalWheel> tabSwitchOnHorizontalWheel { true };
+    // The tab bar belongs to the WINDOW, not to the profile a pane happens to run: a window shows one
+    // tab bar while its tabs may each run a different profile, so asking a profile where the tab bar
+    // sits had no answer when they disagreed.
+    ConfigEntry<TabBarPosition, documentation::TabBarPosition> tabBarPosition { TabBarPosition::Top };
+    ConfigEntry<TabBarVisibility, documentation::TabBarVisibility> tabBarVisibility {
+        TabBarVisibility::Always
+    };
     ConfigEntry<bool, documentation::GuiConfigLocked> guiConfigLocked { false };
     ConfigEntry<contour::config::GuiTheme, documentation::Theme> theme { contour::config::GuiTheme::System };
 
