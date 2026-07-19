@@ -3,7 +3,6 @@ set(_header_files
     BoxDrawingRenderer.h
     CursorRenderer.h
     DecorationRenderer.h
-    GlyphAdvance.h
     GlyphScaling.h
     GlyphSlicing.h
     GridMetrics.h
@@ -38,7 +37,6 @@ set(_test_files
     TextClusterGrouper_test.cpp
     TextShapingCacheKey_test.cpp
     BoxDrawingRenderer_test.cpp
-    GlyphAdvance_test.cpp
     GlyphScaling_test.cpp
     GlyphSlicing_test.cpp
     ImageRenderer_test.cpp

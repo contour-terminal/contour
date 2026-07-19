@@ -1370,27 +1370,44 @@ namespace
 
 constexpr auto Ornament = char32_t { 0x276F };     ///< The prompt ornament from issue #1939.
 constexpr auto NoBreakSpace = char32_t { 0x00A0 }; ///< Follows it, and does not break the run.
+constexpr auto WideFirst = char32_t { 0x4E00 };    ///< A CJK ideograph: two columns wide.
+constexpr auto WideSecond = char32_t { 0x4E8C };   ///< Another, so the two glyphs are distinguishable.
+constexpr auto HebrewAlef = char32_t { 0x05D0 };   ///< Right-to-left, and one column wide.
+constexpr auto HebrewBet = char32_t { 0x05D1 };    ///< Follows it logically, so precedes it visually.
 constexpr auto CellWidth = 10;
 
-/// Renders each of @p cells as its own grid cell of one text group, and returns the X coordinate every
+/// One cell of the group under test: what it holds, how many grid columns it occupies, and which way
+/// it is written.
+struct TestCell
+{
+    std::u32string codepoints;
+    uint8_t columns = 1;
+    uint8_t bidiLevel = 0;
+};
+
+/// Renders @p cells as consecutive grid cells of one text group, and returns the X coordinate every
 /// glyph was drawn at.
 [[nodiscard]] std::vector<int> renderedGlyphPositions(TextRenderer& renderer,
                                                       MockRenderTarget& renderTarget,
-                                                      std::vector<std::u32string> const& cells)
+                                                      std::vector<TestCell> const& cells)
 {
     renderTarget.getMockBackend().renderCommands.clear();
     renderer.beginFrame();
 
-    for (auto const i: std::views::iota(size_t { 0 }, cells.size()))
+    auto column = ColumnOffset(0);
+    for (auto const& testCell: cells)
     {
         auto cell = vtbackend::RenderCell {};
-        cell.groupStart = i == 0;
-        cell.position =
-            vtbackend::CellLocation { .line = LineOffset(0), .column = ColumnOffset(static_cast<int>(i)) };
-        cell.codepoints = cells[i];
+        cell.groupStart = column == ColumnOffset(0);
+        cell.position = vtbackend::CellLocation { .line = LineOffset(0), .column = column };
+        cell.codepoints = testCell.codepoints;
+        cell.width = testCell.columns;
+        cell.sizing.columns = testCell.columns;
+        cell.bidiLevel = testCell.bidiLevel;
         cell.attributes.flags = vtbackend::CellFlags {};
         cell.attributes.foregroundColor = vtbackend::RGBColor(0xFF, 0xFF, 0xFF);
         renderer.renderCell(cell);
+        column += ColumnOffset::cast_from(testCell.columns);
     }
 
     renderer.endFrame();
@@ -1411,9 +1428,20 @@ TEST_CASE("TextRenderer.fallback_run_stays_on_the_cell_grid", "[renderer][fallba
     // The fallback is proportional and covers everything the primary is missing -- DejaVu Sans. Its
     // non-breaking space advances a mere 3px against a 10px cell, which is what used to round away to
     // nothing and drag the rest of the run one cell to the left.
-    auto fallback = text::test::bdf_font {
-        "fallback", false, { { Ornament, 12 }, { NoBreakSpace, 3 }, { U'A', 7 }, { U'B', 7 } }
-    };
+    //
+    // The two ideographs advance 9px while occupying TWO 10px cells. A proportional fallback has no
+    // reason to agree with the terminal's grid, and this pair is what tells the two placement schemes
+    // apart: 9px rounds to one cell, but the cell spans two.
+    auto fallback = text::test::bdf_font { "fallback",
+                                           false,
+                                           { { Ornament, 12 },
+                                             { NoBreakSpace, 3 },
+                                             { U'A', 7 },
+                                             { U'B', 7 },
+                                             { WideFirst, 9 },
+                                             { WideSecond, 9 },
+                                             { HebrewAlef, 6 },
+                                             { HebrewBet, 8 } } };
 
     auto description = text::font_description {};
     description.familyName = "primary";
@@ -1473,10 +1501,12 @@ TEST_CASE("TextRenderer.fallback_run_stays_on_the_cell_grid", "[renderer][fallba
         // The prompt as Claude Code writes it: the ornament, a non-breaking space, then the first word.
         // A plain space would end the text group; a non-breaking space does not, which is why all four
         // cells are shaped as one run and why only the first word was ever affected.
-        auto const positions = renderedGlyphPositions(
-            renderer,
-            renderTarget,
-            { std::u32string { Ornament }, std::u32string { NoBreakSpace }, U"A", U"B" });
+        auto const positions = renderedGlyphPositions(renderer,
+                                                      renderTarget,
+                                                      { TestCell { std::u32string { Ornament } },
+                                                        TestCell { std::u32string { NoBreakSpace } },
+                                                        TestCell { U"A" },
+                                                        TestCell { U"B" } });
 
         REQUIRE(positions.size() == 4);
 
@@ -1491,11 +1521,67 @@ TEST_CASE("TextRenderer.fallback_run_stays_on_the_cell_grid", "[renderer][fallba
 
     SECTION("a run the primary font covers is unaffected")
     {
-        auto const positions = renderedGlyphPositions(renderer, renderTarget, { U"A", U"B" });
+        auto const positions =
+            renderedGlyphPositions(renderer, renderTarget, { TestCell { U"A" }, TestCell { U"B" } });
 
         REQUIRE(positions.size() == 2);
         CHECK(positions[0] == 0);
         CHECK(positions[1] == 1 * CellWidth);
+    }
+
+    // The same question for a cell wider than one column. A glyph is placed at the column its cluster
+    // names, so the answer comes from the grid rather than from the font -- which is the whole point,
+    // because a fallback font's advance is under no obligation to be a whole number of cells.
+    SECTION("a double-width cell occupies two columns whatever its glyph advances")
+    {
+        // Both cells declare two columns and share a sizing, so they form ONE group: the second
+        // ideograph's position is decided purely by its cluster.
+        auto const positions = renderedGlyphPositions(
+            renderer,
+            renderTarget,
+            { TestCell { std::u32string { WideFirst }, 2 }, TestCell { std::u32string { WideSecond }, 2 } });
+
+        REQUIRE(positions.size() == 2);
+        CHECK(positions[0] == 0);
+
+        // Two columns on, not one. Stepping by the rounded font advance put this at 10 -- halfway
+        // through the first ideograph, which draws across both columns.
+        CHECK(positions[1] == 2 * CellWidth);
+    }
+
+    // Cluster-based placement has to survive the two reversals a right-to-left run goes through:
+    // TextRenderer flips the group into logical order to shape it, and shapeWithFont flips the glyphs
+    // back. Clusters are absolute column numbers, so they are the one thing that stays put -- and if
+    // either reversal were dropped, the two glyphs would come back drawn in the other order.
+    //
+    // This is a regression guard rather than a discriminator: the accumulating pen reached the same two
+    // columns here, because a one-column cell cannot round to anything but one cell.
+    SECTION("a right-to-left run is placed left to right by cluster")
+    {
+        // Visual order, which is what RenderBufferBuilder hands the renderer: the logically-first
+        // letter (alef) is the RIGHTMOST, so bet occupies column 0.
+        auto const positions = renderedGlyphPositions(
+            renderer,
+            renderTarget,
+            { TestCell { .codepoints = std::u32string { HebrewBet }, .bidiLevel = 1 },
+              TestCell { .codepoints = std::u32string { HebrewAlef }, .bidiLevel = 1 } });
+
+        REQUIRE(positions.size() == 2);
+        CHECK(positions[0] == 0);
+        CHECK(positions[1] == 1 * CellWidth);
+    }
+
+    SECTION("a narrow cell after a double-width one starts past both its columns")
+    {
+        auto const positions = renderedGlyphPositions(
+            renderer,
+            renderTarget,
+            { TestCell { std::u32string { WideFirst }, 2 }, TestCell { U"A" }, TestCell { U"B" } });
+
+        REQUIRE(positions.size() == 3);
+        CHECK(positions[0] == 0);
+        CHECK(positions[1] == 2 * CellWidth);
+        CHECK(positions[2] == 3 * CellWidth);
     }
 }
 

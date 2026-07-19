@@ -113,7 +113,6 @@ Making use of reserved glyph slots
 #include <vtbackend/primitives.h>
 
 #include <vtrasterizer/BoxDrawingRenderer.h>
-#include <vtrasterizer/GlyphAdvance.h>
 #include <vtrasterizer/GlyphSlicing.h>
 #include <vtrasterizer/GridMetrics.h>
 #include <vtrasterizer/TextShapingCacheKey.h>
@@ -671,9 +670,12 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
         return;
     }
 
-    // Drawn back-to-front for a right-to-left run: the glyphs come back in logical order (ascending
-    // cluster, guaranteed by the normalisation in shapeWithFont), and the pen accumulates to the
-    // right, so the last logical glyph has to be laid down first.
+    // A right-to-left run is drawn back-to-front. Cluster-based placement no longer needs this for the
+    // COLUMN a glyph lands in -- a cluster names its column outright -- but it is still needed WITHIN a
+    // cluster: the shaper positions a base and its marks against each other by accumulated advance, and
+    // that accumulation is only valid in the order HarfBuzz emitted them, which for a right-to-left run
+    // is visual order. shapeWithFont normalised them to logical order so that cluster segmentation could
+    // treat every run alike; this puts them back.
     auto drawOrder = std::vector<text::glyph_position> {};
     if (direction == unicode::Bidi_Direction::Right_To_Left)
     {
@@ -683,28 +685,37 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
     auto const& glyphsToDraw =
         direction == unicode::Bidi_Direction::Right_To_Left ? drawOrder : glyphPositions;
 
+    // Where the group starts. Every cluster is placed against this, so a glyph's column never depends
+    // on how far the glyphs before it happened to advance.
+    //
+    // A cluster of 0 needs no seek, which is why the "none yet" state can simply be 0 rather than an
+    // optional: the branch it would skip is `pen.x = initialPenX + 0`.
+    auto const initialPenX = pen.x;
+    auto currentCluster = 0u;
+
     for (auto const& glyphPosition: glyphsToDraw)
     {
-        if (auto const* attributes = ensureRasterizedIfDirectMapped(glyphPosition.glyph))
+        // Within one cluster the advances rule: a base and its combining marks are positioned against
+        // each other by the shaper, not against the cell grid, so the pen keeps accumulating until the
+        // cluster changes. Across clusters the grid rules, and the pen seeks.
+        if (currentCluster != glyphPosition.cluster)
         {
-            auto const attributesCopy = adjustTileAttributesForLineFlags(lineFlags, *attributes);
-            auto pen1 = applyGlyphPositionToPen(pen, attributesCopy, glyphPosition);
-            pen1 = adjustPenForLineFlags(lineFlags,
-                                         _gridMetrics,
-                                         unbox<int>(attributes->bitmapSize.height),
-                                         attributes->metadata.y.value,
-                                         pen1);
-            renderRasterizedGlyph(pen1, color, attributesCopy);
-
-            // Direct mapping only ever covers printable US-ASCII of the primary font, which occupies
-            // exactly one cell. The advance is known, so the font is not consulted for it.
-            pen.x += cellWidth * advanceScale;
-            continue;
+            currentCluster = glyphPosition.cluster;
+            pen.x = initialPenX + (static_cast<int>(glyphPosition.cluster) * cellWidth * advanceScale);
         }
 
-        auto const glyphHash = hashGlyphKeyAndPresentation(glyphPosition.glyph, glyphPosition.presentation);
-        AtlasTileAttributes const* attributes =
-            getOrCreateRasterizedMetadata(glyphHash, glyphPosition.glyph, glyphPosition.presentation);
+        // Direct-mapped glyphs are single-cell ASCII of the primary font and are never sliced, so the
+        // hash -- which only the slice loop and the atlas lookup want -- is left uncomputed for them.
+        auto const* attributes = ensureRasterizedIfDirectMapped(glyphPosition.glyph);
+        auto glyphHash = strong_hash {};
+        auto const isDirectMapped = attributes != nullptr;
+
+        if (!isDirectMapped)
+        {
+            glyphHash = hashGlyphKeyAndPresentation(glyphPosition.glyph, glyphPosition.presentation);
+            attributes =
+                getOrCreateRasterizedMetadata(glyphHash, glyphPosition.glyph, glyphPosition.presentation);
+        }
 
         if (attributes)
         {
@@ -724,24 +735,28 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
             // Each slice is placed where the previous one ENDED rather than at a re-derived
             // multiple of the cell width. Stepping by the width actually drawn is what keeps the
             // slices contiguous no matter how many multipliers are in play.
-            auto sliceX = pen1.x + unbox<int>(attributesCopy.metadata.targetSize.width);
-            auto sliceKey = unbox(textureAtlas().tileSize().width);
-            while (AtlasTileAttributes const* subAttribs = textureAtlas().try_get(glyphHash * sliceKey))
+            //
+            // Skipped for a direct-mapped glyph: it has no slices, and its hash was never computed --
+            // probing the atlas with a default-constructed one could match an unrelated tile.
+            if (!isDirectMapped)
             {
-                auto const subAttribsCopy = adjustTileAttributesForLineFlags(lineFlags, *subAttribs);
-                renderTile(
-                    atlas::RenderTile::X { sliceX }, atlas::RenderTile::Y { pen1.y }, color, subAttribsCopy);
-                sliceX += unbox<int>(subAttribsCopy.metadata.targetSize.width);
-                sliceKey += unbox(textureAtlas().tileSize().width);
+                auto sliceX = pen1.x + unbox<int>(attributesCopy.metadata.targetSize.width);
+                auto sliceKey = unbox(textureAtlas().tileSize().width);
+                while (AtlasTileAttributes const* subAttribs = textureAtlas().try_get(glyphHash * sliceKey))
+                {
+                    auto const subAttribsCopy = adjustTileAttributesForLineFlags(lineFlags, *subAttribs);
+                    renderTile(atlas::RenderTile::X { sliceX },
+                               atlas::RenderTile::Y { pen1.y },
+                               color,
+                               subAttribsCopy);
+                    sliceX += unbox<int>(subAttribsCopy.metadata.targetSize.width);
+                    sliceKey += unbox(textureAtlas().tileSize().width);
+                }
             }
         }
 
-        // TODO: The font's advance is a stand-in for the datum the pipeline actually has and then drops:
-        // the glyph's cluster, i.e. which cell it belongs to. Carrying the cluster on glyph_position would
-        // let the pen step by the exact cell delta -- zero for a combining mark, N for a ligature spanning
-        // N cells -- with no rounding at all. That awaits TextClusterGrouper's east-asian-width fixme,
-        // since clusters presently count cells appended rather than columns occupied.
-        pen.x += advanceToCells(glyphPosition.advance.x, cellWidth) * cellWidth * advanceScale;
+        // Only ever consumed by the next glyph of the SAME cluster; a cluster change overwrites it.
+        pen.x += glyphPosition.advance.x * advanceScale;
     }
 }
 
@@ -965,7 +980,7 @@ void TextRenderer::renderBlockGroup(text::shape_result const& glyphPositions,
     // comes from the backend, which claimed those cells -- deriving it from the shaper's advances
     // cannot work, because a Devanagari conjunct like `क्नि` is several reordered glyphs, each with
     // an advance, inside one cell.
-    auto const columns = static_cast<uint32_t>(std::max<uint8_t>(1, sizing.columns));
+    auto const columns = static_cast<uint32_t>(sizing.columnSpan());
     auto const cellsAtOneX = std::max(1, static_cast<int>(columns) / blockScale);
 
     // Everything that shapes the canvas is folded into the key by blockCanvasHash; every glyph
