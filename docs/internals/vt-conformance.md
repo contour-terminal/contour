@@ -127,6 +127,16 @@ half-driven screen is worse than none.
 
 The gap files say which sequences are unimplemented. This is for the decisions that outlive them.
 
+- **Two corners of bidirectional support are declared but inert.** `CSI ? 2500` (mirror
+  box-drawing glyphs inside a right-to-left run) is stored and reported, but nothing acts on it: it
+  needs a U+2500..U+257F mirror table, and which corner maps to which is a judgement per glyph rather
+  than a derivation. It defaults to *reset*, so the default rendering is correct either way. The
+  Arabic presentation-form fallback -- mapping a run onto U+FE70..U+FEFF when the resolved font has
+  no `arab` GSUB -- is likewise absent; every Arabic font that ships on the platforms tested does
+  have `arab` GSUB, so the branch could not be exercised in the wild and was left out rather than
+  written blind. The DirectWrite half of the shaping change is written but **unverified**: it cannot
+  be compiled on the machine it was written on and must be checked on Windows before release.
+
 - **The `*` table has not been audited against vttest's menu tables.** The rule above — `*` cannot
   cross a submenu — was applied where it was found (11.7's protected-area item, 11.2.5's UPSS item),
   not proven across the table. Every remaining `*` is a claim that none of its items is a submenu, a
