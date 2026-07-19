@@ -42,6 +42,42 @@ Item {
     // Loader is ready.
     property real _pendingBellVolume: -1
 
+    // OSC 8 hyperlink tooltip. A plain Item carrying an attached ToolTip rather than a Popup of its
+    // own, so it follows the same idiom TabItem.qml uses and inherits the app palette for free.
+    //
+    // Placed above the anchor cell where there is room and below it otherwise, and clamped to the
+    // chrome's width: a link near the right edge would otherwise hang the tooltip off the pane.
+    // Bound rather than assigned on a signal, because C++ already pushes only on a real transition --
+    // moving within one link announces nothing, so the show delay is not restarted per cell.
+    Item {
+        id: hyperlinkTip
+        objectName: "hyperlinkTooltip"
+
+        // Guarded against `undefined`, not merely against a null session: other tests bind this
+        // component to a MOCK session that has no tooltip properties at all, and assigning undefined to
+        // a typed property is a QML warning the run-wide diagnostic gate fails the suite on.
+        readonly property rect anchorRect: (chrome.session && chrome.session.hyperlinkTooltipAnchor !== undefined)
+                                           ? chrome.session.hyperlinkTooltipAnchor
+                                           : Qt.rect(0, 0, 0, 0)
+        readonly property string tipText: (chrome.session && chrome.session.hyperlinkTooltipText !== undefined)
+                                          ? chrome.session.hyperlinkTooltipText
+                                          : ""
+        readonly property bool showAbove: anchorRect.y > height + 8
+
+        width: 1
+        height: 1
+        x: Math.max(0, Math.min(anchorRect.x, chrome.width - 1))
+        y: showAbove ? anchorRect.y : anchorRect.y + anchorRect.height
+
+        ToolTip.text: hyperlinkTip.tipText
+        // Withheld while the window is inactive: a tooltip left standing over an unfocused window is
+        // the pointer describing something the user is no longer looking at.
+        ToolTip.visible: hyperlinkTip.tipText !== ""
+                         && chrome.Window.window !== null
+                         && chrome.Window.window.active
+        ToolTip.delay: 600
+    }
+
     // Vertical scrollbar, bidirectionally bound to the VT viewport (drag -> viewport here; viewport ->
     // thumb via the session Connections below). Honors the session's left/right placement preference;
     // all reads are null-guarded. The self-handlers are declared here (not connect()ed per session)

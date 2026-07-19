@@ -259,6 +259,9 @@ class MockSession: public QObject
     Q_PROPERTY(bool isBlurBackground READ isBlurBackground CONSTANT)
     Q_PROPERTY(float opacityBackground READ opacityBackground CONSTANT)
     Q_PROPERTY(QString pathToBackground READ pathToBackground CONSTANT)
+    // Mirrors TerminalSession's hyperlink tooltip pair. Both change together, so one signal serves them.
+    Q_PROPERTY(QString hyperlinkTooltipText READ hyperlinkTooltipText NOTIFY hyperlinkHoverChanged)
+    Q_PROPERTY(QRectF hyperlinkTooltipAnchor READ hyperlinkTooltipAnchor NOTIFY hyperlinkHoverChanged)
 
   public:
     [[nodiscard]] int pageLineCount() const { return _lines; }
@@ -276,6 +279,16 @@ class MockSession: public QObject
     [[nodiscard]] QString bellSource() const { return QString(); }
     [[nodiscard]] bool isScrollbarRight() const { return _scrollbarRight; }
     [[nodiscard]] bool isScrollbarVisible() const { return _scrollbarVisible; }
+    [[nodiscard]] QString hyperlinkTooltipText() const { return _hyperlinkTooltipText; }
+    [[nodiscard]] QRectF hyperlinkTooltipAnchor() const { return _hyperlinkTooltipAnchor; }
+
+    /// Publishes a hovered hyperlink, the way TerminalSession does on a real cell transition.
+    void setHyperlinkHover(QString text, QRectF anchor)
+    {
+        _hyperlinkTooltipText = std::move(text);
+        _hyperlinkTooltipAnchor = anchor;
+        emit hyperlinkHoverChanged();
+    }
 
     // Drivers: mutate state and fire the NOTIFY the QML binds to, reproducing a live resize / opacity change.
     void setPageSize(int columns, int lines)
@@ -328,6 +341,7 @@ class MockSession: public QObject
     void historyLineCountChanged();
     void isScrollbarRightChanged();
     void isScrollbarVisibleChanged();
+    void hyperlinkHoverChanged();
     void opacityChanged();
     void dimUnfocusedChanged();
     void onBell();
@@ -345,6 +359,8 @@ class MockSession: public QObject
     int _historyLineCount = 0;
     bool _scrollbarRight = true;
     bool _scrollbarVisible = false;
+    QString _hyperlinkTooltipText;
+    QRectF _hyperlinkTooltipAnchor;
     float _opacity = 1.0F;
     float _dimUnfocused = 0.0F;
 };
@@ -3146,3 +3162,68 @@ TEST_CASE("The palette bolds matched characters and tints only unselected rows (
 }
 
 #include <QmlComponents_test.moc>
+
+TEST_CASE("SessionChrome shows the hyperlink tooltip only while there is a link under the pointer",
+          "[contour][gui][qml][hyperlink]")
+{
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::QmlMessageCapture warnings;
+
+    auto host = createChromeInWindow(engine);
+    auto session = createScrollableSession();
+    host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(session.get())));
+    QCoreApplication::processEvents();
+
+    auto* tip = host.chrome->findChild<QQuickItem*>(QStringLiteral("hyperlinkTooltip"));
+    REQUIRE(tip != nullptr);
+
+    // Nothing hovered: nothing to say. The tooltip's own text is the gate, so an empty one can never
+    // pop an empty box.
+    CHECK(tip->property("tipText").toString().isEmpty());
+
+    SECTION("a hovered link publishes its text and is placed at its anchor")
+    {
+        session->setHyperlinkHover("https://example.com/", QRectF(120, 80, 8, 16));
+        QCoreApplication::processEvents();
+
+        CHECK(tip->property("tipText").toString() == "https://example.com/");
+        CHECK(tip->x() == Catch::Approx(120));
+        // Well below the top edge, so it goes ABOVE the cell -- the anchor's own y.
+        CHECK(tip->property("showAbove").toBool());
+        CHECK(tip->y() == Catch::Approx(80));
+    }
+
+    SECTION("a link on the top row is placed below it, where there is room")
+    {
+        session->setHyperlinkHover("https://example.com/", QRectF(10, 0, 8, 16));
+        QCoreApplication::processEvents();
+
+        CHECK_FALSE(tip->property("showAbove").toBool());
+        CHECK(tip->y() == Catch::Approx(16)); // just under the cell
+    }
+
+    SECTION("a link at the right edge is clamped into the pane")
+    {
+        // Without the clamp the tooltip hangs off the pane, which is the popup-placement trap this
+        // codebase has already been bitten by once.
+        session->setHyperlinkHover("https://example.com/", QRectF(host.chrome->width() + 50, 40, 8, 16));
+        QCoreApplication::processEvents();
+
+        CHECK(tip->x() <= host.chrome->width());
+    }
+
+    SECTION("leaving the link withdraws the tooltip")
+    {
+        session->setHyperlinkHover("https://example.com/", QRectF(120, 80, 8, 16));
+        QCoreApplication::processEvents();
+        REQUIRE_FALSE(tip->property("tipText").toString().isEmpty());
+
+        session->setHyperlinkHover(QString(), QRectF());
+        QCoreApplication::processEvents();
+        CHECK(tip->property("tipText").toString().isEmpty());
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}

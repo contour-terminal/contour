@@ -1226,6 +1226,18 @@ void TerminalDisplay::hoverMoveEvent(QHoverEvent* event)
     sendMouseMoveEvent(event, *_session);
 }
 
+void TerminalDisplay::hoverLeaveEvent(QHoverEvent* event)
+{
+    QQuickItem::hoverLeaveEvent(event);
+    if (!_session)
+        return;
+
+    // Nothing is under the pointer once it is outside the item, so the hyperlink tooltip goes with it.
+    // The pointing-hand cursor is reset for the same reason: without a leave handler it survived the
+    // pointer leaving a link at the item's edge, which was a small pre-existing wart.
+    _session->onPointerLeft();
+}
+
 void TerminalDisplay::mouseReleaseEvent(QMouseEvent* event)
 {
     if (!_session)

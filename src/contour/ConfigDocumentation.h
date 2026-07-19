@@ -190,6 +190,12 @@ constexpr StringLiteral PixelReportingConfig {
     "\n"
 };
 
+constexpr StringLiteral HyperlinkHoverTooltipConfig {
+    "{comment} Whether hovering an OSC 8 hyperlink shows a tooltip with its target.\n"
+    "hyperlink_hover_tooltip: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral TabBarPositionConfig {
     "{comment} Where the GUI tab strip (tab bar) is placed within the window (ignore-case):\n"
     "{comment}   Top    = above the terminal content (default).\n"
@@ -1624,6 +1630,14 @@ constexpr StringLiteral PixelReportingWeb {
     "\n"
 };
 
+constexpr StringLiteral HyperlinkHoverTooltipWeb {
+    "\n"
+    "Whether hovering an [OSC 8 hyperlink](../vt-extensions/index.md) shows a tooltip naming its "
+    "target, so it can be read before it is followed. A local `file://` target is shown as a plain "
+    "path.\n"
+    "\n"
+};
+
 constexpr StringLiteral TabBarPositionWeb {
     "\n"
     "Selects where the GUI tab strip (tab bar) is placed within the window. Valid values (ignore-case):\n"
@@ -2173,6 +2187,7 @@ using CopyLastMarkRangeOffset = DocumentationEntry<CopyLastMarkRangeOffsetConfig
 using WMClass = DocumentationEntry<WMClassConfig, WMClassWeb>;
 using TabLabel = DocumentationEntry<TabLabelConfig, TabLabelWeb>;
 using PixelReporting = DocumentationEntry<PixelReportingConfig, PixelReportingWeb>;
+using HyperlinkHoverTooltip = DocumentationEntry<HyperlinkHoverTooltipConfig, HyperlinkHoverTooltipWeb>;
 using TabBarPosition = DocumentationEntry<TabBarPositionConfig, TabBarPositionWeb>;
 using TabBarVisibility = DocumentationEntry<TabBarVisibilityConfig, TabBarVisibilityWeb>;
 using Margins = DocumentationEntry<MarginsConfig, MarginsWeb>;

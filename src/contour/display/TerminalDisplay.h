@@ -134,6 +134,7 @@ class TerminalDisplay: public QQuickItem
     void mouseReleaseEvent(QMouseEvent* mouseReleaseEvent) override;
     void mouseMoveEvent(QMouseEvent* mouseMoveEvent) override;
     void hoverMoveEvent(QHoverEvent* event) override;
+    void hoverLeaveEvent(QHoverEvent* event) override;
     void focusInEvent(QFocusEvent* event) override;
     void focusOutEvent(QFocusEvent* event) override;
 #if QT_CONFIG(im)

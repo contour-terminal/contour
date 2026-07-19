@@ -3,6 +3,7 @@
 #include <contour/ContourGuiApp.h>
 #include <contour/ExternalLauncher.h>
 #include <contour/TerminalSession.h>
+#include <contour/display/CaretGeometry.h>
 #include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/helper.h>
@@ -1303,6 +1304,11 @@ void TerminalSession::inputModeChanged(vtbackend::ViMode mode)
 
 void TerminalSession::onScrollOffsetChanged(vtbackend::ScrollOffset value)
 {
+    // The hovered link is recomputed on mouse MOVEMENT only, so scrolling slides a different line under
+    // a stationary pointer with nothing noticing. Hide rather than recompute: the terminal's own hover
+    // state is stale for the same reason, so re-deriving from it here would only show a different wrong
+    // answer. Browsers likewise drop a tooltip on scroll.
+    clearHyperlinkHover();
     emit scrollOffsetChanged(unbox(value));
 }
 // }}}
@@ -1522,8 +1528,16 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
     terminal().tick(steady_clock::now());
 
     auto constexpr UiHandledHint = false;
-    crispy::locked(_terminal,
-                   [&]() { _terminal.sendMouseMoveEvent(modifiers, pos, pixelPosition, UiHandledHint); });
+
+    // The hovered link is read inside the lock the move already takes, rather than asked for again
+    // afterwards. tryGetHoveringHyperlink() re-queries the screen and needs the same non-recursive
+    // mutex, so a second acquisition here would be one more chance to deadlock, and a callback fired
+    // from vtbackend's own hover-state update would run WITH the lock held and self-deadlock outright.
+    auto const hoveredUri = crispy::locked(_terminal, [&]() -> std::string {
+        _terminal.sendMouseMoveEvent(modifiers, pos, pixelPosition, UiHandledHint);
+        auto const link = _terminal.tryGetHoveringHyperlink();
+        return link ? link->uri : std::string {};
+    });
 
     // The cursor shape lives on the display; a display-less session (background pane, headless
     // test) has no cursor to change.
@@ -1536,7 +1550,45 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
             _display->setMouseCursorShape(MouseCursorShape::PointingHand);
         else
             setDefaultCursor();
+
+        updateHyperlinkHover(hoveredUri, pos);
     }
+}
+
+void TerminalSession::updateHyperlinkHover(std::string_view uri, vtbackend::CellLocation cell)
+{
+    if (!_config.hyperlinkHoverTooltip.value())
+        return;
+
+    auto constexpr MaxTooltipLength = size_t { 100 };
+    auto const change = _hyperlinkHover.update(uri, cell, MaxTooltipLength);
+    if (!change.changed)
+        return;
+
+    _hyperlinkTooltipText = QString::fromStdString(change.text);
+    // The anchor is only meaningful while something is shown, and computing it needs a display.
+    if (!change.text.empty() && _display != nullptr)
+        _hyperlinkTooltipAnchor = display::cellRectangle(_display->gridMetrics().pageMargin,
+                                                         _display->cellSize(),
+                                                         change.anchor,
+                                                         1,
+                                                         _display->contentScale());
+    emit hyperlinkHoverChanged();
+}
+
+void TerminalSession::onPointerLeft()
+{
+    clearHyperlinkHover();
+    setDefaultCursor();
+}
+
+void TerminalSession::clearHyperlinkHover()
+{
+    if (!_hyperlinkHover.clear().changed)
+        return;
+
+    _hyperlinkTooltipText.clear();
+    emit hyperlinkHoverChanged();
 }
 
 void TerminalSession::sendMouseReleaseEvent(Modifiers modifiers,

@@ -78,6 +78,7 @@ set(_header_files
     ContourApp.h
     FuzzyFilter.h
     GuiConfigStore.h
+    HyperlinkTooltip.h
     ModifierNames.h
     Shortcut.h
     TabBarMode.h
@@ -104,6 +105,7 @@ set(_core_source_files
     ContourApp.cpp
     FuzzyFilter.cpp
     GuiConfigStore.cpp
+    HyperlinkTooltip.cpp
     Shortcut.cpp
     TabLabel.cpp
 )
@@ -352,6 +354,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/CaretGeometry_test.cpp
             test/CaretReportGate_test.cpp
             test/Helper_test.cpp
+            test/HyperlinkTooltip_test.cpp
             test/HorizontalWheelGesture_test.cpp
             test/ImeQueryRect_test.cpp
             test/ViewportTextIndex_test.cpp

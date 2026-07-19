@@ -7,6 +7,7 @@
 #include <contour/Config.h>
 #include <contour/ContextMenu.h>
 #include <contour/HorizontalWheelGesture.h>
+#include <contour/HyperlinkTooltip.h>
 #if defined(__linux__)
     #include <contour/FreeDesktopNotifier.h>
 #endif
@@ -91,6 +92,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(int fontSize READ getFontSize)
     Q_PROPERTY(int upTime READ getUptime)
     Q_PROPERTY(QString bellSource READ getBellSource NOTIFY onBell)
+    // The OSC 8 hyperlink under the pointer. Empty means no tooltip. Both change together, so one
+    // signal serves them: the anchor without its text describes nothing.
+    Q_PROPERTY(QString hyperlinkTooltipText READ hyperlinkTooltipText NOTIFY hyperlinkHoverChanged)
+    Q_PROPERTY(QRectF hyperlinkTooltipAnchor READ hyperlinkTooltipAnchor NOTIFY hyperlinkHoverChanged)
 
     // Q_PROPERTY(QString profileName READ profileName NOTIFY profileNameChanged)
 
@@ -103,6 +108,39 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         auto const diff = std::chrono::duration_cast<std::chrono::seconds>(now - _startTime);
         return static_cast<int>(diff.count());
     }
+
+    /// What the hyperlink tooltip should say, or empty for "show nothing".
+    [[nodiscard]] QString hyperlinkTooltipText() const noexcept { return _hyperlinkTooltipText; }
+
+    /// The cell the pointer entered the hyperlink at, in the display's item-local logical coordinates.
+    ///
+    /// The ENTRY cell, so the tooltip stays put while the pointer traces the link rather than sliding
+    /// along with it.
+    [[nodiscard]] QRectF hyperlinkTooltipAnchor() const noexcept { return _hyperlinkTooltipAnchor; }
+
+    /// Withdraws the hyperlink tooltip, whatever the pointer is over.
+    ///
+    /// Called when the pointer leaves the terminal, and when the viewport scrolls: the hovered-link
+    /// state tracks mouse MOVEMENT, so scrolling moves the link out from under a stationary pointer
+    /// without anything noticing. Hiding is the honest answer to that; continuing to show a tooltip for
+    /// a link no longer under the pointer is worse than showing none.
+    void clearHyperlinkHover();
+
+    /// The pointer left the terminal entirely.
+    ///
+    /// Withdraws the hyperlink tooltip and puts the mouse cursor back to its default shape. The shape
+    /// is reset here rather than left alone because it is only ever changed on a cell CHANGE, so a
+    /// pointer that leaves while over a link would otherwise keep the pointing hand it was given.
+    void onPointerLeft();
+
+  private:
+    /// Feeds the hovered-link tracker and publishes any change to QML.
+    ///
+    /// @param uri  The hyperlink under the pointer, or empty when there is none.
+    /// @param cell Where the pointer is, in viewport coordinates.
+    void updateHyperlinkHover(std::string_view uri, vtbackend::CellLocation cell);
+
+  public:
 
     QString getBellSource() const noexcept
     {
@@ -610,6 +648,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void updateImageCanvasCeiling();
 
   signals:
+    void hyperlinkHoverChanged();
     void sessionClosed(TerminalSession&);
     void profileNameChanged(QString newValue);
     void lineCountChanged(int newValue);
@@ -729,6 +768,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     crispy::point _accumulatedPixelScroll;
     crispy::point _accumulatedAngleScroll;
     HorizontalWheelGesture _horizontalWheelGesture;
+    HyperlinkHoverTracker _hyperlinkHover;
+    QString _hyperlinkTooltipText;
+    QRectF _hyperlinkTooltipAnchor;
 
     vtbackend::Terminal _terminal;
     bool _terminatedAndWaitingForKeyPress = false;
