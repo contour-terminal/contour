@@ -121,6 +121,10 @@ struct RenderCursor
     /// A bar or underline cursor is drawn on the LEFT edge of its cell in a left-to-right run and on
     /// the RIGHT edge in a right-to-left one, so that it marks where the next character will go.
     unicode::Bidi_Direction direction = unicode::Bidi_Direction::Left_To_Right;
+
+    /// Whether the cursor's paragraph mixes writing directions, so that @ref direction is worth
+    /// showing. In a paragraph that runs one way the cursor's direction is never in doubt.
+    bool mixedDirection = false;
 };
 
 struct RenderBuffer

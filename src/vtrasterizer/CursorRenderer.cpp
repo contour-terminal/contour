@@ -21,8 +21,14 @@ namespace
 {
     // Times 3 because double-width cursor shapes need 2 tiles,
     // plus 1 for narrow-width cursor shapes.
-    constexpr uint32_t DirectMappedTilesCount =
+    constexpr uint32_t CursorShapeTilesCount =
         static_cast<uint32_t>(std::numeric_limits<vtbackend::CursorShape>::count()) * 3;
+
+    /// The direction-hint square sits after the per-shape tiles. It is one square whatever the shape
+    /// or the cell width, so it needs no width or slice variants of its own.
+    constexpr uint32_t DirectionHintTileIndex = CursorShapeTilesCount;
+
+    constexpr uint32_t DirectMappedTilesCount = CursorShapeTilesCount + 1;
 
     constexpr uint32_t toDirectMappingIndex(vtbackend::CursorShape shape,
                                             int width,
@@ -86,6 +92,10 @@ void CursorRenderer::initializeDirectMapping()
             }
         }
     }
+
+    auto const hintTileIndex = _directMapping.toTileIndex(DirectionHintTileIndex);
+    _textureAtlas->setDirectMapping(hintTileIndex,
+                                    createDirectionHintTileData(_textureAtlas->tileLocation(hintTileIndex)));
 }
 
 namespace
@@ -175,10 +185,29 @@ auto CursorRenderer::createTileData(vtbackend::CursorShape cursorShape,
     return {};
 }
 
+auto CursorRenderer::createDirectionHintTileData(atlas::TileLocation tileLocation)
+    -> TextureAtlas::TileCreateData
+{
+    // A square the width of the bar's stem, so the hint reads as a foot on the stem rather than as a
+    // mark of its own.
+    auto const side = static_cast<size_t>(barThickness(_gridMetrics.baseline));
+    auto const bitmapSize =
+        ImageSize { vtbackend::Width::cast_from(side), vtbackend::Height::cast_from(side) };
+
+    return createTileData(tileLocation,
+                          atlas::Buffer(side * side, 0xFFu),
+                          atlas::Format::Red,
+                          bitmapSize,
+                          RenderTileAttributes::X { 0 },
+                          RenderTileAttributes::Y { 0 },
+                          FRAGMENT_SELECTOR_GLYPH_ALPHA);
+}
+
 void CursorRenderer::render(crispy::point pos,
                             int columnWidth,
                             vtbackend::RGBColor color,
-                            unicode::Bidi_Direction direction)
+                            unicode::Bidi_Direction direction,
+                            bool mixedDirection)
 {
     // A bar cursor marks where the NEXT character will go, so in a right-to-left run it belongs on
     // the cell's right edge rather than its left. The tile draws the bar at its own left edge, so
@@ -200,6 +229,27 @@ void CursorRenderer::render(crispy::point pos,
 
         renderTile({ int(x) }, { pos.y }, color, tileAttributesCopy);
     }
+
+    // Show which way the character under the cursor is written, but only where that is genuinely in
+    // doubt: a paragraph running one way throughout needs no hint. A square at the top of the stem, on
+    // the side the text flows toward, turns the bar into `|-` for left-to-right and `-|` for
+    // right-to-left -- the recommendation's `⎡` and `⎤`, which name an appearance and not a glyph to
+    // draw.
+    //
+    // Bar only, as in VTE, whose own note says the other shapes want a visual design nobody has found
+    // yet. A block or rectangle has no stem to hang the square off, and an underscore already spans
+    // the cell.
+    if (!mixedDirection || _shape != vtbackend::CursorShape::Bar)
+        return;
+
+    auto const thickness = barThickness(_gridMetrics.baseline);
+    auto const stemX = pos.x + trailingEdgeShift;
+    auto const hintX =
+        direction == unicode::Bidi_Direction::Right_To_Left ? stemX - thickness : stemX + thickness;
+
+    auto const hintTileIndex = _directMapping.toTileIndex(DirectionHintTileIndex);
+    auto hintAttributes = _textureAtlas->directMapped(hintTileIndex);
+    renderTile({ hintX }, { pos.y }, color, hintAttributes);
 }
 
 void CursorRenderer::inspect(std::ostream& /*output*/) const

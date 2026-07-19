@@ -200,7 +200,8 @@ optional<RenderCursor> RenderBufferBuilder::renderCursor() const
                           .cursorColor = resolvedCursorColor,
                           .direction = (bidiLayout.levelAt(_cursorPosition->column) & 1) != 0
                                            ? unicode::Bidi_Direction::Right_To_Left
-                                           : unicode::Bidi_Direction::Left_To_Right };
+                                           : unicode::Bidi_Direction::Left_To_Right,
+                          .mixedDirection = bidiLayout.mixedDirection };
 }
 
 RenderCell RenderBufferBuilder::makeRenderCellExplicit(ColorPalette const& colorPalette,

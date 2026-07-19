@@ -34,6 +34,7 @@ set(_source_files
 )
 
 set(_test_files
+    CursorRenderer_test.cpp
     TextClusterGrouper_test.cpp
     TextShapingCacheKey_test.cpp
     BoxDrawingRenderer_test.cpp
