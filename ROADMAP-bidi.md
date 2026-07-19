@@ -104,14 +104,50 @@ logical by the time selection sees them.
 Note a logically contiguous selection may render visually **discontiguous**. That is correct and
 matches VTE; do not "fix" it.
 
-### 3. Cursor — mostly DONE
+### 3. Cursor — DONE
 `RenderCursor::direction` is now consumed: `CursorRenderer::render()` shifts a Bar cursor to the
 cell's trailing edge in a right-to-left run, with the thickness expression extracted so the tile and
 the placement cannot drift apart. Underscore spans the full width and Block/Rectangle fill it, so
 neither needs anything.
 
-Still open: the recommendation's `⎡`/`⎤` shape hint, and hiding the cursor while `wrapPending`
-rather than letting it jump mid-line.
+The `⎡`/`⎤` shape hint is now DONE, and the plan's wording for it was misleading: those characters
+name an *appearance*, not glyphs to draw. VTE fills a `stem_width` square at the top of the I-beam, on
+the side the text flows toward — so the bar reads as `|-` going left-to-right and `-|` going
+right-to-left. `CursorRenderer` does the same, from a direct-mapped tile of its own.
+
+Gated on a new `BidiLineLayout::mixedDirection`, which is VTE's `has_foreign`: does any character
+resolve to a level other than the paragraph's own. Three things about it are load-bearing:
+- It is a **paragraph** property, stamped on every row, so the cursor does not change shape as it
+  crosses a soft wrap inside one paragraph.
+- A paragraph that runs one way throughout gets **no** hint — including a pure-Hebrew one, where base
+  and characters agree and nothing is in doubt. Without this gate every cursor on every ASCII line
+  would carry the extra square.
+- Latin in a *forced* right-to-left paragraph does count as mixed: the Latin resolves above the base
+  level and is genuinely the foreign direction there.
+
+Bar only, as in VTE, whose own note says the other shapes want a visual design nobody has settled on.
+A block or rectangle has no stem to hang the square off; an underscore already spans the cell.
+VTE additionally guards on focus — Contour gets that for free, because an unfocused cursor is already
+substituted to `Rectangle`, which the hint does not apply to.
+
+### 3b. Hiding the cursor while `wrapPending` — RECOMMENDED AGAINST
+The remaining half of the plan's cursor item should NOT be implemented as written.
+
+It is not a bidi behaviour at all, and not scoped to RTL: it would hide the cursor for every user who
+types into the last column of any line. It also does not describe something VTE *does* — it describes
+a consequence of a cursor model Contour does not use. Per the recommendation itself, VTE puts the
+cursor in column 81, off-screen, instead of xterm's "stay in column 80 and set a flag"; the cursor is
+not hidden, it is simply outside the visible area. Contour uses xterm's model, and reports the flag in
+DECCIR (`Screen.cpp`, `sflagBits |= 8`).
+
+Checked against the reference trees: none of foot, kitty, ghostty, mintty or konsole suppresses the
+cursor on a pending wrap. ghostty tracks `pending_wrap` purely for print/wrap logic. VTE is alone, and
+only incidentally.
+
+Adopting it would mean emulating a side effect of someone else's cursor model, diverging from every
+other terminal, for a visible regression in ordinary LTR use. If the underlying complaint — the cursor
+appearing to jump mid-line in an RTL paragraph — turns out to bite in practice, the fix belongs in
+where the cursor is *placed*, not in hiding it.
 
 ### 4. `TextClusterGrouper` space flush — NOT NEEDED, the plan was wrong here too
 Same root cause as the selection item: the plan assumed the grouper does the reordering. It does not.
