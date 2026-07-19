@@ -409,15 +409,19 @@ TEST_CASE("AppendChar.emoji_exclamationmark", "[screen]")
     CHECK(screen.at(LineOffset(0), ColumnOffset(2)).backgroundColor() == IndexedColor::Blue);
 }
 
-TEST_CASE("AppendChar.emoji_VS15_smiley", "[screen]")
+TEST_CASE("AppendChar.emoji_VS15_watch", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
     auto& screen = mock.terminal.primaryScreen();
 
     // Print an emoji, then ask for its TEXT presentation with VS15. The cluster must narrow to one
     // column and give the column back -- the emoji occupied two before the selector arrived.
+    //
+    // U+231A WATCH is used rather than a face emoji because VS15 only has an effect where Unicode
+    // actually defines an emoji variation sequence for the base (emoji-variation-sequences.txt).
+    // U+231A has one; U+1F600 does not, and the case below pins that.
     REQUIRE(*screen.logicalCursorPosition().column == 0);
-    mock.writeToScreen(U"\U0001F600");
+    mock.writeToScreen(U"\u231A");
     REQUIRE(*screen.logicalCursorPosition().column == 2);
     mock.writeToScreen(U"\uFE0E");
     REQUIRE(*screen.logicalCursorPosition().column == 1);
@@ -427,7 +431,7 @@ TEST_CASE("AppendChar.emoji_VS15_smiley", "[screen]")
 
     // emoji, demoted to text presentation
     auto const& c1 = screen.at(LineOffset(0), ColumnOffset(0));
-    CHECK(c1.codepoints() == U"\U0001F600\uFE0E");
+    CHECK(c1.codepoints() == U"\u231A\uFE0E");
     CHECK(c1.width() == 1);
 
     // The continuation cell the emoji used to own was released, and X took it.
@@ -441,6 +445,25 @@ TEST_CASE("AppendChar.emoji_VS15_smiley", "[screen]")
     CHECK(c3.codepoints().empty());
     auto const& c4 = screen.at(LineOffset(0), ColumnOffset(3));
     CHECK(c4.codepoints().empty());
+}
+
+TEST_CASE("AppendChar.VS15_does_nothing_without_a_defined_variation_sequence", "[screen]")
+{
+    // A variation selector only re-presents a base Unicode defines a sequence for. U+1F600 is
+    // emoji-only -- there is no text presentation to select -- so VS15 must leave the cluster two
+    // columns wide rather than narrowing it. Measuring it as one is what wcwidth's
+    // VS15_WIDE_TO_NARROW table would wrongly do for a base outside that table.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen(U"\U0001F600");
+    REQUIRE(*screen.logicalCursorPosition().column == 2);
+    mock.writeToScreen(U"\uFE0E");
+
+    CHECK(*screen.logicalCursorPosition().column == 2);
+    auto const& c0 = screen.at(LineOffset(0), ColumnOffset(0));
+    CHECK(c0.codepoints() == U"\U0001F600\uFE0E");
+    CHECK(c0.width() == 2);
 }
 
 TEST_CASE("AppendChar.emoji_VS16_copyright_sign", "[screen]")
