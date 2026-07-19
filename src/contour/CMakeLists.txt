@@ -29,6 +29,26 @@ message(STATUS "Qt components: ${QT_COMPONENTS}")
 
 find_package(Qt6 COMPONENTS ${QT_COMPONENTS} REQUIRED)
 
+# {{{ Optional features excluded from this build
+# The Qt version CI builds and validates against. Building against an older Qt is supported, but a
+# feature needing a newer Qt — or an optional Qt module that is not installed — is then silently left
+# out of the binary. Silently is the problem: a packager discovers it from a bug report rather than
+# from their build log.
+#
+# So a gate does not print its own warning. It records itself here, and the single report at the
+# bottom of this file names every excluded feature at once. Adding a gated feature is adding one
+# contour_note_excluded_feature() call next to the gate; the reporting needs no edit.
+set(CONTOUR_QT_VALIDATED_VERSION "6.11")
+
+# Records that FEATURE is not built, and why.
+#
+# @param FEATURE Human-readable feature name, as it should read in the warning.
+# @param REASON  Why it is excluded, e.g. "requires Qt 6.11" or "Qt6::TextToSpeech not found".
+function(contour_note_excluded_feature FEATURE REASON)
+    set_property(GLOBAL APPEND PROPERTY CONTOUR_EXCLUDED_FEATURES "${FEATURE} (${REASON})")
+endfunction()
+# }}}
+
 if(CONTOUR_FRONTEND_GUI)
     add_subdirectory(display)
 endif()
@@ -713,3 +733,34 @@ if(UNIX)
 endif()
 
 include(CPack)
+
+# {{{ Report what this build left out (see contour_note_excluded_feature above)
+get_property(_contour_excluded_features GLOBAL PROPERTY CONTOUR_EXCLUDED_FEATURES)
+if(_contour_excluded_features)
+    # A GLOBAL property accumulates for the whole configure run, and a gate may be evaluated more
+    # than once (a re-processed subdirectory, a second find_package pass) — report each feature once.
+    list(REMOVE_DUPLICATES _contour_excluded_features)
+    # NB: string(CONCAT), not set() with several quoted arguments — the latter builds a LIST, and
+    # expanding it back into the message would separate the pieces with a semicolon.
+    list(JOIN _contour_excluded_features "\n  - " _contour_excluded_list)
+    string(CONCAT _contour_notice "Some features are not built into this binary:"
+                                  "\n  - ${_contour_excluded_list}")
+else()
+    set(_contour_notice "")
+endif()
+
+if(Qt6_VERSION VERSION_LESS CONTOUR_QT_VALIDATED_VERSION)
+    string(CONCAT _contour_qt_notice
+           "Qt ${Qt6_VERSION} was detected, which is older than Qt ${CONTOUR_QT_VALIDATED_VERSION}"
+           " — the version Contour is built and tested against. Features needing a newer Qt are"
+           " excluded from this build.")
+    if(_contour_notice)
+        message(WARNING "${_contour_qt_notice}\n${_contour_notice}"
+                        "\nInstall Qt ${CONTOUR_QT_VALIDATED_VERSION} or newer to include them.")
+    else()
+        message(WARNING "${_contour_qt_notice}")
+    endif()
+elseif(_contour_notice)
+    message(WARNING "${_contour_notice}")
+endif()
+# }}}

@@ -164,8 +164,8 @@ jobs:
     - name: "Install Qt (GuiPrivate-capable)"
       uses: jurplel/install-qt-action@v4
       with:
-        version: "6.9.*"
-        modules: qtmultimedia qt5compat qtshadertools
+        version: "6.11.*"
+        modules: qtmultimedia qt5compat qtshadertools qtspeech
     - name: Install clang
       run: |
         wget https://apt.llvm.org/llvm.sh
@@ -575,9 +575,9 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: "6.9.*"
+          version: "6.11.*"
           #version: "5.15.*"
-          modules: qtmultimedia qt5compat qtshadertools
+          modules: qtmultimedia qt5compat qtshadertools qtspeech
       - name: "Setup NuGet for vcpkg caching"
         shell: bash
         run: |
@@ -733,8 +733,8 @@ jobs:
       - name: "Install Qt (GuiPrivate-capable)"
         uses: jurplel/install-qt-action@v4
         with:
-          version: "6.9.*"
-          modules: qtmultimedia qt5compat qtshadertools
+          version: "6.11.*"
+          modules: qtmultimedia qt5compat qtshadertools qtspeech
       - name: Install GCC
         if: ${{ startsWith(matrix.compiler, 'GCC') }}
         run: sudo apt install -y g++-${{ steps.extract_matrix.outputs.CC_VERSION }}
