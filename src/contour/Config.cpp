@@ -2121,50 +2121,48 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     }
 }
 
+namespace
+{
+    /// Reads a tab bar mode spelled as one of the tokens its table carries.
+    ///
+    /// Case-insensitive, and an unrecognized value is reported rather than silently accepted -- a typo
+    /// in a visible appearance setting should not pass unnoticed. It still leaves @p where at its
+    /// default, so a bad value costs a log line rather than a failed startup. Mirrors the GuiTheme
+    /// reader above.
+    ///
+    /// @param node   The mapping to read from.
+    /// @param entry  The key within @p node.
+    /// @param where  Receives the mode, and is left untouched when the value is not recognized.
+    /// @param logger The reader's trace category, passed in because it is a member of the reader.
+    template <typename Mode>
+    void loadTabBarMode(YAML::Node const& node,
+                        std::string const& entry,
+                        Mode& where,
+                        logstore::category const& logger)
+    {
+        auto const child = node[entry];
+        if (!child)
+            return;
+
+        auto const rawValue = child.as<std::string>();
+        logger()("Loading entry: {}, value {}", entry, rawValue);
+        if (auto const mode = tabBarModeFromToken<Mode>(rawValue))
+            where = *mode;
+        else
+            errorLog()("Unknown value for {}: '{}'; keeping {}.", entry, rawValue, where);
+    }
+} // namespace
+
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarPosition& where)
 {
-    // Case-insensitive; an unrecognized value leaves @p where at its (default) value.
-    auto parsePosition = [&](std::string const& key) -> std::optional<TabBarPosition> {
-        auto const literal = crispy::toLower(key);
-        logger()("Loading entry: {}, value {}", entry, literal);
-        if (literal == "top")
-            return TabBarPosition::Top;
-        if (literal == "bottom")
-            return TabBarPosition::Bottom;
-        return std::nullopt;
-    };
-
-    if (auto const child = node[entry])
-    {
-        auto opt = parsePosition(child.as<std::string>());
-        if (opt.has_value())
-            where = opt.value();
-    }
+    loadTabBarMode(node, entry, where, logger);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
                                      TabBarVisibility& where)
 {
-    // Case-insensitive; an unrecognized value leaves @p where at its (default) value.
-    auto parseVisibility = [&](std::string const& key) -> std::optional<TabBarVisibility> {
-        auto const literal = crispy::toLower(key);
-        logger()("Loading entry: {}, value {}", entry, literal);
-        if (literal == "always")
-            return TabBarVisibility::Always;
-        if (literal == "never")
-            return TabBarVisibility::Never;
-        if (literal == "multiple")
-            return TabBarVisibility::Multiple;
-        return std::nullopt;
-    };
-
-    if (auto const child = node[entry])
-    {
-        auto opt = parseVisibility(child.as<std::string>());
-        if (opt.has_value())
-            where = opt.value();
-    }
+    loadTabBarMode(node, entry, where, logger);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,

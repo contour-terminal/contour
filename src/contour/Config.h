@@ -4,6 +4,7 @@
 #include <contour/Actions.h>
 #include <contour/AsciiText.h>
 #include <contour/ConfigDocumentation.h>
+#include <contour/TabBarMode.h>
 
 #include <vtrasterizer/GlyphScaling.h>
 
@@ -92,22 +93,9 @@ enum class PixelReporting : uint8_t
     Device,  //!< Report device pixels: images land 1:1 on the display's own pixels (default).
 };
 
-/// Where the GUI tab strip (tab bar) is placed within the window.
-/// @note Exposed to QML as an @c int (0 = Top, 1 = Bottom); keep the enumerator order in sync
-///       with the literals in @c main.qml if this is ever extended or reordered.
-enum class TabBarPosition : uint8_t
-{
-    Top,    //!< The tab strip sits above the terminal content (default, historical behavior).
-    Bottom, //!< The tab strip sits below the terminal content.
-};
-
-/// When the GUI tab strip (tab bar) is shown.
-enum class TabBarVisibility : uint8_t
-{
-    Always,   //!< Always show the tab strip (default, historical behavior).
-    Never,    //!< Never show the tab strip.
-    Multiple, //!< Show the tab strip only when the window has more than one tab.
-};
+// TabBarPosition and TabBarVisibility live in contour/TabBarMode.h, together with the table that
+// describes them: an action carrying one of these modes is declared in Actions.h, which cannot
+// include this header (this header includes Actions.h).
 
 /// Selects the light/dark appearance of the Qt GUI chrome (title bar, tab strip, command
 /// palette, settings pages, dialogs) independently of the OS.
@@ -2228,18 +2216,14 @@ struct std::formatter<contour::config::PixelReporting>: formatter<std::string_vi
     }
 };
 
+// Both tab bar modes render as the configuration token their table row carries, so what is written
+// back is by construction what the reader accepts -- see contour/TabBarMode.h.
 template <>
 struct std::formatter<contour::config::TabBarPosition>: formatter<std::string_view>
 {
     auto format(contour::config::TabBarPosition value, auto& ctx) const
     {
-        std::string_view name;
-        switch (value)
-        {
-            case contour::config::TabBarPosition::Top: name = "Top"; break;
-            case contour::config::TabBarPosition::Bottom: name = "Bottom"; break;
-        }
-        return formatter<std::string_view>::format(name, ctx);
+        return formatter<std::string_view>::format(contour::config::tabBarModeToken(value), ctx);
     }
 };
 
@@ -2248,14 +2232,7 @@ struct std::formatter<contour::config::TabBarVisibility>: formatter<std::string_
 {
     auto format(contour::config::TabBarVisibility value, auto& ctx) const
     {
-        std::string_view name;
-        switch (value)
-        {
-            case contour::config::TabBarVisibility::Always: name = "Always"; break;
-            case contour::config::TabBarVisibility::Never: name = "Never"; break;
-            case contour::config::TabBarVisibility::Multiple: name = "Multiple"; break;
-        }
-        return formatter<std::string_view>::format(name, ctx);
+        return formatter<std::string_view>::format(contour::config::tabBarModeToken(value), ctx);
     }
 };
 

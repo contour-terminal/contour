@@ -80,6 +80,7 @@ set(_header_files
     GuiConfigStore.h
     ModifierNames.h
     Shortcut.h
+    TabBarMode.h
     TabLabel.h
 )
 # Sources are split into a reusable object library (contour_core) and the thin executable entry

@@ -46,6 +46,42 @@ namespace
                  [accessor](TerminalProfile& p, QVariant const& v) { accessor(p) = v.toBool(); } };
     }
 
+    [[nodiscard]] QString toQString(std::string_view text)
+    {
+        return QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size()));
+    }
+
+    /// Builds an enum profile-field descriptor for a tab bar mode, from the mode's own table.
+    ///
+    /// The options, the value the getter reports and the value the setter accepts all come from
+    /// contour/TabBarMode.h, so the settings page cannot drift from what the configuration reader
+    /// understands -- and a new mode appears here without this file being touched.
+    ///
+    /// @param accessor Yields the ConfigEntry member holding the mode.
+    template <typename Mode, typename Accessor>
+    ProfileFieldDescriptor tabBarModeField(QString key, QString label, QString help, Accessor accessor)
+    {
+        auto options = QStringList {};
+        for (auto const& info: config::tabBarModes<Mode>())
+            options.push_back(toQString(info.token));
+
+        return { std::move(key),
+                 std::move(label),
+                 std::move(help),
+                 "enum",
+                 [accessor](TerminalProfile const& p) {
+                     return QVariant(toQString(config::tabBarModeToken(accessor(p).value())));
+                 },
+                 // An unrecognized token leaves the field alone rather than snapping it to the first
+                 // enumerator: the combo can only offer the tokens above, so anything else is a bug
+                 // elsewhere and silently rewriting the user's setting would hide it.
+                 [accessor](TerminalProfile& p, QVariant const& v) {
+                     if (auto const mode = config::tabBarModeFromToken<Mode>(v.toString().toStdString()))
+                         accessor(p) = *mode;
+                 },
+                 std::move(options) };
+    }
+
     /// The editable scalar profile fields. Data-driven: it grows one row at a time toward full parity
     /// without touching any other code (the QML renders each row by its `type`).
     std::vector<ProfileFieldDescriptor> const& profileFieldDescriptors()
@@ -77,42 +113,15 @@ namespace
               "double",
               [](TerminalProfile const& p) { return QVariant(p.dimUnfocused.value()); },
               [](TerminalProfile& p, QVariant const& v) { p.dimUnfocused = v.toDouble(); } },
-            { "tab_bar_position",
-              "Tab bar position",
-              "Where the tab strip sits relative to the terminal content.",
-              "enum",
-              [](TerminalProfile const& p) {
-                  return QVariant(p.tabBarPosition.value() == config::TabBarPosition::Bottom ? "Bottom"
-                                                                                             : "Top");
-              },
-              [](TerminalProfile& p, QVariant const& v) {
-                  p.tabBarPosition =
-                      v.toString() == "Bottom" ? config::TabBarPosition::Bottom : config::TabBarPosition::Top;
-              },
-              { "Top", "Bottom" } },
-            { "tab_bar_visibility",
-              "Tab bar visibility",
-              "When the tab strip is shown.",
-              "enum",
-              [](TerminalProfile const& p) {
-                  switch (p.tabBarVisibility.value())
-                  {
-                      case config::TabBarVisibility::Never: return QVariant("Never");
-                      case config::TabBarVisibility::Multiple: return QVariant("Multiple");
-                      case config::TabBarVisibility::Always: break;
-                  }
-                  return QVariant("Always");
-              },
-              [](TerminalProfile& p, QVariant const& v) {
-                  auto const s = v.toString();
-                  if (s == "Never")
-                      p.tabBarVisibility = config::TabBarVisibility::Never;
-                  else if (s == "Multiple")
-                      p.tabBarVisibility = config::TabBarVisibility::Multiple;
-                  else
-                      p.tabBarVisibility = config::TabBarVisibility::Always;
-              },
-              { "Always", "Never", "Multiple" } },
+            tabBarModeField<config::TabBarPosition>(
+                "tab_bar_position",
+                "Tab bar position",
+                "Where the tab strip sits relative to the terminal content.",
+                [](auto& p) -> auto& { return p.tabBarPosition; }),
+            tabBarModeField<config::TabBarVisibility>("tab_bar_visibility",
+                                                      "Tab bar visibility",
+                                                      "When the tab strip is shown.",
+                                                      [](auto& p) -> auto& { return p.tabBarVisibility; }),
             // }}}
             // {{{ Font
             { "font_family",

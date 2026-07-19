@@ -1720,6 +1720,42 @@ TEST_CASE("GuiTheme: buildThemePalette forces a legible dark/light chrome palett
     CHECK(dark.color(QPalette::Disabled, QPalette::Text) != dark.color(QPalette::Normal, QPalette::Text));
 }
 
+TEST_CASE("Config: every tab bar mode is described by its table", "[config]")
+{
+    using namespace contour::config;
+
+    // The table is the single source the YAML reader, the config writer, the settings page and any
+    // menu offering these modes all read from. An enumerator missing a row would therefore be
+    // unwritable, unparseable and invisible at once -- so pin that every one of them has a row, and
+    // that a row's token survives the round trip the config file depends on.
+    auto const checkModes = [](auto&& modes, auto&& enumerators) {
+        CHECK(modes.size() == enumerators.size());
+        for (auto const mode: enumerators)
+        {
+            using Mode = std::remove_cvref_t<decltype(mode)>;
+            auto const token = tabBarModeToken(mode);
+            CHECK(!token.empty());
+            CHECK(!tabBarModeLabel(mode).empty());
+            CHECK(tabBarModeFromToken<Mode>(token) == mode);
+        }
+    };
+
+    checkModes(tabBarModes<TabBarPosition>(), std::array { TabBarPosition::Top, TabBarPosition::Bottom });
+    checkModes(tabBarModes<TabBarVisibility>(),
+               std::array { TabBarVisibility::Always, TabBarVisibility::Never, TabBarVisibility::Multiple });
+
+    // The reader is case-insensitive, and refuses what no row carries.
+    CHECK(tabBarModeFromToken<TabBarVisibility>("MULTIPLE") == TabBarVisibility::Multiple);
+    CHECK(tabBarModeFromToken<TabBarVisibility>("mUlTiPlE") == TabBarVisibility::Multiple);
+    CHECK(!tabBarModeFromToken<TabBarVisibility>("sometimes").has_value());
+    CHECK(!tabBarModeFromToken<TabBarPosition>("").has_value());
+
+    // The labels are what a human reads, so they must be distinct -- two rows reading "Multiple"
+    // would be indistinguishable in a menu even though the modes differ.
+    CHECK(tabBarModeLabel(TabBarVisibility::Always) != tabBarModeLabel(TabBarVisibility::Never));
+    CHECK(tabBarModeLabel(TabBarVisibility::Never) != tabBarModeLabel(TabBarVisibility::Multiple));
+}
+
 TEST_CASE("Config: tab_bar_position and tab_bar_visibility parse each value (ignore-case)", "[config]")
 {
     using contour::config::TabBarPosition;
