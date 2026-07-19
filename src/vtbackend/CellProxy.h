@@ -244,6 +244,15 @@ class BasicCellProxy
     {
         _line->scales[_col] = cellScale.scale;
         _line->textScaleExtras[_col] = packTextScaleExtras(cellScale);
+
+        // A sized cell cannot render through the trivial-line fast path, which knows nothing about
+        // scales. invalidateTrivialIfNeeded() only compares SGR and hyperlink, so a request that
+        // changes nothing else -- a purely fractional one such as `OSC 66 ; n=1:d=2:w=1`, which
+        // occupies a single ordinary-width cell -- left the line trivial and the fraction was
+        // silently dropped.
+        if (!cellScale.isOrdinary())
+            _line->trivial = false;
+
         invalidateTrivialIfNeeded();
     }
 

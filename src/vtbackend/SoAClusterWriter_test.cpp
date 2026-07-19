@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/CellProxy.h>
 #include <vtbackend/LineSoA.h>
 #include <vtbackend/SoAClusterWriter.h>
 
@@ -36,6 +37,29 @@ TEST_CASE("writeTextToSoA.ascii", "[SoAWriter]")
     }
 
     CHECK(line.codepoints[5] == 0);
+}
+
+TEST_CASE("writeTextToSoA.ascii.clears_a_previous_block_scale", "[SoAWriter]")
+{
+    // The per-cell write paths reset scales/textScaleExtras; the bulk-ASCII fast path bulk-fills the
+    // other SoA arrays and must not leave a previous OSC 66 block's sizing on the cells it overwrites,
+    // or ordinary text is drawn at that block's scale.
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(10));
+
+    // The cells a scale-2 block leaves behind, set the way the write path sets them -- which also
+    // marks the line non-trivial, so the "freshly reset line" fill-skip does not apply.
+    CellProxy(line, 0).setTextScale(CellScale { .scale = 2 });
+    CellProxy(line, 1).setTextScale(CellScale { .scale = 2 });
+    REQUIRE(line.scales[0] == 2);
+    REQUIRE_FALSE(line.trivial);
+
+    (void) writeTextToSoA(line, 0, "hello"sv, GraphicsAttributes {}, HyperlinkId {}, true);
+
+    CHECK(line.scales[0] == 1);
+    CHECK(line.scales[1] == 1);
+    CHECK(line.textScaleExtras[0] == 0);
+    CHECK(line.textScaleExtras[1] == 0);
 }
 
 TEST_CASE("writeTextToSoA.ascii.atOffset", "[SoAWriter]")

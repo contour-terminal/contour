@@ -940,3 +940,30 @@ TEST_CASE("TextSizing.a_block_whose_head_scrolled_above_the_viewport_still_draws
     CHECK(std::ranges::find(bands, 0) == bands.end());
     CHECK(std::ranges::find(bands, 1) != bands.end());
 }
+
+TEST_CASE("ZZZ.probe_cursor_below_bottom_margin", "[textsizing]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(25), ColumnCount(20) }, LineCount(0) };
+    auto& screen = mock.terminal.primaryScreen();
+
+    // Fill every row with a recognizable marker.
+    for (int i = 1; i <= 25; ++i)
+        mock.writeToScreen(std::format("\033[{};1H"
+                                       "row{}",
+                                       i,
+                                       i));
+
+    // Scroll region rows 1..10, cursor to row 20 (below the region; DECOM off).
+    mock.writeToScreen("\033[1;10r"sv);
+    mock.writeToScreen("\033[20;1H"sv);
+    INFO("cursor before: line=" << screen.cursor().position.line.value);
+    CHECK(screen.cursor().position.line.value == 19);
+
+    mock.writeToScreen("\033]66;s=3;A\a"sv);
+
+    INFO("cursor after: line=" << screen.cursor().position.line.value);
+    for (int i = 0; i < 25; ++i)
+        UNSCOPED_INFO("line " << i << " = '" << screen.grid().lineText(LineOffset(i)) << "'");
+    CHECK(screen.cursor().position.line.value == 19);
+    CHECK(screen.at(LineOffset(19), ColumnOffset(0)).codepoints() == U"A");
+}

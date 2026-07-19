@@ -53,6 +53,14 @@ namespace
             std::fill_n(line.widths.data() + startCol, count, uint8_t { 1 });
             std::fill_n(line.sgr.data() + startCol, count, attrs);
             std::fill_n(line.hyperlinks.data() + startCol, count, hyperlink);
+
+            // Ordinary text carries no sizing. Every per-cell write path resets these two; leaving
+            // them here let a previous `OSC 66` block's scale survive underneath the text that
+            // replaced it, so the text was drawn at the block's size. A line that still carries a
+            // block is never trivial (@see BasicCellProxy::setTextScale), so the skip above cannot
+            // hide a stale scale.
+            std::fill_n(line.scales.data() + startCol, count, uint8_t { 1 });
+            std::fill_n(line.textScaleExtras.data() + startCol, count, uint16_t { 0 });
         }
 
         clearReplacedImageFragments(line.imageFragments, static_cast<uint16_t>(startCol), count);
