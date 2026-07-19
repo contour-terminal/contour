@@ -2167,6 +2167,11 @@ namespace
 
         void operator()(CellLocation pos, CellProxy const& cell)
         {
+        /// Whether any line has been written to @c text yet, which is what decides if the next one
+        /// needs a separator before it. The accumulated text cannot answer that: a blank line is a
+        /// line, but contributes no characters.
+        bool linesEmitted = false;
+
             auto const isNewLine = pos.column < lastColumn || (pos.column == lastColumn && !text.empty());
             if (isNewLine && (!term->isLineWrapped(pos.line)))
                 // TODO: handle logical line in word-selection (don't include LF in wrapped lines)
@@ -2202,7 +2207,12 @@ namespace
                 // The break is a SEPARATOR between lines that carry content, not a terminator emitted
                 // when one ends -- otherwise a trailing continuation-only row, whose emptiness is only
                 // known after the break was already written, leaves "ab\n" behind.
-                if (!text.empty())
+                //
+                // What decides that is whether a line has been emitted, NOT whether the accumulated
+                // text is non-empty: a selected blank line carries content (the user selected it) but
+                // trims to nothing, so leading blank lines left the text empty and their separators
+                // were never written. Interior ones survived, which made the loss position-dependent.
+                if (linesEmitted)
                     text += '\n';
                 trimSpaceRight(currentLine);
                 text += currentLine;
@@ -2210,6 +2220,7 @@ namespace
             currentLine.clear();
             currentLineHasContent = false;
         }
+                linesEmitted = true;
 
         std::string finish()
         {

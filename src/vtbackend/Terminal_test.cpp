@@ -1427,6 +1427,28 @@ TEST_CASE("Terminal.selection_does_not_pad_wide_characters", "[terminal]")
     CHECK(mock.terminal.extractSelectionText() == "\u4e2dab");
 }
 
+TEST_CASE("Terminal.selection_keeps_leading_blank_lines", "[terminal]")
+{
+    // A blank line inside a selection is a line the user selected, so it must copy as a newline. The
+    // line break is emitted as a SEPARATOR, guarded on whether anything has been written yet -- and
+    // using the accumulated text for that test loses LEADING blank lines, because such a line trims
+    // to nothing and never makes the text non-empty. Interior blank lines survive, so the loss is
+    // silent and depends on where in the selection the blank line falls.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(6) } };
+    mock.writeToScreen("\033[3;1H"
+                       "abc"sv); // rows 0 and 1 stay blank
+
+    mock.terminal.setSelector(std::make_unique<vtbackend::LinearSelection>(
+        mock.terminal.selectionHelper(),
+        CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+        []() {}));
+    (void) mock.terminal.selector()->extend(
+        CellLocation { .line = LineOffset(2), .column = ColumnOffset(2) });
+    mock.terminal.selector()->complete();
+
+    CHECK(mock.terminal.extractSelectionText() == "\n\nabc");
+}
+
 TEST_CASE("Terminal.CurlyUnderline", "[terminal]")
 {
     auto const now = chrono::steady_clock::now();
