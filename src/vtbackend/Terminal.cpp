@@ -597,6 +597,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
 
     if (_displayedPage == PageIndex(0))
         _lastRenderPassHints = displayedScreen.render(RenderBufferBuilder { *this,
+                                                                            displayedScreen,
                                                                             output,
                                                                             baseLine,
                                                                             mainDisplayReverseVideo,
@@ -610,6 +611,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                       smoothScrollExtra);
     else
         _lastRenderPassHints = displayedScreen.render(RenderBufferBuilder { *this,
+                                                                            displayedScreen,
                                                                             output,
                                                                             baseLine,
                                                                             mainDisplayReverseVideo,
@@ -798,6 +800,7 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
         case StatusDisplayType::Indicator:
             updateIndicatorStatusLine();
             _indicatorStatusScreen.render(RenderBufferBuilder { *this,
+                                                                _indicatorStatusScreen,
                                                                 output,
                                                                 base,
                                                                 !mainDisplayReverseVideo,
@@ -810,6 +813,7 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
             return _indicatorStatusScreen.pageSize().lines;
         case StatusDisplayType::HostWritable:
             _hostWritableStatusLineScreen.render(RenderBufferBuilder { *this,
+                                                                       _hostWritableStatusLineScreen,
                                                                        output,
                                                                        base,
                                                                        !mainDisplayReverseVideo,
@@ -2163,15 +2167,15 @@ namespace
         string currentLine {};
         bool currentLineHasContent = false;
 
-        SelectionRenderer(Terminal const& term, ColumnOffset rightPage): term(&term), rightPage(rightPage) {}
-
-        void operator()(CellLocation pos, CellProxy const& cell)
-        {
         /// Whether any line has been written to @c text yet, which is what decides if the next one
         /// needs a separator before it. The accumulated text cannot answer that: a blank line is a
         /// line, but contributes no characters.
         bool linesEmitted = false;
 
+        SelectionRenderer(Terminal const& term, ColumnOffset rightPage): term(&term), rightPage(rightPage) {}
+
+        void operator()(CellLocation pos, CellProxy const& cell)
+        {
             auto const isNewLine = pos.column < lastColumn || (pos.column == lastColumn && !text.empty());
             if (isNewLine && (!term->isLineWrapped(pos.line)))
                 // TODO: handle logical line in word-selection (don't include LF in wrapped lines)
@@ -2216,11 +2220,11 @@ namespace
                     text += '\n';
                 trimSpaceRight(currentLine);
                 text += currentLine;
+                linesEmitted = true;
             }
             currentLine.clear();
             currentLineHasContent = false;
         }
-                linesEmitted = true;
 
         std::string finish()
         {

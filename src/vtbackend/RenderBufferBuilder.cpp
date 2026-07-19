@@ -110,6 +110,7 @@ namespace
 } // namespace
 
 RenderBufferBuilder::RenderBufferBuilder(Terminal const& terminal,
+                                         Screen const& screen,
                                          RenderBuffer& output,
                                          LineOffset base,
                                          bool theReverseVideo,
@@ -120,6 +121,7 @@ RenderBufferBuilder::RenderBufferBuilder(Terminal const& terminal,
                                          bool includeSelection):
     _output { &output },
     _terminal { &terminal },
+    _screen { &screen },
     _cursorPosition { theCursorPosition },
     _baseLine { base },
     _reverseVideo { theReverseVideo },
@@ -702,7 +704,10 @@ void RenderBufferBuilder::renderCell(ConstCellProxy screenCell, LineOffset line,
     // exactly as a wide glyph's continuation columns are.
     if (screenCell.isFlagEnabled(CellFlag::MulticellContinuation))
     {
-        auto const& screen = _terminal->currentScreen();
+        // The screen being rendered, NOT the terminal's current one: a status line or a page other
+        // than the cursor's is rendered through this same builder, and re-resolving would read the
+        // block out of an unrelated screen -- drawing the wrong glyph, or missing a block entirely.
+        auto const& screen = *_screen;
         if (auto const block = screen.multicellBlockAt(gridPosition);
             block && block->origin.column == gridPosition.column && block->origin.line < gridPosition.line)
         {
