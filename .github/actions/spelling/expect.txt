@@ -237,6 +237,8 @@ HVC
 hvp
 iconified
 iconify
+ideograph
+ideographs
 ies
 IJK
 IJKLMNOP

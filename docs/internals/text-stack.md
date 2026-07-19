@@ -120,6 +120,33 @@ The text renderer receives an already pre-shaped string of glyphs and
 glyph positions relative to screen coordinates of the first glyph
 to be rendered onto the screen.
 
+Each shaped glyph carries the *cluster* it came from, and a cluster is the grid
+column its cell starts at, counted from the start of the group. A glyph is
+therefore drawn at `initialPen + cluster * cellWidth` — the grid decides, and
+the font is not consulted.
+
+This matters because a font's advance and a terminal's cell width are unrelated
+quantities. A proportional fallback font may advance 3px for a non-breaking
+space against a 15px cell, or 9px for an ideograph that occupies two 10px
+cells. Stepping the pen by rounded advances propagates every such disagreement
+to the rest of the run, which is what
+[issue #1939](https://github.com/contour-terminal/contour/issues/1939) was.
+
+Advances still decide placement *within* one cluster. A base character and its
+combining marks — or the several glyphs of a Devanagari conjunct — are
+positioned against each other by the shaper, not against the cell grid, so the
+pen accumulates the raw advance until the cluster changes. Counting those
+advances to derive a cell span cannot work: a conjunct is several advances
+inside a single cell.
+
+Two consequences worth knowing:
+
+- Whatever produces cells must report the columns each one occupies
+  (`GlyphSizing::columns`). A producer that reports one column for a
+  double-width cell draws everything after it one column too far left.
+- A shaping engine must populate `glyph_position::cluster`. One that leaves it
+  at zero draws a whole run stacked on its first cell.
+
 In order to lower the pressure on the GPU and reduce synchronization times
 between CPU and GPU, all glyph bitmaps are stored into a texture atlas
 on the GPU, such that the text rendering (when everything has been already
