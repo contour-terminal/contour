@@ -32,7 +32,9 @@ namespace
         else if (key == "loc")
             packet.location = value == "primary" ? Location::PrimarySelection : Location::Clipboard;
         else if (key == "mime")
-            packet.mimeType = value;
+            // The protocol base64-encodes this value: `mime=<base64 encoded mime type>`. Storing it
+            // raw made every conforming write fail isSupportedMimeType() and be refused with ENOSYS.
+            packet.mimeType = crispy::base64::decode(value);
         else if (key == "id")
             packet.id = value;
         // Unknown keys -- `name`, `pw`, and whatever the protocol grows next -- are ignored rather
@@ -54,6 +56,18 @@ bool isSupportedMimeType(std::string_view mimeType) noexcept
         std::string_view { "TEXT" },
     };
     return std::ranges::find(Supported, mimeType) != Supported.end();
+}
+
+std::string_view typeName(PacketType type) noexcept
+{
+    switch (type)
+    {
+        case PacketType::Read: return "read";
+        case PacketType::Write: return "write";
+        case PacketType::WriteAlias: return "walias";
+        case PacketType::WriteData: return "wdata";
+    }
+    return "read";
 }
 
 std::expected<Packet, Error> parsePacket(std::string_view payload)

@@ -4774,7 +4774,7 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
     auto const& packet = *parsed;
 
     auto const respond = [&](std::string_view status) {
-        reply("\033]5522;type={}:id={}\033\\", status, packet.id);
+        reply("\033]5522;type={}:status={}\033\\", kitty_clipboard::typeName(responseType), status);
     };
 
     switch (packet.type)
@@ -4801,16 +4801,38 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
                 respond("ENOSYS");
                 return ApplyResult::Ok;
             }
+    // The protocol answers `type=<the type asked about>:status=<code>`. Putting the status in the
+    // `type=` slot -- and inventing an `id=` key the protocol does not define -- meant no conforming
+    // client could parse any reply this terminal sent.
+    // A status is reported against the TRANSMISSION, not against whichever packet happened to carry
+    // the failure: the spec's shapes are `type=read:status=...` and `type=write:status=...`, and the
+    // wdata/walias packets are steps within a write.
+    auto const responseType = packet.type == PacketType::Read ? PacketType::Read : PacketType::Write;
 
-            _terminal->requestClipboardRead("c");
+            // The protocol has its own reply shape: an OK, then one DATA packet per MIME type
+            // carrying a base64 mime and base64 data, then DONE. Delegating to OSC 52 sent a reply
+            // in a different protocol entirely -- a client parsing for `\033]5522;` waits until its
+            // read timeout, while a legacy OSC 52 handler in the same client may swallow the answer
+            // as an unsolicited paste.
+            //
+            // Contour's clipboard is text, so exactly one type is ever delivered. The spec caps a
+            // DATA chunk at 4096 bytes before encoding, which this stays under for any realistic
+            // selection and would need chunking to exceed.
+            auto const content = _terminal->clipboardContent();
+            respond("OK");
+            reply("\033]5522;type=read:status=DATA:mime={};{}\033\\",
+                  crispy::base64::encode(std::string_view { "text/plain" }),
+                  crispy::base64::encode(content.begin(), content.end()));
+            respond("DONE");
             return ApplyResult::Ok;
         }
 
         case PacketType::Write:
-            // A write opens a transmission; the data arrives in the wdata packets that follow.
+            // A write opens a transmission; the data arrives in the wdata packets that follow. The
+            // protocol has the terminal answer only once the transmission ENDS, so there is no reply
+            // here -- an extra unsolicited packet is one a strict client is not expecting.
             _kittyClipboardWrite.clear();
             _kittyClipboardWriteOpen = true;
-            respond("OK");
             return ApplyResult::Ok;
 
         case PacketType::WriteAlias:

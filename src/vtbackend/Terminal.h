@@ -1439,6 +1439,14 @@ class Terminal
     /// terminal's own default and is never popped -- an application that pops more than it pushed
     /// must not be able to leave the terminal with no shape at all.
     void popPointerShape();
+
+    /// Returns to the terminal's own default shape and notifies with an EMPTY name.
+    ///
+    /// The empty name is distinct from every shape an application can ask for, and means "the
+    /// application is no longer imposing one". A frontend caching the application's choice needs
+    /// that signal, or its own screen-type defaults never apply again. Reached by `OSC 22 ;` (the
+    /// documented reset), by popping back to the bottom of the stack, and by RIS.
+    void resetPointerShape();
     // }}}
 
     /// Answers an OSC 52 clipboard read (`OSC 52 ; Pc ; ? ST`) by replying with the current clipboard,
@@ -1447,6 +1455,16 @@ class Terminal
     /// @param pc The selection parameter from the request; an empty Pc is reported back as "s0", xterm's
     ///           default selection.
     void requestClipboardRead(std::string_view pc);
+
+    /// @return the clipboard's current contents, for a protocol that formats its own reply.
+    ///
+    /// requestClipboardRead() both fetches and answers in OSC 52's shape; OSC 5522 has a reply shape
+    /// of its own, so it needs the content without the formatting. Both are gated the same way --
+    /// this returns nothing unless Settings::allowClipboardRead is set.
+    [[nodiscard]] std::string clipboardContent()
+    {
+        return _settings.allowClipboardRead ? _eventListener.getClipboard() : std::string {};
+    }
 
     void openDocument(std::string_view data);
     void inspect();

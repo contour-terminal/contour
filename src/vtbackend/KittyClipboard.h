@@ -66,6 +66,12 @@ enum class Error : uint8_t
 /// @param payload the OSC body WITHOUT its leading "5522;".
 [[nodiscard]] std::expected<Packet, Error> parsePacket(std::string_view payload);
 
+/// @return the wire spelling of @p type, which every response echoes back in its `type=` key.
+///
+/// The protocol answers `type=<the type asked about>:status=<code>` -- the status never goes in the
+/// `type=` slot. @see the reply shapes in kitty's docs/clipboard.rst.
+[[nodiscard]] std::string_view typeName(PacketType type) noexcept;
+
 /// @return whether @p mimeType is one this terminal can actually put on, or take off, the clipboard.
 ///
 /// Contour's clipboard is text, so anything that is not plain text has to be refused rather than

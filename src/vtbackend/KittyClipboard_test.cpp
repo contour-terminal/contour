@@ -9,6 +9,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <format>
+#include <ranges>
+#include <string>
 #include <string_view>
 
 using namespace std::string_view_literals;
@@ -31,7 +34,9 @@ TEST_CASE("KittyClipboard.parse.metadata_is_colon_separated", "[kittyclipboard]"
 {
     // As in OSC 66, colons separate the pairs and the semicolon separates metadata from payload --
     // unlike OSC 52, whose parameters are semicolon-separated.
-    auto const packet = parsePacket("type=wdata:mime=text/plain:id=7;QUI="sv);
+    // `mime=` arrives base64-encoded (`mime=<base64 encoded mime type>`), so the parser decodes it
+    // and callers compare against a real MIME name rather than an encoded one.
+    auto const packet = parsePacket("type=wdata:mime=dGV4dC9wbGFpbg==:id=7;QUI="sv);
     REQUIRE(packet.has_value());
     CHECK(packet->type == PacketType::WriteData);
     CHECK(packet->mimeType == "text/plain");
@@ -88,13 +93,13 @@ TEST_CASE("KittyClipboard.write_transmission_reaches_the_clipboard", "[kittyclip
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
 
     mock.writeToScreen("\033]5522;type=write:id=1\033\\"sv);
-    mock.writeToScreen(
-        std::format("\033]5522;type=wdata:mime=text/plain:id=1;{}\033\\", crispy::base64::encode("hello"sv)));
+    mock.writeToScreen(std::format("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==:id=1;{}\033\\",
+                                   crispy::base64::encode("hello"sv)));
     // An empty chunk ends the transmission.
-    mock.writeToScreen("\033]5522;type=wdata:mime=text/plain:id=1;\033\\"sv);
+    mock.writeToScreen("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==:id=1;\033\\"sv);
 
     CHECK(mock.clipboardData == "hello");
-    CHECK(mock.terminal.peekInput().find("DONE") != std::string_view::npos);
+    CHECK(mock.terminal.peekInput() == "\033]5522;type=write:status=DONE\033\\");
 }
 
 TEST_CASE("KittyClipboard.chunks_are_reassembled_in_order", "[kittyclipboard]")
@@ -103,13 +108,37 @@ TEST_CASE("KittyClipboard.chunks_are_reassembled_in_order", "[kittyclipboard]")
 
     mock.writeToScreen("\033]5522;type=write:id=2\033\\"sv);
     for (auto const& part: { "one "sv, "two "sv, "three"sv })
-        mock.writeToScreen(
-            std::format("\033]5522;type=wdata:mime=text/plain:id=2;{}\033\\", crispy::base64::encode(part)));
-    mock.writeToScreen("\033]5522;type=wdata:mime=text/plain:id=2;\033\\"sv);
+        mock.writeToScreen(std::format("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==:id=2;{}\033\\",
+                                       crispy::base64::encode(part)));
+    mock.writeToScreen("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==:id=2;\033\\"sv);
 
     // The point of the test: three chunks arrive separately and must land concatenated, in order.
     CHECK(mock.clipboardData == "one two three");
-    CHECK(mock.terminal.peekInput().find("DONE") != std::string_view::npos);
+    CHECK(mock.terminal.peekInput() == "\033]5522;type=write:status=DONE\033\\");
+}
+
+TEST_CASE("KittyClipboard.an_endless_write_stream_is_abandoned_not_accumulated", "[kittyclipboard]")
+{
+    // The wdata buffer is only ever flushed by the empty end-of-transmission chunk, so a stream that
+    // never sends one grows it without bound -- the same remote memory-exhaustion the kitty graphics
+    // chunk path is bounded against. Past the cap the transmission is abandoned whole: a truncated
+    // clipboard is not the data the application asked to store.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen("\033]5522;type=write:id=9\033\\"sv);
+
+    // Chunks stay under Sequence::MaxOscLength; anything larger would be truncated by the parser
+    // rather than reaching the accumulator.
+    auto const chunk = crispy::base64::encode(std::string(32 * 1024, 'x'));
+    auto const enough = (kitty_clipboard::MaxClipboardWriteSize / (32 * 1024)) + 2;
+    for ([[maybe_unused]] auto const i: std::views::iota(size_t { 0 }, enough))
+        mock.writeToScreen(std::format("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==:id=9;{}\033\\", chunk));
+
+    CHECK(mock.terminal.peekInput() == "\033]5522;type=write:status=EIO\033\\");
+
+    // The transmission is closed, so the terminating chunk delivers nothing to the clipboard.
+    mock.writeToScreen("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==:id=9;\033\\"sv);
+    CHECK(mock.clipboardData.empty());
 }
 
 TEST_CASE("KittyClipboard.data_without_an_open_write_is_refused", "[kittyclipboard]")
@@ -118,7 +147,7 @@ TEST_CASE("KittyClipboard.data_without_an_open_write_is_refused", "[kittyclipboa
     // packet overwrite the clipboard.
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
     mock.writeToScreen(
-        std::format("\033]5522;type=wdata:mime=text/plain;{}\033\\", crispy::base64::encode("x"sv)));
+        std::format("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==;{}\033\\", crispy::base64::encode("x"sv)));
     CHECK(mock.terminal.peekInput().empty());
     CHECK(mock.clipboardData.empty());
 }
@@ -129,9 +158,9 @@ TEST_CASE("KittyClipboard.an_unsupported_mime_type_is_refused_not_dropped", "[ki
     // application believing its data is on the clipboard.
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
     mock.writeToScreen("\033]5522;type=write:id=3\033\\"sv);
-    mock.writeToScreen(std::format("\033]5522;type=wdata:mime=image/png:id=3;{}\033\\",
+    mock.writeToScreen(std::format("\033]5522;type=wdata:mime=aW1hZ2UvcG5n:id=3;{}\033\\",
                                    crispy::base64::encode("\x89PNG"sv)));
-    CHECK(mock.terminal.peekInput().find("ENOSYS") != std::string_view::npos);
+    CHECK(mock.terminal.peekInput() == "\033]5522;type=write:status=ENOSYS\033\\");
     CHECK(mock.clipboardData.empty());
 }
 
@@ -144,7 +173,29 @@ TEST_CASE("KittyClipboard.read_is_refused_when_not_permitted", "[kittyclipboard]
 
     mock.writeToScreen(
         std::format("\033]5522;type=read:id=4;{}\033\\", crispy::base64::encode("text/plain"sv)));
-    CHECK(mock.terminal.peekInput().find("EPERM") != std::string_view::npos);
+    CHECK(mock.terminal.peekInput() == "\033]5522;type=read:status=EPERM\033\\");
+}
+
+TEST_CASE("KittyClipboard.a_read_is_answered_in_the_5522_protocol", "[kittyclipboard]")
+{
+    // The spec answers a read with its own packets -- an OK, then one DATA packet per MIME type
+    // carrying a base64 mime and base64 data, then DONE. Answering with OSC 52 instead leaves a
+    // client that is parsing for `\033]5522;` waiting until its read timeout, while a legacy OSC 52
+    // handler in the same client may swallow the reply as an unsolicited paste.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
+    mock.terminal.settings().allowClipboardRead = true;
+    mock.clipboardData = "hello";
+
+    mock.writeToScreen(std::format("\033]5522;type=read;{}\033\\", crispy::base64::encode("text/plain"sv)));
+
+    auto const reply = std::string(mock.terminal.peekInput());
+    CHECK(reply.find("\033]52;") == std::string::npos); // never the OSC 52 shape
+    CHECK(reply
+          == std::format("\033]5522;type=read:status=OK\033\\"
+                         "\033]5522;type=read:status=DATA:mime={};{}\033\\"
+                         "\033]5522;type=read:status=DONE\033\\",
+                         crispy::base64::encode("text/plain"sv),
+                         crispy::base64::encode("hello"sv)));
 }
 
 TEST_CASE("KittyClipboard.a_read_for_only_unsupported_types_is_refused", "[kittyclipboard]")
@@ -154,5 +205,5 @@ TEST_CASE("KittyClipboard.a_read_for_only_unsupported_types_is_refused", "[kitty
 
     mock.writeToScreen(
         std::format("\033]5522;type=read:id=5;{}\033\\", crispy::base64::encode("image/png"sv)));
-    CHECK(mock.terminal.peekInput().find("ENOSYS") != std::string_view::npos);
+    CHECK(mock.terminal.peekInput() == "\033]5522;type=read:status=ENOSYS\033\\");
 }
