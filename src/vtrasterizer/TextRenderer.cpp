@@ -399,7 +399,11 @@ Renderable::AtlasTileAttributes const* TextRenderer::ensureRasterizedIfDirectMap
         return &_textureAtlas->directMapped(tileIndex);
 
     auto const tileLocation = _textureAtlas->tileLocation(tileIndex);
-    auto tileCreateData = createRasterizedGlyph(tileLocation, glyph, unicode::PresentationStyle::Text);
+    // A direct-mapped glyph occupies exactly one tile: this path has no way to cut a wider raster
+    // across several, and restrictToTileSize below would simply CUT the excess off. Ask for the
+    // raster to be scaled into the cell instead, so a wide glyph loses proportion rather than pixels.
+    auto tileCreateData = createRasterizedGlyph(
+        tileLocation, glyph, unicode::PresentationStyle::Text, GlyphWidthPolicy::SingleTile);
     if (!tileCreateData)
         return nullptr;
 
@@ -1101,7 +1105,8 @@ auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
 
 auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
                                          text::glyph_key const& glyphKey,
-                                         unicode::PresentationStyle presentation)
+                                         unicode::PresentationStyle presentation,
+                                         GlyphWidthPolicy widthPolicy)
     -> optional<TextureAtlas::TileCreateData>
 {
     auto theGlyphOpt = _textShaper.rasterize(
@@ -1180,7 +1185,8 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
         // max(ratioX, ratioY), so a one-cell-wide box makes the width ratio win and squashes a
         // three-cell ligature to a third of its width. Bounding the height alone leaves the height
         // ratio to scale both axes and preserve the aspect. @see oversizedGlyphBoundingBox.
-        auto const cellBoundingBox = oversizedGlyphBoundingBox(glyph.bitmapSize, _gridMetrics.cellSize);
+        auto const cellBoundingBox =
+            oversizedGlyphBoundingBox(glyph.bitmapSize, _gridMetrics.cellSize, widthPolicy);
         auto const originalPosition = glyph.position;
         if (rasterizerLog)
             rasterizerLog()("Scaling oversized non-RGBA glyph of {}+{} down to box {}.",

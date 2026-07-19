@@ -272,6 +272,28 @@ TEST_CASE("GlyphSlicing.oversizedGlyphBoundingBox.bounds_height_only", "[glyphsl
     CHECK(oversizedGlyphBoundingBox(narrow, cell).height == cell.height);
 }
 
+TEST_CASE("GlyphSlicing.oversizedGlyphBoundingBox.bounds_width_for_a_single_tile", "[glyphslicing]")
+{
+    using vtbackend::Height;
+    using vtbackend::ImageSize;
+    using vtbackend::Width;
+
+    auto const cell = ImageSize { Width(10), Height(20) };
+    auto const wide = ImageSize { Width(30), Height(21) };
+
+    // A caller that stores exactly one tile -- the direct-mapped ASCII path -- cannot cut a wide
+    // raster across cells. Leaving it wide does not preserve the aspect there, it just defers the
+    // damage: restrictToTileSize CUTS the excess off, so the glyph loses its right-hand two thirds.
+    // Bounding the width makes text::scale squash it into the cell instead, which is lossy in
+    // proportion rather than in pixels.
+    auto const box = oversizedGlyphBoundingBox(wide, cell, GlyphWidthPolicy::SingleTile);
+    CHECK(box.width == cell.width);
+    CHECK(box.height == cell.height);
+
+    // Same glyph, caller that can slice: still allowed to stay wide.
+    CHECK(oversizedGlyphBoundingBox(wide, cell, GlyphWidthPolicy::Sliced).width == wide.width);
+}
+
 TEST_CASE("GlyphSlicing.blockCanvasHash.separates_blocks_that_rasterize_differently", "[glyphslicing]")
 {
     using vtbackend::CellScale;

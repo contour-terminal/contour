@@ -211,22 +211,42 @@ inline void blitClipped(std::span<uint8_t> target,
     return 1 + column + (band * 256);
 }
 
+/// Whether the caller of oversizedGlyphBoundingBox can store a raster wider than one cell.
+enum class GlyphWidthPolicy : uint8_t
+{
+    /// The caller cuts the raster across as many tiles as it spans, so it may stay wide.
+    Sliced,
+    /// The caller stores exactly one tile and cannot cut, so the raster has to fit that tile.
+    SingleTile,
+};
+
 /// The box an oversized non-RGBA glyph is scaled down into.
 ///
-/// Only the HEIGHT is bounded. A glyph wider than one cell -- a programming ligature, a powerline
-/// separator -- is meant to stay wide and be cut across cells by createSlicedRasterizedGlyph, so
-/// handing text::scale() a box one cell wide would squash it to a single cell instead: that function
-/// scales by @c max(ratioX, ratioY), so the width ratio wins for anything multi-cell. Giving the box
-/// the glyph's own width makes ratioX 1, leaving the height ratio to scale both axes and preserve the
-/// aspect.
+/// Under @c GlyphWidthPolicy::Sliced only the HEIGHT is bounded. A glyph wider than one cell -- a
+/// programming ligature, a powerline separator -- is meant to stay wide and be cut across cells by
+/// createSlicedRasterizedGlyph, so handing text::scale() a box one cell wide would squash it to a
+/// single cell instead: that function scales by @c max(ratioX, ratioY), so the width ratio wins for
+/// anything multi-cell. Giving the box the glyph's own width makes ratioX 1, leaving the height ratio
+/// to scale both axes and preserve the aspect.
+///
+/// Under @c GlyphWidthPolicy::SingleTile the width is bounded too. Leaving a raster wide for a caller
+/// that stores one tile does not preserve anything: the excess is CUT OFF further down (see
+/// TextRenderer::restrictToTileSize), so the glyph loses its right-hand side rather than being
+/// scaled. Squashing to the cell is the lesser evil, and it is what that path did before a wide
+/// raster could reach it.
 ///
 /// @param glyphSize the glyph's rasterized size.
 /// @param cellSize  one cell; the height a glyph may not exceed, because the atlas stores tiles of
 ///                  exactly that height and spaces their origins that far apart.
-[[nodiscard]] inline vtbackend::ImageSize oversizedGlyphBoundingBox(vtbackend::ImageSize glyphSize,
-                                                                    vtbackend::ImageSize cellSize) noexcept
+/// @param policy    whether the caller can slice the raster across several tiles.
+[[nodiscard]] inline vtbackend::ImageSize oversizedGlyphBoundingBox(
+    vtbackend::ImageSize glyphSize,
+    vtbackend::ImageSize cellSize,
+    GlyphWidthPolicy policy = GlyphWidthPolicy::Sliced) noexcept
 {
-    return vtbackend::ImageSize { std::max(glyphSize.width, cellSize.width), cellSize.height };
+    auto const width =
+        policy == GlyphWidthPolicy::Sliced ? std::max(glyphSize.width, cellSize.width) : cellSize.width;
+    return vtbackend::ImageSize { width, cellSize.height };
 }
 
 /// The part of a block's atlas identity that does not come from its glyphs.

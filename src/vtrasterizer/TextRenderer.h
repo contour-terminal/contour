@@ -8,6 +8,7 @@
 #include <vtrasterizer/BoxDrawingRenderer.h>
 #include <vtrasterizer/FontDescriptions.h>
 #include <vtrasterizer/GlyphScaling.h>
+#include <vtrasterizer/GlyphSlicing.h>
 #include <vtrasterizer/RenderTarget.h>
 #include <vtrasterizer/TextClusterGrouper.h>
 #include <vtrasterizer/TextureAtlas.h>
@@ -180,7 +181,8 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     std::optional<TextureAtlas::TileCreateData> createRasterizedGlyph(
         atlas::TileLocation tileLocation,
         text::glyph_key const& glyphKey,
-        unicode::PresentationStyle presentation);
+        unicode::PresentationStyle presentation,
+        GlyphWidthPolicy widthPolicy = GlyphWidthPolicy::Sliced);
 
     void restrictToTileSize(TextureAtlas::TileCreateData& tileCreateData);
 
