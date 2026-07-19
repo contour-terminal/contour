@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/Actions.h>
 #include <contour/Config.h>
+#include <contour/ModifierNames.h>
 
 #include <vtbackend/Color.h>
 #include <vtbackend/ColorPalette.h>
@@ -142,6 +143,38 @@ namespace
             if (keyword == lowered)
                 return direction;
         return std::nullopt;
+    }
+
+    /// Renders the modifier spellings a `mods:` entry accepts, for a diagnostic.
+    ///
+    /// Folded from ConfigModifierTable rather than restated, so a spelling added there shows up in
+    /// the error message for free.
+    /// @return e.g. "Shift, Alt, Control, Ctrl, Super, Meta, Hyper".
+    [[nodiscard]] std::string acceptedModifierSpellings()
+    {
+        return ConfigModifierTable | std::views::transform(&ConfigModifierRow::name)
+               | crispy::views::join_with(", ");
+    }
+
+    /// Renders an `input_mapping` row for a diagnostic, e.g. "action: ClearHistoryAndReset, key: Q".
+    ///
+    /// Scalar fields only: an absent or non-scalar field is skipped, so a message explaining a
+    /// malformed document cannot itself throw on that document.
+    /// @param row The mapping node.
+    /// @return The row's recognized fields, or "<empty>" when none are usable.
+    [[nodiscard]] std::string describeInputMappingRow(YAML::Node const& row)
+    {
+        using namespace std::string_view_literals;
+        static constexpr auto Fields = std::array { "action"sv, "key"sv, "mouse"sv, "mods"sv, "mode"sv };
+
+        auto described = std::vector<std::string> {};
+        for (auto const field: Fields)
+            if (auto const value = row[std::string { field }]; value && value.IsScalar())
+                described.emplace_back(std::format("{}: {}", field, value.as<std::string>()));
+
+        if (described.empty())
+            return "<empty>";
+        return described | crispy::views::join_with(", ");
     }
 
     optional<std::string> readFile(fs::path const& path)
@@ -2183,7 +2216,10 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     if (auto const child = node[entry])
     {
 
-        // Clear default mappings if we are loading it
+        // Defining `input_mapping` REPLACES the built-in bindings rather than adding to them: the
+        // section is a declaration that the user is defining the full set. This is intended and
+        // documented (docs/configuration/key-mapping.md); the config Contour generates on first run
+        // writes every default out in full, so editing that section keeps the untouched ones.
         where = {};
         if (child.IsSequence())
         {
@@ -2214,10 +2250,37 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
                     }
                     else
                     {
-                        logger()("Could not add some input mapping.");
+                        errorLog()("Dropping input_mapping entry [{}]: it names neither a bindable "
+                                   "'key' nor a 'mouse' button.",
+                                   describeInputMappingRow(mapping));
                     }
                 }
+                else
+                {
+                    // Say which row died and which field killed it. Before this, one misspelled
+                    // modifier made an entire binding vanish with no output at all -- see issue
+                    // #1987, where `mods: [Shift,Alt,Ctrl]` produced nothing but silence.
+                    auto unparsed = std::vector<std::string_view> {};
+                    if (!action)
+                        unparsed.emplace_back("action");
+                    if (!mods)
+                        unparsed.emplace_back("mods");
+                    if (!mode)
+                        unparsed.emplace_back("mode");
+                    errorLog()("Dropping input_mapping entry [{}]: could not parse its {}.",
+                               describeInputMappingRow(mapping),
+                               unparsed | crispy::views::join_with(", "));
+                }
             }
+        }
+        else
+        {
+            // The section is present but is not a list, so not one binding can be read out of it --
+            // and the wipe above has already happened. Without this the user is left with a keyboard
+            // that has nothing bound and no explanation, which is the silent-loss failure of issue
+            // #1987 over again, only total rather than per-row.
+            errorLog()("Ignoring `input_mapping`: expected a list of bindings. The built-in key "
+                       "bindings have been discarded, so no key binding is currently active.");
         }
     }
 }
@@ -2661,22 +2724,13 @@ std::optional<vtbackend::Modifiers> YAMLConfigReader::parseModifier(YAML::Node c
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 std::optional<vtbackend::Modifiers> YAMLConfigReader::parseModifierKey(std::string const& key)
 {
-    using vtbackend::Modifier;
-    auto const upperKey = crispy::toUpper(key);
-    if (upperKey == "ALT")
-        return Modifier::Alt;
-    if (upperKey == "CONTROL")
-        return Modifier::Control;
-    if (upperKey == "SHIFT")
-        return Modifier::Shift;
-    if (upperKey == "SUPER")
-        return Modifier::Super;
-    if (upperKey == "META")
-        // TODO: This is technically not correct, but we used the term Meta up until now,
-        // to refer to the Windows/Cmd key. But Qt also exposes another modifier called
-        // Meta, which rarely exists on modern keyboards (?), but it we need to support it
-        // as well, especially since extended CSIu protocol exposes it as well.
-        return Modifier::Super; // Return Modifier::Meta in the future.
+    if (auto const modifier = parseModifierName(key))
+        return vtbackend::Modifiers { *modifier };
+
+    // Report rather than return a bare nullopt: an unaccepted spelling takes the whole binding down
+    // with it (parseModifier bails on the first bad element), and before this said so out loud a
+    // `mods: [Ctrl]` typo made the entire row vanish in silence -- see issue #1987.
+    errorLog()("Unknown modifier '{}'; expected one of: {}.", key, acceptedModifierSpellings());
     return std::nullopt;
 }
 
@@ -2689,7 +2743,7 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
         auto actionOpt = actions::fromString(actionName);
         if (!actionOpt)
         {
-            logger()("Unknown action '{}'.", actionName);
+            errorLog()("Unknown action '{}'.", actionName);
             return std::nullopt;
         }
         auto action = actionOpt.value();

@@ -1,5 +1,18 @@
 # Key Mapping
 To customize key mappings, you need to configure `input_mapping` yaml entry
+
+!!! warning "Defining `input_mapping` replaces the built-in bindings — it does not add to them"
+
+    As soon as an `input_mapping` section is present in your `contour.yml`, Contour's built-in
+    defaults (`Ctrl+Shift+C`/`Ctrl+Shift+V`, the `Ctrl+Shift+P` command palette, the tab and pane
+    shortcuts, …) are discarded, and only the entries you list are active. Writing an
+    `input_mapping` section is a declaration that you are defining the full set of bindings.
+
+    The `contour.yml` that Contour generates on first run already contains every default binding
+    written out in full, so editing *that* section keeps the defaults you did not touch. If you are
+    writing a configuration by hand and want to keep the defaults, start from a generated one
+    (`contour generate config`) and add your entries to the existing list.
+
 Each element in the `input_mapping` represents one key binding, whereas `mods` represents an array of keyboard modifiers that must be pressed - as well as the `key` or `mouse` - in order to activate the corresponding action. 
 Additionally one can filter input mappings based on special terminal modes using the `modes` option:
 
@@ -14,12 +27,25 @@ Additionally one can filter input mappings based on special terminal modes using
 You can combine these modes by concatenating them via `|` and negate a single one by prefixing with `~`. The `modes` option defaults to not filter at all (the input mappings always match based on modifier and key press/mouse event).
 `key` represents keys on your keyboard, and `mouse` represents buttons as well as the scroll wheel.
 
-Modifiers:
+Modifiers, which are case-insensitive (`Control`, `control` and `CONTROL` are the
+same modifier):
 
-* Alt
-* Control
-* Shift
-* Meta (this is the Windows key on Windows OS, and the Command key on macOS, and Meta on anything else)<br />Keys can be expressed case-insensitively symbolic.
+* `Shift`
+* `Alt`
+* `Control` — may also be written `Ctrl`
+* `Super` — may also be written `Meta`. This is the Windows key on Windows, the Command key on
+  macOS, and the Super key on anything else.
+* `Hyper`
+
+!!! note
+
+    `Meta` is a synonym for `Super` for historical reasons: `contour.yml` has spelled the
+    Windows/Command key `Meta` since before a separate `Meta` modifier existed. There is currently
+    no configuration spelling for the distinct `Meta` modifier that the extended CSI u keyboard
+    protocol reports.
+
+An entry naming a modifier that is not in this list is rejected as a whole — the binding is dropped
+rather than bound with a partial chord — and the reason is reported on startup.
 
 Keys can be expressed case-insensitively symbolic:
 
