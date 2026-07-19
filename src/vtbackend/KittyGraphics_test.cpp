@@ -10,6 +10,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <ranges>
 #include <string>
 #include <string_view>
 
@@ -341,6 +342,45 @@ TEST_CASE("ITerm2.a_download_is_not_drawn", "[iterm2]")
     mock.terminal.setCellPixelSize(ImageSize { Width(2), Height(2) });
     mock.writeToScreen("\033]1337;File=name=eA==;size=4:AAAA\a"sv);
     CHECK_FALSE(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment());
+}
+
+TEST_CASE("ITerm2.an_absurd_height_does_not_scroll_the_screen_away", "[iterm2]")
+{
+    // `height=` is an application-supplied cell count that reaches renderImage with autoScroll set,
+    // and that function's remainder loop performs one linefeed() per row it could not draw. Unclamped,
+    // `height=1000` scrolls a thousand rows: at the scale an application can actually ask for
+    // (`height=90000000`) the terminal wedges for minutes and the scrollback is shredded. The image
+    // can never occupy more than the page, so the request is clamped to it.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) }, LineCount(20) };
+    auto const& screen = mock.terminal.primaryScreen();
+    mock.terminal.setCellPixelSize(ImageSize { Width(2), Height(2) });
+
+    // The PNG decoder is an injected dependency and MockTerm has none, so without this the image
+    // never decodes, renderImage returns before the scroll loop, and the test proves nothing.
+    mock.terminal.setImageDecoder(
+        [](ImageFormat, std::span<uint8_t const>, ImageSize& size) -> std::optional<Image::Data> {
+            size = ImageSize { Width(2), Height(2) };
+            return Image::Data(2uz * 2uz * 4uz, uint8_t { 0xFF });
+        });
+
+    mock.writeToScreen("marker"sv);
+    mock.writeToScreen("\033]1337;File=inline=1;height=1000:AAAA\a"sv);
+
+    // Reaching the placement at all is what makes the assertion below meaningful.
+    auto placed = false;
+    for (auto const line: std::views::iota(-20, 4))
+        for (auto const column: std::views::iota(0, 8))
+            if (screen.at(LineOffset(line), ColumnOffset(column)).imageFragment())
+                placed = true;
+    REQUIRE(placed);
+
+    // A thousand linefeeds would push `marker` clean out of a twenty-line history; a page's worth
+    // does not.
+    auto found = false;
+    for (auto const line: std::views::iota(-20, 4))
+        if (screen.grid().lineAt(LineOffset(line)).toUtf8Trimmed().find("marker") != std::string::npos)
+            found = true;
+    CHECK(found);
 }
 
 TEST_CASE("ITerm2.unknown_OSC_1337_verbs_are_ignored", "[iterm2]")

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <string>
@@ -8,6 +9,15 @@
 
 namespace vtbackend::kitty_clipboard
 {
+
+/// Largest amount of clipboard data one `write` transmission may accumulate, in decoded bytes.
+///
+/// The `wdata` stream is attacker-controlled and is only ever flushed by the empty end-of-transmission
+/// chunk, so a stream that simply never sends one grows this buffer until the process is OOM-killed --
+/// taking every tab and split pane in the window with it. This is the same bound
+/// @c kitty_graphics::MaxChunkedPayloadSize places on the other chunked protocol; 8 MiB is far beyond
+/// any plausible clipboard payload.
+inline constexpr size_t MaxClipboardWriteSize = 8 * 1024 * 1024;
 
 /// What an `OSC 5522` packet is asking for (`type=`).
 enum class PacketType : uint8_t

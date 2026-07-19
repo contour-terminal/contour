@@ -4700,8 +4700,8 @@ void Screen::renderITerm2InlineImage(std::string_view arguments)
     (void) renderImage(ImageFormat::PNG,
                        ImageSize {},
                        std::move(pixmap),
-                       GridSize { .lines = LineCount::cast_from(heightCells),
-                                  .columns = ColumnCount::cast_from(widthCells) },
+                       GridSize { .lines = LineCount::cast_from(clamp(heightCells, pageSize().lines)),
+                                  .columns = ColumnCount::cast_from(clamp(widthCells, pageSize().columns)) },
                        ImageAlignment::TopStart,
                        ImageResize::ResizeToFit,
                        /*autoScroll*/ true,
@@ -4842,7 +4842,22 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
                 return ApplyResult::Ok;
             }
 
-            _kittyClipboardWrite += crispy::base64::decode(packet.payload);
+            // The stream is attacker-controlled and is only flushed by the empty end-of-transmission
+            // chunk, so one that never sends it would grow this buffer until the process is killed.
+            // Abandon the whole transmission rather than truncate it: a partial clipboard is not the
+            // data the application asked to store. @see kitty_graphics::MaxChunkedPayloadSize, which
+            // bounds the other chunked protocol the same way.
+            auto const decoded = crispy::base64::decode(packet.payload);
+            if (_kittyClipboardWrite.size() + decoded.size() > MaxClipboardWriteSize)
+            {
+                _kittyClipboardWriteOpen = false;
+                _kittyClipboardWrite.clear();
+                _kittyClipboardWrite.shrink_to_fit();
+                respond("EIO");
+                return ApplyResult::Ok;
+            }
+
+            _kittyClipboardWrite += decoded;
             return ApplyResult::Ok;
         }
     }
