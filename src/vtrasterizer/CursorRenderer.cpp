@@ -88,6 +88,19 @@ void CursorRenderer::initializeDirectMapping()
     }
 }
 
+namespace
+{
+    /// Thickness of a Bar cursor, in pixels.
+    ///
+    /// Shared by the tile that draws it and by the placement that decides which edge of the cell it
+    /// sits on -- two copies of this expression would drift and put the bar a pixel off the edge.
+    [[nodiscard]] constexpr int barThickness(int baseline) noexcept
+    {
+        auto constexpr LineThickness = 1;
+        return std::max(LineThickness * baseline / 3, 1);
+    }
+} // namespace
+
 auto CursorRenderer::createTileData(vtbackend::CursorShape cursorShape,
                                     int columnWidth,
                                     atlas::TileLocation tileLocation) -> TextureAtlas::TileCreateData
@@ -97,6 +110,7 @@ auto CursorRenderer::createTileData(vtbackend::CursorShape cursorShape,
     auto const defaultBitmapSize = ImageSize { width, height };
     auto const baseline = _gridMetrics.baseline;
     auto constexpr LineThickness = 1;
+    (void) LineThickness;
 
     auto const create = [this, tileLocation](ImageSize bitmapSize,
                                              auto createBitmap) -> TextureAtlas::TileCreateData {
@@ -132,7 +146,7 @@ auto CursorRenderer::createTileData(vtbackend::CursorShape cursorShape,
             });
         case vtbackend::CursorShape::Bar:
             return create(defaultBitmapSize, [&]() {
-                auto const thickness = (size_t) max(LineThickness * baseline / 3, 1);
+                auto const thickness = static_cast<size_t>(barThickness(baseline));
                 // auto const base_y = max((height - thickness) / 2, 0);
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
 
@@ -161,13 +175,26 @@ auto CursorRenderer::createTileData(vtbackend::CursorShape cursorShape,
     return {};
 }
 
-void CursorRenderer::render(crispy::point pos, int columnWidth, vtbackend::RGBColor color)
+void CursorRenderer::render(crispy::point pos,
+                            int columnWidth,
+                            vtbackend::RGBColor color,
+                            unicode::Bidi_Direction direction)
 {
+    // A bar cursor marks where the NEXT character will go, so in a right-to-left run it belongs on
+    // the cell's right edge rather than its left. The tile draws the bar at its own left edge, so
+    // the whole run is shifted to put that ink against the trailing edge instead. Underscore spans
+    // the full width and Block/Rectangle fill it, so neither is affected.
+    auto const cellWidth = unbox<int>(_gridMetrics.cellSize.width);
+    auto const trailingEdgeShift =
+        (direction == unicode::Bidi_Direction::Right_To_Left && _shape == vtbackend::CursorShape::Bar)
+            ? (columnWidth * cellWidth) - barThickness(_gridMetrics.baseline)
+            : 0;
+
     for (uint32_t i = 0; std::cmp_less(i, uint32_t(columnWidth)); ++i)
     {
         auto const directMappingIndex = toDirectMappingIndex(_shape, columnWidth, i);
         auto const tileIndex = _directMapping.toTileIndex(directMappingIndex);
-        auto const x = pos.x + (int(i) * unbox<int>(_gridMetrics.cellSize.width));
+        auto const x = pos.x + (int(i) * cellWidth) + trailingEdgeShift;
         AtlasTileAttributes const& tileAttributes = _textureAtlas->directMapped(tileIndex);
         auto tileAttributesCopy = tileAttributes;
 

@@ -13,6 +13,7 @@ set(_header_files
     ReGISFontRasterizer.h
     Renderer.h
     TextClusterGrouper.h
+    TextShapingCacheKey.h
     TextRenderer.h
     TextureAtlas.h
     utils.h
@@ -35,6 +36,7 @@ set(_source_files
 
 set(_test_files
     TextClusterGrouper_test.cpp
+    TextShapingCacheKey_test.cpp
     BoxDrawingRenderer_test.cpp
     GlyphAdvance_test.cpp
     GlyphScaling_test.cpp

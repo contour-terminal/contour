@@ -4,6 +4,8 @@
 #include <vtbackend/Color.h>
 #include <vtbackend/primitives.h>
 
+#include <libunicode/bidi.h>
+
 #include <vtrasterizer/GridMetrics.h>
 #include <vtrasterizer/RenderTarget.h>
 
@@ -26,7 +28,12 @@ class CursorRenderer: public Renderable
     [[nodiscard]] vtbackend::CursorShape shape() const noexcept { return _shape; }
     void setShape(vtbackend::CursorShape shape);
 
-    void render(crispy::point pos, int columnWidth, vtbackend::RGBColor color);
+    /// @param direction writing direction of the character the cursor sits on; decides which edge of
+    ///                  the cell a Bar cursor is drawn against.
+    void render(crispy::point pos,
+                int columnWidth,
+                vtbackend::RGBColor color,
+                unicode::Bidi_Direction direction = unicode::Bidi_Direction::Left_To_Right);
 
     void inspect(std::ostream& output) const override;
 

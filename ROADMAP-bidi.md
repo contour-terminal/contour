@@ -36,11 +36,24 @@ clicks map between visual and logical space. Arrow keys swap in RTL runs.
 
 Ordered by user-visible impact.
 
-### 1. Cluster-based glyph placement — `TextRenderer.cpp`
+### 1. Cluster-based glyph placement — BLOCKED, not merely undone
 `renderTextGroup` still advances an accumulating pen (`pen.x += advanceToCells(...)`). The plan calls
-for `initialPen + cluster * cellWidth`. This is what puts an RTL glyph in the right cell when a
-font's advance does not match the cell width; `advanceToCells` stays for the intra-cluster case.
-`glyph_position::cluster` already exists and is populated.
+for `initialPen + cluster * cellWidth`, and `glyph_position::cluster` now exists and is populated, so
+the datum is there.
+
+**The precondition is not met.** The TODO at `TextRenderer.cpp` (just above the `pen.x +=` line) says
+so explicitly, and `TextClusterGrouper.h:117` carries the matching
+`int _cellCount = 0; // FIXME: EA width vs actual cells`. Clusters count **cells appended**, not
+**columns occupied**, so for a double-width glyph the cluster index advances by one while the glyph
+covers two columns. Switching to `cluster * cellWidth` without fixing that would misplace every glyph
+after a CJK or emoji character — a far worse regression than the rounding it removes.
+
+Order of work: fix the grouper to count columns (its own FIXME, which predates this branch), *then*
+switch the placement. Do not do the second without the first.
+
+Note that in practice a wide cell's continuation column arrives as a blank and flushes the group, so
+a group may already be one-column-per-cluster — but that is an inference about current call paths,
+not an invariant, and the FIXME is the authority.
 
 ### 2. Selection in mixed text — `Selector.*`, `Terminal.cpp:2286`
 Untouched. Two pieces:

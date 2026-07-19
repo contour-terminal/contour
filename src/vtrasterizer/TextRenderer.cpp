@@ -116,6 +116,7 @@ Making use of reserved glyph slots
 #include <vtrasterizer/GlyphAdvance.h>
 #include <vtrasterizer/GlyphSlicing.h>
 #include <vtrasterizer/GridMetrics.h>
+#include <vtrasterizer/TextShapingCacheKey.h>
 #include <vtrasterizer/shared_defines.h>
 #include <vtrasterizer/utils.h>
 
@@ -168,14 +169,6 @@ namespace
                * static_cast<uint32_t>(presentation)
                ;
         // clang-format on
-    }
-
-    strong_hash hashTextAndStyle(u32string_view text,
-                                 TextStyle style,
-                                 unicode::Bidi_Direction direction) noexcept
-    {
-        return strong_hash::compute(text) * static_cast<uint32_t>(style)
-               * (static_cast<uint32_t>(direction) + 1);
     }
 
     text::font_key getFontForStyle(FontKeys const& fonts, TextStyle style)

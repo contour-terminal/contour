@@ -319,3 +319,48 @@ TEST_CASE("cluster_spans.empty_group_detection", "[cluster_spans]")
     REQUIRE(groups->size() == 1);
     CHECK((*groups)[0].empty());
 }
+
+// HarfBuzz emits a right-to-left run's glyphs in visual order, so their clusters DESCEND.
+// clusterGroups() rejects an unsorted input outright, which drops the whole run to a single
+// indivisible group -- losing per-cluster font fallback for exactly the scripts that need it most.
+//
+// open_shaper therefore normalises at the boundary: it reverses an RTL run's glyphs so that
+// everything downstream sees ascending clusters and needs no direction awareness at all. These two
+// cases pin both halves of that contract.
+TEST_CASE("cluster_spans.descending_clusters_degrade", "[cluster_spans]")
+{
+    // What HarfBuzz hands back for an RTL run, unnormalised.
+    auto const glyphs = glyphsOf({ { 2, false }, { 1, false }, { 0, false } });
+    auto const clusters = clustersOf({ 2, 1, 0 });
+
+    CHECK_FALSE(clusterGroups(glyphs, clusters).has_value());
+
+    // ... and fallbackSegments() then yields one indivisible group covering everything, which is the
+    // degradation the normalisation exists to avoid.
+    auto const segments = fallbackSegments(glyphs, clusters);
+    REQUIRE(segments.size() == 1);
+    CHECK(segments[0].glyphBegin == 0);
+    CHECK(segments[0].glyphEnd == 3);
+    CHECK(segments[0].codepointBegin == 0);
+    CHECK(segments[0].codepointEnd == 3);
+}
+
+TEST_CASE("cluster_spans.reversed_rtl_run_segments_per_cluster", "[cluster_spans]")
+{
+    // The same run after open_shaper's reversal: ascending clusters, so it segments normally and
+    // each cell can fall back to its own font.
+    auto const glyphs = glyphsOf({ { 0, false }, { 1, false }, { 2, false } });
+    auto const clusters = clustersOf({ 0, 1, 2 });
+
+    auto const groups = clusterGroups(glyphs, clusters);
+    REQUIRE(groups.has_value());
+    CHECK(groups->size() == 3);
+
+    // A missing glyph in the middle stays its own segment rather than swallowing the run.
+    auto const withMissing = glyphsOf({ { 0, false }, { 1, true }, { 2, false } });
+    auto const segments = fallbackSegments(withMissing, clusters);
+    REQUIRE(segments.size() == 3);
+    CHECK_FALSE(segments[0].missing);
+    CHECK(segments[1].missing);
+    CHECK_FALSE(segments[2].missing);
+}

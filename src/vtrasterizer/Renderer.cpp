@@ -709,13 +709,15 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
                     ? vtbackend::mixColor(*cursor.animateFromColor, cursor.cursorColor, animationProgress)
                     : cursor.cursorColor;
             _cursorRenderer.setShape(cursor.shape);
-            _cursorRenderer.render(interpolated, cursor.width, color);
+            _cursorRenderer.render(interpolated, cursor.width, color, cursor.direction);
         }
         else if (cursor.shape != vtbackend::CursorShape::Block)
         {
             _cursorRenderer.setShape(cursor.shape);
-            _cursorRenderer.render(
-                _gridMetrics.map(cursor.position, smoothPixelOffset), cursor.width, cursor.cursorColor);
+            _cursorRenderer.render(_gridMetrics.map(cursor.position, smoothPixelOffset),
+                                   cursor.width,
+                                   cursor.cursorColor,
+                                   cursor.direction);
         }
 
         // Scissor-clip cursor to the main display area to prevent overflow into the status line.
