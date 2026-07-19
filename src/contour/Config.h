@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/Actions.h>
+#include <contour/AsciiText.h>
 #include <contour/ConfigDocumentation.h>
 
 #include <vtrasterizer/GlyphScaling.h>
@@ -219,6 +220,27 @@ namespace helper
     }
 
 } // namespace helper
+
+/// Folds @p ch into the case that character bindings are stored and matched in (uppercase).
+///
+/// WHICH case a letter reaches a binding in is decided by the route contour::sendKeyEvent() took,
+/// not by the user: the CharMappings table and the Ctrl branch both report the UPPERCASE key label,
+/// event->text() reports whatever the layout produced (lowercase for an unmodified press), and on
+/// macOS the option-as-Alt branch picks the case from Shift XOR CapsLock. Since the chord carries
+/// Shift separately, a letter's case says nothing the modifiers do not already say, so it is
+/// normalized away on both sides -- when a binding is parsed, and when a key event is looked up.
+///
+/// US-ASCII only, which is not merely inherited from ascii::foldUpper but required here: every route
+/// that can report a second case for one key is range-gated to ASCII (`0x20 <= key < 0x80`, and the
+/// CharMappings table itself), so no codepoint above 0x7F can ever arrive in two different cases.
+/// Folding those would only merge bindings that are distinct today.
+///
+/// @param ch The codepoint a binding is stored under, or one delivered by a key event.
+/// @return The folded codepoint; @p ch unchanged when it is not an ASCII lowercase letter.
+[[nodiscard]] constexpr char32_t foldedBindingCodepoint(char32_t ch) noexcept
+{
+    return ascii::foldUpper(ch);
+}
 
 /// Finds the binding matching @p input under the chord @p modifiers, or nullptr.
 ///

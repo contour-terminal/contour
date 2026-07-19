@@ -59,6 +59,10 @@ Keys can be expressed case-insensitively symbolic:
 
 or in case of standard characters, just the character.
 
+A single-character `key` also matches case-insensitively: `key: 'q'` and `key: 'Q'` bind the same
+chord. Shift is carried by `mods`, not by the letter's case, so writing an uppercase letter does
+*not* mean "with Shift" — use `mods: [Shift]` for that.
+
  Mouse buttons can be one of the following self-explanatory ones:
 
    `Left, Middle, Right, WheelUp, WheelDown, WheelLeft, WheelRight`

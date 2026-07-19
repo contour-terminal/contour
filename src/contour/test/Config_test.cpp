@@ -2854,6 +2854,84 @@ TEST_CASE("Config: an input_mapping section replaces the built-in defaults", "[c
     }
 }
 
+TEST_CASE("Config: a single-character key: is stored case-folded", "[config][input-mapping]")
+{
+    auto dir = QTemporaryDir {};
+    REQUIRE(dir.isValid());
+
+    auto const soleCharMapping = [](contour::config::Config const& config) {
+        auto const& charMappings = config.inputMappings.value().charMappings;
+        REQUIRE(charMappings.size() == 1);
+        return charMappings.front().input;
+    };
+
+    SECTION("a lowercase letter folds")
+    {
+        // Before folding this parsed fine and produced a binding that could never fire, because the
+        // Ctrl branch of sendKeyEvent always reports the uppercase key label.
+        CHECK(soleCharMapping(loadFromYaml(dir, oneMappingYaml("[Control]", "'q'"))) == U'Q');
+    }
+
+    SECTION("an uppercase letter is unchanged")
+    {
+        CHECK(soleCharMapping(loadFromYaml(dir, oneMappingYaml("[Control]", "'Q'"))) == U'Q');
+    }
+
+    SECTION("a non-ASCII letter is NOT folded")
+    {
+        // Deliberate: no input route can deliver a non-ASCII codepoint in two different cases, so
+        // folding above 0x7F would only merge bindings that are distinct today. This is the guard
+        // against someone swapping in unicode::simple_uppercase.
+        CHECK(soleCharMapping(loadFromYaml(dir, oneMappingYaml("[Control]", "'ä'"))) == U'ä');
+    }
+
+    SECTION("punctuation is unchanged")
+    {
+        CHECK(soleCharMapping(loadFromYaml(dir, oneMappingYaml("[Control]", "','"))) == U',');
+    }
+}
+
+TEST_CASE("Config: case-differing rows under the same chord merge", "[config][input-mapping]")
+{
+    auto dir = QTemporaryDir {};
+    REQUIRE(dir.isValid());
+
+    // A consequence of folding, pinned deliberately rather than discovered later: the two rows now
+    // describe the same chord, so appendOrCreateBinding collapses them into one binding that runs
+    // both actions in order. Previously the lowercase row was simply a silent no-op.
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control], key: 'a', action: ScreenshotVT }
+    - { mods: [Control], key: 'A', action: CopySelection }
+)"sv);
+
+    auto const& charMappings = config.inputMappings.value().charMappings;
+    REQUIRE(charMappings.size() == 1);
+    CHECK(charMappings.front().input == U'A');
+    REQUIRE(charMappings.front().binding.size() == 2);
+    CHECK(std::holds_alternative<contour::actions::ScreenshotVT>(charMappings.front().binding.at(0)));
+    CHECK(std::holds_alternative<contour::actions::CopySelection>(charMappings.front().binding.at(1)));
+}
+
+TEST_CASE("Config: every built-in char binding is stored folded", "[config][input-mapping]")
+{
+    // defaultInputMappings is a static C++ aggregate that never passes through parseKeyOrChar, so
+    // its folded-ness is an invariant held only by inspection. A lowercase row added tomorrow would
+    // produce a default binding that can never fire; fail here instead of silently at runtime.
+    //
+    // A runtime CHECK rather than a static_assert: defaultInputMappings holds std::vector and is
+    // therefore not usable in a constant expression.
+    for (auto const& mapping: contour::config::defaultInputMappings.charMappings)
+    {
+        CAPTURE(static_cast<uint32_t>(mapping.input));
+        CHECK(mapping.input == contour::config::foldedBindingCodepoint(mapping.input));
+    }
+}
+
 namespace
 {
 

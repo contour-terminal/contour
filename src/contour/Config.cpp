@@ -2521,7 +2521,11 @@ std::optional<std::variant<vtbackend::Key, char32_t>> YAMLConfigReader::parseKey
 
     auto const text = QString::fromUtf8(name.c_str()).toUcs4();
     if (text.size() == 1)
-        return static_cast<char32_t>(text[0]);
+        // Folded, because the case a letter arrives in is decided by the input route rather than by
+        // the user; the lookup in TerminalSession::sendCharEvent folds the delivered codepoint to
+        // match. Both sides must agree -- folding only here would break `key: 'a'` bindings that
+        // work today. @see config::foldedBindingCodepoint
+        return foldedBindingCodepoint(static_cast<char32_t>(text[0]));
 
     auto constexpr NamedChars =
         std::array { std::pair { "LESS"sv, '<' },          std::pair { "GREATER"sv, '>' },

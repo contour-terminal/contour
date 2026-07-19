@@ -1798,3 +1798,41 @@ input_mapping:
         U'Q', 0, Modifiers { vtbackend::Modifier::Control }, KeyboardEventType::Press, now);
     CHECK_FALSE(mockPtyOf(*session).stdinBuffer().empty());
 }
+
+TEST_CASE("TerminalSession: a lowercase `key:` binding fires", "[contour][session][input]")
+{
+    // A single-character binding is stored folded, and the delivered codepoint is folded to match, so
+    // the case the user happened to write is irrelevant. Before that, `key: 'p'` parsed cleanly and
+    // produced a binding that could never fire — the same silent symptom as issue #1987.
+    //
+    // The `input_mapping:` section replaces the built-in defaults, so this config holds exactly one
+    // binding and the test cannot pass by accident through the default Ctrl+Shift+P.
+    TestApp testApp;
+    testApp.app().config().inputMappings = contour::test::loadConfigFromYaml(R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control, Shift], key: 'p', action: OpenCommandPalette }
+)")
+                                               .inputMappings;
+
+    auto session = makeDisplaylessSession(testApp.app());
+    auto const now = std::chrono::steady_clock::now();
+    auto const ctrlShift = Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift };
+
+    // Both cases must fire: which one arrives depends on the route the Qt event took, not the user.
+    mockPtyOf(*session).stdinBuffer().clear();
+    session->sendCharEvent(U'P', 0, ctrlShift, KeyboardEventType::Press, now);
+    CHECK(mockPtyOf(*session).stdinBuffer().empty());
+
+    mockPtyOf(*session).stdinBuffer().clear();
+    session->sendCharEvent(U'p', 0, ctrlShift, KeyboardEventType::Press, now);
+    CHECK(mockPtyOf(*session).stdinBuffer().empty());
+
+    // An unbound letter still reaches the shell — the fold must not swallow everything.
+    mockPtyOf(*session).stdinBuffer().clear();
+    session->sendCharEvent(U'y', 0, ctrlShift, KeyboardEventType::Press, now);
+    CHECK_FALSE(mockPtyOf(*session).stdinBuffer().empty());
+}
