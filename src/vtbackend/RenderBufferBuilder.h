@@ -48,6 +48,9 @@ class RenderBufferBuilder
     void startLine(LineOffset line, LineFlags flags) noexcept;
     void endLine() noexcept;
 
+    /// Permutes the cells of the line just finished into visual order.
+    void reorderLineCells();
+
     /// Renders a trivial line.
     ///
     /// This call is guaranteed to be invoked sequencially from page top
@@ -156,6 +159,9 @@ class RenderBufferBuilder
 
     // Current line flags being rendered.
     LineFlags _currentLineFlags = LineFlag::None;
+
+    /// Index into the output of the first cell of the line being built.
+    size_t _lineStartCellIndex = 0;
 };
 
 } // namespace vtbackend

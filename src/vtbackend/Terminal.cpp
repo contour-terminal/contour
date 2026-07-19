@@ -562,6 +562,69 @@ void Terminal::fillRenderBuffer(RenderBuffer& output, bool includeSelection)
     fillRenderBufferInternal(output, includeSelection);
 }
 
+BidiLineLayout const& Terminal::bidiLayoutAt(LineOffset line) const noexcept
+{
+    static auto const identityLayout = BidiLineLayout {};
+    if (!bidiReorderingEnabled())
+        return identityLayout;
+    auto const index = unbox<int>(line) - unbox<int>(_bidiPageLayoutTop);
+    if (index < 0)
+        return identityLayout;
+    return _bidiPageLayout.lineAt(static_cast<size_t>(index));
+}
+
+void Terminal::updateBidiPageLayout(ScrollOffset scrollOffset, LineCount extraLines)
+{
+    _bidiPageLayout.lines.clear();
+
+    // BDSM reset means the application has already reordered; drawing it again would undo its work.
+    if (!bidiReorderingEnabled())
+        return;
+
+    auto const& grid = pageAt(_displayedPage).grid();
+
+    // The range Grid::render walks, in grid line offsets.
+    auto const availableAbove = unbox<int>(grid.historyLineCount()) - unbox<int>(scrollOffset);
+    auto const extraOffset = std::min(unbox<int>(extraLines), std::max(0, availableAbove));
+    auto const firstVisible = LineOffset(-unbox<int>(scrollOffset) - extraOffset);
+    auto const lastVisible = firstVisible + unbox<int>(pageSize().lines) + extraOffset - 1;
+
+    // Paragraph context reaches outside the viewport in both directions: back to the line that began
+    // the paragraph, and forward through its continuations. Laying out only what is visible would
+    // make the reordering depend on where the viewport happens to sit.
+    auto const bottomMost = boxed_cast<LineOffset>(grid.pageSize().lines) - LineOffset(1);
+    auto const first = grid.logicalLineHead(firstVisible);
+    auto last = lastVisible;
+    while (last < bottomMost && grid.isLineWrapped(last + 1))
+        ++last;
+
+    auto inputs = std::vector<BidiLineInput> {};
+    auto texts = std::vector<std::u32string> {};
+    auto const lineCount = static_cast<size_t>(unbox<int>(last) - unbox<int>(first) + 1);
+    texts.reserve(lineCount);
+    inputs.reserve(lineCount);
+
+    for (auto line = first; line <= last; ++line)
+    {
+        texts.emplace_back();
+        grid.lineAt(line).codepointsPerColumn(texts.back());
+    }
+
+    for (auto&& [index, text]: crispy::views::enumerate(texts))
+    {
+        auto const line = first + LineOffset::cast_from(index);
+        // The first line of the range starts a paragraph here whatever its flag says: whatever it
+        // continued is above the range we expanded to, which cannot happen after logicalLineHead().
+        inputs.push_back(BidiLineInput {
+            .text = text,
+            .continuesParagraph = index != 0 && grid.isLineWrapped(line),
+        });
+    }
+
+    _bidiPageLayout = computeBidiPageLayout(inputs, bidiParagraphDirection());
+    _bidiPageLayoutTop = first;
+}
+
 void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelection)
 {
     verifyState();
@@ -604,6 +667,10 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     // When DECPCCM is reset and cursor/display pages differ, hide the cursor from rendering.
     auto const effectiveCursorPosition =
         (_cursorPage != _displayedPage) ? std::optional<CellLocation> {} : theCursorPosition;
+
+    // Must run before the render pass: RenderBufferBuilder reads the layout while building cells,
+    // and paragraph context reaches outside the viewport, so it cannot be derived line by line.
+    updateBidiPageLayout(_viewport.scrollOffset(), smoothScrollExtra);
 
     auto& displayedScreen = pageAt(_displayedPage);
 

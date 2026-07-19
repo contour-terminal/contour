@@ -3,6 +3,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
+#include <format>
 #include <string_view>
 #include <vector>
 
@@ -193,6 +195,7 @@ TEST_CASE("Bidi.out_of_range_queries_are_the_identity", "[bidi]")
 // ---- The control sequences ----
 
 #include <vtbackend/MockTerm.h>
+#include <vtbackend/RenderBuffer.h>
 
 #include <crispy/escape.h>
 
@@ -311,3 +314,75 @@ TEST_CASE("Bidi.private modes toggle and report", "[bidi]")
         CHECK(crispy::escape(mock.terminal.peekInput()) == crispy::escape("\033[?1243;1$y")); // set
     }
 }
+
+// ---- End to end: the render buffer really comes out in visual order ----
+
+namespace
+{
+/// The line's codepoints as the render buffer holds them, left to right.
+[[nodiscard]] std::u32string renderedLine(RenderBuffer const& buffer, int line)
+{
+    // A uniform-SGR line takes the trivial fast path and appears as a RenderLine ...
+    for (auto const& renderLine: buffer.lines)
+        if (renderLine.lineOffset.value == line)
+            return renderLine.text;
+
+    // ... otherwise as individual cells.
+    auto result = std::u32string {};
+    for (auto const& cell: buffer.cells)
+        if (cell.position.line.value == line)
+            result += cell.codepoints.empty() ? U' ' : cell.codepoints[0];
+    return result;
+}
+
+[[nodiscard]] std::u32string trimmed(std::u32string text)
+{
+    while (!text.empty() && text.back() == U' ')
+        text.pop_back();
+    return text;
+}
+} // namespace
+
+TEST_CASE("Bidi.render buffer is reordered", "[bidi]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(12) } };
+
+    mock.writeToScreen("\u05E9\u05DC\u05D5\u05DD"); // shalom, logical order
+    auto constexpr ClockBase = std::chrono::steady_clock::time_point {};
+    mock.terminal.tick(ClockBase);
+    mock.terminal.refreshRenderBuffer();
+    auto const buffer = mock.terminal.renderBuffer();
+
+    // Stored logically, drawn reversed.
+    // Reversed: final-mem, vav, lamed, shin.
+    CHECK(trimmed(renderedLine(buffer.get(), 0)) == U"\u05DD\u05D5\u05DC\u05E9");
+}
+
+TEST_CASE("Bidi.BDSM reset leaves the text alone", "[bidi]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(12) } };
+
+    mock.writeToScreen("\033[8l"); // explicit: the application already reordered
+    mock.writeToScreen("\u05E9\u05DC\u05D5\u05DD");
+    auto constexpr ClockBase = std::chrono::steady_clock::time_point {};
+    mock.terminal.tick(ClockBase);
+    mock.terminal.refreshRenderBuffer();
+    auto const buffer = mock.terminal.renderBuffer();
+
+    // Drawn exactly as received -- reordering it here would undo the application's own work.
+    CHECK(trimmed(renderedLine(buffer.get(), 0)) == U"\u05E9\u05DC\u05D5\u05DD");
+}
+
+TEST_CASE("Bidi.pure latin is untouched", "[bidi]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(12) } };
+
+    mock.writeToScreen("hello");
+    auto constexpr ClockBase = std::chrono::steady_clock::time_point {};
+    mock.terminal.tick(ClockBase);
+    mock.terminal.refreshRenderBuffer();
+    auto const buffer = mock.terminal.renderBuffer();
+
+    CHECK(trimmed(renderedLine(buffer.get(), 0)) == U"hello");
+}
+

@@ -357,6 +357,23 @@ RenderLine RenderBufferBuilder::createRenderLine(TrivialLineBuffer const& lineBu
     renderLine.fillAttributes = createRenderAttributes(gridPosition, lineBuffer.fillAttributes);
     renderLine.flags = _currentLineFlags;
 
+    // A trivial line is uniform in SGR, so permuting its codepoints leaves it a single shaping
+    // group -- the reorder is a string permutation and nothing else has to change.
+    auto const& layout = _terminal->bidiLayoutAt(gridPosition.line);
+    renderLine.paragraphDirection = layout.paragraphDirection;
+    if (!layout.identity)
+    {
+        auto reordered = std::u32string(renderLine.text.size(), U' ');
+        for (size_t visual = 0; visual < renderLine.text.size(); ++visual)
+        {
+            auto const logical = unbox<size_t>(layout.logicalColumnAt(ColumnOffset::cast_from(visual)));
+            if (logical < renderLine.text.size())
+                reordered[visual] = renderLine.text[logical];
+        }
+        renderLine.text = std::move(reordered);
+        renderLine.visuallyReordered = true;
+    }
+
     return renderLine;
 }
 
@@ -469,6 +486,13 @@ void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
     }
     // }}}
 
+    // This fallback path emits cells directly and is never bracketed by startLine()/endLine(), so it
+    // has to run the visual reorder itself. It is reached whenever the line carries the cursor, a
+    // selection or a highlight -- which is to say, on the line the user is most likely looking at.
+    _lineNr = lineOffset;
+    _lineStartCellIndex = frontIndex;
+    reorderLineCells();
+
     auto const backIndex = _output->cells.size() - 1;
 
     _output->cells[frontIndex].groupStart = true;
@@ -558,6 +582,7 @@ void RenderBufferBuilder::startLine(LineOffset line, LineFlags flags) noexcept
     _currentLineFlags = flags;
     _prevWidth = 0;
     _prevHasCursor = false;
+    _lineStartCellIndex = _output->cells.size();
 
     _useCursorlineColoring = isCursorLine(line);
 }
@@ -574,10 +599,56 @@ bool RenderBufferBuilder::isCursorLine(LineOffset line) const noexcept
 
 void RenderBufferBuilder::endLine() noexcept
 {
+    reorderLineCells();
+
     if (!_output->cells.empty())
     {
         _output->cells.back().groupEnd = true;
     }
+}
+
+void RenderBufferBuilder::reorderLineCells()
+{
+    auto const gridLine =
+        _terminal->viewport().translateScreenToGridCoordinate(CellLocation { .line = _lineNr }).line;
+    auto const& layout = _terminal->bidiLayoutAt(gridLine);
+
+    auto const first = _lineStartCellIndex;
+    auto const count = _output->cells.size() - first;
+    if (count == 0)
+        return;
+
+    // The level rides along even on the fast path, because a renderer uses it to decide mirroring
+    // and shaping direction, not only ordering.
+    for (size_t i = 0; i < count; ++i)
+        _output->cells[first + i].bidiLevel = layout.levelAt(ColumnOffset::cast_from(i));
+
+    if (layout.identity)
+        return;
+
+    auto reordered = std::vector<RenderCell> {};
+    reordered.reserve(count);
+    for (size_t visual = 0; visual < count; ++visual)
+    {
+        auto const logical = unbox<size_t>(layout.logicalColumnAt(ColumnOffset::cast_from(visual)));
+        if (logical >= count)
+            continue;
+        reordered.push_back(_output->cells[first + logical]);
+        // The cell keeps its own attributes and codepoints but is drawn where the algorithm puts it.
+        reordered.back().position.column = ColumnOffset::cast_from(visual);
+    }
+
+    // A shaping group may not straddle a change of direction, so the boundaries are re-derived from
+    // the levels rather than carried over from logical order.
+    for (size_t i = 0; i < reordered.size(); ++i)
+    {
+        auto const levelChanged = i == 0 || reordered[i].bidiLevel != reordered[i - 1].bidiLevel;
+        reordered[i].groupStart = levelChanged;
+        if (i > 0 && levelChanged)
+            reordered[i - 1].groupEnd = true;
+    }
+
+    std::copy(reordered.begin(), reordered.end(), _output->cells.begin() + static_cast<ptrdiff_t>(first));
 }
 
 ColumnCount RenderBufferBuilder::renderUtf8Text(CellLocation screenPosition,

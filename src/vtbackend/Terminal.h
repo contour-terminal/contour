@@ -23,6 +23,7 @@
 #include <vtbackend/ViInputHandler.h>
 #include <vtbackend/Viewport.h>
 #include <vtbackend/logging.h>
+#include <vtbackend/Bidi.h>
 #include <vtbackend/primitives.h>
 
 #include <libunicode/bidi.h>
@@ -662,6 +663,12 @@ class Terminal
     // {{{ Modes handling
     bool isModeEnabled(AnsiMode m) const noexcept { return _modes.enabled(m); }
     bool isModeEnabled(DECMode m) const noexcept { return _modes.enabled(m); }
+
+    /// Visual layout of the line at grid offset @p line, for the frame being rendered.
+    ///
+    /// Returns a neutral left-to-right layout when the line is outside the range laid out for this
+    /// frame, or when bidirectional reordering is switched off (BDSM reset).
+    [[nodiscard]] BidiLineLayout const& bidiLayoutAt(LineOffset line) const noexcept;
 
     // {{{ Bidirectional text
     /// Selects the character path, per SCP (`CSI Ps SP k`).
@@ -1926,6 +1933,9 @@ class Terminal
 
     void mainLoop();
     void fillRenderBufferInternal(RenderBuffer& output, bool includeSelection);
+
+    /// Recomputes _bidiPageLayout for the grid lines about to be rendered.
+    void updateBidiPageLayout(ScrollOffset scrollOffset, LineCount extraLines);
     LineCount fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, LineOffset base);
     void updateIndicatorStatusLine();
     void updateCursorVisibilityState() const noexcept;
@@ -2285,6 +2295,12 @@ class Terminal
     std::unordered_map<std::string, int> _drcsDesignatorMap; ///< Dscs designator → font number
 
     Modes _modes;
+
+    /// Visual layout of the lines laid out for the current frame, and the grid offset of its first
+    /// entry. Recomputed per frame in fillRenderBufferInternal(); deliberately not cached across
+    /// frames, since every grid mutation, reflow and scroll would have to invalidate it.
+    BidiPageLayout _bidiPageLayout {};
+    LineOffset _bidiPageLayoutTop {};
 
     /// Character path selected by SCP; nullopt means the terminal's own default.
     std::optional<unicode::Bidi_Direction> _characterPath = std::nullopt;

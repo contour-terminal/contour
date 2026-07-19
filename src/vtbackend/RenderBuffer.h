@@ -9,6 +9,8 @@
 #include <vtbackend/TextScale.h>
 #include <vtbackend/primitives.h>
 
+#include <libunicode/bidi.h>
+
 #include <vtrasterizer/RenderTarget.h>
 
 #include <gsl/pointers>
@@ -73,6 +75,12 @@ struct RenderCell
     /// sizing protocol, `OSC 66`). Ordinary text leaves it at its default.
     GlyphSizing sizing {};
 
+    /// Resolved bidirectional embedding level (UAX#9). Even is left-to-right, odd right-to-left.
+    ///
+    /// A shaping group may never straddle a change in this, so it takes part in the group-boundary
+    /// decision exactly as a colour change does.
+    uint8_t bidiLevel = 0;
+
     bool groupStart = false;
     bool groupEnd = false;
 };
@@ -89,6 +97,13 @@ struct RenderLine
     RenderAttributes textAttributes;
     RenderAttributes fillAttributes;
     LineFlags flags = LineFlag::None;
+
+    /// Base direction of the paragraph this line belongs to.
+    unicode::Bidi_Direction paragraphDirection = unicode::Bidi_Direction::Left_To_Right;
+
+    /// Whether @ref text has been permuted into visual order, so that a renderer must not reorder
+    /// it again and a caller mapping back to the grid must go through the inverse permutation.
+    bool visuallyReordered = false;
 };
 
 struct RenderCursor

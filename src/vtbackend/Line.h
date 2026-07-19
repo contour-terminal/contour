@@ -363,6 +363,33 @@ class Line
         return tb;
     }
 
+    /// The line's codepoints with exactly one element per column, for bidirectional layout.
+    ///
+    /// Unlike toUtf8(), which skips the continuation columns of a wide glyph, this keeps index and
+    /// column in step -- element @c i is column @c i -- which is what a column permutation needs.
+    ///
+    /// The continuation columns of a wide glyph repeat that glyph's codepoint rather than holding a
+    /// blank, so the whole glyph resolves to one direction instead of being split by a space in the
+    /// middle of it. Empty cells become spaces.
+    ///
+    /// @param out receives the codepoints; resized to the line's width.
+    void codepointsPerColumn(std::u32string& out) const
+    {
+        auto const cols = unbox<size_t>(_columns);
+        out.assign(cols, U' ');
+        if (isBlank())
+            return;
+
+        for (size_t i = 0; i < cols;)
+        {
+            auto const codepoint = (_storage.clusterSize[i] == 0) ? U' ' : _storage.codepoints[i];
+            auto const width = std::max(uint8_t { 1 }, _storage.widths[i]);
+            for (size_t k = 0; k < width && i + k < cols; ++k)
+                out[i + k] = codepoint;
+            i += width;
+        }
+    }
+
     /// Access the underlying SoA storage.
     [[nodiscard]] LineSoA& storage() noexcept { return _storage; }
     [[nodiscard]] LineSoA const& storage() const noexcept { return _storage; }
