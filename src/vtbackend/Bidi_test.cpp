@@ -489,3 +489,24 @@ TEST_CASE("Bidi.reflow carries the bidi hint", "[bidi]")
     INFO("rendered: " << std::string(line.begin(), line.end()).size() << " codepoints");
     CHECK(line == U"abcdםולש");
 }
+
+// The plan wanted TextClusterGrouper's space flush relaxed, on the grounds that word-at-a-time
+// grouping cannot express a run of right-to-left words reordering relative to one another. That
+// reasoning assumed the grouper does the reordering. It does not: RenderBufferBuilder permutes the
+// cells before the grouper ever sees them, so by then the words are already in visual order and a
+// space may go on ending a shaping group. This pins that.
+TEST_CASE("Bidi.multiple RTL words reorder relative to each other", "[bidi]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(16) } };
+
+    // shalom olam -- two words. Logical: shin lamed vav final-mem, space, ayin vav lamed final-mem.
+    mock.writeToScreen("שלום עולם");
+
+    auto constexpr ClockBase = std::chrono::steady_clock::time_point {};
+    mock.terminal.tick(ClockBase);
+    mock.terminal.refreshRenderBuffer();
+
+    // The whole line reverses, so the SECOND word is drawn first and each word is itself reversed.
+    CHECK(trimmed(renderedLine(mock.terminal.renderBuffer().get(), 0))
+          == U"םלוע םולש");
+}

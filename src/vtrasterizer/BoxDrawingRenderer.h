@@ -69,7 +69,8 @@ class BoxDrawingRenderer: public Renderable
                               vtbackend::ColumnOffset column,
                               char32_t codepoint,
                               vtbackend::LineFlags flags,
-                              vtbackend::RGBColor color);
+                              vtbackend::RGBColor color,
+                              bool mirrored = false);
 
     void inspect(std::ostream& output) const override;
 
@@ -80,18 +81,20 @@ class BoxDrawingRenderer: public Renderable
   private:
     AtlasTileAttributes const* getOrCreateCachedTileAttributes(char32_t codepoint,
                                                                vtbackend::LineFlags flags,
-                                                               int subIndex = 0);
+                                                               int subIndex = 0,
+                                                               bool mirrored = false);
 
     using Renderable::createTileData;
     [[nodiscard]] std::optional<TextureAtlas::TileCreateData> createTileData(char32_t codepoint,
                                                                              vtbackend::LineFlags flags,
                                                                              atlas::TileLocation tileLocation,
-                                                                             int subIndex);
+                                                                             int subIndex, bool mirrored);
 
     [[nodiscard]] static std::optional<atlas::Buffer> buildBoxElements(char32_t codepoint,
                                                                        ImageSize size,
                                                                        int lineThickness,
-                                                                       size_t supersampling = 1);
+                                                                       size_t supersampling = 1,
+                                                                       bool mirrored = false);
 
     [[nodiscard]] std::optional<atlas::Buffer> buildElements(char32_t codepoint,
                                                              ImageSize size,

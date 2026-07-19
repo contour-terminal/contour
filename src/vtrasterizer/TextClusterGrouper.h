@@ -37,7 +37,8 @@ class TextClusterGrouper
         virtual bool renderBoxDrawingCell(vtbackend::CellLocation position,
                                           char32_t codepoint,
                                           vtbackend::RGBColor foregroundColor,
-                                          vtbackend::LineFlags flags) = 0;
+                                          vtbackend::LineFlags flags,
+                                          uint8_t bidiLevel) = 0;
     };
 
     explicit TextClusterGrouper(Events& events);

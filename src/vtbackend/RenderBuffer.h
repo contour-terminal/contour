@@ -130,6 +130,12 @@ struct RenderBuffer
     std::optional<RenderCursor> cursor {};
     uint64_t frameID {};
 
+    /// Whether box-drawing glyphs are mirrored inside a right-to-left run (`CSI ? 2500`).
+    ///
+    /// Terminal-wide state rather than per cell, so it rides on the buffer instead of being asked of
+    /// the terminal from inside the renderer.
+    bool mirrorBoxDrawingInRtl = false;
+
     void clear()
     {
         cells.clear();

@@ -82,7 +82,7 @@ void TextClusterGrouper::renderCell(vtbackend::CellLocation position,
     if (isBoxDrawingCharacter)
     {
         auto const success =
-            _events.renderBoxDrawingCell(position, graphemeCluster[0], foregroundColor, flags);
+            _events.renderBoxDrawingCell(position, graphemeCluster[0], foregroundColor, flags, bidiLevel);
         if (success)
         {
             flushTextClusterGroup();

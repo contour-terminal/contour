@@ -263,6 +263,28 @@ namespace detail
 
             Line circleval = NoLine;
 
+            /// This box reflected about its vertical axis.
+            ///
+            /// What `CSI ? 2500` asks for inside a right-to-left run: a box's corners must keep
+            /// pointing into the box, so the whole drawing flips with the text. Derived from the
+            /// box's own structure rather than a hand-written codepoint table -- left and right
+            /// swap, the two arc pairs swap, and a diagonal reverses. Everything else is symmetric
+            /// about that axis and is left alone.
+            [[nodiscard]] constexpr Box mirroredHorizontally() const noexcept
+            {
+                Box b(*this);
+                b.leftval = rightval;
+                b.rightval = leftval;
+                b.arcURval = arcULval;
+                b.arcULval = arcURval;
+                b.arcBRval = arcBLval;
+                b.arcBLval = arcBRval;
+                b.diagonalval = diagonalval == Forward    ? Backward
+                                : diagonalval == Backward ? Forward
+                                                          : diagonalval; // NoDiagonal and Crossing
+                return b;
+            }
+
             [[nodiscard]] constexpr Box up(Line value = Light)
             {
                 Box b(*this);
@@ -1806,12 +1828,14 @@ bool BoxDrawingRenderer::render(vtbackend::LineOffset line,
                                 vtbackend::ColumnOffset column,
                                 char32_t codepoint,
                                 vtbackend::LineFlags flags,
-                                vtbackend::RGBColor color)
+                                vtbackend::RGBColor color,
+                                bool mirrored)
 {
     auto const width = flags & vtbackend::LineFlag::DoubleWidth ? 2 : 1;
     for (int i = 0; i < width; ++i)
     {
-        Renderable::AtlasTileAttributes const* data = getOrCreateCachedTileAttributes(codepoint, flags, i);
+        Renderable::AtlasTileAttributes const* data =
+            getOrCreateCachedTileAttributes(codepoint, flags, i, mirrored);
         if (!data)
             return false;
 
@@ -1835,7 +1859,8 @@ bool BoxDrawingRenderer::render(vtbackend::LineOffset line,
 auto BoxDrawingRenderer::createTileData(char32_t codepoint,
                                         vtbackend::LineFlags flags,
                                         atlas::TileLocation tileLocation,
-                                        int subIndex) -> optional<TextureAtlas::TileCreateData>
+                                        int subIndex,
+                                        bool mirrored) -> optional<TextureAtlas::TileCreateData>
 {
     // The texture atlas expects tiles of fixed size (cellSize).
     auto const pixelWidth = _gridMetrics.cellSize.width;
@@ -1899,7 +1924,8 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint,
         auto tmp = buildBoxElements(codepoint, //
                                     effectiveSize,
                                     lineThickness,
-                                    supersamplingFactor);
+                                    supersamplingFactor,
+                                    mirrored);
         if (!tmp)
             return nullopt;
         pixels = *tmp;
@@ -1958,7 +1984,7 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint,
 }
 
 Renderable::AtlasTileAttributes const* BoxDrawingRenderer::getOrCreateCachedTileAttributes(
-    char32_t codepoint, vtbackend::LineFlags flags, int subIndex)
+    char32_t codepoint, vtbackend::LineFlags flags, int subIndex, bool mirrored)
 {
     auto const flagsMask = vtbackend::LineFlags { vtbackend::LineFlag::DoubleWidth,
                                                   vtbackend::LineFlag::DoubleHeightTop,
@@ -1969,13 +1995,16 @@ Renderable::AtlasTileAttributes const* BoxDrawingRenderer::getOrCreateCachedTile
     // Flags: 3 bits (masked above) - effectively 8 bits storage
     // subIndex: 1 bit (0 or 1)
     // Layout: [Codepoint 21][Flags 8][SubIndex 1] -> 30 bits used.
+    // Bit 30 distinguishes the mirrored tile: it is a different bitmap, so it needs its own entry
+    // or the first orientation drawn would be served to both. The layout above uses 30 bits.
     auto const cacheKey = (static_cast<uint32_t>(codepoint) << 9)
-                          | (static_cast<uint32_t>(cacheKeyFlags) << 1) | static_cast<uint32_t>(subIndex);
+                          | (static_cast<uint32_t>(cacheKeyFlags) << 1) | static_cast<uint32_t>(subIndex)
+                          | (mirrored ? (uint32_t { 1 } << 30) : uint32_t { 0 });
     return textureAtlas().get_or_try_emplace(
         crispy::strong_hash { 31, 13, 8, cacheKey },
-        [this, codepoint, flags, subIndex](
+        [this, codepoint, flags, subIndex, mirrored](
             atlas::TileLocation tileLocation) -> optional<TextureAtlas::TileCreateData> {
-            return createTileData(codepoint, flags, tileLocation, subIndex);
+            return createTileData(codepoint, flags, tileLocation, subIndex, mirrored);
         });
 }
 
@@ -2929,11 +2958,14 @@ static auto buildBox(detail::Box box,
 optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
                                                              ImageSize size,
                                                              int lineThickness,
-                                                             size_t supersampling)
+                                                             size_t supersampling,
+                                                             bool mirrored)
 {
     auto box = detail::getBoxDrawing(codepoint);
     if (not box)
         return std::nullopt;
+    if (mirrored)
+        box = box->mirroredHorizontally();
     auto lArcStyle = detail::isGitBranchDrawing(codepoint) ? DefaultGitArcStyle : DefaultArcStyle;
     auto image = buildBox(*box, size, lineThickness, supersampling, lArcStyle == ArcStyle::Elliptic);
     boxDrawingLog()("BoxDrawing: build U+{:04X} ({})", static_cast<uint32_t>(codepoint), size);

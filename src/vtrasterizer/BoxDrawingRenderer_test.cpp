@@ -21,9 +21,11 @@ class BoxDrawingRendererTest
     static std::optional<atlas::Buffer> buildBoxElements(char32_t codepoint,
                                                          ImageSize size,
                                                          int lineThickness,
-                                                         size_t supersampling = 1)
+                                                         size_t supersampling = 1,
+                                                         bool mirrored = false)
     {
-        return BoxDrawingRenderer::buildBoxElements(codepoint, size, lineThickness, supersampling);
+        return BoxDrawingRenderer::buildBoxElements(
+            codepoint, size, lineThickness, supersampling, mirrored);
     }
 
     /// Builds elements via the non-static buildElements() path using a minimal GridMetrics.
@@ -595,5 +597,66 @@ TEST_CASE("BoxDrawingRenderer.shade_characters", "[renderer]")
                                        "########",
                                        ".#.#.#.#",
                                    });
+    }
+}
+
+// CSI ? 2500: inside a right-to-left run a box's corners must keep pointing into the box, so the
+// drawing reflects about its vertical axis. Derived from the box's own structure -- left and right
+// swap, the arc pairs swap, a diagonal reverses -- rather than from a hand-written codepoint table,
+// which is why these hold for every glyph rather than only the ones someone remembered.
+TEST_CASE("BoxDrawing.mirrored corners become their opposite", "[boxdrawing]")
+{
+    auto constexpr Size = ImageSize { Width(16), Height(16) };
+    auto constexpr Thickness = 1;
+
+    // U+250C down-and-right mirrors to U+2510 down-and-left, and vice versa.
+    auto const downRightMirrored =
+        vtrasterizer::BoxDrawingRendererTest::buildBoxElements(0x250C, Size, Thickness, 1, true);
+    auto const downLeft =
+        vtrasterizer::BoxDrawingRendererTest::buildBoxElements(0x2510, Size, Thickness, 1, false);
+    REQUIRE(downRightMirrored.has_value());
+    REQUIRE(downLeft.has_value());
+    CHECK(*downRightMirrored == *downLeft);
+
+    // U+2514 up-and-right mirrors to U+2518 up-and-left.
+    auto const upRightMirrored =
+        vtrasterizer::BoxDrawingRendererTest::buildBoxElements(0x2514, Size, Thickness, 1, true);
+    auto const upLeft =
+        vtrasterizer::BoxDrawingRendererTest::buildBoxElements(0x2518, Size, Thickness, 1, false);
+    REQUIRE(upRightMirrored.has_value());
+    REQUIRE(upLeft.has_value());
+    CHECK(*upRightMirrored == *upLeft);
+
+    // U+251C vertical-and-right mirrors to U+2524 vertical-and-left.
+    auto const teeRightMirrored =
+        vtrasterizer::BoxDrawingRendererTest::buildBoxElements(0x251C, Size, Thickness, 1, true);
+    auto const teeLeft =
+        vtrasterizer::BoxDrawingRendererTest::buildBoxElements(0x2524, Size, Thickness, 1, false);
+    REQUIRE(teeRightMirrored.has_value());
+    REQUIRE(teeLeft.has_value());
+    CHECK(*teeRightMirrored == *teeLeft);
+}
+
+TEST_CASE("BoxDrawing.glyphs symmetric about the vertical axis are unchanged", "[boxdrawing]")
+{
+    auto constexpr Size = ImageSize { Width(16), Height(16) };
+    auto constexpr Thickness = 1;
+
+    // Horizontal, vertical, cross, and the two tees that point up and down: all already symmetric,
+    // so mirroring them must be a no-op rather than a subtly different bitmap.
+    for (auto const codepoint: { char32_t { 0x2500 },   // horizontal
+                                 char32_t { 0x2502 },   // vertical
+                                 char32_t { 0x253C },   // cross
+                                 char32_t { 0x252C },   // down and horizontal
+                                 char32_t { 0x2534 } }) // up and horizontal
+    {
+        auto const plain =
+            vtrasterizer::BoxDrawingRendererTest::buildBoxElements(codepoint, Size, Thickness, 1, false);
+        auto const mirrored =
+            vtrasterizer::BoxDrawingRendererTest::buildBoxElements(codepoint, Size, Thickness, 1, true);
+        INFO("U+" << std::hex << static_cast<uint32_t>(codepoint));
+        REQUIRE(plain.has_value());
+        REQUIRE(mirrored.has_value());
+        CHECK(*plain == *mirrored);
     }
 }

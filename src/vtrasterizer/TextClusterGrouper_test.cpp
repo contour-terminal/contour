@@ -184,8 +184,10 @@ struct EventRecorder final: public TextClusterGrouper::Events
     bool renderBoxDrawingCell(vtbackend::CellLocation position,
                               char32_t codepoint,
                               vtbackend::RGBColor foregroundColor,
-                              vtbackend::LineFlags flags) override
+                              vtbackend::LineFlags flags,
+                              uint8_t bidiLevel) override
     {
+        (void) bidiLevel;
         events.emplace_back(BoxDrawingCell {
             .position = position,
             .codepoint = codepoint,

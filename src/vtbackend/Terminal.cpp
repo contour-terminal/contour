@@ -686,6 +686,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     // Must run before the render pass: RenderBufferBuilder reads the layout while building cells,
     // and paragraph context reaches outside the viewport, so it cannot be derived line by line.
     updateBidiPageLayout(_viewport.scrollOffset(), smoothScrollExtra);
+    output.mirrorBoxDrawingInRtl = isModeEnabled(DECMode::BidiBoxMirroring);
 
     auto& displayedScreen = pageAt(_displayedPage);
 

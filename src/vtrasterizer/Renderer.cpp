@@ -627,6 +627,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         renderPass(primaryPressure, [&] {
             vtbackend::RenderBufferRef const renderBuffer = terminal.renderBuffer();
             cursorOpt = renderBuffer.get().cursor;
+            _textRenderer.setMirrorBoxDrawingInRtl(renderBuffer.get().mirrorBoxDrawingInRtl);
             renderCells(std::span(renderBuffer.get().cells));
             renderLines(std::span(renderBuffer.get().lines));
         });

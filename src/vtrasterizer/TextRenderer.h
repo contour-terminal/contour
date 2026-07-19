@@ -92,6 +92,8 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     /// Renders a given terminal's grid cell that has been
     /// transformed into a RenderCell.
     void renderCell(vtbackend::RenderCell const& cell);
+    /// Whether box-drawing glyphs mirror inside a right-to-left run (`CSI ? 2500`), for this frame.
+    void setMirrorBoxDrawingInRtl(bool enable) noexcept { _mirrorBoxDrawingInRtl = enable; }
 
     void renderLine(vtbackend::RenderLine const& renderLine);
 
@@ -112,7 +114,9 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     bool renderBoxDrawingCell(vtbackend::CellLocation position,
                               char32_t codepoint,
                               vtbackend::RGBColor foregroundColor,
-                              vtbackend::LineFlags flags) override;
+                              vtbackend::LineFlags flags,
+                              uint8_t bidiLevel) override;
+
 
   private:
     void initializeDirectMapping();
@@ -207,6 +211,10 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     TextClusterGrouper _textClusterGrouper;
     TextRendererEvents& _textRendererEvents;
     FontDescriptions& _fontDescriptions;
+
+    /// Whether box-drawing glyphs mirror inside a right-to-left run; set per frame from the
+    /// render buffer, which carries the terminal's `CSI ? 2500` state.
+    bool _mirrorBoxDrawingInRtl = false;
     FontKeys const& _fonts;
 
     // performance optimizations

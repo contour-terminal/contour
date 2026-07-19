@@ -528,12 +528,19 @@ void TextRenderer::renderRasterizedGlyph(crispy::point pen,
 bool TextRenderer::renderBoxDrawingCell(vtbackend::CellLocation position,
                                         char32_t codepoint,
                                         vtbackend::RGBColor foregroundColor,
-                                        vtbackend::LineFlags flags)
+                                        vtbackend::LineFlags flags,
+                                        uint8_t bidiLevel)
 {
-    if (_fontDescriptions.builtinBoxDrawing)
-        return _boxDrawingRenderer.render(position.line, position.column, codepoint, flags, foregroundColor);
+    if (!_fontDescriptions.builtinBoxDrawing)
+        return false;
 
-    return false;
+    // CSI ? 2500: inside a right-to-left run a box's corners must keep pointing into the box, so the
+    // drawing flips with the text. Unlike a bracket this is not a Unicode mirroring property -- box
+    // glyphs are not Bidi_Mirrored -- which is why it takes a mode of its own.
+    auto const mirrored = _mirrorBoxDrawingInRtl && (bidiLevel & 1) != 0;
+
+    return _boxDrawingRenderer.render(
+        position.line, position.column, codepoint, flags, foregroundColor, mirrored);
 }
 
 static crispy::point adjustPenForLineFlags(vtbackend::LineFlags lineFlags,

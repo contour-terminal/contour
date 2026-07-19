@@ -81,15 +81,25 @@ neither needs anything.
 Still open: the recommendation's `⎡`/`⎤` shape hint, and hiding the cursor while `wrapPending`
 rather than letting it jump mid-line.
 
-### 4. `TextClusterGrouper` space flush
-`appendCellTextToClusterGroup` is unchanged from master. The plan wants a space to stop being a hard
-group boundary so that a run of RTL words can reorder relative to one another; spaces should still
-end a *shaping* group without resetting the direction context. **Highest-risk item in the plan** —
-it is on the hot path for all text, LTR included.
+### 4. `TextClusterGrouper` space flush — NOT NEEDED, the plan was wrong here too
+Same root cause as the selection item: the plan assumed the grouper does the reordering. It does not.
+`RenderBufferBuilder` permutes the cells first, so by the time the grouper sees them the words are
+already in visual order and a space may go on ending a shaping group.
 
-### 5. Box-drawing mirroring (`CSI ? 2500`)
-Mode is stored and reported; nothing reads it. Needs a U+2500..U+257F mirror table, which is a
-judgement per glyph rather than a derivation. Defaults to reset, so default rendering is unaffected.
+Covered by `Bidi.multiple RTL words reorder relative to each other`. The hot path is untouched, which
+is the best outcome available for what the plan called its highest-risk change.
+
+### 5. Box-drawing mirroring (`CSI ? 2500`) — DONE
+And the earlier note that it "needs a judgement per glyph" was wrong. `detail::Box` already models a
+glyph structurally (up/right/down/left, arcs, diagonal), so the mirror is a reflection of that
+struct: left and right swap, the arc pairs swap, a diagonal reverses. No codepoint table, and it
+holds for every glyph rather than the ones someone remembered.
+
+Tests compare bitmaps rather than trusting the derivation: mirrored U+250C must equal U+2510 exactly,
+and glyphs already symmetric about the vertical axis must come back unchanged.
+
+The mode rides on `RenderBuffer` as per-frame terminal state, and the mirrored tile takes bit 30 of
+the box-drawing atlas cache key -- it is a different bitmap, so it needs its own entry.
 
 ### 6. Arabic presentation-form fallback
 Absent. Maps a run onto U+FE70..U+FEFF when the resolved font has no `arab` GSUB. No font on the
