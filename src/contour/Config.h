@@ -140,38 +140,45 @@ struct InputMappings
 
 struct Config;
 
-/// Enables a fallback row unconditionally. @see FallbackMouseMapping::enabled.
+/// Enables a fallback row unconditionally. @see FallbackMapping::enabled.
 [[nodiscard]] inline bool alwaysEnabled(Config const& /*config*/) noexcept
 {
     return true;
 }
 
-/// A built-in fallback mouse mapping, together with the global-config predicate that enables it.
+/// A built-in fallback binding, together with the global-config predicate that enables it.
 ///
 /// The predicate is a COLUMN rather than an `if` at the consultation site: a default that only applies
 /// when some option is on is then one more row here, and applyBuiltinFallback() stays the only place
 /// that knows gating exists at all.
-struct FallbackMouseMapping
+template <typename Input>
+struct FallbackMapping
 {
-    MouseInputMapping mapping;
+    vtbackend::InputBinding<Input, ActionList> mapping;
     /// Whether this row takes part in matching. Defaults to always.
     ///
     /// A plain function pointer, not std::function: it keeps the table a `static const` literal with
-    /// no allocation, on a path walked for every mouse press the application did not claim.
+    /// no allocation, on a path walked for every input the application did not claim.
     bool (*enabled)(Config const&) noexcept = alwaysEnabled;
 };
 
-/// Mouse mappings that apply when the user's `input_mapping:` does not claim the button itself.
+using FallbackMouseMapping = FallbackMapping<vtbackend::MouseButton>;
+using FallbackKeyMapping = FallbackMapping<vtbackend::Key>;
+
+/// Bindings that apply when the user's `input_mapping:` does not claim the input itself.
 ///
 /// A new DEFAULT cannot reach an existing user: loading an `input_mapping:` section REPLACES the built-in
 /// table wholesale (see YAMLConfigReader::loadFromEntry for InputMappings), and the contour.yml Contour
 /// generates on first run writes every default out into that section. So a mapping added to the defaults
-/// after a user's config was written would be shadowed by their own file, forever. Consulting this table
-/// *after* theirs is what lets a new default still reach them — while an explicit binding of the same
-/// button in their config continues to win, because that one is found first.
+/// after a user's config was written would be shadowed by their own file, forever. Consulting these
+/// tables *after* theirs is what lets a new default still reach them — while an explicit binding of the
+/// same input in their config continues to win, because that one is found first.
 ///
 /// @return The fallback mappings, in match order.
 [[nodiscard]] std::vector<FallbackMouseMapping> const& builtinFallbackMouseMappings();
+
+/// @copydoc builtinFallbackMouseMappings
+[[nodiscard]] std::vector<FallbackKeyMapping> const& builtinFallbackKeyMappings();
 
 namespace helper
 {
@@ -266,6 +273,13 @@ std::vector<actions::Action> const* apply(Mappings&& mappings,
 /// @return The bound actions, or nullptr when no enabled row matches.
 [[nodiscard]] ActionList const* applyBuiltinFallback(Config const& config,
                                                      vtbackend::MouseButton button,
+                                                     vtbackend::Modifiers modifiers,
+                                                     uint8_t actualModeFlags);
+
+/// @copydoc applyBuiltinFallback
+/// An overload rather than a differently-named function, so both consultation sites read alike.
+[[nodiscard]] ActionList const* applyBuiltinFallback(Config const& config,
+                                                     vtbackend::Key key,
                                                      vtbackend::Modifiers modifiers,
                                                      uint8_t actualModeFlags);
 
@@ -745,6 +759,25 @@ const InputMappings defaultInputMappings {
                           .modifiers { vtbackend::Modifier::Shift },
                           .input = vtbackend::Key::RightArrow,
                           .binding = { { actions::SwitchToTabRight {} } } },
+        // The browser chords for the same thing. They are ALSO in builtinFallbackKeyMappings(), which is
+        // what carries them to anyone whose contour.yml predates them; listing them here is what puts
+        // them in a freshly generated one, where they can be seen and rebound.
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Control },
+                          .input = vtbackend::Key::PageUp,
+                          .binding = { { actions::SwitchToTabLeft {} } } },
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Control },
+                          .input = vtbackend::Key::PageDown,
+                          .binding = { { actions::SwitchToTabRight {} } } },
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Control },
+                          .input = vtbackend::Key::Tab,
+                          .binding = { { actions::SwitchToTabRight {} } } },
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                          .input = vtbackend::Key::Tab,
+                          .binding = { { actions::SwitchToTabLeft {} } } },
         KeyInputMapping { .modes { vtbackend::MatchModes {} },
                           .modifiers { vtbackend::Modifier::Alt, vtbackend::Modifier::Shift },
                           .input = vtbackend::Key::LeftArrow,

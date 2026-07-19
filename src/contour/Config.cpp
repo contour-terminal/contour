@@ -107,16 +107,81 @@ std::vector<FallbackMouseMapping> const& builtinFallbackMouseMappings()
     return mappings;
 }
 
+std::vector<FallbackKeyMapping> const& builtinFallbackKeyMappings()
+{
+    // Browser-style tab switching. Fallbacks rather than defaults for the reason given on the
+    // declaration: every contour.yml written before these existed enumerates the key mappings without
+    // them, and would otherwise shadow them away forever.
+    //
+    // Ctrl+Tab is claimed from the application deliberately, matching Windows Terminal, GNOME Terminal
+    // and Konsole. A terminal application CAN ask for it -- the Kitty keyboard protocol gives Ctrl+Tab
+    // its own CSI-u sequence -- so this is a real trade, made the way the reference terminals make it.
+    // Anyone who needs it in an application binds it in their own input_mapping:, which is consulted
+    // first and therefore wins. Should that trade ever need softening, the cheap retreat is a `.modes`
+    // with AlternateScreen DISABLED on the two Tab rows: full-screen applications would keep Ctrl+Tab
+    // while the shell still switched tabs, using only data that already exists.
+    static auto const mappings = std::vector<FallbackKeyMapping> {
+        FallbackKeyMapping {
+            .mapping = { .modes { vtbackend::MatchModes {} },
+                         .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                         .input = vtbackend::Key::PageUp,
+                         .binding = { { actions::SwitchToTabLeft {} } } } },
+        FallbackKeyMapping {
+            .mapping = { .modes { vtbackend::MatchModes {} },
+                         .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                         .input = vtbackend::Key::PageDown,
+                         .binding = { { actions::SwitchToTabRight {} } } } },
+        FallbackKeyMapping {
+            .mapping = { .modes { vtbackend::MatchModes {} },
+                         .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                         .input = vtbackend::Key::Tab,
+                         .binding = { { actions::SwitchToTabRight {} } } } },
+        // Ctrl+Shift+Tab arrives as Key::Tab with Shift re-added: Qt reports the shifted press as
+        // Key_Backtab, which helper.cpp rewrites (see makeKey).
+        FallbackKeyMapping { .mapping = { .modes { vtbackend::MatchModes {} },
+                                          .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
+                                                                              vtbackend::Modifier::Shift } },
+                                          .input = vtbackend::Key::Tab,
+                                          .binding = { { actions::SwitchToTabLeft {} } } } },
+    };
+    return mappings;
+}
+
+namespace
+{
+    /// Matches @p input against the enabled rows of @p table.
+    ///
+    /// Shared by both applyBuiltinFallback overloads so the gating pipeline -- filter by the row's
+    /// predicate, then match -- exists once rather than once per input kind.
+    template <typename Input>
+    [[nodiscard]] ActionList const* applyFallbackTable(std::vector<FallbackMapping<Input>> const& table,
+                                                       Config const& config,
+                                                       Input input,
+                                                       vtbackend::Modifiers modifiers,
+                                                       uint8_t actualModeFlags)
+    {
+        auto enabledMappings =
+            table
+            | std::views::filter([&config](FallbackMapping<Input> const& row) { return row.enabled(config); })
+            | std::views::transform(&FallbackMapping<Input>::mapping);
+        return apply(enabledMappings, input, modifiers, actualModeFlags);
+    }
+} // namespace
+
 ActionList const* applyBuiltinFallback(Config const& config,
                                        vtbackend::MouseButton button,
                                        vtbackend::Modifiers modifiers,
                                        uint8_t actualModeFlags)
 {
-    auto enabledMappings =
-        builtinFallbackMouseMappings()
-        | std::views::filter([&config](FallbackMouseMapping const& row) { return row.enabled(config); })
-        | std::views::transform(&FallbackMouseMapping::mapping);
-    return apply(enabledMappings, button, modifiers, actualModeFlags);
+    return applyFallbackTable(builtinFallbackMouseMappings(), config, button, modifiers, actualModeFlags);
+}
+
+ActionList const* applyBuiltinFallback(Config const& config,
+                                       vtbackend::Key key,
+                                       vtbackend::Modifiers modifiers,
+                                       uint8_t actualModeFlags)
+{
+    return applyFallbackTable(builtinFallbackKeyMappings(), config, key, modifiers, actualModeFlags);
 }
 
 namespace

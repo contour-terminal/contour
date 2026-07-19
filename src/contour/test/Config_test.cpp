@@ -2383,6 +2383,110 @@ TEST_CASE("config.builtinFallbackMouseMappings", "[config]")
     }
 }
 
+TEST_CASE("config.builtinFallbackKeyMappings", "[config]")
+{
+    using contour::config::Config;
+    using vtbackend::Key;
+    using vtbackend::Modifier;
+    using vtbackend::Modifiers;
+
+    auto const modeFlags = uint8_t { 0 };
+    auto const ctrl = Modifiers { Modifier::Control };
+    auto const ctrlShift = Modifiers { Modifier::Control, Modifier::Shift };
+
+    SECTION("the browser chords switch tabs")
+    {
+        auto const config = Config {};
+
+        auto const resolves = [&](Key key, Modifiers modifiers) {
+            return contour::config::applyBuiltinFallback(config, key, modifiers, modeFlags);
+        };
+
+        auto const* pageUp = resolves(Key::PageUp, ctrl);
+        REQUIRE(pageUp != nullptr);
+        REQUIRE(pageUp->size() == 1);
+        CHECK(std::holds_alternative<contour::actions::SwitchToTabLeft>(pageUp->front()));
+
+        auto const* pageDown = resolves(Key::PageDown, ctrl);
+        REQUIRE(pageDown != nullptr);
+        REQUIRE(pageDown->size() == 1);
+        CHECK(std::holds_alternative<contour::actions::SwitchToTabRight>(pageDown->front()));
+
+        auto const* tab = resolves(Key::Tab, ctrl);
+        REQUIRE(tab != nullptr);
+        REQUIRE(tab->size() == 1);
+        CHECK(std::holds_alternative<contour::actions::SwitchToTabRight>(tab->front()));
+
+        // Ctrl+Shift+Tab reaches the binding layer as Key::Tab with Shift re-added (Qt reports the
+        // shifted press as Key_Backtab; helper.cpp rewrites it).
+        auto const* backTab = resolves(Key::Tab, ctrlShift);
+        REQUIRE(backTab != nullptr);
+        REQUIRE(backTab->size() == 1);
+        CHECK(std::holds_alternative<contour::actions::SwitchToTabLeft>(backTab->front()));
+    }
+
+    SECTION("matching is on the exact chord")
+    {
+        auto const config = Config {};
+
+        // apply() requires modifier EQUALITY, so a chord carrying anything extra must not match -- an
+        // application binding Ctrl+Alt+Tab keeps it.
+        CHECK(contour::config::applyBuiltinFallback(
+                  config, Key::Tab, Modifiers { Modifier::Control, Modifier::Alt }, modeFlags)
+              == nullptr);
+        CHECK(contour::config::applyBuiltinFallback(config, Key::Tab, Modifiers { Modifier::None }, modeFlags)
+              == nullptr);
+        CHECK(contour::config::applyBuiltinFallback(
+                  config, Key::PageUp, Modifiers { Modifier::Shift }, modeFlags)
+              == nullptr);
+    }
+
+    SECTION("a user's own input_mapping cannot shadow them away")
+    {
+        // THE reason this table exists, so it is pinned rather than left to a comment. Loading ANY
+        // `input_mapping:` section replaces the built-in key mappings wholesale, and the contour.yml
+        // Contour generates on first run writes every default into that section -- so a binding that
+        // lived only in the defaults would be shadowed, forever, by the config file of every user who
+        // already had one. Here a config supplies one unrelated binding, which wipes the defaults; the
+        // fallback must still resolve.
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir,
+                                         "input_mapping:\n"
+                                         "    - { mods: [Control], key: 'F9', action: ToggleFullscreen }\n"
+                                         "profiles:\n  main:\n    shell: \"/bin/bash\"\n");
+
+        auto const& keyMappings = config.inputMappings.value().keyMappings;
+        auto const boundInUserTable = [&](Key key) {
+            return std::ranges::any_of(keyMappings, [key](auto const& m) { return m.input == key; });
+        };
+        // The wipe really happened: the defaults are gone from the user's table.
+        CHECK_FALSE(boundInUserTable(Key::PageUp));
+        CHECK_FALSE(boundInUserTable(Key::Tab));
+
+        // ...and the fallback still carries them.
+        auto const* tab = contour::config::applyBuiltinFallback(config, Key::Tab, ctrl, modeFlags);
+        REQUIRE(tab != nullptr);
+        CHECK(std::holds_alternative<contour::actions::SwitchToTabRight>(tab->front()));
+
+        auto const* pageUp = contour::config::applyBuiltinFallback(config, Key::PageUp, ctrl, modeFlags);
+        REQUIRE(pageUp != nullptr);
+        CHECK(std::holds_alternative<contour::actions::SwitchToTabLeft>(pageUp->front()));
+    }
+
+    SECTION("a fresh config carries them in its own table too, so they can be seen and rebound")
+    {
+        auto const defaults = Config {}.inputMappings.value().keyMappings;
+        auto const boundTo = [&](Key key, Modifiers modifiers) {
+            return std::ranges::any_of(
+                defaults, [&](auto const& m) { return m.input == key && m.modifiers == modifiers; });
+        };
+        CHECK(boundTo(Key::PageUp, ctrl));
+        CHECK(boundTo(Key::PageDown, ctrl));
+        CHECK(boundTo(Key::Tab, ctrl));
+        CHECK(boundTo(Key::Tab, ctrlShift));
+    }
+}
+
 TEST_CASE("config.applyBuiltinFallback", "[config]")
 {
     auto const modeFlags = uint8_t { 0 };

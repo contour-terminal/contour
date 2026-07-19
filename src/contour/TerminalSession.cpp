@@ -1349,17 +1349,29 @@ void TerminalSession::sendKeyEvent(Key key,
 
     if (eventType != KeyboardEventType::Release)
     {
-        // Key bindings match on the chord: a latched lock key must not change which shortcut fires.
-        if (auto const* actions = config::apply(
-                _config.inputMappings.value().keyMappings, key, modifiers.chord, matchModeFlags()))
-        {
+        // Runs @p actions (when there are any) through the repeat filter, reporting whether anything
+        // actually ran. Shared by the two lookups below so they differ only in which table they consult.
+        auto const runBinding = [&](auto const* actions) {
+            if (actions == nullptr)
+                return false;
             auto executionCount = 0;
             handleAction(actions, eventType, [&](auto const& actions) {
                 executionCount = executeAllActions(actions);
             });
-            if (executionCount > 0)
-                return;
-        }
+            return executionCount > 0;
+        };
+
+        // Key bindings match on the chord: a latched lock key must not change which shortcut fires.
+        if (runBinding(config::apply(
+                _config.inputMappings.value().keyMappings, key, modifiers.chord, matchModeFlags())))
+            return;
+
+        // The user's mappings did not claim this key, so fall back to the built-in ones. They are
+        // consulted second on purpose: an explicit binding in the user's config always wins, because it
+        // is found first (see builtinFallbackKeyMappings for why a plain default could not reach an
+        // existing user at all).
+        if (runBinding(config::applyBuiltinFallback(_config, key, modifiers.chord, matchModeFlags())))
+            return;
     }
     terminal().sendKeyEvent(key, modifiers, eventType, now);
 }
