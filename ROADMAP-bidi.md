@@ -110,12 +110,18 @@ Written blind — it cannot be compiled on Linux. Must be checked on Windows bef
   (`Bidi_Direction::Left_To_Right` and `TextStyle::Invalid` are both 0, and this only works because
   `operator*(strong_hash, uint32_t)` mixes rather than multiplies).
 - ~~RTL cluster normalization in `cluster_spans_test.cpp`~~ — DONE, both halves of the contract.
-- `TextClusterGrouper_test`: level-run boundary cases.
+- ~~`TextClusterGrouper_test`: level-run boundary cases~~ — DONE, and it caught a real bug: the
+  level term was never in the flush predicate at all, despite commit 177803fc claiming it was.
 - `TextRenderer_test`: cluster-based placement.
 - Offscreen `DisplayRendering_test`: a mixed Hebrew/Arabic/Latin/digit screen.
 - A real-font Arabic joining test, gated on FreeMono or Noto Naskh Arabic being present.
-- **Callgrind comparison against master** on a `cat` of a large ASCII file. AGENT.md requires a perf
-  figure for hot-path changes, and the grouper is on the hot path for all text.
+- ~~Performance comparison against the merge-base~~ — DONE, and it found a real regression.
+  Rendering a 40x120 all-ASCII page was **+29.6%** (7.53 → 9.76 us/frame); now **+6.1%**
+  (7.35 → 7.79 us/frame, ~0.45us/frame, about 0.003% of a 60Hz budget). Method: hidden `[.perf]`
+  case in `Bidi_test`, release build, interleaved against a detached worktree at the merge-base,
+  min of 8. `bench-headless` cannot answer this — it drives the parser and never reaches
+  `fillRenderBufferInternal`. **Interleave and take minimums**: sequential runs drifted 2x under
+  varying machine load and gave a nonsense answer first time.
 
 ## Environment notes
 
