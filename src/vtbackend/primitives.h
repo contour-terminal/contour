@@ -659,8 +659,16 @@ enum class ActiveStatusDisplay : uint8_t
 
 enum class AnsiMode : uint8_t
 {
-    KeyboardAction = 2,    // KAM
-    Insert = 4,            // IRM
+    KeyboardAction = 2, // KAM
+    Insert = 4,         // IRM
+
+    /// BDSM (8) -- Bi-Directional Support Mode.
+    ///
+    /// Set (the default) means *implicit*: the terminal reorders bidirectional text itself. Reset
+    /// means *explicit*: the application has already done the reordering and the terminal must draw
+    /// the characters in the order it received them.
+    BiDirectionalSupport = 8,
+
     SendReceive = 12,      // SRM
     AutomaticNewLine = 20, // LNM
 };
@@ -942,14 +950,6 @@ enum class DECMode : std::uint8_t
     // "toggle only" default and this comment shrinks.
     // @see docs/internals/vt-conformance.md -- what is left, and why.
     //
-    // The bidirectional pair is the priority: RightToLeftMode and
-    // HebrewEncodingMode are the entry points for real bidirectional/Hebrew support, not mere toggles.
-
-    /// DECRLM (34) -- Right-to-Left Mode. TODO: drive bidirectional layout; the priority of this group.
-    RightToLeftMode = 51,
-
-    /// DECHEM (36) -- Hebrew Encoding Mode. TODO: pair with DECRLM for real Hebrew/bidirectional text.
-    HebrewEncodingMode = 52,
 
     /// DECNAKB (57) -- Greek/N-A Keyboard Mapping. TODO: keyboard layout selection.
     GreekKeyboardMapping = 53,
@@ -965,9 +965,6 @@ enum class DECMode : std::uint8_t
 
     /// DECKPM (81) -- Key Position Mode (report key position vs. character). TODO: key reporting layer.
     KeyPositionMode = 57,
-
-    /// DECRLCM (96) -- Right-to-Left Copy. TODO: rides with RightToLeftMode's bidirectional support.
-    RightToLeftCopyMode = 58,
 
     /// DECCRTSM (97) -- CRT Save Mode (screen blanking). TODO: display-power policy, a frontend concern.
     CRTSaveMode = 59,
@@ -1019,8 +1016,45 @@ enum class DECMode : std::uint8_t
     PasteMimeNotifications = 72,
     // }}}
 
+    // {{{ Bidirectional text.
+    //
+    // The first three are DEC's own; the last three come from the terminal-wg BiDi recommendation
+    // (https://terminal-wg.pages.freedesktop.org/bidi/), which VTE also implements. That document is
+    // a draft and says its mode numbers are provisional, so treat 2500/2501/1243 as such.
+    //
+    // @see docs/rtl-bidi.md
+
+    /// DECRLM (34) -- Right-to-Left Mode: lay the page out right-to-left.
+    ///
+    /// Equivalent to selecting a right-to-left character path with SCP, and kept in step with it.
+    RightToLeftMode = 51,
+
+    /// DECHEM (36) -- Hebrew Encoding Mode.
+    ///
+    /// Selects logical vs. visual ordering of stored Hebrew text. Contour always stores logical
+    /// order, so setting this only records the request; it does not re-encode the grid.
+    HebrewEncodingMode = 52,
+
+    /// DECRLCM (96) -- Right-to-Left Copy: copy text in visual rather than logical order.
+    RightToLeftCopyMode = 58,
+
+    /// Mirror box-drawing glyphs inside a right-to-left run (`CSI ? 2500 h`).
+    BidiBoxMirroring = 73,
+
+    /// Autodetect each paragraph's direction from its first strong character (`CSI ? 2501 h`).
+    ///
+    /// When reset, the paragraph direction is whatever SCP or DECRLM last selected.
+    BidiAutodetectParagraph = 74,
+
+    /// Swap the Left and Right arrow keys inside a right-to-left paragraph (`CSI ? 1243 h`).
+    ///
+    /// Set by default, so that an arrow key moves the cursor the way it points rather than the way
+    /// memory runs.
+    BidiSwapArrowKeys = 75,
+    // }}}
+
     /// Sentinel value for sizing the mode bitset. Must remain the last entry.
-    DECModeCount = 73
+    DECModeCount = 76
 };
 
 /// The minimum ANSI conformance level (1..5, matching conformanceLevelOf(VTType)) at which a DEC
@@ -1247,6 +1281,7 @@ constexpr unsigned toAnsiModeNum(AnsiMode m)
     {
         case AnsiMode::KeyboardAction: return 2;
         case AnsiMode::Insert: return 4;
+        case AnsiMode::BiDirectionalSupport: return 8;
         case AnsiMode::SendReceive: return 12;
         case AnsiMode::AutomaticNewLine: return 20;
     }
@@ -1259,6 +1294,7 @@ constexpr bool isValidAnsiMode(unsigned int mode) noexcept
     {
         case AnsiMode::KeyboardAction:
         case AnsiMode::Insert:
+        case AnsiMode::BiDirectionalSupport:
         case AnsiMode::SendReceive:
         case AnsiMode::AutomaticNewLine: return true;
     }
@@ -1340,6 +1376,9 @@ constexpr inline auto DECModeNumbers = std::to_array<DECModeNumbering>({
     { DECMode::TransmitRateLimiting, 73 },
     { DECMode::KeyPositionMode, 81 },
     { DECMode::RightToLeftCopyMode, 96 },
+    { DECMode::BidiBoxMirroring, 2500 },
+    { DECMode::BidiAutodetectParagraph, 2501 },
+    { DECMode::BidiSwapArrowKeys, 1243 },
     { DECMode::CRTSaveMode, 97 },
     { DECMode::AutoResizeMode, 98 },
     { DECMode::ModemControlMode, 99 },

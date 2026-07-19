@@ -16,6 +16,7 @@ set(vtbackend_HEADERS
     Capabilities.h
     DesktopNotification.h
     CellProxy.h
+    Bidi.h
     CellUtil.h
     Charset.h
     Color.h
@@ -69,6 +70,7 @@ set(vtbackend_HEADERS
 )
 
 set(vtbackend_SOURCES
+    Bidi.cpp
     Capabilities.cpp
     Charset.cpp
     DesktopNotification.cpp
@@ -158,6 +160,7 @@ if(LIBTERMINAL_TESTING)
     add_executable(vtbackend_test
         test_main.cpp
         Animation_test.cpp
+        Bidi_test.cpp
         Capabilities_test.cpp
         DesktopNotification_test.cpp
         Color_test.cpp

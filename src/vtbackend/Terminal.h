@@ -25,6 +25,8 @@
 #include <vtbackend/logging.h>
 #include <vtbackend/primitives.h>
 
+#include <libunicode/bidi.h>
+
 #include <vtparser/Parser.h>
 
 #include <vtpty/Pty.h>
@@ -660,6 +662,46 @@ class Terminal
     // {{{ Modes handling
     bool isModeEnabled(AnsiMode m) const noexcept { return _modes.enabled(m); }
     bool isModeEnabled(DECMode m) const noexcept { return _modes.enabled(m); }
+
+    // {{{ Bidirectional text
+    /// Selects the character path, per SCP (`CSI Ps SP k`).
+    /// @param direction nullopt restores the terminal's own default.
+    void setCharacterPath(std::optional<unicode::Bidi_Direction> direction) noexcept
+    {
+        _characterPath = direction;
+    }
+
+    /// The character path last selected by SCP, or nullopt for the terminal default.
+    [[nodiscard]] std::optional<unicode::Bidi_Direction> characterPath() const noexcept
+    {
+        return _characterPath;
+    }
+
+    /// Whether the terminal reorders bidirectional text itself.
+    ///
+    /// This is BDSM: set means implicit (we reorder), reset means explicit (the application already
+    /// did, and we must draw what we were given).
+    [[nodiscard]] bool bidiReorderingEnabled() const noexcept
+    {
+        return isModeEnabled(AnsiMode::BiDirectionalSupport);
+    }
+
+    /// The base direction to impose on every paragraph, or nullopt to autodetect each from its own
+    /// first strong character (UAX#9 P2/P3).
+    ///
+    /// Autodetection wins when it is enabled, because it is the more specific request: SCP and
+    /// DECRLM state a default, `CSI ? 2501 h` says to derive the direction from the text instead.
+    [[nodiscard]] std::optional<unicode::Bidi_Direction> bidiParagraphDirection() const noexcept
+    {
+        if (isModeEnabled(DECMode::BidiAutodetectParagraph))
+            return std::nullopt;
+        if (_characterPath.has_value())
+            return _characterPath;
+        if (isModeEnabled(DECMode::RightToLeftMode))
+            return unicode::Bidi_Direction::Right_To_Left;
+        return unicode::Bidi_Direction::Left_To_Right;
+    }
+    // }}}
     void setMode(AnsiMode mode, bool enable);
     void setMode(DECMode mode, bool enable);
     void saveModes(std::vector<DECMode> const& modes) { _modes.save(modes); }
@@ -2243,6 +2285,9 @@ class Terminal
     std::unordered_map<std::string, int> _drcsDesignatorMap; ///< Dscs designator → font number
 
     Modes _modes;
+
+    /// Character path selected by SCP; nullopt means the terminal's own default.
+    std::optional<unicode::Bidi_Direction> _characterPath = std::nullopt;
     std::map<DECMode, std::vector<bool>> _savedModes; //!< saved DEC modes
 
     /// Per-page screen margins for DEC multi-page support.

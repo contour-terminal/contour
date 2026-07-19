@@ -3500,7 +3500,8 @@ namespace impl
         /// Adding a mode is adding a row.
         constexpr auto SupportedAnsiModes = std::array {
             AnsiMode::KeyboardAction,   // KAM -- gates input, see Terminal::allowInput()
-            AnsiMode::Insert,           // IRM
+            AnsiMode::Insert,               // IRM
+            AnsiMode::BiDirectionalSupport, // BDSM -- implicit vs. explicit bidi reordering
             AnsiMode::SendReceive,      // SRM -- local echo, see Terminal::flushInput()
             AnsiMode::AutomaticNewLine, // LNM
         };
@@ -6679,6 +6680,19 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             return ApplyResult::Ok;
         }
         case DECSCUSR: return impl::DECSCUSR(seq, *_terminal);
+        case SCP: {
+            // Ps1: 0 = terminal default, 1 = left-to-right, 2 = right-to-left.
+            // Ps2 selects the implementation effect and is accepted but not acted on, since Contour
+            // always stores logical order and reorders only on the way to the screen.
+            switch (seq.param_or(0, 0))
+            {
+                case 0: _terminal->setCharacterPath(std::nullopt); break;
+                case 1: _terminal->setCharacterPath(unicode::Bidi_Direction::Left_To_Right); break;
+                case 2: _terminal->setCharacterPath(unicode::Bidi_Direction::Right_To_Left); break;
+                default: return ApplyResult::Invalid;
+            }
+            break;
+        }
         case DECSCPP:
             if (auto const columnCount = seq.param_or(0, 80); columnCount == 80 || columnCount == 132)
             {

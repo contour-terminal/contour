@@ -251,6 +251,12 @@ Terminal::Terminal(Events& eventListener,
     setMode(DECMode::PageCursorCoupling, true);
     setMode(DECMode::LeftRightMargin, false);
 
+    // BDSM set means *implicit*: the terminal does the bidirectional reordering itself. Reset would
+    // hand that job to the application, which is not the sensible default for a terminal that can do
+    // it. Likewise the arrow-key swap, so that an arrow moves the cursor the way it points.
+    setMode(AnsiMode::BiDirectionalSupport, true);
+    setMode(DECMode::BidiSwapArrowKeys, true);
+
     for (auto const& [mode, frozen]: _settings.frozenModes)
         freezeMode(mode, frozen);
 }
@@ -3158,7 +3164,7 @@ void Terminal::setMode(DECMode mode, bool enable)
 
             // Sets the left, right, top and bottom scrolling margins to their default positions.
             setTopBottomMargin(std::nullopt, std::nullopt); // DECSTBM
-            setLeftRightMargin(std::nullopt, std::nullopt); // DECRLM
+            setLeftRightMargin(std::nullopt, std::nullopt); // DECSLRM
 
             // resets vertical split screen mode (DECLRMM) to unavailable
             setMode(DECMode::LeftRightMargin, false); // DECSLRM
@@ -3434,7 +3440,7 @@ void Terminal::softReset()
     setMode(DECMode::ReverseWraparoundExtended, false);
 
     setTopBottomMargin({}, boxed_cast<LineOffset>(_settings.pageSize.lines) - LineOffset(1));       // DECSTBM
-    setLeftRightMargin({}, boxed_cast<ColumnOffset>(_settings.pageSize.columns) - ColumnOffset(1)); // DECRLM
+    setLeftRightMargin({}, boxed_cast<ColumnOffset>(_settings.pageSize.columns) - ColumnOffset(1)); // DECSLRM
 
     _currentScreen->cursor().hyperlink = {};
 
@@ -4711,6 +4717,7 @@ std::string to_string(AnsiMode mode)
     {
         case AnsiMode::KeyboardAction: return "KeyboardAction";
         case AnsiMode::Insert: return "Insert";
+        case AnsiMode::BiDirectionalSupport: return "BiDirectionalSupport";
         case AnsiMode::SendReceive: return "SendReceive";
         case AnsiMode::AutomaticNewLine: return "AutomaticNewLine";
     }
@@ -4783,6 +4790,9 @@ std::string to_string(DECMode mode)
         case DECMode::TransmitRateLimiting: return "TransmitRateLimiting";
         case DECMode::KeyPositionMode: return "KeyPositionMode";
         case DECMode::RightToLeftCopyMode: return "RightToLeftCopyMode";
+        case DECMode::BidiBoxMirroring: return "BidiBoxMirroring";
+        case DECMode::BidiAutodetectParagraph: return "BidiAutodetectParagraph";
+        case DECMode::BidiSwapArrowKeys: return "BidiSwapArrowKeys";
         case DECMode::CRTSaveMode: return "CRTSaveMode";
         case DECMode::AutoResizeMode: return "AutoResizeMode";
         case DECMode::ModemControlMode: return "ModemControlMode";

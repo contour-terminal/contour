@@ -108,6 +108,14 @@ constexpr inline auto DECSCA = FunctionDocumentation { .mnemonic = "DECSCA", .co
 constexpr inline auto DECSCL = FunctionDocumentation { .mnemonic = "DECSCL", .comment = "Set conformance level (DECSCL), VT220 and up." };
 constexpr inline auto DECSCPP = FunctionDocumentation { .mnemonic = "DECSCPP", .comment = "Select 80 or 132 Columns per Page" };
 constexpr inline auto DECSCUSR = FunctionDocumentation { .mnemonic = "DECSCUSR", .comment = "Set Cursor Style" };
+constexpr inline auto SCP = FunctionDocumentation {
+    .mnemonic = "SCP",
+    .comment = "Select Character Path",
+    .parameters = "Ps1: 0 = terminal default, 1 = left-to-right, 2 = right-to-left. Ps2: implementation effect.",
+    .description = "Selects the base direction of the paragraphs that follow. Ps1 = 0 restores the "
+                   "terminal's own default, which is what an application should send to undo its own "
+                   "choice rather than assuming which way that default points.",
+};
 constexpr inline auto DECSED = FunctionDocumentation { .mnemonic = "DECSED", .comment = "Selective Erase in Display" };
 constexpr inline auto DECSEL = FunctionDocumentation { .mnemonic = "DECSEL", .comment = "Selective Erase in Line" };
 constexpr inline auto DECSERA = FunctionDocumentation { .mnemonic = "DECSERA", .comment = "Selective Erase in Rectangular Area" };
@@ -758,6 +766,7 @@ constexpr inline auto DECSCA      = detail::CSI(std::nullopt, 0, 1, '"', 'q', VT
 constexpr inline auto DECSCL      = detail::CSI(std::nullopt, 1, 2, '"', 'p', VTType::VT220, documentation::DECSCL);
 constexpr inline auto DECSCPP     = detail::CSI(std::nullopt, 0, 1, '$', '|', VTType::VT100, documentation::DECSCPP);
 constexpr inline auto DECSCUSR    = detail::CSI(std::nullopt, 0, 1, ' ', 'q', VTType::VT520, documentation::DECSCUSR);
+constexpr inline auto SCP          = detail::CSI(std::nullopt, 0, 2, ' ', 'k', VTType::VT510, documentation::SCP);
 constexpr inline auto DECSED      = detail::CSI('?', 0, 1, std::nullopt, 'J', VTType::VT240, documentation::DECSED);
 constexpr inline auto DECSEL      = detail::CSI('?', 0, 1, std::nullopt, 'K', VTType::VT240, documentation::DECSEL);
 constexpr inline auto DECSERA     = detail::CSI(std::nullopt, 0, 4, '$', '{', VTType::VT240, documentation::DECSERA);
@@ -1038,6 +1047,7 @@ constexpr static auto allFunctionsArray() noexcept
         DECSCL,
         DECSCPP,
         DECSCUSR,
+        SCP,
         DECSLRM,
         DECSSCLS,
         DECSM,
