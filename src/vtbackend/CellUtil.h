@@ -171,10 +171,14 @@ template <typename Cell>
 /// @return By how many columns @p cell must grow or shrink once @p codepoint joins its grapheme
 ///         cluster.
 ///
-/// A cluster's width is not settled by its first codepoint. A variation selector arriving later
-/// changes the presentation, and therefore the width: U+FE0F asks for the emoji presentation (two
-/// columns) and U+FE0E for the text presentation (one). Contour used to ignore this outright, which
-/// is why `#` followed by U+FE0F occupied one column instead of two.
+/// A cluster's width is not settled by its first codepoint: U+FE0F asks for the emoji presentation,
+/// which is two columns wide, so `#` followed by it occupies two rather than the one Contour used to
+/// give it.
+///
+/// The answer here is symmetric and may be negative, but callers act on growth only. U+FE0E asks for
+/// the text presentation, and terminal-unicode-core is explicit that this changes the presentation
+/// WITHOUT changing the width -- a cluster already on screen cannot give a column back.
+/// @see Screen::applyClusterWidthChange.
 ///
 /// The rule itself lives in libunicode, so the grid, the renderer and the rasterizer all answer this
 /// question the same way. @see unicode::grapheme_cluster_width_append.

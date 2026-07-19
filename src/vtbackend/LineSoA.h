@@ -231,7 +231,12 @@ void forEachCodepoint(LineSoA const& line, size_t col, F f)
 /// first codepoint decides, and a variation selector arriving later changes nothing.
 enum class ClusterWidthPolicy : uint8_t
 {
-    /// Mode 2027 set: the whole cluster decides its width, so a late VS15/VS16 revises it.
+    /// Mode 2027 set: the whole cluster decides its width, so a late VS16 can widen it.
+    ///
+    /// The measurement is symmetric -- it reports a narrowing as readily as a widening -- but the
+    /// callers only ever act on growth: terminal-unicode-core has VS15 change the presentation
+    /// without touching the width, because a cluster already on screen cannot give a column back.
+    /// @see Screen::applyClusterWidthChange.
     ClusterAware,
 
     /// Mode 2027 reset: the first codepoint decides and nothing later changes it.

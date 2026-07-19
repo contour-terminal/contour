@@ -409,50 +409,43 @@ TEST_CASE("AppendChar.emoji_exclamationmark", "[screen]")
     CHECK(screen.at(LineOffset(0), ColumnOffset(2)).backgroundColor() == IndexedColor::Blue);
 }
 
-TEST_CASE("AppendChar.emoji_VS15_watch", "[screen]")
+TEST_CASE("AppendChar.VS15_selects_text_presentation_without_changing_the_width", "[screen]")
 {
+    // terminal-unicode-core is explicit: VS15 "will NOT change the underlying width but only change
+    // the display to prefer textual non-colored presentation". A cluster already on screen cannot
+    // give a column back -- that would mean un-wrapping a line that wrapped and un-scrolling content
+    // that scrolled -- so the width stands and only the presentation changes.
+    //
+    // U+231A WATCH is the interesting base: Unicode does define a text-presentation sequence for it
+    // (emoji-variation-sequences.txt), so the selector is meaningful here rather than inert, and the
+    // width still must not move.
     auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
     auto& screen = mock.terminal.primaryScreen();
 
-    // Print an emoji, then ask for its TEXT presentation with VS15. The cluster must narrow to one
-    // column and give the column back -- the emoji occupied two before the selector arrived.
-    //
-    // U+231A WATCH is used rather than a face emoji because VS15 only has an effect where Unicode
-    // actually defines an emoji variation sequence for the base (emoji-variation-sequences.txt).
-    // U+231A has one; U+1F600 does not, and the case below pins that.
     REQUIRE(*screen.logicalCursorPosition().column == 0);
     mock.writeToScreen(U"\u231A");
     REQUIRE(*screen.logicalCursorPosition().column == 2);
     mock.writeToScreen(U"\uFE0E");
-    REQUIRE(*screen.logicalCursorPosition().column == 1);
-    mock.writeToScreen("X");
     REQUIRE(*screen.logicalCursorPosition().column == 2);
-    logScreenText(screen);
 
-    // emoji, demoted to text presentation
-    auto const& c1 = screen.at(LineOffset(0), ColumnOffset(0));
-    CHECK(c1.codepoints() == U"\u231A\uFE0E");
-    CHECK(c1.width() == 1);
+    // The selector joined the cluster -- it is what the renderer reads to pick the uncolored glyph --
+    // but the two columns the watch claimed are still its own.
+    auto const& c0 = screen.at(LineOffset(0), ColumnOffset(0));
+    CHECK(c0.codepoints() == U"\u231A\uFE0E");
+    CHECK(c0.width() == 2);
+    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlag::WideCharContinuation));
 
-    // The continuation cell the emoji used to own was released, and X took it.
-    auto const& c2 = screen.at(LineOffset(0), ColumnOffset(1));
-    CHECK(c2.codepoints() == U"X");
-    CHECK(c2.width() == 1);
-    CHECK_FALSE(c2.isFlagEnabled(CellFlag::WideCharContinuation));
-
-    // tail
-    auto const& c3 = screen.at(LineOffset(0), ColumnOffset(2));
-    CHECK(c3.codepoints().empty());
-    auto const& c4 = screen.at(LineOffset(0), ColumnOffset(3));
-    CHECK(c4.codepoints().empty());
+    // The next character lands after the cluster, not inside it.
+    mock.writeToScreen("X");
+    CHECK(screen.at(LineOffset(0), ColumnOffset(2)).codepoints() == U"X");
 }
 
-TEST_CASE("AppendChar.VS15_does_nothing_without_a_defined_variation_sequence", "[screen]")
+TEST_CASE("AppendChar.VS15_is_inert_without_a_defined_variation_sequence", "[screen]")
 {
     // A variation selector only re-presents a base Unicode defines a sequence for. U+1F600 is
-    // emoji-only -- there is no text presentation to select -- so VS15 must leave the cluster two
-    // columns wide rather than narrowing it. Measuring it as one is what wcwidth's
-    // VS15_WIDE_TO_NARROW table would wrongly do for a base outside that table.
+    // emoji-only -- there is no text presentation to select -- so VS15 says nothing about it at all.
+    // Measuring it as one column is what wcwidth's VS15_WIDE_TO_NARROW table would wrongly do for a
+    // base outside that table.
     auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
     auto& screen = mock.terminal.primaryScreen();
 

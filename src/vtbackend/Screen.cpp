@@ -948,6 +948,26 @@ void Screen::applyClusterWidthChange(int delta) noexcept
         headCell.setWidth(static_cast<uint8_t>(oldWidth));
     };
 
+    // A cluster already on screen may only ever GROW. terminal-unicode-core is explicit about the
+    // asymmetry: VS16 "will force the grapheme cluster's width to be 2, which may possibly cause
+    // reflowing", whereas VS15 "will NOT change the underlying width but only change the display to
+    // prefer textual non-colored presentation".
+    //
+    // The reason is mechanical rather than stylistic. Giving a column back would mean undoing work
+    // that is already committed -- un-wrapping a line that has wrapped, un-scrolling content that has
+    // left the screen -- so a terminal that narrows an on-screen cluster ends up with behaviour no
+    // application can predict.
+    //
+    // The measurement in appendCodepointToCluster still reports the narrowing honestly; the screen
+    // simply declines to act on it. The variation selector stays part of the cluster, so the run
+    // segmenter still resolves the run to text presentation and the glyph is drawn uncolored -- which
+    // is the whole of what VS15 is specified to do.
+    if (delta < 0)
+    {
+        abandon();
+        return;
+    }
+
     // Only revise a cluster the cursor is still sitting immediately after. Anything else -- an
     // intervening CUP, a scroll that moved the head, a resize, or a deferred wrap that has already
     // carried the cursor to the next line -- means this is no longer a live cluster, and the "next"
@@ -960,45 +980,27 @@ void Screen::applyClusterWidthChange(int delta) noexcept
         return;
     }
 
-    if (delta > 0)
+    // Growing must not run past the right margin (or the page edge). Rather than reflow a cell that
+    // is already committed -- which would invalidate damage tracking, selections and hyperlink spans
+    // -- abandon the promotion and leave the cluster at its original width.
+    if (head.column + ColumnOffset::cast_from(newWidth - 1) > lastWritableColumn())
     {
-        // Growing must not run past the right margin (or the page edge). Rather than reflow a cell
-        // that is already committed -- which would invalidate damage tracking, selections and
-        // hyperlink spans -- abandon the promotion and leave the cluster at its original width.
-        if (head.column + ColumnOffset::cast_from(newWidth - 1) > lastWritableColumn())
-        {
-            abandon();
-            return;
-        }
-
-        // Insert mode sized its shift from the first codepoint alone, so it is short by exactly the
-        // columns the cluster just gained.
-        if (_terminal->isModeEnabled(AnsiMode::Insert))
-            insertChars(head.line, ColumnCount::cast_from(delta));
-
-        // The continuation inherits the HEAD cell's pen, not the current one: the SGR may have
-        // changed between the base codepoint and the variation selector that widened it.
-        auto const sgr = headCell.graphicsAttributes().with(CellFlag::WideCharContinuation);
-        for (int i = oldWidth; i < newWidth; ++i)
-        {
-            line.useCellAt(head.column + ColumnOffset::cast_from(i)).reset(sgr, headCell.hyperlink());
-            _terminal->markCellDirty(head + ColumnOffset::cast_from(i));
-        }
+        abandon();
+        return;
     }
-    else
-    {
-        // Shrinking releases the continuation cells the cluster no longer covers. The head cell's own
-        // rendition never carries WideCharContinuation, so it can be reused verbatim.
-        auto const sgr = headCell.graphicsAttributes();
-        for (int i = newWidth; i < oldWidth; ++i)
-        {
-            line.useCellAt(head.column + ColumnOffset::cast_from(i)).reset(sgr, headCell.hyperlink());
-            _terminal->markCellDirty(head + ColumnOffset::cast_from(i));
-        }
 
-        // A wide cluster sitting at the last column leaves wrapPending set. After demotion the cursor
-        // is no longer at the edge, and a stale flag would wrap the NEXT character spuriously.
-        _cursor.wrapPending = false;
+    // Insert mode sized its shift from the first codepoint alone, so it is short by exactly the
+    // columns the cluster just gained.
+    if (_terminal->isModeEnabled(AnsiMode::Insert))
+        insertChars(head.line, ColumnCount::cast_from(delta));
+
+    // The continuation inherits the HEAD cell's pen, not the current one: the SGR may have changed
+    // between the base codepoint and the variation selector that widened it.
+    auto const sgr = headCell.graphicsAttributes().with(CellFlag::WideCharContinuation);
+    for (int i = oldWidth; i < newWidth; ++i)
+    {
+        line.useCellAt(head.column + ColumnOffset::cast_from(i)).reset(sgr, headCell.hyperlink());
+        _terminal->markCellDirty(head + ColumnOffset::cast_from(i));
     }
 
     // Advancing past the last writable column is the deferred-wrap case, exactly as in

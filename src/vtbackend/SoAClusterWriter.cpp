@@ -148,9 +148,9 @@ namespace
                            && line.sgr[targetCol].flags.contains(CellFlag::WideCharContinuation))
                         --targetCol;
 
-                    // A variation selector can widen or narrow the cluster it joins, which moves the
-                    // write position. There is no cursor, no margin and no insert mode here -- only
-                    // the end of the line to stay inside of.
+                    // A variation selector can widen the cluster it joins, which moves the write
+                    // position. There is no cursor, no margin and no insert mode here -- only the end
+                    // of the line to stay inside of.
                     auto const delta = appendCodepointToCluster(line, targetCol, codepoint);
                     auto const newWidth = static_cast<size_t>(line.widths[targetCol]);
 
@@ -171,15 +171,12 @@ namespace
                     }
                     else if (delta < 0)
                     {
-                        // The released columns start one past the head at the earliest: a cluster is
-                        // never narrower than one column, which appendCodepointToCluster guarantees
-                        // by clamping the recomputed width. Were the width allowed to reach 0 this
-                        // loop would start ON the head and erase the very cluster it is revising.
-                        auto const oldWidth = newWidth - static_cast<size_t>(delta);
-                        for (auto c = targetCol + newWidth; c < targetCol + oldWidth && c < maxCols; ++c)
-                            writeCellToSoA(
-                                line, c, U'\0', 1, line.sgr[targetCol], line.hyperlinks[targetCol]);
-                        col = std::max(startCol, col - static_cast<size_t>(-delta));
+                        // A cluster never narrows: VS15 selects a text presentation without changing
+                        // the width, and this line is being rebuilt from text that was laid out under
+                        // that same rule -- narrowing here would give a column back that the original
+                        // write never released, so the inflated line would not match what was stored.
+                        // @see Screen::applyClusterWidthChange, terminal-unicode-core "VS15".
+                        line.widths[targetCol] = static_cast<uint8_t>(newWidth - delta);
                     }
                 }
             }
