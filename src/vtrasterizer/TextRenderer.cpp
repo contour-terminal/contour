@@ -1175,7 +1175,12 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
         // NOTE: Width overflow is intentionally NOT checked here, because horizontally oversized glyphs
         // (e.g. programming ligatures) are kept wide and handled by createSlicedRasterizedGlyph(),
         // which slices them into multiple tiles when they exceed the atlas tile size.
-        auto const cellBoundingBox = _gridMetrics.cellSize;
+        //
+        // Which is why the box may not be the cell on BOTH axes: text::scale() scales by
+        // max(ratioX, ratioY), so a one-cell-wide box makes the width ratio win and squashes a
+        // three-cell ligature to a third of its width. Bounding the height alone leaves the height
+        // ratio to scale both axes and preserve the aspect. @see oversizedGlyphBoundingBox.
+        auto const cellBoundingBox = oversizedGlyphBoundingBox(glyph.bitmapSize, _gridMetrics.cellSize);
         auto const originalPosition = glyph.position;
         if (rasterizerLog)
             rasterizerLog()("Scaling oversized non-RGBA glyph of {}+{} down to box {}.",

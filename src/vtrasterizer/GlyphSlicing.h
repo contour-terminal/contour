@@ -211,6 +211,24 @@ inline void blitClipped(std::span<uint8_t> target,
     return 1 + column + (band * 256);
 }
 
+/// The box an oversized non-RGBA glyph is scaled down into.
+///
+/// Only the HEIGHT is bounded. A glyph wider than one cell -- a programming ligature, a powerline
+/// separator -- is meant to stay wide and be cut across cells by createSlicedRasterizedGlyph, so
+/// handing text::scale() a box one cell wide would squash it to a single cell instead: that function
+/// scales by @c max(ratioX, ratioY), so the width ratio wins for anything multi-cell. Giving the box
+/// the glyph's own width makes ratioX 1, leaving the height ratio to scale both axes and preserve the
+/// aspect.
+///
+/// @param glyphSize the glyph's rasterized size.
+/// @param cellSize  one cell; the height a glyph may not exceed, because the atlas stores tiles of
+///                  exactly that height and spaces their origins that far apart.
+[[nodiscard]] inline vtbackend::ImageSize oversizedGlyphBoundingBox(vtbackend::ImageSize glyphSize,
+                                                                    vtbackend::ImageSize cellSize) noexcept
+{
+    return vtbackend::ImageSize { std::max(glyphSize.width, cellSize.width), cellSize.height };
+}
+
 /// The part of a block's atlas identity that does not come from its glyphs.
 ///
 /// Everything that changes the PIXELS the block's tiles are cut from has to be in here, or two

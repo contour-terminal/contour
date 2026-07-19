@@ -249,6 +249,29 @@ TEST_CASE("GlyphSlicing.magnify.keeps_rgba_channels_apart", "[glyphslicing]")
     }
 }
 
+TEST_CASE("GlyphSlicing.oversizedGlyphBoundingBox.bounds_height_only", "[glyphslicing]")
+{
+    using vtbackend::Height;
+    using vtbackend::ImageSize;
+    using vtbackend::Width;
+
+    auto const cell = ImageSize { Width(10), Height(20) };
+
+    // A glyph three cells wide and a little too tall: the height must come down, the width must NOT
+    // be constrained to one cell. text::scale() scales by max(ratioX, ratioY), so a one-cell-wide box
+    // would make the width ratio win and squash a ligature to a third of its intended width.
+    auto const wide = ImageSize { Width(30), Height(21) };
+    auto const box = oversizedGlyphBoundingBox(wide, cell);
+    CHECK(box.height == cell.height);
+    CHECK(box.width == wide.width);
+
+    // A glyph narrower than a cell is not stretched: the box never goes below one cell, and
+    // text::scale only ever scales down.
+    auto const narrow = ImageSize { Width(4), Height(25) };
+    CHECK(oversizedGlyphBoundingBox(narrow, cell).width == cell.width);
+    CHECK(oversizedGlyphBoundingBox(narrow, cell).height == cell.height);
+}
+
 TEST_CASE("GlyphSlicing.blockCanvasHash.separates_blocks_that_rasterize_differently", "[glyphslicing]")
 {
     using vtbackend::CellScale;

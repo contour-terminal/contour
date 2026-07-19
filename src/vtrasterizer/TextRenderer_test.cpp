@@ -441,9 +441,15 @@ TEST_CASE("TextRenderer", "[renderer]")
         auto const buffer = renderGlyph(U'\uE000');
         REQUIRE(buffer.has_value());
 
-        // Verify the scaled bitmap fits within cell dimensions.
-        CHECK(buffer->bitmapSize.width <= gridMetrics.cellSize.width);
+        // The HEIGHT is what the atlas bounds: a tile is exactly one cell tall and the next tile's
+        // origin is that far away, so extra rows overwrite an unrelated glyph.
         CHECK(buffer->bitmapSize.height <= gridMetrics.cellSize.height);
+
+        // The width is NOT bounded here, for the same reason as the wide-but-not-tall case below:
+        // a glyph wider than one cell is sliced across cells by createSlicedRasterizedGlyph. Scaling
+        // it to fit one cell would squash a 16-wide glyph to 10 rather than to the 13 the height
+        // ratio alone calls for, which is the aspect the font actually asked for.
+        CHECK(buffer->bitmapSize.width == vtbackend::Width(13));
     }
 
     SECTION("wide-but-not-tall non-RGBA glyph is not scaled down")
