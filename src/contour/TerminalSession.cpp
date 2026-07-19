@@ -717,6 +717,21 @@ void TerminalSession::applyPendingFontChange(bool allow, bool remember)
 
 void TerminalSession::setPointerShape(std::string_view cssName)
 {
+    // An EMPTY name means the terminal is back to its own default: the application has stopped
+    // imposing a shape, by resetting it, by popping the stack empty, or through RIS. Forgetting the
+    // remembered shape is what lets the screen-type defaults below apply again -- caching the name
+    // the stack happens to hold at its bottom would pin the I-beam for the rest of the session and
+    // the alternate screen would never get its arrow back.
+    if (cssName.empty())
+    {
+        if (_display)
+            postToObject(_display, [this]() {
+                _applicationPointerShape.reset();
+                setDefaultCursor();
+            });
+        return;
+    }
+
     // OSC 22 speaks CSS pointer names; the display speaks its own enum. The mapping is the whole
     // binding between the two, and only names vtbackend advertises as supported can arrive here.
     auto const shape = [cssName]() -> std::optional<MouseCursorShape> {

@@ -47,6 +47,72 @@ TEST_CASE("PointerShape.set_replaces_the_current_shape", "[pointershape]")
     CHECK(mock.terminal.pointerShape() == "pointer");
 }
 
+TEST_CASE("PointerShape.the_leading_operation_char_is_optional_for_a_set", "[pointershape]")
+{
+    // "For set operations, the optional first char can be either `=` or omitted", and the spec's
+    // very first worked example is `OSC 22 ; pointer ST`. Taking payload.front() as the operation
+    // unconditionally turned the 'p' of "pointer" into an unknown operation, so the whole sequence
+    // was rejected and the shape never changed.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen("\033]22;pointer\033\\"sv);
+    CHECK(mock.terminal.pointerShape() == "pointer");
+
+    // The explicit form must keep working and mean the same thing.
+    mock.writeToScreen("\033]22;=text\033\\"sv);
+    CHECK(mock.terminal.pointerShape() == "text");
+}
+
+TEST_CASE("PointerShape.an_empty_payload_resets_to_the_default", "[pointershape]")
+{
+    // `OSC 22 ; ST` is the documented reset. Rejecting it as malformed left whatever shape the
+    // application had set in place, with no way to put it back.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen("\033]22;pointer\033\\"sv);
+    REQUIRE(mock.terminal.pointerShape() == "pointer");
+
+    mock.writeToScreen("\033]22;\033\\"sv);
+    CHECK(mock.terminal.pointerShape() == pointer_shape::DefaultName);
+}
+
+TEST_CASE("PointerShape.returning_to_the_default_is_signalled_as_a_reset", "[pointershape]")
+{
+    // A frontend caches the application's shape so it survives the next mouse move -- but it needs to
+    // know when the application has stopped imposing one, or its own screen-type defaults (the arrow
+    // on the alternate screen) never apply again for the rest of the session. Popping back to the
+    // bottom of the stack and resetting both mean "the terminal is free to use whatever it likes",
+    // which is signalled by an empty name.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
+
+    SECTION("popping back to the bottom of the stack")
+    {
+        mock.writeToScreen("\033]22;>pointer\033\\"sv);
+        REQUIRE(mock.pointerShapeNotifications.back() == "pointer");
+
+        mock.writeToScreen("\033]22;<\033\\"sv);
+        CHECK(mock.pointerShapeNotifications.back().empty());
+    }
+
+    SECTION("the documented reset form")
+    {
+        mock.writeToScreen("\033]22;pointer\033\\"sv);
+        REQUIRE(mock.pointerShapeNotifications.back() == "pointer");
+
+        mock.writeToScreen("\033]22;\033\\"sv);
+        CHECK(mock.pointerShapeNotifications.back().empty());
+    }
+
+    SECTION("a hard reset")
+    {
+        mock.writeToScreen("\033]22;pointer\033\\"sv);
+        REQUIRE(mock.pointerShapeNotifications.back() == "pointer");
+
+        mock.writeToScreen("\033c"sv);
+        CHECK(mock.pointerShapeNotifications.back().empty());
+    }
+}
+
 TEST_CASE("PointerShape.push_and_pop_restore_the_previous_shape", "[pointershape]")
 {
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };

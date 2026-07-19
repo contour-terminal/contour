@@ -4714,10 +4714,20 @@ ApplyResult Screen::processPointerShape(std::string_view payload)
     using namespace pointer_shape;
 
     if (payload.empty())
-        return ApplyResult::Invalid;
+    {
+        _terminal->resetPointerShape();
+        return ApplyResult::Ok;
+    }
 
-    auto const operation = static_cast<Operation>(payload.front());
-    auto const names = payload.substr(1);
+    // "For set operations, the optional first char can be either `=` or omitted" -- so a leading
+    // byte is only an operation when it actually names one. Consuming it unconditionally turned the
+    // 'p' of the spec's own first example, `OSC 22 ; pointer`, into an unknown operation and the
+    // whole sequence was rejected.
+    auto const leading = static_cast<Operation>(payload.front());
+    auto const namesOnly = leading == Operation::Query || leading == Operation::Set
+                           || leading == Operation::Push || leading == Operation::Pop;
+    auto const operation = namesOnly ? leading : Operation::Set;
+    auto const names = namesOnly ? payload.substr(1) : payload;
 
     switch (operation)
     {
@@ -4729,6 +4739,8 @@ ApplyResult Screen::processPointerShape(std::string_view payload)
             for (auto const& name: crispy::split(names, ','))
             {
                 if (!answers.empty())
+    // `OSC 22 ; ST` is the documented reset: "Reset the pointer to default". Rejecting the empty
+    // payload as malformed left an application-set shape in place with no way to put it back.
                     answers += ',';
                 if (isSupportedName(name))
                     answers += '1';
@@ -4789,6 +4801,13 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
             }
 
             // The payload lists the MIME types the application will accept. If none of them is one
+    // The protocol answers `type=<the type asked about>:status=<code>`. Putting the status in the
+    // `type=` slot -- and inventing an `id=` key the protocol does not define -- meant no conforming
+    // client could parse any reply this terminal sent.
+    // A status is reported against the TRANSMISSION, not against whichever packet happened to carry
+    // the failure: the spec's shapes are `type=read:status=...` and `type=write:status=...`, and the
+    // wdata/walias packets are steps within a write.
+    auto const responseType = packet.type == PacketType::Read ? PacketType::Read : PacketType::Write;
             // this terminal can produce, say so rather than sending text under a type it did not ask
             // for.
             auto const requested = crispy::base64::decode(packet.payload);
@@ -4801,13 +4820,6 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
                 respond("ENOSYS");
                 return ApplyResult::Ok;
             }
-    // The protocol answers `type=<the type asked about>:status=<code>`. Putting the status in the
-    // `type=` slot -- and inventing an `id=` key the protocol does not define -- meant no conforming
-    // client could parse any reply this terminal sent.
-    // A status is reported against the TRANSMISSION, not against whichever packet happened to carry
-    // the failure: the spec's shapes are `type=read:status=...` and `type=write:status=...`, and the
-    // wdata/walias packets are steps within a write.
-    auto const responseType = packet.type == PacketType::Read ? PacketType::Read : PacketType::Write;
 
             // The protocol has its own reply shape: an OK, then one DATA packet per MIME type
             // carrying a base64 mime and base64 data, then DONE. Delegating to OSC 52 sent a reply

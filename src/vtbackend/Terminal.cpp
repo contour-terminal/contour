@@ -2399,7 +2399,25 @@ void Terminal::popPointerShape()
 {
     if (_pointerShapes.size() > 1)
         _pointerShapes.pop_back();
-    _eventListener.setPointerShape(_pointerShapes.back());
+
+    // Back at the bottom of the stack the application is no longer imposing anything -- "an empty
+    // stack means the terminal is free to use whatever shape it likes". Reporting the bottom entry's
+    // NAME here would look identical to an application setting that shape, and a frontend caching the
+    // application's choice would never restore its own screen-type defaults again.
+    if (_pointerShapes.size() == 1)
+        resetPointerShape();
+    else
+        _eventListener.setPointerShape(_pointerShapes.back());
+}
+
+void Terminal::resetPointerShape()
+{
+    _pointerShapes.erase(std::next(_pointerShapes.begin()), _pointerShapes.end());
+    _pointerShapes.back() = std::string(pointer_shape::DefaultName);
+
+    // The empty name is the signal, distinct from any shape an application can name: the terminal is
+    // back to its own default and a frontend may resume its own.
+    _eventListener.setPointerShape("");
 }
 
 void Terminal::copyToClipboard(string_view data)
@@ -3496,9 +3514,7 @@ void Terminal::hardReset()
     // A pointer shape is application state like any other, so RIS withdraws it: a program that dies
     // holding a hand cursor must not leave the user with one. The stack keeps its bottom entry -- the
     // terminal's own default -- exactly as popPointerShape does.
-    _pointerShapes.erase(std::next(_pointerShapes.begin()), _pointerShapes.end());
-    _pointerShapes.back() = std::string(pointer_shape::DefaultName);
-    _eventListener.setPointerShape(_pointerShapes.back());
+    resetPointerShape();
 
     resetColorPalette();
 
