@@ -74,6 +74,7 @@ set(_header_files
     Config.h
     ContextMenu.h
     ContextMenuModel.h
+    ContextMenuTable.h
     ContourApp.h
     FuzzyFilter.h
     GuiConfigStore.h
