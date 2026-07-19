@@ -538,9 +538,8 @@ namespace
 
         // Set explicitly, and therefore before guess_segment_properties(), which cannot override a
         // direction that is already set.
-        hb_buffer_set_direction(hbBuf,
-                                direction == unicode::Bidi_Direction::Right_To_Left ? HB_DIRECTION_RTL
-                                                                                    : HB_DIRECTION_LTR);
+        hb_buffer_set_direction(
+            hbBuf, direction == unicode::Bidi_Direction::Right_To_Left ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
         hb_buffer_set_script(hbBuf, mapScriptToHarfbuzzScript(script));
         hb_buffer_set_language(hbBuf, hb_language_get_default());
         hb_buffer_set_content_type(hbBuf, HB_BUFFER_CONTENT_TYPE_UNICODE);

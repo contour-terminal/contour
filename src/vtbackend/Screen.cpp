@@ -3499,11 +3499,11 @@ namespace impl
         ///
         /// Adding a mode is adding a row.
         constexpr auto SupportedAnsiModes = std::array {
-            AnsiMode::KeyboardAction,   // KAM -- gates input, see Terminal::allowInput()
+            AnsiMode::KeyboardAction,       // KAM -- gates input, see Terminal::allowInput()
             AnsiMode::Insert,               // IRM
             AnsiMode::BiDirectionalSupport, // BDSM -- implicit vs. explicit bidi reordering
-            AnsiMode::SendReceive,      // SRM -- local echo, see Terminal::flushInput()
-            AnsiMode::AutomaticNewLine, // LNM
+            AnsiMode::SendReceive,          // SRM -- local echo, see Terminal::flushInput()
+            AnsiMode::AutomaticNewLine,     // LNM
         };
 
         ApplyResult setAnsiMode(Sequence const& seq, size_t modeIndex, bool enable, Terminal& term)

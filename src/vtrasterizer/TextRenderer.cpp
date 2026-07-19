@@ -637,8 +637,8 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
     if (direction == unicode::Bidi_Direction::Right_To_Left)
     {
         for (auto const codepoint: codepoints)
-            mirrored += unicode::is_mirrored(codepoint) ? unicode::bidi_mirroring_glyph(codepoint)
-                                                        : codepoint;
+            mirrored +=
+                unicode::is_mirrored(codepoint) ? unicode::bidi_mirroring_glyph(codepoint) : codepoint;
         std::ranges::reverse(mirrored);
         codepoints = mirrored;
 
@@ -1297,10 +1297,9 @@ text::shape_result const& TextRenderer::getOrCreateCachedGlyphPositions(strong_h
                                                                         TextStyle style,
                                                                         unicode::Bidi_Direction direction)
 {
-    return _textShapingCache->get_or_emplace(
-        hash, [this, codepoints, clusters, style, direction](auto) {
-            return createTextShapedGlyphPositions(codepoints, clusters, style, direction);
-        });
+    return _textShapingCache->get_or_emplace(hash, [this, codepoints, clusters, style, direction](auto) {
+        return createTextShapedGlyphPositions(codepoints, clusters, style, direction);
+    });
 }
 
 text::shape_result TextRenderer::createTextShapedGlyphPositions(u32string_view codepoints,
@@ -1348,13 +1347,7 @@ text::shape_result TextRenderer::shapeTextRun(unicode::run_segmenter::range cons
 
     text::shape_result glyphPosition;
     glyphPosition.reserve(clusters.size());
-    _textShaper.shape(font,
-                      codepoints,
-                      clusters,
-                      script,
-                      presentationStyle,
-                      direction,
-                      glyphPosition);
+    _textShaper.shape(font, codepoints, clusters, script, presentationStyle, direction, glyphPosition);
 
     if (rasterizerLog && !glyphPosition.empty())
     {

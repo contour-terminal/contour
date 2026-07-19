@@ -385,4 +385,3 @@ TEST_CASE("Bidi.pure latin is untouched", "[bidi]")
 
     CHECK(trimmed(renderedLine(buffer.get(), 0)) == U"hello");
 }
-

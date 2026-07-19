@@ -9,9 +9,9 @@
 #include <vtbackend/TextScale.h>
 #include <vtbackend/primitives.h>
 
-#include <libunicode/bidi.h>
-
 #include <vtrasterizer/RenderTarget.h>
+
+#include <libunicode/bidi.h>
 
 #include <gsl/pointers>
 

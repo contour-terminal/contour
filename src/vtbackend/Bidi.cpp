@@ -4,8 +4,8 @@
 #include <libunicode/codepoint_properties.h>
 
 #include <algorithm>
-#include <ranges>
 #include <numeric>
+#include <ranges>
 
 using unicode::Bidi_Class;
 using unicode::Bidi_Direction;

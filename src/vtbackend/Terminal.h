@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vtbackend/Animation.h>
+#include <vtbackend/Bidi.h>
 #include <vtbackend/ColorPalette.h>
 #include <vtbackend/Cursor.h>
 #include <vtbackend/DesktopNotification.h>
@@ -23,10 +24,7 @@
 #include <vtbackend/ViInputHandler.h>
 #include <vtbackend/Viewport.h>
 #include <vtbackend/logging.h>
-#include <vtbackend/Bidi.h>
 #include <vtbackend/primitives.h>
-
-#include <libunicode/bidi.h>
 
 #include <vtparser/Parser.h>
 
@@ -35,6 +33,8 @@
 #include <crispy/BufferObject.h>
 #include <crispy/assert.h>
 #include <crispy/defines.h>
+
+#include <libunicode/bidi.h>
 
 #include <gsl/pointers>
 
