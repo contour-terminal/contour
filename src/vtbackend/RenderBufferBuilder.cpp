@@ -628,13 +628,16 @@ void RenderBufferBuilder::reorderLineCells()
     if (count == 0)
         return;
 
-    // The level rides along even on the fast path, because a renderer uses it to decide mirroring
-    // and shaping direction, not only ordering.
-    for (size_t i = 0; i < count; ++i)
-        _output->cells[first + i].bidiLevel = layout.levelAt(ColumnOffset::cast_from(i));
-
+    // On the identity path every level is zero, which is already RenderCell::bidiLevel's default --
+    // so writing it back costs one call and one store per cell per frame to change nothing. On an
+    // all-ASCII page that is every cell on the screen, so the early-out is the fast path.
     if (layout.identity)
         return;
+
+    // The level rides along even where no permutation happens, because a renderer uses it to decide
+    // mirroring and shaping direction, not only ordering.
+    for (size_t i = 0; i < count; ++i)
+        _output->cells[first + i].bidiLevel = layout.levelAt(ColumnOffset::cast_from(i));
 
     auto reordered = std::vector<RenderCell> {};
     reordered.reserve(count);

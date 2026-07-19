@@ -62,6 +62,11 @@ inline void writeCellToSoA(LineSoA& line,
     line.hyperlinks[col] = hyperlink;
     line.clusterSize[col] = (codepoint != 0) ? uint8_t { 1 } : uint8_t { 0 };
 
+    // See LineSoA::mayContainBidi: everything below U+0590 is left-to-right, so this one compare at
+    // the write saves the render path a scan of the whole line on every frame.
+    if (codepoint >= 0x0590)
+        line.mayContainBidi = true;
+
     // Clear cluster extras if the previous cell had a multi-codepoint grapheme cluster.
     if (oldClusterSize > 1)
         clearClusterExtras(line, col);

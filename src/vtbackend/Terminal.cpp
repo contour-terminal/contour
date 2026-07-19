@@ -598,6 +598,21 @@ void Terminal::updateBidiPageLayout(ScrollOffset scrollOffset, LineCount extraLi
     while (last < bottomMost && grid.isLineWrapped(last + 1))
         ++last;
 
+    // Cheap pre-scan, before anything is materialised. In a left-to-right paragraph every codepoint
+    // below U+0590 resolves to level 0, so a range holding none of them is the identity everywhere
+    // and an empty layout already answers that -- bidiLayoutAt() falls back to a neutral one.
+    //
+    // This has to come before the text is built, not after: gathering one u32string per row costs an
+    // allocation per row per frame, which on an all-ASCII page is the entire expense.
+    if (bidiParagraphDirection() != unicode::Bidi_Direction::Right_To_Left)
+    {
+        auto anyBidi = false;
+        for (auto line = first; line <= last && !anyBidi; ++line)
+            anyBidi = grid.lineAt(line).mayContainBidi();
+        if (!anyBidi)
+            return;
+    }
+
     auto inputs = std::vector<BidiLineInput> {};
     auto texts = std::vector<std::u32string> {};
     auto const lineCount = static_cast<size_t>(unbox<int>(last) - unbox<int>(first) + 1);

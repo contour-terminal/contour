@@ -32,6 +32,7 @@ void initializeLineSoA(LineSoA& line, ColumnCount cols, GraphicsAttributes const
     line.lineFlags = {};
     line.usedColumns = {};
     line.trivial = true;
+    line.mayContainBidi = false;
     line.fillAttrs = fillAttrs;
 }
 
@@ -55,6 +56,7 @@ void initializeBlankLineSoA(LineSoA& line, GraphicsAttributes const& fillAttrs) 
     line.lineFlags = {};
     line.usedColumns = {};
     line.trivial = true;
+    line.mayContainBidi = false;
     line.fillAttrs = fillAttrs;
 }
 
@@ -146,6 +148,7 @@ void resetLine(LineSoA& line, ColumnCount cols, GraphicsAttributes const& fillAt
     line.imageFragments.reset();
     line.usedColumns = {};
     line.trivial = true;
+    line.mayContainBidi = false;
     line.fillAttrs = fillAttrs;
 }
 
@@ -166,6 +169,12 @@ void copyColumns(LineSoA const& src, size_t srcCol, LineSoA& dst, size_t dstCol,
 
     // Bulk copy each SoA array (SIMD auto-vectorizable)
     std::copy_n(src.codepoints.data() + srcCol, count, dst.codepoints.data() + dstCol);
+
+    // Carry the bidi hint across, or reflow would move right-to-left text onto a line whose cached
+    // flag still says it holds none -- and the render path would quietly stop reordering it. ORed
+    // rather than recomputed: over-setting costs a resolve that turns out to be the identity,
+    // under-setting loses the reordering entirely.
+    dst.mayContainBidi = dst.mayContainBidi || src.mayContainBidi;
     std::copy_n(src.widths.data() + srcCol, count, dst.widths.data() + dstCol);
     std::copy_n(src.scales.data() + srcCol, count, dst.scales.data() + dstCol);
     std::copy_n(src.textScaleExtras.data() + srcCol, count, dst.textScaleExtras.data() + dstCol);

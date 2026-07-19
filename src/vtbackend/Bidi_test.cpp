@@ -435,3 +435,57 @@ TEST_CASE("Bidi.selection across a direction boundary is logical", "[bidi]")
 
     CHECK(mock.terminal.extractSelectionText() == "abc שלום def");
 }
+
+// Hidden by default (leading '.'): run with `vtbackend_test "[.perf]"`.
+//
+// The claim under test is that the >= U+0590 scan keeps ordinary left-to-right output at parity.
+// bench-headless cannot answer it -- that harness drives the parser and never reaches
+// fillRenderBufferInternal, where the bidi layout is computed -- so the render path is timed here.
+TEST_CASE("Bidi.perf refreshRenderBuffer over ASCII", "[.perf]")
+{
+    auto mock = MockTerm { PageSize { LineCount(40), ColumnCount(120) } };
+
+    for (auto line = 0; line < 40; ++line)
+        mock.writeToScreen("The quick brown fox jumps over the lazy dog 0123456789 "
+                           "The quick brown fox jumps over the lazy dog 0123456\r\n");
+
+    auto constexpr ClockBase = std::chrono::steady_clock::time_point {};
+    mock.terminal.tick(ClockBase);
+
+    auto constexpr Iterations = 2000;
+    auto const start = std::chrono::steady_clock::now();
+    for (auto i = 0; i < Iterations; ++i)
+    {
+        mock.terminal.markScreenDirty();
+        mock.terminal.refreshRenderBuffer();
+    }
+    auto const elapsed = std::chrono::steady_clock::now() - start;
+    auto const us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+
+    UNSCOPED_INFO("refreshRenderBuffer x" << Iterations << " over 40x120 ASCII: " << us << " us ("
+                                          << (double) us / Iterations << " us/frame)");
+    CHECK(us > 0);
+}
+
+// The bidi hint is a cached per-line flag, so every path that moves cells between lines has to carry
+// it. Reflow is that path: without propagation the text lands on a line whose flag still says it
+// holds nothing right-to-left, and reordering silently stops.
+TEST_CASE("Bidi.reflow carries the bidi hint", "[bidi]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(8) } };
+    mock.terminal.setMode(DECMode::TextReflow, true);
+
+    // Long enough to wrap at 8 columns, so resizing has to move cells between lines.
+    mock.writeToScreen("abcdשלום");
+
+    mock.terminal.resizeScreen(PageSize { LineCount(3), ColumnCount(20) });
+
+    auto constexpr ClockBase = std::chrono::steady_clock::time_point {};
+    mock.terminal.tick(ClockBase);
+    mock.terminal.refreshRenderBuffer();
+
+    // The Hebrew must still be reversed after the reflow.
+    auto const line = trimmed(renderedLine(mock.terminal.renderBuffer().get(), 0));
+    INFO("rendered: " << std::string(line.begin(), line.end()).size() << " codepoints");
+    CHECK(line == U"abcdםולש");
+}

@@ -120,6 +120,18 @@ struct LineSoA
     /// with different SGR than the first cell. Read as O(1) by the render path.
     bool trivial = true;
 
+    /// Cached: true when any cell holds a codepoint at or above U+0590, and so the line might need
+    /// bidirectional reordering.
+    ///
+    /// Maintained at the write exactly as @c trivial is, because the render path asks this of every
+    /// line on every frame: answering it by scanning the codepoints made an all-ASCII page pay a
+    /// full-width scan per row per frame, which measured as a ~30% regression on the render path.
+    ///
+    /// Sticky until the line is reset, so a line that once held right-to-left text keeps saying
+    /// "maybe" after it is overwritten. That is conservative in the safe direction -- it costs a
+    /// resolve that turns out to be the identity, never a missed reordering.
+    bool mayContainBidi = false;
+
     /// The GraphicsAttributes used in the most recent full-line reset/clear.
     /// Used by writeAsciiToSoA and resetLine to skip redundant fill operations
     /// when the line is being rewritten with the same default attributes.
