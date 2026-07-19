@@ -80,6 +80,15 @@ class MockPtySessionFactory final: public contour::SessionFactory
     std::vector<vtpty::MockPty*> createdPtys;
 };
 
+/// The MockPty backing @p session, for seeding output and inspecting the bytes the terminal wrote
+/// towards the shell (key/mouse encodings, replies, focus events).
+/// @param session A session created over a MockPty (via MockPtySessionFactory or directly).
+/// @return The session's PTY, downcast. Throws std::bad_cast if it is not a MockPty.
+[[nodiscard]] inline vtpty::MockPty& mockPtyOf(contour::TerminalSession& session)
+{
+    return dynamic_cast<vtpty::MockPty&>(session.terminal().device());
+}
+
 /// Loads @p yaml through the PRODUCTION config file loader (writing it to a throwaway temp file
 /// first), so a test asserts what a real user's configuration would parse to — including the
 /// sibling-layouts merge and every fallback loadConfigFromFile applies.

@@ -117,6 +117,16 @@ struct Settings
     /// User-initiated transitions (e.g. leaving Vi mode) are not affected.
     bool autoScrollOnUpdate = true;
 
+    /// Whether the terminal considers itself focused at birth. Birth state, not a runtime knob: it is
+    /// read once by the constructor and thereafter only sendFocus{In,Out}Event writes the flag.
+    ///
+    /// A host that multiplexes several terminals and routes focus between them sets this false, so
+    /// focus is granted rather than assumed — a terminal born focused but never told otherwise would
+    /// render an active cursor and an active indicator status line forever, and would never send its
+    /// application the DECSET 1004 focus-out it is due. A host with a single terminal that never moves
+    /// focus leaves it true.
+    bool focused = true;
+
     // Size in bytes per PTY Buffer Object.
     //
     // Defaults to 1 MB, that's roughly 10k lines when column count is 100.

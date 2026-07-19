@@ -1796,4 +1796,46 @@ TEST_CASE("InputGenerator.Wheel.ScrollMultiplier.repeats_cursor_keys", "[termina
 
 // }}}
 
+// {{{ focus events (DECSET 1004)
+
+// NB: bracket-per-tag. Catch2 reads "[terminal,input]" (used widely above) as ONE tag literally named
+// `terminal,input`, so such cases are unreachable via a `[focus]` filter.
+TEST_CASE("InputGenerator.focusEvents", "[terminal][input][focus]")
+{
+    // DECMode::FocusTracking (1004) gates focus notification. The return value is load-bearing:
+    // Terminal::sendFocus{In,Out}Event keys its flushInput() on it, so "nothing was generated" must
+    // read as false. generateFocusOutEvent used to return true on both branches, claiming an event
+    // had been sent with the mode off.
+
+    SECTION("mode off: nothing is generated and neither event claims to have been sent")
+    {
+        auto input = InputGenerator {};
+        REQUIRE_FALSE(input.generateFocusEvents());
+
+        CHECK_FALSE(input.generateFocusInEvent());
+        CHECK_FALSE(input.generateFocusOutEvent());
+        CHECK(input.peek().empty());
+    }
+
+    SECTION("mode on: focus-in emits CSI I")
+    {
+        auto input = InputGenerator {};
+        input.setGenerateFocusEvents(true);
+
+        CHECK(input.generateFocusInEvent());
+        CHECK(escape(input.peek()) == "\\e[I");
+    }
+
+    SECTION("mode on: focus-out emits CSI O")
+    {
+        auto input = InputGenerator {};
+        input.setGenerateFocusEvents(true);
+
+        CHECK(input.generateFocusOutEvent());
+        CHECK(escape(input.peek()) == "\\e[O");
+    }
+}
+
+// }}}
+
 // }}}

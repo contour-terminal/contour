@@ -735,6 +735,31 @@ void WindowController::bindWindow(QQuickWindow* osWindow)
             this,
             &WindowController::onWindowScaleMaybeChanged,
             Qt::UniqueConnection);
+
+    // OS window activation (alt-tab, clicking another application) moves terminal focus, so a shell
+    // running under DECSET 1004 is told the window went away. Item-level Qt focus events usually cover
+    // this, but not for a window whose panes hold no focused display -- and the manager, not Qt, is the
+    // focus authority. A member slot, not a lambda: Qt::UniqueConnection only applies to member
+    // functions, and bindWindow may run more than once for the same window.
+    connect(osWindow,
+            &QWindow::activeChanged,
+            this,
+            &WindowController::onOSWindowActiveChanged,
+            Qt::UniqueConnection);
+}
+
+void WindowController::onOSWindowActiveChanged()
+{
+    // Read the window that RAISED the signal, not _osWindow: focusDisplay() re-points _osWindow for a
+    // display re-homed across windows, so the member and the event's subject can diverge.
+    auto const* osWindow = qobject_cast<QWindow*>(sender());
+    if (osWindow == nullptr)
+        return;
+
+    if (osWindow->isActive())
+        _manager.setFocusedWindow(_windowId);
+    else
+        _manager.clearFocusedWindow(_windowId);
 }
 
 void WindowController::showInitial()

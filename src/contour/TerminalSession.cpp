@@ -142,6 +142,13 @@ namespace
         // the profile's configured terminalSize. Applied here so the terminal is BORN at the right size,
         // not just corrected once a display attaches (which never happens for a background tab).
         settings.pageSize = initialPageSize.value_or(profile.terminalSize.value());
+
+        // Focus is granted, never assumed: TerminalSessionManager::setFocusedSession is the sole
+        // authority, and it only focus-OUTs the session that previously held focus. A session born
+        // focused (a background tab, a non-active split pane, any tab of a window that does not own
+        // focus) would therefore stay "focused" forever -- rendering an active cursor and withholding
+        // the DECSET 1004 focus-out its application is due.
+        settings.focused = false;
         settings.ptyBufferObjectSize = config.ptyBufferObjectSize.value();
         settings.ptyReadBufferSize = config.ptyReadBufferSize.value();
         settings.maxHistoryLineCount = profile.history.value().maxHistoryLineCount;

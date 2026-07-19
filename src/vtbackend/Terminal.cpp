@@ -194,6 +194,7 @@ Terminal::Terminal(Events& eventListener,
     _cellPixelSize {},
     _defaultColorPalette { _settings.colorPalette },
     _colorPalette { _settings.colorPalette },
+    _focused { _settings.focused },
     _pageMargins {},
     _hostWritableScreenMargin { .vertical = Margin::Vertical { .from = {}, .to = LineOffset(0) },
                                 .horizontal =
