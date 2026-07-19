@@ -86,7 +86,7 @@ class TextClusterGrouper
     {
         _codepoints.clear();
         _clusters.clear();
-        _cellCount = 0;
+        _columnCount = 0;
         _initialPenPosition.column += penIncrementInX;
     }
 
@@ -111,11 +111,15 @@ class TextClusterGrouper
     // uniform unicode properties (script, language, direction).
     std::vector<char32_t> _codepoints;
 
-    // cluster indices for each codepoint
+    /// Cluster index for each codepoint: the group-relative COLUMN the codepoint's cell starts at.
+    ///
+    /// Columns, not cells appended -- a double-width character advances this by two, so the value
+    /// doubles as the offset the renderer places the glyph at. Counting cells instead would put every
+    /// glyph after a CJK or emoji character one column too far left.
     std::vector<unsigned> _clusters;
 
-    // number of grid cells processed
-    int _cellCount = 0; // FIXME: EA width vs actual cells
+    /// Number of grid columns this group occupies so far; the cluster the next cell will be given.
+    int _columnCount = 0;
 
     /// The scale the current group is being drawn at. Part of the group's identity: a cell drawn at
     /// a different size cannot share a shaping run with its neighbours.

@@ -345,6 +345,64 @@ TEST_CASE("TextClusterGrouper.a level change ends the group")
     CHECK(get<TextClusterGroup>(recorder.events[1]).codepoints == U"cd");
 }
 
+// A cluster is the COLUMN a cell starts at, not the number of cells that came before it: the renderer
+// places a glyph at `cluster * cellWidth`, so a double-width character has to leave a gap of two
+// behind it. Counting cells instead put every glyph after the first CJK or emoji character one column
+// too far left -- on top of the wide glyph's own second half.
+TEST_CASE("TextClusterGrouper.a wide cell advances the cluster by its column span")
+{
+    auto recorder = EventRecorder {};
+    auto grouper = TextClusterGrouper(recorder);
+    auto const color = RGBColor { 0xF0, 0x80, 0x40 };
+    auto constexpr WideSizing = vtbackend::GlyphSizing { .columns = 2 };
+
+    // Two double-width characters (U+4F60, U+597D), nothing between them. They share a sizing, so they
+    // share a group, and the second one's cluster is the only thing that can say where it goes.
+    grouper.beginFrame();
+    for (auto const [index, codepoint]: std::array { std::pair { 0, U'你' }, std::pair { 2, U'好' } })
+        grouper.renderCell(CellLocation { .line = LineOffset(0), .column = ColumnOffset(index) },
+                           std::u32string_view(&codepoint, 1),
+                           color,
+                           TextStyle::Regular,
+                           LineFlag::None,
+                           WideSizing);
+    grouper.endFrame();
+
+    REQUIRE(recorder.events.size() == 1);
+    auto const& group = get<TextClusterGroup>(recorder.events[0]);
+    CHECK(group.codepoints == U"你好");
+    CHECK(group.clusters == std::vector { 0, 2 }); // counting cells gave { 0, 1 }
+}
+
+// The same arithmetic seen from the other side: when a group ends, the pen moves on by the COLUMNS it
+// covered. Nothing else can put the following group in the right place -- the grouper is handed each
+// cell's position but only reads it when a blank or a box-drawing glyph forces a restart.
+TEST_CASE("TextClusterGrouper.the pen moves on by columns, not by cells")
+{
+    auto recorder = EventRecorder {};
+    auto grouper = TextClusterGrouper(recorder);
+    auto const color = RGBColor { 0xF0, 0x80, 0x40 };
+
+    // 'a' at column 0, a double-width character at column 1, 'b' at column 3. Each differs from its
+    // neighbour in sizing, so each is its own group and every group start is an independent assertion.
+    grouper.beginFrame();
+    for (auto const [codepoint, columns]: std::array { std::pair { U'a', uint8_t { 1 } },
+                                                       std::pair { U'你', uint8_t { 2 } },
+                                                       std::pair { U'b', uint8_t { 1 } } })
+        grouper.renderCell(CellLocation {}, // deliberately not the true position: the pen must be derived
+                           std::u32string_view(&codepoint, 1),
+                           color,
+                           TextStyle::Regular,
+                           LineFlag::None,
+                           vtbackend::GlyphSizing { .columns = columns });
+    grouper.endFrame();
+
+    REQUIRE(recorder.events.size() == 3);
+    CHECK(get<TextClusterGroup>(recorder.events[0]).initialPenPosition.column == ColumnOffset(0));
+    CHECK(get<TextClusterGroup>(recorder.events[1]).initialPenPosition.column == ColumnOffset(1));
+    CHECK(get<TextClusterGroup>(recorder.events[2]).initialPenPosition.column == ColumnOffset(3)); // was 2
+}
+
 TEST_CASE("TextClusterGrouper.a uniform level does not split")
 {
     auto recorder = EventRecorder {};

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtrasterizer/TextClusterGrouper.h>
 
+#include <algorithm>
 #include <cassert>
 
 namespace vtrasterizer
@@ -16,6 +17,10 @@ void TextClusterGrouper::beginFrame() noexcept
     {
         _codepoints.clear();
         _clusters.clear();
+
+        // The column count is what the next cluster is numbered from, so leaving it behind here would
+        // start the frame counting from a dead group's width.
+        _columnCount = 0;
     }
 
     auto constexpr DefaultColor = vtbackend::RGBColor {};
@@ -42,8 +47,20 @@ void TextClusterGrouper::renderLine(std::u32string_view text,
     for (auto const cp: text)
     {
         auto const gridPosition = vtbackend::CellLocation { .line = lineOffset, .column = columnOffset };
-        auto const width = unicode::width(cp);
-        renderCell(gridPosition, std::u32string_view(&cp, 1), foregroundColor, style, flags);
+        auto const width = std::max(1u, unicode::width(cp));
+
+        // The column span travels as GlyphSizing::columns, the same parameter the grid path uses. The
+        // two do not compute it alike, though: this path walks codepoints and asks unicode::width,
+        // while the grid path asks unicode::grapheme_cluster_width over a whole cluster, so they
+        // disagree wherever a cluster is more than one codepoint (`#` + U+FE0F). Pre-existing, and
+        // only reachable on trivial lines -- but it now decides where a glyph is drawn, not merely
+        // where a local counter stands.
+        renderCell(gridPosition,
+                   std::u32string_view(&cp, 1),
+                   foregroundColor,
+                   style,
+                   flags,
+                   vtbackend::GlyphSizing { .columns = static_cast<uint8_t>(width) });
 
         for (unsigned i = 1; i < width; ++i)
             renderCell(vtbackend::CellLocation { .line = gridPosition.line,
@@ -53,7 +70,7 @@ void TextClusterGrouper::renderLine(std::u32string_view text,
                        style,
                        flags);
 
-        columnOffset += vtbackend::ColumnOffset::cast_from(std::max(1u, width));
+        columnOffset += vtbackend::ColumnOffset::cast_from(width);
     }
 
     if (!_codepoints.empty())
@@ -104,14 +121,14 @@ void TextClusterGrouper::appendCellTextToClusterGroup(std::u32string_view codepo
     // A shaping run may never straddle a change of writing direction: the shaper is told which way
     // to lay the whole run out, so a group holding both would be wrong whichever answer it got.
     // A level change therefore ends the group, exactly as a colour change does.
-    bool const attribsChanged = color != _color || style != _style || flags != _lineFlags
-                                || sizing != _sizing || bidiLevel != _bidiLevel;
+    bool const attribsChanged = color != _color || style != _style || flags != _lineFlags || sizing != _sizing
+                                || bidiLevel != _bidiLevel;
     bool const cellIsEmpty = codepoints.empty() || codepoints[0] == 0x20;
-    bool const textStartsNewCluster = _cellCount == 0 && !cellIsEmpty;
+    bool const textStartsNewCluster = _columnCount == 0 && !cellIsEmpty;
 
     if (attribsChanged || textStartsNewCluster)
     {
-        if (_cellCount)
+        if (_columnCount)
             flushTextClusterGroup(); // also increments text start position
         _color = color;
         _style = style;
@@ -125,9 +142,15 @@ void TextClusterGrouper::appendCellTextToClusterGroup(std::u32string_view codepo
         for (char32_t const codepoint: codepoints)
         {
             _codepoints.emplace_back(codepoint);
-            _clusters.emplace_back(_cellCount);
+            _clusters.emplace_back(static_cast<unsigned>(_columnCount));
         }
-        _cellCount++;
+
+        // Step by the COLUMNS the cell occupies, not by one. The cluster is what the renderer places
+        // the glyph at, so a double-width character must leave a gap of two behind it -- otherwise
+        // every glyph after the first CJK or emoji character on a line lands a column too far left.
+        // The backend already resolved this width; re-deriving it from the shaper's advances cannot
+        // work (a Devanagari conjunct is several advances inside one cell).
+        _columnCount += sizing.columnSpan();
     }
     else
     {
@@ -150,7 +173,7 @@ void TextClusterGrouper::flushTextClusterGroup()
                                 _bidiLevel);
     }
 
-    resetAndMovePenForward(vtbackend::ColumnOffset::cast_from(_cellCount));
+    resetAndMovePenForward(vtbackend::ColumnOffset::cast_from(_columnCount));
 }
 
 void TextClusterGrouper::endFrame()
