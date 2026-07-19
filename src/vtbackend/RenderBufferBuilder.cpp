@@ -152,17 +152,18 @@ optional<RenderCursor> RenderBufferBuilder::renderCursor() const
                                + boxed_cast<LineOffset>(_terminal->viewport().scrollOffset()),
                        .column = _cursorPosition->column };
 
-    auto const cellWidth = _terminal->currentScreen().cellWidthAt(*_cursorPosition);
+    auto const cellWidth = _screen->cellWidthAt(*_cursorPosition);
 
     // Resolve cursor color from the cell under the cursor, using the same logic as makeColorsForCell
     // for Block cursor inversion. This ensures the cursor color reflects actual cell content rather
     // than only palette defaults.
     auto const resolvedCursorColor = [&]() -> RGBColor {
         auto const& colorPalette = _terminal->colorPalette();
-        auto const cellFlags = _terminal->currentScreen().cellFlagsAt(*_cursorPosition);
-        // Access the cell through the current screen's virtual interface to obtain colors.
-        auto const cellFg = _terminal->currentScreen().cellForegroundColorAt(*_cursorPosition);
-        auto const cellBg = _terminal->currentScreen().cellBackgroundColorAt(*_cursorPosition);
+        auto const cellFlags = _screen->cellFlagsAt(*_cursorPosition);
+        // Read through the screen being rendered, not the terminal's current one: a status line and
+        // a non-displayed page render through this same builder.
+        auto const cellFg = _screen->cellForegroundColorAt(*_cursorPosition);
+        auto const cellBg = _screen->cellBackgroundColorAt(*_cursorPosition);
         auto const sgrColors = CellUtil::makeColors(colorPalette,
                                                     _colorLookupTable,
                                                     cellFlags,
@@ -302,7 +303,8 @@ RGBColorPair RenderBufferBuilder::makeColorsForCell(CellLocation gridPosition,
 
     auto const selected =
         _includeSelection
-        && _terminal->isSelected(CellLocation { .line = gridPosition.line, .column = gridPosition.column });
+        && _terminal->isSelected(*_screen,
+                                 CellLocation { .line = gridPosition.line, .column = gridPosition.column });
     auto const highlighted =
         _terminal->isHighlighted(CellLocation { .line = gridPosition.line, .column = gridPosition.column });
     auto const blink = _terminal->blinkState();
@@ -359,7 +361,10 @@ RenderLine RenderBufferBuilder::createRenderLine(TrivialLineBuffer const& lineBu
 
 bool RenderBufferBuilder::gridLineContainsCursor(LineOffset lineOffset) const noexcept
 {
-    if (_terminal->currentScreen().cursor().position.line == lineOffset)
+    // The cursor of the screen being RENDERED. Asking the current screen reports the main cursor's
+    // line while rendering a status line, forcing an unrelated line off the trivial fast path on
+    // every frame and drawing the cursor row in the wrong place.
+    if (_screen->cursor().position.line == lineOffset)
         return true;
 
     if (_cursorPosition && _terminal->inputHandler().mode() != ViMode::Insert)

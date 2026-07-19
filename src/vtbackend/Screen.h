@@ -937,10 +937,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Images transmitted by a kitty graphics command but not yet displayed, keyed by their `i=` id.
     std::unordered_map<uint32_t, std::shared_ptr<Image const>> _kittyImages {};
 
-    /// Clipboard data accumulated across the `wdata` packets of one kitty clipboard write, and
-    /// whether such a write is currently open. Data arriving without an opening `write` is refused.
-    std::string _kittyClipboardWrite {};
-    bool _kittyClipboardWriteOpen = false;
+    // NOTE: the `OSC 5522` write transmission lives on Terminal, not here: an application may switch
+    // screens (DECSASD, or a page change) between chunks, and a per-screen buffer would drop the
+    // chunks that landed elsewhere while still answering DONE. @see Terminal::kittyClipboardWrite.
 
     GraphicsAttributes _savedGraphicsRenditions {};
 

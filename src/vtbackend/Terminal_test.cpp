@@ -1427,6 +1427,29 @@ TEST_CASE("Terminal.selection_does_not_pad_wide_characters", "[terminal]")
     CHECK(mock.terminal.extractSelectionText() == "\u4e2dab");
 }
 
+TEST_CASE("Terminal.a_one_column_selection_still_breaks_lines", "[terminal]")
+{
+    // The line-break test asks "has anything been written yet", and used the accumulated text to
+    // answer -- the same proxy flushLine was fixed away from, in the other of the two places that
+    // used it. A one-column selection emits every callback at the same column, so the only thing that
+    // could trigger a flush is that proxy, and it stays false because text only becomes non-empty
+    // inside the flush it is gating.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(4) } };
+    mock.writeToScreen("a\r\nb\r\nc"sv);
+
+    // Rectangular: every callback lands on the same column, which is what leaves the line-break test
+    // with nothing else to go on.
+    mock.terminal.setSelector(std::make_unique<vtbackend::RectangularSelection>(
+        mock.terminal.selectionHelper(),
+        CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+        []() {}));
+    (void) mock.terminal.selector()->extend(
+        CellLocation { .line = LineOffset(2), .column = ColumnOffset(0) });
+    mock.terminal.selector()->complete();
+
+    CHECK(mock.terminal.extractSelectionText() == "a\nb\nc");
+}
+
 TEST_CASE("Terminal.selection_keeps_leading_blank_lines", "[terminal]")
 {
     // A blank line inside a selection is a line the user selected, so it must copy as a newline. The
@@ -4179,9 +4202,12 @@ TEST_CASE("Terminal.TextSelection_drag_into_blank_stops_at_the_pointer", "[termi
     mock.terminal.sendMouseMoveEvent(
         Modifier::None, 0_lineOffset + 6_columnOffset, PixelCoordinate, UiHandledHint);
 
-    CHECK(mock.terminal.isSelected(CellLocation { .line = LineOffset(0), .column = ColumnOffset(5) }));
-    CHECK_FALSE(mock.terminal.isSelected(CellLocation { .line = LineOffset(0), .column = ColumnOffset(7) }));
-    CHECK_FALSE(mock.terminal.isSelected(CellLocation { .line = LineOffset(0), .column = ColumnOffset(19) }));
+    CHECK(mock.terminal.isSelected(mock.terminal.primaryScreen(),
+                                   CellLocation { .line = LineOffset(0), .column = ColumnOffset(5) }));
+    CHECK_FALSE(mock.terminal.isSelected(mock.terminal.primaryScreen(),
+                                         CellLocation { .line = LineOffset(0), .column = ColumnOffset(7) }));
+    CHECK_FALSE(mock.terminal.isSelected(mock.terminal.primaryScreen(),
+                                         CellLocation { .line = LineOffset(0), .column = ColumnOffset(19) }));
 }
 
 TEST_CASE("Terminal.TextSelection_multiline_drag_still_takes_the_first_line_whole", "[terminal]")
@@ -4209,7 +4235,8 @@ TEST_CASE("Terminal.TextSelection_multiline_drag_still_takes_the_first_line_whol
         Modifier::None, 1_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
 
     // Column 15 of the FIRST line is past its text but inside a multi-line selection.
-    CHECK(mock.terminal.isSelected(CellLocation { .line = LineOffset(0), .column = ColumnOffset(15) }));
+    CHECK(mock.terminal.isSelected(mock.terminal.primaryScreen(),
+                                   CellLocation { .line = LineOffset(0), .column = ColumnOffset(15) }));
     // Split so the escape does not run into the text that follows it, which a spell checker reading
     // this file would otherwise take for a single misspelled token.
     CHECK(mock.terminal.extractSelectionText()

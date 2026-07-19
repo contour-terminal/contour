@@ -441,11 +441,13 @@ TEST_CASE("TextSizing.selecting_one_cell_of_a_block_selects_all_of_it", "[textsi
         {
             INFO("row " << row << " column " << column);
             CHECK(mock.terminal.isSelected(
+                mock.terminal.primaryScreen(),
                 CellLocation { .line = LineOffset(row), .column = ColumnOffset(column) }));
         }
 
     // ...and no further: the cell just past the block stays unselected.
-    CHECK_FALSE(mock.terminal.isSelected(CellLocation { .line = LineOffset(0), .column = ColumnOffset(6) }));
+    CHECK_FALSE(mock.terminal.isSelected(mock.terminal.primaryScreen(),
+                                         CellLocation { .line = LineOffset(0), .column = ColumnOffset(6) }));
 }
 
 TEST_CASE("TextSizing.selection_does_not_leak_across_neighbouring_blocks", "[textsizing]")
@@ -463,10 +465,14 @@ TEST_CASE("TextSizing.selection_does_not_leak_across_neighbouring_blocks", "[tex
     (void) mock.terminal.selector()->extend(anchor);
     mock.terminal.selector()->complete();
 
-    CHECK(mock.terminal.isSelected(CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) }));
-    CHECK(mock.terminal.isSelected(CellLocation { .line = LineOffset(0), .column = ColumnOffset(1) }));
-    CHECK_FALSE(mock.terminal.isSelected(CellLocation { .line = LineOffset(0), .column = ColumnOffset(2) }));
-    CHECK_FALSE(mock.terminal.isSelected(CellLocation { .line = LineOffset(0), .column = ColumnOffset(3) }));
+    CHECK(mock.terminal.isSelected(mock.terminal.primaryScreen(),
+                                   CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) }));
+    CHECK(mock.terminal.isSelected(mock.terminal.primaryScreen(),
+                                   CellLocation { .line = LineOffset(0), .column = ColumnOffset(1) }));
+    CHECK_FALSE(mock.terminal.isSelected(mock.terminal.primaryScreen(),
+                                         CellLocation { .line = LineOffset(0), .column = ColumnOffset(2) }));
+    CHECK_FALSE(mock.terminal.isSelected(mock.terminal.primaryScreen(),
+                                         CellLocation { .line = LineOffset(0), .column = ColumnOffset(3) }));
 }
 
 TEST_CASE("TextSizing.the_line_level_selection_test_sees_a_block_reaching_into_the_line", "[textsizing]")
@@ -493,7 +499,8 @@ TEST_CASE("TextSizing.the_line_level_selection_test_sees_a_block_reaching_into_t
     for (auto const row: { 0, 1, 2 })
     {
         INFO("row " << row);
-        CHECK(mock.terminal.isSelected(CellLocation { .line = LineOffset(row), .column = ColumnOffset(3) }));
+        CHECK(mock.terminal.isSelected(mock.terminal.primaryScreen(),
+                                       CellLocation { .line = LineOffset(row), .column = ColumnOffset(3) }));
     }
 }
 
@@ -663,6 +670,57 @@ TEST_CASE("TextSizing.a_block_honours_insert_mode", "[textsizing]")
     CHECK(screen.at(LineOffset(0), ColumnOffset(8)).codepoints() == U"f");
 }
 
+TEST_CASE("TextSizing.insert_mode_shifts_every_row_a_block_claims", "[textsizing]")
+{
+    // A tall block claims `scale` rows, and the loop that claims them overwrites cells on each. IRM
+    // was applied to the head row alone, so the rows beneath still had their characters destroyed --
+    // the exact loss insert mode exists to prevent, fixed on one row out of the block's height.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("abcdef"sv);
+    mock.writeToScreen("\033[2;1H"sv);
+    mock.writeToScreen("ghijkl"sv);
+    mock.writeToScreen("\033[H"sv);
+    mock.writeToScreen("\033[4h"sv); // IRM on
+    mock.writeToScreen("\033]66;s=2;X\a"sv);
+
+    // The block occupies rows 0..1, columns 0..1. Both rows shifted right by two.
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).codepoints() == U"X");
+    CHECK(screen.at(LineOffset(0), ColumnOffset(2)).codepoints() == U"a");
+    CHECK(screen.at(LineOffset(1), ColumnOffset(2)).codepoints() == U"g");
+}
+
+TEST_CASE("TextSizing.insert_mode_does_not_orphan_a_neighbouring_block", "[textsizing]")
+{
+    // insertChars moves one line's cells and knows nothing about MulticellContinuation, so shifting a
+    // line that carries another block's head would move the head while the rows it owns stayed put --
+    // leaving cells that multicellBlockAt cannot resolve and nothing can clean up. Such a block is
+    // destroyed whole instead, exactly as writing over one is.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(12) } };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[1;5H"sv);
+    mock.writeToScreen("\033]66;s=2;B\a"sv); // a block at columns 4..5, rows 0..1
+    REQUIRE(screen.at(LineOffset(1), ColumnOffset(4)).isFlagEnabled(CellFlag::MulticellContinuation));
+
+    mock.writeToScreen("\033[H"sv);
+    mock.writeToScreen("\033[4h"sv);
+    mock.writeToScreen("\033]66;s=2;X\a"sv);
+
+    // Whatever happened to B, no cell may be left claiming a head that is not there.
+    for (auto const column: std::views::iota(0, 12))
+    {
+        INFO("column " << column);
+        auto const cell = screen.at(LineOffset(1), ColumnOffset(column));
+        if (cell.isFlagEnabled(CellFlag::MulticellContinuation))
+            CHECK(
+                screen
+                    .multicellBlockAt(CellLocation { .line = LineOffset(1), .column = ColumnOffset(column) })
+                    .has_value());
+    }
+}
+
 TEST_CASE("TextSizing.a_purely_fractional_request_leaves_the_line_non_trivial", "[textsizing]")
 {
     // kitty's documented half-size example, `OSC 66 ; n=1:d=2:w=1`, is scale 1 in a single ordinary
@@ -772,9 +830,12 @@ TEST_CASE("TextSizing.a_drag_inside_one_row_of_blocks_stays_on_one_line", "[text
         Modifier::None, CellLocation { .line = LineOffset(1), .column = ColumnOffset(3) }, Pixels, UiHandled);
 
     // Still a single-line selection: the caption on row 0 is NOT swept in.
-    CHECK_FALSE(mock.terminal.isSelected(CellLocation { .line = LineOffset(0), .column = ColumnOffset(6) }));
-    CHECK(mock.terminal.isSelected(CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) }));
-    CHECK(mock.terminal.isSelected(CellLocation { .line = LineOffset(1), .column = ColumnOffset(0) }));
+    CHECK_FALSE(mock.terminal.isSelected(mock.terminal.primaryScreen(),
+                                         CellLocation { .line = LineOffset(0), .column = ColumnOffset(6) }));
+    CHECK(mock.terminal.isSelected(mock.terminal.primaryScreen(),
+                                   CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) }));
+    CHECK(mock.terminal.isSelected(mock.terminal.primaryScreen(),
+                                   CellLocation { .line = LineOffset(1), .column = ColumnOffset(0) }));
 }
 
 TEST_CASE("TextSizing.a_drag_that_leaves_the_blocks_still_selects_two_lines", "[textsizing]")
@@ -795,7 +856,8 @@ TEST_CASE("TextSizing.a_drag_that_leaves_the_blocks_still_selects_two_lines", "[
     mock.terminal.sendMouseMoveEvent(
         Modifier::None, CellLocation { .line = LineOffset(2), .column = ColumnOffset(3) }, Pixels, UiHandled);
 
-    CHECK(mock.terminal.isSelected(CellLocation { .line = LineOffset(2), .column = ColumnOffset(0) }));
+    CHECK(mock.terminal.isSelected(mock.terminal.primaryScreen(),
+                                   CellLocation { .line = LineOffset(2), .column = ColumnOffset(0) }));
 }
 
 TEST_CASE("TextSizing.copying_a_block_row_yields_no_blank_trailing_line", "[textsizing]")
@@ -939,31 +1001,4 @@ TEST_CASE("TextSizing.a_block_whose_head_scrolled_above_the_viewport_still_draws
     // Rows 1..3 of the block are on screen; row 0 is not.
     CHECK(std::ranges::find(bands, 0) == bands.end());
     CHECK(std::ranges::find(bands, 1) != bands.end());
-}
-
-TEST_CASE("ZZZ.probe_cursor_below_bottom_margin", "[textsizing]")
-{
-    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(25), ColumnCount(20) }, LineCount(0) };
-    auto& screen = mock.terminal.primaryScreen();
-
-    // Fill every row with a recognizable marker.
-    for (int i = 1; i <= 25; ++i)
-        mock.writeToScreen(std::format("\033[{};1H"
-                                       "row{}",
-                                       i,
-                                       i));
-
-    // Scroll region rows 1..10, cursor to row 20 (below the region; DECOM off).
-    mock.writeToScreen("\033[1;10r"sv);
-    mock.writeToScreen("\033[20;1H"sv);
-    INFO("cursor before: line=" << screen.cursor().position.line.value);
-    CHECK(screen.cursor().position.line.value == 19);
-
-    mock.writeToScreen("\033]66;s=3;A\a"sv);
-
-    INFO("cursor after: line=" << screen.cursor().position.line.value);
-    for (int i = 0; i < 25; ++i)
-        UNSCOPED_INFO("line " << i << " = '" << screen.grid().lineText(LineOffset(i)) << "'");
-    CHECK(screen.cursor().position.line.value == 19);
-    CHECK(screen.at(LineOffset(19), ColumnOffset(0)).codepoints() == U"A");
 }

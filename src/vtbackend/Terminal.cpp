@@ -2172,15 +2172,27 @@ namespace
         /// line, but contributes no characters.
         bool linesEmitted = false;
 
+        /// Whether a cell has been taken for the line being built. A one-column selection emits every
+        /// callback at the same column, so this -- not the accumulated text -- is what tells the
+        /// break test that a line is already under way.
+        bool lineStarted = false;
+
         SelectionRenderer(Terminal const& term, ColumnOffset rightPage): term(&term), rightPage(rightPage) {}
 
         void operator()(CellLocation pos, CellProxy const& cell)
         {
-            auto const isNewLine = pos.column < lastColumn || (pos.column == lastColumn && !text.empty());
+            // "Have we started a line yet" is answered by whether a cell has been taken, not by
+            // whether the accumulated text is non-empty -- the same distinction flushLine draws. A
+            // one-column rectangular selection emits every callback at the SAME column, so this
+            // predicate is the only thing that can start a new line, and the text proxy can never
+            // become true because text is only written inside the flush it was gating: the whole
+            // selection came out as one run.
+            auto const isNewLine = pos.column < lastColumn || (pos.column == lastColumn && lineStarted);
             if (isNewLine && (!term->isLineWrapped(pos.line)))
                 // TODO: handle logical line in word-selection (don't include LF in wrapped lines)
                 flushLine();
 
+            lineStarted = true;
             lastColumn = pos.column;
 
             // A cell that only CONTINUES another carries no text of its own -- horizontally, where its
@@ -2224,6 +2236,7 @@ namespace
             }
             currentLine.clear();
             currentLineHasContent = false;
+            lineStarted = false;
         }
 
         std::string finish()
@@ -2394,6 +2407,11 @@ void Terminal::setFontDef(FontDef const& fontDef)
 
 void Terminal::setPointerShape(std::string shape)
 {
+    // A Set at the bottom of the stack makes that entry the APPLICATION's base shape rather than the
+    // terminal's default, which is what a later pop has to restore.
+    if (_pointerShapes.size() == 1)
+        _pointerShapeBaseSetByApplication = true;
+
     _pointerShapes.back() = std::move(shape);
     _eventListener.setPointerShape(_pointerShapes.back());
 }
@@ -2415,11 +2433,13 @@ void Terminal::popPointerShape()
     if (_pointerShapes.size() > 1)
         _pointerShapes.pop_back();
 
-    // Back at the bottom of the stack the application is no longer imposing anything -- "an empty
-    // stack means the terminal is free to use whatever shape it likes". Reporting the bottom entry's
-    // NAME here would look identical to an application setting that shape, and a frontend caching the
-    // application's choice would never restore its own screen-type defaults again.
-    if (_pointerShapes.size() == 1)
+    // Landing on the bottom means the application is no longer imposing anything ONLY when it never
+    // set a base shape -- "an empty stack means the terminal is free to use whatever shape it likes".
+    // Reporting the bottom entry's name in that case would look identical to an application setting
+    // it, and a frontend caching the application's choice would never restore its own screen-type
+    // defaults again. But when the application DID set a base shape, that shape is exactly what the
+    // pop restores, and signalling a reset instead would throw away a shape it never withdrew.
+    if (_pointerShapes.size() == 1 && !_pointerShapeBaseSetByApplication)
         resetPointerShape();
     else
         _eventListener.setPointerShape(_pointerShapes.back());
@@ -2429,6 +2449,7 @@ void Terminal::resetPointerShape()
 {
     _pointerShapes.erase(std::next(_pointerShapes.begin()), _pointerShapes.end());
     _pointerShapes.back() = std::string(pointer_shape::DefaultName);
+    _pointerShapeBaseSetByApplication = false;
 
     // The empty name is the signal, distinct from any shape an application can name: the terminal is
     // back to its own default and a frontend may resume its own.
@@ -4370,7 +4391,7 @@ CellLocation Terminal::clampDragWithinMulticellBlock(CellLocation anchor, CellLo
     return CellLocation { .line = anchor.line, .column = pointer.column };
 }
 
-bool Terminal::isSelected(CellLocation coord) const noexcept
+bool Terminal::isSelected(Screen const& screen, CellLocation coord) const noexcept
 {
     if (!_selection || _selection->state() == Selection::State::Waiting)
         return false;
@@ -4384,7 +4405,9 @@ bool Terminal::isSelected(CellLocation coord) const noexcept
     //
     // Reached only while a selection is live, and only for cells the selection did not already
     // cover, so ordinary text pays a grid lookup that a trivial line answers immediately.
-    auto const block = currentScreen().multicellBlockAt(coord);
+    // Resolved against the screen the caller is working on: the render path feeds coordinates from
+    // the DISPLAYED page, which with page-cursor coupling reset is not the current one.
+    auto const block = screen.multicellBlockAt(coord);
     if (!block)
         return false;
 

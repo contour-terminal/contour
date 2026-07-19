@@ -109,6 +109,7 @@
         <ul>
           <li>Fixes a tall glyph — a Nerd Font icon, a powerline separator — overwriting a neighbouring glyph in the texture atlas, and no longer shifts such a glyph sideways off its own bearing</li>
           <li>Fixes a hang and a crash on startup when probing the audio device, for profiles that cannot ring an audible bell</li>
+          <li>Fixes the status line and non-displayed pages being drawn against whichever screen was current rather than the one being rendered, which took the cursor row and the cursor colour from the wrong page</li>
           <li>Improves Unicode width measurement: a grapheme cluster is measured as a whole, so ZWJ sequences, skin-tone modifiers and Indic conjuncts occupy the columns they actually need instead of being sized from their first codepoint. Following terminal-unicode-core, VS16 promotes a cluster to the emoji presentation and may widen it to two columns, while VS15 selects the text presentation without changing the width — a cluster already on screen is never narrowed. Cluster measurement is on by default and can be turned off with DEC mode 2027: resetting it returns width measurement to the classic per-codepoint wcwidth() model, where a cluster is sized by its first codepoint and nothing arriving later revises it</li>
           <li>Adds the kitty graphics protocol (APC G): transmitting, displaying, placing and deleting images, in PNG or raw RGB/RGBA, including chunked transmission</li>
           <li>Adds the iTerm2 OSC 1337 extensions: the capabilities report and inline images</li>

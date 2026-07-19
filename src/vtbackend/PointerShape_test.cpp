@@ -76,6 +76,27 @@ TEST_CASE("PointerShape.an_empty_payload_resets_to_the_default", "[pointershape]
     CHECK(mock.terminal.pointerShape() == pointer_shape::DefaultName);
 }
 
+TEST_CASE("PointerShape.a_pop_restores_an_application_set_base_shape", "[pointershape]")
+{
+    // The stack's bottom entry is not always the terminal default: a plain Set writes the
+    // application's own shape there. Popping must restore THAT, not replace it with the default --
+    // otherwise an application that sets a shape for its whole UI and pushes a different one around
+    // a field loses its own shape the moment it pops back.
+    //
+    // The sibling test uses "text", which happens to equal DefaultName, so it cannot see this.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen("\033]22;pointer\033\\"sv); // the application's own base shape
+    REQUIRE(mock.terminal.pointerShape() == "pointer");
+
+    mock.writeToScreen("\033]22;>text\033\\"sv); // pushed around an editable field
+    REQUIRE(mock.terminal.pointerShape() == "text");
+
+    mock.writeToScreen("\033]22;<\033\\"sv); // leaving the field
+    CHECK(mock.terminal.pointerShape() == "pointer");
+    CHECK(mock.pointerShapeNotifications.back() == "pointer");
+}
+
 TEST_CASE("PointerShape.returning_to_the_default_is_signalled_as_a_reset", "[pointershape]")
 {
     // A frontend caches the application's shape so it survives the next mouse move -- but it needs to

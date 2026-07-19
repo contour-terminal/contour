@@ -4815,8 +4815,32 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
     switch (packet.type)
     {
         case PacketType::Read: {
+            // Contour has no primary selection, and the spec's answer for a location it cannot serve
+            // is ENOSYS -- not silently using the system clipboard instead.
+            if (packet.location == Location::PrimarySelection)
+            {
+                respond("ENOSYS");
+                return ApplyResult::Ok;
+            }
+
+            auto const requested = crispy::base64::decode(packet.payload);
+
+            // A payload of a single period asks which MIME types are on the clipboard. The spec
+            // serves that WITHOUT a permission prompt, so that a client is not prompted twice: once
+            // to discover the types and again to read them. Running it through the supported-type
+            // check refused it, which is the one answer the form cannot mean.
+            if (requested == ".")
+            {
+                respond("OK");
+                reply("\033]5522;type=read:status=DATA:mime={};\033\\",
+                      crispy::base64::encode(std::string_view { "text/plain" }));
+                respond("DONE");
+                return ApplyResult::Ok;
+            }
+
             // Reading the clipboard lets an application exfiltrate whatever the user last copied,
-            // so it is gated by the same setting OSC 52 reads are.
+            // so it is gated by the same setting OSC 52 reads are. The TARGETS probe above is
+            // deliberately answered first: it reveals only which types exist, not their contents.
             if (!_terminal->settings().allowClipboardRead)
             {
                 respond("EPERM");
@@ -4826,7 +4850,6 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
             // The payload lists the MIME types the application will accept. If none of them is one
             // this terminal can produce, say so rather than sending text under a type it did not ask
             // for.
-            auto const requested = crispy::base64::decode(packet.payload);
             auto accepted = false;
             for (auto const& mimeType: crispy::split(requested, ' '))
                 if (isSupportedMimeType(mimeType))
@@ -4837,30 +4860,42 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
                 return ApplyResult::Ok;
             }
 
-            // The protocol has its own reply shape: an OK, then one DATA packet per MIME type
-            // carrying a base64 mime and base64 data, then DONE. Delegating to OSC 52 sent a reply
-            // in a different protocol entirely -- a client parsing for `\033]5522;` waits until its
-            // read timeout, while a legacy OSC 52 handler in the same client may swallow the answer
-            // as an unsolicited paste.
+            // The protocol has its own reply shape: an OK, then one or more DATA packets per MIME
+            // type carrying a base64 mime and base64 data, then DONE. Delegating to OSC 52 sent a
+            // reply in a different protocol entirely.
             //
-            // Contour's clipboard is text, so exactly one type is ever delivered. The spec caps a
-            // DATA chunk at 4096 bytes before encoding, which this stays under for any realistic
-            // selection and would need chunking to exceed.
+            // The data is chunked at 4096 bytes BEFORE encoding, as the spec requires: a client with
+            // a bounded OSC buffer truncates or drops a single oversized packet, and a copied log
+            // tail reaches hundreds of KiB routinely.
             auto const content = _terminal->clipboardContent();
+            auto const mime = crispy::base64::encode(std::string_view { "text/plain" });
             respond("OK");
-            reply("\033]5522;type=read:status=DATA:mime={};{}\033\\",
-                  crispy::base64::encode(std::string_view { "text/plain" }),
-                  crispy::base64::encode(content.begin(), content.end()));
+            for (size_t offset = 0; offset < content.size(); offset += kitty_clipboard::ReadChunkSize)
+            {
+                auto const chunk =
+                    std::string_view { content }.substr(offset, kitty_clipboard::ReadChunkSize);
+                reply("\033]5522;type=read:status=DATA:mime={};{}\033\\",
+                      mime,
+                      crispy::base64::encode(chunk.begin(), chunk.end()));
+            }
             respond("DONE");
             return ApplyResult::Ok;
         }
 
         case PacketType::Write:
+            // Contour has no primary selection; per spec that is ENOSYS rather than quietly writing
+            // the system clipboard and reporting DONE.
+            if (packet.location == Location::PrimarySelection)
+            {
+                respond("ENOSYS");
+                return ApplyResult::Ok;
+            }
+
             // A write opens a transmission; the data arrives in the wdata packets that follow. The
             // protocol has the terminal answer only once the transmission ENDS, so there is no reply
             // here -- an extra unsolicited packet is one a strict client is not expecting.
-            _kittyClipboardWrite.clear();
-            _kittyClipboardWriteOpen = true;
+            _terminal->kittyClipboardWrite().clear();
+            _terminal->kittyClipboardWriteOpen() = true;
             return ApplyResult::Ok;
 
         case PacketType::WriteAlias:
@@ -4869,15 +4904,15 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
             return ApplyResult::Ok;
 
         case PacketType::WriteData: {
-            if (!_kittyClipboardWriteOpen)
+            if (!_terminal->kittyClipboardWriteOpen())
                 return ApplyResult::Invalid;
 
             if (!isSupportedMimeType(packet.mimeType))
             {
                 // Refuse rather than accept and drop: an application told its data was stored, which
                 // then reads back something else, is worse off than one told no.
-                _kittyClipboardWriteOpen = false;
-                _kittyClipboardWrite.clear();
+                _terminal->kittyClipboardWriteOpen() = false;
+                _terminal->kittyClipboardWrite().clear();
                 respond("ENOSYS");
                 return ApplyResult::Ok;
             }
@@ -4885,9 +4920,9 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
             // An empty chunk is the end-of-transmission marker.
             if (packet.payload.empty())
             {
-                _terminal->copyToClipboard(_kittyClipboardWrite);
-                _kittyClipboardWrite.clear();
-                _kittyClipboardWriteOpen = false;
+                _terminal->copyToClipboard(_terminal->kittyClipboardWrite());
+                _terminal->kittyClipboardWrite().clear();
+                _terminal->kittyClipboardWriteOpen() = false;
                 respond("DONE");
                 return ApplyResult::Ok;
             }
@@ -4898,16 +4933,16 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
             // data the application asked to store. @see kitty_graphics::MaxChunkedPayloadSize, which
             // bounds the other chunked protocol the same way.
             auto const decoded = crispy::base64::decode(packet.payload);
-            if (_kittyClipboardWrite.size() + decoded.size() > MaxClipboardWriteSize)
+            if (_terminal->kittyClipboardWrite().size() + decoded.size() > MaxClipboardWriteSize)
             {
-                _kittyClipboardWriteOpen = false;
-                _kittyClipboardWrite.clear();
-                _kittyClipboardWrite.shrink_to_fit();
+                _terminal->kittyClipboardWriteOpen() = false;
+                _terminal->kittyClipboardWrite().clear();
+                _terminal->kittyClipboardWrite().shrink_to_fit();
                 respond("EIO");
                 return ApplyResult::Ok;
             }
 
-            _kittyClipboardWrite += decoded;
+            _terminal->kittyClipboardWrite() += decoded;
             return ApplyResult::Ok;
         }
     }
@@ -5116,10 +5151,30 @@ void Screen::writeSizedText(std::u32string_view codepoints, uint8_t columns, Cel
 
     // A sized block is text, so insert mode applies to it as it does to every other write path:
     // writeCharToCurrentAndAdvance shifts the line right before writing, and applyClusterWidthChange
-    // compensates for a cluster that grows. Without this an editor using IRM plus `OSC 66` had the
-    // characters under the block destroyed instead of pushed right.
+    // compensates for a cluster that grows.
+    //
+    // EVERY row the block claims shifts, not just its head: the loop below writes continuation cells
+    // into each of them, so shifting only the head left the rows beneath to be overwritten -- the
+    // very loss insert mode exists to prevent, fixed on one row out of the block's height.
+    //
+    // A block already sitting in the way cannot be shifted intact. insertChars moves one line's cells
+    // and knows nothing about MulticellContinuation, so it would carry a head sideways while the rows
+    // it owns stayed put, leaving cells that multicellBlockAt cannot resolve and that nothing can
+    // clean up afterwards. Each such block is destroyed whole first, exactly as writing over one is.
     if (_terminal->isModeEnabled(AnsiMode::Insert))
-        insertChars(_cursor.position.line, ColumnCount::cast_from(columns));
+    {
+        for (auto const row: std::views::iota(0, static_cast<int>(unbox(height))))
+        {
+            auto const lineOffset = _cursor.position.line + LineOffset::cast_from(row);
+            if (lineOffset >= boxed_cast<LineOffset>(pageSize().lines))
+                break;
+
+            for (auto const column: std::views::iota(*_cursor.position.column, *lastWritableColumn() + 1))
+                eraseMulticellBlockAt(CellLocation { .line = lineOffset, .column = ColumnOffset(column) });
+
+            insertChars(lineOffset, ColumnCount::cast_from(columns));
+        }
+    }
 
     // The cells this block is about to claim may already belong to blocks on screen -- a run that
     // wrapped lands on the very row the previous run's blocks reach down into. Each of those is
@@ -5308,8 +5363,8 @@ void Screen::resetKittyState() noexcept
     _kittyChunkedPayload.clear();
     _kittyChunkedCommand.reset();
     _kittyImages.clear();
-    _kittyClipboardWrite.clear();
-    _kittyClipboardWriteOpen = false;
+    _terminal->kittyClipboardWrite().clear();
+    _terminal->kittyClipboardWriteOpen() = false;
 }
 
 void Screen::processKittyGraphics(std::string_view body)

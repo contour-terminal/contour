@@ -1309,7 +1309,10 @@ class Terminal
     /// A multi-cell block (a wide character, or an `OSC 66` text-sizing block) is indivisible: if any
     /// of its cells is selected, all of them are. Highlighting half a glyph would show a selection
     /// the user cannot have meant and cannot correct.
-    [[nodiscard]] bool isSelected(CellLocation coord) const noexcept;
+    /// @param screen the screen @p coord belongs to. The render path works on the DISPLAYED page,
+    ///               which is not the current screen once page-cursor coupling is reset, and a block
+    ///               resolved against the wrong screen highlights the wrong cells.
+    [[nodiscard]] bool isSelected(Screen const& screen, CellLocation coord) const noexcept;
 
     /// Keeps a drag that stays inside one row of tall blocks from becoming a multi-line selection.
     ///
@@ -1465,6 +1468,11 @@ class Terminal
     {
         return _settings.allowClipboardRead ? _eventListener.getClipboard() : std::string {};
     }
+
+    /// The buffer an `OSC 5522` write accumulates into, and whether such a write is open.
+    /// @see _kittyClipboardWrite.
+    [[nodiscard]] std::string& kittyClipboardWrite() noexcept { return _kittyClipboardWrite; }
+    [[nodiscard]] bool& kittyClipboardWriteOpen() noexcept { return _kittyClipboardWriteOpen; }
 
     void openDocument(std::string_view data);
     void inspect();
@@ -2239,9 +2247,20 @@ class Terminal
     std::shared_ptr<SixelColorPalette> _sixelColorPalette;
     ImagePool _imagePool;
 
+    /// Clipboard data accumulated across the `wdata` packets of one `OSC 5522` write, and whether
+    /// such a write is open. Terminal-level rather than per-screen: an application may switch screens
+    /// between chunks, and the transmission is the terminal's, not any one screen's.
+    std::string _kittyClipboardWrite {};
+    bool _kittyClipboardWriteOpen = false;
+
     /// The mouse pointer shape stack (`OSC 22`), innermost last. Never empty: the bottom entry is
     /// the terminal's default.
     std::vector<std::string> _pointerShapes { std::string(pointer_shape::DefaultName) };
+
+    /// Whether the bottom of @c _pointerShapes holds a shape the APPLICATION set, rather than the
+    /// terminal's own default. A pop landing there restores the former and signals a reset only for
+    /// the latter. @see popPointerShape.
+    bool _pointerShapeBaseSetByApplication = false;
     ImageDecoderCallback _imageDecoder;
 
     std::vector<ColumnOffset> _tabs;

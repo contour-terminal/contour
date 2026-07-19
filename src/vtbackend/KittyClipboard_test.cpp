@@ -176,6 +176,81 @@ TEST_CASE("KittyClipboard.read_is_refused_when_not_permitted", "[kittyclipboard]
     CHECK(mock.terminal.peekInput() == "\033]5522;type=read:status=EPERM\033\\");
 }
 
+TEST_CASE("KittyClipboard.a_write_to_the_primary_selection_is_refused", "[kittyclipboard]")
+{
+    // `loc=primary` targets the X11 primary selection, which Contour does not implement. The spec's
+    // answer for that is ENOSYS. Ignoring the key instead destroys whatever the user last copied with
+    // Ctrl+Shift+C and then reports DONE, so the application believes it wrote where it asked.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
+    mock.clipboardData = "user selection";
+
+    mock.writeToScreen("\033]5522;type=write:loc=primary\033\\"sv);
+    mock.writeToScreen(std::format("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==;{}\033\\",
+                                   crispy::base64::encode("clobber"sv)));
+    mock.writeToScreen("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==;\033\\"sv);
+
+    CHECK(mock.terminal.peekInput().find("status=ENOSYS") != std::string_view::npos);
+    CHECK(mock.clipboardData == "user selection");
+}
+
+TEST_CASE("KittyClipboard.the_targets_probe_lists_the_available_types", "[kittyclipboard]")
+{
+    // A payload of a single base64-encoded period asks which MIME types are on the clipboard. The
+    // spec serves it without a permission prompt, precisely so a client is not prompted twice (once
+    // to list, once to read). Running '.' through the supported-type check refuses it instead.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
+    mock.terminal.settings().allowClipboardRead = true;
+    mock.clipboardData = "hello";
+
+    mock.writeToScreen(std::format("\033]5522;type=read;{}\033\\", crispy::base64::encode("."sv)));
+
+    auto const reply = std::string(mock.terminal.peekInput());
+    CHECK(reply.find("status=ENOSYS") == std::string::npos);
+    // The answer names the type rather than carrying the data.
+    CHECK(reply.find(std::string(crispy::base64::encode("text/plain"sv))) != std::string::npos);
+    CHECK(reply.find("status=DONE") != std::string::npos);
+}
+
+TEST_CASE("KittyClipboard.a_large_read_is_chunked", "[kittyclipboard]")
+{
+    // "The terminal emulator should chunk up the data for an individual type, into chunks of size no
+    // more than 4096 bytes (4096 is the size of a chunk BEFORE base64 encoding)". A client with a
+    // bounded OSC buffer truncates or drops a single oversized packet.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
+    mock.terminal.settings().allowClipboardRead = true;
+    mock.clipboardData = std::string(10000, 'x');
+
+    mock.writeToScreen(std::format("\033]5522;type=read;{}\033\\", crispy::base64::encode("text/plain"sv)));
+
+    auto const reply = std::string(mock.terminal.peekInput());
+    auto dataPackets = size_t { 0 };
+    for (auto pos = reply.find("status=DATA"); pos != std::string::npos;
+         pos = reply.find("status=DATA", pos + 1))
+        ++dataPackets;
+    // 10000 bytes at 4096 per chunk is three packets, not one.
+    CHECK(dataPackets == 3);
+}
+
+TEST_CASE("KittyClipboard.a_write_survives_a_status_line_switch", "[kittyclipboard]")
+{
+    // The transmission belongs to the TERMINAL, not to whichever screen the sequence happened to be
+    // dispatched to. A status-line-updating program switches with DECSASD between chunks; if the
+    // buffer lives on the screen, those chunks land on the status screen (which has no open
+    // transmission), their bytes are dropped, and the final chunk still answers DONE.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
+
+    mock.writeToScreen("\033]5522;type=write\033\\"sv);
+    mock.writeToScreen(
+        std::format("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==;{}\033\\", crispy::base64::encode("one "sv)));
+    mock.writeToScreen("\033[1$}"sv); // DECSASD: to the status line
+    mock.writeToScreen(
+        std::format("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==;{}\033\\", crispy::base64::encode("two"sv)));
+    mock.writeToScreen("\033[0$}"sv); // back to the main display
+    mock.writeToScreen("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==;\033\\"sv);
+
+    CHECK(mock.clipboardData == "one two");
+}
+
 TEST_CASE("KittyClipboard.a_read_is_answered_in_the_5522_protocol", "[kittyclipboard]")
 {
     // The spec answers a read with its own packets -- an OK, then one DATA packet per MIME type

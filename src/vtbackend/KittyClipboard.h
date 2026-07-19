@@ -19,6 +19,13 @@ namespace vtbackend::kitty_clipboard
 /// any plausible clipboard payload.
 inline constexpr size_t MaxClipboardWriteSize = 8 * 1024 * 1024;
 
+/// Largest amount of clipboard data one read-reply `DATA` packet may carry, before base64 encoding.
+///
+/// "The terminal emulator should chunk up the data for an individual type, into chunks of size no
+/// more than 4096 bytes (4096 is the size of a chunk *before* base64 encoding)." A client with a
+/// bounded OSC buffer truncates or drops a single oversized packet.
+inline constexpr size_t ReadChunkSize = 4096;
+
 /// What an `OSC 5522` packet is asking for (`type=`).
 enum class PacketType : uint8_t
 {
