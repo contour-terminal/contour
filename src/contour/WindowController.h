@@ -141,9 +141,18 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// config gate live in exactly one table. The vertical component is ignored: the strip does not
     /// scroll.
     ///
+    /// Takes the whole event rather than its horizontal angle alone: a trackpad reports pixel deltas and
+    /// no angle at all, so a swipe judged only by angle would never move a tab, and the gesture phase and
+    /// the platform's natural-scrolling flag are what decide which way it should move.
+    ///
+    /// @param pixelDeltaX Horizontal pixel-precise delta (trackpads), or 0.
+    /// @param pixelDeltaY Vertical pixel-precise delta, used to tell a sideways gesture from a vertical one.
     /// @param angleDeltaX Horizontal angle delta, in the same units Qt reports (120 per notch).
-    /// @param angleDeltaY Vertical angle delta, used only to tell a sideways gesture from a vertical one.
-    Q_INVOKABLE void dispatchTabStripWheel(int angleDeltaX, int angleDeltaY);
+    /// @param angleDeltaY Vertical angle delta, used to tell a sideways gesture from a vertical one.
+    /// @param phase       The gesture phase, as a vtbackend::ScrollPhase (QML has no enum to pass).
+    /// @param inverted    Whether the platform already flipped the delta for natural scrolling.
+    Q_INVOKABLE void dispatchTabStripWheel(
+        int pixelDeltaX, int pixelDeltaY, int angleDeltaX, int angleDeltaY, int phase, bool inverted);
     Q_INVOKABLE void moveTab(int fromIndex, int toIndex);
     /// The raw id of the window this controller adapts, so a QML drag payload can name its source
     /// window and a DropArea can target the destination window across the shared engine.

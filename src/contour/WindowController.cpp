@@ -341,35 +341,49 @@ QString WindowController::tabWorkingDirectory(int index) const
         abbreviateHomePath(session->displayWorkingDirectory(), QDir::homePath().toStdString()));
 }
 
-void WindowController::dispatchTabStripWheel(int angleDeltaX, int angleDeltaY)
+void WindowController::dispatchTabStripWheel(
+    int pixelDeltaX, int pixelDeltaY, int angleDeltaX, int angleDeltaY, int phase, bool inverted)
 {
     auto* session = activeSession();
     if (session == nullptr)
         return;
 
-    // QML's WheelEvent exposes no gesture phase, so every event is judged as a discrete notch. That is
-    // the right reading for a wheel tilt; a phase-less trackpad driver reporting both axes at once is
-    // declined rather than guessed at.
+    auto const pixelDelta = crispy::point { .x = pixelDeltaX, .y = pixelDeltaY };
     auto const angleDelta = crispy::point { .x = angleDeltaX, .y = angleDeltaY };
-    if (!_tabStripWheelGesture.acceptsHorizontal({}, angleDelta, vtbackend::ScrollPhase::NoPhase))
+    // Translated, not cast: QML can only hand the phase across as an int, and the two enumerations
+    // agreeing numerically today is a coincidence rather than a contract.
+    auto const scrollPhase = mapScrollPhase(static_cast<Qt::ScrollPhase>(phase));
+
+    if (!_tabStripWheelGesture.acceptsHorizontal(pixelDelta, angleDelta, scrollPhase, inverted))
         return;
 
-    // One NOTCH is one tab. Deliberately NOT the 40-unit step consumeScroll() uses: that one quantizes
-    // continuous scrolling and a notch is three of them, so borrowing it would walk three tabs per detent.
-    auto constexpr AngleUnitsPerNotch = 120;
-    _tabStripWheelAccumulator += angleDeltaX;
-    auto const notches = _tabStripWheelAccumulator / AngleUnitsPerNotch;
-    if (notches == 0)
-        return;
-    _tabStripWheelAccumulator -= notches * AngleUnitsPerNotch;
+    // A pixel-precise swipe never reaches a notch. The accumulator below counts ANGLE units, of which a
+    // trackpad produces none, so measuring a swipe against it would silently do nothing at all — one
+    // swipe is simply one step, which consumeNavigationStep() below already guarantees.
+    if (pixelDelta.x == 0)
+    {
+        // One NOTCH is one tab. Deliberately NOT the 40-unit step consumeScroll() uses: that one
+        // quantizes continuous scrolling and a notch is three of them, so borrowing it would walk three
+        // tabs per detent.
+        auto constexpr AngleUnitsPerNotch = 120;
+        _tabStripWheelAccumulator += angleDeltaX;
+        auto const notches = _tabStripWheelAccumulator / AngleUnitsPerNotch;
+        if (notches == 0)
+            return;
+        _tabStripWheelAccumulator -= notches * AngleUnitsPerNotch;
+    }
 
     // One switch per event even when several notches arrive coalesced: a gesture is a unit of intent, and
     // it moves one tab, as a browser does with the same swipe.
     if (!_tabStripWheelGesture.consumeNavigationStep())
         return;
 
-    session->applyFallbackMouseBinding(notches > 0 ? vtbackend::MouseButton::WheelRight
-                                                   : vtbackend::MouseButton::WheelLeft);
+    // Same rule as the terminal view's navigation gate, from the same function: a swipe follows the
+    // fingers, a wheel tilt is taken literally. Nothing here feeds mouse reporting, so it is resolved at
+    // the call rather than after a decline.
+    auto const towardsRight = (pixelDelta.x != 0 ? pixelDelta.x : angleDeltaX) > 0;
+    session->applyFallbackMouseBinding(
+        horizontalNavigationButton(towardsRight, _tabStripWheelGesture.usesNaturalDirection()));
 }
 
 void WindowController::moveTab(int fromIndex, int toIndex)

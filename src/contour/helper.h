@@ -5,6 +5,7 @@
 #include <contour/WindowGeometry.h>
 
 #include <vtbackend/InputGenerator.h>
+#include <vtbackend/Terminal.h> // vtbackend::ScrollPhase
 
 #include <vtrasterizer/GridMetrics.h>
 
@@ -156,6 +157,16 @@ constexpr inline vtbackend::MouseButton makeMouseButton(Qt::MouseButton button)
 /// @param ch The (possibly shifted) input codepoint.
 /// @return The un-shifted base codepoint, or @p ch if it is not a recognized shifted symbol.
 [[nodiscard]] char32_t unshiftedCodepoint(char32_t ch) noexcept;
+
+/// Maps Qt's scroll phase onto the platform-independent vtbackend enum.
+///
+/// Shared rather than local to the QWheelEvent path, because the QML wheel handler needs the same
+/// mapping: QML hands a phase across as a plain int, and the two enumerations agreeing numerically
+/// today is a coincidence to translate through, not one to rely on.
+///
+/// @param phase The phase Qt reported.
+/// @return The corresponding vtbackend phase; NoPhase for anything unrecognized.
+[[nodiscard]] vtbackend::ScrollPhase mapScrollPhase(Qt::ScrollPhase phase) noexcept;
 
 class TerminalSession;
 bool sendKeyEvent(QKeyEvent* keyEvent, vtbackend::KeyboardEventType eventType, TerminalSession& session);

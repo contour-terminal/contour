@@ -1139,12 +1139,13 @@ void TerminalSession::requestWindowResize(Width width, Height height)
 
 void TerminalSession::addToAccumulatedScroll(crispy::point pixelDelta,
                                              crispy::point angleDelta,
-                                             vtbackend::ScrollPhase phase) noexcept
+                                             vtbackend::ScrollPhase phase,
+                                             bool platformInverted) noexcept
 {
     // Drop incidental sideways drift before it can accumulate into a whole column step. Filtering here
     // rather than at the binding lookup keeps it in ONE place and fixes the mouse-reporting path too: an
     // application receiving phantom horizontal wheel reports during a vertical scroll is equally wrong.
-    if (!_horizontalWheelGesture.acceptsHorizontal(pixelDelta, angleDelta, phase))
+    if (!_horizontalWheelGesture.acceptsHorizontal(pixelDelta, angleDelta, phase, platformInverted))
     {
         pixelDelta.x = 0;
         angleDelta.x = 0;
@@ -1473,9 +1474,21 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
     //
     // Only here, never earlier: an application that asked for the mouse consumed the press above and
     // still receives every one of them, because horizontal scrolling inside an application IS continuous.
-    if ((button == MouseButton::WheelLeft || button == MouseButton::WheelRight)
-        && !_horizontalWheelGesture.consumeNavigationStep())
-        return;
+    if (button == MouseButton::WheelLeft || button == MouseButton::WheelRight)
+    {
+        if (!_horizontalWheelGesture.consumeNavigationStep())
+            return;
+
+        // A swipe navigates the way the FINGERS went, a wheel tilt the way it says. Resolved here and
+        // nowhere earlier: the same WheelLeft/WheelRight also feeds mouse REPORTING, where an
+        // application doing its own horizontal scrolling must keep receiving the literal direction.
+        //
+        // Note this sits AFTER the user's own mouseMappings were consulted, so an explicitly bound
+        // WheelLeft keeps meaning the button it names. That is deliberate: following the finger is a
+        // property of the built-in tab-switching default, not of the button.
+        button = horizontalNavigationButton(button == MouseButton::WheelRight,
+                                            _horizontalWheelGesture.usesNaturalDirection());
+    }
 
     // The user's mappings did not claim this button, so fall back to the built-in ones. They are consulted
     // second on purpose: an explicit binding in the user's config always wins (see

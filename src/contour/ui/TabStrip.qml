@@ -126,7 +126,9 @@ Row {
                 // Null-guarded like the bindings above: the C++ controller is destroyed while this QML
                 // tree is still alive during window teardown.
                 if (root.controller)
-                    root.controller.dispatchTabStripWheel(wheel.angleDelta.x, wheel.angleDelta.y)
+                    root.controller.dispatchTabStripWheel(wheel.pixelDelta.x, wheel.pixelDelta.y,
+                                                          wheel.angleDelta.x, wheel.angleDelta.y,
+                                                          wheel.phase, wheel.inverted)
                 wheel.accepted = true
             }
         }

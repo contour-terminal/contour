@@ -199,12 +199,14 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// in the first place — neither for the tab-switch fallback binding nor for an application that
     /// asked for mouse reporting.
     ///
-    /// @param pixelDelta Pixel-precise delta (trackpads), or {0,0}.
-    /// @param angleDelta Angle delta (wheels), or {0,0}.
-    /// @param phase      The gesture phase the windowing system reported.
+    /// @param pixelDelta       Pixel-precise delta (trackpads), or {0,0}.
+    /// @param angleDelta       Angle delta (wheels), or {0,0}.
+    /// @param phase            The gesture phase the windowing system reported.
+    /// @param platformInverted Whether the platform already flipped the delta (natural scrolling).
     void addToAccumulatedScroll(crispy::point pixelDelta,
                                 crispy::point angleDelta,
-                                vtbackend::ScrollPhase phase) noexcept;
+                                vtbackend::ScrollPhase phase,
+                                bool platformInverted) noexcept;
 
     /// Tells the horizontal-wheel gesture where a gesture begins and ends.
     ///

@@ -30,14 +30,33 @@ class HorizontalWheelGesture
   public:
     /// Whether the horizontal component of this event should be acted upon.
     ///
-    /// @param pixelDelta Pixel-precise delta (trackpads), or {0,0}.
-    /// @param angleDelta Angle delta (wheels), or {0,0}.
-    /// @param phase      The gesture phase the windowing system reported.
+    /// @param pixelDelta       Pixel-precise delta (trackpads), or {0,0}.
+    /// @param angleDelta       Angle delta (wheels), or {0,0}.
+    /// @param phase            The gesture phase the windowing system reported.
+    /// @param platformInverted Whether the platform already flipped the delta for natural scrolling
+    ///                         (QWheelEvent::inverted). Recorded here rather than asked for later: the
+    ///                         event that finally claims the navigation step is usually not this one.
     /// @return true when the horizontal component is an intentional horizontal gesture.
     [[nodiscard]] bool acceptsHorizontal(crispy::point pixelDelta,
                                          crispy::point angleDelta,
-                                         vtbackend::ScrollPhase phase) noexcept
+                                         vtbackend::ScrollPhase phase,
+                                         bool platformInverted) noexcept
     {
+        // A boundary starts a fresh judgement. Done here rather than left to notePhase(), because not
+        // every caller has phases to note: the tab strip judges QML wheel events, which arrive without
+        // a gesture around them.
+        if (phase == vtbackend::ScrollPhase::NoPhase || phase == vtbackend::ScrollPhase::Begin)
+        {
+            _pixelPrecise = false;
+            _platformInverted = false;
+        }
+
+        // Both latch for the gesture. Judged per event they would flicker: a trackpad interleaves
+        // pixel-precise events with angle-only ones inside a single swipe, so the direction could flip
+        // halfway through it.
+        _pixelPrecise = _pixelPrecise || pixelDelta != crispy::point {};
+        _platformInverted = _platformInverted || platformInverted;
+
         // Judge on whichever delta actually carries the motion, preferring the pixel-precise one — that
         // is the trackpad, and the trackpad is the whole reason this class exists.
         auto const delta = pixelDelta ? pixelDelta : angleDelta;
@@ -114,16 +133,49 @@ class HorizontalWheelGesture
         return true;
     }
 
+    /// Whether this gesture should navigate in the direction the FINGERS moved, rather than in the
+    /// direction the delta points.
+    ///
+    /// A swipe drags the content under the fingers, so swiping left must reveal what is to the right —
+    /// the carousel sense a browser, a file manager and a photo viewer all use. A wheel tilt has no
+    /// content-following metaphor and keeps meaning what it says, which is also what an application
+    /// receiving mouse reports sees.
+    ///
+    /// The platform may already have flipped the delta for its own natural-scrolling setting, in which
+    /// case the raw delta ALREADY reads as the carousel direction and inverting again would undo it.
+    /// That is why this is not simply "is it a trackpad".
+    [[nodiscard]] bool usesNaturalDirection() const noexcept { return _pixelPrecise && !_platformInverted; }
+
     /// Forgets the current gesture, so the next event is judged afresh.
     void reset() noexcept
     {
         _verticalLatched = false;
         _navigationSpent = false;
+        _pixelPrecise = false;
+        _platformInverted = false;
     }
 
   private:
     bool _verticalLatched = false;
     bool _navigationSpent = false;
+    bool _pixelPrecise = false;
+    bool _platformInverted = false;
 };
+
+/// The button a horizontal NAVIGATION gesture should act as.
+///
+/// Kept apart from the gesture object, and pure, because both wheel paths need the same answer: the
+/// terminal view resolves it after vtbackend has declined the press, the tab strip resolves it with no
+/// terminal in sight. One rule, stated once.
+///
+/// @param towardsRight     Whether the raw delta points to the right.
+/// @param naturalDirection Whether to follow the fingers instead — see usesNaturalDirection().
+/// @return The button to look the navigation binding up under.
+[[nodiscard]] constexpr vtbackend::MouseButton horizontalNavigationButton(bool towardsRight,
+                                                                          bool naturalDirection) noexcept
+{
+    auto const right = naturalDirection ? !towardsRight : towardsRight;
+    return right ? vtbackend::MouseButton::WheelRight : vtbackend::MouseButton::WheelLeft;
+}
 
 } // namespace contour

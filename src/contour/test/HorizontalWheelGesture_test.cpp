@@ -23,15 +23,15 @@ constexpr crispy::point delta(int x, int y) noexcept
 constexpr auto NoDelta = crispy::point { .x = 0, .y = 0 };
 
 /// Feeds a pixel-precise (trackpad-style) event.
-bool pixels(HorizontalWheelGesture& gesture, int x, int y, ScrollPhase phase)
+bool pixels(HorizontalWheelGesture& gesture, int x, int y, ScrollPhase phase, bool inverted = false)
 {
-    return gesture.acceptsHorizontal(delta(x, y), NoDelta, phase);
+    return gesture.acceptsHorizontal(delta(x, y), NoDelta, phase, inverted);
 }
 
 /// Feeds an angle-only (wheel-style) event.
-bool angle(HorizontalWheelGesture& gesture, int x, int y, ScrollPhase phase)
+bool angle(HorizontalWheelGesture& gesture, int x, int y, ScrollPhase phase, bool inverted = false)
 {
-    return gesture.acceptsHorizontal(NoDelta, delta(x, y), phase);
+    return gesture.acceptsHorizontal(NoDelta, delta(x, y), phase, inverted);
 }
 
 } // namespace
@@ -150,10 +150,10 @@ TEST_CASE("HorizontalWheelGesture.a zero-delta event yields no horizontal", "[co
 {
     auto gesture = HorizontalWheelGesture {};
 
-    CHECK_FALSE(gesture.acceptsHorizontal(NoDelta, NoDelta, ScrollPhase::Update));
-    CHECK_FALSE(gesture.acceptsHorizontal(NoDelta, NoDelta, ScrollPhase::NoPhase));
-    CHECK_FALSE(gesture.acceptsHorizontal(NoDelta, NoDelta, ScrollPhase::Begin));
-    CHECK_FALSE(gesture.acceptsHorizontal(NoDelta, NoDelta, ScrollPhase::End));
+    CHECK_FALSE(gesture.acceptsHorizontal(NoDelta, NoDelta, ScrollPhase::Update, false));
+    CHECK_FALSE(gesture.acceptsHorizontal(NoDelta, NoDelta, ScrollPhase::NoPhase, false));
+    CHECK_FALSE(gesture.acceptsHorizontal(NoDelta, NoDelta, ScrollPhase::Begin, false));
+    CHECK_FALSE(gesture.acceptsHorizontal(NoDelta, NoDelta, ScrollPhase::End, false));
 }
 
 TEST_CASE("HorizontalWheelGesture.the sign of the motion is preserved", "[contour][wheel]")
@@ -171,7 +171,7 @@ TEST_CASE("HorizontalWheelGesture.pixel delta wins over angle delta", "[contour]
     // trackpad this filter exists for.
     auto gesture = HorizontalWheelGesture {};
 
-    CHECK_FALSE(gesture.acceptsHorizontal(delta(1, -40), delta(120, 0), ScrollPhase::Begin));
+    CHECK_FALSE(gesture.acceptsHorizontal(delta(1, -40), delta(120, 0), ScrollPhase::Begin, false));
 }
 
 TEST_CASE("HorizontalWheelGesture.reset forgets the current gesture", "[contour][wheel]")
@@ -299,4 +299,81 @@ TEST_CASE("HorizontalWheelGesture.notePhase does not end a gesture mid-swipe", "
     CHECK_FALSE(gesture.consumeNavigationStep());
     gesture.notePhase(ScrollPhase::Momentum);
     CHECK_FALSE(gesture.consumeNavigationStep());
+}
+
+TEST_CASE("HorizontalWheelGesture.a swipe follows the finger, a wheel tilt does not", "[contour][wheel]")
+{
+    SECTION("a pixel-precise gesture navigates naturally")
+    {
+        auto gesture = HorizontalWheelGesture {};
+        gesture.notePhase(ScrollPhase::Begin);
+        REQUIRE(pixels(gesture, -40, 0, ScrollPhase::Begin));
+        CHECK(gesture.usesNaturalDirection());
+    }
+
+    SECTION("a wheel tilt does not")
+    {
+        auto gesture = HorizontalWheelGesture {};
+        REQUIRE(angle(gesture, 120, 0, ScrollPhase::NoPhase));
+        CHECK_FALSE(gesture.usesNaturalDirection());
+    }
+
+    SECTION("the platform having already inverted the delta cancels it out")
+    {
+        // The double-inversion guard. On a platform whose natural-scrolling setting already flipped the
+        // delta, the raw values ALREADY read as the carousel direction; inverting again would undo it
+        // and send the user the wrong way.
+        auto gesture = HorizontalWheelGesture {};
+        gesture.notePhase(ScrollPhase::Begin);
+        REQUIRE(pixels(gesture, -40, 0, ScrollPhase::Begin, /*inverted=*/true));
+        CHECK_FALSE(gesture.usesNaturalDirection());
+    }
+
+    SECTION("both facts latch for the whole gesture")
+    {
+        // The event that finally claims the navigation step is usually not the one that opened the
+        // gesture, and a trackpad interleaves pixel-precise events with angle-only ones inside a single
+        // swipe. Judged per event, the direction would flip halfway through it.
+        auto gesture = HorizontalWheelGesture {};
+        gesture.notePhase(ScrollPhase::Begin);
+        REQUIRE(pixels(gesture, -40, 0, ScrollPhase::Begin));
+        CHECK(gesture.usesNaturalDirection());
+
+        // An angle-only event arriving mid-swipe must not demote it to "wheel tilt".
+        REQUIRE(angle(gesture, -120, 0, ScrollPhase::Update));
+        CHECK(gesture.usesNaturalDirection());
+    }
+
+    SECTION("a boundary forgets it, so the next gesture is judged afresh")
+    {
+        auto gesture = HorizontalWheelGesture {};
+        gesture.notePhase(ScrollPhase::Begin);
+        REQUIRE(pixels(gesture, -40, 0, ScrollPhase::Begin));
+        REQUIRE(gesture.usesNaturalDirection());
+
+        gesture.notePhase(ScrollPhase::End);
+        CHECK_FALSE(gesture.usesNaturalDirection());
+
+        // A wheel tilt right after a swipe is a wheel tilt.
+        REQUIRE(angle(gesture, 120, 0, ScrollPhase::NoPhase));
+        CHECK_FALSE(gesture.usesNaturalDirection());
+    }
+}
+
+TEST_CASE("horizontalNavigationButton states one rule for both wheel paths", "[contour][wheel]")
+{
+    using contour::horizontalNavigationButton;
+    using vtbackend::MouseButton;
+
+    // A wheel tilt means what it says.
+    STATIC_CHECK(horizontalNavigationButton(/*towardsRight=*/true, /*natural=*/false)
+                 == MouseButton::WheelRight);
+    STATIC_CHECK(horizontalNavigationButton(/*towardsRight=*/false, /*natural=*/false)
+                 == MouseButton::WheelLeft);
+
+    // A swipe follows the fingers: dragging the content left reveals what is to the right.
+    STATIC_CHECK(horizontalNavigationButton(/*towardsRight=*/false, /*natural=*/true)
+                 == MouseButton::WheelRight);
+    STATIC_CHECK(horizontalNavigationButton(/*towardsRight=*/true, /*natural=*/true)
+                 == MouseButton::WheelLeft);
 }
