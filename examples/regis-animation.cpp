@@ -92,6 +92,6 @@ int main()
 
     // Clear and reset on exit.
     regis("S(E)");
-    writeToTTY("\033[24H\n");
+    writeToTTY("\033[40H\n");
     return 0;
 }

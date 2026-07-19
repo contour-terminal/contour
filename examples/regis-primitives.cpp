@@ -77,6 +77,6 @@ int main()
     regis(r);
 
     // Move the text cursor below the graphic so the shell prompt does not overwrite it.
-    writeToTTY("\033[24H\n");
+    writeToTTY("\033[40H\n");
     return 0;
 }
