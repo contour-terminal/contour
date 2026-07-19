@@ -742,9 +742,15 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     vtbackend::CellLocation _currentMousePosition = vtbackend::CellLocation {};
 
     /// The shape the application last asked for via `OSC 22`, or nullopt while it has asked for
-    /// none. GUI-thread state: written from the lambda setPointerShape() posts, so that restoring
-    /// the shape never reads the pointer-shape stack the parser thread owns.
-    std::optional<MouseCursorShape> _applicationPointerShape;
+    /// none. Recorded whether or not a display is attached: a session between displays -- a split
+    /// hand-off, a tab whose display was released -- still has to hand the shape to whichever display
+    /// attaches next, and writing it only from the lambda posted to the display dropped it entirely
+    /// for the rest of the session.
+    ///
+    /// Atomic because it is now written on the parser thread (where `OSC 22` arrives) and read on the
+    /// GUI thread in setDefaultCursor(). Caching it here rather than reading the pointer-shape stack
+    /// back is still the point: that stack belongs to the parser thread.
+    std::atomic<std::optional<MouseCursorShape>> _applicationPointerShape;
     bool _allowKeyMappings = true;
     std::unique_ptr<Audio> _audio;
     std::vector<int> _musicalNotesBuffer;

@@ -372,6 +372,13 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
     if (_terminal.hasInput())
         _display->post(bind(&TerminalSession::flushInput, this));
 
+    // And likewise the pointer shape: an `OSC 22` that arrived while no display was attached has
+    // nowhere to go at the time, so the new display starts on its own default and the application's
+    // shape is lost for the rest of the session. setDefaultCursor() applies the remembered shape if
+    // there is one and falls back to the screen-type default if there is not, which is exactly what
+    // a freshly attached display wants.
+    setDefaultCursor();
+
     scheduleRedraw();
 }
 
@@ -724,11 +731,9 @@ void TerminalSession::setPointerShape(std::string_view cssName)
     // the alternate screen would never get its arrow back.
     if (cssName.empty())
     {
+        _applicationPointerShape = std::nullopt;
         if (_display)
-            postToObject(_display, [this]() {
-                _applicationPointerShape.reset();
-                setDefaultCursor();
-            });
+            postToObject(_display, [this]() { setDefaultCursor(); });
         return;
     }
 
@@ -749,13 +754,15 @@ void TerminalSession::setPointerShape(std::string_view cssName)
     if (!shape || !_display)
         return;
 
-    // The event arrives on the parser thread; the cursor belongs to the GUI thread. The remembered
-    // shape is written here rather than read back off the terminal later, so that the GUI thread
-    // never touches the pointer-shape stack the parser thread mutates.
-    postToObject(_display, [this, display = _display, shape = *shape]() {
-        _applicationPointerShape = shape;
-        display->setMouseCursorShape(shape);
-    });
+    // Remember it before the display gets a look in: without a display attached there is nothing to
+    // post to, and dropping the shape there is what lost an `OSC 22` sent to a backgrounded pane.
+    // attachDisplay() applies whatever is remembered here once a display arrives.
+    _applicationPointerShape = *shape;
+
+    // The event arrives on the parser thread; the cursor belongs to the GUI thread.
+    if (_display)
+        postToObject(_display,
+                     [display = _display, shape = *shape]() { display->setMouseCursorShape(shape); });
 }
 
 void TerminalSession::copyToClipboard(std::string_view data)
@@ -2553,9 +2560,9 @@ void TerminalSession::setDefaultCursor()
     // check a requested shape survived exactly one mouse move before reverting -- which looks from
     // the outside like OSC 22 not working at all. RIS withdraws the shape by asking for the default
     // one, and it also returns to the primary screen, whose default this already is.
-    if (_applicationPointerShape)
+    if (auto const applicationShape = _applicationPointerShape.load())
     {
-        _display->setMouseCursorShape(*_applicationPointerShape);
+        _display->setMouseCursorShape(*applicationShape);
         return;
     }
 
