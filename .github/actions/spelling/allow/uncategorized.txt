@@ -305,6 +305,7 @@ cotire
 cpack
 cplusplus
 cppbestpractices
+crtl
 cstyle
 ctest
 ctu
@@ -359,6 +360,7 @@ dnkl
 dockerhub
 documentaion
 doi
+dotless
 dotnet
 downsample
 downsampled

@@ -3,6 +3,7 @@
 
 #include <contour/Actions.h>
 #include <contour/Config.h>
+#include <contour/ModifierNames.h>
 
 #include <vtbackend/InputGenerator.h>
 
@@ -24,10 +25,14 @@ using ShortcutInput = std::variant<vtbackend::Key, char32_t>;
 
 /// One chord modifier and the name a UI shows it under.
 ///
-/// Separate from vtbackend::ChordModifierTable on purpose: that table is the wire/config vocabulary
-/// ("Control"), this one is the user-facing vocabulary ("Ctrl"), and the ORDER of the rows here is
-/// the order they are rendered in — the conventional Ctrl+Alt+Shift+Key, not the bit order that
-/// std::formatter<Modifiers> would give ("Shift|Control").
+/// Separate from vtbackend::ChordModifierTable on purpose: that table is the wire vocabulary and the
+/// canonical config spelling ("Control"), this one is the user-facing vocabulary ("Ctrl"), and the
+/// ORDER of the rows here is the order they are rendered in — the conventional Ctrl+Alt+Shift+Key,
+/// not the bit order that std::formatter<Modifiers> would give ("Shift|Control").
+///
+/// The set contour.yml actually ACCEPTS is a third table, contour::ConfigModifierTable, which is
+/// wider than either of these because it carries synonyms — including the "Ctrl" spelling this table
+/// teaches the user. Keeping them in sync is what issue #1987 was about.
 struct ShortcutModifierRow
 {
     vtbackend::Modifier modifier; ///< The modifier bit.
@@ -49,6 +54,16 @@ constexpr inline auto ShortcutModifierTable = std::array {
 static_assert(ShortcutModifierTable.size() == vtbackend::ChordModifierTable.size(),
               "every chord modifier must have a display name here: a modifier added to vtbackend's "
               "table but not to this one would silently stop rendering in the shortcut column");
+
+static_assert(std::ranges::all_of(ShortcutModifierTable,
+                                  [](auto const& row) {
+                                      return row.modifier == ModifierWithoutConfigSpelling
+                                             || parseModifierName(row.name) == row.modifier;
+                                  }),
+              "every name shown in the shortcut column must be a spelling contour.yml ACCEPTS: this "
+              "table is what teaches a user how to write a chord, so a display name the config "
+              "parser refuses sends them to a binding that silently never fires -- which is exactly "
+              "what issue #1987 was. Add the spelling to contour::ConfigModifierTable as an alias.");
 
 /// Renders a key chord the way a UI shows it, e.g. "Ctrl+Shift+P" or "Alt+Enter".
 ///

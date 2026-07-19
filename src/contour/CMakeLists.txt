@@ -57,6 +57,7 @@ set(_header_files
     ContourApp.h
     FuzzyFilter.h
     GuiConfigStore.h
+    ModifierNames.h
     Shortcut.h
     TabLabel.h
 )

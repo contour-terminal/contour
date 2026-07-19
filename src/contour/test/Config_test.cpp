@@ -10,9 +10,13 @@
 #include <contour/Config.h>
 #include <contour/GuiConfigStore.h>
 #include <contour/GuiTheme.h>
+#include <contour/ModifierNames.h>
 
 #include <vtbackend/Color.h>
+#include <vtbackend/InputGenerator.h>
 #include <vtbackend/primitives.h>
+
+#include <crispy/logstore.h>
 
 #include <QtCore/QTemporaryDir>
 
@@ -1380,11 +1384,13 @@ input_mapping:
     - { mods: [], key: 'F12', action: WriteScreen, chars: "hello" }
 )"sv);
 
-    // The loader appends to the built-in defaults, so assert growth and containment, not totals.
+    // An `input_mapping:` section REPLACES the built-in defaults rather than adding to them, so the
+    // totals are exactly the ten rows above, split by how each `key:` parses: a NAMED key becomes a
+    // KeyInputMapping, a single character a CharInputMapping.
     auto const& mappings = config.inputMappings.value();
-    CHECK_FALSE(mappings.keyMappings.empty());
-    CHECK_FALSE(mappings.charMappings.empty());
-    CHECK_FALSE(mappings.mouseMappings.empty());
+    CHECK(mappings.keyMappings.size() == 5);   // F3, Enter, Tab, PageUp, F12
+    CHECK(mappings.charMappings.size() == 2);  // 'a', 'v'
+    CHECK(mappings.mouseMappings.size() == 3); // Left, WheelUp, WheelDown
 }
 
 TEST_CASE("Config: invalid enum values fall back and do not abort loading", "[config]")
@@ -2625,6 +2631,411 @@ TEST_CASE("Config: FileGuiConfigStore writes and removes side files the loader p
     REQUIRE(store.deleteProfile("saved").has_value());
     auto const afterDelete = loadFromYaml(dir, "default_profile: main\n");
     CHECK(afterDelete.findProfile("saved") == nullptr);
+}
+
+// }}}
+
+// {{{ input_mapping modifier vocabulary and key case folding
+//
+// These pin the two independent defects behind issue #1987, both of which presented as "my binding
+// silently does nothing": a modifier spelling the UI renders but the parser refused (`Ctrl`), and a
+// single-character `key:` whose case could never match what the input routes deliver.
+
+namespace
+{
+
+/// The mapping bound to @p key in @p config, or nullptr.
+[[nodiscard]] contour::config::KeyInputMapping const* keyMappingFor(contour::config::Config const& config,
+                                                                    vtbackend::Key key)
+{
+    auto const& mappings = config.inputMappings.value().keyMappings;
+    auto const i = std::ranges::find(mappings, key, &contour::config::KeyInputMapping::input);
+    return i != mappings.end() ? &*i : nullptr;
+}
+
+/// A one-row `input_mapping` document binding @p mods + @p key to a harmless action.
+///
+/// ScreenshotVT is used as the payload throughout: it takes no argument and, unlike Quit, cannot
+/// end the test run if a binding unexpectedly fires.
+[[nodiscard]] std::string oneMappingYaml(std::string_view mods, std::string_view key)
+{
+    return std::format("default_profile: main\n"
+                       "profiles:\n"
+                       "    main:\n"
+                       "        shell: /bin/sh\n"
+                       "input_mapping:\n"
+                       "    - {{ mods: {}, key: {}, action: ScreenshotVT }}\n",
+                       mods,
+                       key);
+}
+
+} // namespace
+
+TEST_CASE("Config: 'Ctrl' is accepted as a spelling of Control (issue #1987)", "[config][input-mapping]")
+{
+    auto dir = QTemporaryDir {};
+    REQUIRE(dir.isValid());
+
+    // The reproduction from the issue, verbatim. Before the fix parseModifierKey rejected "Ctrl",
+    // parseModifier bailed on it, and the row was dropped without a single line of output.
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Shift,Alt,Ctrl], key: 'Q', action: ClearHistoryAndReset }
+)"sv);
+
+    auto const& mappings = config.inputMappings.value();
+
+    // An `input_mapping:` section replaces the built-in defaults, so this row is the only one left.
+    REQUIRE(mappings.charMappings.size() == 1);
+    CHECK(mappings.keyMappings.empty());
+    CHECK(mappings.mouseMappings.empty());
+
+    auto const& bound = mappings.charMappings.front();
+    CHECK(bound.input == U'Q');
+    // Exact equality, not .test(): config::apply matches modifiers with ==, so a partially-parsed
+    // chord would still fail at runtime even though every individual bit looked right here.
+    CHECK(bound.modifiers
+          == vtbackend::Modifiers {
+              vtbackend::Modifier::Shift, vtbackend::Modifier::Alt, vtbackend::Modifier::Control });
+    REQUIRE(bound.binding.size() == 1);
+    CHECK(std::holds_alternative<contour::actions::ClearHistoryAndReset>(bound.binding.at(0)));
+}
+
+TEST_CASE("Config: every modifier the UI can render parses back from config", "[config][input-mapping]")
+{
+    auto dir = QTemporaryDir {};
+    REQUIRE(dir.isValid());
+
+    // The anti-recurrence test. Contour renders chords using ShortcutModifierTable and the config
+    // writer emits vtbackend::ChordModifierTable's names verbatim; if the reader accepts neither,
+    // Contour teaches the user a spelling it then refuses -- which is exactly issue #1987.
+    //
+    // Sweeping the whole table also covers Hyper, which renders in the shortcut column but had no
+    // config spelling at all before this change: Contour could write a binding it could not read back.
+    for (auto const& row: vtbackend::ChordModifierTable)
+    {
+        CAPTURE(row.name);
+        auto const config = loadFromYaml(dir, oneMappingYaml(std::format("[{}]", row.name), "F1"));
+
+        auto const* bound = keyMappingFor(config, vtbackend::Key::F1);
+        REQUIRE(bound != nullptr);
+
+        // "Meta" is the one deliberate exception: it is spelled for Super, so it parses but not to
+        // itself. Everything else must round-trip exactly. @see contour::ConfigModifierTable
+        if (row.modifier == contour::ModifierWithoutConfigSpelling)
+            CHECK(bound->modifiers == vtbackend::Modifiers { vtbackend::Modifier::Super });
+        else
+            CHECK(bound->modifiers == vtbackend::Modifiers { row.modifier });
+    }
+}
+
+TEST_CASE("Config: modifier spellings are case-insensitive", "[config][input-mapping]")
+{
+    auto dir = QTemporaryDir {};
+    REQUIRE(dir.isValid());
+
+    SECTION("in a sequence")
+    {
+        auto const config = loadFromYaml(dir, oneMappingYaml("[ctrl, ALT, ShIfT]", "F1"));
+        auto const* bound = keyMappingFor(config, vtbackend::Key::F1);
+        REQUIRE(bound != nullptr);
+        CHECK(bound->modifiers
+              == vtbackend::Modifiers {
+                  vtbackend::Modifier::Control, vtbackend::Modifier::Alt, vtbackend::Modifier::Shift });
+    }
+
+    SECTION("as a bare scalar")
+    {
+        // parseModifier handles a scalar `mods:` through a different branch than a sequence, so a
+        // table-driven rewrite could easily fix one and leave the other behind.
+        auto const config = loadFromYaml(dir, oneMappingYaml("Ctrl", "F1"));
+        auto const* bound = keyMappingFor(config, vtbackend::Key::F1);
+        REQUIRE(bound != nullptr);
+        CHECK(bound->modifiers == vtbackend::Modifiers { vtbackend::Modifier::Control });
+    }
+}
+
+TEST_CASE("Config: 'Meta' keeps its legacy mapping to Super", "[config][input-mapping]")
+{
+    auto dir = QTemporaryDir {};
+    REQUIRE(dir.isValid());
+
+    // contour.yml has spelled the Windows/Command key "Meta" since before Modifier::Meta existed.
+    // Re-pointing it at Modifier::Meta would silently relocate every existing `mods: [Meta]` binding
+    // onto a key most keyboards do not have, and nothing else in the tree would notice.
+    auto const config = loadFromYaml(dir, oneMappingYaml("[Meta]", "F1"));
+
+    auto const* bound = keyMappingFor(config, vtbackend::Key::F1);
+    REQUIRE(bound != nullptr);
+    CHECK(bound->modifiers == vtbackend::Modifiers { vtbackend::Modifier::Super });
+    CHECK_FALSE(bound->modifiers.test(vtbackend::Modifier::Meta));
+}
+
+TEST_CASE("Config: an unknown modifier drops the whole row, not just the modifier", "[config][input-mapping]")
+{
+    auto dir = QTemporaryDir {};
+    REQUIRE(dir.isValid());
+
+    // The all-or-nothing contract. Rewriting the old if-chain into a table lookup makes it very
+    // natural to skip past an unrecognized name and bind a PARTIAL chord -- which would be worse
+    // than dropping the row, because Ctrl+F1 would then silently start firing on its own.
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Ctrl, Bogus], key: F1, action: ScreenshotVT }
+    - { mods: [Ctrl],        key: F2, action: ScreenshotVT }
+)"sv);
+
+    auto const& mappings = config.inputMappings.value();
+    REQUIRE(mappings.keyMappings.size() == 1);
+    CHECK(mappings.keyMappings.front().input == vtbackend::Key::F2);
+}
+
+TEST_CASE("Config: the mouse modifier settings accept the same vocabulary", "[config][input-mapping]")
+{
+    auto dir = QTemporaryDir {};
+    REQUIRE(dir.isValid());
+
+    // These two settings share parseModifierKey with `input_mapping`, so they were silently ignoring
+    // `Ctrl` for the same root cause. Widening the vocabulary fixes them for free; pin that.
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+bypass_mouse_protocol_modifier: Ctrl
+mouse_block_selection_modifier: Hyper
+)"sv);
+
+    CHECK(config.bypassMouseProtocolModifiers.value()
+          == vtbackend::Modifiers { vtbackend::Modifier::Control });
+    CHECK(config.mouseBlockSelectionModifiers.value() == vtbackend::Modifiers { vtbackend::Modifier::Hyper });
+}
+
+TEST_CASE("Config: an input_mapping section replaces the built-in defaults", "[config][input-mapping]")
+{
+    auto dir = QTemporaryDir {};
+    REQUIRE(dir.isValid());
+
+    // Intended, supported behaviour: writing an `input_mapping:` section declares that you are
+    // defining the full set of bindings. Documented in docs/configuration/key-mapping.md.
+    auto const hasCommandPaletteDefault = [](contour::config::Config const& config) {
+        auto const& charMappings = config.inputMappings.value().charMappings;
+        return std::ranges::any_of(charMappings, [](auto const& mapping) {
+            return mapping.input == U'P'
+                   && mapping.modifiers
+                          == vtbackend::Modifiers { vtbackend::Modifier::Control,
+                                                    vtbackend::Modifier::Shift };
+        });
+    };
+
+    SECTION("with no section at all, the defaults are intact")
+    {
+        auto const config = loadFromYaml(dir, "default_profile: main\n");
+        CHECK(hasCommandPaletteDefault(config));
+    }
+
+    SECTION("a section discards every default it does not restate")
+    {
+        auto const config = loadFromYaml(dir, oneMappingYaml("[Control]", "F5"));
+        auto const& mappings = config.inputMappings.value();
+
+        CHECK(mappings.keyMappings.size() == 1);
+        CHECK(mappings.charMappings.empty());
+        CHECK(mappings.mouseMappings.empty());
+        CHECK_FALSE(hasCommandPaletteDefault(config));
+    }
+}
+
+TEST_CASE("Config: a single-character key: is stored case-folded", "[config][input-mapping]")
+{
+    auto dir = QTemporaryDir {};
+    REQUIRE(dir.isValid());
+
+    auto const soleCharMapping = [](contour::config::Config const& config) {
+        auto const& charMappings = config.inputMappings.value().charMappings;
+        REQUIRE(charMappings.size() == 1);
+        return charMappings.front().input;
+    };
+
+    SECTION("a lowercase letter folds")
+    {
+        // Before folding this parsed fine and produced a binding that could never fire, because the
+        // Ctrl branch of sendKeyEvent always reports the uppercase key label.
+        CHECK(soleCharMapping(loadFromYaml(dir, oneMappingYaml("[Control]", "'q'"))) == U'Q');
+    }
+
+    SECTION("an uppercase letter is unchanged")
+    {
+        CHECK(soleCharMapping(loadFromYaml(dir, oneMappingYaml("[Control]", "'Q'"))) == U'Q');
+    }
+
+    SECTION("a non-ASCII letter is NOT folded")
+    {
+        // Deliberate: no input route can deliver a non-ASCII codepoint in two different cases, so
+        // folding above 0x7F would only merge bindings that are distinct today. This is the guard
+        // against someone swapping in unicode::simple_uppercase.
+        CHECK(soleCharMapping(loadFromYaml(dir, oneMappingYaml("[Control]", "'ä'"))) == U'ä');
+    }
+
+    SECTION("punctuation is unchanged")
+    {
+        CHECK(soleCharMapping(loadFromYaml(dir, oneMappingYaml("[Control]", "','"))) == U',');
+    }
+}
+
+TEST_CASE("Config: case-differing rows under the same chord merge", "[config][input-mapping]")
+{
+    auto dir = QTemporaryDir {};
+    REQUIRE(dir.isValid());
+
+    // A consequence of folding, pinned deliberately rather than discovered later: the two rows now
+    // describe the same chord, so appendOrCreateBinding collapses them into one binding that runs
+    // both actions in order. Previously the lowercase row was simply a silent no-op.
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control], key: 'a', action: ScreenshotVT }
+    - { mods: [Control], key: 'A', action: CopySelection }
+)"sv);
+
+    auto const& charMappings = config.inputMappings.value().charMappings;
+    REQUIRE(charMappings.size() == 1);
+    CHECK(charMappings.front().input == U'A');
+    REQUIRE(charMappings.front().binding.size() == 2);
+    CHECK(std::holds_alternative<contour::actions::ScreenshotVT>(charMappings.front().binding.at(0)));
+    CHECK(std::holds_alternative<contour::actions::CopySelection>(charMappings.front().binding.at(1)));
+}
+
+TEST_CASE("Config: every built-in char binding is stored folded", "[config][input-mapping]")
+{
+    // defaultInputMappings is a static C++ aggregate that never passes through parseKeyOrChar, so
+    // its folded-ness is an invariant held only by inspection. A lowercase row added tomorrow would
+    // produce a default binding that can never fire; fail here instead of silently at runtime.
+    //
+    // A runtime CHECK rather than a static_assert: defaultInputMappings holds std::vector and is
+    // therefore not usable in a constant expression.
+    for (auto const& mapping: contour::config::defaultInputMappings.charMappings)
+    {
+        CAPTURE(static_cast<uint32_t>(mapping.input));
+        CHECK(mapping.input == contour::config::foldedBindingCodepoint(mapping.input));
+    }
+}
+
+namespace
+{
+
+/// Redirects the `error` log category into a buffer for the lifetime of this object.
+///
+/// The restore runs from the destructor rather than at the end of the test body, because a failing
+/// CHECK unwinds: leaving the category pointing at a destroyed local sink would corrupt every later
+/// test in the binary (category::_sink is a reference_wrapper with no lifetime management).
+class ScopedErrorLogCapture
+{
+  public:
+    ScopedErrorLogCapture():
+        _sink { true, [this](std::string_view const& line) { _captured += line; } },
+        _category { logstore::get("error") }
+    {
+        if (_category)
+            _category->set_sink(_sink);
+    }
+
+    ~ScopedErrorLogCapture()
+    {
+        if (_category)
+            _category->set_sink(logstore::sink::error_console());
+    }
+
+    ScopedErrorLogCapture(ScopedErrorLogCapture const&) = delete;
+    ScopedErrorLogCapture& operator=(ScopedErrorLogCapture const&) = delete;
+
+    [[nodiscard]] std::string const& captured() const noexcept { return _captured; }
+
+  private:
+    std::string _captured;
+    logstore::sink _sink;
+    logstore::category* _category;
+};
+
+} // namespace
+
+TEST_CASE("Config: a dropped input_mapping entry is reported", "[config][input-mapping]")
+{
+    auto dir = QTemporaryDir {};
+    REQUIRE(dir.isValid());
+
+    // The silence was the whole reason issue #1987 was hard to diagnose: a row vanished and nothing
+    // anywhere said so. These assertions stay deliberately weak -- that the offending row and field
+    // are NAMED -- rather than pinning the sentence, which would break on any rewording.
+    auto capture = ScopedErrorLogCapture {};
+
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Shift, Crtl], key: 'Q', action: ClearHistoryAndReset }
+    - { mods: [Control], key: 'K', action: NoSuchActionName }
+    - { mods: [Control], key: 'J', action: ScreenshotVT }
+)"sv);
+
+    // The good row still binds: a bad neighbour must not take the whole section down.
+    CHECK(config.inputMappings.value().charMappings.size() == 1);
+
+    auto const& log = capture.captured();
+    INFO("captured error log:\n" << log);
+
+    // The misspelled modifier is named, and so is the row it killed.
+    CHECK(log.find("Crtl") != std::string::npos);
+    CHECK(log.find("ClearHistoryAndReset") != std::string::npos);
+    // ...and the unknown action, with its own row.
+    CHECK(log.find("NoSuchActionName") != std::string::npos);
+    // The accepted spellings are offered, so the user can see what to write instead.
+    CHECK(log.find("Ctrl") != std::string::npos);
+}
+
+TEST_CASE("Config: an input_mapping that is not a list is reported, not silently obeyed",
+          "[config][input-mapping]")
+{
+    auto dir = QTemporaryDir {};
+    REQUIRE(dir.isValid());
+
+    // The defaults are discarded as soon as the section is PRESENT, before its shape is checked. So a
+    // malformed section leaves the user with nothing bound at all -- the worst version of the silent
+    // loss behind issue #1987, and now the most likely one, since the docs tell people the section
+    // replaces the defaults.
+    auto capture = ScopedErrorLogCapture {};
+
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    mods: [Control]
+    key: 'Q'
+    action: ScreenshotVT
+)"sv);
+
+    auto const& mappings = config.inputMappings.value();
+    CHECK(mappings.keyMappings.empty());
+    CHECK(mappings.charMappings.empty());
+    CHECK(mappings.mouseMappings.empty());
+
+    INFO("captured error log:\n" << capture.captured());
+    CHECK(capture.captured().find("input_mapping") != std::string::npos);
 }
 
 // }}}

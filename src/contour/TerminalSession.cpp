@@ -1390,14 +1390,24 @@ void TerminalSession::sendCharEvent(char32_t value,
         // Find a char binding for this key (ignored while editing the search prompt).
         auto const& charMappings = _config.inputMappings.value().charMappings;
         auto const flags = matchModeFlags();
-        auto const* actions = config::apply(charMappings, value, modifiers.chord, flags);
+
+        // Bindings are stored folded (see YAMLConfigReader::parseKeyOrChar), because WHICH case a
+        // letter arrives in is decided by the route contour::sendKeyEvent() took rather than by the
+        // user — and on macOS the option-as-Alt branch even lets CapsLock decide, which would
+        // otherwise let a latched lock key pick the shortcut. Match in the same folded form.
+        // NB: only the *lookup* is folded; `value` itself is forwarded verbatim to the terminal
+        // below, so what the application receives is unchanged.
+        auto const folded = config::foldedBindingCodepoint(value);
+        auto const* actions = config::apply(charMappings, folded, modifiers.chord, flags);
 
         // A shortcut written with the base key label (e.g. `Ctrl+Shift+,`) is stored under the base
         // character, but Qt delivers a Shift+punctuation chord as the *shifted* symbol ('<' here). When
         // the direct lookup misses and Shift is held, retry under the un-shifted base so the binding
-        // fires as the user intended — letters already match (their codepoint is shift-invariant).
+        // fires as the user intended. The two normalizations are disjoint — unshiftedCodepoint()
+        // rewrites only digits and punctuation, foldedBindingCodepoint() only ASCII letters — so they
+        // compose in either order.
         if (actions == nullptr && modifiers.chord.test(vtbackend::Modifier::Shift))
-            if (auto const base = unshiftedCodepoint(value); base != value)
+            if (auto const base = unshiftedCodepoint(folded); base != folded)
                 actions = config::apply(charMappings, base, modifiers.chord, flags);
 
         if (actions != nullptr && !_terminal.inputHandler().isEditingSearch())

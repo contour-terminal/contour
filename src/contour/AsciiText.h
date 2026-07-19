@@ -40,4 +40,15 @@ namespace contour::ascii
     return isUpper(ch) ? static_cast<char>(ch - 'A' + 'a') : ch;
 }
 
+/// @return @p ch upper-cased, for callers that must normalize onto the upper case.
+///
+/// Codepoint-wide, and deliberately still US-ASCII only: a caller normalizing text it did not author
+/// must not fold the rest of Unicode along with it, because simple case mapping is not
+/// locale-neutral there — Turkish dotless 'ı' upper-cases onto 'I', colliding with 'i', and MICRO
+/// SIGN 'µ' becomes GREEK CAPITAL MU. @see config::foldedBindingCodepoint for the one caller.
+[[nodiscard]] constexpr char32_t foldUpper(char32_t ch) noexcept
+{
+    return U'a' <= ch && ch <= U'z' ? ch - (U'a' - U'A') : ch;
+}
+
 } // namespace contour::ascii

@@ -1752,3 +1752,87 @@ TEST_CASE("TerminalSession: executeAction runs a palette-picked command", "[cont
     // that faithfully — which is exactly what lets a key binding fall through to the terminal.
     CHECK_FALSE(session->executeAction(contour::actions::Action { contour::actions::FollowHyperlink {} }));
 }
+
+TEST_CASE("TerminalSession: a Ctrl-spelled chord fires its binding (issue #1987)",
+          "[contour][session][input]")
+{
+    // End-to-end counterpart to the parse-level test in Config_test.cpp. That one proves a binding
+    // OBJECT exists; this proves the chord actually fires — which additionally exercises the exact
+    // modifier equality in config::apply, the mode gate, and the codepoint the input routes deliver.
+    //
+    // NB: this drives sendCharEvent directly rather than a QKeyEvent, so it is independent of
+    // makeModifiers and runs identically on every platform. (On Windows the real Qt path additionally
+    // strips Ctrl+Alt as AltGr, which is a separate pre-existing limitation.)
+    TestApp testApp;
+    testApp.app().config().inputMappings = contour::test::loadConfigFromYaml(R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Shift,Alt,Ctrl], key: 'Q', action: ClearHistoryAndReset }
+)")
+                                               .inputMappings;
+
+    auto session = makeDisplaylessSession(testApp.app());
+    auto const now = std::chrono::steady_clock::now();
+
+    // Give the action something to actually do, so this asserts the action RAN rather than merely
+    // that something ate the keystroke.
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 40))
+        session->terminal().writeToScreen("scrollback\r\n");
+    REQUIRE(session->terminal().primaryScreen().historyLineCount() > vtbackend::LineCount(0));
+
+    mockPtyOf(*session).stdinBuffer().clear();
+    auto const chord =
+        Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Alt, vtbackend::Modifier::Shift };
+    session->sendCharEvent(U'Q', 0, chord, KeyboardEventType::Press, now);
+
+    CHECK(mockPtyOf(*session).stdinBuffer().empty()); // consumed by the binding
+    CHECK(session->terminal().primaryScreen().historyLineCount() == vtbackend::LineCount(0));
+
+    // A subset of the chord must NOT match: config::apply compares modifiers with ==, and this is the
+    // property that keeps Ctrl+Q from firing a binding written for Ctrl+Alt+Shift+Q.
+    mockPtyOf(*session).stdinBuffer().clear();
+    session->sendCharEvent(
+        U'Q', 0, Modifiers { vtbackend::Modifier::Control }, KeyboardEventType::Press, now);
+    CHECK_FALSE(mockPtyOf(*session).stdinBuffer().empty());
+}
+
+TEST_CASE("TerminalSession: a lowercase `key:` binding fires", "[contour][session][input]")
+{
+    // A single-character binding is stored folded, and the delivered codepoint is folded to match, so
+    // the case the user happened to write is irrelevant. Before that, `key: 'p'` parsed cleanly and
+    // produced a binding that could never fire — the same silent symptom as issue #1987.
+    //
+    // The `input_mapping:` section replaces the built-in defaults, so this config holds exactly one
+    // binding and the test cannot pass by accident through the default Ctrl+Shift+P.
+    TestApp testApp;
+    testApp.app().config().inputMappings = contour::test::loadConfigFromYaml(R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control, Shift], key: 'p', action: OpenCommandPalette }
+)")
+                                               .inputMappings;
+
+    auto session = makeDisplaylessSession(testApp.app());
+    auto const now = std::chrono::steady_clock::now();
+    auto const ctrlShift = Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift };
+
+    // Both cases must fire: which one arrives depends on the route the Qt event took, not the user.
+    mockPtyOf(*session).stdinBuffer().clear();
+    session->sendCharEvent(U'P', 0, ctrlShift, KeyboardEventType::Press, now);
+    CHECK(mockPtyOf(*session).stdinBuffer().empty());
+
+    mockPtyOf(*session).stdinBuffer().clear();
+    session->sendCharEvent(U'p', 0, ctrlShift, KeyboardEventType::Press, now);
+    CHECK(mockPtyOf(*session).stdinBuffer().empty());
+
+    // An unbound letter still reaches the shell — the fold must not swallow everything.
+    mockPtyOf(*session).stdinBuffer().clear();
+    session->sendCharEvent(U'y', 0, ctrlShift, KeyboardEventType::Press, now);
+    CHECK_FALSE(mockPtyOf(*session).stdinBuffer().empty());
+}
