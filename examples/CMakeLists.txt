@@ -12,6 +12,8 @@ if(LIBTERMINAL_TESTING)
 
         add_executable(text-sizing-demo text-sizing-demo.cpp)
 
+        add_executable(bidi-demo bidi-demo.cpp)
+
         add_executable(regis-primitives regis-primitives.cpp)
         add_executable(regis-plot2d regis-plot2d.cpp)
         add_executable(regis-animation regis-animation.cpp)
