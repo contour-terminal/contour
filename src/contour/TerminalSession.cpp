@@ -212,6 +212,7 @@ namespace
         settings.highlightDoubleClickedWord = profile.highlightDoubleClickedWord.value();
         settings.highlightTimeout = profile.highlightTimeout.value();
         settings.frozenModes = profile.frozenModes.value();
+        settings.graphemeClustering = config.graphemeClustering.value();
 
         return settings;
     }
@@ -370,6 +371,13 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
     // focus/input event finally flushes the queue (observed as a multi-second startup stall).
     if (_terminal.hasInput())
         _display->post(bind(&TerminalSession::flushInput, this));
+
+    // And likewise the pointer shape: an `OSC 22` that arrived while no display was attached has
+    // nowhere to go at the time, so the new display starts on its own default and the application's
+    // shape is lost for the rest of the session. setDefaultCursor() applies the remembered shape if
+    // there is one and falls back to the screen-type default if there is not, which is exactly what
+    // a freshly attached display wants.
+    setDefaultCursor();
 
     scheduleRedraw();
 }
@@ -712,6 +720,51 @@ void TerminalSession::applyPendingFontChange(bool allow, bool remember)
         newFonts.emoji = text::font_description::parse(spec.emoji);
 
     _display->setFonts(newFonts);
+}
+
+void TerminalSession::setPointerShape(std::string_view cssName)
+{
+    // An EMPTY name means the terminal is back to its own default: the application has stopped
+    // imposing a shape, by resetting it, by popping the stack empty, or through RIS. Forgetting the
+    // remembered shape is what lets the screen-type defaults below apply again -- caching the name
+    // the stack happens to hold at its bottom would pin the I-beam for the rest of the session and
+    // the alternate screen would never get its arrow back.
+    if (cssName.empty())
+    {
+        _applicationPointerShape = std::nullopt;
+        if (_display)
+            postToObject(_display, [this]() { setDefaultCursor(); });
+        return;
+    }
+
+    // OSC 22 speaks CSS pointer names; the display speaks its own enum. The mapping is the whole
+    // binding between the two, and only names vtbackend advertises as supported can arrive here.
+    auto const shape = [cssName]() -> std::optional<MouseCursorShape> {
+        if (cssName == "text")
+            return MouseCursorShape::IBeam;
+        if (cssName == "pointer")
+            return MouseCursorShape::PointingHand;
+        if (cssName == "default")
+            return MouseCursorShape::Arrow;
+        if (cssName == "none")
+            return MouseCursorShape::Hidden;
+        return std::nullopt;
+    }();
+
+    if (!shape)
+        return;
+
+    // Remember it before the display gets a look in: without a display attached there is nothing to
+    // post to, and dropping the shape there is what lost an `OSC 22` sent to a backgrounded pane.
+    // attachDisplay() applies whatever is remembered here once a display arrives. Returning early on
+    // a null display -- as the reset path above is careful not to do -- would drop the shape in
+    // precisely the case this remembering exists to serve.
+    _applicationPointerShape = *shape;
+
+    // The event arrives on the parser thread; the cursor belongs to the GUI thread.
+    if (_display)
+        postToObject(_display,
+                     [display = _display, shape = *shape]() { display->setMouseCursorShape(shape); });
 }
 
 void TerminalSession::copyToClipboard(std::string_view data)
@@ -2503,6 +2556,17 @@ void TerminalSession::setDefaultCursor()
 {
     if (!_display)
         return;
+
+    // An `OSC 22` shape outranks the screen-type default: the application asked for it and nothing
+    // has withdrawn it. This is reached from every mouse move and every focus change, so without the
+    // check a requested shape survived exactly one mouse move before reverting -- which looks from
+    // the outside like OSC 22 not working at all. RIS withdraws the shape by asking for the default
+    // one, and it also returns to the primary screen, whose default this already is.
+    if (auto const applicationShape = _applicationPointerShape.load())
+    {
+        _display->setMouseCursorShape(*applicationShape);
+        return;
+    }
 
     using Type = vtbackend::ScreenType;
     switch (_terminal.screenType())

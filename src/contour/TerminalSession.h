@@ -373,6 +373,13 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     display::TerminalDisplay* display() noexcept { return _display; }
     display::TerminalDisplay const* display() const noexcept { return _display; }
 
+    /// @return The shape the application last requested via `OSC 22`, or nullopt while it has
+    ///         requested none. Survives a display hand-off; see _applicationPointerShape.
+    [[nodiscard]] std::optional<MouseCursorShape> applicationPointerShape() const noexcept
+    {
+        return _applicationPointerShape.load();
+    }
+
     void attachDisplay(display::TerminalDisplay& display);
     void detachDisplay(display::TerminalDisplay& display);
 
@@ -401,6 +408,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     vtbackend::FontDef getFontDef() override;
     void setFontDef(vtbackend::FontDef const& fontDef) override;
     void copyToClipboard(std::string_view data) override;
+    void setPointerShape(std::string_view cssName) override;
     void openDocument(std::string_view /*fileOrUrl*/) override;
     void inspect() override;
     void notify(std::string_view title, std::string_view content) override;
@@ -739,6 +747,17 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     //
     vtbackend::ScreenType _currentScreenType = vtbackend::ScreenType::Primary;
     vtbackend::CellLocation _currentMousePosition = vtbackend::CellLocation {};
+
+    /// The shape the application last asked for via `OSC 22`, or nullopt while it has asked for
+    /// none. Recorded whether or not a display is attached: a session between displays -- a split
+    /// hand-off, a tab whose display was released -- still has to hand the shape to whichever display
+    /// attaches next, and writing it only from the lambda posted to the display dropped it entirely
+    /// for the rest of the session.
+    ///
+    /// Atomic because it is now written on the parser thread (where `OSC 22` arrives) and read on the
+    /// GUI thread in setDefaultCursor(). Caching it here rather than reading the pointer-shape stack
+    /// back is still the point: that stack belongs to the parser thread.
+    std::atomic<std::optional<MouseCursorShape>> _applicationPointerShape;
     bool _allowKeyMappings = true;
     std::unique_ptr<Audio> _audio;
     std::vector<int> _musicalNotesBuffer;

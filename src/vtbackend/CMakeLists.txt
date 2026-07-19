@@ -27,6 +27,10 @@ set(vtbackend_HEADERS
     Grid.h
     HintModeHandler.h
     Hyperlink.h
+    KittyClipboard.h
+    PointerShape.h
+    KittyGraphics.h
+    TextSizing.h
     Image.h
     InputBinding.h
     InputGenerator.h
@@ -85,6 +89,9 @@ set(vtbackend_SOURCES
     MockTerm.cpp
     RenderBuffer.cpp
     RenderBufferBuilder.cpp
+    KittyClipboard.cpp
+    KittyGraphics.cpp
+    TextSizing.cpp
     Screen.cpp
     SemanticBlockTracker.cpp
     Selector.cpp
@@ -167,6 +174,10 @@ if(LIBTERMINAL_TESTING)
         Line_test.cpp
         MessageParser_test.cpp
         RectangularAreaChecksum_test.cpp
+        KittyClipboard_test.cpp
+        PointerShape_test.cpp
+        KittyGraphics_test.cpp
+        TextSizing_test.cpp
         Screen_test.cpp
         Image_test.cpp
         Sequence_test.cpp

@@ -217,6 +217,30 @@ constexpr bool operator<(CellLocation location, PageSize pageSize) noexcept
            && location.column < boxed_cast<ColumnOffset>(pageSize.columns);
 }
 
+/// A rectangle of cells that form one indivisible unit -- a wide character, or a block laid out by
+/// the kitty text sizing protocol (`OSC 66`).
+///
+/// Half a glyph is not a thing that can be drawn, so a block is erased, highlighted and copied as a
+/// whole. This names its extent so that everything enforcing that agrees on what "the whole" is.
+struct MulticellBlock
+{
+    /// The block's top-left cell -- the one that actually holds the text.
+    CellLocation origin;
+
+    /// How many columns the block spans, at least 1.
+    int columns = 1;
+
+    /// How many lines the block spans, at least 1.
+    int rows = 1;
+
+    /// @return whether @p position falls inside this block.
+    [[nodiscard]] constexpr bool contains(CellLocation position) const noexcept
+    {
+        return position.line >= origin.line && unbox(position.line) < unbox(origin.line) + rows
+               && position.column >= origin.column && unbox(position.column) < unbox(origin.column) + columns;
+    }
+};
+
 struct CellLocationRange
 {
     CellLocation first;
@@ -976,10 +1000,27 @@ enum class DECMode : std::uint8_t
     /// erase page memory; reset (the default) clears the screen on a column-width change (VT100
     /// behaviour).
     NoClearScreenOnColumnChange = 68,
+
+    /// In-band window resize notifications (DEC mode 2048).
+    ///
+    /// While set, the terminal reports its size to the application on the same channel the
+    /// application reads everything else on, as `CSI 48 ; rows ; cols ; height ; width t`. That is
+    /// worth having because the alternative -- SIGWINCH plus an ioctl -- is unavailable to anything
+    /// reading the terminal over a pipe, a socket or an ssh multiplexer.
+    ///
+    /// One report is sent the moment the mode is set, so an application never has to ask separately
+    /// for the size it starts with.
+    InBandWindowResize = 71,
+
+    /// Paste event notifications (DEC mode 5522), from the kitty clipboard protocol.
+    ///
+    /// While set, a paste is announced to the application with the MIME types the clipboard actually
+    /// holds, so a full-screen application can choose how to interpret it rather than guessing.
+    PasteMimeNotifications = 72,
     // }}}
 
     /// Sentinel value for sizing the mode bitset. Must remain the last entry.
-    DECModeCount = 71
+    DECModeCount = 73
 };
 
 /// The minimum ANSI conformance level (1..5, matching conformanceLevelOf(VTType)) at which a DEC
@@ -1285,6 +1326,8 @@ constexpr inline auto DECModeNumbers = std::to_array<DECModeNumbering>({
     { DECMode::ReportGridCellSelection, 2030 },
     { DECMode::ReportColorPaletteUpdated, 2031 },
     { DECMode::SemanticBlockProtocol, 2034 },
+    { DECMode::InBandWindowResize, 2048 },
+    { DECMode::PasteMimeNotifications, 5522 },
     { DECMode::PrintFormFeed, 18 },
     { DECMode::HebrewKeyboardMapping, 35 },
     { DECMode::NationalReplacementCharacterSet, 42 },

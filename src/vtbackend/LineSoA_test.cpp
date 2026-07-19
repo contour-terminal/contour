@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <format>
+#include <ranges>
 
 using namespace vtbackend;
 
@@ -384,6 +385,58 @@ TEST_CASE("CellProxy.resetWithAttrs", "[CellProxy]")
 
     CHECK(cell.empty());
     CHECK(cell.foregroundColor() == Color::Indexed(9));
+}
+
+TEST_CASE("LineSoA.appendCodepointToCluster.width_never_reaches_zero", "[LineSoA]")
+{
+    // unicode::grapheme_cluster_width answers 0 for a cluster made only of zero-width codepoints.
+    // A cell always occupies at least one column, and a width of 0 additionally drove the shrink
+    // path's erase range onto the head cell itself, blanking the very text it was revising.
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(10));
+
+    auto cell = CellProxy(line, 0);
+    cell.write(GraphicsAttributes {}, U'́', 1); // a combining mark as the cluster BASE
+    auto const delta = cell.appendCharacter(U'̂');
+
+    CHECK(line.widths[0] >= 1);
+    CHECK(delta >= 0);
+    CHECK(cell.codepointCount() == 2);
+    CHECK(cell.codepoint(0) == U'́');
+}
+
+TEST_CASE("LineSoA.appendCodepointToCluster.pool_survives_more_appends_than_the_index_can_address",
+          "[LineSoA]")
+{
+    // clusterPoolIndex is a uint16_t and the pool is append-only -- clearClusterExtras deliberately
+    // leaves the runs it abandons behind. A line rewritten in place (a status line, a spinner
+    // cycling emoji) therefore used to walk the index past 65535, wrap it, and start reading an
+    // unrelated codepoint run back out of the cell.
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(10));
+
+    // Each iteration abandons the previous run and appends a fresh one, so the pool grows by 2 while
+    // only 2 entries stay live. Comfortably more turns than a uint16_t can index.
+    for ([[maybe_unused]] auto const i: std::views::iota(0u, 40000u))
+    {
+        auto cell = CellProxy(line, 0);
+        cell.write(GraphicsAttributes {}, U'e', 1);
+        (void) cell.appendCharacter(U'́');
+        (void) cell.appendCharacter(U'̂');
+    }
+
+    // The final cluster ends in a codepoint that appears nowhere else in the pool, so reading it
+    // back proves the index still addresses THIS cell's run rather than a truncated one pointing
+    // into the abandoned garbage -- which the repetitive filler above would otherwise match by luck.
+    auto cell = CellProxy(line, 0);
+    cell.write(GraphicsAttributes {}, U'e', 1);
+    (void) cell.appendCharacter(U'́');
+    (void) cell.appendCharacter(U'⃣');
+
+    REQUIRE(cell.codepointCount() == 3);
+    CHECK(cell.codepoint(0) == U'e');
+    CHECK(cell.codepoint(1) == U'́');
+    CHECK(cell.codepoint(2) == U'⃣');
 }
 
 TEST_CASE("CellProxy.appendCharacter", "[CellProxy]")

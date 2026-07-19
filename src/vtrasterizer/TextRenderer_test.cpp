@@ -17,12 +17,14 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <ranges>
+#include <set>
 #include <string_view>
 #include <thread>
 
@@ -350,9 +352,13 @@ TEST_CASE("TextRenderer", "[renderer]")
     vtrasterizer::atlas::DirectMappingAllocator<vtrasterizer::RenderTileAttributes> allocator;
     renderer.setRenderTarget(renderTarget, allocator);
 
+    // The tile is one CELL, exactly as Renderer::configureTextureAtlas sets it in production. A
+    // roomier tile (this was 256x256, ~12x the cell) makes the atlas' central invariant
+    // untestable: tile origins are spaced one tile apart, so an oversized bitmap overwrites its
+    // neighbour, and nothing here could ever produce one large enough to notice.
     auto const atlasProperties =
         vtrasterizer::atlas::AtlasProperties { .format = vtrasterizer::atlas::Format::Red,
-                                               .tileSize = { Width(256), Height(256) },
+                                               .tileSize = gridMetrics.cellSize,
                                                .hashCount = { 1024 },
                                                .tileCount = { 4096 },
                                                .directMappingCount = 128 };
@@ -435,9 +441,15 @@ TEST_CASE("TextRenderer", "[renderer]")
         auto const buffer = renderGlyph(U'\uE000');
         REQUIRE(buffer.has_value());
 
-        // Verify the scaled bitmap fits within cell dimensions.
-        CHECK(buffer->bitmapSize.width <= gridMetrics.cellSize.width);
+        // The HEIGHT is what the atlas bounds: a tile is exactly one cell tall and the next tile's
+        // origin is that far away, so extra rows overwrite an unrelated glyph.
         CHECK(buffer->bitmapSize.height <= gridMetrics.cellSize.height);
+
+        // The width is NOT bounded here, for the same reason as the wide-but-not-tall case below:
+        // a glyph wider than one cell is sliced across cells by createSlicedRasterizedGlyph. Scaling
+        // it to fit one cell would squash a 16-wide glyph to 10 rather than to the 13 the height
+        // ratio alone calls for, which is the aspect the font actually asked for.
+        CHECK(buffer->bitmapSize.width == vtbackend::Width(13));
     }
 
     SECTION("wide-but-not-tall non-RGBA glyph is not scaled down")
@@ -455,17 +467,32 @@ TEST_CASE("TextRenderer", "[renderer]")
         CHECK(buffer->bitmapSize.height <= gridMetrics.cellSize.height);
     }
 
-    auto const renderAndCapture = [&](char32_t codepoint, vtbackend::LineFlags flags) {
-        renderTarget.getMockBackend().renderCommands.clear();
-        renderer.beginFrame();
-        auto cell = vtbackend::RenderCell {};
-        cell.codepoints = std::u32string(1, codepoint);
-        cell.attributes.flags = vtbackend::CellFlags {};
-        cell.attributes.lineFlags = flags;
-        cell.attributes.foregroundColor = vtbackend::RGBColor(0xFF, 0xFF, 0xFF);
-        renderer.renderCell(cell);
-        renderer.endFrame();
-        return renderTarget.getMockBackend().renderCommands;
+    /// Renders one cell and returns the draw commands it produced.
+    ///
+    /// @param sizing defaults to ordinary text; pass a scaled one to take the `OSC 66` block path,
+    ///              which builds its tiles quite differently from the stretched-glyph path.
+    auto const renderAndCapture =
+        [&](char32_t codepoint, vtbackend::LineFlags flags, vtbackend::GlyphSizing sizing = {}) {
+            renderTarget.getMockBackend().renderCommands.clear();
+            renderer.beginFrame();
+            auto cell = vtbackend::RenderCell {};
+            cell.position = vtbackend::CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) };
+            cell.codepoints = std::u32string(1, codepoint);
+            cell.attributes.flags = vtbackend::CellFlags {};
+            cell.attributes.lineFlags = flags;
+            cell.attributes.foregroundColor = vtbackend::RGBColor(0xFF, 0xFF, 0xFF);
+            cell.sizing = sizing;
+            renderer.renderCell(cell);
+            renderer.endFrame();
+            return renderTarget.getMockBackend().renderCommands;
+        };
+
+    /// The same, for a 2x2 text-sizing block.
+    auto const renderScaledAndCapture = [&](char32_t codepoint, vtbackend::LineFlags flags) {
+        auto sizing = vtbackend::GlyphSizing {};
+        sizing.scale = vtbackend::CellScale { .scale = 2 };
+        sizing.columns = 2;
+        return renderAndCapture(codepoint, flags, sizing);
     };
 
     SECTION("Double Width")
@@ -512,6 +539,50 @@ TEST_CASE("TextRenderer", "[renderer]")
         CHECK(
             cmd.normalizedLocation.y
             == Catch::Approx(normalCmd.normalizedLocation.y + (normalCmd.normalizedLocation.height / 2.0f)));
+    }
+
+    // A scaled cell (OSC 66) takes an entirely different render path: one cell-sized tile per column,
+    // cut out of a block-sized raster, rather than one stretched glyph. That path returned before any
+    // line-flag handling at all, so a block on a DECDWL/DECDHL line ignored the doubling every glyph
+    // beside it received -- covering only the left half of the cells the doubled grid assigns it.
+    SECTION("a scaled block is stretched by a double-width line too")
+    {
+        auto const normal = renderScaledAndCapture(U'A', vtbackend::LineFlag::None);
+        auto const doubled = renderScaledAndCapture(U'A', vtbackend::LineFlag::DoubleWidth);
+        REQUIRE(!normal.empty());
+        REQUIRE(doubled.size() == normal.size());
+
+        // Every tile of the block is twice as wide on the doubled line.
+        for (auto const i: std::views::iota(size_t { 0 }, doubled.size()))
+            CHECK(unbox(doubled[i].targetSize.width) == unbox(normal[i].targetSize.width) * 2);
+
+        // ...and the tiles are spaced twice as far apart, or they would overlap each other.
+        if (doubled.size() >= 2)
+        {
+            auto const normalStride = normal[1].x.value - normal[0].x.value;
+            auto const doubledStride = doubled[1].x.value - doubled[0].x.value;
+            CHECK(doubledStride == normalStride * 2);
+        }
+    }
+
+    SECTION("a scaled block takes its own half of a double-height line")
+    {
+        auto const normal = renderScaledAndCapture(U'A', vtbackend::LineFlag::None);
+        auto const top = renderScaledAndCapture(U'A', vtbackend::LineFlag::DoubleHeightTop);
+        auto const bottom = renderScaledAndCapture(U'A', vtbackend::LineFlag::DoubleHeightBottom);
+        REQUIRE(!normal.empty());
+        REQUIRE(top.size() == normal.size());
+        REQUIRE(bottom.size() == normal.size());
+
+        // Each row samples half the texture height, rather than both rows drawing the whole raster.
+        CHECK(top[0].normalizedLocation.height == Catch::Approx(normal[0].normalizedLocation.height / 2.0f));
+        CHECK(bottom[0].normalizedLocation.height
+              == Catch::Approx(normal[0].normalizedLocation.height / 2.0f));
+
+        // The bottom row starts halfway down the texture the top row started at.
+        CHECK(
+            bottom[0].normalizedLocation.y
+            == Catch::Approx(normal[0].normalizedLocation.y + (normal[0].normalizedLocation.height / 2.0f)));
     }
 
     SECTION("Double Width Advancement")
@@ -1383,9 +1454,13 @@ TEST_CASE("TextRenderer.fallback_run_stays_on_the_cell_grid", "[renderer][fallba
     vtrasterizer::atlas::DirectMappingAllocator<vtrasterizer::RenderTileAttributes> allocator;
     renderer.setRenderTarget(renderTarget, allocator);
 
+    // The tile is one CELL, exactly as Renderer::configureTextureAtlas sets it in production. A
+    // roomier tile (this was 256x256, ~12x the cell) makes the atlas' central invariant
+    // untestable: tile origins are spaced one tile apart, so an oversized bitmap overwrites its
+    // neighbour, and nothing here could ever produce one large enough to notice.
     auto const atlasProperties =
         vtrasterizer::atlas::AtlasProperties { .format = vtrasterizer::atlas::Format::Red,
-                                               .tileSize = { Width(256), Height(256) },
+                                               .tileSize = gridMetrics.cellSize,
                                                .hashCount = { 1024 },
                                                .tileCount = { 4096 },
                                                .directMappingCount = 128 };
@@ -1421,6 +1496,145 @@ TEST_CASE("TextRenderer.fallback_run_stays_on_the_cell_grid", "[renderer][fallba
         CHECK(positions[0] == 0);
         CHECK(positions[1] == 1 * CellWidth);
     }
+}
+
+TEST_CASE("TextRenderer.a_scaled_block_draws_one_cell_sized_tile_per_band", "[renderer][textsizing]")
+{
+    // The atlas is a fixed GRID: TextureAtlas spaces tile origins exactly tileSize apart, so a
+    // bitmap taller than one cell is not "too big" -- it is a write into the tile below, silently
+    // replacing an unrelated glyph's pixels. That is why the damage from this bug shows up as
+    // WRONG CHARACTERS somewhere else on screen rather than as a malformed scaled glyph.
+    //
+    // An `OSC 66` block is `scale` cells tall, but it must still reach the atlas as cell-sized
+    // tiles -- kitty's extract_cell_region does exactly this, and never stores a sprite larger
+    // than one unscaled cell.
+    //
+    // NOTE on what this test can and cannot see: BDF is a fixed-size bitmap format (@see
+    // bdf_test_font), so FreeType hands back the same raster whatever size is asked for. The
+    // oversize half of this test is therefore VACUOUS here -- it cannot produce a too-large tile
+    // to reject. It is the banding half below that gates, and the oversize bound is gated for
+    // real by MockAtlasBackend across every renderer test and by the [display] OSC 66 test, both
+    // of which run against a scalable font.
+    auto font = text::test::bdf_font { "primary", true, { { U'A', 8 }, { U'B', 8 } } };
+
+    auto description = text::font_description {};
+    description.familyName = "primary";
+    description.spacing = text::font_spacing::mono;
+
+    mock_font_locator::configure({ { .description = description, .source = font.source() } });
+    auto const _ = crispy::finally { [] { mock_font_locator::configure({}); } };
+
+    auto locator = mock_font_locator {};
+    auto textShaper = open_shaper { text::test::bdf_font::Dpi, locator };
+
+    auto const fontKey = textShaper.load_font(description, text::test::bdf_font::Size);
+    REQUIRE(fontKey.has_value());
+
+    // `baseline` is the DESCENT -- Renderer computes it as lineHeight - ascender -- so it is a few
+    // pixels, not most of the cell. The neighbouring tests carry 15 against a 20px cell, which
+    // leaves an ascender no glyph fits under and would put a scaled block's baseline above its own
+    // canvas.
+    auto const gridMetrics = GridMetrics { .pageSize = PageSize { LineCount(24), ColumnCount(80) },
+                                           .cellSize = ImageSize { Width(CellWidth), Height(20) },
+                                           .baseline = 4,
+                                           .underline = { .position = 2, .thickness = 1 } };
+
+    auto fontDescriptions = FontDescriptions {};
+    fontDescriptions.dpi = text::test::bdf_font::Dpi;
+    fontDescriptions.size = text::test::bdf_font::Size;
+    fontDescriptions.textShapingEngine = TextShapingEngine::OpenShaper;
+
+    auto const fontKeys = FontKeys {
+        .regular = *fontKey, .bold = *fontKey, .italic = *fontKey, .boldItalic = *fontKey, .emoji = *fontKey
+    };
+
+    MockTextRendererEvents events;
+
+    // Only Stretch is exercised here. Rerasterize asks the shaper for the face at a larger size, and
+    // BDF is a fixed-size bitmap format (@see bdf_test_font) -- it hands back the identical raster,
+    // so a block could not put ink below its first row however correct the code was. Asserting it
+    // anyway would be asserting a property of the test font. Rerasterize is gated end to end by the
+    // [display] OSC 66 test, which runs against a real scalable font.
+    auto const method = GlyphScalingMethod::Stretch;
+    INFO("scaling method: " << nameOf(method));
+    auto const& scaler = glyphScalerFor(method);
+
+    auto renderer = TextRenderer { gridMetrics, textShaper, fontDescriptions, fontKeys, events, scaler };
+
+    MockRenderTarget renderTarget;
+    vtrasterizer::atlas::DirectMappingAllocator<vtrasterizer::RenderTileAttributes> allocator;
+    renderer.setRenderTarget(renderTarget, allocator);
+
+    auto const atlasProperties =
+        vtrasterizer::atlas::AtlasProperties { .format = vtrasterizer::atlas::Format::Red,
+                                               .tileSize = gridMetrics.cellSize,
+                                               .hashCount = { 1024 },
+                                               .tileCount = { 4096 },
+                                               .directMappingCount = 128 };
+    auto textureAtlas = TextureAtlas(renderTarget.getMockBackend(), atlasProperties);
+    renderer.setTextureAtlas(textureAtlas);
+
+    auto const scale = GENERATE(uint8_t { 1 }, uint8_t { 2 }, uint8_t { 3 });
+    INFO("scale: " << static_cast<int>(scale));
+
+    // Each band is its own row, and each row is one group -- exactly how RenderBufferBuilder feeds
+    // a block: the head row carries the text, and every row below it repeats the head's cluster
+    // with its own band index. groupStart/groupEnd bracket each row, or the grouper carries the
+    // pen across a line boundary.
+    auto& backend = renderTarget.getMockBackend();
+
+    // Each band is its own row, and each row is one group -- exactly how RenderBufferBuilder feeds
+    // a block: the head row carries the text, and every row below it repeats the head's cluster
+    // with its own band index. groupStart/groupEnd bracket each row, or the grouper carries the
+    // pen across a line boundary.
+    //
+    // Rendered one band at a time, and the uploads each band produced are inspected before the next
+    // runs. Counting tiles DRAWN would prove nothing -- a blank tile is still a draw, which is
+    // exactly how a first version of this test passed against the very bug it was written for.
+    auto bandsWithInk = std::set<int> {};
+
+    renderer.beginFrame();
+    for (auto const band: std::views::iota(0, static_cast<int>(scale)))
+    {
+        auto const uploadsBefore = backend.uploadCommands.size();
+
+        auto cell = vtbackend::RenderCell {};
+        cell.groupStart = true;
+        cell.groupEnd = true;
+        cell.position = vtbackend::CellLocation { .line = LineOffset(band), .column = ColumnOffset(0) };
+        cell.codepoints = U"A";
+        cell.attributes.foregroundColor = vtbackend::RGBColor(0xFF, 0xFF, 0xFF);
+        cell.sizing.scale.scale = scale;
+        cell.sizing.band = static_cast<uint8_t>(band);
+        // What the backend claimed: a one-cell-wide glyph at scale s spans s columns.
+        cell.sizing.columns = scale;
+        renderer.renderCell(cell);
+        renderer.endFrame();
+        renderer.beginFrame();
+
+        auto const inked = std::ranges::any_of(
+            backend.uploadCommands | std::views::drop(uploadsBefore), [](auto const& upload) {
+                return std::ranges::any_of(upload.bitmap, [](uint8_t v) { return v != 0; });
+            });
+        if (inked)
+            bandsWithInk.insert(band);
+    }
+    renderer.endFrame();
+
+    // The assertion the MockAtlasBackend also makes as each upload arrives; named here so the
+    // failure reads as what it is rather than as an anonymous CHECK deep in the harness.
+    INFO("oversized uploads: " << backend.oversizedUploads.size() << " of " << backend.uploadCommands.size());
+    CHECK(backend.oversizedUploads.empty());
+
+    // The banding contract: a block's ink must reach its LAST row and must not be confined to its
+    // head. Drawing only the head row is how a block collapsed to a sliver of the glyph's top edge.
+    //
+    // Not "every band has ink": a glyph's own bitmap carries blank padding rows (this font's 'A'
+    // starts two rows down), so an interior or leading band can be legitimately empty. Asserting
+    // otherwise would be asserting the shape of the test font's letter.
+    INFO("bands carrying ink: " << bandsWithInk.size() << " of " << static_cast<int>(scale));
+    CHECK(bandsWithInk.contains(static_cast<int>(scale) - 1));
+    CHECK(bandsWithInk.size() >= std::min<size_t>(2, scale));
 }
 
 // }}}

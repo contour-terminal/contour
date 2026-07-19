@@ -53,6 +53,14 @@ namespace
             std::fill_n(line.widths.data() + startCol, count, uint8_t { 1 });
             std::fill_n(line.sgr.data() + startCol, count, attrs);
             std::fill_n(line.hyperlinks.data() + startCol, count, hyperlink);
+
+            // Ordinary text carries no sizing. Every per-cell write path resets these two; leaving
+            // them here let a previous `OSC 66` block's scale survive underneath the text that
+            // replaced it, so the text was drawn at the block's size. A line that still carries a
+            // block is never trivial (@see BasicCellProxy::setTextScale), so the skip above cannot
+            // hide a stale scale.
+            std::fill_n(line.scales.data() + startCol, count, uint8_t { 1 });
+            std::fill_n(line.textScaleExtras.data() + startCol, count, uint16_t { 0 });
         }
 
         clearReplacedImageFragments(line.imageFragments, static_cast<uint16_t>(startCol), count);
@@ -148,7 +156,36 @@ namespace
                            && line.sgr[targetCol].flags.contains(CellFlag::WideCharContinuation))
                         --targetCol;
 
-                    appendCodepointToCluster(line, targetCol, codepoint);
+                    // A variation selector can widen the cluster it joins, which moves the write
+                    // position. There is no cursor, no margin and no insert mode here -- only the end
+                    // of the line to stay inside of.
+                    auto const delta = appendCodepointToCluster(line, targetCol, codepoint);
+                    auto const newWidth = static_cast<size_t>(line.widths[targetCol]);
+
+                    if (delta > 0)
+                    {
+                        if (targetCol + newWidth <= maxCols)
+                        {
+                            fillWideCharContinuation(line,
+                                                     targetCol + newWidth - static_cast<size_t>(delta),
+                                                     static_cast<size_t>(delta),
+                                                     line.sgr[targetCol],
+                                                     line.hyperlinks[targetCol]);
+                            col += static_cast<size_t>(delta);
+                        }
+                        else
+                            // No room to grow: keep the cluster at the width it already occupies.
+                            line.widths[targetCol] = static_cast<uint8_t>(newWidth - delta);
+                    }
+                    else if (delta < 0)
+                    {
+                        // A cluster never narrows: VS15 selects a text presentation without changing
+                        // the width, and this line is being rebuilt from text that was laid out under
+                        // that same rule -- narrowing here would give a column back that the original
+                        // write never released, so the inflated line would not match what was stored.
+                        // @see Screen::applyClusterWidthChange, terminal-unicode-core "VS15".
+                        line.widths[targetCol] = static_cast<uint8_t>(newWidth - delta);
+                    }
                 }
             }
 

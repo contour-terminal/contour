@@ -1406,6 +1406,72 @@ TEST_CASE("Terminal.UnderlineStyleClearing", "[terminal]")
     CHECK(!screen.at(LineOffset(0), ColumnOffset(11)).isFlagEnabled(CellFlag::Italic));
 }
 
+TEST_CASE("Terminal.selection_does_not_pad_wide_characters", "[terminal]")
+{
+    // A wide character occupies two cells: a head carrying the text, and a continuation whose
+    // codepoint is 0. Copying must yield the character ONCE. Treating the continuation as an empty
+    // cell turns it into a space, so every CJK selection comes back padded -- and a multi-column
+    // text-sizing block would trail one space per extra column.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(1), ColumnCount(6) } };
+    mock.writeToScreen("\u4e2dab");
+
+    mock.terminal.setSelector(std::make_unique<vtbackend::LinearSelection>(
+        mock.terminal.selectionHelper(),
+        CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+        []() {}));
+    (void) mock.terminal.selector()->extend(
+        CellLocation { .line = LineOffset(0), .column = ColumnOffset(3) });
+    mock.terminal.selector()->complete();
+
+    // Not "\u4e2d ab" -- the space between the wide char and 'a' is the bug.
+    CHECK(mock.terminal.extractSelectionText() == "\u4e2dab");
+}
+
+TEST_CASE("Terminal.a_one_column_selection_still_breaks_lines", "[terminal]")
+{
+    // The line-break test asks "has anything been written yet", and used the accumulated text to
+    // answer -- the same proxy flushLine was fixed away from, in the other of the two places that
+    // used it. A one-column selection emits every callback at the same column, so the only thing that
+    // could trigger a flush is that proxy, and it stays false because text only becomes non-empty
+    // inside the flush it is gating.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(4) } };
+    mock.writeToScreen("a\r\nb\r\nc"sv);
+
+    // Rectangular: every callback lands on the same column, which is what leaves the line-break test
+    // with nothing else to go on.
+    mock.terminal.setSelector(std::make_unique<vtbackend::RectangularSelection>(
+        mock.terminal.selectionHelper(),
+        CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+        []() {}));
+    (void) mock.terminal.selector()->extend(
+        CellLocation { .line = LineOffset(2), .column = ColumnOffset(0) });
+    mock.terminal.selector()->complete();
+
+    CHECK(mock.terminal.extractSelectionText() == "a\nb\nc");
+}
+
+TEST_CASE("Terminal.selection_keeps_leading_blank_lines", "[terminal]")
+{
+    // A blank line inside a selection is a line the user selected, so it must copy as a newline. The
+    // line break is emitted as a SEPARATOR, guarded on whether anything has been written yet -- and
+    // using the accumulated text for that test loses LEADING blank lines, because such a line trims
+    // to nothing and never makes the text non-empty. Interior blank lines survive, so the loss is
+    // silent and depends on where in the selection the blank line falls.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(6) } };
+    mock.writeToScreen("\033[3;1H"
+                       "abc"sv); // rows 0 and 1 stay blank
+
+    mock.terminal.setSelector(std::make_unique<vtbackend::LinearSelection>(
+        mock.terminal.selectionHelper(),
+        CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+        []() {}));
+    (void) mock.terminal.selector()->extend(
+        CellLocation { .line = LineOffset(2), .column = ColumnOffset(2) });
+    mock.terminal.selector()->complete();
+
+    CHECK(mock.terminal.extractSelectionText() == "\n\nabc");
+}
+
 TEST_CASE("Terminal.CurlyUnderline", "[terminal]")
 {
     auto const now = chrono::steady_clock::now();
@@ -4109,6 +4175,123 @@ TEST_CASE("Terminal.DECMode.numberMappingRoundTrips", "[terminal]")
 }
 // }}}
 
+TEST_CASE("Terminal.TextSelection_drag_into_blank_stops_at_the_pointer", "[terminal]")
+{
+    // Dragging past the end of a short line used to snap the selection to the right margin, so the
+    // whole line lit up -- and copied -- the moment the pointer crossed the last character. The
+    // guard meant to spare real spaces only ever spared TYPED ones: compareCellTextAt returns
+    // `character == 0` for a cell holding no codepoints, so every never-written cell snapped.
+    auto mock = MockTerm { ColumnCount(20), LineCount(4) };
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    mock.terminal.tick(ClockBase);
+    mock.writeToScreen("abc");
+
+    using namespace vtbackend;
+    auto constexpr UiHandledHint = false;
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+
+    mock.terminal.tick(1s);
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None, 0_lineOffset + 0_columnOffset, PixelCoordinate, UiHandledHint);
+    mock.terminal.tick(1s);
+    (void) mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+
+    // Drag well past "abc", into cells that were never written.
+    mock.terminal.tick(1s);
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None, 0_lineOffset + 6_columnOffset, PixelCoordinate, UiHandledHint);
+
+    CHECK(mock.terminal.isSelected(mock.terminal.primaryScreen(),
+                                   CellLocation { .line = LineOffset(0), .column = ColumnOffset(5) }));
+    CHECK_FALSE(mock.terminal.isSelected(mock.terminal.primaryScreen(),
+                                         CellLocation { .line = LineOffset(0), .column = ColumnOffset(7) }));
+    CHECK_FALSE(mock.terminal.isSelected(mock.terminal.primaryScreen(),
+                                         CellLocation { .line = LineOffset(0), .column = ColumnOffset(19) }));
+}
+
+TEST_CASE("Terminal.TextSelection_multiline_drag_still_takes_the_first_line_whole", "[terminal]")
+{
+    // Removing that snap must not cost the standard behaviour: a selection running onto a later
+    // line takes the first line to its right margin. Selection::ranges() and the lexicographic
+    // Selection::contains already provide that, which is what made the snap redundant.
+    auto mock = MockTerm { ColumnCount(20), LineCount(4) };
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    mock.terminal.tick(ClockBase);
+    mock.writeToScreen("abc\r\ndef");
+
+    using namespace vtbackend;
+    auto constexpr UiHandledHint = false;
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+
+    mock.terminal.tick(1s);
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None, 0_lineOffset + 0_columnOffset, PixelCoordinate, UiHandledHint);
+    mock.terminal.tick(1s);
+    (void) mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    mock.terminal.tick(1s);
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None, 1_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
+
+    // Column 15 of the FIRST line is past its text but inside a multi-line selection.
+    CHECK(mock.terminal.isSelected(mock.terminal.primaryScreen(),
+                                   CellLocation { .line = LineOffset(0), .column = ColumnOffset(15) }));
+    // Split so the escape does not run into the text that follows it, which a spell checker reading
+    // this file would otherwise take for a single misspelled token.
+    CHECK(mock.terminal.extractSelectionText()
+          == "abc\n"
+             "de");
+}
+
+TEST_CASE("Terminal.selection_of_a_trivial_line_survives_a_scrolled_viewport", "[terminal]")
+{
+    // The renderer asks two questions about selection at two granularities: isSelected(CellLocation)
+    // colours a cell, and isSelected(LineOffset) decides whether a line may take the trivial fast
+    // path -- which draws it uniformly and never consults the per-cell test at all.
+    //
+    // Both overloads take GRID coordinates, but renderTrivialLine used to hand the coarse one a
+    // SCREEN offset. Unscrolled the two coincide, so this only appears once the viewport moves: a
+    // selected line asked about the wrong line, answered "not selected", and rendered unhighlighted.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(20) }, LineCount(30) };
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    mock.terminal.tick(ClockBase);
+
+    for (auto const i: std::views::iota(0, 20))
+        mock.writeToScreen("line" + std::to_string(i) + "\r\n");
+
+    // Scroll back further than text_sizing::MaxScale. The coarse test looks back that many lines
+    // for a tall block reaching down into this one, and that look-back would otherwise mask a small
+    // coordinate error by accident -- a scroll of 2 still lands inside it.
+    mock.terminal.viewport().scrollUp(LineCount(9));
+    auto const selectedGridLine = LineOffset(-9);
+
+    auto const anchor = CellLocation { .line = selectedGridLine, .column = ColumnOffset(0) };
+    mock.terminal.setSelector(
+        std::make_unique<vtbackend::LinearSelection>(mock.terminal.selectionHelper(), anchor, []() {}));
+    (void) mock.terminal.selector()->extend(
+        CellLocation { .line = selectedGridLine, .column = ColumnOffset(3) });
+    mock.terminal.selector()->complete();
+
+    mock.terminal.tick(ClockBase + 100ms);
+    mock.terminal.ensureFreshRenderBuffer();
+    auto const buffer = mock.terminal.renderBuffer();
+
+    // A selected line must NOT have been emitted as a uniform trivial line...
+    auto const trivialAtScreenLine0 =
+        std::ranges::any_of(buffer.get().lines, [](vtbackend::RenderLine const& line) {
+            return line.lineOffset == LineOffset(0);
+        });
+    CHECK_FALSE(trivialAtScreenLine0);
+
+    // ...it must have dropped to the per-cell path, where the selection colour is applied.
+    auto const cellsAtScreenLine0 =
+        std::ranges::count_if(buffer.get().cells, [](vtbackend::RenderCell const& cell) {
+            return cell.position.line == LineOffset(0);
+        });
+    CHECK(cellsAtScreenLine0 > 0);
+}
+
 // NOLINTEND(misc-const-correctness)
 
 TEST_CASE("Terminal.passive mouse tracking declines the event so the UI may act on it")
@@ -4138,4 +4321,35 @@ TEST_CASE("Terminal.passive mouse tracking declines the event so the UI may act 
         CHECK_FALSE(
             mc.terminal.sendMousePressEvent(none, vtbackend::MouseButton::WheelRight, pos, false).value);
     }
+}
+
+TEST_CASE("TraceHandler.an_APC_body_waits_its_turn_like_every_other_sequence", "[terminal][trace]")
+{
+    // TraceHandler is a BUFFERING decorator: its whole job is to hold what the application sent, in
+    // order, so the user can step through it. Forwarding an APC straight to the display let it
+    // overtake everything still queued ahead of it -- so a kitty image was placed against the cursor
+    // position that a queued CUP had not moved yet, and tracing a graphics problem showed behaviour
+    // that never occurs outside trace mode.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) } };
+    auto trace = vtbackend::TraceHandler { mock.terminal };
+
+    auto cup = vtbackend::Sequence {};
+    cup.setCategory(vtbackend::FunctionCategory::CSI);
+    cup.setFinalChar('H');
+    trace.processSequence(cup);
+
+    trace.processAPC("Ga=T,f=32,s=2,v=2;AAAA"sv);
+
+    REQUIRE(trace.pendingSequences().size() == 2);
+    CHECK(std::holds_alternative<vtbackend::Sequence>(trace.pendingSequences()[0]));
+
+    // Queued, and BEHIND the sequence that preceded it -- not executed on arrival.
+    auto const* apc =
+        std::get_if<vtbackend::TraceHandler::ApplicationProgramCommand>(&trace.pendingSequences()[1]);
+    REQUIRE(apc != nullptr);
+    CHECK(apc->body == "Ga=T,f=32,s=2,v=2;AAAA");
+
+    // The body is OWNED, not viewed: it outlives the parser buffer it arrived in, because nothing
+    // runs it until the user steps the trace forward.
+    CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment() == nullptr);
 }

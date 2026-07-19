@@ -674,6 +674,8 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("spawn_new_process", c.spawnNewProcess);
         loadFromEntry("reflow_on_resize", c.reflowOnResize);
         loadFromEntry("tab_switch_on_horizontal_wheel", c.tabSwitchOnHorizontalWheel);
+        loadFromEntry("text_scaling_method", c.textScalingMethod);
+        loadFromEntry("grapheme_clustering", c.graphemeClustering);
         loadFromEntry("gui_config_locked", c.guiConfigLocked);
         loadFromEntry("theme", c.theme);
         loadFromEntry("experimental", c.experimentalFeatures);
@@ -2044,6 +2046,22 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     }
 }
 
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtrasterizer::GlyphScalingMethod& where)
+{
+    // Case-insensitive, and an unrecognized value is reported rather than silently accepted -- a typo
+    // in a visible rendering setting should not pass unnoticed. Mirrors the GuiTheme reader.
+    if (auto const child = node[entry])
+    {
+        auto const rawValue = child.as<std::string>();
+        if (auto const method = vtrasterizer::methodFromName(crispy::toLower(rawValue)))
+            where = *method;
+        else
+            errorLog()("Invalid value for {}: '{}'. Expected 'stretch' or 'rerasterize'.", entry, rawValue);
+    }
+}
+
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, GuiTheme& where)
 {
     // Case-insensitive. An unrecognized value is reported and leaves @p where at its (default)
@@ -2353,6 +2371,19 @@ void YAMLConfigReader::defaultSettings(vtpty::Process::ExecInfo& shell)
 
     if (shell.env.find("COLORTERM") == shell.env.end())
         shell.env["COLORTERM"] = "truecolor";
+
+    // TERM_PROGRAM / TERM_PROGRAM_VERSION are the de-facto way an application identifies WHICH
+    // terminal it is talking to, as opposed to TERM, which only names a terminfo capability set --
+    // several terminals share `xterm-256color`, so TERM cannot distinguish them.
+    //
+    // This matters beyond cosmetics: Python wcwidth's wcstwidth() selects its per-terminal character
+    // width correction table by TERM_PROGRAM. Without it Contour is simply invisible to that
+    // ecosystem, and applications relying on it fall back to a generic measurement.
+    //
+    // Set unconditionally rather than only-if-absent: an inherited value would name the OUTER
+    // terminal, and answering "I am the terminal you are not talking to" is worse than not answering.
+    shell.env["TERM_PROGRAM"] = "contour";
+    shell.env["TERM_PROGRAM_VERSION"] = CONTOUR_VERSION_STRING;
 }
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)

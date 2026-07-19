@@ -129,6 +129,40 @@ namespace
         }
     }
 
+    /// Appends @p font to @p output as a font_path, unless it names no file.
+    ///
+    /// Shared by both queries this locator answers -- by description and by coverage -- so that a font
+    /// resolved one way carries exactly the same collection index, weight and slant as the other.
+    void appendFontSource(FcPattern* font, font_source_list& output)
+    {
+        FcChar8* file = nullptr;
+        if (FcPatternGetString(font, FC_FILE, 0, &file) != FcResultMatch)
+            return;
+
+        auto integerValue = -1;
+        auto weight = optional<font_weight> { nullopt };
+        auto slant = optional<font_slant> { nullopt };
+        auto ttcIndex = -1;
+
+        if (FcPatternGetInteger(font, FC_INDEX, 0, &integerValue) == FcResultMatch && integerValue >= 0)
+            ttcIndex = integerValue;
+        if (FcPatternGetInteger(font, FC_WEIGHT, 0, &integerValue) == FcResultMatch)
+            weight = fcToFontWeight(integerValue);
+        if (FcPatternGetInteger(font, FC_SLANT, 0, &integerValue) == FcResultMatch)
+            slant = fcToFontSlant(integerValue);
+
+        output.emplace_back(font_path { .value = string { (char const*) (file) },
+                                        .collectionIndex = ttcIndex,
+                                        .weight = weight,
+                                        .slant = slant });
+        locatorLog()("Font {} (ttc index {}, weight {}, slant {}) in chain: {}",
+                     output.size(),
+                     ttcIndex,
+                     weight.has_value() ? std::format("{}", *weight) : "NONE",
+                     slant.has_value() ? std::format("{}", *slant) : "NONE",
+                     (char const*) file);
+    }
+
 } // namespace
 
 struct fontconfig_locator::private_tag
@@ -244,29 +278,7 @@ font_source_list fontconfig_locator::locate(font_description const& description)
             }
         }
 
-        int integerValue = -1;
-        optional<font_weight> weight = nullopt;
-        optional<font_slant> slant = nullopt;
-        int ttcIndex = -1;
-
-        if (FcPatternGetInteger(font, FC_INDEX, 0, &integerValue) == FcResultMatch && integerValue >= 0)
-            ttcIndex = integerValue;
-        if (FcPatternGetInteger(font, FC_WEIGHT, 0, &integerValue) == FcResultMatch)
-            weight = fcToFontWeight(integerValue);
-        if (FcPatternGetInteger(font, FC_SLANT, 0, &integerValue) == FcResultMatch)
-            slant = fcToFontSlant(integerValue);
-
-        output.emplace_back(font_path { .value = string { (char const*) (file) },
-                                        .collectionIndex = ttcIndex,
-                                        .weight = weight,
-                                        .slant = slant });
-        locatorLog()("Font {} (ttc index {}, weight {}, slant {}, spacing {}) in chain: {}",
-                     output.size(),
-                     ttcIndex,
-                     weight.has_value() ? std::format("{}", *weight) : "NONE",
-                     slant.has_value() ? std::format("{}", *slant) : "NONE",
-                     spacing,
-                     (char const*) file);
+        appendFontSource(font, output);
     };
 
     // First font is the primary font that is best matching for description.family, we always
@@ -407,10 +419,61 @@ font_source_list fontconfig_locator::all()
     return output;
 }
 
-font_source_list fontconfig_locator::resolve(gsl::span<const char32_t> /*codepoints*/)
+font_source_list fontconfig_locator::resolve(gsl::span<const char32_t> codepoints)
 {
-    // that's also possible via FC, not sure yet we will/want-to need that.
-    return {}; // TODO
+    // A coverage-driven lookup -- "which fonts contain THESE characters" -- as opposed to locate()'s
+    // "which fonts are near this description".
+    //
+    // The two answer different questions, and the difference is not academic: fontconfig orders a
+    // description's chain by how well each font matches the *description*, which routinely buries the
+    // only face holding a script far down it. On a stock Fedora install the first CJK face sits at
+    // position 83 of 201 for a monospace description, so no chain short enough to walk eagerly will
+    // ever reach it. Asking about the codepoint finds it in one query.
+    if (codepoints.empty())
+        return {};
+
+    auto charSet =
+        unique_ptr<FcCharSet, void (*)(FcCharSet*)>(FcCharSetCreate(), [](auto p) { FcCharSetDestroy(p); });
+    if (!charSet)
+        return {};
+
+    for (auto const codepoint: codepoints)
+        FcCharSetAddChar(charSet.get(), static_cast<FcChar32>(codepoint));
+
+    auto pat =
+        unique_ptr<FcPattern, void (*)(FcPattern*)>(FcPatternCreate(), [](auto p) { FcPatternDestroy(p); });
+    if (!pat)
+        return {};
+
+    FcPatternAddCharSet(pat.get(), FC_CHARSET, charSet.get());
+    FcPatternAddBool(pat.get(), FC_OUTLINE, true);
+    FcPatternAddBool(pat.get(), FC_SCALABLE, true);
+
+    FcConfigSubstitute(_d->ftConfig, pat.get(), FcMatchPattern);
+    FcDefaultSubstitute(pat.get());
+
+    auto result = FcResultNoMatch;
+    auto fs = unique_ptr<FcFontSet, void (*)(FcFontSet*)>(
+        FcFontSort(_d->ftConfig, pat.get(), /*unicode-trim*/ FcTrue, /*FcCharSet***/ nullptr, &result),
+        [](auto p) { FcFontSetDestroy(p); });
+
+    if (!fs || result != FcResultMatch)
+        return {};
+
+    // Only the best few are of interest: this is consulted when every configured fallback has already
+    // failed, and a font that fontconfig ranks below these for a charset query will not do better.
+    constexpr auto MaxCandidates = 4;
+
+    font_source_list output;
+    for (auto const i: std::views::iota(0, fs->nfont))
+    {
+        if (output.size() >= MaxCandidates)
+            break;
+        appendFontSource(fs->fonts[i], output);
+    }
+
+    locatorLog()("Resolved {} font(s) covering {} codepoint(s).", output.size(), codepoints.size());
+    return output;
 }
 
 } // namespace text

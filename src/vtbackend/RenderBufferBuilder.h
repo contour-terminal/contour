@@ -22,7 +22,12 @@ class RenderBufferBuilder
     /// @param colorLookupTable The color mode (DECSTGLT) that applies to the screen being rendered.
     ///                         Status-line screens are host-owned chrome and pass AnsiSgr, so an
     ///                         application's DECATC assignments cannot repaint them.
+    /// @param screen The screen being rendered. It is NOT always the terminal's current screen: a
+    ///               status line and a non-displayed page are rendered through the same builder, so
+    ///               anything that needs to look at neighbouring cells must go through this rather
+    ///               than re-resolving via Terminal::currentScreen().
     RenderBufferBuilder(Terminal const& terminal,
+                        Screen const& screen,
                         RenderBuffer& output,
                         LineOffset base,
                         bool reverseVideo,
@@ -131,6 +136,7 @@ class RenderBufferBuilder
 
     gsl::not_null<RenderBuffer*> _output;
     gsl::not_null<Terminal const*> _terminal;
+    gsl::not_null<Screen const*> _screen;
     std::optional<CellLocation> _cursorPosition;
     LineOffset _baseLine;
     bool _reverseVideo;

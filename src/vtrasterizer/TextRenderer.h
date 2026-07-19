@@ -7,6 +7,8 @@
 
 #include <vtrasterizer/BoxDrawingRenderer.h>
 #include <vtrasterizer/FontDescriptions.h>
+#include <vtrasterizer/GlyphScaling.h>
+#include <vtrasterizer/GlyphSlicing.h>
 #include <vtrasterizer/RenderTarget.h>
 #include <vtrasterizer/TextClusterGrouper.h>
 #include <vtrasterizer/TextureAtlas.h>
@@ -23,6 +25,7 @@
 #include <libunicode/convert.h>
 #include <libunicode/run_segmenter.h>
 
+#include <gsl/pointers>
 #include <gsl/span>
 #include <gsl/span_ext>
 
@@ -60,7 +63,11 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
                  text::shaper& textShaper,
                  FontDescriptions& fontDescriptions,
                  FontKeys const& fontKeys,
-                 TextRendererEvents& eventHandler);
+                 TextRendererEvents& eventHandler,
+                 GlyphScaler const& glyphScaler = defaultGlyphScaler());
+
+    /// The strategy used when no other is injected. @see GlyphScalingMethod.
+    [[nodiscard]] static GlyphScaler const& defaultGlyphScaler() noexcept;
 
     void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
     void setTextureAtlas(TextureAtlas& atlas) override;
@@ -99,7 +106,8 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
                          vtbackend::CellLocation initialPenPosition,
                          TextStyle style,
                          vtbackend::RGBColor color,
-                         vtbackend::LineFlags flags) override;
+                         vtbackend::LineFlags flags,
+                         vtbackend::GlyphSizing const& sizing) override;
 
     bool renderBoxDrawingCell(vtbackend::CellLocation position,
                               char32_t codepoint,
@@ -119,6 +127,44 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
                                     gsl::span<unsigned> clusters,
                                     TextStyle style);
 
+    /// One text-sizing block's raster, sized to whole cells so that cutting it into atlas tiles is
+    /// exact. @see buildBlockCanvas.
+    struct BlockCanvas
+    {
+        vtbackend::ImageSize size {};
+        atlas::Format format {};
+        uint32_t fragmentShaderSelector {};
+        size_t components {};
+        std::vector<uint8_t> bitmap {};
+    };
+
+    /// Draws one row of a scaled block, one cell-sized tile per column.
+    ///
+    /// Separate from the ordinary path because it is a different shape of work, and must stay so:
+    /// unscaled text is the overwhelming majority of what a terminal draws and must not pay for any
+    /// of this.
+    void renderBlockGroup(text::shape_result const& glyphPositions,
+                          crispy::point pen,
+                          vtbackend::RGBColor color,
+                          vtbackend::LineFlags lineFlags,
+                          vtbackend::GlyphSizing const& sizing,
+                          GlyphScaleAdjustment adjustment);
+
+    /// @param cluster one grapheme cluster: a base glyph followed by its zero-advance marks. They
+    ///                share one canvas, or a Devanagari conjunct is torn into its pieces.
+    std::optional<BlockCanvas> buildBlockCanvas(std::span<text::glyph_position const> cluster,
+                                                vtbackend::CellScale const& cellScale,
+                                                GlyphScaleAdjustment adjustment,
+                                                int cellsAtOneX);
+
+    std::optional<TextureAtlas::TileCreateData> createBlockTile(BlockCanvas const* canvas,
+                                                                atlas::TileLocation tileLocation,
+                                                                uint32_t column,
+                                                                uint32_t band);
+
+    std::optional<text::rasterized_glyph> rasterizeAtBlockSize(text::glyph_key const& glyphKey,
+                                                               GlyphScaleAdjustment adjustment);
+
     AtlasTileAttributes const* getOrCreateRasterizedMetadata(crispy::strong_hash const& hash,
                                                              text::glyph_key const& glyphKey,
                                                              unicode::PresentationStyle presentationStyle);
@@ -136,7 +182,8 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     std::optional<TextureAtlas::TileCreateData> createRasterizedGlyph(
         atlas::TileLocation tileLocation,
         text::glyph_key const& glyphKey,
-        unicode::PresentationStyle presentation);
+        unicode::PresentationStyle presentation,
+        GlyphWidthPolicy widthPolicy = GlyphWidthPolicy::Sliced);
 
     void restrictToTileSize(TextureAtlas::TileCreateData& tileCreateData);
 
@@ -184,6 +231,11 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     // sub-renderer
     //
     BoxDrawingRenderer _boxDrawingRenderer;
+
+    /// How a glyph is enlarged for a scaled text-sizing block. Injected so that a second strategy --
+    /// re-rasterizing at the larger point size for a crisper result -- is a new implementation
+    /// rather than an edit here. @see GlyphScaler.
+    gsl::not_null<GlyphScaler const*> _glyphScaler;
 };
 
 } // namespace vtrasterizer

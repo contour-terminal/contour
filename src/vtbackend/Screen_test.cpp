@@ -409,40 +409,117 @@ TEST_CASE("AppendChar.emoji_exclamationmark", "[screen]")
     CHECK(screen.at(LineOffset(0), ColumnOffset(2)).backgroundColor() == IndexedColor::Blue);
 }
 
-TEST_CASE("AppendChar.emoji_VS15_smiley", "[screen]")
+TEST_CASE("AppendChar.VS15_selects_text_presentation_without_changing_the_width", "[screen]")
 {
+    // terminal-unicode-core is explicit: VS15 "will NOT change the underlying width but only change
+    // the display to prefer textual non-colored presentation". A cluster already on screen cannot
+    // give a column back -- that would mean un-wrapping a line that wrapped and un-scrolling content
+    // that scrolled -- so the width stands and only the presentation changes.
+    //
+    // U+231A WATCH is the interesting base: Unicode does define a text-presentation sequence for it
+    // (emoji-variation-sequences.txt), so the selector is meaningful here rather than inert, and the
+    // width still must not move.
     auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
     auto& screen = mock.terminal.primaryScreen();
 
-    // print letter-like symbol copyright sign with forced emoji presentation style.
     REQUIRE(*screen.logicalCursorPosition().column == 0);
-    mock.writeToScreen(U"\U0001F600");
+    mock.writeToScreen(U"\u231A");
     REQUIRE(*screen.logicalCursorPosition().column == 2);
     mock.writeToScreen(U"\uFE0E");
     REQUIRE(*screen.logicalCursorPosition().column == 2);
-    // ^^^ U+FE0E does *NOT* lower width to 1 (easier to implement)
+
+    // The selector joined the cluster -- it is what the renderer reads to pick the uncolored glyph --
+    // but the two columns the watch claimed are still its own.
+    auto const& c0 = screen.at(LineOffset(0), ColumnOffset(0));
+    CHECK(c0.codepoints() == U"\u231A\uFE0E");
+    CHECK(c0.width() == 2);
+    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlag::WideCharContinuation));
+
+    // The next character lands after the cluster, not inside it.
     mock.writeToScreen("X");
-    REQUIRE(*screen.logicalCursorPosition().column == 3);
-    logScreenText(screen);
+    CHECK(screen.at(LineOffset(0), ColumnOffset(2)).codepoints() == U"X");
+}
 
-    // emoji
-    auto const& c1 = screen.at(LineOffset(0), ColumnOffset(0));
-    CHECK(c1.codepoints() == U"\U0001F600\uFE0E");
-    CHECK(c1.width() == 2);
+TEST_CASE("AppendChar.VS15_is_inert_without_a_defined_variation_sequence", "[screen]")
+{
+    // A variation selector only re-presents a base Unicode defines a sequence for. U+1F600 is
+    // emoji-only -- there is no text presentation to select -- so VS15 says nothing about it at all.
+    // Measuring it as one column is what wcwidth's VS15_WIDE_TO_NARROW table would wrongly do for a
+    // base outside that table.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+    auto& screen = mock.terminal.primaryScreen();
 
-    // unused cell
-    auto const& c2 = screen.at(LineOffset(0), ColumnOffset(1));
-    CHECK(c2.empty());
-    CHECK(c2.width() == 1);
+    mock.writeToScreen(U"\U0001F600");
+    REQUIRE(*screen.logicalCursorPosition().column == 2);
+    mock.writeToScreen(U"\uFE0E");
 
-    // character after the emoji
-    auto const& c3 = screen.at(LineOffset(0), ColumnOffset(2));
-    CHECK(c3.codepoints() == U"X");
-    CHECK(c3.width() == 1);
+    CHECK(*screen.logicalCursorPosition().column == 2);
+    auto const& c0 = screen.at(LineOffset(0), ColumnOffset(0));
+    CHECK(c0.codepoints() == U"\U0001F600\uFE0E");
+    CHECK(c0.width() == 2);
+}
 
-    // tail
-    auto const& c4 = screen.at(LineOffset(0), ColumnOffset(3));
-    CHECK(c4.codepoints().empty());
+TEST_CASE("AppendChar.a_wide_char_at_the_second_to_last_column_claims_the_last_one", "[screen]")
+{
+    // The room a character has is its own column PLUS the writable columns to its right. Counting
+    // only the ones strictly to the right makes a two-column character that exactly fills the
+    // remaining space look one column too wide: the continuation cell is never written, so the
+    // previous occupant of the last column survives underneath the wide glyph and is copied out
+    // with it. Any full-screen application repainting a line that ends in CJK hits this.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("AAAAAAAAAA"sv); // fill every column
+    mock.writeToScreen("\033[1;9H"sv);  // cursor to column offset 8, the second-to-last
+    mock.writeToScreen(U"中");          // a two-column CJK character
+
+    auto const& head = screen.at(LineOffset(0), ColumnOffset(8));
+    auto const& tail = screen.at(LineOffset(0), ColumnOffset(9));
+    CHECK(head.width() == 2);
+    CHECK(head.codepoints() == U"中");
+
+    // The stale `A` must be gone, and the column must be marked as belonging to the character.
+    CHECK(tail.isFlagEnabled(CellFlag::WideCharContinuation));
+    CHECK(tail.codepoints().empty());
+
+    // The character filled the line exactly, so the cursor stays put with a wrap pending rather
+    // than stepping outside the page.
+    CHECK(*screen.logicalCursorPosition().column == 8);
+}
+
+TEST_CASE("AppendChar.overwriting_a_wide_char_at_the_second_to_last_column_clears_its_tail", "[screen]")
+{
+    // The other half of the same arithmetic: the count also bounds the clearing of the cell being
+    // REPLACED, so a narrow character written over a wide one at that column used to leave the old
+    // right half -- a WideCharContinuation with no head -- behind at the last column.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[1;9H"sv);
+    mock.writeToScreen(U"中");
+    REQUIRE(screen.at(LineOffset(0), ColumnOffset(9)).isFlagEnabled(CellFlag::WideCharContinuation));
+
+    mock.writeToScreen("\033[1;9H"sv);
+    mock.writeToScreen("x"sv);
+
+    CHECK(screen.at(LineOffset(0), ColumnOffset(8)).codepoints() == U"x");
+    CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(9)).isFlagEnabled(CellFlag::WideCharContinuation));
+}
+
+TEST_CASE("AppendChar.a_wide_char_still_wraps_when_only_one_column_is_left", "[screen]")
+{
+    // The boundary the fix must NOT move: at the very last column a two-column character has no
+    // room at all, and the deferred wrap still has to fire.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[1;10H"sv); // cursor to the last column
+    mock.writeToScreen("a"sv);          // narrow write there leaves the cursor put, wrap pending
+    CHECK(*screen.logicalCursorPosition().column == 9);
+
+    // The next character lands on the following line, not past the page edge.
+    mock.writeToScreen("b"sv);
+    CHECK(screen.at(LineOffset(1), ColumnOffset(0)).codepoints() == U"b");
 }
 
 TEST_CASE("AppendChar.emoji_VS16_copyright_sign", "[screen]")
@@ -454,7 +531,8 @@ TEST_CASE("AppendChar.emoji_VS16_copyright_sign", "[screen]")
     auto const& c2 = screen.at(LineOffset(0), ColumnOffset(2));
     auto const& c3 = screen.at(LineOffset(0), ColumnOffset(3));
 
-    // print letter-like symbol copyright sign with forced emoji presentation style.
+    // Print the letter-like copyright sign, then force its EMOJI presentation with VS16. The cluster
+    // must widen to two columns and claim the cell to its right.
     REQUIRE(screen.cursor().position.column.value == 0);
     mock.writeToScreen(U"\u00A9");
     REQUIRE(screen.cursor().position.column.value == 1);
@@ -462,23 +540,128 @@ TEST_CASE("AppendChar.emoji_VS16_copyright_sign", "[screen]")
     CHECK(c0.width() == 1);
     mock.writeToScreen(U"\uFE0F");
     CHECK(c0.codepointCount() == 2);
-    REQUIRE(screen.cursor().position.column.value == 1);
-    mock.writeToScreen("X");
     REQUIRE(screen.cursor().position.column.value == 2);
+    mock.writeToScreen("X");
+    REQUIRE(screen.cursor().position.column.value == 3);
 
     // double-width emoji with VS16
     CHECK(c0.codepoints() == U"\u00A9\uFE0F");
-    CHECK(c0.width() == 1);
+    CHECK(c0.width() == 2);
+
+    // the claimed continuation cell
+    CHECK(c1.isFlagEnabled(CellFlag::WideCharContinuation));
 
     // character after the emoji
-    CHECK(c1.codepoints() == U"X");
-    CHECK(c1.width() == 1);
-
-    // unused cell
-    CHECK(c2.empty());
+    CHECK(c2.codepoints() == U"X");
     CHECK(c2.width() == 1);
 
     CHECK(c3.codepoints().empty());
+}
+
+TEST_CASE("AppendChar.width_revision_is_gated_on_mode_2027", "[screen]")
+{
+    // DEC mode 2027 is how an application says it expects whole clusters to be measured. With it
+    // reset, the first codepoint decides and a variation selector arriving later changes nothing --
+    // the older behaviour applications that reset the mode are asking for.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.terminal.setMode(DECMode::Unicode, false);
+    mock.writeToScreen(U"\u2139"); // narrow on its own
+    mock.writeToScreen(U"\uFE0F"); // VS16: would widen it to 2 under mode 2027
+    CHECK(screen.cursor().position.column == ColumnOffset(1));
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).width() == 1);
+
+    // The codepoint still JOINED the cluster -- it is part of the text and must round-trip through a
+    // copy; it merely did not change how many columns the cluster occupies.
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).codepoints() == U"\u2139\uFE0F");
+}
+
+TEST_CASE("AppendChar.width_revision_resumes_when_2027_is_set_again", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.terminal.setMode(DECMode::Unicode, false);
+    mock.terminal.setMode(DECMode::Unicode, true);
+    mock.writeToScreen(U"\u2139");
+    mock.writeToScreen(U"\uFE0F");
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).width() == 2);
+}
+
+TEST_CASE("AppendChar.width_revision_at_right_edge_keeps_cursor_on_page", "[screen]")
+{
+    // A cluster promoted to two columns can end flush against the last column: the cluster itself
+    // fits, but the cursor that follows it does not. Advancing there unconditionally left the cursor
+    // one column past the page -- breaking the invariant verifyState() asserts, and indexing the
+    // line's storage out of bounds on the next write.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen(U"abc");
+    REQUIRE(screen.cursor().position.column == ColumnOffset(3));
+
+    mock.writeToScreen(U"ℹ"); // lands at column 3, cursor to 4
+    REQUIRE(screen.cursor().position.column == ColumnOffset(4));
+
+    mock.writeToScreen(U"️"); // widens it to columns 3..4 -- the cursor would land at 5
+    CHECK(screen.at(LineOffset(0), ColumnOffset(3)).width() == 2);
+    CHECK(screen.cursor().position.column == ColumnOffset(4));
+    CHECK(screen.cursor().wrapPending);
+
+    // The deferred wrap is what makes the promotion safe: the next character starts the next line
+    // rather than writing off the end of this one.
+    mock.writeToScreen(U"X");
+    CHECK(screen.cursor().position.line == LineOffset(1));
+    CHECK(screen.at(LineOffset(1), ColumnOffset(0)).codepoints() == U"X");
+}
+
+TEST_CASE("AppendChar.abandoned_width_revision_restores_the_head_cell", "[screen]")
+{
+    // The width is committed to the cell BEFORE the screen decides whether it can carry the
+    // promotion through. When a deferred wrap has already moved the cursor to the next line the
+    // cluster is no longer live, so the promotion is abandoned -- and the committed width has to go
+    // back with it, or the cell claims a column that holds no continuation of it.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(5) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen(U"abcd");
+    REQUIRE(screen.cursor().position.column == ColumnOffset(4));
+
+    mock.writeToScreen(U"ℹ"); // written at the last column; sets wrapPending
+    REQUIRE(screen.cursor().position.column == ColumnOffset(4));
+    REQUIRE(screen.cursor().wrapPending);
+
+    // The wrap fires first, so the head is now on the PREVIOUS line and cannot grow into a column
+    // that does not exist.
+    mock.writeToScreen(U"️");
+    CHECK(screen.cursor().position.line == LineOffset(1));
+    CHECK(screen.at(LineOffset(0), ColumnOffset(4)).width() == 1);
+    CHECK(screen.at(LineOffset(0), ColumnOffset(4)).codepoints() == U"ℹ️");
+}
+
+TEST_CASE("Screen.copyArea_does_not_remeasure_cluster_widths", "[screen]")
+{
+    // DECCRA reproduces cells; it does not re-write them. Re-measuring the cluster would apply
+    // whatever policy is in force NOW to text written under the policy of the time, so a cluster
+    // stored one column wide would silently claim its neighbour -- which holds live text, and has no
+    // continuation cell to mark it as taken.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.terminal.setMode(DECMode::Unicode, false);
+    mock.writeToScreen(U"ℹ"); // stored one column wide under FirstCodepoint
+    mock.writeToScreen(U"️");
+    mock.writeToScreen(U"X");
+    REQUIRE(screen.at(LineOffset(0), ColumnOffset(0)).width() == 1);
+    REQUIRE(screen.at(LineOffset(0), ColumnOffset(1)).codepoints() == U"X");
+
+    // DECCRA: copy the 1x2 region at the top-left down to line 3.
+    mock.writeToScreen("\033[1;1;1;2;1;3;1;1$v"sv);
+
+    CHECK(screen.at(LineOffset(2), ColumnOffset(0)).width() == 1);
+    CHECK(screen.at(LineOffset(2), ColumnOffset(0)).codepoints() == U"ℹ️");
+    CHECK(screen.at(LineOffset(2), ColumnOffset(1)).codepoints() == U"X");
 }
 
 TEST_CASE("AppendChar.emoji_VS16_i", "[screen]")
@@ -493,24 +676,22 @@ TEST_CASE("AppendChar.emoji_VS16_i", "[screen]")
     CHECK(c0.codepoints() == U"\u2139");
     CHECK(c0.width() == 1);
 
-    // append into last cell
+    // U+FE0F promotes the cluster to the emoji presentation, which is two columns wide.
     mock.writeToScreen(U"\uFE0F");
-    // XXX ^^^ later on U+FE0F *will* ensure width 2 if respective mode is enabled.
-    REQUIRE(screen.cursor().position.column.value == 1);
+    REQUIRE(screen.cursor().position.column.value == 2);
     CHECK(c0.codepoints() == U"\u2139\uFE0F");
-    CHECK(c0.width() == 1);
+    CHECK(c0.width() == 2);
 
-    // write into 3rd cell
+    // the claimed continuation cell
+    auto const& c1 = screen.at(LineOffset(0), ColumnOffset(1));
+    CHECK(c1.isFlagEnabled(CellFlag::WideCharContinuation));
+
     mock.writeToScreen("X");
 
-    // X-cell
-    auto const& c1 = screen.at(LineOffset(0), ColumnOffset(1));
-    CHECK(c1.codepoints() == U"X");
-    CHECK(c1.width() == 1);
-
-    // character after the emoji
+    // X lands after the now-two-column emoji, not beside it.
     auto const& c2 = screen.at(LineOffset(0), ColumnOffset(2));
-    CHECK(c2.empty());
+    CHECK(c2.codepoints() == U"X");
+    CHECK(c2.width() == 1);
 
     auto const& c3 = screen.at(LineOffset(0), ColumnOffset(3));
     CHECK(c3.empty());
@@ -587,6 +768,40 @@ TEST_CASE("AppendChar.emoji_zwj_1", "[screen]")
     auto const s32 = unicode::from_utf8(s8);
     CHECK(U"\U0001F926\U0001F3FC\u200D\u2642\uFE0F" == c0.codepoints());
     CHECK(U"\U0001F926\U0001F3FC\u200D\u2642\uFE0F   " == s32);
+}
+
+TEST_CASE("AppendChar.emoji_zwj_ten_codepoints", "[screen]")
+{
+    // 👨🏻‍❤️‍💋‍👨🏻 kiss: man, man, light skin tone -- ten codepoints, the longest
+    // cluster the RGI emoji set produces. It used to exceed MaxGraphemeClusterSize and be silently truncated
+    // to seven, which is what this case pins.
+    //
+    // Truncation is not merely cosmetic. Driven through a real PTY, the overflow also split the
+    // sequence into two wide cells and advanced the cursor four columns instead of two; jquast's
+    // ucs-detect counted 43 such sequences, and raising the cap took its ZWJ score from 93.29% to
+    // 96.26%. That end-to-end effect is NOT reproduced here -- writing the cluster in one call to
+    // writeToScreen keeps the cursor at two columns even when truncated -- so this case guards the
+    // capacity, not the advance.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(6) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    mock.terminal.setMode(DECMode::AutoWrap, false);
+
+    auto const emoji =
+        u32string_view { U"\U0001F468\U0001F3FB‍❤️‍\U0001F48B‍\U0001F468\U0001F3FB" };
+    REQUIRE(emoji.size() == 10);
+    mock.writeToScreen(unicode::convert_to<char>(emoji));
+
+    auto const& c0 = screen.at(LineOffset(0), ColumnOffset(0));
+    CHECK(c0.codepoints() == emoji);
+    CHECK(c0.width() == 2);
+
+    // The whole sequence is ONE cluster: column 1 is its continuation, and nothing was written beyond.
+    CHECK(screen.at(LineOffset(0), ColumnOffset(2)).empty());
+    CHECK(screen.at(LineOffset(0), ColumnOffset(3)).empty());
+
+    // The cursor advanced two columns, not four.
+    CHECK(screen.cursor().position.column == ColumnOffset(2));
 }
 
 TEST_CASE("AppendChar.emoji_1", "[screen]")
@@ -3830,6 +4045,51 @@ TEST_CASE("ReportExtendedCursorPosition", "[screen]")
 
         screen.reportExtendedCursorPosition();
         CHECK("\033[?3;2;1R" == mock.terminal.peekInput());
+    }
+}
+
+TEST_CASE("InBandWindowResize", "[screen]")
+{
+    // DEC mode 2048. The point of it is that an application learns the terminal's size on the same
+    // channel it reads everything else on -- SIGWINCH plus an ioctl is unavailable to anything
+    // reading over a pipe, a socket or an ssh multiplexer.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.terminal.setCellPixelSize(ImageSize { Width(9), Height(18) });
+
+    // The report is asserted where it actually has to ARRIVE -- the PTY -- rather than in the input
+    // generator it passes through. The whole point of the mode is an application that cannot receive
+    // SIGWINCH, so it is blocked on a read: a report still sitting in the generator has not been
+    // delivered, and nothing else is going to happen to flush it. @see reportInBandWindowResize.
+    SECTION("reports once on being enabled")
+    {
+        mock.writeToScreen(std::format("\033[?{}h", toDECModeNum(DECMode::InBandWindowResize)));
+        // rows, cols, then pixel height and width -- the opposite order to XTWINOPS.
+        CHECK(mock.replyData() == "\033[48;10;20;180;180t");
+    }
+
+    SECTION("reports again on every resize")
+    {
+        mock.writeToScreen(std::format("\033[?{}h", toDECModeNum(DECMode::InBandWindowResize)));
+        mock.terminal.resizeScreen(PageSize { LineCount(24), ColumnCount(80) });
+        // Both reports reached the PTY: the one from enabling, then the one from the resize. The
+        // second arrives from the GUI thread, outside the parser loop that flushes every other reply.
+        CHECK(mock.replyData() == "\033[48;10;20;180;180t\033[48;24;80;432;720t");
+        CHECK(mock.terminal.peekInput().empty()); // nothing left queued behind it
+    }
+
+    SECTION("stays silent while the mode is reset")
+    {
+        mock.terminal.resizeScreen(PageSize { LineCount(24), ColumnCount(80) });
+        CHECK(mock.replyData().empty());
+        CHECK(mock.terminal.peekInput().empty());
+    }
+
+    SECTION("is reported as a supported, changeable mode")
+    {
+        auto const modeNum = toDECModeNum(DECMode::InBandWindowResize);
+        mock.writeToScreen(std::format("\033[?{}$p", modeNum));
+        // Ps=2 is "reset but supported"; ucs-detect reads exactly this to decide the mode exists.
+        CHECK(mock.terminal.peekInput() == std::format("\033[?{};2$y", modeNum));
     }
 }
 

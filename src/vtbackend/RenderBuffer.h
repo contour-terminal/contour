@@ -6,6 +6,7 @@
 #include <vtbackend/Grid.h>
 #include <vtbackend/Image.h>
 #include <vtbackend/Line.h>
+#include <vtbackend/TextScale.h>
 #include <vtbackend/primitives.h>
 
 #include <vtrasterizer/RenderTarget.h>
@@ -67,6 +68,10 @@ struct RenderCell
     CellLocation position;
     RenderAttributes attributes;
     uint8_t width = 1;
+
+    /// How this cell's glyph is sized and placed, and which row of its block it draws (kitty text
+    /// sizing protocol, `OSC 66`). Ordinary text leaves it at its default.
+    GlyphSizing sizing {};
 
     bool groupStart = false;
     bool groupEnd = false;

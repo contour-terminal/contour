@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <format>
 #include <ranges>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -602,4 +603,118 @@ TEST_CASE("open_shaper.COLRv1", "[open_shaper]")
     CHECK(glyph.bitmapSize.width > vtbackend::Width(0));
     CHECK(glyph.bitmapSize.height > vtbackend::Height(0));
     CHECK(glyph.bitmap.size() > 0);
+}
+
+TEST_CASE("open_shaper.coverage.resolves_a_codepoint_the_chain_cannot", "[open_shaper][fallback]")
+{
+    // The fallback chain is ordered by how well each font matches the DESCRIPTION, so the only face
+    // holding a script can sort far past any length worth walking eagerly -- on a stock Fedora install
+    // the first CJK face is 83rd of 201, against a chain limit of 16. Once the chain is exhausted the
+    // locator is asked which font actually covers the codepoint, and that answer is used.
+    auto coverageFont = bdf_font { "coverage", Monospaced, { { Snowman, 8 } } };
+
+    auto env = fallback_env { {
+        { .name = "primary", .monospace = Monospaced, .glyphs = { { U'A', 8 }, { Replacement, 8 } } },
+        { .name = "fallback", .monospace = Monospaced, .glyphs = { { U'A', 8 } } },
+    } };
+    mock_font_locator::configureCoverage({ coverageFont.source() });
+
+    auto const primary = env.key("primary");
+    auto const result = shapeCells(env.shaper(), primary, u32string { U'A', Snowman });
+    REQUIRE(result.size() == 2);
+
+    CHECK(result[0].glyph.font == primary);
+    // The snowman came from neither the primary nor its chain, and it is a real glyph, not .notdef.
+    CHECK(result[1].glyph.font != primary);
+    CHECK(result[1].glyph.index.value != 0);
+}
+
+TEST_CASE("open_shaper.coverage.cache_does_not_outlive_the_keys_it_stores", "[open_shaper][fallback]")
+{
+    // The coverage cache answers with a font_key, and those keys are owned by the maps clear_cache()
+    // empties. Surviving that call it would hand back a key nothing can resolve -- and the shaping
+    // path REQUIREs the lookup to succeed, so the next frame drawing that codepoint aborted. Any
+    // non-DPI font change reaches this: applyFontDescriptions() calls clear_cache().
+    auto coverageFont = bdf_font { "coverage", Monospaced, { { Snowman, 8 } } };
+
+    auto env = fallback_env { {
+        { .name = "primary", .monospace = Monospaced, .glyphs = { { U'A', 8 }, { Replacement, 8 } } },
+    } };
+    mock_font_locator::configureCoverage({ coverageFont.source() });
+
+    // Populate the coverage cache.
+    REQUIRE(shapeCells(env.shaper(), env.key("primary"), u32string { Snowman }).size() == 1);
+
+    env.shaper().clear_cache();
+
+    // Re-loading gives a fresh key; shaping the same codepoint must not reach for the stale one.
+    auto const primary = env.key("primary");
+    auto const result = shapeCells(env.shaper(), primary, u32string { U'A', Snowman });
+    REQUIRE(result.size() == 2);
+    CHECK(result[1].glyph.index.value != 0);
+}
+
+TEST_CASE("open_shaper.coverage.is_spent_once_per_span", "[open_shaper][fallback]")
+{
+    // The coverage lookup answers with a font chosen BECAUSE it covers the codepoints. If shaping
+    // against that font still comes back .notdef, asking again would return the same font forever --
+    // so the attempt is spent once and the span then settles for the replacement glyph. This case
+    // hands it a font that does NOT have the snowman, which is what makes the guard observable: with
+    // the attempt unbounded it does not terminate.
+    auto uselessFont = bdf_font { "useless", Monospaced, { { U'B', 8 } } };
+
+    auto env = fallback_env { {
+        { .name = "primary", .monospace = Monospaced, .glyphs = { { U'A', 8 }, { Replacement, 8 } } },
+    } };
+    mock_font_locator::configureCoverage({ uselessFont.source() });
+
+    auto const primary = env.key("primary");
+    auto const replacement = env.shaper().shape(primary, Replacement);
+    REQUIRE(replacement.has_value());
+
+    auto const result = shapeCells(env.shaper(), primary, u32string { U'A', Snowman });
+    REQUIRE(result.size() == 2);
+    CHECK(result[1].glyph.index.value == replacement->glyph.index.value);
+}
+
+TEST_CASE("open_shaper.resize_font.reports_not_resized_by_returning_the_key_it_was_given",
+          "[open_shaper][resize]")
+{
+    // The synthetic fonts here are BDF, which ships fixed strikes and cannot be opened at an
+    // arbitrary size -- the same position a user's bitmap font is in when `OSC 66` asks for one. The
+    // contract that has to hold then is that resize_font() says so by handing back the key it was
+    // given, which TextRenderer::rasterizeAtBlockSize() reads as "not resized" and answers by
+    // magnifying the raster it already has rather than rasterizing at the wrong size.
+    auto env = fallback_env { {
+        { .name = "primary", .monospace = Monospaced, .glyphs = { { U'A', 8 } } },
+    } };
+    auto const primary = env.key("primary");
+
+    CHECK(env.shaper().resize_font(primary, font_size { bdf_font::Size.pt * 2 }) == primary);
+
+    // The size it is already at is not a resize at all, and takes the same answer.
+    CHECK(env.shaper().resize_font(primary, bdf_font::Size) == primary);
+}
+
+TEST_CASE("open_shaper.resize_font.a_size_the_face_lacks_does_not_retire_the_font", "[open_shaper][resize]")
+{
+    // A source is blacklisted to mean "this file is not a font I can use", and nothing clears that
+    // list -- not even clear_cache(). Concluding it from a failure to open a size would let one
+    // `OSC 66` scaled write retire a bitmap font for the rest of the session, including at the size
+    // it was rendering perfectly well at a moment earlier.
+    auto env = fallback_env { {
+        { .name = "primary", .monospace = Monospaced, .glyphs = { { U'A', 8 } } },
+    } };
+    auto const primary = env.key("primary");
+
+    for (auto const i: std::views::iota(1, 8))
+        (void) env.shaper().resize_font(primary, font_size { bdf_font::Size.pt + double(i) });
+
+    // Still shapes, and still resolves to a real glyph rather than .notdef.
+    auto const result = shapeOneCell(env.shaper(), primary, u32string { U'A' });
+    REQUIRE(result.size() == 1);
+    CHECK(result[0].glyph.index.value != 0);
+
+    // And the font still loads at its own size, which the blacklist would have prevented.
+    CHECK(env.key("primary") == primary);
 }

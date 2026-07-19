@@ -165,8 +165,10 @@ struct EventRecorder final: public TextClusterGrouper::Events
                          vtbackend::CellLocation initialPenPosition,
                          TextStyle style,
                          vtbackend::RGBColor color,
-                         vtbackend::LineFlags flags) override
+                         vtbackend::LineFlags flags,
+                         vtbackend::GlyphSizing const& sizing) override
     {
+        (void) sizing;
         events.emplace_back(TextClusterGroup {
             .codepoints = std::u32string(codepoints),
             .clusters = to_vector<int>(clusters),

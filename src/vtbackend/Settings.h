@@ -55,6 +55,11 @@ struct Settings
     /// default: clipboard reading is a well-known exfiltration vector, so it is opt-in. Writing the
     /// clipboard via OSC 52 is unaffected by this. @see Terminal::requestClipboardRead.
     bool allowClipboardRead = false;
+
+    /// Whether DEC mode 2027 (grapheme clustering) starts out set. While set, a codepoint arriving
+    /// after the first may revise how many columns its grapheme cluster occupies.
+    /// @see vtbackend::ClusterWidthPolicy.
+    bool graphemeClustering = true;
     StatusDisplayType statusDisplayType = StatusDisplayType::None;
     StatusDisplayPosition statusDisplayPosition = StatusDisplayPosition::Bottom;
     struct

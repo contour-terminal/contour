@@ -7,6 +7,7 @@
 #include <vtbackend/Hyperlink.h>
 #include <vtbackend/Image.h>
 #include <vtbackend/LineFlags.h>
+#include <vtbackend/TextScale.h>
 #include <vtbackend/primitives.h>
 
 #include <crispy/AlignedAllocator.h>
@@ -23,7 +24,18 @@ template <typename T>
 using AlignedVector = crispy::aligned_vector<T>;
 
 /// Maximum number of codepoints in a grapheme cluster (matches CompactCell::MaxCodepoints).
-inline constexpr uint8_t MaxGraphemeClusterSize = 7;
+///
+/// Sized by the longest grapheme cluster real text produces, not by a round number. The RGI emoji
+/// set reaches ten codepoints -- 👨🏻‍❤️‍💋‍👨🏻 (kiss: man, man, with skin tones) is
+/// `U+1F468 U+1F3FB ZWJ U+2764 U+FE0F ZWJ U+1F48B ZWJ U+1F468 U+1F3FB` -- and a tag-sequence flag
+/// reaches seven. A cap of 7 truncated the ten-codepoint family, which then split into two wide
+/// cells and advanced the cursor four columns instead of two; jquast's ucs-detect counted 43 such
+/// sequences.
+///
+/// 16 leaves headroom above the longest currently-defined sequence. Raising it costs nothing in
+/// layout: only @c clusterPool grows in the worst case, and no element type changes.
+inline constexpr uint8_t MaxGraphemeClusterSize = 16;
+static_assert(MaxGraphemeClusterSize <= 255, "clusterSize is a uint8_t");
 
 /// Structure-of-Arrays storage for one terminal line.
 ///
@@ -50,6 +62,12 @@ struct LineSoA
     /// East Asian Width display width per cell (1 or 2 columns).
     AlignedVector<uint8_t> widths;
 
+    /// Per-cell vertical scale in cells, from the kitty text sizing protocol (`OSC 66` `s=`).
+    ///
+    /// 1 for ordinary text, which is why an all-zero line is still materialized to 1. Kept beside
+    /// `widths` rather than folded into CellFlags because it is a 1..7 magnitude, not a flag.
+    AlignedVector<uint8_t> scales;
+
     // --- Tier 2: Warm — SGR "pen" attributes, always read/written together ---
 
     /// Graphics attributes per cell (foreground, background, underline color + flags).
@@ -60,6 +78,13 @@ struct LineSoA
 
     /// Hyperlink ID per cell.
     AlignedVector<HyperlinkId> hyperlinks;
+
+    /// Fractional scale and alignment per cell, packed as `n:4 | d:4 | v:2 | h:2`.
+    /// @see vtbackend::packTextScaleExtras
+    ///
+    /// Cold on purpose: `scale` above is read on every erase, selection and render, while these are
+    /// zero for all but a vanishing fraction of cells. 0 means "ordinary", so a zeroed line is right.
+    AlignedVector<uint16_t> textScaleExtras;
 
     // --- Grapheme cluster overflow ---
 
@@ -199,7 +224,33 @@ void forEachCodepoint(LineSoA const& line, size_t col, F f)
 
 /// Append a continuation codepoint to an existing grapheme cluster.
 /// @return Width change (0 in current implementation unless AllowWidthChange is enabled).
-int appendCodepointToCluster(LineSoA& line, size_t col, char32_t codepoint);
+/// Whether a grapheme cluster's width may be revised after its first codepoint.
+///
+/// DEC mode 2027 (`DECMode::Unicode`) is what an application uses to say it expects the terminal to
+/// measure whole clusters. With the mode reset, a terminal is expected to behave the older way: the
+/// first codepoint decides, and a variation selector arriving later changes nothing.
+enum class ClusterWidthPolicy : uint8_t
+{
+    /// Mode 2027 set: the whole cluster decides its width, so a late VS16 can widen it.
+    ///
+    /// The measurement is symmetric -- it reports a narrowing as readily as a widening -- but the
+    /// callers only ever act on growth: terminal-unicode-core has VS15 change the presentation
+    /// without touching the width, because a cluster already on screen cannot give a column back.
+    /// @see Screen::applyClusterWidthChange.
+    ClusterAware,
+
+    /// Mode 2027 reset: the first codepoint decides and nothing later changes it.
+    FirstCodepoint,
+};
+
+/// Appends @p codepoint to the grapheme cluster at @p col.
+///
+/// @return by how many columns the cluster's width changed, which is always 0 under
+///         ClusterWidthPolicy::FirstCodepoint.
+int appendCodepointToCluster(LineSoA& line,
+                             size_t col,
+                             char32_t codepoint,
+                             ClusterWidthPolicy policy = ClusterWidthPolicy::ClusterAware);
 
 /// Clear cluster overflow data for a specific column.
 /// Note: this does not compact the pool; garbage entries remain until line reset.

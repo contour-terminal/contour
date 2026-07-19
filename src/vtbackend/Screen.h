@@ -10,9 +10,12 @@
 #include <vtbackend/Grid.h>
 #include <vtbackend/Hyperlink.h>
 #include <vtbackend/Image.h>
+#include <vtbackend/KittyClipboard.h>
+#include <vtbackend/KittyGraphics.h>
 #include <vtbackend/MessageParser.h>
 #include <vtbackend/PromptRegion.h>
 #include <vtbackend/Sequence.h>
+#include <vtbackend/TextSizing.h>
 #include <vtbackend/VTType.h>
 
 #include <vtparser/ParserExtension.h>
@@ -201,7 +204,90 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void writeTextEnd() override;
     void executeControlCode(char controlCode) override;
     void processSequence(Sequence const& seq) override;
+    void processAPC(std::string_view body) override;
+
+  private:
+    /// Handles one kitty graphics command (the APC body after its leading 'G').
+    void processKittyGraphics(std::string_view body);
+
+    /// Answers a kitty graphics command, unless it asked to be left alone (`q=`).
+    void replyKittyGraphics(kitty_graphics::Command const& command, std::string_view status);
+
+    /// Places @p image at the cursor, sized per the command's `c=`/`r=` or derived from its pixels.
+    void renderKittyImage(kitty_graphics::Command const& command, std::shared_ptr<Image const> const& image);
+
+    /// Validates the transmission parameters of @p command against what this terminal implements.
+    /// @return the wire status to answer with, or nullopt when the command is acceptable.
+    ///
+    /// Shared by the transmission path and by `a=q`, which exists precisely to let an application
+    /// discover what a transmission would do without performing one.
+    [[nodiscard]] static std::optional<std::string_view> validateKittyTransmission(
+        kitty_graphics::Command const& command) noexcept;
+
+    /// Handles a kitty graphics `a=d`, honouring the case of its `d=` target: a lower-case target
+    /// removes placements only, an upper-case one additionally frees the transmitted image data.
+    void deleteKittyGraphics(kitty_graphics::Command const& command);
+
+    /// Removes the on-screen placements of @p image, or of every kitty image when it is null,
+    /// leaving the text sharing those cells untouched.
+    void removeKittyPlacements(std::shared_ptr<Image const> const& image);
+
+    /// Drops all kitty graphics and clipboard protocol state. Called on RIS, which must not leave a
+    /// half-open transmission for the next application to inherit.
+    void resetKittyState() noexcept;
+
+    /// Handles one `OSC 22` (kitty pointer shape protocol) request.
+    [[nodiscard]] ApplyResult processPointerShape(std::string_view payload);
+
+    /// Handles one `OSC 5522` (kitty clipboard protocol) packet.
+    [[nodiscard]] ApplyResult processKittyClipboard(std::string_view payload);
+
+    /// Lays out one `OSC 66` (kitty text sizing) request.
+    [[nodiscard]] ApplyResult processTextSizing(std::string_view payload);
+
+    /// Erases the whole multi-cell block that @p position belongs to, however many rows and columns
+    /// it covers, and wherever within it @p position happens to be.
+    void eraseMulticellBlockAt(CellLocation position);
+
+    /// Erases every multi-cell block overlapping @p line between @p from and @p to inclusive.
+    ///
+    /// A block cannot survive a sideways shift. insertChars()/deleteChars() move one line's cells and
+    /// know nothing about MulticellContinuation, so a shift carries a head sideways while the rows it
+    /// owns stay put -- leaving cells multicellBlockAt() can no longer resolve and that no later erase
+    /// can reach. Destroying each overlapping block whole beforehand is the same rule writing over one
+    /// follows, and the only way a shift can leave the grid consistent.
+    ///
+    /// @param line the line whose cells are about to move.
+    /// @param from leftmost column the shift touches.
+    /// @param to rightmost column the shift touches, inclusive.
+    void eraseMulticellBlocksInRange(LineOffset line, ColumnOffset from, ColumnOffset to);
+
+    /// @return whether @p cell could be part of a multi-cell block, and so is worth resolving.
+    ///
+    /// A cheap screen against multicellBlockAt(), whose walk costs several out-of-line grid lookups.
+    /// False here is conclusive: none of the three states its walk can begin from is present.
+    [[nodiscard]] static bool cellCouldBelongToMulticell(ConstCellProxy cell) noexcept;
+
+    /// Writes @p text as a single cell block @p columns wide and @p scale cells tall.
+    void writeSizedText(std::u32string_view codepoints, uint8_t columns, CellScale const& cellScale);
+
+    /// Dispatches one OSC 1337 payload to the iTerm2 extension it names.
+    void processITerm2(std::string_view payload);
+
+    /// Answers `OSC 1337 ; Capabilities` with the features Contour actually has.
+    void reportITerm2Capabilities();
+
+    /// Draws an `OSC 1337 ; File=...` inline image.
+    void renderITerm2InlineImage(std::string_view arguments);
+
+  public:
     // }}}
+
+    /// @return the multi-cell block covering @p position, or nullopt when that cell stands alone.
+    ///
+    /// One authority for "which cells belong together", so that everything treating a block as
+    /// indivisible -- erasing it, highlighting it -- agrees on its extent.
+    [[nodiscard]] std::optional<MulticellBlock> multicellBlockAt(CellLocation position) const noexcept;
 
     void writeTextFromExternal(std::string_view text);
 
@@ -795,6 +881,21 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void writeCharToCurrentAndAdvance(char32_t codepoint) noexcept;
     void clearAndAdvance(int oldWidth, int newWidth) noexcept;
 
+    /// Claims or releases columns after a grapheme cluster's width was revised by a codepoint that
+    /// joined it late (a variation selector).
+    ///
+    /// Anchored on @c _lastCursorPosition -- the cluster head -- not on the cursor, which has already
+    /// moved past it. Does nothing unless the cursor still sits immediately after that head, so an
+    /// intervening cursor move or scroll cannot make this touch an unrelated cell.
+    /// @return whether a late codepoint may revise its cluster's width, per DEC mode 2027.
+    [[nodiscard]] ClusterWidthPolicy clusterWidthPolicy() const noexcept;
+
+    void applyClusterWidthChange(int delta) noexcept;
+
+    /// @return The rightmost column that may still be written on the cursor's line: the right margin
+    ///         when the cursor is inside a DECLRMM band, otherwise the last page column.
+    [[nodiscard]] ColumnOffset lastWritableColumn() const noexcept;
+
     void scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin);
     void scrollUp(LineCount n, Margin margin);
     void scrollDown(LineCount n, Margin margin);
@@ -846,6 +947,18 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     Cursor _cursor {};
     Cursor _savedCursor {};
+
+    /// Payload accumulated across a chunked kitty graphics transmission (`m=1`), plus the command
+    /// that opened it -- the continuation chunks carry no control data of their own.
+    std::string _kittyChunkedPayload {};
+    std::optional<kitty_graphics::Command> _kittyChunkedCommand {};
+
+    /// Images transmitted by a kitty graphics command but not yet displayed, keyed by their `i=` id.
+    std::unordered_map<uint32_t, std::shared_ptr<Image const>> _kittyImages {};
+
+    // NOTE: the `OSC 5522` write transmission lives on Terminal, not here: an application may switch
+    // screens (DECSASD, or a page change) between chunks, and a per-screen buffer would drop the
+    // chunks that landed elsewhere while still answering DONE. @see Terminal::kittyClipboardWrite.
 
     GraphicsAttributes _savedGraphicsRenditions {};
 

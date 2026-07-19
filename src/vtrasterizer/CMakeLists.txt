@@ -4,6 +4,8 @@ set(_header_files
     CursorRenderer.h
     DecorationRenderer.h
     GlyphAdvance.h
+    GlyphScaling.h
+    GlyphSlicing.h
     GridMetrics.h
     ImageRenderer.h
     Pixmap.h
@@ -35,6 +37,8 @@ set(_test_files
     TextClusterGrouper_test.cpp
     BoxDrawingRenderer_test.cpp
     GlyphAdvance_test.cpp
+    GlyphScaling_test.cpp
+    GlyphSlicing_test.cpp
     ImageRenderer_test.cpp
     ReGISFontRasterizer_test.cpp
     TextRenderer_test.cpp

@@ -17,14 +17,15 @@ namespace vtbackend
 
 namespace
 {
+    /// Width of a grapheme cluster, in columns.
+    ///
+    /// This used to be a private copy of the rule that handled VS16 but not VS15, which meant the
+    /// renderer and the grid could disagree about how wide the same cluster was. Both now ask
+    /// libunicode.
     ColumnCount graphemeClusterWidth(std::u32string_view cluster) noexcept
     {
         assert(!cluster.empty());
-        auto baseWidth = ColumnCount::cast_from(unicode::width(cluster[0]));
-        for (size_t i = 1; i < cluster.size(); ++i)
-            if (auto const codepoint = cluster[i]; codepoint == 0xFE0F)
-                return ColumnCount(2);
-        return baseWidth;
+        return ColumnCount::cast_from(unicode::grapheme_cluster_width(cluster));
     }
 
     constexpr RGBColor makeRGBColor(RGBColorPair actualColors, CellRGBColor configuredColor) noexcept
@@ -109,6 +110,7 @@ namespace
 } // namespace
 
 RenderBufferBuilder::RenderBufferBuilder(Terminal const& terminal,
+                                         Screen const& screen,
                                          RenderBuffer& output,
                                          LineOffset base,
                                          bool theReverseVideo,
@@ -119,6 +121,7 @@ RenderBufferBuilder::RenderBufferBuilder(Terminal const& terminal,
                                          bool includeSelection):
     _output { &output },
     _terminal { &terminal },
+    _screen { &screen },
     _cursorPosition { theCursorPosition },
     _baseLine { base },
     _reverseVideo { theReverseVideo },
@@ -149,17 +152,18 @@ optional<RenderCursor> RenderBufferBuilder::renderCursor() const
                                + boxed_cast<LineOffset>(_terminal->viewport().scrollOffset()),
                        .column = _cursorPosition->column };
 
-    auto const cellWidth = _terminal->currentScreen().cellWidthAt(*_cursorPosition);
+    auto const cellWidth = _screen->cellWidthAt(*_cursorPosition);
 
     // Resolve cursor color from the cell under the cursor, using the same logic as makeColorsForCell
     // for Block cursor inversion. This ensures the cursor color reflects actual cell content rather
     // than only palette defaults.
     auto const resolvedCursorColor = [&]() -> RGBColor {
         auto const& colorPalette = _terminal->colorPalette();
-        auto const cellFlags = _terminal->currentScreen().cellFlagsAt(*_cursorPosition);
-        // Access the cell through the current screen's virtual interface to obtain colors.
-        auto const cellFg = _terminal->currentScreen().cellForegroundColorAt(*_cursorPosition);
-        auto const cellBg = _terminal->currentScreen().cellBackgroundColorAt(*_cursorPosition);
+        auto const cellFlags = _screen->cellFlagsAt(*_cursorPosition);
+        // Read through the screen being rendered, not the terminal's current one: a status line and
+        // a non-displayed page render through this same builder.
+        auto const cellFg = _screen->cellForegroundColorAt(*_cursorPosition);
+        auto const cellBg = _screen->cellBackgroundColorAt(*_cursorPosition);
         auto const sgrColors = CellUtil::makeColors(colorPalette,
                                                     _colorLookupTable,
                                                     cellFlags,
@@ -255,6 +259,8 @@ RenderCell RenderBufferBuilder::makeRenderCell(ColorPalette const& colorPalette,
     renderCell.position.line = line;
     renderCell.position.column = column;
     renderCell.width = screenCell.width();
+    renderCell.sizing.scale = screenCell.textScale();
+    renderCell.sizing.columns = std::max<uint8_t>(1, screenCell.width());
 
     if (screenCell.codepointCount() != 0)
     {
@@ -297,7 +303,8 @@ RGBColorPair RenderBufferBuilder::makeColorsForCell(CellLocation gridPosition,
 
     auto const selected =
         _includeSelection
-        && _terminal->isSelected(CellLocation { .line = gridPosition.line, .column = gridPosition.column });
+        && _terminal->isSelected(*_screen,
+                                 CellLocation { .line = gridPosition.line, .column = gridPosition.column });
     auto const highlighted =
         _terminal->isHighlighted(CellLocation { .line = gridPosition.line, .column = gridPosition.column });
     auto const blink = _terminal->blinkState();
@@ -354,7 +361,10 @@ RenderLine RenderBufferBuilder::createRenderLine(TrivialLineBuffer const& lineBu
 
 bool RenderBufferBuilder::gridLineContainsCursor(LineOffset lineOffset) const noexcept
 {
-    if (_terminal->currentScreen().cursor().position.line == lineOffset)
+    // The cursor of the screen being RENDERED. Asking the current screen reports the main cursor's
+    // line while rendering a status line, forcing an unrelated line off the trivial fast path on
+    // every frame and drawing the cursor row in the wrong place.
+    if (_screen->cursor().position.line == lineOffset)
         return true;
 
     if (_cursorPosition && _terminal->inputHandler().mode() != ViMode::Insert)
@@ -401,13 +411,18 @@ void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
     // because it's not really draining performance.
     // A vi yank/motion highlight range (like a selection) recolors part of the line, so a trivial
     // line intersecting it must drop to the per-cell path where makeColorsForCell() applies the
-    // yankHighlight. _highlightRange lives in grid coordinates, so translate this screen line first
-    // (matching how makeColorsForCell() queries isHighlighted() with grid coordinates).
+    // yankHighlight.
+    //
+    // BOTH the selection and the highlight live in grid coordinates, so this screen line is
+    // translated once and the translated value used for both. Passing the untranslated line to the
+    // selection test asked about the wrong line whenever the viewport was scrolled back, which sent
+    // selected trivial lines down the fast path and left them unhighlighted -- while the per-cell
+    // test right beside it (makeColorsForCell) had the coordinates right all along.
     auto const gridLine =
         _terminal->viewport()
             .translateScreenToGridCoordinate(CellLocation { .line = lineOffset, .column = ColumnOffset(0) })
             .line;
-    bool const canRenderViaSimpleLine = (!_terminal->isSelected(lineOffset) || !_includeSelection)
+    bool const canRenderViaSimpleLine = (!_terminal->isSelected(gridLine) || !_includeSelection)
                                         && !gridLineContainsCursor(lineOffset)
                                         && !_terminal->isHighlighted(gridLine);
 
@@ -686,8 +701,44 @@ void RenderBufferBuilder::renderCell(ConstCellProxy screenCell, LineOffset line,
                                                _baseLine + line,
                                                displayColumn));
 
+    // A row that a tall block reaches down into carries no text of its own, so nothing would be drawn
+    // there and the block would exist only as long as its HEAD row was on screen -- scroll the head
+    // above the viewport and the whole block vanished instead of being clipped. Give such a row the
+    // head's glyph and tell the renderer which band of the block it is; the renderer clips the raster
+    // to that row. Only the block's leftmost column on this row draws: the rest are covered by it,
+    // exactly as a wide glyph's continuation columns are.
+    if (screenCell.isFlagEnabled(CellFlag::MulticellContinuation))
+    {
+        // The screen being rendered, NOT the terminal's current one: a status line or a page other
+        // than the cursor's is rendered through this same builder, and re-resolving would read the
+        // block out of an unrelated screen -- drawing the wrong glyph, or missing a block entirely.
+        auto const& screen = *_screen;
+        if (auto const block = screen.multicellBlockAt(gridPosition);
+            block && block->origin.column == gridPosition.column && block->origin.line < gridPosition.line)
+        {
+            auto const head = screen.at(block->origin);
+            auto& emitted = _output->cells.back();
+            emitted.codepoints = head.codepoints();
+            emitted.width = head.width();
+            emitted.sizing.scale = head.textScale();
+            emitted.sizing.columns = std::max<uint8_t>(1, head.width());
+            emitted.sizing.band = static_cast<uint8_t>(unbox(gridPosition.line) - unbox(block->origin.line));
+        }
+    }
+
     if (column == ColumnOffset(0))
         _output->cells.back().groupStart = true;
+
+    // Every block is its own shaping group. Neighbouring blocks share a sizing, so the grouper would
+    // otherwise run them together -- and the renderer, handed one group holding several blocks'
+    // clusters, has no way to tell where one block's glyphs end and the next one's begin. Shaping
+    // advances cannot answer it either: a Devanagari conjunct is several glyphs with advances of
+    // their own inside a SINGLE cell.
+    if (!_output->cells.back().sizing.scale.isOrdinary())
+    {
+        _output->cells.back().groupStart = true;
+        _output->cells.back().groupEnd = true;
+    }
 
     matchSearchPattern(screenCell);
 }

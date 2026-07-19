@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/LineSoA.h>
 
+#include <libunicode/width.h>
+
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstring>
+#include <iterator>
+#include <limits>
+#include <ranges>
 
 namespace vtbackend
 {
@@ -14,6 +20,8 @@ void initializeLineSoA(LineSoA& line, ColumnCount cols, GraphicsAttributes const
 
     line.codepoints.assign(n, char32_t { 0 });
     line.widths.assign(n, uint8_t { 1 });
+    line.scales.assign(n, uint8_t { 1 });
+    line.textScaleExtras.assign(n, uint16_t { 0 });
     line.sgr.assign(n, fillAttrs);
     line.hyperlinks.assign(n, HyperlinkId {});
     line.clusterSize.assign(n, uint8_t { 0 });
@@ -35,6 +43,8 @@ void initializeBlankLineSoA(LineSoA& line, GraphicsAttributes const& fillAttrs) 
     // resident set proportional to currently-used lines rather than high-water mark.
     AlignedVector<char32_t> {}.swap(line.codepoints);
     AlignedVector<uint8_t> {}.swap(line.widths);
+    AlignedVector<uint8_t> {}.swap(line.scales);
+    AlignedVector<uint16_t> {}.swap(line.textScaleExtras);
     AlignedVector<GraphicsAttributes> {}.swap(line.sgr);
     AlignedVector<HyperlinkId> {}.swap(line.hyperlinks);
     AlignedVector<uint8_t> {}.swap(line.clusterSize);
@@ -59,6 +69,8 @@ void resizeLineSoA(LineSoA& line, ColumnCount newCols, GraphicsAttributes const&
 
     line.codepoints.resize(n, char32_t { 0 });
     line.widths.resize(n, uint8_t { 1 });
+    line.scales.resize(n, uint8_t { 1 });
+    line.textScaleExtras.resize(n, uint16_t { 0 });
     line.sgr.resize(n, fillAttrs);
     line.hyperlinks.resize(n, HyperlinkId {});
     line.clusterSize.resize(n, uint8_t { 0 });
@@ -80,6 +92,8 @@ void clearRange(LineSoA& line, size_t from, size_t count, GraphicsAttributes con
 
     std::fill_n(line.codepoints.data() + from, count, char32_t { 0 });
     std::fill_n(line.widths.data() + from, count, uint8_t { 1 });
+    std::fill_n(line.scales.data() + from, count, uint8_t { 1 });
+    std::fill_n(line.textScaleExtras.data() + from, count, uint16_t { 0 });
     std::fill_n(line.sgr.data() + from, count, attrs);
     std::fill_n(line.hyperlinks.data() + from, count, HyperlinkId {});
     std::fill_n(line.clusterSize.data() + from, count, uint8_t { 0 });
@@ -153,6 +167,8 @@ void copyColumns(LineSoA const& src, size_t srcCol, LineSoA& dst, size_t dstCol,
     // Bulk copy each SoA array (SIMD auto-vectorizable)
     std::copy_n(src.codepoints.data() + srcCol, count, dst.codepoints.data() + dstCol);
     std::copy_n(src.widths.data() + srcCol, count, dst.widths.data() + dstCol);
+    std::copy_n(src.scales.data() + srcCol, count, dst.scales.data() + dstCol);
+    std::copy_n(src.textScaleExtras.data() + srcCol, count, dst.textScaleExtras.data() + dstCol);
     std::copy_n(src.sgr.data() + srcCol, count, dst.sgr.data() + dstCol);
     std::copy_n(src.hyperlinks.data() + srcCol, count, dst.hyperlinks.data() + dstCol);
     std::copy_n(src.clusterSize.data() + srcCol, count, dst.clusterSize.data() + dstCol);
@@ -203,6 +219,9 @@ void moveColumns(LineSoA& line, size_t srcCol, size_t dstCol, size_t count)
     // Use memmove for overlapping ranges (one per array)
     std::memmove(line.codepoints.data() + dstCol, line.codepoints.data() + srcCol, count * sizeof(char32_t));
     std::memmove(line.widths.data() + dstCol, line.widths.data() + srcCol, count * sizeof(uint8_t));
+    std::memmove(line.scales.data() + dstCol, line.scales.data() + srcCol, count * sizeof(uint8_t));
+    std::memmove(
+        line.textScaleExtras.data() + dstCol, line.textScaleExtras.data() + srcCol, count * sizeof(uint16_t));
     std::memmove(line.sgr.data() + dstCol, line.sgr.data() + srcCol, count * sizeof(GraphicsAttributes));
     std::memmove(
         line.hyperlinks.data() + dstCol, line.hyperlinks.data() + srcCol, count * sizeof(HyperlinkId));
@@ -228,25 +247,103 @@ size_t trimBlankRight(LineSoA const& line, size_t cols)
     return end;
 }
 
-int appendCodepointToCluster(LineSoA& line, size_t col, char32_t codepoint)
+namespace
+{
+    /// Highest pool size @c LineSoA::clusterPoolIndex (a uint16_t) can still address.
+    constexpr size_t ClusterPoolLimit = std::numeric_limits<uint16_t>::max();
+
+    /// Rebuilds @c clusterPool from the cells that actually reference it, dropping the runs abandoned
+    /// by earlier overwrites, and places @c tailCol's run last.
+    ///
+    /// The pool is append-only: @c clearClusterExtras deliberately does not compact, so every rewrite
+    /// of a cell carrying extra codepoints appends a fresh run and orphans the old one. A long-lived
+    /// line rewritten in place -- a status line, a spinner cycling emoji -- therefore grows the pool
+    /// without bound until @c clusterPoolIndex can no longer address it and silently wraps, at which
+    /// point cells read back an unrelated codepoint run.
+    ///
+    /// @param tailCol the column whose run must end up at the tail, because the caller is about to
+    ///                extend it with @c push_back.
+    void compactClusterPool(LineSoA& line, size_t tailCol)
+    {
+        auto compacted = std::vector<char32_t> {};
+        compacted.reserve(line.clusterPool.size());
+
+        auto const copyRun = [&](size_t col) {
+            auto const start = static_cast<size_t>(line.clusterPoolIndex[col]);
+            auto const extraCount = static_cast<size_t>(line.clusterSize[col] - 1);
+            line.clusterPoolIndex[col] = static_cast<uint16_t>(compacted.size());
+            compacted.insert(compacted.end(),
+                             std::next(line.clusterPool.begin(), static_cast<ptrdiff_t>(start)),
+                             std::next(line.clusterPool.begin(), static_cast<ptrdiff_t>(start + extraCount)));
+        };
+
+        for (auto const col: std::views::iota(size_t { 0 }, line.clusterSize.size()))
+            if (col != tailCol && line.clusterSize[col] > 1)
+                copyRun(col);
+
+        // Appending to a cluster assumes its run is at the tail of the pool, so tailCol goes last.
+        if (line.clusterSize[tailCol] > 1)
+            copyRun(tailCol);
+
+        line.clusterPool = std::move(compacted);
+    }
+} // namespace
+
+int appendCodepointToCluster(LineSoA& line, size_t col, char32_t codepoint, ClusterWidthPolicy policy)
 {
     assert(!line.codepoints.empty());
     auto const currentSize = line.clusterSize[col];
-    if (currentSize >= MaxGraphemeClusterSize)
-        return 0;
 
-    if (currentSize == 1)
+    auto const oldWidth = static_cast<unsigned>(line.widths[col]);
+
+    if (currentSize < MaxGraphemeClusterSize)
     {
-        // First extra codepoint — record start index in pool
-        line.clusterPoolIndex[col] = static_cast<uint16_t>(line.clusterPool.size());
+        // A run must start at an offset a uint16_t can address. Compacting first reclaims the runs
+        // abandoned by earlier overwrites; only if the LIVE extras genuinely fill the pool is the
+        // codepoint dropped, and no page width Contour supports can reach that.
+        if (line.clusterPool.size() + MaxGraphemeClusterSize > ClusterPoolLimit)
+            compactClusterPool(line, col);
+
+        if (line.clusterPool.size() < ClusterPoolLimit)
+        {
+            if (currentSize == 1)
+            {
+                // First extra codepoint — record start index in pool
+                line.clusterPoolIndex[col] = static_cast<uint16_t>(line.clusterPool.size());
+            }
+
+            line.clusterPool.push_back(codepoint);
+            line.clusterSize[col] = currentSize + 1;
+        }
     }
 
-    line.clusterPool.push_back(codepoint);
-    line.clusterSize[col] = currentSize + 1;
+    // The cluster's width is recomputed over the WHOLE cluster rather than adjusted incrementally:
+    // the rules need lookbehind (a consonant widens its cluster only when a virama precedes it, and
+    // a ZWJ swallows whatever follows), which a per-codepoint delta cannot express.
+    //
+    // Copying into a stack buffer keeps this allocation-free -- a cluster is bounded by
+    // MaxGraphemeClusterSize -- and it only runs for continuation codepoints, never for ASCII.
+    std::array<char32_t, MaxGraphemeClusterSize> buffer {};
+    size_t count = 0;
+    forEachCodepoint(line, col, [&](char32_t cp) {
+        if (count < buffer.size())
+            buffer[count++] = cp;
+    });
+    // Under FirstCodepoint the codepoint still joins the cluster -- it is part of the text, and must
+    // round-trip through a copy -- but it may not change how many columns the cluster occupies.
+    if (policy == ClusterWidthPolicy::FirstCodepoint)
+        return 0;
 
-    // Width change computation (currently always returns 0 unless AllowWidthChange is enabled)
-    // Mirrors CellUtil::computeWidthChange behavior
-    return 0;
+    // A cluster always occupies at least one column. grapheme_cluster_width answers 0 for a cluster
+    // made only of zero-width codepoints -- a lone combining mark, ZWSP, a bare ZWJ -- and the base
+    // codepoint was stored under exactly this clamp by writeNonAsciiToSoA. Without it here the width
+    // both violates the "1 or 2 columns" invariant LineSoA.h documents and drives the shrink path's
+    // erase range onto the head cell itself, wiping the text the revision was meant to keep.
+    auto const newWidth =
+        std::max(1u, unicode::grapheme_cluster_width(std::u32string_view(buffer.data(), count)));
+    line.widths[col] = static_cast<uint8_t>(newWidth);
+
+    return static_cast<int>(newWidth) - static_cast<int>(oldWidth);
 }
 
 void clearClusterExtras(LineSoA& line, size_t col)

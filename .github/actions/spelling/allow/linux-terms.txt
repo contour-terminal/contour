@@ -3,3 +3,5 @@ libwayland
 qplatformwindow
 qwayland
 qwaylandwindow
+heaptrack
+wlroots

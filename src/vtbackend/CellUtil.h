@@ -168,23 +168,27 @@ template <typename Cell>
     return (cell.codepointCount() == 0) && !cell.imageFragment();
 }
 
+/// @return By how many columns @p cell must grow or shrink once @p codepoint joins its grapheme
+///         cluster.
+///
+/// A cluster's width is not settled by its first codepoint: U+FE0F asks for the emoji presentation,
+/// which is two columns wide, so `#` followed by it occupies two rather than the one Contour used to
+/// give it.
+///
+/// The answer here is symmetric and may be negative, but callers act on growth only. U+FE0E asks for
+/// the text presentation, and terminal-unicode-core is explicit that this changes the presentation
+/// WITHOUT changing the width -- a cluster already on screen cannot give a column back.
+/// @see Screen::applyClusterWidthChange.
+///
+/// The rule itself lives in libunicode, so the grid, the renderer and the rasterizer all answer this
+/// question the same way. @see unicode::grapheme_cluster_width_append.
 template <typename Cell>
 [[nodiscard]] inline int computeWidthChange(Cell const& cell, char32_t codepoint) noexcept
 {
-    constexpr bool AllowWidthChange = false; // TODO: make configurable
-    if (!AllowWidthChange)
-        return 0;
-
-    auto const newWidth = [codepoint]() {
-        switch (codepoint)
-        {
-            case 0xFE0E: return 1;
-            case 0xFE0F: return 2;
-            default: return static_cast<int>(unicode::width(codepoint));
-        }
-    }();
-
-    return newWidth - cell.width();
+    auto cluster = std::u32string(cell.codepoints());
+    cluster.push_back(codepoint);
+    auto const oldWidth = static_cast<int>(cell.width());
+    return static_cast<int>(unicode::grapheme_cluster_width(cluster)) - oldWidth;
 }
 
 template <typename Cell>

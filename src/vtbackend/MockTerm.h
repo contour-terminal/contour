@@ -181,6 +181,15 @@ class MockTerm: public Terminal::NullEvents
 
     void setIconTitle(std::string_view title) override { iconTitle = title; }
 
+    /// Every pointer-shape notification, in order. An empty entry is the "back to the terminal's own
+    /// default" signal, which is what tells a frontend it may resume its own defaults again.
+    std::vector<std::string> pointerShapeNotifications;
+
+    void setPointerShape(std::string_view cssName) override
+    {
+        pointerShapeNotifications.emplace_back(cssName);
+    }
+
     void copyToClipboard(std::string_view data) override { clipboardData = data; }
 
     std::string getClipboard() override { return clipboardData; }

@@ -56,6 +56,8 @@ inline void writeCellToSoA(LineSoA& line,
     auto const oldClusterSize = line.clusterSize[col];
     line.codepoints[col] = codepoint;
     line.widths[col] = width;
+    line.scales[col] = 1;
+    line.textScaleExtras[col] = 0;
     line.sgr[col] = attrs;
     line.hyperlinks[col] = hyperlink;
     line.clusterSize[col] = (codepoint != 0) ? uint8_t { 1 } : uint8_t { 0 };
@@ -95,6 +97,8 @@ inline void fillWideCharContinuation(LineSoA& line,
     {
         line.codepoints[col + i] = 0;
         line.widths[col + i] = 1;
+        line.scales[col + i] = 1;
+        line.textScaleExtras[col + i] = 0;
         line.clusterSize[col + i] = 0;
         line.sgr[col + i] = contAttrs;
         line.hyperlinks[col + i] = hyperlink;

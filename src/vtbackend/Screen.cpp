@@ -28,10 +28,12 @@
 #include <libunicode/convert.h>
 #include <libunicode/emoji_segmenter.h>
 #include <libunicode/grapheme_segmenter.h>
+#include <libunicode/utf8_grapheme_segmenter.h>
 #include <libunicode/word_segmenter.h>
 
 #include <algorithm>
 #include <cassert>
+#include <charconv>
 #include <cstring>
 #include <iostream>
 #include <iterator>
@@ -388,6 +390,22 @@ namespace // {{{ helper
     }
 
     /// Common parameters shared by GIP render and oneshot operations.
+    /// Clamps an application-supplied cell count to what the page can actually hold.
+    ///
+    /// Every image protocol lets the application state the display size in cells, and every one of them
+    /// takes that number off the wire as an unsigned. The boxed counts are signed, so a value above
+    /// INT_MAX narrows to a negative one -- and a negative extent makes `GridSize::end()` smaller than
+    /// `begin()`, which the iterator can never reach. An image can never occupy more than the page, so
+    /// that is the bound. Zero keeps its protocol meaning of "derive this axis from the image".
+    ///
+    /// @param requested the cell count the application asked for.
+    /// @param limit the page's extent along the same axis.
+    /// @return @p requested, never above @p limit.
+    template <typename Boxed>
+    [[nodiscard]] constexpr unsigned clampToPage(unsigned requested, Boxed limit) noexcept
+    {
+        return std::min(requested, static_cast<unsigned>(unbox(limit)));
+    }
     struct GipRenderParams
     {
         LineCount screenRows {};
@@ -402,11 +420,17 @@ namespace // {{{ helper
         bool requestStatus {};
     };
 
-    GipRenderParams parseGipRenderParams(Message const& message)
+    /// @param pageSize the page the image will be placed on, bounding the cell counts it may ask for.
+    GipRenderParams parseGipRenderParams(Message const& message, PageSize pageSize)
     {
         return GipRenderParams {
-            .screenRows = LineCount::cast_from(toNumber(message.header("r")).value_or(0)),
-            .screenCols = ColumnCount::cast_from(toNumber(message.header("c")).value_or(0)),
+            // `r`/`c` are wire-supplied cell counts and reach renderImage with `l=`'s autoScroll, whose
+            // remainder loop performs one linefeed per row it could not draw. Bounded here, where the
+            // untrusted unsigned becomes a boxed count, for the reason clampToPage() documents.
+            .screenRows =
+                LineCount::cast_from(clampToPage(toNumber(message.header("r")).value_or(0), pageSize.lines)),
+            .screenCols = ColumnCount::cast_from(
+                clampToPage(toNumber(message.header("c")).value_or(0), pageSize.columns)),
             .imageWidth = Width::cast_from(toNumber(message.header("w")).value_or(0)),
             .imageHeight = Height::cast_from(toNumber(message.header("h")).value_or(0)),
             .alignmentPolicy = toImageAlignmentPolicy(message.header("a"), ImageAlignment::MiddleCenter)
@@ -419,6 +443,7 @@ namespace // {{{ helper
             .requestStatus = message.header("s") != nullptr,
         };
     }
+
 } // namespace
 
 // }}}
@@ -481,6 +506,7 @@ void Screen::hardReset()
     _cursor = {};
     _lastCursorPosition = {};
     resetProtection();
+    resetKittyState();
     updateCursorIterator();
 }
 
@@ -697,8 +723,8 @@ void Screen::writeText(string_view text, size_t cellCount)
             }
             else
             {
-                auto const extendedWidth = usePreviousCell().appendCharacter(cp);
-                clearAndAdvance(0, extendedWidth);
+                auto const widthChange = usePreviousCell().appendCharacter(cp, clusterWidthPolicy());
+                applyClusterWidthChange(widthChange);
                 _terminal->markCellDirty(_lastCursorPosition);
             }
 
@@ -842,8 +868,8 @@ void Screen::writeTextInternal(char32_t sourceCodepoint)
     }
     else
     {
-        auto const extendedWidth = usePreviousCell().appendCharacter(codepoint);
-        clearAndAdvance(0, extendedWidth);
+        auto const widthChange = usePreviousCell().appendCharacter(codepoint, clusterWidthPolicy());
+        applyClusterWidthChange(widthChange);
         _terminal->markCellDirty(_lastCursorPosition);
     }
 
@@ -869,12 +895,30 @@ void Screen::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
         cell.reset();
 #endif
 
-    if (cell.isFlagEnabled(CellFlag::WideCharContinuation) && _cursor.position.column > ColumnOffset(0))
-    {
-        // Erase the left half of the wide char.
-        auto prevCell = line.useCellAt(_cursor.position.column - 1);
-        prevCell.reset(_cursor.graphicsRendition);
-    }
+    // A cell claimed by a scaled block on a line ABOVE belongs to that block; writing here destroys
+    // it, exactly as writing into a horizontal continuation does.
+    //
+    // The block's HEAD counts too, and is the easier case to miss: overwriting it is not writing into
+    // a continuation, so neither branch here used to fire and the rows below kept their
+    // MulticellContinuation flag while the head that explained them was gone. Nothing could clean
+    // those cells up afterwards -- multicellBlockAt walks up to an ordinary cell and answers nothing
+    // -- so they stayed as orphans the renderer could not resolve and the selection extractor dropped
+    // whole rows over.
+    // Writing into any part of a multi-column cell destroys the WHOLE cell, not just the column being
+    // written -- half a glyph is not a thing that can be drawn. That covers writing into a horizontal
+    // continuation, into a row a scaled block reaches down into, and over a block's head, which is
+    // the easy one to miss: overwriting the head is not writing into a continuation, so the rows
+    // below kept their MulticellContinuation flag while the head explaining them was gone, and
+    // nothing could clean them up afterwards.
+    //
+    // This used to step back exactly ONE column, which is correct only because a wide character is
+    // exactly two columns. A text-sizing block (OSC 66) can be up to 49, and clearing its second
+    // column while leaving the head and the rest behind leaves a corrupt block. eraseMulticellBlockAt
+    // walks back to the head and clears the entire run, as kitty's nuke_multicell_char_at() does, and
+    // answers nothing for a cell that stands alone -- so it needs no guard of its own beyond the
+    // cheap screen, which restates its precondition rather than narrowing it.
+    if (cellCouldBelongToMulticell(cell))
+        eraseMulticellBlockAt(_cursor.position);
 
     auto const oldWidth = cell.width();
 
@@ -895,25 +939,150 @@ void Screen::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
     _terminal->markCellDirty(_cursor.position);
 }
 
-void Screen::clearAndAdvance(int oldWidth, int newWidth) noexcept
+ClusterWidthPolicy Screen::clusterWidthPolicy() const noexcept
 {
+    // DEC mode 2027 is how an application says it expects whole clusters to be measured. Contour
+    // keeps the mode set by default and always clusters; what the mode gates is narrower -- whether
+    // a codepoint arriving AFTER the first may change how many columns the cluster occupies.
+    //
+    // NOTE: resetting 2027 does not restore the full pre-clustering behaviour, only this part of it.
+    // A terminal that also stopped segmenting would place every combining mark in its own cell, which
+    // is a larger change and is not what applications resetting the mode are usually after.
+    return _terminal->isModeEnabled(DECMode::Unicode) ? ClusterWidthPolicy::ClusterAware
+                                                      : ClusterWidthPolicy::FirstCodepoint;
+}
+
+void Screen::applyClusterWidthChange(int delta) noexcept
+{
+    if (delta == 0)
+        return;
+
+    // The cluster head is where the last write landed, NOT the cursor -- the cursor has already moved
+    // past it. Anchoring on _cursor.position here would claim or release the wrong columns.
+    auto const head = _lastCursorPosition;
+
+    // The head has to be addressable before its width can be read back, let alone put back.
+    if (head.line < LineOffset(0) || head.line >= boxed_cast<LineOffset>(pageSize().lines)
+        || head.column < ColumnOffset(0) || head.column >= boxed_cast<ColumnOffset>(pageSize().columns))
+        return;
+
+    auto& line = _grid.lineAt(head.line);
+    auto headCell = line.useCellAt(head.column);
+    auto const newWidth = static_cast<int>(headCell.width());
+    auto const oldWidth = newWidth - delta;
+
+    // appendCodepointToCluster has ALREADY committed the revised width to the head cell, so every
+    // path that declines to carry the change through has to put the old width back. Leaving it would
+    // let a cell claim a column that holds no continuation of it: the renderer draws the glyph across
+    // its neighbour, and eraseMulticellBlockAt later wipes both.
+    auto const abandon = [&]() noexcept {
+        headCell.setWidth(static_cast<uint8_t>(oldWidth));
+    };
+
+    // A cluster already on screen may only ever GROW. terminal-unicode-core is explicit about the
+    // asymmetry: VS16 "will force the grapheme cluster's width to be 2, which may possibly cause
+    // reflowing", whereas VS15 "will NOT change the underlying width but only change the display to
+    // prefer textual non-colored presentation".
+    //
+    // The reason is mechanical rather than stylistic. Giving a column back would mean undoing work
+    // that is already committed -- un-wrapping a line that has wrapped, un-scrolling content that has
+    // left the screen -- so a terminal that narrows an on-screen cluster ends up with behaviour no
+    // application can predict.
+    //
+    // The measurement in appendCodepointToCluster still reports the narrowing honestly; the screen
+    // simply declines to act on it. The variation selector stays part of the cluster, so the run
+    // segmenter still resolves the run to text presentation and the glyph is drawn uncolored -- which
+    // is the whole of what VS15 is specified to do.
+    if (delta < 0)
+    {
+        abandon();
+        return;
+    }
+
+    // Only revise a cluster the cursor is still sitting immediately after. Anything else -- an
+    // intervening CUP, a scroll that moved the head, a resize, or a deferred wrap that has already
+    // carried the cursor to the next line -- means this is no longer a live cluster, and the "next"
+    // cell is not ours to take. In the normal sequential flow the cursor IS the next cell, so it is
+    // free by construction.
+    if (head.line != _cursor.position.line
+        || _cursor.position.column != head.column + ColumnOffset::cast_from(oldWidth))
+    {
+        abandon();
+        return;
+    }
+
+    // Growing must not run past the right margin (or the page edge). Rather than reflow a cell that
+    // is already committed -- which would invalidate damage tracking, selections and hyperlink spans
+    // -- abandon the promotion and leave the cluster at its original width.
+    if (head.column + ColumnOffset::cast_from(newWidth - 1) > lastWritableColumn())
+    {
+        abandon();
+        return;
+    }
+
+    // Insert mode sized its shift from the first codepoint alone, so it is short by exactly the
+    // columns the cluster just gained.
+    if (_terminal->isModeEnabled(AnsiMode::Insert))
+        insertChars(head.line, ColumnCount::cast_from(delta));
+
+    // The continuation inherits the HEAD cell's pen, not the current one: the SGR may have changed
+    // between the base codepoint and the variation selector that widened it.
+    auto const sgr = headCell.graphicsAttributes().with(CellFlag::WideCharContinuation);
+    for (int i = oldWidth; i < newWidth; ++i)
+    {
+        line.useCellAt(head.column + ColumnOffset::cast_from(i)).reset(sgr, headCell.hyperlink());
+        _terminal->markCellDirty(head + ColumnOffset::cast_from(i));
+    }
+
+    // Advancing past the last writable column is the deferred-wrap case, exactly as in
+    // clearAndAdvance: the cursor stays where it is and the wrap happens when the next character
+    // arrives. The grow guard above only proves the cluster ITSELF fits; a cluster ending flush
+    // against the last column still leaves the cursor one past it. Moving there unconditionally
+    // breaks the `column < pageSize().columns` invariant verifyState() asserts, and in a build
+    // without it the next write indexes the line's storage out of bounds.
+    auto const landing = _cursor.position.column + ColumnOffset::cast_from(delta);
+    if (landing <= lastWritableColumn())
+        _cursor.position.column = landing;
+    else if (_terminal->isModeEnabled(DECMode::AutoWrap))
+        _cursor.wrapPending = true;
+}
+
+ColumnOffset Screen::lastWritableColumn() const noexcept
+{
+    // Inside the left/right band the last writable column is the right margin itself; on the full
+    // page it is the last page column. The band form once carried an extra `- 1`, which made autowrap
+    // fire one column early -- the char destined for the right margin wrapped instead. Extracted so
+    // that the arithmetic exists exactly once.
     bool const cursorInsideMargin =
         _terminal->isModeEnabled(DECMode::LeftRightMargin) && isCursorInsideMargins();
-    // Columns strictly to the right of the cursor that are still writable. Inside the left/right band
-    // the last writable column is the right margin itself, so it is `to - column`; on the full page it
-    // is the last page column, `(columns - 1) - column`. The band form once carried an extra `- 1`,
-    // which made autowrap fire one column early -- the char destined for the right margin wrapped instead.
-    auto const cellsAvailable = cursorInsideMargin ? *(margin().horizontal.to - _cursor.position.column)
-                                                   : *pageSize().columns - *_cursor.position.column - 1;
+    return cursorInsideMargin ? margin().horizontal.to : boxed_cast<ColumnOffset>(pageSize().columns) - 1;
+}
 
+void Screen::clearAndAdvance(int oldWidth, int newWidth) noexcept
+{
+    // Writable cells the character has to work with: the cursor's OWN column plus every writable
+    // column to the right of it. Counting only the columns strictly to the right -- as though the
+    // cursor's cell were not one of them -- makes a character exactly fill the remaining room look
+    // one column too wide. A two-column character at the second-to-last column then gets no
+    // continuation cell: the previous occupant of the last column survives underneath the wide glyph
+    // and is copied out with it, and the head is left claiming a column it never took.
+    auto const lastColumn = lastWritableColumn();
+    auto const cellsAvailable = *(lastColumn - _cursor.position.column) + 1;
+
+    // The same count bounds the clearing of the cell being REPLACED, so the off-by-one also used to
+    // leave the old right half of an overwritten wide character behind at that column.
     auto const sgr = newWidth > 1 ? _cursor.graphicsRendition.with(CellFlag::WideCharContinuation)
                                   : _cursor.graphicsRendition;
     auto& line = currentLine();
     for (int i = 1; i < std::min(std::max(oldWidth, newWidth), cellsAvailable); ++i)
         line.useCellAt(_cursor.position.column + i).reset(sgr, _cursor.hyperlink);
 
-    if (newWidth == std::min(newWidth, cellsAvailable))
-        _cursor.position.column += ColumnOffset::cast_from(newWidth);
+    // Landing past the last writable column is the deferred-wrap case: the cursor stays where it is
+    // and the wrap happens when the next character arrives. Comparing the landing column against the
+    // margin says that directly, where comparing widths against a count only said it by accident.
+    auto const landing = _cursor.position.column + ColumnOffset::cast_from(newWidth);
+    if (landing <= lastColumn)
+        _cursor.position.column = landing;
     else if (_terminal->isModeEnabled(DECMode::AutoWrap))
         _cursor.wrapPending = true;
 }
@@ -1567,12 +1736,32 @@ void Screen::selectiveEraseArea(Rect area, CellFlag protectedFlag)
     {
         for (int x = left.value; x <= right.value; ++x)
         {
-            auto cell = grid().lineAt(LineOffset::cast_from(y)).useCellAt(ColumnOffset::cast_from(x));
-            if (!cell.isFlagEnabled(protectedFlag))
+            auto const location =
+                CellLocation { .line = LineOffset::cast_from(y), .column = ColumnOffset::cast_from(x) };
+            auto cell = grid().lineAt(location.line).useCellAt(location.column);
+            if (cell.isFlagEnabled(protectedFlag))
+                continue;
+
+            // Erasing any part of a multi-cell character destroys all of it. writeTextOnly() below
+            // deliberately preserves the cell's rendition -- that is what makes this a SELECTIVE
+            // erase -- but a cell's width, scale and continuation flags are layout, not rendition.
+            // Left behind, they let RenderBufferBuilder resolve the cell back to its head and re-emit
+            // the very glyph DECSERA was asked to erase, and they leave continuation cells whose head
+            // is gone: unresolvable by the renderer, unreachable by any later erase, and skipped by
+            // the selection extractor.
+            //
+            // The proxy is already in hand, so the cheap screen costs nothing and spares the ordinary
+            // cells that make up almost any erased area a block walk each.
+            if (cellCouldBelongToMulticell(cell))
             {
-                cell.writeTextOnly(L' ', 1);
-                cell.setHyperlink(HyperlinkId(0));
+                eraseMulticellBlockAt(location);
+                // Re-acquire: erasing a block materializes every line it spans, which can move the
+                // storage this proxy points into.
+                cell = grid().lineAt(location.line).useCellAt(location.column);
             }
+
+            cell.writeTextOnly(L' ', 1);
+            cell.setHyperlink(HyperlinkId(0));
         }
     }
 }
@@ -1683,6 +1872,10 @@ void Screen::insertChars(LineOffset lineOffset, ColumnCount columnsToInsert)
 {
     auto const sanitizedN =
         std::min(*columnsToInsert, *margin().horizontal.to - *logicalCursorPosition().column + 1);
+
+    // Every cell from here to the right margin is about to move sideways, and a block cannot move
+    // with them. @see eraseMulticellBlocksInRange.
+    eraseMulticellBlocksInRange(lineOffset, realCursorPosition().column, margin().horizontal.to);
 
     auto& line = _grid.lineAt(lineOffset);
     // Insert into a blank line with matching fill attrs is a no-op: shifting "all default cells"
@@ -1828,12 +2021,26 @@ void Screen::copyArea(Rect sourceArea, int page, CellLocation targetTopLeft, int
             {
                 targetCell.write(attrs, sourceCell.codepoint(0), sourceCell.width(), sourceCell.hyperlink());
                 for (size_t ci = 1; ci < sourceCell.codepointCount(); ++ci)
-                    (void) targetCell.appendCharacter(sourceCell.codepoint(ci));
+                    // A copy reproduces the source cell; it does not re-measure it. The source's
+                    // width is whatever the policy in force when it was WRITTEN decided, so
+                    // re-measuring here would rewrite it under a policy the application may have
+                    // since reset -- claiming a neighbouring column that holds live text, with no
+                    // continuation cell to mark it. FirstCodepoint keeps the codepoints and leaves
+                    // the width alone.
+                    (void) targetCell.appendCharacter(sourceCell.codepoint(ci),
+                                                      ClusterWidthPolicy::FirstCodepoint);
             }
             else
             {
                 targetCell.reset(attrs, sourceCell.hyperlink());
             }
+
+            // Both write() and reset() clear the sizing, but `attrs` still carries
+            // MulticellContinuation to the rows a scaled block reaches into. Copying the flags
+            // without the scale leaves those rows orphaned: RenderBufferBuilder sees a block of
+            // height 1 whose origin is above them and redraws the head's text on each, and
+            // eraseMulticellBlockAt -- also reading the scale -- never reaches them to clean up.
+            targetCell.setTextScale(sourceCell.textScale());
         }
     }
 }
@@ -1961,6 +2168,10 @@ void Screen::deleteCharacters(ColumnCount n)
 
 void Screen::deleteChars(LineOffset lineOffset, ColumnOffset column, ColumnCount columnsToDelete)
 {
+    // The cells from here to the right margin are about to move left, and a block cannot move with
+    // them. @see eraseMulticellBlocksInRange.
+    eraseMulticellBlocksInRange(lineOffset, column, margin().horizontal.to);
+
     auto& line = _grid.lineAt(lineOffset);
 
     // Deleting from a blank line with matching fill attrs is a no-op: shifting "all default cells" left
@@ -2669,6 +2880,14 @@ void Screen::renderImage(shared_ptr<Image const> image,
                          bool updateCursor,
                          ImageLayer layer)
 {
+    // Floor both extents at the one point every image protocol funnels through, so that no caller can
+    // express a size that cannot be walked. @see clampToPage, which explains how a wire-supplied
+    // count becomes negative -- and which bounds the same values from ABOVE at each protocol's own
+    // handler, where the page-sized ceiling belongs (a sixel legitimately asks for more rows than the
+    // page has and scrolls for them).
+    gridSize.lines = std::max(gridSize.lines, LineCount(0));
+    gridSize.columns = std::max(gridSize.columns, ColumnCount(0));
+
     auto const linesAvailable = pageSize().lines - topLeft.line.as<LineCount>();
     auto const linesToBeRendered = std::min(gridSize.lines, linesAvailable);
     auto const columnsAvailable = pageSize().columns - topLeft.column;
@@ -2711,7 +2930,9 @@ void Screen::renderImage(shared_ptr<Image const> image,
         return boxed_cast<LineOffset>(linesToBeRendered);
     }();
 
-    if (unbox(linesToBeRendered))
+    // Both extents have to be positive before the grid is walked: the iterator's makeOffset() divides
+    // by the column count, which a cursor sitting in the pending-wrap column reduces to zero.
+    if (unbox(linesToBeRendered) > 0 && unbox(columnsToBeRendered) > 0)
     {
         for (GridSize::Offset const gridOffset:
              GridSize { .lines = linesToBeRendered, .columns = columnsToBeRendered })
@@ -4456,6 +4677,996 @@ void Screen::reply(std::string_view text)
     _terminal->reply(text);
 }
 
+void Screen::processITerm2(std::string_view payload)
+{
+    // OSC 1337 carries several unrelated iTerm2 extensions, told apart by the text before the first
+    // '=' (or the whole payload, for the ones that take no argument).
+    if (payload == "Capabilities")
+    {
+        reportITerm2Capabilities();
+        return;
+    }
+
+    if (payload.starts_with("File="))
+        renderITerm2InlineImage(payload.substr(5));
+}
+
+void Screen::reportITerm2Capabilities()
+{
+    // Only what Contour genuinely does. Advertising a capability we do not have would make an
+    // application choose a path that then fails, which is worse than it choosing a lesser path.
+    //
+    // Codes and their value semantics are iTerm2's: T is a bitmask (2 = full 24-bit SGR sequences),
+    // Sc a bitmask of the DECSCUSR shapes understood (1 = modes 1-4, 2 = modes 5-6, 4 = reset),
+    // Uw the Unicode version the width tables come from, and Ts a bitmask (1 = title stacks,
+    // 2 = title setting).
+    auto capabilities = std::string {};
+    capabilities += "T2";   // 24-bit colour, full sequences
+    capabilities += "Cw";   // clipboard writable (OSC 52)
+    capabilities += "Lr";   // DECSLRM
+    capabilities += "M";    // mouse
+    capabilities += "Sc7";  // DECSCUSR modes 1-6 plus reset
+    capabilities += "U";    // basic Unicode
+    capabilities += "Uw17"; // width tables from Unicode 17
+    capabilities += "Ts3";  // title stacks and title setting
+    capabilities += "B";    // bracketed paste
+    capabilities += "F";    // focus reporting
+    capabilities += "Gs";   // strikethrough
+    capabilities += "Go";   // overline
+    capabilities += "Sy";   // synchronized output (mode 2026)
+    capabilities += "H";    // hyperlinks (OSC 8)
+    capabilities += "No";   // notifications (OSC 99)
+    capabilities += "Sx";   // sixel
+
+    reply("\033]1337;Capabilities={}\a", capabilities);
+}
+
+void Screen::renderITerm2InlineImage(std::string_view arguments)
+{
+    // `File=key=value;...:<base64 data>`. The colon separates the arguments from the payload.
+    auto const colon = arguments.find(':');
+    if (colon == std::string_view::npos)
+        return;
+
+    auto const keyValues = arguments.substr(0, colon);
+    auto const encoded = arguments.substr(colon + 1);
+
+    auto widthCells = 0u;
+    auto heightCells = 0u;
+    auto inlineImage = false;
+
+    for (size_t offset = 0; offset < keyValues.size();)
+    {
+        auto end = keyValues.find(';', offset);
+        if (end == std::string_view::npos)
+            end = keyValues.size();
+        auto const pair = keyValues.substr(offset, end - offset);
+        offset = end + 1;
+
+        auto const equals = pair.find('=');
+        if (equals == std::string_view::npos)
+            continue;
+        auto const key = pair.substr(0, equals);
+        auto const value = pair.substr(equals + 1);
+
+        // Only the cell-valued forms of width/height are honoured; the "10px" and "50%" forms would
+        // each need their own unit handling and are simply left at "derive from the image".
+        auto const cells = [](std::string_view text) -> unsigned {
+            auto result = 0u;
+            auto const* const last = text.data() + text.size();
+            auto const [ptr, ec] = std::from_chars(text.data(), last, result);
+            return (ec == std::errc {} && ptr == last) ? result : 0u;
+        };
+
+        if (key == "width")
+            widthCells = cells(value);
+        else if (key == "height")
+            heightCells = cells(value);
+        else if (key == "inline")
+            inlineImage = value == "1";
+    }
+
+    // Without inline=1 the payload is a file download, not something to draw. Contour does not save
+    // files an application sends, so there is nothing to do.
+    if (!inlineImage)
+        return;
+
+    auto const decoded = crispy::base64::decode(encoded);
+    if (decoded.empty())
+        return;
+
+    // iTerm2 sends whole image files rather than raw pixels, so the format is whatever the file is;
+    // PNG is the one Contour can decode.
+    auto pixmap = Image::Data(decoded.begin(), decoded.end());
+
+    // `width=`/`height=` are application-supplied cell counts with no relation to the image, and they
+    // reach renderImage with autoScroll set -- whose remainder loop performs one linefeed() per row it
+    // could not draw. Unclamped, `height=90000000` is ninety million linefeeds: the terminal wedges
+    // and the scrollback is destroyed.
+    (void) renderImage(
+        ImageFormat::PNG,
+        ImageSize {},
+        std::move(pixmap),
+        GridSize { .lines = LineCount::cast_from(clampToPage(heightCells, pageSize().lines)),
+                   .columns = ColumnCount::cast_from(clampToPage(widthCells, pageSize().columns)) },
+        ImageAlignment::TopStart,
+        ImageResize::ResizeToFit,
+        /*autoScroll*/ true,
+        /*updateCursor*/ true,
+        ImageLayer::Above);
+}
+
+ApplyResult Screen::processPointerShape(std::string_view payload)
+{
+    using namespace pointer_shape;
+
+    // `OSC 22 ; ST` is the documented reset: "Reset the pointer to default". Rejecting the empty
+    // payload as malformed left an application-set shape in place with no way to put it back.
+    if (payload.empty())
+    {
+        _terminal->resetPointerShape();
+        return ApplyResult::Ok;
+    }
+
+    // "For set operations, the optional first char can be either `=` or omitted" -- so a leading
+    // byte is only an operation when it actually names one. Consuming it unconditionally turned the
+    // 'p' of the spec's own first example, `OSC 22 ; pointer`, into an unknown operation and the
+    // whole sequence was rejected.
+    auto const leading = static_cast<Operation>(payload.front());
+    auto const namesOnly = leading == Operation::Query || leading == Operation::Set
+                           || leading == Operation::Push || leading == Operation::Pop;
+    auto const operation = namesOnly ? leading : Operation::Set;
+    auto const names = namesOnly ? payload.substr(1) : payload;
+
+    switch (operation)
+    {
+        case Operation::Query: {
+            // Answer one value per queried name: `1` for a shape we can display, `0` for one we
+            // cannot, and the actual CSS name for the three introspection pseudo-names. Answering
+            // `1` for a shape we would not actually show would be a lie an application acts on.
+            auto answers = std::string {};
+            for (auto const& name: crispy::split(names, ','))
+            {
+                if (!answers.empty())
+                    answers += ',';
+                if (isSupportedName(name))
+                    answers += '1';
+                else if (name == "__current__")
+                    answers += _terminal->pointerShape();
+                else if (name == "__default__" || name == "__grabbed__")
+                    answers += DefaultName;
+                else
+                    answers += '0';
+            }
+            reply("\033]22;{}\033\\", answers);
+            return ApplyResult::Ok;
+        }
+
+        case Operation::Set:
+        case Operation::Push: {
+            // A list is pushed left to right, so the last name given ends up current.
+            for (auto const& name: crispy::split(names, ','))
+            {
+                if (!isSupportedName(name))
+                    continue;
+                if (operation == Operation::Push)
+                    _terminal->pushPointerShape(std::string(name));
+                else
+                    _terminal->setPointerShape(std::string(name));
+            }
+            return ApplyResult::Ok;
+        }
+
+        case Operation::Pop: _terminal->popPointerShape(); return ApplyResult::Ok;
+    }
+
+    return ApplyResult::Invalid;
+}
+
+ApplyResult Screen::processKittyClipboard(std::string_view payload)
+{
+    using namespace kitty_clipboard;
+
+    auto const parsed = parsePacket(payload);
+    if (!parsed)
+        return ApplyResult::Invalid;
+    auto const& packet = *parsed;
+
+    // The protocol answers `type=<the type asked about>:status=<code>`. Putting the status in the
+    // `type=` slot -- and inventing an `id=` key the protocol does not define -- meant no conforming
+    // client could parse any reply this terminal sent.
+    // A status is reported against the TRANSMISSION, not against whichever packet happened to carry
+    // the failure: the spec's shapes are `type=read:status=...` and `type=write:status=...`, and the
+    // wdata/walias packets are steps within a write.
+    auto const responseType = packet.type == PacketType::Read ? PacketType::Read : PacketType::Write;
+    auto const respond = [&](std::string_view status) {
+        reply("\033]5522;type={}:status={}\033\\", kitty_clipboard::typeName(responseType), status);
+    };
+
+    switch (packet.type)
+    {
+        case PacketType::Read: {
+            // Contour has no primary selection, and the spec's answer for a location it cannot serve
+            // is ENOSYS -- not silently using the system clipboard instead.
+            if (packet.location == Location::PrimarySelection)
+            {
+                respond("ENOSYS");
+                return ApplyResult::Ok;
+            }
+
+            auto const requested = crispy::base64::decode(packet.payload);
+
+            // A payload of a single period asks which MIME types are on the clipboard. The spec
+            // serves that WITHOUT a permission prompt, so that a client is not prompted twice: once
+            // to discover the types and again to read them. Running it through the supported-type
+            // check refused it, which is the one answer the form cannot mean.
+            if (requested == ".")
+            {
+                respond("OK");
+                reply("\033]5522;type=read:status=DATA:mime={};\033\\",
+                      crispy::base64::encode(std::string_view { "text/plain" }));
+                respond("DONE");
+                return ApplyResult::Ok;
+            }
+
+            // Reading the clipboard lets an application exfiltrate whatever the user last copied,
+            // so it is gated by the same setting OSC 52 reads are. The TARGETS probe above is
+            // deliberately answered first: it reveals only which types exist, not their contents.
+            if (!_terminal->settings().allowClipboardRead)
+            {
+                respond("EPERM");
+                return ApplyResult::Ok;
+            }
+
+            // The payload lists the MIME types the application will accept. If none of them is one
+            // this terminal can produce, say so rather than sending text under a type it did not ask
+            // for.
+            auto accepted = false;
+            for (auto const& mimeType: crispy::split(requested, ' '))
+                if (isSupportedMimeType(mimeType))
+                    accepted = true;
+            if (!requested.empty() && !accepted)
+            {
+                respond("ENOSYS");
+                return ApplyResult::Ok;
+            }
+
+            // The protocol has its own reply shape: an OK, then one or more DATA packets per MIME
+            // type carrying a base64 mime and base64 data, then DONE. Delegating to OSC 52 sent a
+            // reply in a different protocol entirely.
+            //
+            // The data is chunked at 4096 bytes BEFORE encoding, as the spec requires: a client with
+            // a bounded OSC buffer truncates or drops a single oversized packet, and a copied log
+            // tail reaches hundreds of KiB routinely.
+            auto const content = _terminal->clipboardContent();
+            auto const mime = crispy::base64::encode(std::string_view { "text/plain" });
+            respond("OK");
+            for (size_t offset = 0; offset < content.size(); offset += kitty_clipboard::ReadChunkSize)
+            {
+                auto const chunk =
+                    std::string_view { content }.substr(offset, kitty_clipboard::ReadChunkSize);
+                reply("\033]5522;type=read:status=DATA:mime={};{}\033\\",
+                      mime,
+                      crispy::base64::encode(chunk.begin(), chunk.end()));
+            }
+            respond("DONE");
+            return ApplyResult::Ok;
+        }
+
+        case PacketType::Write:
+            // Contour has no primary selection; per spec that is ENOSYS rather than quietly writing
+            // the system clipboard and reporting DONE.
+            if (packet.location == Location::PrimarySelection)
+            {
+                respond("ENOSYS");
+                return ApplyResult::Ok;
+            }
+
+            // A write opens a transmission; the data arrives in the wdata packets that follow. The
+            // protocol has the terminal answer only once the transmission ENDS, so there is no reply
+            // here -- an extra unsolicited packet is one a strict client is not expecting.
+            _terminal->kittyClipboardWrite().clear();
+            _terminal->kittyClipboardWriteOpen() = true;
+            return ApplyResult::Ok;
+
+        case PacketType::WriteAlias:
+            // Aliases map other MIME names onto one this terminal understands. Contour's clipboard
+            // is text, so there is nothing to map them onto and nothing to record.
+            return ApplyResult::Ok;
+
+        case PacketType::WriteData: {
+            if (!_terminal->kittyClipboardWriteOpen())
+                return ApplyResult::Invalid;
+
+            if (!isSupportedMimeType(packet.mimeType))
+            {
+                // Refuse rather than accept and drop: an application told its data was stored, which
+                // then reads back something else, is worse off than one told no.
+                _terminal->kittyClipboardWriteOpen() = false;
+                _terminal->kittyClipboardWrite().clear();
+                respond("ENOSYS");
+                return ApplyResult::Ok;
+            }
+
+            // An empty chunk is the end-of-transmission marker.
+            if (packet.payload.empty())
+            {
+                _terminal->copyToClipboard(_terminal->kittyClipboardWrite());
+                _terminal->kittyClipboardWrite().clear();
+                _terminal->kittyClipboardWriteOpen() = false;
+                respond("DONE");
+                return ApplyResult::Ok;
+            }
+
+            // The stream is attacker-controlled and is only flushed by the empty end-of-transmission
+            // chunk, so one that never sends it would grow this buffer until the process is killed.
+            // Abandon the whole transmission rather than truncate it: a partial clipboard is not the
+            // data the application asked to store. @see kitty_graphics::MaxChunkedPayloadSize, which
+            // bounds the other chunked protocol the same way.
+            auto const decoded = crispy::base64::decode(packet.payload);
+            if (_terminal->kittyClipboardWrite().size() + decoded.size() > MaxClipboardWriteSize)
+            {
+                _terminal->kittyClipboardWriteOpen() = false;
+                _terminal->kittyClipboardWrite().clear();
+                _terminal->kittyClipboardWrite().shrink_to_fit();
+                respond("EIO");
+                return ApplyResult::Ok;
+            }
+
+            _terminal->kittyClipboardWrite() += decoded;
+            return ApplyResult::Ok;
+        }
+    }
+
+    return ApplyResult::Unsupported;
+}
+
+namespace
+{
+    /// The per-cell sizing a parsed `OSC 66` request asks for.
+    ///
+    /// The block's extent in cells comes from `s` alone; `n`/`d`/`v`/`h` change only how the glyph is
+    /// drawn inside it, which is why they travel together but are stored apart.
+    [[nodiscard]] CellScale cellScaleOf(text_sizing::Request const& request) noexcept
+    {
+        return CellScale { .scale = request.scale,
+                           .numerator = request.numerator,
+                           .denominator = request.denominator,
+                           .verticalAlignment = request.verticalAlignment,
+                           .horizontalAlignment = request.horizontalAlignment };
+    }
+} // namespace
+
+ApplyResult Screen::processTextSizing(std::string_view payload)
+{
+    auto const parsed = text_sizing::parseRequest(payload);
+    if (!parsed)
+        return ApplyResult::Invalid;
+    auto const& request = *parsed;
+
+    if (request.text.empty())
+        return ApplyResult::Ok;
+
+    // An explicit `w` states the size the application wants regardless of what the text measures, so
+    // the whole run becomes ONE cell block of that width. Without it, each cluster the text would
+    // normally occupy becomes a `scale`-wide block of its own.
+    if (request.width != 0)
+    {
+        auto const codepoints = unicode::convert_to<char32_t>(request.text);
+
+        // The whole run is stored as ONE cell's grapheme cluster, so it can be no longer than a
+        // cluster may be. Writing it anyway put the first MaxGraphemeClusterSize codepoints on
+        // screen and dropped the rest on the floor -- appendCodepointToCluster() simply stops --
+        // while the block went on claiming its full `scale * width` columns as though it held the
+        // whole text. That is different text from the text the application asked for, arrived at
+        // silently, which is precisely why a block too wide for the line is dropped rather than
+        // clipped. Refusing is at least visible: the sequence is logged as invalid.
+        if (codepoints.size() > MaxGraphemeClusterSize)
+            return ApplyResult::Invalid;
+
+        auto const columns = static_cast<uint8_t>(
+            std::min<unsigned>(request.columnsFor(0), std::numeric_limits<uint8_t>::max()));
+        writeSizedText(codepoints, columns, cellScaleOf(request));
+        return ApplyResult::Ok;
+    }
+
+    // No explicit width: measure each grapheme cluster and scale it.
+    auto segmenter = unicode::utf8_grapheme_segmenter(request.text);
+    for (auto const& cluster: segmenter)
+    {
+        auto const natural = unicode::grapheme_cluster_width(cluster);
+        auto const columns = static_cast<uint8_t>(
+            std::min<unsigned>(request.columnsFor(natural), std::numeric_limits<uint8_t>::max()));
+        writeSizedText(cluster, columns, cellScaleOf(request));
+    }
+    return ApplyResult::Ok;
+}
+
+std::optional<MulticellBlock> Screen::multicellBlockAt(CellLocation position) const noexcept
+{
+    // A line carrying a block is never trivial -- its cells hold continuation flags and a scale --
+    // so a trivial line answers "no block here" without touching per-cell storage it does not have.
+    auto const continuesInto = [this](CellLocation loc, CellFlag flag) noexcept {
+        auto const& line = grid().lineAt(loc.line);
+        return !line.isTrivialBuffer()
+               && ConstCellProxy(line.storage(), unbox<size_t>(loc.column)).isFlagEnabled(flag);
+    };
+
+    // Walk to the block's head: up while this cell continues a block above, then left while it
+    // continues one to its left. The axes are independent -- every column of a scaled block's
+    // second row carries the vertical flag.
+    // The walk stops at the first line the grid HAS, which is the top of the scrollback -- not at
+    // line 0. Grid lines run negative into history, so bounding at 0 made the walk a no-op for every
+    // block that had scrolled off the page: its continuation rows then reported themselves as heads,
+    // which is empty, and the block stopped being drawn or erased as a whole.
+    auto const topLine = -boxed_cast<LineOffset>(grid().historyLineCount());
+    auto origin = position;
+    while (origin.line > topLine && continuesInto(origin, CellFlag::MulticellContinuation))
+        --origin.line;
+    while (origin.column > ColumnOffset(0) && continuesInto(origin, CellFlag::WideCharContinuation))
+        --origin.column;
+
+    auto const& headLine = grid().lineAt(origin.line);
+    if (headLine.isTrivialBuffer())
+        return std::nullopt;
+
+    auto const head = ConstCellProxy(headLine.storage(), unbox<size_t>(origin.column));
+    auto const columns = std::max(1, static_cast<int>(head.width()));
+    auto const rows = std::max(1, static_cast<int>(head.scale()));
+    if (columns == 1 && rows == 1)
+        return std::nullopt;
+
+    return MulticellBlock { .origin = origin, .columns = columns, .rows = rows };
+}
+
+void Screen::eraseMulticellBlockAt(CellLocation position)
+{
+    // Half a glyph is not a thing that can be drawn, so touching any part of a block destroys all of
+    // it. kitty's nuke_multicell_char_at() does the same.
+    auto const block = multicellBlockAt(position);
+    if (!block)
+        return;
+
+    // The extent to erase is the BLOCK's, so the only legitimate bound on it is the page. Stopping at
+    // lastWritableColumn() bounded the erase by the cursor's margins instead: a block reaching past
+    // the current right margin -- trivially arranged by writing it, then narrowing the margins with
+    // DECLRMM -- was destroyed only up to that margin, and every column beyond it kept its
+    // continuation flag and its scale while the head that explained them was gone. Those are exactly
+    // the orphans this function exists to prevent, created by the cleanup itself.
+    auto const lastColumn = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
+    for (auto const row: std::views::iota(0, block->rows))
+    {
+        auto const lineOffset = block->origin.line + LineOffset::cast_from(row);
+        if (lineOffset >= boxed_cast<LineOffset>(pageSize().lines))
+            break;
+        auto& target = grid().lineAt(lineOffset);
+        for (auto const i: std::views::iota(0, block->columns))
+        {
+            auto const column = block->origin.column + ColumnOffset::cast_from(i);
+            if (column > lastColumn)
+                break;
+            target.useCellAt(column).reset(_cursor.graphicsRendition);
+        }
+    }
+}
+
+bool Screen::cellCouldBelongToMulticell(ConstCellProxy cell) noexcept
+{
+    // The three states multicellBlockAt()'s walk can start from: a cell continuing a block above it,
+    // one continuing a block to its left, or a head that is itself more than one cell. Anything else
+    // stands alone, and the walk would only confirm as much -- at the cost of several out-of-line
+    // Grid::lineAt() calls, which is why this exists to be asked first.
+    return cell.isFlagEnabled(CellFlag::MulticellContinuation)
+           || cell.isFlagEnabled(CellFlag::WideCharContinuation) || cell.width() > 1 || cell.scale() > 1;
+}
+
+void Screen::eraseMulticellBlocksInRange(LineOffset line, ColumnOffset from, ColumnOffset to)
+{
+    // Only an inflated line can carry a block: the flags and the scale that make one are per-cell
+    // state a trivial line does not have.
+    auto const& target = grid().lineAt(line);
+    if (target.isTrivialBuffer())
+        return;
+
+    if (to < from)
+        return;
+
+    // Ask the cheap question per column and the expensive one only where it can be answered yes. The
+    // guard above only excludes lines that are blank or uniformly attributed, so every line carrying
+    // a colored prompt reaches here -- and a full-width walk of multicellBlockAt() per column would
+    // put an order of magnitude more work in front of ICH/DCH than the shift they perform.
+    //
+    // The scan cannot be shortened to the line's `usedColumns`: a block's continuation rows are
+    // written with reset(), which stores no codepoint, so a row carrying nothing but continuations
+    // reports none of its columns as used -- and those are exactly the cells that must be erased.
+    for (auto const column: std::views::iota(*from, *to + 1))
+    {
+        auto const location = CellLocation { .line = line, .column = ColumnOffset(column) };
+        if (cellCouldBelongToMulticell(ConstCellProxy(target.storage(), static_cast<size_t>(column))))
+            eraseMulticellBlockAt(location);
+    }
+}
+
+void Screen::writeSizedText(std::u32string_view codepoints, uint8_t columns, CellScale const& cellScale)
+{
+    // The run has to fit one cell's grapheme cluster, because that is where it is stored. Checked on
+    // entry, before any of the scrolling and erasing below has happened -- @see processTextSizing,
+    // which refuses a run it cannot hold rather than putting a shortened one on screen.
+    Require(codepoints.size() <= MaxGraphemeClusterSize);
+
+    if (columns == 0)
+        return;
+
+    // This is a second entry point into writing text, parallel to writeTextInternal, so it owes the
+    // same prologue: a wrap deferred by the PREVIOUS character is still outstanding and has to be
+    // taken first. Skipping it let a one-column block overwrite the character sitting in the last
+    // column -- the relocation test below compares the block's own extent against the margin and a
+    // one-column block always fits -- and left wrapPending set, so every following block clobbered
+    // that same cell. Wider blocks did move, but via linefeed(), which does not mark the line
+    // Wrappable|Wrapped the way a real deferred wrap does, so reflow and selection then treated it
+    // as a hard newline.
+    crlfIfWrapPending();
+
+    // A block wider than the line can never be placed, so it is dropped rather than clipped -- a
+    // clipped block is a different size from the one the application asked for. kitty drops it too.
+    auto const lineWidth = lastWritableColumn() - margin().horizontal.from + 1;
+    if (ColumnOffset::cast_from(columns) > lineWidth)
+        return;
+
+    // A block that merely does not fit *here* moves rather than splits. With autowrap it goes to the
+    // next line; without it, it is placed flush against the right edge, which is what kitty's
+    // move_cursor_past_multicell() does when DECAWM is off.
+    if (_cursor.position.column + ColumnOffset::cast_from(columns - 1) > lastWritableColumn())
+    {
+        if (_terminal->isModeEnabled(DECMode::AutoWrap))
+            linefeed(margin().horizontal.from);
+        else
+            _cursor.position.column = lastWritableColumn() - ColumnOffset::cast_from(columns - 1);
+    }
+
+    if (codepoints.empty())
+        return;
+
+    // A block `scale` cells tall needs that many rows BELOW the cursor. When they are not there the
+    // page SCROLLS to make room, exactly as it would for text running off the bottom -- the block is
+    // not clipped.
+    //
+    // This is the overwhelmingly common case, not an edge case: a terminal that has been printing
+    // sits on its last line, so every block written by a program that has produced any output at all
+    // arrives with no room beneath it. Clipping it left only the head row, and the head row is band
+    // 0 -- the TOP slice of the glyph -- so all that reached the screen was a sliver of the glyph's
+    // top edge, on one row, while the rest of the block did not exist to be drawn.
+    //
+    // kitty does the same in handle_fixed_width_multicell_command() (screen.c): it scrolls by the
+    // shortfall and walks the cursor back up by as much.
+    auto const height = LineCount::cast_from(std::max<uint8_t>(cellScale.scale, 1));
+    if (height > LineCount(1))
+    {
+        // Scrolling can only make room while the cursor is INSIDE the scroll region: scrollUp moves
+        // the region's rows, and the rows below it stay exactly where they are. Measuring the room
+        // against the bottom margin regardless made `available` negative for a cursor beneath the
+        // region, so the shortfall came out larger than the block itself and the region was scrolled
+        // for a block whose rows were already free.
+        auto const insideRegion =
+            _cursor.position.line >= margin().vertical.from && _cursor.position.line <= margin().vertical.to;
+
+        if (insideRegion)
+        {
+            // Taller than the scroll region can ever be: there is nowhere to put it, so it is dropped
+            // whole rather than clipped -- a clipped block is a different size from the one asked for.
+            if (height > margin().vertical.length())
+                return;
+
+            auto const available =
+                LineCount::cast_from(margin().vertical.to - _cursor.position.line) + LineCount(1);
+            if (height > available)
+            {
+                auto const shortfall = height - available;
+                scrollUp(shortfall);
+                // The cursor follows its content up. `currentLine()` reads a CACHED pointer, so
+                // moving the cursor without refreshing it would write the block into the line the
+                // cursor used to be on.
+                _cursor.position.line -= LineOffset::cast_from(shortfall);
+                updateCursorIterator();
+            }
+        }
+        else
+        {
+            // Below the region there is nothing that can be scrolled into place, so the block is
+            // dropped whole when the rows it needs are not already free -- the same answer given to a
+            // block taller than the region itself.
+            auto const bottom = boxed_cast<LineOffset>(pageSize().lines) - 1;
+            if (height > LineCount::cast_from(bottom - _cursor.position.line) + LineCount(1))
+                return;
+        }
+    }
+
+    // A sized block is text, so insert mode applies to it as it does to every other write path:
+    // writeCharToCurrentAndAdvance shifts the line right before writing, and applyClusterWidthChange
+    // compensates for a cluster that grows.
+    //
+    // EVERY row the block claims shifts, not just its head: the loop below writes continuation cells
+    // into each of them, so shifting only the head left the rows beneath to be overwritten -- the
+    // very loss insert mode exists to prevent, fixed on one row out of the block's height.
+    //
+    // A block already sitting in the way cannot be shifted intact, so each is destroyed whole first --
+    // which insertChars() now does for itself, for every caller. @see eraseMulticellBlocksInRange.
+    if (_terminal->isModeEnabled(AnsiMode::Insert))
+    {
+        for (auto const row: std::views::iota(0, static_cast<int>(unbox(height))))
+        {
+            auto const lineOffset = _cursor.position.line + LineOffset::cast_from(row);
+            if (lineOffset >= boxed_cast<LineOffset>(pageSize().lines))
+                break;
+
+            insertChars(lineOffset, ColumnCount::cast_from(columns));
+        }
+    }
+
+    // The cells this block is about to claim may already belong to blocks on screen -- a run that
+    // wrapped lands on the very row the previous run's blocks reach down into. Each of those is
+    // destroyed WHOLE before this one takes their space; overwriting only the cells that overlap
+    // would leave the old block's head behind, still describing a body that is gone.
+    //
+    // This is the same rule the ordinary write path applies to the single cell it touches. @see
+    // writeText. A block covers up to MaxWidth * MaxScale columns and MaxScale rows, so the walk is
+    // bounded by the protocol, and it is reached only on an `OSC 66` write.
+    auto const claimedTo =
+        std::min(_cursor.position.column + ColumnOffset::cast_from(columns - 1), lastWritableColumn());
+    for (auto const row: std::views::iota(0, static_cast<int>(std::max<uint8_t>(cellScale.scale, 1))))
+    {
+        auto const lineOffset = _cursor.position.line + LineOffset::cast_from(row);
+        if (lineOffset >= boxed_cast<LineOffset>(pageSize().lines))
+            break;
+        eraseMulticellBlocksInRange(lineOffset, _cursor.position.column, claimedTo);
+    }
+
+    auto& line = currentLine();
+    auto cell = line.useCellAt(_cursor.position.column);
+    cell.write(_cursor.graphicsRendition, codepoints[0], columns, _cursor.hyperlink);
+    for (size_t i = 1; i < codepoints.size(); ++i)
+        // The application stated this block's width explicitly; re-measuring the cluster would
+        // silently overrule it. FirstCodepoint takes the codepoints and leaves the width write()
+        // already set alone.
+        (void) cell.appendCharacter(codepoints[i], ClusterWidthPolicy::FirstCodepoint);
+
+    cell.setTextScale(cellScale);
+
+    auto const sgr = _cursor.graphicsRendition.with(CellFlag::WideCharContinuation);
+    for (uint8_t i = 1; i < columns; ++i)
+    {
+        auto continuation = line.useCellAt(_cursor.position.column + ColumnOffset::cast_from(i));
+        continuation.reset(sgr, _cursor.hyperlink);
+        continuation.setTextScale(cellScale);
+    }
+
+    // A scaled block is `scale` cells TALL as well as `columns` wide -- the first thing in this grid
+    // that occupies more than one line. The rows beneath are claimed so that nothing else can be
+    // written into them and so that erasing any part of the block finds the whole of it.
+    for (uint8_t row = 1; row < cellScale.scale; ++row)
+    {
+        auto const lineOffset = _cursor.position.line + LineOffset::cast_from(row);
+        if (lineOffset >= boxed_cast<LineOffset>(pageSize().lines))
+            break;
+        auto& below = grid().lineAt(lineOffset);
+        for (uint8_t i = 0; i < columns; ++i)
+        {
+            auto continuation = below.useCellAt(_cursor.position.column + ColumnOffset::cast_from(i));
+            continuation.reset(sgr.with(CellFlag::MulticellContinuation), _cursor.hyperlink);
+            continuation.setTextScale(cellScale);
+        }
+    }
+
+    _lastCursorPosition = _cursor.position;
+    _terminal->markCellDirty(_cursor.position);
+
+    // The cursor may not step past the last column -- verifyState() requires it to stay addressable.
+    // A block ending exactly at the edge therefore leaves the cursor on the edge with the wrap
+    // deferred, exactly as an ordinary write does. @see clearAndAdvance.
+    auto const landing = _cursor.position.column + ColumnOffset::cast_from(columns);
+    if (landing <= lastWritableColumn())
+        _cursor.position.column = landing;
+    else
+    {
+        _cursor.position.column = lastWritableColumn();
+        if (_terminal->isModeEnabled(DECMode::AutoWrap))
+            _cursor.wrapPending = true;
+    }
+}
+
+void Screen::processAPC(std::string_view body)
+{
+    // APC carries application-defined protocols that share no grammar, so each is recognised by its
+    // own introducer. 'G' is the kitty graphics protocol; anything else is not ours to interpret.
+    if (body.empty() || body.front() != 'G')
+        return;
+
+    processKittyGraphics(body.substr(1));
+}
+
+void Screen::replyKittyGraphics(kitty_graphics::Command const& command, std::string_view status)
+{
+    auto const isError = !status.starts_with("OK");
+    if (command.quietAlways || (command.quietOnSuccess && !isError))
+        return;
+
+    // An unsolicited response would desynchronise an application that never identified its image,
+    // so a command carrying no identity is answered only when it failed.
+    if (command.imageId == 0 && command.imageNumber == 0 && !isError)
+        return;
+
+    if (command.imageNumber != 0)
+        reply("\033_Gi={},I={};{}\033\\", command.imageId, command.imageNumber, status);
+    else
+        reply("\033_Gi={};{}\033\\", command.imageId, status);
+}
+
+std::optional<std::string_view> Screen::validateKittyTransmission(
+    kitty_graphics::Command const& command) noexcept
+{
+    using namespace kitty_graphics;
+
+    // A raw pixel transmission has no header to carry its dimensions, so the control data must. PNG
+    // is exempt: the file states its own size. Checked here rather than in the parser because a
+    // continuation chunk legitimately carries no dimensions -- only the reassembled command has them.
+    if (command.format != Format::Png && (command.pixelWidth == 0 || command.pixelHeight == 0))
+        return "EINVAL:missing image dimensions";
+
+    if (command.medium != Medium::Direct)
+        // Reading a path or a shared-memory object the application names would let it point the
+        // terminal at any file the user can read. Not implemented deliberately.
+        return "ENOTSUP:only direct transmission is supported";
+
+    if (command.compression != Compression::None)
+        return "ENOTSUP:compressed payloads are not supported";
+
+    return std::nullopt;
+}
+
+void Screen::removeKittyPlacements(std::shared_ptr<Image const> const& image)
+{
+    // Placements are not tracked separately: a placement IS the image fragments sitting in the cells
+    // it covers. Dropping one therefore means clearing those fragments, and only those -- the text
+    // sharing the cells is not the placement's to erase.
+    for (auto const line: std::views::iota(0, *pageSize().lines))
+    {
+        for (auto const column: std::views::iota(0, *pageSize().columns))
+        {
+            auto cell = at(LineOffset(line), ColumnOffset(column));
+            auto const fragment = cell.imageFragment();
+            if (!fragment)
+                continue;
+            if (image && fragment->rasterizedImage().imagePointer() != image)
+                continue;
+            cell.clearImageFragment();
+            _terminal->markCellDirty(
+                CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) });
+        }
+    }
+}
+
+void Screen::deleteKittyGraphics(kitty_graphics::Command const& command)
+{
+    // The CASE of `d=` decides how far the delete reaches: lower case removes placements and leaves
+    // the transmitted data resident, upper case additionally frees it. Ignoring the distinction broke
+    // the protocol's standard redraw idiom -- `a=d,d=a` to clear placements, then `a=p,i=1` to place
+    // the image already transmitted -- because the data the re-placement needs had been destroyed.
+    auto const freesData = static_cast<bool>(std::isupper(static_cast<unsigned char>(command.deleteTarget)));
+    auto const target = static_cast<char>(std::tolower(static_cast<unsigned char>(command.deleteTarget)));
+
+    // 'i' names one image, by id; 'a' (and everything Contour does not implement, such as the
+    // positional targets) clears every placement.
+    auto const image = [&]() -> std::shared_ptr<Image const> {
+        if (target != 'i' || command.imageId == 0)
+            return {};
+        auto const it = _kittyImages.find(command.imageId);
+        return it != _kittyImages.end() ? it->second : nullptr;
+    }();
+
+    if (target == 'i' && command.imageId != 0 && !image)
+        return; // Nothing transmitted under that id; nothing placed from it either.
+
+    removeKittyPlacements(image);
+
+    if (!freesData)
+        return;
+
+    if (target == 'i' && command.imageId != 0)
+        _kittyImages.erase(command.imageId);
+    else
+        _kittyImages.clear();
+}
+
+void Screen::resetKittyState() noexcept
+{
+    // RIS must not leave a half-open transmission behind: the next application's first graphics
+    // command would be swallowed as a continuation chunk of the dead one, taking that command's
+    // format and dimensions instead of its own. The same applies to a clipboard write left open, and
+    // to images Terminal::hardReset() has already dropped from the image pool.
+    _kittyChunkedPayload.clear();
+    _kittyChunkedCommand.reset();
+    _kittyImages.clear();
+    _terminal->kittyClipboardWrite().clear();
+    _terminal->kittyClipboardWriteOpen() = false;
+}
+
+void Screen::processKittyGraphics(std::string_view body)
+{
+    using namespace kitty_graphics;
+
+    auto parsed = parseCommand(body);
+    if (!parsed)
+    {
+        auto const failed = Command {};
+        replyKittyGraphics(failed, std::format("{}:bad control data", errorCode(parsed.error())));
+        return;
+    }
+    auto command = std::move(parsed.value());
+
+    // A chunked transmission carries its control data only in the FIRST chunk; the rest is payload
+    // that has to be stitched onto it before anything can be decided.
+    if (_kittyChunkedCommand)
+    {
+        // A chunk stream that never terminates is otherwise an unbounded allocation driven straight
+        // from the wire. Abandon the whole transmission rather than truncate it: a partial image
+        // decoded against its declared dimensions is not an image.
+        if (_kittyChunkedPayload.size() + command.payload.size() > MaxChunkedPayloadSize)
+        {
+            auto const abandoned = *_kittyChunkedCommand;
+            _kittyChunkedCommand.reset();
+            _kittyChunkedPayload.clear();
+            _kittyChunkedPayload.shrink_to_fit();
+            replyKittyGraphics(abandoned, "EINVAL:image transmission too large");
+            return;
+        }
+
+        _kittyChunkedPayload += command.payload;
+        if (command.moreChunksFollow)
+            return;
+        auto continued = *_kittyChunkedCommand;
+        continued.payload = std::move(_kittyChunkedPayload);
+        _kittyChunkedCommand.reset();
+        _kittyChunkedPayload.clear();
+        command = std::move(continued);
+    }
+    else if (command.moreChunksFollow)
+    {
+        _kittyChunkedPayload = command.payload;
+        auto opener = command;
+        opener.payload.clear();
+        _kittyChunkedCommand = std::move(opener);
+        return;
+    }
+
+    switch (command.action)
+    {
+        case Action::Query:
+            // A query must be validated exactly as a transmission would be -- answering OK to a
+            // command we could not actually honour is worse than answering the error. An application
+            // probes with `a=q` precisely so that it can fall back; telling it yes and then failing
+            // the real transmission leaves it with nothing to fall back to.
+            replyKittyGraphics(command, validateKittyTransmission(command).value_or("OK"));
+            return;
+        case Action::Delete:
+            deleteKittyGraphics(command);
+            replyKittyGraphics(command, "OK");
+            return;
+        case Action::Put: {
+            auto const it = _kittyImages.find(command.imageId);
+            if (it == _kittyImages.end())
+            {
+                replyKittyGraphics(command, "ENOENT:no such image");
+                return;
+            }
+            renderKittyImage(command, it->second);
+            replyKittyGraphics(command, "OK");
+            return;
+        }
+        case Action::Transmit:
+        case Action::TransmitAndDisplay: break;
+        case Action::Frame:
+        case Action::Animate:
+        case Action::Compose:
+            // Animation is not implemented. Say so rather than silently accepting frames that will
+            // never be shown.
+            replyKittyGraphics(command, "ENOTSUP:animation not supported");
+            return;
+    }
+
+    if (auto const rejection = validateKittyTransmission(command))
+    {
+        replyKittyGraphics(command, *rejection);
+        return;
+    }
+
+    auto const decoded = crispy::base64::decode(command.payload);
+    auto pixmap = Image::Data(decoded.begin(), decoded.end());
+
+    auto const format = [&] {
+        switch (command.format)
+        {
+            case Format::Png: return ImageFormat::PNG;
+            case Format::Rgb: return ImageFormat::RGB;
+            case Format::Rgba: break;
+        }
+        return ImageFormat::RGBA;
+    }();
+    auto const pixelSize =
+        ImageSize { Width::cast_from(command.pixelWidth), Height::cast_from(command.pixelHeight) };
+
+    if (format != ImageFormat::PNG)
+    {
+        // The renderer reads width*height*bytesPerPixel from this buffer, so a payload that does not
+        // match the declared size is a read past the end waiting to happen.
+        auto const expected =
+            static_cast<size_t>(command.pixelWidth) * command.pixelHeight * bytesPerPixel(command.format);
+        if (pixmap.size() != expected)
+        {
+            replyKittyGraphics(command, "EINVAL:payload size does not match dimensions");
+            return;
+        }
+    }
+
+    auto image = _terminal->imagePool().create(format, pixelSize, std::move(pixmap));
+    if (!image)
+    {
+        replyKittyGraphics(command, "EINVAL:could not decode image");
+        return;
+    }
+
+    if (command.imageId != 0)
+    {
+        // Ids are 32-bit, so without a quota an application can park billions of decoded images in
+        // the terminal. Refusing is preferable to evicting: the whole point of storing an image is
+        // that a later `a=p` can place it, and silently dropping one turns that into ENOENT.
+        auto const stored = std::accumulate(
+            _kittyImages.begin(), _kittyImages.end(), size_t { 0 }, [&](size_t sum, auto const& entry) {
+                return entry.first == command.imageId ? sum : sum + entry.second->data().size();
+            });
+        if (stored + image->data().size() > MaxStoredImageBytes)
+        {
+            replyKittyGraphics(command, "ENOSPC:image storage quota exceeded");
+            return;
+        }
+        _kittyImages[command.imageId] = image;
+    }
+
+    if (command.action == Action::TransmitAndDisplay)
+        renderKittyImage(command, image);
+
+    replyKittyGraphics(command, "OK");
+}
+
+void Screen::renderKittyImage(kitty_graphics::Command const& command,
+                              std::shared_ptr<Image const> const& image)
+{
+    auto const cellSize = _terminal->cellPixelSize();
+    auto const pixels = image->size();
+
+    // `c=`/`r=` state the display size in cells; without them it follows from the pixel size, rounded
+    // up so that a partial cell is still drawn rather than clipped away. Both arrive off the wire as
+    // unsigned and are clamped to the page for the reason clampToPage() documents.
+    auto const cellWidth = std::max(unbox<int>(cellSize.width), 1);
+    auto const cellHeight = std::max(unbox<int>(cellSize.height), 1);
+    auto const columns = command.columns != 0
+                             ? ColumnCount::cast_from(clampToPage(command.columns, pageSize().columns))
+                             : ColumnCount::cast_from((unbox<int>(pixels.width) + cellWidth - 1) / cellWidth);
+    auto const lines = command.rows != 0
+                           ? LineCount::cast_from(clampToPage(command.rows, pageSize().lines))
+                           : LineCount::cast_from((unbox<int>(pixels.height) + cellHeight - 1) / cellHeight);
+
+    renderImage(image,
+                _cursor.position,
+                GridSize { .lines = lines, .columns = columns },
+                PixelCoordinate {},
+                ImageSize {},
+                ImageAlignment::TopStart,
+                ImageResize::ResizeToFit,
+                /*autoScroll*/ false,
+                /*updateCursor*/ !command.doNotMoveCursor,
+                command.zIndex < 0 ? ImageLayer::Below : ImageLayer::Above);
+}
+
 void Screen::processSequence(Sequence const& seq)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
@@ -5865,6 +7076,10 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case RCOLORHIGHLIGHTBG: resetDynamicColor(DynamicColorName::HighlightBackgroundColor); break;
         case CONEMU: return impl::CONEMU(seq, *this);
         case NOTIFY: return impl::NOTIFY(seq, *this);
+        case ITERM2: processITerm2(seq.intermediateCharacters()); return ApplyResult::Ok;
+        case TEXTSIZING: return processTextSizing(seq.intermediateCharacters());
+        case KITTYCLIPBOARD: return processKittyClipboard(seq.intermediateCharacters());
+        case POINTERSHAPE: return processPointerShape(seq.intermediateCharacters());
         case DESKTOPNOTIFY: return impl::DESKTOPNOTIFY(seq, *_terminal);
         case DUMPSTATE: inspect(); break;
         case SEMA: processShellIntegration(seq); break;
@@ -6391,7 +7606,7 @@ void Screen::handleGipUpload(Message message)
 void Screen::handleGipRender(Message const& message)
 {
     auto const* const name = message.header("n");
-    auto const params = parseGipRenderParams(message);
+    auto const params = parseGipRenderParams(message, pageSize());
     auto const x = PixelCoordinate::X { toNumber(message.header("x")).value_or(0) };
     auto const y = PixelCoordinate::Y { toNumber(message.header("y")).value_or(0) };
 
@@ -6426,7 +7641,7 @@ void Screen::handleGipQuery()
 
 void Screen::handleGipOneshot(Message message)
 {
-    auto const params = parseGipRenderParams(message);
+    auto const params = parseGipRenderParams(message, pageSize());
     auto imageFormat = toImageFormat(message.header("f"));
 
     // Resolve Auto format from the data before rendering.

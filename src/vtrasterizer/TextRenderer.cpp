@@ -112,6 +112,7 @@ Making use of reserved glyph slots
 
 #include <vtrasterizer/BoxDrawingRenderer.h>
 #include <vtrasterizer/GlyphAdvance.h>
+#include <vtrasterizer/GlyphSlicing.h>
 #include <vtrasterizer/GridMetrics.h>
 #include <vtrasterizer/TextRenderer.h>
 #include <vtrasterizer/shared_defines.h>
@@ -253,7 +254,8 @@ TextRenderer::TextRenderer(GridMetrics const& gridMetrics,
                            text::shaper& textShaper,
                            FontDescriptions& fontDescriptions,
                            FontKeys const& fontKeys,
-                           TextRendererEvents& eventHandler):
+                           TextRendererEvents& eventHandler,
+                           GlyphScaler const& glyphScaler):
     Renderable { gridMetrics },
     _textClusterGrouper { *this },
     _textRendererEvents { eventHandler },
@@ -263,8 +265,20 @@ TextRenderer::TextRenderer(GridMetrics const& gridMetrics,
                                                    crispy::lru_capacity { TextShapingCacheSize },
                                                    "Text shaping cache") },
     _textShaper { textShaper },
-    _boxDrawingRenderer { gridMetrics }
+    _boxDrawingRenderer { gridMetrics },
+    _glyphScaler { &glyphScaler }
 {
+}
+
+GlyphScaler const& TextRenderer::defaultGlyphScaler() noexcept
+{
+    // Re-rasterizing, matching Config's `text_scaling_method` default: asking the font for the
+    // outline at the larger size re-hints it, where stretching magnifies an ordinary-size raster.
+    // This became real once shaper::resize_font gave a caller the same face at another size -- a
+    // font_key encodes its size, so scaling `glyph_key.size.pt` alone never reached FreeType.
+    // @see GlyphScalingMethod.
+    static auto const scaler = RerasterizingGlyphScaler {};
+    return scaler;
 }
 
 void TextRenderer::inspect(ostream& textOutput) const
@@ -385,7 +399,11 @@ Renderable::AtlasTileAttributes const* TextRenderer::ensureRasterizedIfDirectMap
         return &_textureAtlas->directMapped(tileIndex);
 
     auto const tileLocation = _textureAtlas->tileLocation(tileIndex);
-    auto tileCreateData = createRasterizedGlyph(tileLocation, glyph, unicode::PresentationStyle::Text);
+    // A direct-mapped glyph occupies exactly one tile: this path has no way to cut a wider raster
+    // across several, and restrictToTileSize below would simply CUT the excess off. Ask for the
+    // raster to be scaled into the cell instead, so a wide glyph loses proportion rather than pixels.
+    auto tileCreateData = createRasterizedGlyph(
+        tileLocation, glyph, unicode::PresentationStyle::Text, GlyphWidthPolicy::SingleTile);
     if (!tileCreateData)
         return nullptr;
 
@@ -442,7 +460,8 @@ void TextRenderer::renderCell(vtbackend::RenderCell const& cell)
                                    cell.codepoints,
                                    cell.attributes.foregroundColor,
                                    makeTextStyle(cell.attributes.flags),
-                                   cell.attributes.lineFlags);
+                                   cell.attributes.lineFlags,
+                                   cell.sizing);
 
     if (cell.groupEnd)
         _textClusterGrouper.forceGroupEnd();
@@ -547,6 +566,21 @@ crispy::point adjustPenForLineFlags(vtbackend::LineFlags lineFlags,
     return pen;
 }
 
+/// @return how many ordinary cells one cell of @p lineFlags' line occupies horizontally.
+///
+/// DECDWL and BOTH halves of DECDHL draw at double width. Screen happens to set DoubleWidth alongside
+/// either height flag, but this layer does not require that of its caller -- each flag is tested, so
+/// a height flag arriving on its own still widens. Every place that steps a pen across such a line,
+/// and the tile widening below, read the factor from here, so they cannot disagree about a flag.
+constexpr int lineAdvanceScale(vtbackend::LineFlags lineFlags) noexcept
+{
+    using vtbackend::LineFlag;
+    return lineFlags.test(LineFlag::DoubleWidth) || lineFlags.test(LineFlag::DoubleHeightTop)
+                   || lineFlags.test(LineFlag::DoubleHeightBottom)
+               ? 2
+               : 1;
+}
+
 Renderable::AtlasTileAttributes adjustTileAttributesForLineFlags(
     vtbackend::LineFlags lineFlags, Renderable::AtlasTileAttributes const& originalAttributes)
 {
@@ -555,29 +589,59 @@ Renderable::AtlasTileAttributes adjustTileAttributesForLineFlags(
 
     auto attributesCopy = originalAttributes;
 
-    auto const currentWidth = unbox(attributesCopy.metadata.targetSize.width);
+    auto const stretch = lineAdvanceScale(lineFlags);
+    attributesCopy.metadata.targetSize.width =
+        Width::cast_from(unbox(attributesCopy.metadata.targetSize.width) * stretch);
+    attributesCopy.metadata.x.value *= stretch;
 
-    if (lineFlags.test(LineFlag::DoubleHeightTop))
-    {
-        attributesCopy.metadata.targetSize.width = Width::cast_from(currentWidth * 2);
-        attributesCopy.metadata.x.value *= 2;
-        attributesCopy.metadata.normalizedLocation.height /= 2.0f;
-    }
-    else if (lineFlags.test(LineFlag::DoubleHeightBottom))
-    {
-        attributesCopy.metadata.targetSize.width = Width::cast_from(currentWidth * 2);
-        attributesCopy.metadata.x.value *= 2;
+    // Double HEIGHT additionally gives each of the two rows its own half of the texture.
+    if (lineFlags.test(LineFlag::DoubleHeightBottom))
         attributesCopy.metadata.normalizedLocation.y +=
             attributesCopy.metadata.normalizedLocation.height / 2.0f;
+    if (lineFlags.test(LineFlag::DoubleHeightTop) || lineFlags.test(LineFlag::DoubleHeightBottom))
         attributesCopy.metadata.normalizedLocation.height /= 2.0f;
-    }
-    else if (lineFlags.test(LineFlag::DoubleWidth))
-    {
-        attributesCopy.metadata.targetSize.width = Width::cast_from(currentWidth * 2);
-        attributesCopy.metadata.x.value *= 2;
-    }
 
     return attributesCopy;
+}
+
+/// Clips a tile about to be drawn to one screen row's band, in both texture space and height.
+///
+/// A block `scale` cells tall is one raster drawn across several rows. Each row draws its own band of
+/// it, so a block whose head has scrolled above the viewport is CLIPPED rather than lost -- when only
+/// the head cell drew, the whole block vanished with it. kitty cuts the same bands in
+/// calculate_regions_for_line().
+///
+/// @param attributes the tile, adjusted in place.
+/// @param tileTop    the tile's top in screen pixels; moved down to the visible part.
+/// @param bandTop    the row's top edge in screen pixels.
+/// @param bandBottom the row's bottom edge in screen pixels.
+/// @return false when the tile does not reach this band at all, and must not be drawn.
+[[nodiscard]] bool clipTileToBand(Renderable::AtlasTileAttributes& attributes,
+                                  int& tileTop,
+                                  int bandTop,
+                                  int bandBottom)
+{
+    auto const drawnHeight = unbox<int>(attributes.metadata.targetSize.height);
+    if (drawnHeight <= 0)
+        return true;
+
+    auto const tileBottom = tileTop + drawnHeight;
+    auto const visibleTop = std::max(tileTop, bandTop);
+    auto const visibleBottom = std::min(tileBottom, bandBottom);
+    if (visibleBottom <= visibleTop)
+        return false;
+    if (visibleTop == tileTop && visibleBottom == tileBottom)
+        return true;
+
+    auto const from = static_cast<float>(visibleTop - tileTop) / static_cast<float>(drawnHeight);
+    auto const to = static_cast<float>(visibleBottom - tileTop) / static_cast<float>(drawnHeight);
+
+    auto& location = attributes.metadata.normalizedLocation;
+    location.y += location.height * from;
+    location.height *= to - from;
+    attributes.metadata.targetSize.height = vtbackend::Height::cast_from(visibleBottom - visibleTop);
+    tileTop = visibleTop;
+    return true;
 }
 
 void TextRenderer::renderTextGroup(std::u32string_view codepoints,
@@ -585,7 +649,8 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
                                    vtbackend::CellLocation initialPenPosition,
                                    TextStyle style,
                                    vtbackend::RGBColor color,
-                                   vtbackend::LineFlags lineFlags)
+                                   vtbackend::LineFlags lineFlags,
+                                   vtbackend::GlyphSizing const& sizing)
 {
     if (codepoints.empty())
         return;
@@ -600,8 +665,22 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
 
     using vtbackend::LineFlag;
 
-    auto const advanceScale = lineFlags.test(LineFlag::DoubleWidth) ? 2 : 1;
+    auto const advanceScale = lineAdvanceScale(lineFlags);
     auto const cellWidth = unbox<int>(_gridMetrics.cellSize.width);
+
+    // How this group's glyphs are enlarged. Hoisted out of the loop: it is a property of the group,
+    // and both branches below need it.
+    auto const& scale = sizing.scale;
+    auto const adjustment = _glyphScaler->adjustmentFor(scale);
+
+    // A text-sizing block is drawn from cell-sized tiles cut out of one block-sized raster, which is
+    // a different shape of work from the ordinary path below -- and must stay so: the atlas cannot
+    // hold a tile larger than one cell, and every row of the block has to be able to draw itself.
+    if (!scale.isOrdinary())
+    {
+        renderBlockGroup(glyphPositions, pen, color, lineFlags, sizing, adjustment);
+        return;
+    }
 
     for (auto const& glyphPosition: glyphPositions)
     {
@@ -614,7 +693,6 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
                                          unbox<int>(attributes->bitmapSize.height),
                                          attributes->metadata.y.value,
                                          pen1);
-
             renderRasterizedGlyph(pen1, color, attributesCopy);
 
             // Direct mapping only ever covers printable US-ASCII of the primary font, which occupies
@@ -623,9 +701,9 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
             continue;
         }
 
-        auto const hash = hashGlyphKeyAndPresentation(glyphPosition.glyph, glyphPosition.presentation);
+        auto const glyphHash = hashGlyphKeyAndPresentation(glyphPosition.glyph, glyphPosition.presentation);
         AtlasTileAttributes const* attributes =
-            getOrCreateRasterizedMetadata(hash, glyphPosition.glyph, glyphPosition.presentation);
+            getOrCreateRasterizedMetadata(glyphHash, glyphPosition.glyph, glyphPosition.presentation);
 
         if (attributes)
         {
@@ -636,45 +714,24 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
                                          unbox<int>(attributes->bitmapSize.height),
                                          attributes->metadata.y.value,
                                          pen1);
-
             renderRasterizedGlyph(pen1, color, attributesCopy);
 
-            auto xOffset = unbox(textureAtlas().tileSize().width);
-            while (AtlasTileAttributes const* subAttribs = textureAtlas().try_get(hash * xOffset))
+            // A glyph wider than one atlas tile was sliced at rasterization time; the head tile was
+            // just drawn, and the remaining slices follow. They are parts of the SAME glyph, so
+            // every enlargement that applied to the head applies to them identically.
+            //
+            // Each slice is placed where the previous one ENDED rather than at a re-derived
+            // multiple of the cell width. Stepping by the width actually drawn is what keeps the
+            // slices contiguous no matter how many multipliers are in play.
+            auto sliceX = pen1.x + unbox<int>(attributesCopy.metadata.targetSize.width);
+            auto sliceKey = unbox(textureAtlas().tileSize().width);
+            while (AtlasTileAttributes const* subAttribs = textureAtlas().try_get(glyphHash * sliceKey))
             {
-                auto subAttribsCopy = *subAttribs;
-                auto const subWidth = unbox(subAttribsCopy.metadata.targetSize.width)
-                                          ? unbox(subAttribsCopy.metadata.targetSize.width)
-                                          : unbox(subAttribsCopy.bitmapSize.width);
-
-                if (lineFlags.test(LineFlag::DoubleHeightTop))
-                {
-                    subAttribsCopy.metadata.targetSize.width = vtbackend::Width::cast_from(subWidth * 2);
-                    subAttribsCopy.metadata.x.value *= 2;
-                    subAttribsCopy.metadata.normalizedLocation.height /= 2.0f;
-                }
-                else if (lineFlags.test(LineFlag::DoubleHeightBottom))
-                {
-                    subAttribsCopy.metadata.targetSize.width = vtbackend::Width::cast_from(subWidth * 2);
-                    subAttribsCopy.metadata.x.value *= 2;
-                    subAttribsCopy.metadata.normalizedLocation.y +=
-                        subAttribsCopy.metadata.normalizedLocation.height / 2.0f;
-                    subAttribsCopy.metadata.normalizedLocation.height /= 2.0f;
-                }
-                else if (lineFlags.test(LineFlag::DoubleWidth))
-                {
-                    subAttribsCopy.metadata.targetSize.width = vtbackend::Width::cast_from(subWidth * 2);
-                    subAttribsCopy.metadata.x.value *= 2;
-                }
-
-                auto const drawXOffset =
-                    lineFlags.test(LineFlag::DoubleWidth) ? (int(xOffset) * 2) : int(xOffset);
-
-                renderTile(atlas::RenderTile::X { pen1.x + drawXOffset },
-                           atlas::RenderTile::Y { pen1.y },
-                           color,
-                           subAttribsCopy);
-                xOffset += unbox(textureAtlas().tileSize().width);
+                auto const subAttribsCopy = adjustTileAttributesForLineFlags(lineFlags, *subAttribs);
+                renderTile(
+                    atlas::RenderTile::X { sliceX }, atlas::RenderTile::Y { pen1.y }, color, subAttribsCopy);
+                sliceX += unbox<int>(subAttribsCopy.metadata.targetSize.width);
+                sliceKey += unbox(textureAtlas().tileSize().width);
             }
         }
 
@@ -684,6 +741,275 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
         // N cells -- with no rounding at all. That awaits TextClusterGrouper's east-asian-width fixme,
         // since clusters presently count cells appended rather than columns occupied.
         pen.x += advanceToCells(glyphPosition.advance.x, cellWidth) * cellWidth * advanceScale;
+    }
+}
+
+/// Composites @p glyphPosition's raster into a canvas the size of its text-sizing block.
+///
+/// The canvas is whole cells on both axes, so cutting it into atlas tiles is exact, and the glyph is
+/// placed at its block baseline with `v`/`h` applied -- kitty does the same in render_group() before
+/// extract_cell_region() cuts the sprites.
+std::optional<TextRenderer::BlockCanvas> TextRenderer::buildBlockCanvas(
+    std::span<text::glyph_position const> cluster,
+    vtbackend::CellScale const& cellScale,
+    GlyphScaleAdjustment adjustment,
+    int cellsAtOneX)
+{
+    if (cluster.empty())
+        return std::nullopt;
+
+    auto const base = rasterizeAtBlockSize(cluster.front().glyph, adjustment);
+    if (!base.has_value())
+        return std::nullopt;
+
+    // Asked with zero bearings, this answers where the block's own box sits: originX is the box's
+    // left edge and originY its baseline. Each glyph is then placed against those, so the marks of a
+    // cluster share one origin instead of each deriving its own.
+    auto const box = blockPlacementFor(cellScale,
+                                       unbox<int>(_gridMetrics.cellSize.width),
+                                       unbox<int>(_gridMetrics.cellSize.height),
+                                       _gridMetrics.baseline,
+                                       cellsAtOneX,
+                                       0,
+                                       0);
+
+    auto const components = static_cast<size_t>(text::pixel_size(base->format));
+    auto canvas =
+        BlockCanvas { .size = box.canvasSize,
+                      .format = toAtlasFormat(base->format),
+                      .fragmentShaderSelector = toFragmentShaderSelector(base->format),
+                      .components = components,
+                      .bitmap = std::vector<uint8_t>(box.canvasSize.area() * components, uint8_t { 0 }) };
+
+    auto const scaled = [&](int value) {
+        return static_cast<int>(std::lround(static_cast<double>(value) * adjustment.factor));
+    };
+
+    // HarfBuzz's contract, and the reason a cluster is more than one glyph: each glyph is drawn at
+    // `pen + offset`, and then the pen moves on by `advance`. Placing every glyph at the block's own
+    // origin instead stacks the pieces of a Devanagari conjunct on top of one another, which is what
+    // left `क्नि` showing nothing but its matra.
+    //
+    // These advances are NOT rounded to whole cells the way the ordinary path rounds them: inside a
+    // cluster they position glyphs against each other, not against the cell grid.
+    struct Placement
+    {
+        text::rasterized_glyph glyph;
+        int x;
+        int y;
+    };
+    auto placements = std::vector<Placement> {};
+    placements.reserve(cluster.size());
+
+    auto pen = crispy::point { .x = box.originX, .y = box.originY };
+
+    for (auto const& glyphPosition: cluster)
+    {
+        auto glyph =
+            &glyphPosition == &cluster.front() ? base : rasterizeAtBlockSize(glyphPosition.glyph, adjustment);
+
+        // One canvas holds one pixel format. A glyph whose format differs from the cluster's first
+        // (an emoji modifier on a text base, say) cannot be composited into it, and is skipped
+        // rather than written with the wrong stride -- but it still moves the pen.
+        if (!glyph.has_value())
+            rasterizerLog()("Cluster glyph {} did not rasterize.", glyphPosition.glyph.index.value);
+        else if (glyph->format != base->format)
+            rasterizerLog()(
+                "Skipping cluster glyph of format {} on a {} canvas.", glyph->format, base->format);
+        else
+        {
+            auto const x = pen.x + scaled(glyphPosition.offset.x) + glyph->position.x;
+            auto const y = pen.y - scaled(glyphPosition.offset.y) - glyph->position.y;
+            placements.emplace_back(Placement { .glyph = std::move(*glyph), .x = x, .y = y });
+        }
+
+        pen.x += scaled(glyphPosition.advance.x);
+        pen.y -= scaled(glyphPosition.advance.y);
+    }
+
+    // A cluster can reach LEFT of its own origin: Devanagari reorders the i-matra ahead of its base,
+    // and its bearing is negative. On the grid that merely draws into the neighbouring cell, but a
+    // canvas has an edge, and the overhang was being cut away. Shift the cluster right so its
+    // leftmost ink starts at the canvas origin -- kitty's right_shift_canvas() does the same.
+    auto leftmost = 0;
+    for (auto const& placement: placements)
+        leftmost = std::min(leftmost, placement.x);
+
+    for (auto const& placement: placements)
+        // Overhang above or below -- a descender, an accent -- is still clipped rather than being an
+        // error: a glyph is placed on its baseline, not fitted to the box.
+        blitClipped(canvas.bitmap,
+                    canvas.size,
+                    placement.glyph.bitmap,
+                    placement.glyph.bitmapSize,
+                    placement.x - leftmost,
+                    placement.y,
+                    components);
+
+    return canvas;
+}
+
+/// Cuts the single cell at (@p column, @p band) out of @p canvas as an atlas tile.
+///
+/// Every tile is one cell, which is the whole point: TextureAtlas spaces tile origins one tileSize
+/// apart, so a taller tile would overwrite its neighbour.
+std::optional<TextRenderer::TextureAtlas::TileCreateData> TextRenderer::createBlockTile(
+    BlockCanvas const* canvas, atlas::TileLocation tileLocation, uint32_t column, uint32_t band)
+{
+    if (canvas == nullptr)
+        return std::nullopt;
+
+    auto const tiles =
+        sliceIntoTiles(canvas->bitmap, canvas->size, _gridMetrics.cellSize, canvas->components);
+
+    auto const wanted = std::ranges::find_if(
+        tiles, [&](GlyphTile const& tile) { return tile.column == column && tile.band == band; });
+    if (wanted == tiles.end())
+        return std::nullopt;
+
+    if (!SoftRequire(wanted->size.width <= _gridMetrics.cellSize.width
+                     && wanted->size.height <= _gridMetrics.cellSize.height))
+        return std::nullopt;
+
+    return createTileData(tileLocation,
+                          std::move(wanted->bitmap),
+                          canvas->format,
+                          wanted->size,
+                          RenderTileAttributes::X { 0 },
+                          RenderTileAttributes::Y { 0 },
+                          canvas->fragmentShaderSelector);
+}
+
+/// Rasterizes @p glyphKey at the size the block will draw it, magnifying an ordinary raster when the
+/// strategy is Stretch.
+///
+/// Both strategies must hand back a raster at its FINAL size, because the block canvas composites
+/// pixels: there is no later opportunity to enlarge. That is what makes the two methods differ only
+/// in fidelity (a re-hinted outline versus a magnified bitmap) rather than in code path.
+std::optional<text::rasterized_glyph> TextRenderer::rasterizeAtBlockSize(text::glyph_key const& glyphKey,
+                                                                         GlyphScaleAdjustment adjustment)
+{
+    auto key = glyphKey;
+    auto rerasterized = false;
+    if (adjustment.requiresRerasterization)
+    {
+        // A font_key already encodes its size, so editing glyph_key::size alone would change nothing
+        // FreeType can see. Ask the shaper for the SAME face at the larger size; that re-hints it.
+        key.size.pt *= adjustment.factor;
+        key.font = _textShaper.resize_font(glyphKey.font, key.size);
+
+        // The shaper reports "not resized" by handing back the key it was given -- it refuses once
+        // its budget for wire-driven sizes is spent. Taking that as success would rasterize at the
+        // ORIGINAL size while every downstream placement expects the scaled one, drawing a glyph far
+        // too small into its block. Fall back to magnifying instead, which is what the Stretch
+        // strategy below already does.
+        rerasterized = key.font != glyphKey.font;
+        if (!rerasterized)
+            key.size = glyphKey.size;
+    }
+
+    auto glyph =
+        _textShaper.rasterize(key, _fontDescriptions.renderMode, _fontDescriptions.textOutline.thickness);
+    if (!glyph.has_value())
+        return std::nullopt;
+
+    if (!SoftRequire(glyph->bitmap.size()
+                     == text::pixel_size(glyph->format) * unbox<size_t>(glyph->bitmapSize.width)
+                            * unbox<size_t>(glyph->bitmapSize.height)))
+        return std::nullopt;
+
+    if (!rerasterized && adjustment.factor != 1.0)
+    {
+        // Stretch: magnify the ordinary raster to the drawn size. Its bearings scale with it, so the
+        // placement arithmetic downstream needs no knowledge of which strategy produced this.
+        auto const magnifiedSize =
+            ImageSize { vtbackend::Width::cast_from(
+                            std::lround(unbox<double>(glyph->bitmapSize.width) * adjustment.factor)),
+                        vtbackend::Height::cast_from(
+                            std::lround(unbox<double>(glyph->bitmapSize.height) * adjustment.factor)) };
+
+        if (unbox(magnifiedSize.width) != 0 && unbox(magnifiedSize.height) != 0)
+        {
+            glyph->bitmap = magnify(glyph->bitmap,
+                                    glyph->bitmapSize,
+                                    magnifiedSize,
+                                    static_cast<size_t>(text::pixel_size(glyph->format)));
+            glyph->bitmapSize = magnifiedSize;
+            glyph->position.x =
+                static_cast<int>(std::lround(static_cast<double>(glyph->position.x) * adjustment.factor));
+            glyph->position.y =
+                static_cast<int>(std::lround(static_cast<double>(glyph->position.y) * adjustment.factor));
+        }
+    }
+
+    return glyph;
+}
+
+void TextRenderer::renderBlockGroup(text::shape_result const& glyphPositions,
+                                    crispy::point pen,
+                                    vtbackend::RGBColor color,
+                                    vtbackend::LineFlags lineFlags,
+                                    vtbackend::GlyphSizing const& sizing,
+                                    GlyphScaleAdjustment adjustment)
+{
+    auto const cellWidth = unbox<int>(_gridMetrics.cellSize.width);
+    auto const cellHeight = unbox<int>(_gridMetrics.cellSize.height);
+    auto const& scale = sizing.scale;
+    auto const blockScale = std::max<int>(1, scale.scale);
+
+    // The pen is the bottom of THIS row; a tile is drawn from its top, and every tile is exactly one
+    // cell. No band arithmetic survives here: the band chose which tile to fetch, not where to put it.
+    auto const rowTop = pen.y - cellHeight;
+
+    // RenderBufferBuilder makes every block its own group, so all of these glyphs belong to ONE
+    // block: a single grapheme cluster, however many glyphs shaping turned it into. The column span
+    // comes from the backend, which claimed those cells -- deriving it from the shaper's advances
+    // cannot work, because a Devanagari conjunct like `क्नि` is several reordered glyphs, each with
+    // an advance, inside one cell.
+    auto const columns = static_cast<uint32_t>(std::max<uint8_t>(1, sizing.columns));
+    auto const cellsAtOneX = std::max(1, static_cast<int>(columns) / blockScale);
+
+    // Everything that shapes the canvas is folded into the key by blockCanvasHash; every glyph
+    // contributes on top, or two conjuncts sharing a base glyph would collide on one entry.
+    auto blockHash = blockCanvasHash(scale, static_cast<uint32_t>(cellsAtOneX));
+    for (auto const& glyphPosition: glyphPositions)
+        blockHash = blockHash * hashGlyphKeyAndPresentation(glyphPosition.glyph, glyphPosition.presentation);
+
+    // Built at most once, and only if some tile is actually missing: a block that is already cached
+    // costs a hash lookup per cell and no rasterization at all.
+    auto canvas = std::optional<BlockCanvas> {};
+    auto const canvasFor = [&]() -> BlockCanvas const* {
+        if (!canvas.has_value())
+            canvas = buildBlockCanvas(glyphPositions, scale, adjustment, cellsAtOneX);
+        return canvas.has_value() ? &canvas.value() : nullptr;
+    };
+
+    // A block on a DECDWL/DECDHL line is stretched by the LINE as well as by its own scale: the two
+    // compose, exactly as they do for ordinary glyphs. Skipping the line's doubling here drew the
+    // block at single width while every glyph beside it doubled -- so it covered only the left half
+    // of the cells the doubled grid gives it and ran into its neighbour -- and on a double-height
+    // line it drew the full-height raster on both rows instead of each row taking its own half.
+    //
+    // @see lineAdvanceScale, which the tile widening below reads from too, so the stride a block
+    // steps by cannot drift from the width its tiles are given.
+    auto const advanceScale = lineAdvanceScale(lineFlags);
+
+    for (auto const column: std::views::iota(0u, columns))
+    {
+        auto const key = blockHash * glyphTileSubKey(column, sizing.band);
+        auto const* attributes =
+            textureAtlas().get_or_try_emplace(key, [&](atlas::TileLocation tileLocation) {
+                return createBlockTile(canvasFor(), tileLocation, column, sizing.band);
+            });
+
+        if (attributes)
+        {
+            auto const attributesCopy = adjustTileAttributesForLineFlags(lineFlags, *attributes);
+            renderTile(atlas::RenderTile::X { pen.x + (static_cast<int>(column) * cellWidth * advanceScale) },
+                       atlas::RenderTile::Y { rowTop },
+                       color,
+                       attributesCopy);
+        }
     }
 }
 
@@ -783,7 +1109,8 @@ auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
 
 auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
                                          text::glyph_key const& glyphKey,
-                                         unicode::PresentationStyle presentation)
+                                         unicode::PresentationStyle presentation,
+                                         GlyphWidthPolicy widthPolicy)
     -> optional<TextureAtlas::TileCreateData>
 {
     auto theGlyphOpt = _textShaper.rasterize(
@@ -803,6 +1130,10 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     // TODO: Derive numCells based on grapheme cluster's EA width instead of emoji presentation.
     // FIXME: this `2` is a hack of my bad knowledge. FIXME.
     // As I only know of emoji being colored fonts, and those take up 2 cell with units.
+
+    // Everything a glyph is measured against below is the box it is allowed to occupy: one cell.
+    // A text-sizing block does not come through here at all -- it is rasterized into a block canvas
+    // and cut into cell-sized tiles. @see buildBlockCanvas.
 
     // Scale bitmap down overflowing in diemensions
     auto const emojiBoundingBox = ImageSize {
@@ -835,54 +1166,77 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
         // At least on macOS, the emoji font reports bad positioning, so we simply center them ourself.
         // Center horizontally within the emoji bounding box (numCells * cellWidth).
         glyph.position.x = unbox<int>(emojiBoundingBox.width - glyph.bitmapSize.width) / 2;
-        // Center vertically within the full cell height, accounting for the baseline offset.
+        // Center vertically within the full box height, accounting for the baseline offset.
         glyph.position.y = (unbox<int>(_gridMetrics.cellSize.height) + glyph.bitmapSize.height.as<int>()) / 2
                            - _gridMetrics.baseline;
     }
-    else if (glyph.bitmapSize.height
-             > vtbackend::Height::cast_from(unbox<double>(_gridMetrics.cellSize.height) * 1.1))
+    else if (glyph.bitmapSize.height > _gridMetrics.cellSize.height)
     {
         // Scale down vertically oversized non-RGBA glyphs (e.g. Nerd Font icons in alpha_mask format)
-        // to fit within cell height, preventing invalid cropping math downstream.
+        // to fit within the box, preventing invalid cropping math downstream.
+        //
+        // The bound is the cell EXACTLY. It used to allow a further 10%, which meant a glyph up to
+        // 1.1 cells tall passed through unscaled and was uploaded into a tile one cell tall --
+        // overwriting the rows of the tile beneath it in the atlas, and so replacing part of an
+        // unrelated glyph. Nothing about text sizing is needed to hit that; a tall Nerd Font icon
+        // does it.
+        //
         // NOTE: Width overflow is intentionally NOT checked here, because horizontally oversized glyphs
         // (e.g. programming ligatures) are kept wide and handled by createSlicedRasterizedGlyph(),
         // which slices them into multiple tiles when they exceed the atlas tile size.
-        auto const cellBoundingBox = ImageSize { _gridMetrics.cellSize.width, _gridMetrics.cellSize.height };
+        //
+        // Which is why the box may not be the cell on BOTH axes: text::scale() scales by
+        // max(ratioX, ratioY), so a one-cell-wide box makes the width ratio win and squashes a
+        // three-cell ligature to a third of its width. Bounding the height alone leaves the height
+        // ratio to scale both axes and preserve the aspect. @see oversizedGlyphBoundingBox.
+        auto const cellBoundingBox =
+            oversizedGlyphBoundingBox(glyph.bitmapSize, _gridMetrics.cellSize, widthPolicy);
         auto const originalPosition = glyph.position;
         if (rasterizerLog)
-            rasterizerLog()("Scaling oversized non-RGBA glyph of {}+{} down to cell size {}.",
+            rasterizerLog()("Scaling oversized non-RGBA glyph of {}+{} down to box {}.",
                             glyph.bitmapSize,
                             glyph.position,
                             cellBoundingBox);
         auto [scaledGlyph, scaleFactor] = text::scale(glyph, cellBoundingBox);
         glyph = std::move(scaledGlyph);
-        // Restore baseline-relative positioning instead of emoji-style centering.
+        // Restore baseline-relative positioning instead of emoji-style centering -- on BOTH axes.
+        // The bearing is the font's statement of where the ink sits relative to the pen, so scaling
+        // it by the same factor as the raster is what keeps the glyph where the font put it.
+        // Overwriting x with a centering value instead shifted every glyph coming through here by
+        // (cellWidth - inkWidth)/2 minus its true left side bearing, so a column of box-drawing or
+        // powerline glyphs stopped lining up with the text beside it. That went unnoticed while the
+        // height bound carried a 10% tolerance, because only badly oversized icons reached it;
+        // bounding by the cell exactly brings ordinary glyphs down this path too.
         glyph.position.y = static_cast<int>(static_cast<float>(originalPosition.y) / scaleFactor);
-        glyph.position.x = (unbox<int>(_gridMetrics.cellSize.width) - glyph.bitmapSize.width.as<int>()) / 2;
+        glyph.position.x = static_cast<int>(static_cast<float>(originalPosition.x) / scaleFactor);
         if (rasterizerLog)
             rasterizerLog()(" ==> scaled: {}/{}, factor {}", glyph, cellBoundingBox, scaleFactor);
     }
 
-    // y-position relative to cell-bottom of glyphs top.
-    auto yMax = _gridMetrics.baseline + glyph.position.y;
+    // The crop below asks "does this glyph overflow the box it may occupy" -- one cell.
+    auto const boxBaseline = _gridMetrics.baseline;
+    auto const boxHeight = _gridMetrics.cellSize.height.as<int>();
+
+    // y-position relative to box-bottom of glyphs top.
+    auto yMax = boxBaseline + glyph.position.y;
 
     if (yMax <= 0)
     {
-        // Glyph's top is at or below cell bottom — not visible.
+        // Glyph's top is at or below box bottom — not visible.
         if (rasterizerLog)
-            rasterizerLog()("Skipping glyph with yMax={} (not visible within cell).", yMax);
+            rasterizerLog()("Skipping glyph with yMax={} (not visible within box).", yMax);
         return nullopt;
     }
 
-    // y-position relative to cell-bottom of the glyphs bottom.
+    // y-position relative to box-bottom of the glyphs bottom.
     auto const yMin = yMax - glyph.bitmapSize.height.as<int>();
 
-    // Number of pixel lines this rasterized glyph is overflowing above cell-top,
+    // Number of pixel lines this rasterized glyph is overflowing above box-top,
     // or 0 if not overflowing.
-    auto const yOverflow = max(0, yMax - _gridMetrics.cellSize.height.as<int>());
+    auto const yOverflow = max(0, yMax - boxHeight);
 
-    // {{{ crop underflow if glyph is larger than cell
-    if (yMin < 0 && yMax - yMin > _gridMetrics.cellSize.height.as<int>())
+    // {{{ crop underflow if glyph is larger than the box
+    if (yMin < 0 && yMax - yMin > boxHeight)
     {
         auto const rowCount = (unsigned) -yMin;
         if (!SoftRequire(rowCount <= unbox(glyph.bitmapSize.height)))

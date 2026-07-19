@@ -82,6 +82,101 @@ profiles:
     CHECK(config.reflowOnResize.value() == false);
 }
 
+TEST_CASE("Config: grapheme clustering defaults on and can be turned off", "[config]")
+{
+    // Mode 2027 is set at power-on by default; the setting only chooses what an application finds,
+    // and an application may still toggle the mode itself afterwards.
+    QTemporaryDir dir;
+    CHECK(loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+)"sv)
+              .graphemeClustering.value());
+
+    QTemporaryDir dir2;
+    CHECK_FALSE(loadFromYaml(dir2, R"(
+default_profile: main
+grapheme_clustering: false
+profiles:
+    main:
+        shell: /bin/sh
+)"sv)
+                    .graphemeClustering.value());
+}
+
+TEST_CASE("Config: text scaling method loads from YAML", "[config]")
+{
+    // Asserted with `stretch` on purpose: it is the NON-default, so this fails if the key is ignored
+    // and the default silently answers instead.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+text_scaling_method: stretch
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+    CHECK(config.textScalingMethod.value() == vtrasterizer::GlyphScalingMethod::Stretch);
+}
+
+TEST_CASE("Config: text scaling method defaults to rerasterize", "[config]")
+{
+    // Re-rasterizing is the default because scaled text is text an application asked to be LARGE, and
+    // a magnified bitmap is visibly soft at those sizes. Stretch remains the opt-in for the case it
+    // exists for: large text scrolling past the viewport, where the per-(glyph, scale) rasterization
+    // is paid repeatedly.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+    CHECK(config.textScalingMethod.value() == vtrasterizer::GlyphScalingMethod::Rerasterize);
+}
+
+TEST_CASE("Config: an invalid text scaling method keeps the default", "[config]")
+{
+    // A typo in a visible rendering setting must not silently select something else.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+text_scaling_method: crispy-please
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+    CHECK(config.textScalingMethod.value() == vtrasterizer::GlyphScalingMethod::Rerasterize);
+}
+
+TEST_CASE("Config: the shell environment identifies the terminal", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    auto const& env = profile->shell.value().env;
+
+    // TERM only names a terminfo capability set, which several terminals share; TERM_PROGRAM is how
+    // an application learns WHICH terminal it is talking to. Python wcwidth's wcstwidth() selects
+    // its per-terminal width correction table by exactly this variable, so an absent or stale value
+    // silently costs correctness in every application that uses it.
+    REQUIRE(env.contains("TERM_PROGRAM"));
+    CHECK(env.at("TERM_PROGRAM") == "contour");
+
+    REQUIRE(env.contains("TERM_PROGRAM_VERSION"));
+    CHECK(env.at("TERM_PROGRAM_VERSION") == CONTOUR_VERSION_STRING);
+    CHECK_FALSE(env.at("TERM_PROGRAM_VERSION").empty());
+}
+
 TEST_CASE("Config: profile knobs load from YAML", "[config]")
 {
     QTemporaryDir dir;

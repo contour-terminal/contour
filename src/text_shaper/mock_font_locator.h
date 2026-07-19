@@ -27,6 +27,9 @@ class mock_font_locator: public font_locator
     [[nodiscard]] font_source_list resolve(gsl::span<const char32_t> codepoints) override;
 
     static void configure(std::vector<font_description_and_source> registry);
+
+    /// Sets what resolve() answers with. Cleared by configure(), so a case cannot leak into the next.
+    static void configureCoverage(font_source_list sources);
 };
 
 } // namespace text

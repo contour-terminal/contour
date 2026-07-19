@@ -84,6 +84,16 @@ class BasicCellProxy
 
     [[nodiscard]] uint8_t width() const noexcept { return _line->widths[_col]; }
 
+    /// Per-cell vertical scale in cells (kitty text sizing protocol, `OSC 66` `s=`); 1 for ordinary
+    /// text.
+    [[nodiscard]] uint8_t scale() const noexcept { return _line->scales[_col]; }
+
+    /// The full sizing of this cell: the block scale plus the fraction and alignment.
+    [[nodiscard]] CellScale textScale() const noexcept
+    {
+        return unpackTextScale(_line->scales[_col], _line->textScaleExtras[_col]);
+    }
+
     [[nodiscard]] CellFlags flags() const noexcept { return _line->sgr[_col].flags; }
 
     [[nodiscard]] bool isFlagEnabled(CellFlags testFlags) const noexcept
@@ -96,6 +106,13 @@ class BasicCellProxy
     [[nodiscard]] Color underlineColor() const noexcept { return _line->sgr[_col].underlineColor; }
 
     [[nodiscard]] HyperlinkId hyperlink() const noexcept { return _line->hyperlinks[_col]; }
+
+    /// The cell's full graphics rendition.
+    ///
+    /// Needed when a cell must be styled to match ANOTHER cell rather than the current pen -- a wide
+    /// cluster's continuation cells, for instance, whose pen may have moved on between the base
+    /// codepoint and the variation selector that widened the cluster.
+    [[nodiscard]] GraphicsAttributes graphicsAttributes() const noexcept { return _line->sgr[_col]; }
 
     [[nodiscard]] std::shared_ptr<ImageFragment> imageFragment() const noexcept
     {
@@ -153,6 +170,8 @@ class BasicCellProxy
         auto const oldClusterSize = _line->clusterSize[_col];
         _line->codepoints[_col] = 0;
         _line->widths[_col] = 1;
+        _line->scales[_col] = 1;
+        _line->textScaleExtras[_col] = 0;
         _line->sgr[_col] = GraphicsAttributes {};
         _line->hyperlinks[_col] = {};
         _line->clusterSize[_col] = 0;
@@ -168,6 +187,8 @@ class BasicCellProxy
         auto const oldClusterSize = _line->clusterSize[_col];
         _line->codepoints[_col] = 0;
         _line->widths[_col] = 1;
+        _line->scales[_col] = 1;
+        _line->textScaleExtras[_col] = 0;
         _line->sgr[_col] = attrs;
         _line->hyperlinks[_col] = {};
         _line->clusterSize[_col] = 0;
@@ -186,10 +207,11 @@ class BasicCellProxy
         invalidateTrivialIfNeeded();
     }
 
-    [[nodiscard]] int appendCharacter(char32_t ch) noexcept
+    [[nodiscard]] int appendCharacter(char32_t ch,
+                                      ClusterWidthPolicy policy = ClusterWidthPolicy::ClusterAware) noexcept
         requires(!IsConst)
     {
-        return appendCodepointToCluster(*_line, _col, ch);
+        return appendCodepointToCluster(*_line, _col, ch, policy);
     }
 
     void setCharacter(char32_t ch) noexcept
@@ -202,8 +224,36 @@ class BasicCellProxy
             _line->widths[_col] = static_cast<uint8_t>(std::max(1u, unicode::width(ch)));
         else
             _line->widths[_col] = 1;
+        _line->scales[_col] = 1;
+        _line->textScaleExtras[_col] = 0;
 
         clearReplacedImageFragment(_line->imageFragments, static_cast<uint16_t>(_col));
+    }
+
+    /// Sets the per-cell vertical scale (kitty text sizing protocol).
+    void setScale(uint8_t s) noexcept
+        requires(!IsConst)
+    {
+        _line->scales[_col] = s;
+        invalidateTrivialIfNeeded();
+    }
+
+    /// Sets the whole sizing of this cell: the block scale plus the fraction and alignment.
+    void setTextScale(CellScale const& cellScale) noexcept
+        requires(!IsConst)
+    {
+        _line->scales[_col] = cellScale.scale;
+        _line->textScaleExtras[_col] = packTextScaleExtras(cellScale);
+
+        // A sized cell cannot render through the trivial-line fast path, which knows nothing about
+        // scales. invalidateTrivialIfNeeded() only compares SGR and hyperlink, so a request that
+        // changes nothing else -- a purely fractional one such as `OSC 66 ; n=1:d=2:w=1`, which
+        // occupies a single ordinary-width cell -- left the line trivial and the fraction was
+        // silently dropped.
+        if (!cellScale.isOrdinary())
+            _line->trivial = false;
+
+        invalidateTrivialIfNeeded();
     }
 
     void setWidth(uint8_t w) noexcept
@@ -262,6 +312,17 @@ class BasicCellProxy
         (*_line->imageFragments)[static_cast<uint16_t>(_col)] =
             std::make_shared<ImageFragment>(std::move(rasterizedImage), offset);
         _line->trivial = false; // Images require per-cell rendering (RenderLine has no image support)
+    }
+
+    /// Removes this cell's image fragment while leaving its text and rendition untouched.
+    ///
+    /// Deleting an image *placement* is not the same as clearing the cell: the kitty graphics
+    /// protocol lets an application drop a placement and keep whatever text shares those cells.
+    void clearImageFragment() noexcept
+        requires(!IsConst)
+    {
+        if (_line->imageFragments)
+            _line->imageFragments->erase(static_cast<uint16_t>(_col));
     }
 
     void setGraphicsRendition(GraphicsRendition sgr) noexcept

@@ -10,6 +10,7 @@
 #include <vtbackend/Hyperlink.h>
 #include <vtbackend/InputGenerator.h>
 #include <vtbackend/InputHandler.h>
+#include <vtbackend/PointerShape.h>
 #include <vtbackend/RenderBuffer.h>
 #include <vtbackend/Selector.h>
 #include <vtbackend/SemanticBlockTracker.h>
@@ -215,6 +216,7 @@ class TraceHandler: public SequenceHandler
 
     void executeControlCode(char controlCode) override;
     void processSequence(Sequence const& sequence) override;
+    void processAPC(std::string_view body) override;
     void writeText(char32_t codepoint) override;
     void writeText(std::string_view codepoints, size_t cellCount) override;
     void writeTextEnd() override;
@@ -224,7 +226,18 @@ class TraceHandler: public SequenceHandler
         std::string_view text;
         size_t cellCount;
     };
-    using PendingSequence = std::variant<char32_t, CodepointSequence, Sequence>;
+
+    /// One queued `APC` body, waiting its turn behind the sequences that preceded it.
+    ///
+    /// Owns its bytes rather than viewing them: everything else in this queue is drained within the
+    /// parse that produced it, but an APC body is held until the user steps the trace forward, long
+    /// after the parser buffer it arrived in has been reused.
+    struct ApplicationProgramCommand
+    {
+        std::string body;
+    };
+
+    using PendingSequence = std::variant<char32_t, CodepointSequence, Sequence, ApplicationProgramCommand>;
     using PendingSequenceQueue = std::deque<PendingSequence>;
 
     [[nodiscard]] PendingSequenceQueue const& pendingSequences() const noexcept { return _pendingSequences; }
@@ -273,6 +286,10 @@ class Terminal
         virtual FontDef getFontDef() { return {}; }
         virtual void setFontDef(FontDef const& /*fontSpec*/) {}
         virtual void copyToClipboard(std::string_view /*data*/) {}
+
+        /// The application asked for a different mouse pointer shape, by CSS name (`OSC 22`).
+        /// @see vtbackend::pointer_shape::SupportedNames.
+        virtual void setPointerShape(std::string_view /*cssName*/) {}
         /// Returns the current clipboard contents, for an OSC 52 read (`OSC 52 ; Pc ; ? ST`). The base
         /// implementation returns nothing; only a frontend that permits clipboard reading answers. Reads
         /// are additionally gated by Settings::allowClipboardRead. @see Terminal::requestClipboardRead.
@@ -344,6 +361,7 @@ class Terminal
         FontDef getFontDef() override { return {}; }
         void setFontDef(FontDef const& /*fontSpec*/) override {}
         void copyToClipboard(std::string_view /*data*/) override {}
+        void setPointerShape(std::string_view /*cssName*/) override {}
         void openDocument(std::string_view /*fileOrUrl*/) override {}
         void inspect() override {}
         void notify(std::string_view /*title*/, std::string_view /*body*/) override {}
@@ -1298,17 +1316,31 @@ class Terminal
     }
 
     /// Tests whether given absolute coordinate is covered by a current selection.
-    bool isSelected(CellLocation coord) const noexcept
-    {
-        return _selection && _selection->state() != Selection::State::Waiting && _selection->contains(coord);
-    }
+    ///
+    /// A multi-cell block (a wide character, or an `OSC 66` text-sizing block) is indivisible: if any
+    /// of its cells is selected, all of them are. Highlighting half a glyph would show a selection
+    /// the user cannot have meant and cannot correct.
+    /// @param screen the screen @p coord belongs to. The render path works on the DISPLAYED page,
+    ///               which is not the current screen once page-cursor coupling is reset, and a block
+    ///               resolved against the wrong screen highlights the wrong cells.
+    [[nodiscard]] bool isSelected(Screen const& screen, CellLocation coord) const noexcept;
+
+    /// Keeps a drag that stays inside one row of tall blocks from becoming a multi-line selection.
+    ///
+    /// @param anchor  where the drag started.
+    /// @param pointer where the pointer is now.
+    /// @return @p pointer, with its line snapped back to @p anchor's while both are in the same
+    ///         block-row of equally shaped blocks.
+    [[nodiscard]] CellLocation clampDragWithinMulticellBlock(CellLocation anchor,
+                                                             CellLocation pointer) const noexcept;
 
     /// Tests whether given line offset is intersecting with selection.
-    bool isSelected(LineOffset line) const noexcept
-    {
-        return _selection && _selection->state() != Selection::State::Waiting
-               && _selection->containsLine(line);
-    }
+    ///
+    /// This is the COARSE test the renderer's trivial-line fast path consults: a line it calls
+    /// unselected is drawn uniformly and never asks isSelected(CellLocation) about any of its cells.
+    /// It must therefore agree with the per-cell test about blocks -- a tall block reaching down into
+    /// this line makes the line selected even when the selection's own range stops above it.
+    [[nodiscard]] bool isSelected(LineOffset line) const noexcept;
 
     /// Tests whether the given cell is covered by the active (vi yank/motion) highlight range.
     /// @param cell The absolute grid coordinate to test.
@@ -1407,12 +1439,51 @@ class Terminal
     void setFontDef(FontDef const& fontDef);
     void copyToClipboard(std::string_view data);
 
+    // {{{ Mouse pointer shape (OSC 22)
+    /// @return the CSS name of the shape currently in effect.
+    [[nodiscard]] std::string const& pointerShape() const noexcept { return _pointerShapes.back(); }
+
+    /// Replaces the current shape without touching what is beneath it.
+    void setPointerShape(std::string shape);
+
+    /// Pushes a shape, remembering the one beneath so a later pop can restore it.
+    void pushPointerShape(std::string shape);
+
+    /// Discards the current shape, revealing the one beneath. The bottom of the stack is the
+    /// terminal's own default and is never popped -- an application that pops more than it pushed
+    /// must not be able to leave the terminal with no shape at all.
+    void popPointerShape();
+
+    /// Returns to the terminal's own default shape and notifies with an EMPTY name.
+    ///
+    /// The empty name is distinct from every shape an application can ask for, and means "the
+    /// application is no longer imposing one". A frontend caching the application's choice needs
+    /// that signal, or its own screen-type defaults never apply again. Reached by `OSC 22 ;` (the
+    /// documented reset), by popping back to the bottom of the stack, and by RIS.
+    void resetPointerShape();
+    // }}}
+
     /// Answers an OSC 52 clipboard read (`OSC 52 ; Pc ; ? ST`) by replying with the current clipboard,
     /// base64-encoded, as `OSC 52 ; Pc ; <base64> ST`. Does nothing when Settings::allowClipboardRead is
     /// false (the default), so an application cannot read the clipboard unless the user opts in.
     /// @param pc The selection parameter from the request; an empty Pc is reported back as "s0", xterm's
     ///           default selection.
     void requestClipboardRead(std::string_view pc);
+
+    /// @return the clipboard's current contents, for a protocol that formats its own reply.
+    ///
+    /// requestClipboardRead() both fetches and answers in OSC 52's shape; OSC 5522 has a reply shape
+    /// of its own, so it needs the content without the formatting. Both are gated the same way --
+    /// this returns nothing unless Settings::allowClipboardRead is set.
+    [[nodiscard]] std::string clipboardContent()
+    {
+        return _settings.allowClipboardRead ? _eventListener.getClipboard() : std::string {};
+    }
+
+    /// The buffer an `OSC 5522` write accumulates into, and whether such a write is open.
+    /// @see _kittyClipboardWrite.
+    [[nodiscard]] std::string& kittyClipboardWrite() noexcept { return _kittyClipboardWrite; }
+    [[nodiscard]] bool& kittyClipboardWriteOpen() noexcept { return _kittyClipboardWriteOpen; }
 
     void openDocument(std::string_view data);
     void inspect();
@@ -1568,6 +1639,11 @@ class Terminal
     void markCellDirty(CellLocation position) noexcept;
     void markRegionDirty(Rect area) noexcept;
     void synchronizedOutput(bool enabled);
+
+    /// Reports the current page size in band, as `CSI 48 ; rows ; cols ; height ; width t`.
+    ///
+    /// A no-op unless DEC mode 2048 is set. Sent on every resize, and once when the mode is enabled.
+    void reportInBandWindowResize();
     void onBufferScrolled(LineCount n) noexcept;
 
     void onViewportChanged();
@@ -2181,6 +2257,21 @@ class Terminal
     std::optional<ImageSize> _negotiatedImageCanvasSize;
     std::shared_ptr<SixelColorPalette> _sixelColorPalette;
     ImagePool _imagePool;
+
+    /// Clipboard data accumulated across the `wdata` packets of one `OSC 5522` write, and whether
+    /// such a write is open. Terminal-level rather than per-screen: an application may switch screens
+    /// between chunks, and the transmission is the terminal's, not any one screen's.
+    std::string _kittyClipboardWrite {};
+    bool _kittyClipboardWriteOpen = false;
+
+    /// The mouse pointer shape stack (`OSC 22`), innermost last. Never empty: the bottom entry is
+    /// the terminal's default.
+    std::vector<std::string> _pointerShapes { std::string(pointer_shape::DefaultName) };
+
+    /// Whether the bottom of @c _pointerShapes holds a shape the APPLICATION set, rather than the
+    /// terminal's own default. A pop landing there restores the former and signals a reset only for
+    /// the latter. @see popPointerShape.
+    bool _pointerShapeBaseSetByApplication = false;
     ImageDecoderCallback _imageDecoder;
 
     std::vector<ColumnOffset> _tabs;
@@ -2236,6 +2327,7 @@ class Terminal
         {
             terminal.sequenceHandler().processSequence(sequence);
         }
+        void processAPC(std::string_view body) { terminal.sequenceHandler().processAPC(body); }
         void writeText(char32_t codepoint) { terminal.sequenceHandler().writeText(codepoint); }
         void writeText(std::string_view codepoints, size_t cellCount)
         {

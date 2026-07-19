@@ -243,7 +243,7 @@ Terminal::Terminal(Events& eventListener,
     setMode(DECMode::AutoRepeat, true);
     setMode(DECMode::SixelCursorNextToGraphic, true);
     setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
-    setMode(DECMode::Unicode, true);
+    setMode(DECMode::Unicode, _settings.graphemeClustering);
     setMode(DECMode::VisibleCursor, true);
     setMode(DECMode::PageCursorCoupling, true);
     setMode(DECMode::LeftRightMargin, false);
@@ -597,6 +597,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
 
     if (_displayedPage == PageIndex(0))
         _lastRenderPassHints = displayedScreen.render(RenderBufferBuilder { *this,
+                                                                            displayedScreen,
                                                                             output,
                                                                             baseLine,
                                                                             mainDisplayReverseVideo,
@@ -610,6 +611,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                       smoothScrollExtra);
     else
         _lastRenderPassHints = displayedScreen.render(RenderBufferBuilder { *this,
+                                                                            displayedScreen,
                                                                             output,
                                                                             baseLine,
                                                                             mainDisplayReverseVideo,
@@ -798,6 +800,7 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
         case StatusDisplayType::Indicator:
             updateIndicatorStatusLine();
             _indicatorStatusScreen.render(RenderBufferBuilder { *this,
+                                                                _indicatorStatusScreen,
                                                                 output,
                                                                 base,
                                                                 !mainDisplayReverseVideo,
@@ -810,6 +813,7 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
             return _indicatorStatusScreen.pageSize().lines;
         case StatusDisplayType::HostWritable:
             _hostWritableStatusLineScreen.render(RenderBufferBuilder { *this,
+                                                                       _hostWritableStatusLineScreen,
                                                                        output,
                                                                        base,
                                                                        !mainDisplayReverseVideo,
@@ -1338,9 +1342,13 @@ void Terminal::sendMouseMoveEvent(Modifiers modifiers,
         }
         else if (selector()->state() != Selection::State::Complete)
         {
-            if (currentScreen().isCellEmpty(relativePos)
-                && !currentScreen().compareCellTextAt(relativePos, 0x20))
-                relativePos.column = ColumnOffset { 0 } + unbox(_settings.pageSize.columns - 1);
+            // NB: The drag end is taken exactly where the pointer is, including over the blank
+            // region right of a short line. Snapping it to the right margin there -- as this used to
+            // -- selected (and copied) the whole line the moment the pointer crossed the last
+            // character. It was redundant besides: Selection::ranges() already gives the first line
+            // of a MULTI-line selection its full width, and Selection::contains is lexicographic, so
+            // hit-testing agrees without help.
+            relativePos = clampDragWithinMulticellBlock(selector()->from(), relativePos);
             _viCommands.cursorPosition = relativePos;
             if (_inputHandler.mode() != ViMode::Insert)
                 _inputHandler.setMode(selector()->viMode());
@@ -1600,6 +1608,8 @@ struct SimpleSequenceHandler
         // We might make use of Terminal::activeSequences() here somehow.
         targetScreen.processSequence(seq);
     }
+
+    void processAPC(std::string_view body) { targetScreen.processAPC(body); }
 
     void writeText(char32_t codepoint) { targetScreen.writeText(codepoint); }
 
@@ -2059,7 +2069,40 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
 
     _viCommands.cursorPosition = clampToScreen(_viCommands.cursorPosition);
 
+    reportInBandWindowResize();
+
     verifyState();
+}
+
+void Terminal::reportInBandWindowResize()
+{
+    if (!_modes.enabled(DECMode::InBandWindowResize))
+        return;
+
+    // `CSI 48 ; rows ; cols ; height ; width t`. Cell counts first, pixels second -- the opposite of
+    // the order XTWINOPS reports them in, which is easy to get backwards.
+    //
+    // The size reported is the MAIN page, not the total: the status line is the terminal's own
+    // furniture and is not addressable by the application, so counting it would tell the application
+    // it has a row it cannot use.
+    auto const size = pageSize();
+    auto const pixels = cellPixelSize() * size;
+    reply("\033[48;{};{};{};{}t",
+          size.lines.value,
+          size.columns.value,
+          pixels.height.value,
+          pixels.width.value);
+
+    // A reply produced outside the parser loop has to reach the PTY itself -- the loop's own flush is
+    // what carries every other reply, and a window resize does not go through it: resizeScreen() runs
+    // on the GUI thread. Left unflushed, the report sat in the input generator until some unrelated
+    // event happened to flush it, which is precisely no use to the applications this mode exists for.
+    // They cannot receive SIGWINCH -- they are behind a socket or an ssh multiplexer -- so an
+    // application blocked on read across a resize went on drawing at the old size indefinitely.
+    // Flushing here rather than at the call site is what keeps that true for every caller; the parser
+    // path (setMode) reaches this too, where flushInput() is equally safe and already the convention
+    // for a replying sequence handler. @see Screen::reportColorPaletteUpdate.
+    flushInput();
 }
 
 void Terminal::verifyState()
@@ -2133,31 +2176,83 @@ namespace
         ColumnOffset lastColumn {};
         string text {};
         string currentLine {};
+        bool currentLineHasContent = false;
+
+        /// Whether any line has been written to @c text yet, which is what decides if the next one
+        /// needs a separator before it. The accumulated text cannot answer that: a blank line is a
+        /// line, but contributes no characters.
+        bool linesEmitted = false;
+
+        /// Whether a cell has been taken for the line being built. A one-column selection emits every
+        /// callback at the same column, so this -- not the accumulated text -- is what tells the
+        /// break test that a line is already under way.
+        bool lineStarted = false;
 
         SelectionRenderer(Terminal const& term, ColumnOffset rightPage): term(&term), rightPage(rightPage) {}
 
         void operator()(CellLocation pos, CellProxy const& cell)
         {
-            auto const isNewLine = pos.column < lastColumn || (pos.column == lastColumn && !text.empty());
+            // "Have we started a line yet" is answered by whether a cell has been taken, not by
+            // whether the accumulated text is non-empty -- the same distinction flushLine draws. A
+            // one-column rectangular selection emits every callback at the SAME column, so this
+            // predicate is the only thing that can start a new line, and the text proxy can never
+            // become true because text is only written inside the flush it was gating: the whole
+            // selection came out as one run.
+            auto const isNewLine = pos.column < lastColumn || (pos.column == lastColumn && lineStarted);
             if (isNewLine && (!term->isLineWrapped(pos.line)))
-            {
                 // TODO: handle logical line in word-selection (don't include LF in wrapped lines)
-                trimSpaceRight(currentLine);
-                text += currentLine;
-                text += '\n';
-                currentLine.clear();
-            }
+                flushLine();
+
+            lineStarted = true;
+            lastColumn = pos.column;
+
+            // A cell that only CONTINUES another carries no text of its own -- horizontally, where its
+            // codepoint is 0, or vertically, where a tall block reaches down into the row. Without
+            // this they fall into the empty-cell branch below and copy as spaces: 中a would yield
+            // "中 a", and a six-column text-sizing block would trail five spaces.
+            if (cell.isFlagEnabled(CellFlag::WideCharContinuation)
+                || cell.isFlagEnabled(CellFlag::MulticellContinuation))
+                return;
+
+            currentLineHasContent = true;
             if (cell.empty())
                 currentLine += ' ';
             else
                 currentLine += cell.toUtf8();
-            lastColumn = pos.column;
+        }
+
+        /// Ends the line being built, dropping it entirely when it held nothing but continuation cells.
+        ///
+        /// Such a row is not a line of text -- it is the lower half of the blocks on the row above --
+        /// so emitting its break would copy a scaled word as "ab\n". kitty trims exactly these rows in
+        /// flag_selection_to_extract_text(). A genuinely BLANK selected line still counts as content,
+        /// because a blank line inside a selection is a line the user selected.
+        void flushLine()
+        {
+            if (currentLineHasContent)
+            {
+                // The break is a SEPARATOR between lines that carry content, not a terminator emitted
+                // when one ends -- otherwise a trailing continuation-only row, whose emptiness is only
+                // known after the break was already written, leaves "ab\n" behind.
+                //
+                // What decides that is whether a line has been emitted, NOT whether the accumulated
+                // text is non-empty: a selected blank line carries content (the user selected it) but
+                // trims to nothing, so leading blank lines left the text empty and their separators
+                // were never written. Interior ones survived, which made the loss position-dependent.
+                if (linesEmitted)
+                    text += '\n';
+                trimSpaceRight(currentLine);
+                text += currentLine;
+                linesEmitted = true;
+            }
+            currentLine.clear();
+            currentLineHasContent = false;
+            lineStarted = false;
         }
 
         std::string finish()
         {
-            trimSpaceRight(currentLine);
-            text += currentLine;
+            flushLine();
             if (dynamic_cast<FullLineSelection const*>(term->selector()))
                 text += '\n';
             return std::move(text);
@@ -2319,6 +2414,57 @@ FontDef Terminal::getFontDef()
 void Terminal::setFontDef(FontDef const& fontDef)
 {
     _eventListener.setFontDef(fontDef);
+}
+
+void Terminal::setPointerShape(std::string shape)
+{
+    // A Set at the bottom of the stack makes that entry the APPLICATION's base shape rather than the
+    // terminal's default, which is what a later pop has to restore.
+    if (_pointerShapes.size() == 1)
+        _pointerShapeBaseSetByApplication = true;
+
+    _pointerShapes.back() = std::move(shape);
+    _eventListener.setPointerShape(_pointerShapes.back());
+}
+
+void Terminal::pushPointerShape(std::string shape)
+{
+    // Bounded so that an application looping on push cannot grow this without limit. Past the cap the
+    // newest shape still takes effect; only the ability to restore that many levels is lost.
+    constexpr auto MaxDepth = size_t { 16 };
+    if (_pointerShapes.size() >= MaxDepth)
+        _pointerShapes.back() = std::move(shape);
+    else
+        _pointerShapes.push_back(std::move(shape));
+    _eventListener.setPointerShape(_pointerShapes.back());
+}
+
+void Terminal::popPointerShape()
+{
+    if (_pointerShapes.size() > 1)
+        _pointerShapes.pop_back();
+
+    // Landing on the bottom means the application is no longer imposing anything ONLY when it never
+    // set a base shape -- "an empty stack means the terminal is free to use whatever shape it likes".
+    // Reporting the bottom entry's name in that case would look identical to an application setting
+    // it, and a frontend caching the application's choice would never restore its own screen-type
+    // defaults again. But when the application DID set a base shape, that shape is exactly what the
+    // pop restores, and signalling a reset instead would throw away a shape it never withdrew.
+    if (_pointerShapes.size() == 1 && !_pointerShapeBaseSetByApplication)
+        resetPointerShape();
+    else
+        _eventListener.setPointerShape(_pointerShapes.back());
+}
+
+void Terminal::resetPointerShape()
+{
+    _pointerShapes.erase(std::next(_pointerShapes.begin()), _pointerShapes.end());
+    _pointerShapes.back() = std::string(pointer_shape::DefaultName);
+    _pointerShapeBaseSetByApplication = false;
+
+    // The empty name is the signal, distinct from any shape an application can name: the terminal is
+    // back to its own default and a frontend may resume its own.
+    _eventListener.setPointerShape("");
 }
 
 void Terminal::copyToClipboard(string_view data)
@@ -3037,6 +3183,15 @@ void Terminal::setMode(DECMode mode, bool enable)
             if (_modes.enabled(DECMode::BatchedRendering) != enable)
                 synchronizedOutput(enable);
             break;
+        case DECMode::InBandWindowResize:
+            // Report once on enabling, so an application never has to ask separately for the size it
+            // starts with. The mode has to be recorded first -- reportInBandWindowResize() checks it.
+            if (enable && !_modes.enabled(DECMode::InBandWindowResize))
+            {
+                _modes.set(DECMode::InBandWindowResize, true);
+                reportInBandWindowResize();
+            }
+            break;
         case DECMode::TextReflow:
             if (_settings.primaryScreen.allowReflowOnResize && isPrimaryScreen())
             {
@@ -3378,7 +3533,7 @@ void Terminal::hardReset()
     setMode(DECMode::AutoRepeat, true);
     setMode(DECMode::SixelCursorNextToGraphic, true);
     setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
-    setMode(DECMode::Unicode, true);
+    setMode(DECMode::Unicode, _settings.graphemeClustering);
     setMode(DECMode::VisibleCursor, true);
     setMode(DECMode::PageCursorCoupling, true);
 
@@ -3402,6 +3557,11 @@ void Terminal::hardReset()
 
     _imagePool.clear();
     _tabs.clear();
+
+    // A pointer shape is application state like any other, so RIS withdraws it: a program that dies
+    // holding a hand cursor must not leave the user with one. The stack keeps its bottom entry -- the
+    // terminal's own default -- exactly as popPointerShape does.
+    resetPointerShape();
 
     resetColorPalette();
 
@@ -4215,6 +4375,85 @@ optional<CellLocation> Terminal::searchReverse(CellLocation searchPosition)
     return matchLocation;
 }
 
+CellLocation Terminal::clampDragWithinMulticellBlock(CellLocation anchor, CellLocation pointer) const noexcept
+{
+    // A scale>1 block is several screen rows tall but reads as ONE line of text. Dragging along such
+    // a line, the pointer inevitably strays into the row below the one it started on -- and without
+    // this, that one-row wobble turns a single-line selection into a two-line one, which sweeps the
+    // first line to its right margin and swallows everything after the sized run.
+    //
+    // So while both ends sit in the SAME block-row of blocks of the same shape, the drag is treated
+    // as horizontal: the pointer's row is snapped back to the anchor's. It releases as soon as the
+    // pointer leaves those blocks, which is how a genuine multi-line selection is still made.
+    //
+    // kitty solves it the same way, in clamp_selection_input_to_multicell().
+    if (anchor.line == pointer.line)
+        return pointer;
+
+    auto const anchorBlock = currentScreen().multicellBlockAt(anchor);
+    if (!anchorBlock || anchorBlock->rows < 2)
+        return pointer;
+
+    auto const pointerBlock = currentScreen().multicellBlockAt(pointer);
+    if (!pointerBlock || pointerBlock->rows != anchorBlock->rows
+        || pointerBlock->origin.line != anchorBlock->origin.line)
+        return pointer;
+
+    return CellLocation { .line = anchor.line, .column = pointer.column };
+}
+
+bool Terminal::isSelected(Screen const& screen, CellLocation coord) const noexcept
+{
+    if (!_selection || _selection->state() == Selection::State::Waiting)
+        return false;
+
+    if (_selection->contains(coord))
+        return true;
+
+    // The cell itself is outside the selection -- but if it belongs to a block whose other cells are
+    // inside, it is selected too. kitty expands its selection mask over a block's whole rectangle
+    // (apply_selection / xrange_for_iteration_with_multicells) for the same reason.
+    //
+    // Reached only while a selection is live, and only for cells the selection did not already
+    // cover, so ordinary text pays a grid lookup that a trivial line answers immediately.
+    // Resolved against the screen the caller is working on: the render path feeds coordinates from
+    // the DISPLAYED page, which with page-cursor coupling reset is not the current one.
+    auto const block = screen.multicellBlockAt(coord);
+    if (!block)
+        return false;
+
+    for (auto const row: std::views::iota(0, block->rows))
+        for (auto const column: std::views::iota(0, block->columns))
+            if (_selection->contains(
+                    CellLocation { .line = block->origin.line + LineOffset::cast_from(row),
+                                   .column = block->origin.column + ColumnOffset::cast_from(column) }))
+                return true;
+
+    return false;
+}
+
+bool Terminal::isSelected(LineOffset line) const noexcept
+{
+    if (!_selection || _selection->state() == Selection::State::Waiting)
+        return false;
+
+    if (_selection->containsLine(line))
+        return true;
+
+    // A block whose head sits on a selected line above reaches down into this one, and the whole
+    // block is selected. Saying "no" here would send this line down the trivial fast path, which
+    // renders it uniformly and never consults the per-cell test that knows about the block -- so the
+    // highlight would stop at the block's first row.
+    //
+    // A block spans at most text_sizing::MaxScale lines, which bounds the look-back. Answering "yes"
+    // for a line that turns out to hold no block only costs it the per-cell path for one frame.
+    for (auto const above: std::views::iota(1, static_cast<int>(text_sizing::MaxScale)))
+        if (_selection->containsLine(line - LineOffset::cast_from(above)))
+            return true;
+
+    return false;
+}
+
 bool Terminal::isHighlighted(CellLocation cell) const noexcept // NOLINT(bugprone-exception-escape)
 {
     return _highlightRange.has_value()
@@ -4374,6 +4613,16 @@ void TraceHandler::processSequence(Sequence const& sequence)
     _pendingSequences.emplace_back(sequence);
 }
 
+void TraceHandler::processAPC(std::string_view body)
+{
+    // Queued like everything else, and for the same reason: this handler's whole job is to preserve
+    // the ORDER in which the application sent things while letting the user step through them.
+    // Forwarding an APC straight to the display let it overtake every sequence still queued ahead of
+    // it -- a kitty image placed against the cursor position a queued CUP had not moved yet, so
+    // tracing a graphics problem showed behaviour that never happens outside trace mode.
+    _pendingSequences.emplace_back(ApplicationProgramCommand { .body = std::string(body) });
+}
+
 void TraceHandler::writeText(char32_t codepoint)
 {
     _pendingSequences.emplace_back(codepoint);
@@ -4426,6 +4675,11 @@ void TraceHandler::flushOne(PendingSequence const& pendingSequence)
     {
         std::cout << std::format("\t\"{}\"   ; {} cells\n", codepoints->text, codepoints->cellCount);
         _terminal->activeDisplay().writeText(codepoints->text, codepoints->cellCount);
+    }
+    else if (auto const* apc = std::get_if<ApplicationProgramCommand>(&pendingSequence))
+    {
+        std::cout << std::format("\tAPC {:<16} ; {} bytes\n", apc->body.substr(0, 16), apc->body.size());
+        _terminal->activeDisplay().processAPC(apc->body);
     }
 }
 // }}}
@@ -4494,6 +4748,8 @@ std::string to_string(DECMode mode)
         case DECMode::TextReflow: return "TextReflow";
         case DECMode::SixelCursorNextToGraphic: return "SixelCursorNextToGraphic";
         case DECMode::ReportColorPaletteUpdated: return "ReportColorPaletteUpdated";
+        case DECMode::InBandWindowResize: return "InBandWindowResize";
+        case DECMode::PasteMimeNotifications: return "PasteMimeNotifications";
         case DECMode::SemanticBlockProtocol: return "SemanticBlockProtocol";
         case DECMode::PrintFormFeed: return "PrintFormFeed";
         case DECMode::HebrewKeyboardMapping: return "HebrewKeyboardMapping";

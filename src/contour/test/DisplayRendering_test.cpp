@@ -43,6 +43,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
 #include <QtTest/QTest>
 #include <vtmux/Pane.h>
@@ -223,6 +224,118 @@ TEST_CASE("display: a live session renders real frames and content changes pixel
     auto const after = h.pump();
     REQUIRE_FALSE(after.isNull());
     CHECK(before != after);
+}
+
+namespace
+{
+/// The bounding box of every pixel that differs between @p before and @p after.
+///
+/// What a selection paints is a background change, not ink, so it cannot be found by brightness.
+/// Comparing the two frames names exactly the region the selection touched and nothing else.
+[[nodiscard]] QRect changedBounds(QImage const& before, QImage const& after)
+{
+    if (before.size() != after.size())
+        return {};
+
+    auto left = before.width();
+    auto right = -1;
+    auto top = before.height();
+    auto bottom = -1;
+
+    for (auto y = 0; y < before.height(); ++y)
+        for (auto x = 0; x < before.width(); ++x)
+            if (before.pixel(x, y) != after.pixel(x, y))
+            {
+                left = std::min(left, x);
+                right = std::max(right, x);
+                top = std::min(top, y);
+                bottom = std::max(bottom, y);
+            }
+
+    if (right < 0)
+        return {};
+    return QRect(QPoint(left, top), QPoint(right, bottom));
+}
+} // namespace
+
+TEST_CASE("display: a scaled block draws at its full height", "[display][render][textsizing]")
+{
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+
+    // The property, stated so that it needs no knowledge of the font or the cell size: the same
+    // glyph at `s=2` must cover about twice the height it does unscaled. Comparing the two renders
+    // is what makes this immune to whichever font the test machine resolves.
+    //
+    // Each glyph is measured as the difference from the SAME screen without it, which isolates
+    // exactly the pixels that glyph is responsible for. The cursor is hidden first, or it would
+    // contribute its own block of changed pixels one cell to the right.
+    //
+    // The cursor is put on the LAST line before writing, which is where a terminal that has printed
+    // anything actually sits -- and therefore the state nearly every block a real program writes
+    // arrives in. Written at the top of a fresh screen there is always room below, so the block is
+    // never asked to make any, and this passes whether or not the backend can.
+    auto const measureGlyph = [&](std::string_view payload) {
+        h.feedAndSettle("\033[?25l\033[2J\033[999;1H"sv);
+        auto const blank = h.pump();
+        h.feedAndSettle(payload);
+        return changedBounds(blank, h.pump());
+    };
+
+    auto const ordinary = measureGlyph("X"sv);
+    REQUIRE(ordinary.isValid());
+
+    auto const scaled = measureGlyph("\033]66;s=2;X\a"sv);
+    REQUIRE(scaled.isValid());
+
+    INFO("ordinary " << ordinary.width() << "x" << ordinary.height() << ", scaled " << scaled.width() << "x"
+                     << scaled.height());
+
+    // Generous bounds: hinting at the larger size legitimately shifts the ink by a pixel or two, so
+    // this asserts the SHAPE of the result -- roughly twice as tall and wide -- not exact geometry.
+    // A block drawing only its head row lands at ~1x here, which is the failure this gates.
+    CHECK(scaled.height() >= ordinary.height() * 3 / 2);
+    CHECK(scaled.width() >= ordinary.width() * 3 / 2);
+}
+
+TEST_CASE("display: a scaled block is selected over its whole height", "[display][render][textsizing]")
+{
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+
+    h.feedAndSettle("\033[?25l\033[2J\033[999;1H"sv);
+    auto const blank = h.pump();
+    h.feedAndSettle("\033]66;s=2;X\a"sv);
+    auto const unselected = h.pump();
+    auto const glyph = changedBounds(blank, unselected);
+    REQUIRE(glyph.isValid());
+
+    // Select the block by dragging across its FIRST row only. A block is indivisible, so the
+    // highlight must cover both of its rows -- and therefore reach below the glyph's own ink.
+    h.session->terminal().markScreenDirty();
+    {
+        auto const _ = std::scoped_lock { h.session->terminal() };
+        h.session->terminal().setSelector(std::make_unique<vtbackend::LinearSelection>(
+            h.session->terminal().selectionHelper(),
+            vtbackend::CellLocation { .line = vtbackend::LineOffset(0),
+                                      .column = vtbackend::ColumnOffset(0) },
+            [](auto&&...) {}));
+        (void) h.session->terminal().selector()->extend(vtbackend::CellLocation {
+            .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(1) });
+        h.session->terminal().selector()->complete();
+    }
+
+    auto const selected = h.pump();
+    auto const highlight = changedBounds(unselected, selected);
+    REQUIRE(highlight.isValid());
+
+    INFO("glyph ink " << glyph.top() << ".." << glyph.bottom() << ", highlight " << highlight.top() << ".."
+                      << highlight.bottom());
+
+    // The highlight spans the whole block, so it reaches at least as low as the glyph's own ink --
+    // the block is indivisible, and selecting its first row selects all of it.
+    CHECK(highlight.bottom() >= glyph.bottom());
+    CHECK(highlight.height() >= glyph.height());
 }
 
 TEST_CASE("display: keyboard, mouse and wheel events reach the PTY through the real display",

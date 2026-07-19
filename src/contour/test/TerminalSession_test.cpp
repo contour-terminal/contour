@@ -960,6 +960,41 @@ TEST_CASE("TerminalSession: clipboard, selection and notification paths are disp
     }
 }
 
+TEST_CASE("TerminalSession: an OSC 22 pointer shape is remembered without a display attached",
+          "[contour][session][pointershape]")
+{
+    // A pane in a background tab, or a session mid display hand-off, has no display to post the
+    // cursor change to. The shape still has to be REMEMBERED, because attachDisplay() applies
+    // whatever is recorded here once a display arrives -- returning early on the null display drops
+    // it in precisely the case the remembering exists for, and the pane never gets the shape for the
+    // rest of the session.
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    REQUIRE(session->display() == nullptr);
+
+    session->setPointerShape("pointer");
+    CHECK(session->applicationPointerShape() == contour::MouseCursorShape::PointingHand);
+
+    // Each supported CSS name maps to its own shape, display or no display.
+    session->setPointerShape("text");
+    CHECK(session->applicationPointerShape() == contour::MouseCursorShape::IBeam);
+    session->setPointerShape("none");
+    CHECK(session->applicationPointerShape() == contour::MouseCursorShape::Hidden);
+    session->setPointerShape("default");
+    CHECK(session->applicationPointerShape() == contour::MouseCursorShape::Arrow);
+
+    // The empty name is the documented reset, and must clear the memory rather than pin the last
+    // shape -- otherwise the alternate screen would never get its own default back.
+    session->setPointerShape("");
+    CHECK(session->applicationPointerShape() == std::nullopt);
+
+    // A name this terminal does not implement leaves the remembered shape untouched: it is not a
+    // reset, and inventing one would let an unsupported request clear a supported one.
+    session->setPointerShape("pointer");
+    session->setPointerShape("zoom-in");
+    CHECK(session->applicationPointerShape() == contour::MouseCursorShape::PointingHand);
+}
+
 TEST_CASE("TerminalSession: desktop notification wiring is display-safe and reports back over the PTY",
           "[contour][session][notification]")
 {
