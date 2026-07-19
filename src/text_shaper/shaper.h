@@ -76,11 +76,15 @@ struct glyph_position
     crispy::point offset;
     crispy::point advance;
 
-    /// Index of the input codepoint this glyph came from.
+    /// The input cluster this glyph came from, which the renderer reads as the grid COLUMN of the cell
+    /// it belongs to.
     ///
-    /// Carried so that a glyph can be placed by cluster rather than by an accumulating pen. That
-    /// matters for right-to-left runs, where the glyphs no longer arrive in the order they are
-    /// drawn: once placement is cluster-driven, visual glyph order stops mattering.
+    /// Load-bearing: a glyph is drawn at `initialPen + cluster * cellWidth`, so a shaping engine that
+    /// leaves this at zero draws a whole run stacked on its first cell.
+    ///
+    /// It decides the column a glyph lands in, but not the order glyphs are drawn in. Within one
+    /// cluster the shaper still positions glyphs against each other by accumulated advance, and that
+    /// accumulation is only valid in the order the engine emitted them.
     unsigned cluster = 0;
 
     unicode::PresentationStyle presentation {};

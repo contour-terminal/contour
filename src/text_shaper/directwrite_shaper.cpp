@@ -4,7 +4,9 @@
 #include <text_shaper/font_locator.h>
 
 #include <algorithm>
+#include <limits>
 #include <string>
+#include <string_view>
 
 // {{{ TODO: replace with libunicode
 #include <codecvt>
@@ -38,6 +40,42 @@ namespace text
 {
 namespace
 {
+    /// Maps every UTF-16 code unit of @p utf16Text to the cluster of the codepoint it belongs to.
+    ///
+    /// DirectWrite indexes text by UTF-16 code unit while the cluster array arrives per codepoint, so
+    /// the two index spaces must be reconciled: one astral character -- an emoji, say -- is two code
+    /// units but one codepoint, and without this every cluster after it would be off by one.
+    ///
+    /// This walks @p utf16Text rather than re-deriving how many code units each codepoint encodes to,
+    /// which makes the result the same length as the text *by construction*. A second, independent
+    /// encoding rule could disagree with whatever produced @p utf16Text -- over a lone surrogate, say --
+    /// and silently shift every cluster past the disagreement.
+    ///
+    /// @param utf16Text The run's text as DirectWrite sees it.
+    /// @param clusters  The per-codepoint cluster values.
+    /// @return One cluster value per code unit of @p utf16Text.
+    [[nodiscard]] vector<unsigned> clustersPerCodeUnit(std::wstring_view utf16Text,
+                                                       gsl::span<unsigned const> clusters)
+    {
+        auto result = vector<unsigned> {};
+        result.reserve(utf16Text.size());
+
+        auto codepointIndex = size_t { 0 };
+        for (size_t i = 0; i < utf16Text.size(); ++i)
+        {
+            // A low surrogate continues the codepoint its high surrogate began, and so shares its
+            // cluster. Anything else starts a new codepoint.
+            auto const unit = static_cast<uint16_t>(utf16Text[i]);
+            auto const isLowSurrogate = unit >= 0xDC00 && unit <= 0xDFFF;
+            if (i != 0 && !isLowSurrogate)
+                ++codepointIndex;
+
+            result.push_back(codepointIndex < clusters.size() ? clusters[codepointIndex] : 0u);
+        }
+
+        return result;
+    }
+
     void renderGlyphRunToBitmap(IDWriteGlyphRunAnalysis* _glyphAnalysis,
                                 const RECT& _textureBounds,
                                 const DWRITE_COLOR_F& runColor,
@@ -306,7 +344,10 @@ void directwrite_shaper::shape(font_key _font,
                                shape_result& _result)
 {
     // NOTE: This file cannot be compiled on the platform this was written on, so the changes below
-    // are unverified and must be checked on Windows before release.
+    // are unverified and must be checked on Windows before release. What to check first: every
+    // glyph_position must come back carrying the cluster of the cell it belongs to. The renderer places
+    // a glyph at the column its cluster names, so a run whose clusters are all zero is drawn stacked on
+    // its first cell -- a failure that is obvious on screen and invisible to any test here.
     auto const isRightToLeft = _direction == unicode::Bidi_Direction::Right_To_Left;
     auto const bidiLevel = static_cast<UINT8>(isRightToLeft ? 1 : 0);
 
@@ -323,6 +364,10 @@ void directwrite_shaper::shape(font_key _font,
     vector<UINT16> glyphIndices;
     vector<INT32> glyphDesignUnitAdvances;
     vector<UINT16> glyphClusters;
+
+    // Which cell each glyph belongs to. Indexed like everything else DirectWrite hands back: by UTF-16
+    // code unit, so exactly as long as wText.
+    auto const utf16Clusters = clustersPerCodeUnit(wText, _clusters);
 
     BOOL isTextSimple = FALSE;
     UINT32 uiLengthRead = 0;
@@ -358,6 +403,10 @@ void directwrite_shaper::shape(font_key _font,
             gpos.presentation = _presentation;
             gpos.glyph = glyph_key { fontInfo.size, _font, glyph_index { glyphIndices.at(i) } };
             gpos.advance.x = static_cast<int>(cellWidth);
+
+            // Simple text is one glyph per code unit, in order, so a glyph is indexed by its own
+            // position in the text.
+            gpos.cluster = utf16Clusters.at(i);
             _result.emplace_back(gpos);
         }
     }
@@ -457,11 +506,34 @@ void directwrite_shaper::shape(font_key _font,
                                                       &glyphAdvances.at(glyphStart),
                                                       &glyphOffsets.at(glyphStart));
 
+        // DirectWrite's cluster map runs the other way -- text position to the FIRST glyph of that
+        // position's cluster -- so invert it. A position that shaped into several glyphs names only the
+        // first, and the rest of a cluster follow it contiguously in the glyph array (in both writing
+        // directions), so filling forward from each named glyph covers them.
+        auto constexpr Unassigned = std::numeric_limits<unsigned>::max();
+        auto glyphClusterValues = vector<unsigned>(actualGlyphCount, Unassigned);
+        for (size_t textPosition = 0; textPosition < textLength; ++textPosition)
+        {
+            auto const glyphIndex = glyphClusters.at(textPosition);
+            if (glyphIndex < actualGlyphCount)
+                glyphClusterValues[glyphIndex] = utf16Clusters.at(textPosition);
+        }
+
+        auto lastAssigned = 0u;
+        for (auto& value: glyphClusterValues)
+        {
+            if (value == Unassigned)
+                value = lastAssigned;
+            else
+                lastAssigned = value;
+        }
+
         for (size_t i = glyphStart; i < actualGlyphCount; i++)
         {
             glyph_position gpos {};
             gpos.glyph = glyph_key { fontInfo.size, _font, glyph_index { glyphIndices.at(i) } };
             gpos.offset.x = static_cast<int>(glyphOffsets.at(i).advanceOffset);
+            gpos.cluster = glyphClusterValues.at(i);
             // gpos.offset.y = static_cast<int>(static_cast<double>(pos[i].y_offset) / 64.0f);
 
             gpos.advance.x = static_cast<int>(glyphAdvances.at(i));
