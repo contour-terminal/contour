@@ -36,24 +36,56 @@ clicks map between visual and logical space. Arrow keys swap in RTL runs.
 
 Ordered by user-visible impact.
 
-### 1. Cluster-based glyph placement — BLOCKED, not merely undone
-`renderTextGroup` still advances an accumulating pen (`pen.x += advanceToCells(...)`). The plan calls
-for `initialPen + cluster * cellWidth`, and `glyph_position::cluster` now exists and is populated, so
-the datum is there.
+### 1. Cluster-based glyph placement — DONE
+`renderTextGroup` places each glyph at `initialPen + cluster * cellWidth`. The accumulating pen is
+gone, and with it `advanceToCells` and its `GlyphAdvance.h` — the rounding heuristic existed only to
+guess a cell count from a font advance, which is now known exactly.
 
-**The precondition is not met.** The TODO at `TextRenderer.cpp` (just above the `pen.x +=` line) says
-so explicitly, and `TextClusterGrouper.h:117` carries the matching
-`int _cellCount = 0; // FIXME: EA width vs actual cells`. Clusters count **cells appended**, not
-**columns occupied**, so for a double-width glyph the cluster index advances by one while the glyph
-covers two columns. Switching to `cluster * cellWidth` without fixing that would misplace every glyph
-after a CJK or emoji character — a far worse regression than the rounding it removes.
+The precondition was cleared first, as the order of work demanded. `TextClusterGrouper` counts grid
+**columns** rather than cells appended, taking the span from `GlyphSizing::columns` — the field whose
+documented job is already "how many cells the block spans, as the backend claimed them", so the number
+gains no third spelling.
 
-Order of work: fix the grouper to count columns (its own FIXME, which predates this branch), *then*
-switch the placement. Do not do the second without the first.
+The earlier note that a wide cell's continuation blank already flushes the group turned out to hold on
+every current call path — but by coincidence of three independent producers, not by construction.
+Driving `renderCell` directly with two adjacent wide cells yields clusters `{0, 1}`; both new grouper
+tests fail on the old code (`{0,1}` vs `{0,2}`, and a following group starting at column 2 vs 3).
 
-Note that in practice a wide cell's continuation column arrives as a blank and flushes the group, so
-a group may already be one-column-per-cluster — but that is an inference about current call paths,
-not an invariant, and the FIXME is the authority.
+Advances still rule **within** a cluster: a base and its combining marks are positioned against each
+other by the shaper, not against the cell grid, so the pen accumulates until the cluster changes — and
+it accumulates the *raw* advance, since intra-cluster placement is sub-cell. That is also why the
+right-to-left glyph reversal stays. Placement no longer depends on draw order, but intra-cluster
+accumulation is only valid in HarfBuzz's own output order, which for an RTL run is visual.
+
+Two producers had to be corrected before the column span was honest:
+- `RenderBufferBuilder::makeRenderCellExplicit` set `width` but left `sizing.columns` at 1, so a wide
+  grapheme cluster in a status line or IME preedit string counted as one column.
+- `TextClusterGrouper::renderLine` (the trivial-line path) passed a default sizing for every cell.
+
+And one hazard the change created, now closed: `directwrite_shaper` never populated
+`glyph_position::cluster`. That cost nothing while the field was advisory; with placement reading it,
+every glyph of a run would have been drawn stacked on the group's first cell. Both its simple and
+complex paths now set it — the complex one by inverting DirectWrite's cluster map, which runs the
+opposite way to HarfBuzz's (text position → first glyph). Still unverifiable here; see item 8.
+
+**Two design points deferred, both raised by review and both larger than this change.**
+
+*`RenderCell::width` and `sizing.columns` are one datum with two names.* Every producer writes both;
+the consumers are split (`BackgroundRenderer` and `DecorationRenderer` read `width`, `TextRenderer`
+reads `sizing.columns`). An audit found no producer today that sets one without the other, but nothing
+enforces it. The right fix is to delete `RenderCell::width` and point its two readers at
+`sizing.columns` — a `vtbackend` change touching two renderers, so not folded in here. Related:
+`GlyphSizing::columns` is documented as `scale * width` while all three producers store plain `width`,
+and `TextRenderer` then divides by the block scale. That contradiction predates this branch but is now
+load-bearing for every glyph.
+
+*The cluster could be derived from `position.column - initialPen.column` instead of being plumbed.*
+The grouper is already handed each cell's position, so on the face of it the span is redundant. It is
+not, yet: positions are **display** columns — `RenderBufferBuilder` multiplies by two on a DECDWL line
+(`displayColumn = column * 2`) while `advanceScale` doubles again at draw time — and `renderLine`
+applies that scale to a wide cell's continuation columns but not to the head. Deriving the cluster
+from a position means untangling that first. Worth doing; it would delete the plumbing and fix the
+DECDWL inconsistency at the same time.
 
 ### 2. Selection — RESOLVED, the plan was wrong here
 Now covered by tests (`Bidi.selection yields logical order`, `Bidi.selection across a direction
@@ -112,6 +144,14 @@ still always returns empty.
 ### 8. DirectWrite is UNVERIFIED
 Written blind — it cannot be compiled on Linux. Must be checked on Windows before release.
 
+Check the clusters first. `glyph_position::cluster` is now load-bearing: the renderer places a glyph at
+the column its cluster names, so a run coming back with all-zero clusters draws stacked on its first
+cell. Obvious on screen, invisible to every test in this tree. Reachable via `text_shaping.engine` set
+to `native` or `dwrite`.
+
+Unrelated and pre-existing, but adjacent: the complex-shaping path never sets `gpos.presentation`,
+while the simple path does. That feeds the atlas cache key.
+
 ## Missing tests and verification
 
 - ~~Cache-collision test for `hashTextAndStyle`~~ — DONE. `hashTextAndStyle` moved to its own header
@@ -122,7 +162,12 @@ Written blind — it cannot be compiled on Linux. Must be checked on Windows bef
 - ~~RTL cluster normalization in `cluster_spans_test.cpp`~~ — DONE, both halves of the contract.
 - ~~`TextClusterGrouper_test`: level-run boundary cases~~ — DONE, and it caught a real bug: the
   level term was never in the flush predicate at all, despite commit 177803fc claiming it was.
-- `TextRenderer_test`: cluster-based placement.
+- ~~`TextRenderer_test`: cluster-based placement~~ — DONE, as sections of the issue-#1939 case, which
+  asks the same question ("does a run stay on the cell grid?") for one-column cells. The discriminating
+  one gives a fallback font's ideograph a 9px advance against two 10px cells: the accumulating pen
+  rounds that to one cell and draws the next glyph at 10, cluster placement puts it at 20. Plus a
+  right-to-left guard — a regression guard only, since a one-column cell cannot round to anything but
+  one cell, but it does catch either of the two RTL reversals being dropped.
 - Offscreen `DisplayRendering_test`: a mixed Hebrew/Arabic/Latin/digit screen.
 - A real-font Arabic joining test, gated on FreeMono or Noto Naskh Arabic being present.
 - ~~Performance comparison against the merge-base~~ — DONE, and it found a real regression.
