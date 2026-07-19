@@ -153,11 +153,7 @@ namespace
 using vtbackend::KeyboardEventType;
 using vtbackend::Modifiers;
 
-/// The MockPty backing @p session, for seeding output and inspecting written input bytes.
-[[nodiscard]] vtpty::MockPty& mockPtyOf(contour::TerminalSession& session)
-{
-    return dynamic_cast<vtpty::MockPty&>(session.terminal().device());
-}
+using contour::test::mockPtyOf;
 
 /// Registers a copy of the "main" profile under @p name in @p app's config, letting @p mutate it, so
 /// a session constructed under that name exercises config-driven behaviour (hint patterns, bell

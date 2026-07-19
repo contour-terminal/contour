@@ -116,10 +116,7 @@ namespace
     return std::make_unique<contour::TerminalSession>(&app.sessionsManager(), std::move(pty), app);
 }
 
-[[nodiscard]] vtpty::MockPty& mockPtyOf(contour::TerminalSession& s)
-{
-    return dynamic_cast<vtpty::MockPty&>(s.terminal().device());
-}
+using contour::test::mockPtyOf;
 } // namespace
 
 TEST_CASE("sendKeyEvent maps Qt key events onto the terminal's PTY encoding", "[helper][input]")
