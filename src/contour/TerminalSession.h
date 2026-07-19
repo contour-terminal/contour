@@ -373,6 +373,13 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     display::TerminalDisplay* display() noexcept { return _display; }
     display::TerminalDisplay const* display() const noexcept { return _display; }
 
+    /// @return The shape the application last requested via `OSC 22`, or nullopt while it has
+    ///         requested none. Survives a display hand-off; see _applicationPointerShape.
+    [[nodiscard]] std::optional<MouseCursorShape> applicationPointerShape() const noexcept
+    {
+        return _applicationPointerShape.load();
+    }
+
     void attachDisplay(display::TerminalDisplay& display);
     void detachDisplay(display::TerminalDisplay& display);
 

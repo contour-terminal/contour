@@ -226,7 +226,18 @@ class TraceHandler: public SequenceHandler
         std::string_view text;
         size_t cellCount;
     };
-    using PendingSequence = std::variant<char32_t, CodepointSequence, Sequence>;
+
+    /// One queued `APC` body, waiting its turn behind the sequences that preceded it.
+    ///
+    /// Owns its bytes rather than viewing them: everything else in this queue is drained within the
+    /// parse that produced it, but an APC body is held until the user steps the trace forward, long
+    /// after the parser buffer it arrived in has been reused.
+    struct ApplicationProgramCommand
+    {
+        std::string body;
+    };
+
+    using PendingSequence = std::variant<char32_t, CodepointSequence, Sequence, ApplicationProgramCommand>;
     using PendingSequenceQueue = std::deque<PendingSequence>;
 
     [[nodiscard]] PendingSequenceQueue const& pendingSequences() const noexcept { return _pendingSequences; }

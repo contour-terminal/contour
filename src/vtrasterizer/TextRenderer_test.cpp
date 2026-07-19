@@ -467,17 +467,32 @@ TEST_CASE("TextRenderer", "[renderer]")
         CHECK(buffer->bitmapSize.height <= gridMetrics.cellSize.height);
     }
 
-    auto const renderAndCapture = [&](char32_t codepoint, vtbackend::LineFlags flags) {
-        renderTarget.getMockBackend().renderCommands.clear();
-        renderer.beginFrame();
-        auto cell = vtbackend::RenderCell {};
-        cell.codepoints = std::u32string(1, codepoint);
-        cell.attributes.flags = vtbackend::CellFlags {};
-        cell.attributes.lineFlags = flags;
-        cell.attributes.foregroundColor = vtbackend::RGBColor(0xFF, 0xFF, 0xFF);
-        renderer.renderCell(cell);
-        renderer.endFrame();
-        return renderTarget.getMockBackend().renderCommands;
+    /// Renders one cell and returns the draw commands it produced.
+    ///
+    /// @param sizing defaults to ordinary text; pass a scaled one to take the `OSC 66` block path,
+    ///              which builds its tiles quite differently from the stretched-glyph path.
+    auto const renderAndCapture =
+        [&](char32_t codepoint, vtbackend::LineFlags flags, vtbackend::GlyphSizing sizing = {}) {
+            renderTarget.getMockBackend().renderCommands.clear();
+            renderer.beginFrame();
+            auto cell = vtbackend::RenderCell {};
+            cell.position = vtbackend::CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) };
+            cell.codepoints = std::u32string(1, codepoint);
+            cell.attributes.flags = vtbackend::CellFlags {};
+            cell.attributes.lineFlags = flags;
+            cell.attributes.foregroundColor = vtbackend::RGBColor(0xFF, 0xFF, 0xFF);
+            cell.sizing = sizing;
+            renderer.renderCell(cell);
+            renderer.endFrame();
+            return renderTarget.getMockBackend().renderCommands;
+        };
+
+    /// The same, for a 2x2 text-sizing block.
+    auto const renderScaledAndCapture = [&](char32_t codepoint, vtbackend::LineFlags flags) {
+        auto sizing = vtbackend::GlyphSizing {};
+        sizing.scale = vtbackend::CellScale { .scale = 2 };
+        sizing.columns = 2;
+        return renderAndCapture(codepoint, flags, sizing);
     };
 
     SECTION("Double Width")
@@ -524,6 +539,50 @@ TEST_CASE("TextRenderer", "[renderer]")
         CHECK(
             cmd.normalizedLocation.y
             == Catch::Approx(normalCmd.normalizedLocation.y + (normalCmd.normalizedLocation.height / 2.0f)));
+    }
+
+    // A scaled cell (OSC 66) takes an entirely different render path: one cell-sized tile per column,
+    // cut out of a block-sized raster, rather than one stretched glyph. That path returned before any
+    // line-flag handling at all, so a block on a DECDWL/DECDHL line ignored the doubling every glyph
+    // beside it received -- covering only the left half of the cells the doubled grid assigns it.
+    SECTION("a scaled block is stretched by a double-width line too")
+    {
+        auto const normal = renderScaledAndCapture(U'A', vtbackend::LineFlag::None);
+        auto const doubled = renderScaledAndCapture(U'A', vtbackend::LineFlag::DoubleWidth);
+        REQUIRE(!normal.empty());
+        REQUIRE(doubled.size() == normal.size());
+
+        // Every tile of the block is twice as wide on the doubled line.
+        for (auto const i: std::views::iota(size_t { 0 }, doubled.size()))
+            CHECK(unbox(doubled[i].targetSize.width) == unbox(normal[i].targetSize.width) * 2);
+
+        // ...and the tiles are spaced twice as far apart, or they would overlap each other.
+        if (doubled.size() >= 2)
+        {
+            auto const normalStride = normal[1].x.value - normal[0].x.value;
+            auto const doubledStride = doubled[1].x.value - doubled[0].x.value;
+            CHECK(doubledStride == normalStride * 2);
+        }
+    }
+
+    SECTION("a scaled block takes its own half of a double-height line")
+    {
+        auto const normal = renderScaledAndCapture(U'A', vtbackend::LineFlag::None);
+        auto const top = renderScaledAndCapture(U'A', vtbackend::LineFlag::DoubleHeightTop);
+        auto const bottom = renderScaledAndCapture(U'A', vtbackend::LineFlag::DoubleHeightBottom);
+        REQUIRE(!normal.empty());
+        REQUIRE(top.size() == normal.size());
+        REQUIRE(bottom.size() == normal.size());
+
+        // Each row samples half the texture height, rather than both rows drawing the whole raster.
+        CHECK(top[0].normalizedLocation.height == Catch::Approx(normal[0].normalizedLocation.height / 2.0f));
+        CHECK(bottom[0].normalizedLocation.height
+              == Catch::Approx(normal[0].normalizedLocation.height / 2.0f));
+
+        // The bottom row starts halfway down the texture the top row started at.
+        CHECK(
+            bottom[0].normalizedLocation.y
+            == Catch::Approx(normal[0].normalizedLocation.y + (normal[0].normalizedLocation.height / 2.0f)));
     }
 
     SECTION("Double Width Advancement")

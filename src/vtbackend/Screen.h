@@ -249,6 +249,25 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// it covers, and wherever within it @p position happens to be.
     void eraseMulticellBlockAt(CellLocation position);
 
+    /// Erases every multi-cell block overlapping @p line between @p from and @p to inclusive.
+    ///
+    /// A block cannot survive a sideways shift. insertChars()/deleteChars() move one line's cells and
+    /// know nothing about MulticellContinuation, so a shift carries a head sideways while the rows it
+    /// owns stay put -- leaving cells multicellBlockAt() can no longer resolve and that no later erase
+    /// can reach. Destroying each overlapping block whole beforehand is the same rule writing over one
+    /// follows, and the only way a shift can leave the grid consistent.
+    ///
+    /// @param line the line whose cells are about to move.
+    /// @param from leftmost column the shift touches.
+    /// @param to rightmost column the shift touches, inclusive.
+    void eraseMulticellBlocksInRange(LineOffset line, ColumnOffset from, ColumnOffset to);
+
+    /// @return whether @p cell could be part of a multi-cell block, and so is worth resolving.
+    ///
+    /// A cheap screen against multicellBlockAt(), whose walk costs several out-of-line grid lookups.
+    /// False here is conclusive: none of the three states its walk can begin from is present.
+    [[nodiscard]] static bool cellCouldBelongToMulticell(ConstCellProxy cell) noexcept;
+
     /// Writes @p text as a single cell block @p columns wide and @p scale cells tall.
     void writeSizedText(std::u32string_view codepoints, uint8_t columns, CellScale const& cellScale);
 

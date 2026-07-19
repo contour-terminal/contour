@@ -80,7 +80,6 @@ TEST_CASE("GlyphScaling.stretching.scale_of_one_changes_nothing", "[glyphscaling
     // Ordinary text is the overwhelming majority of what a terminal draws, so the unscaled case must
     // cost nothing and must not perturb the tile it was given.
     auto const scaler = StretchingGlyphScaler {};
-    CHECK(scaler.adjustmentFor(whole(1)).isIdentity());
     CHECK(scaler.adjustmentFor(whole(1)).factor == 1.0);
     CHECK_FALSE(scaler.adjustmentFor(whole(1)).requiresRerasterization);
 }

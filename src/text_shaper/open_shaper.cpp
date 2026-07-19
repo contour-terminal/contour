@@ -238,6 +238,7 @@ struct hash<FontInfo>
             fnv(fnv(fd.path), to_string(fd.size.pt), std::format("{}", fd.weight))); // SSO should kick in.
     }
 };
+
 } // namespace std
 
 namespace text
@@ -254,6 +255,22 @@ auto constexpr MissingGlyphId = 0xFFFDu;
 /// in the initial set.
 constexpr size_t InitialFallbackCount = 8;
 
+/// How many distinct sizes resize_font() may open a face at before it stops opening new ones.
+///
+/// `OSC 66` draws at `s * n/d` with `s` in 1..7 and `n < d <= 15`, so the protocol can name a few
+/// hundred distinct factors per face -- far more than the 28 that whole-number scales alone would
+/// suggest. The cap therefore sits well above what any document that is not deliberately cycling
+/// through the fraction space will reach, so that ordinary content never degrades, while still
+/// bounding what a hostile stream can pin: without it, faces accumulate for the life of the session
+/// (only a font-description change clears them) and each one is an FT_Face plus an hb_font_t.
+///
+/// The trade this makes deliberately: past the cap, WHICH glyphs keep a re-hinted face depends on
+/// the order they were asked for. That is the cost of having a hard bound at all -- eviction is not
+/// available here, because font_keys are baked into texture-atlas keys -- and unbounded memory
+/// growth driven by whatever is writing to the terminal is the worse of the two.
+/// @see open_shaper::resize_font.
+constexpr size_t MaxResizedFonts = 512;
+
 struct HbFontInfo // NOLINT(readability-identifier-naming)
 {
     font_source primary;
@@ -263,6 +280,15 @@ struct HbFontInfo // NOLINT(readability-identifier-naming)
     ft_face_ptr ftFace;
     hb_font_ptr hbFont;
     std::optional<font_metrics> metrics {};
+
+    /// The weight this face was actually loaded at, which together with @c size is its cache identity.
+    ///
+    /// Distinct from @c description.weight: a description is only attached to keys that came from
+    /// load_font(), so every key minted for a fallback face or a resize carried a default-constructed
+    /// description. Reading the weight from there filed those faces under a weight they were never
+    /// loaded at.
+    font_weight weight { font_weight::normal };
+
     font_description description {};
 };
 
@@ -663,12 +689,37 @@ struct open_shaper::private_open_shaper // {{{
     /// regardless of DPI or font size changes.
     unordered_map<font_description, font_source_list> locateCache;
 
-    /// Cache for resolveByCoverage(), keyed by the first codepoint of an unresolvable span.
-    /// Holds negative answers too, so a codepoint no installed font covers is queried only once.
+    /// One remembered answer from resolveByCoverage(), with the face parameters it was found for.
+    ///
+    /// The answer is a font_key, and a font_key encodes a point size and a weight as well as a file,
+    /// so an answer found at one size is wrong at another. A font-size-only change reloads the font
+    /// keys WITHOUT clearing this cache (@see Renderer::applyPendingReconfig), which is how a
+    /// coverage-resolved CJK glyph kept rasterizing at the pre-zoom size while the text around it
+    /// scaled, and how a bold run reused the regular-weight fallback face.
+    ///
+    /// Recorded beside the answer rather than folded into the map's KEY, because this cache is also
+    /// the guard that stops a span being resolved over and over: there must be an entry for a
+    /// codepoint once it has been tried, whatever the outcome. A key that varied with the face
+    /// parameters could miss forever, and shapeRunWithFallback() does not terminate if it does.
+    struct coverage_cache_entry
+    {
+        font_size size;
+        font_weight weight;
+        optional<font_key> resolved; ///< nullopt when no installed font covers the codepoint.
+    };
+
+    /// Cache for resolveByCoverage(), keyed by the first codepoint of an unresolvable span. Holds
+    /// negative answers too, so a codepoint no installed font covers is queried only once.
     ///
     /// Unlike @c locateCache this does NOT survive clear_cache(): its values are font_keys owned by
     /// @c fontKeyToHbFontInfoMapping, not font files, and outliving that map would make them dangle.
-    unordered_map<char32_t, optional<font_key>> coverageCache;
+    unordered_map<char32_t, coverage_cache_entry> coverageCache;
+
+    /// How many faces resize_font() has minted, against @c resizedFontLimit.
+    size_t resizedFontCount = 0;
+
+    /// The ceiling on @c resizedFontCount. @see MaxResizedFonts, open_shaper::set_resized_font_limit.
+    size_t resizedFontLimit = MaxResizedFonts;
 
     // Blacklisted font files as we tried them already and failed.
     std::vector<std::string> blacklistedSources;
@@ -692,16 +743,27 @@ struct open_shaper::private_open_shaper // {{{
         return FT_HAS_COLOR(fontKeyToHbFontInfoMapping.at(font).ftFace.get());
     }
 
+    /// @return the key already held for this face, or nullopt when opening it would load a new one.
+    ///
+    /// Lets a caller find out whether a request is a cache HIT without paying for the miss, which is
+    /// what resize_font() needs to keep a budget on faces it would otherwise mint without limit.
+    [[nodiscard]] optional<font_key> findKeyForFont(font_source const& source,
+                                                    font_size fontSize,
+                                                    font_weight fontWeight) const
+    {
+        auto const i = fontPathAndSizeToKeyMapping.find(
+            FontInfo { .path = identifierOf(source), .size = fontSize, .weight = fontWeight });
+        return i != fontPathAndSizeToKeyMapping.end() ? optional { i->second } : nullopt;
+    }
+
     optional<font_key> getOrCreateKeyForFont(font_source const& source,
                                              font_size fontSize,
                                              font_weight fontWeight)
     {
-        auto const sourceId = identifierOf(source);
-        if (auto i = fontPathAndSizeToKeyMapping.find(
-                FontInfo { .path = sourceId, .size = fontSize, .weight = fontWeight });
-            i != fontPathAndSizeToKeyMapping.end())
-            return i->second;
+        if (auto const existing = findKeyForFont(source, fontSize, fontWeight))
+            return existing;
 
+        auto const sourceId = identifierOf(source);
         if (std::any_of(blacklistedSources.begin(), blacklistedSources.end(), [&](auto const& a) {
                 return a == sourceId;
             }))
@@ -710,7 +772,15 @@ struct open_shaper::private_open_shaper // {{{
         auto ftFacePtrOpt = loadFace(source, fontSize, dpi, ft);
         if (!ftFacePtrOpt.has_value())
         {
-            blacklistedSources.emplace_back(sourceId);
+            // Blacklisting says "this file is not a font I can use", so it must not be concluded from
+            // a failure to open a file that has already opened at another size. A bitmap font has
+            // only the strikes it ships, and `OSC 66` asks for arbitrary sizes -- so one scaled write
+            // could otherwise retire the user's font for the rest of the session, including at the
+            // size it was happily rendering at, since clear_cache() does not clear this list.
+            auto const loadedAtAnotherSize = std::ranges::any_of(
+                fontPathAndSizeToKeyMapping, [&](auto const& entry) { return entry.first.path == sourceId; });
+            if (!loadedAtAnotherSize)
+                blacklistedSources.emplace_back(sourceId);
             return nullopt;
         }
 
@@ -723,7 +793,8 @@ struct open_shaper::private_open_shaper // {{{
                                      .allFallbacks = {},
                                      .size = fontSize,
                                      .ftFace = std::move(ftFacePtr),
-                                     .hbFont = std::move(hbFontPtr) };
+                                     .hbFont = std::move(hbFontPtr),
+                                     .weight = fontWeight };
 
         auto key = create_font_key();
         fontPathAndSizeToKeyMapping.emplace(
@@ -869,8 +940,7 @@ struct open_shaper::private_open_shaper // {{{
             auto const& fallbackSource = fontInfo.fallbacks[cursor.index];
             ++cursor.index;
 
-            auto const fallbackKeyOpt =
-                getOrCreateKeyForFont(fallbackSource, fontInfo.size, fontInfo.description.weight);
+            auto const fallbackKeyOpt = getOrCreateKeyForFont(fallbackSource, fontInfo.size, fontInfo.weight);
             if (!fallbackKeyOpt.has_value())
                 continue;
 
@@ -906,14 +976,22 @@ struct open_shaper::private_open_shaper // {{{
         // Keyed on the first codepoint: a run that reaches this path is overwhelmingly one script, and
         // a fontconfig charset query is far too expensive to repeat per run. Negative answers are cached
         // too -- a codepoint no font on the system covers must not re-query on every frame.
+        //
+        // A remembered answer is only USED when it was found for the face parameters in hand: the key
+        // it holds encodes a size and a weight, so one found at another size would rasterize the glyph
+        // at that size while the text around it scaled. A stale entry is re-resolved and overwritten
+        // rather than sitting alongside a second one, which is what keeps this a guard as well as a
+        // cache -- @see coverage_cache_entry.
         auto const cacheKey = codepoints.front();
-        if (auto const i = coverageCache.find(cacheKey); i != coverageCache.end())
-            return i->second;
+        if (auto const i = coverageCache.find(cacheKey); i != coverageCache.end()
+                                                         && i->second.size.pt == fontInfo.size.pt
+                                                         && i->second.weight == fontInfo.weight)
+            return i->second.resolved;
 
         auto resolved = optional<font_key> { nullopt };
         for (auto const& source: locator->resolve(gsl::span(codepoints.data(), codepoints.size())))
         {
-            resolved = getOrCreateKeyForFont(source, fontInfo.size, fontInfo.description.weight);
+            resolved = getOrCreateKeyForFont(source, fontInfo.size, fontInfo.weight);
             if (resolved.has_value())
             {
                 textShapingLog()("Resolved U+{:04X} by coverage to font key:{}.",
@@ -923,7 +1001,8 @@ struct open_shaper::private_open_shaper // {{{
             }
         }
 
-        coverageCache[cacheKey] = resolved;
+        coverageCache[cacheKey] =
+            coverage_cache_entry { .size = fontInfo.size, .weight = fontInfo.weight, .resolved = resolved };
         return resolved;
     }
 
@@ -1062,6 +1141,11 @@ void open_shaper::set_font_fallback_limit(int limit)
     _d->fontFallbackLimit = limit;
 }
 
+void open_shaper::set_resized_font_limit(size_t limit)
+{
+    _d->resizedFontLimit = limit;
+}
+
 void open_shaper::clear_cache()
 {
     locatorLog()("Clearing cache ({} keys, {} font infos).",
@@ -1076,6 +1160,9 @@ void open_shaper::clear_cache()
     // live one. Unlike locateCache, this cache is NOT description-independent: it answers with a key,
     // not a font file.
     _d->coverageCache.clear();
+
+    // The faces the budget was counting are gone with the maps, so the allowance starts over.
+    _d->resizedFontCount = 0;
 }
 
 optional<font_key> open_shaper::load_font(font_description const& description, font_size size)
@@ -1136,8 +1223,32 @@ font_key open_shaper::resize_font(font_key key, font_size size)
     // The SAME source, re-opened at the new size. Going through getOrCreateKeyForFont keeps the
     // one-key-per-(source, size, weight) invariant, so asking twice costs one FreeType face, and the
     // fallback chain the primary owns is left alone -- only the face this glyph came from is resized.
-    auto const resized = _d->getOrCreateKeyForFont(fontInfo.primary, size, fontInfo.description.weight);
-    return resized.value_or(key);
+    //
+    // The size asked for here is WIRE-DRIVEN: it is the cell size times an `OSC 66` draw factor, and
+    // that factor is `s * n/d` with all three chosen by whatever is writing to the terminal. Every
+    // distinct value mints an FT_Face and a hb_font_t that nothing ever releases -- only a font
+    // description change clears these maps -- so a remote host cycling through the factors the
+    // protocol allows can pin hundreds of megabytes of font faces. Already-loaded sizes stay free;
+    // once the budget for NEW ones is spent, this reports "not resized" by handing back the key it
+    // was given, and the caller falls back to magnifying the raster it already has.
+    auto const resized = _d->findKeyForFont(fontInfo.primary, size, fontInfo.weight);
+    if (resized.has_value())
+        return *resized;
+
+    if (_d->resizedFontCount >= _d->resizedFontLimit)
+    {
+        locatorLog()("Resized-font budget of {} exhausted; drawing at {} by magnification instead.",
+                     _d->resizedFontLimit,
+                     size);
+        return key;
+    }
+
+    auto const minted = _d->getOrCreateKeyForFont(fontInfo.primary, size, fontInfo.weight);
+    if (!minted.has_value())
+        return key;
+
+    ++_d->resizedFontCount;
+    return *minted;
 }
 
 font_metrics open_shaper::metrics(font_key key) const

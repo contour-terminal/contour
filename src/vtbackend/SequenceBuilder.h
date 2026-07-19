@@ -180,7 +180,11 @@ class SequenceBuilder
             _hookedParser.reset();
         }
     }
-    void startAPC() { _apcBuffer.clear(); }
+    void startAPC()
+    {
+        _apcBuffer.clear();
+        _apcTruncated = false;
+    }
 
     void putAPC(char ch)
     {
@@ -188,12 +192,26 @@ class SequenceBuilder
         // chunks anything large anyway (`m=1`), so a single unbounded body is never legitimate.
         if (_apcBuffer.size() < Sequence::MaxOscLength)
             _apcBuffer.push_back(ch);
+        else
+            _apcTruncated = true;
     }
 
     void dispatchAPC()
     {
-        _handler.processAPC(_apcBuffer);
+        // A body that hit the cap is DROPPED, not dispatched. Handing the front of it on as though it
+        // were whole gave the kitty graphics parser a well-formed command carrying base64 cut off
+        // mid-stream: the image decodes to garbage or fails outright, and because nothing said so the
+        // terminal answered as if the transmission had succeeded, leaving the client with no reason
+        // to retry with the chunking that would have worked.
+        if (_apcTruncated)
+            vtParserLog()("APC body exceeded {} bytes and was dropped. Chunked transmission (m=1) is "
+                          "the supported way to send a payload this large.",
+                          Sequence::MaxOscLength);
+        else
+            _handler.processAPC(_apcBuffer);
+
         _apcBuffer.clear();
+        _apcTruncated = false;
         clear();
     }
     void startPM() {}
@@ -220,6 +238,9 @@ class SequenceBuilder
 
     Sequence _sequence {};
     std::string _apcBuffer {};
+
+    /// Whether the APC body being accumulated overran MaxOscLength. @see dispatchAPC.
+    bool _apcTruncated = false;
     SequenceParameterBuilder _parameterBuilder;
     IncrementInstructionCounter _incrementInstructionCounter;
     Handler _handler;

@@ -2092,6 +2092,17 @@ void Terminal::reportInBandWindowResize()
           size.columns.value,
           pixels.height.value,
           pixels.width.value);
+
+    // A reply produced outside the parser loop has to reach the PTY itself -- the loop's own flush is
+    // what carries every other reply, and a window resize does not go through it: resizeScreen() runs
+    // on the GUI thread. Left unflushed, the report sat in the input generator until some unrelated
+    // event happened to flush it, which is precisely no use to the applications this mode exists for.
+    // They cannot receive SIGWINCH -- they are behind a socket or an ssh multiplexer -- so an
+    // application blocked on read across a resize went on drawing at the old size indefinitely.
+    // Flushing here rather than at the call site is what keeps that true for every caller; the parser
+    // path (setMode) reaches this too, where flushInput() is equally safe and already the convention
+    // for a replying sequence handler. @see Screen::reportColorPaletteUpdate.
+    flushInput();
 }
 
 void Terminal::verifyState()
@@ -4604,9 +4615,12 @@ void TraceHandler::processSequence(Sequence const& sequence)
 
 void TraceHandler::processAPC(std::string_view body)
 {
-    // Tracing steps through sequences one at a time; an APC body has no Sequence representation, so
-    // it is forwarded rather than queued -- there is nothing to single-step through.
-    _terminal->activeDisplay().processAPC(body);
+    // Queued like everything else, and for the same reason: this handler's whole job is to preserve
+    // the ORDER in which the application sent things while letting the user step through them.
+    // Forwarding an APC straight to the display let it overtake every sequence still queued ahead of
+    // it -- a kitty image placed against the cursor position a queued CUP had not moved yet, so
+    // tracing a graphics problem showed behaviour that never happens outside trace mode.
+    _pendingSequences.emplace_back(ApplicationProgramCommand { .body = std::string(body) });
 }
 
 void TraceHandler::writeText(char32_t codepoint)
@@ -4661,6 +4675,11 @@ void TraceHandler::flushOne(PendingSequence const& pendingSequence)
     {
         std::cout << std::format("\t\"{}\"   ; {} cells\n", codepoints->text, codepoints->cellCount);
         _terminal->activeDisplay().writeText(codepoints->text, codepoints->cellCount);
+    }
+    else if (auto const* apc = std::get_if<ApplicationProgramCommand>(&pendingSequence))
+    {
+        std::cout << std::format("\tAPC {:<16} ; {} bytes\n", apc->body.substr(0, 16), apc->body.size());
+        _terminal->activeDisplay().processAPC(apc->body);
     }
 }
 // }}}

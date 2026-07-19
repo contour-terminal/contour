@@ -566,29 +566,19 @@ crispy::point adjustPenForLineFlags(vtbackend::LineFlags lineFlags,
     return pen;
 }
 
-/// Applies a glyph scale adjustment on top of whatever the line flags already did.
+/// @return how many ordinary cells one cell of @p lineFlags' line occupies horizontally.
 ///
-/// The two compose: a scaled cell on a double-width line is stretched by both. The mechanism is the
-/// same one DECDHL uses -- widen the tile's target rectangle and its x offset, leaving the source
-/// texture alone -- which is what makes the Stretch strategy free at rasterization time.
-Renderable::AtlasTileAttributes adjustTileAttributesForScale(
-    GlyphScaleAdjustment adjustment, Renderable::AtlasTileAttributes const& originalAttributes)
+/// DECDWL and BOTH halves of DECDHL draw at double width. Screen happens to set DoubleWidth alongside
+/// either height flag, but this layer does not require that of its caller -- each flag is tested, so
+/// a height flag arriving on its own still widens. Every place that steps a pen across such a line,
+/// and the tile widening below, read the factor from here, so they cannot disagree about a flag.
+constexpr int lineAdvanceScale(vtbackend::LineFlags lineFlags) noexcept
 {
-    if (adjustment.isIdentity())
-        return originalAttributes;
-
-    auto const scaled = [factor = adjustment.factor](auto value) {
-        return static_cast<int>(std::lround(static_cast<double>(value) * factor));
-    };
-
-    auto attributesCopy = originalAttributes;
-    attributesCopy.metadata.targetSize.width =
-        vtbackend::Width::cast_from(scaled(unbox(attributesCopy.metadata.targetSize.width)));
-    attributesCopy.metadata.targetSize.height =
-        vtbackend::Height::cast_from(scaled(unbox(attributesCopy.metadata.targetSize.height)));
-    attributesCopy.metadata.x.value = scaled(attributesCopy.metadata.x.value);
-
-    return attributesCopy;
+    using vtbackend::LineFlag;
+    return lineFlags.test(LineFlag::DoubleWidth) || lineFlags.test(LineFlag::DoubleHeightTop)
+                   || lineFlags.test(LineFlag::DoubleHeightBottom)
+               ? 2
+               : 1;
 }
 
 Renderable::AtlasTileAttributes adjustTileAttributesForLineFlags(
@@ -599,27 +589,17 @@ Renderable::AtlasTileAttributes adjustTileAttributesForLineFlags(
 
     auto attributesCopy = originalAttributes;
 
-    auto const currentWidth = unbox(attributesCopy.metadata.targetSize.width);
+    auto const stretch = lineAdvanceScale(lineFlags);
+    attributesCopy.metadata.targetSize.width =
+        Width::cast_from(unbox(attributesCopy.metadata.targetSize.width) * stretch);
+    attributesCopy.metadata.x.value *= stretch;
 
-    if (lineFlags.test(LineFlag::DoubleHeightTop))
-    {
-        attributesCopy.metadata.targetSize.width = Width::cast_from(currentWidth * 2);
-        attributesCopy.metadata.x.value *= 2;
-        attributesCopy.metadata.normalizedLocation.height /= 2.0f;
-    }
-    else if (lineFlags.test(LineFlag::DoubleHeightBottom))
-    {
-        attributesCopy.metadata.targetSize.width = Width::cast_from(currentWidth * 2);
-        attributesCopy.metadata.x.value *= 2;
+    // Double HEIGHT additionally gives each of the two rows its own half of the texture.
+    if (lineFlags.test(LineFlag::DoubleHeightBottom))
         attributesCopy.metadata.normalizedLocation.y +=
             attributesCopy.metadata.normalizedLocation.height / 2.0f;
+    if (lineFlags.test(LineFlag::DoubleHeightTop) || lineFlags.test(LineFlag::DoubleHeightBottom))
         attributesCopy.metadata.normalizedLocation.height /= 2.0f;
-    }
-    else if (lineFlags.test(LineFlag::DoubleWidth))
-    {
-        attributesCopy.metadata.targetSize.width = Width::cast_from(currentWidth * 2);
-        attributesCopy.metadata.x.value *= 2;
-    }
 
     return attributesCopy;
 }
@@ -685,7 +665,7 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
 
     using vtbackend::LineFlag;
 
-    auto const advanceScale = lineFlags.test(LineFlag::DoubleWidth) ? 2 : 1;
+    auto const advanceScale = lineAdvanceScale(lineFlags);
     auto const cellWidth = unbox<int>(_gridMetrics.cellSize.width);
 
     // How this group's glyphs are enlarged. Hoisted out of the loop: it is a property of the group,
@@ -698,7 +678,7 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
     // hold a tile larger than one cell, and every row of the block has to be able to draw itself.
     if (!scale.isOrdinary())
     {
-        renderBlockGroup(glyphPositions, pen, color, sizing, adjustment);
+        renderBlockGroup(glyphPositions, pen, color, lineFlags, sizing, adjustment);
         return;
     }
 
@@ -910,12 +890,22 @@ std::optional<text::rasterized_glyph> TextRenderer::rasterizeAtBlockSize(text::g
                                                                          GlyphScaleAdjustment adjustment)
 {
     auto key = glyphKey;
+    auto rerasterized = false;
     if (adjustment.requiresRerasterization)
     {
         // A font_key already encodes its size, so editing glyph_key::size alone would change nothing
         // FreeType can see. Ask the shaper for the SAME face at the larger size; that re-hints it.
         key.size.pt *= adjustment.factor;
         key.font = _textShaper.resize_font(glyphKey.font, key.size);
+
+        // The shaper reports "not resized" by handing back the key it was given -- it refuses once
+        // its budget for wire-driven sizes is spent. Taking that as success would rasterize at the
+        // ORIGINAL size while every downstream placement expects the scaled one, drawing a glyph far
+        // too small into its block. Fall back to magnifying instead, which is what the Stretch
+        // strategy below already does.
+        rerasterized = key.font != glyphKey.font;
+        if (!rerasterized)
+            key.size = glyphKey.size;
     }
 
     auto glyph =
@@ -928,7 +918,7 @@ std::optional<text::rasterized_glyph> TextRenderer::rasterizeAtBlockSize(text::g
                             * unbox<size_t>(glyph->bitmapSize.height)))
         return std::nullopt;
 
-    if (!adjustment.requiresRerasterization && adjustment.factor != 1.0)
+    if (!rerasterized && adjustment.factor != 1.0)
     {
         // Stretch: magnify the ordinary raster to the drawn size. Its bearings scale with it, so the
         // placement arithmetic downstream needs no knowledge of which strategy produced this.
@@ -958,6 +948,7 @@ std::optional<text::rasterized_glyph> TextRenderer::rasterizeAtBlockSize(text::g
 void TextRenderer::renderBlockGroup(text::shape_result const& glyphPositions,
                                     crispy::point pen,
                                     vtbackend::RGBColor color,
+                                    vtbackend::LineFlags lineFlags,
                                     vtbackend::GlyphSizing const& sizing,
                                     GlyphScaleAdjustment adjustment)
 {
@@ -993,6 +984,16 @@ void TextRenderer::renderBlockGroup(text::shape_result const& glyphPositions,
         return canvas.has_value() ? &canvas.value() : nullptr;
     };
 
+    // A block on a DECDWL/DECDHL line is stretched by the LINE as well as by its own scale: the two
+    // compose, exactly as they do for ordinary glyphs. Skipping the line's doubling here drew the
+    // block at single width while every glyph beside it doubled -- so it covered only the left half
+    // of the cells the doubled grid gives it and ran into its neighbour -- and on a double-height
+    // line it drew the full-height raster on both rows instead of each row taking its own half.
+    //
+    // @see lineAdvanceScale, which the tile widening below reads from too, so the stride a block
+    // steps by cannot drift from the width its tiles are given.
+    auto const advanceScale = lineAdvanceScale(lineFlags);
+
     for (auto const column: std::views::iota(0u, columns))
     {
         auto const key = blockHash * glyphTileSubKey(column, sizing.band);
@@ -1002,10 +1003,13 @@ void TextRenderer::renderBlockGroup(text::shape_result const& glyphPositions,
             });
 
         if (attributes)
-            renderTile(atlas::RenderTile::X { pen.x + (static_cast<int>(column) * cellWidth) },
+        {
+            auto const attributesCopy = adjustTileAttributesForLineFlags(lineFlags, *attributes);
+            renderTile(atlas::RenderTile::X { pen.x + (static_cast<int>(column) * cellWidth * advanceScale) },
                        atlas::RenderTile::Y { rowTop },
                        color,
-                       *attributes);
+                       attributesCopy);
+        }
     }
 }
 

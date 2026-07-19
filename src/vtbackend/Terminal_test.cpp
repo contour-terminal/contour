@@ -4322,3 +4322,34 @@ TEST_CASE("Terminal.passive mouse tracking declines the event so the UI may act 
             mc.terminal.sendMousePressEvent(none, vtbackend::MouseButton::WheelRight, pos, false).value);
     }
 }
+
+TEST_CASE("TraceHandler.an_APC_body_waits_its_turn_like_every_other_sequence", "[terminal][trace]")
+{
+    // TraceHandler is a BUFFERING decorator: its whole job is to hold what the application sent, in
+    // order, so the user can step through it. Forwarding an APC straight to the display let it
+    // overtake everything still queued ahead of it -- so a kitty image was placed against the cursor
+    // position that a queued CUP had not moved yet, and tracing a graphics problem showed behaviour
+    // that never occurs outside trace mode.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) } };
+    auto trace = vtbackend::TraceHandler { mock.terminal };
+
+    auto cup = vtbackend::Sequence {};
+    cup.setCategory(vtbackend::FunctionCategory::CSI);
+    cup.setFinalChar('H');
+    trace.processSequence(cup);
+
+    trace.processAPC("Ga=T,f=32,s=2,v=2;AAAA"sv);
+
+    REQUIRE(trace.pendingSequences().size() == 2);
+    CHECK(std::holds_alternative<vtbackend::Sequence>(trace.pendingSequences()[0]));
+
+    // Queued, and BEHIND the sequence that preceded it -- not executed on arrival.
+    auto const* apc =
+        std::get_if<vtbackend::TraceHandler::ApplicationProgramCommand>(&trace.pendingSequences()[1]);
+    REQUIRE(apc != nullptr);
+    CHECK(apc->body == "Ga=T,f=32,s=2,v=2;AAAA");
+
+    // The body is OWNED, not viewed: it outlives the parser buffer it arrived in, because nothing
+    // runs it until the user steps the trace forward.
+    CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment() == nullptr);
+}

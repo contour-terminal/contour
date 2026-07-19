@@ -146,6 +146,7 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     void renderBlockGroup(text::shape_result const& glyphPositions,
                           crispy::point pen,
                           vtbackend::RGBColor color,
+                          vtbackend::LineFlags lineFlags,
                           vtbackend::GlyphSizing const& sizing,
                           GlyphScaleAdjustment adjustment);
 

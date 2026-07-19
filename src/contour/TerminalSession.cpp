@@ -751,12 +751,14 @@ void TerminalSession::setPointerShape(std::string_view cssName)
         return std::nullopt;
     }();
 
-    if (!shape || !_display)
+    if (!shape)
         return;
 
     // Remember it before the display gets a look in: without a display attached there is nothing to
     // post to, and dropping the shape there is what lost an `OSC 22` sent to a backgrounded pane.
-    // attachDisplay() applies whatever is remembered here once a display arrives.
+    // attachDisplay() applies whatever is remembered here once a display arrives. Returning early on
+    // a null display -- as the reset path above is careful not to do -- would drop the shape in
+    // precisely the case this remembering exists to serve.
     _applicationPointerShape = *shape;
 
     // The event arrives on the parser thread; the cursor belongs to the GUI thread.

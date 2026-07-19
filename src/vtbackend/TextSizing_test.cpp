@@ -11,6 +11,7 @@
 #include <format>
 #include <ranges>
 #include <string_view>
+#include <vector>
 
 using namespace std::string_view_literals;
 using namespace vtbackend;
@@ -77,6 +78,27 @@ TEST_CASE("TextSizing.parse.ignores_unknown_keys", "[textsizing]")
     CHECK(request->scale == 2);
 }
 
+TEST_CASE("TextSizing.parse.an_unknown_key_may_carry_a_non_numeric_value", "[textsizing]")
+{
+    // The point of ignoring unknown keys is forward compatibility, and a later revision of the
+    // protocol is free to give its new key a value that is not a number. Parsing the value before
+    // deciding whether the key is even known throws the whole request away over a field this
+    // terminal was never going to read -- so `Hello` never reaches the screen at all, where kitty
+    // renders it scaled and ignores the key it does not recognise.
+    auto const request = parseRequest("s=2:name=title;Hello"sv);
+    REQUIRE(request.has_value());
+    CHECK(request->scale == 2);
+    CHECK(request->text == "Hello");
+
+    // The same holds when the unknown key is the only one present, and when its value is empty.
+    CHECK(parseRequest("name=title;Hello"sv).has_value());
+    CHECK(parseRequest("qq=;Hello"sv).has_value());
+
+    // A KNOWN key with a non-numeric value is still malformed -- the allowance is for keys this
+    // terminal does not implement, not for values it does.
+    CHECK(parseRequest("s=big;Hello"sv).error() == Error::MalformedKey);
+}
+
 TEST_CASE("TextSizing.columnsFor", "[textsizing]")
 {
     // With an explicit width the application states the size, so the text's own width is irrelevant.
@@ -97,6 +119,85 @@ TEST_CASE("TextSizing.columnsFor", "[textsizing]")
 // }}}
 // {{{ grid effect
 
+namespace
+{
+/// @return Every cell on the page carrying a continuation flag that no block accounts for.
+///
+/// An ORPHAN is the one state the multicell design forbids: a cell still flagged as part of a block
+/// whose head no longer describes it. multicellBlockAt() walks up and left to the head and answers
+/// nothing once that head has become an ordinary cell, so an orphan can never be resolved by the
+/// renderer -- it draws as nothing -- nor cleaned up by any later erase, which finds no block to
+/// destroy. It also makes extractSelectionText() skip the cell, and a row of nothing but orphans is
+/// dropped from copied text entirely, taking its line break with it.
+///
+/// Ordinary wide characters are NOT orphans: their head still reports width 2, so the walk resolves.
+template <typename ScreenType>
+[[nodiscard]] std::vector<CellLocation> orphanedContinuations(ScreenType const& screen, PageSize pageSize)
+{
+    auto result = std::vector<CellLocation> {};
+    for (auto const line: std::views::iota(0, unbox<int>(pageSize.lines)))
+        for (auto const column: std::views::iota(0, unbox<int>(pageSize.columns)))
+        {
+            auto const location = CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) };
+            auto const& cell = screen.at(location.line, location.column);
+            auto const continuesABlock = cell.isFlagEnabled(CellFlag::MulticellContinuation)
+                                         || cell.isFlagEnabled(CellFlag::WideCharContinuation);
+            if (continuesABlock && !screen.multicellBlockAt(location))
+                result.push_back(location);
+        }
+    return result;
+}
+} // namespace
+
+TEST_CASE("TextSizing.plain_ascii_over_a_block_leaves_no_orphan", "[textsizing]")
+{
+    // Writing over any part of a block must destroy the WHOLE block. The bulk ASCII fast path in
+    // Screen::writeText() carries no such logic -- it clears only the cells it writes -- so the
+    // invariant depends on that path never running over a line that carries a block. It cannot:
+    // writing a block inflates every row it claims (useCellAt), and the bulk path is gated on
+    // Terminal::maxBulkTextSequenceWidth(), which returns 0 for a non-trivial line. This test pins
+    // that reasoning to observable behaviour, so that widening the fast path later cannot quietly
+    // reintroduce orphans.
+    auto const pageSize = PageSize { LineCount(3), ColumnCount(20) };
+    auto mock = MockTerm<vtpty::MockPty> { pageSize };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    // A 4-column, 2-row block at the origin: head at (0,0), continuations across (1,0)..(1,3).
+    mock.writeToScreen("\033]66;s=2:w=2;W\a"sv);
+    REQUIRE(screen.at(LineOffset(0), ColumnOffset(0)).scale() == 2);
+    REQUIRE(screen.at(LineOffset(1), ColumnOffset(0)).isFlagEnabled(CellFlag::MulticellContinuation));
+
+    // Pure ASCII, insert mode off, full margins, USASCII -- everything the fast path asks for.
+    mock.writeToScreen("\033[1;1H"sv);
+    mock.writeToScreen("hello"sv);
+
+    CHECK(orphanedContinuations(screen, pageSize).empty());
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).codepoints() == U"h");
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).scale() == 1);
+    CHECK_FALSE(screen.at(LineOffset(1), ColumnOffset(0)).isFlagEnabled(CellFlag::MulticellContinuation));
+}
+
+TEST_CASE("TextSizing.plain_ascii_on_a_blocks_continuation_row_leaves_no_orphan", "[textsizing]")
+{
+    // The mirror image: writing into the rows the block reaches DOWN into, rather than over its head.
+    // Clearing the continuations while the head above kept its scale would leave the block glyph
+    // drawn across the freshly written text.
+    auto const pageSize = PageSize { LineCount(3), ColumnCount(20) };
+    auto mock = MockTerm<vtpty::MockPty> { pageSize };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033]66;s=2:w=2;W\a"sv);
+    REQUIRE(screen.at(LineOffset(1), ColumnOffset(0)).isFlagEnabled(CellFlag::MulticellContinuation));
+
+    mock.writeToScreen("\033[2;1H"sv); // second row: nothing but this block's continuations
+    mock.writeToScreen("hello"sv);
+
+    CHECK(orphanedContinuations(screen, pageSize).empty());
+    CHECK(screen.at(LineOffset(1), ColumnOffset(0)).codepoints() == U"h");
+    // The head is gone too -- half a glyph is not a thing that can be drawn.
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).scale() == 1);
+}
+
 TEST_CASE("TextSizing.width_advances_scale_times_width", "[textsizing]")
 {
     // The probe blessed/ucs-detect uses to decide the width mechanism is supported: one space with
@@ -113,6 +214,156 @@ TEST_CASE("TextSizing.width_advances_scale_times_width", "[textsizing]")
 
     // The second column belongs to the block, not to the next character.
     CHECK(screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlag::WideCharContinuation));
+}
+
+TEST_CASE("TextSizing.a_run_too_long_to_store_is_refused_not_shortened", "[textsizing]")
+{
+    // With an explicit `w` the whole run becomes ONE cell block, and it is stored as that cell's
+    // grapheme cluster -- so it cannot exceed MaxGraphemeClusterSize (16) codepoints. It used to be
+    // written anyway: appendCodepointToCluster() stops at the cap and returns a value the caller
+    // discarded, so the tail vanished while the block went on claiming its full width, as though it
+    // held the whole text. Different text from the text asked for, arrived at in silence.
+    auto const pageSize = PageSize { LineCount(3), ColumnCount(40) };
+    auto mock = MockTerm<vtpty::MockPty> { pageSize };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    // `w` is capped at MaxWidth (7) by the parser, so it is the TEXT length that must do the
+    // refusing here -- a width out of range would reject the request for an unrelated reason and
+    // prove nothing.
+    mock.writeToScreen("\033]66;w=7;The quick brown fox\a"sv); // 19 codepoints
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).codepoints().empty());
+    CHECK(screen.cursor().position.column == ColumnOffset(0));
+
+    // Exactly at the cap still goes through: the boundary is inclusive.
+    mock.writeToScreen("\033]66;w=7;0123456789abcdef\a"sv); // 16 codepoints
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).codepoints().size() == 16);
+    CHECK(screen.cursor().position.column == ColumnOffset(7));
+
+    // Without an explicit `w` the run is segmented into grapheme clusters first, so a long run is
+    // laid out as many small blocks and the cap is never in play.
+    mock.writeToScreen("\033[2;1H"sv);
+    mock.writeToScreen("\033]66;s=2;The quick brown fox\a"sv);
+    CHECK(screen.at(LineOffset(1), ColumnOffset(0)).codepoints() == U"T");
+}
+
+TEST_CASE("TextSizing.ICH_destroys_the_blocks_it_would_shift", "[textsizing]")
+{
+    // insertChars() moves one line's cells sideways and knows nothing about MulticellContinuation,
+    // so shifting a block carries its head across while the rows it owns stay put. The head then
+    // describes a body that is no longer beneath it, and the cells left behind resolve to nothing:
+    // the renderer draws them blank forever and the selection extractor drops their row's line break.
+    auto const pageSize = PageSize { LineCount(3), ColumnCount(20) };
+    auto mock = MockTerm<vtpty::MockPty> { pageSize };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033]66;s=2;A\a"sv); // 2x2 block at the origin
+    REQUIRE(screen.at(LineOffset(0), ColumnOffset(0)).scale() == 2);
+    REQUIRE(screen.at(LineOffset(1), ColumnOffset(0)).isFlagEnabled(CellFlag::MulticellContinuation));
+
+    mock.writeToScreen("\033[1;1H"sv);
+    mock.writeToScreen("\033[1@"sv); // ICH: shift the line one column right
+
+    CHECK(orphanedContinuations(screen, pageSize).empty());
+    // The block is gone rather than smeared: no cell still claims to be scaled.
+    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).scale() == 1);
+}
+
+TEST_CASE("TextSizing.DCH_destroys_the_blocks_it_would_shift", "[textsizing]")
+{
+    // The mirror of ICH: deleteChars() pulls the line left through the block.
+    auto const pageSize = PageSize { LineCount(3), ColumnCount(20) };
+    auto mock = MockTerm<vtpty::MockPty> { pageSize };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033]66;s=2;A\a"sv);
+    REQUIRE(screen.at(LineOffset(1), ColumnOffset(0)).isFlagEnabled(CellFlag::MulticellContinuation));
+
+    mock.writeToScreen("\033[1;1H"sv);
+    mock.writeToScreen("\033[1P"sv); // DCH
+
+    CHECK(orphanedContinuations(screen, pageSize).empty());
+}
+
+TEST_CASE("TextSizing.ICH_to_the_right_of_a_block_still_destroys_it", "[textsizing]")
+{
+    // The shift runs from the cursor to the right margin, so a block anywhere in that span moves --
+    // not only one sitting under the cursor itself.
+    auto const pageSize = PageSize { LineCount(3), ColumnCount(20) };
+    auto mock = MockTerm<vtpty::MockPty> { pageSize };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[1;5H"sv);
+    mock.writeToScreen("\033]66;s=2;A\a"sv); // block at columns 4..5
+    REQUIRE(screen.at(LineOffset(1), ColumnOffset(4)).isFlagEnabled(CellFlag::MulticellContinuation));
+
+    mock.writeToScreen("\033[1;1H"sv);
+    mock.writeToScreen("\033[2@"sv);
+
+    CHECK(orphanedContinuations(screen, pageSize).empty());
+}
+
+TEST_CASE("TextSizing.DECSERA_over_a_block_erases_it_whole", "[textsizing]")
+{
+    // DECSERA erases characters while deliberately preserving rendition -- but a cell's scale and
+    // continuation flags are layout, not rendition. Preserved, they let the renderer resolve the
+    // erased cells back to the head and re-emit the very glyph the application asked to erase, and
+    // they leave continuation cells whose head is gone.
+    auto const pageSize = PageSize { LineCount(4), ColumnCount(20) };
+    auto mock = MockTerm<vtpty::MockPty> { pageSize };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033]66;s=3;X\a"sv); // 3x3 block at the origin
+    REQUIRE(screen.at(LineOffset(0), ColumnOffset(0)).scale() == 3);
+    REQUIRE(screen.at(LineOffset(2), ColumnOffset(0)).isFlagEnabled(CellFlag::MulticellContinuation));
+
+    // Erase only the block's lower rows (rows 2..3, columns 1..1 in one-based DECSERA coordinates).
+    mock.writeToScreen("\033[2;1;3;1${"sv);
+
+    CHECK(orphanedContinuations(screen, pageSize).empty());
+    // The head went with them -- half a glyph is not a thing that can be drawn.
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).scale() == 1);
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).codepoints().empty());
+}
+
+TEST_CASE("TextSizing.DECSERA_over_a_wide_char_leaves_no_continuation_behind", "[textsizing]")
+{
+    // The same hazard without OSC 66 at all: writeTextOnly() narrows the head to one column but
+    // leaves the WideCharContinuation beside it, which then has no head to resolve against.
+    auto const pageSize = PageSize { LineCount(2), ColumnCount(10) };
+    auto mock = MockTerm<vtpty::MockPty> { pageSize };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen(U"中");
+    REQUIRE(screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlag::WideCharContinuation));
+
+    mock.writeToScreen("\033[1;1;1;1${"sv); // erase just the head cell
+
+    CHECK(orphanedContinuations(screen, pageSize).empty());
+}
+
+TEST_CASE("TextSizing.a_block_past_the_right_margin_is_still_erased_whole", "[textsizing]")
+{
+    // eraseMulticellBlockAt() bounds its erase by the BLOCK's extent; bounding it by the cursor's
+    // margins instead left every column past the margin flagged and scaled while the head that
+    // explained them was gone -- the cleanup creating the very orphans it exists to prevent.
+    auto const pageSize = PageSize { LineCount(3), ColumnCount(20) };
+    auto mock = MockTerm<vtpty::MockPty> { pageSize };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    // A 6-column, 2-row block at columns 10..15.
+    mock.writeToScreen("\033[1;11H"sv);
+    mock.writeToScreen("\033]66;s=2:w=3;A\a"sv);
+    REQUIRE(screen.at(LineOffset(0), ColumnOffset(10)).width() == 6);
+    REQUIRE(screen.at(LineOffset(1), ColumnOffset(15)).isFlagEnabled(CellFlag::MulticellContinuation));
+
+    // Narrow the writable band to columns 5..12, so the block now reaches past the right margin,
+    // then write into it.
+    mock.writeToScreen("\033[?69h"sv);  // DECLRMM: enable left/right margins
+    mock.writeToScreen("\033[6;13s"sv); // DECSLRM: columns 5..12 (zero-based)
+    mock.writeToScreen("\033[1;12H"sv);
+    mock.writeToScreen("X"sv);
+
+    CHECK(orphanedContinuations(screen, pageSize).empty());
 }
 
 TEST_CASE("TextSizing.scale_advances_and_records_the_scale", "[textsizing]")
@@ -709,16 +960,7 @@ TEST_CASE("TextSizing.insert_mode_does_not_orphan_a_neighbouring_block", "[texts
     mock.writeToScreen("\033]66;s=2;X\a"sv);
 
     // Whatever happened to B, no cell may be left claiming a head that is not there.
-    for (auto const column: std::views::iota(0, 12))
-    {
-        INFO("column " << column);
-        auto const cell = screen.at(LineOffset(1), ColumnOffset(column));
-        if (cell.isFlagEnabled(CellFlag::MulticellContinuation))
-            CHECK(
-                screen
-                    .multicellBlockAt(CellLocation { .line = LineOffset(1), .column = ColumnOffset(column) })
-                    .has_value());
-    }
+    CHECK(orphanedContinuations(screen, PageSize { LineCount(3), ColumnCount(12) }).empty());
 }
 
 TEST_CASE("TextSizing.a_purely_fractional_request_leaves_the_line_non_trivial", "[textsizing]")

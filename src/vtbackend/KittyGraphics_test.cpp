@@ -389,3 +389,116 @@ TEST_CASE("ITerm2.unknown_OSC_1337_verbs_are_ignored", "[iterm2]")
     mock.writeToScreen("\033]1337;SetBadgeFormat=eA==\a"sv);
     CHECK(mock.terminal.peekInput().empty());
 }
+
+TEST_CASE("KittyGraphics.a_row_count_above_INT_MAX_does_not_wedge_the_terminal", "[kitty]")
+{
+    // `r=`/`c=` are uint32_t on the wire but the counts they feed are signed, so anything above
+    // INT_MAX narrows to a negative extent. A negative extent puts GridSize::end() before begin(),
+    // and the placement loop counts upwards: it never terminates, and every iteration writes further
+    // past the grid. One escape sequence from any process holding the tty is enough. Reaching the
+    // assertions below at all is the substance of this test -- before the clamp it never returned.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    auto const& screen = mock.terminal.primaryScreen();
+    mock.terminal.setCellPixelSize(ImageSize { Width(2), Height(2) });
+
+    auto pixels = std::string {};
+    for (int i = 0; i < 4; ++i)
+        pixels += "\xFF\x00\x00\xFF"sv;
+    auto const encoded = crispy::base64::encode(pixels);
+
+    mock.writeToScreen(std::format("\033_Ga=T,f=32,s=2,v=2,i=1,c=1,r=3000000000;{}\033\\", encoded));
+
+    // Clamped to the page, so the image is placed rather than dropped -- and only within the page.
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).imageFragment());
+    CHECK(mock.terminal.peekInput().find("EINVAL") == std::string_view::npos);
+}
+
+TEST_CASE("KittyGraphics.a_column_count_above_INT_MAX_does_not_wedge_the_terminal", "[kitty]")
+{
+    // The column axis narrows the same way, and additionally drives GridSize::iterator's makeOffset(),
+    // which divides by the column count.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    auto const& screen = mock.terminal.primaryScreen();
+    mock.terminal.setCellPixelSize(ImageSize { Width(2), Height(2) });
+
+    auto pixels = std::string {};
+    for (int i = 0; i < 4; ++i)
+        pixels += "\x00\x00\xFF\xFF"sv;
+    auto const encoded = crispy::base64::encode(pixels);
+
+    mock.writeToScreen(std::format("\033_Ga=T,f=32,s=2,v=2,i=1,c=4000000000,r=1;{}\033\\", encoded));
+
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).imageFragment());
+}
+
+TEST_CASE("KittyGraphics.an_oversized_but_positive_cell_count_is_clamped_to_the_page", "[kitty]")
+{
+    // The ordinary in-range case of the same clamp: a request larger than the page places over the
+    // page and stops there, rather than being refused outright.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    auto const& screen = mock.terminal.primaryScreen();
+    mock.terminal.setCellPixelSize(ImageSize { Width(2), Height(2) });
+
+    auto pixels = std::string {};
+    for (int i = 0; i < 4; ++i)
+        pixels += "\x00\xFF\x00\xFF"sv;
+    auto const encoded = crispy::base64::encode(pixels);
+
+    mock.writeToScreen(std::format("\033_Ga=T,f=32,s=2,v=2,i=1,c=99,r=99;{}\033\\", encoded));
+
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).imageFragment());
+    CHECK(screen.at(LineOffset(3), ColumnOffset(7)).imageFragment());
+}
+
+TEST_CASE("KittyGraphics.an_APC_body_past_the_cap_is_dropped_not_dispatched_truncated", "[kitty]")
+{
+    // An APC body is bounded, as OSC is, because it is attacker-controlled. What the bound must NOT
+    // do is hand the front of an over-long body on as though it were whole: the kitty parser then
+    // sees a well-formed command carrying base64 cut off mid-stream, so the image decodes to garbage
+    // or not at all -- and because the truncation was silent, the terminal answered as if the
+    // transmission had succeeded, leaving the client no reason to retry with chunking.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    auto const& screen = mock.terminal.primaryScreen();
+    mock.terminal.setCellPixelSize(ImageSize { Width(2), Height(2) });
+
+    // 100x100 RGBA is 40000 bytes, whose base64 is 53336 -- past the 50 KiB cap.
+    auto pixels = std::string(100uz * 100uz * 4uz, '\xFF');
+    auto const encoded = crispy::base64::encode(pixels);
+    REQUIRE(encoded.size() > 1024 * 50);
+
+    mock.writeToScreen(std::format("\033_Ga=T,f=32,s=100,v=100,i=7;{}\033\\", encoded));
+
+    // Nothing was placed, and nothing claimed success.
+    CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(0)).imageFragment());
+    CHECK(mock.terminal.peekInput().find("OK") == std::string_view::npos);
+}
+
+TEST_CASE("KittyGraphics.a_chunked_transmission_of_the_same_size_still_works", "[kitty]")
+{
+    // The counterpart to the cap: chunking (m=1) is the supported way to send a payload this large,
+    // and each chunk stays well under the bound. Without this, the cap above would read as "images
+    // over 50 KiB are unsupported" rather than "send them the way the protocol says to".
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    auto const& screen = mock.terminal.primaryScreen();
+    mock.terminal.setCellPixelSize(ImageSize { Width(2), Height(2) });
+
+    auto pixels = std::string(100uz * 100uz * 4uz, '\xFF');
+    auto const encoded = crispy::base64::encode(pixels);
+
+    auto constexpr ChunkSize = size_t { 4096 };
+    auto first = true;
+    for (size_t offset = 0; offset < encoded.size(); offset += ChunkSize)
+    {
+        auto const chunk = encoded.substr(offset, ChunkSize);
+        auto const more = offset + ChunkSize < encoded.size() ? 1 : 0;
+        if (first)
+        {
+            mock.writeToScreen(std::format("\033_Ga=T,f=32,s=100,v=100,i=8,m={};{}\033\\", more, chunk));
+            first = false;
+        }
+        else
+            mock.writeToScreen(std::format("\033_Gm={};{}\033\\", more, chunk));
+    }
+
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).imageFragment());
+}

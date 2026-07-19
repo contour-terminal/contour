@@ -459,6 +459,69 @@ TEST_CASE("AppendChar.VS15_is_inert_without_a_defined_variation_sequence", "[scr
     CHECK(c0.width() == 2);
 }
 
+TEST_CASE("AppendChar.a_wide_char_at_the_second_to_last_column_claims_the_last_one", "[screen]")
+{
+    // The room a character has is its own column PLUS the writable columns to its right. Counting
+    // only the ones strictly to the right makes a two-column character that exactly fills the
+    // remaining space look one column too wide: the continuation cell is never written, so the
+    // previous occupant of the last column survives underneath the wide glyph and is copied out
+    // with it. Any full-screen application repainting a line that ends in CJK hits this.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("AAAAAAAAAA"sv); // fill every column
+    mock.writeToScreen("\033[1;9H"sv);  // cursor to column offset 8, the second-to-last
+    mock.writeToScreen(U"中");          // a two-column CJK character
+
+    auto const& head = screen.at(LineOffset(0), ColumnOffset(8));
+    auto const& tail = screen.at(LineOffset(0), ColumnOffset(9));
+    CHECK(head.width() == 2);
+    CHECK(head.codepoints() == U"中");
+
+    // The stale `A` must be gone, and the column must be marked as belonging to the character.
+    CHECK(tail.isFlagEnabled(CellFlag::WideCharContinuation));
+    CHECK(tail.codepoints().empty());
+
+    // The character filled the line exactly, so the cursor stays put with a wrap pending rather
+    // than stepping outside the page.
+    CHECK(*screen.logicalCursorPosition().column == 8);
+}
+
+TEST_CASE("AppendChar.overwriting_a_wide_char_at_the_second_to_last_column_clears_its_tail", "[screen]")
+{
+    // The other half of the same arithmetic: the count also bounds the clearing of the cell being
+    // REPLACED, so a narrow character written over a wide one at that column used to leave the old
+    // right half -- a WideCharContinuation with no head -- behind at the last column.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[1;9H"sv);
+    mock.writeToScreen(U"中");
+    REQUIRE(screen.at(LineOffset(0), ColumnOffset(9)).isFlagEnabled(CellFlag::WideCharContinuation));
+
+    mock.writeToScreen("\033[1;9H"sv);
+    mock.writeToScreen("x"sv);
+
+    CHECK(screen.at(LineOffset(0), ColumnOffset(8)).codepoints() == U"x");
+    CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(9)).isFlagEnabled(CellFlag::WideCharContinuation));
+}
+
+TEST_CASE("AppendChar.a_wide_char_still_wraps_when_only_one_column_is_left", "[screen]")
+{
+    // The boundary the fix must NOT move: at the very last column a two-column character has no
+    // room at all, and the deferred wrap still has to fire.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033[1;10H"sv); // cursor to the last column
+    mock.writeToScreen("a"sv);          // narrow write there leaves the cursor put, wrap pending
+    CHECK(*screen.logicalCursorPosition().column == 9);
+
+    // The next character lands on the following line, not past the page edge.
+    mock.writeToScreen("b"sv);
+    CHECK(screen.at(LineOffset(1), ColumnOffset(0)).codepoints() == U"b");
+}
+
 TEST_CASE("AppendChar.emoji_VS16_copyright_sign", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
@@ -3993,24 +4056,31 @@ TEST_CASE("InBandWindowResize", "[screen]")
     auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
     mock.terminal.setCellPixelSize(ImageSize { Width(9), Height(18) });
 
+    // The report is asserted where it actually has to ARRIVE -- the PTY -- rather than in the input
+    // generator it passes through. The whole point of the mode is an application that cannot receive
+    // SIGWINCH, so it is blocked on a read: a report still sitting in the generator has not been
+    // delivered, and nothing else is going to happen to flush it. @see reportInBandWindowResize.
     SECTION("reports once on being enabled")
     {
         mock.writeToScreen(std::format("\033[?{}h", toDECModeNum(DECMode::InBandWindowResize)));
         // rows, cols, then pixel height and width -- the opposite order to XTWINOPS.
-        CHECK(mock.terminal.peekInput() == "\033[48;10;20;180;180t");
+        CHECK(mock.replyData() == "\033[48;10;20;180;180t");
     }
 
     SECTION("reports again on every resize")
     {
         mock.writeToScreen(std::format("\033[?{}h", toDECModeNum(DECMode::InBandWindowResize)));
         mock.terminal.resizeScreen(PageSize { LineCount(24), ColumnCount(80) });
-        // Both reports are still queued: the one from enabling, then the one from the resize.
-        CHECK(mock.terminal.peekInput() == "\033[48;10;20;180;180t\033[48;24;80;432;720t");
+        // Both reports reached the PTY: the one from enabling, then the one from the resize. The
+        // second arrives from the GUI thread, outside the parser loop that flushes every other reply.
+        CHECK(mock.replyData() == "\033[48;10;20;180;180t\033[48;24;80;432;720t");
+        CHECK(mock.terminal.peekInput().empty()); // nothing left queued behind it
     }
 
     SECTION("stays silent while the mode is reset")
     {
         mock.terminal.resizeScreen(PageSize { LineCount(24), ColumnCount(80) });
+        CHECK(mock.replyData().empty());
         CHECK(mock.terminal.peekInput().empty());
     }
 

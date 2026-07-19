@@ -390,6 +390,22 @@ namespace // {{{ helper
     }
 
     /// Common parameters shared by GIP render and oneshot operations.
+    /// Clamps an application-supplied cell count to what the page can actually hold.
+    ///
+    /// Every image protocol lets the application state the display size in cells, and every one of them
+    /// takes that number off the wire as an unsigned. The boxed counts are signed, so a value above
+    /// INT_MAX narrows to a negative one -- and a negative extent makes `GridSize::end()` smaller than
+    /// `begin()`, which the iterator can never reach. An image can never occupy more than the page, so
+    /// that is the bound. Zero keeps its protocol meaning of "derive this axis from the image".
+    ///
+    /// @param requested the cell count the application asked for.
+    /// @param limit the page's extent along the same axis.
+    /// @return @p requested, never above @p limit.
+    template <typename Boxed>
+    [[nodiscard]] constexpr unsigned clampToPage(unsigned requested, Boxed limit) noexcept
+    {
+        return std::min(requested, static_cast<unsigned>(unbox(limit)));
+    }
     struct GipRenderParams
     {
         LineCount screenRows {};
@@ -404,11 +420,17 @@ namespace // {{{ helper
         bool requestStatus {};
     };
 
-    GipRenderParams parseGipRenderParams(Message const& message)
+    /// @param pageSize the page the image will be placed on, bounding the cell counts it may ask for.
+    GipRenderParams parseGipRenderParams(Message const& message, PageSize pageSize)
     {
         return GipRenderParams {
-            .screenRows = LineCount::cast_from(toNumber(message.header("r")).value_or(0)),
-            .screenCols = ColumnCount::cast_from(toNumber(message.header("c")).value_or(0)),
+            // `r`/`c` are wire-supplied cell counts and reach renderImage with `l=`'s autoScroll, whose
+            // remainder loop performs one linefeed per row it could not draw. Bounded here, where the
+            // untrusted unsigned becomes a boxed count, for the reason clampToPage() documents.
+            .screenRows =
+                LineCount::cast_from(clampToPage(toNumber(message.header("r")).value_or(0), pageSize.lines)),
+            .screenCols = ColumnCount::cast_from(
+                clampToPage(toNumber(message.header("c")).value_or(0), pageSize.columns)),
             .imageWidth = Width::cast_from(toNumber(message.header("w")).value_or(0)),
             .imageHeight = Height::cast_from(toNumber(message.header("h")).value_or(0)),
             .alignmentPolicy = toImageAlignmentPolicy(message.header("a"), ImageAlignment::MiddleCenter)
@@ -421,6 +443,7 @@ namespace // {{{ helper
             .requestStatus = message.header("s") != nullptr,
         };
     }
+
 } // namespace
 
 // }}}
@@ -881,20 +904,21 @@ void Screen::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
     // those cells up afterwards -- multicellBlockAt walks up to an ordinary cell and answers nothing
     // -- so they stayed as orphans the renderer could not resolve and the selection extractor dropped
     // whole rows over.
-    if (cell.isFlagEnabled(CellFlag::MulticellContinuation) || cell.scale() > 1)
+    // Writing into any part of a multi-column cell destroys the WHOLE cell, not just the column being
+    // written -- half a glyph is not a thing that can be drawn. That covers writing into a horizontal
+    // continuation, into a row a scaled block reaches down into, and over a block's head, which is
+    // the easy one to miss: overwriting the head is not writing into a continuation, so the rows
+    // below kept their MulticellContinuation flag while the head explaining them was gone, and
+    // nothing could clean them up afterwards.
+    //
+    // This used to step back exactly ONE column, which is correct only because a wide character is
+    // exactly two columns. A text-sizing block (OSC 66) can be up to 49, and clearing its second
+    // column while leaving the head and the rest behind leaves a corrupt block. eraseMulticellBlockAt
+    // walks back to the head and clears the entire run, as kitty's nuke_multicell_char_at() does, and
+    // answers nothing for a cell that stands alone -- so it needs no guard of its own beyond the
+    // cheap screen, which restates its precondition rather than narrowing it.
+    if (cellCouldBelongToMulticell(cell))
         eraseMulticellBlockAt(_cursor.position);
-
-    if (cell.isFlagEnabled(CellFlag::WideCharContinuation) && _cursor.position.column > ColumnOffset(0))
-    {
-        // Writing into the middle of a multi-column cell destroys the whole cell, not just the
-        // column being written -- half a glyph is not a thing that can be drawn.
-        //
-        // This used to step back exactly ONE column, which is correct only because a wide character
-        // is exactly two columns. A text-sizing block (OSC 66) can be up to 49, and clearing its
-        // second column while leaving the head and the rest behind leaves a corrupt block. Walk back
-        // to the head and clear the entire run, as kitty's nuke_multicell_char_at() does.
-        eraseMulticellBlockAt(_cursor.position);
-    }
 
     auto const oldWidth = cell.width();
 
@@ -1036,17 +1060,29 @@ ColumnOffset Screen::lastWritableColumn() const noexcept
 
 void Screen::clearAndAdvance(int oldWidth, int newWidth) noexcept
 {
-    // Columns strictly to the right of the cursor that are still writable.
-    auto const cellsAvailable = *(lastWritableColumn() - _cursor.position.column);
+    // Writable cells the character has to work with: the cursor's OWN column plus every writable
+    // column to the right of it. Counting only the columns strictly to the right -- as though the
+    // cursor's cell were not one of them -- makes a character exactly fill the remaining room look
+    // one column too wide. A two-column character at the second-to-last column then gets no
+    // continuation cell: the previous occupant of the last column survives underneath the wide glyph
+    // and is copied out with it, and the head is left claiming a column it never took.
+    auto const lastColumn = lastWritableColumn();
+    auto const cellsAvailable = *(lastColumn - _cursor.position.column) + 1;
 
+    // The same count bounds the clearing of the cell being REPLACED, so the off-by-one also used to
+    // leave the old right half of an overwritten wide character behind at that column.
     auto const sgr = newWidth > 1 ? _cursor.graphicsRendition.with(CellFlag::WideCharContinuation)
                                   : _cursor.graphicsRendition;
     auto& line = currentLine();
     for (int i = 1; i < std::min(std::max(oldWidth, newWidth), cellsAvailable); ++i)
         line.useCellAt(_cursor.position.column + i).reset(sgr, _cursor.hyperlink);
 
-    if (newWidth == std::min(newWidth, cellsAvailable))
-        _cursor.position.column += ColumnOffset::cast_from(newWidth);
+    // Landing past the last writable column is the deferred-wrap case: the cursor stays where it is
+    // and the wrap happens when the next character arrives. Comparing the landing column against the
+    // margin says that directly, where comparing widths against a count only said it by accident.
+    auto const landing = _cursor.position.column + ColumnOffset::cast_from(newWidth);
+    if (landing <= lastColumn)
+        _cursor.position.column = landing;
     else if (_terminal->isModeEnabled(DECMode::AutoWrap))
         _cursor.wrapPending = true;
 }
@@ -1700,12 +1736,32 @@ void Screen::selectiveEraseArea(Rect area, CellFlag protectedFlag)
     {
         for (int x = left.value; x <= right.value; ++x)
         {
-            auto cell = grid().lineAt(LineOffset::cast_from(y)).useCellAt(ColumnOffset::cast_from(x));
-            if (!cell.isFlagEnabled(protectedFlag))
+            auto const location =
+                CellLocation { .line = LineOffset::cast_from(y), .column = ColumnOffset::cast_from(x) };
+            auto cell = grid().lineAt(location.line).useCellAt(location.column);
+            if (cell.isFlagEnabled(protectedFlag))
+                continue;
+
+            // Erasing any part of a multi-cell character destroys all of it. writeTextOnly() below
+            // deliberately preserves the cell's rendition -- that is what makes this a SELECTIVE
+            // erase -- but a cell's width, scale and continuation flags are layout, not rendition.
+            // Left behind, they let RenderBufferBuilder resolve the cell back to its head and re-emit
+            // the very glyph DECSERA was asked to erase, and they leave continuation cells whose head
+            // is gone: unresolvable by the renderer, unreachable by any later erase, and skipped by
+            // the selection extractor.
+            //
+            // The proxy is already in hand, so the cheap screen costs nothing and spares the ordinary
+            // cells that make up almost any erased area a block walk each.
+            if (cellCouldBelongToMulticell(cell))
             {
-                cell.writeTextOnly(L' ', 1);
-                cell.setHyperlink(HyperlinkId(0));
+                eraseMulticellBlockAt(location);
+                // Re-acquire: erasing a block materializes every line it spans, which can move the
+                // storage this proxy points into.
+                cell = grid().lineAt(location.line).useCellAt(location.column);
             }
+
+            cell.writeTextOnly(L' ', 1);
+            cell.setHyperlink(HyperlinkId(0));
         }
     }
 }
@@ -1816,6 +1872,10 @@ void Screen::insertChars(LineOffset lineOffset, ColumnCount columnsToInsert)
 {
     auto const sanitizedN =
         std::min(*columnsToInsert, *margin().horizontal.to - *logicalCursorPosition().column + 1);
+
+    // Every cell from here to the right margin is about to move sideways, and a block cannot move
+    // with them. @see eraseMulticellBlocksInRange.
+    eraseMulticellBlocksInRange(lineOffset, realCursorPosition().column, margin().horizontal.to);
 
     auto& line = _grid.lineAt(lineOffset);
     // Insert into a blank line with matching fill attrs is a no-op: shifting "all default cells"
@@ -2108,6 +2168,10 @@ void Screen::deleteCharacters(ColumnCount n)
 
 void Screen::deleteChars(LineOffset lineOffset, ColumnOffset column, ColumnCount columnsToDelete)
 {
+    // The cells from here to the right margin are about to move left, and a block cannot move with
+    // them. @see eraseMulticellBlocksInRange.
+    eraseMulticellBlocksInRange(lineOffset, column, margin().horizontal.to);
+
     auto& line = _grid.lineAt(lineOffset);
 
     // Deleting from a blank line with matching fill attrs is a no-op: shifting "all default cells" left
@@ -2816,6 +2880,14 @@ void Screen::renderImage(shared_ptr<Image const> image,
                          bool updateCursor,
                          ImageLayer layer)
 {
+    // Floor both extents at the one point every image protocol funnels through, so that no caller can
+    // express a size that cannot be walked. @see clampToPage, which explains how a wire-supplied
+    // count becomes negative -- and which bounds the same values from ABOVE at each protocol's own
+    // handler, where the page-sized ceiling belongs (a sixel legitimately asks for more rows than the
+    // page has and scrolls for them).
+    gridSize.lines = std::max(gridSize.lines, LineCount(0));
+    gridSize.columns = std::max(gridSize.columns, ColumnCount(0));
+
     auto const linesAvailable = pageSize().lines - topLeft.line.as<LineCount>();
     auto const linesToBeRendered = std::min(gridSize.lines, linesAvailable);
     auto const columnsAvailable = pageSize().columns - topLeft.column;
@@ -2858,7 +2930,9 @@ void Screen::renderImage(shared_ptr<Image const> image,
         return boxed_cast<LineOffset>(linesToBeRendered);
     }();
 
-    if (unbox(linesToBeRendered))
+    // Both extents have to be positive before the grid is walked: the iterator's makeOffset() divides
+    // by the column count, which a cursor sitting in the pending-wrap column reduces to zero.
+    if (unbox(linesToBeRendered) > 0 && unbox(columnsToBeRendered) > 0)
     {
         for (GridSize::Offset const gridOffset:
              GridSize { .lines = linesToBeRendered, .columns = columnsToBeRendered })
@@ -4708,21 +4782,18 @@ void Screen::renderITerm2InlineImage(std::string_view arguments)
     // `width=`/`height=` are application-supplied cell counts with no relation to the image, and they
     // reach renderImage with autoScroll set -- whose remainder loop performs one linefeed() per row it
     // could not draw. Unclamped, `height=90000000` is ninety million linefeeds: the terminal wedges
-    // and the scrollback is destroyed. An image can never occupy more than the page, so that is the
-    // bound. Zero keeps its meaning of "derive this axis from the decoded image".
-    auto const clamp = [](unsigned requested, auto limit) {
-        return std::min(requested, static_cast<unsigned>(unbox(limit)));
-    };
-    (void) renderImage(ImageFormat::PNG,
-                       ImageSize {},
-                       std::move(pixmap),
-                       GridSize { .lines = LineCount::cast_from(clamp(heightCells, pageSize().lines)),
-                                  .columns = ColumnCount::cast_from(clamp(widthCells, pageSize().columns)) },
-                       ImageAlignment::TopStart,
-                       ImageResize::ResizeToFit,
-                       /*autoScroll*/ true,
-                       /*updateCursor*/ true,
-                       ImageLayer::Above);
+    // and the scrollback is destroyed.
+    (void) renderImage(
+        ImageFormat::PNG,
+        ImageSize {},
+        std::move(pixmap),
+        GridSize { .lines = LineCount::cast_from(clampToPage(heightCells, pageSize().lines)),
+                   .columns = ColumnCount::cast_from(clampToPage(widthCells, pageSize().columns)) },
+        ImageAlignment::TopStart,
+        ImageResize::ResizeToFit,
+        /*autoScroll*/ true,
+        /*updateCursor*/ true,
+        ImageLayer::Above);
 }
 
 ApplyResult Screen::processPointerShape(std::string_view payload)
@@ -4981,9 +5052,21 @@ ApplyResult Screen::processTextSizing(std::string_view payload)
     // normally occupy becomes a `scale`-wide block of its own.
     if (request.width != 0)
     {
+        auto const codepoints = unicode::convert_to<char32_t>(request.text);
+
+        // The whole run is stored as ONE cell's grapheme cluster, so it can be no longer than a
+        // cluster may be. Writing it anyway put the first MaxGraphemeClusterSize codepoints on
+        // screen and dropped the rest on the floor -- appendCodepointToCluster() simply stops --
+        // while the block went on claiming its full `scale * width` columns as though it held the
+        // whole text. That is different text from the text the application asked for, arrived at
+        // silently, which is precisely why a block too wide for the line is dropped rather than
+        // clipped. Refusing is at least visible: the sequence is logged as invalid.
+        if (codepoints.size() > MaxGraphemeClusterSize)
+            return ApplyResult::Invalid;
+
         auto const columns = static_cast<uint8_t>(
             std::min<unsigned>(request.columnsFor(0), std::numeric_limits<uint8_t>::max()));
-        writeSizedText(unicode::convert_to<char32_t>(request.text), columns, cellScaleOf(request));
+        writeSizedText(codepoints, columns, cellScaleOf(request));
         return ApplyResult::Ok;
     }
 
@@ -5044,6 +5127,13 @@ void Screen::eraseMulticellBlockAt(CellLocation position)
     if (!block)
         return;
 
+    // The extent to erase is the BLOCK's, so the only legitimate bound on it is the page. Stopping at
+    // lastWritableColumn() bounded the erase by the cursor's margins instead: a block reaching past
+    // the current right margin -- trivially arranged by writing it, then narrowing the margins with
+    // DECLRMM -- was destroyed only up to that margin, and every column beyond it kept its
+    // continuation flag and its scale while the head that explained them was gone. Those are exactly
+    // the orphans this function exists to prevent, created by the cleanup itself.
+    auto const lastColumn = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
     for (auto const row: std::views::iota(0, block->rows))
     {
         auto const lineOffset = block->origin.line + LineOffset::cast_from(row);
@@ -5053,15 +5143,57 @@ void Screen::eraseMulticellBlockAt(CellLocation position)
         for (auto const i: std::views::iota(0, block->columns))
         {
             auto const column = block->origin.column + ColumnOffset::cast_from(i);
-            if (column > lastWritableColumn())
+            if (column > lastColumn)
                 break;
             target.useCellAt(column).reset(_cursor.graphicsRendition);
         }
     }
 }
 
+bool Screen::cellCouldBelongToMulticell(ConstCellProxy cell) noexcept
+{
+    // The three states multicellBlockAt()'s walk can start from: a cell continuing a block above it,
+    // one continuing a block to its left, or a head that is itself more than one cell. Anything else
+    // stands alone, and the walk would only confirm as much -- at the cost of several out-of-line
+    // Grid::lineAt() calls, which is why this exists to be asked first.
+    return cell.isFlagEnabled(CellFlag::MulticellContinuation)
+           || cell.isFlagEnabled(CellFlag::WideCharContinuation) || cell.width() > 1 || cell.scale() > 1;
+}
+
+void Screen::eraseMulticellBlocksInRange(LineOffset line, ColumnOffset from, ColumnOffset to)
+{
+    // Only an inflated line can carry a block: the flags and the scale that make one are per-cell
+    // state a trivial line does not have.
+    auto const& target = grid().lineAt(line);
+    if (target.isTrivialBuffer())
+        return;
+
+    if (to < from)
+        return;
+
+    // Ask the cheap question per column and the expensive one only where it can be answered yes. The
+    // guard above only excludes lines that are blank or uniformly attributed, so every line carrying
+    // a colored prompt reaches here -- and a full-width walk of multicellBlockAt() per column would
+    // put an order of magnitude more work in front of ICH/DCH than the shift they perform.
+    //
+    // The scan cannot be shortened to the line's `usedColumns`: a block's continuation rows are
+    // written with reset(), which stores no codepoint, so a row carrying nothing but continuations
+    // reports none of its columns as used -- and those are exactly the cells that must be erased.
+    for (auto const column: std::views::iota(*from, *to + 1))
+    {
+        auto const location = CellLocation { .line = line, .column = ColumnOffset(column) };
+        if (cellCouldBelongToMulticell(ConstCellProxy(target.storage(), static_cast<size_t>(column))))
+            eraseMulticellBlockAt(location);
+    }
+}
+
 void Screen::writeSizedText(std::u32string_view codepoints, uint8_t columns, CellScale const& cellScale)
 {
+    // The run has to fit one cell's grapheme cluster, because that is where it is stored. Checked on
+    // entry, before any of the scrolling and erasing below has happened -- @see processTextSizing,
+    // which refuses a run it cannot hold rather than putting a shortened one on screen.
+    Require(codepoints.size() <= MaxGraphemeClusterSize);
+
     if (columns == 0)
         return;
 
@@ -5157,10 +5289,8 @@ void Screen::writeSizedText(std::u32string_view codepoints, uint8_t columns, Cel
     // into each of them, so shifting only the head left the rows beneath to be overwritten -- the
     // very loss insert mode exists to prevent, fixed on one row out of the block's height.
     //
-    // A block already sitting in the way cannot be shifted intact. insertChars moves one line's cells
-    // and knows nothing about MulticellContinuation, so it would carry a head sideways while the rows
-    // it owns stayed put, leaving cells that multicellBlockAt cannot resolve and that nothing can
-    // clean up afterwards. Each such block is destroyed whole first, exactly as writing over one is.
+    // A block already sitting in the way cannot be shifted intact, so each is destroyed whole first --
+    // which insertChars() now does for itself, for every caller. @see eraseMulticellBlocksInRange.
     if (_terminal->isModeEnabled(AnsiMode::Insert))
     {
         for (auto const row: std::views::iota(0, static_cast<int>(unbox(height))))
@@ -5168,9 +5298,6 @@ void Screen::writeSizedText(std::u32string_view codepoints, uint8_t columns, Cel
             auto const lineOffset = _cursor.position.line + LineOffset::cast_from(row);
             if (lineOffset >= boxed_cast<LineOffset>(pageSize().lines))
                 break;
-
-            for (auto const column: std::views::iota(*_cursor.position.column, *lastWritableColumn() + 1))
-                eraseMulticellBlockAt(CellLocation { .line = lineOffset, .column = ColumnOffset(column) });
 
             insertChars(lineOffset, ColumnCount::cast_from(columns));
         }
@@ -5184,18 +5311,14 @@ void Screen::writeSizedText(std::u32string_view codepoints, uint8_t columns, Cel
     // This is the same rule the ordinary write path applies to the single cell it touches. @see
     // writeText. A block covers up to MaxWidth * MaxScale columns and MaxScale rows, so the walk is
     // bounded by the protocol, and it is reached only on an `OSC 66` write.
+    auto const claimedTo =
+        std::min(_cursor.position.column + ColumnOffset::cast_from(columns - 1), lastWritableColumn());
     for (auto const row: std::views::iota(0, static_cast<int>(std::max<uint8_t>(cellScale.scale, 1))))
     {
         auto const lineOffset = _cursor.position.line + LineOffset::cast_from(row);
         if (lineOffset >= boxed_cast<LineOffset>(pageSize().lines))
             break;
-        for (auto const i: std::views::iota(0, static_cast<int>(columns)))
-        {
-            auto const column = _cursor.position.column + ColumnOffset::cast_from(i);
-            if (column > lastWritableColumn())
-                break;
-            eraseMulticellBlockAt(CellLocation { .line = lineOffset, .column = column });
-        }
+        eraseMulticellBlocksInRange(lineOffset, _cursor.position.column, claimedTo);
     }
 
     auto& line = currentLine();
@@ -5521,14 +5644,15 @@ void Screen::renderKittyImage(kitty_graphics::Command const& command,
     auto const pixels = image->size();
 
     // `c=`/`r=` state the display size in cells; without them it follows from the pixel size, rounded
-    // up so that a partial cell is still drawn rather than clipped away.
+    // up so that a partial cell is still drawn rather than clipped away. Both arrive off the wire as
+    // unsigned and are clamped to the page for the reason clampToPage() documents.
     auto const cellWidth = std::max(unbox<int>(cellSize.width), 1);
     auto const cellHeight = std::max(unbox<int>(cellSize.height), 1);
     auto const columns = command.columns != 0
-                             ? ColumnCount::cast_from(command.columns)
+                             ? ColumnCount::cast_from(clampToPage(command.columns, pageSize().columns))
                              : ColumnCount::cast_from((unbox<int>(pixels.width) + cellWidth - 1) / cellWidth);
     auto const lines = command.rows != 0
-                           ? LineCount::cast_from(command.rows)
+                           ? LineCount::cast_from(clampToPage(command.rows, pageSize().lines))
                            : LineCount::cast_from((unbox<int>(pixels.height) + cellHeight - 1) / cellHeight);
 
     renderImage(image,
@@ -7482,7 +7606,7 @@ void Screen::handleGipUpload(Message message)
 void Screen::handleGipRender(Message const& message)
 {
     auto const* const name = message.header("n");
-    auto const params = parseGipRenderParams(message);
+    auto const params = parseGipRenderParams(message, pageSize());
     auto const x = PixelCoordinate::X { toNumber(message.header("x")).value_or(0) };
     auto const y = PixelCoordinate::Y { toNumber(message.header("y")).value_or(0) };
 
@@ -7517,7 +7641,7 @@ void Screen::handleGipQuery()
 
 void Screen::handleGipOneshot(Message message)
 {
-    auto const params = parseGipRenderParams(message);
+    auto const params = parseGipRenderParams(message, pageSize());
     auto imageFormat = toImageFormat(message.header("f"));
 
     // Resolve Auto format from the data before rendering.

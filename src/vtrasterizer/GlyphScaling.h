@@ -49,12 +49,6 @@ struct GlyphScaleAdjustment
     /// Whether the caller must rasterize the glyph afresh at `pointSize * factor` rather than reuse
     /// the tile it already has.
     bool requiresRerasterization = false;
-
-    /// @return whether this leaves the tile exactly as it was -- the ordinary-text case.
-    [[nodiscard]] constexpr bool isIdentity() const noexcept
-    {
-        return !requiresRerasterization && factor == 1.0;
-    }
 };
 
 /// Where a glyph's tile is drawn relative to the position ordinary text would take.
