@@ -55,14 +55,22 @@ Note that in practice a wide cell's continuation column arrives as a blank and f
 a group may already be one-column-per-cluster — but that is an inference about current call paths,
 not an invariant, and the FIXME is the authority.
 
-### 2. Selection in mixed text — `Selector.*`, `Terminal.cpp:2286`
-Untouched. Two pieces:
-- `SelectionHelper` needs visual-order hit-testing.
-- `SelectionRenderer` infers a line break from `pos.column < lastColumn || (pos.column == lastColumn
-  && lineStarted)`. That is false under reordering; pass the line explicitly.
+### 2. Selection — RESOLVED, the plan was wrong here
+Now covered by tests (`Bidi.selection yields logical order`, `Bidi.selection across a direction
+boundary is logical`) and no code change was needed.
 
-A logically contiguous selection rendering as visually discontiguous is **correct** — do not "fix"
-that.
+The plan called for changing `SelectionRenderer`'s
+`pos.column < lastColumn || (pos.column == lastColumn && lineStarted)` line-break inference, on the
+grounds that reordering breaks it. It does not: that callback is fed **logical** grid positions, and
+under the display-only model Selection never sees the permutation at all. The columns are still
+monotonic, so the predicate still holds.
+
+`SelectionHelper` likewise needs no visual-order hit-testing, because mouse pixels are already mapped
+visual to logical in `helper.cpp` before they ever reach `Terminal` -- so the anchors that arrive are
+logical by the time selection sees them.
+
+Note a logically contiguous selection may render visually **discontiguous**. That is correct and
+matches VTE; do not "fix" it.
 
 ### 3. `RenderCursor::direction` is a dead field
 Added and populated, consumed by nobody. The bar/underline cursor still draws on the left edge of its

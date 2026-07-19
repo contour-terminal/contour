@@ -196,6 +196,7 @@ TEST_CASE("Bidi.out_of_range_queries_are_the_identity", "[bidi]")
 
 #include <vtbackend/MockTerm.h>
 #include <vtbackend/RenderBuffer.h>
+#include <vtbackend/Selector.h>
 
 #include <crispy/escape.h>
 
@@ -384,4 +385,53 @@ TEST_CASE("Bidi.pure latin is untouched", "[bidi]")
     auto const buffer = mock.terminal.renderBuffer();
 
     CHECK(trimmed(renderedLine(buffer.get(), 0)) == U"hello");
+}
+
+// ---- Selection stays logical ----
+
+// The whole point of the display-only model: reordering lives in the render buffer, so Selection's
+// anchors and extractSelectionText() never see it. What is copied is reading order, even though the
+// screen shows the characters in a different one -- and a logically contiguous selection rendering
+// as visually DISCONTIGUOUS is correct, not a bug to be fixed.
+TEST_CASE("Bidi.selection yields logical order", "[bidi]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(12) } };
+
+    // Hebrew shalom, logical order: shin lamed vav final-mem.
+    mock.writeToScreen("שלום");
+
+    auto constexpr ClockBase = std::chrono::steady_clock::time_point {};
+    mock.terminal.tick(ClockBase);
+    mock.terminal.refreshRenderBuffer();
+
+    // Sanity: the screen really is reordered, so this test is not vacuous.
+    REQUIRE(trimmed(renderedLine(mock.terminal.renderBuffer().get(), 0)) == U"םולש");
+
+    mock.terminal.setSelector(std::make_unique<LinearSelection>(
+        mock.terminal.selectionHelper(),
+        CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+        []() {}));
+    (void) mock.terminal.selector()->extend(
+        CellLocation { .line = LineOffset(0), .column = ColumnOffset(3) });
+    mock.terminal.selector()->complete();
+
+    // Logical order, i.e. what a person would paste and read -- NOT the visual order above.
+    CHECK(mock.terminal.extractSelectionText() == "שלום");
+}
+
+TEST_CASE("Bidi.selection across a direction boundary is logical", "[bidi]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(20) } };
+
+    mock.writeToScreen("abc שלום def");
+
+    mock.terminal.setSelector(std::make_unique<LinearSelection>(
+        mock.terminal.selectionHelper(),
+        CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+        []() {}));
+    (void) mock.terminal.selector()->extend(
+        CellLocation { .line = LineOffset(0), .column = ColumnOffset(11) });
+    mock.terminal.selector()->complete();
+
+    CHECK(mock.terminal.extractSelectionText() == "abc שלום def");
 }
