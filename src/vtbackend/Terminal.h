@@ -2215,7 +2215,9 @@ class Terminal
     std::vector<ColorPalette> _savedColorPalettes;
     size_t _lastSavedColorPalette = 0;
 
-    bool _focused = true;
+    /// Whether this terminal currently has focus. Seeded from Settings::focused (NOT defaulted here, so
+    /// there is one source of truth) and thereafter written only by sendFocus{In,Out}Event.
+    bool _focused;
 
     VTType _terminalId = VTType::VT525;
     VTType _operatingLevel = VTType::VT525;

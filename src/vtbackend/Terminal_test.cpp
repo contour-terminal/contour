@@ -4353,3 +4353,40 @@ TEST_CASE("TraceHandler.an_APC_body_waits_its_turn_like_every_other_sequence", "
     // runs it until the user steps the trace forward.
     CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment() == nullptr);
 }
+
+TEST_CASE("Terminal.focus.events_reach_the_pty_only_under_DECMode_1004", "[terminal][focus]")
+{
+    // Focus state is tracked unconditionally (the renderer needs it for the inactive cursor shape and
+    // the inactive indicator status line), but the CSI I / CSI O notification is gated on DECMode 1004.
+    // The return value reports whether bytes were actually produced.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+
+    SECTION("mode off: focus is tracked, nothing reaches the PTY")
+    {
+        mock.discardPendingReplies();
+
+        CHECK_FALSE(mock.terminal.sendFocusOutEvent());
+        CHECK_FALSE(mock.terminal.focused());
+        CHECK(mock.replyData().empty());
+
+        CHECK_FALSE(mock.terminal.sendFocusInEvent());
+        CHECK(mock.terminal.focused());
+        CHECK(mock.replyData().empty());
+    }
+
+    SECTION("mode on: CSI O on focus loss, CSI I on focus gain")
+    {
+        mock.writeToScreen("\033[?1004h");
+        mock.discardPendingReplies();
+
+        CHECK(mock.terminal.sendFocusOutEvent());
+        CHECK_FALSE(mock.terminal.focused());
+        CHECK(e(mock.replyData()) == e("\033[O"s));
+
+        mock.resetReplyData();
+
+        CHECK(mock.terminal.sendFocusInEvent());
+        CHECK(mock.terminal.focused());
+        CHECK(e(mock.replyData()) == e("\033[I"s));
+    }
+}

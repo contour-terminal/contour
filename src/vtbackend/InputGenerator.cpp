@@ -1160,7 +1160,7 @@ bool InputGenerator::generateFocusOutEvent()
         inputLog()("Sending focus-out event.");
         return true;
     }
-    return true;
+    return false;
 }
 
 bool InputGenerator::generateRaw(std::string_view const& raw)
