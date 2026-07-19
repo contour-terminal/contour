@@ -170,9 +170,12 @@ namespace
         // clang-format on
     }
 
-    strong_hash hashTextAndStyle(u32string_view text, TextStyle style) noexcept
+    strong_hash hashTextAndStyle(u32string_view text,
+                                 TextStyle style,
+                                 unicode::Bidi_Direction direction) noexcept
     {
-        return strong_hash::compute(text) * static_cast<uint32_t>(style);
+        return strong_hash::compute(text) * static_cast<uint32_t>(style)
+               * (static_cast<uint32_t>(direction) + 1);
     }
 
     text::font_key getFontForStyle(FontKeys const& fonts, TextStyle style)
@@ -455,7 +458,8 @@ void TextRenderer::renderCell(vtbackend::RenderCell const& cell)
                                    cell.attributes.foregroundColor,
                                    makeTextStyle(cell.attributes.flags),
                                    cell.attributes.lineFlags,
-                                   cell.sizing);
+                                   cell.sizing,
+                                   cell.bidiLevel);
 
     if (cell.groupEnd)
         _textClusterGrouper.forceGroupEnd();
@@ -604,7 +608,8 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
                                    TextStyle style,
                                    vtbackend::RGBColor color,
                                    vtbackend::LineFlags lineFlags,
-                                   vtbackend::GlyphSizing const& sizing)
+                                   vtbackend::GlyphSizing const& sizing,
+                                   uint8_t bidiLevel)
 {
     if (codepoints.empty())
         return;
@@ -612,9 +617,27 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
     _textRendererEvents.onBeforeRenderingText();
     auto _ = crispy::finally { [&]() noexcept { _textRendererEvents.onAfterRenderingText(); } };
 
-    auto const hash = hashTextAndStyle(codepoints, style);
+    // The direction is part of the shaped result, so it must be part of the key. The same
+    // codepoints shaped right-to-left produce different glyphs -- Arabic joining forms above all --
+    // and a key that ignored it would hand back the other run's glyphs from the cache.
+    auto const direction = (bidiLevel & 1) != 0 ? unicode::Bidi_Direction::Right_To_Left
+                                                : unicode::Bidi_Direction::Left_To_Right;
+
+    // A bracket or other mirrored character inside a right-to-left run is drawn as its mirror, so
+    // that it still opens and closes around the text it encloses (UAX#9 L4). Substituting here, ahead
+    // of the cache key, means the mirrored form is what gets shaped and what gets cached.
+    auto mirrored = std::u32string {};
+    if (direction == unicode::Bidi_Direction::Right_To_Left)
+    {
+        for (auto const codepoint: codepoints)
+            mirrored += unicode::is_mirrored(codepoint) ? unicode::bidi_mirroring_glyph(codepoint)
+                                                        : codepoint;
+        codepoints = mirrored;
+    }
+
+    auto const hash = hashTextAndStyle(codepoints, style, direction);
     text::shape_result const& glyphPositions =
-        getOrCreateCachedGlyphPositions(hash, codepoints, clusters, style);
+        getOrCreateCachedGlyphPositions(hash, codepoints, clusters, style, direction);
     crispy::point pen = _gridMetrics.mapBottomLeft(initialPenPosition, _smoothScrollYOffset);
 
     using vtbackend::LineFlag;
@@ -1247,23 +1270,27 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
 text::shape_result const& TextRenderer::getOrCreateCachedGlyphPositions(strong_hash hash,
                                                                         u32string_view codepoints,
                                                                         gsl::span<unsigned> clusters,
-                                                                        TextStyle style)
+                                                                        TextStyle style,
+                                                                        unicode::Bidi_Direction direction)
 {
-    return _textShapingCache->get_or_emplace(hash, [this, codepoints, clusters, style](auto) {
-        return createTextShapedGlyphPositions(codepoints, clusters, style);
-    });
+    return _textShapingCache->get_or_emplace(
+        hash, [this, codepoints, clusters, style, direction](auto) {
+            return createTextShapedGlyphPositions(codepoints, clusters, style, direction);
+        });
 }
 
 text::shape_result TextRenderer::createTextShapedGlyphPositions(u32string_view codepoints,
                                                                 gsl::span<unsigned> clusters,
-                                                                TextStyle style)
+                                                                TextStyle style,
+                                                                unicode::Bidi_Direction direction)
 {
     auto glyphPositions = text::shape_result {};
 
     auto run = unicode::run_segmenter::range {};
     auto rs = unicode::run_segmenter(codepoints); // TODO Consider moving run segmentation to text grouper
     while (rs.consume(out(run)))
-        for (text::glyph_position const& glyphPosition: shapeTextRun(run, codepoints, clusters, style))
+        for (text::glyph_position const& glyphPosition:
+             shapeTextRun(run, codepoints, clusters, style, direction))
             glyphPositions.emplace_back(glyphPosition);
 
     return glyphPositions;
@@ -1280,7 +1307,8 @@ text::shape_result TextRenderer::createTextShapedGlyphPositions(u32string_view c
 text::shape_result TextRenderer::shapeTextRun(unicode::run_segmenter::range const& run,
                                               u32string_view totalCodepoints,
                                               gsl::span<unsigned> totalClusters,
-                                              TextStyle style)
+                                              TextStyle style,
+                                              unicode::Bidi_Direction direction)
 {
     // TODO(where to apply cell-advances) auto const advanceX = _gridMetrics.cellSize.width;
     auto const count = static_cast<size_t>(run.end - run.start);
@@ -1288,6 +1316,9 @@ text::shape_result TextRenderer::shapeTextRun(unicode::run_segmenter::range cons
     auto const clusters = gsl::span(totalClusters.data() + run.start, count);
     auto const script = get<unicode::Script>(run.properties);
     auto const presentationStyle = get<unicode::PresentationStyle>(run.properties);
+    // The direction comes from the level vtbackend resolved for these cells, NOT from re-running
+    // detection over the group in isolation: the group is a fragment of a paragraph, and a fragment
+    // does not know the paragraph's base direction.
     auto const isEmojiPresentation = presentationStyle == unicode::PresentationStyle::Emoji;
     auto const font = isEmojiPresentation ? _fonts.emoji : getFontForStyle(_fonts, style);
 
@@ -1296,8 +1327,9 @@ text::shape_result TextRenderer::shapeTextRun(unicode::run_segmenter::range cons
     _textShaper.shape(font,
                       codepoints,
                       clusters,
-                      script,            // get<unicode::Script>(run.properties),
-                      presentationStyle, // get<unicode::PresentationStyle>(run.properties),
+                      script,
+                      presentationStyle,
+                      direction,
                       glyphPosition);
 
     if (rasterizerLog && !glyphPosition.empty())

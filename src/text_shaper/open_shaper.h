@@ -45,6 +45,7 @@ class open_shaper: public shaper
                gsl::span<unsigned> clusters,
                unicode::Script script,
                unicode::PresentationStyle presentation,
+               unicode::Bidi_Direction direction,
                shape_result& result) override;
 
     [[nodiscard]] std::optional<glyph_position> shape(font_key font, char32_t codepoint) override;

@@ -21,8 +21,11 @@ class dwrite_analysis_wrapper:
                         IDWriteTextAnalysisSink>
 {
   public:
-    dwrite_analysis_wrapper(std::wstring const& _text, std::wstring const& _userLocale):
-        text(_text), userLocale(_userLocale)
+    dwrite_analysis_wrapper(std::wstring const& _text,
+                            std::wstring const& _userLocale,
+                            DWRITE_READING_DIRECTION _readingDirection =
+                                DWRITE_READING_DIRECTION::DWRITE_READING_DIRECTION_LEFT_TO_RIGHT):
+        readingDirection(_readingDirection), text(_text), userLocale(_userLocale)
     {
     }
 
@@ -61,8 +64,10 @@ class dwrite_analysis_wrapper:
 
     DWRITE_READING_DIRECTION GetParagraphReadingDirection() override
     {
-        // TODO: is this always correct?
-        return DWRITE_READING_DIRECTION::DWRITE_READING_DIRECTION_LEFT_TO_RIGHT;
+        // The direction the caller resolved for this run. DirectWrite asks for it before analysing,
+        // and returning a hard-coded left-to-right made every right-to-left run analyse as if it
+        // were Latin.
+        return readingDirection;
     }
 
     HRESULT GetLocaleName(UINT32 textPosition,
@@ -108,6 +113,11 @@ class dwrite_analysis_wrapper:
                          UINT8 /*explicitLevel*/,
                          UINT8 resolvedLevel) override
     {
+        // DirectWrite hands back the level it resolved; record it so the caller can place the run
+        // rather than discarding it and assuming zero.
+        (void) textPosition;
+        (void) textLength;
+        this->resolvedBidiLevel = resolvedLevel;
         return S_OK;
     }
 
@@ -121,7 +131,11 @@ class dwrite_analysis_wrapper:
 
     DWRITE_SCRIPT_ANALYSIS script;
 
+    /// The level DirectWrite resolved for the run, recorded by SetBidiLevel().
+    UINT8 resolvedBidiLevel = 0;
+
   private:
+    DWRITE_READING_DIRECTION readingDirection;
     std::wstring const& text;
     std::wstring const& userLocale;
 };

@@ -129,6 +129,7 @@ class fallback_env
                  gsl::span<unsigned> { clusters },
                  unicode::Script::Latin,
                  unicode::PresentationStyle::Text,
+                 unicode::Bidi_Direction::Left_To_Right,
                  result);
     return result;
 }
@@ -144,6 +145,7 @@ class fallback_env
                  gsl::span<unsigned> { clusters },
                  unicode::Script::Latin,
                  unicode::PresentationStyle::Text,
+                 unicode::Bidi_Direction::Left_To_Right,
                  result);
     return result;
 }
@@ -471,6 +473,7 @@ TEST_CASE("open_shaper.fallback.non_monotone_clusters_fall_back_on_the_whole_run
                        gsl::span<unsigned> { clusters },
                        unicode::Script::Latin,
                        unicode::PresentationStyle::Text,
+                       unicode::Bidi_Direction::Left_To_Right,
                        result);
 
     REQUIRE(result.size() == 3);

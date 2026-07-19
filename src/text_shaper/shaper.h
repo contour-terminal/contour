@@ -9,6 +9,7 @@
 #include <crispy/point.h>
 #include <crispy/size.h>
 
+#include <libunicode/bidi.h>
 #include <libunicode/emoji_segmenter.h>
 #include <libunicode/ucd.h>
 
@@ -74,6 +75,13 @@ struct glyph_position
     glyph_key glyph;
     crispy::point offset;
     crispy::point advance;
+
+    /// Index of the input codepoint this glyph came from.
+    ///
+    /// Carried so that a glyph can be placed by cluster rather than by an accumulating pen. That
+    /// matters for right-to-left runs, where the glyphs no longer arrive in the order they are
+    /// drawn: once placement is cluster-driven, visual glyph order stops mattering.
+    unsigned cluster = 0;
 
     unicode::PresentationStyle presentation {};
 };
@@ -156,6 +164,7 @@ class shaper
                        gsl::span<unsigned> clusters,
                        unicode::Script script,
                        unicode::PresentationStyle presentation,
+                       unicode::Bidi_Direction direction,
                        shape_result& result) = 0;
 
     [[nodiscard]] virtual std::optional<glyph_position> shape(font_key font, char32_t codepoint) = 0;

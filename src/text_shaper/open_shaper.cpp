@@ -353,9 +353,28 @@ namespace
             case Script::Latin: return HB_SCRIPT_LATIN;
             case Script::Greek: return HB_SCRIPT_GREEK;
             case Script::Common: return HB_SCRIPT_COMMON;
+            case Script::Cyrillic: return HB_SCRIPT_CYRILLIC;
+
+            // The right-to-left scripts must be named explicitly rather than left to
+            // hb_buffer_guess_segment_properties(): the font's GSUB is selected by script tag, and
+            // it is the `arab` tables that supply Arabic's init/medi/fina/isol joining forms and the
+            // lam-alef ligature. Guessed wrong, the letters render as unjoined isolates.
+            case Script::Arabic: return HB_SCRIPT_ARABIC;
+            case Script::Hebrew: return HB_SCRIPT_HEBREW;
+            case Script::Syriac: return HB_SCRIPT_SYRIAC;
+            case Script::Thaana: return HB_SCRIPT_THAANA;
+
+            case Script::Han: return HB_SCRIPT_HAN;
+            case Script::Hiragana: return HB_SCRIPT_HIRAGANA;
+            case Script::Katakana: return HB_SCRIPT_KATAKANA;
+            case Script::Hangul: return HB_SCRIPT_HANGUL;
+            case Script::Devanagari: return HB_SCRIPT_DEVANAGARI;
+            case Script::Thai: return HB_SCRIPT_THAI;
+
             default:
-                // TODO: make this list complete
-                return HB_SCRIPT_INVALID; // hb_buffer_guess_segment_properties() will fill it
+                // Anything else is left to hb_buffer_guess_segment_properties(), which infers the
+                // script from the codepoints themselves.
+                return HB_SCRIPT_INVALID;
         }
     }
 
@@ -510,13 +529,18 @@ namespace
     void prepareBuffer(hb_buffer_t* hbBuf,
                        u32string_view codepoints,
                        std::span<unsigned const> clusters,
-                       unicode::Script script)
+                       unicode::Script script,
+                       unicode::Bidi_Direction direction)
     {
         hb_buffer_clear_contents(hbBuf);
         for (auto const i: iota(0u, codepoints.size()))
             hb_buffer_add(hbBuf, codepoints[i], clusters[i]);
 
-        hb_buffer_set_direction(hbBuf, HB_DIRECTION_LTR);
+        // Set explicitly, and therefore before guess_segment_properties(), which cannot override a
+        // direction that is already set.
+        hb_buffer_set_direction(hbBuf,
+                                direction == unicode::Bidi_Direction::Right_To_Left ? HB_DIRECTION_RTL
+                                                                                    : HB_DIRECTION_LTR);
         hb_buffer_set_script(hbBuf, mapScriptToHarfbuzzScript(script));
         hb_buffer_set_language(hbBuf, hb_language_get_default());
         hb_buffer_set_content_type(hbBuf, HB_BUFFER_CONTENT_TYPE_UNICODE);
@@ -578,6 +602,7 @@ namespace
                                            hb_font_t* hbFont,
                                            unicode::Script script,
                                            unicode::PresentationStyle presentation,
+                                           unicode::Bidi_Direction direction,
                                            u32string_view codepoints,
                                            std::span<unsigned const> clusters)
     {
@@ -590,7 +615,7 @@ namespace
         if (codepoints.empty())
             return {};
 
-        prepareBuffer(hbBuf, codepoints, clusters, script);
+        prepareBuffer(hbBuf, codepoints, clusters, script, direction);
 
         vector<hb_feature_t> hbFeatures;
         for (font_feature const feature: fontInfo.description.features)
@@ -632,12 +657,26 @@ namespace
             gpos.advance.x = static_cast<int>(static_cast<double>(pos[i].x_advance) / 64.0);
             gpos.advance.y = static_cast<int>(static_cast<double>(pos[i].y_advance) / 64.0);
             gpos.presentation = presentation;
+            gpos.cluster = info[i].cluster;
 
             auto const missing = glyphMissing(gpos);
             output.anyMissing = output.anyMissing || missing;
 
             output.glyphs.emplace_back(gpos);
             output.refs.emplace_back(shaped_glyph_ref { .cluster = info[i].cluster, .missing = missing });
+        }
+
+        // HarfBuzz emits a right-to-left run's glyphs in visual order, so their clusters DESCEND.
+        // clusterGroups() rejects that outright and every RTL run would fall back to one indivisible
+        // group -- losing per-cluster font fallback for exactly the scripts that most need it.
+        //
+        // Normalising here rather than teaching the downstream code about direction keeps the whole
+        // fallback path direction-agnostic. It is safe only because glyph_position now carries its
+        // own cluster, so placement no longer depends on the order glyphs arrive in.
+        if (direction == unicode::Bidi_Direction::Right_To_Left)
+        {
+            std::ranges::reverse(output.glyphs);
+            std::ranges::reverse(output.refs);
         }
 
         return output;
@@ -1029,6 +1068,7 @@ struct open_shaper::private_open_shaper // {{{
                               fallback_cursor cursor,
                               unicode::Script script,
                               unicode::PresentationStyle presentation,
+                              unicode::Bidi_Direction direction,
                               u32string_view codepoints,
                               std::span<unsigned const> clusters,
                               shape_result& result)
@@ -1043,6 +1083,7 @@ struct open_shaper::private_open_shaper // {{{
                                           shapingFontInfo.hbFont.get(),
                                           script,
                                           presentation,
+                                          direction,
                                           codepoints,
                                           clusters);
         if (shaped.glyphs.empty())
@@ -1097,6 +1138,7 @@ struct open_shaper::private_open_shaper // {{{
                                       spanCursor,
                                       script,
                                       presentation,
+                                      direction,
                                       codepoints.substr(segment.codepointBegin, count),
                                       clusters.subspan(segment.codepointBegin, count),
                                       result))
@@ -1302,6 +1344,7 @@ void open_shaper::shape(font_key font,
                         gsl::span<unsigned> clusters,
                         unicode::Script script,
                         unicode::PresentationStyle presentation,
+                        unicode::Bidi_Direction direction,
                         shape_result& result)
 {
     assert(clusters.size() == codepoints.size());
@@ -1339,6 +1382,7 @@ void open_shaper::shape(font_key font,
                                  fallback_cursor {},
                                  script,
                                  presentation,
+                                 direction,
                                  codepoints,
                                  inputClusters,
                                  result))

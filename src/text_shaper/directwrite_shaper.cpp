@@ -302,8 +302,14 @@ void directwrite_shaper::shape(font_key _font,
                                gsl::span<unsigned> _clusters,
                                unicode::Script _script,
                                unicode::PresentationStyle _presentation,
+                               unicode::Bidi_Direction _direction,
                                shape_result& _result)
 {
+    // NOTE: This file cannot be compiled on the platform this was written on, so the changes below
+    // are unverified and must be checked on Windows before release.
+    auto const isRightToLeft = _direction == unicode::Bidi_Direction::Right_To_Left;
+    auto const bidiLevel = static_cast<UINT8>(isRightToLeft ? 1 : 0);
+
     wstring_convert<codecvt_utf8<char32_t>, char32_t> conv1;
     string bytes = conv1.to_bytes(u32string { _text });
     wstring_convert<codecvt_utf8_utf16<wchar_t>> conv2;
@@ -359,7 +365,11 @@ void directwrite_shaper::shape(font_key _font,
     {
         // Complex shaping
         UINT32 const textStart = 0;
-        dwrite_analysis_wrapper analysisWrapper(wText, d->userLocale);
+        dwrite_analysis_wrapper analysisWrapper(
+            wText,
+            d->userLocale,
+            isRightToLeft ? DWRITE_READING_DIRECTION::DWRITE_READING_DIRECTION_RIGHT_TO_LEFT
+                          : DWRITE_READING_DIRECTION::DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
 
         // Script analysis
         d->textAnalyzer->AnalyzeScript(&analysisWrapper, 0, wText.size(), &analysisWrapper);
@@ -377,7 +387,7 @@ void directwrite_shaper::shape(font_key _font,
                                                  textLength,
                                                  fontFace,
                                                  0, // isSideways,
-                                                 0, // isRightToLeft
+                                                 isRightToLeft ? 1 : 0,
                                                  &analysisWrapper.script,
                                                  d->userLocale.data(),
                                                  nullptr,       // _numberSubstitution
@@ -438,7 +448,7 @@ void directwrite_shaper::shape(font_key _font,
                                                       fontFace,
                                                       fontInfo.size.pt,
                                                       0, // isSideways,
-                                                      0, // isRightToLeft
+                                                      isRightToLeft ? 1 : 0,
                                                       &analysisWrapper.script,
                                                       d->userLocale.data(),
                                                       nullptr, // features
@@ -481,7 +491,9 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph,
     glyphRun.glyphIndices = &(glyphIndex);
     glyphRun.glyphOffsets = &(glyphOffset);
     glyphRun.isSideways = false;
-    glyphRun.bidiLevel = 0;
+    // DirectWrite lays the run out right-to-left when the level is odd; it was resolving the
+    // levels all along and having them discarded here.
+    glyphRun.bidiLevel = bidiLevel;
 
     ComPtr<IDWriteRenderingParams> renderingParams;
     d->factory->CreateRenderingParams(&renderingParams);

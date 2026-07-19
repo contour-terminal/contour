@@ -31,7 +31,8 @@ class TextClusterGrouper
                                      TextStyle style,
                                      vtbackend::RGBColor color,
                                      vtbackend::LineFlags flags,
-                                     vtbackend::GlyphSizing const& sizing) = 0;
+                                     vtbackend::GlyphSizing const& sizing,
+                                     uint8_t bidiLevel) = 0;
 
         virtual bool renderBoxDrawingCell(vtbackend::CellLocation position,
                                           char32_t codepoint,
@@ -56,7 +57,8 @@ class TextClusterGrouper
                     vtbackend::RGBColor foregroundColor,
                     TextStyle style,
                     vtbackend::LineFlags flags,
-                    vtbackend::GlyphSizing const& sizing = {});
+                    vtbackend::GlyphSizing const& sizing = {},
+                    uint8_t bidiLevel = 0);
 
     void renderLine(std::u32string_view text,
                     vtbackend::LineOffset lineOffset,
@@ -74,7 +76,8 @@ class TextClusterGrouper
                                       TextStyle style,
                                       vtbackend::RGBColor color,
                                       vtbackend::LineFlags flags,
-                                      vtbackend::GlyphSizing const& sizing);
+                                      vtbackend::GlyphSizing const& sizing,
+                                      uint8_t bidiLevel);
 
     void flushTextClusterGroup();
 
@@ -97,6 +100,11 @@ class TextClusterGrouper
     // uniform text color for this text group
     vtbackend::RGBColor _color {};
     vtbackend::LineFlags _lineFlags = vtbackend::LineFlag::None;
+
+    /// Resolved bidirectional level shared by every cell of this group. A change in it ends the
+    /// group exactly as a colour change does: a shaping run may not straddle a direction change,
+    /// because the shaper is told which way to lay the whole run out.
+    uint8_t _bidiLevel = 0;
 
     // codepoints within this text group with
     // uniform unicode properties (script, language, direction).

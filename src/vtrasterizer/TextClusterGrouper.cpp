@@ -65,7 +65,8 @@ void TextClusterGrouper::renderCell(vtbackend::CellLocation position,
                                     vtbackend::RGBColor foregroundColor,
                                     TextStyle style,
                                     vtbackend::LineFlags flags,
-                                    vtbackend::GlyphSizing const& sizing)
+                                    vtbackend::GlyphSizing const& sizing,
+                                    uint8_t bidiLevel)
 {
     if (_forceUpdateInitialPenPosition)
     {
@@ -90,14 +91,15 @@ void TextClusterGrouper::renderCell(vtbackend::CellLocation position,
         }
     }
 
-    appendCellTextToClusterGroup(graphemeCluster, style, foregroundColor, flags, sizing);
+    appendCellTextToClusterGroup(graphemeCluster, style, foregroundColor, flags, sizing, bidiLevel);
 }
 
 void TextClusterGrouper::appendCellTextToClusterGroup(std::u32string_view codepoints,
                                                       TextStyle style,
                                                       vtbackend::RGBColor color,
                                                       vtbackend::LineFlags flags,
-                                                      vtbackend::GlyphSizing const& sizing)
+                                                      vtbackend::GlyphSizing const& sizing,
+                                                      uint8_t bidiLevel)
 {
     bool const attribsChanged =
         color != _color || style != _style || flags != _lineFlags || sizing != _sizing;
@@ -112,6 +114,7 @@ void TextClusterGrouper::appendCellTextToClusterGroup(std::u32string_view codepo
         _style = style;
         _lineFlags = flags;
         _sizing = sizing;
+        _bidiLevel = bidiLevel;
     }
 
     if (!cellIsEmpty)
@@ -140,7 +143,8 @@ void TextClusterGrouper::flushTextClusterGroup()
                                 _style,
                                 _color,
                                 _lineFlags,
-                                _sizing);
+                                _sizing,
+                                _bidiLevel);
     }
 
     resetAndMovePenForward(vtbackend::ColumnOffset::cast_from(_cellCount));

@@ -33,6 +33,7 @@ class directwrite_shaper: public shaper
                gsl::span<unsigned> _clusters,
                unicode::Script _script,
                unicode::PresentationStyle _presentation,
+               unicode::Bidi_Direction _direction,
                shape_result& _result) override;
 
     std::optional<glyph_position> shape(font_key _font, char32_t _codepoint) override;

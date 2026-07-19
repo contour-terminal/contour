@@ -280,6 +280,7 @@ std::optional<TextureAtlas::TileCreateData> renderSingleGlyph(TextRenderer& rend
                      gsl::span<unsigned>(clusters.data(), clusters.size()),
                      unicode::Script::Common,
                      unicode::PresentationStyle::Text,
+                     unicode::Bidi_Direction::Left_To_Right,
                      shaped);
 
     if (shaped.empty())

@@ -106,7 +106,8 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
                          TextStyle style,
                          vtbackend::RGBColor color,
                          vtbackend::LineFlags flags,
-                         vtbackend::GlyphSizing const& sizing) override;
+                         vtbackend::GlyphSizing const& sizing,
+                         uint8_t bidiLevel) override;
 
     bool renderBoxDrawingCell(vtbackend::CellLocation position,
                               char32_t codepoint,
@@ -120,14 +121,17 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     text::shape_result const& getOrCreateCachedGlyphPositions(crispy::strong_hash hash,
                                                               std::u32string_view codepoints,
                                                               gsl::span<unsigned> clusters,
-                                                              TextStyle style);
+                                                              TextStyle style,
+                                                              unicode::Bidi_Direction direction);
     text::shape_result createTextShapedGlyphPositions(std::u32string_view codepoints,
                                                       gsl::span<unsigned> clusters,
-                                                      TextStyle style);
+                                                      TextStyle style,
+                                                      unicode::Bidi_Direction direction);
     text::shape_result shapeTextRun(unicode::run_segmenter::range const& run,
                                     std::u32string_view codepoints,
                                     gsl::span<unsigned> clusters,
-                                    TextStyle style);
+                                    TextStyle style,
+                                    unicode::Bidi_Direction direction);
 
     /// One text-sizing block's raster, sized to whole cells so that cutting it into atlas tiles is
     /// exact. @see buildBlockCanvas.
