@@ -339,6 +339,25 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @param session The session whose display just lost Qt focus.
     void clearFocusIfCurrent(TerminalSession* session);
 
+    /// The OS window that currently owns keyboard focus, as a model identity rather than a Qt pointer.
+    /// VT focus only ever moves within this window, so a model event raised in a background window (a
+    /// layout applying its tabs, a tab dropped in by a drag) cannot steal the focused terminal.
+    /// @return The focus-owning window, or std::nullopt when no window of this process owns focus.
+    [[nodiscard]] std::optional<vtmux::WindowId> focusedWindow() const noexcept { return _focusedWindow; }
+
+    /// Records @p window as the focus-owning OS window AND re-points terminal focus at its active leaf.
+    /// Idempotent. Ownership is also recorded — without re-pointing, since there is no session to point
+    /// at yet or the caller supplies its own — when a window is spawned (createWindowController) and
+    /// when one of its displays takes Qt focus (FocusOnDisplay). @see clearFocusedWindow.
+    /// @param window The window that just became the active OS window.
+    void setFocusedWindow(vtmux::WindowId window);
+
+    /// Revokes focus ownership iff @p window currently holds it, leaving no window focused and no
+    /// terminal focused. A no-op for any other window, so a background window deactivating cannot
+    /// clear the focused window's terminal focus.
+    /// @param window The window that just stopped being the active OS window (or is being destroyed).
+    void clearFocusedWindow(vtmux::WindowId window);
+
     void update() { updateStatusLine(); }
 
     /// Invalidates TitleRole on every tab row of EVERY window's tab strip (each WindowController
@@ -371,9 +390,10 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @param session The session (by model id) whose hosting tab color should be cleared.
     void resetTabColorForSession(vtmux::SessionId session);
 
-    /// Clears the destroyed @p display from any controller that held it as its focused display, and from
-    /// the manager's _activeDisplay. Called when the display's QML item / pane is torn down. Session->
-    /// display ownership lives on the pane tree, so there is no per-display session map to scrub.
+    /// Clears the destroyed @p display from any controller that held it as its focused display. Called
+    /// when the display's QML item / pane is torn down. Session->display ownership lives on the pane
+    /// tree, so there is no per-display session map to scrub. Focus ownership is unaffected: it is held
+    /// per WINDOW (@see _focusedWindow), so a tab switch still notifies its sessions across this gap.
     /// @param display The display being destroyed.
     void detachDisplay(display::TerminalDisplay* display) noexcept;
 
@@ -644,12 +664,17 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     bool _commandHistoryLoaded = false;
     std::chrono::seconds _earlyExitThreshold;
     // The process-wide "focused display". Session->display ownership lives on the pane tree; this is only
-    // the currently-focused display, routed to its owning WindowController for window services.
-    display::TerminalDisplay* _activeDisplay = nullptr;
-
     // The single session that currently holds terminal (VT) focus across all windows, or nullptr.
-    // setFocusedSession() is the sole mutator and emits the symmetric focus-out/focus-in pair.
+    // setFocusedSession() is the only mutator that NOTIFIES (the symmetric focus-out/focus-in pair);
+    // the teardown paths (removeSession, and removeWindowController via clearFocusedWindow) drop the
+    // back-pointer without notifying a session that is already dying.
     TerminalSession* _focusedSession = nullptr;
+
+    // Which OS window owns focus, as a model identity rather than a Qt pointer: this is what gates
+    // whether a model event may move VT focus. A pointer to the focused display cannot serve, because
+    // it is null between a display teardown and the next Qt focus-in -- and a tab switch in that gap
+    // notified nobody. @see syncFocusForWindow.
+    std::optional<vtmux::WindowId> _focusedWindow;
 
     bool _multimediaReady = false;
 

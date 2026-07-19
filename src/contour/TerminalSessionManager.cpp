@@ -92,6 +92,10 @@ WindowController* TerminalSessionManager::createWindowController()
     auto* controller = new WindowController(*this, window->id());
     QQmlEngine::setObjectOwnership(controller, QQmlEngine::CppOwnership);
     _controllersByWindow[window->id().value] = controller;
+    // A freshly spawned window is the one the user is looking at. Seeding ownership here (rather than
+    // waiting for the first Qt focus-in) is what lets the very first tab be focused at creation, and
+    // makes a tab switch notify the shell even before the window has ever been clicked.
+    _focusedWindow = window->id();
     return controller;
 }
 
@@ -124,9 +128,9 @@ TerminalSession* TerminalSessionManager::createSessionInBackground(vtmux::Window
     // TODO: Remove dependency on app-knowledge and pass shell / terminal-size instead.
     // The GuiApp *or* (Global)Config could be made a global to be accessible from within QML.
 
-    if (!_activeDisplay)
+    if (!_focusedWindow)
     {
-        managerLog()("No active display found. something went wrong.");
+        managerLog()("No focused window found. something went wrong.");
     }
 
     auto* targetWindow = _model->window(window);
@@ -217,10 +221,7 @@ void TerminalSessionManager::detachDisplay(display::TerminalDisplay* display) no
 
     // The display (one pane of a tab) is being destroyed. Session->display ownership lives solely on the
     // pane tree now, so there is no per-display map to scrub; just make sure no controller keeps this
-    // freed display as its focused one.
-    if (_activeDisplay == display)
-        _activeDisplay = nullptr;
-
+    // freed display as its focused one. Focus ownership is per WINDOW and survives this untouched.
     for (auto const& [id, controller]: _controllersByWindow)
         controller->onDisplayDetached(display);
 }
@@ -241,9 +242,14 @@ void TerminalSessionManager::FocusOnDisplay(display::TerminalDisplay* display)
     // a focused pane already owns its session. FocusOnDisplay only makes this the active display and hands
     // the focus to the owning window's controller, which re-points its window-service signal bridge and
     // re-emits the window bindings. Route by the display's OS window so the correct controller updates.
-    _activeDisplay = display;
     if (auto* c = controllerForDisplay(display))
+    {
+        // A genuine Qt focus-in transfers focus ownership to this display's window. The session is not
+        // re-pointed here: the caller (TerminalDisplay::focusInEvent) supplies its own pane's session,
+        // which mid-rebind can differ from the controller's active one.
+        _focusedWindow = c->windowId();
         c->focusDisplay(display);
+    }
 }
 
 void TerminalSessionManager::setFocusedSession(TerminalSession* next)
@@ -263,14 +269,30 @@ void TerminalSessionManager::clearFocusIfCurrent(TerminalSession* session)
         setFocusedSession(nullptr);
 }
 
+void TerminalSessionManager::setFocusedWindow(vtmux::WindowId window)
+{
+    // Taking ownership satisfies syncFocusForWindow's gate by construction, so the re-pointing half is
+    // that one implementation rather than a second copy of it.
+    _focusedWindow = window;
+    syncFocusForWindow(controllerFor(window));
+}
+
+void TerminalSessionManager::clearFocusedWindow(vtmux::WindowId window)
+{
+    if (_focusedWindow != window) // guarded like clearFocusIfCurrent
+        return;
+    _focusedWindow.reset();
+    setFocusedSession(nullptr);
+}
+
 void TerminalSessionManager::syncFocusForWindow(WindowController* controller)
 {
     if (controller == nullptr)
         return;
-    // Only the window owning the focused display moves focus (so a background window can't steal it);
-    // this is the seam that focuses a session swapped onto an already-focused display, where no Qt
-    // focus event fires.
-    if (_activeDisplay != nullptr && controllerForDisplay(_activeDisplay) == controller)
+    // Only the focus-owning window moves focus, so a background window can't steal it. This is also the
+    // seam that focuses a session swapped onto an already-focused display, where no Qt focus event
+    // fires at all -- which is the whole reason a tab switch notifies anyone. @see _focusedWindow.
+    if (_focusedWindow == controller->windowId())
         setFocusedSession(controller->activeSession());
 }
 
@@ -689,12 +711,17 @@ void TerminalSessionManager::removeWindowController(vtmux::WindowId windowId)
     if (controller != nullptr)
         controller->deleteLater();
 
+    // Ownership must not survive the window that held it: a stale WindowId would let a later model
+    // event in an unrelated window re-grant focus through syncFocusForWindow. The window's sessions
+    // were terminated by WindowController::closeWindow, and removeSession already dropped the focus
+    // back-pointer for each, so the focus-out this issues finds nothing to notify.
+    clearFocusedWindow(windowId);
+
     if (wasLast)
     {
         managerLog()("Last window closed: clearing residual session registries.");
         _sessionsById.clear();
         _tabBySession.clear();
-        _activeDisplay = nullptr;
     }
 }
 

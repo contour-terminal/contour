@@ -335,6 +335,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/ViewportTextIndex_test.cpp
             test/KeyboardRouting_test.cpp
             test/MainWindowQml_test.cpp
+            test/FocusRouting_test.cpp
             test/MultiWindow_test.cpp
             test/NotificationRouter_test.cpp
             test/QmlDiagnosticPredicate_test.cpp

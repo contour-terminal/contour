@@ -563,6 +563,11 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// fractional-scale arrival keep the grid, not the pixel size). Idempotent per scale value.
     void onWindowScaleMaybeChanged();
 
+    /// OS window activation handler (QWindow::activeChanged): grants focus ownership to this window
+    /// when it becomes the active OS window and revokes it when it stops being active, so alt-tabbing
+    /// away from Contour notifies the shell (DECSET 1004) even when no display holds Qt item focus.
+    void onOSWindowActiveChanged();
+
     /// Watches the bound window for QEvent::DevicePixelRatioChange (no QWindow signal exists for it).
     bool eventFilter(QObject* watched, QEvent* event) override;
 

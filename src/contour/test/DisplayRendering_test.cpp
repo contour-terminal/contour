@@ -1091,15 +1091,52 @@ TEST_CASE("display: focus in/out toggle the terminal's focus state on the live d
 {
     REQUIRE_DISPLAY_OR_SKIP();
     DisplayHarness h;
+    auto& controller = h.bindController();
+    auto& manager = h.testApp.app().sessionsManager();
+
+    // A session is born unfocused (Settings::focused is false for every contour session) — focus is
+    // granted by the manager, never assumed. @see TerminalSession's createSettingsFromConfig.
+    REQUIRE_FALSE(h.session->terminal().focused());
 
     QFocusEvent focusIn(QEvent::FocusIn);
     QCoreApplication::sendEvent(h.display, &focusIn);
     h.pump();
+    // A Qt focus-in on a display routes through the manager, which is the single VT-focus authority:
+    // it focuses this session AND records the display's window as the focus owner.
+    CHECK(h.session->terminal().focused());
+    CHECK(manager.focusedWindow() == controller.windowId());
+
     QFocusEvent focusOut(QEvent::FocusOut);
     QCoreApplication::sendEvent(h.display, &focusOut);
     h.pump();
+    CHECK_FALSE(h.session->terminal().focused());
+
     // Focus events must not desync the session — it stays alive and renders.
     CHECK(h.session->terminal().pageSize().lines.value > 0);
+}
+
+TEST_CASE("display: revoking the window's focus ownership leaves its live session unfocused",
+          "[display][focus][window]")
+{
+    // Alt-tabbing away from Contour revokes the window's focus ownership, which must unfocus the live
+    // session so a DECSET 1004 application is told. (That the QWindow::activeChanged signal is wired to
+    // this revoke is pinned headlessly in FocusRouting_test; here it runs against a real display.)
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+    auto& controller = h.bindController();
+    auto& manager = h.testApp.app().sessionsManager();
+
+    // Focus the session the way production does, through a Qt focus-in on its display.
+    QFocusEvent focusIn(QEvent::FocusIn);
+    QCoreApplication::sendEvent(h.display, &focusIn);
+    h.pump();
+    REQUIRE(h.session->terminal().focused());
+    REQUIRE(manager.focusedWindow() == controller.windowId());
+
+    manager.clearFocusedWindow(controller.windowId());
+    h.pump();
+    CHECK_FALSE(manager.focusedWindow().has_value());
+    CHECK_FALSE(h.session->terminal().focused());
 }
 
 TEST_CASE("display: blur-behind and programmatic resize route through the live display", "[display][window]")
