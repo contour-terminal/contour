@@ -105,6 +105,7 @@ nav:
     - Images: demo/images.md
     - ReGIS vector graphics: demo/regis-graphics.md
     - Input method editor (IME): demo/ime.md
+    - Right-to-left and bidirectional text: rtl-bidi.md
     - Line marks: demo/line-marks.md
     - Status line: demo/statusline.md
     - Hint mode: demo/hint-mode.md

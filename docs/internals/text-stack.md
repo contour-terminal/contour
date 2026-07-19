@@ -172,10 +172,22 @@ not see why a terminal emulator should *not* do provide support for
 complex unicode, as the performance I have achieved so far is above average at
 least, and therefore should be sufficient for everyday use.
 
-Bidirectional text was not addressed in this document nor in the implementation
-in the Contour terminal yet, as this imposes a new set of challenges
-that have to be dealt with separately. Hopefully this will be eventually
-added (or contributed) and this document will then be updated accordingly.
+Bidirectional text is implemented, and is display-only: the grid stores logical order and the
+reordering happens on the way to the screen, with the inverse transform applied to mouse positions on
+the way back. The unit of the algorithm is the paragraph -- delimited by hard newlines, so a
+soft-wrapped line continues the one above -- which is why the reordering does not change when the
+window is resized.
+
+UAX#9 itself lives in libunicode (`unicode::bidi_resolve`), which passes the official
+`BidiTest.txt` and `BidiCharacterTest.txt` suites in full. `src/vtbackend/Bidi.{h,cpp}` turns the
+resolved levels into a per-line column permutation, `RenderBufferBuilder` applies it to the cells,
+and the shaper is told each run's direction so that HarfBuzz selects the font's `arab` or `hebr`
+GSUB tables -- without which Arabic renders as unjoined isolated forms.
+
+A line holding no codepoint at or above U+0590 takes a fast path that allocates nothing, so ordinary
+left-to-right output is unaffected.
+
+See [docs/rtl-bidi.md](../rtl-bidi.md) for the user-facing description and the control sequences.
 
 Conclusion
 ----------

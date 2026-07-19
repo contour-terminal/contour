@@ -670,6 +670,9 @@ class Terminal
     /// frame, or when bidirectional reordering is switched off (BDSM reset).
     [[nodiscard]] BidiLineLayout const& bidiLayoutAt(LineOffset line) const noexcept;
 
+    /// Whether the cursor currently sits inside a right-to-left run.
+    [[nodiscard]] bool cursorIsInRightToLeftRun() const noexcept;
+
     // {{{ Bidirectional text
     /// Selects the character path, per SCP (`CSI Ps SP k`).
     /// @param direction nullopt restores the terminal's own default.

@@ -115,6 +115,12 @@ struct RenderCursor
     float animationProgress = 1.0f;              ///< 0.0 = at animateFrom, 1.0 = at position.
     RGBColor cursorColor {};                     ///< Resolved cursor color at target position.
     std::optional<RGBColor> animateFromColor {}; ///< Cursor color at animation source position.
+
+    /// Writing direction of the character the cursor sits on.
+    ///
+    /// A bar or underline cursor is drawn on the LEFT edge of its cell in a left-to-right run and on
+    /// the RIGHT edge in a right-to-left one, so that it marks where the next character will go.
+    unicode::Bidi_Direction direction = unicode::Bidi_Direction::Left_To_Right;
 };
 
 struct RenderBuffer

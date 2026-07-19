@@ -170,8 +170,14 @@ namespace
         auto const row = vtbackend::LineOffset(
             clamp((sy - marginTop) / cellSize.height.as<int>(), 0, *pageSize.lines - 1));
 
-        auto const col = vtbackend::ColumnOffset(
+        auto const visualColumn = vtbackend::ColumnOffset(
             clamp((sx - marginLeft) / cellSize.width.as<int>(), 0, *pageSize.columns - 1));
+
+        // The pixel gives a VISUAL column, but everything downstream -- mouse reports to the
+        // application, and selection anchors -- is addressed logically. This is the inverse of the
+        // transform the render buffer applied, and without it a click inside reordered text lands on
+        // whatever character happens to be drawn there rather than the one the user pointed at.
+        auto const col = session.terminal().bidiLayoutAt(row).logicalColumnAt(visualColumn);
 
         return { .line = row, .column = col };
     }

@@ -148,10 +148,17 @@ optional<RenderCursor> RenderBufferBuilder::renderCursor() const
     auto constexpr InactiveCursorShape = CursorShape::Rectangle; // TODO configurable
     auto const shape = _terminal->focused() ? _terminal->cursorShape() : InactiveCursorShape;
 
+    // The cursor sits OVER a character rather than between two, so it simply follows the character
+    // it is on: its logical column is mapped through the same permutation the cells took. What
+    // changes with direction is which edge of the cell a bar or underline is drawn on, which the
+    // renderer decides from RenderCursor::direction.
+    auto const& bidiLayout = _terminal->bidiLayoutAt(_cursorPosition->line);
+    auto const visualCursorColumn = bidiLayout.visualColumnAt(_cursorPosition->column);
+
     auto const cursorScreenPosition =
         CellLocation { .line = _baseLine + _cursorPosition->line
                                + boxed_cast<LineOffset>(_terminal->viewport().scrollOffset()),
-                       .column = _cursorPosition->column };
+                       .column = visualCursorColumn };
 
     auto const cellWidth = _screen->cellWidthAt(*_cursorPosition);
 
@@ -190,7 +197,10 @@ optional<RenderCursor> RenderBufferBuilder::renderCursor() const
                           .shape = shape,
                           .width = cellWidth,
                           .animationProgress = animProgress,
-                          .cursorColor = resolvedCursorColor };
+                          .cursorColor = resolvedCursorColor,
+                          .direction = (bidiLayout.levelAt(_cursorPosition->column) & 1) != 0
+                                           ? unicode::Bidi_Direction::Right_To_Left
+                                           : unicode::Bidi_Direction::Left_To_Right };
 }
 
 RenderCell RenderBufferBuilder::makeRenderCellExplicit(ColorPalette const& colorPalette,

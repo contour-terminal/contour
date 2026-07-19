@@ -127,16 +127,6 @@ half-driven screen is worse than none.
 
 The gap files say which sequences are unimplemented. This is for the decisions that outlive them.
 
-- **Bidirectional text is a toggle, and the toggle is a no-op.** `RightToLeftMode` (DECRLM, 34),
-  `HebrewEncodingMode` (DECHEM, 36) and `RightToLeftCopyMode` (DECRLCM, 96) are settable and reported
-  honestly by DECRQM — SM/RM toggle them, DECRQM answers Set/Reset — but **nothing reads the bit**.
-  They are the entry points for real right-to-left and Hebrew support, which is a wanted feature
-  rather than a checkbox, and they are the priority of their group. The rendering half of the problem
-  is a separate and larger one; see `docs/internals/text-stack.md`, which does not address BiDi
-  either. They are part of a block of seventeen VT525 keyboard, national and hardware modes in
-  `primitives.h`'s `DECMode` that are honest toggles today, each carrying its own `TODO`. Reporting a
-  mode's state truthfully while not acting on it is deliberate: it is a step above the
-  `PermanentlyReset` modes, which can never mean anything here.
 - **The `*` table has not been audited against vttest's menu tables.** The rule above — `*` cannot
   cross a submenu — was applied where it was found (11.7's protected-area item, 11.2.5's UPSS item),
   not proven across the table. Every remaining `*` is a claim that none of its items is a submenu, a
@@ -218,6 +208,15 @@ in the first column:
 | `ghostty`           | <https://github.com/ghostty-org/ghostty>             |
 | `wezterm`           | <https://github.com/wez/wezterm>                     |
 | `mintty`            | <https://github.com/mintty/mintty>                   |
+| `vte`               | <https://gitlab.gnome.org/GNOME/vte>                 |
+| `mlterm`            | <https://github.com/arakiken/mlterm>                 |
+| `fribidi`           | <https://github.com/fribidi/fribidi>                 |
+
+The last three are the bidirectional-text references. `vte` implements the terminal-wg BiDi
+recommendation and is the model for the paragraph/row split (`src/bidi.cc`); `mlterm` is the
+reference for Arabic presentation-form handling (`vtemu/vt_bidi.c`, `vtemu/vt_shape.c`). `fribidi`
+is a UAX#9 implementation read as a cross-check only — Contour does **not** link it (the algorithm
+lives in libunicode, per the no-new-dependencies rule in `AGENT.md`).
 
 Set the variable however your environment prefers. For a Claude Code checkout, the least intrusive
 place is the (git-ignored) `.claude/settings.local.json`, which injects it into the tool sandbox:

@@ -1008,6 +1008,12 @@ void Terminal::scrollToBottomOnInput()
     _viewport.scrollToBottom();
 }
 
+bool Terminal::cursorIsInRightToLeftRun() const noexcept
+{
+    auto const position = currentScreen().cursor().position;
+    return (bidiLayoutAt(position.line).levelAt(position.column) & 1) != 0;
+}
+
 Handled Terminal::sendKeyEvent(Key key,
                                KeyboardModifiers modifiers,
                                KeyboardEventType eventType,
@@ -1051,6 +1057,12 @@ Handled Terminal::sendKeyEvent(Key key,
             return Handled { true };
         }
     }
+
+    // CSI ? 1243, set by default: inside a right-to-left paragraph the Left and Right arrows swap,
+    // so that an arrow moves the cursor the way it points rather than the way memory runs.
+    if (isModeEnabled(DECMode::BidiSwapArrowKeys) && (key == Key::LeftArrow || key == Key::RightArrow)
+        && cursorIsInRightToLeftRun())
+        key = key == Key::LeftArrow ? Key::RightArrow : Key::LeftArrow;
 
     bool const success = _inputGenerator.generate(key, modifiers, eventType);
     if (success)
