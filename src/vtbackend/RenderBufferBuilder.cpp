@@ -223,6 +223,11 @@ RenderCell RenderBufferBuilder::makeRenderCellExplicit(ColorPalette const& color
     renderCell.position.line = line;
     renderCell.position.column = column;
     renderCell.width = unbox<uint8_t>(width);
+
+    // The renderer places a glyph at the column its cluster names, and clusters are counted in
+    // GlyphSizing::columns -- so a wide grapheme cluster must say so here too, or everything after it
+    // in a status line or an IME preedit string is drawn one column too far left.
+    renderCell.sizing.columns = std::max<uint8_t>(1, unbox<uint8_t>(width));
     renderCell.codepoints = std::move(graphemeCluster);
     return renderCell;
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 
 namespace vtbackend
@@ -100,6 +101,13 @@ struct GlyphSizing
     /// and gives advances of their own, so counting them yields more cells than the one the block
     /// occupies. The backend already knows the answer; carrying it is what keeps a cluster whole.
     uint8_t columns = 1;
+
+    /// @return How many grid columns this cell occupies; never zero.
+    ///
+    /// Every reader wants the clamped value -- a span of zero would give two cells the same cluster and
+    /// draw them on top of each other -- so the floor lives here rather than being restated at each of
+    /// them.
+    [[nodiscard]] constexpr uint8_t columnSpan() const noexcept { return std::max<uint8_t>(1, columns); }
 
     constexpr bool operator==(GlyphSizing const&) const noexcept = default;
 };
