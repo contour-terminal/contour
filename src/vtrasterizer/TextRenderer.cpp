@@ -626,13 +626,25 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
     // A bracket or other mirrored character inside a right-to-left run is drawn as its mirror, so
     // that it still opens and closes around the text it encloses (UAX#9 L4). Substituting here, ahead
     // of the cache key, means the mirrored form is what gets shaped and what gets cached.
+    //
+    // The run arrives in VISUAL order, because RenderBufferBuilder already permuted the cells. A
+    // shaper needs LOGICAL order: Arabic decides its initial/medial/final forms from logical
+    // adjacency, so shaping a reversed string yields mirrored joining forms. The run is uniform in
+    // level, so restoring logical order is just a reversal, and the glyphs are drawn back-to-front
+    // below to put them where they belong.
     auto mirrored = std::u32string {};
+    auto reversedClusters = std::vector<unsigned> {};
     if (direction == unicode::Bidi_Direction::Right_To_Left)
     {
         for (auto const codepoint: codepoints)
             mirrored += unicode::is_mirrored(codepoint) ? unicode::bidi_mirroring_glyph(codepoint)
                                                         : codepoint;
+        std::ranges::reverse(mirrored);
         codepoints = mirrored;
+
+        reversedClusters.assign(clusters.begin(), clusters.end());
+        std::ranges::reverse(reversedClusters);
+        clusters = gsl::span<unsigned> { reversedClusters };
     }
 
     auto const hash = hashTextAndStyle(codepoints, style, direction);
@@ -659,7 +671,19 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
         return;
     }
 
-    for (auto const& glyphPosition: glyphPositions)
+    // Drawn back-to-front for a right-to-left run: the glyphs come back in logical order (ascending
+    // cluster, guaranteed by the normalisation in shapeWithFont), and the pen accumulates to the
+    // right, so the last logical glyph has to be laid down first.
+    auto drawOrder = std::vector<text::glyph_position> {};
+    if (direction == unicode::Bidi_Direction::Right_To_Left)
+    {
+        drawOrder.assign(glyphPositions.begin(), glyphPositions.end());
+        std::ranges::reverse(drawOrder);
+    }
+    auto const& glyphsToDraw =
+        direction == unicode::Bidi_Direction::Right_To_Left ? drawOrder : glyphPositions;
+
+    for (auto const& glyphPosition: glyphsToDraw)
     {
         if (auto const* attributes = ensureRasterizedIfDirectMapped(glyphPosition.glyph))
         {
