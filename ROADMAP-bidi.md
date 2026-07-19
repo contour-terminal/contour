@@ -72,10 +72,14 @@ logical by the time selection sees them.
 Note a logically contiguous selection may render visually **discontiguous**. That is correct and
 matches VTE; do not "fix" it.
 
-### 3. `RenderCursor::direction` is a dead field
-Added and populated, consumed by nobody. The bar/underline cursor still draws on the left edge of its
-cell inside an RTL run; it should draw on the right, and apply the recommendation's `⎡`/`⎤` shape
-hint. Also: the cursor should be hidden while `wrapPending` rather than jumping mid-line.
+### 3. Cursor — mostly DONE
+`RenderCursor::direction` is now consumed: `CursorRenderer::render()` shifts a Bar cursor to the
+cell's trailing edge in a right-to-left run, with the thickness expression extracted so the tile and
+the placement cannot drift apart. Underscore spans the full width and Block/Rectangle fill it, so
+neither needs anything.
+
+Still open: the recommendation's `⎡`/`⎤` shape hint, and hiding the cursor while `wrapPending`
+rather than letting it jump mid-line.
 
 ### 4. `TextClusterGrouper` space flush
 `appendCellTextToClusterGroup` is unchanged from master. The plan wants a space to stop being a hard
@@ -100,10 +104,12 @@ Written blind — it cannot be compiled on Linux. Must be checked on Windows bef
 
 ## Missing tests and verification
 
-- **Cache-collision test for `hashTextAndStyle`** — the plan singles this out as "the kind of bug
-  that passes every test". Direction is folded into the key; nothing proves it.
-- RTL cluster normalization in `cluster_spans_test.cpp`: a descending-cluster run must segment, not
-  degrade to `indivisibleGroup()`.
+- ~~Cache-collision test for `hashTextAndStyle`~~ — DONE. `hashTextAndStyle` moved to its own header
+  (`TextShapingCacheKey.h`) so it is testable; three cases, verified against a deliberately
+  direction-blind key which fails two of them. Covers the zero-enumerator trap from both sides
+  (`Bidi_Direction::Left_To_Right` and `TextStyle::Invalid` are both 0, and this only works because
+  `operator*(strong_hash, uint32_t)` mixes rather than multiplies).
+- ~~RTL cluster normalization in `cluster_spans_test.cpp`~~ — DONE, both halves of the contract.
 - `TextClusterGrouper_test`: level-run boundary cases.
 - `TextRenderer_test`: cluster-based placement.
 - Offscreen `DisplayRendering_test`: a mixed Hebrew/Arabic/Latin/digit screen.

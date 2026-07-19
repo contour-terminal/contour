@@ -309,3 +309,61 @@ TEST_CASE("TextClusterGrouper.SplitAtColorChange")
               .flags = vtbackend::LineFlag::None,
           });
 }
+
+// A shaping run may never straddle a change of writing direction: the shaper is told which way to
+// lay the whole run out, so a group holding both directions would be laid out wrongly whichever
+// answer it was given. A level change therefore ends a group exactly as a colour change does.
+TEST_CASE("TextClusterGrouper.a level change ends the group")
+{
+    auto recorder = EventRecorder {};
+    auto grouper = TextClusterGrouper(recorder);
+    auto const color = RGBColor { 0xF0, 0x80, 0x40 };
+
+    grouper.beginFrame();
+    // Two cells at level 0, then two at level 1 -- no space, no colour change, nothing else that
+    // would flush. Only the level differs.
+    for (auto const [index, level]: std::array { std::pair { 0, uint8_t { 0 } },
+                                                 std::pair { 1, uint8_t { 0 } },
+                                                 std::pair { 2, uint8_t { 1 } },
+                                                 std::pair { 3, uint8_t { 1 } } })
+    {
+        auto const codepoint = static_cast<char32_t>(U'a' + index);
+        grouper.renderCell(CellLocation { .line = LineOffset(0), .column = ColumnOffset(index) },
+                           std::u32string_view(&codepoint, 1),
+                           color,
+                           TextStyle::Regular,
+                           LineFlag::None,
+                           {},
+                           level);
+    }
+    grouper.endFrame();
+
+    REQUIRE(recorder.events.size() == 2);
+    CHECK(get<TextClusterGroup>(recorder.events[0]).codepoints == U"ab");
+    CHECK(get<TextClusterGroup>(recorder.events[1]).codepoints == U"cd");
+}
+
+TEST_CASE("TextClusterGrouper.a uniform level does not split")
+{
+    auto recorder = EventRecorder {};
+    auto grouper = TextClusterGrouper(recorder);
+    auto const color = RGBColor { 0xF0, 0x80, 0x40 };
+
+    grouper.beginFrame();
+    for (auto const index: { 0, 1, 2, 3 })
+    {
+        auto const codepoint = static_cast<char32_t>(U'a' + index);
+        grouper.renderCell(CellLocation { .line = LineOffset(0), .column = ColumnOffset(index) },
+                           std::u32string_view(&codepoint, 1),
+                           color,
+                           TextStyle::Regular,
+                           LineFlag::None,
+                           {},
+                           uint8_t { 1 }); // all right-to-left
+    }
+    grouper.endFrame();
+
+    // One run, not four: the level is part of the flush predicate, not a per-cell key.
+    REQUIRE(recorder.events.size() == 1);
+    CHECK(get<TextClusterGroup>(recorder.events[0]).codepoints == U"abcd");
+}

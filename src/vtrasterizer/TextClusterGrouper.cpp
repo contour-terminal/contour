@@ -101,8 +101,11 @@ void TextClusterGrouper::appendCellTextToClusterGroup(std::u32string_view codepo
                                                       vtbackend::GlyphSizing const& sizing,
                                                       uint8_t bidiLevel)
 {
-    bool const attribsChanged =
-        color != _color || style != _style || flags != _lineFlags || sizing != _sizing;
+    // A shaping run may never straddle a change of writing direction: the shaper is told which way
+    // to lay the whole run out, so a group holding both would be wrong whichever answer it got.
+    // A level change therefore ends the group, exactly as a colour change does.
+    bool const attribsChanged = color != _color || style != _style || flags != _lineFlags
+                                || sizing != _sizing || bidiLevel != _bidiLevel;
     bool const cellIsEmpty = codepoints.empty() || codepoints[0] == 0x20;
     bool const textStartsNewCluster = _cellCount == 0 && !cellIsEmpty;
 
