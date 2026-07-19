@@ -874,7 +874,14 @@ void Screen::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
 
     // A cell claimed by a scaled block on a line ABOVE belongs to that block; writing here destroys
     // it, exactly as writing into a horizontal continuation does.
-    if (cell.isFlagEnabled(CellFlag::MulticellContinuation))
+    //
+    // The block's HEAD counts too, and is the easier case to miss: overwriting it is not writing into
+    // a continuation, so neither branch here used to fire and the rows below kept their
+    // MulticellContinuation flag while the head that explained them was gone. Nothing could clean
+    // those cells up afterwards -- multicellBlockAt walks up to an ordinary cell and answers nothing
+    // -- so they stayed as orphans the renderer could not resolve and the selection extractor dropped
+    // whole rows over.
+    if (cell.isFlagEnabled(CellFlag::MulticellContinuation) || cell.scale() > 1)
         eraseMulticellBlockAt(_cursor.position);
 
     if (cell.isFlagEnabled(CellFlag::WideCharContinuation) && _cursor.position.column > ColumnOffset(0))
@@ -4697,6 +4704,15 @@ void Screen::renderITerm2InlineImage(std::string_view arguments)
     // iTerm2 sends whole image files rather than raw pixels, so the format is whatever the file is;
     // PNG is the one Contour can decode.
     auto pixmap = Image::Data(decoded.begin(), decoded.end());
+
+    // `width=`/`height=` are application-supplied cell counts with no relation to the image, and they
+    // reach renderImage with autoScroll set -- whose remainder loop performs one linefeed() per row it
+    // could not draw. Unclamped, `height=90000000` is ninety million linefeeds: the terminal wedges
+    // and the scrollback is destroyed. An image can never occupy more than the page, so that is the
+    // bound. Zero keeps its meaning of "derive this axis from the decoded image".
+    auto const clamp = [](unsigned requested, auto limit) {
+        return std::min(requested, static_cast<unsigned>(unbox(limit)));
+    };
     (void) renderImage(ImageFormat::PNG,
                        ImageSize {},
                        std::move(pixmap),
@@ -4713,6 +4729,8 @@ ApplyResult Screen::processPointerShape(std::string_view payload)
 {
     using namespace pointer_shape;
 
+    // `OSC 22 ; ST` is the documented reset: "Reset the pointer to default". Rejecting the empty
+    // payload as malformed left an application-set shape in place with no way to put it back.
     if (payload.empty())
     {
         _terminal->resetPointerShape();
@@ -4739,8 +4757,6 @@ ApplyResult Screen::processPointerShape(std::string_view payload)
             for (auto const& name: crispy::split(names, ','))
             {
                 if (!answers.empty())
-    // `OSC 22 ; ST` is the documented reset: "Reset the pointer to default". Rejecting the empty
-    // payload as malformed left an application-set shape in place with no way to put it back.
                     answers += ',';
                 if (isSupportedName(name))
                     answers += '1';
@@ -4785,6 +4801,13 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
         return ApplyResult::Invalid;
     auto const& packet = *parsed;
 
+    // The protocol answers `type=<the type asked about>:status=<code>`. Putting the status in the
+    // `type=` slot -- and inventing an `id=` key the protocol does not define -- meant no conforming
+    // client could parse any reply this terminal sent.
+    // A status is reported against the TRANSMISSION, not against whichever packet happened to carry
+    // the failure: the spec's shapes are `type=read:status=...` and `type=write:status=...`, and the
+    // wdata/walias packets are steps within a write.
+    auto const responseType = packet.type == PacketType::Read ? PacketType::Read : PacketType::Write;
     auto const respond = [&](std::string_view status) {
         reply("\033]5522;type={}:status={}\033\\", kitty_clipboard::typeName(responseType), status);
     };
@@ -4801,13 +4824,6 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
             }
 
             // The payload lists the MIME types the application will accept. If none of them is one
-    // The protocol answers `type=<the type asked about>:status=<code>`. Putting the status in the
-    // `type=` slot -- and inventing an `id=` key the protocol does not define -- meant no conforming
-    // client could parse any reply this terminal sent.
-    // A status is reported against the TRANSMISSION, not against whichever packet happened to carry
-    // the failure: the spec's shapes are `type=read:status=...` and `type=write:status=...`, and the
-    // wdata/walias packets are steps within a write.
-    auto const responseType = packet.type == PacketType::Read ? PacketType::Read : PacketType::Write;
             // this terminal can produce, say so rather than sending text under a type it did not ask
             // for.
             auto const requested = crispy::base64::decode(packet.payload);
@@ -5059,24 +5075,51 @@ void Screen::writeSizedText(std::u32string_view codepoints, uint8_t columns, Cel
     auto const height = LineCount::cast_from(std::max<uint8_t>(cellScale.scale, 1));
     if (height > LineCount(1))
     {
-        // Taller than the scroll region can ever be: there is nowhere to put it, so it is dropped
-        // whole rather than clipped -- a clipped block is a different size from the one asked for.
-        if (height > margin().vertical.length())
-            return;
+        // Scrolling can only make room while the cursor is INSIDE the scroll region: scrollUp moves
+        // the region's rows, and the rows below it stay exactly where they are. Measuring the room
+        // against the bottom margin regardless made `available` negative for a cursor beneath the
+        // region, so the shortfall came out larger than the block itself and the region was scrolled
+        // for a block whose rows were already free.
+        auto const insideRegion =
+            _cursor.position.line >= margin().vertical.from && _cursor.position.line <= margin().vertical.to;
 
-        auto const available =
-            LineCount::cast_from(margin().vertical.to - _cursor.position.line) + LineCount(1);
-        if (height > available)
+        if (insideRegion)
         {
-            auto const shortfall = height - available;
-            scrollUp(shortfall);
-            // The cursor follows its content up. `currentLine()` reads a CACHED pointer, so moving
-            // the cursor without refreshing it would write the block into the line the cursor used
-            // to be on.
-            _cursor.position.line -= LineOffset::cast_from(shortfall);
-            updateCursorIterator();
+            // Taller than the scroll region can ever be: there is nowhere to put it, so it is dropped
+            // whole rather than clipped -- a clipped block is a different size from the one asked for.
+            if (height > margin().vertical.length())
+                return;
+
+            auto const available =
+                LineCount::cast_from(margin().vertical.to - _cursor.position.line) + LineCount(1);
+            if (height > available)
+            {
+                auto const shortfall = height - available;
+                scrollUp(shortfall);
+                // The cursor follows its content up. `currentLine()` reads a CACHED pointer, so
+                // moving the cursor without refreshing it would write the block into the line the
+                // cursor used to be on.
+                _cursor.position.line -= LineOffset::cast_from(shortfall);
+                updateCursorIterator();
+            }
+        }
+        else
+        {
+            // Below the region there is nothing that can be scrolled into place, so the block is
+            // dropped whole when the rows it needs are not already free -- the same answer given to a
+            // block taller than the region itself.
+            auto const bottom = boxed_cast<LineOffset>(pageSize().lines) - 1;
+            if (height > LineCount::cast_from(bottom - _cursor.position.line) + LineCount(1))
+                return;
         }
     }
+
+    // A sized block is text, so insert mode applies to it as it does to every other write path:
+    // writeCharToCurrentAndAdvance shifts the line right before writing, and applyClusterWidthChange
+    // compensates for a cluster that grows. Without this an editor using IRM plus `OSC 66` had the
+    // characters under the block destroyed instead of pushed right.
+    if (_terminal->isModeEnabled(AnsiMode::Insert))
+        insertChars(_cursor.position.line, ColumnCount::cast_from(columns));
 
     // The cells this block is about to claim may already belong to blocks on screen -- a run that
     // wrapped lands on the very row the previous run's blocks reach down into. Each of those is

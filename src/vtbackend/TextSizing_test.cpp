@@ -8,6 +8,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <format>
+#include <ranges>
 #include <string_view>
 
 using namespace std::string_view_literals;
@@ -615,6 +617,96 @@ TEST_CASE("TextSizing.the_cell_carries_the_whole_sizing", "[textsizing]")
     // Ordinary text must come back as ordinary, whatever was written before it.
     mock.writeToScreen("\033[3;1Hz"sv);
     CHECK(screen.at(LineOffset(2), ColumnOffset(0)).textScale().isOrdinary());
+}
+
+TEST_CASE("TextSizing.overwriting_a_block_head_releases_its_rows", "[textsizing]")
+{
+    // The rows a tall block claims are only ever cleaned up when something writes INTO one of them.
+    // Writing over the block's HEAD hits neither continuation branch, so the rows below keep their
+    // MulticellContinuation flag while the head that explained them is gone. Those cells are then
+    // orphans: multicellBlockAt walks up, finds an ordinary cell, and answers nothing -- so nothing
+    // ever clears them, the renderer cannot resolve them, and extractSelectionText drops the whole
+    // row from a copied selection, joining the line above straight to the line below.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033]66;s=2;A\a"sv);
+    REQUIRE(screen.at(LineOffset(1), ColumnOffset(0)).isFlagEnabled(CellFlag::MulticellContinuation));
+
+    // Ordinary text straight over the head.
+    mock.writeToScreen("\033[H"sv);
+    mock.writeToScreen("x"sv);
+
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).codepoints() == U"x");
+    CHECK_FALSE(screen.at(LineOffset(1), ColumnOffset(0)).isFlagEnabled(CellFlag::MulticellContinuation));
+    CHECK_FALSE(screen.at(LineOffset(1), ColumnOffset(1)).isFlagEnabled(CellFlag::MulticellContinuation));
+}
+
+TEST_CASE("TextSizing.a_block_honours_insert_mode", "[textsizing]")
+{
+    // Every other entry into the write path honours IRM: writeCharToCurrentAndAdvance shifts the line
+    // right before writing, and applyClusterWidthChange compensates for a cluster that grows. A sized
+    // block is text too, so an editor using insert mode plus OSC 66 must not lose the characters the
+    // block would otherwise overwrite.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(2), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("abcdef"sv);
+    mock.writeToScreen("\033[H"sv);  // home
+    mock.writeToScreen("\033[4h"sv); // IRM on
+    mock.writeToScreen("\033]66;w=3;X\a"sv);
+
+    // The block took the first three columns and pushed the text right rather than destroying "abc".
+    // The two columns between are the block's own continuations, which carry no text of their own.
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).codepoints() == U"X");
+    CHECK(screen.at(LineOffset(0), ColumnOffset(3)).codepoints() == U"a");
+    CHECK(screen.at(LineOffset(0), ColumnOffset(8)).codepoints() == U"f");
+}
+
+TEST_CASE("TextSizing.a_purely_fractional_request_leaves_the_line_non_trivial", "[textsizing]")
+{
+    // kitty's documented half-size example, `OSC 66 ; n=1:d=2:w=1`, is scale 1 in a single ordinary
+    // column: it writes no continuation columns and no continuation rows, so the ONLY state it
+    // changes is the cell's sizing. The trivial-line fast path knows nothing about sizing, so a line
+    // left trivial renders through it and the fraction is silently dropped.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\033]66;n=1:d=2:w=1;Ha\a"sv);
+
+    auto const sizing = screen.at(LineOffset(0), ColumnOffset(0)).textScale();
+    REQUIRE(sizing.numerator == 1);
+    REQUIRE(sizing.denominator == 2);
+    CHECK_FALSE(sizing.isOrdinary());
+    CHECK_FALSE(screen.grid().lineAt(LineOffset(0)).isTrivialBuffer());
+}
+
+TEST_CASE("TextSizing.a_block_below_the_scroll_region_does_not_scroll_it", "[textsizing]")
+{
+    // The room-to-grow test measures from the bottom margin, which is BELOW the cursor only while the
+    // cursor is inside the region. With the cursor beneath it (legal with DECOM off) the difference
+    // goes negative, `height > available` is trivially true, and the shortfall exceeds the block's own
+    // height -- so the region scrolls by more rows than the block needs and the block lands inside the
+    // region instead of where the cursor was.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(25), ColumnCount(20) } };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    // Fill the page so any scroll is observable, then confine the region to the top ten rows.
+    for (auto const line: std::views::iota(0, 25))
+        mock.writeToScreen(std::format("\033[{};1Hline{}", line + 1, line));
+
+    mock.writeToScreen("\033[1;10r"sv); // DECSTBM: region is rows 1..10
+    mock.writeToScreen("\033[20;1H"sv); // cursor to row 20 -- below the region
+    REQUIRE(screen.cursor().position.line == LineOffset(19));
+
+    mock.writeToScreen("\033]66;s=3;A\a"sv);
+
+    // Rows 20..22 were free, so nothing had to move: the block is written where the cursor stood and
+    // the rows inside the scroll region are untouched.
+    CHECK(screen.cursor().position.line == LineOffset(19));
+    CHECK(screen.at(LineOffset(19), ColumnOffset(0)).codepoints() == U"A");
+    CHECK(screen.grid().lineAt(LineOffset(0)).toUtf8Trimmed() == "line0");
+    CHECK(screen.grid().lineAt(LineOffset(9)).toUtf8Trimmed() == "line9");
 }
 
 TEST_CASE("TextSizing.a_block_takes_a_deferred_wrap_before_placing_itself", "[textsizing]")
