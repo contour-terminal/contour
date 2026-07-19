@@ -94,6 +94,48 @@ TEST_CASE("Bidi.digits_move_within_an_rtl_run", "[bidi]")
           == std::vector { 0, 1, 2, 3, 9, 10, 11, 8, 7, 6, 5, 4, 12, 13, 14, 15 });
 }
 
+// Gates the cursor's direction hint: it is drawn only where the paragraph actually mixes directions,
+// so that the overwhelming majority of terminal lines carry no extra ink. VTE calls this `has_foreign`
+// and asks the same question -- does any character resolve to a level other than the paragraph's own.
+TEST_CASE("Bidi.mixedDirection", "[bidi]")
+{
+    SECTION("a paragraph that runs one way does not mix")
+    {
+        CHECK_FALSE(layOut({ { U"hello world", false } }).lines[0].mixedDirection);
+
+        // Hebrew throughout is no more ambiguous than Latin throughout: base and characters agree.
+        CHECK_FALSE(layOut({ { U"שלום", false } }).lines[0].mixedDirection); // shalom
+    }
+
+    SECTION("Latin inside Hebrew mixes")
+    {
+        CHECK(layOut({ { U"abc שלום 123 def", false } }).lines[0].mixedDirection);
+    }
+
+    SECTION("Latin in a forced right-to-left paragraph mixes")
+    {
+        // Nothing in the text is right-to-left, but the paragraph is, so the Latin resolves to a level
+        // above the base and is genuinely the foreign direction here.
+        auto const layout = layOut({ { U"abc", false } }, Bidi_Direction::Right_To_Left);
+        CHECK(layout.lines[0].mixedDirection);
+    }
+
+    SECTION("it is a property of the paragraph, not of the row")
+    {
+        // The second row is pure Latin and would answer "no" on its own. It continues a paragraph that
+        // mixes, so it must answer "yes" -- the cursor may not change shape as it crosses a soft wrap
+        // within one paragraph.
+        auto const layout = layOut({
+            { U"שלום", false }, // Hebrew, starts the paragraph
+            { U"abc", true },   // continues it
+        });
+
+        REQUIRE(layout.lines.size() == 2);
+        CHECK(layout.lines[0].mixedDirection);
+        CHECK(layout.lines[1].mixedDirection);
+    }
+}
+
 // The point of the paragraph model: a soft-wrapped row is NOT resolved on its own. Resolving the
 // same two rows independently gives a different answer, and that difference is the bug this guards.
 TEST_CASE("Bidi.paragraph_spans_wrapped_lines", "[bidi]")
@@ -407,10 +449,10 @@ TEST_CASE("Bidi.selection yields logical order", "[bidi]")
     // Sanity: the screen really is reordered, so this test is not vacuous.
     REQUIRE(trimmed(renderedLine(mock.terminal.renderBuffer().get(), 0)) == U"םולש");
 
-    mock.terminal.setSelector(std::make_unique<LinearSelection>(
-        mock.terminal.selectionHelper(),
-        CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
-        []() {}));
+    mock.terminal.setSelector(
+        std::make_unique<LinearSelection>(mock.terminal.selectionHelper(),
+                                          CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+                                          []() {}));
     (void) mock.terminal.selector()->extend(
         CellLocation { .line = LineOffset(0), .column = ColumnOffset(3) });
     mock.terminal.selector()->complete();
@@ -425,10 +467,10 @@ TEST_CASE("Bidi.selection across a direction boundary is logical", "[bidi]")
 
     mock.writeToScreen("abc שלום def");
 
-    mock.terminal.setSelector(std::make_unique<LinearSelection>(
-        mock.terminal.selectionHelper(),
-        CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
-        []() {}));
+    mock.terminal.setSelector(
+        std::make_unique<LinearSelection>(mock.terminal.selectionHelper(),
+                                          CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+                                          []() {}));
     (void) mock.terminal.selector()->extend(
         CellLocation { .line = LineOffset(0), .column = ColumnOffset(11) });
     mock.terminal.selector()->complete();
@@ -507,6 +549,5 @@ TEST_CASE("Bidi.multiple RTL words reorder relative to each other", "[bidi]")
     mock.terminal.refreshRenderBuffer();
 
     // The whole line reverses, so the SECOND word is drawn first and each word is itself reversed.
-    CHECK(trimmed(renderedLine(mock.terminal.renderBuffer().get(), 0))
-          == U"םלוע םולש");
+    CHECK(trimmed(renderedLine(mock.terminal.renderBuffer().get(), 0)) == U"םלוע םולש");
 }

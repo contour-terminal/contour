@@ -131,6 +131,13 @@ namespace
         auto const paragraphLevel =
             static_cast<uint8_t>(resolved.base_direction == Bidi_Direction::Right_To_Left ? 1 : 0);
 
+        // Whether this paragraph mixes directions, which is what gates the cursor's direction hint.
+        // Levels X9 removed carry no direction of their own and take no part in the question. Asked
+        // over the whole paragraph rather than per row, so that every row of it answers alike.
+        auto const mixedDirection = std::ranges::any_of(resolved.levels, [paragraphLevel](uint8_t level) {
+            return level != unicode::bidi_removed_level && level != paragraphLevel;
+        });
+
         auto offset = size_t { 0 };
         for (size_t row = 0; row < paragraph.size(); ++row)
         {
@@ -142,6 +149,7 @@ namespace
             applyLineEndWhitespaceReset(paragraph[row].text, paragraphLevel, rowLevels);
 
             out[row].paragraphDirection = resolved.base_direction;
+            out[row].mixedDirection = mixedDirection;
             buildPermutation(out[row], rowLevels);
 
             offset += length;

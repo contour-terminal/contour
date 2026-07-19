@@ -51,6 +51,17 @@ struct BidiLineLayout
     /// The base direction of the paragraph this line belongs to.
     unicode::Bidi_Direction paragraphDirection = unicode::Bidi_Direction::Left_To_Right;
 
+    /// Whether the paragraph mixes writing directions -- some character resolved to a level other
+    /// than the paragraph's own.
+    ///
+    /// This is VTE's `has_foreign`, and it exists for one purpose: the cursor shows which way the
+    /// character under it is written only where that is genuinely in doubt. A paragraph that runs one
+    /// way throughout needs no such hint, and drawing one on every cursor would be noise.
+    ///
+    /// A property of the PARAGRAPH, not of the line: it is stamped on every line of the paragraph,
+    /// because the paragraph is the unit a reader takes in.
+    bool mixedDirection = false;
+
     /// Resolved embedding level per column. Empty when @ref identity holds.
     std::vector<uint8_t> levels;
 
