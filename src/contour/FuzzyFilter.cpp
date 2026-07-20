@@ -49,7 +49,7 @@ namespace
     /// is wrong, which is what the alignment below is for.
     [[nodiscard]] constexpr bool isSubsequence(std::string_view query, std::string_view candidate) noexcept
     {
-        auto const* wanted = query.begin();
+        auto wanted = query.begin();
         for (auto const ch: candidate)
         {
             if (wanted == query.end())

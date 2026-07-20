@@ -11,6 +11,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <ctime>
 #include <format>
 #include <optional>
 #include <ranges>
