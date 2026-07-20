@@ -115,7 +115,6 @@
           <li>A two-finger sideways swipe now switches tabs in the direction the fingers moved, the way a browser does. A mouse wheel tilt is unchanged</li>
           <li>Fixes a sideways swipe over the tab bar doing nothing at all on a trackpad</li>
           <li>Fixes the tab bar placement and visibility settings appearing to do nothing until Contour was restarted</li>
-          <li>The settings page now opens on the global settings instead of an empty pane</li>
           <li>Fixes a tall glyph — a Nerd Font icon, a powerline separator — overwriting a neighbouring glyph in the texture atlas, and no longer shifts such a glyph sideways off its own bearing</li>
           <li>Fixes a hang and a crash on startup when probing the audio device, for profiles that cannot ring an audible bell</li>
           <li>Fixes the status line and non-displayed pages being drawn against whichever screen was current rather than the one being rendered, which took the cursor row and the cursor colour from the wrong page</li>
