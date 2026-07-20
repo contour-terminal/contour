@@ -64,16 +64,19 @@ RowLayout {
 
     ControlButton {
         text: "—" // minimize
+        Accessible.name: qsTr("Minimize")
         onClicked: root.controller.minimizeWindow()
     }
 
     ControlButton {
         text: root.window.visibility === Window.Maximized ? "❐" : "▢" // restore / maximize
+        Accessible.name: root.window.visibility === Window.Maximized ? qsTr("Restore") : qsTr("Maximize")
         onClicked: root.controller.toggleMaximized()
     }
 
     ControlButton {
         text: "✕" // close
+        Accessible.name: qsTr("Close window")
         onClicked: root.window.close()
 
         // The close glyph turns white on the red hover fill for contrast.

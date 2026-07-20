@@ -90,9 +90,15 @@ Item {
         }
     }
 
+    // Every editor names itself from the row's own label. The label is a SIBLING Label, so without
+    // this a screen reader reaches an unlabelled control and can only say what KIND it is -- and that
+    // is true of every field on the settings page at once. Set here rather than per call site, so a new
+    // field type is still just a new case in the Loader above.
     Component {
         id: enumEditor
         ComboBox {
+            Accessible.name: root.label
+            Accessible.description: root.help
             Layout.fillWidth: true
             enabled: root.editable
             model: root.options
@@ -104,6 +110,8 @@ Item {
     Component {
         id: boolEditor
         Switch {
+            Accessible.name: root.label
+            Accessible.description: root.help
             checked: root.value === true
             enabled: root.editable
             onToggled: root.edited(root.fieldKey, checked)
@@ -113,6 +121,8 @@ Item {
     Component {
         id: doubleEditor
         TextField {
+            Accessible.name: root.label
+            Accessible.description: root.help
             Layout.fillWidth: true
             text: root.value !== null && root.value !== undefined ? String(root.value) : ""
             enabled: root.editable
@@ -125,6 +135,8 @@ Item {
     Component {
         id: intEditor
         SpinBox {
+            Accessible.name: root.label
+            Accessible.description: root.help
             enabled: root.editable
             // Full 32-bit signed range: the config fields this drives are plain ints (e.g.
             // read_buffer_size, which can legitimately exceed a megabyte), and a narrower cap would
@@ -139,6 +151,8 @@ Item {
     Component {
         id: stringEditor
         TextField {
+            Accessible.name: root.label
+            Accessible.description: root.help
             Layout.fillWidth: true
             text: root.value !== null && root.value !== undefined ? String(root.value) : ""
             enabled: root.editable

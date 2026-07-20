@@ -10,6 +10,14 @@ import QtQuick.Window
 Item {
     id: root
 
+    // A page tab, named by its title. Accessible.selected is not decoration: QtQuick's attached type
+    // emits a state-change event from its setter, so binding it here IS the tab-switch announcement an
+    // assistive client hears -- no explicit event needs raising anywhere.
+    Accessible.role: Accessible.PageTab
+    Accessible.name: root.tabTitle
+    Accessible.selected: root.tabActive
+    Accessible.focusable: true
+
     required property var controller
     required property var window          // ApplicationWindow, for restoring terminal focus after rename
     required property int tabIndex
@@ -265,6 +273,7 @@ Item {
         width: 22
         height: 22
         text: "✕" // ✕
+        Accessible.name: qsTr("Close tab %1").arg(root.tabTitle)
         font.pointSize: 8
         // Don't take keyboard focus away from the terminal when clicked.
         focusPolicy: Qt.NoFocus

@@ -12,6 +12,9 @@ import QtQuick.Window
 Item {
     id: root
 
+    Accessible.role: Accessible.TitleBar
+    Accessible.name: qsTr("Title bar")
+
     required property var controller // this window's WindowController (main.qml: appWindow.win)
     required property var window
 

@@ -345,6 +345,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/Config_test.cpp
             test/SettingsController_test.cpp
             test/SettingsPageQml_test.cpp
+            test/Accessibility_qml_test.cpp
             test/ContextMenu_test.cpp
             test/TitleBarContextMenu_test.cpp
             test/FuzzyFilter_test.cpp

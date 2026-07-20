@@ -12,6 +12,11 @@ import QtQuick.Layouts
 Row {
     id: root
 
+    // A tab strip, so an assistive client reads the tabs below as the pages of one group rather than
+    // as loose buttons. The delegates carry the matching PageTab role.
+    Accessible.role: Accessible.PageTabList
+    Accessible.name: qsTr("Tabs")
+
     required property var controller
     // The ApplicationWindow, so a delegate can call restoreTerminalFocus() when a rename closes.
     required property var window
@@ -208,6 +213,7 @@ Row {
                 onClicked: if (root.controller) root.controller.closeSettings()
                 contentItem: Label {
                     text: "✕"
+                    Accessible.name: qsTr("Close settings")
                     color: settingsTabPalette.highlightedText
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
@@ -228,6 +234,7 @@ Row {
         id: newTabButton
         height: root.height
         text: "+"
+        Accessible.name: qsTr("New tab")
         font.pointSize: 12
         focusPolicy: Qt.NoFocus
         onClicked: root.controller.createNewTab()
@@ -249,6 +256,7 @@ Row {
         objectName: "newTabMenuButton"
         height: root.height
         text: "▾"
+        Accessible.name: qsTr("New tab with profile")
         font.pointSize: 10
         focusPolicy: Qt.NoFocus
         ToolTip.visible: hovered

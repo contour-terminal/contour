@@ -12,6 +12,7 @@ import QtQuick.Layouts
 Dialog {
     id: root
 
+
     modal: true
     anchors.centerIn: Overlay.overlay
     focus: true

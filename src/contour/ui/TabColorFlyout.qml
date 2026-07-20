@@ -215,6 +215,7 @@ Popup {
 
             Label {
                 text: "#"
+                Accessible.name: qsTr("Custom color, as hex")
                 Layout.alignment: Qt.AlignVCenter
             }
 
