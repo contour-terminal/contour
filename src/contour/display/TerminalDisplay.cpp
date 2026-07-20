@@ -1334,8 +1334,14 @@ QVariant TerminalDisplay::inputMethodQuery(Qt::InputMethodQuery query) const
             }
             return QRectF();
         case Qt::ImCursorPosition:
+        case Qt::ImAnchorPosition:
             // Qt contract: the cursor's CHARACTER index within ImSurroundingText (the current
             // line), i.e. the grid column — not a pixel offset.
+            //
+            // The anchor answers the same, which is how Qt is told that nothing is selected. It is
+            // answered explicitly rather than left to the base class: an unanswered anchor invites a
+            // client to read it as 0 and treat the whole line up to the cursor as selected text it
+            // may replace.
             if (terminal().isCursorInViewport())
                 return unbox<int>(terminal().currentScreen().cursor().position.column);
             return 0;
@@ -1347,7 +1353,13 @@ QVariant TerminalDisplay::inputMethodQuery(Qt::InputMethodQuery query) const
 
             return QString();
         case Qt::ImCurrentSelection:
-            // Nothing selected.
+            // Always empty, and deliberately so rather than for want of implementing it. A terminal's
+            // selection is a clipboard range over the scrollback, not an editable range an input
+            // method may replace: committing sends keystrokes to the child process and deletes
+            // nothing. Reporting the mouse selection here would say otherwise, and would contradict
+            // the anchor and cursor positions this same function reports.
+            //
+            // konsole, the other Qt terminal, does not answer this query at all.
             return QString();
         default:
             // bubble up

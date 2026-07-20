@@ -1390,7 +1390,15 @@ TEST_CASE("display: IME cursor-position and surrounding-text queries read the li
     auto const surrounding = h.display->inputMethodQuery(Qt::ImSurroundingText);
     CHECK(surrounding.toString().contains(QStringLiteral("hello")));
 
-    // Current selection is empty -> empty string.
+    // The anchor must answer, and must answer the SAME as the cursor: that pair is how Qt is told
+    // nothing is selected. Left unanswered it reads as 0, which claims everything up to the cursor is
+    // selected text the input method may replace.
+    auto const anchor = h.display->inputMethodQuery(Qt::ImAnchorPosition);
+    CHECK(anchor.isValid());
+    CHECK(anchor.toInt() == col.toInt());
+
+    // ... and the selection agrees with them. A terminal's mouse selection is a clipboard range, not
+    // an editable one, so it is never reported here.
     CHECK(h.display->inputMethodQuery(Qt::ImCurrentSelection).toString().isEmpty());
 }
 
