@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <cassert>
-
 #include <vtmux/Pane.h>
+
+#include <cassert>
 
 namespace vtmux
 {

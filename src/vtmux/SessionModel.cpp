@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtmux/SessionModel.h>
+
 #include <algorithm>
 #include <cassert>
 #include <cctype>
 #include <ranges>
-
-#include <vtmux/SessionModel.h>
 
 namespace vtmux
 {

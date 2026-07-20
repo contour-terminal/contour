@@ -1,5 +1,6 @@
-#include <vtbackend/ControlCode.h>
 #include <vtbackend/Sequence.h>
+
+#include <vtbackend/ControlCode.h>
 
 #include <crispy/escape.h>
 

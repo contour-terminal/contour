@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/Screen.h>
+
 #include <vtbackend/ControlCode.h>
 #include <vtbackend/DesktopNotification.h>
 #include <vtbackend/InputGenerator.h>
 #include <vtbackend/MessageParser.h>
 #include <vtbackend/RectangularAreaChecksum.h>
-#include <vtbackend/Screen.h>
 #include <vtbackend/SixelParser.h>
 #include <vtbackend/SoAClusterWriter.h>
 #include <vtbackend/Terminal.h>

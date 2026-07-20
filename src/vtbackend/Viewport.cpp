@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Terminal.h>
 #include <vtbackend/Viewport.h>
+
+#include <vtbackend/Terminal.h>
 
 #include <crispy/logstore.h>
 

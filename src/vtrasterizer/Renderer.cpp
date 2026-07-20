@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtrasterizer/Renderer.h>
+
 #include <vtrasterizer/TextRenderer.h>
 #include <vtrasterizer/utils.h>
 

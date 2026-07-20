@@ -107,6 +107,8 @@ Making use of reserved glyph slots
     }
 */
 
+#include <vtrasterizer/TextRenderer.h>
+
 #include <vtbackend/logging.h>
 #include <vtbackend/primitives.h>
 
@@ -114,7 +116,6 @@ Making use of reserved glyph slots
 #include <vtrasterizer/GlyphAdvance.h>
 #include <vtrasterizer/GlyphSlicing.h>
 #include <vtrasterizer/GridMetrics.h>
-#include <vtrasterizer/TextRenderer.h>
 #include <vtrasterizer/shared_defines.h>
 #include <vtrasterizer/utils.h>
 

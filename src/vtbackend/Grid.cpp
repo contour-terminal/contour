@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/Grid.h>
+
 #include <vtbackend/primitives.h>
 
 #include <crispy/assert.h>

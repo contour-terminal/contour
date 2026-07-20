@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/primitives.h>
-
 #include <text_shaper/shaper.h>
+
+#include <vtbackend/primitives.h>
 
 #include <crispy/logstore.h>
 

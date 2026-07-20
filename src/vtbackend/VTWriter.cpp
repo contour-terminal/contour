@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/CellProxy.h>
 #include <vtbackend/VTWriter.h>
+
+#include <vtbackend/CellProxy.h>
 
 #include <numeric>
 

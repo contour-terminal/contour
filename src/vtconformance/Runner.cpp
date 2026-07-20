@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtconformance/Runner.h>
+
 #include <crispy/utils.h>
 
 #include <cstdlib>
@@ -12,7 +14,6 @@
 #include <utility>
 
 #include <vtconformance/EscTestLog.h>
-#include <vtconformance/Runner.h>
 #include <vtconformance/VtTestLog.h>
 
 namespace fs = std::filesystem;

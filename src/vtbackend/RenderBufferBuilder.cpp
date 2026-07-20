@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#include <vtbackend/RenderBufferBuilder.h>
+
 #include <vtbackend/CellUtil.h>
 #include <vtbackend/Color.h>
 #include <vtbackend/ColorPalette.h>
-#include <vtbackend/RenderBufferBuilder.h>
 
 #include <crispy/utils.h>
 

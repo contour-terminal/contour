@@ -44,6 +44,7 @@ IndentWidth: 4
 IndentWrappedFunctionNames: false
 InsertNewlineAtEOF: true
 LineEnding: LF
+MainIncludeChar: Any
 MaxEmptyLinesToKeep: 1
 NamespaceIndentation: Inner
 PackConstructorInitializers: NextLine

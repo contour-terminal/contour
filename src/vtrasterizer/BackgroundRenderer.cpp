@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtrasterizer/BackgroundRenderer.h>
+
 #include <vtrasterizer/GridMetrics.h>
 #include <vtrasterizer/RenderTarget.h>
 

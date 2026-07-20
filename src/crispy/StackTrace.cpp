@@ -1,4 +1,5 @@
 #include <crispy/StackTrace.h>
+
 #include <crispy/utils.h>
 
 #include <cctype>

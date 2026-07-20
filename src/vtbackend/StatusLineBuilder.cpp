@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Color.h>
 #include <vtbackend/StatusLineBuilder.h>
+
+#include <vtbackend/Color.h>
 #include <vtbackend/Terminal.h>
 
 #include <crispy/interpolated_string.h>

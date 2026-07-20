@@ -1,5 +1,6 @@
-#include <text_shaper/directwrite_analysis_wrapper.h>
 #include <text_shaper/directwrite_shaper.h>
+
+#include <text_shaper/directwrite_analysis_wrapper.h>
 #include <text_shaper/font_locator.h>
 
 #include <algorithm>

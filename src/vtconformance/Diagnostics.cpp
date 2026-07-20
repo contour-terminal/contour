@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtconformance/Diagnostics.h>
+
 #include <vtbackend/logging.h>
 
 #include <crispy/logstore.h>
@@ -8,8 +10,6 @@
 #include <memory>
 #include <ranges>
 #include <utility>
-
-#include <vtconformance/Diagnostics.h>
 
 using namespace std::string_view_literals;
 

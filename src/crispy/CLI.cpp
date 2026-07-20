@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <crispy/CLI.h>
+
 #include <crispy/assert.h>
 #include <crispy/logstore.h>
 #include <crispy/times.h>

@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtconformance/VtTestLog.h>
+
 #include <crispy/utils.h>
 
 #include <array>
@@ -8,8 +10,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-
-#include <vtconformance/VtTestLog.h>
 
 using namespace std::string_view_literals;
 

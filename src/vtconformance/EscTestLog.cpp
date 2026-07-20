@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtconformance/EscTestLog.h>
+
 #include <crispy/utils.h>
 
 #include <algorithm>
@@ -8,8 +10,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include <vtconformance/EscTestLog.h>
 
 namespace vtconformance
 {

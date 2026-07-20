@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtrasterizer/Pixmap.h>
+
 #include <vtrasterizer/utils.h>
 
 using std::clamp;

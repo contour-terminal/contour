@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Terminal.h>
 #include <vtbackend/ViCommands.h>
+
+#include <vtbackend/Terminal.h>
 #include <vtbackend/ViInputHandler.h>
 #include <vtbackend/logging.h>
 #include <vtbackend/primitives.h>

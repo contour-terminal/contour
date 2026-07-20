@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <text_shaper/font.h>
 #include <text_shaper/mock_font_locator.h>
+
+#include <text_shaper/font.h>
 
 #include <string_view>
 

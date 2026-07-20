@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtconformance/ScreenDump.h>
+
 #include <vtbackend/CellProxy.h>
 #include <vtbackend/Screen.h>
 #include <vtbackend/Terminal.h>
@@ -14,8 +16,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-
-#include <vtconformance/ScreenDump.h>
 
 using namespace std::string_view_literals;
 

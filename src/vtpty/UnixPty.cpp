@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtpty/Process.h>
 #include <vtpty/UnixPty.h>
+
+#include <vtpty/Process.h>
 #include <vtpty/UnixUtils.h>
 
 #include <crispy/BufferObject.h>
