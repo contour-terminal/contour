@@ -349,9 +349,7 @@ bool TerminalSessionManager::applyLayoutToWindow(vtmux::WindowId window,
                 managerLog()("Layout references unknown profile '{}'; using window profile.", *profileName);
                 profileName.reset();
             }
-            std::optional<std::string> const cwd =
-                leaf.directory ? std::optional { leaf.directory->string() } : std::nullopt;
-            createBackingSession(sessionId, cwd, pageSize, command, profileName);
+            createBackingSession(sessionId, leaf.directory, pageSize, command, profileName);
         };
 
         auto* modelTab = realizeLayoutTab(*_model, window, tabSpec, seeder);

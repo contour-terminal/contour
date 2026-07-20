@@ -258,7 +258,7 @@ layouts:
     REQUIRE(t0.root.arguments.size() == 1);
     CHECK(t0.root.arguments[0] == ".");
     REQUIRE(t0.root.directory.has_value());
-    CHECK(t0.root.directory->generic_string() == "/tmp");
+    CHECK(*t0.root.directory == "/tmp");
 
     auto const& t1 = work.tabs[1];
     CHECK(t1.title == "claude");

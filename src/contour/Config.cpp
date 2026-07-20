@@ -1086,7 +1086,7 @@ void YAMLConfigReader::parseLayoutPane(YAML::Node const& node, config::LayoutPan
     if (auto const directory = node["directory"]; directory && directory.IsScalar())
         // resolvedPath (not bare homeResolvedPath): a layout's directory expands ${VAR} as well as
         // ~, exactly like every other path in the configuration.
-        where.directory = resolvedPath(directory.as<std::string>());
+        where.directory = resolvedPath(directory.as<std::string>()).string();
     if (auto const profile = node["profile"]; profile && profile.IsScalar())
         where.profile = profile.as<std::string>();
 }

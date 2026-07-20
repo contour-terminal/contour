@@ -1,4 +1,6 @@
 add_library(vtmux STATIC
+    LayoutTree.cpp
+    LayoutTree.h
     Pane.cpp
     Pane.h
     PaneLayout.h
@@ -23,6 +25,7 @@ if(VTMUX_TESTING)
     enable_testing()
     add_executable(vtmux_test
         test_main.cpp
+        LayoutTree_test.cpp
         Pane_test.cpp
         PaneLayout_test.cpp
         Tab_test.cpp
