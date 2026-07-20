@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <ranges>
+#include <utility>
 
 using contour::buildTitleBarContextMenu;
 using contour::ContextMenuEntry;
