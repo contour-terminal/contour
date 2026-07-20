@@ -21,17 +21,12 @@
 #include <span>
 #include <stdexcept>
 
-using std::array;
 using std::initializer_list;
 using std::make_unique;
-using std::move;
-using std::nullopt;
 using std::optional;
 using std::scoped_lock;
-using std::tuple;
 using std::unique_ptr;
 using std::vector;
-using std::chrono::steady_clock;
 
 namespace vtrasterizer
 {

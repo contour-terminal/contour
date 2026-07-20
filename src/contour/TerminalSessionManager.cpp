@@ -25,9 +25,6 @@
 
 using namespace std::string_literals;
 
-using std::make_unique;
-using std::nullopt;
-
 namespace contour
 {
 

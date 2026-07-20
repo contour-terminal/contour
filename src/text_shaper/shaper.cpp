@@ -17,8 +17,6 @@ using std::min;
 using std::tuple;
 using std::vector;
 
-using std::views::iota;
-
 namespace text
 {
 

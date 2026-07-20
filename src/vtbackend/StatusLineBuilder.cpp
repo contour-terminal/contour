@@ -42,8 +42,8 @@ namespace // helper functions
     }
 } // namespace
 
-std::optional<RGBColor> tryParseColorAttribute(crispy::string_interpolation const& interpolation,
-                                               std::string_view key)
+static std::optional<RGBColor> tryParseColorAttribute(crispy::string_interpolation const& interpolation,
+                                                      std::string_view key)
 {
     if (auto const i = interpolation.attributes.find(key); i != interpolation.attributes.end())
         return parseColor(i->second);
@@ -51,7 +51,7 @@ std::optional<RGBColor> tryParseColorAttribute(crispy::string_interpolation cons
     return std::nullopt;
 }
 
-std::optional<StatusLineDefinitions::Item> makeStatusLineItem(
+static std::optional<StatusLineDefinitions::Item> makeStatusLineItem(
     crispy::interpolated_string_fragment const& fragment)
 {
     if (std::holds_alternative<std::string_view>(fragment))

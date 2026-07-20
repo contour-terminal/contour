@@ -29,22 +29,15 @@
 
 using std::array;
 using std::clamp;
-using std::get;
-using std::holds_alternative;
-using std::max;
-using std::monostate;
 using std::nullopt;
 using std::optional;
 using std::pair;
 using std::scoped_lock;
 using std::string;
 using std::u32string;
-using std::variant;
-using std::vector;
 using std::chrono::steady_clock;
 
 using crispy::point;
-using crispy::size;
 using crispy::Zero;
 
 using vtbackend::Height;

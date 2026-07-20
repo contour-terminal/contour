@@ -49,7 +49,7 @@ TEST_CASE("splitCamelCase turns an action name into a readable title", "[contour
 
     SECTION("degenerate inputs do not crash or gain a leading space")
     {
-        CHECK(splitCamelCase("") == "");
+        CHECK(splitCamelCase("").empty());
         CHECK(splitCamelCase("Quit") == "Quit");
     }
 }

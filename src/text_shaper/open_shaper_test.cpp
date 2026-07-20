@@ -602,7 +602,7 @@ TEST_CASE("open_shaper.COLRv1", "[open_shaper]")
     CHECK(glyph.format == text::bitmap_format::rgba);
     CHECK(glyph.bitmapSize.width > vtbackend::Width(0));
     CHECK(glyph.bitmapSize.height > vtbackend::Height(0));
-    CHECK(glyph.bitmap.size() > 0);
+    CHECK(!glyph.bitmap.empty());
 }
 
 TEST_CASE("open_shaper.coverage.resolves_a_codepoint_the_chain_cannot", "[open_shaper][fallback]")

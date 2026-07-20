@@ -21,10 +21,7 @@
 #endif
 // clang-format on
 
-using std::copy;
 using std::make_shared;
-using std::min;
-using std::move;
 using std::ostream;
 using std::shared_ptr;
 using std::string;
@@ -63,9 +60,9 @@ ImagePool::ImagePool(OnImageRemove onImageRemove, ImageId nextImageId):
 {
 }
 
-constexpr ImageSize computeTargetSize(ImageResize resizePolicy,
-                                      ImageSize imageSize,
-                                      ImageSize gridSize) noexcept
+static constexpr ImageSize computeTargetSize(ImageResize resizePolicy,
+                                             ImageSize imageSize,
+                                             ImageSize gridSize) noexcept
 {
     auto const imageWidth = unbox(imageSize.width);
     auto const imageHeight = unbox(imageSize.height);
@@ -111,9 +108,9 @@ struct TopLeft
     int y {};
 };
 
-constexpr TopLeft computeTargetTopLeftOffset(ImageAlignment alignmentPolicy,
-                                             ImageSize targetSize,
-                                             ImageSize gridSize) noexcept
+static constexpr TopLeft computeTargetTopLeftOffset(ImageAlignment alignmentPolicy,
+                                                    ImageSize targetSize,
+                                                    ImageSize gridSize) noexcept
 {
     auto const gridWidth = unbox<int>(gridSize.width);
     auto const gridHeight = unbox<int>(gridSize.height);

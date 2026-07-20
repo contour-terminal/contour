@@ -38,12 +38,8 @@
 auto constexpr MinimumFontSize = text::font_size { 8.0 };
 
 using namespace std;
-using crispy::escape;
 using crispy::homeResolvedPath;
 using crispy::replaceVariables;
-using crispy::toLower;
-using crispy::toUpper;
-using crispy::unescape;
 
 using vtpty::Process;
 
@@ -375,7 +371,7 @@ fs::path configHome()
     return configHome("contour");
 }
 
-std::string createString(Config const& c)
+static std::string createString(Config const& c)
 {
     return createString<YAMLConfigWriter>(c);
 }
@@ -469,7 +465,7 @@ void compareEntries(Config& config, auto const& output)
 /// settings page) from the hand-maintained inline entries, which stay read-only there.
 /// @param config The just-parsed configuration to annotate.
 /// @param reader The reader that parsed contour.yml; its @c doc supplies the inline `color_schemes:` node.
-void recordMainConfigOrigins(Config& config, YAMLConfigReader const& reader)
+static void recordMainConfigOrigins(Config& config, YAMLConfigReader const& reader)
 {
     for (auto const& [name, _]: config.profiles.value())
         config.profileOrigins.emplace(name, SettingsOrigin::MainConfig);
@@ -499,7 +495,7 @@ void recordMainConfigOrigins(Config& config, YAMLConfigReader const& reader)
 /// @param config The configuration to augment in place (its @c configFile locates the side files).
 /// @param reader The reader used for the main config; reused to parse profile bodies (it carries the
 ///               logger and ${VAR} replacer, and loadProfileBody takes its node explicitly).
-void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
+static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
 {
     auto const dir = config.configFile.parent_path();
 
@@ -3047,8 +3043,8 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
                         { "COPYANDPASTE", vtbackend::HintAction::CopyAndPaste },
                         { "SELECT", vtbackend::HintAction::Select },
                     } };
-                if (auto const p = std::ranges::find_if(HintActionMappings,
-                                                        [&](auto const& t) { return t.first == actionStr; });
+                if (auto const* const p = std::ranges::find_if(
+                        HintActionMappings, [&](auto const& t) { return t.first == actionStr; });
                     p != HintActionMappings.end())
                 {
                     hintAction = p->second;
@@ -3249,7 +3245,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 }
 
 template <typename Writer>
-std::string createForGlobal(Config const& c)
+static std::string createForGlobal(Config const& c)
 {
     auto doc = std::string {};
     Writer writer;
@@ -3314,7 +3310,7 @@ std::string createForGlobal(Config const& c)
 /// @param doc The output buffer to append to.
 /// @param profile The profile to serialize.
 template <typename Writer>
-void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile const& profile)
+static void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile const& profile)
 {
     auto const processConfigEntry =
         [&]<typename T, documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
@@ -3359,7 +3355,7 @@ void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile const& pr
 /// Serializes one profile's body as a bare top-level map for a `profiles/<name>.yml` GUI side file
 /// (no `profiles:`/name wrapper), so the same reader that parses an inline profile parses it back.
 template <typename Writer>
-std::string createForSingleProfile(TerminalProfile const& profile)
+static std::string createForSingleProfile(TerminalProfile const& profile)
 {
     auto doc = std::string {};
     Writer writer;
@@ -3368,7 +3364,7 @@ std::string createForSingleProfile(TerminalProfile const& profile)
 }
 
 template <typename Writer>
-std::string createForProfile(Config const& c)
+static std::string createForProfile(Config const& c)
 {
     auto doc = std::string {};
     Writer writer;
@@ -3397,7 +3393,7 @@ std::string createForProfile(Config const& c)
 /// @param doc The output buffer to append to.
 /// @param entry The palette to serialize.
 template <typename Writer>
-void emitColorPaletteBody(Writer& writer, std::string& doc, vtbackend::ColorPalette const& entry)
+static void emitColorPaletteBody(Writer& writer, std::string& doc, vtbackend::ColorPalette const& entry)
 {
     auto const processWithDoc = [&](auto&& docString, auto... val) {
         doc.append(writer.replaceCommentPlaceholder(writer.process(writer.whichDoc(docString), val...)));
@@ -3511,7 +3507,7 @@ void emitColorPaletteBody(Writer& writer, std::string& doc, vtbackend::ColorPale
 /// Serializes one color palette as a bare top-level body for a `colorschemes/<name>.yml` GUI side
 /// file (no `color_schemes:`/name wrapper), matching that file's lazy read path.
 template <typename Writer>
-std::string createForSingleColorScheme(vtbackend::ColorPalette const& palette)
+static std::string createForSingleColorScheme(vtbackend::ColorPalette const& palette)
 {
     auto doc = std::string {};
     Writer writer;
@@ -3520,7 +3516,7 @@ std::string createForSingleColorScheme(vtbackend::ColorPalette const& palette)
 }
 
 template <typename Writer>
-std::string createForColorScheme(Config const& c)
+static std::string createForColorScheme(Config const& c)
 {
     auto doc = std::string {};
     Writer writer;
@@ -3541,7 +3537,7 @@ std::string createForColorScheme(Config const& c)
 }
 
 template <typename Writer>
-std::string createKeyMapping(Config const& c)
+static std::string createKeyMapping(Config const& c)
 {
     auto doc = std::string {};
     Writer writer;

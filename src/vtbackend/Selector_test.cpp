@@ -5,7 +5,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-using crispy::size;
 using namespace std;
 using namespace std::placeholders;
 using namespace vtbackend;

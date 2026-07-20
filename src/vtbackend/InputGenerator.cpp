@@ -44,7 +44,7 @@ string to_string(MouseButton button)
 /// Maps a character to its Ctrl-modified equivalent, following Kitty's ctrled_key algorithm.
 /// @param ch The character to map (e.g., 'a' for Ctrl+A).
 /// @returns The Ctrl-mapped byte, or std::nullopt if no legacy Ctrl mapping exists.
-constexpr std::optional<char> ctrlMappedKey(char32_t ch) noexcept
+static constexpr std::optional<char> ctrlMappedKey(char32_t ch) noexcept
 {
     // clang-format off
     if (ch >= 'a' && ch <= 'z') return static_cast<char>(ch - 'a' + 1);
@@ -370,7 +370,7 @@ bool ExtendedKeyboardInputGenerator::generateChar(char32_t characterEvent,
     return true;
 }
 
-constexpr unsigned encodeEventType(KeyboardEventType eventType) noexcept
+static constexpr unsigned encodeEventType(KeyboardEventType eventType) noexcept
 {
     return static_cast<unsigned>(eventType);
 }
@@ -439,7 +439,7 @@ std::string ExtendedKeyboardInputGenerator::encodeCharacter(char32_t ch,
     return result;
 }
 
-constexpr pair<unsigned, char> mapKey(Key key) noexcept
+static constexpr pair<unsigned, char> mapKey(Key key) noexcept
 {
     switch (key)
     {
@@ -559,7 +559,7 @@ constexpr pair<unsigned, char> mapKey(Key key) noexcept
 
 /// Returns the associated text codepoint for a numpad key, or 0 if none.
 /// Per the Kitty keyboard protocol, associated text is the character the key would produce.
-constexpr char32_t numpadAssociatedText(Key key) noexcept
+static constexpr char32_t numpadAssociatedText(Key key) noexcept
 {
     switch (key)
     {
@@ -722,7 +722,7 @@ namespace VK
 /// Returns true if the given Key represents an enhanced key in Windows terminology.
 /// Enhanced keys have E0 scan code prefixes on a standard 101/102-key keyboard layout.
 /// This sets the ENHANCED_KEY (0x0100) flag in dwControlKeyState.
-constexpr bool isEnhancedKey(Key key) noexcept
+static constexpr bool isEnhancedKey(Key key) noexcept
 {
     // clang-format off
     switch (key)
@@ -1059,7 +1059,7 @@ bool InputGenerator::generate(char32_t characterEvent,
 /// On key release, Windows KEY_EVENT_RECORDs reflect the post-release state
 /// (e.g., releasing Alt clears LEFT_ALT_PRESSED from dwControlKeyState).
 /// Qt may still report the pre-release modifier, so we strip it explicitly.
-constexpr Modifiers stripSelfModifier(Key key, Modifiers modifiers) noexcept
+static constexpr Modifiers stripSelfModifier(Key key, Modifiers modifiers) noexcept
 {
     // clang-format off
     switch (key)

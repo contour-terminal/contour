@@ -540,7 +540,7 @@ TEST_CASE("extractPathFromFileUrl.NonFileUrl", "[hintmode]")
 {
     CHECK(extractPathFromFileUrl("https://example.com") == "https://example.com");
     CHECK(extractPathFromFileUrl("ftp://server/file") == "ftp://server/file");
-    CHECK(extractPathFromFileUrl("") == "");
+    CHECK(extractPathFromFileUrl("").empty());
     CHECK(extractPathFromFileUrl("/plain/path") == "/plain/path");
 }
 
@@ -553,7 +553,7 @@ TEST_CASE("extractPathFromFileUrl.FileUrlWithLocalPath", "[hintmode]")
 TEST_CASE("extractPathFromFileUrl.FileUrlWithHost", "[hintmode]")
 {
     CHECK(extractPathFromFileUrl("file://hostname/home/user/file.txt") == "/home/user/file.txt");
-    CHECK(extractPathFromFileUrl("file://hostname") == "");
+    CHECK(extractPathFromFileUrl("file://hostname").empty());
 }
 
 TEST_CASE("extractPathFromFileUrl.WindowsDriveLetter", "[hintmode]")

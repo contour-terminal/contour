@@ -57,28 +57,18 @@ using crispy::for_each;
 using crispy::times;
 using crispy::toHexString;
 
-using gsl::span;
-
-using std::accumulate;
 using std::array;
 using std::clamp;
-using std::endl;
-using std::fill;
 using std::function;
 using std::get;
 using std::holds_alternative;
 using std::make_shared;
 using std::make_unique;
 using std::monostate;
-using std::move;
-using std::next;
 using std::nullopt;
 using std::optional;
 using std::ostringstream;
 using std::pair;
-using std::prev;
-using std::ref;
-using std::rotate;
 using std::shared_ptr;
 using std::string;
 using std::string_view;
@@ -3849,7 +3839,8 @@ namespace impl
 
             // `auto const`, not `auto const*`: libstdc++'s array iterator is a raw pointer but MSVC's
             // is a class type. @see setDynamicColorCommand in primitives.h.
-            auto const report = std::ranges::find(DeviceStatusReports, request, &DeviceStatusReport::request);
+            auto const* const report =
+                std::ranges::find(DeviceStatusReports, request, &DeviceStatusReport::request);
             if (report == DeviceStatusReports.end())
                 return ApplyResult::Unsupported;
 
@@ -4325,7 +4316,7 @@ namespace impl
                 auto const requested = seq.param_or(i, 0U);
                 // `auto const`, not `auto const*`: libstdc++'s array iterator is a raw pointer but
                 // MSVC's is a class type. @see setDynamicColorCommand in primitives.h.
-                auto const test = std::ranges::find(
+                auto const* const test = std::ranges::find(
                     ConfidenceTests, requested, [](ConfidenceTest const& t) { return t.id; });
                 if (test == ConfidenceTests.end())
                     return ApplyResult::Invalid;

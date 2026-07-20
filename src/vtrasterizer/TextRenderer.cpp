@@ -135,19 +135,14 @@ using crispy::strong_hash;
 
 using unicode::out;
 
-using std::array;
 using std::get;
-using std::make_unique;
 using std::max;
 using std::min;
-using std::move;
 using std::nullopt;
 using std::optional;
 using std::ostream;
-using std::pair;
 using std::u32string;
 using std::u32string_view;
-using std::unique_ptr;
 using std::vector;
 
 using namespace std::placeholders;
@@ -155,8 +150,6 @@ using namespace std::string_view_literals;
 
 namespace vtrasterizer
 {
-
-using text::locatorLog;
 
 namespace
 {
@@ -546,11 +539,11 @@ bool TextRenderer::renderBoxDrawingCell(vtbackend::CellLocation position,
     return false;
 }
 
-crispy::point adjustPenForLineFlags(vtbackend::LineFlags lineFlags,
-                                    GridMetrics const& gridMetrics,
-                                    int glyphHeight,
-                                    int glyphBearingY,
-                                    crispy::point pen) noexcept
+static crispy::point adjustPenForLineFlags(vtbackend::LineFlags lineFlags,
+                                           GridMetrics const& gridMetrics,
+                                           int glyphHeight,
+                                           int glyphBearingY,
+                                           crispy::point pen) noexcept
 {
     using vtbackend::LineFlag;
 
@@ -573,7 +566,7 @@ crispy::point adjustPenForLineFlags(vtbackend::LineFlags lineFlags,
 /// either height flag, but this layer does not require that of its caller -- each flag is tested, so
 /// a height flag arriving on its own still widens. Every place that steps a pen across such a line,
 /// and the tile widening below, read the factor from here, so they cannot disagree about a flag.
-constexpr int lineAdvanceScale(vtbackend::LineFlags lineFlags) noexcept
+static constexpr int lineAdvanceScale(vtbackend::LineFlags lineFlags) noexcept
 {
     using vtbackend::LineFlag;
     return lineFlags.test(LineFlag::DoubleWidth) || lineFlags.test(LineFlag::DoubleHeightTop)
@@ -582,7 +575,7 @@ constexpr int lineAdvanceScale(vtbackend::LineFlags lineFlags) noexcept
                : 1;
 }
 
-Renderable::AtlasTileAttributes adjustTileAttributesForLineFlags(
+static Renderable::AtlasTileAttributes adjustTileAttributesForLineFlags(
     vtbackend::LineFlags lineFlags, Renderable::AtlasTileAttributes const& originalAttributes)
 {
     using vtbackend::LineFlag;
@@ -603,46 +596,6 @@ Renderable::AtlasTileAttributes adjustTileAttributesForLineFlags(
         attributesCopy.metadata.normalizedLocation.height /= 2.0f;
 
     return attributesCopy;
-}
-
-/// Clips a tile about to be drawn to one screen row's band, in both texture space and height.
-///
-/// A block `scale` cells tall is one raster drawn across several rows. Each row draws its own band of
-/// it, so a block whose head has scrolled above the viewport is CLIPPED rather than lost -- when only
-/// the head cell drew, the whole block vanished with it. kitty cuts the same bands in
-/// calculate_regions_for_line().
-///
-/// @param attributes the tile, adjusted in place.
-/// @param tileTop    the tile's top in screen pixels; moved down to the visible part.
-/// @param bandTop    the row's top edge in screen pixels.
-/// @param bandBottom the row's bottom edge in screen pixels.
-/// @return false when the tile does not reach this band at all, and must not be drawn.
-[[nodiscard]] bool clipTileToBand(Renderable::AtlasTileAttributes& attributes,
-                                  int& tileTop,
-                                  int bandTop,
-                                  int bandBottom)
-{
-    auto const drawnHeight = unbox<int>(attributes.metadata.targetSize.height);
-    if (drawnHeight <= 0)
-        return true;
-
-    auto const tileBottom = tileTop + drawnHeight;
-    auto const visibleTop = std::max(tileTop, bandTop);
-    auto const visibleBottom = std::min(tileBottom, bandBottom);
-    if (visibleBottom <= visibleTop)
-        return false;
-    if (visibleTop == tileTop && visibleBottom == tileBottom)
-        return true;
-
-    auto const from = static_cast<float>(visibleTop - tileTop) / static_cast<float>(drawnHeight);
-    auto const to = static_cast<float>(visibleBottom - tileTop) / static_cast<float>(drawnHeight);
-
-    auto& location = attributes.metadata.normalizedLocation;
-    location.y += location.height * from;
-    location.height *= to - from;
-    attributes.metadata.targetSize.height = vtbackend::Height::cast_from(visibleBottom - visibleTop);
-    tileTop = visibleTop;
-    return true;
 }
 
 void TextRenderer::renderTextGroup(std::u32string_view codepoints,

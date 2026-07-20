@@ -29,32 +29,32 @@ struct Cap
 };
 
 template <typename T>
-constexpr bool operator<(Cap<T> const& a, Cap<T> const& b) noexcept
+static constexpr bool operator<(Cap<T> const& a, Cap<T> const& b) noexcept
 {
     return a.name < b.name;
 }
 template <typename T>
-constexpr bool operator>(Cap<T> const& a, Cap<T> const& b) noexcept
+static constexpr bool operator>(Cap<T> const& a, Cap<T> const& b) noexcept
 {
     return a.name > b.name;
 }
 template <typename T>
-constexpr bool operator<=(Cap<T> const& a, Cap<T> const& b) noexcept
+static constexpr bool operator<=(Cap<T> const& a, Cap<T> const& b) noexcept
 {
     return a.name <= b.name;
 }
 template <typename T>
-constexpr bool operator>=(Cap<T> const& a, Cap<T> const& b) noexcept
+static constexpr bool operator>=(Cap<T> const& a, Cap<T> const& b) noexcept
 {
     return a.name >= b.name;
 }
 template <typename T>
-constexpr bool operator==(Cap<T> const& a, Cap<T> const& b) noexcept
+static constexpr bool operator==(Cap<T> const& a, Cap<T> const& b) noexcept
 {
     return a.name == b.name;
 }
 template <typename T>
-constexpr bool operator!=(Cap<T> const& a, Cap<T> const& b) noexcept
+static constexpr bool operator!=(Cap<T> const& a, Cap<T> const& b) noexcept
 {
     return a.name == b.name;
 }

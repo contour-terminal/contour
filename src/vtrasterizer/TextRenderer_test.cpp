@@ -38,7 +38,7 @@ using TextureAtlas = vtrasterizer::Renderable::TextureAtlas;
 
 template <typename T, typename U, typename S>
     requires std::is_convertible_v<T, S>
-constexpr boxed::boxed<T, U> operator*(boxed::boxed<T, U> w, S scalar) noexcept
+static constexpr boxed::boxed<T, U> operator*(boxed::boxed<T, U> w, S scalar) noexcept
 {
     return boxed::boxed<T, U>(w.value * scalar);
 }
@@ -324,7 +324,7 @@ TEST_CASE("TextRenderer", "[renderer]")
 
     // Verify locator finds it
     auto const sources = fontLocator->locate(font_description::parse("regular"));
-    CHECK(sources.size() >= 1);
+    CHECK(!sources.empty());
 
     auto& fontLocatorRef = *fontLocator; // standard usage
     auto textShaper = open_shaper(DPI { 96, 96 }, fontLocatorRef);

@@ -164,7 +164,7 @@ TEST_CASE("fuzzyMatch reports the exact characters the best alignment landed on"
 
     SECTION("the reported score is byte-for-byte the one fuzzyScore ranks by")
     {
-        for (auto const candidate: { "Toggle Pane Zoom", "Split Vertical", "Toggle Status Line" })
+        for (auto const* const candidate: { "Toggle Pane Zoom", "Split Vertical", "Toggle Status Line" })
         {
             auto const match = fuzzyMatch("tpz", candidate);
             auto const score = fuzzyScore("tpz", candidate);

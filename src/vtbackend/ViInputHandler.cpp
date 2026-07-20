@@ -462,15 +462,15 @@ void ViInputHandler::startSearchExternally()
     }
 }
 
-auto handleEditor(char32_t ch,
-                  Modifiers modifiers,
-                  auto& where,
-                  PromptMode& promptEditMode,
-                  auto& settings,
-                  auto setViMode,
-                  auto cancel,
-                  auto done,
-                  auto update)
+static auto handleEditor(char32_t ch,
+                         Modifiers modifiers,
+                         auto& where,
+                         PromptMode& promptEditMode,
+                         auto& settings,
+                         auto setViMode,
+                         auto cancel,
+                         auto done,
+                         auto update)
 {
     switch (InputMatch { .modifiers = modifiers, .ch = ch })
     {

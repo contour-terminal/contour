@@ -174,7 +174,7 @@ ContourApp::ContourApp(): app("contour", "Contour Terminal Emulator", CONTOUR_VE
 }
 
 template <typename Callback>
-auto withOutput(crispy::cli::flag_store const& flags, std::string const& name, Callback callback)
+static auto withOutput(crispy::cli::flag_store const& flags, std::string const& name, Callback callback)
 {
     std::ostream* out = &cout;
 

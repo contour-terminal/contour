@@ -8,7 +8,6 @@
 #include <sstream>
 #include <string>
 
-using std::accumulate;
 using std::string;
 using std::stringstream;
 

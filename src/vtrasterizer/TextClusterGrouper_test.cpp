@@ -199,12 +199,12 @@ struct EventRecorder final: public TextClusterGrouper::Events
 // {{{ ostream <<
 namespace std
 {
-ostream& operator<<(std::ostream& os, u32string_view text)
+static ostream& operator<<(std::ostream& os, u32string_view text)
 {
     return os << '"' << crispy::escape(unicode::convert_to<char>(text)) << '"';
 }
 
-ostream& operator<<(std::ostream& os, TextClusterGroup const& group)
+static ostream& operator<<(std::ostream& os, TextClusterGroup const& group)
 {
     return os << std::format("{}", group);
 }

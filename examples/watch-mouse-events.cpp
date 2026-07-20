@@ -203,7 +203,7 @@ struct MouseTracker final: public BasicParserEvents
     {
         if (selection.mode == 0)
             return "no text selection";
-        auto const mode = [&]() {
+        auto const* const mode = [&]() {
             switch (selection.mode)
             {
                 case 1: return "Linear";

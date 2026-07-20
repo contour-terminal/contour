@@ -49,7 +49,6 @@ using std::holds_alternative;
 using std::invalid_argument;
 using std::max;
 using std::min;
-using std::move;
 using std::nullopt;
 using std::numeric_limits;
 using std::optional;
@@ -59,7 +58,6 @@ using std::runtime_error;
 using std::size_t;
 using std::string;
 using std::string_view;
-using std::tuple;
 using std::u32string_view;
 using std::unique_ptr;
 using std::unordered_map;
@@ -87,14 +85,14 @@ struct FontInfo // NOLINT(readability-identifier-naming)
 } // namespace
 
 #ifdef CONTOUR_HAS_CAIRO
-void cleanup_cairo_font_face(void*)
+static void cleanup_cairo_font_face(void*)
 {
     // No-op destructor callback: the FT_Face lifetime is managed elsewhere.
 }
 
-std::optional<text::rasterized_glyph> rasterizeWithCairo(FT_Face ftFace,
-                                                         text::glyph_key glyph,
-                                                         text::render_mode /*mode*/)
+static std::optional<text::rasterized_glyph> rasterizeWithCairo(FT_Face ftFace,
+                                                                text::glyph_key glyph,
+                                                                text::render_mode /*mode*/)
 {
     // 1. Setup Cairo surface
     auto width = static_cast<int>(ceil(static_cast<double>(ftFace->glyph->metrics.width) / 64.0));
@@ -137,7 +135,7 @@ std::optional<text::rasterized_glyph> rasterizeWithCairo(FT_Face ftFace,
     auto const stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, width);
     auto buffer = std::vector<uint8_t>(static_cast<size_t>(stride * height));
 
-    auto surface =
+    auto* surface =
         cairo_image_surface_create_for_data(buffer.data(), CAIRO_FORMAT_ARGB32, width, height, stride);
     if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS)
     {
@@ -145,7 +143,7 @@ std::optional<text::rasterized_glyph> rasterizeWithCairo(FT_Face ftFace,
         return std::nullopt;
     }
 
-    auto cr = cairo_create(surface);
+    auto* cr = cairo_create(surface);
 
     // 2. Create/Set Cairo Font Face
     auto* fontFace = cairo_ft_font_face_create_for_ft_face(ftFace, 0);
@@ -1365,7 +1363,7 @@ void open_shaper::shape(font_key font,
 /// @param outlineThickness outline radius in pixel units.
 ///
 /// @return rasterized_glyph with bitmap_format::outlined, or nullopt on failure.
-optional<rasterized_glyph> rasterizeOutlined(
+static optional<rasterized_glyph> rasterizeOutlined(
     FT_Library ftLib, FT_Face ftFace, glyph_key const& glyph, glyph_index glyphIndex, float outlineThickness)
 {
     // Load the glyph outline (vector, not bitmap).

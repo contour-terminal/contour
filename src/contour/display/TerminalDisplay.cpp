@@ -59,7 +59,7 @@ namespace fs = std::filesystem;
 
 // Must be in global namespace
 // NB: must be publicly visible, and due to -Wmissing-declarations, we better tell the compiler.
-void initializeDisplayResources();
+static void initializeDisplayResources();
 
 void initializeDisplayResources()
 {
@@ -76,7 +76,6 @@ using vtbackend::Width;
 using vtbackend::ColumnCount;
 using vtbackend::LineCount;
 using vtbackend::PageSize;
-using vtbackend::RGBAColor;
 
 using text::DPI;
 

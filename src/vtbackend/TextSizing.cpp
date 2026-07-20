@@ -58,7 +58,7 @@ namespace
                                                       std::string_view key,
                                                       std::string_view value)
     {
-        auto const definition = std::ranges::find(KeyDefinitions, key, &KeyDefinition::key);
+        auto const* const definition = std::ranges::find(KeyDefinitions, key, &KeyDefinition::key);
 
         // An unknown key is ignored rather than rejected, so that a future addition to the protocol
         // does not cost an older terminal the parts it does understand. Its value is not even parsed:

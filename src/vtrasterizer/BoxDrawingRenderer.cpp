@@ -15,15 +15,11 @@
 using namespace std::string_view_literals;
 
 using std::clamp;
-using std::get;
-using std::max;
 using std::min;
 using std::nullopt;
 using std::optional;
 using std::pair;
-using std::sort;
 using std::string_view;
-using std::tuple;
 
 using crispy::point;
 
@@ -2492,7 +2488,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
     return nullopt;
 }
 
-auto boxDashedHorizontal(auto& dashed, ImageSize size, int lineThickness)
+static auto boxDashedHorizontal(auto& dashed, ImageSize size, int lineThickness)
 {
     auto const height = size.height;
     auto const width = size.width;
@@ -2519,7 +2515,7 @@ auto boxDashedHorizontal(auto& dashed, ImageSize size, int lineThickness)
     return image;
 }
 
-auto boxDashedVertical(auto& dashed, ImageSize size, int lineThickness)
+static auto boxDashedVertical(auto& dashed, ImageSize size, int lineThickness)
 {
     auto const height = size.height;
     auto const width = size.width;
@@ -2547,8 +2543,11 @@ auto boxDashedVertical(auto& dashed, ImageSize size, int lineThickness)
 }
 
 // NOLINTNEXTLINE(*complexity*)
-auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersampling, bool useEllipticArcs)
-    -> std::optional<atlas::Buffer>
+static auto buildBox(detail::Box box,
+                     ImageSize size,
+                     int lineThickness,
+                     size_t supersampling,
+                     bool useEllipticArcs) -> std::optional<atlas::Buffer>
 {
     // catch all non-solid single-lines before the quad-render below
     if (auto const dashed = box.get_dashed_horizontal())

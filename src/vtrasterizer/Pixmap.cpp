@@ -6,7 +6,6 @@
 using std::clamp;
 using std::max;
 using std::min;
-using std::move;
 using std::swap;
 
 namespace vtrasterizer

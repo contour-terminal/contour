@@ -693,7 +693,7 @@ TEST_CASE("GoodImageProtocol.Render.SubRegion", "[GIP]")
 // ==================== Auto Format Detection Tests ====================
 
 /// Helper: creates raw RGB pixel data of the given size filled with the given color.
-std::vector<uint8_t> makeRGB(int width, int height, uint8_t r, uint8_t g, uint8_t b)
+static std::vector<uint8_t> makeRGB(int width, int height, uint8_t r, uint8_t g, uint8_t b)
 {
     auto const pixelCount = static_cast<size_t>(width * height);
     auto data = std::vector<uint8_t>(pixelCount * 3);

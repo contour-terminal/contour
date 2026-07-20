@@ -274,8 +274,8 @@ TEST_CASE("Config: shellSplit tokenizes a command line respecting quotes", "[con
     CHECK(shellSplit("emacs -nw") == V { "emacs", "-nw" });
     CHECK(shellSplit("  git   log --oneline ") == V { "git", "log", "--oneline" });
     CHECK(shellSplit("nvim") == V { "nvim" });
-    CHECK(shellSplit("") == V {});
-    CHECK(shellSplit("   ") == V {});
+    CHECK(shellSplit("").empty());
+    CHECK(shellSplit("   ").empty());
     // Double quotes group spaces into one token; the quotes themselves are stripped.
     CHECK(shellSplit(R"("/opt/my app/emacs" -nw)") == V { "/opt/my app/emacs", "-nw" });
     // Single quotes are literal (no inner processing).

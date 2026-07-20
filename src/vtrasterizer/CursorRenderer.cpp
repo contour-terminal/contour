@@ -11,13 +11,7 @@
 
 using crispy::each_element;
 
-using std::array;
-using std::get;
 using std::max;
-using std::move;
-using std::nullopt;
-using std::optional;
-using std::runtime_error;
 using std::string;
 
 namespace vtrasterizer

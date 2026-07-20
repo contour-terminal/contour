@@ -7,7 +7,6 @@
 #include <ranges>
 
 using std::clamp;
-using std::fill;
 using std::max;
 using std::min;
 using std::vector;

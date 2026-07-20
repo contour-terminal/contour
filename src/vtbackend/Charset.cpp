@@ -6,7 +6,7 @@
 namespace vtbackend
 {
 
-constexpr CharsetMap usasciiCharset() noexcept
+static constexpr CharsetMap usasciiCharset() noexcept
 {
     CharsetMap result {};
 
@@ -19,7 +19,7 @@ constexpr CharsetMap usasciiCharset() noexcept
 /// British:
 ///     ESC (A
 ///     Reference: https://vt100.net/docs/vt220-rm/chapter2.html#T2-5
-constexpr CharsetMap createBritishCharset() noexcept
+static constexpr CharsetMap createBritishCharset() noexcept
 {
     auto result = usasciiCharset();
     result['#'] = 0x00A3; // U'£';
@@ -28,7 +28,7 @@ constexpr CharsetMap createBritishCharset() noexcept
 
 /// German:
 ///     ESC ( K
-constexpr CharsetMap createGermanCharset() noexcept
+static constexpr CharsetMap createGermanCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -47,7 +47,7 @@ constexpr CharsetMap createGermanCharset() noexcept
 /// DEC Special Character and Line Drawing Set.
 ///
 /// Reference: https://vt100.net/docs/vt102-ug/chapter5.html#T5-13
-constexpr CharsetMap createSpecialCharset() noexcept
+static constexpr CharsetMap createSpecialCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -89,7 +89,7 @@ constexpr CharsetMap createSpecialCharset() noexcept
 /// Dutch:
 ///     ESC ( 4
 ///
-constexpr CharsetMap createDutchCharset() noexcept
+static constexpr CharsetMap createDutchCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -109,7 +109,7 @@ constexpr CharsetMap createDutchCharset() noexcept
 /// Finnish:
 ///     ESC ( C
 ///     ESC ( 5
-constexpr CharsetMap createFinnishCharset() noexcept
+static constexpr CharsetMap createFinnishCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -128,7 +128,7 @@ constexpr CharsetMap createFinnishCharset() noexcept
 
 /// French:
 ///     ESC ( R
-constexpr CharsetMap createFrenchCharset() noexcept
+static constexpr CharsetMap createFrenchCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -147,7 +147,7 @@ constexpr CharsetMap createFrenchCharset() noexcept
 
 /// French Canadian:
 ///     ESC ( Q
-constexpr CharsetMap createFrenchCanadianCharset() noexcept
+static constexpr CharsetMap createFrenchCanadianCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -168,7 +168,7 @@ constexpr CharsetMap createFrenchCanadianCharset() noexcept
 /// Norwegian/Danich:
 ///     ESC ( E
 ///     ESC ( 6
-constexpr CharsetMap createNorwegianDanishCharset() noexcept
+static constexpr CharsetMap createNorwegianDanishCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -188,7 +188,7 @@ constexpr CharsetMap createNorwegianDanishCharset() noexcept
 
 /// Spanish:
 ///     ESC ( Z
-constexpr CharsetMap createSpanishCharset() noexcept
+static constexpr CharsetMap createSpanishCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -207,7 +207,7 @@ constexpr CharsetMap createSpanishCharset() noexcept
 /// Swedish:
 ///     ESC ( H
 ///     ESC ( 7
-constexpr CharsetMap createSwedishCharset() noexcept
+static constexpr CharsetMap createSwedishCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -227,7 +227,7 @@ constexpr CharsetMap createSwedishCharset() noexcept
 
 /// Swiss:
 ///     ESC ( =
-constexpr CharsetMap createSwissCharset() noexcept
+static constexpr CharsetMap createSwissCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -249,7 +249,7 @@ constexpr CharsetMap createSwissCharset() noexcept
 
 /// DEC Technical Character Set
 /// Reference: VT320/VT510 programmer reference
-constexpr CharsetMap createTechnicalCharset() noexcept
+static constexpr CharsetMap createTechnicalCharset() noexcept
 {
     auto result = usasciiCharset();
     // Row 2 (0x21-0x2F): Mathematical symbols
@@ -360,7 +360,7 @@ constexpr CharsetMap createTechnicalCharset() noexcept
 ///
 /// Positions 0x20..0x7E map to U+00A0..U+00FE (the GR half of ISO 8859-1). Position 0x7F is
 /// unreachable through the GL path (which only maps codes < 0x7F), so it is left blank.
-constexpr CharsetMap createISOLatin1SupplementalCharset() noexcept
+static constexpr CharsetMap createISOLatin1SupplementalCharset() noexcept
 {
     CharsetMap result {};
     for (auto const position: std::views::iota(std::size_t { 0x20 }, std::size_t { 0x7F }))

@@ -38,7 +38,6 @@
 #include <utility>
 #include <variant>
 
-using crispy::size;
 using std::nullopt;
 using std::optional;
 using std::string;
@@ -4210,7 +4209,8 @@ std::optional<std::string> Terminal::udkStringForKey(Key key) const noexcept
         { Key::F20, 34 },
     } };
 
-    auto const it = std::ranges::find_if(KeyMapping, [key](auto const& pair) { return pair.first == key; });
+    auto const* const it =
+        std::ranges::find_if(KeyMapping, [key](auto const& pair) { return pair.first == key; });
     if (it != KeyMapping.end())
         return udkString(it->second);
     return std::nullopt;

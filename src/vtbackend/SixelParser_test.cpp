@@ -642,10 +642,10 @@ TEST_CASE("SixelParser.at_of_an_image_that_never_painted", "[sixel]")
     // 1x1 sentinel, so at() may not index it and may not use _size as a modulus either.
     auto constexpr DefaultColor = RGBAColor { 0x11, 0x22, 0x33, 0xFF };
 
-    auto const payload = GENERATE("#0;2;0;0;0", // defines a colour register, paints nothing
-                                  "???",        // blank sixels: cursor movement only
-                                  "!100?",      // a blank run: likewise
-                                  "");          // nothing at all
+    auto const* const payload = GENERATE("#0;2;0;0;0", // defines a colour register, paints nothing
+                                         "???",        // blank sixels: cursor movement only
+                                         "!100?",      // a blank run: likewise
+                                         "");          // nothing at all
     INFO(std::format("payload='{}'", payload));
 
     auto ib = SixelImageBuilder(ImageSize { Width(640), Height(480) },

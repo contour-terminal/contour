@@ -1333,7 +1333,7 @@ void TerminalSession::onScrollOffsetChanged(vtbackend::ScrollOffset value)
 // }}}
 // {{{ Input Events
 
-void handleAction(auto const& actions, auto eventType, auto callback)
+static void handleAction(auto const& actions, auto eventType, auto callback)
 {
     if (eventType == KeyboardEventType::Press)
         callback(*actions);

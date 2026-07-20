@@ -20,7 +20,6 @@
 #include <string_view>
 
 using crispy::escape;
-using crispy::size;
 using namespace vtbackend;
 using namespace vtbackend::test;
 using namespace std;
@@ -6838,7 +6837,7 @@ TEST_CASE("HT.does_not_overwrite_existing_content", "[screen]")
 // {{{ DA1 (Primary Device Attributes) Tests
 
 /// Parses a DA1 response string (e.g. "\033[?65;1;4;6;...c") and returns the set of extension numbers.
-std::set<int> parseDA1Extensions(std::string_view reply)
+static std::set<int> parseDA1Extensions(std::string_view reply)
 {
     std::set<int> extensions;
 
@@ -6883,7 +6882,7 @@ std::set<int> parseDA1Extensions(std::string_view reply)
 }
 
 /// Parses the conformance level from a DA1 response.
-int parseDA1Level(std::string_view reply)
+static int parseDA1Level(std::string_view reply)
 {
     auto const prefix = reply.find("\033[?");
     if (prefix == std::string_view::npos)
@@ -7105,7 +7104,7 @@ TEST_CASE("foldC1ControlsToEightBit", "[screen]")
     // all pass through untouched.
     CHECK(foldC1ControlsToEightBit("\033(B") == "\033(B");
     CHECK(foldC1ControlsToEightBit("ab\033") == "ab\033");
-    CHECK(foldC1ControlsToEightBit("") == "");
+    CHECK(foldC1ControlsToEightBit("").empty());
     CHECK(foldC1ControlsToEightBit("no controls") == "no controls");
 }
 

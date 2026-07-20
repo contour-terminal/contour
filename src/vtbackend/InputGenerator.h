@@ -877,7 +877,7 @@ struct std::formatter<vtbackend::Modifier>: formatter<std::string_view>
         if (value == vtbackend::Modifier::None)
             return formatter<std::string_view>::format("None", ctx);
 
-        auto const row = std::ranges::find(
+        auto const* const row = std::ranges::find(
             vtbackend::ChordModifierTable, value, &vtbackend::detail::ChordModifierRow::modifier);
 
         // A value that names no chord modifier formats empty on purpose: crispy::flags's formatter

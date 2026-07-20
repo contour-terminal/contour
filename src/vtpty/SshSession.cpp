@@ -77,7 +77,7 @@ struct crispy::close_native_handle<SOCKET>
 namespace vtpty
 {
 
-auto inline sshLog = logstore::category("ssh", "SSH I/O logger", logstore::category::state::Enabled);
+static auto inline sshLog = logstore::category("ssh", "SSH I/O logger", logstore::category::state::Enabled);
 
 // {{{ helper
 namespace

@@ -135,12 +135,12 @@ TEST_CASE("Line.blank.constructionIsLazy", "[Line][blank]")
     REQUIRE(line.isBlank());
     CHECK(line.size() == ColumnCount(80));
     // All six SoA arrays remain at size 0 — no per-column allocation happened.
-    CHECK(line.storage().codepoints.size() == 0);
-    CHECK(line.storage().widths.size() == 0);
-    CHECK(line.storage().sgr.size() == 0);
-    CHECK(line.storage().hyperlinks.size() == 0);
-    CHECK(line.storage().clusterSize.size() == 0);
-    CHECK(line.storage().clusterPoolIndex.size() == 0);
+    CHECK(line.storage().codepoints.empty());
+    CHECK(line.storage().widths.empty());
+    CHECK(line.storage().sgr.empty());
+    CHECK(line.storage().hyperlinks.empty());
+    CHECK(line.storage().clusterSize.empty());
+    CHECK(line.storage().clusterPoolIndex.empty());
     // fillAttrs is preserved through the lazy state.
     CHECK(line.storage().fillAttrs.backgroundColor == Color::Indexed(4));
     // Read accessors short-circuit safely on the blank state.
@@ -174,7 +174,7 @@ TEST_CASE("Line.blank.toUtf8ReturnsSpaces", "[Line][blank]")
 
     REQUIRE(line.isBlank());
     CHECK(line.toUtf8() == "     ");
-    CHECK(line.toUtf8Trimmed() == "");
+    CHECK(line.toUtf8Trimmed().empty());
 }
 
 TEST_CASE("Line.blank.searchOnlyMatchesEmpty", "[Line][blank]")

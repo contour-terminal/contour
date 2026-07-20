@@ -51,10 +51,7 @@
 
 using std::bind;
 using std::cerr;
-using std::get;
-using std::holds_alternative;
 using std::make_unique;
-using std::prev;
 using std::string;
 using std::string_view;
 using std::vector;
@@ -412,7 +409,7 @@ bool ContourGuiApp::loadConfig(string const& target)
 
     if (auto const wmClass = flags.get<string>("contour.terminal.class"); !wmClass.empty())
     {
-        auto profile = _config.profile(profileName());
+        auto* profile = _config.profile(profileName());
         if (profile)
         {
             profile->wmClass = wmClass;

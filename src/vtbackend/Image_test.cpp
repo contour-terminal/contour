@@ -240,7 +240,7 @@ TEST_CASE("RasterizedImage.fragment", "[RasterizedImage]")
         auto f = rasterizedImage->fragment(CellLocation { .line = LineOffset(5), .column = ColumnOffset(5) });
         check += f.size();
         // Verify center pixel is white (part of image)
-        if (f.size() > 0)
+        if (!f.empty())
         {
             // Check first pixel RGBA
             // Image is white (0xFF, 0xFF, 0xFF, 0xFF)

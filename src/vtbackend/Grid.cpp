@@ -25,10 +25,10 @@ auto inline const gridLog = logstore::category(
 
 namespace detail
 {
-    Lines createLines(PageSize pageSize,
-                      LineCount maxHistoryLineCount,
-                      bool reflowOnResize,
-                      GraphicsAttributes initialSGR)
+    static Lines createLines(PageSize pageSize,
+                             LineCount maxHistoryLineCount,
+                             bool reflowOnResize,
+                             GraphicsAttributes initialSGR)
     {
         auto const defaultLineFlags = reflowOnResize ? LineFlag::Wrappable : LineFlag::None;
         auto const totalLineCount = unbox<size_t>(pageSize.lines + maxHistoryLineCount);
@@ -47,14 +47,14 @@ namespace detail
     /// @param commandEndOffset The logical line's command-end offset, likewise carried by the head alone.
     /// @param promptEndOffset The logical line's prompt-end offset, likewise carried by the head alone.
     /// @returns number of inserted lines.
-    LineCount addNewWrappedLines(Lines& targetLines,
-                                 ColumnCount newColumnCount,
-                                 LineSoA&& logicalLineBuffer,
-                                 size_t usedColumns,
-                                 LineFlags baseFlags,
-                                 ColumnOffset commandEndOffset,
-                                 ColumnOffset promptEndOffset,
-                                 bool initialNoWrap)
+    static LineCount addNewWrappedLines(Lines& targetLines,
+                                        ColumnCount newColumnCount,
+                                        LineSoA&& logicalLineBuffer,
+                                        size_t usedColumns,
+                                        LineFlags baseFlags,
+                                        ColumnOffset commandEndOffset,
+                                        ColumnOffset promptEndOffset,
+                                        bool initialNoWrap)
     {
         auto const newCols = unbox<size_t>(newColumnCount);
         int i = 0;

@@ -252,5 +252,5 @@ TEST_CASE("for_each_key_value")
     crispy::for_each_key_value({ .text = "key_only", .entryDelimiter = ';', .assignmentDelimiter = '=' },
                                collect);
     CHECK(result.size() == 1);
-    CHECK(result["key_only"] == "");
+    CHECK(result["key_only"].empty());
 }

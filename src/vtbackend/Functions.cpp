@@ -16,14 +16,6 @@
 #include <sstream>
 #include <string>
 
-using crispy::for_each;
-using crispy::times;
-
-using std::accumulate;
-using std::array;
-using std::for_each;
-using std::pair;
-using std::sort;
 using std::string;
 using std::string_view;
 using std::stringstream;
@@ -55,7 +47,7 @@ Function const* select(FunctionSelector const& selector,
             // Multiple definitions can match the same selector (e.g. DCS with 0 args
             // and the same final byte). The leftmost match
             // in the sorted array has the tightest parameter range.
-            auto result = &fui;
+            auto const* result = &fui;
             for (auto j = i; j > 0; --j)
             {
                 if (compare(selector, availableDefinitions[j - 1]) == 0)

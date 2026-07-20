@@ -11,7 +11,6 @@
 
 using contour::display::CaretReportGate;
 using contour::display::CaretState;
-using vtbackend::CellLocation;
 using vtbackend::ColumnOffset;
 using vtbackend::LineOffset;
 
