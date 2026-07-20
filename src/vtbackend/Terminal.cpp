@@ -615,7 +615,9 @@ void Terminal::updateBidiPageLayout(ScrollOffset scrollOffset, LineCount extraLi
 
     auto inputs = std::vector<BidiLineInput> {};
     auto texts = std::vector<std::u32string> {};
-    auto const lineCount = static_cast<size_t>(unbox<int>(last) - unbox<int>(first) + 1);
+    // first never runs past last -- logicalLineHead() only walks backwards and last only forwards --
+    // but clamping says so in the code, and keeps the widening from wrapping if that ever changes.
+    auto const lineCount = static_cast<size_t>(std::max(0, unbox<int>(last) - unbox<int>(first) + 1));
     texts.reserve(lineCount);
     inputs.reserve(lineCount);
 

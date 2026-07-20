@@ -11,6 +11,8 @@
 #include <libunicode/convert.h>
 #include <libunicode/utf8_grapheme_segmenter.h>
 
+#include <algorithm>
+
 using namespace std;
 
 namespace vtbackend
@@ -688,7 +690,7 @@ void RenderBufferBuilder::reorderLineCells()
             reordered[i - 1].groupEnd = true;
     }
 
-    std::copy(reordered.begin(), reordered.end(), _output->cells.begin() + static_cast<ptrdiff_t>(first));
+    std::ranges::copy(reordered, _output->cells.begin() + static_cast<ptrdiff_t>(first));
 }
 
 ColumnCount RenderBufferBuilder::renderUtf8Text(CellLocation screenPosition,

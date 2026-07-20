@@ -58,8 +58,11 @@ namespace
 {
 
 // U+202D LRO ... U+202C PDF: render exactly as stored, whatever the terminal's BiDi state.
-constexpr auto Verbatim = "‭"sv;
-constexpr auto VerbatimEnd = "‬"sv;
+// Written as escapes rather than literal characters: both are invisible bidi controls, so
+// spelling them out keeps the source readable and keeps this file free of the very reordering
+// it demonstrates (see misc-misleading-bidirectional).
+constexpr auto Verbatim = "\u202D"sv;
+constexpr auto VerbatimEnd = "\u202C"sv;
 
 void write(std::string_view text)
 {

@@ -368,10 +368,7 @@ class Line
     /// O(1) -- reads a cached flag maintained by writeCellToSoA, in the same way isTrivialBuffer()
     /// does. Both scanning the codepoints here and materialising the text first were measurable on
     /// the render path, which asks this of every line on every frame.
-    [[nodiscard]] bool mayContainBidi() const noexcept
-    {
-        return !isBlank() && _storage.mayContainBidi;
-    }
+    [[nodiscard]] bool mayContainBidi() const noexcept { return !isBlank() && _storage.mayContainBidi; }
 
     /// The line's codepoints with exactly one element per column, for bidirectional layout.
     ///

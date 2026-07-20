@@ -117,7 +117,6 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
                               vtbackend::LineFlags flags,
                               uint8_t bidiLevel) override;
 
-
   private:
     void initializeDirectMapping();
 

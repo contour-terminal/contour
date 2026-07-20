@@ -88,7 +88,8 @@ class BoxDrawingRenderer: public Renderable
     [[nodiscard]] std::optional<TextureAtlas::TileCreateData> createTileData(char32_t codepoint,
                                                                              vtbackend::LineFlags flags,
                                                                              atlas::TileLocation tileLocation,
-                                                                             int subIndex, bool mirrored);
+                                                                             int subIndex,
+                                                                             bool mirrored);
 
     [[nodiscard]] static std::optional<atlas::Buffer> buildBoxElements(char32_t codepoint,
                                                                        ImageSize size,

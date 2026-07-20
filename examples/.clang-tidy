@@ -1,0 +1,17 @@
+---
+# Overrides for the standalone example programs. These are demonstrations meant to be read
+# and run, not library code, and they extend rather than replace the repository-root config.
+#
+#   * `misc-misleading-bidirectional` -- bidi-demo.cpp exists to demonstrate bidirectional
+#     text, and it frames its reference renderings in U+202D LEFT-TO-RIGHT OVERRIDE ...
+#     U+202C POP DIRECTIONAL FORMAT so that a terminal which has implemented BiDi does not
+#     reorder the already-reordered reference and make a correct terminal look broken.
+#     The check reads the *value* of a string literal rather than its spelling, so writing
+#     the controls as \u202D / \u202C escapes -- which the file does, to keep invisible
+#     characters out of the source -- does not and cannot satisfy it. The check guards
+#     against Trojan Source (CVE-2021-42574), where bidi controls make code read
+#     differently than it compiles; a literal deliberately emitting one to the terminal is
+#     the legitimate case it cannot distinguish.
+InheritParentConfig: true
+Checks: >-
+  -misc-misleading-bidirectional

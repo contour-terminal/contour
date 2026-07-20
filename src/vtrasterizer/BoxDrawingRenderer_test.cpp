@@ -24,8 +24,7 @@ class BoxDrawingRendererTest
                                                          size_t supersampling = 1,
                                                          bool mirrored = false)
     {
-        return BoxDrawingRenderer::buildBoxElements(
-            codepoint, size, lineThickness, supersampling, mirrored);
+        return BoxDrawingRenderer::buildBoxElements(codepoint, size, lineThickness, supersampling, mirrored);
     }
 
     /// Builds elements via the non-static buildElements() path using a minimal GridMetrics.

@@ -270,6 +270,22 @@ namespace detail
             /// box's own structure rather than a hand-written codepoint table -- left and right
             /// swap, the two arc pairs swap, and a diagonal reverses. Everything else is symmetric
             /// about that axis and is left alone.
+            /// Mirrors a diagonal about the vertical axis.
+            ///
+            /// The two slanted diagonals swap. NoDiagonal has nothing to mirror, and Crossing is
+            /// both diagonals at once, so each of those is its own mirror image.
+            [[nodiscard]] static constexpr Diagonal mirroredDiagonal(Diagonal value) noexcept
+            {
+                switch (value)
+                {
+                    case Forward: return Backward;
+                    case Backward: return Forward;
+                    case NoDiagonal:
+                    case Crossing: break;
+                }
+                return value;
+            }
+
             [[nodiscard]] constexpr Box mirroredHorizontally() const noexcept
             {
                 Box b(*this);
@@ -279,9 +295,7 @@ namespace detail
                 b.arcULval = arcURval;
                 b.arcBRval = arcBLval;
                 b.arcBLval = arcBRval;
-                b.diagonalval = diagonalval == Forward    ? Backward
-                                : diagonalval == Backward ? Forward
-                                                          : diagonalval; // NoDiagonal and Crossing
+                b.diagonalval = mirroredDiagonal(diagonalval);
                 return b;
             }
 
@@ -2955,11 +2969,8 @@ static auto buildBox(detail::Box box,
     return downsample(image, 1, size * double(ss), size);
 }
 
-optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
-                                                             ImageSize size,
-                                                             int lineThickness,
-                                                             size_t supersampling,
-                                                             bool mirrored)
+optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(
+    char32_t codepoint, ImageSize size, int lineThickness, size_t supersampling, bool mirrored)
 {
     auto box = detail::getBoxDrawing(codepoint);
     if (not box)
