@@ -43,7 +43,7 @@ TEST_CASE("TerminalEngine.renders bytes written to the screen", "[vtconformance]
     auto mocked = MockedEngine {};
     mocked.engine->writeToScreen("hello engine"sv);
 
-    CHECK(mocked.engine->screenText().find("hello engine") != std::string::npos);
+    CHECK(mocked.engine->screenText().contains("hello engine"));
 }
 
 TEST_CASE("TerminalEngine.a query reply reaches the wire", "[vtconformance]")
@@ -56,7 +56,7 @@ TEST_CASE("TerminalEngine.a query reply reaches the wire", "[vtconformance]")
 
     // Contour identifies as a VT525, so DA1 must lead with `?65`.
     INFO(mocked.wire());
-    CHECK(mocked.wire().find("[?65;") != std::string::npos);
+    CHECK(mocked.wire().contains("[?65;"));
 }
 
 TEST_CASE("TerminalEngine.Return honours New Line mode", "[vtconformance]")
@@ -154,7 +154,7 @@ TEST_CASE("TerminalEngine.OSC 52 round-trips through the clipboard", "[vtconform
     mocked.engine->writeToScreen("\033]52;c;?\033\\"sv);        // read it back
 
     INFO(mocked.wire());
-    CHECK(mocked.wire().find("aGVsbG8=") != std::string::npos);
+    CHECK(mocked.wire().contains("aGVsbG8="));
 }
 
 TEST_CASE("TerminalEngine.collects a diagnostic for an unknown sequence", "[vtconformance]")

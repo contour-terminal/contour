@@ -744,7 +744,7 @@ TEST_CASE("Terminal.DECNCSM", "[terminal]")
     {
         mc.writeToScreen("HELLO");
         mc.writeToScreen("\033[?3h"); // DECCOLM -> 132
-        CHECK(mc.terminal.primaryScreen().grid().lineText(LineOffset(0)).find('H') == std::string::npos);
+        CHECK(!mc.terminal.primaryScreen().grid().lineText(LineOffset(0)).contains('H'));
     }
 
     SECTION("DECNCSM set: DECCOLM preserves the screen")
@@ -1669,10 +1669,10 @@ TEST_CASE("Terminal.BoxDrawingCharacters", "[terminal]")
     auto const line1 = terminal.primaryScreen().grid().lineAt(LineOffset(1)).toUtf8();
 
     // Check that box-drawing characters are present (not corrupted to replacement chars)
-    CHECK(line0.find("\xE2\x94\x82") != std::string::npos); // │
-    CHECK(line1.find("\xE2\x94\x9C") != std::string::npos); // ├
-    CHECK(line0.find("file") != std::string::npos);
-    CHECK(line1.find("dir") != std::string::npos);
+    CHECK(line0.contains("\xE2\x94\x82")); // │
+    CHECK(line1.contains("\xE2\x94\x9C")); // ├
+    CHECK(line0.contains("file"));
+    CHECK(line1.contains("dir"));
 }
 
 TEST_CASE("Terminal.smoothScrollExtraLines.zero_when_no_offset", "[terminal]")
@@ -3440,7 +3440,7 @@ TEST_CASE("Terminal.PassiveMouseTracking_Selection", "[terminal]")
 
         // Verify mouse events were forwarded to the app via the PTY (SGR format: ESC [ < ... M/m)
         auto const& reply = mock.replyData();
-        CHECK(reply.find("\033[<") != std::string::npos);
+        CHECK(reply.contains("\033[<"));
     }
 
     SECTION("click-to-deselect works with passive tracking")
@@ -3842,7 +3842,7 @@ TEST_CASE("Terminal.Wheel.AltScreen.AppTracking.passes_through_as_SGR", "[termin
           == Handled { true });
     // SGR mouse report, not a cursor key.
     CHECK(e(mock.replyData()).starts_with(e("\033[<")));
-    CHECK(e(mock.replyData()).find(e("\033[B")) == std::string::npos);
+    CHECK(!e(mock.replyData()).contains(e("\033[B")));
 }
 
 TEST_CASE("Terminal.Wheel.PrimaryScreen.NoProtocol.local_scroll", "[terminal]")
@@ -4133,10 +4133,10 @@ TEST_CASE("Terminal.selectAll", "[terminal]")
 
     // "All" means the scrollback too, not merely the visible page.
     auto const text = mock.terminal.extractSelectionText();
-    CHECK(text.find("hist1") != std::string::npos);
-    CHECK(text.find("hist2") != std::string::npos);
-    CHECK(text.find("page1") != std::string::npos);
-    CHECK(text.find("page3") != std::string::npos);
+    CHECK(text.contains("hist1"));
+    CHECK(text.contains("hist2"));
+    CHECK(text.contains("page1"));
+    CHECK(text.contains("page3"));
 }
 
 TEST_CASE("Terminal.selectAll.completesInInsertMode", "[terminal]")

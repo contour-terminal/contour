@@ -463,7 +463,7 @@ TEST_CASE("SemanticBlockProtocol.DECRQM")
         mc.writeToScreen(DECRQM(2034));
         mc.terminal.flushInput();
         // Response should be CSI ? 2034 ; 2 $ y  (2 = reset)
-        CHECK(mc.replyData().find("2034;2$y") != std::string::npos);
+        CHECK(mc.replyData().contains("2034;2$y"));
     }
 
     SECTION("DECRQM reports mode 2034 as set after enabling")
@@ -474,7 +474,7 @@ TEST_CASE("SemanticBlockProtocol.DECRQM")
         mc.writeToScreen(DECRQM(2034));
         mc.terminal.flushInput();
         // Response should be CSI ? 2034 ; 1 $ y  (1 = set)
-        CHECK(mc.replyData().find("2034;1$y") != std::string::npos);
+        CHECK(mc.replyData().contains("2034;1$y"));
     }
 }
 
@@ -489,7 +489,7 @@ TEST_CASE("SemanticBlockProtocol.QueryDisabled")
         mc.writeToScreen(SBQUERY(SBQueryType::LastCommand));
         mc.terminal.flushInput();
         // Should get error DCS: ESC P > 0 b ESC backslash
-        CHECK(mc.replyData().find("\033P>0b\033\\") != std::string::npos);
+        CHECK(mc.replyData().contains("\033P>0b\033\\"));
     }
 }
 
@@ -515,15 +515,15 @@ TEST_CASE("SemanticBlockProtocol.QueryLastCommand")
     auto const& reply = mc.replyData();
 
     // Should get success DCS
-    REQUIRE(reply.find("\033P>1b") != std::string::npos);
+    REQUIRE(reply.contains("\033P>1b"));
     // Should contain JSON with version
-    CHECK(reply.find("\"version\":1") != std::string::npos);
+    CHECK(reply.contains("\"version\":1"));
     // Should contain the command
-    CHECK(reply.find("\"command\":\"ls\"") != std::string::npos);
+    CHECK(reply.contains("\"command\":\"ls\""));
     // Should contain exit code
-    CHECK(reply.find("\"exitCode\":0") != std::string::npos);
+    CHECK(reply.contains("\"exitCode\":0"));
     // Should be marked as finished
-    CHECK(reply.find("\"finished\":true") != std::string::npos);
+    CHECK(reply.contains("\"finished\":true"));
 }
 
 TEST_CASE("SemanticBlockProtocol.QueryLastNCommands")
@@ -546,10 +546,10 @@ TEST_CASE("SemanticBlockProtocol.QueryLastNCommands")
     mc.terminal.flushInput();
 
     auto const& reply = mc.replyData();
-    REQUIRE(reply.find("\033P>1b") != std::string::npos);
+    REQUIRE(reply.contains("\033P>1b"));
     // Both commands should be present
-    CHECK(reply.find("\"command\":\"cmd1\"") != std::string::npos);
-    CHECK(reply.find("\"command\":\"cmd2\"") != std::string::npos);
+    CHECK(reply.contains("\"command\":\"cmd1\""));
+    CHECK(reply.contains("\"command\":\"cmd2\""));
 }
 
 TEST_CASE("SemanticBlockProtocol.QueryInProgress")
@@ -572,11 +572,11 @@ TEST_CASE("SemanticBlockProtocol.QueryInProgress")
     mc.terminal.flushInput();
 
     auto const& reply = mc.replyData();
-    REQUIRE(reply.find("\033P>1b") != std::string::npos);
+    REQUIRE(reply.contains("\033P>1b"));
     // Should be marked as not finished
-    CHECK(reply.find("\"finished\":false") != std::string::npos);
+    CHECK(reply.contains("\"finished\":false"));
     // Should contain the command
-    CHECK(reply.find("\"command\":\"running\"") != std::string::npos);
+    CHECK(reply.contains("\"command\":\"running\""));
 }
 
 TEST_CASE("SemanticBlockProtocol.NoCompletedCommands")
@@ -593,7 +593,7 @@ TEST_CASE("SemanticBlockProtocol.NoCompletedCommands")
 
     auto const& reply = mc.replyData();
     // Should get error DCS (no data)
-    CHECK(reply.find("\033P>0b\033\\") != std::string::npos);
+    CHECK(reply.contains("\033P>0b\033\\"));
 }
 
 // ==================== Token Authentication Tests ====================
@@ -609,7 +609,7 @@ TEST_CASE("SemanticBlockProtocol.TokenOnEnable")
     auto const& reply = mc.replyData();
 
     // Should receive DCS reply with token
-    REQUIRE(reply.find("\033P>2034;1b") != std::string::npos);
+    REQUIRE(reply.contains("\033P>2034;1b"));
 
     // Extract and validate the token
     auto const token = extractTokenFromDecsetReply(reply);
@@ -658,7 +658,7 @@ TEST_CASE("SemanticBlockProtocol.QueryWithoutToken")
 
     auto const& reply = mc.replyData();
     // Should get status 2: authentication required
-    CHECK(reply.find("\033P>2b\033\\") != std::string::npos);
+    CHECK(reply.contains("\033P>2b\033\\"));
 }
 
 TEST_CASE("SemanticBlockProtocol.QueryWithWrongToken")
@@ -680,7 +680,7 @@ TEST_CASE("SemanticBlockProtocol.QueryWithWrongToken")
 
     auto const& reply = mc.replyData();
     // Should get status 3: authentication failed
-    CHECK(reply.find("\033P>3b\033\\") != std::string::npos);
+    CHECK(reply.contains("\033P>3b\033\\"));
 }
 
 TEST_CASE("SemanticBlockProtocol.TokenChangesOnReEnable")
@@ -705,13 +705,13 @@ TEST_CASE("SemanticBlockProtocol.TokenChangesOnReEnable")
     mc.resetReplyData();
     mc.writeToScreen(authenticatedSBQuery(SBQueryType::LastCommand, 1, token1));
     mc.terminal.flushInput();
-    CHECK(mc.replyData().find("\033P>3b\033\\") != std::string::npos);
+    CHECK(mc.replyData().contains("\033P>3b\033\\"));
 
     // New token should work
     mc.resetReplyData();
     mc.writeToScreen(authenticatedSBQuery(SBQueryType::LastCommand, 1, token2));
     mc.terminal.flushInput();
-    CHECK(mc.replyData().find("\033P>1b") != std::string::npos);
+    CHECK(mc.replyData().contains("\033P>1b"));
 }
 
 // {{{ OSC 133;B — the prompt/input border

@@ -146,7 +146,7 @@ TEST_CASE("sendKeyEvent maps Qt key events onto the terminal's PTY encoding", "[
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier);
         pty.stdinBuffer().clear();
         contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session);
-        CHECK(pty.stdinBuffer().find('\033') != std::string::npos);
+        CHECK(pty.stdinBuffer().contains('\033'));
     }
 
     // Ctrl+C encodes as 0x03.
@@ -154,7 +154,7 @@ TEST_CASE("sendKeyEvent maps Qt key events onto the terminal's PTY encoding", "[
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier, QStringLiteral("\x03"));
         pty.stdinBuffer().clear();
         contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session);
-        CHECK(pty.stdinBuffer().find('\x03') != std::string::npos);
+        CHECK(pty.stdinBuffer().contains('\x03'));
     }
 }
 

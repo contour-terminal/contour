@@ -514,27 +514,30 @@ int Terminal::TheSelectionHelper::cellWidth(CellLocation pos) const noexcept
     return terminal->currentScreen().cellWidthAt(pos);
 }
 
-/**
- * Sets the hyperlink into hovering state if mouse is currently hovering it
- * and unsets the state when the object is being destroyed.
- */
-struct ScopedHyperlinkHover
+namespace
 {
-    std::shared_ptr<HyperlinkInfo const> href;
-
-    ScopedHyperlinkHover(Terminal const& terminal, Screen const& /*screen*/):
-        href { terminal.tryGetHoveringHyperlink() }
+    /**
+     * Sets the hyperlink into hovering state if mouse is currently hovering it
+     * and unsets the state when the object is being destroyed.
+     */
+    struct ScopedHyperlinkHover
     {
-        if (href)
-            href->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?
-    }
+        std::shared_ptr<HyperlinkInfo const> href;
 
-    ~ScopedHyperlinkHover()
-    {
-        if (href)
-            href->state = HyperlinkState::Inactive;
-    }
-};
+        ScopedHyperlinkHover(Terminal const& terminal, Screen const& /*screen*/):
+            href { terminal.tryGetHoveringHyperlink() }
+        {
+            if (href)
+                href->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?
+        }
+
+        ~ScopedHyperlinkHover()
+        {
+            if (href)
+                href->state = HyperlinkState::Inactive;
+        }
+    };
+} // namespace
 
 void Terminal::updateInputMethodPreeditString(std::string preeditString)
 {
@@ -1597,43 +1600,46 @@ size_t Terminal::maxBulkTextSequenceWidth() const noexcept
 // This simple sequence handler is used to write to the screen
 // without any optimizations (and no parser hooking).
 // We use this for rendering the status line.
-struct SimpleSequenceHandler
+namespace
 {
-    Screen& targetScreen;
-
-    void executeControlCode(char controlCode) { targetScreen.executeControlCode(controlCode); }
-
-    void processSequence(Sequence const& seq)
+    struct SimpleSequenceHandler
     {
-        // NB: We might want to check for some VT sequences that should not be processed here.
-        // We might make use of Terminal::activeSequences() here somehow.
-        targetScreen.processSequence(seq);
-    }
+        Screen& targetScreen;
 
-    void processAPC(std::string_view body) { targetScreen.processAPC(body); }
+        void executeControlCode(char controlCode) { targetScreen.executeControlCode(controlCode); }
 
-    void writeText(char32_t codepoint) { targetScreen.writeText(codepoint); }
+        void processSequence(Sequence const& seq)
+        {
+            // NB: We might want to check for some VT sequences that should not be processed here.
+            // We might make use of Terminal::activeSequences() here somehow.
+            targetScreen.processSequence(seq);
+        }
 
-    void writeText(std::string_view chars, size_t /*cellCount*/)
-    {
-        // implementation of targetScreen.writeText(chars, cellCount)
-        // is buggy and does not work correctly
-        // so we do not use optimization for
-        // ParserEvents::print(chars,cellCount)
-        // but write char by char
-        // TODO fix targetScreen.writeText(chars, cellCount)
-        for (auto c: chars)
-            targetScreen.writeText(c);
-    }
+        void processAPC(std::string_view body) { targetScreen.processAPC(body); }
 
-    void writeTextEnd() { targetScreen.writeTextEnd(); }
+        void writeText(char32_t codepoint) { targetScreen.writeText(codepoint); }
 
-    [[nodiscard]] size_t maxBulkTextSequenceWidth() const noexcept
-    {
-        // Returning 0 here, because we do not make use of the performance optimized bulk write above.
-        return 0;
-    }
-};
+        void writeText(std::string_view chars, size_t /*cellCount*/)
+        {
+            // implementation of targetScreen.writeText(chars, cellCount)
+            // is buggy and does not work correctly
+            // so we do not use optimization for
+            // ParserEvents::print(chars,cellCount)
+            // but write char by char
+            // TODO fix targetScreen.writeText(chars, cellCount)
+            for (auto c: chars)
+                targetScreen.writeText(c);
+        }
+
+        void writeTextEnd() { targetScreen.writeTextEnd(); }
+
+        [[nodiscard]] size_t maxBulkTextSequenceWidth() const noexcept
+        {
+            // Returning 0 here, because we do not make use of the performance optimized bulk write above.
+            return 0;
+        }
+    };
+} // namespace
 // }}}
 
 void Terminal::writeToScreenInternal(Screen& screen, std::string_view vtStream)

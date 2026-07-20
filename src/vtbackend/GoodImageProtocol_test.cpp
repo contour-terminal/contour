@@ -156,7 +156,7 @@ TEST_CASE("GoodImageProtocol.Render.StatusSuccess", "[GIP]")
     mock.writeToScreen(gipRender("n=img,c=4,r=2,s"));
 
     // CSI > 0 i = success
-    CHECK(mock.replyData().find("\033P!gs=0\033\\") != std::string::npos);
+    CHECK(mock.replyData().contains("\033P!gs=0\033\\"));
 }
 
 TEST_CASE("GoodImageProtocol.Render.StatusFailure", "[GIP]")
@@ -166,7 +166,7 @@ TEST_CASE("GoodImageProtocol.Render.StatusFailure", "[GIP]")
     mock.writeToScreen(gipRender("n=missing,c=4,r=2,s"));
 
     // CSI > 1 i = failure
-    CHECK(mock.replyData().find("\033P!gs=1\033\\") != std::string::npos);
+    CHECK(mock.replyData().contains("\033P!gs=1\033\\"));
 }
 
 // ==================== Oneshot Tests ====================
@@ -258,7 +258,7 @@ TEST_CASE("GoodImageProtocol.DA1.IncludesGIPCode", "[GIP]")
     mock.terminal.flushInput();
 
     // Response should contain ;90 (the GIP DA1 code)
-    CHECK(mock.replyData().find(";90") != std::string::npos);
+    CHECK(mock.replyData().contains(";90"));
 }
 
 // ==================== Screen Layer Tests ====================
@@ -521,7 +521,7 @@ TEST_CASE("GoodImageProtocol.Upload.StatusSuccess", "[GIP]")
     mock.writeToScreen(gipUpload("n=upstat,f=3,w=2,h=2,s", pixels));
 
     // CSI > 0 i = success
-    CHECK(mock.replyData().find("\033P!gs=0\033\\") != std::string::npos);
+    CHECK(mock.replyData().contains("\033P!gs=0\033\\"));
 
     // Verify image was actually uploaded.
     auto const imageRef = mock.terminal.imagePool().findImageByName("upstat");
@@ -537,7 +537,7 @@ TEST_CASE("GoodImageProtocol.Upload.StatusInvalidData", "[GIP]")
     mock.writeToScreen(gipUpload("n=bad,f=3,w=2,h=2,s", wrongPixels));
 
     // CSI > 2 i = invalid image data
-    CHECK(mock.replyData().find("\033P!gs=2\033\\") != std::string::npos);
+    CHECK(mock.replyData().contains("\033P!gs=2\033\\"));
 
     // Image should NOT be in pool.
     CHECK(mock.terminal.imagePool().findImageByName("bad") == nullptr);
@@ -575,8 +575,8 @@ TEST_CASE("GoodImageProtocol.Query.ResourceLimits", "[GIP]")
 
     // Response should be DCS ! g s=8,m=Pm,b=Pb,w=Pw,h=Ph ST
     auto const& reply = mock.replyData();
-    CHECK(reply.find("\033P!gs=8,m=") != std::string::npos);
-    CHECK(reply.find("\033\\") != std::string::npos);
+    CHECK(reply.contains("\033P!gs=8,m="));
+    CHECK(reply.contains("\033\\"));
 }
 
 // ==================== Oneshot Update-Cursor Tests ====================
@@ -624,7 +624,7 @@ TEST_CASE("GoodImageProtocol.Oneshot.StatusResponse", "[GIP]")
 
     mock.writeToScreen(gipOneshot("f=3,w=2,h=2,c=4,r=2,s", pixels));
 
-    CHECK(mock.replyData().find("\033P!gs=0\033\\") != std::string::npos);
+    CHECK(mock.replyData().contains("\033P!gs=0\033\\"));
 }
 
 // ==================== Invalid Format Tests ====================
@@ -745,7 +745,7 @@ TEST_CASE("GoodImageProtocol.Upload.AutoFormatUnresolvable", "[GIP]")
     mock.writeToScreen(gipUpload("n=ambiguous,f=1,s", randomData));
 
     // Should fail with error code 2.
-    CHECK(mock.replyData().find("\033P!gs=2\033\\") != std::string::npos);
+    CHECK(mock.replyData().contains("\033P!gs=2\033\\"));
     CHECK(mock.terminal.imagePool().findImageByName("ambiguous") == nullptr);
 }
 

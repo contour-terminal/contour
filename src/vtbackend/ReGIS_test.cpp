@@ -22,7 +22,7 @@ TEST_CASE("ReGIS.DeviceAttributes.advertisesRegisGraphics", "[regis]")
     mock.writeToScreen("\033[c");
     auto const reply = mock.terminal.peekInput();
     INFO("DA1 reply: " << reply);
-    CHECK(reply.find(";3;") != std::string::npos);
+    CHECK(reply.contains(";3;"));
 }
 
 TEST_CASE("ReGIS.XtSmGraphics.geometry", "[regis][xtsmgraphics]")

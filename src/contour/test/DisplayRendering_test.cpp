@@ -351,15 +351,15 @@ TEST_CASE("display: keyboard, mouse and wheel events reach the PTY through the r
     QTest::keyClick(h.window.get(), Qt::Key_Return);
     for (int i = 0; i < 50 && !h.pty->stdinSnapshot().contains('a'); ++i)
         QTest::qWait(10);
-    CHECK(h.pty->stdinSnapshot().find('a') != std::string::npos);
-    CHECK(h.pty->stdinSnapshot().find('\r') != std::string::npos);
+    CHECK(h.pty->stdinSnapshot().contains('a'));
+    CHECK(h.pty->stdinSnapshot().contains('\r'));
 
     // Enable X10 mouse reporting, then click inside the grid: the terminal must encode a report.
     h.feedAndSettle("\033[?1000h"sv);
     QTest::mouseClick(h.window.get(), Qt::LeftButton, Qt::NoModifier, QPoint(100, 100));
     for (int i = 0; i < 50 && !h.pty->stdinSnapshot().contains("\033[M"); ++i)
         QTest::qWait(10);
-    CHECK(h.pty->stdinSnapshot().find("\033[M") != std::string::npos);
+    CHECK(h.pty->stdinSnapshot().contains("\033[M"));
 
     // Wheel over the (alt-less) primary screen scrolls the viewport — no crash, event consumed.
     // A phase-less notch now arms an inertial glide advanced by the render loop (nextRender +
@@ -457,7 +457,7 @@ TEST_CASE("display: a phase-less wheel notch that cannot arm a glide falls throu
     auto const snapshot = h.pty->stdinSnapshot();
     CHECK(snapshot.size() > before);
     // SGR wheel-up report: CSI < 64 ; col ; row M  (button code 64 == wheel up).
-    CHECK(snapshot.find("\033[<64;") != std::string::npos);
+    CHECK(snapshot.contains("\033[<64;"));
 }
 
 TEST_CASE("display: window resize reflows the grid through the real render loop", "[display][resize]")
@@ -1006,7 +1006,7 @@ TEST_CASE("display: input-method events compose and query on the live display", 
     }
     for (int i = 0; i < 50 && !h.pty->stdinSnapshot().contains('Z'); ++i)
         QTest::qWait(10);
-    CHECK(h.pty->stdinSnapshot().find('Z') != std::string::npos);
+    CHECK(h.pty->stdinSnapshot().contains('Z'));
 
     // The IME queries the display for its cursor rectangle / font / anchor — all must return
     // without crashing while a session is attached.

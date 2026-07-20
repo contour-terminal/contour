@@ -317,7 +317,7 @@ TEST_CASE("TerminalSession: the context-menu actions and the state they are gate
 
         CHECK((*session)(contour::actions::SelectAll {}));
         CHECK(session->contextMenuState().hasSelection);
-        CHECK(session->terminal().extractSelectionText().find("line 0") != std::string::npos);
+        CHECK(session->terminal().extractSelectionText().contains("line 0"));
     }
 
     SECTION("a finished OSC 133 command block lights up the last-command rows")
@@ -345,8 +345,8 @@ TEST_CASE("TerminalSession: the context-menu actions and the state they are gate
         // is the sequence doing its job -- what matters is that the scrollback SURVIVES.
         CHECK((*session)(contour::actions::SoftReset {}));
         CHECK(session->terminal().primaryScreen().historyLineCount() > vtbackend::LineCount(0));
-        CHECK(session->terminal().primaryScreen().grid().lineText(vtbackend::LineOffset(-1)).find("line")
-              != std::string::npos);
+        CHECK(
+            session->terminal().primaryScreen().grid().lineText(vtbackend::LineOffset(-1)).contains("line"));
 
         // A hard reset, by contrast, throws the whole scrollback away. That is the difference the
         // Advanced submenu offers the user, so it is pinned here.
@@ -594,7 +594,7 @@ TEST_CASE("TerminalSession: pasteFromClipboard writes clipboard text and enforce
 
     clipboard->setText(QStringLiteral("pasted"));
     session->pasteFromClipboard(1, /*strip*/ false);
-    CHECK(mockPtyOf(*session).stdinBuffer().find("pasted") != std::string::npos);
+    CHECK(mockPtyOf(*session).stdinBuffer().contains("pasted"));
 
     // > 1 MB: hard-rejected — and (regression) must not crash on a display-less session.
     mockPtyOf(*session).stdinBuffer().clear();
@@ -730,7 +730,7 @@ TEST_CASE("TerminalSession: display-independent actions dispatch without a displ
     auto& pty = mockPtyOf(*session);
     pty.stdinBuffer().clear();
     CHECK((*session)(actions::SendChars { .chars = "abc" }));
-    CHECK(pty.stdinBuffer().find("abc") != std::string::npos);
+    CHECK(pty.stdinBuffer().contains("abc"));
     CHECK((*session)(actions::WriteScreen { .chars = "xyz" }));
 
     // Clipboard write action (no display: routed but harmless).
@@ -856,13 +856,13 @@ TEST_CASE("TerminalSession: key and char events encode modifiers into the PTY", 
     pty.stdinBuffer().clear();
     session->sendCharEvent(
         U'c', 0, Modifiers { Modifier::Control }, KeyboardEventType::Press, std::chrono::steady_clock::now());
-    CHECK(pty.stdinBuffer().find('\x03') != std::string::npos);
+    CHECK(pty.stdinBuffer().contains('\x03'));
 
     // A function/navigation key produces its escape sequence (CSI-prefixed).
     pty.stdinBuffer().clear();
     session->sendKeyEvent(
         Key::UpArrow, Modifiers {}, KeyboardEventType::Press, std::chrono::steady_clock::now());
-    CHECK(pty.stdinBuffer().find('\033') != std::string::npos);
+    CHECK(pty.stdinBuffer().contains('\033'));
 
     // A key RELEASE encodes nothing (the legacy protocol is press-only).
     pty.stdinBuffer().clear();
@@ -891,7 +891,7 @@ TEST_CASE("TerminalSession: mouse events encode under an active mouse protocol",
     session->sendMousePressEvent(Modifiers {}, MouseButton::Left, at);
     session->sendMouseReleaseEvent(Modifiers {}, MouseButton::Left, at);
     // SGR mouse reports are CSI < ... M/m; at minimum an escape must have been emitted.
-    CHECK(pty.stdinBuffer().find('\033') != std::string::npos);
+    CHECK(pty.stdinBuffer().contains('\033'));
 }
 
 TEST_CASE("TerminalSession: host-writable status line permission executes headlessly",
@@ -952,7 +952,7 @@ TEST_CASE("TerminalSession: clipboard, selection and notification paths are disp
         clipboard->setText(QStringLiteral("ab"));
         pty.stdinBuffer().clear();
         session->pasteFromClipboard(3, /*strip*/ false);
-        CHECK(pty.stdinBuffer().find("ababab") != std::string::npos);
+        CHECK(pty.stdinBuffer().contains("ababab"));
     }
 }
 

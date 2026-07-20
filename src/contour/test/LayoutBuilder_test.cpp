@@ -468,7 +468,7 @@ TEST_CASE("emitLayoutsYaml: an engaged-but-empty command is not emitted", "[layo
     work.tabs = { tab };
 
     auto const yaml = emitLayoutsYaml({ { "work", work } });
-    CHECK(yaml.find("command:") == std::string::npos);
+    CHECK(!yaml.contains("command:"));
 
     auto const cfg = loadConfigFromYaml(yaml);
     auto const& parsed = cfg.layouts.value().at("work").tabs.at(0).root;

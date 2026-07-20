@@ -1305,10 +1305,10 @@ TEST_CASE("Config: generated default config round-trips through the loader", "[c
     // Guards the global `theme` writer<->reader key match: the std::formatter emits "system" into the
     // generated doc, and the loader must read the same key back.
     CHECK(reloaded.theme.value() == defaults.theme.value());
-    CHECK(rendered.find("pixel_reporting:") != std::string::npos);
-    CHECK(rendered.find("tab_bar_position:") != std::string::npos);
-    CHECK(rendered.find("tab_bar_visibility:") != std::string::npos);
-    CHECK(rendered.find("theme:") != std::string::npos);
+    CHECK(rendered.contains("pixel_reporting:"));
+    CHECK(rendered.contains("tab_bar_position:"));
+    CHECK(rendered.contains("tab_bar_visibility:"));
+    CHECK(rendered.contains("theme:"));
 }
 
 TEST_CASE("Config: dual color schemes, palette list forms, and infinite history load", "[config]")
@@ -1437,7 +1437,7 @@ profiles:
     REQUIRE(profile != nullptr);
     // A leading ~ resolves to the user's home directory (homeResolvedPath).
     auto const cwd = profile->shell.value().workingDirectory.string();
-    CHECK(cwd.find('~') == std::string::npos);
+    CHECK(!cwd.contains('~'));
     CHECK_FALSE(cwd.empty());
 }
 
@@ -2037,7 +2037,7 @@ TEST_CASE("Config: defaultConfigFilePath and the documentation generators produc
     // These are the pure string-producing entry points used by the `contour generate`/`documentation`
     // subcommands; exercising them covers the no-argument overloads and their default-Config path.
     CHECK_FALSE(contour::config::defaultConfigFilePath().empty());
-    CHECK(contour::config::defaultConfigFilePath().find("contour.yml") != std::string::npos);
+    CHECK(contour::config::defaultConfigFilePath().contains("contour.yml"));
 
     CHECK_FALSE(contour::config::documentationGlobalConfig().empty());
     CHECK_FALSE(contour::config::documentationProfileConfig().empty());
@@ -2280,7 +2280,7 @@ TEST_CASE("config.tab_switch_on_horizontal_wheel", "[config]")
         auto config = contour::config::Config {};
         config.tabSwitchOnHorizontalWheel = false;
         auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
-        REQUIRE(written.find("tab_switch_on_horizontal_wheel") != std::string::npos);
+        REQUIRE(written.contains("tab_switch_on_horizontal_wheel"));
 
         auto const reloaded = loadFromYaml(dir, written);
         CHECK_FALSE(reloaded.tabSwitchOnHorizontalWheel.value());
@@ -3152,12 +3152,12 @@ input_mapping:
     INFO("captured error log:\n" << log);
 
     // The misspelled modifier is named, and so is the row it killed.
-    CHECK(log.find("Crtl") != std::string::npos);
-    CHECK(log.find("ClearHistoryAndReset") != std::string::npos);
+    CHECK(log.contains("Crtl"));
+    CHECK(log.contains("ClearHistoryAndReset"));
     // ...and the unknown action, with its own row.
-    CHECK(log.find("NoSuchActionName") != std::string::npos);
+    CHECK(log.contains("NoSuchActionName"));
     // The accepted spellings are offered, so the user can see what to write instead.
-    CHECK(log.find("Ctrl") != std::string::npos);
+    CHECK(log.contains("Ctrl"));
 }
 
 TEST_CASE("Config: an input_mapping that is not a list is reported, not silently obeyed",
@@ -3189,7 +3189,7 @@ input_mapping:
     CHECK(mappings.mouseMappings.empty());
 
     INFO("captured error log:\n" << capture.captured());
-    CHECK(capture.captured().find("input_mapping") != std::string::npos);
+    CHECK(capture.captured().contains("input_mapping"));
 }
 
 // }}}

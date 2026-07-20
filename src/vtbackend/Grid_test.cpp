@@ -1152,7 +1152,7 @@ TEST_CASE("Grid.shrinkColumnsWrapsTextWithBlankHistory", "[grid][blank]")
 
     INFO("Reconstructed history+page: " << reconstructed);
     // The wide text must survive the reflow somewhere in history.
-    CHECK(reconstructed.find(wideText) != std::string::npos);
+    CHECK(reconstructed.contains(wideText));
 }
 
 TEST_CASE("Grid.render.blankLineWithSearchHighlight.usesTrivialPath", "[grid][blank]")

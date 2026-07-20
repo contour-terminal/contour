@@ -212,7 +212,7 @@ TEST_CASE("TerminalSessionManager: saveWindowLayout writes layouts.yml", "[manag
         std::ifstream const in(path, std::ios::binary);
         std::ostringstream contents;
         contents << in.rdbuf();
-        CHECK(contents.str().find("saved:") != std::string::npos);
+        CHECK(contents.str().contains("saved:"));
     }
 
     // Re-parse the written file through the production config loader to confirm it is valid

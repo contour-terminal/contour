@@ -211,291 +211,298 @@ StatusLineDefinition parseStatusLineDefinition(std::string_view left,
     };
 }
 
-struct VTSerializer
+namespace
 {
-    Terminal const& vt;
-    StatusLineStyling styling;
-    std::string result {};
-
-    std::string makeTextColor(std::optional<RGBColor> const& color, std::string_view defaultSequence = {})
+    struct VTSerializer
     {
-        if (!color)
-            return std::string(defaultSequence);
+        Terminal const& vt;
+        StatusLineStyling styling;
+        std::string result {};
 
-        return std::format("\033[38:2:{}:{}:{}m", color->red, color->green, color->blue);
-    }
+        std::string makeTextColor(std::optional<RGBColor> const& color, std::string_view defaultSequence = {})
+        {
+            if (!color)
+                return std::string(defaultSequence);
 
-    std::string makeBackgroundColor(std::optional<RGBColor> const& color,
-                                    std::string_view defaultSequence = {})
-    {
-        if (!color)
-            return std::string(defaultSequence);
+            return std::format("\033[38:2:{}:{}:{}m", color->red, color->green, color->blue);
+        }
 
-        return std::format("\033[48:2:{}:{}:{}m", color->red, color->green, color->blue);
-    }
+        std::string makeBackgroundColor(std::optional<RGBColor> const& color,
+                                        std::string_view defaultSequence = {})
+        {
+            if (!color)
+                return std::string(defaultSequence);
 
-    void applyStyles(StatusLineDefinitions::Styles const& styles) // {{{
-    {
-        if (styling == StatusLineStyling::Disabled)
-            return;
+            return std::format("\033[48:2:{}:{}:{}m", color->red, color->green, color->blue);
+        }
 
-        result += makeTextColor(styles.foregroundColor);
-        result += makeBackgroundColor(styles.backgroundColor);
+        void applyStyles(StatusLineDefinitions::Styles const& styles) // {{{
+        {
+            if (styling == StatusLineStyling::Disabled)
+                return;
 
-        result += styles.flags.reduce(std::string {}, [](std::string&& result, CellFlag flag) -> std::string {
-            switch (flag)
-            {
-                case CellFlag::None: return result;
-                case CellFlag::Bold: return std::move(result) + "\033[1m";
-                case CellFlag::Italic: return std::move(result) + "\033[3m";
-                case CellFlag::Underline: return std::move(result) + "\033[4m";
-                case CellFlag::DottedUnderline: return std::move(result) + "\033[4:1m";
-                case CellFlag::CurlyUnderlined: return std::move(result) + "\033[4:3m";
-                case CellFlag::DoublyUnderlined: return std::move(result) + "\033[4:4m";
-                case CellFlag::DashedUnderline: return std::move(result) + "\033[4:5m";
-                case CellFlag::Blinking: return std::move(result) + "\033[5m";
-                case CellFlag::RapidBlinking: return std::move(result) + "\033[6m";
-                case CellFlag::Inverse: return std::move(result) + "\033[7m";
-                case CellFlag::Hidden: return std::move(result) + "\033[8m";
-                case CellFlag::CrossedOut: return std::move(result) + "\033[9m";
-                case CellFlag::Framed: return std::move(result) + "\033[51m";
-                case CellFlag::Encircled: return std::move(result) + "\033[52m";
-                case CellFlag::Overline: return std::move(result) + "\033[53m";
-                case CellFlag::Faint: return std::move(result) + "\033[2m";
-                case CellFlag::CharacterProtected:
-                default: return result;
-            }
-        });
-    } // }}}
+            result += makeTextColor(styles.foregroundColor);
+            result += makeBackgroundColor(styles.backgroundColor);
 
-    std::string operator()(StatusLineDefinitions::Item const& item)
-    {
-        std::visit(
-            [this](auto const& item) {
-                if (auto const text = visit(item); !text.empty())
-                {
-                    if constexpr (std::is_same_v<decltype(item), StatusLineDefinitions::Text>)
-                        result += text;
-                    else
+            result +=
+                styles.flags.reduce(std::string {}, [](std::string&& result, CellFlag flag) -> std::string {
+                    switch (flag)
                     {
-                        if (styling == StatusLineStyling::Enabled)
-                        {
-                            result += SGRSAVE();
-                            applyStyles(item);
-                        }
-                        result += item.textLeft;
-                        result += text;
-                        result += item.textRight;
-                        if (styling == StatusLineStyling::Enabled)
-                            result += SGRRESTORE();
+                        case CellFlag::None: return result;
+                        case CellFlag::Bold: return std::move(result) + "\033[1m";
+                        case CellFlag::Italic: return std::move(result) + "\033[3m";
+                        case CellFlag::Underline: return std::move(result) + "\033[4m";
+                        case CellFlag::DottedUnderline: return std::move(result) + "\033[4:1m";
+                        case CellFlag::CurlyUnderlined: return std::move(result) + "\033[4:3m";
+                        case CellFlag::DoublyUnderlined: return std::move(result) + "\033[4:4m";
+                        case CellFlag::DashedUnderline: return std::move(result) + "\033[4:5m";
+                        case CellFlag::Blinking: return std::move(result) + "\033[5m";
+                        case CellFlag::RapidBlinking: return std::move(result) + "\033[6m";
+                        case CellFlag::Inverse: return std::move(result) + "\033[7m";
+                        case CellFlag::Hidden: return std::move(result) + "\033[8m";
+                        case CellFlag::CrossedOut: return std::move(result) + "\033[9m";
+                        case CellFlag::Framed: return std::move(result) + "\033[51m";
+                        case CellFlag::Encircled: return std::move(result) + "\033[52m";
+                        case CellFlag::Overline: return std::move(result) + "\033[53m";
+                        case CellFlag::Faint: return std::move(result) + "\033[2m";
+                        case CellFlag::CharacterProtected:
+                        default: return result;
                     }
-                }
-            },
-            item);
-        return result;
-    }
+                });
+        } // }}}
 
-    std::string operator()(StatusLineSegment const& segment)
-    {
-        std::string result;
-        for (auto const& item: segment)
-            result += std::visit(*this, item);
-        return result;
-    }
-
-    // {{{
-    std::string visit(StatusLineDefinitions::Title const&) { return vt.windowTitle(); }
-
-    std::string visit(StatusLineDefinitions::CellSGR const&)
-    {
-        auto const currentMousePosition = vt.currentMousePosition();
-        auto const cellFlags = vt.currentScreen().cellFlagsAt(currentMousePosition);
-        return std::format("{}", cellFlags);
-    }
-
-    std::string visit(StatusLineDefinitions::CellTextUtf32 const&)
-    {
-        auto const currentMousePosition = vt.currentMousePosition();
-        if (!vt.contains(currentMousePosition))
-            return {};
-
-        auto const cellText = vt.currentScreen().cellTextAt(currentMousePosition);
-        auto const cellText32 = unicode::convert_to<char32_t>(std::string_view(cellText));
-
-        std::string result;
-        bool first = true;
-        for (char32_t ch: cellText32)
+        std::string operator()(StatusLineDefinitions::Item const& item)
         {
-            if (!first)
-                result += " ";
-            result += std::format("U+{:04X}", static_cast<uint32_t>(ch));
-            first = false;
+            std::visit(
+                [this](auto const& item) {
+                    if (auto const text = visit(item); !text.empty())
+                    {
+                        if constexpr (std::is_same_v<decltype(item), StatusLineDefinitions::Text>)
+                            result += text;
+                        else
+                        {
+                            if (styling == StatusLineStyling::Enabled)
+                            {
+                                result += SGRSAVE();
+                                applyStyles(item);
+                            }
+                            result += item.textLeft;
+                            result += text;
+                            result += item.textRight;
+                            if (styling == StatusLineStyling::Enabled)
+                                result += SGRRESTORE();
+                        }
+                    }
+                },
+                item);
+            return result;
         }
-        return result;
-    }
 
-    std::string visit(StatusLineDefinitions::CellTextUtf8 const&)
-    {
-        auto const currentMousePosition = vt.currentMousePosition();
-        if (!vt.contains(currentMousePosition))
-            return {};
-        return crispy::escape(vt.currentScreen().cellTextAt(currentMousePosition));
-    }
-
-    std::string visit(StatusLineDefinitions::Clock const&)
-    {
-        crispy::ignore_unused(this);
-
-        // TODO: Find a more convinient way; The following is printing the time in UTC,
-        //       but we need it in local time.
-        // return std::format("{:%H:%M}", std::chrono::system_clock::now());
-
-        auto now = std::chrono::system_clock::now();
-        std::time_t const nowTimeT = std::chrono::system_clock::to_time_t(now);
-        std::tm const* tm = std::localtime(&nowTimeT);
-        std::stringstream out;
-        out << std::put_time(tm, "%H:%M");
-        return out.str();
-    }
-
-    std::string visit(StatusLineDefinitions::HistoryLineCount const&)
-    {
-        if (!vt.isPrimaryScreen())
-            return {};
-
-        if (vt.viewport().scrollOffset().value)
+        std::string operator()(StatusLineSegment const& segment)
         {
-            auto const pct =
-                double(vt.viewport().scrollOffset()) / double(vt.primaryScreen().historyLineCount());
-            return std::format("{}/{} {:3}%",
-                               vt.viewport().scrollOffset(),
-                               vt.primaryScreen().historyLineCount(),
-                               int(pct * 100));
+            std::string result;
+            for (auto const& item: segment)
+                result += std::visit(*this, item);
+            return result;
         }
-        else
-            return std::format("{}", vt.primaryScreen().historyLineCount());
-    }
 
-    std::string visit(StatusLineDefinitions::Hyperlink const&)
-    {
-        if (auto const hyperlink = vt.currentScreen().hyperlinkAt(vt.currentMousePosition()))
-            return std::format("{}", hyperlink->uri);
+        // {{{
+        std::string visit(StatusLineDefinitions::Title const&) { return vt.windowTitle(); }
 
-        return {};
-    }
-
-    std::string visit(StatusLineDefinitions::InputMode const&)
-    {
-        return std::string(modeString(vt.inputHandler().mode()));
-    }
-
-    std::string visit(StatusLineDefinitions::ProtectedMode const&)
-    {
-        if (vt.allowInput())
-            return {};
-
-        return " (PROTECTED)";
-    }
-
-    std::string visit(StatusLineDefinitions::TraceMode const&)
-    {
-        // Trace mode is off in Normal execution; render nothing then (mirrors ProtectedMode's gating), so
-        // the default status line's {TraceMode} segment is empty unless tracing is actually active.
-        if (vt.executionMode() == ExecutionMode::Normal)
-            return {};
-
-        std::string result;
-
-        result += "TRACING";
-
-        if (!vt.traceHandler().pendingSequences().empty())
-            result += std::format(" (#{}): {}",
-                                  vt.traceHandler().pendingSequences().size(),
-                                  vt.traceHandler().pendingSequences().front());
-        return result;
-    }
-
-    std::string visit(StatusLineDefinitions::SearchMode const&)
-    {
-        if (!vt.search().pattern.empty() || vt.inputHandler().isEditingSearch())
-            return " SEARCH";
-
-        return {};
-    }
-
-    std::string visit(StatusLineDefinitions::SearchPrompt const&)
-    {
-        if (vt.inputHandler().isEditingSearch())
-            return std::format("Search: {}█",
-                               unicode::convert_to<char>(std::u32string_view(vt.search().pattern)));
-
-        return {};
-    }
-
-    std::string visit(StatusLineDefinitions::Command const& item)
-    {
-        crispy::ignore_unused(this);
-
-        std::string result;
-        if (FILE* fp = popen(item.command.c_str(), "r"); fp)
+        std::string visit(StatusLineDefinitions::CellSGR const&)
         {
-            char buffer[256] {};
-            while (fgets(buffer, sizeof(buffer), fp) != nullptr)
+            auto const currentMousePosition = vt.currentMousePosition();
+            auto const cellFlags = vt.currentScreen().cellFlagsAt(currentMousePosition);
+            return std::format("{}", cellFlags);
+        }
+
+        std::string visit(StatusLineDefinitions::CellTextUtf32 const&)
+        {
+            auto const currentMousePosition = vt.currentMousePosition();
+            if (!vt.contains(currentMousePosition))
+                return {};
+
+            auto const cellText = vt.currentScreen().cellTextAt(currentMousePosition);
+            auto const cellText32 = unicode::convert_to<char32_t>(std::string_view(cellText));
+
+            std::string result;
+            bool first = true;
+            for (char32_t ch: cellText32)
             {
-                result += buffer;
+                if (!first)
+                    result += " ";
+                result += std::format("U+{:04X}", static_cast<uint32_t>(ch));
+                first = false;
             }
-            pclose(fp);
-
-            // Only keep first line
-            if (auto const pos = result.find('\n'); pos != std::string::npos)
-                result.erase(pos);
+            return result;
         }
-        else
-            result = std::strerror(errno);
-        return result;
-    }
 
-    std::string visit(StatusLineDefinitions::Text const& item)
-    {
-        crispy::ignore_unused(this);
-        return item.text;
-    }
-
-    std::string visit(StatusLineDefinitions::VTType const&) { return std::format("{}", vt.operatingLevel()); }
-
-    std::string visit(StatusLineDefinitions::Tabs const& tabs)
-    {
-        auto const tabsInfo = vt.guiTabsInfoForStatusLine();
-
-        std::string fragment;
-        for (auto const position: std::views::iota(1u, tabsInfo.tabs.size() + 1))
+        std::string visit(StatusLineDefinitions::CellTextUtf8 const&)
         {
-            if (!fragment.empty())
-                fragment += tabs.separator.value_or("|");
+            auto const currentMousePosition = vt.currentMousePosition();
+            if (!vt.contains(currentMousePosition))
+                return {};
+            return crispy::escape(vt.currentScreen().cellTextAt(currentMousePosition));
+        }
 
-            auto const isActivePosition = position == tabsInfo.activeTabPosition;
-            auto const activePositionStylized =
-                isActivePosition && (tabs.activeColor || tabs.activeBackground);
+        std::string visit(StatusLineDefinitions::Clock const&)
+        {
+            crispy::ignore_unused(this);
 
-            if (activePositionStylized)
+            // TODO: Find a more convinient way; The following is printing the time in UTC,
+            //       but we need it in local time.
+            // return std::format("{:%H:%M}", std::chrono::system_clock::now());
+
+            auto now = std::chrono::system_clock::now();
+            std::time_t const nowTimeT = std::chrono::system_clock::to_time_t(now);
+            std::tm const* tm = std::localtime(&nowTimeT);
+            std::stringstream out;
+            out << std::put_time(tm, "%H:%M");
+            return out.str();
+        }
+
+        std::string visit(StatusLineDefinitions::HistoryLineCount const&)
+        {
+            if (!vt.isPrimaryScreen())
+                return {};
+
+            if (vt.viewport().scrollOffset().value)
             {
-                fragment += SGRSAVE();
-                fragment += makeTextColor(tabs.activeColor);
-                fragment += makeBackgroundColor(tabs.activeBackground);
+                auto const pct =
+                    double(vt.viewport().scrollOffset()) / double(vt.primaryScreen().historyLineCount());
+                return std::format("{}/{} {:3}%",
+                                   vt.viewport().scrollOffset(),
+                                   vt.primaryScreen().historyLineCount(),
+                                   int(pct * 100));
             }
-
-            if (tabsInfo.tabs[position - 1].name)
-                fragment += tabsInfo.tabs[position - 1].name.value();
             else
-                fragment += std::to_string(position);
-
-            if (activePositionStylized)
-                fragment += SGRRESTORE();
+                return std::format("{}", vt.primaryScreen().historyLineCount());
         }
-        return fragment;
-    }
-    // }}}
-};
+
+        std::string visit(StatusLineDefinitions::Hyperlink const&)
+        {
+            if (auto const hyperlink = vt.currentScreen().hyperlinkAt(vt.currentMousePosition()))
+                return std::format("{}", hyperlink->uri);
+
+            return {};
+        }
+
+        std::string visit(StatusLineDefinitions::InputMode const&)
+        {
+            return std::string(modeString(vt.inputHandler().mode()));
+        }
+
+        std::string visit(StatusLineDefinitions::ProtectedMode const&)
+        {
+            if (vt.allowInput())
+                return {};
+
+            return " (PROTECTED)";
+        }
+
+        std::string visit(StatusLineDefinitions::TraceMode const&)
+        {
+            // Trace mode is off in Normal execution; render nothing then (mirrors ProtectedMode's gating), so
+            // the default status line's {TraceMode} segment is empty unless tracing is actually active.
+            if (vt.executionMode() == ExecutionMode::Normal)
+                return {};
+
+            std::string result;
+
+            result += "TRACING";
+
+            if (!vt.traceHandler().pendingSequences().empty())
+                result += std::format(" (#{}): {}",
+                                      vt.traceHandler().pendingSequences().size(),
+                                      vt.traceHandler().pendingSequences().front());
+            return result;
+        }
+
+        std::string visit(StatusLineDefinitions::SearchMode const&)
+        {
+            if (!vt.search().pattern.empty() || vt.inputHandler().isEditingSearch())
+                return " SEARCH";
+
+            return {};
+        }
+
+        std::string visit(StatusLineDefinitions::SearchPrompt const&)
+        {
+            if (vt.inputHandler().isEditingSearch())
+                return std::format("Search: {}█",
+                                   unicode::convert_to<char>(std::u32string_view(vt.search().pattern)));
+
+            return {};
+        }
+
+        std::string visit(StatusLineDefinitions::Command const& item)
+        {
+            crispy::ignore_unused(this);
+
+            std::string result;
+            if (FILE* fp = popen(item.command.c_str(), "r"); fp)
+            {
+                char buffer[256] {};
+                while (fgets(buffer, sizeof(buffer), fp) != nullptr)
+                {
+                    result += buffer;
+                }
+                pclose(fp);
+
+                // Only keep first line
+                if (auto const pos = result.find('\n'); pos != std::string::npos)
+                    result.erase(pos);
+            }
+            else
+                result = std::strerror(errno);
+            return result;
+        }
+
+        std::string visit(StatusLineDefinitions::Text const& item)
+        {
+            crispy::ignore_unused(this);
+            return item.text;
+        }
+
+        std::string visit(StatusLineDefinitions::VTType const&)
+        {
+            return std::format("{}", vt.operatingLevel());
+        }
+
+        std::string visit(StatusLineDefinitions::Tabs const& tabs)
+        {
+            auto const tabsInfo = vt.guiTabsInfoForStatusLine();
+
+            std::string fragment;
+            for (auto const position: std::views::iota(1u, tabsInfo.tabs.size() + 1))
+            {
+                if (!fragment.empty())
+                    fragment += tabs.separator.value_or("|");
+
+                auto const isActivePosition = position == tabsInfo.activeTabPosition;
+                auto const activePositionStylized =
+                    isActivePosition && (tabs.activeColor || tabs.activeBackground);
+
+                if (activePositionStylized)
+                {
+                    fragment += SGRSAVE();
+                    fragment += makeTextColor(tabs.activeColor);
+                    fragment += makeBackgroundColor(tabs.activeBackground);
+                }
+
+                if (tabsInfo.tabs[position - 1].name)
+                    fragment += tabsInfo.tabs[position - 1].name.value();
+                else
+                    fragment += std::to_string(position);
+
+                if (activePositionStylized)
+                    fragment += SGRRESTORE();
+            }
+            return fragment;
+        }
+        // }}}
+    };
+} // namespace
 
 std::string serializeToVT(Terminal const& vt, StatusLineSegment const& segment, StatusLineStyling styling)
 {

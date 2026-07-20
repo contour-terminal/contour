@@ -3287,7 +3287,7 @@ TEST_CASE("DECSCL.conformance_level_gating", "[screen]")
         mock.resetReplyData();
         mock.writeToScreen("\033[4$p"); // DECRQM (ANSI) for IRM
         mock.terminal.flushInput();
-        CHECK(mock.replyData().find("$y") != std::string::npos); // level 3 answers CSI 4 ; Ps $ y
+        CHECK(mock.replyData().contains("$y")); // level 3 answers CSI 4 ; Ps $ y
     }
 
     SECTION("DECSLRM (a VT420 feature) is inert below VT level 4")
@@ -7082,7 +7082,7 @@ TEST_CASE("DECSCL: DECRQSS reports current level", "[screen]")
     mock.terminal.flushInput();
     auto const reply = mock.replyData();
     // Should contain "64;1" for level 64 with 7-bit C1
-    CHECK(reply.find("64;1\"p") != std::string::npos);
+    CHECK(reply.contains("64;1\"p"));
 }
 
 TEST_CASE("foldC1ControlsToEightBit", "[screen]")
@@ -7354,7 +7354,7 @@ TEST_CASE("OSC 110/111 reset dynamic colors to the default palette", "[screen]")
         mock.writeToScreen("\033]10;?\033\\"); // query the default foreground
         mock.terminal.flushInput();
         auto const original = mock.replyData();
-        REQUIRE(original.find("]10;rgb:") != std::string::npos);
+        REQUIRE(original.contains("]10;rgb:"));
 
         mock.resetReplyData();
         mock.writeToScreen("\033]10;#aaaabbbbcccc\033\\"); // override it
@@ -7374,7 +7374,7 @@ TEST_CASE("OSC 110/111 reset dynamic colors to the default palette", "[screen]")
         mock.writeToScreen("\033]11;?\033\\");
         mock.terminal.flushInput();
         auto const original = mock.replyData();
-        REQUIRE(original.find("]11;rgb:") != std::string::npos);
+        REQUIRE(original.contains("]11;rgb:"));
 
         mock.resetReplyData();
         mock.writeToScreen("\033]11;#112233445566\033\\");
@@ -7490,9 +7490,9 @@ TEST_CASE("DECINVM: nested macro invocation", "[screen]")
     mock.terminal.flushInput();
     // Macro 0 body outputs "A" then "C" (deferred macro 1 runs after), then macro 1 outputs "B"
     auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
-    CHECK(text.find('A') != std::string::npos);
-    CHECK(text.find('B') != std::string::npos);
-    CHECK(text.find('C') != std::string::npos);
+    CHECK(text.contains('A'));
+    CHECK(text.contains('B'));
+    CHECK(text.contains('C'));
 }
 
 TEST_CASE("DECINVM: recursive macro guard", "[screen]")
@@ -7675,7 +7675,7 @@ TEST_CASE("NRCS: British charset substitution", "[screen]")
     mock.terminal.flushInput();
     auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
     // £ is U+00A3 — the UTF-8 encoding is 0xC2 0xA3
-    CHECK(text.find("\xC2\xA3") != std::string::npos);
+    CHECK(text.contains("\xC2\xA3"));
 }
 
 TEST_CASE("NRCS: German charset substitution", "[screen]")
@@ -7687,7 +7687,7 @@ TEST_CASE("NRCS: German charset substitution", "[screen]")
     mock.writeToScreen("[");
     mock.terminal.flushInput();
     auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
-    CHECK(text.find("\xC3\x84") != std::string::npos); // Ä in UTF-8
+    CHECK(text.contains("\xC3\x84")); // Ä in UTF-8
 }
 
 TEST_CASE("NRCS: French charset substitution", "[screen]")
@@ -7699,7 +7699,7 @@ TEST_CASE("NRCS: French charset substitution", "[screen]")
     mock.writeToScreen("#");
     mock.terminal.flushInput();
     auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
-    CHECK(text.find("\xC2\xA3") != std::string::npos); // £ in UTF-8
+    CHECK(text.contains("\xC2\xA3")); // £ in UTF-8
 }
 
 TEST_CASE("NRCS: switch back to USASCII", "[screen]")
@@ -7732,7 +7732,7 @@ TEST_CASE("NRCS: G1 charset via locking shift", "[screen]")
     mock.writeToScreen("#");
     mock.terminal.flushInput();
     auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
-    CHECK(text.find("\xC2\xA3") != std::string::npos);
+    CHECK(text.contains("\xC2\xA3"));
 }
 
 TEST_CASE("NRCS: DA1 includes ext 9", "[screen]")
@@ -7770,7 +7770,7 @@ TEST_CASE("NRCS: single-byte SCS fallback designates British to G2", "[screen]")
     mock.writeToScreen("\033N#");
     mock.terminal.flushInput();
     auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
-    CHECK(text.find("\xC2\xA3") != std::string::npos); // £ in UTF-8
+    CHECK(text.contains("\xC2\xA3")); // £ in UTF-8
 }
 
 // }}} NRCS (National Replacement Character Sets) Tests
@@ -7787,7 +7787,7 @@ TEST_CASE("Technical charset: designate and use", "[screen]")
     mock.terminal.flushInput();
     auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
     // Α (U+0391) in UTF-8 is 0xCE 0x91
-    CHECK(text.find("\xCE\x91") != std::string::npos);
+    CHECK(text.contains("\xCE\x91"));
 }
 
 TEST_CASE("Technical charset: pi mapping", "[screen]")
@@ -7799,7 +7799,7 @@ TEST_CASE("Technical charset: pi mapping", "[screen]")
     mock.terminal.flushInput();
     auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
     // π (U+03C0) in UTF-8 is 0xCF 0x80
-    CHECK(text.find("\xCF\x80") != std::string::npos);
+    CHECK(text.contains("\xCF\x80"));
 }
 
 TEST_CASE("Technical charset: switch back to USASCII", "[screen]")
@@ -7901,7 +7901,7 @@ TEST_CASE("DECRQLP: request locator position", "[screen]")
     mock.terminal.flushInput();
     auto const reply = mock.replyData();
     // Should contain DECLRP format: CSI 0 ; ... & w
-    CHECK(reply.find("&w") != std::string::npos);
+    CHECK(reply.contains("&w"));
 }
 
 TEST_CASE("DECELR: soft reset disables locator", "[screen]")
