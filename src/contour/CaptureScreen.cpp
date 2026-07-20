@@ -95,11 +95,26 @@ namespace
         }
     };
 
+#ifndef _WIN32
+    /// Opens the controlling terminal for reading and writing.
+    ///
+    /// Kept out of TTY's constructor body so the descriptor can be a default member initializer:
+    /// an assignment in the body would have to sit inside `#ifndef _WIN32`, and hoisting it into
+    /// the member-initializer list -- which is what cppcoreguidelines-prefer-member-initializer
+    /// asks for -- would place it outside that guard, where neither open() nor `fd` exists.
+    ///
+    /// @return The file descriptor for /dev/tty, or -1 if it could not be opened.
+    [[nodiscard]] int openControllingTerminal() noexcept
+    {
+        return open("/dev/tty", O_RDWR);
+    }
+#endif
+
     struct TTY final: CaptureTransport
     {
         bool configured = false;
 #ifndef _WIN32
-        int fd = -1;
+        int fd = openControllingTerminal();
         termios savedModes {};
 #else
         DWORD savedModes {};
@@ -115,10 +130,9 @@ namespace
 #endif
         }
 
-        TTY(): fd(open("/dev/tty", O_RDWR))
+        TTY()
         {
 #ifndef _WIN32
-
             if (fd < 0)
             {
                 cerr << "Could not open current terminal.\r\n";

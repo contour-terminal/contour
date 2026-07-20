@@ -71,6 +71,10 @@
 #     a std::array satisfies it on Linux and fails to compile on MSVC, whose STL uses
 #     a class type. Color.cpp already carried a comment warning about exactly this;
 #     the check reverted that fix and broke the Windows build.
+#   * `bugprone-chained-comparison` -- unavoidable with Catch2. CHECK(a == b) expands to
+#     `Catch::Decomposer() <= a == b`, which is a chained comparison by construction,
+#     so the check fires on ordinary assertions. Whether it does depends on how Catch2
+#     is included, which is why a local sweep can measure zero and CI still fail.
 #   * `misc-no-recursion` (41) -- recursion is a legitimate tool in a parser and a
 #     renderer; the check flags the technique rather than any defect.
 #   * `misc-use-anonymous-namespace` (79) -- directly contradicts
@@ -95,6 +99,7 @@ Checks: >-
   -*,
   bugprone-*,
   -bugprone-branch-clone,
+  -bugprone-chained-comparison,
   -bugprone-command-processor,
   -bugprone-std-namespace-modification,
   -bugprone-easily-swappable-parameters,

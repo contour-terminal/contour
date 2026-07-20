@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <ranges>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace contour;
