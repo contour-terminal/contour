@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtpty/PageSize.h>
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <vector>
 
 #include <vtmux/Pane.h>
 
@@ -79,6 +82,76 @@ inline constexpr int DefaultSplitHandleThickness = 6;
     }
 
     return { .width = static_cast<int>(width), .height = static_cast<int>(height) };
+}
+
+/// One leaf pane's resolved rectangle in CELL space, as produced by layoutInCells().
+struct PaneCellRect
+{
+    /// The leaf this rectangle belongs to.
+    PaneId pane;
+    /// Leftmost cell column of the pane, 0-based within the laid-out area.
+    int x = 0;
+    /// Topmost cell row of the pane, 0-based within the laid-out area.
+    int y = 0;
+    /// Extent in cell columns (>= 1).
+    int width = 0;
+    /// Extent in cell rows (>= 1).
+    int height = 0;
+
+    [[nodiscard]] constexpr bool operator==(PaneCellRect const&) const noexcept = default;
+};
+
+/// Computes every leaf's cell rectangle when @p root is laid out into @p area with a ONE-CELL
+/// divider between split children — tmux's model, deliberately NOT the GUI's pixel-thick handle.
+///
+/// This is a cell-space PROJECTION of the pane tree, never a readout of GUI geometry: along a
+/// split's axis the first child receives round(ratio * (extent - 1)) cells (clamped so both
+/// children keep at least one cell), the divider takes one, and the second child receives the
+/// rest. Hence `first + 1 + second == extent` exactly — the arithmetic tmux's layout_check
+/// verifies on every ingested layout string, which is why the divider width must be one cell.
+/// SplitState::Vertical places children side-by-side (splits columns); SplitState::Horizontal
+/// stacks them (splits lines), matching contentSizeForLeaf's axis contract above.
+///
+/// Pass Tab::layoutRoot() as @p root so a zoomed tab projects as its zoomed leaf filling the area.
+///
+/// The exact-sum invariant holds whenever every split receives at least 3 cells along its axis;
+/// a smaller extent clamps both children to one cell each and the subtree overflows the area.
+/// Callers that promise tmux-valid output (the resize policy) must not shrink a grid below that.
+/// @param root The pane tree (or subtree) occupying the whole area.
+/// @param area The content grid to project into.
+/// @return One rectangle per leaf, in tree order (first child before second child).
+[[nodiscard]] inline std::vector<PaneCellRect> layoutInCells(Pane const& root, vtpty::PageSize area)
+{
+    auto out = std::vector<PaneCellRect> {};
+    out.reserve(static_cast<size_t>(root.leafCount()));
+
+    auto const recurse = [&out](auto const& self, Pane const& node, int x, int y, int width, int height) {
+        if (node.isLeaf())
+        {
+            out.push_back({ .pane = node.id(), .x = x, .y = y, .width = width, .height = height });
+            return;
+        }
+
+        auto const axisExtent = node.splitState() == SplitState::Vertical ? width : height;
+        // One cell goes to the divider; the rest is shared with both children kept >= 1 cell.
+        auto const divisible = axisExtent - 1;
+        auto const first = std::clamp(
+            static_cast<int>(std::lround(node.ratio() * divisible)), 1, std::max(1, divisible - 1));
+        auto const second = std::max(1, divisible - first);
+
+        if (node.splitState() == SplitState::Vertical)
+        {
+            self(self, *node.first(), x, y, first, height);
+            self(self, *node.second(), x + first + 1, y, second, height);
+        }
+        else
+        {
+            self(self, *node.first(), x, y, width, first);
+            self(self, *node.second(), x, y + first + 1, width, second);
+        }
+    };
+    recurse(recurse, root, 0, 0, unbox(area.columns), unbox(area.lines));
+    return out;
 }
 
 } // namespace vtmux

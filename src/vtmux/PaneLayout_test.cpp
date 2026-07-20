@@ -12,6 +12,8 @@
 #include <vtmux/PaneLayout.h>
 
 using namespace vtmux;
+using vtpty::ColumnCount;
+using vtpty::LineCount;
 
 namespace
 {
@@ -160,4 +162,105 @@ TEST_CASE("PaneLayout: the layout root bounds the ratio walk", "[vtmux][layout][
         CHECK(content.width == required.width);
         CHECK(content.height > required.height);
     }
+}
+
+TEST_CASE("layoutInCells: a single leaf fills the whole area", "[vtmux][layout][cells]")
+{
+    auto root = Pane { PaneId { 1 }, SessionId { 1 } };
+    auto const rects = layoutInCells(root, { .lines = LineCount(24), .columns = ColumnCount(80) });
+    REQUIRE(rects.size() == 1);
+    CHECK(rects[0] == PaneCellRect { .pane = PaneId { 1 }, .x = 0, .y = 0, .width = 80, .height = 24 });
+}
+
+TEST_CASE("layoutInCells: a side-by-side split spends one column on the divider", "[vtmux][layout][cells]")
+{
+    auto root = Pane { PaneId { 1 }, SessionId { 1 } };
+    auto const [first, second] =
+        root.split(SplitState::Vertical, PaneId { 2 }, PaneId { 3 }, SessionId { 2 }, 0.5);
+
+    auto const rects = layoutInCells(root, { .lines = LineCount(24), .columns = ColumnCount(80) });
+    REQUIRE(rects.size() == 2);
+
+    // 79 divisible columns: first gets round(0.5 * 79) = 40, divider 1, second the remaining 39 —
+    // exactly the sum(child + 1) - 1 == parent arithmetic tmux's layout_check verifies.
+    CHECK(rects[0] == PaneCellRect { .pane = first->id(), .x = 0, .y = 0, .width = 40, .height = 24 });
+    CHECK(rects[1] == PaneCellRect { .pane = second->id(), .x = 41, .y = 0, .width = 39, .height = 24 });
+    CHECK(rects[0].width + 1 + rects[1].width == 80);
+}
+
+TEST_CASE("layoutInCells: a stacked split spends one line on the divider", "[vtmux][layout][cells]")
+{
+    auto root = Pane { PaneId { 1 }, SessionId { 1 } };
+    auto const [top, bottom] =
+        root.split(SplitState::Horizontal, PaneId { 2 }, PaneId { 3 }, SessionId { 2 }, 0.5);
+
+    auto const rects = layoutInCells(root, { .lines = LineCount(24), .columns = ColumnCount(80) });
+    REQUIRE(rects.size() == 2);
+    CHECK(rects[0] == PaneCellRect { .pane = top->id(), .x = 0, .y = 0, .width = 80, .height = 12 });
+    CHECK(rects[1] == PaneCellRect { .pane = bottom->id(), .x = 0, .y = 13, .width = 80, .height = 11 });
+    CHECK(rects[0].height + 1 + rects[1].height == 24);
+}
+
+TEST_CASE("layoutInCells: an asymmetric ratio rounds and the remainder goes to the second child",
+          "[vtmux][layout][cells]")
+{
+    auto root = Pane { PaneId { 1 }, SessionId { 1 } };
+    root.split(SplitState::Vertical, PaneId { 2 }, PaneId { 3 }, SessionId { 2 }, 0.7);
+
+    auto const rects = layoutInCells(root, { .lines = LineCount(24), .columns = ColumnCount(100) });
+    REQUIRE(rects.size() == 2);
+    // 99 divisible columns: round(0.7 * 99) = 69 for the first child, the remaining 30 for the second.
+    CHECK(rects[0].width == 69);
+    CHECK(rects[1].width == 30);
+    CHECK(rects[1].x == 70);
+    CHECK(rects[0].width + 1 + rects[1].width == 100);
+}
+
+TEST_CASE("layoutInCells: nested splits keep the cell arithmetic exact per level", "[vtmux][layout][cells]")
+{
+    auto root = Pane { PaneId { 1 }, SessionId { 1 } };
+    auto const [left, right] =
+        root.split(SplitState::Vertical, PaneId { 2 }, PaneId { 3 }, SessionId { 2 }, 0.5);
+    auto const [top, bottom] =
+        right->split(SplitState::Horizontal, PaneId { 4 }, PaneId { 5 }, SessionId { 3 }, 0.3);
+
+    auto const rects = layoutInCells(root, { .lines = LineCount(50), .columns = ColumnCount(160) });
+    REQUIRE(rects.size() == 3);
+
+    // Outer: 159 divisible -> 80 | 79. Inner (within the right child's 79 x 50): 49 divisible
+    // lines -> round(0.3 * 49) = 15 on top, the remaining 34 below.
+    CHECK(rects[0] == PaneCellRect { .pane = left->id(), .x = 0, .y = 0, .width = 80, .height = 50 });
+    CHECK(rects[1] == PaneCellRect { .pane = top->id(), .x = 81, .y = 0, .width = 79, .height = 15 });
+    CHECK(rects[2] == PaneCellRect { .pane = bottom->id(), .x = 81, .y = 16, .width = 79, .height = 34 });
+
+    CHECK(rects[0].width + 1 + rects[1].width == 160);
+    CHECK(rects[1].height + 1 + rects[2].height == 50);
+}
+
+TEST_CASE("layoutInCells: an extreme ratio still leaves the small child one cell", "[vtmux][layout][cells]")
+{
+    auto root = Pane { PaneId { 1 }, SessionId { 1 } };
+    // Pane::setRatio itself clamps into [0.05, 0.95], so 0.999 arrives as 0.95. In a 4-column area
+    // that still rounds to the FULL divisible extent (round(0.95 * 3) = 3), which the solver must
+    // pull back so the second child keeps its one guaranteed cell.
+    root.split(SplitState::Vertical, PaneId { 2 }, PaneId { 3 }, SessionId { 2 }, 0.999);
+
+    auto const rects = layoutInCells(root, { .lines = LineCount(24), .columns = ColumnCount(4) });
+    REQUIRE(rects.size() == 2);
+    CHECK(rects[0].width == 2);
+    CHECK(rects[1].width == 1);
+    CHECK(rects[0].width + 1 + rects[1].width == 4);
+}
+
+TEST_CASE("layoutInCells: an area too small for a split degrades without crashing", "[vtmux][layout][cells]")
+{
+    auto root = Pane { PaneId { 1 }, SessionId { 1 } };
+    root.split(SplitState::Vertical, PaneId { 2 }, PaneId { 3 }, SessionId { 2 }, 0.5);
+
+    // Two columns cannot host `first + divider + second`: both children clamp to one cell and the
+    // subtree overflows the area (documented; the server's resize policy refuses such grids).
+    auto const rects = layoutInCells(root, { .lines = LineCount(24), .columns = ColumnCount(2) });
+    REQUIRE(rects.size() == 2);
+    CHECK(rects[0].width == 1);
+    CHECK(rects[1].width == 1);
 }
