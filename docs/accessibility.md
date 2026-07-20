@@ -36,6 +36,46 @@ reported as usual — only the prompt region is unavailable.
 This needs no opt-in beyond the shell integration itself: it is driven by the OSC 133 marks directly and
 does **not** require [DEC mode 2034](vt-extensions/semantic-block-query.md).
 
+## The window around the terminal
+
+The tab bar is exposed as a tab list whose tabs announce themselves as you switch between them, the
+window and tab buttons say what they do rather than naming the glyph they are drawn with, and every
+field on the settings page carries its own label.
+
+## Things that are only announced
+
+Some of what a terminal does has no representation in the accessibility tree at all — nothing's state
+changed, so nothing is reported unless it is said explicitly. Contour announces:
+
+| Event | Politeness |
+|-------|-----------|
+| The bell | Polite — it waits for your screen reader to finish its sentence |
+| A desktop notification (OSC 99 / OSC 777) | Polite |
+| Read-only mode being switched on or off | Assertive — it interrupts, because it changes what typing does |
+
+Set `accessibility_announcements: false` in `contour.yml` to switch these off. They cost nothing while
+no assistive client is attached.
+
+## Reading a selection aloud
+
+Select some text and press ++ctrl+shift+s++, or pick **Read Aloud** from the right-click menu, to have
+the operating system's speech synthesizer read it. ++ctrl+shift+s++ again reads the new selection.
+
+Text is prepared before it is spoken: the blank padding every terminal line carries out to the right
+margin is dropped, runs of empty lines collapse to a single pause, and a very long selection is cut at
+a line boundary so that selecting a build log gives a readable excerpt rather than many minutes of
+speech.
+
+!!! note "This needs a speech engine, and it is optional"
+
+    Reading aloud needs Qt's TextToSpeech module at build time and a speech engine with an installed
+    voice at run time — on Linux that means `speech-dispatcher` or `flite`. Where either is missing the
+    feature is simply not offered: the menu row does not appear and the shortcut does nothing, rather
+    than appearing and staying silent.
+
+    A build that omitted it says so in its own build log, so a packager can see it without having to
+    run the application.
+
 ## Platform notes
 
 | Platform | Technology | Notes |

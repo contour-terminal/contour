@@ -74,10 +74,10 @@ TEST_CASE("elideMiddle never splits a codepoint", "[contour][hyperlink]")
         // Every byte of the result decodes: no lead byte is left without its continuations, and no
         // continuation byte stands alone at the start.
         CHECK((static_cast<unsigned char>(elided.front()) & 0xC0U) != 0x80U);
-        auto reencoded = std::string {};
+        auto roundTripped = std::string {};
         for (auto const ch: elided)
-            reencoded.push_back(ch);
-        CHECK(reencoded == elided);
+            roundTripped.push_back(ch);
+        CHECK(roundTripped == elided);
     }
 }
 
