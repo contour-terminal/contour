@@ -774,7 +774,7 @@ std::optional<TextRenderer::BlockCanvas> TextRenderer::buildBlockCanvas(
                                        0,
                                        0);
 
-    auto const components = static_cast<size_t>(text::pixel_size(base->format));
+    auto const components = text::pixel_size(base->format);
     auto canvas =
         BlockCanvas { .size = box.canvasSize,
                       .format = toAtlasFormat(base->format),
@@ -931,10 +931,8 @@ std::optional<text::rasterized_glyph> TextRenderer::rasterizeAtBlockSize(text::g
 
         if (unbox(magnifiedSize.width) != 0 && unbox(magnifiedSize.height) != 0)
         {
-            glyph->bitmap = magnify(glyph->bitmap,
-                                    glyph->bitmapSize,
-                                    magnifiedSize,
-                                    static_cast<size_t>(text::pixel_size(glyph->format)));
+            glyph->bitmap =
+                magnify(glyph->bitmap, glyph->bitmapSize, magnifiedSize, text::pixel_size(glyph->format));
             glyph->bitmapSize = magnifiedSize;
             glyph->position.x =
                 static_cast<int>(std::lround(static_cast<double>(glyph->position.x) * adjustment.factor));

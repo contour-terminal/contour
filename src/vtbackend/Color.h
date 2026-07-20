@@ -271,7 +271,7 @@ struct RGBAColor
 
     constexpr RGBAColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a) noexcept:
         value { (static_cast<uint32_t>(r) << 24) | (static_cast<uint32_t>(g) << 16)
-                | (static_cast<uint32_t>(b) << 8) | (a) }
+                | (static_cast<uint32_t>(b) << 8) | a }
     {
     }
 
@@ -287,7 +287,7 @@ struct RGBAColor
     [[nodiscard]] RGBAColor& operator=(std::string const& hexCode);
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    constexpr static inline auto White = uint32_t(0xFF'FF'FF'FF);
+    constexpr static auto White = uint32_t(0xFF'FF'FF'FF);
 
     constexpr auto operator<=>(RGBAColor const&) const noexcept = default;
 };

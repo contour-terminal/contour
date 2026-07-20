@@ -652,7 +652,7 @@ namespace detail
             auto const s = *size.width / N;
             auto const f = linearEq({ .x = 0, .y = 0 }, { .x = 10, .y = 10 });
             return [s, f](int x, int y) {
-                return ((y) / s) % 2 && ((x) / s) % 2 ? 255 : 0;
+                return (y / s) % 2 && (x / s) % 2 ? 255 : 0;
             };
         }
 
@@ -662,7 +662,7 @@ namespace detail
             auto const s = *size.width / N;
             auto const f = linearEq({ .x = 0, .y = 0 }, { .x = 10, .y = 10 });
             return [s, f](int x, int y) {
-                return ((y) / s) % 2 || ((x) / s) % 2 ? 255 : 0;
+                return (y / s) % 2 || (x / s) % 2 ? 255 : 0;
             };
         }
 
@@ -917,13 +917,13 @@ namespace detail
         }
 
         // 1 <= n <= r*n
-        constexpr inline RatioBlock horiz_nth(double r, int n) noexcept
+        constexpr RatioBlock horiz_nth(double r, int n) noexcept
         {
             return RatioBlock { .from = { .x = 0, .y = r * double(n - 1) },
                                 .to = { .x = 1, .y = r * double(n) } };
         }
 
-        constexpr inline RatioBlock vert_nth(double r, int n) noexcept
+        constexpr RatioBlock vert_nth(double r, int n) noexcept
         {
             return RatioBlock { .from = { .x = r * double(n - 1), .y = 0 },
                                 .to = { .x = r * double(n), .y = 1 } };
@@ -1445,7 +1445,7 @@ namespace detail
         // }}}
         // {{{ block sextant construction
         template <typename Container, typename T>
-        constexpr inline void blockSextant(Container& image, ImageSize size, T position)
+        constexpr void blockSextant(Container& image, ImageSize size, T position)
         {
             auto const x0 = (position - 1) % 2;
             auto const y0 = [position]() {
@@ -1490,7 +1490,7 @@ namespace detail
         }
 
         template <typename Container, typename A, typename... B>
-        constexpr inline void blockSextant(Container& image, ImageSize size, A first, B... others)
+        constexpr void blockSextant(Container& image, ImageSize size, A first, B... others)
         {
             blockSextant(image, size, first);
             blockSextant(image, size, others...);
@@ -2668,30 +2668,30 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
         auto [dcx, dcy] = [=] {
             switch (arc)
             {
-                case (Arc::UR): return std::make_pair(double(x0) + ro, double(y0) + ro);
-                case (Arc::UL): return std::make_pair(double(x0) - ri, double(y0) + ro);
-                case (Arc::BL): return std::make_pair(double(x0) - ri, double(y0) - ri);
-                case (Arc::BR): return std::make_pair(double(x0) + ro, double(y0) - ri);
+                case Arc::UR: return std::make_pair(double(x0) + ro, double(y0) + ro);
+                case Arc::UL: return std::make_pair(double(x0) - ri, double(y0) + ro);
+                case Arc::BL: return std::make_pair(double(x0) - ri, double(y0) - ri);
+                case Arc::BR: return std::make_pair(double(x0) + ro, double(y0) - ri);
                 default: assert(false); return std::make_pair(0., 0.);
             }
         }();
         auto const xQuadrant = [=](auto x) -> bool {
             switch (arc)
             {
-                case (Arc::UR): [[fallthrough]];
-                case (Arc::BR): return (x <= 0);
-                case (Arc::UL): [[fallthrough]];
-                case (Arc::BL): return (x >= 0);
+                case Arc::UR: [[fallthrough]];
+                case Arc::BR: return (x <= 0);
+                case Arc::UL: [[fallthrough]];
+                case Arc::BL: return (x >= 0);
                 default: return false;
             }
         };
         auto const yQuadrant = [=](auto y) -> bool {
             switch (arc)
             {
-                case (Arc::UR): [[fallthrough]];
-                case (Arc::UL): return (y <= 0);
-                case (Arc::BL): [[fallthrough]];
-                case (Arc::BR): return (y >= 0);
+                case Arc::UR: [[fallthrough]];
+                case Arc::UL: return (y <= 0);
+                case Arc::BL: [[fallthrough]];
+                case Arc::BR: return (y >= 0);
                 default: return false;
             }
         };

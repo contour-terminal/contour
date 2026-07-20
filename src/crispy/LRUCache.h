@@ -24,8 +24,8 @@ class lru_cache
     };
     using item_list = std::list<item>;
 
-    using iterator = typename item_list::iterator;
-    using const_iterator = typename item_list::const_iterator;
+    using iterator = item_list::iterator;
+    using const_iterator = item_list::const_iterator;
 
     explicit lru_cache(std::size_t capacity): _capacity { capacity } {}
 

@@ -85,10 +85,10 @@ class Message
 class MessageParser: public ParserExtension
 {
   public:
-    constexpr static inline size_t MaxKeyLength = 64;
-    constexpr static inline size_t MaxValueLength = 512;
-    constexpr static inline size_t MaxParamCount = 32;
-    constexpr static inline size_t MaxBodyLength = 16 * 1024 * 1024; // 16 MB
+    constexpr static size_t MaxKeyLength = 64;
+    constexpr static size_t MaxValueLength = 512;
+    constexpr static size_t MaxParamCount = 32;
+    constexpr static size_t MaxBodyLength = 16 * 1024 * 1024; // 16 MB
 
     using OnFinalize = std::function<void(Message&&)>;
 

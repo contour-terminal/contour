@@ -90,7 +90,7 @@ class result
 
     static_assert(!std::is_same_v<T, std::remove_cv_t<failure_t>>, "T must not be failure_t");
 
-    static inline constexpr failure_t Failure {};
+    static constexpr failure_t Failure {};
 
   public:
     using value_type = T;

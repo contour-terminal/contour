@@ -285,7 +285,7 @@ struct glyph_key
     std::u32string text = {};
     static constexpr inline bool Debug = true;
 #else
-    static constexpr inline bool Debug = false;
+    static constexpr bool Debug = false;
 #endif
 };
 

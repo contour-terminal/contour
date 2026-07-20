@@ -92,8 +92,8 @@ class strong_lru_hashtable
 
     using ptr = std::unique_ptr<strong_lru_hashtable, std::function<void(strong_lru_hashtable*)>>;
 
-    [[nodiscard]] static constexpr inline size_t requiredMemorySize(strong_hashtable_size hashCount,
-                                                                    lru_capacity entryCount);
+    [[nodiscard]] static constexpr size_t requiredMemorySize(strong_hashtable_size hashCount,
+                                                             lru_capacity entryCount);
 
     template <typename Allocator = std::allocator<unsigned char>>
     [[nodiscard]] static ptr create(strong_hashtable_size hashCount,
@@ -311,8 +311,8 @@ strong_lru_hashtable<Value>::~strong_lru_hashtable()
 }
 
 template <typename Value>
-constexpr inline size_t strong_lru_hashtable<Value>::requiredMemorySize(strong_hashtable_size hashCount,
-                                                                        lru_capacity entryCount)
+constexpr size_t strong_lru_hashtable<Value>::requiredMemorySize(strong_hashtable_size hashCount,
+                                                                 lru_capacity entryCount)
 {
     Require(detail::isPowerOfTwo(hashCount.value)); // Hash capacity must be power of 2.
     Require(hashCount.value >= 1);

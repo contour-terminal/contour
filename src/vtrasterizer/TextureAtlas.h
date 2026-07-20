@@ -308,7 +308,7 @@ class TextureAtlas
 
   private:
     using TileCache = crispy::strong_lru_hashtable<TileAttributes<Metadata>>;
-    using TileCachePtr = typename TileCache::ptr;
+    using TileCachePtr = TileCache::ptr;
 
     template <typename CreateTileDataFn>
     std::optional<TileAttributes<Metadata>> constructTile(CreateTileDataFn createTileData,
@@ -339,7 +339,7 @@ class TextureAtlas
 template <typename Metadata = std::monostate>
 struct DirectMapping
 {
-    using TileCreateData = typename TextureAtlas<Metadata>::TileCreateData;
+    using TileCreateData = TextureAtlas<Metadata>::TileCreateData;
 
     uint32_t baseIndex = 0;
     uint32_t count = 0;

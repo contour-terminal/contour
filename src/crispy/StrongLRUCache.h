@@ -111,7 +111,7 @@ class strong_lru_cache
   private:
     using entry = detail::lru_cache_entry<Key, Value>;
     using hashtable = strong_lru_hashtable<entry>;
-    using hashtable_ptr = typename hashtable::ptr;
+    using hashtable_ptr = hashtable::ptr;
 
     hashtable_ptr _hashtable;
 };

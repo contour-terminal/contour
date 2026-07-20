@@ -3135,7 +3135,7 @@ void TerminalSession::setFontSize(text::font_size size)
 bool TerminalSession::reloadConfigWithProfile(string const& profileName)
 {
     auto newConfig = config::Config {};
-    auto configFailures = int { 0 };
+    auto configFailures = 0;
 
     try
     {

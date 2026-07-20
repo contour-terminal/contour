@@ -241,7 +241,7 @@ struct strong_hasher
 template <>
 struct strong_hasher<uint64_t>
 {
-    inline strong_hash operator()(uint64_t v) noexcept
+    strong_hash operator()(uint64_t v) noexcept
     {
         auto const c = static_cast<uint32_t>((v >> 32) & 0xFFFFFFFFu);
         auto const d = static_cast<uint32_t>(v & 0xFFFFFFFFu);
@@ -258,7 +258,7 @@ namespace detail
     template <typename T>
     struct std_hash32
     {
-        inline strong_hash operator()(T v) noexcept
+        strong_hash operator()(T v) noexcept
         {
 #ifdef STRONGHASH_USE_INTRINSICS
             return strong_hash { Intrinsics::load32(0, 0, 0, v) };
@@ -282,7 +282,7 @@ template <> struct strong_hasher<uint32_t>: public detail::std_hash32<uint32_t> 
 template <class Char, class Allocator>
 struct strong_hasher<std::basic_string<Char, Allocator>>
 {
-    inline strong_hash operator()(std::basic_string<Char, Allocator> const& v) noexcept
+    strong_hash operator()(std::basic_string<Char, Allocator> const& v) noexcept
     {
         return strong_hasher<int> {}((int) std::hash<std::basic_string<Char, Allocator>> {}(v));
     }
@@ -291,7 +291,7 @@ struct strong_hasher<std::basic_string<Char, Allocator>>
 template <typename U>
 struct strong_hasher<std::basic_string_view<U>>
 {
-    inline strong_hash operator()(std::basic_string_view<U> v) noexcept
+    strong_hash operator()(std::basic_string_view<U> v) noexcept
     {
         return strong_hasher<int> {}((int) std::hash<std::basic_string_view<U>> {}(v));
     }

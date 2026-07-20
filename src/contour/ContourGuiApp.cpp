@@ -318,7 +318,7 @@ bool ContourGuiApp::loadConfig(string const& target)
     auto const& flags = parameters();
     auto const prefix = "contour." + target + ".";
 
-    auto configFailures = int { 0 };
+    auto configFailures = 0;
     auto const configLogger = [&](string const& msg) {
         cerr << "Configuration failure. " << msg << '\n';
         ++configFailures;

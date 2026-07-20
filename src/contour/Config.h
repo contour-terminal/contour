@@ -1912,7 +1912,7 @@ struct YAMLConfigWriter: Writer
 {
 
     constexpr static std::string_view FormatTemplate = "{}";
-    inline std::string replaceCommentPlaceholder(std::string const& docString) override
+    std::string replaceCommentPlaceholder(std::string const& docString) override
     {
         return std::regex_replace(docString, std::regex { "\\{comment\\}" }, "#");
     }
@@ -1958,7 +1958,7 @@ struct YAMLConfigWriter: Writer
 struct DocumentationWriter: Writer
 {
     constexpr static std::string_view FormatTemplate = "{}";
-    inline std::string replaceCommentPlaceholder(std::string const& docString) override
+    std::string replaceCommentPlaceholder(std::string const& docString) override
     {
         return std::regex_replace(docString, std::regex { "\\{comment\\}" }, "");
     }
@@ -2018,7 +2018,7 @@ struct DocumentationWriter: Writer
 struct PlainWriter: Writer
 {
     constexpr static std::string_view FormatTemplate = "{}";
-    inline std::string replaceCommentPlaceholder(std::string const& docString) override
+    std::string replaceCommentPlaceholder(std::string const& docString) override
     {
         return std::regex_replace(docString, std::regex { "\\{comment\\}" }, "");
     }

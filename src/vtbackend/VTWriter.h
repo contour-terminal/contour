@@ -22,7 +22,7 @@ class VTWriter
   public:
     using Writer = std::function<void(char const*, size_t)>;
 
-    static constexpr inline auto MaxParameterCount = 16;
+    static constexpr auto MaxParameterCount = 16;
 
     explicit VTWriter(Writer writer);
     explicit VTWriter(std::ostream& output);

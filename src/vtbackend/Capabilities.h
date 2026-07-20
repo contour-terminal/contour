@@ -68,7 +68,7 @@ namespace literals
 class Database
 {
   public:
-    constexpr static inline unsigned Npos = unsigned(-1);
+    constexpr static unsigned Npos = unsigned(-1);
 
     virtual ~Database() = default;
 

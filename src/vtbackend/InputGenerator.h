@@ -511,7 +511,7 @@ using KeyboardEventFlags = crispy::flags<KeyboardEventFlag>;
 class ExtendedKeyboardInputGenerator final: public StandardKeyboardInputGenerator
 {
   public:
-    static constexpr inline size_t MaxStackDepth = 32;
+    static constexpr size_t MaxStackDepth = 32;
 
     constexpr void enter(KeyboardEventFlags flags) noexcept
     {

@@ -39,6 +39,10 @@
 #     the cppcoreguidelines- check of the same name, which is already disabled.
 #   * `misc-no-recursion` (41) -- recursion is a legitimate tool in a parser and a
 #     renderer; the check flags the technique rather than any defect.
+#   * `readability-redundant-member-init` (272) -- its fix is unsound here. Several
+#     aggregates are built with designated initializers that omit fields, so a
+#     `T member {};` default member initializer is load-bearing: dropping the `{}`
+#     leaves the field uninitialized and trips -Wmissing-designated-field-initializers.
 #
 # The three LLVM 20/21/22 arrivals above were auto-enabled by the `cppcoreguidelines-*`,
 # `modernize-*` and `readability-*` globs during the toolchain bump, silently
@@ -117,8 +121,6 @@ Checks: >-
   -readability-math-missing-parentheses,
   -readability-named-parameter,
   -readability-redundant-access-specifiers,
-  -readability-redundant-casting,
-  -readability-redundant-inline-specifier,
   -readability-redundant-member-init,
   -readability-simplify-boolean-expr,
   -readability-uppercase-literal-suffix,

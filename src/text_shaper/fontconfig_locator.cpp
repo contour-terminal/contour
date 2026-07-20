@@ -152,7 +152,7 @@ namespace
         if (FcPatternGetInteger(font, FC_SLANT, 0, &integerValue) == FcResultMatch)
             slant = fcToFontSlant(integerValue);
 
-        output.emplace_back(font_path { .value = string { (char const*) (file) },
+        output.emplace_back(font_path { .value = string { (char const*) file },
                                         .collectionIndex = ttcIndex,
                                         .weight = weight,
                                         .slant = slant });
@@ -272,7 +272,7 @@ font_source_list fontconfig_locator::locate(font_description const& description)
                     || (description.spacing == font_spacing::mono && spacing < FC_MONO)))
             {
                 locatorLog()("Skipping font: {} ({} < {}).",
-                             (char const*) (file),
+                             (char const*) file,
                              fcSpacingStr(spacing),
                              fcSpacingStr(FC_DUAL));
                 return;
