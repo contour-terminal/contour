@@ -2412,9 +2412,32 @@ bool TerminalSession::operator()(actions::WriteScreen const& event)
     return true;
 }
 
-bool TerminalSession::operator()(actions::CreateNewTab)
+bool TerminalSession::operator()(actions::CreateNewTab action)
 {
-    _manager->createNewTab(this);
+    _manager->createNewTab(this, std::move(action.profileName));
+    return true;
+}
+
+bool TerminalSession::operator()(actions::CloseAllTabs)
+{
+    // Deliberately NOT actions::Quit: that one calls exit() straight from a Qt slot, with no teardown
+    // and no PTY reaping. Closing the window runs the tested teardown instead, and with a single window
+    // open closing it IS quitting.
+    _manager->closeAllTabs(this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SetTabBarVisibility action)
+{
+    if (_display)
+        _display->setTabBarVisibility(action.mode);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SetTabBarPosition action)
+{
+    if (_display)
+        _display->setTabBarPosition(action.position);
     return true;
 }
 

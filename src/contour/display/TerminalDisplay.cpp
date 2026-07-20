@@ -1858,6 +1858,18 @@ void TerminalDisplay::toggleFullScreen()
         controller->toggleFullScreen(*this);
 }
 
+void TerminalDisplay::setTabBarVisibility(config::TabBarVisibility mode)
+{
+    if (auto* controller = windowController())
+        controller->setTabBarVisibility(mode);
+}
+
+void TerminalDisplay::setTabBarPosition(config::TabBarPosition position)
+{
+    if (auto* controller = windowController())
+        controller->setTabBarPosition(position);
+}
+
 void TerminalDisplay::toggleTitleBar()
 {
     // Title-bar visibility is WINDOW state: it lives on the WindowController (the window authority),

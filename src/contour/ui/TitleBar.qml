@@ -54,11 +54,24 @@ Item {
             window: root.window
         }
 
-        // Draggable empty region: move the window, double-click to toggle maximize.
+        // Draggable empty region: move the window, double-click to toggle maximize, right-click for the
+        // window's own context menu.
         Item {
             id: dragRegion
+            objectName: "dragRegion"
             Layout.fillWidth: true
             Layout.fillHeight: true
+
+            // Right-click opens the title bar menu. It does not fight the handlers below: both of those
+            // take the LEFT button only, which the DragHandler now says explicitly rather than leaving
+            // to a default that a future edit could quietly change.
+            TapHandler {
+                acceptedButtons: Qt.RightButton
+                // ReleaseWithinBounds rather than the default DragThreshold: a little jitter while the
+                // button is down should still open the menu, not swallow the click.
+                gesturePolicy: TapHandler.ReleaseWithinBounds
+                onTapped: if (root.controller) root.controller.openTitleBarContextMenu()
+            }
 
             TapHandler {
                 // Routed through the controller (the only window-geometry mutator): direct
@@ -70,6 +83,7 @@ Item {
             }
             DragHandler {
                 target: null
+                acceptedButtons: Qt.LeftButton
                 onActiveChanged: if (active) root.window.startSystemMove()
             }
         }

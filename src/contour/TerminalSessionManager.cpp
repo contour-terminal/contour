@@ -305,11 +305,17 @@ TerminalSession* TerminalSessionManager::createSession(vtmux::WindowId window,
     return createSessionInBackground(window, std::move(profileName));
 }
 
-void TerminalSessionManager::createNewTab(TerminalSession* acting)
+void TerminalSessionManager::createNewTab(TerminalSession* acting, std::optional<std::string> profileName)
 {
     // The CreateNewTab keybinding: the new tab belongs to the window the user typed in.
     if (auto* win = windowHostingSession(acting))
-        createSession(win->id());
+        createNewTab(win->id(), std::move(profileName));
+}
+
+void TerminalSessionManager::closeAllTabs(TerminalSession* acting)
+{
+    if (auto* controller = controllerHostingSession(acting))
+        controller->closeWindow();
 }
 
 bool TerminalSessionManager::applyLayoutToWindow(vtmux::WindowId window,

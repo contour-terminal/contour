@@ -37,6 +37,8 @@
 #include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_approx.hpp>
+#include <QtTest/QSignalSpy>
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
@@ -89,7 +91,7 @@ class MockTabController: public QAbstractListModel
     /// Mirrors TerminalDisplay::toggleTitleBar(): flips the native-decoration axis.
     Q_INVOKABLE void toggleTitleBar() { setTitleBarVisible(!_titleBarVisible); }
 
-    /// Mirrors WindowController::triggerContextMenuAction(): what TerminalContextMenu.qml calls on a pick.
+    /// Mirrors WindowController::triggerContextMenuAction(): what ActionContextMenu.qml calls on a pick.
     Q_INVOKABLE void triggerContextMenuAction(int actionId) { lastTriggeredActionId = actionId; }
 
     int lastTriggeredActionId = -1;
@@ -532,7 +534,7 @@ TEST_CASE("GUI QML tab components load without errors (offscreen)", "[contour][g
         QStringLiteral("qrc:/contour/ui/SessionChrome.qml"),
         QStringLiteral("qrc:/contour/ui/CommandPalette.qml"),
         QStringLiteral("qrc:/contour/ui/SaveLayoutDialog.qml"),
-        QStringLiteral("qrc:/contour/ui/TerminalContextMenu.qml"),
+        QStringLiteral("qrc:/contour/ui/ActionContextMenu.qml"),
         QStringLiteral("qrc:/contour/ui/SettingsNavItem.qml"),
         QStringLiteral("qrc:/contour/ui/SettingsListItem.qml"),
         QStringLiteral("qrc:/contour/ui/ConfirmDialog.qml"),
@@ -588,7 +590,7 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
     // silent no-op at runtime.
     //
     // The menu is never popup()'d: offscreen there is no overlay to open into. That is exactly why
-    // TerminalContextMenu.qml populates on Component.onCompleted / model change rather than in an
+    // ActionContextMenu.qml populates on Component.onCompleted / model change rather than in an
     // about-to-show hook — the rows are there to be asserted the moment the component is complete.
     QQmlEngine engine;
     MockTabController controller;
@@ -609,15 +611,18 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
     auto const model = contour::toContextMenuModel(contour::buildContextMenu(state), actions);
     REQUIRE_FALSE(model.isEmpty());
 
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/TerminalContextMenu.qml")));
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/ActionContextMenu.qml")));
     INFO("component errors: " << component.errorString().toStdString());
     REQUIRE(component.isReady());
 
     QVariantMap initial;
-    initial.insert("controller", QVariant::fromValue(&controller));
     initial.insert("entries", model);
     std::unique_ptr<QObject> menu(component.createWithInitialProperties(initial));
     REQUIRE(menu != nullptr);
+
+    // The component announces a pick rather than calling a controller, which is what lets one component
+    // serve both menu surfaces; its host decides where that goes.
+    QSignalSpy pickedSpy(menu.get(), SIGNAL(picked(int)));
 
     // Every row became an entry: separators and the "Advanced"/"Change Profile" sub-menus included. A
     // native popup (the Windows trap TabContextMenu documents) would have come up empty.
@@ -636,7 +641,8 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
 
     // MenuItem exposes triggered() as a SIGNAL, and emitting it by name is what a click would do.
     REQUIRE(QMetaObject::invokeMethod(copyItem, "triggered"));
-    CHECK(controller.lastTriggeredActionId == 0);
+    REQUIRE(pickedSpy.count() == 1);
+    CHECK(pickedSpy.at(0).at(0).toInt() == 0);
     REQUIRE_FALSE(actions.empty());
     CHECK(contour::commandId(actions[0]) == "CopySelection");
 

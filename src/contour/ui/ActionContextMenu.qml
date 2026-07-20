@@ -18,8 +18,10 @@ Menu {
     // app-wide in ContourGuiApp) then draws an opaque, themed surface on every platform.
     popupType: Popup.Item
 
-    // The WindowController.
-    required property var controller
+    // Raised when a command row is picked, carrying that row's actionId. A SIGNAL rather than a
+    // controller call, so one component serves every menu surface: the terminal pane's and the title
+    // bar's differ only in which controller method their host wires this to.
+    signal picked(int actionId)
 
     // The menu, as data. One row is
     //   { kind: "command" | "separator" | "submenu",
@@ -42,7 +44,7 @@ Menu {
         id: commandEntry
         MenuItem {
             property int actionId: -1
-            onTriggered: root.controller.triggerContextMenuAction(actionId)
+            onTriggered: root.picked(actionId)
         }
     }
 
@@ -102,7 +104,7 @@ Menu {
     }
 
     function rebuild() {
-        if (!root.controller)
+        if (!root.entries)
             return;
 
         while (root.count > 0) {

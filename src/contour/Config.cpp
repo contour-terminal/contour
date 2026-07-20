@@ -2828,6 +2828,32 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
                 return std::nullopt;
         }
 
+        if (holds_alternative<actions::CreateNewTab>(action))
+        {
+            // Optional: a bare `action: CreateNewTab` opens the default profile, which is what the
+            // shipped binding does. A `profile:` sibling names one instead.
+            if (auto profile = node["profile"]; profile && profile.IsScalar())
+                return actions::CreateNewTab { profile.as<std::string>() };
+            return actions::CreateNewTab {};
+        }
+
+        if (holds_alternative<actions::SetTabBarVisibility>(action))
+        {
+            if (auto mode = node["mode"]; mode && mode.IsScalar())
+                if (auto const parsed =
+                        tabBarModeFromToken<TabBarVisibility>(mode.as<std::string>()))
+                    return actions::SetTabBarVisibility { *parsed };
+            return std::nullopt;
+        }
+
+        if (holds_alternative<actions::SetTabBarPosition>(action))
+        {
+            if (auto position = node["position"]; position && position.IsScalar())
+                if (auto const parsed = tabBarModeFromToken<TabBarPosition>(position.as<std::string>()))
+                    return actions::SetTabBarPosition { *parsed };
+            return std::nullopt;
+        }
+
         if (holds_alternative<actions::MoveTabTo>(action))
         {
             if (auto position = node["position"]; position && position.IsScalar())

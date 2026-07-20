@@ -75,6 +75,7 @@ set(_header_files
     ContextMenu.h
     ContextMenuModel.h
     ContextMenuTable.h
+    TitleBarContextMenu.h
     ContourApp.h
     FuzzyFilter.h
     GuiConfigStore.h
@@ -102,6 +103,7 @@ set(_core_source_files
     Config.cpp
     ContextMenu.cpp
     ContextMenuModel.cpp
+    TitleBarContextMenu.cpp
     ContourApp.cpp
     FuzzyFilter.cpp
     GuiConfigStore.cpp
@@ -344,6 +346,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/SettingsController_test.cpp
             test/SettingsPageQml_test.cpp
             test/ContextMenu_test.cpp
+            test/TitleBarContextMenu_test.cpp
             test/FuzzyFilter_test.cpp
             test/Shortcut_test.cpp
             test/LayoutBuilder_test.cpp

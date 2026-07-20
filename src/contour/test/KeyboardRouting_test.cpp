@@ -212,9 +212,12 @@ class RoutingMockController: public QAbstractListModel
     // against this controller and Connections-targets its commandPaletteRequested signal, so the mock
     // must carry both or the run-wide QML message gate fails the suite.
     Q_PROPERTY(QObject* commandPalette READ commandPalette CONSTANT)
-    // Ditto for the context-menu surface: main.qml instantiates TerminalContextMenu.qml against this
+    // Ditto for the context-menu surface: main.qml instantiates ActionContextMenu.qml against this
     // controller, binds its `entries` to contextMenuModel and Connections-targets contextMenuRequested.
     Q_PROPERTY(QVariantList contextMenuModel READ contextMenuModel NOTIFY contextMenuModelChanged)
+    // Ditto for the title bar's own menu surface, which main.qml instantiates alongside it.
+    Q_PROPERTY(QVariantList titleBarContextMenuModel READ titleBarContextMenuModel NOTIFY
+                   titleBarContextMenuModelChanged)
 
   public:
     enum Roles : std::uint16_t
@@ -270,6 +273,9 @@ class RoutingMockController: public QAbstractListModel
     Q_INVOKABLE void openCommandPalette() { emit commandPaletteRequested(); }
 
     [[nodiscard]] QVariantList contextMenuModel() const { return {}; }
+    [[nodiscard]] QVariantList titleBarContextMenuModel() const { return {}; }
+    Q_INVOKABLE void openTitleBarContextMenu() { emit titleBarContextMenuRequested(); }
+    Q_INVOKABLE void triggerTitleBarContextMenuAction(int /*actionId*/) {}
     Q_INVOKABLE void triggerContextMenuAction(int) {}
     /// Mirrors WindowController::openContextMenu(): what the manager calls for the OpenContextMenu
     /// action, and what makes main.qml pop the terminal's right-click menu.
@@ -338,6 +344,8 @@ class RoutingMockController: public QAbstractListModel
     void commandPaletteRequested();
     void contextMenuModelChanged();
     void contextMenuRequested();
+    void titleBarContextMenuModelChanged();
+    void titleBarContextMenuRequested();
     void tabBarPositionChanged();
     void tabBarShouldShowChanged();
     void chromeHeightChanged();

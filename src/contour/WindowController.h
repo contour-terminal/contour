@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/CommandCatalog.h>
+#include <contour/ContextMenuModel.h>
 #include <contour/CommandPaletteModel.h>
 #include <contour/HorizontalWheelGesture.h>
 #include <contour/display/TerminalDisplay.h>
@@ -64,6 +65,8 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// app-wide and lives on the manager.
     Q_PROPERTY(contour::CommandPaletteModel* commandPalette READ commandPalette CONSTANT)
     Q_PROPERTY(QVariantList contextMenuModel READ contextMenuModel NOTIFY contextMenuModelChanged)
+    Q_PROPERTY(QVariantList titleBarContextMenuModel READ titleBarContextMenuModel NOTIFY
+                   titleBarContextMenuModelChanged)
     Q_PROPERTY(int activeTabIndex READ activeTabIndex NOTIFY activeTabIndexChanged)
     Q_PROPERTY(bool multimediaReady READ isMultimediaReady NOTIFY multimediaReadyChanged)
     Q_PROPERTY(contour::PaneProxy* activeTabRootPane READ activeTabRootPane NOTIFY activeTabRootPaneChanged)
@@ -285,7 +288,18 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// `actionId` indexes into this controller's own action list rather than naming a command, so a click
     /// runs the exact action the row was built with. Nothing has to be looked up by name at click time,
     /// and nothing depends on some other model having been populated first.
-    [[nodiscard]] QVariantList contextMenuModel() const { return _contextMenuModel; }
+    [[nodiscard]] QVariantList contextMenuModel() const { return _paneContextMenu.model; }
+
+    /// The title bar's context menu rows. Its OWN model, not the pane menu's: publishing into that one
+    /// would rebuild and re-target a menu the user may still have open.
+    [[nodiscard]] QVariantList titleBarContextMenuModel() const { return _titleBarContextMenu.model; }
+
+    /// Builds and publishes the title bar's context menu, then asks QML to pop it.
+    Q_INVOKABLE void openTitleBarContextMenu();
+
+    /// Runs the title-bar menu action with id @p actionId. Out-of-range ids are ignored.
+    /// @param actionId The row's `actionId`.
+    Q_INVOKABLE void triggerTitleBarContextMenuAction(int actionId);
 
     /// Runs the context-menu action with id @p actionId against the pane the menu was opened over.
     /// Out-of-range ids are ignored.
@@ -361,6 +375,16 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// @param position   The configured tab_bar_position value.
     /// @param visibility The configured tab_bar_visibility value.
     void applyTabBarFromConfig(config::TabBarPosition position, config::TabBarVisibility visibility);
+
+    /// Sets this window's tab strip visibility mode at runtime.
+    ///
+    /// A view toggle, in the same spirit as toggleTitleBar(): it applies to THIS window for as long as
+    /// it lives, and the settings page remains where the choice is made permanent. Marks the mode as
+    /// seeded so a later session rebind cannot revert it.
+    void setTabBarVisibility(config::TabBarVisibility visibility);
+
+    /// Sets this window's tab strip placement at runtime. @see setTabBarVisibility.
+    void setTabBarPosition(config::TabBarPosition position);
     // }}}
 
     /// This window's currently focused display (for window services + status-line targeting).
@@ -532,6 +556,8 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     void contextMenuModelChanged();
     /// Requests that this window pop its terminal context menu, at the mouse cursor.
     void contextMenuRequested();
+    void titleBarContextMenuModelChanged();
+    void titleBarContextMenuRequested();
     void multimediaReadyChanged();
     void activeTabRootPaneChanged();
     void titleBarVisibleChanged();
@@ -623,11 +649,11 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
 
     // {{{ Terminal context menu
     /// The menu as QML sees it, rebuilt on every right-click.
-    QVariantList _contextMenuModel;
+    PublishedContextMenu _paneContextMenu;
+    PublishedContextMenu _titleBarContextMenu;
 
     /// The actions those rows run, in the order the rows carry as `actionId`. Held here rather than in
     /// the QML so a row runs the exact action it was built with — no lookup by name at click time.
-    std::vector<actions::Action> _contextMenuActions;
 
     /// The session the menu was BUILT over — the pane the user right-clicked.
     ///

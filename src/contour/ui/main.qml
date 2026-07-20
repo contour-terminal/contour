@@ -229,10 +229,20 @@ ApplicationWindow
     // right-clicked pane active, then republishes the model for the state under the cursor and asks us to
     // pop it. popup() with no arguments opens at the mouse cursor — which is the click position, since the
     // whole chain runs synchronously inside the mouse-press handler.
-    TerminalContextMenu {
+    ActionContextMenu {
         id: terminalContextMenu
-        controller: appWindow.win
         entries: appWindow.win ? appWindow.win.contextMenuModel : []
+        onPicked: (actionId) => { if (appWindow.win) appWindow.win.triggerContextMenuAction(actionId); }
+    }
+
+    // The title bar's own menu: a second instance of the same component, differing only in which model
+    // it renders and which controller method a pick runs.
+    ActionContextMenu {
+        id: titleBarContextMenu
+        entries: appWindow.win ? appWindow.win.titleBarContextMenuModel : []
+        onPicked: (actionId) => {
+            if (appWindow.win) appWindow.win.triggerTitleBarContextMenuAction(actionId);
+        }
     }
 
     Connections {
@@ -240,6 +250,7 @@ ApplicationWindow
         function onCommandPaletteRequested() { commandPalette.open(); }
         function onSaveLayoutRequested() { saveLayoutDialog.open(); }
         function onContextMenuRequested() { terminalContextMenu.popup(); }
+        function onTitleBarContextMenuRequested() { titleBarContextMenu.popup(); }
     }
 
     // Frameless windows need their own edge/corner resize handles. With the native frame

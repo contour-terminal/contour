@@ -249,6 +249,16 @@ class TerminalDisplay: public QQuickItem
     void setBlurBehind(bool enable);
     void toggleFullScreen();
     void toggleTitleBar();
+
+    /// Sets this WINDOW's tab bar visibility mode, for as long as the window lives.
+    ///
+    /// Window state, like the title bar above: a change made from any pane applies to the whole window
+    /// and survives pane-focus changes and tab switches. A configuration reload supersedes it, which is
+    /// what reloading a configuration means (see WindowController::applyTabBarFromConfig).
+    void setTabBarVisibility(config::TabBarVisibility mode);
+
+    /// Sets this WINDOW's tab bar placement. @see setTabBarVisibility.
+    void setTabBarPosition(config::TabBarPosition position);
     void toggleInputMethodEditorHandling();
     void setHyperlinkDecoration(vtrasterizer::Decorator normal, vtrasterizer::Decorator hover);
 

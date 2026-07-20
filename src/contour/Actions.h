@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/TabBarMode.h>
+
 #include <vtbackend/Color.h>
 #include <vtbackend/HintModeHandler.h>
 
@@ -103,7 +105,7 @@ struct TraceLeave{};
 struct TraceStep{};
 struct ViNormalMode{};
 struct WriteScreen{ std::string chars; }; // "\033[2J\033[3J"
-struct CreateNewTab{};
+struct CreateNewTab{ std::optional<std::string> profileName; };
 struct CloseTab{};
 struct MoveTabTo{ int position; };
 struct MoveTabToLeft{};
@@ -143,6 +145,9 @@ struct CopyHyperlink{ std::string uri; }; // empty uri => whatever lies under th
 // Colorize the active tab. No color => open the tab's color picker; a color => apply it right away.
 struct SetTabColor{ std::optional<vtbackend::RGBColor> color; };
 struct ResetTabColor{}; // drop the user's tab color, revealing any color the application assigned
+struct CloseAllTabs{};  // close every tab in THIS window, which with one window means quitting
+struct SetTabBarVisibility{ config::TabBarVisibility mode = config::TabBarVisibility::Always; };
+struct SetTabBarPosition{ config::TabBarPosition position = config::TabBarPosition::Top; };
 // clang-format on
 
 using Action = std::variant<CancelSelection,
@@ -237,7 +242,10 @@ using Action = std::variant<CancelSelection,
                             CopyLastCommandBlock,
                             CopyHyperlink,
                             SetTabColor,
-                            ResetTabColor>;
+                            ResetTabColor,
+                            CloseAllTabs,
+                            SetTabBarVisibility,
+                            SetTabBarPosition>;
 
 /// Actions that must fire exactly once per physical keypress and be dropped on key auto-repeat.
 ///
@@ -256,6 +264,7 @@ template <typename T>
 concept NonRepeatableActionConcept = crispy::one_of<T,
                                                     CreateNewTab,
                                                     CloseTab,
+                                                    CloseAllTabs,
                                                     ClosePane,
                                                     OpenCommandPalette,
                                                     OpenContextMenu,
@@ -495,6 +504,17 @@ namespace documentation
         "Removes the color you gave the current tab, restoring its default look (or the color the "
         "running application assigned, if it assigned one)."
     };
+    constexpr inline std::string_view CloseAllTabs {
+        "Closes every tab in this window. With only one window open, that closes Contour."
+    };
+    constexpr inline std::string_view SetTabBarVisibility {
+        "Sets when this window's tab bar is shown (mode: always, never or multiple). Applies to this "
+        "window until it is closed; the settings page is where the choice is made permanent."
+    };
+    constexpr inline std::string_view SetTabBarPosition {
+        "Places this window's tab bar above or below the terminal (position: top or bottom). Applies to "
+        "this window until it is closed; the settings page is where the choice is made permanent."
+    };
     constexpr inline std::string_view SplitVertical {
         "Splits the active pane into two side-by-side panes (a vertical divider)."
     };
@@ -720,6 +740,11 @@ struct ActionCatalogEntry
         ActionCatalogEntry { "CopyHyperlink", Action { CopyHyperlink {} }, documentation::CopyHyperlink },
         ActionCatalogEntry { "SetTabColor", Action { SetTabColor {} }, documentation::SetTabColor },
         ActionCatalogEntry { "ResetTabColor", Action { ResetTabColor {} }, documentation::ResetTabColor },
+        ActionCatalogEntry { "CloseAllTabs", Action { CloseAllTabs {} }, documentation::CloseAllTabs },
+        ActionCatalogEntry {
+            "SetTabBarVisibility", Action { SetTabBarVisibility {} }, documentation::SetTabBarVisibility },
+        ActionCatalogEntry {
+            "SetTabBarPosition", Action { SetTabBarPosition {} }, documentation::SetTabBarPosition },
     };
     return catalog;
 }
@@ -813,6 +838,18 @@ struct std::formatter<contour::actions::Direction>: std::formatter<std::string_v
                 // A nameless SaveLayout opens the save-as prompt, so — like a colorless SetTabColor below
                 // — it has no argument to write; a named one round-trips its name.
                 return a.name.empty() ? std::string {} : std::format(", name: '{}'", a.name);
+            },
+            [](CreateNewTab const& a) {
+                // A profile-less CreateNewTab opens the default profile, so it has no argument to write.
+                return a.profileName ? std::format(", profile: '{}'", *a.profileName) : std::string {};
+            },
+            // Both render the token their TabBarMode.h row carries, so what is written back is by
+            // construction what the reader accepts.
+            [](SetTabBarVisibility const& a) {
+                return std::format(", mode: {}", contour::config::tabBarModeToken(a.mode));
+            },
+            [](SetTabBarPosition const& a) {
+                return std::format(", position: {}", contour::config::tabBarModeToken(a.position));
             },
             [](SetTabColor const& a) {
                 // A colorless SetTabColor opens the picker, so it has no argument to write. The color

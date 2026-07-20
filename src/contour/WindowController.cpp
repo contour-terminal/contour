@@ -2,6 +2,7 @@
 #include <contour/ColorConversion.h>
 #include <contour/ContextMenu.h>
 #include <contour/ContextMenuModel.h>
+#include <contour/TitleBarContextMenu.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/GuiConfigStore.h>
 #include <contour/PaneProxy.h>
@@ -122,8 +123,7 @@ void WindowController::openContextMenu()
 
     auto const entries = buildContextMenu(state);
 
-    _contextMenuActions.clear();
-    _contextMenuModel = toContextMenuModel(entries, _contextMenuActions);
+    _paneContextMenu.publish(entries);
 
     // The pane the rows were built for. Held, so that picking one acts on it and not on whichever pane is
     // active by the time the click lands.
@@ -143,16 +143,54 @@ void WindowController::triggerContextMenuAction(int actionId)
     if (session == nullptr)
         return;
 
-    if (actionId < 0 || std::cmp_greater_equal(actionId, _contextMenuActions.size()))
+    // Copied out of the model before running, for the same reason runCommand() does: an action can
+    // rebuild this window (ClosePane, ChangeProfile) and free the vector it was standing in.
+    auto const action = _paneContextMenu.actionAt(actionId);
+    if (!action)
         return;
-
-    // Copy the action out before running it, for the same reason runCommand() does: an action can rebuild
-    // this window (ClosePane, ChangeProfile) and free the vector it is standing in.
-    auto const action = _contextMenuActions[static_cast<size_t>(actionId)];
 
     // Deliberately NOT recorded in the command history: that list is "commands the user reached for by
     // name", and it exists to float them to the top of the palette. A right-click on "Copy" is not that.
-    session->executeAction(action);
+    session->executeAction(*action);
+}
+
+void WindowController::openTitleBarContextMenu()
+{
+    auto state = TitleBarContextMenuState {
+        .tabCount = count(),
+        // The WINDOW's live modes, not the configuration's: these rows set a runtime override, so a
+        // window changed since startup must show what it is actually doing.
+        .tabBarVisibility = _tabBarVisibility,
+        .tabBarPosition = _tabBarPosition,
+        .activeProfile = {},
+        .profileNames = {},
+    };
+
+    if (auto* session = activeSession())
+        state.activeProfile = session->profileName();
+
+    for (auto const& [name, _]: _manager.app().config().profiles.value())
+        state.profileNames.push_back(name);
+    std::ranges::sort(state.profileNames);
+
+    _titleBarContextMenu.publish(buildTitleBarContextMenu(state));
+
+    // Model first, then the request to show: both are synchronous, so QML has rebuilt the rows by the
+    // time it is told to pop them.
+    emit titleBarContextMenuModelChanged();
+    emit titleBarContextMenuRequested();
+}
+
+void WindowController::triggerTitleBarContextMenuAction(int actionId)
+{
+    auto const action = _titleBarContextMenu.actionAt(actionId);
+    if (!action)
+        return;
+
+    // Runs against the window's ACTIVE session, unlike the pane menu: every row here is window-scoped
+    // (a new tab, this window's tab bar), so there is no particular pane it was opened over.
+    if (auto* session = activeSession())
+        session->executeAction(*action);
 }
 
 void WindowController::runCommand(QString const& id)
@@ -672,6 +710,26 @@ bool WindowController::tabBarShouldShow() const noexcept
         case config::TabBarVisibility::Multiple: return count() > 1;
     }
     return true;
+}
+
+void WindowController::setTabBarVisibility(config::TabBarVisibility visibility)
+{
+    _tabBarVisibilitySeeded = true;
+    if (_tabBarVisibility == visibility)
+        return;
+    _tabBarVisibility = visibility;
+    emit tabBarVisibilityChanged();
+    // The mode is one of the two inputs to the resolved gate, so QML must re-evaluate it.
+    emit tabBarShouldShowChanged();
+}
+
+void WindowController::setTabBarPosition(config::TabBarPosition position)
+{
+    _tabBarPositionSeeded = true;
+    if (_tabBarPosition == position)
+        return;
+    _tabBarPosition = position;
+    emit tabBarPositionChanged();
 }
 
 void WindowController::applyTabBarFromConfig(config::TabBarPosition position,

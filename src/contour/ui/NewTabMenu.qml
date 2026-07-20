@@ -5,7 +5,7 @@
 //
 // The profile list is data from the SettingsController (reached via the WindowController), so the menu
 // never hard-codes it and stays in step with the config. The items are built at runtime the same way
-// TerminalContextMenu builds its rows (createObject under contentItem + addItem), for the same reason:
+// ActionContextMenu builds its rows (createObject under contentItem + addItem), for the same reason:
 // an Instantiator/Repeater cannot host a heterogeneous Menu, and a native OS menu cannot host runtime
 // items (it came up empty on Windows) — so this forces the in-scene popup and builds by hand.
 import QtQuick
@@ -14,7 +14,7 @@ import QtQuick.Controls
 Menu {
     id: root
 
-    // Force the in-scene (item) popup rather than a native OS menu (see TerminalContextMenu for the why).
+    // Force the in-scene (item) popup rather than a native OS menu (see ActionContextMenu for the why).
     popupType: Popup.Item
 
     // The WindowController. Null-guarded throughout: it is torn down before this QML tree on window close.
