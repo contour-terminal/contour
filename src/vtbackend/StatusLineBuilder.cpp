@@ -461,7 +461,7 @@ namespace
                     result.erase(pos);
             }
             else
-                result = std::system_category().message(errno);
+                result = std::generic_category().message(errno);
             return result;
         }
 

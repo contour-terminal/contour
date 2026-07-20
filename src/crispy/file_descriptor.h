@@ -39,7 +39,7 @@ struct close_native_handle<int>
             {
                 case 0: return;
                 case EINTR: break;
-                default: throw std::system_error(errno, std::system_category(), "close() failed");
+                default: throw std::system_error(errno, std::generic_category(), "close() failed");
             }
         }
     }
@@ -78,7 +78,7 @@ class native_handle
     static native_handle from_native(native_handle_type fd) // NOLINT
     {
         if (fd == invalid_native_handle)
-            throw std::system_error(errno, std::system_category(), "native_handle() failed");
+            throw std::system_error(errno, std::generic_category(), "native_handle() failed");
         return native_handle { fd };
     }
 

@@ -1205,7 +1205,8 @@ bool SshSession::connect(std::string_view host, int port)
                 return true;
             }
 
-            logError("Failed to connect to {}:{} ({})", addrStr, port, std::system_category().message(errno));
+            logError(
+                "Failed to connect to {}:{} ({})", addrStr, port, std::generic_category().message(errno));
             addrEntry = addrEntry->ai_next;
         }
     }
