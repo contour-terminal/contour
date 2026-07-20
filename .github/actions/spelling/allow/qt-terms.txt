@@ -48,6 +48,7 @@ QPointer
 QProcess
 QQml
 QQuick
+qquickaccessibleattached
 QRect
 QRegion
 QRunnable

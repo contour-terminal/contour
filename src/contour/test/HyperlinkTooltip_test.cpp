@@ -104,7 +104,7 @@ TEST_CASE("hyperlinkTooltipText says the useful part of a target", "[contour][hy
 
     SECTION("a file on another host keeps its scheme, because the path alone would mislead")
     {
-        CHECK(hyperlinkTooltipText("file://otherhost/tmp/x.log", 64) == "file://otherhost/tmp/x.log");
+        CHECK(hyperlinkTooltipText("file://remote/tmp/x.log", 64) == "file://remote/tmp/x.log");
     }
 
     SECTION("a malformed escape is shown as written rather than swallowed")
