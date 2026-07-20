@@ -619,7 +619,7 @@ inline std::string replace(std::string_view text, std::string_view pattern, T&& 
     return os.str();
 }
 
-inline std::filesystem::path homeResolvedPath(std::string input, const std::filesystem::path& homeDirectory)
+inline std::filesystem::path homeResolvedPath(std::string input, std::filesystem::path const& homeDirectory)
 {
     if (!input.empty() && input[0] == '~')
     {

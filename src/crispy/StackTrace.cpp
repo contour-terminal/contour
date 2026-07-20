@@ -176,7 +176,7 @@ stack_trace::stack_trace():
 #endif
 }
 
-string stack_trace::demangleSymbol(const char* symbol)
+string stack_trace::demangleSymbol(char const* symbol)
 {
 #if (defined(__linux__) || defined(__APPLE__)) && defined(HAVE_CXXABI_H)
     int status = 0;

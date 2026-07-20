@@ -43,7 +43,7 @@ using buffer_object_release = std::function<void(buffer_object<T>*)>;
 template <BufferObjectElementType T>
 using buffer_object_ptr = std::shared_ptr<buffer_object<T>>;
 
-auto const inline bufferObjectLog = logstore::category("BufferObject",
+auto inline const bufferObjectLog = logstore::category("BufferObject",
                                                        "Logs buffer object pool activity.",
                                                        logstore::category::state::Disabled,
                                                        logstore::category::visibility::Hidden);

@@ -36,7 +36,7 @@ namespace vtrasterizer
 
 namespace
 {
-    auto const inline boxDrawingLog = logstore::category("renderer.boxdrawing",
+    auto inline const boxDrawingLog = logstore::category("renderer.boxdrawing",
                                                          "Logs box drawing debugging.",
                                                          logstore::category::state::Disabled,
                                                          logstore::category::visibility::Hidden);
@@ -507,7 +507,7 @@ namespace detail
         };
         static_assert(BoxDrawingDefinitions.size() == 0x80);
 
-        auto getBranchBoxes(const Line mergeCommitLine = Line::Double, const Line branchLine = Line::Light)
+        auto getBranchBoxes(Line const mergeCommitLine = Line::Double, Line const branchLine = Line::Light)
         {
             return std::array {
                 /*U+F5D0  */ Box {}.horizontal(branchLine),

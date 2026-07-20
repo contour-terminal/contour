@@ -151,8 +151,8 @@ std::optional<StatusLineDefinitions::Item> makeStatusLineItem(
 
     if (interpolation.name == "Tabs")
     {
-        const std::optional<RGBColor> activeColor = tryParseColorAttribute(interpolation, "ActiveColor");
-        const std::optional<RGBColor> activeBackground =
+        std::optional<RGBColor> const activeColor = tryParseColorAttribute(interpolation, "ActiveColor");
+        std::optional<RGBColor> const activeBackground =
             tryParseColorAttribute(interpolation, "ActiveBackground");
 
         return StatusLineDefinitions::Tabs {
@@ -468,7 +468,7 @@ struct VTSerializer
         auto const tabsInfo = vt.guiTabsInfoForStatusLine();
 
         std::string fragment;
-        for (const auto position: std::views::iota(1u, tabsInfo.tabs.size() + 1))
+        for (auto const position: std::views::iota(1u, tabsInfo.tabs.size() + 1))
         {
             if (!fragment.empty())
                 fragment += tabs.separator.value_or("|");

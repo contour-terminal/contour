@@ -62,7 +62,7 @@ template <>
 struct std::formatter<vtbackend::LogEvent>
 {
     auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    auto format(const vtbackend::LogEvent& ev, auto& ctx) const
+    auto format(vtbackend::LogEvent const& ev, auto& ctx) const
     {
         using namespace vtbackend;
         return std::visit(

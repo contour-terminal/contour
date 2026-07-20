@@ -24,7 +24,7 @@ class mock_font_locator: public font_locator
   public:
     [[nodiscard]] font_source_list locate(font_description const& description) override;
     [[nodiscard]] font_source_list all() override;
-    [[nodiscard]] font_source_list resolve(gsl::span<const char32_t> codepoints) override;
+    [[nodiscard]] font_source_list resolve(gsl::span<char32_t const> codepoints) override;
 
     static void configure(std::vector<font_description_and_source> registry);
 

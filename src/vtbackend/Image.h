@@ -504,7 +504,7 @@ struct std::formatter<vtbackend::RasterizedImage>: formatter<std::string>
 template <>
 struct std::formatter<vtbackend::ImageFragment>: std::formatter<std::string>
 {
-    auto format(const vtbackend::ImageFragment& fragment, auto& ctx) const
+    auto format(vtbackend::ImageFragment const& fragment, auto& ctx) const
     {
         return formatter<std::string>::format(
             std::format("ImageFragment<offset={}, {}>",

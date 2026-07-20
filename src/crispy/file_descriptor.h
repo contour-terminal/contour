@@ -46,7 +46,7 @@ struct close_native_handle<int>
 };
 #endif
 
-template <typename T, const T InvalidHandleValue>
+template <typename T, T const InvalidHandleValue>
 class native_handle
 {
   public:

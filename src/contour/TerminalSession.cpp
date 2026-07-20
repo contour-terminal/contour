@@ -293,7 +293,7 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
         _configFileChangeWatcher = make_unique<QFileSystemWatcher>();
         _configFileChangeWatcher->addPath(QString::fromStdString(_config.configFile.generic_string()));
         connect(_configFileChangeWatcher.get(),
-                SIGNAL(fileChanged(const QString&)),
+                SIGNAL(fileChanged(QString const&)),
                 this,
                 SLOT(onConfigReload()));
     }
@@ -3237,14 +3237,14 @@ void TerminalSession::onConfigReload()
 
     if (_configFileChangeWatcher)
         connect(_configFileChangeWatcher.get(),
-                SIGNAL(fileChanged(const QString&)),
+                SIGNAL(fileChanged(QString const&)),
                 this,
                 SLOT(onConfigReload()));
 }
 
 // }}}
 // {{{ QAbstractItemModel impl
-QModelIndex TerminalSession::index(int row, int column, const QModelIndex& parent) const
+QModelIndex TerminalSession::index(int row, int column, QModelIndex const& parent) const
 {
     Require(row == 0);
     Require(column == 0);
@@ -3254,25 +3254,25 @@ QModelIndex TerminalSession::index(int row, int column, const QModelIndex& paren
     return createIndex(row, column, nullptr);
 }
 
-QModelIndex TerminalSession::parent(const QModelIndex& child) const
+QModelIndex TerminalSession::parent(QModelIndex const& child) const
 {
     crispy::ignore_unused(child);
     return QModelIndex();
 }
 
-int TerminalSession::rowCount(const QModelIndex& parent) const
+int TerminalSession::rowCount(QModelIndex const& parent) const
 {
     crispy::ignore_unused(parent);
     return 1;
 }
 
-int TerminalSession::columnCount(const QModelIndex& parent) const
+int TerminalSession::columnCount(QModelIndex const& parent) const
 {
     crispy::ignore_unused(parent);
     return 1;
 }
 
-QVariant TerminalSession::data(const QModelIndex& index, int role) const
+QVariant TerminalSession::data(QModelIndex const& index, int role) const
 {
     crispy::ignore_unused(index, role);
     Require(index.row() == 0);
@@ -3281,7 +3281,7 @@ QVariant TerminalSession::data(const QModelIndex& index, int role) const
     return QVariant(_id);
 }
 
-bool TerminalSession::setData(const QModelIndex& index, const QVariant& value, int role)
+bool TerminalSession::setData(QModelIndex const& index, QVariant const& value, int role)
 {
     // NB: Session-Id is read-only.
     crispy::ignore_unused(index, value, role);

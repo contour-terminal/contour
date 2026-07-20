@@ -68,7 +68,7 @@ class TerminalRenderNode: public QSGRenderNode
     /// delegates to TerminalDisplay::renderFrameRhi(). The scene graph clips the node; the terminal submits
     /// exclusively through QRhi (no raw GL).
     /// @param state Per-frame scene-graph render state (projection, scissor, stencil, clip region).
-    void render(const RenderState* state) override;
+    void render(RenderState const* state) override;
 
     /// @return The state categories this node mutates so Qt restores the rest afterwards. Submission is
     ///         pure QRhi now (no raw GL state poking); the only fixed-function state we drive through the

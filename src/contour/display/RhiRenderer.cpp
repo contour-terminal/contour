@@ -87,14 +87,14 @@ namespace
 
     /// The interleaved vertex-input attributes for the background/rect pass: vec3 position @loc0,
     /// vec4 color @loc1 (single binding 0).
-    const std::array rectVertexAttributes {
+    std::array const rectVertexAttributes {
         QRhiVertexInputAttribute(0, 0, QRhiVertexInputAttribute::Float3, RectPositionOffset),
         QRhiVertexInputAttribute(0, 1, QRhiVertexInputAttribute::Float4, RectColorOffset),
     };
 
     /// The interleaved vertex-input attributes for the text/glyph pass: vec3 position @loc0,
     /// vec4 texCoords @loc1, vec4 color @loc2 (single binding 0).
-    const std::array textVertexAttributes {
+    std::array const textVertexAttributes {
         QRhiVertexInputAttribute(0, 0, QRhiVertexInputAttribute::Float3, TextPositionOffset),
         QRhiVertexInputAttribute(0, 1, QRhiVertexInputAttribute::Float4, TextTexCoordOffset),
         QRhiVertexInputAttribute(0, 2, QRhiVertexInputAttribute::Float4, TextColorOffset),

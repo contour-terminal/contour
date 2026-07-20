@@ -27,7 +27,7 @@
 namespace text
 {
 
-auto const inline locatorLog = logstore::category("font.locator", "Logs about font loads.");
+auto inline const locatorLog = logstore::category("font.locator", "Logs about font loads.");
 
 namespace detail
 {

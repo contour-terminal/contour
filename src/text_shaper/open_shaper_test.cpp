@@ -573,7 +573,7 @@ TEST_CASE("open_shaper.COLRv1", "[open_shaper]")
 
         font_source_list all() override { return {}; }
 
-        font_source_list resolve(gsl::span<const char32_t /*codepoints*/>) override { return {}; }
+        font_source_list resolve(gsl::span<char32_t const /*codepoints*/>) override { return {}; }
     };
 
     auto testLocator = test_font_locator { fontPath };

@@ -114,8 +114,8 @@ class Pty
 
 [[nodiscard]] std::unique_ptr<Pty> createPty(PageSize pageSize, std::optional<ImageSize> viewSize);
 
-auto const inline ptyLog = logstore::category("pty", "Logs general PTY informations.");
-auto const inline ptyInLog = logstore::category("pty.input", "Logs PTY raw input.");
-auto const inline ptyOutLog = logstore::category("pty.output", "Logs PTY raw output.");
+auto inline const ptyLog = logstore::category("pty", "Logs general PTY informations.");
+auto inline const ptyInLog = logstore::category("pty.input", "Logs PTY raw input.");
+auto inline const ptyOutLog = logstore::category("pty.output", "Logs PTY raw output.");
 
 } // namespace vtpty

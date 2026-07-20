@@ -88,7 +88,7 @@ void tryAttachConsole()
 }
 #endif
 
-void qtCustomMessageOutput(QtMsgType type, const QMessageLogContext& context, const QString& msg)
+void qtCustomMessageOutput(QtMsgType type, QMessageLogContext const& context, QString const& msg)
 {
     QByteArray const localMsg = msg.toLocal8Bit();
 

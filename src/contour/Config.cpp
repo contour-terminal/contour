@@ -382,7 +382,7 @@ std::string createString(Config const& c)
 
 std::string defaultConfigString()
 {
-    const Config config {};
+    Config const config {};
     auto configString = createString(config);
 
     return configString;
@@ -2780,7 +2780,7 @@ std::optional<vtbackend::Modifiers> YAMLConfigReader::parseModifier(YAML::Node c
         return std::nullopt;
 
     vtbackend::Modifiers mods;
-    for (const auto& i: node)
+    for (auto const& i: node)
     {
         if (!i.IsScalar())
             return std::nullopt;
@@ -3376,7 +3376,7 @@ std::string createForProfile(Config const& c)
     // inside profiles:
     doc.append(writer.replaceCommentPlaceholder(std::string { writer.whichDoc(c.profiles) }));
     {
-        const auto _ = typename Writer::Offset {};
+        auto const _ = typename Writer::Offset {};
         for (auto&& [name, entry]: c.profiles.value())
         {
             if constexpr (std::same_as<Writer, YAMLConfigWriter>)
@@ -3531,7 +3531,7 @@ std::string createForColorScheme(Config const& c)
         {
             doc.append(std::format("    {}: \n", name));
             {
-                const auto _ = typename Writer::Offset {};
+                auto const _ = typename Writer::Offset {};
                 emitColorPaletteBody(writer, doc, entry);
             }
         }
@@ -3548,7 +3548,7 @@ std::string createKeyMapping(Config const& c)
 
     doc.append(writer.replaceCommentPlaceholder(c.inputMappings.documentation));
     {
-        const auto _ = typename Writer::Offset {};
+        auto const _ = typename Writer::Offset {};
         for (auto&& entry: c.inputMappings.value().keyMappings)
             doc.append(Writer::addOffset(writer.format(entry), Writer::Offset::Levels * Writer::OneOffset));
 

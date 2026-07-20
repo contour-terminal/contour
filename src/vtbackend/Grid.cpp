@@ -20,7 +20,7 @@ using std::vector;
 namespace vtbackend
 {
 
-auto const inline gridLog = logstore::category(
+auto inline const gridLog = logstore::category(
     "vt.grid", "Grid related", logstore::category::state::Disabled, logstore::category::visibility::Hidden);
 
 namespace detail

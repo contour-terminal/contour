@@ -13,7 +13,7 @@ class coretext_locator: public font_locator
 
     [[nodiscard]] font_source_list locate(font_description const& description) override;
     [[nodiscard]] font_source_list all() override;
-    [[nodiscard]] font_source_list resolve(gsl::span<const char32_t> codepoints) override;
+    [[nodiscard]] font_source_list resolve(gsl::span<char32_t const> codepoints) override;
 
   private:
     struct Private;

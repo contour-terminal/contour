@@ -241,7 +241,7 @@ struct LogicalLine
   private:
     // Finds the maximum number of characters of searchText that can be matched from right end of line
     [[nodiscard]] size_t searchPartialMatch(std::u32string_view searchText,
-                                            const Line& line,
+                                            Line const& line,
                                             bool isCaseSensitive) const noexcept
     {
         auto const lineLength = unbox<size_t>(line.size());
@@ -259,7 +259,7 @@ struct LogicalLine
 
     // Finds the maximum number of characters of searchText that can be matched from left end of line
     [[nodiscard]] size_t searchPartialMatchReverse(std::u32string_view searchText,
-                                                   const Line& line,
+                                                   Line const& line,
                                                    bool isCaseSensitive) const noexcept
     {
         while (!searchText.empty())
@@ -841,7 +841,7 @@ template <typename RendererT>
 template <>
 struct std::formatter<vtbackend::Margin::Horizontal>: std::formatter<std::string>
 {
-    auto format(const vtbackend::Margin::Horizontal range, auto& ctx) const
+    auto format(vtbackend::Margin::Horizontal const range, auto& ctx) const
     {
         return formatter<std::string>::format(std::format("{}..{}", range.from, range.to), ctx);
     }
@@ -850,7 +850,7 @@ struct std::formatter<vtbackend::Margin::Horizontal>: std::formatter<std::string
 template <>
 struct std::formatter<vtbackend::Margin::Vertical>: std::formatter<std::string>
 {
-    auto format(const vtbackend::Margin::Vertical range, auto& ctx) const
+    auto format(vtbackend::Margin::Vertical const range, auto& ctx) const
     {
         return formatter<std::string>::format(std::format("{}..{}", range.from, range.to), ctx);
     }

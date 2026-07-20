@@ -529,7 +529,7 @@ Handled ViInputHandler::handleSearchEditor(char32_t ch, Modifiers modifiers)
         [&](auto mode) { setMode(mode); },
         [&]() { _executor->searchCancel(); },
         [&]() { _executor->searchDone(); },
-        [&](const auto& val) { _executor->updateSearchTerm(val); });
+        [&](auto const& val) { _executor->updateSearchTerm(val); });
 
     return Handled { true };
 }

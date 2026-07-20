@@ -1533,7 +1533,7 @@ struct std::formatter<vtbackend::GridSize>: formatter<std::string>
 template <>
 struct std::formatter<vtbackend::ScreenType>: formatter<std::string_view>
 {
-    auto format(const vtbackend::ScreenType value, auto& ctx) const
+    auto format(vtbackend::ScreenType const value, auto& ctx) const
     {
         string_view name;
         switch (value)
@@ -1548,7 +1548,7 @@ struct std::formatter<vtbackend::ScreenType>: formatter<std::string_view>
 template <>
 struct std::formatter<vtbackend::PixelCoordinate>: formatter<std::string>
 {
-    auto format(const vtbackend::PixelCoordinate coord, auto& ctx) const
+    auto format(vtbackend::PixelCoordinate const coord, auto& ctx) const
     {
         return formatter<std::string>::format(std::format("{}:{}", coord.x.value, coord.y.value), ctx);
     }

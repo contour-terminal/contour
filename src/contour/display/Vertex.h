@@ -7,10 +7,10 @@ class Vertex
 {
   public:
     Q_DECL_CONSTEXPR Vertex() = default;
-    Q_DECL_CONSTEXPR explicit Vertex(const QVector3D& position);
+    Q_DECL_CONSTEXPR explicit Vertex(QVector3D const& position);
 
     [[nodiscard]] Q_DECL_CONSTEXPR const QVector3D& position() const;
-    void setPosition(const QVector3D& position);
+    void setPosition(QVector3D const& position);
 
     // OpenGL Helpers
     static constexpr int PositionTupleSize = 3;
@@ -22,7 +22,7 @@ class Vertex
 };
 
 // Constructors
-Q_DECL_CONSTEXPR inline Vertex::Vertex(const QVector3D& position): _position(position)
+Q_DECL_CONSTEXPR inline Vertex::Vertex(QVector3D const& position): _position(position)
 {
 }
 
@@ -31,7 +31,7 @@ Q_DECL_CONSTEXPR inline const QVector3D& Vertex::position() const
 {
     return _position;
 }
-void inline Vertex::setPosition(const QVector3D& position)
+void inline Vertex::setPosition(QVector3D const& position)
 {
     _position = position;
 }

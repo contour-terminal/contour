@@ -202,7 +202,7 @@ struct std::formatter<vtbackend::Selection::State>: formatter<std::string_view>
 template <>
 struct std::formatter<vtbackend::Selection>: formatter<std::string>
 {
-    auto format(const vtbackend::Selection& selector, auto& ctx) const
+    auto format(vtbackend::Selection const& selector, auto& ctx) const
     {
         return formatter<std::string>::format(
             std::format(

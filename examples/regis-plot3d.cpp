@@ -27,7 +27,7 @@ using namespace std::string_view_literals;
 namespace
 {
 
-volatile std::sig_atomic_t g_running = 1;
+std::sig_atomic_t volatile g_running = 1;
 
 void onSignal(int) noexcept
 {

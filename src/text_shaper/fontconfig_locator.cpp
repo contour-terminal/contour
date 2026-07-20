@@ -420,7 +420,7 @@ font_source_list fontconfig_locator::all()
     return output;
 }
 
-font_source_list fontconfig_locator::resolve(gsl::span<const char32_t> codepoints)
+font_source_list fontconfig_locator::resolve(gsl::span<char32_t const> codepoints)
 {
     // A coverage-driven lookup -- "which fonts contain THESE characters" -- as opposed to locate()'s
     // "which fonts are near this description".

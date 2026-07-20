@@ -116,7 +116,7 @@ template <>
 struct std::formatter<crispy::size>
 {
     auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    auto format(const crispy::size& value, auto& ctx) const
+    auto format(crispy::size const& value, auto& ctx) const
     {
         return std::format_to(ctx.out(), "{}x{}", value.width, value.height);
     }

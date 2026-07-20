@@ -44,8 +44,8 @@ namespace
                                 bitmap_format _targetFormat,
                                 std::vector<uint8_t>::iterator& _it)
     {
-        const auto width = _textureBounds.right - _textureBounds.left;
-        const auto height = _textureBounds.bottom - _textureBounds.top;
+        auto const width = _textureBounds.right - _textureBounds.left;
+        auto const height = _textureBounds.bottom - _textureBounds.top;
 
         std::vector<uint8_t> tmp;
         tmp.resize(height * width * 3);
@@ -57,10 +57,10 @@ namespace
         for (auto i = 0; i < height; i++)
             for (auto j = 0; j < width; j++)
             {
-                const auto base = (i * width + j) * 3;
-                const auto srcR = tmp[base];
-                const auto srcG = tmp[base + 1];
-                const auto srcB = tmp[base + 2];
+                auto const base = (i * width + j) * 3;
+                auto const srcR = tmp[base];
+                auto const srcG = tmp[base + 1];
+                auto const srcB = tmp[base + 2];
 
                 if (_targetFormat == bitmap_format::rgb)
                 {
@@ -193,7 +193,7 @@ struct directwrite_shaper::Private
         if (!localeExists)
         {
             // Fallback to en-US
-            const wchar_t* localeName = L"en-US";
+            wchar_t const* localeName = L"en-US";
             familyNames->FindLocaleName(localeName, &index, &localeExists);
         }
 
@@ -346,7 +346,7 @@ void directwrite_shaper::shape(font_key _font,
 
         for (size_t i = glyphStart; i < textLength; i++)
         {
-            const auto cellWidth = static_cast<double>((float) glyphDesignUnitAdvances.at(i))
+            auto const cellWidth = static_cast<double>((float) glyphDesignUnitAdvances.at(i))
                                    / designUnitsPerEm * ptToEm(fontInfo.size.pt) * d->pixelPerDip();
             glyph_position gpos {};
             gpos.presentation = _presentation;

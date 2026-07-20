@@ -95,7 +95,7 @@ auto constexpr inline ColorPaletteUpdateDsrReplyId = 997;
 
 auto constexpr inline TabWidth = ColumnCount(8);
 
-auto const inline vtCaptureBufferLog = logstore::category("vt.ext.capturebuffer",
+auto inline const vtCaptureBufferLog = logstore::category("vt.ext.capturebuffer",
                                                           "Capture Buffer debug logging.",
                                                           logstore::category::state::Disabled,
                                                           logstore::category::visibility::Hidden);

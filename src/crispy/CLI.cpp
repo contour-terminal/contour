@@ -753,7 +753,7 @@ namespace // {{{ helpers
                               command const& com,
                               unsigned margin,
                               vector<command const*>& parents,
-                              const auto& stylize)
+                              auto const& stylize)
     {
         os << indent(1);
         for (command const* parent: parents)

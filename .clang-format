@@ -50,6 +50,7 @@ NamespaceIndentation: Inner
 PackConstructorInitializers: NextLine
 PenaltyBreakAssignment: 0
 PointerAlignment: Left
+QualifierAlignment: Right
 ReflowComments: true
 RemoveSemicolon: true
 SortIncludes: true

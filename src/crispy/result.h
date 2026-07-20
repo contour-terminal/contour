@@ -16,7 +16,7 @@ class failure
   public:
     using error_type = E;
 
-    constexpr failure(const failure&) = default;
+    constexpr failure(failure const&) = default;
     constexpr failure(failure&&) noexcept = default;
 
     template <typename Err = E>
@@ -36,12 +36,12 @@ class failure
     {
     }
 
-    constexpr failure& operator=(const failure&) = default;
+    constexpr failure& operator=(failure const&) = default;
     constexpr failure& operator=(failure&&) noexcept = default;
 
-    [[nodiscard]] constexpr const E& error() const& noexcept { return _value; }
+    [[nodiscard]] constexpr E const& error() const& noexcept { return _value; }
     constexpr E& error() & noexcept { return _value; }
-    [[nodiscard]] constexpr const E&& error() const&& noexcept { return std::move(_value); }
+    [[nodiscard]] constexpr E const&& error() const&& noexcept { return std::move(_value); }
     constexpr E&& error() && noexcept { return std::move(_value); }
 
     constexpr void swap(failure& other) noexcept { std::swap(_value, other._value); }
@@ -101,7 +101,7 @@ class result
     constexpr result(result&&) noexcept = default;
 
     template <typename U, typename G>
-    constexpr explicit result(const result<U, G>& other):
+    constexpr explicit result(result<U, G> const& other):
         _data { std::holds_alternative<U>(other._data) ? std::get<U>(other._data)
                                                        : failure<G> { other.error() } }
     {

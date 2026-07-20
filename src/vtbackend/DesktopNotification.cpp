@@ -216,7 +216,7 @@ void DesktopNotificationManager::handleOSC99(string_view payload, Terminal& term
                     else if (notification.currentPayload == NotificationPayloadType::Body)
                         pending.body += notification.body;
                     // Only overwrite fields that were explicitly set (differ from defaults).
-                    static const DesktopNotification notificationDefaults {};
+                    static DesktopNotification const notificationDefaults {};
                     if (!notification.applicationName.empty())
                         pending.applicationName = std::move(notification.applicationName);
                     if (notification.urgency != notificationDefaults.urgency)

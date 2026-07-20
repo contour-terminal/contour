@@ -1200,7 +1200,7 @@ class SupportedSequences
         // Contour's hardware identity is VT525, so both are genuine capabilities at every level.
         auto* itr = std::partition(begin(),
                                    _supportedSequences.data() + _supportedSequences.size(),
-                                   [vt](const Function& value) noexcept {
+                                   [vt](Function const& value) noexcept {
                                        return value.conformanceLevel <= vt || value.id() == DECSCL.id()
                                               || value.id() == DECRQCRA.id();
                                    });
@@ -1318,7 +1318,7 @@ struct std::hash<vtbackend::Function>
 template <>
 struct std::formatter<vtbackend::FunctionCategory>: std::formatter<std::string_view>
 {
-    auto format(const vtbackend::FunctionCategory value, auto& ctx) const
+    auto format(vtbackend::FunctionCategory const value, auto& ctx) const
     {
         using vtbackend::FunctionCategory;
         string_view name;
@@ -1356,7 +1356,7 @@ struct std::formatter<vtbackend::FunctionCategory>: std::formatter<std::string_v
 template <>
 struct std::formatter<vtbackend::Function>: std::formatter<std::string>
 {
-    auto format(const vtbackend::Function f, auto& ctx) const
+    auto format(vtbackend::Function const f, auto& ctx) const
     {
         std::string value;
         switch (f.category)
@@ -1407,7 +1407,7 @@ struct std::formatter<vtbackend::Function>: std::formatter<std::string>
 template <>
 struct std::formatter<vtbackend::FunctionSelector>: std::formatter<std::string>
 {
-    auto format(const vtbackend::FunctionSelector f, auto& ctx) const
+    auto format(vtbackend::FunctionSelector const f, auto& ctx) const
     {
         std::string value;
         // clang-format off

@@ -251,7 +251,7 @@ void app::customizeLogStoreOutput()
     logstore::sink::console().set_enabled(true);
 
     // A curated list of colors.
-    static const bool colorized =
+    static bool const colorized =
 #if !defined(_WIN32)
         isatty(STDOUT_FILENO) != 0;
 #else
@@ -264,7 +264,7 @@ void app::customizeLogStoreOutput()
         auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string> {
             if (!colorized)
                 return { "", "", "" };
-            const auto* const tagStart = "\033[1m";
+            auto const* const tagStart = "\033[1m";
             auto const colorIndex =
                 Colors.at(std::hash<string_view> {}(msg.get_category().name()) % Colors.size());
             auto const msgStart = std::format("\033[38;5;{}m", colorIndex);
@@ -317,9 +317,9 @@ void app::customizeLogStoreOutput()
         auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string> {
             if (!colorized)
                 return { "", "", "" };
-            const auto* const tagStart = "\033[1;31m";
-            const auto* const msgStart = "\033[31m";
-            const auto* const resetSGR = "\033[m";
+            auto const* const tagStart = "\033[1;31m";
+            auto const* const msgStart = "\033[31m";
+            auto const* const resetSGR = "\033[m";
             return { tagStart, msgStart, resetSGR };
         }();
 

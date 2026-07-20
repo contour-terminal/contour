@@ -188,7 +188,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         if (!backgroundImage)
             return QString();
 
-        if (const auto* p = std::get_if<std::filesystem::path>(&backgroundImage->location))
+        if (auto const* p = std::get_if<std::filesystem::path>(&backgroundImage->location))
             return QString("file:") + QString(p->string().c_str());
 
         return QString();
@@ -289,12 +289,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     // }}}
 
     // {{{ QAbstractItemModel overrides
-    QModelIndex index(int row, int column, const QModelIndex& parent = QModelIndex()) const override;
-    QModelIndex parent(const QModelIndex& child) const override;
-    int rowCount(const QModelIndex& parent = QModelIndex()) const override;
-    int columnCount(const QModelIndex& parent = QModelIndex()) const override;
-    QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
-    bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override;
+    QModelIndex index(int row, int column, QModelIndex const& parent = QModelIndex()) const override;
+    QModelIndex parent(QModelIndex const& child) const override;
+    int rowCount(QModelIndex const& parent = QModelIndex()) const override;
+    int columnCount(QModelIndex const& parent = QModelIndex()) const override;
+    QVariant data(QModelIndex const& index, int role = Qt::DisplayRole) const override;
+    bool setData(QModelIndex const& index, QVariant const& value, int role = Qt::EditRole) override;
     // }}}
 
     /**

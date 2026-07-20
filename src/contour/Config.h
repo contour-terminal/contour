@@ -525,7 +525,7 @@ inline auto defaultFamilyName = "Monaco";
 inline auto defaultFamilyName = "monospace";
 #endif
 
-const inline vtrasterizer::FontDescriptions defaultFont = vtrasterizer::FontDescriptions {
+inline vtrasterizer::FontDescriptions const defaultFont = vtrasterizer::FontDescriptions {
     .dpiScale = 1.0,
     .dpi = { 0, 0 },
     .size = { 12 },
@@ -696,7 +696,7 @@ struct TerminalProfile
     ConfigEntry<bool, documentation::OptionKeyAsAlt> optionKeyAsAlt { false };
 };
 
-const InputMappings defaultInputMappings {
+InputMappings const defaultInputMappings {
     .keyMappings {
         KeyInputMapping { .modes { vtbackend::MatchModes {} },
                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt } },

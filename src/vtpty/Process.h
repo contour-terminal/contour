@@ -51,7 +51,7 @@ class [[nodiscard]] Process: public Pty
     {
     }
 
-    Process(const std::string& path,
+    Process(std::string const& path,
             std::vector<std::string> const& args,
             std::filesystem::path const& cwd,
             Environment const& env,

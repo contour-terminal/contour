@@ -232,7 +232,7 @@ void setEnabled(QWindow* window, bool enable, QRegion const& region)
         if (hDwm)
         {
             typedef HRESULT(WINAPI * P_DwmSetWindowAttribute)(HWND, DWORD, LPCVOID, DWORD);
-            const auto pDwmSetWindowAttribute =
+            auto const pDwmSetWindowAttribute =
                 (P_DwmSetWindowAttribute) GetProcAddress(hDwm, "DwmSetWindowAttribute");
 
             if (pDwmSetWindowAttribute)
@@ -290,7 +290,7 @@ void setEnabled(QWindow* window, bool enable, QRegion const& region)
                 ULONG ulDataSize;
             };
             typedef BOOL(WINAPI * pSetWindowCompositionAttribute)(HWND, WINCOMPATTRDATA const*);
-            const pSetWindowCompositionAttribute SetWindowCompositionAttribute =
+            pSetWindowCompositionAttribute const SetWindowCompositionAttribute =
                 (pSetWindowCompositionAttribute) GetProcAddress(hModule, "SetWindowCompositionAttribute");
             if (SetWindowCompositionAttribute)
             {
