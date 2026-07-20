@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <crispy/environment.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <functional>
 #include <map>
 #include <string>
+#include <string_view>
 
 #ifdef __APPLE__
     #include <crt_externs.h>
@@ -17,7 +19,35 @@ namespace crispy::environment
 
 namespace
 {
-    using environment_map = std::map<std::string, std::string, std::less<>>;
+#ifdef _WIN32
+    [[nodiscard]] constexpr char toLowerASCII(char ch) noexcept
+    {
+        return 'A' <= ch && ch <= 'Z' ? static_cast<char>(ch - 'A' + 'a') : ch;
+    }
+#endif
+
+    /// Orders environment variable names the way the host's own getenv() resolves them: byte-wise on
+    /// POSIX, case-insensitively on Windows.
+    ///
+    /// Windows stores whatever casing the creating process used but matches names case-insensitively,
+    /// so a byte-wise map would answer nullopt for a `LOCALAPPDATA` lookup against a block that spells
+    /// it `LocalAppData` -- a regression against the getenv() this snapshot replaces.
+    struct name_less
+    {
+        using is_transparent = void;
+
+        [[nodiscard]] bool operator()(std::string_view a, std::string_view b) const noexcept
+        {
+#ifdef _WIN32
+            return std::ranges::lexicographical_compare(
+                a, b, std::ranges::less {}, toLowerASCII, toLowerASCII);
+#else
+            return a < b;
+#endif
+        }
+    };
+
+    using environment_map = std::map<std::string, std::string, name_less>;
 
     [[nodiscard]] char** currentEnviron() noexcept
     {

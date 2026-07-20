@@ -187,6 +187,27 @@ namespace
 
     auto const configLog = logstore::category("config", "Logs configuration file loading.");
 
+    /// Reads an environment variable as the raw bytes the environment holds.
+    ///
+    /// qgetenv() rather than qEnvironmentVariable(): the latter decodes through QString's local 8-bit
+    /// codec, so under a non-UTF-8 locale any byte that codec cannot represent comes back as U+FFFD.
+    /// What is read here names filesystem paths, and a path is a byte string that has to survive
+    /// intact -- a mangled one simply does not exist, and contour then silently falls back to its
+    /// defaults as though the user's configuration had never been there.
+    ///
+    /// Not crispy::environment either: that serves an immutable snapshot taken at first access, and
+    /// `${VAR}` expansion has to see the environment as it stands when the config is read. qgetenv()
+    /// is nonetheless thread safe (Qt guards the environment with its own lock), which is what ruled
+    /// out plain getenv() here -- config (re)load runs while the PTY threads are live.
+    ///
+    /// @param name Name of the variable to read.
+    /// @return The variable's value as raw bytes, or an empty string if it is unset.
+    [[nodiscard]] std::string environmentBytes(char const* name)
+    {
+        auto const value = qgetenv(name);
+        return std::string { value.constData(), static_cast<std::size_t>(value.size()) };
+    }
+
     /// Parses a resize/direction keyword ("Left"/"Right"/"Up"/"Down", case-insensitive) into the
     /// action-layer Direction enum.
     /// @param name The direction keyword from the config.
@@ -299,10 +320,7 @@ namespace
 
         locations.emplace_back(Process::homeDirectory() / ".terminfo");
 
-        // qEnvironmentVariable() rather than getenv(): the latter is not thread safe, and this runs
-        // on config (re)load while the PTY threads are live.
-        if (auto const terminfoDirs = qEnvironmentVariable("TERMINFO_DIRS").toStdString();
-            !terminfoDirs.empty())
+        if (auto const terminfoDirs = environmentBytes("TERMINFO_DIRS"); !terminfoDirs.empty())
             for (auto const dir: crispy::split(string_view(terminfoDirs), ':'))
                 locations.emplace_back(string(dir));
 
@@ -352,8 +370,8 @@ namespace
 fs::path configHome(string const& programName)
 {
 #if defined(__unix__) || defined(__APPLE__)
-    if (auto const value = qEnvironmentVariable("XDG_CONFIG_HOME"); !value.isEmpty())
-        return fs::path { value.toStdString() } / programName;
+    if (auto const value = environmentBytes("XDG_CONFIG_HOME"); !value.empty())
+        return fs::path { value } / programName;
     else
         return Process::homeDirectory() / ".config" / programName;
 #endif
@@ -678,7 +696,7 @@ YAMLConfigReader::YAMLConfigReader(std::string const& filename,
         variableReplacer = [&log = logger](std::string_view name) -> std::string {
             auto const key = std::string(name);
             if (qEnvironmentVariableIsSet(key.c_str()))
-                return qEnvironmentVariable(key.c_str()).toStdString();
+                return environmentBytes(key.c_str());
             log()("Undefined environment variable: ${{{}}}", name);
             return {};
         };
