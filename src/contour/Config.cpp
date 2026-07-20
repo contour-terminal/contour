@@ -25,9 +25,9 @@
 #include <iostream>
 #include <ranges>
 
-#if defined(_WIN32)
+#ifdef _WIN32
     #include <Windows.h>
-#elif defined(__APPLE__)
+#elifdef __APPLE__
     #include <unistd.h>
 
     #include <mach-o/dyld.h>
@@ -316,7 +316,7 @@ namespace
 
     string getDefaultTERM(optional<fs::path> const& appTerminfoDir)
     {
-#if defined(_WIN32)
+#ifdef _WIN32
         return "contour";
 #else
 
@@ -334,7 +334,7 @@ namespace
                 if (access((prefix / term.substr(0, 1) / term).string().c_str(), R_OK) == 0)
                     return term;
 
-    #if defined(__APPLE__)
+    #ifdef __APPLE__
                 // I realized that on Apple the `tic` command sometimes installs
                 // the terminfo files into weird paths.
                 if (access((prefix / std::format("{:02X}", term.at(0)) / term).string().c_str(), R_OK) == 0)
@@ -357,7 +357,7 @@ fs::path configHome(string const& programName)
         return Process::homeDirectory() / ".config" / programName;
 #endif
 
-#if defined(_WIN32)
+#ifdef _WIN32
     DWORD size = GetEnvironmentVariableA("LOCALAPPDATA", nullptr, 0);
     if (size)
     {
@@ -791,7 +791,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("profiles", c.profiles, c.defaultProfileName.value());
         loadFromEntry("layouts", c.layouts);
         loadFromEntry("git_drawings", c.gitDrawings);
-#if defined(CONTOUR_FRONTEND_GUI)
+#ifdef CONTOUR_FRONTEND_GUI
         vtrasterizer::BoxDrawingRenderer::setGitDrawingsStyle(c.gitDrawings.value());
         loadFromEntry("box_arc_style", c.boxArcStyle);
         vtrasterizer::BoxDrawingRenderer::setArcStyle(c.boxArcStyle.value());
@@ -1935,9 +1935,9 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      vtrasterizer::TextShapingEngine& where)
 {
     auto constexpr NativeTextShapingEngine =
-#if defined(_WIN32)
+#ifdef _WIN32
         vtrasterizer::TextShapingEngine::DWrite;
-#elif defined(__APPLE__)
+#elifdef __APPLE__
         vtrasterizer::TextShapingEngine::CoreText;
 #else
         vtrasterizer::TextShapingEngine::OpenShaper;
@@ -2478,7 +2478,7 @@ void YAMLConfigReader::defaultSettings(vtpty::Process::ExecInfo& shell)
 
     // {{{ Populate environment variables
     std::optional<fs::path> appTerminfoDir; // NOLINT(misc-const-correctness)
-#if defined(__APPLE__)
+#ifdef __APPLE__
     {
         char buf[1024];
         uint32_t len = sizeof(buf);

@@ -16,7 +16,7 @@
 #include <ranges>
 #include <vector>
 
-#if !defined(_WIN32)
+#ifndef _WIN32
     #include <crispy/file_descriptor.h>
 
     #include <sys/select.h>
@@ -25,7 +25,7 @@
     #include <unistd.h>
 #endif
 
-#if defined(__linux__)
+#ifdef __linux__
     #include <sys/epoll.h>
     #include <sys/eventfd.h>
 #endif
@@ -185,7 +185,7 @@ class posix_read_selector
 };
 
 // {{{ epoll_read_selector, implements waiting for a set of file descriptors to become readable.
-#if defined(__linux__)
+#ifdef __linux__
 
 /// Implements waiting for a set of file descriptors to become readable.
 ///
@@ -327,7 +327,7 @@ inline std::optional<int> epoll_read_selector::wait_one(
 #endif // }}}
 
 /// Implements waiting for a set of file descriptors to become readable.
-#if defined(__linux__)
+#ifdef __linux__
 using read_selector = epoll_read_selector;
 #else
 using read_selector = posix_read_selector;

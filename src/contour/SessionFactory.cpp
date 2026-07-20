@@ -3,7 +3,7 @@
 #include <contour/SessionFactory.h>
 
 #include <vtpty/Process.h>
-#if defined(VTPTY_LIBSSH2)
+#ifdef VTPTY_LIBSSH2
     #include <vtpty/SshSession.h>
 #endif
 
@@ -36,7 +36,7 @@ std::unique_ptr<vtpty::Pty> AppSessionFactory::createPty(
     std::optional<std::string> profileName)
 {
     auto const& profile = _app.config().profile(profileName.value_or(_app.profileName()));
-#if defined(VTPTY_LIBSSH2)
+#ifdef VTPTY_LIBSSH2
     // A layout pane's command overrides the profile's shell and should run locally, not open the
     // SSH session the profile would otherwise use. Only a REAL program override counts: a
     // directory-only pane (engaged override, empty program) still runs the profile's shell and
@@ -80,7 +80,7 @@ std::unique_ptr<vtpty::Pty> AppSessionFactory::createPty(
         shell, vtpty::createPty(initialSize, nullopt), profile->escapeSandbox.value());
 }
 
-#if defined(VTPTY_LIBSSH2)
+#ifdef VTPTY_LIBSSH2
 void AppSessionFactory::requestSshHostkeyVerification(
     vtpty::SshHostkeyVerificationRequest const& request,
     vtpty::SshHostkeyVerificationResponseCallback const& response)

@@ -13,7 +13,7 @@
 #include <numeric>
 #include <optional>
 
-#if !defined(_WIN32)
+#ifndef _WIN32
     #include <sys/ioctl.h>
 
     #include <pwd.h>
@@ -56,7 +56,7 @@ CLI::help_display_style helpStyle()
 
     style.optionStyle = CLI::option_style::Natural;
 
-#if !defined(_WIN32)
+#ifndef _WIN32
     if (isatty(STDOUT_FILENO) == 0)
     {
         style.colors.reset();
@@ -71,7 +71,7 @@ unsigned screenWidth()
 {
     constexpr auto DefaultWidth = 80u;
 
-#if !defined(_WIN32)
+#ifndef _WIN32
     auto ws = winsize {};
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != -1)
         return ws.ws_col;
@@ -85,7 +85,7 @@ fs::path xdgStateHome()
     if (auto const* p = getenv("XDG_STATE_HOME"); (p != nullptr) && (*p != '\0'))
         return fs::path(p);
 
-#if defined(_WIN32)
+#ifdef _WIN32
     if (auto const* p = getenv("LOCALAPPDATA"); p && *p)
         return fs::path(p);
 #else
@@ -252,7 +252,7 @@ void app::customizeLogStoreOutput()
 
     // A curated list of colors.
     static bool const colorized =
-#if !defined(_WIN32)
+#ifndef _WIN32
         isatty(STDOUT_FILENO) != 0;
 #else
         true;

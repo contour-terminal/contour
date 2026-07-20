@@ -29,7 +29,7 @@
 #include <memory>
 #include <optional>
 #include <variant>
-#if defined(CONTOUR_PERF_STATS)
+#ifdef CONTOUR_PERF_STATS
     #include <atomic>
 #endif
 
@@ -440,7 +440,7 @@ class TerminalDisplay: public QQuickItem
     /// otherwise.
     bool setScreenDirty()
     {
-#if defined(CONTOUR_PERF_STATS)
+#ifdef CONTOUR_PERF_STATS
         stats_.updatesSinceRendering++;
 #endif
         return _state.touch();
@@ -496,7 +496,7 @@ class TerminalDisplay: public QQuickItem
 
     // ======================================================================
 
-#if defined(CONTOUR_PERF_STATS)
+#ifdef CONTOUR_PERF_STATS
     struct Stats
     {
         std::atomic<uint64_t> updatesSinceRendering = 0;

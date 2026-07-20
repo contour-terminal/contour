@@ -31,7 +31,7 @@ QSurfaceFormat createSurfaceFormat()
     format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
     format.setSwapInterval(1);
 
-#if !defined(NDEBUG)
+#ifndef NDEBUG
     format.setOption(QSurfaceFormat::DebugContext);
 #endif
 

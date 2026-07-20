@@ -36,7 +36,7 @@ TEST_CASE("exitCodeFor: a process signal exit maps to EXIT_FAILURE", "[contour][
     CHECK(exitCodeFor(status, 0) == EXIT_FAILURE);
 }
 
-#if defined(VTPTY_LIBSSH2)
+#ifdef VTPTY_LIBSSH2
 TEST_CASE("exitCodeFor: an SSH normal exit propagates its code and a signal exit fails",
           "[contour][exitcode]")
 {

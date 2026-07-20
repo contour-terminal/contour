@@ -39,7 +39,7 @@ class aligned_allocator
         // Round up to a multiple of Alignment (required by aligned_alloc).
         auto const alignedSize = (byteCount + Alignment - 1) & ~(Alignment - 1);
 
-#if defined(_MSC_VER)
+#ifdef _MSC_VER
         auto* ptr = static_cast<T*>(_aligned_malloc(alignedSize, Alignment));
 #else
         auto* ptr = static_cast<T*>(std::aligned_alloc(Alignment, alignedSize));
@@ -53,7 +53,7 @@ class aligned_allocator
     {
         if (!p)
             return;
-#if defined(_MSC_VER)
+#ifdef _MSC_VER
         _aligned_free(p);
 #else
         std::free(p);

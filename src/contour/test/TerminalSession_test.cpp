@@ -1546,7 +1546,7 @@ TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the ex
         CHECK(launcher.executed.empty());
     }
 
-#if !defined(_WIN32)
+#ifndef _WIN32
     // The "is this an executable file" branch of followHyperlink() keys off POSIX owner-execute
     // permission; Windows determines executability by extension, not filesystem perms, so this Unix
     // semantics section does not apply there.

@@ -9,7 +9,7 @@
 /// (CI, scripted GUI/verification runs) — to prevent a modal CRT assert/abort/crash dialog from
 /// blocking a headless run. The reports are redirected to stderr instead, so they are still visible.
 
-#if defined(_WIN32)
+#ifdef _WIN32
     #include <cstdlib>
 
     #include <Windows.h>
@@ -28,7 +28,7 @@ namespace crispy
 /// - Invalid parameter handler dialogs
 inline void suppressWindowsDialogs()
 {
-#if defined(_WIN32)
+#ifdef _WIN32
     // Redirect CRT debug reports (assert, error, warning) to stderr instead of showing dialogs.
     _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
     _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);

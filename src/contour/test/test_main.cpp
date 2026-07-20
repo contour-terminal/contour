@@ -35,13 +35,13 @@ int main(int argc, char* argv[])
     ///   - Otherwise leave the platform untouched and let Qt pick.
     if (qgetenv("CONTOUR_TEST_DISPLAY") != "1")
     {
-#if defined(_WIN32)
+#ifdef _WIN32
         _putenv_s("QT_QPA_PLATFORM", "offscreen");
 #else
         setenv("QT_QPA_PLATFORM", "offscreen", /*overwrite*/ 1);
 #endif
     }
-#if !defined(_WIN32)
+#ifndef _WIN32
     else if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM") && !qEnvironmentVariableIsEmpty("DISPLAY"))
         setenv("QT_QPA_PLATFORM", "xcb", /*overwrite*/ 0);
 #endif

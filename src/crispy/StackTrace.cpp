@@ -9,7 +9,7 @@
 #include <optional>
 #include <regex>
 
-#if !defined(_WIN32)
+#ifndef _WIN32
     #include <sys/types.h>
     #include <sys/wait.h>
 
@@ -17,19 +17,19 @@
     #include <unistd.h>
 #endif
 
-#if defined(HAVE_CXXABI_H)
+#ifdef HAVE_CXXABI_H
     #include <cxxabi.h>
 #endif
 
-#if defined(HAVE_EXECINFO_H)
+#ifdef HAVE_EXECINFO_H
     #include <execinfo.h>
 #endif
 
-#if defined(HAVE_DLFCN_H)
+#ifdef HAVE_DLFCN_H
     #include <dlfcn.h>
 #endif
 
-#if defined(HAVE_UNWIND_H)
+#ifdef HAVE_UNWIND_H
     #include <unwind.h>
 #endif
 
@@ -77,7 +77,7 @@ vector<void*> stack_trace::getFrames(size_t skip, size_t max)
 {
     vector<void*> frames;
 
-#if defined(HAVE_BACKTRACE)
+#ifdef HAVE_BACKTRACE
     frames.resize(skip + max);
     frames.resize((size_t) ::backtrace(frames.data(), static_cast<int>(skip + max)));
     std::copy(std::next(frames.begin(), (int) skip), frames.end(), frames.begin());
@@ -94,7 +94,7 @@ optional<debug_info> stack_trace::getDebugInfoForFrame(void const* frameAddress)
     if (!frameAddress)
         return nullopt;
 
-#if defined(__linux__)
+#ifdef __linux__
     auto pipe = system_wrap();
     if (!pipe.good())
         return nullopt;
@@ -165,13 +165,13 @@ optional<debug_info> stack_trace::getDebugInfoForFrame(void const* frameAddress)
 }
 
 stack_trace::stack_trace():
-#if defined(HAVE_BACKTRACE)
+#ifdef HAVE_BACKTRACE
     _frames { SKIP_FRAMES + MAX_FRAMES }
 #else
     _frames {}
 #endif
 {
-#if defined(HAVE_BACKTRACE)
+#ifdef HAVE_BACKTRACE
     _frames.resize((size_t) ::backtrace(_frames.data(), SKIP_FRAMES + MAX_FRAMES));
 #endif
 }
@@ -206,7 +206,7 @@ vector<string> stack_trace::symbols() const
     vector<string> output;
     for (auto const* frame: frames)
     {
-#if defined(CONTOUR_STACKTRACE_ADDR2LINE)
+#ifdef CONTOUR_STACKTRACE_ADDR2LINE
         auto debugInfo = getDebugInfoForFrame(frame);
         if (!debugInfo)
             output.emplace_back(std::format("{}", frame));

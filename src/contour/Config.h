@@ -8,7 +8,7 @@
 
 #include <vtrasterizer/GlyphScaling.h>
 
-#if defined(CONTOUR_FRONTEND_GUI)
+#ifdef CONTOUR_FRONTEND_GUI
     #include <contour/display/ShaderConfig.h>
 #endif
 
@@ -519,7 +519,7 @@ struct Bell
     float volume = 1.0f;
 };
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
 inline auto defaultFamilyName = "Monaco";
 #else
 inline auto defaultFamilyName = "monospace";

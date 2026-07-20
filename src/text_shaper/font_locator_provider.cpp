@@ -23,9 +23,9 @@ font_locator& font_locator_provider::native()
 {
     if (!_native)
     {
-#if defined(__APPLE__)
+#ifdef __APPLE__
         _native = make_unique<coretext_locator>();
-#elif defined(_WIN32)
+#elifdef _WIN32
         _native = make_unique<directwrite_locator>();
 #else
         _native = make_unique<fontconfig_locator>();

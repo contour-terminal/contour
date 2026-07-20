@@ -18,7 +18,7 @@ using namespace vtconformance;
 /// Every case in this file spawns `/bin/sh` and talks to it through a real PTY, which Windows has
 /// neither of. They are skipped rather than compiled out: a test that does not exist reads exactly
 /// like a test that passed, and this file is where the harness's process half is measured.
-#if defined(_WIN32)
+#ifdef _WIN32
     #define SKIP_WITHOUT_POSIX_SHELL() SKIP("needs a POSIX shell over a PTY, which Windows has not")
 #else
     #define SKIP_WITHOUT_POSIX_SHELL() ((void) 0)

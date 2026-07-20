@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#if defined(CONTOUR_FRONTEND_GUI)
+#ifdef CONTOUR_FRONTEND_GUI
     #include <contour/ContourGuiApp.h>
 #else
     #include <contour/ContourApp.h>
@@ -20,7 +20,7 @@
 #include <cstddef>
 #include <string_view>
 
-#if defined(_WIN32)
+#ifdef _WIN32
     #include <cstdio>
     #include <iostream>
 
@@ -33,7 +33,7 @@ using namespace std;
 
 namespace
 {
-#if defined(_WIN32)
+#ifdef _WIN32
 bool is_a_console(HANDLE h)
 {
     auto modeDummy = DWORD { 0 };
@@ -150,7 +150,7 @@ void qtCustomMessageOutput(QtMsgType type, QMessageLogContext const& context, QS
 
 int main(int argc, char const* argv[])
 {
-#if defined(_WIN32)
+#ifdef _WIN32
     tryAttachConsole();
 
     // Route CRT assert/abort/crash reporting to stderr instead of a modal dialog when no debugger is
@@ -162,7 +162,7 @@ int main(int argc, char const* argv[])
 
     qInstallMessageHandler(qtCustomMessageOutput);
 
-#if defined(CONTOUR_FRONTEND_GUI)
+#ifdef CONTOUR_FRONTEND_GUI
     contour::ContourGuiApp app;
 #else
     contour::ContourApp app;

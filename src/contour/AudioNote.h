@@ -18,7 +18,7 @@ namespace contour::audio
 constexpr double SampleRate = 44100.0;
 
 // On Windows, this cannot be constexpr just yet, because std::fmod is not constexpr in MSVC (yet).
-#if !defined(_WIN32)
+#ifndef _WIN32
     #define CONTOUR_CONSTEXPR_UNLESS_MSVC constexpr
 #else
     #define CONTOUR_CONSTEXPR_UNLESS_MSVC

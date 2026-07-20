@@ -7,7 +7,7 @@
 #include <QtCore/QDebug>
 #include <QtGui/QWindow>
 
-#if defined(_WIN32)
+#ifdef _WIN32
     #include <Windows.h>
 #endif
 
@@ -16,7 +16,7 @@
     #include <xcb/xproto.h>
 #endif
 
-#if defined(CONTOUR_FRONTEND_XCB)
+#ifdef CONTOUR_FRONTEND_XCB
     #include <QtGui/QGuiApplication>
 #endif
 
@@ -39,7 +39,7 @@ using std::nullopt;
 using std::optional;
 using std::string;
 
-#if defined(CONTOUR_FRONTEND_XCB)
+#ifdef CONTOUR_FRONTEND_XCB
 namespace
 {
     struct XcbPropertyInfo

@@ -45,20 +45,20 @@
 #include <ranges>
 #include <regex>
 
-#if defined(__OpenBSD__)
+#ifdef __OpenBSD__
     #include <pthread_np.h>
     #define pthread_setname_np pthread_set_name_np
-#elif !defined(_WIN32)
+#elifndef _WIN32
     #include <pthread.h>
 #endif
 
-#if !defined(_MSC_VER)
+#ifndef _MSC_VER
     #include <csignal>
 
     #include <unistd.h>
 #endif
 
-#if defined(_MSC_VER)
+#ifdef _MSC_VER
     #define __PRETTY_FUNCTION__ __FUNCDNAME__
 #endif
 
@@ -80,9 +80,9 @@ namespace
 
     void setThreadName(char const* name)
     {
-#if defined(__APPLE__)
+#ifdef __APPLE__
         pthread_setname_np(name);
-#elif !defined(_WIN32)
+#elifndef _WIN32
         pthread_setname_np(pthread_self(), name);
 #endif
     }
@@ -107,7 +107,7 @@ namespace
 
     string normalize_crlf(QString&& text)
     {
-#if !defined(_WIN32)
+#ifndef _WIN32
         return text.replace("\r\n", "\n").replace("\r", "\n").toUtf8().toStdString();
 #else
         return text.toUtf8().toStdString();
@@ -831,7 +831,7 @@ void TerminalSession::inspect()
 
 void TerminalSession::notify(string_view title, string_view content)
 {
-#if defined(__linux__)
+#ifdef __linux__
     auto notification = vtbackend::DesktopNotification {};
     notification.title = std::string(title);
     notification.body = std::string(content);
@@ -851,7 +851,7 @@ void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification con
                  : QStringLiteral("%1: %2").arg(QString::fromStdString(notification.title),
                                                 QString::fromStdString(notification.body)));
 
-#if defined(__linux__)
+#ifdef __linux__
     _desktopNotifier.notify(notification);
 
     // Connect close event reporting if requested.
@@ -910,7 +910,7 @@ void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification con
 
 void TerminalSession::discardDesktopNotification(std::string_view identifier)
 {
-#if defined(__linux__)
+#ifdef __linux__
     _desktopNotifier.close(std::string(identifier));
 #else
     (void) identifier;
@@ -954,7 +954,7 @@ void TerminalSession::onClosed()
         else
             sessionLog()("Process terminated after {} seconds.", diff.count());
     }
-#if defined(VTPTY_LIBSSH2)
+#ifdef VTPTY_LIBSSH2
     else if (auto* sshSession = dynamic_cast<vtpty::SshSession*>(&_terminal.device()))
     {
         auto const exitStatus = sshSession->exitStatus();
@@ -1223,7 +1223,7 @@ QString TerminalSession::title() const
     // windowTitle() reference, which would tear (or use-after-free on a string reallocation) against that
     // writer. Native tabs/splits make these GUI-thread title reads far more frequent.
     auto const windowTitle = resolvedWindowTitle();
-#if !defined(NDEBUG)
+#ifndef NDEBUG
     return QString::fromStdString(windowTitle + " - Contour (DEBUG)");
 #else
     return QString::fromStdString(windowTitle + " - Contour");
@@ -2801,7 +2801,7 @@ bool TerminalSession::executeAction(actions::Action const& action)
 
 std::string TerminalSession::workingDirectory() const
 {
-#if !defined(_WIN32)
+#ifndef _WIN32
     if (auto const* ptyProcess = dynamic_cast<vtpty::Process const*>(&_terminal.device()))
         return ptyProcess->workingDirectory();
 #else
@@ -2846,7 +2846,7 @@ std::string TerminalSession::displayWorkingDirectory() const
     // Nothing reported (no shell integration, or not yet): fall back to where the session was started.
     // Unlike workingDirectory() this is NOT filtered for local existence — a path worth SHOWING need not
     // be one a child could be spawned in.
-#if !defined(_WIN32)
+#ifndef _WIN32
     if (auto const* ptyProcess = dynamic_cast<vtpty::Process const*>(&_terminal.device()))
         return ptyProcess->workingDirectory();
 #endif

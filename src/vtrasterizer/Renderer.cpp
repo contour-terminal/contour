@@ -10,7 +10,7 @@
 #include <crispy/StrongLRUHashtable.h>
 #include <crispy/utils.h>
 
-#if defined(_WIN32)
+#ifdef _WIN32
     #include <text_shaper/directwrite_shaper.h>
 #endif
 
@@ -101,7 +101,7 @@ namespace
         switch (engine)
         {
             case TextShapingEngine::DWrite:
-#if defined(_WIN32)
+#ifdef _WIN32
                 rendererLog()("Using DirectWrite text shaping engine.");
                 // TODO: do we want to use custom font locator here?
                 return make_unique<text::directwrite_shaper>(dpi, locator);
@@ -111,7 +111,7 @@ namespace
 #endif
 
             case TextShapingEngine::CoreText:
-#if defined(__APPLE__)
+#ifdef __APPLE__
                 rendererLog()("CoreText not yet implemented.");
                 break;
 #else

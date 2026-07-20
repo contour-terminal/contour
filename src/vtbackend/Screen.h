@@ -974,7 +974,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     std::shared_ptr<regis::ReGISTextRasterizer> _regisTextRasterizer;
     std::unique_ptr<regis::ReGISEvents> _regisEvents;
 
-#if defined(LIBTERMINAL_LOG_TRACE)
+#ifdef LIBTERMINAL_LOG_TRACE
     std::atomic<bool> _logCharTrace = true;
     std::string _pendingCharTraceLog;
 #endif

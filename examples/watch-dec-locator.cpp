@@ -15,7 +15,7 @@
 #include <format>
 #include <string_view>
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
     #include <util.h>
 #else
     #include <termios.h>

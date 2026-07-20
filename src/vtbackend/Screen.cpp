@@ -46,7 +46,7 @@
 #include <type_traits>
 #include <variant>
 
-#if defined(_WIN32)
+#ifdef _WIN32
     #include <Windows.h>
 #endif
 
@@ -115,12 +115,12 @@ namespace // {{{ helper
     template <typename Rep, typename Period>
     inline void sleep_for(std::chrono::duration<Rep, Period> const& rtime)
     {
-#if defined(USE_SLEEP_FOR_FROM_STD_CHRONO)
+#ifdef USE_SLEEP_FOR_FROM_STD_CHRONO
         std::this_thread::sleep_for(rtime);
 #else
         if (rtime.count() <= 0)
             return;
-    #if defined(_WIN32)
+    #ifdef _WIN32
         auto const ms = std::chrono::duration_cast<std::chrono::milliseconds>(rtime);
         Sleep(ms.count());
     #else
@@ -561,7 +561,7 @@ void Screen::advanceCursorAfterWrite(ColumnCount n) noexcept
 
 void Screen::writeText(string_view text, size_t cellCount)
 {
-#if defined(LIBTERMINAL_LOG_TRACE)
+#ifdef LIBTERMINAL_LOG_TRACE
     if (vtTraceSequenceLog)
         vtTraceSequenceLog()(
             "[{}] text: ({} bytes, {} cells): \"{}\"", _name, text.size(), cellCount, escape(text));
@@ -737,7 +737,7 @@ void Screen::writeText(string_view text, size_t cellCount)
 
 void Screen::writeTextEnd()
 {
-#if defined(LIBTERMINAL_LOG_TRACE)
+#ifdef LIBTERMINAL_LOG_TRACE
     // Do not log individual characters, as we already logged the whole string above
     if (!_pendingCharTraceLog.empty())
     {
@@ -757,7 +757,7 @@ void Screen::writeTextEnd()
 
 void Screen::writeTextFromExternal(std::string_view text)
 {
-#if defined(LIBTERMINAL_LOG_TRACE)
+#ifdef LIBTERMINAL_LOG_TRACE
     if (vtTraceSequenceLog)
         vtTraceSequenceLog()("external text: \"{}\"", text);
 #endif
@@ -780,7 +780,7 @@ void Screen::crlfIfWrapPending()
 
 void Screen::writeText(char32_t codepoint)
 {
-#if defined(LIBTERMINAL_LOG_TRACE)
+#ifdef LIBTERMINAL_LOG_TRACE
     if (vtTraceSequenceLog && _logCharTrace.load())
         _pendingCharTraceLog += unicode::convert_to<char>(codepoint);
 #endif
@@ -890,7 +890,7 @@ void Screen::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
 
     auto cell = line.useCellAt(_cursor.position.column);
 
-#if defined(LINE_AVOID_CELL_RESET)
+#ifdef LINE_AVOID_CELL_RESET
     bool const consecutiveTextWrite = _terminal->instructionCounter() == 1;
     if (!consecutiveTextWrite)
         cell.reset();
@@ -4597,7 +4597,7 @@ namespace impl
 
 void Screen::executeControlCode(char controlCode)
 {
-#if defined(LIBTERMINAL_LOG_TRACE)
+#ifdef LIBTERMINAL_LOG_TRACE
     // Flush any pending text trace before processing the control code.
     // Without this, when the parser's bulk text optimization processes
     // text → C0 → text inline (without leaving Ground state), writeTextEnd()
@@ -5670,7 +5670,7 @@ void Screen::renderKittyImage(kitty_graphics::Command const& command,
 
 void Screen::processSequence(Sequence const& seq)
 {
-#if defined(LIBTERMINAL_LOG_TRACE)
+#ifdef LIBTERMINAL_LOG_TRACE
     if (vtTraceSequenceLog)
     {
         if (auto const* fd = seq.functionDefinition(_terminal->activeSequences()))

@@ -24,7 +24,7 @@ namespace crispy
 /// Function signature for custom assertion failure handlers.
 using fail_handler_t = std::function<void(std::string_view, std::string_view, std::string_view, int)>;
 
-#if defined(__GNUC__)
+#ifdef __GNUC__
 // GCC 4.8+, Clang, Intel and other compilers compatible with GCC (-std=c++0x or above)
 [[noreturn]] inline __attribute__((always_inline)) void unreachable()
 {

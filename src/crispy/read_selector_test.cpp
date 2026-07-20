@@ -3,7 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#if !defined(_WIN32)
+#ifndef _WIN32
     #include <array>
     #include <atomic>
     #include <chrono>

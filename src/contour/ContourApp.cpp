@@ -26,13 +26,13 @@
 #include <iostream>
 #include <memory>
 
-#if !defined(_WIN32)
+#ifndef _WIN32
     #include <sys/ioctl.h>
 
     #include <unistd.h>
 #endif
 
-#if defined(_WIN32)
+#ifdef _WIN32
     #include <Windows.h>
 #endif
 
@@ -56,7 +56,7 @@ namespace contour
 // {{{ helper
 namespace
 {
-#if defined(__linux__)
+#ifdef __linux__
     void crashLogger(std::ostream& out)
     {
         out << "Contour version: " << CONTOUR_VERSION_STRING << "\r\n"
@@ -121,7 +121,7 @@ ContourApp::ContourApp(): app("contour", "Contour Terminal Emulator", CONTOUR_VE
 {
     using Project = crispy::cli::about::project;
     crispy::cli::about::registerProjects(
-#if defined(CONTOUR_BUILD_WITH_MIMALLOC)
+#ifdef CONTOUR_BUILD_WITH_MIMALLOC
         Project { "mimalloc", "", "" },
 #endif
         Project { "Qt", "GPL", "https://www.qt.io/" },
@@ -133,7 +133,7 @@ ContourApp::ContourApp(): app("contour", "Contour Terminal Emulator", CONTOUR_VE
         Project { "termbench-pro", "Apache-2.0", "https://github.com/contour-terminal/termbench-pro" },
         Project { "fmt", "MIT", "https://github.com/fmtlib/fmt" });
 
-#if defined(__linux__)
+#ifdef __linux__
     auto crashLogDirPath = crispy::app::instance()->localStateDir() / "crash";
     crashLogDir = crashLogDirPath.string();
     auto errorCode = std::error_code {};
@@ -146,7 +146,7 @@ ContourApp::ContourApp(): app("contour", "Contour Terminal Emulator", CONTOUR_VE
     signal(SIGABRT, segvHandler);
 #endif
 
-#if defined(_WIN32)
+#ifdef _WIN32
     // Enable VT output processing on Conhost.
     HANDLE stdoutHandle = GetStdHandle(STD_OUTPUT_HANDLE);
     DWORD savedModes {}; // NOTE: Is it required to restore that upon process exit?

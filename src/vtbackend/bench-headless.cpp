@@ -175,7 +175,7 @@ class ContourHeadlessBench: public crispy::app
     {
         using Project = crispy::cli::about::project;
         crispy::cli::about::registerProjects(
-#if defined(CONTOUR_BUILD_WITH_MIMALLOC)
+#ifdef CONTOUR_BUILD_WITH_MIMALLOC
             Project { "mimalloc", "", "" },
 #endif
             Project { "yaml-cpp", "MIT", "https://github.com/jbeder/yaml-cpp" },

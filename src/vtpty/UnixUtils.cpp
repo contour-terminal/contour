@@ -14,7 +14,7 @@ namespace vtpty
 
 UnixPipe::UnixPipe(unsigned flags): pfd { -1, -1 }
 {
-#if defined(__linux__)
+#ifdef __linux__
     if (pipe2(pfd.data(), static_cast<int>(flags)) < 0)
         throw std::runtime_error { "Failed to create PTY pipe. "s + strerror(errno) };
 #else

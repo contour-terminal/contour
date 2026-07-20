@@ -13,7 +13,7 @@ auto inline const vtParserLog = logstore::category("vt.parser",
                                                    logstore::category::state::Enabled,
                                                    logstore::category::visibility::Hidden);
 
-#if defined(LIBTERMINAL_LOG_TRACE)
+#ifdef LIBTERMINAL_LOG_TRACE
 auto inline const vtTraceSequenceLog = logstore::category("vt.trace.sequence", "Logs terminal screen trace.");
 #endif
 

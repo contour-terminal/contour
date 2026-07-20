@@ -17,16 +17,16 @@
 #include <stdexcept>
 #include <string>
 
-#if !defined(__FreeBSD__)
+#ifndef __FreeBSD__
     #include <utmp.h>
 #endif
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
     #include <libproc.h>
     #include <util.h>
 #endif
 
-#if defined(__linux__)
+#ifdef __linux__
     #include <pty.h>
 #endif
 
@@ -80,12 +80,12 @@ namespace
 
     void closeAllFileDescriptorsAbove(int keepFd)
     {
-#if defined(HAVE_CLOSE_RANGE)
+#ifdef HAVE_CLOSE_RANGE
         if (close_range(keepFd + 1, ~0U, 0) == 0)
             return;
 #endif
 
-#if defined(__linux__)
+#ifdef __linux__
         try
         {
             for (auto const& entry: fs::directory_iterator("/proc/self/fd"))
@@ -348,7 +348,7 @@ vector<string> Process::loginShell(bool escapeSandbox)
 {
     if (passwd const* pw = getpwuid(getuid()); pw != nullptr)
     {
-#if defined(__APPLE__)
+#ifdef __APPLE__
         crispy::ignore_unused(escapeSandbox);
         return { pw->pw_shell };
 #else
@@ -398,7 +398,7 @@ fs::path Process::homeDirectory()
 
 string Process::workingDirectory() const
 {
-#if defined(__linux__)
+#ifdef __linux__
     try
     {
         auto const path = fs::path { std::format("/proc/{}/cwd", _d->pid) };
@@ -410,7 +410,7 @@ string Process::workingDirectory() const
         // ignore failure, and use default instead.
         return "."s;
     }
-#elif defined(__APPLE__)
+#elifdef __APPLE__
     try
     {
         auto vpi = proc_vnodepathinfo {};

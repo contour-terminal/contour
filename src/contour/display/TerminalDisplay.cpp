@@ -53,7 +53,7 @@
 
 namespace fs = std::filesystem;
 
-#if defined(_MSC_VER)
+#ifdef _MSC_VER
     #define __PRETTY_FUNCTION__ __FUNCDNAME__
 #endif
 
@@ -647,7 +647,7 @@ void TerminalDisplay::logDisplayInfo()
     // reading them per line (5 + 2 times) would do 7 locked deep copies for one diagnostic dump.
     auto const gm = gridMetrics();
     auto const fd = _renderer->fontDescriptions();
-#if defined(CONTOUR_BUILD_TYPE)
+#ifdef CONTOUR_BUILD_TYPE
     displayLog()("[FYI] Build type          : {}", CONTOUR_BUILD_TYPE);
 #endif
     displayLog()("[FYI] Application PID     : {}", QCoreApplication::applicationPid());
@@ -995,7 +995,7 @@ void TerminalDisplay::paint()
     {
         [[maybe_unused]] auto const lastState = _state.fetchAndClear();
 
-#if defined(CONTOUR_PERF_STATS)
+#ifdef CONTOUR_PERF_STATS
         {
             ++renderCount_;
             auto const updateCount = stats_.updatesSinceRendering.exchange(0);

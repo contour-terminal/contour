@@ -22,14 +22,14 @@
 
 #if defined(__APPLE__) || defined(__OpenBSD__)
     #include <util.h>
-#elif defined(__FreeBSD__)
+#elifdef __FreeBSD__
     #include <libutil.h>
 #else
     #include <pty.h>
 #endif
 
 #include <fcntl.h>
-#if !defined(__FreeBSD__)
+#ifndef __FreeBSD__
     #include <utmp.h>
 #endif
 #include <sys/ioctl.h>
@@ -76,7 +76,7 @@ namespace
                            .ws_xpixel = unbox<unsigned short>(pixels.value_or(ImageSize {}).width),
                            .ws_ypixel = unbox<unsigned short>(pixels.value_or(ImageSize {}).height) };
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
         auto* wsa = const_cast<winsize*>(&ws);
 #else
         winsize const* wsa = &ws;
@@ -175,7 +175,7 @@ bool UnixPty::Slave::login()
 
     setsid();
 
-#if defined(TIOCSCTTY)
+#ifdef TIOCSCTTY
     // Set the controlling terminal, unless we are running inside a flatpak.
     // Because flatpak does not allow setting the controlling terminal.
     // - https://github.com/flatpak/flatpak/issues/3697

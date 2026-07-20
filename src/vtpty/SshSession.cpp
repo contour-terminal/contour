@@ -2,7 +2,7 @@
 
 // clang-format off
 #include <system_error>
-#if defined(_WIN32)
+#ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
     #include <winsock2.h>
     #include <windows.h>
@@ -29,7 +29,7 @@
 #include <libssh2.h>
 #include <libssh2_publickey.h>
 
-#if not defined(_WIN32)
+#ifndef _WIN32
     #include <sys/ioctl.h>
     #include <sys/select.h>
     #include <sys/socket.h>
@@ -66,7 +66,7 @@ using crispy::file_descriptor;
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 
-#if defined(_WIN32)
+#ifdef _WIN32
 template <>
 struct crispy::close_native_handle<SOCKET>
 {
@@ -136,19 +136,19 @@ namespace
             case LIBSSH2_ERROR_ENCRYPT: return "Encryption error";
             case LIBSSH2_ERROR_BAD_SOCKET: return "Bad socket";
             case LIBSSH2_ERROR_KNOWN_HOSTS: return "Known hosts error";
-#if defined(LIBSSH2_ERROR_CHANNEL_WINDOW_FULL)
+#ifdef LIBSSH2_ERROR_CHANNEL_WINDOW_FULL
             case LIBSSH2_ERROR_CHANNEL_WINDOW_FULL: return "Window full";
 #endif
-#if defined(LIBSSH2_ERROR_KEYFILE_AUTH_FAILED)
+#ifdef LIBSSH2_ERROR_KEYFILE_AUTH_FAILED
             case LIBSSH2_ERROR_KEYFILE_AUTH_FAILED: return "Keyfile authentication failed";
 #endif
-#if defined(LIBSSH2_ERROR_RANDGEN)
+#ifdef LIBSSH2_ERROR_RANDGEN
             case LIBSSH2_ERROR_RANDGEN: return "Random generator error";
 #endif
-#if defined(LIBSSH2_ERROR_MISSING_USERAUTH_BANNER)
+#ifdef LIBSSH2_ERROR_MISSING_USERAUTH_BANNER
             case LIBSSH2_ERROR_MISSING_USERAUTH_BANNER: return "Missing userauth banner";
 #endif
-#if defined(LIBSSH2_ERROR_ALGO_UNSUPPORTED)
+#ifdef LIBSSH2_ERROR_ALGO_UNSUPPORTED
             case LIBSSH2_ERROR_ALGO_UNSUPPORTED: return "Unsupported algorithm";
 #endif
             default: return "Unknown error";
@@ -159,22 +159,22 @@ namespace
     {
         switch (type)
         {
-#if defined(LIBSSH2_HOSTKEY_TYPE_RSA)
+#ifdef LIBSSH2_HOSTKEY_TYPE_RSA
             case LIBSSH2_HOSTKEY_TYPE_RSA: return LIBSSH2_KNOWNHOST_KEY_SSHRSA;
 #endif
-#if defined(LIBSSH2_HOSTKEY_TYPE_DSS)
+#ifdef LIBSSH2_HOSTKEY_TYPE_DSS
             case LIBSSH2_HOSTKEY_TYPE_DSS: return LIBSSH2_KNOWNHOST_KEY_SSHDSS;
 #endif
-#if defined(LIBSSH2_HOSTKEY_TYPE_ECDSA_256)
+#ifdef LIBSSH2_HOSTKEY_TYPE_ECDSA_256
             case LIBSSH2_HOSTKEY_TYPE_ECDSA_256: return LIBSSH2_KNOWNHOST_KEY_ECDSA_256;
 #endif
-#if defined(LIBSSH2_HOSTKEY_TYPE_ECDSA_384)
+#ifdef LIBSSH2_HOSTKEY_TYPE_ECDSA_384
             case LIBSSH2_HOSTKEY_TYPE_ECDSA_384: return LIBSSH2_KNOWNHOST_KEY_ECDSA_384;
 #endif
-#if defined(LIBSSH2_HOSTKEY_TYPE_ECDSA_521)
+#ifdef LIBSSH2_HOSTKEY_TYPE_ECDSA_521
             case LIBSSH2_HOSTKEY_TYPE_ECDSA_521: return LIBSSH2_KNOWNHOST_KEY_ECDSA_521;
 #endif
-#if defined(LIBSSH2_HOSTKEY_TYPE_ED25519)
+#ifdef LIBSSH2_HOSTKEY_TYPE_ED25519
             case LIBSSH2_HOSTKEY_TYPE_ED25519: return LIBSSH2_KNOWNHOST_KEY_ED25519;
 #endif
             default: return LIBSSH2_KNOWNHOST_KEY_UNKNOWN;
@@ -185,22 +185,22 @@ namespace
     {
         switch (hostkeyType)
         {
-#if defined(LIBSSH2_HOSTKEY_TYPE_RSA)
+#ifdef LIBSSH2_HOSTKEY_TYPE_RSA
             case LIBSSH2_HOSTKEY_TYPE_RSA: return "RSA";
 #endif
-#if defined(LIBSSH2_HOSTKEY_TYPE_DSS)
+#ifdef LIBSSH2_HOSTKEY_TYPE_DSS
             case LIBSSH2_HOSTKEY_TYPE_DSS: return "DSA";
 #endif
-#if defined(LIBSSH2_HOSTKEY_TYPE_ECDSA_256)
+#ifdef LIBSSH2_HOSTKEY_TYPE_ECDSA_256
             case LIBSSH2_HOSTKEY_TYPE_ECDSA_256: return "ECDSA-256";
 #endif
-#if defined(LIBSSH2_HOSTKEY_TYPE_ECDSA_384)
+#ifdef LIBSSH2_HOSTKEY_TYPE_ECDSA_384
             case LIBSSH2_HOSTKEY_TYPE_ECDSA_384: return "ECDSA-384";
 #endif
-#if defined(LIBSSH2_HOSTKEY_TYPE_ECDSA_521)
+#ifdef LIBSSH2_HOSTKEY_TYPE_ECDSA_521
             case LIBSSH2_HOSTKEY_TYPE_ECDSA_521: return "ECDSA-521";
 #endif
-#if defined(LIBSSH2_HOSTKEY_TYPE_ED25519)
+#ifdef LIBSSH2_HOSTKEY_TYPE_ED25519
             case LIBSSH2_HOSTKEY_TYPE_ED25519: return "ED25519";
 #endif
             default: return std::unexpected { hostkeyType };
@@ -313,7 +313,7 @@ class SshPtySlave final: public PtySlave
 };
 // }}}
 
-#if defined(_WIN32)
+#ifdef _WIN32
 // Why is it, that Windows API is so much more complicated than POSIX? Extrawurst!
 using socket_handle = crispy::native_handle<SOCKET, INVALID_SOCKET>;
 #else
@@ -481,7 +481,7 @@ SshSession::SshSession(SshHostConfig config, SshHostkeyVerificationRequestCallba
 {
     libssh2_init(0); // TODO: call only once?
 
-#if defined(SSH_SESSION_NB_IO)
+#ifdef SSH_SESSION_NB_IO
     libssh2_session_set_blocking(_p->sshSession, 0);
 #endif
 
@@ -515,7 +515,7 @@ SshSession::~SshSession()
         _p->sshSession = nullptr;
     }
 
-#if defined(_WIN32)
+#ifdef _WIN32
     WSACleanup();
 #endif
 }
@@ -1139,7 +1139,7 @@ void SshSession::logError(std::string_view message) const
 
 bool SshSession::connect(std::string_view host, int port)
 {
-#if defined(_WIN32)
+#ifdef _WIN32
     WSADATA wsaData {};
     if (auto const wsaStartupCode = WSAStartup(MAKEWORD(2, 2), &wsaData); wsaStartupCode != 0)
     {
@@ -1318,7 +1318,7 @@ int SshSession::waitForSocket(std::optional<std::chrono::milliseconds> timeout)
 
     _p->wantsWaitForSocket = false;
 
-#if defined(SSH_SESSION_NB_IO)
+#ifdef SSH_SESSION_NB_IO
     fd_set fd;
     fd_set* writefd = nullptr;
     fd_set* readfd = nullptr;

@@ -119,7 +119,7 @@ namespace // {{{ helpers
             value.pop_back();
     }
 
-#if defined(CONTOUR_PERF_STATS)
+#ifdef CONTOUR_PERF_STATS
     void logRenderBufferSwap(bool success, uint64_t frameID)
     {
         if (!renderBufferLog)
@@ -294,7 +294,7 @@ void Terminal::setLastMarkRangeOffset(LineOffset value) noexcept
 std::optional<Terminal::PtyReadResult> Terminal::readFromPty()
 {
     auto const timeout =
-#if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
         (_renderBuffer.state == RenderBufferState::WaitingForRefresh && !_screenDirty)
             ? std::optional { _refreshInterval.value }
             : std::chrono::milliseconds(0);
@@ -411,7 +411,7 @@ bool Terminal::processInputOnce()
     if (!_modes.enabled(DECMode::BatchedRendering))
         screenUpdated();
 
-#if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
     ensureFreshRenderBuffer();
 #endif
 
@@ -474,11 +474,11 @@ bool Terminal::ensureFreshRenderBuffer(bool locked)
         case RenderBufferState::TrySwapBuffers: {
             [[maybe_unused]] auto const success = _renderBuffer.swapBuffers(_currentTime);
 
-#if defined(CONTOUR_PERF_STATS)
+#ifdef CONTOUR_PERF_STATS
             logRenderBufferSwap(success, _lastFrameID);
 #endif
 
-#if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
             // Passively invoked by the terminal thread -> do inform render thread about updates.
             if (success)
                 _eventListener.renderBufferUpdated();
@@ -562,7 +562,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     _screenDirty = false;
     ++_lastFrameID;
 
-#if defined(CONTOUR_PERF_STATS)
+#ifdef CONTOUR_PERF_STATS
     if (terminalLog)
         terminalLog()("{}: Refreshing render buffer.\n", _lastFrameID.load());
 #endif
@@ -2109,7 +2109,7 @@ void Terminal::reportInBandWindowResize()
 
 void Terminal::verifyState()
 {
-#if defined(CONTOUR_VERIFY_STATE)
+#ifdef CONTOUR_VERIFY_STATE
     auto const thePageSize = _settings.pageSize;
     Require(*_currentMousePosition.column < *thePageSize.columns);
     Require(*_currentMousePosition.line < *thePageSize.lines);

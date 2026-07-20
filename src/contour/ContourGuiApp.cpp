@@ -231,7 +231,7 @@ void ContourGuiApp::onExit(TerminalSession& session)
 {
     if (auto const* localProcess = dynamic_cast<vtpty::Process const*>(&session.terminal().device()))
         _exitStatus = localProcess->checkStatus();
-#if defined(VTPTY_LIBSSH2)
+#ifdef VTPTY_LIBSSH2
     else if (auto const* sshSession = dynamic_cast<vtpty::SshSession const*>(&session.terminal().device()))
         _exitStatus = sshSession->exitStatus();
 #endif
@@ -450,7 +450,7 @@ int ContourGuiApp::terminalGuiAction()
             return EXIT_FAILURE;
     }
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
     QGuiApplication::setAttribute(Qt::AA_MacDontSwapCtrlAndMeta, true);
 #endif
 
@@ -500,7 +500,7 @@ int ContourGuiApp::terminalGuiAction()
         }
     }
 
-#if defined(__linux__)
+#ifdef __linux__
     addQtArgIfSet("contour.terminal.display", "-display");
 #endif
 

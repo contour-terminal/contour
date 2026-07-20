@@ -10,7 +10,7 @@
 #include <contour/HyperlinkTooltip.h>
 #include <contour/SpeechSynthesizer.h>
 #include <contour/display/Announcer.h>
-#if defined(__linux__)
+#ifdef __linux__
     #include <contour/FreeDesktopNotifier.h>
 #endif
 #include <contour/helper.h>
@@ -853,7 +853,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// own shortly after startup.
     std::atomic<bool> _terminationRequested = false;
 
-#if defined(__linux__)
+#ifdef __linux__
     FreeDesktopNotifier _desktopNotifier;
 #endif
 };

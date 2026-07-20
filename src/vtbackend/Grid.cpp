@@ -143,7 +143,7 @@ void Grid::clearHistory()
 
 void Grid::verifyState() const noexcept
 {
-#if defined(CONTOUR_VERIFY_STATE)
+#ifdef CONTOUR_VERIFY_STATE
     Require(LineCount::cast_from(_lines.size()) >= totalLineCount());
     Require(LineCount::cast_from(_lines.size()) >= _linesUsed);
     Require(_linesUsed >= _pageSize.lines);

@@ -48,7 +48,7 @@ struct TextClusterGroup
     TextStyle style {};
     vtbackend::LineFlags flags = vtbackend::LineFlag::None;
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
     // NB: Don't use default implementation for operator<=>,
     // as it's not yet supported by std::vector<> on macOS it seems.
     bool operator==(TextClusterGroup const& other) const noexcept

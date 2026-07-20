@@ -67,9 +67,9 @@ TEST_CASE("Other (Linux/BSD) accepts OpenGL and Vulkan, rejects Metal and Direct
 
 TEST_CASE("currentRhiPlatform matches the host this test was built for", "[rendering-backend]")
 {
-#if defined(_WIN32)
+#ifdef _WIN32
     CHECK(currentRhiPlatform() == RhiPlatform::Windows);
-#elif defined(__APPLE__)
+#elifdef __APPLE__
     CHECK(currentRhiPlatform() == RhiPlatform::MacOS);
 #else
     CHECK(currentRhiPlatform() == RhiPlatform::Other);

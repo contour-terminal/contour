@@ -108,9 +108,9 @@ struct SizeHintPolicy
 /// @return The compile-time @ref SizeHintPlatform.
 [[nodiscard]] constexpr SizeHintPlatform currentSizeHintPlatform() noexcept
 {
-#if defined(_WIN32)
+#ifdef _WIN32
     return SizeHintPlatform::Windows;
-#elif defined(__APPLE__)
+#elifdef __APPLE__
     return SizeHintPlatform::MacOS;
 #else
     return SizeHintPlatform::Other;

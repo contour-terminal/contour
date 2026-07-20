@@ -24,9 +24,9 @@ enum class RhiPlatform : uint8_t
 /// @return The compile-time @ref RhiPlatform.
 [[nodiscard]] constexpr RhiPlatform currentRhiPlatform() noexcept
 {
-#if defined(_WIN32)
+#ifdef _WIN32
     return RhiPlatform::Windows;
-#elif defined(__APPLE__)
+#elifdef __APPLE__
     return RhiPlatform::MacOS;
 #else
     return RhiPlatform::Other;

@@ -12,7 +12,7 @@
 // NB: That should be defined via CMakeLists.txt's option()...
 // #define STRONGHASH_USE_INTRINSICS 1
 
-#if defined(STRONGHASH_USE_INTRINSICS)
+#ifdef STRONGHASH_USE_INTRINSICS
     #include <crispy/Intrinsics.h>
 #else
     #include <crispy/FNV.h>
@@ -31,7 +31,7 @@ struct strong_hash
 
     strong_hash(uint32_t a, uint32_t b, uint32_t c, uint32_t d) noexcept;
 
-#if defined(STRONGHASH_USE_INTRINSICS)
+#ifdef STRONGHASH_USE_INTRINSICS
     explicit strong_hash(Intrinsics::m128i v) noexcept;
 #endif
 
@@ -56,14 +56,14 @@ struct strong_hash
     // TODO: Provide access also to: a, b, c.
     [[nodiscard]] uint32_t d() const noexcept
     {
-#if defined(STRONGHASH_USE_INTRINSICS)
+#ifdef STRONGHASH_USE_INTRINSICS
         return static_cast<uint32_t>(Intrinsics::castToInt32(value));
 #else
         return value[3];
 #endif
     }
 
-#if defined(STRONGHASH_USE_INTRINSICS)
+#ifdef STRONGHASH_USE_INTRINSICS
     Intrinsics::m128i value {};
 #else
     std::array<uint32_t, 4> value;
@@ -71,7 +71,7 @@ struct strong_hash
 };
 
 inline strong_hash::strong_hash(uint32_t a, uint32_t b, uint32_t c, uint32_t d) noexcept:
-#if defined(STRONGHASH_USE_INTRINSICS)
+#ifdef STRONGHASH_USE_INTRINSICS
     strong_hash(Intrinsics::xor128(Intrinsics::load32(a, b, c, d),
                                    Intrinsics::loadUnaligned((__m128i const*) defaultSeed.data())))
 #else
@@ -80,7 +80,7 @@ inline strong_hash::strong_hash(uint32_t a, uint32_t b, uint32_t c, uint32_t d) 
 {
 }
 
-#if defined(STRONGHASH_USE_INTRINSICS)
+#ifdef STRONGHASH_USE_INTRINSICS
 inline strong_hash::strong_hash(__m128i v) noexcept: value { v }
 {
 }
@@ -88,7 +88,7 @@ inline strong_hash::strong_hash(__m128i v) noexcept: value { v }
 
 inline bool operator==(strong_hash a, strong_hash b) noexcept
 {
-#if defined(STRONGHASH_USE_INTRINSICS)
+#ifdef STRONGHASH_USE_INTRINSICS
     return Intrinsics::compare(a.value, b.value);
 #else
     return a.value == b.value;
@@ -102,7 +102,7 @@ inline bool operator!=(strong_hash a, strong_hash b) noexcept
 
 inline strong_hash operator*(strong_hash const& a, strong_hash const& b) noexcept
 {
-#if defined(STRONGHASH_USE_INTRINSICS)
+#ifdef STRONGHASH_USE_INTRINSICS
     Intrinsics::m128i hashValue = a.value;
 
     hashValue = Intrinsics::xor128(hashValue, b.value);
@@ -153,7 +153,7 @@ strong_hash strong_hash::compute(T const& value) noexcept
 
 inline strong_hash strong_hash::compute(void const* data, size_t n) noexcept
 {
-#if defined(STRONGHASH_USE_INTRINSICS)
+#ifdef STRONGHASH_USE_INTRINSICS
     static_assert(sizeof(__m128i) == 16);
     auto constexpr ChunkSize = static_cast<int>(sizeof(__m128i));
 
@@ -225,7 +225,7 @@ inline std::string to_structured_string(strong_hash const& hash)
 
 inline int to_integer(strong_hash hash) noexcept
 {
-#if defined(STRONGHASH_USE_INTRINSICS)
+#ifdef STRONGHASH_USE_INTRINSICS
     return Intrinsics::castToInt32(hash.value);
 #else
     return static_cast<int>(hash.value.back());
@@ -245,7 +245,7 @@ struct strong_hasher<uint64_t>
     {
         auto const c = static_cast<uint32_t>((v >> 32) & 0xFFFFFFFFu);
         auto const d = static_cast<uint32_t>(v & 0xFFFFFFFFu);
-#if defined(STRONGHASH_USE_INTRINSICS)
+#ifdef STRONGHASH_USE_INTRINSICS
         return strong_hash { Intrinsics::load32(0, 0, c, d) };
 #else
         return strong_hash { 0, 0, c, d };
@@ -260,7 +260,7 @@ namespace detail
     {
         inline strong_hash operator()(T v) noexcept
         {
-#if defined(STRONGHASH_USE_INTRINSICS)
+#ifdef STRONGHASH_USE_INTRINSICS
             return strong_hash { Intrinsics::load32(0, 0, 0, v) };
 #else
             return strong_hash { 0, 0, 0, static_cast<uint32_t>(v) };

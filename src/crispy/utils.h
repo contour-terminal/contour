@@ -18,7 +18,7 @@
 #include <unordered_map>
 #include <vector>
 
-#if defined(CRISPY_CONCEPTS_SUPPORTED)
+#ifdef CRISPY_CONCEPTS_SUPPORTED
     #include <concepts>
 #endif
 
@@ -411,7 +411,7 @@ class finally // NOLINT(readability-identifier-naming)
     std::function<void()> _hook {};
 };
 
-#if defined(CRISPY_CONCEPTS_SUPPORTED)
+#ifdef CRISPY_CONCEPTS_SUPPORTED
 
 // clang-format off
 template <typename T>

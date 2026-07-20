@@ -118,7 +118,7 @@ struct std::formatter<vtpty::Process::ExitStatus>: std::formatter<std::string>
                                    },
                                     [&](vtpty::Process::SignalExit exit) {
                                         char buf[256];
-#if defined(_WIN32)
+#ifdef _WIN32
                                         strerror_s(buf, sizeof(buf), errno);
                                         return std::format("{} (signal number {})", buf, exit.signum);
 #else

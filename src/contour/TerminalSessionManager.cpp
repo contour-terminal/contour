@@ -12,7 +12,7 @@
 #include <vtbackend/primitives.h>
 
 #include <vtpty/Process.h>
-#if defined(VTPTY_LIBSSH2)
+#ifdef VTPTY_LIBSSH2
     #include <vtpty/SshSession.h>
 #endif
 

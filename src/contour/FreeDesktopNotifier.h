@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#if defined(__linux__)
+#ifdef __linux__
 
     #include <contour/NotificationRouter.h>
 

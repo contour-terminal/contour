@@ -21,7 +21,7 @@
 #include <tuple>
 
 // clang-format off
-#if defined(_WIN32)
+#ifdef _WIN32
     #include <Winsock2.h>
 #else
     #include <fcntl.h>
@@ -31,7 +31,7 @@
 #endif
 // clang-format on
 
-#if !defined(STDIN_FILENO)
+#ifndef STDIN_FILENO
     #define STDIN_FILENO 0
 #endif
 
@@ -97,7 +97,7 @@ namespace
     struct TTY final: CaptureTransport
     {
         bool configured = false;
-#if !defined(_WIN32)
+#ifndef _WIN32
         int fd = -1;
         termios savedModes {};
 #else
@@ -106,7 +106,7 @@ namespace
 
         ~TTY() override
         {
-#if !defined(_WIN32)
+#ifndef _WIN32
             tcsetattr(fd, TCSANOW, &savedModes);
 #else
             auto stdinHandle = GetStdHandle(STD_INPUT_HANDLE);
@@ -116,7 +116,7 @@ namespace
 
         TTY()
         {
-#if !defined(_WIN32)
+#ifndef _WIN32
             fd = open("/dev/tty", O_RDWR);
             if (fd < 0)
             {
@@ -155,7 +155,7 @@ namespace
 
         int wait(timeval* timeout) override
         {
-#if defined(_WIN32)
+#ifdef _WIN32
             auto const fd0 = GetStdHandle(STD_INPUT_HANDLE);
             DWORD const timeoutMillis = timeout->tv_sec * 1000 + timeout->tv_usec / 1000;
             DWORD const result = WaitForSingleObject(fd0, timeoutMillis);
@@ -182,7 +182,7 @@ namespace
 
         int write(char const* buf, size_t size) const
         {
-#if defined(_WIN32)
+#ifdef _WIN32
             DWORD nwritten {};
             if (WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buf, static_cast<DWORD>(size), &nwritten, nullptr))
                 return static_cast<int>(nwritten);
@@ -197,7 +197,7 @@ namespace
 
         int read(void* buf, size_t size) override
         {
-#if defined(_WIN32)
+#ifdef _WIN32
             DWORD nread {};
             if (ReadFile(GetStdHandle(STD_INPUT_HANDLE), buf, static_cast<DWORD>(size), &nread, nullptr))
                 return static_cast<int>(nread);

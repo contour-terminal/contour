@@ -137,7 +137,7 @@ constexpr TopLeft computeTargetTopLeftOffset(ImageAlignment alignmentPolicy,
     std::unreachable();
 }
 
-#if defined(VTBACKEND_SIMD_FOUND)
+#ifdef VTBACKEND_SIMD_FOUND
 namespace
 {
     struct SimdContext
@@ -351,7 +351,7 @@ Image::Data RasterizedImage::fragment(CellLocation pos, ImageSize targetCellSize
     fragmentData.resize(cellSize.area() * 4); // RGBA
     uint8_t* target = fragmentData.data();
 
-#if defined(VTBACKEND_SIMD_FOUND)
+#ifdef VTBACKEND_SIMD_FOUND
     auto const imageHeight = unbox<int>(_image->height());
     auto const simdContext = SimdContext {
         .width = unbox<int>(cellSize.width),
@@ -378,7 +378,7 @@ Image::Data RasterizedImage::fragment(CellLocation pos, ImageSize targetCellSize
         bool const yInBounds = (globalY >= yOffset) && (globalY < (yOffset + paramHeight));
         int x = 0;
 
-#if defined(VTBACKEND_SIMD_FOUND)
+#ifdef VTBACKEND_SIMD_FOUND
         fillFragmentSimd(x, target, simdContext, globalY, yInBounds);
 #endif
 

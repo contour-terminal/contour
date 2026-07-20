@@ -11,7 +11,7 @@
 #include <crispy/logstore.h>
 #include <crispy/point.h>
 
-#if defined(GLYPH_KEY_DEBUG)
+#ifdef GLYPH_KEY_DEBUG
     #include <libunicode/convert.h>
     #include <libunicode/width.h>
 #endif
@@ -175,7 +175,7 @@ struct font_fallback_list
 struct font_description
 {
     std::string familyName { "regular" };
-#if defined(_WIN32)
+#ifdef _WIN32
     std::wstring wFamilyName { L"regular" };
 #endif
 
@@ -281,7 +281,7 @@ struct glyph_key
     font_key font;
     glyph_index index {};
 
-#if defined(GLYPH_KEY_DEBUG)
+#ifdef GLYPH_KEY_DEBUG
     std::u32string text = {};
     static constexpr inline bool Debug = true;
 #else
@@ -493,7 +493,7 @@ struct std::formatter<text::glyph_key>: std::formatter<std::string>
 {
     auto format(text::glyph_key const& key, auto& ctx) const
     {
-#if defined(GLYPH_KEY_DEBUG)
+#ifdef GLYPH_KEY_DEBUG
         return formatter<std::string>::format(
             std::format("({}, {}:{}, \"{}\")",
                         key.size,

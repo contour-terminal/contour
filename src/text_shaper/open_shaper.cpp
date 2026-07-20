@@ -86,7 +86,7 @@ struct FontInfo // NOLINT(readability-identifier-naming)
 
 } // namespace
 
-#if defined(CONTOUR_HAS_CAIRO)
+#ifdef CONTOUR_HAS_CAIRO
 void cleanup_cairo_font_face(void*)
 {
     // No-op destructor callback: the FT_Face lifetime is managed elsewhere.
@@ -621,7 +621,7 @@ namespace
             glyph_position gpos {};
             gpos.glyph =
                 glyph_key { .size = fontInfo.size, .font = font, .index = glyph_index { info[i].codepoint } };
-#if defined(GLYPH_KEY_DEBUG)
+#ifdef GLYPH_KEY_DEBUG
             {
                 auto const cluster = info[i].cluster;
                 for (size_t k = 0; k < codepoints.size(); ++k)
@@ -1291,7 +1291,7 @@ optional<glyph_position> open_shaper::shape(font_key font, char32_t codepoint)
     // A glyph index means nothing outside the face it came from, so the key has to name that face rather
     // than the font that was asked for.
     gpos.glyph = glyph_key { .size = fontInfo.size, .font = resolvedFont, .index = glyphIndex };
-#if defined(GLYPH_KEY_DEBUG)
+#ifdef GLYPH_KEY_DEBUG
     gpos.glyph.text = std::u32string(1, codepoint);
 #endif
     gpos.advance.x = this->metrics(font).advance;
@@ -1570,7 +1570,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
     {
         if (ftFace->glyph->format != FT_GLYPH_FORMAT_BITMAP)
         {
-#if defined(CONTOUR_HAS_CAIRO)
+#ifdef CONTOUR_HAS_CAIRO
             if (auto result = rasterizeWithCairo(ftFace, glyph, mode))
                 return result;
             // If Cairo fails, fall through to FreeType rendering (which might produce outlines or empty

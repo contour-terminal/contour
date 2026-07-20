@@ -12,7 +12,7 @@
 #include <format>
 #include <iostream>
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
     #include <util.h>
 #else
     #include <termios.h>

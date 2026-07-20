@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#if defined(__linux__)
+#ifdef __linux__
 
     #include <contour/FreeDesktopNotifier.h>
 

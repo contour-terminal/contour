@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#if defined(_WIN32)
+#ifdef _WIN32
     #include <windows.h>
 #endif
 
@@ -58,7 +58,7 @@ namespace contour
 
 namespace
 {
-#if defined(_WIN32)
+#ifdef _WIN32
     // Bit positions Contour uses to carry the CapsLock/NumLock toggle state into makeModifiers()
     // through its `nativeModifiers` argument on Windows, where Qt's native modifier mask omits lock
     // toggles. (X11 encodes these as 0x02/0x10 and macOS as 0x00010000, read in their own branches.)
@@ -77,7 +77,7 @@ namespace
     /// @return The native modifier mask to pass to makeModifiers().
     [[nodiscard]] quint32 nativeModifiersWithLockState([[maybe_unused]] quint32 qtNativeModifiers) noexcept
     {
-#if defined(_WIN32)
+#ifdef _WIN32
         quint32 bits = 0;
         if ((GetKeyState(VK_CAPITAL) & 0x0001) != 0)
             bits |= Win32CapsLockBit;
@@ -112,7 +112,7 @@ vtbackend::KeyboardModifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
 
     vtbackend::LockKeys locks {};
 
-#if defined(_WIN32)
+#ifdef _WIN32
     // Windows: Handle AltGr (Ctrl+Alt combination).
     // In Win32 Input Mode, we keep the raw modifier state so ConPTY receives
     // the correct dwControlKeyState flags.
@@ -133,7 +133,7 @@ vtbackend::KeyboardModifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
     if ((nativeModifiers & Win32NumLockBit) != 0)
         locks |= LockKey::NumLock;
 
-#elif defined(__APPLE__)
+#elifdef __APPLE__
     // macOS: NSEventModifierFlagCapsLock = 0x00010000
     constexpr quint32 MacCapsLock = 0x00010000;
     if (nativeModifiers & MacCapsLock)
@@ -623,7 +623,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         return true;
     }
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
     if (0x20 <= key && key < 0x80
         && (modifiers.chord.test(Modifier::Alt) && session.profile().optionKeyAsAlt.value()))
     {
@@ -649,7 +649,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
     {
         auto const codepoints = event->text().toUcs4();
         assert(codepoints.size() >= 1);
-#if defined(__APPLE__)
+#ifdef __APPLE__
         // On macOS the Alt-modifier does not seem to be passed to the terminal apps
         // but rather remapped to whatever macOS is mapping them to.
         for (char32_t const ch: codepoints)

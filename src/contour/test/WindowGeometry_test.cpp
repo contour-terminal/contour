@@ -452,9 +452,9 @@ TEST_CASE("WindowGeometry.sizeHintPolicyFor", "[contour][geometry]")
 
 TEST_CASE("WindowGeometry.currentSizeHintPlatform.matchesBuildHost", "[contour][geometry]")
 {
-#if defined(_WIN32)
+#ifdef _WIN32
     CHECK(currentSizeHintPlatform() == SizeHintPlatform::Windows);
-#elif defined(__APPLE__)
+#elifdef __APPLE__
     CHECK(currentSizeHintPlatform() == SizeHintPlatform::MacOS);
 #else
     CHECK(currentSizeHintPlatform() == SizeHintPlatform::Other);

@@ -123,7 +123,6 @@ Checks: >-
   -readability-simplify-boolean-expr,
   -readability-uppercase-literal-suffix,
   -readability-use-anyofallof,
-  -readability-use-concise-preprocessor-directives,
 
 # Checks promoted from warning to hard error. Everything else is advisory.
 WarningsAsErrors: >-

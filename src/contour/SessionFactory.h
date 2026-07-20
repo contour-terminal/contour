@@ -5,7 +5,7 @@
 
 #include <vtpty/Process.h>
 #include <vtpty/Pty.h>
-#if defined(VTPTY_LIBSSH2)
+#ifdef VTPTY_LIBSSH2
     #include <vtpty/SshSession.h>
 #endif
 
@@ -84,7 +84,7 @@ class AppSessionFactory final: public SessionFactory
         std::optional<std::string> profileName = std::nullopt) override;
 
   private:
-#if defined(VTPTY_LIBSSH2)
+#ifdef VTPTY_LIBSSH2
     void requestSshHostkeyVerification(vtpty::SshHostkeyVerificationRequest const& request,
                                        vtpty::SshHostkeyVerificationResponseCallback const& response);
 #endif
