@@ -11,15 +11,15 @@ control mode; per-line cell deltas feed the native protocol. GUI and daemon shar
 
 ## Phase 0 — foundations
 
-- [ ] 0a. `vtmux::LayoutTree`: move `LayoutPane`/`LayoutTab`/`Layout` + serialize/realize
+- [x] 0a. `vtmux::LayoutTree`: move `LayoutPane`/`LayoutTab`/`Layout` + serialize/realize
       helpers out of `src/contour/` (yaml emission stays behind); tests move to `vtmux_test`
-- [ ] 0b. `vtmux::layoutInCells` forward solver (1-cell divider, tmux `layout_check` exact)
-- [ ] 0c-1. `src/coro` — verbatim endo port (`endo::coro`→`coro`), + `WhenAll_test`
-- [ ] 0c-2. `src/net` reactor core — `EventLoop` (ex-TuiRuntime) with spawn-reap +
+- [x] 0b. `vtmux::layoutInCells` forward solver (1-cell divider, tmux `layout_check` exact)
+- [x] 0c-1. `src/coro` — verbatim endo port (`endo::coro`→`coro`), + `WhenAll_test`
+- [x] 0c-2. `src/net` reactor core — `EventLoop` (ex-TuiRuntime) with spawn-reap +
       `SystemPipe`-backed `post()`, `EventSource`/`PollEventSource`, `net/platform/`
-- [ ] 0c-3. sockets (POSIX + Win32) + `testing/InMemoryTransport`
-- [ ] 0c-4. `AsyncBufferedReader` (scan offset) + bounded `WriteQueue` (single writer/conn)
-- [ ] 0c-5. `AF_UNIX` listener + tmux-mirror socket-dir hardening
+- [x] 0c-3. sockets (POSIX + Win32) + `testing/InMemoryTransport`
+- [x] 0c-4. `AsyncBufferedReader` (scan offset) + bounded `WriteQueue` (single writer/conn)
+- [x] 0c-5. `AF_UNIX` listener + tmux-mirror socket-dir hardening
 
 ## Phase 1 — headless session host
 
