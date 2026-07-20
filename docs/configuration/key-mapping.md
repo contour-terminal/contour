@@ -13,6 +13,34 @@ To customize key mappings, you need to configure `input_mapping` yaml entry
     writing a configuration by hand and want to keep the defaults, start from a generated one
     (`contour generate config`) and add your entries to the existing list.
 
+## Built-in bindings
+
+A small number of bindings are built in and do **not** appear in `input_mapping`:
+
+| Binding | Action |
+|---------|--------|
+| `Ctrl+Tab` / `Ctrl+PageDown` | Switch to the tab on the right (wrapping around) |
+| `Ctrl+Shift+Tab` / `Ctrl+PageUp` | Switch to the tab on the left (wrapping around) |
+| `Right` mouse button | Open the terminal's context menu |
+| Horizontal wheel / two-finger sideways swipe | Switch tabs |
+
+These are consulted only when your `input_mapping` does not claim the same key or button, so binding
+one of them yourself replaces it.
+
+They are built in rather than listed as defaults for the reason given in the warning above: an
+`input_mapping` section replaces the built-in list wholesale, and the generated `contour.yml` writes
+every default into that section. A binding added to Contour *after* your configuration file was
+written would therefore be shadowed by your own file forever. Consulting these after yours is what
+lets a new binding still reach you, while anything you bind explicitly keeps winning.
+
+!!! note "`Ctrl+Tab` is taken from the application"
+
+    Like Windows Terminal, GNOME Terminal and Konsole, Contour claims `Ctrl+Tab` for tab switching,
+    so a terminal application that wants it (via the Kitty keyboard protocol) will not receive it.
+    Bind it in your own `input_mapping` to give it back to the application.
+
+## Writing bindings
+
 Each element in the `input_mapping` represents one key binding, whereas `mods` represents an array of keyboard modifiers that must be pressed - as well as the `key` or `mouse` - in order to activate the corresponding action. 
 Additionally one can filter input mappings based on special terminal modes using the `modes` option:
 

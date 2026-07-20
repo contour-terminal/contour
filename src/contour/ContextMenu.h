@@ -24,6 +24,12 @@ struct ContextMenuState
     bool hasLocalWorkingDirectory = false; ///< OSC 7 reported a working directory on THIS host (openable).
     bool hasSplits = false;                ///< This tab holds more than one pane.
     bool inputProtected = false;           ///< Input protection (KAM / read-only) is on for this pane.
+    /// Whether this build can speak, and this platform has a voice to speak with.
+    ///
+    /// A fact about the machine rather than about the pane, but it belongs in the snapshot for the same
+    /// reason everything else does: the menu is a pure function of this struct, so asking the world
+    /// from inside it would put an untestable branch in the one place that has none.
+    bool canSpeak = false;
 
     /// The OSC 8 hyperlink the user right-clicked, empty if there was none.
     ///

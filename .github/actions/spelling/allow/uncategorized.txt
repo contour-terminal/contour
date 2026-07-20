@@ -165,6 +165,7 @@ TCSANOW
 TESTINGG
 TLDR
 TLeftt
+speakable
 tooltip
 TRANSPARENTGRADIENT
 TTop
@@ -223,6 +224,7 @@ appimage
 appimagecrafters
 appimagetool
 applica
+aqtinstall
 archlinux
 arcval
 arget
@@ -694,6 +696,7 @@ netto
 nfghij
 nfo
 nfont
+nhello
 nitroshare
 nologo
 norweigian
@@ -707,6 +710,7 @@ nread
 nsecs
 nsight
 ntrap
+nworld
 nwritten
 oaw
 octicons
@@ -803,6 +807,7 @@ qtqml
 qtquick
 qtquickcontrols
 qtshadertools
+qtspeech
 qttools
 qtver
 qtwayland

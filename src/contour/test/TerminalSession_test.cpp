@@ -1394,7 +1394,8 @@ TEST_CASE("TerminalSession: accumulated angle scroll consumes into line/column s
     // angle-only delta with no pixel delta takes the "reset pixel accumulation" branch.
     session->addToAccumulatedScroll(crispy::point { .x = 0, .y = 0 },
                                     crispy::point { .x = 0, .y = 8 * 5 * 3 },
-                                    vtbackend::ScrollPhase::NoPhase);
+                                    vtbackend::ScrollPhase::NoPhase,
+                                    false);
     auto const [lines, columns] = session->consumeScroll();
     CHECK(lines.value != 0);
     CHECK(columns.value == 0);
@@ -1411,10 +1412,10 @@ TEST_CASE("TerminalSession: sideways drift of a vertical scroll never becomes a 
     auto constexpr Step = 8 * 5; // one angle notch, per consumeScroll()
 
     session->addToAccumulatedScroll(
-        crispy::point {}, crispy::point { .x = 0, .y = -Step }, vtbackend::ScrollPhase::Begin);
+        crispy::point {}, crispy::point { .x = 0, .y = -Step }, vtbackend::ScrollPhase::Begin, false);
     for ([[maybe_unused]] auto const _: std::views::iota(0, 20))
         session->addToAccumulatedScroll(
-            crispy::point {}, crispy::point { .x = Step, .y = -1 }, vtbackend::ScrollPhase::Update);
+            crispy::point {}, crispy::point { .x = Step, .y = -1 }, vtbackend::ScrollPhase::Update, false);
 
     auto const [lines, columns] = session->consumeScroll();
     CHECK(columns.value == 0);
@@ -1432,9 +1433,9 @@ TEST_CASE("TerminalSession: a deliberate sideways swipe does produce column step
     auto constexpr Step = 8 * 5;
 
     session->addToAccumulatedScroll(
-        crispy::point {}, crispy::point { .x = Step, .y = 0 }, vtbackend::ScrollPhase::Begin);
+        crispy::point {}, crispy::point { .x = Step, .y = 0 }, vtbackend::ScrollPhase::Begin, false);
     session->addToAccumulatedScroll(
-        crispy::point {}, crispy::point { .x = Step, .y = 0 }, vtbackend::ScrollPhase::Update);
+        crispy::point {}, crispy::point { .x = Step, .y = 0 }, vtbackend::ScrollPhase::Update, false);
 
     auto const [lines, columns] = session->consumeScroll();
     CHECK(columns.value != 0);
@@ -1831,4 +1832,128 @@ input_mapping:
     mockPtyOf(*session).stdinBuffer().clear();
     session->sendCharEvent(U'y', 0, ctrlShift, KeyboardEventType::Press, now);
     CHECK_FALSE(mockPtyOf(*session).stdinBuffer().empty());
+}
+
+TEST_CASE("TerminalSession: a tab-strip swipe follows the finger while a wheel tilt does not",
+          "[contour][session][wheel]")
+{
+    // End-to-end for the direction rule, with real tabs behind a mock PTY factory. Both events below
+    // carry the SAME sign, so any difference in where they land is the rule itself and nothing else.
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    TestApp testApp(std::move(factoryOwned));
+    contour::test::ScopedController controller(testApp.manager());
+
+    controller->createNewTab();
+    controller->createNewTab();
+    controller->createNewTab();
+    REQUIRE(controller->count() == 3);
+
+    auto constexpr NoPhase = static_cast<int>(vtbackend::ScrollPhase::NoPhase);
+    auto constexpr Begin = static_cast<int>(vtbackend::ScrollPhase::Begin);
+
+    SECTION("a leftward swipe moves to the tab on the right")
+    {
+        controller->activateTab(0);
+        REQUIRE(controller->activeTabIndex() == 0);
+
+        // Fingers drag the content left, so what was to the right comes into view -- the carousel
+        // sense a browser and a photo viewer use for the same gesture.
+        controller->dispatchTabStripWheel(-120, 0, 0, 0, Begin, /*inverted=*/false);
+        CHECK(controller->activeTabIndex() == 1);
+    }
+
+    SECTION("a leftward wheel tilt moves to the tab on the left")
+    {
+        controller->activateTab(0);
+        REQUIRE(controller->activeTabIndex() == 0);
+
+        // Same sign, no pixel precision: a tilt means the direction it names, and SwitchToTabLeft wraps.
+        controller->dispatchTabStripWheel(0, 0, -120, 0, NoPhase, /*inverted=*/false);
+        CHECK(controller->activeTabIndex() == 2);
+    }
+
+    SECTION("a platform that already inverted the delta is not inverted twice")
+    {
+        controller->activateTab(0);
+        REQUIRE(controller->activeTabIndex() == 0);
+
+        // Same swipe as the first section, but the platform's own natural-scrolling setting already
+        // flipped it. Inverting again would undo that and send the user the wrong way.
+        controller->dispatchTabStripWheel(-120, 0, 0, 0, Begin, /*inverted=*/true);
+        CHECK(controller->activeTabIndex() == 2);
+    }
+
+    for (int row = controller->count() - 1; row >= 0; --row)
+        controller->closeTabAtIndex(row);
+}
+
+namespace
+{
+/// An Announcer that records instead of speaking, so the DECISIONS are assertable with no
+/// accessibility bridge in sight (offscreen QPA has none).
+class RecordingAnnouncer final: public contour::display::Announcer
+{
+  public:
+    struct Said
+    {
+        QString message;
+        QAccessible::AnnouncementPoliteness politeness;
+    };
+
+    void announce(QString const& message, QAccessible::AnnouncementPoliteness politeness) override
+    {
+        said.push_back({ message, politeness });
+    }
+
+    std::vector<Said> said;
+};
+} // namespace
+
+TEST_CASE("TerminalSession: things with no place in the accessibility tree are announced",
+          "[contour][session][a11y]")
+{
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+
+    auto announcer = std::make_unique<RecordingAnnouncer>();
+    auto* recorder = announcer.get();
+    session->setAnnouncer(std::move(announcer));
+
+    SECTION("the bell rings for a screen reader too")
+    {
+        // A bell changes no object's state, so without this nothing reaches an assistive client at all.
+        session->bell();
+        REQUIRE(recorder->said.size() == 1);
+        CHECK(recorder->said.front().message == "Bell");
+        CHECK(recorder->said.front().politeness == QAccessible::AnnouncementPoliteness::Polite);
+    }
+
+    SECTION("a read-only toggle interrupts, because it changes what typing does")
+    {
+        (*session)(contour::actions::ToggleInputProtection {});
+        REQUIRE(recorder->said.size() == 1);
+        // Assertive: telling the user AFTER they have typed into a terminal that ignored them is too
+        // late to be worth saying.
+        CHECK(recorder->said.front().politeness == QAccessible::AnnouncementPoliteness::Assertive);
+        auto const first = recorder->said.front().message;
+
+        // ...and toggling back says the opposite, rather than repeating itself.
+        (*session)(contour::actions::ToggleInputProtection {});
+        REQUIRE(recorder->said.size() == 2);
+        CHECK(recorder->said.back().message != first);
+    }
+
+    SECTION("switching announcements off silences them")
+    {
+        // The gate is checked at the call, so a user who does not want them pays nothing at all.
+        testApp.app().config().accessibilityAnnouncements = false;
+        auto quiet = makeDisplaylessSession(testApp.app());
+        auto quietAnnouncer = std::make_unique<RecordingAnnouncer>();
+        auto* quietRecorder = quietAnnouncer.get();
+        quiet->setAnnouncer(std::move(quietAnnouncer));
+
+        quiet->bell();
+        (*quiet)(contour::actions::ToggleInputProtection {});
+        CHECK(quietRecorder->said.empty());
+    }
 }

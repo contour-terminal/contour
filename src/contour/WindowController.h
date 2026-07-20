@@ -3,6 +3,7 @@
 
 #include <contour/CommandCatalog.h>
 #include <contour/CommandPaletteModel.h>
+#include <contour/ContextMenuModel.h>
 #include <contour/HorizontalWheelGesture.h>
 #include <contour/display/TerminalDisplay.h>
 
@@ -64,6 +65,8 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// app-wide and lives on the manager.
     Q_PROPERTY(contour::CommandPaletteModel* commandPalette READ commandPalette CONSTANT)
     Q_PROPERTY(QVariantList contextMenuModel READ contextMenuModel NOTIFY contextMenuModelChanged)
+    Q_PROPERTY(QVariantList titleBarContextMenuModel READ titleBarContextMenuModel NOTIFY
+                   titleBarContextMenuModelChanged)
     Q_PROPERTY(int activeTabIndex READ activeTabIndex NOTIFY activeTabIndexChanged)
     Q_PROPERTY(bool multimediaReady READ isMultimediaReady NOTIFY multimediaReadyChanged)
     Q_PROPERTY(contour::PaneProxy* activeTabRootPane READ activeTabRootPane NOTIFY activeTabRootPaneChanged)
@@ -141,9 +144,18 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// config gate live in exactly one table. The vertical component is ignored: the strip does not
     /// scroll.
     ///
+    /// Takes the whole event rather than its horizontal angle alone: a trackpad reports pixel deltas and
+    /// no angle at all, so a swipe judged only by angle would never move a tab, and the gesture phase and
+    /// the platform's natural-scrolling flag are what decide which way it should move.
+    ///
+    /// @param pixelDeltaX Horizontal pixel-precise delta (trackpads), or 0.
+    /// @param pixelDeltaY Vertical pixel-precise delta, used to tell a sideways gesture from a vertical one.
     /// @param angleDeltaX Horizontal angle delta, in the same units Qt reports (120 per notch).
-    /// @param angleDeltaY Vertical angle delta, used only to tell a sideways gesture from a vertical one.
-    Q_INVOKABLE void dispatchTabStripWheel(int angleDeltaX, int angleDeltaY);
+    /// @param angleDeltaY Vertical angle delta, used to tell a sideways gesture from a vertical one.
+    /// @param phase       The gesture phase, as a vtbackend::ScrollPhase (QML has no enum to pass).
+    /// @param inverted    Whether the platform already flipped the delta for natural scrolling.
+    Q_INVOKABLE void dispatchTabStripWheel(
+        int pixelDeltaX, int pixelDeltaY, int angleDeltaX, int angleDeltaY, int phase, bool inverted);
     Q_INVOKABLE void moveTab(int fromIndex, int toIndex);
     /// The raw id of the window this controller adapts, so a QML drag payload can name its source
     /// window and a DropArea can target the destination window across the shared engine.
@@ -276,7 +288,18 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// `actionId` indexes into this controller's own action list rather than naming a command, so a click
     /// runs the exact action the row was built with. Nothing has to be looked up by name at click time,
     /// and nothing depends on some other model having been populated first.
-    [[nodiscard]] QVariantList contextMenuModel() const { return _contextMenuModel; }
+    [[nodiscard]] QVariantList contextMenuModel() const { return _paneContextMenu.model; }
+
+    /// The title bar's context menu rows. Its OWN model, not the pane menu's: publishing into that one
+    /// would rebuild and re-target a menu the user may still have open.
+    [[nodiscard]] QVariantList titleBarContextMenuModel() const { return _titleBarContextMenu.model; }
+
+    /// Builds and publishes the title bar's context menu, then asks QML to pop it.
+    Q_INVOKABLE void openTitleBarContextMenu();
+
+    /// Runs the title-bar menu action with id @p actionId. Out-of-range ids are ignored.
+    /// @param actionId The row's `actionId`.
+    Q_INVOKABLE void triggerTitleBarContextMenuAction(int actionId);
 
     /// Runs the context-menu action with id @p actionId against the pane the menu was opened over.
     /// Out-of-range ids are ignored.
@@ -332,15 +355,36 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// @return True if the tab strip should be shown.
     [[nodiscard]] bool tabBarShouldShow() const noexcept;
 
-    /// Seeds this window's tab strip position from the profile's tab_bar_position setting.
+    /// Seeds this window's tab strip position from the global tab_bar_position setting.
     /// First-write-wins (see seedTitleBarVisible).
-    /// @param position The profile's tab_bar_position value.
+    /// @param position The configured tab_bar_position value.
     void seedTabBarPosition(config::TabBarPosition position);
 
-    /// Seeds this window's tab strip visibility mode from the profile's tab_bar_visibility setting.
+    /// Seeds this window's tab strip visibility mode from the global tab_bar_visibility setting.
     /// First-write-wins (see seedTitleBarVisible).
-    /// @param visibility The profile's tab_bar_visibility value.
+    /// @param visibility The configured tab_bar_visibility value.
     void seedTabBarVisibility(config::TabBarVisibility visibility);
+
+    /// Re-applies the configured tab strip placement and visibility to this window.
+    ///
+    /// Unlike the seed methods above this is NOT first-write-wins. It runs only on an explicit
+    /// configuration reload, where the user has just asked for the configured value to take effect --
+    /// so it supersedes a runtime override, which is what reloading a configuration means. Without it
+    /// the seed latch swallows the change and the setting appears to do nothing until restart.
+    ///
+    /// @param position   The configured tab_bar_position value.
+    /// @param visibility The configured tab_bar_visibility value.
+    void applyTabBarFromConfig(config::TabBarPosition position, config::TabBarVisibility visibility);
+
+    /// Sets this window's tab strip visibility mode at runtime.
+    ///
+    /// A view toggle, in the same spirit as toggleTitleBar(): it applies to THIS window for as long as
+    /// it lives, and the settings page remains where the choice is made permanent. Marks the mode as
+    /// seeded so a later session rebind cannot revert it.
+    void setTabBarVisibility(config::TabBarVisibility visibility);
+
+    /// Sets this window's tab strip placement at runtime. @see setTabBarVisibility.
+    void setTabBarPosition(config::TabBarPosition position);
     // }}}
 
     /// This window's currently focused display (for window services + status-line targeting).
@@ -512,6 +556,8 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     void contextMenuModelChanged();
     /// Requests that this window pop its terminal context menu, at the mouse cursor.
     void contextMenuRequested();
+    void titleBarContextMenuModelChanged();
+    void titleBarContextMenuRequested();
     void multimediaReadyChanged();
     void activeTabRootPaneChanged();
     void titleBarVisibleChanged();
@@ -603,11 +649,11 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
 
     // {{{ Terminal context menu
     /// The menu as QML sees it, rebuilt on every right-click.
-    QVariantList _contextMenuModel;
+    PublishedContextMenu _paneContextMenu;
+    PublishedContextMenu _titleBarContextMenu;
 
     /// The actions those rows run, in the order the rows carry as `actionId`. Held here rather than in
     /// the QML so a row runs the exact action it was built with — no lookup by name at click time.
-    std::vector<actions::Action> _contextMenuActions;
 
     /// The session the menu was BUILT over — the pane the user right-clicked.
     ///

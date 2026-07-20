@@ -222,25 +222,12 @@ namespace
         return QPoint { p.y(), p.x() };
     }
 
-    /// Maps Qt's scroll phase to the platform-independent vtbackend enum.
-    vtbackend::ScrollPhase mapScrollPhase(Qt::ScrollPhase phase) noexcept
-    {
-        switch (phase)
-        {
-            case Qt::ScrollBegin: return vtbackend::ScrollPhase::Begin;
-            case Qt::ScrollUpdate: return vtbackend::ScrollPhase::Update;
-            case Qt::ScrollEnd: return vtbackend::ScrollPhase::End;
-            case Qt::ScrollMomentum: return vtbackend::ScrollPhase::Momentum;
-            case Qt::NoScrollPhase: return vtbackend::ScrollPhase::NoPhase;
-        }
-        return vtbackend::ScrollPhase::NoPhase;
-    }
-
     void sendWheelEvent(crispy::point const& pixelDelta,
                         crispy::point const& angleDelta,
                         PixelCoordinate const& currentMousePixelPosition,
                         vtbackend::Modifiers modifiers,
                         vtbackend::ScrollPhase scrollPhase,
+                        bool platformInverted,
                         TerminalSession& session)
     {
         using VTMouseButton = vtbackend::MouseButton;
@@ -317,7 +304,7 @@ namespace
         }
 
         // Existing line-based scrolling (unchanged)
-        session.addToAccumulatedScroll(pixelDelta, angleDelta, scrollPhase);
+        session.addToAccumulatedScroll(pixelDelta, angleDelta, scrollPhase, platformInverted);
         auto const [linesScroll, columnsScroll] = session.consumeScroll();
 
         inputLog()("[{}] Accumulate scroll with by value {} pixelDelta / {} angleDelta, {} lines, {} columns "
@@ -347,6 +334,19 @@ namespace
     }
 
 } // namespace
+
+vtbackend::ScrollPhase mapScrollPhase(Qt::ScrollPhase phase) noexcept
+{
+    switch (phase)
+    {
+        case Qt::ScrollBegin: return vtbackend::ScrollPhase::Begin;
+        case Qt::ScrollUpdate: return vtbackend::ScrollPhase::Update;
+        case Qt::ScrollEnd: return vtbackend::ScrollPhase::End;
+        case Qt::ScrollMomentum: return vtbackend::ScrollPhase::Momentum;
+        case Qt::NoScrollPhase: return vtbackend::ScrollPhase::NoPhase;
+    }
+    return vtbackend::ScrollPhase::NoPhase;
+}
 
 char32_t unshiftedCodepoint(char32_t ch) noexcept
 {
@@ -716,7 +716,7 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
     }();
 
     auto const scrollPhase = mapScrollPhase(event->phase());
-    sendWheelEvent(pixelDelta, angleDelta, pixelPosition, modifiers, scrollPhase, session);
+    sendWheelEvent(pixelDelta, angleDelta, pixelPosition, modifiers, scrollPhase, event->inverted(), session);
     event->accept();
 }
 

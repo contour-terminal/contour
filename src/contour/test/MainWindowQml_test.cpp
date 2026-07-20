@@ -90,10 +90,13 @@ class MockMainController: public QAbstractListModel
     // must carry both — a missing signal is a QML warning, and the run-wide gate turns that into a
     // failure of the whole suite. A null model is what an unopened palette shows anyway.
     Q_PROPERTY(QObject* commandPalette READ commandPalette CONSTANT)
-    // Ditto for the context-menu surface: main.qml instantiates TerminalContextMenu.qml against this
+    // Ditto for the context-menu surface: main.qml instantiates ActionContextMenu.qml against this
     // controller, binds its `entries` to contextMenuModel and Connections-targets contextMenuRequested.
     // An empty model is what a menu that has never been opened holds anyway.
     Q_PROPERTY(QVariantList contextMenuModel READ contextMenuModel NOTIFY contextMenuModelChanged)
+    // Ditto for the title bar's own menu surface, which main.qml instantiates alongside it.
+    Q_PROPERTY(QVariantList titleBarContextMenuModel READ titleBarContextMenuModel NOTIFY
+                   titleBarContextMenuModelChanged)
 
   public:
     enum Roles : std::uint16_t
@@ -151,6 +154,9 @@ class MockMainController: public QAbstractListModel
     Q_INVOKABLE void openCommandPalette() { emit commandPaletteRequested(); }
 
     [[nodiscard]] QVariantList contextMenuModel() const { return {}; }
+    [[nodiscard]] QVariantList titleBarContextMenuModel() const { return {}; }
+    Q_INVOKABLE void openTitleBarContextMenu() { emit titleBarContextMenuRequested(); }
+    Q_INVOKABLE void triggerTitleBarContextMenuAction(int /*actionId*/) {}
     Q_INVOKABLE void triggerContextMenuAction(int) {}
     /// Mirrors WindowController::openContextMenu(): what the manager calls for the OpenContextMenu
     /// action, and what makes main.qml pop the terminal's right-click menu.
@@ -240,6 +246,8 @@ class MockMainController: public QAbstractListModel
     void commandPaletteRequested();
     void contextMenuModelChanged();
     void contextMenuRequested();
+    void titleBarContextMenuModelChanged();
+    void titleBarContextMenuRequested();
     void tabBarPositionChanged();
     void tabBarShouldShowChanged();
     void chromeHeightChanged();

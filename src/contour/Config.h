@@ -4,6 +4,7 @@
 #include <contour/Actions.h>
 #include <contour/AsciiText.h>
 #include <contour/ConfigDocumentation.h>
+#include <contour/TabBarMode.h>
 
 #include <vtrasterizer/GlyphScaling.h>
 
@@ -92,22 +93,9 @@ enum class PixelReporting : uint8_t
     Device,  //!< Report device pixels: images land 1:1 on the display's own pixels (default).
 };
 
-/// Where the GUI tab strip (tab bar) is placed within the window.
-/// @note Exposed to QML as an @c int (0 = Top, 1 = Bottom); keep the enumerator order in sync
-///       with the literals in @c main.qml if this is ever extended or reordered.
-enum class TabBarPosition : uint8_t
-{
-    Top,    //!< The tab strip sits above the terminal content (default, historical behavior).
-    Bottom, //!< The tab strip sits below the terminal content.
-};
-
-/// When the GUI tab strip (tab bar) is shown.
-enum class TabBarVisibility : uint8_t
-{
-    Always,   //!< Always show the tab strip (default, historical behavior).
-    Never,    //!< Never show the tab strip.
-    Multiple, //!< Show the tab strip only when the window has more than one tab.
-};
+// TabBarPosition and TabBarVisibility live in contour/TabBarMode.h, together with the table that
+// describes them: an action carrying one of these modes is declared in Actions.h, which cannot
+// include this header (this header includes Actions.h).
 
 /// Selects the light/dark appearance of the Qt GUI chrome (title bar, tab strip, command
 /// palette, settings pages, dialogs) independently of the OS.
@@ -152,38 +140,45 @@ struct InputMappings
 
 struct Config;
 
-/// Enables a fallback row unconditionally. @see FallbackMouseMapping::enabled.
+/// Enables a fallback row unconditionally. @see FallbackMapping::enabled.
 [[nodiscard]] inline bool alwaysEnabled(Config const& /*config*/) noexcept
 {
     return true;
 }
 
-/// A built-in fallback mouse mapping, together with the global-config predicate that enables it.
+/// A built-in fallback binding, together with the global-config predicate that enables it.
 ///
 /// The predicate is a COLUMN rather than an `if` at the consultation site: a default that only applies
 /// when some option is on is then one more row here, and applyBuiltinFallback() stays the only place
 /// that knows gating exists at all.
-struct FallbackMouseMapping
+template <typename Input>
+struct FallbackMapping
 {
-    MouseInputMapping mapping;
+    vtbackend::InputBinding<Input, ActionList> mapping;
     /// Whether this row takes part in matching. Defaults to always.
     ///
     /// A plain function pointer, not std::function: it keeps the table a `static const` literal with
-    /// no allocation, on a path walked for every mouse press the application did not claim.
+    /// no allocation, on a path walked for every input the application did not claim.
     bool (*enabled)(Config const&) noexcept = alwaysEnabled;
 };
 
-/// Mouse mappings that apply when the user's `input_mapping:` does not claim the button itself.
+using FallbackMouseMapping = FallbackMapping<vtbackend::MouseButton>;
+using FallbackKeyMapping = FallbackMapping<vtbackend::Key>;
+
+/// Bindings that apply when the user's `input_mapping:` does not claim the input itself.
 ///
 /// A new DEFAULT cannot reach an existing user: loading an `input_mapping:` section REPLACES the built-in
 /// table wholesale (see YAMLConfigReader::loadFromEntry for InputMappings), and the contour.yml Contour
 /// generates on first run writes every default out into that section. So a mapping added to the defaults
-/// after a user's config was written would be shadowed by their own file, forever. Consulting this table
-/// *after* theirs is what lets a new default still reach them — while an explicit binding of the same
-/// button in their config continues to win, because that one is found first.
+/// after a user's config was written would be shadowed by their own file, forever. Consulting these
+/// tables *after* theirs is what lets a new default still reach them — while an explicit binding of the
+/// same input in their config continues to win, because that one is found first.
 ///
 /// @return The fallback mappings, in match order.
 [[nodiscard]] std::vector<FallbackMouseMapping> const& builtinFallbackMouseMappings();
+
+/// @copydoc builtinFallbackMouseMappings
+[[nodiscard]] std::vector<FallbackKeyMapping> const& builtinFallbackKeyMappings();
 
 namespace helper
 {
@@ -278,6 +273,13 @@ std::vector<actions::Action> const* apply(Mappings&& mappings,
 /// @return The bound actions, or nullptr when no enabled row matches.
 [[nodiscard]] ActionList const* applyBuiltinFallback(Config const& config,
                                                      vtbackend::MouseButton button,
+                                                     vtbackend::Modifiers modifiers,
+                                                     uint8_t actualModeFlags);
+
+/// @copydoc applyBuiltinFallback
+/// An overload rather than a differently-named function, so both consultation sites read alike.
+[[nodiscard]] ActionList const* applyBuiltinFallback(Config const& config,
+                                                     vtbackend::Key key,
                                                      vtbackend::Modifiers modifiers,
                                                      uint8_t actualModeFlags);
 
@@ -691,10 +693,6 @@ struct TerminalProfile
 
     ConfigEntry<std::string, documentation::WMClass> wmClass { CONTOUR_APP_ID };
     ConfigEntry<std::string, documentation::TabLabel> tabLabel { "{WindowTitle}" };
-    ConfigEntry<TabBarPosition, documentation::TabBarPosition> tabBarPosition { TabBarPosition::Top };
-    ConfigEntry<TabBarVisibility, documentation::TabBarVisibility> tabBarVisibility {
-        TabBarVisibility::Always
-    };
     ConfigEntry<bool, documentation::OptionKeyAsAlt> optionKeyAsAlt { false };
 };
 
@@ -761,6 +759,25 @@ const InputMappings defaultInputMappings {
                           .modifiers { vtbackend::Modifier::Shift },
                           .input = vtbackend::Key::RightArrow,
                           .binding = { { actions::SwitchToTabRight {} } } },
+        // The browser chords for the same thing. They are ALSO in builtinFallbackKeyMappings(), which is
+        // what carries them to anyone whose contour.yml predates them; listing them here is what puts
+        // them in a freshly generated one, where they can be seen and rebound.
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Control },
+                          .input = vtbackend::Key::PageUp,
+                          .binding = { { actions::SwitchToTabLeft {} } } },
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Control },
+                          .input = vtbackend::Key::PageDown,
+                          .binding = { { actions::SwitchToTabRight {} } } },
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Control },
+                          .input = vtbackend::Key::Tab,
+                          .binding = { { actions::SwitchToTabRight {} } } },
+        KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                          .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                          .input = vtbackend::Key::Tab,
+                          .binding = { { actions::SwitchToTabLeft {} } } },
         KeyInputMapping { .modes { vtbackend::MatchModes {} },
                           .modifiers { vtbackend::Modifier::Alt, vtbackend::Modifier::Shift },
                           .input = vtbackend::Key::LeftArrow,
@@ -874,6 +891,12 @@ const InputMappings defaultInputMappings {
                            .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
                            .input = 'T',
                            .binding = { { actions::CreateNewTab {} } } },
+        // Reads the selection aloud. Does nothing where no speech engine is installed, and the context
+        // menu hides its row there, so the binding is harmless on a machine without a voice.
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                           .input = 'S',
+                           .binding = { { actions::SpeakSelection {} } } },
         CharInputMapping { .modes { vtbackend::MatchModes {} },
                            .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
                            .input = 'E',
@@ -1119,6 +1142,15 @@ struct Config
     ConfigEntry<bool, documentation::SpawnNewProcess> spawnNewProcess { false };
     ConfigEntry<bool, documentation::ReflowOnResize> reflowOnResize { true };
     ConfigEntry<bool, documentation::TabSwitchOnHorizontalWheel> tabSwitchOnHorizontalWheel { true };
+    ConfigEntry<bool, documentation::HyperlinkHoverTooltip> hyperlinkHoverTooltip { true };
+    ConfigEntry<bool, documentation::AccessibilityAnnouncements> accessibilityAnnouncements { true };
+    // The tab bar belongs to the WINDOW, not to the profile a pane happens to run: a window shows one
+    // tab bar while its tabs may each run a different profile, so asking a profile where the tab bar
+    // sits had no answer when they disagreed.
+    ConfigEntry<TabBarPosition, documentation::TabBarPosition> tabBarPosition { TabBarPosition::Top };
+    ConfigEntry<TabBarVisibility, documentation::TabBarVisibility> tabBarVisibility {
+        TabBarVisibility::Always
+    };
     ConfigEntry<bool, documentation::GuiConfigLocked> guiConfigLocked { false };
     ConfigEntry<contour::config::GuiTheme, documentation::Theme> theme { contour::config::GuiTheme::System };
 
@@ -2228,18 +2260,14 @@ struct std::formatter<contour::config::PixelReporting>: formatter<std::string_vi
     }
 };
 
+// Both tab bar modes render as the configuration token their table row carries, so what is written
+// back is by construction what the reader accepts -- see contour/TabBarMode.h.
 template <>
 struct std::formatter<contour::config::TabBarPosition>: formatter<std::string_view>
 {
     auto format(contour::config::TabBarPosition value, auto& ctx) const
     {
-        std::string_view name;
-        switch (value)
-        {
-            case contour::config::TabBarPosition::Top: name = "Top"; break;
-            case contour::config::TabBarPosition::Bottom: name = "Bottom"; break;
-        }
-        return formatter<std::string_view>::format(name, ctx);
+        return formatter<std::string_view>::format(contour::config::tabBarModeToken(value), ctx);
     }
 };
 
@@ -2248,14 +2276,7 @@ struct std::formatter<contour::config::TabBarVisibility>: formatter<std::string_
 {
     auto format(contour::config::TabBarVisibility value, auto& ctx) const
     {
-        std::string_view name;
-        switch (value)
-        {
-            case contour::config::TabBarVisibility::Always: name = "Always"; break;
-            case contour::config::TabBarVisibility::Never: name = "Never"; break;
-            case contour::config::TabBarVisibility::Multiple: name = "Multiple"; break;
-        }
-        return formatter<std::string_view>::format(name, ctx);
+        return formatter<std::string_view>::format(contour::config::tabBarModeToken(value), ctx);
     }
 };
 

@@ -47,6 +47,7 @@
 #include <memory>
 #include <ranges>
 
+#include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
 #include <vtmux/PaneLayout.h>
 
@@ -89,7 +90,7 @@ class MockTabController: public QAbstractListModel
     /// Mirrors TerminalDisplay::toggleTitleBar(): flips the native-decoration axis.
     Q_INVOKABLE void toggleTitleBar() { setTitleBarVisible(!_titleBarVisible); }
 
-    /// Mirrors WindowController::triggerContextMenuAction(): what TerminalContextMenu.qml calls on a pick.
+    /// Mirrors WindowController::triggerContextMenuAction(): what ActionContextMenu.qml calls on a pick.
     Q_INVOKABLE void triggerContextMenuAction(int actionId) { lastTriggeredActionId = actionId; }
 
     int lastTriggeredActionId = -1;
@@ -259,6 +260,9 @@ class MockSession: public QObject
     Q_PROPERTY(bool isBlurBackground READ isBlurBackground CONSTANT)
     Q_PROPERTY(float opacityBackground READ opacityBackground CONSTANT)
     Q_PROPERTY(QString pathToBackground READ pathToBackground CONSTANT)
+    // Mirrors TerminalSession's hyperlink tooltip pair. Both change together, so one signal serves them.
+    Q_PROPERTY(QString hyperlinkTooltipText READ hyperlinkTooltipText NOTIFY hyperlinkHoverChanged)
+    Q_PROPERTY(QRectF hyperlinkTooltipAnchor READ hyperlinkTooltipAnchor NOTIFY hyperlinkHoverChanged)
 
   public:
     [[nodiscard]] int pageLineCount() const { return _lines; }
@@ -276,6 +280,16 @@ class MockSession: public QObject
     [[nodiscard]] QString bellSource() const { return QString(); }
     [[nodiscard]] bool isScrollbarRight() const { return _scrollbarRight; }
     [[nodiscard]] bool isScrollbarVisible() const { return _scrollbarVisible; }
+    [[nodiscard]] QString hyperlinkTooltipText() const { return _hyperlinkTooltipText; }
+    [[nodiscard]] QRectF hyperlinkTooltipAnchor() const { return _hyperlinkTooltipAnchor; }
+
+    /// Publishes a hovered hyperlink, the way TerminalSession does on a real cell transition.
+    void setHyperlinkHover(QString text, QRectF anchor)
+    {
+        _hyperlinkTooltipText = std::move(text);
+        _hyperlinkTooltipAnchor = anchor;
+        emit hyperlinkHoverChanged();
+    }
 
     // Drivers: mutate state and fire the NOTIFY the QML binds to, reproducing a live resize / opacity change.
     void setPageSize(int columns, int lines)
@@ -328,6 +342,7 @@ class MockSession: public QObject
     void historyLineCountChanged();
     void isScrollbarRightChanged();
     void isScrollbarVisibleChanged();
+    void hyperlinkHoverChanged();
     void opacityChanged();
     void dimUnfocusedChanged();
     void onBell();
@@ -345,6 +360,8 @@ class MockSession: public QObject
     int _historyLineCount = 0;
     bool _scrollbarRight = true;
     bool _scrollbarVisible = false;
+    QString _hyperlinkTooltipText;
+    QRectF _hyperlinkTooltipAnchor;
     float _opacity = 1.0F;
     float _dimUnfocused = 0.0F;
 };
@@ -516,7 +533,7 @@ TEST_CASE("GUI QML tab components load without errors (offscreen)", "[contour][g
         QStringLiteral("qrc:/contour/ui/SessionChrome.qml"),
         QStringLiteral("qrc:/contour/ui/CommandPalette.qml"),
         QStringLiteral("qrc:/contour/ui/SaveLayoutDialog.qml"),
-        QStringLiteral("qrc:/contour/ui/TerminalContextMenu.qml"),
+        QStringLiteral("qrc:/contour/ui/ActionContextMenu.qml"),
         QStringLiteral("qrc:/contour/ui/SettingsNavItem.qml"),
         QStringLiteral("qrc:/contour/ui/SettingsListItem.qml"),
         QStringLiteral("qrc:/contour/ui/ConfirmDialog.qml"),
@@ -572,7 +589,7 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
     // silent no-op at runtime.
     //
     // The menu is never popup()'d: offscreen there is no overlay to open into. That is exactly why
-    // TerminalContextMenu.qml populates on Component.onCompleted / model change rather than in an
+    // ActionContextMenu.qml populates on Component.onCompleted / model change rather than in an
     // about-to-show hook — the rows are there to be asserted the moment the component is complete.
     QQmlEngine engine;
     MockTabController controller;
@@ -593,15 +610,18 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
     auto const model = contour::toContextMenuModel(contour::buildContextMenu(state), actions);
     REQUIRE_FALSE(model.isEmpty());
 
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/TerminalContextMenu.qml")));
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/ActionContextMenu.qml")));
     INFO("component errors: " << component.errorString().toStdString());
     REQUIRE(component.isReady());
 
     QVariantMap initial;
-    initial.insert("controller", QVariant::fromValue(&controller));
     initial.insert("entries", model);
     std::unique_ptr<QObject> menu(component.createWithInitialProperties(initial));
     REQUIRE(menu != nullptr);
+
+    // The component announces a pick rather than calling a controller, which is what lets one component
+    // serve both menu surfaces; its host decides where that goes.
+    QSignalSpy pickedSpy(menu.get(), SIGNAL(picked(int)));
 
     // Every row became an entry: separators and the "Advanced"/"Change Profile" sub-menus included. A
     // native popup (the Windows trap TabContextMenu documents) would have come up empty.
@@ -620,7 +640,8 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
 
     // MenuItem exposes triggered() as a SIGNAL, and emitting it by name is what a click would do.
     REQUIRE(QMetaObject::invokeMethod(copyItem, "triggered"));
-    CHECK(controller.lastTriggeredActionId == 0);
+    REQUIRE(pickedSpy.count() == 1);
+    CHECK(pickedSpy.at(0).at(0).toInt() == 0);
     REQUIRE_FALSE(actions.empty());
     CHECK(contour::commandId(actions[0]) == "CopySelection");
 
@@ -3146,3 +3167,68 @@ TEST_CASE("The palette bolds matched characters and tints only unselected rows (
 }
 
 #include <QmlComponents_test.moc>
+
+TEST_CASE("SessionChrome shows the hyperlink tooltip only while there is a link under the pointer",
+          "[contour][gui][qml][hyperlink]")
+{
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::QmlMessageCapture warnings;
+
+    auto host = createChromeInWindow(engine);
+    auto session = createScrollableSession();
+    host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(session.get())));
+    QCoreApplication::processEvents();
+
+    auto* tip = host.chrome->findChild<QQuickItem*>(QStringLiteral("hyperlinkTooltip"));
+    REQUIRE(tip != nullptr);
+
+    // Nothing hovered: nothing to say. The tooltip's own text is the gate, so an empty one can never
+    // pop an empty box.
+    CHECK(tip->property("tipText").toString().isEmpty());
+
+    SECTION("a hovered link publishes its text and is placed at its anchor")
+    {
+        session->setHyperlinkHover("https://example.com/", QRectF(120, 80, 8, 16));
+        QCoreApplication::processEvents();
+
+        CHECK(tip->property("tipText").toString() == "https://example.com/");
+        CHECK(tip->x() == Catch::Approx(120));
+        // Well below the top edge, so it goes ABOVE the cell -- the anchor's own y.
+        CHECK(tip->property("showAbove").toBool());
+        CHECK(tip->y() == Catch::Approx(80));
+    }
+
+    SECTION("a link on the top row is placed below it, where there is room")
+    {
+        session->setHyperlinkHover("https://example.com/", QRectF(10, 0, 8, 16));
+        QCoreApplication::processEvents();
+
+        CHECK_FALSE(tip->property("showAbove").toBool());
+        CHECK(tip->y() == Catch::Approx(16)); // just under the cell
+    }
+
+    SECTION("a link at the right edge is clamped into the pane")
+    {
+        // Without the clamp the tooltip hangs off the pane, which is the popup-placement trap this
+        // codebase has already been bitten by once.
+        session->setHyperlinkHover("https://example.com/", QRectF(host.chrome->width() + 50, 40, 8, 16));
+        QCoreApplication::processEvents();
+
+        CHECK(tip->x() <= host.chrome->width());
+    }
+
+    SECTION("leaving the link withdraws the tooltip")
+    {
+        session->setHyperlinkHover("https://example.com/", QRectF(120, 80, 8, 16));
+        QCoreApplication::processEvents();
+        REQUIRE_FALSE(tip->property("tipText").toString().isEmpty());
+
+        session->setHyperlinkHover(QString(), QRectF());
+        QCoreApplication::processEvents();
+        CHECK(tip->property("tipText").toString().isEmpty());
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}

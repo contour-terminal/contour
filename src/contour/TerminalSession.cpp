@@ -3,6 +3,7 @@
 #include <contour/ContourGuiApp.h>
 #include <contour/ExternalLauncher.h>
 #include <contour/TerminalSession.h>
+#include <contour/display/CaretGeometry.h>
 #include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/helper.h>
@@ -474,12 +475,24 @@ void TerminalSession::terminate()
 }
 
 // {{{ Events implementations
+void TerminalSession::announce(QString const& message, QAccessible::AnnouncementPoliteness politeness)
+{
+    if (!_config.accessibilityAnnouncements.value())
+        return;
+    _announcer->announce(message, politeness);
+}
+
 void TerminalSession::bell()
 {
     emit onBell(_profile.bell.value().volume);
 
     if (_profile.bell.value().alert)
         emit onAlert();
+
+    // A bell has no object whose state changed, so nothing reaches a screen reader unless it is said.
+    // Runs on the TERMINAL thread, possibly with the state mutex held -- the announcer posts, and this
+    // message is a literal, so nothing here reads the terminal.
+    announce(QObject::tr("Bell"));
 }
 
 void TerminalSession::bufferChanged(vtbackend::ScreenType type)
@@ -831,6 +844,13 @@ void TerminalSession::notify(string_view title, string_view content)
 
 void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification const& notification)
 {
+    // Said as well as shown: a desktop notification is a visual popup, and an assistive client that
+    // does not read the desktop's own notifications would otherwise miss it entirely.
+    announce(notification.title.empty()
+                 ? QString::fromStdString(notification.body)
+                 : QStringLiteral("%1: %2").arg(QString::fromStdString(notification.title),
+                                                QString::fromStdString(notification.body)));
+
 #if defined(__linux__)
     _desktopNotifier.notify(notification);
 
@@ -1139,12 +1159,13 @@ void TerminalSession::requestWindowResize(Width width, Height height)
 
 void TerminalSession::addToAccumulatedScroll(crispy::point pixelDelta,
                                              crispy::point angleDelta,
-                                             vtbackend::ScrollPhase phase) noexcept
+                                             vtbackend::ScrollPhase phase,
+                                             bool platformInverted) noexcept
 {
     // Drop incidental sideways drift before it can accumulate into a whole column step. Filtering here
     // rather than at the binding lookup keeps it in ONE place and fixes the mouse-reporting path too: an
     // application receiving phantom horizontal wheel reports during a vertical scroll is equally wrong.
-    if (!_horizontalWheelGesture.acceptsHorizontal(pixelDelta, angleDelta, phase))
+    if (!_horizontalWheelGesture.acceptsHorizontal(pixelDelta, angleDelta, phase, platformInverted))
     {
         pixelDelta.x = 0;
         angleDelta.x = 0;
@@ -1302,6 +1323,11 @@ void TerminalSession::inputModeChanged(vtbackend::ViMode mode)
 
 void TerminalSession::onScrollOffsetChanged(vtbackend::ScrollOffset value)
 {
+    // The hovered link is recomputed on mouse MOVEMENT only, so scrolling slides a different line under
+    // a stationary pointer with nothing noticing. Hide rather than recompute: the terminal's own hover
+    // state is stale for the same reason, so re-deriving from it here would only show a different wrong
+    // answer. Browsers likewise drop a tooltip on scroll.
+    clearHyperlinkHover();
     emit scrollOffsetChanged(unbox(value));
 }
 // }}}
@@ -1349,17 +1375,29 @@ void TerminalSession::sendKeyEvent(Key key,
 
     if (eventType != KeyboardEventType::Release)
     {
-        // Key bindings match on the chord: a latched lock key must not change which shortcut fires.
-        if (auto const* actions = config::apply(
-                _config.inputMappings.value().keyMappings, key, modifiers.chord, matchModeFlags()))
-        {
+        // Runs @p actions (when there are any) through the repeat filter, reporting whether anything
+        // actually ran. Shared by the two lookups below so they differ only in which table they consult.
+        auto const runBinding = [&](auto const* actions) {
+            if (actions == nullptr)
+                return false;
             auto executionCount = 0;
             handleAction(actions, eventType, [&](auto const& actions) {
                 executionCount = executeAllActions(actions);
             });
-            if (executionCount > 0)
-                return;
-        }
+            return executionCount > 0;
+        };
+
+        // Key bindings match on the chord: a latched lock key must not change which shortcut fires.
+        if (runBinding(config::apply(
+                _config.inputMappings.value().keyMappings, key, modifiers.chord, matchModeFlags())))
+            return;
+
+        // The user's mappings did not claim this key, so fall back to the built-in ones. They are
+        // consulted second on purpose: an explicit binding in the user's config always wins, because it
+        // is found first (see builtinFallbackKeyMappings for why a plain default could not reach an
+        // existing user at all).
+        if (runBinding(config::applyBuiltinFallback(_config, key, modifiers.chord, matchModeFlags())))
+            return;
     }
     terminal().sendKeyEvent(key, modifiers, eventType, now);
 }
@@ -1461,9 +1499,21 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
     //
     // Only here, never earlier: an application that asked for the mouse consumed the press above and
     // still receives every one of them, because horizontal scrolling inside an application IS continuous.
-    if ((button == MouseButton::WheelLeft || button == MouseButton::WheelRight)
-        && !_horizontalWheelGesture.consumeNavigationStep())
-        return;
+    if (button == MouseButton::WheelLeft || button == MouseButton::WheelRight)
+    {
+        if (!_horizontalWheelGesture.consumeNavigationStep())
+            return;
+
+        // A swipe navigates the way the FINGERS went, a wheel tilt the way it says. Resolved here and
+        // nowhere earlier: the same WheelLeft/WheelRight also feeds mouse REPORTING, where an
+        // application doing its own horizontal scrolling must keep receiving the literal direction.
+        //
+        // Note this sits AFTER the user's own mouseMappings were consulted, so an explicitly bound
+        // WheelLeft keeps meaning the button it names. That is deliberate: following the finger is a
+        // property of the built-in tab-switching default, not of the button.
+        button = horizontalNavigationButton(button == MouseButton::WheelRight,
+                                            _horizontalWheelGesture.usesNaturalDirection());
+    }
 
     // The user's mappings did not claim this button, so fall back to the built-in ones. They are consulted
     // second on purpose: an explicit binding in the user's config always wins (see
@@ -1497,8 +1547,16 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
     terminal().tick(steady_clock::now());
 
     auto constexpr UiHandledHint = false;
-    crispy::locked(_terminal,
-                   [&]() { _terminal.sendMouseMoveEvent(modifiers, pos, pixelPosition, UiHandledHint); });
+
+    // The hovered link is read inside the lock the move already takes, rather than asked for again
+    // afterwards. tryGetHoveringHyperlink() re-queries the screen and needs the same non-recursive
+    // mutex, so a second acquisition here would be one more chance to deadlock, and a callback fired
+    // from vtbackend's own hover-state update would run WITH the lock held and self-deadlock outright.
+    auto const hoveredUri = crispy::locked(_terminal, [&]() -> std::string {
+        _terminal.sendMouseMoveEvent(modifiers, pos, pixelPosition, UiHandledHint);
+        auto const link = _terminal.tryGetHoveringHyperlink();
+        return link ? link->uri : std::string {};
+    });
 
     // The cursor shape lives on the display; a display-less session (background pane, headless
     // test) has no cursor to change.
@@ -1511,7 +1569,45 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
             _display->setMouseCursorShape(MouseCursorShape::PointingHand);
         else
             setDefaultCursor();
+
+        updateHyperlinkHover(hoveredUri, pos);
     }
+}
+
+void TerminalSession::updateHyperlinkHover(std::string_view uri, vtbackend::CellLocation cell)
+{
+    if (!_config.hyperlinkHoverTooltip.value())
+        return;
+
+    auto constexpr MaxTooltipLength = size_t { 100 };
+    auto const change = _hyperlinkHover.update(uri, cell, MaxTooltipLength);
+    if (!change.changed)
+        return;
+
+    _hyperlinkTooltipText = QString::fromStdString(change.text);
+    // The anchor is only meaningful while something is shown, and computing it needs a display.
+    if (!change.text.empty() && _display != nullptr)
+        _hyperlinkTooltipAnchor = display::cellRectangle(_display->gridMetrics().pageMargin,
+                                                         _display->cellSize(),
+                                                         change.anchor,
+                                                         1,
+                                                         _display->contentScale());
+    emit hyperlinkHoverChanged();
+}
+
+void TerminalSession::onPointerLeft()
+{
+    clearHyperlinkHover();
+    setDefaultCursor();
+}
+
+void TerminalSession::clearHyperlinkHover()
+{
+    if (!_hyperlinkHover.clear().changed)
+        return;
+
+    _hyperlinkTooltipText.clear();
+    emit hyperlinkHoverChanged();
 }
 
 void TerminalSession::sendMouseReleaseEvent(Modifiers modifiers,
@@ -1702,6 +1798,9 @@ ContextMenuState TerminalSession::contextMenuState()
             // a session knows about itself.
             .hasSplits = false,
             .inputProtected = !terminal().allowInput(),
+            // A property of the build and the machine, asked once here so the menu itself stays a pure
+            // function of this snapshot.
+            .canSpeak = _speech->available(),
             // Taken now, while the pointer is still on the cell the user clicked. The rows built from this
             // carry the URI with them, because by the time one is picked the pointer has moved to the menu.
             .hyperlinkUnderCursor = hyperlink ? hyperlink->uri : std::string {},
@@ -2267,6 +2366,10 @@ bool TerminalSession::operator()(actions::ToggleInputMethodHandling)
 bool TerminalSession::operator()(actions::ToggleInputProtection)
 {
     terminal().setAllowInput(!terminal().allowInput());
+    // Assertive: this changes what typing does, so a client mid-sentence should be interrupted rather
+    // than tell the user about it after they have already typed into a terminal that ignored them.
+    announce(terminal().allowInput() ? QObject::tr("Editable") : QObject::tr("Read-only"),
+             QAccessible::AnnouncementPoliteness::Assertive);
     return true;
 }
 
@@ -2335,9 +2438,55 @@ bool TerminalSession::operator()(actions::WriteScreen const& event)
     return true;
 }
 
-bool TerminalSession::operator()(actions::CreateNewTab)
+bool TerminalSession::operator()(actions::CreateNewTab action)
 {
-    _manager->createNewTab(this);
+    _manager->createNewTab(this, std::move(action.profileName));
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SpeakSelection)
+{
+    // Bounded so a selected build log becomes a readable excerpt rather than minutes of speech with no
+    // way to skip ahead.
+    auto constexpr MaxSpokenChars = size_t { 4000 };
+
+    if (!_speech->available())
+        return false;
+
+    auto const text = speakableText(terminal().extractSelectionText(), MaxSpokenChars);
+    if (text.empty())
+        return false;
+
+    _speech->say(text);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::StopSpeaking)
+{
+    _speech->stop();
+    return true;
+}
+
+bool TerminalSession::operator()(actions::CloseAllTabs)
+{
+    // Deliberately NOT actions::Quit: that one calls exit() straight from a Qt slot, with no teardown
+    // and no PTY reaping. Closing the window runs the tested teardown instead, and with a single window
+    // open closing it IS quitting.
+    _manager->closeAllTabs(this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SetTabBarVisibility action)
+{
+    if (_display)
+        _display->setTabBarVisibility(action.mode);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SetTabBarPosition action)
+{
+    if (_display)
+        _display->setTabBarPosition(action.position);
     return true;
 }
 

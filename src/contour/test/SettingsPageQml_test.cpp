@@ -37,6 +37,53 @@ void clickButton(QObject* object)
 
 } // namespace
 
+TEST_CASE("SettingsPage opens on the global settings pane", "[contour][gui][qml][settings]")
+{
+    contour::test::QmlMessageCapture warnings;
+
+    QTemporaryDir dir;
+    auto const configDir = std::filesystem::path(dir.path().toStdString());
+    auto const configPath = configDir / "contour.yml";
+    {
+        auto out = std::ofstream(configPath);
+        out << "default_profile: main\nprofiles:\n    main:\n        show_title_bar: true\n";
+    }
+
+    config::Config cfg;
+    config::loadConfigFromFile(cfg, configPath);
+    auto store = std::make_shared<FileGuiConfigStore>(configDir);
+    auto controller = SettingsController([&]() -> config::Config const& { return cfg; }, store, [&]() {});
+
+    QQmlEngine engine;
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/SettingsPage.qml")));
+    REQUIRE(component.isReady());
+
+    auto initial = QVariantMap {};
+    initial.insert("controller", QVariant::fromValue(&controller));
+    std::unique_ptr<QObject> page(component.createWithInitialProperties(initial));
+    REQUIRE(page != nullptr);
+    auto* item = qobject_cast<QQuickItem*>(page.get());
+    REQUIRE(item != nullptr);
+
+    // The page lands on a pane rather than on a "pick something" placeholder, and the nav rail agrees
+    // with the pane it is showing.
+    CHECK(page->property("editorMode").toString() == "globals");
+    CHECK(!page->property("headerTitle").toString().isEmpty());
+
+    auto* globalsButton = item->findChild<QObject*>("globalSettingsButton");
+    REQUIRE(globalsButton != nullptr);
+    CHECK(globalsButton->property("selected").toBool());
+
+    // Nothing else in the rail claims to be selected at the same time.
+    auto* keybindingsButton = item->findChild<QObject*>("keybindingsButton");
+    REQUIRE(keybindingsButton != nullptr);
+    CHECK(!keybindingsButton->property("selected").toBool());
+
+    CHECK(warnings.count([](QString const& w) {
+        return w.contains("TypeError") || w.contains("ReferenceError");
+    }) == 0);
+}
+
 TEST_CASE("SettingsPage creates a profile through the QML and it lands on disk (offscreen)",
           "[contour][gui][qml][settings]")
 {

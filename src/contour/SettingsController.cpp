@@ -46,6 +46,21 @@ namespace
                  [accessor](TerminalProfile& p, QVariant const& v) { accessor(p) = v.toBool(); } };
     }
 
+    [[nodiscard]] QString toQString(std::string_view text)
+    {
+        return QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size()));
+    }
+
+    /// The configuration tokens of every mode of type @p Mode, in table order.
+    template <typename Mode>
+    [[nodiscard]] QStringList tabBarModeTokens()
+    {
+        auto tokens = QStringList {};
+        for (auto const& info: config::tabBarModes<Mode>())
+            tokens.push_back(toQString(info.token));
+        return tokens;
+    }
+
     /// The editable scalar profile fields. Data-driven: it grows one row at a time toward full parity
     /// without touching any other code (the QML renders each row by its `type`).
     std::vector<ProfileFieldDescriptor> const& profileFieldDescriptors()
@@ -77,42 +92,6 @@ namespace
               "double",
               [](TerminalProfile const& p) { return QVariant(p.dimUnfocused.value()); },
               [](TerminalProfile& p, QVariant const& v) { p.dimUnfocused = v.toDouble(); } },
-            { "tab_bar_position",
-              "Tab bar position",
-              "Where the tab strip sits relative to the terminal content.",
-              "enum",
-              [](TerminalProfile const& p) {
-                  return QVariant(p.tabBarPosition.value() == config::TabBarPosition::Bottom ? "Bottom"
-                                                                                             : "Top");
-              },
-              [](TerminalProfile& p, QVariant const& v) {
-                  p.tabBarPosition =
-                      v.toString() == "Bottom" ? config::TabBarPosition::Bottom : config::TabBarPosition::Top;
-              },
-              { "Top", "Bottom" } },
-            { "tab_bar_visibility",
-              "Tab bar visibility",
-              "When the tab strip is shown.",
-              "enum",
-              [](TerminalProfile const& p) {
-                  switch (p.tabBarVisibility.value())
-                  {
-                      case config::TabBarVisibility::Never: return QVariant("Never");
-                      case config::TabBarVisibility::Multiple: return QVariant("Multiple");
-                      case config::TabBarVisibility::Always: break;
-                  }
-                  return QVariant("Always");
-              },
-              [](TerminalProfile& p, QVariant const& v) {
-                  auto const s = v.toString();
-                  if (s == "Never")
-                      p.tabBarVisibility = config::TabBarVisibility::Never;
-                  else if (s == "Multiple")
-                      p.tabBarVisibility = config::TabBarVisibility::Multiple;
-                  else
-                      p.tabBarVisibility = config::TabBarVisibility::Always;
-              },
-              { "Always", "Never", "Multiple" } },
             // }}}
             // {{{ Font
             { "font_family",
@@ -332,6 +311,28 @@ namespace
               },
               [](QVariant const& v) { return v.toString().toStdString(); },
               { "system", "dark", "light" } },
+            // Both tab bar rows read their options, their rendered value and their accepted set from
+            // contour/TabBarMode.h, so the page cannot offer a token the configuration reader would
+            // then reject -- and a new mode shows up here with this file untouched.
+            { "tab_bar_position",
+              "Tab bar position",
+              "Where the tab strip sits relative to the terminal content.",
+              "enum",
+              [](config::Config const& c) {
+                  return QVariant(toQString(config::tabBarModeToken(c.tabBarPosition.value())));
+              },
+              [](QVariant const& v) { return v.toString().toStdString(); },
+              tabBarModeTokens<config::TabBarPosition>() },
+            { "tab_bar_visibility",
+              "Tab bar visibility",
+              "When the tab strip is shown: always, never, or only once a window has more than one "
+              "tab.",
+              "enum",
+              [](config::Config const& c) {
+                  return QVariant(toQString(config::tabBarModeToken(c.tabBarVisibility.value())));
+              },
+              [](QVariant const& v) { return v.toString().toStdString(); },
+              tabBarModeTokens<config::TabBarVisibility>() },
             { "grapheme_clustering",
               "Grapheme clustering",
               "Whether DEC mode 2027 starts out set, letting a codepoint arriving after the first "

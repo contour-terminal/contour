@@ -107,6 +107,16 @@
     <release version="0.7.0" urgency="medium" type="development">
       <description>
         <ul>
+          <li>BREAKING: `tab_bar_position` and `tab_bar_visibility` moved from a profile to the top level of contour.yml. A window shows one tab bar whichever profiles its tabs run, so the setting belongs to the application rather than to a profile. Move these two keys out of your `profiles:` block; a profile-scoped copy is no longer read</li>
+          <li>Selected text can be read aloud through the operating system's speech synthesizer, from the context menu or with Ctrl+Shift+S. Needs Qt's TextToSpeech module and an installed voice; where either is missing the feature is simply not offered</li>
+          <li>The bell, desktop notifications and read-only mode are now announced to screen readers, which have no other way to learn about them. Turn it off with `accessibility_announcements: false`</li>
+          <li>The window chrome is now described to screen readers: the tab bar reads as a tab list whose tabs announce themselves as they are switched, the window and tab buttons say what they do instead of naming their glyph, and every settings field carries its own label</li>
+          <li>Right-clicking the empty part of the title bar or tab bar opens a window menu: open a tab (optionally under a named profile), close the current tab or all of them, and switch the tab bar between always visible, auto-hide and hidden</li>
+          <li>Hovering an OSC 8 hyperlink now shows a tooltip naming its target, so it can be read before it is followed. A local file:// target is shown as a plain path. Turn it off with `hyperlink_hover_tooltip: false`</li>
+          <li>Adds Ctrl+Tab / Ctrl+Shift+Tab and Ctrl+PageDown / Ctrl+PageUp as tab-switching shortcuts. They reach existing configurations too, and binding them yourself still wins. Note that Ctrl+Tab is now taken from applications that request it through the Kitty keyboard protocol</li>
+          <li>A two-finger sideways swipe now switches tabs in the direction the fingers moved, the way a browser does. A mouse wheel tilt is unchanged</li>
+          <li>Fixes a sideways swipe over the tab bar doing nothing at all on a trackpad</li>
+          <li>Fixes the tab bar placement and visibility settings appearing to do nothing until Contour was restarted</li>
           <li>Fixes a tall glyph — a Nerd Font icon, a powerline separator — overwriting a neighbouring glyph in the texture atlas, and no longer shifts such a glyph sideways off its own bearing</li>
           <li>Fixes a hang and a crash on startup when probing the audio device, for profiles that cannot ring an audible bell</li>
           <li>Fixes the status line and non-displayed pages being drawn against whichever screen was current rather than the one being rendered, which took the cursor row and the cursor colour from the wrong page</li>

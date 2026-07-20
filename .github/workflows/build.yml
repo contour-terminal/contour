@@ -164,8 +164,8 @@ jobs:
     - name: "Install Qt (GuiPrivate-capable)"
       uses: jurplel/install-qt-action@v4
       with:
-        version: "6.9.*"
-        modules: qtmultimedia qt5compat qtshadertools
+        version: "6.11.*"
+        modules: qtmultimedia qt5compat qtshadertools qtspeech
     - name: Install clang
       run: |
         wget https://apt.llvm.org/llvm.sh
@@ -575,9 +575,20 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: "6.9.*"
+          # 6.10, not the 6.11 the other platforms pin: Qt restructured its Windows package
+          # repository at 6.11 into per-architecture subdirectories
+          # (qt6_6111/qt6_6111_msvc2022_64/Updates.xml) where every release up to 6.10 kept a flat
+          # one (qt6_6103/Updates.xml). aqtinstall still requests the flat path, so a 6.11 install
+          # here dies with "Failed to locate XML data for Qt version '6.11.1'". 3.3.0 is its latest
+          # release, so there is nothing newer to move to; Linux and macOS are unaffected because
+          # their repositories stayed flat.
+          #
+          # 6.10 carries all four modules below, so this costs no feature -- only the configure-time
+          # notice that the detected Qt is older than the version Contour is tested against. Raise
+          # this to "6.11.*" once aqtinstall learns the new layout.
+          version: "6.10.*"
           #version: "5.15.*"
-          modules: qtmultimedia qt5compat qtshadertools
+          modules: qtmultimedia qt5compat qtshadertools qtspeech
       - name: "Setup NuGet for vcpkg caching"
         shell: bash
         run: |
@@ -733,8 +744,8 @@ jobs:
       - name: "Install Qt (GuiPrivate-capable)"
         uses: jurplel/install-qt-action@v4
         with:
-          version: "6.9.*"
-          modules: qtmultimedia qt5compat qtshadertools
+          version: "6.11.*"
+          modules: qtmultimedia qt5compat qtshadertools qtspeech
       - name: Install GCC
         if: ${{ startsWith(matrix.compiler, 'GCC') }}
         run: sudo apt install -y g++-${{ steps.extract_matrix.outputs.CC_VERSION }}

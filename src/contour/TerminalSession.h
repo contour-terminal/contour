@@ -7,6 +7,9 @@
 #include <contour/Config.h>
 #include <contour/ContextMenu.h>
 #include <contour/HorizontalWheelGesture.h>
+#include <contour/HyperlinkTooltip.h>
+#include <contour/SpeechSynthesizer.h>
+#include <contour/display/Announcer.h>
 #if defined(__linux__)
     #include <contour/FreeDesktopNotifier.h>
 #endif
@@ -91,6 +94,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(int fontSize READ getFontSize)
     Q_PROPERTY(int upTime READ getUptime)
     Q_PROPERTY(QString bellSource READ getBellSource NOTIFY onBell)
+    // The OSC 8 hyperlink under the pointer. Empty means no tooltip. Both change together, so one
+    // signal serves them: the anchor without its text describes nothing.
+    Q_PROPERTY(QString hyperlinkTooltipText READ hyperlinkTooltipText NOTIFY hyperlinkHoverChanged)
+    Q_PROPERTY(QRectF hyperlinkTooltipAnchor READ hyperlinkTooltipAnchor NOTIFY hyperlinkHoverChanged)
 
     // Q_PROPERTY(QString profileName READ profileName NOTIFY profileNameChanged)
 
@@ -104,6 +111,51 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return static_cast<int>(diff.count());
     }
 
+    /// What the hyperlink tooltip should say, or empty for "show nothing".
+    [[nodiscard]] QString hyperlinkTooltipText() const noexcept { return _hyperlinkTooltipText; }
+
+    /// The cell the pointer entered the hyperlink at, in the display's item-local logical coordinates.
+    ///
+    /// The ENTRY cell, so the tooltip stays put while the pointer traces the link rather than sliding
+    /// along with it.
+    [[nodiscard]] QRectF hyperlinkTooltipAnchor() const noexcept { return _hyperlinkTooltipAnchor; }
+
+    /// Withdraws the hyperlink tooltip, whatever the pointer is over.
+    ///
+    /// Called when the pointer leaves the terminal, and when the viewport scrolls: the hovered-link
+    /// state tracks mouse MOVEMENT, so scrolling moves the link out from under a stationary pointer
+    /// without anything noticing. Hiding is the honest answer to that; continuing to show a tooltip for
+    /// a link no longer under the pointer is worse than showing none.
+    void clearHyperlinkHover();
+
+  private:
+    /// Announces @p message, unless the user switched announcements off.
+    void announce(
+        QString const& message,
+        QAccessible::AnnouncementPoliteness politeness = QAccessible::AnnouncementPoliteness::Polite);
+
+  public:
+    /// The pointer left the terminal entirely.
+    ///
+    /// Withdraws the hyperlink tooltip and puts the mouse cursor back to its default shape. The shape
+    /// is reset here rather than left alone because it is only ever changed on a cell CHANGE, so a
+    /// pointer that leaves while over a link would otherwise keep the pointing hand it was given.
+    void onPointerLeft();
+
+    /// Replaces the announcer this session speaks through.
+    ///
+    /// Injected rather than constructed here, so the DECISIONS below (what is worth announcing) are
+    /// assertable against a recording implementation with no accessibility bridge in sight.
+    void setAnnouncer(std::unique_ptr<display::Announcer> announcer) { _announcer = std::move(announcer); }
+
+  private:
+    /// Feeds the hovered-link tracker and publishes any change to QML.
+    ///
+    /// @param uri  The hyperlink under the pointer, or empty when there is none.
+    /// @param cell Where the pointer is, in viewport coordinates.
+    void updateHyperlinkHover(std::string_view uri, vtbackend::CellLocation cell);
+
+  public:
     QString getBellSource() const noexcept
     {
         if (_profile.bell.value().sound == "default")
@@ -199,12 +251,14 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// in the first place — neither for the tab-switch fallback binding nor for an application that
     /// asked for mouse reporting.
     ///
-    /// @param pixelDelta Pixel-precise delta (trackpads), or {0,0}.
-    /// @param angleDelta Angle delta (wheels), or {0,0}.
-    /// @param phase      The gesture phase the windowing system reported.
+    /// @param pixelDelta       Pixel-precise delta (trackpads), or {0,0}.
+    /// @param angleDelta       Angle delta (wheels), or {0,0}.
+    /// @param phase            The gesture phase the windowing system reported.
+    /// @param platformInverted Whether the platform already flipped the delta (natural scrolling).
     void addToAccumulatedScroll(crispy::point pixelDelta,
                                 crispy::point angleDelta,
-                                vtbackend::ScrollPhase phase) noexcept;
+                                vtbackend::ScrollPhase phase,
+                                bool platformInverted) noexcept;
 
     /// Tells the horizontal-wheel gesture where a gesture begins and ends.
     ///
@@ -522,6 +576,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::WriteScreen const& event);
     bool operator()(actions::CreateNewTab);
     bool operator()(actions::CloseTab);
+    bool operator()(actions::CloseAllTabs);
+    bool operator()(actions::SpeakSelection);
+    bool operator()(actions::StopSpeaking);
+    bool operator()(actions::SetTabBarVisibility);
+    bool operator()(actions::SetTabBarPosition);
     bool operator()(actions::MoveTabTo);
     bool operator()(actions::MoveTabToLeft);
     bool operator()(actions::MoveTabToRight);
@@ -608,6 +667,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void updateImageCanvasCeiling();
 
   signals:
+    void hyperlinkHoverChanged();
     void sessionClosed(TerminalSession&);
     void profileNameChanged(QString newValue);
     void lineCountChanged(int newValue);
@@ -727,6 +787,15 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     crispy::point _accumulatedPixelScroll;
     crispy::point _accumulatedAngleScroll;
     HorizontalWheelGesture _horizontalWheelGesture;
+    HyperlinkHoverTracker _hyperlinkHover;
+    /// Never null: a NullAnnouncer stands in wherever there is nothing to announce through, so the call
+    /// sites never have to ask whether announcing is possible.
+    std::unique_ptr<display::Announcer> _announcer = std::make_unique<display::NullAnnouncer>();
+    /// Built once per session rather than per invocation: a QTextToSpeech probes the platform's engines
+    /// on construction, which is far too much work to redo on every keypress.
+    std::unique_ptr<SpeechSynthesizer> _speech = makeSpeechSynthesizer();
+    QString _hyperlinkTooltipText;
+    QRectF _hyperlinkTooltipAnchor;
 
     vtbackend::Terminal _terminal;
     bool _terminatedAndWaitingForKeyPress = false;

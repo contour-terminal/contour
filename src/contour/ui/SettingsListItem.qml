@@ -98,6 +98,7 @@ Item {
             onClicked: if (!root.isDefault) root.setDefaultRequested()
             contentItem: Label {
                 text: "⌂"
+                Accessible.name: qsTr("Make this the default")
                 font.pointSize: 11
                 color: root.isDefault ? sys.highlight : sys.windowText
                 horizontalAlignment: Text.AlignHCenter
@@ -142,6 +143,7 @@ Item {
             onClicked: root.deleteRequested()
             contentItem: Label {
                 text: "🗑"
+                Accessible.name: qsTr("Delete")
                 font.pointSize: 11
                 color: trashButton.hovered ? "#e53935" : "#c62828"
                 horizontalAlignment: Text.AlignHCenter

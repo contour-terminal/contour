@@ -158,6 +158,51 @@ TEST_CASE("sendKeyEvent maps Qt key events onto the terminal's PTY encoding", "[
     }
 }
 
+TEST_CASE("the browser tab-switch chords are claimed before the terminal encodes them", "[helper][input]")
+{
+    contour::test::TestApp app;
+
+    // Reproduce what the fallback table exists for. Loading ANY `input_mapping:` section replaces the
+    // built-in key mappings wholesale, which is the situation of every user whose contour.yml predates
+    // these chords. Emptying the table here is that same state.
+    //
+    // This is load-bearing, not scene-setting: a DEFAULT config carries these chords in its own key
+    // mappings too, so the user-table lookup would claim them first and this test would pass whether or
+    // not the fallback were consulted at all. (Verified by deleting the consultation site: with the
+    // defaults left in place the test still passed.) The session copies the config in its constructor,
+    // so this must happen before makeSession.
+    app.app().config().inputMappings.value().keyMappings.clear();
+
+    auto session = makeSession(app.app());
+    auto& pty = mockPtyOf(*session);
+
+    // End-to-end proof that the fallback table is actually CONSULTED, which a unit test of
+    // applyBuiltinFallback cannot give: were the consultation missing, these chords would fall through
+    // to the terminal and be encoded onto the PTY. So an empty stdin buffer is the evidence the binding
+    // fired -- and it needs no window and no second tab to observe, because SwitchToTab* reports success
+    // whether or not there is another tab to move to.
+    auto const reachedThePty = [&](Qt::Key key, Qt::KeyboardModifiers modifiers) {
+        QKeyEvent ev(QEvent::KeyPress, key, modifiers);
+        pty.stdinBuffer().clear();
+        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session);
+        return !pty.stdinBuffer().empty();
+    };
+
+    // NB: Ctrl+PageUp is the one chord here that does NOT discriminate on its own -- measured, it
+    // encodes to nothing even when no binding claims it, so this line would hold either way. The
+    // evidence that the consultation site exists comes from the three below, each of which DOES reach
+    // the PTY when the fallback is not consulted.
+    CHECK_FALSE(reachedThePty(Qt::Key_PageUp, Qt::ControlModifier));
+    CHECK_FALSE(reachedThePty(Qt::Key_PageDown, Qt::ControlModifier));
+    CHECK_FALSE(reachedThePty(Qt::Key_Tab, Qt::ControlModifier));
+    // Qt reports the shifted Tab as Key_Backtab; helper.cpp rewrites it back to Tab with Shift re-added.
+    CHECK_FALSE(reachedThePty(Qt::Key_Backtab, Qt::ControlModifier | Qt::ShiftModifier));
+
+    // A chord the table does NOT carry still reaches the terminal. Without this the checks above would
+    // also pass if key handling were broken outright and nothing were ever encoded.
+    CHECK(reachedThePty(Qt::Key_PageDown, Qt::NoModifier));
+}
+
 TEST_CASE("sendKeyEvent covers the whole special-key mapping table", "[helper][input]")
 {
     contour::test::TestApp app;

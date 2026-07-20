@@ -112,7 +112,17 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     }
 
     /// Creates and activates a new tab in the window hosting @p acting (the CreateNewTab keybinding).
-    void createNewTab(TerminalSession* acting);
+    /// Creates a tab in the window the acting session belongs to.
+    ///
+    /// @param acting      The session the request came from.
+    /// @param profileName The profile to launch under, or nullopt for the default.
+    void createNewTab(TerminalSession* acting, std::optional<std::string> profileName = std::nullopt);
+
+    /// Closes every tab in the window the acting session belongs to.
+    ///
+    /// With a single window open this closes the application -- through the window's own teardown,
+    /// which is the tested path, rather than through actions::Quit's bare exit().
+    void closeAllTabs(TerminalSession* acting);
 
     /// Looks up @p name in the app's configured layouts and appends its tabs to the window hosting
     /// @p acting (the LaunchLayout action). Logs and no-ops if the layout is unknown or @p acting has

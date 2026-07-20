@@ -6,6 +6,8 @@
 
 #include <QtCore/QVariantList>
 
+#include <optional>
+#include <utility>
 #include <vector>
 
 namespace contour
@@ -27,5 +29,34 @@ namespace contour
 /// @return The rows, in menu order.
 [[nodiscard]] QVariantList toContextMenuModel(std::vector<ContextMenuEntry> const& entries,
                                               std::vector<actions::Action>& actions);
+
+/// A published context menu: the rows QML renders, plus the actions those rows carry.
+///
+/// One per menu SURFACE. Publishing a second menu into the first's model would rebuild -- and re-target
+/// -- a menu the user may still have open, so the terminal pane and the title bar hold one of these
+/// each rather than sharing.
+struct PublishedContextMenu
+{
+    QVariantList model;                   ///< What QML renders.
+    std::vector<actions::Action> actions; ///< What the rows run, indexed by their `actionId`.
+
+    /// Replaces the published rows with @p entries.
+    void publish(std::vector<ContextMenuEntry> const& entries)
+    {
+        actions.clear();
+        model = toContextMenuModel(entries, actions);
+    }
+
+    /// The action row @p actionId carries.
+    ///
+    /// @return The action, or nullopt when the id names no row -- which happens when a click arrives
+    ///         against a menu that has since been rebuilt.
+    [[nodiscard]] std::optional<actions::Action> actionAt(int actionId) const
+    {
+        if (actionId < 0 || std::cmp_greater_equal(actionId, actions.size()))
+            return std::nullopt;
+        return actions[static_cast<size_t>(actionId)];
+    }
+};
 
 } // namespace contour

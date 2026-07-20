@@ -190,6 +190,19 @@ constexpr StringLiteral PixelReportingConfig {
     "\n"
 };
 
+constexpr StringLiteral AccessibilityAnnouncementsConfig {
+    "{comment} Whether to announce the bell, notifications and mode changes to assistive technology.\n"
+    "{comment} Costs nothing while no screen reader is attached.\n"
+    "accessibility_announcements: {}\n"
+    "\n"
+};
+
+constexpr StringLiteral HyperlinkHoverTooltipConfig {
+    "{comment} Whether hovering an OSC 8 hyperlink shows a tooltip with its target.\n"
+    "hyperlink_hover_tooltip: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral TabBarPositionConfig {
     "{comment} Where the GUI tab strip (tab bar) is placed within the window (ignore-case):\n"
     "{comment}   Top    = above the terminal content (default).\n"
@@ -846,6 +859,14 @@ constexpr StringLiteral InputMappingsConfig {
     "{comment} ------------\n"
     "{comment}\n"
     "{comment} In this section you can customize key bindings.\n"
+    "{comment}\n"
+    "{comment} A few bindings are BUILT IN and are not listed below: Ctrl+Tab / Ctrl+Shift+Tab and\n"
+    "{comment} Ctrl+PageDown / Ctrl+PageUp switch tabs, right-click opens the context menu, and a\n"
+    "{comment} horizontal wheel switches tabs. They apply only when this list does not claim the same\n"
+    "{comment} key or button, so binding one here replaces it. They are built in rather than listed\n"
+    "{comment} because this list, once written to a config file, replaces the built-in one wholesale --\n"
+    "{comment} so a binding added to Contour after your config was generated could never reach you.\n"
+    "{comment}\n"
     "{comment} Each array element in `input_mapping` represents one key binding,\n"
     "{comment} whereas `mods` represents an array of keyboard modifiers that must be pressed - as well "
     "as\n"
@@ -1616,6 +1637,22 @@ constexpr StringLiteral PixelReportingWeb {
     "\n"
 };
 
+constexpr StringLiteral AccessibilityAnnouncementsWeb {
+    "\n"
+    "Whether events with no representation in the accessibility tree -- the bell, a desktop "
+    "notification, a mode change -- are announced to assistive technology. Costs nothing while no "
+    "assistive client is attached. See [Accessibility](../../accessibility.md).\n"
+    "\n"
+};
+
+constexpr StringLiteral HyperlinkHoverTooltipWeb {
+    "\n"
+    "Whether hovering an [OSC 8 hyperlink](../vt-extensions/index.md) shows a tooltip naming its "
+    "target, so it can be read before it is followed. A local `file://` target is shown as a plain "
+    "path.\n"
+    "\n"
+};
+
 constexpr StringLiteral TabBarPositionWeb {
     "\n"
     "Selects where the GUI tab strip (tab bar) is placed within the window. Valid values (ignore-case):\n"
@@ -2165,6 +2202,9 @@ using CopyLastMarkRangeOffset = DocumentationEntry<CopyLastMarkRangeOffsetConfig
 using WMClass = DocumentationEntry<WMClassConfig, WMClassWeb>;
 using TabLabel = DocumentationEntry<TabLabelConfig, TabLabelWeb>;
 using PixelReporting = DocumentationEntry<PixelReportingConfig, PixelReportingWeb>;
+using AccessibilityAnnouncements =
+    DocumentationEntry<AccessibilityAnnouncementsConfig, AccessibilityAnnouncementsWeb>;
+using HyperlinkHoverTooltip = DocumentationEntry<HyperlinkHoverTooltipConfig, HyperlinkHoverTooltipWeb>;
 using TabBarPosition = DocumentationEntry<TabBarPositionConfig, TabBarPositionWeb>;
 using TabBarVisibility = DocumentationEntry<TabBarVisibilityConfig, TabBarVisibilityWeb>;
 using Margins = DocumentationEntry<MarginsConfig, MarginsWeb>;

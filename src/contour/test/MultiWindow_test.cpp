@@ -152,6 +152,46 @@ TEST_CASE("tab strip seeds are first-write-wins per window", "[contour][multiwin
     CHECK(window->tabBarVisibility() == static_cast<int>(TabBarVisibility::Never));
 }
 
+TEST_CASE("a config reload overrides the seeded tab strip state", "[contour][multiwindow]")
+{
+    using contour::config::TabBarPosition;
+    using contour::config::TabBarVisibility;
+
+    TestApp app;
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    REQUIRE(window.controller != nullptr);
+
+    // The seed latch exists so a session rebind cannot reset a runtime override. It must NOT swallow a
+    // reload: before applyTabBarFromConfig existed, saving tab_bar_visibility in the settings page did
+    // nothing at all until the application was restarted, because the reload arrived as another seed.
+    window->seedTabBarPosition(TabBarPosition::Bottom);
+    window->seedTabBarVisibility(TabBarVisibility::Never);
+
+    auto positionSpy = QSignalSpy(window.controller, &contour::WindowController::tabBarPositionChanged);
+    auto visibilitySpy = QSignalSpy(window.controller, &contour::WindowController::tabBarVisibilityChanged);
+    auto shouldShowSpy = QSignalSpy(window.controller, &contour::WindowController::tabBarShouldShowChanged);
+
+    window->applyTabBarFromConfig(TabBarPosition::Top, TabBarVisibility::Multiple);
+    CHECK(window->tabBarPosition() == static_cast<int>(TabBarPosition::Top));
+    CHECK(window->tabBarVisibility() == static_cast<int>(TabBarVisibility::Multiple));
+    CHECK(positionSpy.count() == 1);
+    CHECK(visibilitySpy.count() == 1);
+    // The resolved gate depends on the mode, so QML must be told to re-evaluate it too.
+    CHECK(shouldShowSpy.count() == 1);
+
+    // Applying the same values again changes nothing and says nothing.
+    window->applyTabBarFromConfig(TabBarPosition::Top, TabBarVisibility::Multiple);
+    CHECK(positionSpy.count() == 1);
+    CHECK(visibilitySpy.count() == 1);
+
+    // And a later session rebind still cannot clobber what the reload applied.
+    window->seedTabBarPosition(TabBarPosition::Bottom);
+    window->seedTabBarVisibility(TabBarVisibility::Never);
+    CHECK(window->tabBarPosition() == static_cast<int>(TabBarPosition::Top));
+    CHECK(window->tabBarVisibility() == static_cast<int>(TabBarVisibility::Multiple));
+}
+
 TEST_CASE("tab strip Always/Never gates ignore the tab count", "[contour][multiwindow]")
 {
     using contour::config::TabBarVisibility;

@@ -107,16 +107,81 @@ std::vector<FallbackMouseMapping> const& builtinFallbackMouseMappings()
     return mappings;
 }
 
+std::vector<FallbackKeyMapping> const& builtinFallbackKeyMappings()
+{
+    // Browser-style tab switching. Fallbacks rather than defaults for the reason given on the
+    // declaration: every contour.yml written before these existed enumerates the key mappings without
+    // them, and would otherwise shadow them away forever.
+    //
+    // Ctrl+Tab is claimed from the application deliberately, matching Windows Terminal, GNOME Terminal
+    // and Konsole. A terminal application CAN ask for it -- the Kitty keyboard protocol gives Ctrl+Tab
+    // its own CSI-u sequence -- so this is a real trade, made the way the reference terminals make it.
+    // Anyone who needs it in an application binds it in their own input_mapping:, which is consulted
+    // first and therefore wins. Should that trade ever need softening, the cheap retreat is a `.modes`
+    // with AlternateScreen DISABLED on the two Tab rows: full-screen applications would keep Ctrl+Tab
+    // while the shell still switched tabs, using only data that already exists.
+    static auto const mappings = std::vector<FallbackKeyMapping> {
+        FallbackKeyMapping {
+            .mapping = { .modes { vtbackend::MatchModes {} },
+                         .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                         .input = vtbackend::Key::PageUp,
+                         .binding = { { actions::SwitchToTabLeft {} } } } },
+        FallbackKeyMapping {
+            .mapping = { .modes { vtbackend::MatchModes {} },
+                         .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                         .input = vtbackend::Key::PageDown,
+                         .binding = { { actions::SwitchToTabRight {} } } } },
+        FallbackKeyMapping {
+            .mapping = { .modes { vtbackend::MatchModes {} },
+                         .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                         .input = vtbackend::Key::Tab,
+                         .binding = { { actions::SwitchToTabRight {} } } } },
+        // Ctrl+Shift+Tab arrives as Key::Tab with Shift re-added: Qt reports the shifted press as
+        // Key_Backtab, which helper.cpp rewrites (see makeKey).
+        FallbackKeyMapping { .mapping = { .modes { vtbackend::MatchModes {} },
+                                          .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
+                                                                              vtbackend::Modifier::Shift } },
+                                          .input = vtbackend::Key::Tab,
+                                          .binding = { { actions::SwitchToTabLeft {} } } } },
+    };
+    return mappings;
+}
+
+namespace
+{
+    /// Matches @p input against the enabled rows of @p table.
+    ///
+    /// Shared by both applyBuiltinFallback overloads so the gating pipeline -- filter by the row's
+    /// predicate, then match -- exists once rather than once per input kind.
+    template <typename Input>
+    [[nodiscard]] ActionList const* applyFallbackTable(std::vector<FallbackMapping<Input>> const& table,
+                                                       Config const& config,
+                                                       Input input,
+                                                       vtbackend::Modifiers modifiers,
+                                                       uint8_t actualModeFlags)
+    {
+        auto enabledMappings =
+            table
+            | std::views::filter([&config](FallbackMapping<Input> const& row) { return row.enabled(config); })
+            | std::views::transform(&FallbackMapping<Input>::mapping);
+        return apply(enabledMappings, input, modifiers, actualModeFlags);
+    }
+} // namespace
+
 ActionList const* applyBuiltinFallback(Config const& config,
                                        vtbackend::MouseButton button,
                                        vtbackend::Modifiers modifiers,
                                        uint8_t actualModeFlags)
 {
-    auto enabledMappings =
-        builtinFallbackMouseMappings()
-        | std::views::filter([&config](FallbackMouseMapping const& row) { return row.enabled(config); })
-        | std::views::transform(&FallbackMouseMapping::mapping);
-    return apply(enabledMappings, button, modifiers, actualModeFlags);
+    return applyFallbackTable(builtinFallbackMouseMappings(), config, button, modifiers, actualModeFlags);
+}
+
+ActionList const* applyBuiltinFallback(Config const& config,
+                                       vtbackend::Key key,
+                                       vtbackend::Modifiers modifiers,
+                                       uint8_t actualModeFlags)
+{
+    return applyFallbackTable(builtinFallbackKeyMappings(), config, key, modifiers, actualModeFlags);
 }
 
 namespace
@@ -510,6 +575,10 @@ void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
             overrides.loadFromEntry("spawn_new_process", config.spawnNewProcess);
             overrides.loadFromEntry("reflow_on_resize", config.reflowOnResize);
             overrides.loadFromEntry("tab_switch_on_horizontal_wheel", config.tabSwitchOnHorizontalWheel);
+            overrides.loadFromEntry("accessibility_announcements", config.accessibilityAnnouncements);
+            overrides.loadFromEntry("hyperlink_hover_tooltip", config.hyperlinkHoverTooltip);
+            overrides.loadFromEntry("tab_bar_position", config.tabBarPosition);
+            overrides.loadFromEntry("tab_bar_visibility", config.tabBarVisibility);
             overrides.loadFromEntry("theme", config.theme);
             overrides.loadFromEntry("early_exit_threshold", config.earlyExitThreshold);
         }
@@ -707,6 +776,10 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("spawn_new_process", c.spawnNewProcess);
         loadFromEntry("reflow_on_resize", c.reflowOnResize);
         loadFromEntry("tab_switch_on_horizontal_wheel", c.tabSwitchOnHorizontalWheel);
+        loadFromEntry("accessibility_announcements", c.accessibilityAnnouncements);
+        loadFromEntry("hyperlink_hover_tooltip", c.hyperlinkHoverTooltip);
+        loadFromEntry("tab_bar_position", c.tabBarPosition);
+        loadFromEntry("tab_bar_visibility", c.tabBarVisibility);
         loadFromEntry("text_scaling_method", c.textScalingMethod);
         loadFromEntry("grapheme_clustering", c.graphemeClustering);
         loadFromEntry("gui_config_locked", c.guiConfigLocked);
@@ -771,8 +844,6 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child, TerminalProfile&
         loadFromEntry(child, "wm_class", where.wmClass);
         loadFromEntry(child, "tab_label", where.tabLabel);
         loadFromEntry(child, "pixel_reporting", where.pixelReporting);
-        loadFromEntry(child, "tab_bar_position", where.tabBarPosition);
-        loadFromEntry(child, "tab_bar_visibility", where.tabBarVisibility);
         loadFromEntry(child, "option_as_alt", where.optionKeyAsAlt);
         loadFromEntry(child, "margins", where.margins);
         loadFromEntry(child, "terminal_id", where.terminalId);
@@ -2121,50 +2192,48 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     }
 }
 
+namespace
+{
+    /// Reads a tab bar mode spelled as one of the tokens its table carries.
+    ///
+    /// Case-insensitive, and an unrecognized value is reported rather than silently accepted -- a typo
+    /// in a visible appearance setting should not pass unnoticed. It still leaves @p where at its
+    /// default, so a bad value costs a log line rather than a failed startup. Mirrors the GuiTheme
+    /// reader above.
+    ///
+    /// @param node   The mapping to read from.
+    /// @param entry  The key within @p node.
+    /// @param where  Receives the mode, and is left untouched when the value is not recognized.
+    /// @param logger The reader's trace category, passed in because it is a member of the reader.
+    template <typename Mode>
+    void loadTabBarMode(YAML::Node const& node,
+                        std::string const& entry,
+                        Mode& where,
+                        logstore::category const& logger)
+    {
+        auto const child = node[entry];
+        if (!child)
+            return;
+
+        auto const rawValue = child.as<std::string>();
+        logger()("Loading entry: {}, value {}", entry, rawValue);
+        if (auto const mode = tabBarModeFromToken<Mode>(rawValue))
+            where = *mode;
+        else
+            errorLog()("Unknown value for {}: '{}'; keeping {}.", entry, rawValue, where);
+    }
+} // namespace
+
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarPosition& where)
 {
-    // Case-insensitive; an unrecognized value leaves @p where at its (default) value.
-    auto parsePosition = [&](std::string const& key) -> std::optional<TabBarPosition> {
-        auto const literal = crispy::toLower(key);
-        logger()("Loading entry: {}, value {}", entry, literal);
-        if (literal == "top")
-            return TabBarPosition::Top;
-        if (literal == "bottom")
-            return TabBarPosition::Bottom;
-        return std::nullopt;
-    };
-
-    if (auto const child = node[entry])
-    {
-        auto opt = parsePosition(child.as<std::string>());
-        if (opt.has_value())
-            where = opt.value();
-    }
+    loadTabBarMode(node, entry, where, logger);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
                                      TabBarVisibility& where)
 {
-    // Case-insensitive; an unrecognized value leaves @p where at its (default) value.
-    auto parseVisibility = [&](std::string const& key) -> std::optional<TabBarVisibility> {
-        auto const literal = crispy::toLower(key);
-        logger()("Loading entry: {}, value {}", entry, literal);
-        if (literal == "always")
-            return TabBarVisibility::Always;
-        if (literal == "never")
-            return TabBarVisibility::Never;
-        if (literal == "multiple")
-            return TabBarVisibility::Multiple;
-        return std::nullopt;
-    };
-
-    if (auto const child = node[entry])
-    {
-        auto opt = parseVisibility(child.as<std::string>());
-        if (opt.has_value())
-            where = opt.value();
-    }
+    loadTabBarMode(node, entry, where, logger);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
@@ -2759,6 +2828,31 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
             }
             else
                 return std::nullopt;
+        }
+
+        if (holds_alternative<actions::CreateNewTab>(action))
+        {
+            // Optional: a bare `action: CreateNewTab` opens the default profile, which is what the
+            // shipped binding does. A `profile:` sibling names one instead.
+            if (auto profile = node["profile"]; profile && profile.IsScalar())
+                return actions::CreateNewTab { profile.as<std::string>() };
+            return actions::CreateNewTab {};
+        }
+
+        if (holds_alternative<actions::SetTabBarVisibility>(action))
+        {
+            if (auto mode = node["mode"]; mode && mode.IsScalar())
+                if (auto const parsed = tabBarModeFromToken<TabBarVisibility>(mode.as<std::string>()))
+                    return actions::SetTabBarVisibility { *parsed };
+            return std::nullopt;
+        }
+
+        if (holds_alternative<actions::SetTabBarPosition>(action))
+        {
+            if (auto position = node["position"]; position && position.IsScalar())
+                if (auto const parsed = tabBarModeFromToken<TabBarPosition>(position.as<std::string>()))
+                    return actions::SetTabBarPosition { *parsed };
+            return std::nullopt;
         }
 
         if (holds_alternative<actions::MoveTabTo>(action))

@@ -21,7 +21,7 @@
         <file>ui/ResizeBorder.qml</file>
         <file>ui/PaneNode.qml</file>
         <file>ui/TerminalPane.qml</file>
-        <file>ui/TerminalContextMenu.qml</file>
+        <file>ui/ActionContextMenu.qml</file>
         <file>ui/CommandPalette.qml</file>
         <file>ui/SaveLayoutDialog.qml</file>
         <file>ui/SettingsPage.qml</file>

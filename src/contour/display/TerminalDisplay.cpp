@@ -3,6 +3,7 @@
 #include <contour/BlurBehind.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/WindowController.h>
+#include <contour/display/Announcer.h>
 #include <contour/display/ContentScale.h>
 #include <contour/display/ImeQueryRect.h>
 #include <contour/display/RhiRenderer.h>
@@ -252,13 +253,20 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     // would otherwise double-decorate); main.qml binds the TitleBar's visibility to the CONTROLLER's
     // titleBarVisible. Only SEED the window default here (first-write-wins): re-applying the profile
     // value on every session rebind silently reverted a runtime ToggleTitleBar on each tab switch.
+    // Announcements go through THIS display, which is the object an assistive client already knows
+    // about (TerminalAccessible::installFactory hands out its interface). Installed on every session
+    // bind, so a rebound session speaks through the display it is actually shown in.
+    _session->setAnnouncer(std::make_unique<QtAnnouncer>(this));
+
     if (auto* controller = windowController())
     {
         controller->seedTitleBarVisible(profile().showTitleBar.value());
-        // Tab-strip placement + visibility are window state seeded once from the profile, same
+        // Tab-strip placement + visibility are window state seeded once from the configuration, same
         // first-write-wins contract as the title bar (so a runtime state is never reset on rebind).
-        controller->seedTabBarPosition(profile().tabBarPosition.value());
-        controller->seedTabBarVisibility(profile().tabBarVisibility.value());
+        // They are global rather than per-profile: one window shows one tab bar, whichever profiles
+        // its tabs happen to run.
+        controller->seedTabBarPosition(_session->config().tabBarPosition.value());
+        controller->seedTabBarVisibility(_session->config().tabBarVisibility.value());
     }
 
     if (!_renderer)
@@ -423,12 +431,17 @@ void TerminalDisplay::handleWindowChanged(QQuickWindow* newWindow)
                 Qt::DirectConnection);
 
         // setSession() may have run before a window existed, in which case windowController() could not
-        // route to THIS window's controller (it matches by the display's OS window) and the profile's
-        // show_title_bar seed was dropped or mis-targeted a no-op. Re-seed now that the window exists;
-        // seedTitleBarVisible is first-write-wins per window, so an already-seeded window is unaffected.
+        // route to THIS window's controller (it matches by the display's OS window) and the chrome
+        // seeds were dropped or mis-targeted a no-op. Re-seed now that the window exists; all three are
+        // first-write-wins per window, so an already-seeded window is unaffected. The tab bar pair is
+        // seeded here too, not just the title bar: they are dropped by the very same race.
         if (_session != nullptr)
             if (auto* controller = windowController())
+            {
                 controller->seedTitleBarVisible(_session->profile().showTitleBar.value());
+                controller->seedTabBarPosition(_session->config().tabBarPosition.value());
+                controller->seedTabBarVisibility(_session->config().tabBarVisibility.value());
+            }
     }
     else
         displayLog()("Detaching widget {} from window.", (void*) this);
@@ -1219,6 +1232,18 @@ void TerminalDisplay::hoverMoveEvent(QHoverEvent* event)
     sendMouseMoveEvent(event, *_session);
 }
 
+void TerminalDisplay::hoverLeaveEvent(QHoverEvent* event)
+{
+    QQuickItem::hoverLeaveEvent(event);
+    if (!_session)
+        return;
+
+    // Nothing is under the pointer once it is outside the item, so the hyperlink tooltip goes with it.
+    // The pointing-hand cursor is reset for the same reason: without a leave handler it survived the
+    // pointer leaving a link at the item's edge, which was a small pre-existing wart.
+    _session->onPointerLeft();
+}
+
 void TerminalDisplay::mouseReleaseEvent(QMouseEvent* event)
 {
     if (!_session)
@@ -1837,6 +1862,18 @@ void TerminalDisplay::toggleFullScreen()
 {
     if (auto* controller = windowController())
         controller->toggleFullScreen(*this);
+}
+
+void TerminalDisplay::setTabBarVisibility(config::TabBarVisibility mode)
+{
+    if (auto* controller = windowController())
+        controller->setTabBarVisibility(mode);
+}
+
+void TerminalDisplay::setTabBarPosition(config::TabBarPosition position)
+{
+    if (auto* controller = windowController())
+        controller->setTabBarPosition(position);
 }
 
 void TerminalDisplay::toggleTitleBar()

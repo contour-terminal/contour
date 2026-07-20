@@ -22,8 +22,13 @@ Rectangle {
     property var controller: null
     property var windowController: null
 
-    // Which editor the right pane shows: "profile", "scheme", "globals", "keybindings", or "" (nothing).
-    property string editorMode: ""
+    // Which editor the right pane shows: "profile", "scheme", "globals" or "keybindings".
+    //
+    // Opens on the global settings rather than on a chooser: the page is reached by asking for
+    // settings, so landing on a pane that says "pick something on the left" spends the user's first
+    // click telling them what they already came here to do. Global settings is the one pane that
+    // always exists — a fresh install has no GUI-owned profile or colour scheme to show instead.
+    property string editorMode: "globals"
 
     // Live OS palette handle, so the whole page follows dark/light in realtime (see CommandPalette.qml).
     SystemPalette {
@@ -322,7 +327,6 @@ Rectangle {
                 // Page header band.
                 ColumnLayout {
                     Layout.fillWidth: true
-                    visible: root.editorMode !== ""
                     spacing: 2
                     Label {
                         text: root.headerTitle
@@ -629,26 +633,6 @@ Rectangle {
                                     opacity: 0.5
                                 }
                             }
-                        }
-                    }
-                    // }}}
-
-                    // {{{ Empty state
-                    ColumnLayout {
-                        anchors.centerIn: parent
-                        visible: root.editorMode === ""
-                        spacing: 10
-                        Label {
-                            text: "⚙"
-                            font.pointSize: 42
-                            opacity: 0.35
-                            Layout.alignment: Qt.AlignHCenter
-                        }
-                        Label {
-                            text: qsTr("Select a profile or color scheme on the left,\nor create a new one.")
-                            horizontalAlignment: Text.AlignHCenter
-                            color: root.subtleText
-                            Layout.alignment: Qt.AlignHCenter
                         }
                     }
                     // }}}
