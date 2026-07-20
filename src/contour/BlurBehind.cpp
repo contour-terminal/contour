@@ -21,7 +21,6 @@
 #endif
 
 #if defined(CONTOUR_WAYLAND) && QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-    #include <QtGui/QGuiApplication>
     #include <QtWaylandClient/QWaylandClientExtension>
     #include <QtWaylandClient/private/qwaylandwindow_p.h>
 

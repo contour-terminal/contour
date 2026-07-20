@@ -1470,7 +1470,7 @@ struct YAMLConfigReader
     /// loader (whose `profiles/<name>.yml` document root IS the body) calls it directly.
     /// @param profileNode The profile body map; a null node is a no-op (@p where keeps its base values).
     /// @param where The profile to populate; pre-seed it with an inheritance base before calling.
-    void loadProfileBody(YAML::Node const& profileNode, TerminalProfile& where);
+    void loadProfileBody(YAML::Node const& child, TerminalProfile& where);
 
     void loadFromEntry(YAML::Node const& node, std::string const& entry, RendererConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ImagesConfig& where);

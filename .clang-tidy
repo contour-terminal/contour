@@ -165,6 +165,9 @@ CheckOptions:
   modernize-replace-auto-ptr.IncludeStyle: llvm
   modernize-use-default-member-init.UseAssignment: '1'
   modernize-use-nullptr.NullMacros: 'NULL'
+  # Pointer analysis proposes a const *pointee* where only the pointer itself could be
+  # const, which is a different guarantee and breaks callers that write through it.
+  misc-const-correctness.AnalyzePointers: 'false'
   readability-function-cognitive-complexity.Threshold: '50'
   readability-function-cognitive-complexity.IgnoreMacros: 'true'
 

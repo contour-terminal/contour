@@ -31,32 +31,32 @@ namespace
     };
 
     template <typename T>
-    static constexpr bool operator<(Cap<T> const& a, Cap<T> const& b) noexcept
+    constexpr bool operator<(Cap<T> const& a, Cap<T> const& b) noexcept
     {
         return a.name < b.name;
     }
     template <typename T>
-    static constexpr bool operator>(Cap<T> const& a, Cap<T> const& b) noexcept
+    constexpr bool operator>(Cap<T> const& a, Cap<T> const& b) noexcept
     {
         return a.name > b.name;
     }
     template <typename T>
-    static constexpr bool operator<=(Cap<T> const& a, Cap<T> const& b) noexcept
+    constexpr bool operator<=(Cap<T> const& a, Cap<T> const& b) noexcept
     {
         return a.name <= b.name;
     }
     template <typename T>
-    static constexpr bool operator>=(Cap<T> const& a, Cap<T> const& b) noexcept
+    constexpr bool operator>=(Cap<T> const& a, Cap<T> const& b) noexcept
     {
         return a.name >= b.name;
     }
     template <typename T>
-    static constexpr bool operator==(Cap<T> const& a, Cap<T> const& b) noexcept
+    constexpr bool operator==(Cap<T> const& a, Cap<T> const& b) noexcept
     {
         return a.name == b.name;
     }
     template <typename T>
-    static constexpr bool operator!=(Cap<T> const& a, Cap<T> const& b) noexcept
+    constexpr bool operator!=(Cap<T> const& a, Cap<T> const& b) noexcept
     {
         return a.name == b.name;
     }

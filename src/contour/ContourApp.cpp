@@ -26,6 +26,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <utility>
 
 #ifndef _WIN32
     #include <sys/ioctl.h>
@@ -493,7 +494,7 @@ namespace
         ifs.seekg(0, std::ios::beg);
         auto data = std::vector<uint8_t>(static_cast<size_t>(fileSize));
         ifs.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(fileSize));
-        if (!ifs || static_cast<std::uintmax_t>(ifs.gcount()) != fileSize)
+        if (!ifs || std::cmp_not_equal(ifs.gcount(), fileSize))
             return {};
         return data;
     }
@@ -504,8 +505,7 @@ namespace
                       int layer,
                       string_view fileName)
     {
-        auto constexpr MaxImageFileSize =
-            std::uintmax_t { static_cast<std::uintmax_t>(16 * 1024 * 1024) }; // GIP body limit
+        auto constexpr MaxImageFileSize = static_cast<std::uintmax_t>(16 * 1024 * 1024); // GIP body limit
         auto const data = readFile(std::filesystem::path(string(fileName)), MaxImageFileSize);
         if (data.empty())
         {

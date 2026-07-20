@@ -190,7 +190,7 @@ TEST_CASE("fuzzyMatch reports the exact characters the best alignment landed on"
             INFO("query[" << i << "]='" << query[i] << "' -> candidate index " << at);
             CHECK(at > previous); // strictly ascending
             REQUIRE(at >= 0);
-            REQUIRE(at < static_cast<int>(candidate.size()));
+            REQUIRE(std::cmp_less(at, candidate.size()));
             auto const folded = [](char c) {
                 return std::tolower(static_cast<unsigned char>(c));
             };

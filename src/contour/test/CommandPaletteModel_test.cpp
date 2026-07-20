@@ -20,6 +20,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace contour;
@@ -294,7 +295,7 @@ TEST_CASE("Title-match highlight indices are UTF-16 code units, not UTF-8 byte o
     // Each reported index must land on the matched character in the UTF-16 string — the property the QML
     // highlighter relies on. Byte offsets would index the wrong characters (and run off the end) here.
     auto const query = QStringLiteral("zephyr");
-    for (auto i = 0; i < static_cast<int>(matches.size()); ++i)
+    for (auto i = 0; std::cmp_less(i, matches.size()); ++i)
         CHECK(title.at(matches[static_cast<std::size_t>(i)]) == query.at(i));
 }
 

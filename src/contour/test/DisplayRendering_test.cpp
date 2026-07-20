@@ -87,7 +87,7 @@ struct DisplayHarness
     contour::display::TerminalDisplay* display = nullptr; // manually deleted in teardown
     contour::WindowController* controller = nullptr;      // manager-owned; removed in teardown
 
-    DisplayHarness()
+    DisplayHarness(): display(new contour::display::TerminalDisplay())
     {
         auto ptyOwned = std::make_unique<contour::test::BlockingMockPty>(
             vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) });
@@ -103,7 +103,6 @@ struct DisplayHarness
         // the grid). Clear to black so grabbed frames reflect what a user actually sees.
         window->setColor(QColor(Qt::black));
 
-        display = new contour::display::TerminalDisplay();
         display->setParentItem(window->contentItem());
         display->setSize(QSizeF(800, 600));
         display->setSession(session.get());

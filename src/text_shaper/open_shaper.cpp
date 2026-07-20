@@ -191,7 +191,7 @@ static std::optional<text::rasterized_glyph> rasterizeWithCairo(FT_Face ftFace,
     output.format = text::bitmap_format::rgba;
     output.bitmap = std::move(buffer);
 
-    size_t const pixelCount = static_cast<size_t>(width * height);
+    auto const pixelCount = static_cast<size_t>(width * height);
     auto* pixels = reinterpret_cast<uint32_t*>(output.bitmap.data());
     for (size_t i = 0; i < pixelCount; ++i)
     {
@@ -764,9 +764,7 @@ struct open_shaper::private_open_shaper // {{{
             return existing;
 
         auto const sourceId = identifierOf(source);
-        if (std::any_of(blacklistedSources.begin(), blacklistedSources.end(), [&](auto const& a) {
-                return a == sourceId;
-            }))
+        if (std::ranges::any_of(blacklistedSources, [&](auto const& a) { return a == sourceId; }))
             return nullopt;
 
         auto ftFacePtrOpt = loadFace(source, fontSize, dpi, ft);

@@ -171,11 +171,11 @@ struct fontconfig_locator::private_tag
     // currently empty, maybe later something (such as caching)?
     FcConfig* ftConfig = nullptr;
 
-    private_tag()
+    private_tag(): ftConfig(FcInitLoadConfigAndFonts())
     {
         auto const start = std::chrono::steady_clock::now();
         FcInit();
-        ftConfig = FcInitLoadConfigAndFonts();
+
         auto const elapsed = std::chrono::steady_clock::now() - start;
         auto const ms =
             static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count())

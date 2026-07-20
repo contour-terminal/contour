@@ -25,7 +25,6 @@ using std::string_view;
 using crispy::point;
 
 namespace Ranges = std::ranges;
-namespace Ranges = std::ranges;
 namespace Views = std::views;
 
 namespace vtrasterizer

@@ -826,7 +826,7 @@ std::optional<TextRenderer::TextureAtlas::TileCreateData> TextRenderer::createBl
         return std::nullopt;
 
     return createTileData(tileLocation,
-                          std::move(wanted->bitmap),
+                          wanted->bitmap,
                           canvas->format,
                           wanted->size,
                           RenderTileAttributes::X { 0 },

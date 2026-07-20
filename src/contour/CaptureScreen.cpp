@@ -115,10 +115,10 @@ namespace
 #endif
         }
 
-        TTY()
+        TTY(): fd(open("/dev/tty", O_RDWR))
         {
 #ifndef _WIN32
-            fd = open("/dev/tty", O_RDWR);
+
             if (fd < 0)
             {
                 cerr << "Could not open current terminal.\r\n";

@@ -50,9 +50,9 @@ namespace
 {
     struct system_wrap // {{{
     {
-        int pfd[2];
+        int pfd[2] { -1, -1 };
 
-        system_wrap(): pfd { -1, -1 }
+        system_wrap()
         {
             if (pipe(pfd))
                 perror("pipe");

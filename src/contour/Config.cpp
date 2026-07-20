@@ -2955,9 +2955,10 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
                         { "VT", actions::CopyFormat::VT },
                     } };
                 // NOLINTNEXTLINE(readability-qualified-auto)
-                if (auto const p = std::find_if(Mappings.begin(),
-                                                Mappings.end(),
-                                                [&](auto const& t) { return t.first == formatString; });
+                if (auto const p =
+                        std::ranges::find_if(Mappings,
+
+                                             [&](auto const& t) { return t.first == formatString; });
                     p != Mappings.end())
                 {
                     return actions::CopySelection { p->second };

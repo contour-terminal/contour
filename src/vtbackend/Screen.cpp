@@ -44,6 +44,7 @@
 #include <string_view>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 #include <variant>
 
 #ifdef _WIN32
@@ -775,7 +776,7 @@ void Screen::writeText(char32_t codepoint)
         _pendingCharTraceLog += unicode::convert_to<char>(codepoint);
 #endif
 
-    return writeTextInternal(codepoint);
+    writeTextInternal(codepoint);
 }
 
 void Screen::writeTextInternal(char32_t sourceCodepoint)
@@ -5991,7 +5992,7 @@ void Screen::handleInProgressQuery(SemanticBlockTracker const& tracker)
     }
 
     auto const json = formatBlockJson(*currentBlock, promptText, outputText, outputLineCount);
-    reply("{}{{\"version\":1,\"blocks\":[{}]}}{}", SBQueryResponseSuccess, json, DcsTerminator);
+    reply(R"({}{{"version":1,"blocks":[{}]}}{})", SBQueryResponseSuccess, json, DcsTerminator);
 }
 
 void Screen::handleCompletedBlocksQuery(SemanticBlockTracker const& tracker,
@@ -6020,7 +6021,7 @@ void Screen::handleCompletedBlocksQuery(SemanticBlockTracker const& tracker,
 
     // Add from completed blocks (back = most recent).
     for (auto it = completedBlocks.rbegin();
-         it != completedBlocks.rend() && static_cast<int>(blocks.size()) < requestedCount;
+         it != completedBlocks.rend() && std::cmp_less(blocks.size(), requestedCount);
          ++it)
         blocks.push_back(&*it);
 
@@ -7468,8 +7469,7 @@ optional<CellLocation> Screen::search(std::u32string_view searchText, CellLocati
 {
     // TODO use LogicalLines to spawn logical lines for improving the search on wrapped lines.
 
-    auto const isCaseSensitive =
-        std::any_of(searchText.begin(), searchText.end(), [](auto ch) { return std::isupper(ch); });
+    auto const isCaseSensitive = std::ranges::any_of(searchText, [](auto ch) { return std::isupper(ch); });
 
     if (searchText.empty())
         return nullopt;
@@ -7494,8 +7494,7 @@ optional<CellLocation> Screen::search(std::u32string_view searchText, CellLocati
 optional<CellLocation> Screen::searchReverse(std::u32string_view searchText, CellLocation startPosition)
 {
     // TODO use LogicalLinesReverse to spawn logical lines for improving the search on wrapped lines.
-    auto const isCaseSensitive =
-        std::any_of(searchText.begin(), searchText.end(), [](auto ch) { return std::isupper(ch); });
+    auto const isCaseSensitive = std::ranges::any_of(searchText, [](auto ch) { return std::isupper(ch); });
 
     if (searchText.empty())
         return nullopt;

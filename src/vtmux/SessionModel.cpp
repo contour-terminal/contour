@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cctype>
 #include <ranges>
+#include <utility>
 
 namespace vtmux
 {
@@ -23,7 +24,7 @@ Tab* Window::previousActiveTab() const noexcept
 
 Tab* Window::tabAt(int index) const noexcept
 {
-    if (index < 0 || index >= static_cast<int>(_tabs.size()))
+    if (index < 0 || std::cmp_greater_equal(index, _tabs.size()))
         return nullptr;
     return _tabs[static_cast<size_t>(index)].get();
 }
