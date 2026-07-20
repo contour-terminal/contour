@@ -71,7 +71,7 @@ namespace
 
         auto const atomNameCookie =
             xcb_intern_atom(xcbConnection, 0, static_cast<uint16_t>(name.size()), name.c_str());
-        xcb_intern_atom_reply_t* reply = xcb_intern_atom_reply(xcbConnection, atomNameCookie, nullptr);
+        xcb_intern_atom_reply_t const* reply = xcb_intern_atom_reply(xcbConnection, atomNameCookie, nullptr);
         if (!reply)
             return nullopt;
         auto const atomName = reply->atom;

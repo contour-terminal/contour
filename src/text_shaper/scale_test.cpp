@@ -16,7 +16,7 @@ TEST_CASE("scale alpha mask", "[scale]")
     glyph.bitmap.resize(10 * 10, 0xFF);
     glyph.position = { .x = 0, .y = 0 };
 
-    ImageSize targetSize { Width(5), Height(5) };
+    ImageSize const targetSize { Width(5), Height(5) };
 
     auto [scaled, factor] = scale(glyph, targetSize);
 
@@ -34,7 +34,7 @@ TEST_CASE("scale non-integer ratio RGBA", "[scale]")
     glyph.bitmap.resize(100 * 100 * 4, 255); // Fill with white
     glyph.position = { .x = 0, .y = 0 };
 
-    ImageSize targetSize { Width(66), Height(66) };
+    ImageSize const targetSize { Width(66), Height(66) };
     auto [scaled, factor] = scale(glyph, targetSize);
 
     CHECK(factor == Catch::Approx(1.515f).epsilon(0.01f));
@@ -43,7 +43,8 @@ TEST_CASE("scale non-integer ratio RGBA", "[scale]")
 
     if (!scaled.bitmap.empty())
     {
-        size_t lastPixelIndex = ((unbox(scaled.bitmapSize.width) * unbox(scaled.bitmapSize.height)) - 1) * 4;
+        size_t const lastPixelIndex =
+            ((unbox(scaled.bitmapSize.width) * unbox(scaled.bitmapSize.height)) - 1) * 4;
         CHECK(scaled.bitmap[lastPixelIndex] == 255);
     }
 }

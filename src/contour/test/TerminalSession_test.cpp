@@ -624,7 +624,7 @@ TEST_CASE("TerminalSession: manager creates real tabs headlessly through the inj
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     auto* factory = factoryOwned.get();
     TestApp testApp(std::move(factoryOwned));
-    contour::test::ScopedController controller(testApp.manager());
+    contour::test::ScopedController const controller(testApp.manager());
 
     controller->createNewTab();
     controller->createNewTab();
@@ -1455,7 +1455,7 @@ TEST_CASE("TerminalSession: openDocument routes through the injected external la
     CHECK(launcher.openedUrls.back().toString().toStdString() == "https://contour-terminal.org/");
 
     // A scheme-less path that EXISTS is resolved to an absolute file:// URL.
-    QTemporaryDir dir;
+    QTemporaryDir const dir;
     auto const filePath = std::filesystem::path(dir.path().toStdString()) / "doc.txt";
     {
         std::ofstream(filePath) << "x";
@@ -1557,7 +1557,7 @@ TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the ex
         auto& launcher = testApp.launcher();
 
         // Create a real executable file and hover a file://<localhost>/<path> link to it.
-        QTemporaryDir tmp;
+        QTemporaryDir const tmp;
         REQUIRE(tmp.isValid());
         auto const exePath = std::filesystem::path(tmp.path().toStdString()) / "script.sh";
         {
@@ -1841,7 +1841,7 @@ TEST_CASE("TerminalSession: a tab-strip swipe follows the finger while a wheel t
     // carry the SAME sign, so any difference in where they land is the rule itself and nothing else.
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     TestApp testApp(std::move(factoryOwned));
-    contour::test::ScopedController controller(testApp.manager());
+    contour::test::ScopedController const controller(testApp.manager());
 
     controller->createNewTab();
     controller->createNewTab();

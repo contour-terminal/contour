@@ -102,7 +102,7 @@ TEST_CASE("tab strip Multiple gate tracks the live tab count and re-notifies QML
     window->seedTabBarVisibility(TabBarVisibility::Multiple);
     // The seed itself emits the change once (mode is one input to the resolved gate). Spy AFTER seeding
     // so the counts below reflect only the count-driven add/close notifications.
-    QSignalSpy shouldShowSpy(window.controller, &contour::WindowController::tabBarShouldShowChanged);
+    QSignalSpy const shouldShowSpy(window.controller, &contour::WindowController::tabBarShouldShowChanged);
 
     // One tab: Multiple hides the strip.
     createTabs(manager, *window, 1);

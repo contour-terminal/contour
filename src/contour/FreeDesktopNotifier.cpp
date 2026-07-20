@@ -73,15 +73,15 @@ void FreeDesktopNotifier::notify(vtbackend::DesktopNotification const& notificat
     // org.freedesktop.Notifications.Notify parameters:
     // STRING app_name, UINT32 replaces_id, STRING app_icon, STRING summary,
     // STRING body, ARRAY actions, DICT hints, INT32 expire_timeout
-    QDBusReply<uint> reply = _interface->call("Notify",
-                                              appName,
-                                              replacesId,
-                                              QStringLiteral(""), // app_icon (empty)
-                                              title,
-                                              body,
-                                              actions,
-                                              hints,
-                                              notification.timeout);
+    QDBusReply<uint> const reply = _interface->call("Notify",
+                                                    appName,
+                                                    replacesId,
+                                                    QStringLiteral(""), // app_icon (empty)
+                                                    title,
+                                                    body,
+                                                    actions,
+                                                    hints,
+                                                    notification.timeout);
 
     if (reply.isValid())
     {

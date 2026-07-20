@@ -1218,7 +1218,7 @@ PaneProxy* WindowController::getProxy(vtmux::PaneId id)
 
 void WindowController::rebuildActiveTabPaneProxies()
 {
-    vtmux::Tab* tab = activeModelTab();
+    vtmux::Tab const* tab = activeModelTab();
 
     // Walk from rootPane(), NOT layoutRoot(): the liveness set below decides which proxies survive, and
     // every pane of the tab stays live even while a zoom hides all but one. Walking the layout root

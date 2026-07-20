@@ -191,7 +191,7 @@ void Process::start()
                     setenv(StdoutFastPipeEnvironmentName.data(), StdoutFastPipeFdStr.data(), true);
             }
 
-            char** argv = [stdoutFastPipe, this]() -> char** {
+            char* const* argv = [stdoutFastPipe, this]() -> char** {
                 if (!isFlatpak() || !_d->escapeSandbox)
                     return createArgv(_d->path, _d->args, 0);
 

@@ -125,7 +125,7 @@ TEST_CASE("TerminalSessionManager: applyLayoutToWindow builds tabs with colors",
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     auto* factory = factoryOwned.get();
     contour::test::TestApp app { std::move(factoryOwned) };
-    contour::test::ScopedController win { app.manager() };
+    contour::test::ScopedController const win { app.manager() };
 
     // Build a 3-tab layout in C++ (no config needed). Panes set NO profile, so no config lookup
     // happens. t2 is a vertical split of two leaves, covering the multi-pane realization path.
@@ -175,13 +175,13 @@ TEST_CASE("TerminalSessionManager: saveWindowLayout writes layouts.yml", "[manag
     // The save writes NEXT TO the loaded config file (where loadConfigFromFile merges it back
     // from); pointing configFile into an isolated temp dir keeps the test off the real user
     // config without mutating process-global environment (XDG_CONFIG_HOME).
-    QTemporaryDir configDir;
+    QTemporaryDir const configDir;
     REQUIRE(configDir.isValid());
 
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     contour::test::TestApp app { std::move(factoryOwned) };
     app.app().config().configFile = std::filesystem::path(configDir.path().toStdString()) / "contour.yml";
-    contour::test::ScopedController win { app.manager() };
+    contour::test::ScopedController const win { app.manager() };
 
     // Inject an inline layout (as if hand-written in contour.yml) BEFORE saving a DIFFERENT
     // layout. SaveLayout must not freeze this inline-only layout into layouts.yml: since
@@ -209,7 +209,7 @@ TEST_CASE("TerminalSessionManager: saveWindowLayout writes layouts.yml", "[manag
 
     // Sanity: the written file textually contains the saved layout's name.
     {
-        std::ifstream in(path, std::ios::binary);
+        std::ifstream const in(path, std::ios::binary);
         std::ostringstream contents;
         contents << in.rdbuf();
         CHECK(contents.str().find("saved:") != std::string::npos);
@@ -246,13 +246,13 @@ TEST_CASE("TerminalSessionManager: saveWindowLayout refuses to overwrite an unre
     // The save is a read-modify-write of layouts.yml. If the read fails to PARSE, treating the
     // file as empty and rewriting it would permanently destroy every layout it still contains —
     // refusing (and telling the user) is the only safe move.
-    QTemporaryDir configDir;
+    QTemporaryDir const configDir;
     REQUIRE(configDir.isValid());
 
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     contour::test::TestApp app { std::move(factoryOwned) };
     app.app().config().configFile = std::filesystem::path(configDir.path().toStdString()) / "contour.yml";
-    contour::test::ScopedController win { app.manager() };
+    contour::test::ScopedController const win { app.manager() };
 
     auto const layoutsPath = std::filesystem::path(configDir.path().toStdString()) / "layouts.yml";
     auto const garbage = std::string { "layouts:\n  broken: [unterminated\n" };
@@ -269,7 +269,7 @@ TEST_CASE("TerminalSessionManager: saveWindowLayout refuses to overwrite an unre
     CHECK_FALSE(app.manager().saveWindowLayout(win.id, "saved"));
 
     // The unreadable file is left byte-for-byte untouched for the user to fix or remove.
-    std::ifstream in(layoutsPath, std::ios::binary);
+    std::ifstream const in(layoutsPath, std::ios::binary);
     std::ostringstream contents;
     contents << in.rdbuf();
     CHECK(contents.str() == garbage);
@@ -280,7 +280,7 @@ TEST_CASE("TerminalSessionManager: SaveLayout persists through the injected Layo
     // The manager owns no filesystem knowledge: it serializes the window and hands the result to
     // the injected store. Driving that seam with an in-memory store exercises SaveLayout end to end
     // (including the read-modify-write against what the store already holds) without any disk I/O.
-    QTemporaryDir configDir;
+    QTemporaryDir const configDir;
     REQUIRE(configDir.isValid());
 
     auto storeOwned = std::make_unique<contour::test::InMemoryLayoutStore>();
@@ -297,7 +297,7 @@ TEST_CASE("TerminalSessionManager: SaveLayout persists through the injected Layo
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     contour::test::TestApp app { std::move(factoryOwned), std::move(storeOwned) };
     app.app().config().configFile = std::filesystem::path(configDir.path().toStdString()) / "contour.yml";
-    contour::test::ScopedController win { app.manager() };
+    contour::test::ScopedController const win { app.manager() };
 
     contour::config::Layout layout;
     contour::config::LayoutTab tab;
@@ -327,7 +327,7 @@ TEST_CASE("TerminalSessionManager: SaveLayout reports why a save failed", "[mana
     auto* store = storeOwned.get();
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     contour::test::TestApp app { std::move(factoryOwned), std::move(storeOwned) };
-    contour::test::ScopedController win { app.manager() };
+    contour::test::ScopedController const win { app.manager() };
 
     // Each failure is a distinct, reportable cause — not a bare "false".
     CHECK(app.manager().saveWindowLayout(win.id, "").error() == contour::LayoutSaveError::EmptyName);
@@ -355,7 +355,7 @@ TEST_CASE("TerminalSessionManager: a directory-only layout pane does not overrid
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     auto* factory = factoryOwned.get();
     contour::test::TestApp app { std::move(factoryOwned) };
-    contour::test::ScopedController win { app.manager() };
+    contour::test::ScopedController const win { app.manager() };
 
     contour::config::Layout layout;
     contour::config::LayoutTab tab;
@@ -385,14 +385,14 @@ TEST_CASE("TerminalSessionManager: consumeDefaultLayout applies the startup layo
     app.app().config().layouts.value()["auto"] = layout;
     app.app().config().defaultLayoutName.value() = "auto";
 
-    contour::test::ScopedController first { app.manager() };
+    contour::test::ScopedController const first { app.manager() };
     CHECK(app.manager().consumeDefaultLayout(first.controller));
     auto* firstWindow = app.manager().model().window(first.id);
     REQUIRE(firstWindow != nullptr);
     CHECK(firstWindow->tabCount() == 1);
 
     // A later window must NOT re-apply the layout (it gets its usual single default tab instead).
-    contour::test::ScopedController second { app.manager() };
+    contour::test::ScopedController const second { app.manager() };
     CHECK_FALSE(app.manager().consumeDefaultLayout(second.controller));
     auto* secondWindow = app.manager().model().window(second.id);
     REQUIRE(secondWindow != nullptr);
@@ -408,7 +408,7 @@ TEST_CASE("TerminalSessionManager: launchLayout births panes at the live window 
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     auto* factory = factoryOwned.get();
     contour::test::TestApp app { std::move(factoryOwned) };
-    contour::test::ScopedController win { app.manager() };
+    contour::test::ScopedController const win { app.manager() };
 
     auto* acting = app.manager().createSession(win.id);
     REQUIRE(acting != nullptr);
@@ -436,7 +436,7 @@ TEST_CASE("TerminalSessionManager: createSession launches under the named profil
     // default (no override); with one it records that profile as its explicit override.
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     contour::test::TestApp app { std::move(factoryOwned) };
-    contour::test::ScopedController win { app.manager() };
+    contour::test::ScopedController const win { app.manager() };
 
     // A second profile to launch (cloned from the default so it resolves against the config).
     auto& profiles = app.app().config().profiles.value();
@@ -461,7 +461,7 @@ TEST_CASE("TerminalSessionManager: running a palette command records and persist
 {
     // The DI seam again: the manager owns no filesystem knowledge, it hands the MRU to the injected
     // store. Driving that with an in-memory store exercises record -> persist end to end, with no disk.
-    QTemporaryDir configDir;
+    QTemporaryDir const configDir;
     REQUIRE(configDir.isValid());
 
     auto historyOwned = std::make_unique<contour::test::InMemoryCommandHistoryStore>();
@@ -470,7 +470,7 @@ TEST_CASE("TerminalSessionManager: running a palette command records and persist
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     contour::test::TestApp app { std::move(factoryOwned), nullptr, std::move(historyOwned) };
     app.app().config().configFile = std::filesystem::path(configDir.path().toStdString()) / "contour.yml";
-    contour::test::ScopedController win { app.manager() };
+    contour::test::ScopedController const win { app.manager() };
 
     app.manager().recordCommand("SplitVertical");
     app.manager().recordCommand("CreateNewTab");
@@ -500,7 +500,7 @@ TEST_CASE("TerminalSessionManager: the recent-command list survives a restart", 
 
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     contour::test::TestApp app { std::move(factoryOwned), nullptr, std::move(historyOwned) };
-    contour::test::ScopedController win { app.manager() };
+    contour::test::ScopedController const win { app.manager() };
 
     // The history is loaded lazily, on the first palette open — the configured capacity is not known at
     // construction time, and seeding early would truncate a longer stored list to the DEFAULT capacity.
@@ -528,7 +528,7 @@ TEST_CASE("TerminalSessionManager: an unreadable command history leaves the pale
 
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     contour::test::TestApp app { std::move(factoryOwned), nullptr, std::move(historyOwned) };
-    contour::test::ScopedController win { app.manager() };
+    contour::test::ScopedController const win { app.manager() };
 
     auto* session = app.manager().createSession(win.id);
     REQUIRE(session != nullptr);
@@ -546,7 +546,7 @@ TEST_CASE("TerminalSessionManager: recent_count bounds what is remembered", "[ma
     auto historyOwned = std::make_unique<contour::test::InMemoryCommandHistoryStore>();
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     contour::test::TestApp app { std::move(factoryOwned), nullptr, std::move(historyOwned) };
-    contour::test::ScopedController win { app.manager() };
+    contour::test::ScopedController const win { app.manager() };
 
     app.app().config().commandPaletteRecentCount.value() = 2;
 

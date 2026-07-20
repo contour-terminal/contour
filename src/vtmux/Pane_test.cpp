@@ -25,7 +25,7 @@ TEST_CASE("Pane: a fresh pane is a leaf carrying its session", "[vtmux][pane]")
 {
     Ids ids;
     auto const sid = ids.session();
-    Pane pane { ids.pane(), sid };
+    Pane const pane { ids.pane(), sid };
 
     CHECK(pane.isLeaf());
     CHECK(pane.splitState() == SplitState::None);

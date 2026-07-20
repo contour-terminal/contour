@@ -993,7 +993,7 @@ input_mapping:
     auto const sendChars = std::ranges::find_if(mappings.charMappings, [](auto const& m) {
         return std::holds_alternative<contour::actions::SendChars>(m.binding.at(0));
     });
-    bool foundSendChars = sendChars != mappings.charMappings.end();
+    bool const foundSendChars = sendChars != mappings.charMappings.end();
     if (foundSendChars)
         CHECK(std::get<contour::actions::SendChars>(sendChars->binding.at(0)).chars == "hello\r");
     else
@@ -2007,7 +2007,7 @@ TEST_CASE("Config: createDefaultConfig writes a loadable file into a fresh direc
     // createDefaultConfig() creates the parent directory chain and writes the generated default
     // document. Point it at a nested path that does not exist yet so the create_directories branch
     // runs, then load it back to prove the written file round-trips.
-    QTemporaryDir dir;
+    QTemporaryDir const dir;
     auto const path = std::filesystem::path(dir.path().toStdString()) / "nested" / "sub" / "contour.yml";
 
     auto const ec = contour::config::createDefaultConfig(path);
@@ -2023,7 +2023,7 @@ TEST_CASE("Config: loadConfigFromFile creates the file when it does not exist", 
     // The path overload of loadConfigFromFile() runs createFileIfNotExists() first: a missing file
     // is materialized with the default config, so loading a not-yet-existent path yields a usable
     // config AND leaves the file on disk.
-    QTemporaryDir dir;
+    QTemporaryDir const dir;
     auto const path = std::filesystem::path(dir.path().toStdString()) / "created" / "contour.yml";
     REQUIRE_FALSE(std::filesystem::exists(path));
 
@@ -2740,7 +2740,7 @@ profiles:
 TEST_CASE("Config: GUI settings round-trip through emitGuiSettingsYaml / loadGuiSettingsFile",
           "[config][gui]")
 {
-    QTemporaryDir dir;
+    QTemporaryDir const dir;
     auto const path = std::filesystem::path(dir.path().toStdString()) / "settings.yml";
     {
         auto out = std::ofstream(path);

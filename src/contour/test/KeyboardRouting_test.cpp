@@ -433,7 +433,7 @@ TEST_CASE("keyboard routing survives tab creation, tab switching, and splitting 
     rootA.setActive(true);
     controller.setActiveTabRootPane(&rootA);
 
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
 
     auto root = loadMainWindow(engine, controller);
     REQUIRE(root != nullptr);

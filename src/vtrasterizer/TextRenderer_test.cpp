@@ -338,11 +338,11 @@ TEST_CASE("TextRenderer", "[renderer]")
     // We need to initialize metrics for the font.
     // TextRenderer constructor does updateFontMetrics().
 
-    FontKeys fontKeys { .regular = regularFontKey.value(),
-                        .bold = regularFontKey.value(), // Reuse
-                        .italic = regularFontKey.value(),
-                        .boldItalic = regularFontKey.value(),
-                        .emoji = regularFontKey.value() };
+    FontKeys const fontKeys { .regular = regularFontKey.value(),
+                              .bold = regularFontKey.value(), // Reuse
+                              .italic = regularFontKey.value(),
+                              .boldItalic = regularFontKey.value(),
+                              .emoji = regularFontKey.value() };
 
     MockTextRendererEvents events;
 
@@ -687,7 +687,7 @@ TEST_CASE("Renderer.findCellPartitionPoint", "[renderer]")
 {
     SECTION("empty vector returns 0")
     {
-        std::vector<RenderCell> cells;
+        std::vector<RenderCell> const cells;
         CHECK(Renderer::findCellPartitionPoint(cells, LineCount(5)) == 0);
     }
 
@@ -733,7 +733,7 @@ TEST_CASE("Renderer.findLinePartitionPoint", "[renderer]")
 {
     SECTION("empty vector returns 0")
     {
-        std::vector<RenderLine> lines;
+        std::vector<RenderLine> const lines;
         CHECK(Renderer::findLinePartitionPoint(lines, LineCount(5)) == 0);
     }
 
@@ -1659,7 +1659,7 @@ int main(int argc, char* argv[])
     if (returnCode != 0)
         return returnCode;
 
-    int result = session.run();
+    int const result = session.run();
 
     return result;
 }

@@ -864,7 +864,7 @@ QMatrix4x4 TerminalDisplay::createModelMatrix() const
     auto const count = transformations.count(&transformations);
     for (int i = 0; i < count; i++)
     {
-        QQuickTransform* transform = transformations.at(&transformations, i);
+        QQuickTransform const* transform = transformations.at(&transformations, i);
         transform->applyTo(&result);
     }
 

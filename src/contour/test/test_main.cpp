@@ -46,7 +46,7 @@ int main(int argc, char* argv[])
         setenv("QT_QPA_PLATFORM", "xcb", /*overwrite*/ 0);
 #endif
 
-    QGuiApplication app(argc, argv);
+    QGuiApplication const app(argc, argv);
 
     // Pin the same Qt Quick Controls style the app itself pins (ContourGuiApp: QQuickStyle::setStyle).
     // The tests instantiate real Controls (SessionChrome's customized ScrollBar, the tab flyout, ...),

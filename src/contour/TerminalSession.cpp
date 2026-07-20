@@ -2148,7 +2148,7 @@ bool TerminalSession::operator()(actions::PasteClipboard paste)
 
 bool TerminalSession::operator()(actions::PasteSelection paste)
 {
-    if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
+    if (QClipboard const* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
     {
         string const text = normalize_crlf(clipboard->text(QClipboard::Selection));
         if (paste.evaluateInShell)

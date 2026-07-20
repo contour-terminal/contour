@@ -93,7 +93,7 @@ class lru_cache
     template <typename ValueConstructFn>
     [[nodiscard]] bool try_emplace(Key key, ValueConstructFn constructValue)
     {
-        if (Value* p = try_get(key))
+        if (Value const* p = try_get(key))
             return false;
 
         if (_items.size() == _capacity)
