@@ -446,18 +446,23 @@ void TerminalDisplay::handleWindowChanged(QQuickWindow* newWindow)
         displayLog()("Detaching widget {} from window.", (void*) this);
 }
 
-/// Deletes an RhiRenderer on the render thread (where its RHI/GPU resources must be released).
-/// Takes ownership of the renderer for its lifetime; the scheduling code hands over the unique_ptr.
-class CleanupJob: public QRunnable
+namespace
 {
-  public:
-    explicit CleanupJob(std::unique_ptr<RhiRenderer> renderer): _renderer { std::move(renderer) } {}
 
-    void run() override { _renderer.reset(); }
+    /// Deletes an RhiRenderer on the render thread (where its RHI/GPU resources must be released).
+    /// Takes ownership of the renderer for its lifetime; the scheduling code hands over the unique_ptr.
+    class CleanupJob: public QRunnable
+    {
+      public:
+        explicit CleanupJob(std::unique_ptr<RhiRenderer> renderer): _renderer { std::move(renderer) } {}
 
-  private:
-    std::unique_ptr<RhiRenderer> _renderer;
-};
+        void run() override { _renderer.reset(); }
+
+      private:
+        std::unique_ptr<RhiRenderer> _renderer;
+    };
+
+} // namespace
 
 void TerminalDisplay::releaseResources()
 {

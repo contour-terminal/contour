@@ -46,31 +46,34 @@ constexpr size_t MAX_FRAMES { 128 }; // NOLINT
 constexpr size_t SKIP_FRAMES { 0 };  // NOLINT
 
 #if defined(__linux__) || defined(__APPLE__)
-struct system_wrap // {{{
+namespace
 {
-    int pfd[2];
-
-    system_wrap(): pfd { -1, -1 }
+    struct system_wrap // {{{
     {
-        if (pipe(pfd))
-            perror("pipe");
-    }
+        int pfd[2];
 
-    [[nodiscard]] bool good() const noexcept { return pfd[0] != -1 && pfd[1] != -1; }
-    [[nodiscard]] int reader() noexcept { return pfd[0]; }
-    [[nodiscard]] int writer() noexcept { return pfd[1]; }
+        system_wrap(): pfd { -1, -1 }
+        {
+            if (pipe(pfd))
+                perror("pipe");
+        }
 
-    ~system_wrap() { close(); }
+        [[nodiscard]] bool good() const noexcept { return pfd[0] != -1 && pfd[1] != -1; }
+        [[nodiscard]] int reader() noexcept { return pfd[0]; }
+        [[nodiscard]] int writer() noexcept { return pfd[1]; }
 
-    void close()
-    {
-        if (pfd[0] != -1)
-            ::close(pfd[0]);
-        if (pfd[1] != -1)
-            ::close(pfd[1]);
-    }
-};
-// }}}
+        ~system_wrap() { close(); }
+
+        void close()
+        {
+            if (pfd[0] != -1)
+                ::close(pfd[0]);
+            if (pfd[1] != -1)
+                ::close(pfd[1]);
+        }
+    };
+    // }}}
+} // namespace
 #endif
 
 vector<void*> stack_trace::getFrames(size_t skip, size_t max)

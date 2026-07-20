@@ -40,8 +40,6 @@ std::string createText(size_t bytes)
     return text;
 }
 
-} // namespace
-
 struct BenchOptions
 {
     unsigned testSizeMB = 64;
@@ -50,6 +48,8 @@ struct BenchOptions
     bool sgr = false;
     bool binary = false;
 };
+
+} // namespace
 
 template <typename Writer>
 static int baseBenchmark(Writer&& writer, BenchOptions options, string_view title)
@@ -167,6 +167,8 @@ static int benchSixelStream(std::string const& sixelData,
 
 namespace CLI = crispy::cli;
 
+namespace
+{
 class ContourHeadlessBench: public crispy::app
 {
   public:
@@ -462,6 +464,7 @@ class ContourHeadlessBench: public crispy::app
             "Parser only");
     }
 };
+} // namespace
 
 int main(int argc, char const* argv[])
 {

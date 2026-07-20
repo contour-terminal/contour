@@ -120,10 +120,13 @@ TEST_CASE("fromHexString")
     CHECK(crispy::fromHexString("4162"sv).value() == "Ab"sv);
 }
 
+namespace
+{
 struct variable_collector
 {
     auto operator()(string_view name) const { return std::format("({})", name); }
 };
+} // namespace
 
 TEST_CASE("replaceVariables")
 {

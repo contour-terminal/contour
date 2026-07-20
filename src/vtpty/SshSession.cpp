@@ -302,15 +302,18 @@ namespace
 // }}}
 
 // {{{ SshPtySlave
-class SshPtySlave final: public PtySlave
+namespace
 {
-  public:
-    void close() override {}
-    [[nodiscard]] bool isClosed() const noexcept override { return false; }
-    bool configure() noexcept override { return true; }
-    bool login() override { return true; }
-    int write(std::string_view) noexcept override { return 0; }
-};
+    class SshPtySlave final: public PtySlave
+    {
+      public:
+        void close() override {}
+        [[nodiscard]] bool isClosed() const noexcept override { return false; }
+        bool configure() noexcept override { return true; }
+        bool login() override { return true; }
+        int write(std::string_view) noexcept override { return 0; }
+    };
+} // namespace
 // }}}
 
 #ifdef _WIN32

@@ -2626,14 +2626,17 @@ void Screen::setGraphicsRendition(GraphicsRendition rendition)
         _cursor.graphicsRendition.flags = CellUtil::makeCellFlags(rendition, _cursor.graphicsRendition.flags);
 }
 
-enum class ModeResponse : uint8_t
-{ // TODO: respect response 0, 3, 4.
-    NotRecognized = 0,
-    Set = 1,
-    Reset = 2,
-    PermanentlySet = 3,
-    PermanentlyReset = 4
-};
+namespace
+{
+    enum class ModeResponse : uint8_t
+    { // TODO: respect response 0, 3, 4.
+        NotRecognized = 0,
+        Set = 1,
+        Reset = 2,
+        PermanentlySet = 3,
+        PermanentlyReset = 4
+    };
+} // namespace
 
 void Screen::requestAnsiMode(unsigned int mode)
 {

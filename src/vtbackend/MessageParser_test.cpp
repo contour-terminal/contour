@@ -141,6 +141,8 @@ TEST_CASE("MessageParser.body", "[MessageParser]")
     }
 }
 
+namespace
+{
 class MessageParserTest: public vtparser::NullParserEvents
 {
   private:
@@ -170,6 +172,7 @@ class MessageParserTest: public vtparser::NullParserEvents
         }
     }
 };
+} // namespace
 
 TEST_CASE("MessageParser.VT_embedded")
 {

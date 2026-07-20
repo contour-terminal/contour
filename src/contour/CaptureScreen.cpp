@@ -55,45 +55,46 @@ using namespace std::string_view_literals;
 namespace contour
 {
 
-class CaptureBufferCollector: public vtparser::NullParserEvents
-{
-  public:
-    std::ostream& output;
-    bool splitByWord;
-    std::string capturedBuffer;
-    bool done = false;
-
-    CaptureBufferCollector(ostream& out, bool words): output { out }, splitByWord { words } {}
-
-    void startPM() override { capturedBuffer.clear(); }
-
-    void putPM(char t) override { capturedBuffer += t; }
-    void execute(char ch) override { putPM(ch); }
-
-    void dispatchPM() override
-    {
-        auto const [code, offset] = vtparser::extractCodePrefix(capturedBuffer);
-        if (code == vtbackend::CaptureBufferCode)
-        {
-            auto const payload = string_view(capturedBuffer.data() + offset, capturedBuffer.size() - offset);
-            if (splitByWord)
-            {
-                crispy::split(payload, ' ', [&](auto word) -> bool {
-                    output.write(word.data(), static_cast<streamsize>(word.size()));
-                    output << '\n';
-                    return true;
-                });
-            }
-            else
-                output.write(payload.data(), static_cast<streamsize>(payload.size()));
-            if (payload.empty())
-                done = true;
-        }
-    }
-};
-
 namespace
 {
+    class CaptureBufferCollector: public vtparser::NullParserEvents
+    {
+      public:
+        std::ostream& output;
+        bool splitByWord;
+        std::string capturedBuffer;
+        bool done = false;
+
+        CaptureBufferCollector(ostream& out, bool words): output { out }, splitByWord { words } {}
+
+        void startPM() override { capturedBuffer.clear(); }
+
+        void putPM(char t) override { capturedBuffer += t; }
+        void execute(char ch) override { putPM(ch); }
+
+        void dispatchPM() override
+        {
+            auto const [code, offset] = vtparser::extractCodePrefix(capturedBuffer);
+            if (code == vtbackend::CaptureBufferCode)
+            {
+                auto const payload =
+                    string_view(capturedBuffer.data() + offset, capturedBuffer.size() - offset);
+                if (splitByWord)
+                {
+                    crispy::split(payload, ' ', [&](auto word) -> bool {
+                        output.write(word.data(), static_cast<streamsize>(word.size()));
+                        output << '\n';
+                        return true;
+                    });
+                }
+                else
+                    output.write(payload.data(), static_cast<streamsize>(payload.size()));
+                if (payload.empty())
+                    done = true;
+            }
+        }
+    };
+
     struct TTY final: CaptureTransport
     {
         bool configured = false;

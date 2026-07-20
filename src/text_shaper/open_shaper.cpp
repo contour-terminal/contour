@@ -270,29 +270,29 @@ constexpr size_t InitialFallbackCount = 8;
 /// @see open_shaper::resize_font.
 constexpr size_t MaxResizedFonts = 512;
 
-struct HbFontInfo // NOLINT(readability-identifier-naming)
-{
-    font_source primary;
-    font_source_list fallbacks;
-    font_source_list allFallbacks; ///< Complete fallback list for on-demand extension.
-    font_size size;
-    ft_face_ptr ftFace;
-    hb_font_ptr hbFont;
-    std::optional<font_metrics> metrics {};
-
-    /// The weight this face was actually loaded at, which together with @c size is its cache identity.
-    ///
-    /// Distinct from @c description.weight: a description is only attached to keys that came from
-    /// load_font(), so every key minted for a fallback face or a resize carried a default-constructed
-    /// description. Reading the weight from there filed those faces under a weight they were never
-    /// loaded at.
-    font_weight weight { font_weight::normal };
-
-    font_description description {};
-};
-
 namespace
 {
+    struct HbFontInfo // NOLINT(readability-identifier-naming)
+    {
+        font_source primary;
+        font_source_list fallbacks;
+        font_source_list allFallbacks; ///< Complete fallback list for on-demand extension.
+        font_size size;
+        ft_face_ptr ftFace;
+        hb_font_ptr hbFont;
+        std::optional<font_metrics> metrics {};
+
+        /// The weight this face was actually loaded at, which together with @c size is its cache identity.
+        ///
+        /// Distinct from @c description.weight: a description is only attached to keys that came from
+        /// load_font(), so every key minted for a fallback face or a resize carried a default-constructed
+        /// description. Reading the weight from there filed those faces under a weight they were never
+        /// loaded at.
+        font_weight weight { font_weight::normal };
+
+        font_description description {};
+    };
+
     string identifierOf(font_source const& source)
     {
         if (holds_alternative<font_path>(source))
@@ -535,8 +535,8 @@ namespace
     ///
     /// The fallback chain is walked twice, so that a font matching the primary's spacing is always tried
     /// before one that does not. A terminal wants a monospaced fallback where one exists, because a
-    /// proportional face's advances do not line up with the cell grid -- but a proportional face still beats
-    /// a replacement box, so it is accepted once nothing better has answered.
+    /// proportional face's advances do not line up with the cell grid -- but a proportional face still
+    /// beats a replacement box, so it is accepted once nothing better has answered.
     enum class fallback_pass : uint8_t
     {
         Preferred, ///< Fonts whose spacing matches the primary font description's.
@@ -559,8 +559,8 @@ namespace
 
     /// Shapes @p codepoints with @p hbFont alone, applying no fallback.
     ///
-    /// Deliberately inspects nothing beyond its own output: glyphs an earlier call left unresolved must not
-    /// make this one look like it failed.
+    /// Deliberately inspects nothing beyond its own output: glyphs an earlier call left unresolved must
+    /// not make this one look like it failed.
     ///
     /// @param font        The key to stamp onto every glyph produced here.
     /// @param fontInfo    Font info of @p font, supplying size and font features.
@@ -653,8 +653,9 @@ namespace
 
     /// Appends the segment's glyphs, re-homing the unresolved ones onto @p primaryFont.
     ///
-    /// Without this, replaceMissingGlyphs() would stamp the primary face's replacement glyph index onto a key
-    /// still naming whichever fallback font was tried last -- an index that means nothing in that font.
+    /// Without this, replaceMissingGlyphs() would stamp the primary face's replacement glyph index onto a
+    /// key still naming whichever fallback font was tried last -- an index that means nothing in that
+    /// font.
     void appendUnresolvedGlyphs(shape_result& result,
                                 shaped_run const& shaped,
                                 cluster_group const& segment,
@@ -677,8 +678,8 @@ struct open_shaper::private_open_shaper // {{{
     font_locator* locator = nullptr;
     DPI dpi;
     // Default must match vtrasterizer::DefaultMaxFallbackCount.
-    // Cannot include the header directly due to dependency direction (vtrasterizer depends on text_shaper).
-    // The actual value is passed at runtime via set_font_fallback_limit().
+    // Cannot include the header directly due to dependency direction (vtrasterizer depends on
+    // text_shaper). The actual value is passed at runtime via set_font_fallback_limit().
     int fontFallbackLimit = 16; ///< Maximum total fallback fonts per key. -1 = unlimited, 0 = disabled.
     unordered_map<FontInfo, font_key> fontPathAndSizeToKeyMapping;
     unordered_map<font_key, HbFontInfo> fontKeyToHbFontInfoMapping; // from font_key to FontInfo struct
@@ -1049,8 +1050,8 @@ struct open_shaper::private_open_shaper // {{{
         if (shaped.glyphs.empty())
             return true;
 
-        // The overwhelmingly common case: this font renders the whole run. Take the glyphs as they are and
-        // do not pay for the segmentation at all.
+        // The overwhelmingly common case: this font renders the whole run. Take the glyphs as they are
+        // and do not pay for the segmentation at all.
         if (!shaped.anyMissing)
         {
             result.insert(result.end(), shaped.glyphs.begin(), shaped.glyphs.end());

@@ -20,44 +20,47 @@ using namespace std::string_view_literals;
 namespace vtbackend::capabilities
 {
 
-template <typename T>
-struct Cap
+namespace
 {
-    Code code;
-    std::string_view name;
-    T value;
-};
+    template <typename T>
+    struct Cap
+    {
+        Code code;
+        std::string_view name;
+        T value;
+    };
 
-template <typename T>
-static constexpr bool operator<(Cap<T> const& a, Cap<T> const& b) noexcept
-{
-    return a.name < b.name;
-}
-template <typename T>
-static constexpr bool operator>(Cap<T> const& a, Cap<T> const& b) noexcept
-{
-    return a.name > b.name;
-}
-template <typename T>
-static constexpr bool operator<=(Cap<T> const& a, Cap<T> const& b) noexcept
-{
-    return a.name <= b.name;
-}
-template <typename T>
-static constexpr bool operator>=(Cap<T> const& a, Cap<T> const& b) noexcept
-{
-    return a.name >= b.name;
-}
-template <typename T>
-static constexpr bool operator==(Cap<T> const& a, Cap<T> const& b) noexcept
-{
-    return a.name == b.name;
-}
-template <typename T>
-static constexpr bool operator!=(Cap<T> const& a, Cap<T> const& b) noexcept
-{
-    return a.name == b.name;
-}
+    template <typename T>
+    static constexpr bool operator<(Cap<T> const& a, Cap<T> const& b) noexcept
+    {
+        return a.name < b.name;
+    }
+    template <typename T>
+    static constexpr bool operator>(Cap<T> const& a, Cap<T> const& b) noexcept
+    {
+        return a.name > b.name;
+    }
+    template <typename T>
+    static constexpr bool operator<=(Cap<T> const& a, Cap<T> const& b) noexcept
+    {
+        return a.name <= b.name;
+    }
+    template <typename T>
+    static constexpr bool operator>=(Cap<T> const& a, Cap<T> const& b) noexcept
+    {
+        return a.name >= b.name;
+    }
+    template <typename T>
+    static constexpr bool operator==(Cap<T> const& a, Cap<T> const& b) noexcept
+    {
+        return a.name == b.name;
+    }
+    template <typename T>
+    static constexpr bool operator!=(Cap<T> const& a, Cap<T> const& b) noexcept
+    {
+        return a.name == b.name;
+    }
+} // namespace
 
 using Boolean = Cap<bool>;
 using Numeric = Cap<unsigned>;

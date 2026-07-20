@@ -39,12 +39,15 @@ class BoxDrawingRendererTest
 };
 } // namespace vtrasterizer
 
+namespace
+{
 struct TestTileData
 {
     vtbackend::ImageSize bitmapSize;
     vtrasterizer::atlas::Format bitmapFormat;
     std::vector<uint8_t> bitmap;
 };
+} // namespace
 
 /// Counts the number of non-zero pixels in a buffer.
 static size_t countLitPixels(atlas::Buffer const& buffer)

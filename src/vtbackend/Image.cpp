@@ -102,11 +102,14 @@ static constexpr ImageSize computeTargetSize(ImageResize resizePolicy,
     std::unreachable();
 }
 
-struct TopLeft
+namespace
 {
-    int x {};
-    int y {};
-};
+    struct TopLeft
+    {
+        int x {};
+        int y {};
+    };
+} // namespace
 
 static constexpr TopLeft computeTargetTopLeftOffset(ImageAlignment alignmentPolicy,
                                                     ImageSize targetSize,

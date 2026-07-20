@@ -113,6 +113,8 @@ class RendererTest
 };
 } // namespace vtrasterizer
 
+namespace
+{
 class MockTextRendererEvents: public TextRendererEvents
 {
   public:
@@ -120,8 +122,6 @@ class MockTextRendererEvents: public TextRendererEvents
     void onAfterRenderingText() override {}
 };
 
-namespace
-{
 constexpr std::string_view TestFontContent = R"(STARTFONT 2.1
 FONT -Success-Console-Medium-R-Normal--12-120-75-75-C-80-ISO10646-1
 SIZE 9 96 96

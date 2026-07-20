@@ -39,6 +39,11 @@
 #     the cppcoreguidelines- check of the same name, which is already disabled.
 #   * `misc-no-recursion` (41) -- recursion is a legitimate tool in a parser and a
 #     renderer; the check flags the technique rather than any defect.
+#   * `misc-use-anonymous-namespace` (79) -- directly contradicts
+#     `misc-use-internal-linkage`, which is kept: that check gives functions and
+#     variables internal linkage with `static` (its FixMode default) and reserves
+#     anonymous namespaces for types, which cannot be `static`. Enabling both means
+#     every symbol is flagged whichever form it takes.
 #   * `readability-convert-member-functions-to-static` (100) -- its fix is malformed at
 #     scale here: it emits `static` before `[[nodiscard]]`, where the attribute then
 #     appertains to the return type rather than the function. It also makes Qt
@@ -97,6 +102,7 @@ Checks: >-
   misc-*,
   -misc-include-cleaner,
   -misc-no-recursion,
+  -misc-use-anonymous-namespace,
   -misc-non-private-member-variables-in-classes,
   modernize-*,
   -modernize-avoid-bind,
