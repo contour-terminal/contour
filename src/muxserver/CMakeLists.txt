@@ -6,6 +6,8 @@ add_library(muxserver STATIC
     SessionHost.cpp
     SessionHost.h
     SocketPath.h
+    tmux/ControlOutput.cpp
+    tmux/ControlOutput.h
     tmux/LayoutString.cpp
     tmux/LayoutString.h
 )
@@ -29,6 +31,7 @@ if(MUXSERVER_TESTING)
         SessionHost_test.cpp
         MuxServer_test.cpp
         SocketPath_test.cpp
+        tmux/ControlOutput_test.cpp
         tmux/LayoutString_test.cpp
     )
     target_link_libraries(muxserver_test muxserver crispy::core Catch2::Catch2)
