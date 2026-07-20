@@ -5,6 +5,11 @@ file. Durable knowledge belongs in `docs/internals/` and `docs/rtl-bidi.md`.
 
 Companion: `PLAN-bidi.md` (the original plan).
 
+## Goal
+
+Contour is fully BiDi aware and offers first-class BiDi support: Hebrew and Arabic in the terminal,
+across input, cursor positioning and rendering.
+
 ## State
 
 Contour `feature/rtl-text`, libunicode `feature/bidi`. `ctest --preset=clang-asan` is 16/16 green,
@@ -173,9 +178,40 @@ the box-drawing atlas cache key -- it is a different bitmap, so it needs its own
 Absent. Maps a run onto U+FE70..U+FEFF when the resolved font has no `arab` GSUB. No font on the
 tested platforms lacks it, so the branch cannot be exercised locally.
 
-### 7. IME
-Preedit is not rendered with the paragraph direction, and `ImCurrentSelection` in `inputMethodQuery`
-still always returns empty.
+### 7. IME — DONE, and the premise was understated
+"Preedit is not rendered with the paragraph direction" was too kind. Measured with `MockTerm`, the
+preedit was not rendered **at all** on any uniform-SGR line — which is most lines, a shell prompt
+among them. The hook lived only in the per-cell path; a trivial line that carries the cursor drops to
+a fallback that emits its cells through `renderUtf8Text` in bulk and never called it. This hit every
+IME user in every language, not only bidi.
+
+Preedit is now applied once per line as an overlay, after the line's cells have been put into visual
+order. Both ways a line's cells can be produced end in `finishLineCells()`, so there is one place for
+anything that must happen to every line. The per-cell hook and its `_inputMethodSkipColumns`
+book-keeping are gone: the overlay writes visual columns directly and takes no part in the grid's
+permutation — which was computed from the grid's own text and means nothing for this string.
+
+The preedit is laid out with the surrounding paragraph's base direction. Its own strong characters
+still decide their runs, so the base only settles the neutrals; composing Hebrew at a Latin prompt
+reads correctly either way, which is why the choice between "inherit the paragraph" and "autodetect
+from the preedit" was low-stakes.
+
+*Known limitation:* the preedit BLOCK grows rightward from the cursor whichever way its text runs;
+only the text inside it is reordered. Growing the block leftward in a right-to-left paragraph is the
+refinement, and there is no reference to copy: the recommendation does not mention input methods at
+all, and konsole does no bidi preedit.
+
+`ImCurrentSelection` stays empty, and that is a decision, not a stub — see below.
+
+### 7b. `ImCurrentSelection` — correct as it was, for a reason nobody had written down
+A terminal's selection is a clipboard range over the scrollback, not an editable range an input method
+may replace: a commit is sent to the child process as keystrokes and deletes nothing. Reporting the
+mouse selection would say otherwise. konsole does not answer the query at all.
+
+The real defect was next to it. Qt is told that nothing is selected by `ImAnchorPosition` and
+`ImCursorPosition` agreeing, and the anchor was left to the base class, which does not answer it. An
+unanswered query reads back as 0 — measured: with the cursor at column 11 an input method was told
+that the whole line up to it was selected. Now answered explicitly.
 
 ### 8. DirectWrite is UNVERIFIED
 Written blind — it cannot be compiled on Linux. Must be checked on Windows before release.
