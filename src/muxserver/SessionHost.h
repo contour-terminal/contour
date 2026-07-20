@@ -154,6 +154,13 @@ class SessionHost final: public vtmux::ModelEvents
         _onScreenUpdated = std::move(handler);
     }
 
+    /// Sets the callback invoked (on the loop thread) with each raw PTY output
+    /// chunk BEFORE the parser consumed it — the control-mode %output byte tap.
+    void setOutputHandler(std::function<void(vtmux::SessionId, std::string const&)> handler)
+    {
+        _onOutput = std::move(handler);
+    }
+
     /// Handles a session whose PTY closed (shell exited): prunes its pane from
     /// the model (prune-then-terminate) and destroys the session. Invoked on
     /// the loop thread — by the pump's posted completion in production, or
@@ -192,6 +199,7 @@ class SessionHost final: public vtmux::ModelEvents
     std::unordered_map<uint64_t, std::unique_ptr<HostedSession>> _sessions;
     std::vector<vtmux::ModelEvents*> _subscribers;
     std::function<void(vtmux::SessionId)> _onScreenUpdated;
+    std::function<void(vtmux::SessionId, std::string const&)> _onOutput;
 
     vtmux::SessionModel _model; ///< Last member: its callbacks reach into the host.
     vtmux::WindowId _window;

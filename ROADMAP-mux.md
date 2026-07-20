@@ -23,19 +23,20 @@ control mode; per-line cell deltas feed the native protocol. GUI and daemon shar
 
 ## Phase 1 — headless session host
 
-- [ ] `muxserver::SessionHost` (SessionId → {Pty, Terminal}, implements `vtmux::ModelEvents`,
+- [x] `muxserver::SessionHost` (SessionId → {Pty, Terminal}, implements `vtmux::ModelEvents`,
       pre-mint id handshake); one reactor thread + per-session PTY threads bridged by `post()`
-- [ ] CLI verbs: `contour daemon`, `contour attach`; socket path
+- [x] CLI verbs: `contour daemon`, `contour attach` (probe); socket path
       `$XDG_RUNTIME_DIR/contour/<label>`, `$CONTOUR_MUX` override
 
 ## Phase 2 — tmux control-mode server (primary use case; pin: tmux 3.7b)
 
 - [ ] line framing + `%begin/%end/%error` guards (flags bit 0 = client-originated)
-- [ ] notifications incl. `%output` octal escaping, `%extended-output`, `%layout-change`
-- [ ] dual-queue ordering + pause/continue flow control (budget/3, floor 32)
-- [ ] layout-string encoder/ingester (n-ary↔binary; tree-equality conformance against
-      real `tmux select-layout`)
+- [x] `%output` octal escaping; notification emission machinery
+- [x] dual-queue ordering + pause/continue flow control (budget/3, floor 32)
+- [x] layout-string encoder/ingester (n-ary↔binary; tree-equality conformance against
+      real `tmux select-layout` — oracle tests pass against tmux 3.7b)
 - [ ] data-driven command table → `SessionModel`
+- [ ] control-mode connection protocol (byte tap → %output; ModelEvents → notifications)
 
 ## Phase 3 — native protocol (cells + deltas)
 

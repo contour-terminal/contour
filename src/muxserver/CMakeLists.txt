@@ -6,6 +6,7 @@ add_library(muxserver STATIC
     SessionHost.cpp
     SessionHost.h
     SocketPath.h
+    TappingPty.h
     tmux/ControlOutput.cpp
     tmux/ControlOutput.h
     tmux/LayoutString.cpp

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <muxserver/SessionHost.h>
+#include <muxserver/TappingPty.h>
 
 #include <chrono>
 #include <ranges>
@@ -107,9 +108,18 @@ std::optional<SessionId> SessionHost::seedSession()
     if (!pty)
         return std::nullopt;
 
+    // The control-mode byte tap: fires on the session's PUMP thread with a view
+    // into the read buffer, so the bytes are copied before crossing to the loop.
+    auto tapped = std::make_unique<TappingPty>(std::move(pty), [this, id](std::string_view data) {
+        _loop.post([this, id, copy = std::string { data }] {
+            if (_onOutput && _sessions.contains(id.value))
+                _onOutput(id, copy);
+        });
+    });
+
     auto session = std::make_unique<HostedSession>(
         id,
-        std::move(pty),
+        std::move(tapped),
         _settings,
         /*onScreenUpdated=*/
         [this, id] {
