@@ -1,3 +1,4 @@
+NSS
 VDPAU
 libwayland
 qplatformwindow

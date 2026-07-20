@@ -68,7 +68,7 @@ namespace
 
     string getLastErrorAsString()
     {
-        return std::system_category().message(errno);
+        return std::generic_category().message(errno);
     }
 
     // {{{ async-signal-safe helpers, for use between fork() and exec()
@@ -93,7 +93,7 @@ namespace
             return result == 0 ? buffer : "unknown error"; // XSI: fills `buffer`.
     }
 
-    /// Describes an errno value without allocating, unlike strerror() and std::system_category().
+    /// Describes an errno value without allocating, unlike strerror() and std::generic_category().
     ///
     /// @param errorCode errno value to describe.
     /// @param buffer Scratch space for the message; must outlive the returned pointer.
@@ -114,8 +114,12 @@ namespace
             auto const written = ::write(fd, text.data(), text.size());
             if (written > 0)
                 text.remove_prefix(static_cast<size_t>(written));
-            else if (errno != EINTR)
-                break;
+            else if (written < 0 && errno == EINTR)
+                continue; // Interrupted before any byte was written: retry.
+            else
+                break; // NB: errno is only meaningful for written < 0. A write() returning 0 did not
+                       // fail and did not set it, so retrying on a stale EINTR left over from an
+                       // earlier call -- the child inherits the parent's errno -- would spin forever.
         }
     }
     // }}}
@@ -139,20 +143,6 @@ namespace
         for (auto const& [name, value]: overrides)
             entries.emplace_back(std::format("{}={}", name, value));
         return entries;
-    }
-
-    [[nodiscard]] char** createArgv(string const& arg0, vector<string> const& args, size_t startIndex = 0)
-    {
-        // Factor out in order to avoid false-positive by static analyzers.
-        auto const argCount = args.size() - startIndex;
-        assert(startIndex <= args.size());
-
-        char** argv = new char*[argCount + 2];
-        argv[0] = strdup(arg0.c_str());
-        for (size_t i = 0; i < argCount; ++i)
-            argv[i + 1] = strdup(args[i + startIndex].c_str());
-        argv[argCount + 1] = nullptr;
-        return argv;
     }
 
     void saveDup2(int a, int b)
@@ -268,6 +258,70 @@ void Process::start()
         childEnvp.push_back(entry.data());
     childEnvp.push_back(nullptr);
 
+    // argv is assembled before the fork for the same reason: the flatpak variant reads the home
+    // directory and formats a dozen strings, none of which the child is allowed to do.
+    auto childArgs = [stdoutFastPipe, this]() -> vector<string> {
+        if (!isFlatpak() || !_d->escapeSandbox)
+        {
+            auto args = vector<string> { _d->path };
+            args.insert(args.end(), _d->args.begin(), _d->args.end());
+            return args;
+        }
+
+        auto const terminfoBaseDirectory = homeDirectory() / ".var/app/org.contourterminal.Contour/terminfo";
+
+        // Prepend flatpak to jump out of sandbox:
+        // flatpak-spawn --host --watch-bus --env=TERM=$TERM /bin/zsh
+        auto realArgs = vector<string> { "/usr/bin/flatpak-spawn" };
+        realArgs.emplace_back("--host");
+        realArgs.emplace_back("--watch-bus");
+        realArgs.emplace_back(std::format("--env=TERMINFO={}", terminfoBaseDirectory.generic_string()));
+        if (stdoutFastPipe)
+        {
+            realArgs.emplace_back(std::format("--forward-fd={}", StdoutFastPipeFdStr));
+            realArgs.emplace_back(
+                std::format("--env={}={}", StdoutFastPipeEnvironmentName, StdoutFastPipeFdStr));
+        }
+        if (!_d->cwd.empty())
+            realArgs.emplace_back(std::format("--directory={}", _d->cwd.generic_string()));
+        realArgs.emplace_back(std::format("--env=TERM={}", "contour"));
+        for (auto&& [name, value]: _d->env)
+            realArgs.emplace_back(std::format("--env={}={}", name, value));
+        if (stdoutFastPipe)
+            realArgs.emplace_back(
+                std::format("--env={}={}", StdoutFastPipeEnvironmentName, StdoutFastPipeFd));
+        realArgs.push_back(_d->path);
+        for (auto const& arg: _d->args)
+            realArgs.push_back(arg);
+
+        return realArgs;
+    }();
+
+    auto childArgv = vector<char*> {};
+    childArgv.reserve(childArgs.size() + 1);
+    for (auto& entry: childArgs)
+        childArgv.push_back(entry.data());
+    childArgv.push_back(nullptr);
+
+    // The login-shell fallback is likewise prepared before the fork. Between fork() and exec() the
+    // child may call async-signal-safe functions only, and loginShell() reaches getpwuid_r() -- NSS,
+    // locks, allocation -- while joining the arguments for the diagnostic allocates as well. Running
+    // any of that in a child forked from the multi-threaded GUI process can deadlock outright, if a
+    // thread happened to hold the malloc arena or the NSS lock at the moment of the fork.
+    auto loginShellArgs = loginShell(_d->escapeSandbox);
+    auto const loginShellText = crispy::joinHumanReadableQuoted(loginShellArgs, ' ');
+
+    // Same layout and lifetime as childEnvp above: the vector's own storage backs the argv, so
+    // nothing needs freeing in either process.
+    auto loginShellArgv = vector<char*> {};
+    if (!loginShellArgs.empty())
+    {
+        loginShellArgv.reserve(loginShellArgs.size() + 1);
+        for (auto& entry: loginShellArgs)
+            loginShellArgv.push_back(entry.data());
+        loginShellArgv.push_back(nullptr);
+    }
+
     _d->pid = fork();
 
     switch (_d->pid)
@@ -300,41 +354,6 @@ void Process::start()
                 environ = childEnvp.data();
             }
 
-            char* const* argv = [stdoutFastPipe, this]() -> char** {
-                if (!isFlatpak() || !_d->escapeSandbox)
-                    return createArgv(_d->path, _d->args, 0);
-
-                auto const terminfoBaseDirectory =
-                    homeDirectory() / ".var/app/org.contourterminal.Contour/terminfo";
-
-                // Prepend flatpak to jump out of sandbox:
-                // flatpak-spawn --host --watch-bus --env=TERM=$TERM /bin/zsh
-                auto realArgs = vector<string> {};
-                realArgs.emplace_back("--host");
-                realArgs.emplace_back("--watch-bus");
-                realArgs.emplace_back(
-                    std::format("--env=TERMINFO={}", terminfoBaseDirectory.generic_string()));
-                if (stdoutFastPipe)
-                {
-                    realArgs.emplace_back(std::format("--forward-fd={}", StdoutFastPipeFdStr));
-                    realArgs.emplace_back(
-                        std::format("--env={}={}", StdoutFastPipeEnvironmentName, StdoutFastPipeFdStr));
-                }
-                if (!_d->cwd.empty())
-                    realArgs.emplace_back(std::format("--directory={}", _d->cwd.generic_string()));
-                realArgs.emplace_back(std::format("--env=TERM={}", "contour"));
-                for (auto&& [name, value]: _d->env)
-                    realArgs.emplace_back(std::format("--env={}={}", name, value));
-                if (stdoutFastPipe)
-                    realArgs.emplace_back(
-                        std::format("--env={}={}", StdoutFastPipeEnvironmentName, StdoutFastPipeFd));
-                realArgs.push_back(_d->path);
-                for (auto const& arg: _d->args)
-                    realArgs.push_back(arg);
-
-                return createArgv("/usr/bin/flatpak-spawn", realArgs, 0);
-            }();
-
             if (auto* pty = dynamic_cast<UnixPty*>(_d->pty.get()))
             {
                 if (pty->stdoutFastPipe().writer() != -1)
@@ -349,21 +368,16 @@ void Process::start()
             // reset signal(s) to default that may have been changed in the parent process.
             signal(SIGPIPE, SIG_DFL);
 
-            ::execvp(argv[0], argv);
+            ::execvp(childArgv[0], childArgv.data());
 
-            // Fallback: Try login shell.
-            auto theLoginShell = loginShell(_d->escapeSandbox);
+            // Fallback: Try login shell. Everything this needs was computed before the fork.
             writeAll(STDOUT_FILENO, "\r\033[31;1mFailed to spawn ");
-            writeAll(STDOUT_FILENO, argv[0]);
+            writeAll(STDOUT_FILENO, childArgv[0]);
             writeAll(STDOUT_FILENO, "\033[m\r\nTrying login shell: ");
-            writeAll(STDOUT_FILENO, crispy::joinHumanReadableQuoted(theLoginShell, ' '));
+            writeAll(STDOUT_FILENO, loginShellText);
             writeAll(STDOUT_FILENO, "\n");
-            if (!theLoginShell.empty())
-            {
-                delete[] argv;
-                argv = createArgv(theLoginShell[0], theLoginShell, 1);
-                ::execvp(argv[0], argv);
-            }
+            if (!loginShellArgv.empty())
+                ::execvp(loginShellArgv[0], loginShellArgv.data());
 
             // Bad luck.
             auto errorTextBuffer = array<char, 256> {};
@@ -420,7 +434,7 @@ optional<Process::ExitStatus> Process::Private::checkStatus(bool waitForExit) co
         auto const _ = lock_guard { exitStatusMutex };
         if (exitStatus.has_value())
             return exitStatus;
-        errorLog()("waitpid() failed: {}", std::system_category().message(waitPidErrorCode));
+        errorLog()("waitpid() failed: {}", std::generic_category().message(waitPidErrorCode));
         return std::nullopt;
     }
     else if (rv == 0 && !waitForExit)
@@ -455,35 +469,59 @@ Process::ExitStatus Process::wait()
     return *_d->checkStatus(true);
 }
 
+namespace
+{
+    /// Resolves the user's login shell, asking flatpak's host side when sandbox escape is requested.
+    ///
+    /// @param escapeSandbox Whether the shell is to be run outside the flatpak sandbox.
+    /// @return argv of the login shell; `{"/bin/sh"}` if the user has no password-database entry.
+    [[nodiscard]] vector<string> resolveLoginShell(bool escapeSandbox)
+    {
+        if (auto const pw = crispy::currentUserPasswordEntry(); pw.has_value())
+        {
+#ifdef __APPLE__
+            crispy::ignore_unused(escapeSandbox);
+            return { pw->shell };
+#else
+            if (Process::isFlatpak() && escapeSandbox)
+            {
+                char buf[1024];
+                auto const cmd = std::format("flatpak-spawn --host getent passwd {}", pw->name);
+                FILE* fp = popen(cmd.c_str(), "r");
+                auto fpCloser = crispy::finally { [fp]() { pclose(fp); } };
+                size_t const nread = fread(buf, sizeof(char), sizeof(buf) / sizeof(char), fp);
+                auto const output = trimRight(string_view(buf, nread));
+                auto const colonIndex = output.rfind(':');
+                if (colonIndex != string_view::npos)
+                {
+                    auto const shell = output.substr(colonIndex + 1);
+                    return { string(shell.data(), shell.size()) };
+                }
+            }
+
+            return { pw->shell };
+#endif
+        }
+        else
+            return { "/bin/sh"s };
+    }
+} // namespace
+
 vector<string> Process::loginShell(bool escapeSandbox)
 {
-    if (auto const pw = crispy::currentUserPasswordEntry(); pw.has_value())
+    // Memoized, because the login shell cannot change over the process lifetime and start() has to
+    // resolve it before *every* fork -- the child, between fork() and exec(), may not (@see start()).
+    // Recomputing per session would mean a getpwuid_r() each time, and under flatpak sandbox escape an
+    // entire `flatpak-spawn --host getent passwd` subprocess. Each branch initializes on first use;
+    // initialization of a function-local static is thread safe.
+    if (escapeSandbox)
     {
-#ifdef __APPLE__
-        crispy::ignore_unused(escapeSandbox);
-        return { pw->shell };
-#else
-        if (isFlatpak() && escapeSandbox)
-        {
-            char buf[1024];
-            auto const cmd = std::format("flatpak-spawn --host getent passwd {}", pw->name);
-            FILE* fp = popen(cmd.c_str(), "r");
-            auto fpCloser = crispy::finally { [fp]() { pclose(fp); } };
-            size_t const nread = fread(buf, sizeof(char), sizeof(buf) / sizeof(char), fp);
-            auto const output = trimRight(string_view(buf, nread));
-            auto const colonIndex = output.rfind(':');
-            if (colonIndex != string_view::npos)
-            {
-                auto const shell = output.substr(colonIndex + 1);
-                return { string(shell.data(), shell.size()) };
-            }
-        }
-
-        return { pw->shell };
-#endif
+        static auto const shell = resolveLoginShell(true);
+        return shell;
     }
-    else
-        return { "/bin/sh"s };
+
+    static auto const shell = resolveLoginShell(false);
+    return shell;
 }
 
 std::string Process::userName()
