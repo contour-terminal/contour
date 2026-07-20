@@ -48,8 +48,17 @@ class RenderBufferBuilder
     void startLine(LineOffset line, LineFlags flags) noexcept;
     void endLine() noexcept;
 
+    /// Completes the cells of the line just emitted: visual order first, then any overlay on top.
+    ///
+    /// Both ways a line's cells can be produced -- per cell and the trivial line's fallback -- end
+    /// here, so anything that must happen to every line belongs in this one place.
+    void finishLineCells();
+
     /// Permutes the cells of the line just finished into visual order.
     void reorderLineCells();
+
+    /// Draws the IME preedit string over the cells of the line the cursor is on.
+    void overlayInputMethodPreedit();
 
     /// Renders a trivial line.
     ///
@@ -118,8 +127,6 @@ class RenderBufferBuilder
     [[nodiscard]] RenderAttributes createRenderAttributes(
         CellLocation gridPosition, GraphicsAttributes graphicsAttributes) const noexcept;
 
-    [[nodiscard]] bool tryRenderInputMethodEditor(CellLocation screenPosition, CellLocation gridPosition);
-
     ColumnCount renderUtf8Text(CellLocation screenPosition,
                                GraphicsAttributes attributes,
                                std::string_view text,
@@ -147,7 +154,6 @@ class RenderBufferBuilder
     HighlightSearchMatches _highlightSearchMatches;
     InputMethodData _inputMethodData;
     bool _includeSelection;
-    ColumnCount _inputMethodSkipColumns = ColumnCount(0);
 
     int _prevWidth = 0;
     bool _prevHasCursor = false;

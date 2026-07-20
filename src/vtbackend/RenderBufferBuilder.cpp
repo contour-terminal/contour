@@ -29,6 +29,21 @@ namespace
         return ColumnCount::cast_from(unicode::grapheme_cluster_width(cluster));
     }
 
+    /// The preedit string as one codepoint per grid COLUMN, which is the shape the bidi layout takes a
+    /// line in: a wide cluster repeats its codepoint across the columns it covers, exactly as
+    /// Line::codepointsPerColumn() presents grid content.
+    [[nodiscard]] std::u32string preeditCodepointsPerColumn(std::string_view preedit)
+    {
+        auto result = std::u32string {};
+        for (std::u32string const& cluster: unicode::utf8_grapheme_segmenter(preedit))
+        {
+            auto const width =
+                std::max(ColumnCount(1), ColumnCount::cast_from(unicode::grapheme_cluster_width(cluster)));
+            result.append(unbox<size_t>(width), cluster.empty() ? U' ' : cluster[0]);
+        }
+        return result;
+    }
+
     constexpr RGBColor makeRGBColor(RGBColorPair actualColors, CellRGBColor configuredColor) noexcept
     {
         if (holds_alternative<CellForegroundColor>(configuredColor))
@@ -507,7 +522,7 @@ void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
     // selection or a highlight -- which is to say, on the line the user is most likely looking at.
     _lineNr = lineOffset;
     _lineStartCellIndex = frontIndex;
-    reorderLineCells();
+    finishLineCells();
 
     auto const backIndex = _output->cells.size() - 1;
 
@@ -615,12 +630,18 @@ bool RenderBufferBuilder::isCursorLine(LineOffset line) const noexcept
 
 void RenderBufferBuilder::endLine() noexcept
 {
-    reorderLineCells();
+    finishLineCells();
 
     if (!_output->cells.empty())
     {
         _output->cells.back().groupEnd = true;
     }
+}
+
+void RenderBufferBuilder::finishLineCells()
+{
+    reorderLineCells();
+    overlayInputMethodPreedit();
 }
 
 void RenderBufferBuilder::reorderLineCells()
@@ -734,46 +755,81 @@ ColumnCount RenderBufferBuilder::renderUtf8Text(CellLocation screenPosition,
     return columnCountRendered;
 }
 
-bool RenderBufferBuilder::tryRenderInputMethodEditor(CellLocation screenPosition, CellLocation gridPosition)
+void RenderBufferBuilder::overlayInputMethodPreedit()
 {
-    // Render IME preeditString if available and screen position matches cursor position.
-    if (_cursorPosition && gridPosition == *_cursorPosition && !_inputMethodData.preeditString.empty())
+    if (_inputMethodData.preeditString.empty() || !_output->cursor)
+        return;
+
+    // The cursor of the screen being RENDERED, for the same reason gridLineContainsCursor() asks it:
+    // a status line has a cursor of its own.
+    if (_screen->cursor().position.line != _lineNr)
+        return;
+
+    // Lay the preedit out with the surrounding paragraph's base direction, so that Arabic or Hebrew
+    // being composed reads the way it will once committed. Its own strong characters still decide
+    // their runs, so the base only settles the neutrals -- which is why a right-to-left preedit reads
+    // correctly even while the shell's line around it runs left to right.
+    auto const gridLine =
+        _terminal->viewport().translateScreenToGridCoordinate(CellLocation { .line = _lineNr }).line;
+    auto const perColumn = preeditCodepointsPerColumn(_inputMethodData.preeditString);
+    if (perColumn.empty())
+        return;
+
+    auto const preeditInput = BidiLineInput { .text = perColumn, .continuesParagraph = false };
+    auto const preeditLayout = computeBidiPageLayout(std::span(&preeditInput, 1),
+                                                     _terminal->bidiLayoutAt(gridLine).paragraphDirection);
+    auto const& layout = preeditLayout.lineAt(0);
+
+    // Composing text is marked out from committed text, so that what is still provisional is obvious.
+    auto const styles = _terminal->colorPalette().inputMethodEditor;
+    auto const flags = CellFlags {} | CellFlag::Bold | CellFlag::Underline;
+
+    // The cells below have already been permuted, so the cursor's visual column indexes them
+    // directly. The block itself grows rightward from there whichever way its text runs; only the
+    // text inside it is reordered.
+    auto const first = _lineStartCellIndex;
+    auto const available = _output->cells.size() - first;
+    auto const startColumn = unbox<size_t>(_output->cursor->position.column);
+    auto const width = std::min(perColumn.size(), available > startColumn ? available - startColumn : 0);
+
+    for (size_t visual = 0; visual < width; ++visual)
     {
-        auto const inputMethodEditorStyles = _terminal->colorPalette().inputMethodEditor;
-        auto textAttributes = GraphicsAttributes {};
-        textAttributes.foregroundColor = inputMethodEditorStyles.foreground;
-        textAttributes.backgroundColor = inputMethodEditorStyles.background;
-        textAttributes.flags.enable({ CellFlag::Bold, CellFlag::Underline });
+        auto const logical = unbox<size_t>(layout.logicalColumnAt(ColumnOffset::cast_from(visual)));
+        auto const codepoint = logical < perColumn.size() ? perColumn[logical] : U' ';
+        auto const column = ColumnOffset::cast_from(startColumn + visual);
 
-        if (!_output->cells.empty())
-            _output->cells.back().groupEnd = true;
-
-        _inputMethodSkipColumns =
-            renderUtf8Text(screenPosition, textAttributes, _inputMethodData.preeditString, false);
-        if (_inputMethodSkipColumns > ColumnCount(0))
-        {
-            _output->cursor->position.column += ColumnOffset::cast_from(_inputMethodSkipColumns);
-            _output->cells.at(_output->cells.size() - unbox<size_t>(_inputMethodSkipColumns)).groupStart =
-                true;
-            _output->cells.back().groupEnd = true;
-        }
+        auto& cell = _output->cells[first + startColumn + visual];
+        cell = makeRenderCellExplicit(_terminal->colorPalette(),
+                                      std::u32string(1, codepoint),
+                                      ColumnCount(1),
+                                      flags,
+                                      _currentLineFlags,
+                                      styles.foreground,
+                                      styles.background,
+                                      styles.foreground,
+                                      _baseLine + _lineNr,
+                                      column);
+        cell.bidiLevel = layout.levelAt(ColumnOffset::cast_from(logical));
     }
 
-    if (_inputMethodSkipColumns == ColumnCount(0))
-        return false;
+    if (width == 0)
+        return;
 
-    // Skipping grid cells that have already been rendered due to IME.
-    _inputMethodSkipColumns--;
-    return true;
+    // The preedit is its own shaping run: it neither continues the grid text before it nor runs into
+    // whatever follows.
+    _output->cells[first + startColumn].groupStart = true;
+    _output->cells[first + startColumn + width - 1].groupEnd = true;
+    if (startColumn > 0)
+        _output->cells[first + startColumn - 1].groupEnd = true;
+
+    // The caret belongs after what has been composed so far, which is where the next character lands.
+    _output->cursor->position.column += ColumnOffset::cast_from(width);
 }
 
 void RenderBufferBuilder::renderCell(ConstCellProxy screenCell, LineOffset line, ColumnOffset column)
 {
     auto const screenPosition = CellLocation { .line = line, .column = column };
     auto const gridPosition = _terminal->viewport().translateScreenToGridCoordinate(screenPosition);
-
-    if (tryRenderInputMethodEditor(screenPosition, gridPosition))
-        return;
 
     auto const [fg, bg] = makeColorsForCell(
         gridPosition, screenCell.flags(), screenCell.foregroundColor(), screenCell.backgroundColor());

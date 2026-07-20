@@ -551,3 +551,58 @@ TEST_CASE("Bidi.multiple RTL words reorder relative to each other", "[bidi]")
     // The whole line reverses, so the SECOND word is drawn first and each word is itself reversed.
     CHECK(trimmed(renderedLine(mock.terminal.renderBuffer().get(), 0)) == U"םלוע םולש");
 }
+
+// ---- IME preedit ----
+
+namespace
+{
+/// Renders one screen with an active IME preedit string and returns line 0 as drawn.
+[[nodiscard]] std::u32string renderedWithPreedit(std::string_view screenText, std::string preedit)
+{
+    auto constexpr ClockBase = std::chrono::steady_clock::time_point {};
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(16) } };
+    mock.writeToScreen(screenText);
+    mock.terminal.updateInputMethodPreeditString(std::move(preedit));
+    mock.terminal.tick(ClockBase);
+    mock.terminal.refreshRenderBuffer();
+    return trimmed(renderedLine(mock.terminal.renderBuffer().get(), 0));
+}
+} // namespace
+
+// The preedit used to be woven into the per-cell render path alone, so a line with uniform SGR --
+// which is most lines, a shell prompt among them -- took the trivial fast path and dropped it
+// silently. Nothing was drawn at all while composing, in any language.
+TEST_CASE("Bidi.preedit is drawn on a uniform-SGR line", "[bidi][ime]")
+{
+    CHECK(renderedWithPreedit("abc", "xyz") == U"abcxyz");
+}
+
+TEST_CASE("Bidi.preedit is drawn on a per-cell line", "[bidi][ime]")
+{
+    // A colour change forces the line off the trivial path; this is the case that always worked, and
+    // must keep working now that one mechanism serves both paths.
+    CHECK(renderedWithPreedit("\033[31ma\033[32mbc", "xyz") == U"abcxyz");
+}
+
+// What is being composed has to read the way it will once committed, or the user cannot tell whether
+// they typed what they meant.
+TEST_CASE("Bidi.preedit reads right-to-left while composing Hebrew", "[bidi][ime]")
+{
+    // alef bet gimel, composed at the end of a Hebrew line. The line itself reverses, and the preedit
+    // reverses within its own block: gimel is drawn leftmost of the three.
+    auto const rendered = renderedWithPreedit("שלום", "אבג");
+    CHECK(rendered == U"םולשגבא");
+}
+
+TEST_CASE("Bidi.preedit reads right-to-left even on a left-to-right line", "[bidi][ime]")
+{
+    // The paragraph runs left to right, but Hebrew is strongly right-to-left and resolves that way
+    // whatever the base direction is -- so composing Hebrew at a Latin shell prompt still reads
+    // correctly.
+    CHECK(renderedWithPreedit("abc", "אבג") == U"abcגבא");
+}
+
+TEST_CASE("Bidi.an empty preedit leaves the line alone", "[bidi][ime]")
+{
+    CHECK(renderedWithPreedit("abc", "") == U"abc");
+}
