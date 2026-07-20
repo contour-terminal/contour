@@ -7,7 +7,6 @@ add_library(vtparser STATIC
     Parser-impl.h
     ParserEvents.h
 )
-set_target_properties(vtparser PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
 target_link_libraries(vtparser PUBLIC
     Microsoft.GSL::GSL
     unicode::unicode

@@ -116,7 +116,6 @@ set(vtbackend_SOURCES
 )
 
 add_library(vtbackend STATIC ${vtbackend_SOURCES} ${vtbackend_HEADERS})
-set_target_properties(vtbackend PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
 target_compile_definitions(vtbackend PRIVATE
     LIBTERMINAL_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
     LIBTERMINAL_VERSION_MINOR=${PROJECT_VERSION_MINOR}

@@ -37,8 +37,6 @@ set(crispy_SOURCES
 add_library(crispy-core STATIC ${crispy_SOURCES})
 add_library(crispy::core ALIAS crispy-core)
 
-set_target_properties(crispy-core PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
-
 if(STRONGHASH_USE_AES_NI)
     target_compile_definitions(crispy-core PUBLIC -DSTRONGHASH_USE_AES_NI=1)
 endif()
