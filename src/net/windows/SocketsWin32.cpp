@@ -113,6 +113,22 @@ coro::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connect(EventLoop*
     co_return std::unexpected(lastError);
 }
 
+std::expected<std::unique_ptr<IListener>, NetError> listenUnix(EventLoop& /*loop*/,
+                                                               std::string_view /*path*/,
+                                                               int /*backlog*/)
+{
+    // Windows 10+ supports AF_UNIX via afunix.h; wiring it (and its distinct
+    // security model) up is a self-contained follow-up. Until then the daemon's
+    // Windows transport is TCP.
+    return std::unexpected(makeNetError(NetErrorCode::Unsupported, 0, "AF_UNIX on Windows"));
+}
+
+coro::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connectUnix(EventLoop* /*loop*/,
+                                                                          std::string_view /*path*/)
+{
+    co_return std::unexpected(makeNetError(NetErrorCode::Unsupported, 0, "AF_UNIX on Windows"));
+}
+
 } // namespace net
 
 #endif // _WIN32

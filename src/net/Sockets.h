@@ -43,4 +43,23 @@ namespace net
                                                                                     std::string_view host,
                                                                                     std::uint16_t port);
 
+/// Binds an AF_UNIX listener on the socket file @p path, hardening its parent
+/// directory first (see UnixListener::bind for the exact policy).
+/// @param loop The loop whose reactor drives accept readiness (not owned).
+/// @param path The socket file path.
+/// @param backlog The listen backlog.
+/// @return The bound listener; @c NetErrorCode::Unsupported on Windows (for now).
+[[nodiscard]] std::expected<std::unique_ptr<IListener>, NetError> listenUnix(EventLoop& loop,
+                                                                             std::string_view path,
+                                                                             int backlog = 128);
+
+/// Connects to the AF_UNIX socket file @p path.
+/// @param loop The loop whose reactor drives connect readiness (not owned; a
+///        pointer, since coroutine reference parameters can dangle).
+/// @param path The socket file path.
+/// @return A task resolving to the connected socket; a @c NetError on failure,
+///         @c NetErrorCode::Unsupported on Windows (for now).
+[[nodiscard]] coro::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connectUnix(
+    EventLoop* loop, std::string_view path);
+
 } // namespace net

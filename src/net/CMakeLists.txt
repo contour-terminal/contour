@@ -38,6 +38,8 @@ else()
         posix/PosixSocket.cpp
         posix/PosixSocket.h
         posix/SocketsPosix.cpp
+        posix/UnixListener.cpp
+        posix/UnixListener.h
     )
 endif()
 
@@ -54,13 +56,17 @@ target_include_directories(net PUBLIC
 option(NET_TESTING "Enables building of unittests for net [default: ON]" ${CONTOUR_TESTING})
 if(NET_TESTING)
     enable_testing()
-    add_executable(net_test
+    set(net_TEST_SOURCES
         test_main.cpp
         AsyncBufferedReader_test.cpp
         EventLoop_test.cpp
         Socket_test.cpp
         WriteQueue_test.cpp
     )
+    if(NOT WIN32)
+        list(APPEND net_TEST_SOURCES UnixSocket_test.cpp)
+    endif()
+    add_executable(net_test ${net_TEST_SOURCES})
     target_link_libraries(net_test net crispy::core Catch2::Catch2)
     add_test(NAME net_test COMMAND $<TARGET_FILE:net_test>)
 

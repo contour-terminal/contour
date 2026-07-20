@@ -4,8 +4,11 @@
 #ifndef _WIN32
 
     #include <sys/socket.h>
+    #include <sys/un.h>
 
     #include <cerrno>
+    #include <cstring>
+    #include <filesystem>
     #include <string>
 
     #include <fcntl.h>
@@ -15,6 +18,7 @@
     #include <net/platform/WinsockInit.h>
     #include <net/posix/PosixListener.h>
     #include <net/posix/PosixSocket.h>
+    #include <net/posix/UnixListener.h>
 
 namespace net
 {
@@ -126,6 +130,63 @@ coro::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connect(EventLoop*
     }
     ::freeaddrinfo(resolved);
     co_return std::unexpected(lastError);
+}
+
+std::expected<std::unique_ptr<IListener>, NetError> listenUnix(EventLoop& loop,
+                                                               std::string_view path,
+                                                               int backlog)
+{
+    return UnixListener::bind(loop, std::filesystem::path { path }, backlog)
+        .transform(
+            [](std::unique_ptr<UnixListener> listener) -> std::unique_ptr<IListener> { return listener; });
+}
+
+coro::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connectUnix(EventLoop* loop,
+                                                                          std::string_view path)
+{
+    auto address = sockaddr_un {};
+    if (path.size() >= sizeof(address.sun_path))
+        co_return std::unexpected(
+            makeNetError(NetErrorCode::AddressError, ENAMETOOLONG, "socket path too long"));
+    address.sun_family = AF_UNIX;
+    std::memcpy(address.sun_path, path.data(), path.size());
+    address.sun_path[path.size()] = '\0';
+
+    auto const fd = makeStreamSocket(AF_UNIX, 0);
+    if (fd < 0)
+        co_return std::unexpected(makeNetError(NetErrorCode::Other, errno, "socket"));
+
+    auto const rc = ::connect(fd, reinterpret_cast<sockaddr const*>(&address), sizeof(address));
+    if (rc == 0)
+        co_return std::unique_ptr<ISocket>(new PosixSocket(*loop, fd));
+
+    // A non-blocking AF_UNIX connect defers with EINPROGRESS (rarely, EAGAIN when
+    // the server's backlog is full): park until writable, then read the outcome.
+    if (errno == EINPROGRESS || errno == EAGAIN)
+    {
+        try
+        {
+            co_await loop->waitWritable(fd);
+        }
+        catch (coro::OperationCancelled const&)
+        {
+            ::close(fd);
+            co_return std::unexpected(makeNetError(NetErrorCode::Cancelled, 0, "connect cancelled"));
+        }
+        int soError = 0;
+        auto soLen = socklen_t { sizeof(soError) };
+        ::getsockopt(fd, SOL_SOCKET, SO_ERROR, &soError, &soLen);
+        if (soError == 0)
+            co_return std::unique_ptr<ISocket>(new PosixSocket(*loop, fd));
+        ::close(fd);
+        co_return std::unexpected(makeNetError(
+            soError == ECONNREFUSED ? NetErrorCode::ConnRefused : NetErrorCode::Other, soError, "connect"));
+    }
+
+    auto const err = errno;
+    ::close(fd);
+    co_return std::unexpected(
+        makeNetError(err == ECONNREFUSED ? NetErrorCode::ConnRefused : NetErrorCode::Other, err, "connect"));
 }
 
 } // namespace net
