@@ -7,6 +7,7 @@
 #include <contour/display/ImeQueryRect.h>
 #include <contour/display/RhiRenderer.h>
 #include <contour/display/TerminalAccessible.h>
+#include <contour/display/Announcer.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/display/TerminalRenderNode.h>
 #include <contour/helper.h>
@@ -252,6 +253,11 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     // would otherwise double-decorate); main.qml binds the TitleBar's visibility to the CONTROLLER's
     // titleBarVisible. Only SEED the window default here (first-write-wins): re-applying the profile
     // value on every session rebind silently reverted a runtime ToggleTitleBar on each tab switch.
+    // Announcements go through THIS display, which is the object an assistive client already knows
+    // about (TerminalAccessible::installFactory hands out its interface). Installed on every session
+    // bind, so a rebound session speaks through the display it is actually shown in.
+    _session->setAnnouncer(std::make_unique<QtAnnouncer>(this));
+
     if (auto* controller = windowController())
     {
         controller->seedTitleBarVisible(profile().showTitleBar.value());

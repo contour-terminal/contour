@@ -8,6 +8,7 @@
 #include <contour/ContextMenu.h>
 #include <contour/HorizontalWheelGesture.h>
 #include <contour/HyperlinkTooltip.h>
+#include <contour/display/Announcer.h>
 #if defined(__linux__)
     #include <contour/FreeDesktopNotifier.h>
 #endif
@@ -126,12 +127,29 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// a link no longer under the pointer is worse than showing none.
     void clearHyperlinkHover();
 
+  private:
+    /// Announces @p message, unless the user switched announcements off.
+    void announce(QString const& message,
+                  QAccessible::AnnouncementPoliteness politeness =
+                      QAccessible::AnnouncementPoliteness::Polite);
+
+  public:
+
     /// The pointer left the terminal entirely.
     ///
     /// Withdraws the hyperlink tooltip and puts the mouse cursor back to its default shape. The shape
     /// is reset here rather than left alone because it is only ever changed on a cell CHANGE, so a
     /// pointer that leaves while over a link would otherwise keep the pointing hand it was given.
     void onPointerLeft();
+
+    /// Replaces the announcer this session speaks through.
+    ///
+    /// Injected rather than constructed here, so the DECISIONS below (what is worth announcing) are
+    /// assertable against a recording implementation with no accessibility bridge in sight.
+    void setAnnouncer(std::unique_ptr<display::Announcer> announcer)
+    {
+        _announcer = std::move(announcer);
+    }
 
   private:
     /// Feeds the hovered-link tracker and publishes any change to QML.
@@ -772,6 +790,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     crispy::point _accumulatedAngleScroll;
     HorizontalWheelGesture _horizontalWheelGesture;
     HyperlinkHoverTracker _hyperlinkHover;
+    /// Never null: a NullAnnouncer stands in wherever there is nothing to announce through, so the call
+    /// sites never have to ask whether announcing is possible.
+    std::unique_ptr<display::Announcer> _announcer = std::make_unique<display::NullAnnouncer>();
     QString _hyperlinkTooltipText;
     QRectF _hyperlinkTooltipAnchor;
 

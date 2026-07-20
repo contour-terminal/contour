@@ -1885,3 +1885,74 @@ TEST_CASE("TerminalSession: a tab-strip swipe follows the finger while a wheel t
     for (int row = controller->count() - 1; row >= 0; --row)
         controller->closeTabAtIndex(row);
 }
+
+namespace
+{
+/// An Announcer that records instead of speaking, so the DECISIONS are assertable with no
+/// accessibility bridge in sight (offscreen QPA has none).
+class RecordingAnnouncer final: public contour::display::Announcer
+{
+  public:
+    struct Said
+    {
+        QString message;
+        QAccessible::AnnouncementPoliteness politeness;
+    };
+
+    void announce(QString const& message, QAccessible::AnnouncementPoliteness politeness) override
+    {
+        said.push_back({ message, politeness });
+    }
+
+    std::vector<Said> said;
+};
+} // namespace
+
+TEST_CASE("TerminalSession: things with no place in the accessibility tree are announced",
+          "[contour][session][a11y]")
+{
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+
+    auto announcer = std::make_unique<RecordingAnnouncer>();
+    auto* recorder = announcer.get();
+    session->setAnnouncer(std::move(announcer));
+
+    SECTION("the bell rings for a screen reader too")
+    {
+        // A bell changes no object's state, so without this nothing reaches an assistive client at all.
+        session->bell();
+        REQUIRE(recorder->said.size() == 1);
+        CHECK(recorder->said.front().message == "Bell");
+        CHECK(recorder->said.front().politeness == QAccessible::AnnouncementPoliteness::Polite);
+    }
+
+    SECTION("a read-only toggle interrupts, because it changes what typing does")
+    {
+        (*session)(contour::actions::ToggleInputProtection {});
+        REQUIRE(recorder->said.size() == 1);
+        // Assertive: telling the user AFTER they have typed into a terminal that ignored them is too
+        // late to be worth saying.
+        CHECK(recorder->said.front().politeness == QAccessible::AnnouncementPoliteness::Assertive);
+        auto const first = recorder->said.front().message;
+
+        // ...and toggling back says the opposite, rather than repeating itself.
+        (*session)(contour::actions::ToggleInputProtection {});
+        REQUIRE(recorder->said.size() == 2);
+        CHECK(recorder->said.back().message != first);
+    }
+
+    SECTION("switching announcements off silences them")
+    {
+        // The gate is checked at the call, so a user who does not want them pays nothing at all.
+        testApp.app().config().accessibilityAnnouncements = false;
+        auto quiet = makeDisplaylessSession(testApp.app());
+        auto quietAnnouncer = std::make_unique<RecordingAnnouncer>();
+        auto* quietRecorder = quietAnnouncer.get();
+        quiet->setAnnouncer(std::move(quietAnnouncer));
+
+        quiet->bell();
+        (*quiet)(contour::actions::ToggleInputProtection {});
+        CHECK(quietRecorder->said.empty());
+    }
+}

@@ -190,6 +190,13 @@ constexpr StringLiteral PixelReportingConfig {
     "\n"
 };
 
+constexpr StringLiteral AccessibilityAnnouncementsConfig {
+    "{comment} Whether to announce the bell, notifications and mode changes to assistive technology.\n"
+    "{comment} Costs nothing while no screen reader is attached.\n"
+    "accessibility_announcements: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral HyperlinkHoverTooltipConfig {
     "{comment} Whether hovering an OSC 8 hyperlink shows a tooltip with its target.\n"
     "hyperlink_hover_tooltip: {}\n"
@@ -1630,6 +1637,14 @@ constexpr StringLiteral PixelReportingWeb {
     "\n"
 };
 
+constexpr StringLiteral AccessibilityAnnouncementsWeb {
+    "\n"
+    "Whether events with no representation in the accessibility tree -- the bell, a desktop "
+    "notification, a mode change -- are announced to assistive technology. Costs nothing while no "
+    "assistive client is attached. See [Accessibility](../../accessibility.md).\n"
+    "\n"
+};
+
 constexpr StringLiteral HyperlinkHoverTooltipWeb {
     "\n"
     "Whether hovering an [OSC 8 hyperlink](../vt-extensions/index.md) shows a tooltip naming its "
@@ -2187,6 +2202,8 @@ using CopyLastMarkRangeOffset = DocumentationEntry<CopyLastMarkRangeOffsetConfig
 using WMClass = DocumentationEntry<WMClassConfig, WMClassWeb>;
 using TabLabel = DocumentationEntry<TabLabelConfig, TabLabelWeb>;
 using PixelReporting = DocumentationEntry<PixelReportingConfig, PixelReportingWeb>;
+using AccessibilityAnnouncements =
+    DocumentationEntry<AccessibilityAnnouncementsConfig, AccessibilityAnnouncementsWeb>;
 using HyperlinkHoverTooltip = DocumentationEntry<HyperlinkHoverTooltipConfig, HyperlinkHoverTooltipWeb>;
 using TabBarPosition = DocumentationEntry<TabBarPositionConfig, TabBarPositionWeb>;
 using TabBarVisibility = DocumentationEntry<TabBarVisibilityConfig, TabBarVisibilityWeb>;

@@ -1137,6 +1137,7 @@ struct Config
     ConfigEntry<bool, documentation::ReflowOnResize> reflowOnResize { true };
     ConfigEntry<bool, documentation::TabSwitchOnHorizontalWheel> tabSwitchOnHorizontalWheel { true };
     ConfigEntry<bool, documentation::HyperlinkHoverTooltip> hyperlinkHoverTooltip { true };
+    ConfigEntry<bool, documentation::AccessibilityAnnouncements> accessibilityAnnouncements { true };
     // The tab bar belongs to the WINDOW, not to the profile a pane happens to run: a window shows one
     // tab bar while its tabs may each run a different profile, so asking a profile where the tab bar
     // sits had no answer when they disagreed.

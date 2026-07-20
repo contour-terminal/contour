@@ -108,6 +108,7 @@
       <description>
         <ul>
           <li>BREAKING: `tab_bar_position` and `tab_bar_visibility` moved from a profile to the top level of contour.yml. A window shows one tab bar whichever profiles its tabs run, so the setting belongs to the application rather than to a profile. Move these two keys out of your `profiles:` block; a profile-scoped copy is no longer read</li>
+          <li>The bell, desktop notifications and read-only mode are now announced to screen readers, which have no other way to learn about them. Turn it off with `accessibility_announcements: false`</li>
           <li>The window chrome is now described to screen readers: the tab bar reads as a tab list whose tabs announce themselves as they are switched, the window and tab buttons say what they do instead of naming their glyph, and every settings field carries its own label</li>
           <li>Right-clicking the empty part of the title bar or tab bar opens a window menu: open a tab (optionally under a named profile), close the current tab or all of them, and switch the tab bar between always visible, auto-hide and hidden</li>
           <li>Hovering an OSC 8 hyperlink now shows a tooltip naming its target, so it can be read before it is followed. A local file:// target is shown as a plain path. Turn it off with `hyperlink_hover_tooltip: false`</li>

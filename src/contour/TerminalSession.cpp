@@ -475,12 +475,24 @@ void TerminalSession::terminate()
 }
 
 // {{{ Events implementations
+void TerminalSession::announce(QString const& message, QAccessible::AnnouncementPoliteness politeness)
+{
+    if (!_config.accessibilityAnnouncements.value())
+        return;
+    _announcer->announce(message, politeness);
+}
+
 void TerminalSession::bell()
 {
     emit onBell(_profile.bell.value().volume);
 
     if (_profile.bell.value().alert)
         emit onAlert();
+
+    // A bell has no object whose state changed, so nothing reaches a screen reader unless it is said.
+    // Runs on the TERMINAL thread, possibly with the state mutex held -- the announcer posts, and this
+    // message is a literal, so nothing here reads the terminal.
+    announce(QObject::tr("Bell"));
 }
 
 void TerminalSession::bufferChanged(vtbackend::ScreenType type)
@@ -832,6 +844,14 @@ void TerminalSession::notify(string_view title, string_view content)
 
 void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification const& notification)
 {
+    // Said as well as shown: a desktop notification is a visual popup, and an assistive client that
+    // does not read the desktop's own notifications would otherwise miss it entirely.
+    announce(notification.title.empty()
+                 ? QString::fromStdString(notification.body)
+                 : QStringLiteral("%1: %2")
+                       .arg(QString::fromStdString(notification.title),
+                            QString::fromStdString(notification.body)));
+
 #if defined(__linux__)
     _desktopNotifier.notify(notification);
 
@@ -2344,6 +2364,10 @@ bool TerminalSession::operator()(actions::ToggleInputMethodHandling)
 bool TerminalSession::operator()(actions::ToggleInputProtection)
 {
     terminal().setAllowInput(!terminal().allowInput());
+    // Assertive: this changes what typing does, so a client mid-sentence should be interrupted rather
+    // than tell the user about it after they have already typed into a terminal that ignored them.
+    announce(terminal().allowInput() ? QObject::tr("Editable") : QObject::tr("Read-only"),
+             QAccessible::AnnouncementPoliteness::Assertive);
     return true;
 }
 
