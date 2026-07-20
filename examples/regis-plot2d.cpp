@@ -116,6 +116,6 @@ int main()
     r += "P[" + std::to_string(Right - 40) + "," + std::to_string(mapY(0.0) + 20) + "]T(S0)'x'";
 
     regis(r);
-    writeToTTY("\033[24H\n");
+    writeToTTY("\033[40H\n");
     return 0;
 }

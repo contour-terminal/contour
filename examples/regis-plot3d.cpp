@@ -268,6 +268,6 @@ int main()
     }
 
     regis("S(E)");
-    writeToTTY("\033[24H\n");
+    writeToTTY("\033[40H\n");
     return 0;
 }
