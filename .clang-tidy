@@ -32,8 +32,13 @@
 #     area and flagged 179 sites. Brace style is settled by .clang-format.
 #
 #   * `modernize-use-designated-initializers` -- deliberate, see commit 8cd3d714.
-#   * `portability-avoid-pragma-once` -- `#pragma once` is the house include guard.
-#   * `misc-include-cleaner` -- pursued separately via scripts/check-includes.sh.
+#   * `portability-avoid-pragma-once` (394) -- `#pragma once` is the house include guard.
+#   * `misc-include-cleaner` (4380) -- include hygiene is pursued separately, via
+#     scripts/check-includes.sh and the self-contained-includes workflow.
+#   * `misc-non-private-member-variables-in-classes` (1038) -- exact duplicate of
+#     the cppcoreguidelines- check of the same name, which is already disabled.
+#   * `misc-no-recursion` (41) -- recursion is a legitimate tool in a parser and a
+#     renderer; the check flags the technique rather than any defect.
 #
 # The three LLVM 20/21/22 arrivals above were auto-enabled by the `cppcoreguidelines-*`,
 # `modernize-*` and `readability-*` globs during the toolchain bump, silently
@@ -43,7 +48,6 @@ Checks: >-
   -*,
   bugprone-*,
   -bugprone-branch-clone,
-  -bugprone-chained-comparison,
   -bugprone-easily-swappable-parameters,
   -bugprone-exception-escape,
   -bugprone-implicit-widening-of-multiplication-result,
@@ -61,6 +65,7 @@ Checks: >-
   clang-analyzer-security.*,
   clang-analyzer-unix.*,
   clang-diagnostic-*,
+  concurrency-*,
   cppcoreguidelines-*,
   -cppcoreguidelines-avoid-c-arrays,
   -cppcoreguidelines-avoid-const-or-ref-data-members,
@@ -71,7 +76,6 @@ Checks: >-
   -cppcoreguidelines-no-malloc,
   -cppcoreguidelines-non-private-member-variables-in-classes,
   -cppcoreguidelines-owning-memory,
-  -cppcoreguidelines-prefer-member-initializer,
   -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
   -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
   -cppcoreguidelines-pro-bounds-constant-array-index,
@@ -83,6 +87,10 @@ Checks: >-
   -cppcoreguidelines-pro-type-union-access,
   -cppcoreguidelines-pro-type-vararg,
   -cppcoreguidelines-special-member-functions,
+  misc-*,
+  -misc-include-cleaner,
+  -misc-no-recursion,
+  -misc-non-private-member-variables-in-classes,
   modernize-*,
   -modernize-avoid-bind,
   -modernize-avoid-c-arrays,
@@ -93,6 +101,8 @@ Checks: >-
   -modernize-use-scoped-lock,
   -modernize-use-trailing-return-type,
   performance-*,
+  portability-*,
+  -portability-avoid-pragma-once,
   -performance-no-int-to-ptr,
   readability-*,
   -readability-avoid-unconditional-preprocessor-if,
