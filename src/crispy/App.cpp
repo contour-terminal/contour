@@ -1,21 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <crispy/App.h>
+
+#include <crispy/environment.h>
 #include <crispy/logstore.h>
+#include <crispy/user_info.h>
 #include <crispy/utils.h>
 
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <ctime>
 #include <filesystem>
 #include <format>
 #include <iomanip>
 #include <numeric>
 #include <optional>
 
-#if !defined(_WIN32)
+#ifndef _WIN32
     #include <sys/ioctl.h>
 
-    #include <pwd.h>
     #include <unistd.h>
 #endif
 
@@ -24,9 +27,7 @@ using std::cout;
 using std::exception;
 using std::left;
 using std::max;
-using std::nullopt;
 using std::optional;
-using std::setfill;
 using std::setw;
 using std::string;
 using std::string_view;
@@ -55,7 +56,7 @@ CLI::help_display_style helpStyle()
 
     style.optionStyle = CLI::option_style::Natural;
 
-#if !defined(_WIN32)
+#ifndef _WIN32
     if (isatty(STDOUT_FILENO) == 0)
     {
         style.colors.reset();
@@ -70,7 +71,7 @@ unsigned screenWidth()
 {
     constexpr auto DefaultWidth = 80u;
 
-#if !defined(_WIN32)
+#ifndef _WIN32
     auto ws = winsize {};
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != -1)
         return ws.ws_col;
@@ -81,15 +82,15 @@ unsigned screenWidth()
 
 fs::path xdgStateHome()
 {
-    if (auto const* p = getenv("XDG_STATE_HOME"); (p != nullptr) && (*p != '\0'))
-        return fs::path(p);
+    if (auto const p = crispy::environment::get("XDG_STATE_HOME"); p && !p->empty())
+        return { *p };
 
-#if defined(_WIN32)
-    if (auto const* p = getenv("LOCALAPPDATA"); p && *p)
-        return fs::path(p);
+#ifdef _WIN32
+    if (auto const p = crispy::environment::get("LOCALAPPDATA"); p && !p->empty())
+        return { *p };
 #else
-    if (passwd const* pw = getpwuid(getuid()); (pw != nullptr) && (pw->pw_dir != nullptr))
-        return fs::path(pw->pw_dir) / ".local" / "state";
+    if (auto const home = crispy::userHomeDirectory(); !home.empty())
+        return fs::path(home) / ".local" / "state";
 #endif
 
     return fs::temp_directory_path();
@@ -108,9 +109,9 @@ app::app(std::string appName, std::string appTitle, std::string appVersion, std:
     _appLicense { std::move(appLicense) },
     _localStateDir { xdgStateHome() / _appName }
 {
-    if (char const* logFilterString = getenv("LOG"))
+    if (auto const logFilterString = crispy::environment::get("LOG"))
     {
-        logstore::configure(logFilterString);
+        logstore::configure(*logFilterString);
         customizeLogStoreOutput();
     }
 
@@ -250,8 +251,8 @@ void app::customizeLogStoreOutput()
     logstore::sink::console().set_enabled(true);
 
     // A curated list of colors.
-    static const bool colorized =
-#if !defined(_WIN32)
+    static bool const colorized =
+#ifndef _WIN32
         isatty(STDOUT_FILENO) != 0;
 #else
         true;
@@ -263,7 +264,7 @@ void app::customizeLogStoreOutput()
         auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string> {
             if (!colorized)
                 return { "", "", "" };
-            const auto* const tagStart = "\033[1m";
+            auto const* const tagStart = "\033[1m";
             auto const colorIndex =
                 Colors.at(std::hash<string_view> {}(msg.get_category().name()) % Colors.size());
             auto const msgStart = std::format("\033[38;5;{}m", colorIndex);
@@ -289,9 +290,14 @@ void app::customizeLogStoreOutput()
                 // clang-format off
                 auto const now = chrono::system_clock::now();
                 std::time_t const nowTimeT = std::chrono::system_clock::to_time_t(now);
-                std::tm const* tm = std::localtime(&nowTimeT);
+                auto tm = std::tm {};
+#ifdef _WIN32
+                localtime_s(&tm, &nowTimeT);
+#else
+                localtime_r(&nowTimeT, &tm);
+#endif
                 std::stringstream dateTimeStrStream;
-                dateTimeStrStream << std::put_time(tm, "%Y-%m-%d %H:%M:%S");
+                dateTimeStrStream << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
                 auto const micros = duration_cast<chrono::microseconds>(now.time_since_epoch()).count() % 1'000'000;
                 result += sgrTag;
                 result += std::format("[{}.{:06}] [{}]",
@@ -316,9 +322,9 @@ void app::customizeLogStoreOutput()
         auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string> {
             if (!colorized)
                 return { "", "", "" };
-            const auto* const tagStart = "\033[1;31m";
-            const auto* const msgStart = "\033[31m";
-            const auto* const resetSGR = "\033[m";
+            auto const* const tagStart = "\033[1;31m";
+            auto const* const msgStart = "\033[31m";
+            auto const* const resetSGR = "\033[m";
             return { tagStart, msgStart, resetSGR };
         }();
 

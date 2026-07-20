@@ -120,10 +120,13 @@ TEST_CASE("fromHexString")
     CHECK(crispy::fromHexString("4162"sv).value() == "Ab"sv);
 }
 
+namespace
+{
 struct variable_collector
 {
     auto operator()(string_view name) const { return std::format("({})", name); }
 };
+} // namespace
 
 TEST_CASE("replaceVariables")
 {
@@ -252,5 +255,5 @@ TEST_CASE("for_each_key_value")
     crispy::for_each_key_value({ .text = "key_only", .entryDelimiter = ';', .assignmentDelimiter = '=' },
                                collect);
     CHECK(result.size() == 1);
-    CHECK(result["key_only"] == "");
+    CHECK(result["key_only"].empty());
 }

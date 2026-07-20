@@ -42,11 +42,11 @@ namespace contour::test
 class QmlMessageCapture
 {
   public:
-    QmlMessageCapture()
+    QmlMessageCapture():
+        _previousHandler(qInstallMessageHandler(&QmlMessageCapture::trampoline)),
+        _previousGuard(ActiveCapture)
     {
-        _previousGuard = ActiveCapture;
         ActiveCapture = this;
-        _previousHandler = qInstallMessageHandler(&QmlMessageCapture::trampoline);
     }
 
     ~QmlMessageCapture()

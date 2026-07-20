@@ -257,9 +257,9 @@ inline void Pixmap::paint(int x, int y, uint8_t value)
 {
     auto const w = unbox<int>(size.width);
     auto const h = unbox<int>(size.height) - 1;
-    if (!(0 <= y && y <= h))
+    if (0 > y || y > h)
         return;
-    if (!(0 <= x && x < w))
+    if (0 > x || x >= w)
         return;
     buffer.at(static_cast<unsigned>(((h - y) * w) + x)) = value;
 }
@@ -268,9 +268,9 @@ inline void Pixmap::paintOver(int x, int y, uint8_t intensity)
 {
     auto const w = unbox<int>(size.width);
     auto const h = unbox<int>(size.height) - 1;
-    if (!(0 <= y && y <= h))
+    if (0 > y || y > h)
         return;
-    if (!(0 <= x && x < w))
+    if (0 > x || x >= w)
         return;
     auto& target = buffer.at(static_cast<unsigned>(((h - y) * w) + x));
     target = static_cast<uint8_t>(std::min(static_cast<int>(target) + static_cast<int>(intensity), 255));

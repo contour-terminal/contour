@@ -12,9 +12,9 @@
 #include <mutex>
 #include <optional>
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
     #include <util.h>
-#elif defined(__linux__)
+#elifdef __linux__
     #include <pty.h>
 #endif
 

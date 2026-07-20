@@ -64,7 +64,7 @@ namespace
 TEST_CASE("accessibility: the tab strip declares itself a tab list", "[contour][gui][qml][a11y]")
 {
     QQmlEngine engine;
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
 
     auto root = loadComponent(engine,
                               QStringLiteral("qrc:/contour/ui/TabStrip.qml"),
@@ -88,7 +88,7 @@ TEST_CASE("accessibility: every settings editor carries the row's label", "[cont
     // and that was true of every field on the settings page at once. Asserted for every editor TYPE,
     // so a new field type added to the Loader cannot quietly reintroduce it.
     QQmlEngine engine;
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
 
     struct Case
     {

@@ -19,7 +19,7 @@ namespace
     {
         auto const width = unbox<int>(glyph.bitmapSize.width);
         auto const bytesPerPixel = static_cast<int>(text::pixel_size(glyph.format));
-        auto const base = static_cast<size_t>(((y * width) + x) * bytesPerPixel);
+        auto const base = static_cast<size_t>((y * width) + x) * static_cast<size_t>(bytesPerPixel);
         if (base >= glyph.bitmap.size())
             return 0;
         // alpha_mask stores coverage directly; rgba keeps it in the last byte.
@@ -98,7 +98,8 @@ std::optional<ReGISGlyphBitmap> ReGISFontRasterizer::rasterize(char32_t codepoin
             auto const tx = offsetX + gx;
             if (tx < 0 || tx >= cellWidth)
                 continue;
-            bitmap.coverage[static_cast<size_t>((ty * cellWidth) + tx)] = coverageAt(*glyph, gx, gy);
+            bitmap.coverage[(static_cast<size_t>(ty) * static_cast<size_t>(cellWidth))
+                            + static_cast<size_t>(tx)] = coverageAt(*glyph, gx, gy);
         }
     }
     return bitmap;

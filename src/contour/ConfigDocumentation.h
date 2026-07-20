@@ -9,7 +9,7 @@ namespace contour::config::documentation
 template <std::size_t N>
 struct StringLiteral
 {
-    constexpr StringLiteral(const char (&str)[N]): value {} { std::copy_n(str, N, value); }
+    constexpr StringLiteral(char const (&str)[N]): value {} { std::copy_n(str, N, value); }
 
     char value[N]; // NOLINT
 };

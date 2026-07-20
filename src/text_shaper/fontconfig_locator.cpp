@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <text_shaper/font.h>
 #include <text_shaper/fontconfig_locator.h>
+
+#include <text_shaper/font.h>
 
 #include <crispy/assert.h>
 #include <crispy/utils.h>
@@ -103,7 +104,7 @@ namespace
             case FC_WEIGHT_THIN: return "Thin";
             case FC_WEIGHT_EXTRALIGHT: return "ExtraLight";
             case FC_WEIGHT_LIGHT: return "Light";
-#if defined(FC_WEIGHT_DEMILIGHT)
+#ifdef FC_WEIGHT_DEMILIGHT
             case FC_WEIGHT_DEMILIGHT: return "DemiLight";
 #endif
             case FC_WEIGHT_BOOK: return "Book";
@@ -151,7 +152,7 @@ namespace
         if (FcPatternGetInteger(font, FC_SLANT, 0, &integerValue) == FcResultMatch)
             slant = fcToFontSlant(integerValue);
 
-        output.emplace_back(font_path { .value = string { (char const*) (file) },
+        output.emplace_back(font_path { .value = string { (char const*) file },
                                         .collectionIndex = ttcIndex,
                                         .weight = weight,
                                         .slant = slant });
@@ -170,11 +171,11 @@ struct fontconfig_locator::private_tag
     // currently empty, maybe later something (such as caching)?
     FcConfig* ftConfig = nullptr;
 
-    private_tag()
+    private_tag(): ftConfig(FcInitLoadConfigAndFonts())
     {
         auto const start = std::chrono::steady_clock::now();
         FcInit();
-        ftConfig = FcInitLoadConfigAndFonts();
+
         auto const elapsed = std::chrono::steady_clock::now() - start;
         auto const ms =
             static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count())
@@ -215,11 +216,11 @@ font_source_list fontconfig_locator::locate(font_description const& description)
 
     if (description.spacing != font_spacing::proportional)
     {
-#if defined(_WIN32)
+#ifdef _WIN32
         // On Windows FontConfig can't find "monospace". We need to use "Consolas" instead.
         if (description.familyName == "monospace")
             FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) "Consolas");
-#elif defined(__APPLE__)
+#elifdef __APPLE__
         // Same for macOS, we use "Menlo" for "monospace".
         if (description.familyName == "monospace")
             FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) "Menlo");
@@ -249,7 +250,7 @@ font_source_list fontconfig_locator::locate(font_description const& description)
 
     font_source_list output;
 
-#if defined(_WIN32)
+#ifdef _WIN32
     auto const addFontFile = [&](std::string_view path) {
         output.emplace_back(font_path { string { path } });
     };
@@ -271,7 +272,7 @@ font_source_list fontconfig_locator::locate(font_description const& description)
                     || (description.spacing == font_spacing::mono && spacing < FC_MONO)))
             {
                 locatorLog()("Skipping font: {} ({} < {}).",
-                             (char const*) (file),
+                             (char const*) file,
                              fcSpacingStr(spacing),
                              fcSpacingStr(FC_DUAL));
                 return;
@@ -324,7 +325,7 @@ font_source_list fontconfig_locator::locate(font_description const& description)
                },
                description.fontFallback);
 
-#if defined(_WIN32)
+#ifdef _WIN32
     #define FONTDIR "C:\\Windows\\Fonts\\"
     if (description.familyName == "emoji")
     {
@@ -362,7 +363,7 @@ font_source_list fontconfig_locator::all()
 {
     FcPattern* pat = FcPatternCreate();
     FcObjectSet* os = FcObjectSetBuild(
-#if defined(FC_COLOR)
+#ifdef FC_COLOR
         FC_COLOR,
 #endif
         FC_FAMILY,
@@ -372,7 +373,7 @@ font_source_list fontconfig_locator::all()
         FC_HINT_STYLE,
         FC_INDEX,
         FC_OUTLINE,
-#if defined(FC_POSTSCRIPT_NAME)
+#ifdef FC_POSTSCRIPT_NAME
         FC_POSTSCRIPT_NAME,
 #endif
         FC_SCALABLE,
@@ -419,7 +420,7 @@ font_source_list fontconfig_locator::all()
     return output;
 }
 
-font_source_list fontconfig_locator::resolve(gsl::span<const char32_t> codepoints)
+font_source_list fontconfig_locator::resolve(gsl::span<char32_t const> codepoints)
 {
     // A coverage-driven lookup -- "which fonts contain THESE characters" -- as opposed to locate()'s
     // "which fonts are near this description".

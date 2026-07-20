@@ -274,8 +274,8 @@ TEST_CASE("Config: shellSplit tokenizes a command line respecting quotes", "[con
     CHECK(shellSplit("emacs -nw") == V { "emacs", "-nw" });
     CHECK(shellSplit("  git   log --oneline ") == V { "git", "log", "--oneline" });
     CHECK(shellSplit("nvim") == V { "nvim" });
-    CHECK(shellSplit("") == V {});
-    CHECK(shellSplit("   ") == V {});
+    CHECK(shellSplit("").empty());
+    CHECK(shellSplit("   ").empty());
     // Double quotes group spaces into one token; the quotes themselves are stripped.
     CHECK(shellSplit(R"("/opt/my app/emacs" -nw)") == V { "/opt/my app/emacs", "-nw" });
     // Single quotes are literal (no inner processing).
@@ -973,14 +973,14 @@ input_mapping:
 
     auto const& mappings = config.inputMappings.value();
 
-    auto const hasKeyAction = [&](auto actionTag) {
+    auto const hasKeyAction = [&](auto const& actionTag) {
         return std::ranges::any_of(mappings.keyMappings, [&](auto const& m) {
-            return std::holds_alternative<decltype(actionTag)>(m.binding.at(0));
+            return std::holds_alternative<std::remove_cvref_t<decltype(actionTag)>>(m.binding.at(0));
         });
     };
-    auto const hasCharAction = [&](auto actionTag) {
+    auto const hasCharAction = [&](auto const& actionTag) {
         return std::ranges::any_of(mappings.charMappings, [&](auto const& m) {
-            return std::holds_alternative<decltype(actionTag)>(m.binding.at(0));
+            return std::holds_alternative<std::remove_cvref_t<decltype(actionTag)>>(m.binding.at(0));
         });
     };
 
@@ -993,7 +993,7 @@ input_mapping:
     auto const sendChars = std::ranges::find_if(mappings.charMappings, [](auto const& m) {
         return std::holds_alternative<contour::actions::SendChars>(m.binding.at(0));
     });
-    bool foundSendChars = sendChars != mappings.charMappings.end();
+    bool const foundSendChars = sendChars != mappings.charMappings.end();
     if (foundSendChars)
         CHECK(std::get<contour::actions::SendChars>(sendChars->binding.at(0)).chars == "hello\r");
     else
@@ -1305,10 +1305,10 @@ TEST_CASE("Config: generated default config round-trips through the loader", "[c
     // Guards the global `theme` writer<->reader key match: the std::formatter emits "system" into the
     // generated doc, and the loader must read the same key back.
     CHECK(reloaded.theme.value() == defaults.theme.value());
-    CHECK(rendered.find("pixel_reporting:") != std::string::npos);
-    CHECK(rendered.find("tab_bar_position:") != std::string::npos);
-    CHECK(rendered.find("tab_bar_visibility:") != std::string::npos);
-    CHECK(rendered.find("theme:") != std::string::npos);
+    CHECK(rendered.contains("pixel_reporting:"));
+    CHECK(rendered.contains("tab_bar_position:"));
+    CHECK(rendered.contains("tab_bar_visibility:"));
+    CHECK(rendered.contains("theme:"));
 }
 
 TEST_CASE("Config: dual color schemes, palette list forms, and infinite history load", "[config]")
@@ -1437,7 +1437,7 @@ profiles:
     REQUIRE(profile != nullptr);
     // A leading ~ resolves to the user's home directory (homeResolvedPath).
     auto const cwd = profile->shell.value().workingDirectory.string();
-    CHECK(cwd.find('~') == std::string::npos);
+    CHECK(!cwd.contains('~'));
     CHECK_FALSE(cwd.empty());
 }
 
@@ -2007,7 +2007,7 @@ TEST_CASE("Config: createDefaultConfig writes a loadable file into a fresh direc
     // createDefaultConfig() creates the parent directory chain and writes the generated default
     // document. Point it at a nested path that does not exist yet so the create_directories branch
     // runs, then load it back to prove the written file round-trips.
-    QTemporaryDir dir;
+    QTemporaryDir const dir;
     auto const path = std::filesystem::path(dir.path().toStdString()) / "nested" / "sub" / "contour.yml";
 
     auto const ec = contour::config::createDefaultConfig(path);
@@ -2023,7 +2023,7 @@ TEST_CASE("Config: loadConfigFromFile creates the file when it does not exist", 
     // The path overload of loadConfigFromFile() runs createFileIfNotExists() first: a missing file
     // is materialized with the default config, so loading a not-yet-existent path yields a usable
     // config AND leaves the file on disk.
-    QTemporaryDir dir;
+    QTemporaryDir const dir;
     auto const path = std::filesystem::path(dir.path().toStdString()) / "created" / "contour.yml";
     REQUIRE_FALSE(std::filesystem::exists(path));
 
@@ -2037,7 +2037,7 @@ TEST_CASE("Config: defaultConfigFilePath and the documentation generators produc
     // These are the pure string-producing entry points used by the `contour generate`/`documentation`
     // subcommands; exercising them covers the no-argument overloads and their default-Config path.
     CHECK_FALSE(contour::config::defaultConfigFilePath().empty());
-    CHECK(contour::config::defaultConfigFilePath().find("contour.yml") != std::string::npos);
+    CHECK(contour::config::defaultConfigFilePath().contains("contour.yml"));
 
     CHECK_FALSE(contour::config::documentationGlobalConfig().empty());
     CHECK_FALSE(contour::config::documentationProfileConfig().empty());
@@ -2070,7 +2070,7 @@ profiles:
     auto const& features = config.experimentalFeatures.value();
     CHECK(features.count("feature_a") == 1);
     CHECK(features.count("feature_b") == 1);
-    CHECK(features.count("feature_c") == 0); // disabled entries are not inserted
+    CHECK(!features.contains("feature_c")); // disabled entries are not inserted
 }
 
 TEST_CASE("Config: image max_width/max_height and color registers load from YAML", "[config]")
@@ -2115,7 +2115,7 @@ profiles:
     CHECK(frozen.at(static_cast<vtbackend::DECMode>(25)) == true);
     CHECK(frozen.at(static_cast<vtbackend::DECMode>(2004)) == false);
     // 999999 is not a valid DEC mode: skipped, so never stored.
-    CHECK(frozen.count(static_cast<vtbackend::DECMode>(999999)) == 0);
+    CHECK(!frozen.contains(static_cast<vtbackend::DECMode>(999999)));
 }
 
 TEST_CASE("Config: input_mapping match modes parse every flag arm", "[config]")
@@ -2215,7 +2215,7 @@ TEST_CASE("Config: the command palette is bound to Ctrl+Shift+P by default", "[c
     // Ctrl+Shift+P arrives as a CHARACTER, not a named key: Qt::Key_P is not in helper.cpp's
     // KeyMappings table, so any Ctrl+printable is routed through sendCharEvent. A KeyInputMapping here
     // would therefore never match, and the chord would do nothing.
-    auto const& mappings = contour::config::defaultInputMappings;
+    auto const& mappings = contour::config::defaultInputMappings();
 
     auto const bound = std::ranges::find_if(mappings.charMappings, [](auto const& mapping) {
         return !mapping.binding.empty()
@@ -2280,7 +2280,7 @@ TEST_CASE("config.tab_switch_on_horizontal_wheel", "[config]")
         auto config = contour::config::Config {};
         config.tabSwitchOnHorizontalWheel = false;
         auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
-        REQUIRE(written.find("tab_switch_on_horizontal_wheel") != std::string::npos);
+        REQUIRE(written.contains("tab_switch_on_horizontal_wheel"));
 
         auto const reloaded = loadFromYaml(dir, written);
         CHECK_FALSE(reloaded.tabSwitchOnHorizontalWheel.value());
@@ -2629,9 +2629,9 @@ profiles:
     std::filesystem::remove(std::filesystem::path(dir.path().toStdString()) / "profiles" / "work.yml");
     contour::config::loadConfigFromFile(config, configPath);
 
-    CHECK(config.findProfile("work") == nullptr);    // no longer in the profiles map
-    CHECK(config.profileOrigins.count("work") == 0); // and no stale SideFile provenance left behind
-    REQUIRE(config.findProfile("main") != nullptr);  // the contour.yml profile is intact
+    CHECK(config.findProfile("work") == nullptr);   // no longer in the profiles map
+    CHECK(!config.profileOrigins.contains("work")); // and no stale SideFile provenance left behind
+    REQUIRE(config.findProfile("main") != nullptr); // the contour.yml profile is intact
     CHECK(config.profileOrigins.at("main") == contour::config::SettingsOrigin::MainConfig);
 }
 
@@ -2740,7 +2740,7 @@ profiles:
 TEST_CASE("Config: GUI settings round-trip through emitGuiSettingsYaml / loadGuiSettingsFile",
           "[config][gui]")
 {
-    QTemporaryDir dir;
+    QTemporaryDir const dir;
     auto const path = std::filesystem::path(dir.path().toStdString()) / "settings.yml";
     {
         auto out = std::ofstream(path);
@@ -3079,7 +3079,7 @@ TEST_CASE("Config: every built-in char binding is stored folded", "[config][inpu
     //
     // A runtime CHECK rather than a static_assert: defaultInputMappings holds std::vector and is
     // therefore not usable in a constant expression.
-    for (auto const& mapping: contour::config::defaultInputMappings.charMappings)
+    for (auto const& mapping: contour::config::defaultInputMappings().charMappings)
     {
         CAPTURE(static_cast<uint32_t>(mapping.input));
         CHECK(mapping.input == contour::config::foldedBindingCodepoint(mapping.input));
@@ -3152,12 +3152,12 @@ input_mapping:
     INFO("captured error log:\n" << log);
 
     // The misspelled modifier is named, and so is the row it killed.
-    CHECK(log.find("Crtl") != std::string::npos);
-    CHECK(log.find("ClearHistoryAndReset") != std::string::npos);
+    CHECK(log.contains("Crtl"));
+    CHECK(log.contains("ClearHistoryAndReset"));
     // ...and the unknown action, with its own row.
-    CHECK(log.find("NoSuchActionName") != std::string::npos);
+    CHECK(log.contains("NoSuchActionName"));
     // The accepted spellings are offered, so the user can see what to write instead.
-    CHECK(log.find("Ctrl") != std::string::npos);
+    CHECK(log.contains("Ctrl"));
 }
 
 TEST_CASE("Config: an input_mapping that is not a list is reported, not silently obeyed",
@@ -3189,7 +3189,7 @@ input_mapping:
     CHECK(mappings.mouseMappings.empty());
 
     INFO("captured error log:\n" << capture.captured());
-    CHECK(capture.captured().find("input_mapping") != std::string::npos);
+    CHECK(capture.captured().contains("input_mapping"));
 }
 
 // }}}

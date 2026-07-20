@@ -21,10 +21,7 @@
 #endif
 // clang-format on
 
-using std::copy;
 using std::make_shared;
-using std::min;
-using std::move;
 using std::ostream;
 using std::shared_ptr;
 using std::string;
@@ -63,9 +60,9 @@ ImagePool::ImagePool(OnImageRemove onImageRemove, ImageId nextImageId):
 {
 }
 
-constexpr ImageSize computeTargetSize(ImageResize resizePolicy,
-                                      ImageSize imageSize,
-                                      ImageSize gridSize) noexcept
+static constexpr ImageSize computeTargetSize(ImageResize resizePolicy,
+                                             ImageSize imageSize,
+                                             ImageSize gridSize) noexcept
 {
     auto const imageWidth = unbox(imageSize.width);
     auto const imageHeight = unbox(imageSize.height);
@@ -105,15 +102,18 @@ constexpr ImageSize computeTargetSize(ImageResize resizePolicy,
     std::unreachable();
 }
 
-struct TopLeft
+namespace
 {
-    int x {};
-    int y {};
-};
+    struct TopLeft
+    {
+        int x {};
+        int y {};
+    };
+} // namespace
 
-constexpr TopLeft computeTargetTopLeftOffset(ImageAlignment alignmentPolicy,
-                                             ImageSize targetSize,
-                                             ImageSize gridSize) noexcept
+static constexpr TopLeft computeTargetTopLeftOffset(ImageAlignment alignmentPolicy,
+                                                    ImageSize targetSize,
+                                                    ImageSize gridSize) noexcept
 {
     auto const gridWidth = unbox<int>(gridSize.width);
     auto const gridHeight = unbox<int>(gridSize.height);
@@ -137,7 +137,7 @@ constexpr TopLeft computeTargetTopLeftOffset(ImageAlignment alignmentPolicy,
     std::unreachable();
 }
 
-#if defined(VTBACKEND_SIMD_FOUND)
+#ifdef VTBACKEND_SIMD_FOUND
 namespace
 {
     struct SimdContext
@@ -193,7 +193,7 @@ namespace
                     for (int i = 0; i < SimdWidth; ++i)
                     {
                         auto const sourceIndex =
-                            (static_cast<size_t>(sourceY) * static_cast<size_t>(context.imageWidth)
+                            ((static_cast<size_t>(sourceY) * static_cast<size_t>(context.imageWidth))
                              + static_cast<size_t>(sourceXVec[i]))
                             * 4;
                         if (sourceIndex + 4 <= context.imageData.size())
@@ -231,7 +231,7 @@ namespace
                                                    * static_cast<double>(context.subHeight)
                                                    / static_cast<double>(context.paramHeight));
                             auto const sourceIndex =
-                                (static_cast<size_t>(sourceY) * static_cast<size_t>(context.imageWidth)
+                                ((static_cast<size_t>(sourceY) * static_cast<size_t>(context.imageWidth))
                                  + static_cast<size_t>(sourceX))
                                 * 4;
                             if (sourceIndex + 4 <= context.imageData.size())
@@ -351,7 +351,7 @@ Image::Data RasterizedImage::fragment(CellLocation pos, ImageSize targetCellSize
     fragmentData.resize(cellSize.area() * 4); // RGBA
     uint8_t* target = fragmentData.data();
 
-#if defined(VTBACKEND_SIMD_FOUND)
+#ifdef VTBACKEND_SIMD_FOUND
     auto const imageHeight = unbox<int>(_image->height());
     auto const simdContext = SimdContext {
         .width = unbox<int>(cellSize.width),
@@ -378,7 +378,7 @@ Image::Data RasterizedImage::fragment(CellLocation pos, ImageSize targetCellSize
         bool const yInBounds = (globalY >= yOffset) && (globalY < (yOffset + paramHeight));
         int x = 0;
 
-#if defined(VTBACKEND_SIMD_FOUND)
+#ifdef VTBACKEND_SIMD_FOUND
         fillFragmentSimd(x, target, simdContext, globalY, yInBounds);
 #endif
 
@@ -394,7 +394,7 @@ Image::Data RasterizedImage::fragment(CellLocation pos, ImageSize targetCellSize
                 auto const sourceY = subOffsetY
                                      + static_cast<int>((globalY - yOffset) * static_cast<double>(subHeight)
                                                         / static_cast<double>(paramHeight));
-                auto const sourceIndex = (static_cast<size_t>(sourceY) * static_cast<size_t>(imageWidth)
+                auto const sourceIndex = ((static_cast<size_t>(sourceY) * static_cast<size_t>(imageWidth))
                                           + static_cast<size_t>(sourceX))
                                          * 4;
                 if (sourceIndex + 4 <= _image->data().size())
@@ -431,9 +431,9 @@ shared_ptr<RasterizedImage> rasterize(shared_ptr<Image const> image,
         std::move(image), alignmentPolicy, resizePolicy, defaultColor, cellSpan, cellSize, layer);
 }
 
-void ImagePool::link(string name, shared_ptr<Image const> imageRef)
+void ImagePool::link(string const& name, shared_ptr<Image const> imageRef)
 {
-    _imageNameToImageCache.emplace(std::move(name), std::move(imageRef));
+    _imageNameToImageCache.emplace(name, std::move(imageRef));
 }
 
 shared_ptr<Image const> ImagePool::findImageByName(string const& name) const noexcept

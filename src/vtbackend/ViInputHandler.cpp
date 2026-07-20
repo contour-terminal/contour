@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/HintModeHandler.h>
 #include <vtbackend/ViInputHandler.h>
+
+#include <vtbackend/HintModeHandler.h>
 #include <vtbackend/logging.h>
 
 #include <crispy/TrieMap.h>
@@ -461,15 +462,15 @@ void ViInputHandler::startSearchExternally()
     }
 }
 
-auto handleEditor(char32_t ch,
-                  Modifiers modifiers,
-                  auto& where,
-                  PromptMode& promptEditMode,
-                  auto& settings,
-                  auto setViMode,
-                  auto cancel,
-                  auto done,
-                  auto update)
+static auto handleEditor(char32_t ch,
+                         Modifiers modifiers,
+                         auto& where,
+                         PromptMode& promptEditMode,
+                         auto& settings,
+                         auto setViMode,
+                         auto cancel,
+                         auto done,
+                         auto update)
 {
     switch (InputMatch { .modifiers = modifiers, .ch = ch })
     {
@@ -528,7 +529,7 @@ Handled ViInputHandler::handleSearchEditor(char32_t ch, Modifiers modifiers)
         [&](auto mode) { setMode(mode); },
         [&]() { _executor->searchCancel(); },
         [&]() { _executor->searchDone(); },
-        [&](const auto& val) { _executor->updateSearchTerm(val); });
+        [&](auto const& val) { _executor->updateSearchTerm(val); });
 
     return Handled { true };
 }
@@ -615,7 +616,7 @@ bool ViInputHandler::parseCount(char32_t ch, Modifiers modifiers)
         case '8':
         case '9':
             //.
-            _count = _count * 10 + (ch - '0');
+            _count = (_count * 10) + (ch - '0');
             return true;
         default:
             //.

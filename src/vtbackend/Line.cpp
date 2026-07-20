@@ -81,7 +81,12 @@ std::string Line::toUtf8(ColumnOffset begin, ColumnOffset end) const
         return {};
 
     if (isBlank())
-        return std::string(last - first, ' ');
+    {
+        // Not a braced init list: {n, ' '} would select std::string's initializer_list<char>
+        // constructor and narrow the count to char. NRVO makes the named local free.
+        auto blanks = std::string(static_cast<size_t>(last - first), ' ');
+        return blanks;
+    }
 
     std::string str;
     str.reserve(last - first); // exact for ASCII, a sound floor for anything wider

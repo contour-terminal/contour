@@ -12,7 +12,7 @@
 #include <vtbackend/primitives.h>
 
 #include <vtpty/Process.h>
-#if defined(VTPTY_LIBSSH2)
+#ifdef VTPTY_LIBSSH2
     #include <vtpty/SshSession.h>
 #endif
 
@@ -24,9 +24,6 @@
 #include <string>
 
 using namespace std::string_literals;
-
-using std::make_unique;
-using std::nullopt;
 
 namespace contour
 {
@@ -122,8 +119,8 @@ WindowController* TerminalSessionManager::controllerForDisplay(
     return _controllersByWindow.begin()->second;
 }
 
-TerminalSession* TerminalSessionManager::createSessionInBackground(vtmux::WindowId window,
-                                                                   std::optional<std::string> profileName)
+TerminalSession* TerminalSessionManager::createSessionInBackground(
+    vtmux::WindowId window, std::optional<std::string> const& profileName)
 {
     // TODO: Remove dependency on app-knowledge and pass shell / terminal-size instead.
     // The GuiApp *or* (Global)Config could be made a global to be accessible from within QML.
@@ -297,19 +294,20 @@ void TerminalSessionManager::syncFocusForWindow(WindowController* controller)
 }
 
 TerminalSession* TerminalSessionManager::createSession(vtmux::WindowId window,
-                                                       std::optional<std::string> profileName)
+                                                       std::optional<std::string> const& profileName)
 {
     // Just create the backing session + its model tab. The model's activeTabChanged fires the owning
     // controller's proxy rebuild, and the pane tree's `session:` binding attaches the session to its
     // display — no legacy activateSession display-assignment.
-    return createSessionInBackground(window, std::move(profileName));
+    return createSessionInBackground(window, profileName);
 }
 
-void TerminalSessionManager::createNewTab(TerminalSession* acting, std::optional<std::string> profileName)
+void TerminalSessionManager::createNewTab(TerminalSession* acting,
+                                          std::optional<std::string> const& profileName)
 {
     // The CreateNewTab keybinding: the new tab belongs to the window the user typed in.
     if (auto* win = windowHostingSession(acting))
-        createNewTab(win->id(), std::move(profileName));
+        createNewTab(win->id(), profileName);
 }
 
 void TerminalSessionManager::closeAllTabs(TerminalSession* acting)
@@ -351,7 +349,7 @@ bool TerminalSessionManager::applyLayoutToWindow(vtmux::WindowId window,
                 managerLog()("Layout references unknown profile '{}'; using window profile.", *profileName);
                 profileName.reset();
             }
-            std::optional<std::string> cwd =
+            std::optional<std::string> const cwd =
                 leaf.directory ? std::optional { leaf.directory->string() } : std::nullopt;
             createBackingSession(sessionId, cwd, pageSize, command, profileName);
         };
@@ -951,7 +949,8 @@ void TerminalSessionManager::paneSplit(vtmux::TabId tab, vtmux::PaneId, vtmux::P
 {
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
     {
-        c->notifyTabRowChanged(tab, { WindowController::TitleRole, WindowController::PaneCountRole });
+        c->notifyTabRowChanged(
+            tab, { WindowController::Roles::TitleRole, WindowController::Roles::PaneCountRole });
         c->rebuildActiveTabPaneProxies();
     }
 }
@@ -960,7 +959,8 @@ void TerminalSessionManager::paneClosed(vtmux::TabId tab, vtmux::PaneId, vtmux::
 {
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
     {
-        c->notifyTabRowChanged(tab, { WindowController::TitleRole, WindowController::PaneCountRole });
+        c->notifyTabRowChanged(
+            tab, { WindowController::Roles::TitleRole, WindowController::Roles::PaneCountRole });
         c->rebuildActiveTabPaneProxies();
     }
 }
@@ -969,7 +969,7 @@ void TerminalSessionManager::activePaneChanged(vtmux::TabId tab, vtmux::PaneId)
 {
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
     {
-        c->notifyTabRowChanged(tab, { WindowController::TitleRole });
+        c->notifyTabRowChanged(tab, { WindowController::Roles::TitleRole });
         c->notifyActivePaneChanged();
         c->emitActiveSessionChanged();
         // Move terminal focus to the newly active pane's leaf (symmetric out/in via setFocusedSession).
@@ -1011,7 +1011,7 @@ void TerminalSessionManager::paneZoomChanged(vtmux::TabId tab, std::optional<vtm
     // (SessionModel::announceZoomChange -> tabTitleChanged), so every host gets it, not just this one.
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
     {
-        c->notifyTabRowChanged(tab, { WindowController::ZoomedRole });
+        c->notifyTabRowChanged(tab, { WindowController::Roles::ZoomedRole });
         c->refreshActiveTabLayoutRoot();
     }
 }
@@ -1021,7 +1021,8 @@ void TerminalSessionManager::paneTreeRestructured(vtmux::TabId tab)
     // A move re-parents nodes and re-homes ids unpredictably, so re-read the whole tab's tree.
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
     {
-        c->notifyTabRowChanged(tab, { WindowController::TitleRole, WindowController::PaneCountRole });
+        c->notifyTabRowChanged(
+            tab, { WindowController::Roles::TitleRole, WindowController::Roles::PaneCountRole });
         c->rebuildActiveTabPaneProxies();
     }
 }
@@ -1033,14 +1034,15 @@ void TerminalSessionManager::tabTitleChanged(vtmux::TabId tab)
     // the status line until an unrelated event next refreshes it.
     updateStatusLine();
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
-        c->notifyTabRowChanged(tab, { WindowController::TitleRole, WindowController::RawTitleRole });
+        c->notifyTabRowChanged(tab,
+                               { WindowController::Roles::TitleRole, WindowController::Roles::RawTitleRole });
 }
 
 void TerminalSessionManager::tabColorChanged(vtmux::TabId tab)
 {
     updateStatusLine();
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
-        c->notifyTabRowChanged(tab, { WindowController::ColorRole });
+        c->notifyTabRowChanged(tab, { WindowController::Roles::ColorRole });
 }
 
 void TerminalSessionManager::refreshAllTabTitles()
@@ -1057,7 +1059,7 @@ void TerminalSessionManager::refreshTabForSession(vtmux::SessionId session)
     // renders from. (Emitting on the manager reached nothing: no QML binds the manager's rows.)
     if (auto* tab = findTabHostingSession(session))
         if (auto* c = controllerFor(_model->windowOfTab(tab->id())))
-            c->notifyTabRowChanged(tab->id(), { WindowController::TitleRole });
+            c->notifyTabRowChanged(tab->id(), { WindowController::Roles::TitleRole });
 }
 
 void TerminalSessionManager::setTabColorForSession(vtmux::SessionId session, vtbackend::RGBColor color)

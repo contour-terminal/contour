@@ -408,7 +408,7 @@ TEST_CASE("SessionModel: moveTab reorders tabs the way the manager's MoveTab* ac
 
     SECTION("MoveTabTo(position=1) sends c to the front")
     {
-        f.model.moveTab(win->id(), c->id(), 1 - 1);
+        f.model.moveTab(win->id(), c->id(), 0);
         CHECK(win->tabAt(0) == c);
         CHECK(win->tabAt(1) == a);
         CHECK(win->tabAt(2) == b);
@@ -784,7 +784,7 @@ TEST_CASE("SessionModel: an empty or blank tab title resets to the default templ
 
 TEST_CASE("SessionModel: color palette is non-empty and shared", "[vtmux][model][color]")
 {
-    Fixture f;
+    Fixture const f;
     CHECK_FALSE(f.model.colorPalette().empty());
     CHECK(f.model.colorPalette().size() >= 8);
 
@@ -795,7 +795,7 @@ TEST_CASE("SessionModel: color palette is non-empty and shared", "[vtmux][model]
     CHECK(first.data() == again.data());
     CHECK(first.size() == again.size());
 
-    Fixture other;
+    Fixture const other;
     CHECK(other.model.colorPalette().data() == first.data());
 }
 

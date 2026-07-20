@@ -140,7 +140,7 @@ TEST_CASE("captureScreen: a full capture round-trip lands the payload in the out
     CHECK(out.str() == "hello capture\n");
     // The request must carry the physical-lines flag and the line count, under the ',' intermediate that
     // distinguishes XTCAPTURE from xterm's XTSMTITLE. @see vtbackend/Functions.h, XTCAPTURE.
-    CHECK(transport.requests.find("\033[>0;2,t") != std::string::npos);
+    CHECK(transport.requests.contains("\033[>0;2,t"));
 }
 
 TEST_CASE("captureScreen: words mode splits the payload one word per line", "[capture]")
@@ -154,7 +154,7 @@ TEST_CASE("captureScreen: words mode splits the payload one word per line", "[ca
     auto out = std::ostringstream {};
     CHECK(contour::captureScreen(settings, transport, out));
     CHECK(out.str() == "alpha\nbeta\n");
-    CHECK(transport.requests.find("\033[>1;0,t") != std::string::npos); // logical-lines flag
+    CHECK(transport.requests.contains("\033[>1;0,t")); // logical-lines flag
 }
 
 TEST_CASE("captureScreen: an unanswered capture request times out cleanly", "[capture]")

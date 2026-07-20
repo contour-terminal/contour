@@ -10,6 +10,7 @@
 #include <crispy/App.h>
 #include <crispy/BufferObject.h>
 #include <crispy/CLI.h>
+#include <crispy/environment.h>
 #include <crispy/utils.h>
 
 #include <chrono>
@@ -18,6 +19,7 @@
 #include <iostream>
 #include <iterator>
 #include <optional>
+#include <random>
 #include <thread>
 
 #include <libtermbench/termbench.h>
@@ -30,17 +32,19 @@ namespace
 
 std::string createText(size_t bytes)
 {
+    auto entropy = std::random_device {};
+    auto engine = std::mt19937 { entropy() };
+    auto letters = std::uniform_int_distribution<int> { 0, 25 };
+
     std::string text;
     while (text.size() < bytes)
     {
-        text += char('A' + (rand() % 26));
+        text += static_cast<char>('A' + letters(engine));
         if ((text.size() % 65) == 0)
             text += '\n';
     }
     return text;
 }
-
-} // namespace
 
 struct BenchOptions
 {
@@ -51,8 +55,10 @@ struct BenchOptions
     bool binary = false;
 };
 
+} // namespace
+
 template <typename Writer>
-int baseBenchmark(Writer&& writer, BenchOptions options, string_view title)
+static int baseBenchmark(Writer&& writer, BenchOptions options, string_view title)
 {
     if (!(options.binary || options.longLines || options.manyLines || options.sgr))
     {
@@ -102,7 +108,7 @@ int baseBenchmark(Writer&& writer, BenchOptions options, string_view title)
 /// Reads a whole file into memory.
 /// @param path File to read.
 /// @return Its bytes, or nullopt when it cannot be read.
-std::optional<std::string> readWholeFile(std::string const& path)
+static std::optional<std::string> readWholeFile(std::string const& path)
 {
     auto file = std::ifstream(path, std::ios::binary);
     if (!file)
@@ -122,11 +128,11 @@ std::optional<std::string> readWholeFile(std::string const& path)
 /// @param cellSize     Pixel size of one grid cell.
 /// @param maxImageSize The image canvas ceiling, as a display would set it.
 /// @return EXIT_SUCCESS.
-int benchSixelStream(std::string const& sixelData,
-                     unsigned iterations,
-                     vtbackend::PageSize pageSize,
-                     vtbackend::ImageSize cellSize,
-                     vtbackend::ImageSize maxImageSize)
+static int benchSixelStream(std::string const& sixelData,
+                            unsigned iterations,
+                            vtbackend::PageSize pageSize,
+                            vtbackend::ImageSize cellSize,
+                            vtbackend::ImageSize maxImageSize)
 {
     auto vt = vtbackend::MockTerm<>(pageSize, vtbackend::LineCount(0), 1'000'000);
     vt.terminal.setCellPixelSize(cellSize);
@@ -167,6 +173,8 @@ int benchSixelStream(std::string const& sixelData,
 
 namespace CLI = crispy::cli;
 
+namespace
+{
 class ContourHeadlessBench: public crispy::app
 {
   public:
@@ -175,7 +183,7 @@ class ContourHeadlessBench: public crispy::app
     {
         using Project = crispy::cli::about::project;
         crispy::cli::about::registerProjects(
-#if defined(CONTOUR_BUILD_WITH_MIMALLOC)
+#ifdef CONTOUR_BUILD_WITH_MIMALLOC
             Project { "mimalloc", "", "" },
 #endif
             Project { "yaml-cpp", "MIT", "https://github.com/jbeder/yaml-cpp" },
@@ -187,10 +195,9 @@ class ContourHeadlessBench: public crispy::app
         link("bench-headless.pty", bind(&ContourHeadlessBench::benchPTY));
         link("bench-headless.meta", bind(&ContourHeadlessBench::showMetaInfo));
 
-        char const* logFilterString = getenv("LOG");
-        if (logFilterString)
+        if (auto const logFilterString = crispy::environment::get("LOG"))
         {
-            logstore::configure(logFilterString);
+            logstore::configure(*logFilterString);
             crispy::app::customizeLogStoreOutput();
         }
     }
@@ -462,11 +469,10 @@ class ContourHeadlessBench: public crispy::app
             "Parser only");
     }
 };
+} // namespace
 
 int main(int argc, char const* argv[])
 {
-    srand(static_cast<unsigned int>(time(nullptr))); // initialize rand(). No strong seed required.
-
     ContourHeadlessBench app;
     return app.run(argc, argv);
 }

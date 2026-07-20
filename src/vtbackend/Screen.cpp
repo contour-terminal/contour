@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/Screen.h>
+
 #include <vtbackend/ControlCode.h>
 #include <vtbackend/DesktopNotification.h>
 #include <vtbackend/InputGenerator.h>
 #include <vtbackend/MessageParser.h>
 #include <vtbackend/RectangularAreaChecksum.h>
-#include <vtbackend/Screen.h>
 #include <vtbackend/SixelParser.h>
 #include <vtbackend/SoAClusterWriter.h>
 #include <vtbackend/Terminal.h>
@@ -28,6 +29,7 @@
 #include <libunicode/convert.h>
 #include <libunicode/emoji_segmenter.h>
 #include <libunicode/grapheme_segmenter.h>
+#include <libunicode/ucd.h>
 #include <libunicode/utf8_grapheme_segmenter.h>
 #include <libunicode/word_segmenter.h>
 
@@ -43,9 +45,10 @@
 #include <string_view>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 #include <variant>
 
-#if defined(_WIN32)
+#ifdef _WIN32
     #include <Windows.h>
 #endif
 
@@ -56,28 +59,18 @@ using crispy::for_each;
 using crispy::times;
 using crispy::toHexString;
 
-using gsl::span;
-
-using std::accumulate;
 using std::array;
 using std::clamp;
-using std::endl;
-using std::fill;
 using std::function;
 using std::get;
 using std::holds_alternative;
 using std::make_shared;
 using std::make_unique;
 using std::monostate;
-using std::move;
-using std::next;
 using std::nullopt;
 using std::optional;
 using std::ostringstream;
 using std::pair;
-using std::prev;
-using std::ref;
-using std::rotate;
 using std::shared_ptr;
 using std::string;
 using std::string_view;
@@ -94,7 +87,7 @@ auto constexpr inline ColorPaletteUpdateDsrReplyId = 997;
 
 auto constexpr inline TabWidth = ColumnCount(8);
 
-auto const inline vtCaptureBufferLog = logstore::category("vt.ext.capturebuffer",
+auto inline const vtCaptureBufferLog = logstore::category("vt.ext.capturebuffer",
                                                           "Capture Buffer debug logging.",
                                                           logstore::category::state::Disabled,
                                                           logstore::category::visibility::Hidden);
@@ -114,12 +107,12 @@ namespace // {{{ helper
     template <typename Rep, typename Period>
     inline void sleep_for(std::chrono::duration<Rep, Period> const& rtime)
     {
-#if defined(USE_SLEEP_FOR_FROM_STD_CHRONO)
+#ifdef USE_SLEEP_FOR_FROM_STD_CHRONO
         std::this_thread::sleep_for(rtime);
 #else
         if (rtime.count() <= 0)
             return;
-    #if defined(_WIN32)
+    #ifdef _WIN32
         auto const ms = std::chrono::duration_cast<std::chrono::milliseconds>(rtime);
         Sleep(ms.count());
     #else
@@ -560,7 +553,7 @@ void Screen::advanceCursorAfterWrite(ColumnCount n) noexcept
 
 void Screen::writeText(string_view text, size_t cellCount)
 {
-#if defined(LIBTERMINAL_LOG_TRACE)
+#ifdef LIBTERMINAL_LOG_TRACE
     if (vtTraceSequenceLog)
         vtTraceSequenceLog()(
             "[{}] text: ({} bytes, {} cells): \"{}\"", _name, text.size(), cellCount, escape(text));
@@ -570,7 +563,7 @@ void Screen::writeText(string_view text, size_t cellCount)
     auto const _ = crispy::finally { [&]() { _logCharTrace = true; } };
 #endif
 
-    assert(cellCount <= static_cast<size_t>(pageSize().columns.value - _cursor.position.column.value));
+    assert(std::cmp_less_equal(cellCount, pageSize().columns.value - _cursor.position.column.value));
 
     // Fast path: bulk-write ASCII directly into SoA arrays.
     // Only for pure ASCII content — non-ASCII needs the per-codepoint grapheme segmenter
@@ -736,7 +729,7 @@ void Screen::writeText(string_view text, size_t cellCount)
 
 void Screen::writeTextEnd()
 {
-#if defined(LIBTERMINAL_LOG_TRACE)
+#ifdef LIBTERMINAL_LOG_TRACE
     // Do not log individual characters, as we already logged the whole string above
     if (!_pendingCharTraceLog.empty())
     {
@@ -756,7 +749,7 @@ void Screen::writeTextEnd()
 
 void Screen::writeTextFromExternal(std::string_view text)
 {
-#if defined(LIBTERMINAL_LOG_TRACE)
+#ifdef LIBTERMINAL_LOG_TRACE
     if (vtTraceSequenceLog)
         vtTraceSequenceLog()("external text: \"{}\"", text);
 #endif
@@ -779,12 +772,12 @@ void Screen::crlfIfWrapPending()
 
 void Screen::writeText(char32_t codepoint)
 {
-#if defined(LIBTERMINAL_LOG_TRACE)
+#ifdef LIBTERMINAL_LOG_TRACE
     if (vtTraceSequenceLog && _logCharTrace.load())
         _pendingCharTraceLog += unicode::convert_to<char>(codepoint);
 #endif
 
-    return writeTextInternal(codepoint);
+    writeTextInternal(codepoint);
 }
 
 void Screen::writeTextInternal(char32_t sourceCodepoint)
@@ -889,7 +882,7 @@ void Screen::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
 
     auto cell = line.useCellAt(_cursor.position.column);
 
-#if defined(LINE_AVOID_CELL_RESET)
+#ifdef LINE_AVOID_CELL_RESET
     bool const consecutiveTextWrite = _terminal->instructionCounter() == 1;
     if (!consecutiveTextWrite)
         cell.reset();
@@ -1884,7 +1877,7 @@ void Screen::insertChars(LineOffset lineOffset, ColumnCount columnsToInsert)
         return;
     auto& storage = line.materializedStorage();
     auto const cursorCol = static_cast<size_t>(*realCursorPosition().column);
-    auto const marginEnd = static_cast<size_t>(*margin().horizontal.to + 1);
+    auto const marginEnd = static_cast<size_t>(*margin().horizontal.to) + 1;
     auto const moveCount = marginEnd - cursorCol - static_cast<size_t>(sanitizedN);
 
     if (moveCount > 0)
@@ -2132,7 +2125,7 @@ void Screen::eraseArea(int top, int left, int bottom, int right)
 void Screen::fillArea(char32_t ch, int top, int left, int bottom, int right)
 {
     // "Pch can be any value from 32 to 126 or from 160 to 255."
-    if (!(32 <= ch && ch <= 126) && !(160 <= ch && ch <= 255))
+    if ((32 > ch || ch > 126) && (160 > ch || ch > 255))
         return;
 
     auto const w = static_cast<uint8_t>(unicode::width(ch));
@@ -2186,7 +2179,7 @@ void Screen::deleteChars(LineOffset lineOffset, ColumnOffset column, ColumnCount
     // did.
     auto& storage = line.materializedStorage();
     auto const leftCol = column.as<size_t>();
-    auto const rightCol = static_cast<size_t>(*margin().horizontal.to + 1);
+    auto const rightCol = static_cast<size_t>(*margin().horizontal.to) + 1;
     auto const n =
         static_cast<size_t>(std::min(columnsToDelete.as<long>(), static_cast<long>(rightCol - leftCol)));
 
@@ -2557,7 +2550,7 @@ void Screen::cursorBackwardTab(TabStopCount count)
         else
         {
             auto const m = (*_cursor.position.column + 1) % *TabWidth;
-            auto const n = m ? (*count - 1) * *TabWidth + m : *count * *TabWidth + m;
+            auto const n = m ? ((*count - 1) * *TabWidth) + m : (*count * *TabWidth) + m;
             setCurrentAbsoluteColumn(ColumnOffset(std::max(0, *_cursor.position.column - (n - 1))));
         }
     }
@@ -2635,14 +2628,17 @@ void Screen::setGraphicsRendition(GraphicsRendition rendition)
         _cursor.graphicsRendition.flags = CellUtil::makeCellFlags(rendition, _cursor.graphicsRendition.flags);
 }
 
-enum class ModeResponse : uint8_t
-{ // TODO: respect response 0, 3, 4.
-    NotRecognized = 0,
-    Set = 1,
-    Reset = 2,
-    PermanentlySet = 3,
-    PermanentlyReset = 4
-};
+namespace
+{
+    enum class ModeResponse : uint8_t
+    { // TODO: respect response 0, 3, 4.
+        NotRecognized = 0,
+        Set = 1,
+        Reset = 2,
+        PermanentlySet = 3,
+        PermanentlyReset = 4
+    };
+} // namespace
 
 void Screen::requestAnsiMode(unsigned int mode)
 {
@@ -4103,7 +4099,7 @@ namespace impl
             int out = 0;
             for (auto const ch: value)
             {
-                if (!(ch >= '0' && ch <= '9'))
+                if (ch < '0' || ch > '9')
                     return 0;
 
                 out = (out * 10) + (ch - '0');
@@ -4596,7 +4592,7 @@ namespace impl
 
 void Screen::executeControlCode(char controlCode)
 {
-#if defined(LIBTERMINAL_LOG_TRACE)
+#ifdef LIBTERMINAL_LOG_TRACE
     // Flush any pending text trace before processing the control code.
     // Without this, when the parser's bulk text optimization processes
     // text → C0 → text inline (without leaving Ground state), writeTextEnd()
@@ -4753,8 +4749,10 @@ void Screen::renderITerm2InlineImage(std::string_view arguments)
         // each need their own unit handling and are simply left at "derive from the image".
         auto const cells = [](std::string_view text) -> unsigned {
             auto result = 0u;
-            auto const* const last = text.data() + text.size();
-            auto const [ptr, ec] = std::from_chars(text.data(), last, result);
+            // from_chars takes a [first, last) range, not a NUL-terminated string.
+            auto const* const first = text.data();
+            auto const* const last = first + text.size();
+            auto const [ptr, ec] = std::from_chars(first, last, result);
             return (ec == std::errc {} && ptr == last) ? result : 0u;
         };
 
@@ -5669,7 +5667,7 @@ void Screen::renderKittyImage(kitty_graphics::Command const& command,
 
 void Screen::processSequence(Sequence const& seq)
 {
-#if defined(LIBTERMINAL_LOG_TRACE)
+#ifdef LIBTERMINAL_LOG_TRACE
     if (vtTraceSequenceLog)
     {
         if (auto const* fd = seq.functionDefinition(_terminal->activeSequences()))
@@ -5996,7 +5994,7 @@ void Screen::handleInProgressQuery(SemanticBlockTracker const& tracker)
     }
 
     auto const json = formatBlockJson(*currentBlock, promptText, outputText, outputLineCount);
-    reply("{}{{\"version\":1,\"blocks\":[{}]}}{}", SBQueryResponseSuccess, json, DcsTerminator);
+    reply(R"({}{{"version":1,"blocks":[{}]}}{})", SBQueryResponseSuccess, json, DcsTerminator);
 }
 
 void Screen::handleCompletedBlocksQuery(SemanticBlockTracker const& tracker,
@@ -6025,7 +6023,7 @@ void Screen::handleCompletedBlocksQuery(SemanticBlockTracker const& tracker,
 
     // Add from completed blocks (back = most recent).
     for (auto it = completedBlocks.rbegin();
-         it != completedBlocks.rend() && static_cast<int>(blocks.size()) < requestedCount;
+         it != completedBlocks.rend() && std::cmp_less(blocks.size(), requestedCount);
          ++it)
         blocks.push_back(&*it);
 
@@ -7469,12 +7467,28 @@ unique_ptr<ParserExtension> Screen::hookDECUDK(Sequence const& seq)
         [this, clearAll, locked](string_view data) { _terminal->programUDK(clearAll, locked, data); });
 }
 
+namespace
+{
+    /// Decides whether a search is case-sensitive ("smart case"): it is, as soon as the needle
+    /// contains an uppercase character.
+    ///
+    /// @param searchText The needle to inspect.
+    /// @return true if @p searchText contains at least one uppercase letter.
+    [[nodiscard]] bool isCaseSensitiveSearch(std::u32string_view searchText) noexcept
+    {
+        // NB: std::isupper() takes an *int holding an unsigned char value* (or EOF), so feeding it a
+        // char32_t is undefined for every codepoint above 0xFF -- and it would answer for the wrong
+        // alphabet anyway. The UCD lookup is the codepoint-correct test, so "Привет" and "Ünicode"
+        // now select a case-sensitive search just like "Hello" does.
+        return std::ranges::any_of(searchText, unicode::general_category::is_uppercase_letter);
+    }
+} // namespace
+
 optional<CellLocation> Screen::search(std::u32string_view searchText, CellLocation startPosition)
 {
     // TODO use LogicalLines to spawn logical lines for improving the search on wrapped lines.
 
-    auto const isCaseSensitive =
-        std::any_of(searchText.begin(), searchText.end(), [](auto ch) { return std::isupper(ch); });
+    auto const isCaseSensitive = isCaseSensitiveSearch(searchText);
 
     if (searchText.empty())
         return nullopt;
@@ -7499,8 +7513,7 @@ optional<CellLocation> Screen::search(std::u32string_view searchText, CellLocati
 optional<CellLocation> Screen::searchReverse(std::u32string_view searchText, CellLocation startPosition)
 {
     // TODO use LogicalLinesReverse to spawn logical lines for improving the search on wrapped lines.
-    auto const isCaseSensitive =
-        std::any_of(searchText.begin(), searchText.end(), [](auto ch) { return std::isupper(ch); });
+    auto const isCaseSensitive = isCaseSensitiveSearch(searchText);
 
     if (searchText.empty())
         return nullopt;
@@ -7695,7 +7708,7 @@ std::optional<Image::Data> Screen::decodePng(std::span<uint8_t const> data, Imag
     return decoded;
 }
 
-void Screen::uploadImage(string name, ImageFormat format, ImageSize imageSize, Image::Data&& pixmap)
+void Screen::uploadImage(string const& name, ImageFormat format, ImageSize imageSize, Image::Data&& pixmap)
 {
     assert(format != ImageFormat::Auto && "Auto must be resolved before upload");
     if (!isConsistentPixmap(format, imageSize, pixmap.size()))
@@ -7711,14 +7724,14 @@ void Screen::uploadImage(string name, ImageFormat format, ImageSize imageSize, I
     {
         auto decodedSize = imageSize;
         if (auto decodedData = decodePng(pixmap, decodedSize))
-            _terminal->imagePool().link(std::move(name),
+            _terminal->imagePool().link(name,
                                         uploadImage(ImageFormat::RGBA, decodedSize, std::move(*decodedData)));
         else
             errorLog()("Failed to decode PNG image for upload.");
         return;
     }
 
-    _terminal->imagePool().link(std::move(name), uploadImage(format, imageSize, std::move(pixmap)));
+    _terminal->imagePool().link(name, uploadImage(format, imageSize, std::move(pixmap)));
 }
 
 void Screen::renderImageByName(std::string const& name,

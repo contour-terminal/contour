@@ -28,11 +28,11 @@ TEST_CASE("ScreenDump.text plane", "[vtconformance]")
         dumpScreen(mock.terminal,
                    DumpOptions { .attributes = false, .lineFlags = false, .modes = false, .cursor = false });
 
-    CHECK(dump.find("@geometry 3x8") != std::string::npos);
+    CHECK(dump.contains("@geometry 3x8"));
 
     // A never-written cell and an explicitly written space look the same on screen but are distinct
     // to DECRQCRA and to selective erase, so the dump must keep them apart.
-    CHECK(dump.find("01|AB······") != std::string::npos);
+    CHECK(dump.contains("01|AB······"));
 }
 
 TEST_CASE("ScreenDump.a written space is not an untouched cell", "[vtconformance]")
@@ -44,7 +44,7 @@ TEST_CASE("ScreenDump.a written space is not an untouched cell", "[vtconformance
         dumpScreen(mock.terminal,
                    DumpOptions { .attributes = false, .lineFlags = false, .modes = false, .cursor = false });
 
-    CHECK(dump.find("01|A␣B·····") != std::string::npos);
+    CHECK(dump.contains("01|A␣B·····"));
 }
 
 TEST_CASE("ScreenDump.attribute plane and legend", "[vtconformance]")
@@ -56,10 +56,10 @@ TEST_CASE("ScreenDump.attribute plane and legend", "[vtconformance]")
         dumpScreen(mock.terminal,
                    DumpOptions { .attributes = true, .lineFlags = false, .modes = false, .cursor = false });
 
-    CHECK(dump.find("---- attributes ") != std::string::npos);
-    CHECK(dump.find("01|A.......") != std::string::npos);
-    CHECK(dump.find("A = Bold") != std::string::npos);
-    CHECK(dump.find(". = default") != std::string::npos);
+    CHECK(dump.contains("---- attributes "));
+    CHECK(dump.contains("01|A......."));
+    CHECK(dump.contains("A = Bold"));
+    CHECK(dump.contains(". = default"));
 }
 
 TEST_CASE("ScreenDump.line flags record double-width and double-height", "[vtconformance]")
@@ -71,8 +71,8 @@ TEST_CASE("ScreenDump.line flags record double-width and double-height", "[vtcon
         dumpScreen(mock.terminal,
                    DumpOptions { .attributes = false, .lineFlags = true, .modes = false, .cursor = false });
 
-    CHECK(dump.find("---- lineflags ") != std::string::npos);
-    CHECK(dump.find("01|DoubleWidth") != std::string::npos);
+    CHECK(dump.contains("---- lineflags "));
+    CHECK(dump.contains("01|DoubleWidth"));
 }
 
 TEST_CASE("ScreenDump.mode plane", "[vtconformance]")
@@ -84,8 +84,8 @@ TEST_CASE("ScreenDump.mode plane", "[vtconformance]")
         dumpScreen(mock.terminal,
                    DumpOptions { .attributes = false, .lineFlags = false, .modes = true, .cursor = false });
 
-    CHECK(dump.find("DECOM=on") != std::string::npos);
-    CHECK(dump.find("DECAWM=") != std::string::npos);
+    CHECK(dump.contains("DECOM=on"));
+    CHECK(dump.contains("DECAWM="));
 }
 
 TEST_CASE("ScreenDump.cursor position is 1-based, like the VT sequences that move it", "[vtconformance]")
@@ -97,7 +97,7 @@ TEST_CASE("ScreenDump.cursor position is 1-based, like the VT sequences that mov
         dumpScreen(mock.terminal,
                    DumpOptions { .attributes = false, .lineFlags = false, .modes = false, .cursor = true });
 
-    CHECK(dump.find("@cursor line=2 column=3") != std::string::npos);
+    CHECK(dump.contains("@cursor line=2 column=3"));
 }
 
 TEST_CASE("ScreenDump.dumps are deterministic", "[vtconformance]")
@@ -118,9 +118,9 @@ TEST_CASE("ScreenDump.diffDumps", "[vtconformance]")
     SECTION("a differing line is reported with both sides")
     {
         auto const diff = diffDumps("a\nb\n"sv, "a\nc\n"sv);
-        CHECK(diff.find("@@ line 2") != std::string::npos);
-        CHECK(diff.find("-b") != std::string::npos);
-        CHECK(diff.find("+c") != std::string::npos);
+        CHECK(diff.contains("@@ line 2"));
+        CHECK(diff.contains("-b"));
+        CHECK(diff.contains("+c"));
     }
 }
 
@@ -161,7 +161,7 @@ TEST_CASE("ScreenDump.an ISO-protected cell is distinguishable from a plain one"
     auto const dump = dumpScreen(mock.terminal, DumpOptions { .lineFlags = false, .modes = false });
 
     INFO(dump);
-    CHECK(dump.find("= CharacterProtectedISO") != std::string::npos);
+    CHECK(dump.contains("= CharacterProtectedISO"));
     // The two cells must not collapse onto one legend symbol.
-    CHECK(dump.find("A = default") == std::string::npos);
+    CHECK(!dump.contains("A = default"));
 }

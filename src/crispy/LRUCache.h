@@ -24,8 +24,8 @@ class lru_cache
     };
     using item_list = std::list<item>;
 
-    using iterator = typename item_list::iterator;
-    using const_iterator = typename item_list::const_iterator;
+    using iterator = item_list::iterator;
+    using const_iterator = item_list::const_iterator;
 
     explicit lru_cache(std::size_t capacity): _capacity { capacity } {}
 
@@ -93,7 +93,7 @@ class lru_cache
     template <typename ValueConstructFn>
     [[nodiscard]] bool try_emplace(Key key, ValueConstructFn constructValue)
     {
-        if (Value* p = try_get(key))
+        if (Value const* p = try_get(key))
             return false;
 
         if (_items.size() == _capacity)

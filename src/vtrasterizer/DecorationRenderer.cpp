@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtrasterizer/DecorationRenderer.h>
+
 #include <vtrasterizer/GridMetrics.h>
 #include <vtrasterizer/Pixmap.h>
 #include <vtrasterizer/shared_defines.h>
@@ -14,18 +15,11 @@
 #include <utility>
 
 using crispy::each_element;
-using crispy::size;
 
 using std::array;
 using std::ceil;
-using std::clamp;
 using std::floor;
-using std::get;
 using std::max;
-using std::min;
-using std::move;
-using std::nullopt;
-using std::optional;
 using std::pair;
 using std::string;
 

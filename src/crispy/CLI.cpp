@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <crispy/CLI.h>
+
 #include <crispy/assert.h>
 #include <crispy/logstore.h>
 #include <crispy/times.h>
@@ -61,7 +62,6 @@ using std::holds_alternative;
 using std::invalid_argument;
 using std::map;
 using std::max;
-using std::move;
 using std::nullopt;
 using std::optional;
 using std::ostream;
@@ -520,7 +520,7 @@ namespace crispy::cli
 
 namespace // {{{ helpers
 {
-    string spaces(size_t count)
+    auto spaces(size_t count)
     {
         return string(count, ' ');
     }
@@ -752,7 +752,7 @@ namespace // {{{ helpers
                               command const& com,
                               unsigned margin,
                               vector<command const*>& parents,
-                              const auto& stylize)
+                              auto const& stylize)
     {
         os << indent(1);
         for (command const* parent: parents)

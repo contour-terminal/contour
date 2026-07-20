@@ -14,9 +14,10 @@
 #include <mutex>
 #include <optional>
 #include <ranges>
+#include <system_error>
 #include <vector>
 
-#if !defined(_WIN32)
+#ifndef _WIN32
     #include <crispy/file_descriptor.h>
 
     #include <sys/select.h>
@@ -25,7 +26,7 @@
     #include <unistd.h>
 #endif
 
-#if defined(__linux__)
+#ifdef __linux__
     #include <sys/epoll.h>
     #include <sys/eventfd.h>
 #endif
@@ -83,7 +84,7 @@ class posix_read_selector
         {
             auto written = write(_breakPipeWriter, "x", 1);
             if (written == -1)
-                errorLog()("Writing to break-pipe failed. {}", strerror(errno));
+                errorLog()("Writing to break-pipe failed. {}", std::generic_category().message(errno));
         }
     }
 
@@ -185,7 +186,7 @@ class posix_read_selector
 };
 
 // {{{ epoll_read_selector, implements waiting for a set of file descriptors to become readable.
-#if defined(__linux__)
+#ifdef __linux__
 
 /// Implements waiting for a set of file descriptors to become readable.
 ///
@@ -265,7 +266,7 @@ inline void epoll_read_selector::wakeup() const noexcept
     auto const value = eventfd_t { 1 };
     auto written = write(_eventFd, &value, sizeof(value));
     if (written == -1)
-        errorLog()("Writing to eventFd failed. {}", strerror(errno));
+        errorLog()("Writing to eventFd failed. {}", std::generic_category().message(errno));
 }
 
 inline std::optional<int> epoll_read_selector::try_pop_pending() noexcept
@@ -327,7 +328,7 @@ inline std::optional<int> epoll_read_selector::wait_one(
 #endif // }}}
 
 /// Implements waiting for a set of file descriptors to become readable.
-#if defined(__linux__)
+#ifdef __linux__
 using read_selector = epoll_read_selector;
 #else
 using read_selector = posix_read_selector;

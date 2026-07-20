@@ -96,7 +96,7 @@ class MockPtySessionFactory final: public contour::SessionFactory
 /// @return The parsed configuration.
 [[nodiscard]] inline contour::config::Config loadConfigFromYaml(std::string_view yaml)
 {
-    QTemporaryDir dir;
+    QTemporaryDir const dir;
     REQUIRE(dir.isValid());
     auto const path = std::filesystem::path(dir.path().toStdString()) / "contour.yml";
     {

@@ -29,7 +29,7 @@
 #include <memory>
 #include <optional>
 #include <variant>
-#if defined(CONTOUR_PERF_STATS)
+#ifdef CONTOUR_PERF_STATS
     #include <atomic>
 #endif
 
@@ -126,23 +126,9 @@ class TerminalDisplay: public QQuickItem
         return *_session;
     }
 
-    // {{{ Input handling
-    void keyPressEvent(QKeyEvent* keyEvent) override;
-    void keyReleaseEvent(QKeyEvent* keyEvent) override;
-    void wheelEvent(QWheelEvent* wheelEvent) override;
-    void mousePressEvent(QMouseEvent* mousePressEvent) override;
-    void mouseReleaseEvent(QMouseEvent* mouseReleaseEvent) override;
-    void mouseMoveEvent(QMouseEvent* mouseMoveEvent) override;
-    void hoverMoveEvent(QHoverEvent* event) override;
-    void hoverLeaveEvent(QHoverEvent* event) override;
-    void focusInEvent(QFocusEvent* event) override;
-    void focusOutEvent(QFocusEvent* event) override;
 #if QT_CONFIG(im)
-    void inputMethodEvent(QInputMethodEvent* event) override;
     [[nodiscard]] QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
 #endif
-    bool event(QEvent* event) override;
-    // }}}
 
     /// Prepares (stages) one terminal frame for the RHI, called by TerminalRenderNode from
     /// QSGRenderNode::prepare() — before the scene graph begins the render pass.
@@ -275,12 +261,29 @@ class TerminalDisplay: public QQuickItem
 
     Q_INVOKABLE void logDisplayInfo();
 
-    void releaseResources() override;
-
     [[nodiscard]] QString profileName() const { return QString::fromStdString(_profileName); }
     void setProfileName(QString const& name) { _profileName = name.toStdString(); }
 
   protected:
+    // {{{ Input handling — kept protected, matching QQuickItem's own visibility for these hooks
+    void keyPressEvent(QKeyEvent* keyEvent) override;
+    void keyReleaseEvent(QKeyEvent* keyEvent) override;
+    void wheelEvent(QWheelEvent* wheelEvent) override;
+    void mousePressEvent(QMouseEvent* mousePressEvent) override;
+    void mouseReleaseEvent(QMouseEvent* mouseReleaseEvent) override;
+    void mouseMoveEvent(QMouseEvent* mouseMoveEvent) override;
+    void hoverMoveEvent(QHoverEvent* event) override;
+    void hoverLeaveEvent(QHoverEvent* event) override;
+    void focusInEvent(QFocusEvent* event) override;
+    void focusOutEvent(QFocusEvent* event) override;
+#if QT_CONFIG(im)
+    void inputMethodEvent(QInputMethodEvent* event) override;
+#endif
+    bool event(QEvent* event) override;
+    // }}}
+
+    void releaseResources() override;
+
     /// Scene-graph extension point: creates/updates the TerminalRenderNode that draws the terminal in
     /// z-order. On first call it lazily creates the OpenGL renderer (formerly done from the render
     /// signals) and the node; on subsequent calls it marks the node dirty so Qt re-renders. Runs on the
@@ -440,7 +443,7 @@ class TerminalDisplay: public QQuickItem
     /// otherwise.
     bool setScreenDirty()
     {
-#if defined(CONTOUR_PERF_STATS)
+#ifdef CONTOUR_PERF_STATS
         stats_.updatesSinceRendering++;
 #endif
         return _state.touch();
@@ -496,7 +499,7 @@ class TerminalDisplay: public QQuickItem
 
     // ======================================================================
 
-#if defined(CONTOUR_PERF_STATS)
+#ifdef CONTOUR_PERF_STATS
     struct Stats
     {
         std::atomic<uint64_t> updatesSinceRendering = 0;

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#if defined(_WIN32)
+#ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
     #include <windows.h>
-#elif defined(__OpenBSD__)
+#elifdef __OpenBSD__
     #include <pthread_np.h>
     #define pthread_getname_np pthread_get_name_np
 #else
@@ -19,7 +19,7 @@ using namespace std::string_literals;
 
 std::string threadName()
 {
-#if defined(_WIN32)
+#ifdef _WIN32
     auto const ThreadHandle = GetCurrentThread();
     PWSTR pwsz = nullptr;
     HRESULT hr = GetThreadDescription(ThreadHandle, &pwsz);

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtpty/Process.h>
 #include <vtpty/UnixPty.h>
+
+#include <vtpty/Process.h>
 #include <vtpty/UnixUtils.h>
 
 #include <crispy/BufferObject.h>
 #include <crispy/deferred.h>
+#include <crispy/environment.h>
 #include <crispy/escape.h>
 #include <crispy/logstore.h>
 
@@ -16,19 +18,20 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <utility>
 
 #if defined(__APPLE__) || defined(__OpenBSD__)
     #include <util.h>
-#elif defined(__FreeBSD__)
+#elifdef __FreeBSD__
     #include <libutil.h>
 #else
     #include <pty.h>
 #endif
 
 #include <fcntl.h>
-#if !defined(__FreeBSD__)
+#ifndef __FreeBSD__
     #include <utmp.h>
 #endif
 #include <sys/ioctl.h>
@@ -36,6 +39,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
+#include <pthread.h>
 #include <pwd.h>
 #include <unistd.h>
 
@@ -45,7 +49,6 @@
 
 using std::make_unique;
 using std::nullopt;
-using std::numeric_limits;
 using std::optional;
 using std::runtime_error;
 using std::scoped_lock;
@@ -67,15 +70,15 @@ namespace
     PtyHandles createUnixPty(PageSize const& windowSize, optional<ImageSize> pixels)
     {
         // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
-        assert(std::cmp_less_equal(unbox(windowSize.lines), numeric_limits<unsigned short>::max()));
-        assert(std::cmp_less_equal(unbox(windowSize.columns), numeric_limits<unsigned short>::max()));
+        assert(std::cmp_less_equal(unbox(windowSize.lines), std::numeric_limits<unsigned short>::max()));
+        assert(std::cmp_less_equal(unbox(windowSize.columns), std::numeric_limits<unsigned short>::max()));
 
         winsize const ws { .ws_row = unbox<unsigned short>(windowSize.lines),
                            .ws_col = unbox<unsigned short>(windowSize.columns),
                            .ws_xpixel = unbox<unsigned short>(pixels.value_or(ImageSize {}).width),
                            .ws_ypixel = unbox<unsigned short>(pixels.value_or(ImageSize {}).height) };
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
         auto* wsa = const_cast<winsize*>(&ws);
 #else
         winsize const* wsa = &ws;
@@ -85,7 +88,7 @@ namespace
         int masterFd {};
         int slaveFd {};
         if (openpty(&masterFd, &slaveFd, nullptr, /*&term*/ nullptr, (winsize*) wsa) < 0)
-            throw runtime_error { "Failed to open PTY. "s + strerror(errno) };
+            throw runtime_error { "Failed to open PTY. "s + std::generic_category().message(errno) };
 
         ptyLog()("PTY opened. master={}, slave={}", masterFd, slaveFd);
 
@@ -97,7 +100,7 @@ namespace
     char const* hostnameForUtmp()
     {
         for (auto const* env: { "DISPLAY", "WAYLAND_DISPLAY" })
-            if (auto const* value = std::getenv(env))
+            if (auto const* value = crispy::environment::getCString(env))
                 return value;
 
         return nullptr;
@@ -162,7 +165,7 @@ bool UnixPty::Slave::login()
 
     sigset_t signals;
     sigemptyset(&signals);
-    sigprocmask(SIG_SETMASK, &signals, nullptr);
+    pthread_sigmask(SIG_SETMASK, &signals, nullptr);
 
     // clang-format off
     struct sigaction act {};
@@ -174,7 +177,7 @@ bool UnixPty::Slave::login()
 
     setsid();
 
-#if defined(TIOCSCTTY)
+#ifdef TIOCSCTTY
     // Set the controlling terminal, unless we are running inside a flatpak.
     // Because flatpak does not allow setting the controlling terminal.
     // - https://github.com/flatpak/flatpak/issues/3697
@@ -223,7 +226,7 @@ void UnixPty::start()
     _slave = make_unique<Slave>(handles.slave);
 
     if (!util::setFileFlags(_masterFd, O_CLOEXEC | O_NONBLOCK))
-        throw runtime_error { "Failed to configure PTY. "s + strerror(errno) };
+        throw runtime_error { "Failed to configure PTY. "s + std::generic_category().message(errno) };
 
     util::setFileFlags(_stdoutFastPipe.reader(), O_NONBLOCK);
     ptyLog()("stdout fastpipe: reader {}, writer {}", _stdoutFastPipe.reader(), _stdoutFastPipe.writer());
@@ -291,7 +294,9 @@ optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
         // Callers do not need to distinguish: they already read `errno` themselves, and every value
         // other than EAGAIN/EINTR means the same thing to them (closed). @see Terminal::processInputOnce.
         if (errno != EAGAIN && errno != EINTR && errno != EIO)
-            errorLog()("{} read failed: {}", fd == _masterFd ? "master" : "stdout-fastpipe", strerror(errno));
+            errorLog()("{} read failed: {}",
+                       fd == _masterFd ? "master" : "stdout-fastpipe",
+                       std::generic_category().message(errno));
         return nullopt;
     }
 
@@ -380,7 +385,7 @@ int UnixPty::write(std::string_view data)
 
         if (rv < 0)
             // errorlog()("PTY write failed: {}", strerror(errno));
-            ptyOutLog()("PTY write of {} bytes failed. {}\n", size, strerror(errno));
+            ptyOutLog()("PTY write of {} bytes failed. {}\n", size, std::generic_category().message(errno));
         else if (0 <= rv && std::cmp_less(rv, size))
             // clang-format off
             ptyOutLog()("Partial write. {} bytes written and {} bytes left.",
@@ -441,7 +446,7 @@ void UnixPty::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
     }
 
     if (ioctl(_masterFd, TIOCSWINSZ, &w) == -1)
-        throw runtime_error { strerror(errno) };
+        throw runtime_error { std::generic_category().message(errno) };
 
     _pageSize = cells;
 }

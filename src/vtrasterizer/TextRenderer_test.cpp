@@ -38,7 +38,7 @@ using TextureAtlas = vtrasterizer::Renderable::TextureAtlas;
 
 template <typename T, typename U, typename S>
     requires std::is_convertible_v<T, S>
-constexpr boxed::boxed<T, U> operator*(boxed::boxed<T, U> w, S scalar) noexcept
+static constexpr boxed::boxed<T, U> operator*(boxed::boxed<T, U> w, S scalar) noexcept
 {
     return boxed::boxed<T, U>(w.value * scalar);
 }
@@ -113,6 +113,8 @@ class RendererTest
 };
 } // namespace vtrasterizer
 
+namespace
+{
 class MockTextRendererEvents: public TextRendererEvents
 {
   public:
@@ -120,8 +122,6 @@ class MockTextRendererEvents: public TextRendererEvents
     void onAfterRenderingText() override {}
 };
 
-namespace
-{
 constexpr std::string_view TestFontContent = R"(STARTFONT 2.1
 FONT -Success-Console-Medium-R-Normal--12-120-75-75-C-80-ISO10646-1
 SIZE 9 96 96
@@ -324,7 +324,7 @@ TEST_CASE("TextRenderer", "[renderer]")
 
     // Verify locator finds it
     auto const sources = fontLocator->locate(font_description::parse("regular"));
-    CHECK(sources.size() >= 1);
+    CHECK(!sources.empty());
 
     auto& fontLocatorRef = *fontLocator; // standard usage
     auto textShaper = open_shaper(DPI { 96, 96 }, fontLocatorRef);
@@ -338,11 +338,11 @@ TEST_CASE("TextRenderer", "[renderer]")
     // We need to initialize metrics for the font.
     // TextRenderer constructor does updateFontMetrics().
 
-    FontKeys fontKeys { .regular = regularFontKey.value(),
-                        .bold = regularFontKey.value(), // Reuse
-                        .italic = regularFontKey.value(),
-                        .boldItalic = regularFontKey.value(),
-                        .emoji = regularFontKey.value() };
+    FontKeys const fontKeys { .regular = regularFontKey.value(),
+                              .bold = regularFontKey.value(), // Reuse
+                              .italic = regularFontKey.value(),
+                              .boldItalic = regularFontKey.value(),
+                              .emoji = regularFontKey.value() };
 
     MockTextRendererEvents events;
 
@@ -687,7 +687,7 @@ TEST_CASE("Renderer.findCellPartitionPoint", "[renderer]")
 {
     SECTION("empty vector returns 0")
     {
-        std::vector<RenderCell> cells;
+        std::vector<RenderCell> const cells;
         CHECK(Renderer::findCellPartitionPoint(cells, LineCount(5)) == 0);
     }
 
@@ -733,7 +733,7 @@ TEST_CASE("Renderer.findLinePartitionPoint", "[renderer]")
 {
     SECTION("empty vector returns 0")
     {
-        std::vector<RenderLine> lines;
+        std::vector<RenderLine> const lines;
         CHECK(Renderer::findLinePartitionPoint(lines, LineCount(5)) == 0);
     }
 
@@ -1228,7 +1228,7 @@ TEST_CASE("Renderer.reconfig.concurrent_requests_and_apply", "[renderer]")
     for (auto const i: std::views::iota(0, Iterations))
     {
         auto const lines = 10 + (i % 50);
-        renderer.applyResize(vtbackend::ImageSize { Width(640 + i % 100), Height(480 + i % 100) },
+        renderer.applyResize(vtbackend::ImageSize { Width(640 + (i % 100)), Height(480 + (i % 100)) },
                              PageSize { LineCount(lines), ColumnCount(lines * 2) },
                              vtrasterizer::PageMargin { .left = i % 5, .top = i % 7, .bottom = i % 3 });
         if (i % 3 == 0)
@@ -1659,7 +1659,7 @@ int main(int argc, char* argv[])
     if (returnCode != 0)
         return returnCode;
 
-    int result = session.run();
+    int const result = session.run();
 
     return result;
 }

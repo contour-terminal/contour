@@ -11,12 +11,14 @@
 #include <crispy/logstore.h>
 #include <crispy/point.h>
 
-#if defined(GLYPH_KEY_DEBUG)
+#ifdef GLYPH_KEY_DEBUG
     #include <libunicode/convert.h>
     #include <libunicode/width.h>
 #endif
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <format>
 #include <optional>
 #include <string>
@@ -27,7 +29,7 @@
 namespace text
 {
 
-auto const inline locatorLog = logstore::category("font.locator", "Logs about font loads.");
+auto inline const locatorLog = logstore::category("font.locator", "Logs about font loads.");
 
 namespace detail
 {
@@ -175,7 +177,7 @@ struct font_fallback_list
 struct font_description
 {
     std::string familyName { "regular" };
-#if defined(_WIN32)
+#ifdef _WIN32
     std::wstring wFamilyName { L"regular" };
 #endif
 
@@ -281,11 +283,11 @@ struct glyph_key
     font_key font;
     glyph_index index {};
 
-#if defined(GLYPH_KEY_DEBUG)
+#ifdef GLYPH_KEY_DEBUG
     std::u32string text = {};
-    static constexpr inline bool Debug = true;
+    static constexpr bool Debug = true;
 #else
-    static constexpr inline bool Debug = false;
+    static constexpr bool Debug = false;
 #endif
 };
 
@@ -333,10 +335,23 @@ struct hash<text::glyph_key>
 {
     std::size_t operator()(text::glyph_key const& key) const noexcept
     {
-        auto const f = key.font.value;
-        auto const i = key.index.value;
-        auto const s = int(key.size.pt * 10.0);
-        return std::size_t(((size_t(f) << 32) & 0xFFFF) | ((i << 16) & 0xFFFF) | (s & 0xFF));
+        // Pack the three components into disjoint bit fields: font at bits 32..47,
+        // glyph index at bits 16..31, and the size (in tenths of a point) at bits 0..15.
+        // NB: each component must be masked BEFORE it is shifted into place, and the packing is done
+        // in a fixed-width uint64_t rather than in size_t. `<< 32` on a 32-bit size_t (i386, armhf,
+        // 32-bit Windows) shifts by the full width of the type, which is undefined: the compiler may
+        // fold the font term away entirely and collapse every font's glyphs into the same buckets --
+        // exactly the collision this packing exists to avoid. Where size_t cannot hold all 48 bits,
+        // the halves are folded together so that all three components still contribute.
+        auto const f = static_cast<std::uint64_t>(key.font.value);
+        auto const i = static_cast<std::uint64_t>(key.index.value);
+        auto const s = static_cast<std::uint64_t>(static_cast<int>(key.size.pt * 10.0));
+        auto const packed = ((f & 0xFFFF) << 32) | ((i & 0xFFFF) << 16) | (s & 0xFFFF);
+
+        if constexpr (sizeof(std::size_t) >= sizeof(std::uint64_t))
+            return static_cast<std::size_t>(packed);
+        else
+            return static_cast<std::size_t>(packed ^ (packed >> 32));
     }
 };
 
@@ -493,7 +508,7 @@ struct std::formatter<text::glyph_key>: std::formatter<std::string>
 {
     auto format(text::glyph_key const& key, auto& ctx) const
     {
-#if defined(GLYPH_KEY_DEBUG)
+#ifdef GLYPH_KEY_DEBUG
         return formatter<std::string>::format(
             std::format("({}, {}:{}, \"{}\")",
                         key.size,

@@ -6,6 +6,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstddef>
 #include <format>
 #include <ranges>
 #include <vector>
@@ -918,7 +919,7 @@ TEST_CASE("Grid resize with wrap and spaces", "[grid]")
     auto grid = Grid(PageSize { LineCount(3), width }, true, LineCount(0));
 
     auto text = "a a a a"sv;
-    auto pool = crispy::buffer_object_pool<char>(unbox(width) * 8);
+    auto pool = crispy::buffer_object_pool<char>(static_cast<size_t>(unbox(width) * 8));
     auto bufferObject = pool.allocateBufferObject();
     bufferObject->writeAtEnd(text);
     auto const bufferFragment = bufferObject->ref(0, unbox(width));
@@ -1151,7 +1152,7 @@ TEST_CASE("Grid.shrinkColumnsWrapsTextWithBlankHistory", "[grid][blank]")
 
     INFO("Reconstructed history+page: " << reconstructed);
     // The wide text must survive the reflow somewhere in history.
-    CHECK(reconstructed.find(wideText) != std::string::npos);
+    CHECK(reconstructed.contains(wideText));
 }
 
 TEST_CASE("Grid.render.blankLineWithSearchHighlight.usesTrivialPath", "[grid][blank]")

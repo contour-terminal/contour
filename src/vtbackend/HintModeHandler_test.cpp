@@ -42,7 +42,12 @@ class MockExecutor: public HintModeHandler::Executor
     void requestRedraw() override { ++redrawCount; }
 };
 
-auto const allPatterns = HintModeHandler::builtinPatterns();
+/// The full set of built-in patterns, materialized on first use.
+auto const& allPatterns()
+{
+    static auto const patterns = HintModeHandler::builtinPatterns();
+    return patterns;
+}
 
 /// Returns only the URL pattern for precise count-based test assertions.
 auto urlOnlyPatterns() -> std::vector<HintPattern>
@@ -209,7 +214,7 @@ TEST_CASE("HintModeHandler.FilePathPattern", "[hintmode]")
 
     auto lines = std::vector<std::string> { "edit /home/user/file.txt and ./local/path" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(50) }, allPatterns, HintAction::Open);
+    handler.activate(lines, PageSize { LineCount(1), ColumnCount(50) }, allPatterns(), HintAction::Open);
 
     REQUIRE(handler.isActive());
     // Should find file paths.
@@ -217,9 +222,9 @@ TEST_CASE("HintModeHandler.FilePathPattern", "[hintmode]")
     auto foundLocal = false;
     for (auto const& m: handler.matches())
     {
-        if (m.matchedText.find("/home/user/file.txt") != std::string::npos)
+        if (m.matchedText.contains("/home/user/file.txt"))
             foundHome = true;
-        if (m.matchedText.find("./local/path") != std::string::npos)
+        if (m.matchedText.contains("./local/path"))
             foundLocal = true;
     }
     CHECK(foundHome);
@@ -233,7 +238,7 @@ TEST_CASE("HintModeHandler.GitHashPattern", "[hintmode]")
 
     auto lines = std::vector<std::string> { "commit a1b2c3d some message" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(40) }, allPatterns, HintAction::Copy);
+    handler.activate(lines, PageSize { LineCount(1), ColumnCount(40) }, allPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     auto foundHash = false;
@@ -315,7 +320,7 @@ TEST_CASE("HintModeHandler.OverlappingPatterns", "[hintmode]")
     // The overlap removal should keep only the longer URL match.
     auto lines = std::vector<std::string> { "visit https://example.com/path for info" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(50) }, allPatterns, HintAction::Copy);
+    handler.activate(lines, PageSize { LineCount(1), ColumnCount(50) }, allPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
 
@@ -361,7 +366,7 @@ TEST_CASE("HintModeHandler.BareRelativeFilePath", "[hintmode]")
     {
         if (m.matchedText == "src/vtbackend/Terminal.cpp")
             foundTerminal = true;
-        if (m.matchedText.find("lib/utils/helpers.h") != std::string::npos)
+        if (m.matchedText.contains("lib/utils/helpers.h"))
             foundHelpers = true;
     }
     CHECK(foundTerminal);
@@ -395,7 +400,7 @@ TEST_CASE("HintModeHandler.ValidatorFiltersMatches", "[hintmode]")
     for (auto& p: patterns)
     {
         p.validator = [](std::string const& matchStr) -> bool {
-            return matchStr.find("accept") != std::string::npos;
+            return matchStr.contains("accept");
         };
     }
 
@@ -540,7 +545,7 @@ TEST_CASE("extractPathFromFileUrl.NonFileUrl", "[hintmode]")
 {
     CHECK(extractPathFromFileUrl("https://example.com") == "https://example.com");
     CHECK(extractPathFromFileUrl("ftp://server/file") == "ftp://server/file");
-    CHECK(extractPathFromFileUrl("") == "");
+    CHECK(extractPathFromFileUrl("").empty());
     CHECK(extractPathFromFileUrl("/plain/path") == "/plain/path");
 }
 
@@ -553,7 +558,7 @@ TEST_CASE("extractPathFromFileUrl.FileUrlWithLocalPath", "[hintmode]")
 TEST_CASE("extractPathFromFileUrl.FileUrlWithHost", "[hintmode]")
 {
     CHECK(extractPathFromFileUrl("file://hostname/home/user/file.txt") == "/home/user/file.txt");
-    CHECK(extractPathFromFileUrl("file://hostname") == "");
+    CHECK(extractPathFromFileUrl("file://hostname").empty());
 }
 
 TEST_CASE("extractPathFromFileUrl.WindowsDriveLetter", "[hintmode]")
@@ -759,9 +764,7 @@ TEST_CASE("HintModeHandler.TransformerRewritesMatchedText", "[hintmode]")
         HintPattern {
             .name = "filepath",
             .regex = std::regex(R"([\w./]+)", std::regex_constants::ECMAScript),
-            .validator = [](std::string const& matchStr) -> bool {
-                return matchStr.find('/') != std::string::npos;
-            },
+            .validator = [](std::string const& matchStr) -> bool { return matchStr.contains('/'); },
             .transformer = [](std::string const& matchStr) -> std::string { return "/project/" + matchStr; },
         },
     };

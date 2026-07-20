@@ -9,6 +9,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstddef>
 #include <format>
 #include <ranges>
 #include <string>
@@ -129,8 +130,8 @@ TEST_CASE("KittyClipboard.an_endless_write_stream_is_abandoned_not_accumulated",
 
     // Chunks stay under Sequence::MaxOscLength; anything larger would be truncated by the parser
     // rather than reaching the accumulator.
-    auto const chunk = crispy::base64::encode(std::string(32 * 1024, 'x'));
-    auto const enough = (kitty_clipboard::MaxClipboardWriteSize / (32 * 1024)) + 2;
+    auto const chunk = crispy::base64::encode(std::string(static_cast<std::size_t>(32 * 1024), 'x'));
+    auto const enough = (kitty_clipboard::MaxClipboardWriteSize / (static_cast<size_t>(32 * 1024))) + 2;
     for ([[maybe_unused]] auto const i: std::views::iota(size_t { 0 }, enough))
         mock.writeToScreen(std::format("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==:id=9;{}\033\\", chunk));
 
@@ -189,7 +190,7 @@ TEST_CASE("KittyClipboard.a_write_to_the_primary_selection_is_refused", "[kittyc
                                    crispy::base64::encode("clobber"sv)));
     mock.writeToScreen("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==;\033\\"sv);
 
-    CHECK(mock.terminal.peekInput().find("status=ENOSYS") != std::string_view::npos);
+    CHECK(mock.terminal.peekInput().contains("status=ENOSYS"));
     CHECK(mock.clipboardData == "user selection");
 }
 
@@ -205,10 +206,10 @@ TEST_CASE("KittyClipboard.the_targets_probe_lists_the_available_types", "[kittyc
     mock.writeToScreen(std::format("\033]5522;type=read;{}\033\\", crispy::base64::encode("."sv)));
 
     auto const reply = std::string(mock.terminal.peekInput());
-    CHECK(reply.find("status=ENOSYS") == std::string::npos);
+    CHECK(!reply.contains("status=ENOSYS"));
     // The answer names the type rather than carrying the data.
-    CHECK(reply.find(std::string(crispy::base64::encode("text/plain"sv))) != std::string::npos);
-    CHECK(reply.find("status=DONE") != std::string::npos);
+    CHECK(reply.contains(std::string(crispy::base64::encode("text/plain"sv))));
+    CHECK(reply.contains("status=DONE"));
 }
 
 TEST_CASE("KittyClipboard.a_large_read_is_chunked", "[kittyclipboard]")
@@ -264,7 +265,7 @@ TEST_CASE("KittyClipboard.a_read_is_answered_in_the_5522_protocol", "[kittyclipb
     mock.writeToScreen(std::format("\033]5522;type=read;{}\033\\", crispy::base64::encode("text/plain"sv)));
 
     auto const reply = std::string(mock.terminal.peekInput());
-    CHECK(reply.find("\033]52;") == std::string::npos); // never the OSC 52 shape
+    CHECK(!reply.contains("\033]52;")); // never the OSC 52 shape
     CHECK(reply
           == std::format("\033]5522;type=read:status=OK\033\\"
                          "\033]5522;type=read:status=DATA:mime={};{}\033\\"

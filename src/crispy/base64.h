@@ -94,7 +94,8 @@ constexpr void finish(Alphabet const& alphabet, encoder_state& state, sink const
             state.modulo = 0;
         }
         break;
-        case 0: break;
+        case 0:
+        default: break;
     }
 }
 
@@ -165,13 +166,13 @@ size_t decodeLength(Iterator begin, Iterator end)
     return decodeLength(begin, end, detail::IndexMap);
 }
 
-inline size_t decodeLength(const std::string_view& value)
+inline size_t decodeLength(std::string_view const& value)
 {
     return decodeLength(value.begin(), value.end());
 }
 
 template <typename Iterator, typename IndexTable, typename Output>
-size_t decode(Iterator begin, Iterator end, const IndexTable& indexmap, Output output)
+size_t decode(Iterator begin, Iterator end, IndexTable const& indexmap, Output output)
 {
     auto const index = [indexmap](Iterator i) {
         return indexmap[static_cast<uint8_t>(*i)];

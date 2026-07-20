@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Screen.h>
 #include <vtbackend/Selector.h>
+
+#include <vtbackend/Screen.h>
 #include <vtbackend/Terminal.h>
 
 #include <crispy/times.h>

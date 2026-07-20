@@ -87,7 +87,7 @@ struct DisplayHarness
     contour::display::TerminalDisplay* display = nullptr; // manually deleted in teardown
     contour::WindowController* controller = nullptr;      // manager-owned; removed in teardown
 
-    DisplayHarness()
+    DisplayHarness(): display(new contour::display::TerminalDisplay())
     {
         auto ptyOwned = std::make_unique<contour::test::BlockingMockPty>(
             vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) });
@@ -103,7 +103,6 @@ struct DisplayHarness
         // the grid). Clear to black so grabbed frames reflect what a user actually sees.
         window->setColor(QColor(Qt::black));
 
-        display = new contour::display::TerminalDisplay();
         display->setParentItem(window->contentItem());
         display->setSize(QSizeF(800, 600));
         display->setSession(session.get());
@@ -126,7 +125,7 @@ struct DisplayHarness
     }
 
     /// Forces one synchronous frame (scene-graph sync + render) and returns the grabbed image.
-    QImage pump()
+    QImage pump() const
     {
         QCoreApplication::processEvents();
         auto image = window->grabWindow();
@@ -135,7 +134,7 @@ struct DisplayHarness
     }
 
     /// Feeds VT output and pumps frames until the read loop consumed it (bounded).
-    void feedAndSettle(std::string_view vt)
+    void feedAndSettle(std::string_view vt) const
     {
         pty->feed(vt);
         for (int i = 0; i < 50 && pty->isStdoutPending(); ++i)
@@ -197,7 +196,7 @@ TEST_CASE("display: the display's PNG image decoder handles PNG, non-PNG and inv
     REQUIRE(pixels.has_value());
     CHECK(decodedSize.width == vtbackend::Width(4));
     CHECK(decodedSize.height == vtbackend::Height(3));
-    CHECK(pixels->size() == 4u * 3u * 4u); // width * height * RGBA
+    CHECK(pixels->size() == static_cast<std::size_t>(4u * 3u * 4u)); // width * height * RGBA
 
     // A non-PNG format is declined outright.
     vtbackend::ImageSize ignored;
@@ -211,7 +210,7 @@ TEST_CASE("display: the display's PNG image decoder handles PNG, non-PNG and inv
 TEST_CASE("display: a live session renders real frames and content changes pixels", "[display][render]")
 {
     REQUIRE_DISPLAY_OR_SKIP();
-    DisplayHarness h;
+    DisplayHarness const h;
 
     auto const before = h.pump();
     REQUIRE_FALSE(before.isNull());
@@ -254,7 +253,7 @@ namespace
 
     if (right < 0)
         return {};
-    return QRect(QPoint(left, top), QPoint(right, bottom));
+    return { QPoint(left, top), QPoint(right, bottom) };
 }
 } // namespace
 
@@ -349,17 +348,17 @@ TEST_CASE("display: keyboard, mouse and wheel events reach the PTY through the r
 
     QTest::keyClick(h.window.get(), Qt::Key_A);
     QTest::keyClick(h.window.get(), Qt::Key_Return);
-    for (int i = 0; i < 50 && h.pty->stdinSnapshot().find('a') == std::string::npos; ++i)
+    for (int i = 0; i < 50 && !h.pty->stdinSnapshot().contains('a'); ++i)
         QTest::qWait(10);
-    CHECK(h.pty->stdinSnapshot().find('a') != std::string::npos);
-    CHECK(h.pty->stdinSnapshot().find('\r') != std::string::npos);
+    CHECK(h.pty->stdinSnapshot().contains('a'));
+    CHECK(h.pty->stdinSnapshot().contains('\r'));
 
     // Enable X10 mouse reporting, then click inside the grid: the terminal must encode a report.
     h.feedAndSettle("\033[?1000h"sv);
     QTest::mouseClick(h.window.get(), Qt::LeftButton, Qt::NoModifier, QPoint(100, 100));
-    for (int i = 0; i < 50 && h.pty->stdinSnapshot().find("\033[M") == std::string::npos; ++i)
+    for (int i = 0; i < 50 && !h.pty->stdinSnapshot().contains("\033[M"); ++i)
         QTest::qWait(10);
-    CHECK(h.pty->stdinSnapshot().find("\033[M") != std::string::npos);
+    CHECK(h.pty->stdinSnapshot().contains("\033[M"));
 
     // Wheel over the (alt-less) primary screen scrolls the viewport — no crash, event consumed.
     // A phase-less notch now arms an inertial glide advanced by the render loop (nextRender +
@@ -457,7 +456,7 @@ TEST_CASE("display: a phase-less wheel notch that cannot arm a glide falls throu
     auto const snapshot = h.pty->stdinSnapshot();
     CHECK(snapshot.size() > before);
     // SGR wheel-up report: CSI < 64 ; col ; row M  (button code 64 == wheel up).
-    CHECK(snapshot.find("\033[<64;") != std::string::npos);
+    CHECK(snapshot.contains("\033[<64;"));
 }
 
 TEST_CASE("display: window resize reflows the grid through the real render loop", "[display][resize]")
@@ -632,7 +631,7 @@ TEST_CASE("display: the permission machinery routes guarded roles end-to-end", "
 TEST_CASE("display: bell rings the session signals and the alert path", "[display][bell]")
 {
     REQUIRE_DISPLAY_OR_SKIP();
-    DisplayHarness h;
+    DisplayHarness const h;
 
     auto bells = 0;
     auto alerts = 0;
@@ -1004,9 +1003,9 @@ TEST_CASE("display: input-method events compose and query on the live display", 
         commit.setCommitString(QStringLiteral("Z"));
         QCoreApplication::sendEvent(h.display, &commit);
     }
-    for (int i = 0; i < 50 && h.pty->stdinSnapshot().find('Z') == std::string::npos; ++i)
+    for (int i = 0; i < 50 && !h.pty->stdinSnapshot().contains('Z'); ++i)
         QTest::qWait(10);
-    CHECK(h.pty->stdinSnapshot().find('Z') != std::string::npos);
+    CHECK(h.pty->stdinSnapshot().contains('Z'));
 
     // The IME queries the display for its cursor rectangle / font / anchor — all must return
     // without crashing while a session is attached.
@@ -1413,7 +1412,7 @@ TEST_CASE("display: a Close event closes the PTY and emits terminated on the liv
           "[display][close]")
 {
     REQUIRE_DISPLAY_OR_SKIP();
-    DisplayHarness h;
+    DisplayHarness const h;
     h.pump();
 
     bool terminated = false;

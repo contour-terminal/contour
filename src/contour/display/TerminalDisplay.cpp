@@ -53,13 +53,13 @@
 
 namespace fs = std::filesystem;
 
-#if defined(_MSC_VER)
+#ifdef _MSC_VER
     #define __PRETTY_FUNCTION__ __FUNCDNAME__
 #endif
 
 // Must be in global namespace
 // NB: must be publicly visible, and due to -Wmissing-declarations, we better tell the compiler.
-void initializeDisplayResources();
+static void initializeDisplayResources();
 
 void initializeDisplayResources()
 {
@@ -76,7 +76,6 @@ using vtbackend::Width;
 using vtbackend::ColumnCount;
 using vtbackend::LineCount;
 using vtbackend::PageSize;
-using vtbackend::RGBAColor;
 
 using text::DPI;
 
@@ -447,18 +446,23 @@ void TerminalDisplay::handleWindowChanged(QQuickWindow* newWindow)
         displayLog()("Detaching widget {} from window.", (void*) this);
 }
 
-/// Deletes an RhiRenderer on the render thread (where its RHI/GPU resources must be released).
-/// Takes ownership of the renderer for its lifetime; the scheduling code hands over the unique_ptr.
-class CleanupJob: public QRunnable
+namespace
 {
-  public:
-    explicit CleanupJob(std::unique_ptr<RhiRenderer> renderer): _renderer { std::move(renderer) } {}
 
-    void run() override { _renderer.reset(); }
+    /// Deletes an RhiRenderer on the render thread (where its RHI/GPU resources must be released).
+    /// Takes ownership of the renderer for its lifetime; the scheduling code hands over the unique_ptr.
+    class CleanupJob: public QRunnable
+    {
+      public:
+        explicit CleanupJob(std::unique_ptr<RhiRenderer> renderer): _renderer { std::move(renderer) } {}
 
-  private:
-    std::unique_ptr<RhiRenderer> _renderer;
-};
+        void run() override { _renderer.reset(); }
+
+      private:
+        std::unique_ptr<RhiRenderer> _renderer;
+    };
+
+} // namespace
 
 void TerminalDisplay::releaseResources()
 {
@@ -647,7 +651,7 @@ void TerminalDisplay::logDisplayInfo()
     // reading them per line (5 + 2 times) would do 7 locked deep copies for one diagnostic dump.
     auto const gm = gridMetrics();
     auto const fd = _renderer->fontDescriptions();
-#if defined(CONTOUR_BUILD_TYPE)
+#ifdef CONTOUR_BUILD_TYPE
     displayLog()("[FYI] Build type          : {}", CONTOUR_BUILD_TYPE);
 #endif
     displayLog()("[FYI] Application PID     : {}", QCoreApplication::applicationPid());
@@ -865,7 +869,7 @@ QMatrix4x4 TerminalDisplay::createModelMatrix() const
     auto const count = transformations.count(&transformations);
     for (int i = 0; i < count; i++)
     {
-        QQuickTransform* transform = transformations.at(&transformations, i);
+        QQuickTransform const* transform = transformations.at(&transformations, i);
         transform->applyTo(&result);
     }
 
@@ -995,7 +999,7 @@ void TerminalDisplay::paint()
     {
         [[maybe_unused]] auto const lastState = _state.fetchAndClear();
 
-#if defined(CONTOUR_PERF_STATS)
+#ifdef CONTOUR_PERF_STATS
         {
             ++renderCount_;
             auto const updateCount = stats_.updatesSinceRendering.exchange(0);

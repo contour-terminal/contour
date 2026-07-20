@@ -22,6 +22,7 @@ set(crispy_SOURCES
     base64.h
     compose.h
     defines.h
+    environment.cpp environment.h
     escape.h
     file_descriptor.h
     flags.h
@@ -31,13 +32,12 @@ set(crispy_SOURCES
     reference.h
     ring.h
     times.h
+    user_info.cpp user_info.h
     utils.cpp utils.h
 )
 
 add_library(crispy-core STATIC ${crispy_SOURCES})
 add_library(crispy::core ALIAS crispy-core)
-
-set_target_properties(crispy-core PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
 
 if(STRONGHASH_USE_AES_NI)
     target_compile_definitions(crispy-core PUBLIC -DSTRONGHASH_USE_AES_NI=1)
@@ -132,6 +132,7 @@ if(CRISPY_TESTING)
         TrieMap_test.cpp
         base64_test.cpp
         compose_test.cpp
+        environment_test.cpp
         interpolated_string_test.cpp
         utils_test.cpp
         result_test.cpp

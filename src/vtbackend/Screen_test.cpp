@@ -15,12 +15,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <charconv>
+#include <cstddef>
 #include <ranges>
 #include <set>
 #include <string_view>
 
 using crispy::escape;
-using crispy::size;
 using namespace vtbackend;
 using namespace vtbackend::test;
 using namespace std;
@@ -30,19 +30,30 @@ namespace // {{{
 {
 
 // Chessboard image with each square of size 10x10 pixels
-std::string const chessBoard =
-    R"=(P0;0;0q"1;1;100;100#0;2;0;0;0#1;2;100;100;100#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-#0!10N!10o!10N!10o!10N!10o!10N!10o!10N!10o$#1!10o!10N!10o!10N!10o!10N!10o!10N!10o!10N-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10{!10B!10{!10B!10{!10B!10{!10B!10{!10B$#1!10B!10{!10B!10{!10B!10{!10B!10{!10B!10{-#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10o!10N!10o!10N!10o!10N!10o!10N!10o!10N$#1!10N!10o!10N!10o!10N!10o!10N!10o!10N!10o-#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-#0!10B!10{!10B!10{!10B!10{!10B!10{!10B!10{$#1!10{!10B!10{!10B!10{!10B!10{!10B!10{!10B-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-#0!10N!10o!10N!10o!10N!10o!10N!10o!10N!10o$#1!10o!10N!10o!10N!10o!10N!10o!10N!10o!10N-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10{!10B!10{!10B!10{!10B!10{!10B!10{!10B$#1!10B!10{!10B!10{!10B!10{!10B!10{!10B!10{-#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-#1!10N#0!10N#1!10N#0!10N#1!10N#0!10N#1!10N#0!10N#1!10N#0!10N-\)=";
+constexpr auto ChessBoard = std::string_view {
+    R"=(P0;0;0q"1;1;100;100#0;2;0;0;0#1;2;100;100;100#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-#0!10N!10o!10N!10o!10N!10o!10N!10o!10N!10o$#1!10o!10N!10o!10N!10o!10N!10o!10N!10o!10N-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10{!10B!10{!10B!10{!10B!10{!10B!10{!10B$#1!10B!10{!10B!10{!10B!10{!10B!10{!10B!10{-#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10o!10N!10o!10N!10o!10N!10o!10N!10o!10N$#1!10N!10o!10N!10o!10N!10o!10N!10o!10N!10o-#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-#0!10B!10{!10B!10{!10B!10{!10B!10{!10B!10{$#1!10{!10B!10{!10B!10{!10B!10{!10B!10{!10B-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-#0!10N!10o!10N!10o!10N!10o!10N!10o!10N!10o$#1!10o!10N!10o!10N!10o!10N!10o!10N!10o!10N-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10{!10B!10{!10B!10{!10B!10{!10B!10{!10B$#1!10B!10{!10B!10{!10B!10{!10B!10{!10B!10{-#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-#1!10N#0!10N#1!10N#0!10N#1!10N#0!10N#1!10N#0!10N#1!10N#0!10N-\)="
+};
 
-Image::Data const black10x10 = [] {
-    Image::Data ret(100 * 4, 0);
-    for (size_t i = 3; i < ret.size(); i += 4)
-    {
-        ret[i] = 255;
-    }
-    return ret;
-}();
+/// Opaque black 10x10 RGBA pixels.
+Image::Data const& black10x10()
+{
+    static Image::Data const data = [] {
+        Image::Data ret(static_cast<std::size_t>(100 * 4), 0);
+        for (size_t i = 3; i < ret.size(); i += 4)
+        {
+            ret[i] = 255;
+        }
+        return ret;
+    }();
+    return data;
+}
 
-Image::Data const white10x10(100 * 4, 255);
+/// Opaque white 10x10 RGBA pixels.
+Image::Data const& white10x10()
+{
+    static Image::Data const data(static_cast<std::size_t>(100 * 4), 255);
+    return data;
+}
 
 struct TextRenderBuilder
 {
@@ -3287,7 +3298,7 @@ TEST_CASE("DECSCL.conformance_level_gating", "[screen]")
         mock.resetReplyData();
         mock.writeToScreen("\033[4$p"); // DECRQM (ANSI) for IRM
         mock.terminal.flushInput();
-        CHECK(mock.replyData().find("$y") != std::string::npos); // level 3 answers CSI 4 ; Ps $ y
+        CHECK(mock.replyData().contains("$y")); // level 3 answers CSI 4 ; Ps $ y
     }
 
     SECTION("DECSLRM (a VT420 feature) is inert below VT level 4")
@@ -4610,6 +4621,41 @@ TEST_CASE("searchReverse", "[screen]")
     }
 }
 
+TEST_CASE("search.smartCaseIsCodepointAware", "[screen]")
+{
+    // "Smart case" asks whether the needle holds an uppercase character, and the comparison then folds
+    // case unless it does. Both halves used to be asked of <cctype> -- std::isupper() and std::tolower()
+    // -- which are defined only for values representable as unsigned char, so every codepoint above
+    // U+00FF was undefined behaviour: an out-of-bounds read into the ctype table on glibc, an
+    // invalid-parameter abort on the MSVC debug CRT. Both now go through the UCD, which answers for the
+    // actual codepoint and so makes smart case work for non-Latin scripts as well.
+    //
+    // Cyrillic П is U+041F, far outside what either function may be asked about.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(10) };
+    mock.writeToScreen("Привет");
+
+    auto& screen = mock.terminal.primaryScreen();
+    auto const start = CellLocation { LineOffset(0), ColumnOffset(0) };
+
+    SECTION("an uppercase non-ASCII needle selects a case-sensitive search")
+    {
+        CHECK(screen.search(U"Привет", start).has_value());  // matches exactly
+        CHECK(!screen.search(U"ПРИВЕТ", start).has_value()); // case-sensitive, so this must not match
+    }
+
+    SECTION("an all-lowercase non-ASCII needle stays case-insensitive")
+    {
+        CHECK(screen.search(U"привет", start).has_value());
+    }
+
+    SECTION("codepoints far above the ctype table are safe to scan")
+    {
+        // Reaching these at all used to be the crash; not matching is the only expected outcome.
+        CHECK(!screen.search(U"\U0001F600", start).has_value()); // emoji, U+1F600
+        CHECK(!screen.search(U"\U00010400", start).has_value()); // Deseret capital, U+10400
+    }
+}
+
 TEST_CASE("findMarkerDownwards", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(4) }, LineCount(10) };
@@ -5383,7 +5429,7 @@ TEST_CASE("Sixel.simple", "[screen]")
     auto mock = MockTerm { pageSize, LineCount(11) };
     mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(10) });
 
-    mock.writeToScreen(chessBoard);
+    mock.writeToScreen(ChessBoard);
 
     CHECK(mock.terminal.primaryScreen().cursor().position.column.value == ColumnOffset(0).value);
     CHECK(mock.terminal.primaryScreen().cursor().position.line.value == LineOffset(10).value);
@@ -5398,9 +5444,9 @@ TEST_CASE("Sixel.simple", "[screen]")
                 auto fragment = cell.imageFragment();
                 REQUIRE(fragment);
                 if ((column.value + line.value) % 2)
-                    REQUIRE(fragment->data() == white10x10);
+                    REQUIRE(fragment->data() == white10x10());
                 else
-                    REQUIRE(fragment->data() == black10x10);
+                    REQUIRE(fragment->data() == black10x10());
 
                 CHECK(fragment->offset().line == line);
                 CHECK(fragment->offset().column == column);
@@ -5422,7 +5468,7 @@ TEST_CASE("Sixel.AutoScroll-1", "[screen]")
     mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(10) });
     mock.terminal.setMode(DECMode::NoSixelScrolling, false);
 
-    mock.writeToScreen(chessBoard);
+    mock.writeToScreen(ChessBoard);
 
     CHECK(mock.terminal.primaryScreen().cursor().position.column == ColumnOffset(0));
     CHECK(mock.terminal.primaryScreen().cursor().position.line == LineOffset(8));
@@ -5439,9 +5485,9 @@ TEST_CASE("Sixel.AutoScroll-1", "[screen]")
                 auto fragment = cell.imageFragment();
                 REQUIRE(fragment);
                 if ((column.value + line.value) % 2)
-                    REQUIRE(fragment->data() == black10x10);
+                    REQUIRE(fragment->data() == black10x10());
                 else
-                    REQUIRE(fragment->data() == white10x10);
+                    REQUIRE(fragment->data() == white10x10());
                 CHECK(fragment->offset().line == line + 1);
                 CHECK(fragment->offset().column == column);
                 CHECK(!fragment->data().empty());
@@ -5462,7 +5508,7 @@ TEST_CASE("Sixel.status_line", "[screen]")
     mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(10) });
     mock.terminal.setStatusDisplay(StatusDisplayType::Indicator);
 
-    mock.writeToScreen(chessBoard);
+    mock.writeToScreen(ChessBoard);
 
     CHECK(mock.terminal.primaryScreen().cursor().position.column.value == ColumnOffset(0).value);
     CHECK(mock.terminal.primaryScreen().cursor().position.line.value == LineOffset(3).value);
@@ -5478,9 +5524,9 @@ TEST_CASE("Sixel.status_line", "[screen]")
                 auto fragment = cell.imageFragment();
                 REQUIRE(fragment);
                 if ((column.value + line.value) % 2)
-                    REQUIRE(fragment->data() == white10x10);
+                    REQUIRE(fragment->data() == white10x10());
                 else
-                    REQUIRE(fragment->data() == black10x10);
+                    REQUIRE(fragment->data() == black10x10());
 
                 CHECK(fragment->offset().line == line + 6);
                 CHECK(fragment->offset().column == column);
@@ -6838,7 +6884,7 @@ TEST_CASE("HT.does_not_overwrite_existing_content", "[screen]")
 // {{{ DA1 (Primary Device Attributes) Tests
 
 /// Parses a DA1 response string (e.g. "\033[?65;1;4;6;...c") and returns the set of extension numbers.
-std::set<int> parseDA1Extensions(std::string_view reply)
+static std::set<int> parseDA1Extensions(std::string_view reply)
 {
     std::set<int> extensions;
 
@@ -6883,7 +6929,7 @@ std::set<int> parseDA1Extensions(std::string_view reply)
 }
 
 /// Parses the conformance level from a DA1 response.
-int parseDA1Level(std::string_view reply)
+static int parseDA1Level(std::string_view reply)
 {
     auto const prefix = reply.find("\033[?");
     if (prefix == std::string_view::npos)
@@ -7082,7 +7128,7 @@ TEST_CASE("DECSCL: DECRQSS reports current level", "[screen]")
     mock.terminal.flushInput();
     auto const reply = mock.replyData();
     // Should contain "64;1" for level 64 with 7-bit C1
-    CHECK(reply.find("64;1\"p") != std::string::npos);
+    CHECK(reply.contains("64;1\"p"));
 }
 
 TEST_CASE("foldC1ControlsToEightBit", "[screen]")
@@ -7105,7 +7151,7 @@ TEST_CASE("foldC1ControlsToEightBit", "[screen]")
     // all pass through untouched.
     CHECK(foldC1ControlsToEightBit("\033(B") == "\033(B");
     CHECK(foldC1ControlsToEightBit("ab\033") == "ab\033");
-    CHECK(foldC1ControlsToEightBit("") == "");
+    CHECK(foldC1ControlsToEightBit("").empty());
     CHECK(foldC1ControlsToEightBit("no controls") == "no controls");
 }
 
@@ -7354,7 +7400,7 @@ TEST_CASE("OSC 110/111 reset dynamic colors to the default palette", "[screen]")
         mock.writeToScreen("\033]10;?\033\\"); // query the default foreground
         mock.terminal.flushInput();
         auto const original = mock.replyData();
-        REQUIRE(original.find("]10;rgb:") != std::string::npos);
+        REQUIRE(original.contains("]10;rgb:"));
 
         mock.resetReplyData();
         mock.writeToScreen("\033]10;#aaaabbbbcccc\033\\"); // override it
@@ -7374,7 +7420,7 @@ TEST_CASE("OSC 110/111 reset dynamic colors to the default palette", "[screen]")
         mock.writeToScreen("\033]11;?\033\\");
         mock.terminal.flushInput();
         auto const original = mock.replyData();
-        REQUIRE(original.find("]11;rgb:") != std::string::npos);
+        REQUIRE(original.contains("]11;rgb:"));
 
         mock.resetReplyData();
         mock.writeToScreen("\033]11;#112233445566\033\\");
@@ -7490,9 +7536,9 @@ TEST_CASE("DECINVM: nested macro invocation", "[screen]")
     mock.terminal.flushInput();
     // Macro 0 body outputs "A" then "C" (deferred macro 1 runs after), then macro 1 outputs "B"
     auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
-    CHECK(text.find('A') != std::string::npos);
-    CHECK(text.find('B') != std::string::npos);
-    CHECK(text.find('C') != std::string::npos);
+    CHECK(text.contains('A'));
+    CHECK(text.contains('B'));
+    CHECK(text.contains('C'));
 }
 
 TEST_CASE("DECINVM: recursive macro guard", "[screen]")
@@ -7675,7 +7721,7 @@ TEST_CASE("NRCS: British charset substitution", "[screen]")
     mock.terminal.flushInput();
     auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
     // £ is U+00A3 — the UTF-8 encoding is 0xC2 0xA3
-    CHECK(text.find("\xC2\xA3") != std::string::npos);
+    CHECK(text.contains("\xC2\xA3"));
 }
 
 TEST_CASE("NRCS: German charset substitution", "[screen]")
@@ -7687,7 +7733,7 @@ TEST_CASE("NRCS: German charset substitution", "[screen]")
     mock.writeToScreen("[");
     mock.terminal.flushInput();
     auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
-    CHECK(text.find("\xC3\x84") != std::string::npos); // Ä in UTF-8
+    CHECK(text.contains("\xC3\x84")); // Ä in UTF-8
 }
 
 TEST_CASE("NRCS: French charset substitution", "[screen]")
@@ -7699,7 +7745,7 @@ TEST_CASE("NRCS: French charset substitution", "[screen]")
     mock.writeToScreen("#");
     mock.terminal.flushInput();
     auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
-    CHECK(text.find("\xC2\xA3") != std::string::npos); // £ in UTF-8
+    CHECK(text.contains("\xC2\xA3")); // £ in UTF-8
 }
 
 TEST_CASE("NRCS: switch back to USASCII", "[screen]")
@@ -7732,7 +7778,7 @@ TEST_CASE("NRCS: G1 charset via locking shift", "[screen]")
     mock.writeToScreen("#");
     mock.terminal.flushInput();
     auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
-    CHECK(text.find("\xC2\xA3") != std::string::npos);
+    CHECK(text.contains("\xC2\xA3"));
 }
 
 TEST_CASE("NRCS: DA1 includes ext 9", "[screen]")
@@ -7770,7 +7816,7 @@ TEST_CASE("NRCS: single-byte SCS fallback designates British to G2", "[screen]")
     mock.writeToScreen("\033N#");
     mock.terminal.flushInput();
     auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
-    CHECK(text.find("\xC2\xA3") != std::string::npos); // £ in UTF-8
+    CHECK(text.contains("\xC2\xA3")); // £ in UTF-8
 }
 
 // }}} NRCS (National Replacement Character Sets) Tests
@@ -7787,7 +7833,7 @@ TEST_CASE("Technical charset: designate and use", "[screen]")
     mock.terminal.flushInput();
     auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
     // Α (U+0391) in UTF-8 is 0xCE 0x91
-    CHECK(text.find("\xCE\x91") != std::string::npos);
+    CHECK(text.contains("\xCE\x91"));
 }
 
 TEST_CASE("Technical charset: pi mapping", "[screen]")
@@ -7799,7 +7845,7 @@ TEST_CASE("Technical charset: pi mapping", "[screen]")
     mock.terminal.flushInput();
     auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
     // π (U+03C0) in UTF-8 is 0xCF 0x80
-    CHECK(text.find("\xCF\x80") != std::string::npos);
+    CHECK(text.contains("\xCF\x80"));
 }
 
 TEST_CASE("Technical charset: switch back to USASCII", "[screen]")
@@ -7901,7 +7947,7 @@ TEST_CASE("DECRQLP: request locator position", "[screen]")
     mock.terminal.flushInput();
     auto const reply = mock.replyData();
     // Should contain DECLRP format: CSI 0 ; ... & w
-    CHECK(reply.find("&w") != std::string::npos);
+    CHECK(reply.contains("&w"));
 }
 
 TEST_CASE("DECELR: soft reset disables locator", "[screen]")

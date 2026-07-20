@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtrasterizer/BoxDrawingRenderer.h>
+
 #include <vtrasterizer/Pixmap.h>
 #include <vtrasterizer/utils.h>
 
+#include <crispy/environment.h>
 #include <crispy/logstore.h>
 
 #include <array>
+#include <charconv>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <numbers>
 #include <ranges>
@@ -14,19 +18,14 @@
 using namespace std::string_view_literals;
 
 using std::clamp;
-using std::get;
-using std::max;
 using std::min;
 using std::nullopt;
 using std::optional;
 using std::pair;
-using std::sort;
 using std::string_view;
-using std::tuple;
 
 using crispy::point;
 
-namespace Ranges = std::ranges;
 namespace Ranges = std::ranges;
 namespace Views = std::views;
 
@@ -35,7 +34,7 @@ namespace vtrasterizer
 
 namespace
 {
-    auto const inline boxDrawingLog = logstore::category("renderer.boxdrawing",
+    auto inline const boxDrawingLog = logstore::category("renderer.boxdrawing",
                                                          "Logs box drawing debugging.",
                                                          logstore::category::state::Disabled,
                                                          logstore::category::visibility::Hidden);
@@ -66,7 +65,7 @@ namespace detail
             Heavy
         };
 
-        enum Line : uint8_t
+        enum class Line : uint8_t
         {
             NoLine,
             Light,  // solid light line
@@ -79,6 +78,10 @@ namespace detail
             Heavy3, // 3-dashed heavy line
             Heavy4, // 4-dashed heavy line
         };
+
+        // The box-drawing definition tables below read far better without the `Line::` prefix on
+        // every one of their several hundred entries.
+        using enum Line;
 
         [[maybe_unused]] string_view to_stringview(Line lm)
         {
@@ -98,13 +101,16 @@ namespace detail
             return "?"sv;
         }
 
-        enum Diagonal : uint8_t
+        enum class Diagonal : uint8_t
         {
             NoDiagonal = 0x00,
             Forward = 0x01,
             Backward = 0x02,
             Crossing = 0x03
         };
+
+        // As for Line: keeps the definition tables readable.
+        using enum Diagonal;
 
         void drawArcElliptic(atlas::Buffer& buffer, ImageSize imageSize, unsigned thickness, Arc arc)
         {
@@ -506,7 +512,10 @@ namespace detail
         };
         static_assert(BoxDrawingDefinitions.size() == 0x80);
 
-        auto getBranchBoxes(const Line mergeCommitLine = Line::Double, const Line branchLine = Line::Light)
+        // noexcept: builds an array of aggregates, nothing here can throw. Saying so lets the
+        // static below be recognised as safe to initialise before main().
+        constexpr auto getBranchBoxes(Line const mergeCommitLine = Line::Double,
+                                      Line const branchLine = Line::Light) noexcept
         {
             return std::array {
                 /*U+F5D0  */ Box {}.horizontal(branchLine),
@@ -573,7 +582,9 @@ namespace detail
                 /*U+F60D  */ Box {}.circle(Line::Light).horizontal(branchLine).vertical(branchLine),
             };
         }
-        auto branchDrawingDefinitions = getBranchBoxes();
+        // constinit: guarantees constant initialization, so no dynamic (and possibly throwing)
+        // initializer runs at static-init time. Still mutable -- setGitStyles() reassigns it.
+        constinit auto branchDrawingDefinitions = getBranchBoxes();
 
         constexpr bool isGitBranchDrawing(char32_t codepoint)
         {
@@ -651,7 +662,7 @@ namespace detail
             auto const s = *size.width / N;
             auto const f = linearEq({ .x = 0, .y = 0 }, { .x = 10, .y = 10 });
             return [s, f](int x, int y) {
-                return ((y) / s) % 2 && ((x) / s) % 2 ? 255 : 0;
+                return (y / s) % 2 && (x / s) % 2 ? 255 : 0;
             };
         }
 
@@ -661,7 +672,7 @@ namespace detail
             auto const s = *size.width / N;
             auto const f = linearEq({ .x = 0, .y = 0 }, { .x = 10, .y = 10 });
             return [s, f](int x, int y) {
-                return ((y) / s) % 2 || ((x) / s) % 2 ? 255 : 0;
+                return (y / s) % 2 || (x / s) % 2 ? 255 : 0;
             };
         }
 
@@ -916,13 +927,13 @@ namespace detail
         }
 
         // 1 <= n <= r*n
-        constexpr inline RatioBlock horiz_nth(double r, int n) noexcept
+        constexpr RatioBlock horiz_nth(double r, int n) noexcept
         {
             return RatioBlock { .from = { .x = 0, .y = r * double(n - 1) },
                                 .to = { .x = 1, .y = r * double(n) } };
         }
 
-        constexpr inline RatioBlock vert_nth(double r, int n) noexcept
+        constexpr RatioBlock vert_nth(double r, int n) noexcept
         {
             return RatioBlock { .from = { .x = r * double(n - 1), .y = 0 },
                                 .to = { .x = r * double(n), .y = 1 } };
@@ -976,9 +987,9 @@ namespace detail
             // naturally matches the stem width (2*halfLt), giving a consistent stroke.
             for (auto const i: Views::iota(0, numSteps + 1))
             {
-                auto const t = tStart + (tEnd - tStart) * static_cast<double>(i) / numSteps;
-                auto const px = static_cast<int>(std::round(cx + rx * std::cos(t)));
-                auto const py = static_cast<int>(std::round(cy + ry * std::sin(t)));
+                auto const t = tStart + ((tEnd - tStart) * static_cast<double>(i) / numSteps);
+                auto const px = static_cast<int>(std::round(cx + (rx * std::cos(t))));
+                auto const py = static_cast<int>(std::round(cy + (ry * std::sin(t))));
 
                 for (auto const dy: Views::iota(-halfTh, halfTh + 1))
                     for (auto const dx: Views::iota(-halfTh, halfTh + 1))
@@ -1417,25 +1428,25 @@ namespace detail
             auto const barThickness = static_cast<double>(halfLt) / h;
 
             // 2 * static_cast<double>(halfLt) / h;
-            auto const verticalGap = static_cast<double>(baseline) / h + 4 * barThickness;
+            auto const verticalGap = (static_cast<double>(baseline) / h) + (4 * barThickness);
 
             if (isTop)
             {
                 // ⎲: Horizontal bar at screen-top, diagonal going down-right toward the vertex.
                 pixmap.rect(Ratio { .x = 0.0, .y = verticalGap },
-                            Ratio { .x = 1.0, .y = verticalGap + barThickness * 2 });
+                            Ratio { .x = 1.0, .y = verticalGap + (barThickness * 2) });
                 pixmap.getlineThickness(lt * 4);
-                pixmap.line(Ratio { .x = 0.0, .y = verticalGap + barThickness * 2 },
-                            Ratio { .x = 0.5, .y = 1.0 - verticalGap + barThickness * 2 });
+                pixmap.line(Ratio { .x = 0.0, .y = verticalGap + (barThickness * 2) },
+                            Ratio { .x = 0.5, .y = 1.0 - verticalGap + (barThickness * 2) });
             }
             else
             {
                 // ⎳: Diagonal going from vertex at screen-top down-left to the bar at screen-bottom.
-                pixmap.rect(Ratio { .x = 0.0, .y = 1.0 - verticalGap - barThickness * 2 },
+                pixmap.rect(Ratio { .x = 0.0, .y = 1.0 - verticalGap - (barThickness * 2) },
                             Ratio { .x = 1.0, .y = 1.0 - verticalGap });
                 pixmap.getlineThickness(lt * 4);
                 pixmap.line(Ratio { .x = 0.5, .y = 0.0 },
-                            Ratio { .x = 0.0, .y = 1.0 - verticalGap - barThickness * 2 });
+                            Ratio { .x = 0.0, .y = 1.0 - verticalGap - (barThickness * 2) });
             }
 
             return pixmap.take();
@@ -1444,7 +1455,7 @@ namespace detail
         // }}}
         // {{{ block sextant construction
         template <typename Container, typename T>
-        constexpr inline void blockSextant(Container& image, ImageSize size, T position)
+        constexpr void blockSextant(Container& image, ImageSize size, T position)
         {
             auto const x0 = (position - 1) % 2;
             auto const y0 = [position]() {
@@ -1489,7 +1500,7 @@ namespace detail
         }
 
         template <typename Container, typename A, typename... B>
-        constexpr inline void blockSextant(Container& image, ImageSize size, A first, B... others)
+        constexpr void blockSextant(Container& image, ImageSize size, A first, B... others)
         {
             blockSextant(image, size, first);
             blockSextant(image, size, others...);
@@ -1541,10 +1552,12 @@ namespace detail
                     case AASquare: [[fallthrough]];
                     case AASquareEmpty:
                         return buildSquare(value, size, th, ss, CurrentStyle == AASquareEmpty);
-                    case Font: (void) SoftRequire(false); return atlas::Buffer(*size.width * *size.height);
+                    case Font:
+                        (void) SoftRequire(false);
+                        return atlas::Buffer(static_cast<std::size_t>(*size.width * *size.height));
                 }
                 (void) SoftRequire(false);
-                return atlas::Buffer(*size.width * *size.height);
+                return atlas::Buffer(static_cast<std::size_t>(*size.width * *size.height));
             }
             static auto buildSolid(uint8_t value, ImageSize size) -> atlas::Buffer
             {
@@ -1683,7 +1696,7 @@ namespace detail
                         {
                             auto dx = x - static_cast<double>(xi);
                             auto dy = y - static_cast<double>(yi);
-                            if (dx * dx + dy * dy <= radius * radius)
+                            if ((dx * dx) + (dy * dy) <= radius * radius)
                                 image[(yi * width) + xi] = value;
                         }
                 };
@@ -1859,13 +1872,28 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint,
     {
         auto const supersamplingFactor = []() {
             auto constexpr EnvName = "SSA_FACTOR";
-            auto* const envValue = getenv(EnvName);
+            auto constexpr DefaultFactor = 4;
+            auto const envValue = crispy::environment::get(EnvName);
             if (!envValue)
-                return 4;
-            auto const val = atoi(envValue);
-            if (!(val >= 1 && val <= 8))
+                return DefaultFactor;
+
+            // atoi()'s leniency is preserved on purpose: this is a developer knob, and "+4", " 4" and
+            // "4x" all used to yield 4. std::from_chars is stricter on every one of those counts -- it
+            // rejects a leading '+', skips no leading whitespace, and reports where it stopped -- so
+            // the prefix is stripped here and whatever trails the digits is ignored.
+            auto value = std::string_view { *envValue };
+            while (!value.empty() && (value.front() == ' ' || value.front() == '\t'))
+                value.remove_prefix(1);
+            if (!value.empty() && value.front() == '+')
+                value.remove_prefix(1);
+
+            auto factor = 0;
+            auto const* const first = value.data();
+            auto const* const last = first + value.size();
+            auto const error = std::from_chars(first, last, factor).ec;
+            if (error != std::errc {} || factor < 1 || factor > 8)
                 return 1;
-            return val;
+            return factor;
         }();
 
         auto tmp = buildBoxElements(codepoint, //
@@ -1911,7 +1939,7 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint,
     // Perform Copy (2D Slice)
     for (size_t y = 0; y < targetHeight; ++y)
     {
-        auto const srcOffset = (srcYBase + y) * rowSize + srcXBase;
+        auto const srcOffset = ((srcYBase + y) * rowSize) + srcXBase;
         auto const dstOffset = y * targetWidth;
         std::copy_n(pixels.data() + srcOffset, targetWidth, sliced.data() + dstOffset);
     }
@@ -2491,7 +2519,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
     return nullopt;
 }
 
-auto boxDashedHorizontal(auto& dashed, ImageSize size, int lineThickness)
+static auto boxDashedHorizontal(auto& dashed, ImageSize size, int lineThickness)
 {
     auto const height = size.height;
     auto const width = size.width;
@@ -2518,7 +2546,7 @@ auto boxDashedHorizontal(auto& dashed, ImageSize size, int lineThickness)
     return image;
 }
 
-auto boxDashedVertical(auto& dashed, ImageSize size, int lineThickness)
+static auto boxDashedVertical(auto& dashed, ImageSize size, int lineThickness)
 {
     auto const height = size.height;
     auto const width = size.width;
@@ -2546,8 +2574,11 @@ auto boxDashedVertical(auto& dashed, ImageSize size, int lineThickness)
 }
 
 // NOLINTNEXTLINE(*complexity*)
-auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersampling, bool useEllipticArcs)
-    -> std::optional<atlas::Buffer>
+static auto buildBox(detail::Box box,
+                     ImageSize size,
+                     int lineThickness,
+                     size_t supersampling,
+                     bool useEllipticArcs) -> std::optional<atlas::Buffer>
 {
     // catch all non-solid single-lines before the quad-render below
     if (auto const dashed = box.get_dashed_horizontal())
@@ -2613,15 +2644,15 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
             using enum detail::Line;
             case NoLine: return Center(xOffset * ss, xOffset * ss, yOffset * ss, yOffset * ss);
             case Light:
-                return Center { .x0 = (xOffset - lightTh / 2) * ss,
-                                .x1 = (xOffset - lightTh / 2 + lightTh) * ss,
-                                .y0 = (yOffset - lightTh / 2) * ss,
-                                .y1 = (yOffset - lightTh / 2 + lightTh) * ss };
+                return Center { .x0 = (xOffset - (lightTh / 2)) * ss,
+                                .x1 = (xOffset - (lightTh / 2) + lightTh) * ss,
+                                .y0 = (yOffset - (lightTh / 2)) * ss,
+                                .y1 = (yOffset - (lightTh / 2) + lightTh) * ss };
             case Double:
-                return Center { .x0 = (xOffset - lightTh / 2 - lightTh) * ss,
-                                .x1 = (xOffset - lightTh / 2 + 2 * lightTh) * ss,
-                                .y0 = (yOffset - lightTh / 2 - lightTh) * ss,
-                                .y1 = (yOffset - lightTh / 2 + 2 * lightTh) * ss };
+                return Center { .x0 = (xOffset - (lightTh / 2) - lightTh) * ss,
+                                .x1 = (xOffset - (lightTh / 2) + (2 * lightTh)) * ss,
+                                .y0 = (yOffset - (lightTh / 2) - lightTh) * ss,
+                                .y1 = (yOffset - (lightTh / 2) + (2 * lightTh)) * ss };
             case Heavy:
                 return Center { .x0 = (xOffset - lightTh) * ss,
                                 .x1 = (xOffset + lightTh) * ss,
@@ -2638,15 +2669,15 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
     yOffset *= static_cast<int>(ss);
     xOffset *= static_cast<int>(ss);
     lightTh *= static_cast<int>(ss);
-    auto image = atlas::Buffer(width * height, 0x00);
+    auto image = atlas::Buffer(static_cast<std::size_t>(width * height), 0x00);
 
     auto const getThickness = [=](Line value) -> size_t {
         switch (value)
         {
             case Line::NoLine: return 0;
             case Line::Light: return lightTh;
-            case Line::Double: return lightTh * 3;
-            case Line::Heavy: return lightTh * 2;
+            case Line::Double: return static_cast<size_t>(lightTh) * 3;
+            case Line::Heavy: return static_cast<size_t>(lightTh) * 2;
             default: assert(false); return 0; // dashed lines are handled explicitly
         }
     };
@@ -2658,8 +2689,8 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
     };
 
     auto drawArc = [=, &image](Arc arc, size_t th, uint8_t value) {
-        auto const x0 = (xOffset / ss - th / ss / 2) * ss;
-        auto const y0 = (yOffset / ss - th / ss / 2) * ss;
+        auto const x0 = ((xOffset / ss) - (th / ss / 2)) * ss;
+        auto const y0 = ((yOffset / ss) - (th / ss / 2)) * ss;
 
         auto const ro = static_cast<double>(std::min({ width - x0, height - y0, x0 + th, y0 + th }));
         auto const ri = ro - static_cast<double>(th);
@@ -2667,30 +2698,30 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
         auto [dcx, dcy] = [=] {
             switch (arc)
             {
-                case (Arc::UR): return std::make_pair(double(x0) + ro, double(y0) + ro);
-                case (Arc::UL): return std::make_pair(double(x0) - ri, double(y0) + ro);
-                case (Arc::BL): return std::make_pair(double(x0) - ri, double(y0) - ri);
-                case (Arc::BR): return std::make_pair(double(x0) + ro, double(y0) - ri);
+                case Arc::UR: return std::make_pair(double(x0) + ro, double(y0) + ro);
+                case Arc::UL: return std::make_pair(double(x0) - ri, double(y0) + ro);
+                case Arc::BL: return std::make_pair(double(x0) - ri, double(y0) - ri);
+                case Arc::BR: return std::make_pair(double(x0) + ro, double(y0) - ri);
                 default: assert(false); return std::make_pair(0., 0.);
             }
         }();
         auto const xQuadrant = [=](auto x) -> bool {
             switch (arc)
             {
-                case (Arc::UR): [[fallthrough]];
-                case (Arc::BR): return (x <= 0);
-                case (Arc::UL): [[fallthrough]];
-                case (Arc::BL): return (x >= 0);
+                case Arc::UR: [[fallthrough]];
+                case Arc::BR: return (x <= 0);
+                case Arc::UL: [[fallthrough]];
+                case Arc::BL: return (x >= 0);
                 default: return false;
             }
         };
         auto const yQuadrant = [=](auto y) -> bool {
             switch (arc)
             {
-                case (Arc::UR): [[fallthrough]];
-                case (Arc::UL): return (y <= 0);
-                case (Arc::BL): [[fallthrough]];
-                case (Arc::BR): return (y >= 0);
+                case Arc::UR: [[fallthrough]];
+                case Arc::UL: return (y <= 0);
+                case Arc::BL: [[fallthrough]];
+                case Arc::BR: return (y >= 0);
                 default: return false;
             }
         };
@@ -2844,7 +2875,7 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
                 {
                     auto y = static_cast<double>(yi) - static_cast<double>(yOffset);
                     auto x = static_cast<double>(xi) - static_cast<double>(xOffset);
-                    if ((x * x + y * y) <= radius * radius)
+                    if (((x * x) + (y * y)) <= radius * radius)
                         image[(yi * width) + xi] = value;
                 }
         };
@@ -2856,7 +2887,7 @@ auto buildBox(detail::Box box, ImageSize size, int lineThickness, size_t supersa
                 constexpr auto SpaceThicknessFactor = 1.35; // empirical value
                 constexpr auto MinThicknessFactor = 3.;     // 3 = 2x center + space + outer;
                 auto space = SpaceThicknessFactor * double(getThickness(Line::Light));
-                if (radius < MinThicknessFactor * double(getThickness(Line::Light)) + space)
+                if (radius < (MinThicknessFactor * double(getThickness(Line::Light))) + space)
                 {
                     auto solidTh = radius - space;
                     if (solidTh <= 0)

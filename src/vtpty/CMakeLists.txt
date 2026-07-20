@@ -71,7 +71,6 @@ else()
 endif()
 
 add_library(vtpty STATIC ${vtpty_SOURCES} ${vtpty_HEADERS})
-set_target_properties(vtpty PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
 if(CONTOUR_WITH_UTEMPTER)
     target_compile_definitions(vtpty PRIVATE UTEMPTER=1)
 endif()

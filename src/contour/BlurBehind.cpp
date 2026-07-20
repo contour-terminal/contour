@@ -7,7 +7,7 @@
 #include <QtCore/QDebug>
 #include <QtGui/QWindow>
 
-#if defined(_WIN32)
+#ifdef _WIN32
     #include <Windows.h>
 #endif
 
@@ -16,12 +16,11 @@
     #include <xcb/xproto.h>
 #endif
 
-#if defined(CONTOUR_FRONTEND_XCB)
+#ifdef CONTOUR_FRONTEND_XCB
     #include <QtGui/QGuiApplication>
 #endif
 
 #if defined(CONTOUR_WAYLAND) && QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-    #include <QtGui/QGuiApplication>
     #include <QtWaylandClient/QWaylandClientExtension>
     #include <QtWaylandClient/private/qwaylandwindow_p.h>
 
@@ -39,7 +38,7 @@ using std::nullopt;
 using std::optional;
 using std::string;
 
-#if defined(CONTOUR_FRONTEND_XCB)
+#ifdef CONTOUR_FRONTEND_XCB
 namespace
 {
     struct XcbPropertyInfo
@@ -71,7 +70,7 @@ namespace
 
         auto const atomNameCookie =
             xcb_intern_atom(xcbConnection, 0, static_cast<uint16_t>(name.size()), name.c_str());
-        xcb_intern_atom_reply_t* reply = xcb_intern_atom_reply(xcbConnection, atomNameCookie, nullptr);
+        xcb_intern_atom_reply_t const* reply = xcb_intern_atom_reply(xcbConnection, atomNameCookie, nullptr);
         if (!reply)
             return nullopt;
         auto const atomName = reply->atom;
@@ -161,7 +160,7 @@ void setEnabled(QWindow* window, bool enable, QRegion const& region)
                     {
                         if (enable)
                         {
-                            if (activeBlurs.find(window) == activeBlurs.end())
+                            if (!activeBlurs.contains(window))
                             {
                                 auto* rawBlur = blurManager->create(surface);
                                 activeBlurs[window] = std::make_unique<QtWayland::org_kde_kwin_blur>(rawBlur);
@@ -232,7 +231,7 @@ void setEnabled(QWindow* window, bool enable, QRegion const& region)
         if (hDwm)
         {
             typedef HRESULT(WINAPI * P_DwmSetWindowAttribute)(HWND, DWORD, LPCVOID, DWORD);
-            const auto pDwmSetWindowAttribute =
+            auto const pDwmSetWindowAttribute =
                 (P_DwmSetWindowAttribute) GetProcAddress(hDwm, "DwmSetWindowAttribute");
 
             if (pDwmSetWindowAttribute)
@@ -290,7 +289,7 @@ void setEnabled(QWindow* window, bool enable, QRegion const& region)
                 ULONG ulDataSize;
             };
             typedef BOOL(WINAPI * pSetWindowCompositionAttribute)(HWND, WINCOMPATTRDATA const*);
-            const pSetWindowCompositionAttribute SetWindowCompositionAttribute =
+            pSetWindowCompositionAttribute const SetWindowCompositionAttribute =
                 (pSetWindowCompositionAttribute) GetProcAddress(hModule, "SetWindowCompositionAttribute");
             if (SetWindowCompositionAttribute)
             {

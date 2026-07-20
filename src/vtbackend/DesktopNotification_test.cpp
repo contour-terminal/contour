@@ -187,9 +187,9 @@ TEST_CASE("DesktopNotification.UnknownKeysIgnored", "[DesktopNotification]")
 TEST_CASE("DesktopNotification.QueryResponse", "[DesktopNotification]")
 {
     auto const response = buildOSC99QueryResponse("test-id");
-    CHECK(response.find("99;i=test-id:p=?;") != std::string::npos);
-    CHECK(response.find("a=focus,report") != std::string::npos);
-    CHECK(response.find("u=0,1,2") != std::string::npos);
-    CHECK(response.find("c=1") != std::string::npos);
-    CHECK(response.find("w=1") != std::string::npos);
+    CHECK(response.contains("99;i=test-id:p=?;"));
+    CHECK(response.contains("a=focus,report"));
+    CHECK(response.contains("u=0,1,2"));
+    CHECK(response.contains("c=1"));
+    CHECK(response.contains("w=1"));
 }

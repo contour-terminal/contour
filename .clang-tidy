@@ -1,0 +1,226 @@
+---
+# Base clang-tidy configuration for all first-party code (src/ and examples/).
+#
+# This lives at the repository root rather than in src/ so that every first-party
+# tree resolves to it by clang-tidy's normal parent-directory search, and so that
+# tools invoked from the root (run-clang-tidy, IDEs) find a config at all instead
+# of failing with "No checks enabled". Vendored third-party code under _deps/ is
+# kept out of linting by CMake, which clears CMAKE_CXX_CLANG_TIDY across the
+# dependency fetch -- see the top-level CMakeLists.txt.
+#
+# Module-local overrides live in src/<module>/.clang-tidy and use
+# `InheritParentConfig: true` so they extend rather than replace this file.
+#
+# A bare `-some-check` with no rationale is indistinguishable from an accident,
+# so record the reasoning here when disabling something. Note that YAML folded
+# scalars cannot carry `#` comments, hence this block rather than inline notes.
+#
+# Deliberate, standing policy decisions:
+#
+#   * Unchecked container access. The whole `pro-bounds-*` family is off: this is
+#     a terminal emulator whose hot paths index grid buffers by computed offset,
+#     and bounds-checked accessors are neither free nor more correct here.
+#     `pro-bounds-avoid-unchecked-container-access` (new in LLVM 20) is simply the
+#     fourth member of that family and flagged 2470 sites.
+#
+#   * C-style casts. `cppcoreguidelines-pro-type-cstyle-cast` has long been off;
+#     `modernize-avoid-c-style-cast` (new in LLVM 22) restates the same rule under
+#     a different name and flagged 426 sites. Kept consistent with the former.
+#
+#   * Brace style. `readability-braces-around-statements` has long been off;
+#     `readability-inconsistent-ifelse-braces` (new in LLVM 21) polices the same
+#     area and flagged 179 sites. Brace style is settled by .clang-format.
+#
+#   * `modernize-use-designated-initializers` -- deliberate, see commit 8cd3d714.
+#   * `portability-avoid-pragma-once` (394) -- `#pragma once` is the house include guard.
+#   * `misc-include-cleaner` (4380) -- include hygiene is pursued separately, via
+#     scripts/check-includes.sh and the self-contained-includes workflow.
+#   * `misc-non-private-member-variables-in-classes` (1038) -- exact duplicate of
+#     the cppcoreguidelines- check of the same name, which is already disabled.
+#   * `bugprone-std-namespace-modification` (29) -- every report is a std::formatter
+#     specialization for a program-defined type, which [namespace.std] explicitly
+#     permits. The check does not distinguish that from adding new declarations.
+#   * `misc-multiple-inheritance` (14) -- unavoidable and idiomatic here. Qt requires
+#     QObject plus an interface for TerminalSession, TerminalSessionManager,
+#     ContourGuiApp and TerminalAccessible, and crispy::overloaded is the standard
+#     `struct overloaded: Ts...` visitor idiom the check cannot recognise.
+#   * `cppcoreguidelines-use-enum-class` (3) -- vtbackend::Modifier, LockKey and
+#     MatchModes::Flag are bitmask enums whose values are protocol-defined bit
+#     positions, combined with bitwise operators throughout. Scoping them would
+#     require a cast at every use for no gain in type safety.
+#   * `misc-header-include-cycle` (2) -- Parser.h includes Parser-impl.h at its end,
+#     the usual template-implementation split rather than a real cycle. The
+#     Selector.h/ViInputHandler.h pair is a genuine mutual dependency and worth
+#     untangling separately; it is not a lint fix.
+#   * `clang-analyzer-optin.performance.Padding` (1) -- reordering vtbackend::Settings'
+#     44 fields by size would save 32 bytes on a single long-lived object while
+#     destroying the grouping that makes it readable.
+#   * `bugprone-command-processor` (2) -- the two popen() calls are deliberate: shell
+#     integration and process lookup both need a shell.
+#   * `readability-function-size` (1) -- Screen::apply is the VT sequence dispatch
+#     switch. Its size is the size of the protocol.
+#   * `clang-analyzer-unix.BlockInCriticalSection` (1) -- it flags the ::read() that
+#     UnixPty::read() performs under _mutex. The master fd is opened O_NONBLOCK
+#     (UnixPty.cpp:228) and the read only runs once the selector has reported it
+#     readable, so it cannot block; the checker classifies by function name rather
+#     than by the descriptor's flags. Holding the lock across it is deliberate --
+#     see 52d85da9, which added it to make read() safe against a concurrent close().
+#   * `readability-qualified-auto` -- unsound for portable code. It rewrites `auto` to
+#     `auto const* const` whenever the initializer's type is a pointer, and libstdc++
+#     implements std::array's iterator AS a raw pointer -- so `std::ranges::find` over
+#     a std::array satisfies it on Linux and fails to compile on MSVC, whose STL uses
+#     a class type. Color.cpp already carried a comment warning about exactly this;
+#     the check reverted that fix and broke the Windows build.
+#   * `bugprone-chained-comparison` -- unavoidable with Catch2. CHECK(a == b) expands to
+#     `Catch::Decomposer() <= a == b`, which is a chained comparison by construction,
+#     so the check fires on ordinary assertions. Whether it does depends on how Catch2
+#     is included, which is why a local sweep can measure zero and CI still fail.
+#   * `misc-no-recursion` (41) -- recursion is a legitimate tool in a parser and a
+#     renderer; the check flags the technique rather than any defect.
+#   * `misc-use-anonymous-namespace` (79) -- directly contradicts
+#     `misc-use-internal-linkage`, which is kept: that check gives functions and
+#     variables internal linkage with `static` (its FixMode default) and reserves
+#     anonymous namespaces for types, which cannot be `static`. Enabling both means
+#     every symbol is flagged whichever form it takes.
+#   * `readability-convert-member-functions-to-static` (100) -- its fix is malformed at
+#     scale here: it emits `static` before `[[nodiscard]]`, where the attribute then
+#     appertains to the return type rather than the function. It also makes Qt
+#     Q_INVOKABLE methods static and strips their const, changing what QML binds to.
+#   * `readability-redundant-member-init` (272) -- its fix is unsound here. Several
+#     aggregates are built with designated initializers that omit fields, so a
+#     `T member {};` default member initializer is load-bearing: dropping the `{}`
+#     leaves the field uninitialized and trips -Wmissing-designated-field-initializers.
+#
+# The three LLVM 20/21/22 arrivals above were auto-enabled by the `cppcoreguidelines-*`,
+# `modernize-*` and `readability-*` globs during the toolchain bump, silently
+# contradicting policy this file already stated. Re-check this list when bumping LLVM.
+
+Checks: >-
+  -*,
+  bugprone-*,
+  -bugprone-branch-clone,
+  -bugprone-chained-comparison,
+  -bugprone-command-processor,
+  -bugprone-std-namespace-modification,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-exception-escape,
+  -bugprone-reserved-identifier,
+  -bugprone-suspicious-include,
+  -bugprone-unchecked-optional-access,
+  clang-analyzer-core.*,
+  clang-analyzer-cplusplus.*,
+  clang-analyzer-deadcode.*,
+  clang-analyzer-nullability.*,
+  clang-analyzer-optin.cplusplus.*,
+  -clang-analyzer-optin.cplusplus.UninitializedObject,
+  clang-analyzer-optin.performance.*,
+  -clang-analyzer-optin.performance.Padding,
+  clang-analyzer-optin.portability.*,
+  clang-analyzer-security.*,
+  clang-analyzer-unix.*,
+  -clang-analyzer-unix.BlockInCriticalSection,
+  clang-diagnostic-*,
+  concurrency-*,
+  cppcoreguidelines-*,
+  -cppcoreguidelines-avoid-c-arrays,
+  -cppcoreguidelines-avoid-const-or-ref-data-members,
+  -cppcoreguidelines-use-enum-class,
+  -cppcoreguidelines-avoid-do-while,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-avoid-non-const-global-variables,
+  -cppcoreguidelines-macro-usage,
+  -cppcoreguidelines-no-malloc,
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-type-const-cast,
+  -cppcoreguidelines-pro-type-cstyle-cast,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-pro-type-static-cast-downcast,
+  -cppcoreguidelines-pro-type-union-access,
+  -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-special-member-functions,
+  misc-*,
+  -misc-include-cleaner,
+  -misc-header-include-cycle,
+  -misc-multiple-inheritance,
+  -misc-no-recursion,
+  -misc-use-anonymous-namespace,
+  -misc-non-private-member-variables-in-classes,
+  modernize-*,
+  -modernize-avoid-bind,
+  -modernize-avoid-c-arrays,
+  -modernize-avoid-c-style-cast,
+  -modernize-use-bool-literals,
+  -modernize-use-designated-initializers,
+  -modernize-use-scoped-lock,
+  -modernize-use-trailing-return-type,
+  performance-*,
+  portability-*,
+  -portability-avoid-pragma-once,
+  -performance-no-int-to-ptr,
+  readability-*,
+  -readability-avoid-unconditional-preprocessor-if,
+  -readability-braces-around-statements,
+  -readability-convert-member-functions-to-static,
+  -readability-else-after-return,
+  -readability-function-size,
+  -readability-identifier-length,
+  -readability-implicit-bool-conversion,
+  -readability-inconsistent-ifelse-braces,
+  -readability-magic-numbers,
+  -readability-named-parameter,
+  -readability-qualified-auto,
+  -readability-redundant-access-specifiers,
+  -readability-redundant-member-init,
+  -readability-uppercase-literal-suffix,
+  -readability-use-anyofallof,
+
+# Every enabled check is a hard error. The codebase is clean under this list; see
+# AGENT.md's zero-warning policy. Fix the cause rather than adding a NOLINT.
+WarningsAsErrors: '*'
+
+UseColor: true
+HeaderFilterRegex: 'src/(contour|crispy|text_shaper|vtpty|vtparser|vtbackend|vtrasterizer|vtmux|vtconformance)/'
+# Qt's AUTOMOC/AUTOUIC output lands under out/<preset>/src/<module>/..._autogen/, whose
+# path matches HeaderFilterRegex; it is generated code and not ours to lint.
+ExcludeHeaderFilterRegex: 'wayland-.*-protocol\.h|.*_autogen/.*|.*\.moc$'
+FormatStyle: none
+
+CheckOptions:
+  cppcoreguidelines-explicit-virtual-functions.IgnoreDestructors: '1'
+  modernize-loop-convert.MaxCopySize: '16'
+  modernize-loop-convert.MinConfidence: reasonable
+  modernize-loop-convert.NamingStyle: CamelCase
+  modernize-pass-by-value.IncludeStyle: llvm
+  modernize-replace-auto-ptr.IncludeStyle: llvm
+  modernize-use-default-member-init.UseAssignment: '1'
+  modernize-use-nullptr.NullMacros: 'NULL'
+  # Pointer analysis proposes a const *pointee* where only the pointer itself could be
+  # const, which is a different guarantee and breaks callers that write through it.
+  misc-const-correctness.AnalyzePointers: 'false'
+  readability-function-cognitive-complexity.Threshold: '50'
+  readability-function-cognitive-complexity.IgnoreMacros: 'true'
+
+  # Identifier naming. Types are CamelCase, everything else camelBack, with a
+  # leading underscore on non-public data members. The snake_case modules
+  # (crispy, text_shaper) override the type categories in their own configs.
+  readability-identifier-naming.ClassCase: CamelCase
+  readability-identifier-naming.ClassConstantCase: CamelCase
+  readability-identifier-naming.ClassMemberCase: CamelCase
+  readability-identifier-naming.ClassMethodCase: camelBack
+  readability-identifier-naming.ConstantCase: camelBack
+  readability-identifier-naming.ConstantMemberCase: camelBack
+  readability-identifier-naming.ConstantMemberPrefix: '_'
+  readability-identifier-naming.ConstexprVariableCase: CamelCase
+  readability-identifier-naming.EnumCase: CamelCase
+  readability-identifier-naming.EnumConstantCase: CamelCase
+  readability-identifier-naming.ParameterCase: camelBack
+  readability-identifier-naming.PrivateMemberCase: camelBack
+  readability-identifier-naming.PrivateMemberPrefix: '_'
+  readability-identifier-naming.PublicMemberCase: camelBack
+  readability-identifier-naming.ScopedEnumConstantCase: CamelCase
+  readability-identifier-naming.VariableCase: camelBack

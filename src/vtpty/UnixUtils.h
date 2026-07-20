@@ -6,7 +6,7 @@
 #include <array>
 #include <cerrno>
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
     #include <util.h>
 #else
     #include <termios.h>
@@ -45,7 +45,7 @@ inline termios constructTerminalSettings(int fd) noexcept
     auto tio = getTerminalSettings(fd);
 
     // input flags
-#if defined(IUTF8)
+#ifdef IUTF8
     // Input is UTF-8; this allows character-erase to be properly applied in cooked mode.
     tio.c_iflag |= IUTF8;
 #endif

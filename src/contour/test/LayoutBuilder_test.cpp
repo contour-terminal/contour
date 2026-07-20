@@ -236,7 +236,7 @@ TEST_CASE("emitLayoutsYaml: round-trips a leaf + bare + split layout through the
 
     work.tabs = { t0, t1, t2 };
 
-    std::unordered_map<std::string, config::Layout> layouts { { "work", work } };
+    std::unordered_map<std::string, config::Layout> const layouts { { "work", work } };
     auto const yaml = emitLayoutsYaml(layouts);
 
     auto const cfg = loadConfigFromYaml(yaml);
@@ -290,7 +290,7 @@ TEST_CASE("emitLayoutsYaml: escapes embedded double-quotes in a command so it ro
 
     config::Layout work;
     work.tabs = { tab };
-    std::unordered_map<std::string, config::Layout> layouts { { "work", work } };
+    std::unordered_map<std::string, config::Layout> const layouts { { "work", work } };
     auto const yaml = emitLayoutsYaml(layouts);
 
     auto const cfg = loadConfigFromYaml(yaml);
@@ -323,7 +323,7 @@ TEST_CASE("emitLayoutsYaml: round-trips an asymmetric split ratio through save",
 
     config::Layout work;
     work.tabs = { tab };
-    std::unordered_map<std::string, config::Layout> layouts { { "work", work } };
+    std::unordered_map<std::string, config::Layout> const layouts { { "work", work } };
     auto const yaml = emitLayoutsYaml(layouts);
 
     auto const cfg = loadConfigFromYaml(yaml);
@@ -373,7 +373,8 @@ TEST_CASE("emitLayoutsYaml: a YAML-significant layout name is quoted and round-t
     config::Layout other;
     other.tabs = { otherTab };
 
-    std::unordered_map<std::string, config::Layout> layouts { { "foo: bar", work }, { "plain", other } };
+    std::unordered_map<std::string, config::Layout> const layouts { { "foo: bar", work },
+                                                                    { "plain", other } };
     auto const yaml = emitLayoutsYaml(layouts);
 
     auto const cfg = loadConfigFromYaml(yaml);
@@ -395,7 +396,7 @@ TEST_CASE("emitLayoutsYaml: a fully-default tab terminates its line", "[layout][
     second.root.command = std::string { "top" };
     work.tabs.push_back(second);
 
-    std::unordered_map<std::string, config::Layout> layouts { { "work", work } };
+    std::unordered_map<std::string, config::Layout> const layouts { { "work", work } };
     auto const yaml = emitLayoutsYaml(layouts);
 
     auto const cfg = loadConfigFromYaml(yaml);
@@ -467,7 +468,7 @@ TEST_CASE("emitLayoutsYaml: an engaged-but-empty command is not emitted", "[layo
     work.tabs = { tab };
 
     auto const yaml = emitLayoutsYaml({ { "work", work } });
-    CHECK(yaml.find("command:") == std::string::npos);
+    CHECK(!yaml.contains("command:"));
 
     auto const cfg = loadConfigFromYaml(yaml);
     auto const& parsed = cfg.layouts.value().at("work").tabs.at(0).root;

@@ -43,7 +43,7 @@ using buffer_object_release = std::function<void(buffer_object<T>*)>;
 template <BufferObjectElementType T>
 using buffer_object_ptr = std::shared_ptr<buffer_object<T>>;
 
-auto const inline bufferObjectLog = logstore::category("BufferObject",
+auto inline const bufferObjectLog = logstore::category("BufferObject",
                                                        "Logs buffer object pool activity.",
                                                        logstore::category::state::Disabled,
                                                        logstore::category::visibility::Hidden);
@@ -123,7 +123,7 @@ class buffer_object: public std::enable_shared_from_this<buffer_object<T>>
     void unlock() { _mutex.unlock(); }
 
   private:
-#if !defined(BUFFER_OBJECT_INLINE)
+#ifndef BUFFER_OBJECT_INLINE
     T* data_;
 #endif
     T* _hotEnd;
@@ -217,13 +217,13 @@ buffer_fragment(buffer_object_ptr<T>, std::basic_string_view<T>) -> buffer_fragm
 // {{{ buffer_object implementation
 template <BufferObjectElementType T>
 buffer_object<T>::buffer_object(size_t capacity) noexcept:
-#if !defined(BUFFER_OBJECT_INLINE)
+#ifndef BUFFER_OBJECT_INLINE
     data_ { new T[capacity] },
 #endif
     _hotEnd { data() },
     _end { data() + capacity }
 {
-#if defined(BUFFER_OBJECT_INLINE)
+#ifdef BUFFER_OBJECT_INLINE
     new (data()) T[capacity];
 #endif
     if (bufferObjectLog)
@@ -235,7 +235,7 @@ buffer_object<T>::~buffer_object()
 {
     if (bufferObjectLog)
         bufferObjectLog()("Destroying BufferObject: {}..{}.", (void*) data(), (void*) end());
-#if defined(BUFFER_OBJECT_INLINE)
+#ifdef BUFFER_OBJECT_INLINE
     std::destroy_n(data(), capacity());
 #else
     delete[] data_;
@@ -245,7 +245,7 @@ buffer_object<T>::~buffer_object()
 template <BufferObjectElementType T>
 buffer_object_ptr<T> buffer_object<T>::create(size_t capacity, buffer_object_release<T> release)
 {
-#if defined(BUFFER_OBJECT_INLINE)
+#ifdef BUFFER_OBJECT_INLINE
     auto const totalCapacity = nextPowerOfTwo(static_cast<uint32_t>(sizeof(buffer_object) + capacity));
     auto const nettoCapacity = totalCapacity - sizeof(buffer_object);
     auto ptr = (buffer_object*) malloc(totalCapacity);
@@ -273,7 +273,7 @@ void buffer_object<T>::reset() noexcept
 template <BufferObjectElementType T>
 inline T* buffer_object<T>::data() noexcept
 {
-#if defined(BUFFER_OBJECT_INLINE)
+#ifdef BUFFER_OBJECT_INLINE
     return (T*) (this + 1);
 #else
     return data_;
@@ -283,7 +283,7 @@ inline T* buffer_object<T>::data() noexcept
 template <BufferObjectElementType T>
 inline T const* buffer_object<T>::data() const noexcept
 {
-#if defined(BUFFER_OBJECT_INLINE)
+#ifdef BUFFER_OBJECT_INLINE
     return (T*) (this + 1);
 #else
     return data_;
@@ -393,7 +393,7 @@ void buffer_object_pool<T>::release(buffer_object<T>* ptr)
     }
     else
     {
-#if defined(BUFFER_OBJECT_INLINE)
+#ifdef BUFFER_OBJECT_INLINE
         std::destroy_n(ptr, 1);
         free(ptr);
 #else

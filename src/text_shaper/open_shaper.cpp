@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <text_shaper/open_shaper.h>
+
 #include <text_shaper/cluster_spans.h>
 #include <text_shaper/font.h>
 #include <text_shaper/font_locator.h>
-#include <text_shaper/open_shaper.h>
 
 #include <crispy/assert.h>
 #include <crispy/times.h>
@@ -48,7 +49,6 @@ using std::holds_alternative;
 using std::invalid_argument;
 using std::max;
 using std::min;
-using std::move;
 using std::nullopt;
 using std::numeric_limits;
 using std::optional;
@@ -58,7 +58,6 @@ using std::runtime_error;
 using std::size_t;
 using std::string;
 using std::string_view;
-using std::tuple;
 using std::u32string_view;
 using std::unique_ptr;
 using std::unordered_map;
@@ -85,15 +84,15 @@ struct FontInfo // NOLINT(readability-identifier-naming)
 
 } // namespace
 
-#if defined(CONTOUR_HAS_CAIRO)
-void cleanup_cairo_font_face(void*)
+#ifdef CONTOUR_HAS_CAIRO
+static void cleanup_cairo_font_face(void*)
 {
     // No-op destructor callback: the FT_Face lifetime is managed elsewhere.
 }
 
-std::optional<text::rasterized_glyph> rasterizeWithCairo(FT_Face ftFace,
-                                                         text::glyph_key glyph,
-                                                         text::render_mode /*mode*/)
+static std::optional<text::rasterized_glyph> rasterizeWithCairo(FT_Face ftFace,
+                                                                text::glyph_key const& glyph,
+                                                                text::render_mode /*mode*/)
 {
     // 1. Setup Cairo surface
     auto width = static_cast<int>(ceil(static_cast<double>(ftFace->glyph->metrics.width) / 64.0));
@@ -136,7 +135,7 @@ std::optional<text::rasterized_glyph> rasterizeWithCairo(FT_Face ftFace,
     auto const stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, width);
     auto buffer = std::vector<uint8_t>(static_cast<size_t>(stride * height));
 
-    auto surface =
+    auto* surface =
         cairo_image_surface_create_for_data(buffer.data(), CAIRO_FORMAT_ARGB32, width, height, stride);
     if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS)
     {
@@ -144,7 +143,7 @@ std::optional<text::rasterized_glyph> rasterizeWithCairo(FT_Face ftFace,
         return std::nullopt;
     }
 
-    auto cr = cairo_create(surface);
+    auto* cr = cairo_create(surface);
 
     // 2. Create/Set Cairo Font Face
     auto* fontFace = cairo_ft_font_face_create_for_ft_face(ftFace, 0);
@@ -192,7 +191,7 @@ std::optional<text::rasterized_glyph> rasterizeWithCairo(FT_Face ftFace,
     output.format = text::bitmap_format::rgba;
     output.bitmap = std::move(buffer);
 
-    size_t const pixelCount = static_cast<size_t>(width * height);
+    auto const pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
     auto* pixels = reinterpret_cast<uint32_t*>(output.bitmap.data());
     for (size_t i = 0; i < pixelCount; ++i)
     {
@@ -271,29 +270,29 @@ constexpr size_t InitialFallbackCount = 8;
 /// @see open_shaper::resize_font.
 constexpr size_t MaxResizedFonts = 512;
 
-struct HbFontInfo // NOLINT(readability-identifier-naming)
-{
-    font_source primary;
-    font_source_list fallbacks;
-    font_source_list allFallbacks; ///< Complete fallback list for on-demand extension.
-    font_size size;
-    ft_face_ptr ftFace;
-    hb_font_ptr hbFont;
-    std::optional<font_metrics> metrics {};
-
-    /// The weight this face was actually loaded at, which together with @c size is its cache identity.
-    ///
-    /// Distinct from @c description.weight: a description is only attached to keys that came from
-    /// load_font(), so every key minted for a fallback face or a resize carried a default-constructed
-    /// description. Reading the weight from there filed those faces under a weight they were never
-    /// loaded at.
-    font_weight weight { font_weight::normal };
-
-    font_description description {};
-};
-
 namespace
 {
+    struct HbFontInfo // NOLINT(readability-identifier-naming)
+    {
+        font_source primary;
+        font_source_list fallbacks;
+        font_source_list allFallbacks; ///< Complete fallback list for on-demand extension.
+        font_size size;
+        ft_face_ptr ftFace;
+        hb_font_ptr hbFont;
+        std::optional<font_metrics> metrics {};
+
+        /// The weight this face was actually loaded at, which together with @c size is its cache identity.
+        ///
+        /// Distinct from @c description.weight: a description is only attached to keys that came from
+        /// load_font(), so every key minted for a fallback face or a resize carried a default-constructed
+        /// description. Reading the weight from there filed those faces under a weight they were never
+        /// loaded at.
+        font_weight weight { font_weight::normal };
+
+        font_description description {};
+    };
+
     string identifierOf(font_source const& source)
     {
         if (holds_alternative<font_path>(source))
@@ -536,8 +535,8 @@ namespace
     ///
     /// The fallback chain is walked twice, so that a font matching the primary's spacing is always tried
     /// before one that does not. A terminal wants a monospaced fallback where one exists, because a
-    /// proportional face's advances do not line up with the cell grid -- but a proportional face still beats
-    /// a replacement box, so it is accepted once nothing better has answered.
+    /// proportional face's advances do not line up with the cell grid -- but a proportional face still
+    /// beats a replacement box, so it is accepted once nothing better has answered.
     enum class fallback_pass : uint8_t
     {
         Preferred, ///< Fonts whose spacing matches the primary font description's.
@@ -560,8 +559,8 @@ namespace
 
     /// Shapes @p codepoints with @p hbFont alone, applying no fallback.
     ///
-    /// Deliberately inspects nothing beyond its own output: glyphs an earlier call left unresolved must not
-    /// make this one look like it failed.
+    /// Deliberately inspects nothing beyond its own output: glyphs an earlier call left unresolved must
+    /// not make this one look like it failed.
     ///
     /// @param font        The key to stamp onto every glyph produced here.
     /// @param fontInfo    Font info of @p font, supplying size and font features.
@@ -620,7 +619,7 @@ namespace
             glyph_position gpos {};
             gpos.glyph =
                 glyph_key { .size = fontInfo.size, .font = font, .index = glyph_index { info[i].codepoint } };
-#if defined(GLYPH_KEY_DEBUG)
+#ifdef GLYPH_KEY_DEBUG
             {
                 auto const cluster = info[i].cluster;
                 for (size_t k = 0; k < codepoints.size(); ++k)
@@ -654,8 +653,9 @@ namespace
 
     /// Appends the segment's glyphs, re-homing the unresolved ones onto @p primaryFont.
     ///
-    /// Without this, replaceMissingGlyphs() would stamp the primary face's replacement glyph index onto a key
-    /// still naming whichever fallback font was tried last -- an index that means nothing in that font.
+    /// Without this, replaceMissingGlyphs() would stamp the primary face's replacement glyph index onto a
+    /// key still naming whichever fallback font was tried last -- an index that means nothing in that
+    /// font.
     void appendUnresolvedGlyphs(shape_result& result,
                                 shaped_run const& shaped,
                                 cluster_group const& segment,
@@ -678,8 +678,8 @@ struct open_shaper::private_open_shaper // {{{
     font_locator* locator = nullptr;
     DPI dpi;
     // Default must match vtrasterizer::DefaultMaxFallbackCount.
-    // Cannot include the header directly due to dependency direction (vtrasterizer depends on text_shaper).
-    // The actual value is passed at runtime via set_font_fallback_limit().
+    // Cannot include the header directly due to dependency direction (vtrasterizer depends on
+    // text_shaper). The actual value is passed at runtime via set_font_fallback_limit().
     int fontFallbackLimit = 16; ///< Maximum total fallback fonts per key. -1 = unlimited, 0 = disabled.
     unordered_map<FontInfo, font_key> fontPathAndSizeToKeyMapping;
     unordered_map<font_key, HbFontInfo> fontKeyToHbFontInfoMapping; // from font_key to FontInfo struct
@@ -703,8 +703,8 @@ struct open_shaper::private_open_shaper // {{{
     /// parameters could miss forever, and shapeRunWithFallback() does not terminate if it does.
     struct coverage_cache_entry
     {
-        font_size size;
-        font_weight weight;
+        font_size size {};
+        font_weight weight = font_weight::normal;
         optional<font_key> resolved; ///< nullopt when no installed font covers the codepoint.
     };
 
@@ -764,9 +764,7 @@ struct open_shaper::private_open_shaper // {{{
             return existing;
 
         auto const sourceId = identifierOf(source);
-        if (std::any_of(blacklistedSources.begin(), blacklistedSources.end(), [&](auto const& a) {
-                return a == sourceId;
-            }))
+        if (std::ranges::any_of(blacklistedSources, [&](auto const& a) { return a == sourceId; }))
             return nullopt;
 
         auto ftFacePtrOpt = loadFace(source, fontSize, dpi, ft);
@@ -1050,8 +1048,8 @@ struct open_shaper::private_open_shaper // {{{
         if (shaped.glyphs.empty())
             return true;
 
-        // The overwhelmingly common case: this font renders the whole run. Take the glyphs as they are and
-        // do not pay for the segmentation at all.
+        // The overwhelmingly common case: this font renders the whole run. Take the glyphs as they are
+        // and do not pay for the segmentation at all.
         if (!shaped.anyMissing)
         {
             result.insert(result.end(), shaped.glyphs.begin(), shaped.glyphs.end());
@@ -1290,7 +1288,7 @@ optional<glyph_position> open_shaper::shape(font_key font, char32_t codepoint)
     // A glyph index means nothing outside the face it came from, so the key has to name that face rather
     // than the font that was asked for.
     gpos.glyph = glyph_key { .size = fontInfo.size, .font = resolvedFont, .index = glyphIndex };
-#if defined(GLYPH_KEY_DEBUG)
+#ifdef GLYPH_KEY_DEBUG
     gpos.glyph.text = std::u32string(1, codepoint);
 #endif
     gpos.advance.x = this->metrics(font).advance;
@@ -1308,7 +1306,7 @@ void open_shaper::shape(font_key font,
 {
     assert(clusters.size() == codepoints.size());
     textShapingLog()("Shaping using font key: {}, text: \"{}\"", font, unicode::convert_to<char>(codepoints));
-    if (!_d->fontKeyToHbFontInfoMapping.count(font))
+    if (!_d->fontKeyToHbFontInfoMapping.contains(font))
         textShapingLog()("Font not found? {}", font);
 
     Require(_d->fontKeyToHbFontInfoMapping.count(font) == 1);
@@ -1364,7 +1362,7 @@ void open_shaper::shape(font_key font,
 /// @param outlineThickness outline radius in pixel units.
 ///
 /// @return rasterized_glyph with bitmap_format::outlined, or nullopt on failure.
-optional<rasterized_glyph> rasterizeOutlined(
+static optional<rasterized_glyph> rasterizeOutlined(
     FT_Library ftLib, FT_Face ftFace, glyph_key const& glyph, glyph_index glyphIndex, float outlineThickness)
 {
     // Load the glyph outline (vector, not bitmap).
@@ -1497,14 +1495,14 @@ optional<rasterized_glyph> rasterizeOutlined(
             auto const pixelIdx = static_cast<size_t>((row * outWidth) + col) * 4;
 
             // Outline alpha from G channel
-            auto const outlineAlpha = outlineBmp.buffer[row * outPitch + col];
+            auto const outlineAlpha = outlineBmp.buffer[(row * outPitch) + col];
 
             // Fill alpha from R channel (offset into the outline bitmap)
             auto const fillRow = row - fillOffsetY;
             auto const fillCol = col - fillOffsetX;
             uint8_t fillAlpha = 0;
             if (fillRow >= 0 && fillRow < fillH && fillCol >= 0 && fillCol < fillW)
-                fillAlpha = fillBmp.buffer[fillRow * fillPitch + fillCol];
+                fillAlpha = fillBmp.buffer[(fillRow * fillPitch) + fillCol];
 
             output.bitmap[pixelIdx + 0] = fillAlpha;                    // R = fill
             output.bitmap[pixelIdx + 1] = outlineAlpha;                 // G = outline
@@ -1569,7 +1567,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
     {
         if (ftFace->glyph->format != FT_GLYPH_FORMAT_BITMAP)
         {
-#if defined(CONTOUR_HAS_CAIRO)
+#ifdef CONTOUR_HAS_CAIRO
             if (auto result = rasterizeWithCairo(ftFace, glyph, mode))
                 return result;
             // If Cairo fails, fall through to FreeType rendering (which might produce outlines or empty

@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtconformance/Runner.h>
+
+#include <crispy/environment.h>
 #include <crispy/utils.h>
 
 #include <cstdlib>
@@ -12,7 +15,6 @@
 #include <utility>
 
 #include <vtconformance/EscTestLog.h>
-#include <vtconformance/Runner.h>
 #include <vtconformance/VtTestLog.h>
 
 namespace fs = std::filesystem;
@@ -84,7 +86,7 @@ namespace
     /// never have, so the driver checks for vttest's own parting words rather than trusting the file.
     [[nodiscard]] bool exitedCleanly(std::string_view transcript)
     {
-        return transcript.find("That's all, folks!") != std::string_view::npos;
+        return transcript.contains("That's all, folks!");
     }
 
     /// Answers one prompt, capturing a golden first when the screen is one a human would have judged.
@@ -239,14 +241,14 @@ namespace
 
 bool isProgramAvailable(std::string const& program)
 {
-    if (program.find('/') != std::string::npos)
+    if (program.contains('/'))
         return fs::exists(program);
 
-    auto const* const pathEnv = std::getenv("PATH");
+    auto const pathEnv = crispy::environment::get("PATH");
     if (!pathEnv)
         return false;
 
-    auto stream = std::istringstream { pathEnv };
+    auto stream = std::istringstream { std::string { *pathEnv } };
     auto directory = std::string {};
     while (std::getline(stream, directory, ':'))
     {
@@ -457,7 +459,7 @@ Report runSuite(Suite const& suite, RunOptions const& options)
 
     for (auto const& scenario: suite.scenarios)
     {
-        if (options.filter && scenario.id.find(*options.filter) == std::string_view::npos)
+        if (options.filter && !scenario.id.contains(*options.filter))
             continue;
         report.scenarios.push_back(runScenario(suite, scenario, options));
     }

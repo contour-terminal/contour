@@ -107,6 +107,8 @@ Making use of reserved glyph slots
     }
 */
 
+#include <vtrasterizer/TextRenderer.h>
+
 #include <vtbackend/logging.h>
 #include <vtbackend/primitives.h>
 
@@ -114,7 +116,6 @@ Making use of reserved glyph slots
 #include <vtrasterizer/GlyphAdvance.h>
 #include <vtrasterizer/GlyphSlicing.h>
 #include <vtrasterizer/GridMetrics.h>
-#include <vtrasterizer/TextRenderer.h>
 #include <vtrasterizer/shared_defines.h>
 #include <vtrasterizer/utils.h>
 
@@ -134,19 +135,14 @@ using crispy::strong_hash;
 
 using unicode::out;
 
-using std::array;
 using std::get;
-using std::make_unique;
 using std::max;
 using std::min;
-using std::move;
 using std::nullopt;
 using std::optional;
 using std::ostream;
-using std::pair;
 using std::u32string;
 using std::u32string_view;
-using std::unique_ptr;
 using std::vector;
 
 using namespace std::placeholders;
@@ -154,8 +150,6 @@ using namespace std::string_view_literals;
 
 namespace vtrasterizer
 {
-
-using text::locatorLog;
 
 namespace
 {
@@ -545,11 +539,11 @@ bool TextRenderer::renderBoxDrawingCell(vtbackend::CellLocation position,
     return false;
 }
 
-crispy::point adjustPenForLineFlags(vtbackend::LineFlags lineFlags,
-                                    GridMetrics const& gridMetrics,
-                                    int glyphHeight,
-                                    int glyphBearingY,
-                                    crispy::point pen) noexcept
+static crispy::point adjustPenForLineFlags(vtbackend::LineFlags lineFlags,
+                                           GridMetrics const& gridMetrics,
+                                           int glyphHeight,
+                                           int glyphBearingY,
+                                           crispy::point pen) noexcept
 {
     using vtbackend::LineFlag;
 
@@ -572,7 +566,7 @@ crispy::point adjustPenForLineFlags(vtbackend::LineFlags lineFlags,
 /// either height flag, but this layer does not require that of its caller -- each flag is tested, so
 /// a height flag arriving on its own still widens. Every place that steps a pen across such a line,
 /// and the tile widening below, read the factor from here, so they cannot disagree about a flag.
-constexpr int lineAdvanceScale(vtbackend::LineFlags lineFlags) noexcept
+static constexpr int lineAdvanceScale(vtbackend::LineFlags lineFlags) noexcept
 {
     using vtbackend::LineFlag;
     return lineFlags.test(LineFlag::DoubleWidth) || lineFlags.test(LineFlag::DoubleHeightTop)
@@ -581,7 +575,7 @@ constexpr int lineAdvanceScale(vtbackend::LineFlags lineFlags) noexcept
                : 1;
 }
 
-Renderable::AtlasTileAttributes adjustTileAttributesForLineFlags(
+static Renderable::AtlasTileAttributes adjustTileAttributesForLineFlags(
     vtbackend::LineFlags lineFlags, Renderable::AtlasTileAttributes const& originalAttributes)
 {
     using vtbackend::LineFlag;
@@ -602,46 +596,6 @@ Renderable::AtlasTileAttributes adjustTileAttributesForLineFlags(
         attributesCopy.metadata.normalizedLocation.height /= 2.0f;
 
     return attributesCopy;
-}
-
-/// Clips a tile about to be drawn to one screen row's band, in both texture space and height.
-///
-/// A block `scale` cells tall is one raster drawn across several rows. Each row draws its own band of
-/// it, so a block whose head has scrolled above the viewport is CLIPPED rather than lost -- when only
-/// the head cell drew, the whole block vanished with it. kitty cuts the same bands in
-/// calculate_regions_for_line().
-///
-/// @param attributes the tile, adjusted in place.
-/// @param tileTop    the tile's top in screen pixels; moved down to the visible part.
-/// @param bandTop    the row's top edge in screen pixels.
-/// @param bandBottom the row's bottom edge in screen pixels.
-/// @return false when the tile does not reach this band at all, and must not be drawn.
-[[nodiscard]] bool clipTileToBand(Renderable::AtlasTileAttributes& attributes,
-                                  int& tileTop,
-                                  int bandTop,
-                                  int bandBottom)
-{
-    auto const drawnHeight = unbox<int>(attributes.metadata.targetSize.height);
-    if (drawnHeight <= 0)
-        return true;
-
-    auto const tileBottom = tileTop + drawnHeight;
-    auto const visibleTop = std::max(tileTop, bandTop);
-    auto const visibleBottom = std::min(tileBottom, bandBottom);
-    if (visibleBottom <= visibleTop)
-        return false;
-    if (visibleTop == tileTop && visibleBottom == tileBottom)
-        return true;
-
-    auto const from = static_cast<float>(visibleTop - tileTop) / static_cast<float>(drawnHeight);
-    auto const to = static_cast<float>(visibleBottom - tileTop) / static_cast<float>(drawnHeight);
-
-    auto& location = attributes.metadata.normalizedLocation;
-    location.y += location.height * from;
-    location.height *= to - from;
-    attributes.metadata.targetSize.height = vtbackend::Height::cast_from(visibleBottom - visibleTop);
-    tileTop = visibleTop;
-    return true;
 }
 
 void TextRenderer::renderTextGroup(std::u32string_view codepoints,
@@ -773,7 +727,7 @@ std::optional<TextRenderer::BlockCanvas> TextRenderer::buildBlockCanvas(
                                        0,
                                        0);
 
-    auto const components = static_cast<size_t>(text::pixel_size(base->format));
+    auto const components = text::pixel_size(base->format);
     auto canvas =
         BlockCanvas { .size = box.canvasSize,
                       .format = toAtlasFormat(base->format),
@@ -872,7 +826,7 @@ std::optional<TextRenderer::TextureAtlas::TileCreateData> TextRenderer::createBl
         return std::nullopt;
 
     return createTileData(tileLocation,
-                          std::move(wanted->bitmap),
+                          wanted->bitmap,
                           canvas->format,
                           wanted->size,
                           RenderTileAttributes::X { 0 },
@@ -930,10 +884,8 @@ std::optional<text::rasterized_glyph> TextRenderer::rasterizeAtBlockSize(text::g
 
         if (unbox(magnifiedSize.width) != 0 && unbox(magnifiedSize.height) != 0)
         {
-            glyph->bitmap = magnify(glyph->bitmap,
-                                    glyph->bitmapSize,
-                                    magnifiedSize,
-                                    static_cast<size_t>(text::pixel_size(glyph->format)));
+            glyph->bitmap =
+                magnify(glyph->bitmap, glyph->bitmapSize, magnifiedSize, text::pixel_size(glyph->format));
             glyph->bitmapSize = magnifiedSize;
             glyph->position.x =
                 static_cast<int>(std::lround(static_cast<double>(glyph->position.x) * adjustment.factor));
@@ -1167,8 +1119,9 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
         // Center horizontally within the emoji bounding box (numCells * cellWidth).
         glyph.position.x = unbox<int>(emojiBoundingBox.width - glyph.bitmapSize.width) / 2;
         // Center vertically within the full box height, accounting for the baseline offset.
-        glyph.position.y = (unbox<int>(_gridMetrics.cellSize.height) + glyph.bitmapSize.height.as<int>()) / 2
-                           - _gridMetrics.baseline;
+        glyph.position.y =
+            ((unbox<int>(_gridMetrics.cellSize.height) + glyph.bitmapSize.height.as<int>()) / 2)
+            - _gridMetrics.baseline;
     }
     else if (glyph.bitmapSize.height > _gridMetrics.cellSize.height)
     {
@@ -1251,7 +1204,8 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
                        pixelCount);
             return nullopt;
         }
-        if (!SoftRequire(0 < pixelCount && static_cast<size_t>(pixelCount) <= glyph.bitmap.size()))
+        if (!SoftRequire(0 < pixelCount)
+            || !SoftRequire(static_cast<size_t>(pixelCount) <= glyph.bitmap.size()))
             return nullopt;
         rasterizerLog()("Cropping {} underflowing bitmap rows.", rowCount);
         glyph.bitmapSize.height += vtbackend::Height::cast_from(yMin);

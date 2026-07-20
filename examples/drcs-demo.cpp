@@ -36,7 +36,7 @@ void writeToTTY(std::string_view s) noexcept
 /// Encodes a 10-wide, 20-tall monochrome bitmap as DECDLD sixel data.
 /// @param bitmap  Row-major array of 200 bytes (10 columns x 20 rows), 1=pixel set, 0=clear.
 /// @return  The sixel-encoded string for one glyph.
-std::string encodeDRCSGlyph(const uint8_t bitmap[20][10])
+std::string encodeDRCSGlyph(uint8_t const bitmap[20][10])
 {
     std::string result;
 

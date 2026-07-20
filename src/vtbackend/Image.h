@@ -358,7 +358,7 @@ class ImagePool
 
     // named image access
     //
-    void link(std::string name, std::shared_ptr<Image const> imageRef);
+    void link(std::string const& name, std::shared_ptr<Image const> imageRef);
     [[nodiscard]] std::shared_ptr<Image const> findImageByName(std::string const& name) const noexcept;
     void unlink(std::string const& name);
 
@@ -504,7 +504,7 @@ struct std::formatter<vtbackend::RasterizedImage>: formatter<std::string>
 template <>
 struct std::formatter<vtbackend::ImageFragment>: std::formatter<std::string>
 {
-    auto format(const vtbackend::ImageFragment& fragment, auto& ctx) const
+    auto format(vtbackend::ImageFragment const& fragment, auto& ctx) const
     {
         return formatter<std::string>::format(
             std::format("ImageFragment<offset={}, {}>",

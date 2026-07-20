@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <cassert>
-
 #include <vtmux/Tab.h>
+
+#include <cassert>
 
 namespace vtmux
 {
@@ -65,7 +65,7 @@ SessionId Tab::closePane(Pane* leaf)
 
     auto const closedId = leaf->id();
     // The pane the parent will become (its surviving sibling), determined before absorption.
-    Pane* sibling = (parent->first() == leaf) ? parent->second() : parent->first();
+    Pane const* sibling = (parent->first() == leaf) ? parent->second() : parent->first();
 
     // Decide whether the active leaf is about to be invalidated BEFORE closeChild() runs: it absorbs the
     // sibling's contents into the parent and destroys both the closed leaf and the old sibling Pane

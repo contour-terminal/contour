@@ -107,10 +107,10 @@ struct MenuTable
     };
 
     /// A row that runs @p action. @p title defaults to the action's own display name.
-    [[nodiscard]] static Row command(actions::Action action, std::string_view title = {})
+    [[nodiscard]] static Row command(actions::Action const& action, std::string_view title = {})
     {
         return Row { .kind = ContextMenuEntryKind::Command,
-                     .action = std::move(action),
+                     .action = action,
                      .title = title,
                      .visible = always,
                      .enabled = always,

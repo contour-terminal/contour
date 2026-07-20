@@ -22,8 +22,6 @@ endif()
 
 # TODO: coretext_shaper.cpp coretext_shaper.h
 add_library(text_shaper STATIC ${text_shaper_SRC})
-set_target_properties(text_shaper PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
-
 set(TEXT_SHAPER_LIBS unicode::unicode boxed-cpp::boxed-cpp)
 list(APPEND TEXT_SHAPER_LIBS Microsoft.GSL::GSL)
 
@@ -82,7 +80,7 @@ message(STATUS "[text_shaper] Libraries: ${TEXT_SHAPER_LIBS}")
 
 if(CONTOUR_TESTING)
     enable_testing()
-    add_executable(text_shaper_test test_main.cpp cluster_spans_test.cpp open_shaper_test.cpp scale_test.cpp)
+    add_executable(text_shaper_test test_main.cpp cluster_spans_test.cpp font_hash_test.cpp open_shaper_test.cpp scale_test.cpp)
     target_link_libraries(text_shaper_test PRIVATE text_shaper Catch2::Catch2 Microsoft.GSL::GSL unicode::unicode boxed-cpp::boxed-cpp crispy::core)
     add_test(NAME text_shaper_test COMMAND $<TARGET_FILE:text_shaper_test>)
     if(NOT WIN32)

@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtconformance/TerminalHarness.h>
+
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -7,8 +9,6 @@
 #include <string>
 #include <thread>
 #include <utility>
-
-#include <vtconformance/TerminalHarness.h>
 
 using namespace std::chrono_literals;
 

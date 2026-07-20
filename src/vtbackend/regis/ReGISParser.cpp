@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstddef>
 #include <format>
 #include <numbers>
 
@@ -50,7 +51,7 @@ namespace
 
     // Fork-bomb guards for macrograph expansion: untrusted input can define self-referential macros.
     constexpr std::size_t MaxMacroDepth = 32;
-    constexpr std::size_t MaxMacroOutput = 256 * 1024;
+    constexpr std::size_t MaxMacroOutput = static_cast<std::size_t>(256 * 1024);
 
     /// Expands ReGIS macrographs in @p input, appending the result to @p out.
     ///

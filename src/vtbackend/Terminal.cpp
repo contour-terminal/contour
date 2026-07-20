@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/Terminal.h>
+
 #include <vtbackend/ControlCode.h>
 #include <vtbackend/Functions.h>
 #include <vtbackend/InputGenerator.h>
 #include <vtbackend/RenderBuffer.h>
 #include <vtbackend/RenderBufferBuilder.h>
 #include <vtbackend/SequenceBuilder.h>
-#include <vtbackend/Terminal.h>
 #include <vtbackend/logging.h>
 #include <vtbackend/primitives.h>
 
@@ -15,6 +16,7 @@
 
 #include <crispy/assert.h>
 #include <crispy/base64.h>
+#include <crispy/environment.h>
 #include <crispy/escape.h>
 #include <crispy/utils.h>
 
@@ -34,10 +36,10 @@
 #include <regex>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <variant>
 
-using crispy::size;
 using std::nullopt;
 using std::optional;
 using std::string;
@@ -118,7 +120,7 @@ namespace // {{{ helpers
             value.pop_back();
     }
 
-#if defined(CONTOUR_PERF_STATS)
+#ifdef CONTOUR_PERF_STATS
     void logRenderBufferSwap(bool success, uint64_t frameID)
     {
         if (!renderBufferLog)
@@ -293,7 +295,7 @@ void Terminal::setLastMarkRangeOffset(LineOffset value) noexcept
 std::optional<Terminal::PtyReadResult> Terminal::readFromPty()
 {
     auto const timeout =
-#if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
         (_renderBuffer.state == RenderBufferState::WaitingForRefresh && !_screenDirty)
             ? std::optional { _refreshInterval.value }
             : std::chrono::milliseconds(0);
@@ -369,7 +371,7 @@ bool Terminal::processInputOnce()
 
     if (!ptyReadResult)
     {
-        terminalLog()("PTY read failed. {}", strerror(errno));
+        terminalLog()("PTY read failed. {}", std::generic_category().message(errno));
         if (errno == EINTR || errno == EAGAIN)
             return true;
 
@@ -398,7 +400,7 @@ bool Terminal::processInputOnce()
             auto const parseGuard = ParseDepthGuard {};
             _parser.parseFragment(buf);
         }
-        _parsingBuffer.reset();
+        _parsingBuffer = nullptr;
 
         // Process any macros that were queued by DECINVM during the parse.
         processPendingMacros();
@@ -410,7 +412,7 @@ bool Terminal::processInputOnce()
     if (!_modes.enabled(DECMode::BatchedRendering))
         screenUpdated();
 
-#if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
     ensureFreshRenderBuffer();
 #endif
 
@@ -473,11 +475,11 @@ bool Terminal::ensureFreshRenderBuffer(bool locked)
         case RenderBufferState::TrySwapBuffers: {
             [[maybe_unused]] auto const success = _renderBuffer.swapBuffers(_currentTime);
 
-#if defined(CONTOUR_PERF_STATS)
+#ifdef CONTOUR_PERF_STATS
             logRenderBufferSwap(success, _lastFrameID);
 #endif
 
-#if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
             // Passively invoked by the terminal thread -> do inform render thread about updates.
             if (success)
                 _eventListener.renderBufferUpdated();
@@ -514,27 +516,30 @@ int Terminal::TheSelectionHelper::cellWidth(CellLocation pos) const noexcept
     return terminal->currentScreen().cellWidthAt(pos);
 }
 
-/**
- * Sets the hyperlink into hovering state if mouse is currently hovering it
- * and unsets the state when the object is being destroyed.
- */
-struct ScopedHyperlinkHover
+namespace
 {
-    std::shared_ptr<HyperlinkInfo const> href;
-
-    ScopedHyperlinkHover(Terminal const& terminal, Screen const& /*screen*/):
-        href { terminal.tryGetHoveringHyperlink() }
+    /**
+     * Sets the hyperlink into hovering state if mouse is currently hovering it
+     * and unsets the state when the object is being destroyed.
+     */
+    struct ScopedHyperlinkHover
     {
-        if (href)
-            href->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?
-    }
+        std::shared_ptr<HyperlinkInfo const> href;
 
-    ~ScopedHyperlinkHover()
-    {
-        if (href)
-            href->state = HyperlinkState::Inactive;
-    }
-};
+        ScopedHyperlinkHover(Terminal const& terminal, Screen const& /*screen*/):
+            href { terminal.tryGetHoveringHyperlink() }
+        {
+            if (href)
+                href->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?
+        }
+
+        ~ScopedHyperlinkHover()
+        {
+            if (href)
+                href->state = HyperlinkState::Inactive;
+        }
+    };
+} // namespace
 
 void Terminal::updateInputMethodPreeditString(std::string preeditString)
 {
@@ -561,7 +566,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     _screenDirty = false;
     ++_lastFrameID;
 
-#if defined(CONTOUR_PERF_STATS)
+#ifdef CONTOUR_PERF_STATS
     if (terminalLog)
         terminalLog()("{}: Refreshing render buffer.\n", _lastFrameID.load());
 #endif
@@ -1118,7 +1123,7 @@ bool Terminal::handleMouseSelection(Modifiers modifiers)
 
     double const diffMs = chrono::duration<double, std::milli>(_currentTime - _lastClick).count();
     _lastClick = _currentTime;
-    _speedClicks = (diffMs >= 0.0 && diffMs <= 1000.0 ? _speedClicks : 0) % 4 + 1;
+    _speedClicks = ((diffMs >= 0.0 && diffMs <= 1000.0 ? _speedClicks : 0) % 4) + 1;
 
     auto const startPos = CellLocation {
         .line = _currentMousePosition.line - boxed_cast<LineOffset>(_viewport.scrollOffset()),
@@ -1547,7 +1552,7 @@ void Terminal::parseFragmentChunked(string_view vtStream)
         // Set parsingBuffer to ensure buffer_fragment holds the correct buffer reference.
         _parsingBuffer = _currentPtyBuffer;
         _parser.parseFragment(_currentPtyBuffer->writeAtEnd(chunk));
-        _parsingBuffer.reset();
+        _parsingBuffer = nullptr;
     }
 }
 
@@ -1575,7 +1580,7 @@ string_view Terminal::lockedWriteToPtyBuffer(string_view data)
     auto const chunk = data.substr(0, std::min(data.size(), _currentPtyBuffer->bytesAvailable()));
     auto const _ = std::scoped_lock { *_currentPtyBuffer };
     auto const ref = _currentPtyBuffer->writeAtEnd(chunk);
-    return string_view(ref.data(), ref.size());
+    return { ref.data(), ref.size() };
 }
 
 size_t Terminal::maxBulkTextSequenceWidth() const noexcept
@@ -1597,43 +1602,46 @@ size_t Terminal::maxBulkTextSequenceWidth() const noexcept
 // This simple sequence handler is used to write to the screen
 // without any optimizations (and no parser hooking).
 // We use this for rendering the status line.
-struct SimpleSequenceHandler
+namespace
 {
-    Screen& targetScreen;
-
-    void executeControlCode(char controlCode) { targetScreen.executeControlCode(controlCode); }
-
-    void processSequence(Sequence const& seq)
+    struct SimpleSequenceHandler
     {
-        // NB: We might want to check for some VT sequences that should not be processed here.
-        // We might make use of Terminal::activeSequences() here somehow.
-        targetScreen.processSequence(seq);
-    }
+        Screen& targetScreen;
 
-    void processAPC(std::string_view body) { targetScreen.processAPC(body); }
+        void executeControlCode(char controlCode) { targetScreen.executeControlCode(controlCode); }
 
-    void writeText(char32_t codepoint) { targetScreen.writeText(codepoint); }
+        void processSequence(Sequence const& seq)
+        {
+            // NB: We might want to check for some VT sequences that should not be processed here.
+            // We might make use of Terminal::activeSequences() here somehow.
+            targetScreen.processSequence(seq);
+        }
 
-    void writeText(std::string_view chars, size_t /*cellCount*/)
-    {
-        // implementation of targetScreen.writeText(chars, cellCount)
-        // is buggy and does not work correctly
-        // so we do not use optimization for
-        // ParserEvents::print(chars,cellCount)
-        // but write char by char
-        // TODO fix targetScreen.writeText(chars, cellCount)
-        for (auto c: chars)
-            targetScreen.writeText(c);
-    }
+        void processAPC(std::string_view body) { targetScreen.processAPC(body); }
 
-    void writeTextEnd() { targetScreen.writeTextEnd(); }
+        void writeText(char32_t codepoint) { targetScreen.writeText(codepoint); }
 
-    [[nodiscard]] size_t maxBulkTextSequenceWidth() const noexcept
-    {
-        // Returning 0 here, because we do not make use of the performance optimized bulk write above.
-        return 0;
-    }
-};
+        void writeText(std::string_view chars, size_t /*cellCount*/)
+        {
+            // implementation of targetScreen.writeText(chars, cellCount)
+            // is buggy and does not work correctly
+            // so we do not use optimization for
+            // ParserEvents::print(chars,cellCount)
+            // but write char by char
+            // TODO fix targetScreen.writeText(chars, cellCount)
+            for (auto c: chars)
+                targetScreen.writeText(c);
+        }
+
+        void writeTextEnd() { targetScreen.writeTextEnd(); }
+
+        [[nodiscard]] size_t maxBulkTextSequenceWidth() const noexcept
+        {
+            // Returning 0 here, because we do not make use of the performance optimized bulk write above.
+            return 0;
+        }
+    };
+} // namespace
 // }}}
 
 void Terminal::writeToScreenInternal(Screen& screen, std::string_view vtStream)
@@ -1967,7 +1975,7 @@ SmoothScrollResult Terminal::applySmoothScrollPixelDelta(float pixelDelta)
     // notifications and causes visual glitches).
     auto const totalPixels = _viewport.pixelOffset() + pixelDelta;
     auto const linesDelta = static_cast<int>(std::floor(totalPixels / cellHeight));
-    auto const remainder = totalPixels - static_cast<float>(linesDelta) * cellHeight;
+    auto const remainder = totalPixels - (static_cast<float>(linesDelta) * cellHeight);
 
     auto const maxOffset = boxed_cast<ScrollOffset>(primaryScreen().historyLineCount());
     auto const unclampedOffset = _viewport.scrollOffset().value + linesDelta;
@@ -2108,7 +2116,7 @@ void Terminal::reportInBandWindowResize()
 
 void Terminal::verifyState()
 {
-#if defined(CONTOUR_VERIFY_STATE)
+#ifdef CONTOUR_VERIFY_STATE
     auto const thePageSize = _settings.pageSize;
     Require(*_currentMousePosition.column < *thePageSize.columns);
     Require(*_currentMousePosition.line < *thePageSize.lines);
@@ -2501,8 +2509,7 @@ std::optional<std::string> Terminal::localPathAtMousePosition() const
     auto const lineText = currentScreen().lineTextAt(mousePosition->line, false, false);
     auto const mouseColumn = static_cast<size_t>(*mousePosition->column);
     auto const cwd = extractPathFromFileUrl(currentWorkingDirectory());
-    auto const* const homeEnv = std::getenv("HOME");
-    auto const home = std::string(homeEnv ? homeEnv : "");
+    auto const home = std::string(crispy::environment::get("HOME").value_or(""));
 
     static auto const localPathRegex = [] {
         // Matches, in order: drive-letter absolute paths (C:/foo, C:\foo) for Windows,
@@ -2571,8 +2578,7 @@ void Terminal::activateHintMode(std::vector<HintPattern> const& patterns, HintAc
     auto const cwd = extractPathFromFileUrl(cwdUrl);
     if (!cwd.empty())
     {
-        auto const* const homeEnv = std::getenv("HOME");
-        auto const home = std::string(homeEnv ? homeEnv : "");
+        auto const home = std::string(crispy::environment::get("HOME").value_or(""));
         for (auto& pattern: mutablePatterns)
         {
             if (pattern.name != "filepath")
@@ -2592,7 +2598,10 @@ void Terminal::activateHintMode(std::vector<HintPattern> const& patterns, HintAc
                     return matchStr;
                 if (matchStr.starts_with("~/"))
                     return home.empty() ? matchStr : home + matchStr.substr(1);
-                return cwd + "/" + matchStr;
+                auto resolved = cwd;
+                resolved += '/';
+                resolved += matchStr;
+                return resolved;
             };
 
             pattern.validator = [resolvePath, home](std::string const& matchStr) -> bool {
@@ -2839,9 +2848,9 @@ void Terminal::reply(string_view text)
     else
         _inputGenerator.generateRaw(text);
 
-    auto const* syncReply = getenv("CONTOUR_SYNC_PTY_OUTPUT");
+    auto const syncReply = crispy::environment::get("CONTOUR_SYNC_PTY_OUTPUT");
 
-    if (syncReply && *syncReply != '0')
+    if (syncReply && !syncReply->starts_with('0'))
         flushInput();
 }
 
@@ -3523,6 +3532,14 @@ void Terminal::hardReset()
     _parser.setVT52Mode(false);
     setOperatingLevel(_factorySettings.terminalId);
 
+    // Clear the input generator's mirrored mode state *before* the mode register is replayed below.
+    // DECCKM, DECNKM, DECBKM, DECMode::MousePassiveTracking and friends live in the generator rather
+    // than in `_modes`, and setMode() is what pushes them across. Resetting the generator afterwards
+    // would therefore undo every mode this function is about to (re-)establish -- and for a mode listed
+    // in `frozenModes` that damage is permanent, because setMode() early-returns on a frozen mode and
+    // nothing can ever resync the two halves again.
+    _inputGenerator.reset();
+
     _modes = Modes {};
 
     // SRM, set: the terminal does *not* echo what it sends -- the host does. The mode register was just
@@ -3597,7 +3614,8 @@ void Terminal::hardReset()
 
     setStatusDisplay(_factorySettings.statusDisplayType);
 
-    _inputGenerator.reset();
+    // NB: _inputGenerator.reset() deliberately runs near the top of this function, before the mode
+    // register is replayed. @see the comment there.
     _pendingLocalEcho.clear();
 }
 
@@ -3908,7 +3926,7 @@ void Terminal::processPendingMacros()
             auto const parseGuard = ParseDepthGuard {};
             _parser.parseFragment(chunk);
         }
-        _parsingBuffer.reset();
+        _parsingBuffer = nullptr;
 
         --_macroRecursionDepth;
     }
@@ -3917,17 +3935,17 @@ void Terminal::processPendingMacros()
 std::shared_ptr<RasterizedImage> Terminal::createDRCSImage(DRCSGlyph const& glyph, RGBColor foregroundColor)
 {
     // Convert monochrome bitmap to RGBA
-    auto const pixelCount = static_cast<size_t>(glyph.width * glyph.height);
+    auto const pixelCount = static_cast<size_t>(glyph.width) * static_cast<size_t>(glyph.height);
     auto rgbaData = Image::Data(pixelCount * 4, 0);
 
     for (size_t i = 0; i < pixelCount && i < glyph.bitmap.size(); ++i)
     {
         if (glyph.bitmap[i])
         {
-            rgbaData[i * 4 + 0] = foregroundColor.red;
-            rgbaData[i * 4 + 1] = foregroundColor.green;
-            rgbaData[i * 4 + 2] = foregroundColor.blue;
-            rgbaData[i * 4 + 3] = 0xFF;
+            rgbaData[(i * 4) + 0] = foregroundColor.red;
+            rgbaData[(i * 4) + 1] = foregroundColor.green;
+            rgbaData[(i * 4) + 2] = foregroundColor.blue;
+            rgbaData[(i * 4) + 3] = 0xFF;
         }
         // else: leave as transparent (0,0,0,0)
     }
@@ -3981,7 +3999,7 @@ void Terminal::defineDRCS(int fontNumber,
         if (!glyphData.empty())
         {
             auto glyph = DRCSGlyph { .width = width, .height = height, .bitmap = {} };
-            glyph.bitmap.resize(static_cast<size_t>(width * height), 0);
+            glyph.bitmap.resize(static_cast<size_t>(width) * static_cast<size_t>(height), 0);
 
             auto row = 0;
             auto colBase = size_t { 0 };
@@ -4002,7 +4020,8 @@ void Terminal::defineDRCS(int fontNumber,
                 {
                     if ((sixel >> bit) & 1)
                     {
-                        auto const idx = static_cast<size_t>((row + bit) * width + col);
+                        auto const idx = (static_cast<size_t>(row + bit) * static_cast<size_t>(width))
+                                         + static_cast<size_t>(col);
                         if (idx < glyph.bitmap.size())
                             glyph.bitmap[idx] = 1;
                     }

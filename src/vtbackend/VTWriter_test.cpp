@@ -27,9 +27,9 @@ TEST_CASE("VTWriter.writeBlankLine.preservesBoldFromFillAttrs", "[VTWriter][blan
     // SGR params are combined into one prologue (e.g. "\e[1;39;49m    ").
     CHECK(emitted.starts_with("\x1b[1;"));
     // Must NOT emit the Normal weight (SGR 22), which would clear bold.
-    CHECK(emitted.find("22") == std::string::npos);
+    CHECK(!emitted.contains("22"));
     // Four spaces for the four blank columns follow the SGR prologue.
-    CHECK(emitted.find("    ") != std::string::npos);
+    CHECK(emitted.contains("    "));
 }
 
 TEST_CASE("VTWriter.writeBlankLine.emitsNormalWhenNoBold", "[VTWriter][blank]")
@@ -45,5 +45,5 @@ TEST_CASE("VTWriter.writeBlankLine.emitsNormalWhenNoBold", "[VTWriter][blank]")
 
     auto const emitted = std::string(output.data(), output.size());
     CHECK(emitted.starts_with("\x1b[22;"));
-    CHECK(emitted.find("   ") != std::string::npos);
+    CHECK(emitted.contains("   "));
 }

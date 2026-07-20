@@ -2,7 +2,7 @@
 #pragma once
 
 #include <vtpty/Process.h>
-#if defined(VTPTY_LIBSSH2)
+#ifdef VTPTY_LIBSSH2
     #include <vtpty/SshSession.h>
 #endif
 
@@ -16,7 +16,7 @@ namespace contour
 /// The terminal's session exit status: the process (or SSH) exit variant, or nullopt when the app
 /// exited without a session ever terminating (e.g. the window was closed while the shell still ran).
 using SessionExitStatus = std::optional<std::variant<vtpty::Process::ExitStatus
-#if defined(VTPTY_LIBSSH2)
+#ifdef VTPTY_LIBSSH2
                                                      ,
                                                      vtpty::SshSession::ExitStatus
 #endif
@@ -42,7 +42,7 @@ using SessionExitStatus = std::optional<std::variant<vtpty::Process::ExitStatus
         return EXIT_FAILURE; // SignalExit
     };
 
-#if defined(VTPTY_LIBSSH2)
+#ifdef VTPTY_LIBSSH2
     if (auto const* ssh = std::get_if<vtpty::SshSession::ExitStatus>(&*status))
     {
         if (auto const* normal = std::get_if<vtpty::SshSession::NormalExit>(ssh))

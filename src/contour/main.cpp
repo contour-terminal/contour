@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#if defined(CONTOUR_FRONTEND_GUI)
+#ifdef CONTOUR_FRONTEND_GUI
     #include <contour/ContourGuiApp.h>
 #else
     #include <contour/ContourApp.h>
@@ -18,9 +18,14 @@
 #endif
 
 #include <cstddef>
+#include <cstdio>
+#include <cstdlib>
+#include <format>
+#include <print>
+#include <string>
 #include <string_view>
 
-#if defined(_WIN32)
+#ifdef _WIN32
     #include <cstdio>
     #include <iostream>
 
@@ -33,7 +38,7 @@ using namespace std;
 
 namespace
 {
-#if defined(_WIN32)
+#ifdef _WIN32
 bool is_a_console(HANDLE h)
 {
     auto modeDummy = DWORD { 0 };
@@ -88,7 +93,23 @@ void tryAttachConsole()
 }
 #endif
 
-void qtCustomMessageOutput(QtMsgType type, const QMessageLogContext& context, const QString& msg)
+/// Human-readable severity prefix for a Qt message type.
+/// @param type The Qt message severity.
+/// @return The prefix printed ahead of the message text.
+[[nodiscard]] constexpr std::string_view severityName(QtMsgType type) noexcept
+{
+    switch (type)
+    {
+        case QtDebugMsg: return "Debug";
+        case QtInfoMsg: return "Info";
+        case QtWarningMsg: return "Warning";
+        case QtCriticalMsg: return "Critical";
+        case QtFatalMsg: return "Fatal";
+    }
+    return "Unknown";
+}
+
+void qtCustomMessageOutput(QtMsgType type, QMessageLogContext const& context, QString const& msg)
 {
     QByteArray const localMsg = msg.toLocal8Bit();
 
@@ -101,56 +122,31 @@ void qtCustomMessageOutput(QtMsgType type, const QMessageLogContext& context, co
             std::string_view { localMsg.constData(), static_cast<size_t>(localMsg.size()) }))
         return;
 
-    switch (type)
-    {
-        case QtDebugMsg:
-            fprintf(stderr,
-                    "Debug[%s]: %s (%s:%u, %s)\n",
-                    context.category,
-                    localMsg.constData(),
-                    context.file,
-                    context.line,
-                    context.function);
-            break;
-        case QtInfoMsg:
-            fprintf(stderr,
-                    "Info: %s (%s:%u, %s)\n",
-                    localMsg.constData(),
-                    context.file,
-                    context.line,
-                    context.function);
-            break;
-        case QtWarningMsg:
-            fprintf(stderr,
-                    "Warning: %s (%s:%u, %s)\n",
-                    localMsg.constData(),
-                    context.file,
-                    context.line,
-                    context.function);
-            break;
-        case QtCriticalMsg:
-            fprintf(stderr,
-                    "Critical: %s (%s:%u, %s)\n",
-                    localMsg.constData(),
-                    context.file,
-                    context.line,
-                    context.function);
-            break;
-        case QtFatalMsg:
-            fprintf(stderr,
-                    "Fatal: %s (%s:%u, %s)\n",
-                    localMsg.constData(),
-                    context.file,
-                    context.line,
-                    context.function);
-            abort();
-    }
+    // Qt only fills context.file/function when the caller was compiled with QT_MESSAGELOGCONTEXT;
+    // std::format has no printf-style "(null)" fallback for a null char const*, so normalise here.
+    auto const orNull = [](char const* text) {
+        return text != nullptr ? text : "(null)";
+    };
+    auto const severity = type == QtDebugMsg ? std::format("Debug[{}]", orNull(context.category))
+                                             : std::string { severityName(type) };
+
+    std::println(stderr,
+                 "{}: {} ({}:{}, {})",
+                 severity,
+                 localMsg.constData(),
+                 orNull(context.file),
+                 context.line,
+                 orNull(context.function));
+
+    // Qt considers a fatal message terminal; keep aborting rather than returning into an undefined state.
+    if (type == QtFatalMsg)
+        abort();
 }
 } // namespace
 
 int main(int argc, char const* argv[])
 {
-#if defined(_WIN32)
+#ifdef _WIN32
     tryAttachConsole();
 
     // Route CRT assert/abort/crash reporting to stderr instead of a modal dialog when no debugger is
@@ -162,7 +158,7 @@ int main(int argc, char const* argv[])
 
     qInstallMessageHandler(qtCustomMessageOutput);
 
-#if defined(CONTOUR_FRONTEND_GUI)
+#ifdef CONTOUR_FRONTEND_GUI
     contour::ContourGuiApp app;
 #else
     contour::ContourApp app;

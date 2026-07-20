@@ -10,7 +10,7 @@
 #include <contour/HyperlinkTooltip.h>
 #include <contour/SpeechSynthesizer.h>
 #include <contour/display/Announcer.h>
-#if defined(__linux__)
+#ifdef __linux__
     #include <contour/FreeDesktopNotifier.h>
 #endif
 #include <contour/helper.h>
@@ -160,11 +160,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     {
         if (_profile.bell.value().sound == "default")
         {
-            return QString("qrc:/contour/bell.wav");
+            return { "qrc:/contour/bell.wav" };
         }
         if (_profile.bell.value().sound == "off")
         {
-            return QString();
+            return {};
         }
 
         return QString::fromStdString(_profile.bell.value().sound);
@@ -186,12 +186,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         // practice.
         auto const& backgroundImage = _terminal.colorPalette().backgroundImage;
         if (!backgroundImage)
-            return QString();
+            return {};
 
-        if (const auto* p = std::get_if<std::filesystem::path>(&backgroundImage->location))
+        if (auto const* p = std::get_if<std::filesystem::path>(&backgroundImage->location))
             return QString("file:") + QString(p->string().c_str());
 
-        return QString();
+        return {};
     }
     QColor getBackgroundColor() const noexcept
     {
@@ -211,11 +211,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     }
     bool getIsImageBackground() const noexcept
     {
-        if (_terminal.colorPalette().backgroundImage)
-        {
-            return true;
-        }
-        return false;
+        return static_cast<bool>(_terminal.colorPalette().backgroundImage);
     }
 
     bool getIsBlurBackground() const noexcept
@@ -289,12 +285,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     // }}}
 
     // {{{ QAbstractItemModel overrides
-    QModelIndex index(int row, int column, const QModelIndex& parent = QModelIndex()) const override;
-    QModelIndex parent(const QModelIndex& child) const override;
-    int rowCount(const QModelIndex& parent = QModelIndex()) const override;
-    int columnCount(const QModelIndex& parent = QModelIndex()) const override;
-    QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
-    bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override;
+    QModelIndex index(int row, int column, QModelIndex const& parent = QModelIndex()) const override;
+    QModelIndex parent(QModelIndex const& child) const override;
+    int rowCount(QModelIndex const& parent = QModelIndex()) const override;
+    int columnCount(QModelIndex const& parent = QModelIndex()) const override;
+    QVariant data(QModelIndex const& index, int role = Qt::DisplayRole) const override;
+    bool setData(QModelIndex const& index, QVariant const& value, int role = Qt::EditRole) override;
     // }}}
 
     /**
@@ -574,7 +570,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::TraceStep);
     bool operator()(actions::ViNormalMode);
     bool operator()(actions::WriteScreen const& event);
-    bool operator()(actions::CreateNewTab);
+    bool operator()(actions::CreateNewTab const&);
     bool operator()(actions::CloseTab);
     bool operator()(actions::CloseAllTabs);
     bool operator()(actions::SpeakSelection);
@@ -853,7 +849,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// own shortly after startup.
     std::atomic<bool> _terminationRequested = false;
 
-#if defined(__linux__)
+#ifdef __linux__
     FreeDesktopNotifier _desktopNotifier;
 #endif
 };

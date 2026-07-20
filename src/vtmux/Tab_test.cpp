@@ -33,7 +33,7 @@ TEST_CASE("Tab: a new tab has one pane and derives its title from the session", 
     Ids ids;
     auto const rootPaneId = ids.pane();
     auto const session = ids.session();
-    Tab tab { TabId { 1 }, rootPaneId, session };
+    Tab const tab { TabId { 1 }, rootPaneId, session };
 
     CHECK(tab.paneCount() == 1);
     CHECK_FALSE(tab.hasMultiplePanes());

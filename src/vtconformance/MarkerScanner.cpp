@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtconformance/MarkerScanner.h>
+
 #include <crispy/utils.h>
 
 #include <algorithm>
@@ -6,8 +8,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include <vtconformance/MarkerScanner.h>
 
 namespace vtconformance
 {

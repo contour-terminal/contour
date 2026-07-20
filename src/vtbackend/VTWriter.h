@@ -22,7 +22,7 @@ class VTWriter
   public:
     using Writer = std::function<void(char const*, size_t)>;
 
-    static constexpr inline auto MaxParameterCount = 16;
+    static constexpr auto MaxParameterCount = 16;
 
     explicit VTWriter(Writer writer);
     explicit VTWriter(std::ostream& output);
@@ -72,7 +72,7 @@ class VTWriter
 template <typename... Ts>
 inline void VTWriter::write(std::format_string<Ts...> fmt, Ts const&... args)
 {
-#if defined(__APPLE__)
+#ifdef __APPLE__
     write(std::vformat(fmt, std::make_format_args(args...)));
 #else
     write(std::vformat(fmt, std::make_format_args(std::forward<Ts>(args)...)));

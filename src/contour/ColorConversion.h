@@ -20,7 +20,7 @@ namespace contour
 /// @return The equivalent QColor.
 [[nodiscard]] inline QColor toQColor(vtbackend::RGBColor color, std::uint8_t alpha = 255) noexcept
 {
-    return QColor(color.red, color.green, color.blue, alpha);
+    return { color.red, color.green, color.blue, alpha };
 }
 
 /// Converts a Qt QColor to a vtbackend RGB color (dropping any alpha).

@@ -48,7 +48,7 @@ struct TextClusterGroup
     TextStyle style {};
     vtbackend::LineFlags flags = vtbackend::LineFlag::None;
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
     // NB: Don't use default implementation for operator<=>,
     // as it's not yet supported by std::vector<> on macOS it seems.
     bool operator==(TextClusterGroup const& other) const noexcept
@@ -199,12 +199,12 @@ struct EventRecorder final: public TextClusterGrouper::Events
 // {{{ ostream <<
 namespace std
 {
-ostream& operator<<(std::ostream& os, u32string_view text)
+static ostream& operator<<(std::ostream& os, u32string_view text)
 {
     return os << '"' << crispy::escape(unicode::convert_to<char>(text)) << '"';
 }
 
-ostream& operator<<(std::ostream& os, TextClusterGroup const& group)
+static ostream& operator<<(std::ostream& os, TextClusterGroup const& group)
 {
     return os << std::format("{}", group);
 }

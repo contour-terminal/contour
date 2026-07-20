@@ -23,7 +23,7 @@ namespace
 [[nodiscard]] std::vector<std::string> contents(CommandHistory const& history)
 {
     auto const recent = history.recent();
-    return std::vector<std::string>(recent.begin(), recent.end());
+    return { recent.begin(), recent.end() };
 }
 } // namespace
 

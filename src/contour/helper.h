@@ -96,7 +96,7 @@ void postToObject(QObject* obj, F fun)
     QMetaObject::invokeMethod(obj, std::forward<F>(fun), Qt::QueuedConnection);
 }
 
-constexpr inline bool isModifier(Qt::Key key)
+constexpr bool isModifier(Qt::Key key)
 {
     switch (key)
     {
@@ -108,7 +108,7 @@ constexpr inline bool isModifier(Qt::Key key)
     }
 }
 
-constexpr inline char32_t makeChar(Qt::Key key, Qt::KeyboardModifiers mods)
+constexpr char32_t makeChar(Qt::Key key, Qt::KeyboardModifiers mods)
 {
     auto const value = static_cast<int>(key);
     if (value >= 'A' && value <= 'Z')
@@ -134,7 +134,7 @@ vtbackend::KeyboardModifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
                                            quint32 nativeModifiers = 0,
                                            bool stripAltGr = true);
 
-constexpr inline vtbackend::MouseButton makeMouseButton(Qt::MouseButton button)
+constexpr vtbackend::MouseButton makeMouseButton(Qt::MouseButton button)
 {
     switch (button)
     {

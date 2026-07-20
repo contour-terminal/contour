@@ -17,8 +17,8 @@ using namespace std::string_view_literals;
 TEST_CASE("MessageParser.empty", "[MessageParser]")
 {
     auto const m = MessageParser::parse("");
-    CHECK(m.body().size() == 0);
-    CHECK(m.headers().size() == 0);
+    CHECK(m.body().empty());
+    CHECK(m.headers().empty());
 }
 
 TEST_CASE("MessageParser.headers.one", "[MessageParser]")
@@ -27,7 +27,7 @@ TEST_CASE("MessageParser.headers.one", "[MessageParser]")
     {
         auto const m = MessageParser::parse("name=");
         REQUIRE(!!m.header("name"));
-        CHECK(*m.header("name") == "");
+        CHECK(m.header("name")->empty());
     }
     SECTION("with value")
     {
@@ -49,7 +49,7 @@ TEST_CASE("MessageParser.headers.many", "[MessageParser]")
     SECTION("without value")
     {
         auto const m = MessageParser::parse("name=,name2=");
-        CHECK(m.body().size() == 0);
+        CHECK(m.body().empty());
         REQUIRE(!!m.header("name"));
         REQUIRE(!!m.header("name2"));
         CHECK(m.header("name")->empty());
@@ -58,7 +58,7 @@ TEST_CASE("MessageParser.headers.many", "[MessageParser]")
     SECTION("with value")
     {
         auto const m = MessageParser::parse("name=value,name2=other");
-        CHECK(m.body().size() == 0);
+        CHECK(m.body().empty());
         REQUIRE(!!m.header("name"));
         REQUIRE(!!m.header("name2"));
         CHECK(*m.header("name") == "value");
@@ -67,20 +67,20 @@ TEST_CASE("MessageParser.headers.many", "[MessageParser]")
     SECTION("mixed value 1")
     {
         auto const m = MessageParser::parse("name=,name2=other");
-        CHECK(m.body().size() == 0);
+        CHECK(m.body().empty());
         REQUIRE(!!m.header("name"));
         REQUIRE(!!m.header("name2"));
-        CHECK(*m.header("name") == "");
+        CHECK(m.header("name")->empty());
         CHECK(*m.header("name2") == "other");
     }
     SECTION("mixed value 2")
     {
         auto const m = MessageParser::parse("name=some,name2=");
-        CHECK(m.body().size() == 0);
+        CHECK(m.body().empty());
         REQUIRE(!!m.header("name"));
         REQUIRE(!!m.header("name2"));
         CHECK(*m.header("name") == "some");
-        CHECK(*m.header("name2") == "");
+        CHECK(m.header("name2")->empty());
     }
 
     SECTION("superfluous comma 1")
@@ -109,14 +109,14 @@ TEST_CASE("MessageParser.body", "[MessageParser]")
     SECTION("empty body")
     {
         auto const m = MessageParser::parse(";");
-        CHECK(m.headers().size() == 0);
-        CHECK(m.body().size() == 0);
+        CHECK(m.headers().empty());
+        CHECK(m.body().empty());
     }
 
     SECTION("simple body")
     {
         auto const m = MessageParser::parse(";foo");
-        CHECK(m.headers().size() == 0);
+        CHECK(m.headers().empty());
         CHECK(m.body() == std::vector<uint8_t> { 'f', 'o', 'o' });
     }
 
@@ -141,6 +141,8 @@ TEST_CASE("MessageParser.body", "[MessageParser]")
     }
 }
 
+namespace
+{
 class MessageParserTest: public vtparser::NullParserEvents
 {
   private:
@@ -170,6 +172,7 @@ class MessageParserTest: public vtparser::NullParserEvents
         }
     }
 };
+} // namespace
 
 TEST_CASE("MessageParser.VT_embedded")
 {

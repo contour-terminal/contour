@@ -98,9 +98,8 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     /// Must be invoked when rendering the terminal's text has finished for this frame.
     void endFrame();
 
-  private:
-    void initializeDirectMapping();
-
+    // TextClusterGrouper::Events overrides -- public, as in the base interface.
+    //
     void renderTextGroup(std::u32string_view codepoints,
                          gsl::span<unsigned> clusters,
                          vtbackend::CellLocation initialPenPosition,
@@ -113,6 +112,9 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
                               char32_t codepoint,
                               vtbackend::RGBColor foregroundColor,
                               vtbackend::LineFlags flags) override;
+
+  private:
+    void initializeDirectMapping();
 
     /// Gets the text shaping result of the current text cluster group
     text::shape_result const& getOrCreateCachedGlyphPositions(crispy::strong_hash hash,
@@ -132,7 +134,8 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     struct BlockCanvas
     {
         vtbackend::ImageSize size {};
-        atlas::Format format {};
+        // NB: atlas::Format has no zero enumerator; Red is the narrowest valid one.
+        atlas::Format format = atlas::Format::Red;
         uint32_t fragmentShaderSelector {};
         size_t components {};
         std::vector<uint8_t> bitmap {};

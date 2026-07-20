@@ -18,7 +18,7 @@
 #include <unordered_map>
 #include <vector>
 
-#if defined(CRISPY_CONCEPTS_SUPPORTED)
+#ifdef CRISPY_CONCEPTS_SUPPORTED
     #include <concepts>
 #endif
 
@@ -152,7 +152,7 @@ constexpr std::string_view trimRight(std::string_view value) noexcept
 {
     while (!value.empty())
     {
-        if (std::string_view(" \t\r\n").find(value.back()) == std::string_view::npos)
+        if (!std::string_view(" \t\r\n").contains(value.back()))
             return value;
         value.remove_suffix(1);
     }
@@ -245,8 +245,7 @@ constexpr bool split(std::basic_string_view<T> text,
 }
 
 template <typename T>
-constexpr inline auto split(std::basic_string_view<T> text, T delimiter)
-    -> std::vector<std::basic_string_view<T>>
+constexpr auto split(std::basic_string_view<T> text, T delimiter) -> std::vector<std::basic_string_view<T>>
 {
     std::vector<std::basic_string_view<T>> output {};
     split(text, delimiter, [&](auto value) {
@@ -411,7 +410,7 @@ class finally // NOLINT(readability-identifier-naming)
     std::function<void()> _hook {};
 };
 
-#if defined(CRISPY_CONCEPTS_SUPPORTED)
+#ifdef CRISPY_CONCEPTS_SUPPORTED
 
 // clang-format off
 template <typename T>
@@ -619,7 +618,7 @@ inline std::string replace(std::string_view text, std::string_view pattern, T&& 
     return os.str();
 }
 
-inline std::filesystem::path homeResolvedPath(std::string input, const std::filesystem::path& homeDirectory)
+inline std::filesystem::path homeResolvedPath(std::string input, std::filesystem::path const& homeDirectory)
 {
     if (!input.empty() && input[0] == '~')
     {
@@ -628,7 +627,7 @@ inline std::filesystem::path homeResolvedPath(std::string input, const std::file
         return homeDirectory / std::filesystem::path(subPath);
     }
 
-    return std::filesystem::path(input);
+    return { std::move(input) };
 }
 
 /// Substitutes each `${NAME}` in @p text with `replace(NAME)`.
@@ -637,7 +636,7 @@ inline std::filesystem::path homeResolvedPath(std::string input, const std::file
 /// would-be variable untouched, so machine-emitted config (e.g. SaveLayout) can round-trip values
 /// that contain literal `${...}` text without them being re-expanded on reload.
 template <typename VariableReplacer>
-inline std::string replaceVariables(std::string_view text, VariableReplacer replace)
+inline std::string replaceVariables(std::string_view text, VariableReplacer const& replace)
 {
     using namespace std::string_view_literals;
 
@@ -723,7 +722,7 @@ inline std::string humanReadableBytes(uint64_t bytes)
 }
 
 template <typename... Ts>
-constexpr void ignore_unused(Ts... /*values*/) noexcept
+constexpr void ignore_unused(Ts const&... /*values*/) noexcept
 {
 }
 

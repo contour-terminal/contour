@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <crispy/logstore.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -9,11 +11,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-namespace logstore
-{
-class sink;
-}
 
 namespace vtconformance
 {

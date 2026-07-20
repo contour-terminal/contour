@@ -23,7 +23,7 @@ TEST_CASE("screenshotBufferSize: RGBA8 byte count is width*height*4", "[screensh
 {
     CHECK(screenshotBufferSize(1, 1) == 4);
     CHECK(screenshotBufferSize(10, 20) == 800);
-    CHECK(screenshotBufferSize(1920, 1080) == 1920u * 1080u * 4u);
+    CHECK(screenshotBufferSize(1920, 1080) == static_cast<std::size_t>(1920u * 1080u * 4u));
     CHECK(ScreenshotBytesPerPixel == 4);
 }
 
@@ -47,7 +47,8 @@ std::vector<uint8_t> makeRowTaggedBuffer(int width, int height)
     for (int y = 0; y < height; ++y)
         for (int x = 0; x < width; ++x)
         {
-            auto const i = (static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)) * 4;
+            auto const i =
+                ((static_cast<size_t>(y) * static_cast<size_t>(width)) + static_cast<size_t>(x)) * 4;
             buf[i + 0] = static_cast<uint8_t>(y);
             buf[i + 1] = static_cast<uint8_t>(x);
             buf[i + 2] = 0;
@@ -97,11 +98,11 @@ TEST_CASE("normalizeScreenshotBuffer: shorter input zero-pads the missing rows",
     auto const out = normalizeScreenshotBuffer(full, W, H, /*flip*/ false);
     REQUIRE(out.size() == screenshotBufferSize(W, H));
     // The two supplied rows are present; the remaining two are zero-filled.
-    CHECK(out[0] == 0);                // row 0 present
-    CHECK(out[rowBytes] == 1);         // row 1 present
-    CHECK(out[rowBytes * 2] == 0);     // row 2 zero-filled
-    CHECK(out[rowBytes * 3] == 0);     // row 3 zero-filled
-    CHECK(out[rowBytes * 3 + 3] == 0); // and its alpha is zero (defensive pad, not opaque)
+    CHECK(out[0] == 0);                  // row 0 present
+    CHECK(out[rowBytes] == 1);           // row 1 present
+    CHECK(out[rowBytes * 2] == 0);       // row 2 zero-filled
+    CHECK(out[rowBytes * 3] == 0);       // row 3 zero-filled
+    CHECK(out[(rowBytes * 3) + 3] == 0); // and its alpha is zero (defensive pad, not opaque)
 }
 
 TEST_CASE("normalizeScreenshotBuffer: longer input is truncated to the expected rows", "[screenshot]")

@@ -33,9 +33,9 @@ inline std::string escape(uint8_t ch, numeric_escape numericEscape = numeric_esc
             if (0x20 <= ch && ch < 0x7E)
                 return std::format("{}", static_cast<char>(ch));
             else if (numericEscape == numeric_escape::Hex)
-                return std::format("\\x{:02x}", static_cast<uint8_t>(ch) & 0xFF);
+                return std::format("\\x{:02x}", ch & 0xFF);
             else
-                return std::format("\\{:03o}", static_cast<uint8_t>(ch) & 0xFF);
+                return std::format("\\{:03o}", ch & 0xFF);
     }
 }
 

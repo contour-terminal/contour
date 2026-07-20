@@ -16,6 +16,8 @@
 #include <yaml-cpp/emitter.h>
 
 #include <QtCore/QFile>
+#include <QtCore/QString>
+#include <QtCore/QtGlobal>
 
 #include <algorithm>
 #include <array>
@@ -25,9 +27,9 @@
 #include <iostream>
 #include <ranges>
 
-#if defined(_WIN32)
+#ifdef _WIN32
     #include <Windows.h>
-#elif defined(__APPLE__)
+#elifdef __APPLE__
     #include <unistd.h>
 
     #include <mach-o/dyld.h>
@@ -38,12 +40,8 @@
 auto constexpr MinimumFontSize = text::font_size { 8.0 };
 
 using namespace std;
-using crispy::escape;
 using crispy::homeResolvedPath;
 using crispy::replaceVariables;
-using crispy::toLower;
-using crispy::toUpper;
-using crispy::unescape;
 
 using vtpty::Process;
 
@@ -189,6 +187,27 @@ namespace
 
     auto const configLog = logstore::category("config", "Logs configuration file loading.");
 
+    /// Reads an environment variable as the raw bytes the environment holds.
+    ///
+    /// qgetenv() rather than qEnvironmentVariable(): the latter decodes through QString's local 8-bit
+    /// codec, so under a non-UTF-8 locale any byte that codec cannot represent comes back as U+FFFD.
+    /// What is read here names filesystem paths, and a path is a byte string that has to survive
+    /// intact -- a mangled one simply does not exist, and contour then silently falls back to its
+    /// defaults as though the user's configuration had never been there.
+    ///
+    /// Not crispy::environment either: that serves an immutable snapshot taken at first access, and
+    /// `${VAR}` expansion has to see the environment as it stands when the config is read. qgetenv()
+    /// is nonetheless thread safe (Qt guards the environment with its own lock), which is what ruled
+    /// out plain getenv() here -- config (re)load runs while the PTY threads are live.
+    ///
+    /// @param name Name of the variable to read.
+    /// @return The variable's value as raw bytes, or an empty string if it is unset.
+    [[nodiscard]] std::string environmentBytes(char const* name)
+    {
+        auto const value = qgetenv(name);
+        return std::string { value.constData(), static_cast<std::size_t>(value.size()) };
+    }
+
     /// Parses a resize/direction keyword ("Left"/"Right"/"Up"/"Down", case-insensitive) into the
     /// action-layer Direction enum.
     /// @param name The direction keyword from the config.
@@ -301,8 +320,8 @@ namespace
 
         locations.emplace_back(Process::homeDirectory() / ".terminfo");
 
-        if (auto const* value = getenv("TERMINFO_DIRS"); value && *value)
-            for (auto const dir: crispy::split(string_view(value), ':'))
+        if (auto const terminfoDirs = environmentBytes("TERMINFO_DIRS"); !terminfoDirs.empty())
+            for (auto const dir: crispy::split(string_view(terminfoDirs), ':'))
                 locations.emplace_back(string(dir));
 
         locations.emplace_back("/usr/share/terminfo");
@@ -316,7 +335,7 @@ namespace
 
     string getDefaultTERM(optional<fs::path> const& appTerminfoDir)
     {
-#if defined(_WIN32)
+#ifdef _WIN32
         return "contour";
 #else
 
@@ -334,7 +353,7 @@ namespace
                 if (access((prefix / term.substr(0, 1) / term).string().c_str(), R_OK) == 0)
                     return term;
 
-    #if defined(__APPLE__)
+    #ifdef __APPLE__
                 // I realized that on Apple the `tic` command sometimes installs
                 // the terminfo files into weird paths.
                 if (access((prefix / std::format("{:02X}", term.at(0)) / term).string().c_str(), R_OK) == 0)
@@ -351,13 +370,13 @@ namespace
 fs::path configHome(string const& programName)
 {
 #if defined(__unix__) || defined(__APPLE__)
-    if (auto const* value = getenv("XDG_CONFIG_HOME"); value && *value)
+    if (auto const value = environmentBytes("XDG_CONFIG_HOME"); !value.empty())
         return fs::path { value } / programName;
     else
         return Process::homeDirectory() / ".config" / programName;
 #endif
 
-#if defined(_WIN32)
+#ifdef _WIN32
     DWORD size = GetEnvironmentVariableA("LOCALAPPDATA", nullptr, 0);
     if (size)
     {
@@ -375,14 +394,14 @@ fs::path configHome()
     return configHome("contour");
 }
 
-std::string createString(Config const& c)
+static std::string createString(Config const& c)
 {
     return createString<YAMLConfigWriter>(c);
 }
 
 std::string defaultConfigString()
 {
-    const Config config {};
+    Config const config {};
     auto configString = createString(config);
 
     return configString;
@@ -469,7 +488,7 @@ void compareEntries(Config& config, auto const& output)
 /// settings page) from the hand-maintained inline entries, which stay read-only there.
 /// @param config The just-parsed configuration to annotate.
 /// @param reader The reader that parsed contour.yml; its @c doc supplies the inline `color_schemes:` node.
-void recordMainConfigOrigins(Config& config, YAMLConfigReader const& reader)
+static void recordMainConfigOrigins(Config& config, YAMLConfigReader const& reader)
 {
     for (auto const& [name, _]: config.profiles.value())
         config.profileOrigins.emplace(name, SettingsOrigin::MainConfig);
@@ -499,7 +518,7 @@ void recordMainConfigOrigins(Config& config, YAMLConfigReader const& reader)
 /// @param config The configuration to augment in place (its @c configFile locates the side files).
 /// @param reader The reader used for the main config; reused to parse profile bodies (it carries the
 ///               logger and ${VAR} replacer, and loadProfileBody takes its node explicitly).
-void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
+static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
 {
     auto const dir = config.configFile.parent_path();
 
@@ -675,8 +694,9 @@ YAMLConfigReader::YAMLConfigReader(std::string const& filename,
     if (!variableReplacer)
     {
         variableReplacer = [&log = logger](std::string_view name) -> std::string {
-            if (auto const* value = std::getenv(std::string(name).c_str()))
-                return value;
+            auto const key = std::string(name);
+            if (qEnvironmentVariableIsSet(key.c_str()))
+                return environmentBytes(key.c_str());
             log()("Undefined environment variable: ${{{}}}", name);
             return {};
         };
@@ -713,7 +733,7 @@ std::filesystem::path YAMLConfigReader::resolvedPath(std::string const& input) c
 // NOLINTBEGIN(readability-convert-member-functions-to-static)
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     std::filesystem::path& where)
+                                     std::filesystem::path& where) const
 {
     auto const child = node[entry];
     if (child)
@@ -791,7 +811,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("profiles", c.profiles, c.defaultProfileName.value());
         loadFromEntry("layouts", c.layouts);
         loadFromEntry("git_drawings", c.gitDrawings);
-#if defined(CONTOUR_FRONTEND_GUI)
+#ifdef CONTOUR_FRONTEND_GUI
         vtrasterizer::BoxDrawingRenderer::setGitDrawingsStyle(c.gitDrawings.value());
         loadFromEntry("box_arc_style", c.boxArcStyle);
         vtrasterizer::BoxDrawingRenderer::setArcStyle(c.boxArcStyle.value());
@@ -1510,7 +1530,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     vtpty::Process::ExecInfo& where)
+                                     vtpty::Process::ExecInfo& where) const
 {
     if (auto const child = node[entry])
     {
@@ -1935,9 +1955,9 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      vtrasterizer::TextShapingEngine& where)
 {
     auto constexpr NativeTextShapingEngine =
-#if defined(_WIN32)
+#ifdef _WIN32
         vtrasterizer::TextShapingEngine::DWrite;
-#elif defined(__APPLE__)
+#elifdef __APPLE__
         vtrasterizer::TextShapingEngine::CoreText;
 #else
         vtrasterizer::TextShapingEngine::OpenShaper;
@@ -2478,7 +2498,7 @@ void YAMLConfigReader::defaultSettings(vtpty::Process::ExecInfo& shell)
 
     // {{{ Populate environment variables
     std::optional<fs::path> appTerminfoDir; // NOLINT(misc-const-correctness)
-#if defined(__APPLE__)
+#ifdef __APPLE__
     {
         char buf[1024];
         uint32_t len = sizeof(buf);
@@ -2495,13 +2515,13 @@ void YAMLConfigReader::defaultSettings(vtpty::Process::ExecInfo& shell)
 #endif
 
     // force some default env
-    if (shell.env.find("TERM") == shell.env.end())
+    if (!shell.env.contains("TERM"))
     {
         shell.env["TERM"] = getDefaultTERM(appTerminfoDir);
         logger()("Defaulting TERM to {}.", shell.env["TERM"]);
     }
 
-    if (shell.env.find("COLORTERM") == shell.env.end())
+    if (!shell.env.contains("COLORTERM"))
         shell.env["COLORTERM"] = "truecolor";
 
     // TERM_PROGRAM / TERM_PROGRAM_VERSION are the de-facto way an application identifies WHICH
@@ -2780,7 +2800,7 @@ std::optional<vtbackend::Modifiers> YAMLConfigReader::parseModifier(YAML::Node c
         return std::nullopt;
 
     vtbackend::Modifiers mods;
-    for (const auto& i: node)
+    for (auto const& i: node)
     {
         if (!i.IsScalar())
             return std::nullopt;
@@ -2959,9 +2979,10 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
                         { "VT", actions::CopyFormat::VT },
                     } };
                 // NOLINTNEXTLINE(readability-qualified-auto)
-                if (auto const p = std::find_if(Mappings.begin(),
-                                                Mappings.end(),
-                                                [&](auto const& t) { return t.first == formatString; });
+                if (auto const p =
+                        std::ranges::find_if(Mappings,
+
+                                             [&](auto const& t) { return t.first == formatString; });
                     p != Mappings.end())
                 {
                     return actions::CopySelection { p->second };
@@ -3249,7 +3270,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 }
 
 template <typename Writer>
-std::string createForGlobal(Config const& c)
+static std::string createForGlobal(Config const& c)
 {
     auto doc = std::string {};
     Writer writer;
@@ -3263,7 +3284,7 @@ std::string createForGlobal(Config const& c)
 
     auto const processConfigEntry =
         [&]<typename T, documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
-            auto name,
+            auto const& name,
             contour::config::ConfigEntry<
                 T,
                 contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& v) {
@@ -3272,7 +3293,7 @@ std::string createForGlobal(Config const& c)
 
     auto const processConfigEntryWithEscape =
         [&]<documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
-            auto name,
+            auto const& name,
             contour::config::ConfigEntry<
                 std::string,
                 contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& v) {
@@ -3283,21 +3304,21 @@ std::string createForGlobal(Config const& c)
         processConfigEntry,
         processConfigEntryWithEscape,
         // Ignored entries
-        [&]([[maybe_unused]] auto name,
+        [&]([[maybe_unused]] auto const& name,
             [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, vtbackend::ColorPalette>,
                                          documentation::ColorSchemes> const& v) {},
-        [&]([[maybe_unused]] auto name,
+        [&]([[maybe_unused]] auto const& name,
             [[maybe_unused]] ConfigEntry<std::map<vtbackend::DECMode, bool>,
                                          documentation::FrozenDecMode> const& v) {},
-        [&]([[maybe_unused]] auto name,
+        [&]([[maybe_unused]] auto const& name,
             [[maybe_unused]] ConfigEntry<InputMappings, documentation::InputMappings> const& v) {},
-        [&]([[maybe_unused]] auto name,
+        [&]([[maybe_unused]] auto const& name,
             [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, TerminalProfile>,
                                          documentation::Profiles> const& v) {},
-        [&]([[maybe_unused]] auto name,
+        [&]([[maybe_unused]] auto const& name,
             [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, config::Layout>,
                                          documentation::Layouts> const& v) {},
-        [&]([[maybe_unused]] auto name, [[maybe_unused]] auto const& v) {},
+        [&]([[maybe_unused]] auto const& name, [[maybe_unused]] auto const& v) {},
     };
 
     Reflection::CallOnMembers(c, completeOverload);
@@ -3314,11 +3335,11 @@ std::string createForGlobal(Config const& c)
 /// @param doc The output buffer to append to.
 /// @param profile The profile to serialize.
 template <typename Writer>
-void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile const& profile)
+static void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile const& profile)
 {
     auto const processConfigEntry =
         [&]<typename T, documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
-            auto name,
+            auto const& name,
             contour::config::ConfigEntry<
                 T,
                 contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& v) {
@@ -3329,7 +3350,7 @@ void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile const& pr
     // we add this lambda to handle it in overload set for now
     auto const processConfigEntryWithExecInfo =
         [&]<documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
-            auto name,
+            auto const& name,
             contour::config::ConfigEntry<
                 vtpty::Process::ExecInfo,
                 contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& vEntry) {
@@ -3350,7 +3371,7 @@ void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile const& pr
     auto completeOverload = crispy::overloaded {
         processConfigEntryWithExecInfo,
         processConfigEntry,
-        [&]([[maybe_unused]] auto name, [[maybe_unused]] auto const& v) {},
+        [&]([[maybe_unused]] auto const& name, [[maybe_unused]] auto const& v) {},
     };
 
     Reflection::CallOnMembers(profile, completeOverload);
@@ -3359,7 +3380,7 @@ void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile const& pr
 /// Serializes one profile's body as a bare top-level map for a `profiles/<name>.yml` GUI side file
 /// (no `profiles:`/name wrapper), so the same reader that parses an inline profile parses it back.
 template <typename Writer>
-std::string createForSingleProfile(TerminalProfile const& profile)
+static std::string createForSingleProfile(TerminalProfile const& profile)
 {
     auto doc = std::string {};
     Writer writer;
@@ -3368,7 +3389,7 @@ std::string createForSingleProfile(TerminalProfile const& profile)
 }
 
 template <typename Writer>
-std::string createForProfile(Config const& c)
+static std::string createForProfile(Config const& c)
 {
     auto doc = std::string {};
     Writer writer;
@@ -3376,7 +3397,7 @@ std::string createForProfile(Config const& c)
     // inside profiles:
     doc.append(writer.replaceCommentPlaceholder(std::string { writer.whichDoc(c.profiles) }));
     {
-        const auto _ = typename Writer::Offset {};
+        auto const _ = typename Writer::Offset {};
         for (auto&& [name, entry]: c.profiles.value())
         {
             if constexpr (std::same_as<Writer, YAMLConfigWriter>)
@@ -3397,7 +3418,7 @@ std::string createForProfile(Config const& c)
 /// @param doc The output buffer to append to.
 /// @param entry The palette to serialize.
 template <typename Writer>
-void emitColorPaletteBody(Writer& writer, std::string& doc, vtbackend::ColorPalette const& entry)
+static void emitColorPaletteBody(Writer& writer, std::string& doc, vtbackend::ColorPalette const& entry)
 {
     auto const processWithDoc = [&](auto&& docString, auto... val) {
         doc.append(writer.replaceCommentPlaceholder(writer.process(writer.whichDoc(docString), val...)));
@@ -3511,7 +3532,7 @@ void emitColorPaletteBody(Writer& writer, std::string& doc, vtbackend::ColorPale
 /// Serializes one color palette as a bare top-level body for a `colorschemes/<name>.yml` GUI side
 /// file (no `color_schemes:`/name wrapper), matching that file's lazy read path.
 template <typename Writer>
-std::string createForSingleColorScheme(vtbackend::ColorPalette const& palette)
+static std::string createForSingleColorScheme(vtbackend::ColorPalette const& palette)
 {
     auto doc = std::string {};
     Writer writer;
@@ -3520,7 +3541,7 @@ std::string createForSingleColorScheme(vtbackend::ColorPalette const& palette)
 }
 
 template <typename Writer>
-std::string createForColorScheme(Config const& c)
+static std::string createForColorScheme(Config const& c)
 {
     auto doc = std::string {};
     Writer writer;
@@ -3531,7 +3552,7 @@ std::string createForColorScheme(Config const& c)
         {
             doc.append(std::format("    {}: \n", name));
             {
-                const auto _ = typename Writer::Offset {};
+                auto const _ = typename Writer::Offset {};
                 emitColorPaletteBody(writer, doc, entry);
             }
         }
@@ -3541,14 +3562,14 @@ std::string createForColorScheme(Config const& c)
 }
 
 template <typename Writer>
-std::string createKeyMapping(Config const& c)
+static std::string createKeyMapping(Config const& c)
 {
     auto doc = std::string {};
     Writer writer;
 
     doc.append(writer.replaceCommentPlaceholder(c.inputMappings.documentation));
     {
-        const auto _ = typename Writer::Offset {};
+        auto const _ = typename Writer::Offset {};
         for (auto&& entry: c.inputMappings.value().keyMappings)
             doc.append(Writer::addOffset(writer.format(entry), Writer::Offset::Levels * Writer::OneOffset));
 

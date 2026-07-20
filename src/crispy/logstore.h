@@ -17,7 +17,7 @@
 #include <string_view>
 #include <vector>
 
-#if defined __has_include
+#ifdef __has_include
     #if __cpp_lib_source_location
         #include <source_location>
     #endif
@@ -54,7 +54,7 @@ class source_location_custom
 
     static source_location_custom current() noexcept
     {
-        return source_location_custom(__builtin_FILE(), __builtin_LINE(), __builtin_FUNCTION());
+        return { __builtin_FILE(), __builtin_LINE(), __builtin_FUNCTION() };
     }
 
   private:
@@ -63,8 +63,8 @@ class source_location_custom
     char const* _functionName;
 };
 
-#if defined __has_include
-    #if defined __cpp_lib_source_location
+#ifdef __has_include
+    #ifdef __cpp_lib_source_location
 using source_location = std::source_location;
     #else
 using source_location = source_location_custom;

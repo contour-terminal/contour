@@ -50,7 +50,7 @@ TEST_CASE("elideMiddle keeps both informative ends", "[contour][hyperlink]")
         CHECK(codepointCount(elided) == 30);
         CHECK(elided.starts_with("https://"));
         CHECK(elided.ends_with("final.txt"));
-        CHECK(elided.find("…") != std::string::npos);
+        CHECK(elided.contains("…"));
     }
 
     SECTION("a degenerate limit yields just the ellipsis rather than a broken string")

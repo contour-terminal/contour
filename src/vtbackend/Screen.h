@@ -473,7 +473,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     std::shared_ptr<Image const> uploadImage(ImageFormat format, ImageSize imageSize, Image::Data&& pixmap);
 
     /// Uploads an image to the named image pool, decoding PNG to RGBA if needed.
-    void uploadImage(std::string name, ImageFormat format, ImageSize imageSize, Image::Data&& pixmap);
+    void uploadImage(std::string const& name, ImageFormat format, ImageSize imageSize, Image::Data&& pixmap);
 
     /**
      * Renders an image onto the screen.
@@ -974,7 +974,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     std::shared_ptr<regis::ReGISTextRasterizer> _regisTextRasterizer;
     std::unique_ptr<regis::ReGISEvents> _regisEvents;
 
-#if defined(LIBTERMINAL_LOG_TRACE)
+#ifdef LIBTERMINAL_LOG_TRACE
     std::atomic<bool> _logCharTrace = true;
     std::string _pendingCharTraceLog;
 #endif

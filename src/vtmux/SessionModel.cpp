@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtmux/SessionModel.h>
+
 #include <algorithm>
 #include <cassert>
 #include <cctype>
 #include <ranges>
-
-#include <vtmux/SessionModel.h>
+#include <utility>
 
 namespace vtmux
 {
@@ -23,7 +24,7 @@ Tab* Window::previousActiveTab() const noexcept
 
 Tab* Window::tabAt(int index) const noexcept
 {
-    if (index < 0 || index >= static_cast<int>(_tabs.size()))
+    if (index < 0 || std::cmp_greater_equal(index, _tabs.size()))
         return nullptr;
     return _tabs[static_cast<size_t>(index)].get();
 }
@@ -137,7 +138,7 @@ Tab* SessionModel::createTab(WindowId windowId)
 
 void SessionModel::closeTabAt(Window& win, int index)
 {
-    assert(index >= 0 && index < static_cast<int>(win._tabs.size()));
+    assert(index >= 0 && std::cmp_less(index, win._tabs.size()));
     auto const tabId = win._tabs[static_cast<size_t>(index)]->id();
 
     auto const previousActiveIndex = win._activeTabIndex;

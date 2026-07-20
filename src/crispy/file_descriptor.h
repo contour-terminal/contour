@@ -4,7 +4,7 @@
 #include <format>
 #include <system_error>
 
-#if defined(_WIN32)
+#ifdef _WIN32
     #include <string>
 
     #include <Windows.h>
@@ -20,7 +20,7 @@ struct close_native_handle
 {
 };
 
-#if defined(_WIN32)
+#ifdef _WIN32
 template <>
 struct close_native_handle<HANDLE>
 {
@@ -39,14 +39,14 @@ struct close_native_handle<int>
             {
                 case 0: return;
                 case EINTR: break;
-                default: throw std::system_error(errno, std::system_category(), "close() failed");
+                default: throw std::system_error(errno, std::generic_category(), "close() failed");
             }
         }
     }
 };
 #endif
 
-template <typename T, const T InvalidHandleValue>
+template <typename T, T const InvalidHandleValue>
 class native_handle
 {
   public:
@@ -78,7 +78,7 @@ class native_handle
     static native_handle from_native(native_handle_type fd) // NOLINT
     {
         if (fd == invalid_native_handle)
-            throw std::system_error(errno, std::system_category(), "native_handle() failed");
+            throw std::system_error(errno, std::generic_category(), "native_handle() failed");
         return native_handle { fd };
     }
 
@@ -108,7 +108,7 @@ class native_handle
     native_handle_type _fd = invalid_native_handle;
 };
 
-#if defined(_WIN32)
+#ifdef _WIN32
 using file_descriptor = native_handle<HANDLE, INVALID_HANDLE_VALUE>;
 #else
 using file_descriptor = native_handle<int, -1>;
@@ -116,7 +116,7 @@ using file_descriptor = native_handle<int, -1>;
 
 } // end namespace crispy
 
-#if defined(_WIN32)
+#ifdef _WIN32
 template <>
 struct std::formatter<HANDLE>: std::formatter<std::string>
 {

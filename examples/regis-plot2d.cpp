@@ -6,6 +6,7 @@
 /// draw a polyline with the Vector (V) command.
 
 #include <cmath>
+#include <ranges>
 #include <string>
 #include <string_view>
 
@@ -40,6 +41,13 @@ constexpr double XMax = 12.0;
 constexpr double YMin = -1.0;
 constexpr double YMax = 1.0;
 
+// Grid spacing, expressed as a step size plus the number of grid lines it yields.
+// Counting integer steps (rather than accumulating a double) keeps the loop exact.
+constexpr double XGridStep = 2.0;
+constexpr double YGridStep = 0.5;
+constexpr int XGridLines = static_cast<int>((XMax - XMin) / XGridStep) + 1;
+constexpr int YGridLines = static_cast<int>((YMax - YMin) / YGridStep) + 1;
+
 int mapX(double x)
 {
     return Left + static_cast<int>((x - XMin) / (XMax - XMin) * (Right - Left));
@@ -64,12 +72,18 @@ int main()
 
     // Grid (dotted, dim colour). Vertical lines every 2 units, horizontal every 0.5.
     r += "W(I8)W(P4)";
-    for (auto gx = XMin; gx <= XMax + 1e-9; gx += 2.0)
+    for (auto const i: std::views::iota(0, XGridLines))
+    {
+        auto const gx = XMin + (XGridStep * i);
         r += "P[" + std::to_string(mapX(gx)) + "," + std::to_string(Top) + "]V[" + std::to_string(mapX(gx))
              + "," + std::to_string(Bottom) + "]";
-    for (auto gy = YMin; gy <= YMax + 1e-9; gy += 0.5)
+    }
+    for (auto const i: std::views::iota(0, YGridLines))
+    {
+        auto const gy = YMin + (YGridStep * i);
         r += "P[" + std::to_string(Left) + "," + std::to_string(mapY(gy)) + "]V[" + std::to_string(Right)
              + "," + std::to_string(mapY(gy)) + "]";
+    }
     r += "W(P1)"; // solid again
 
     // Axes (bright).
@@ -84,7 +98,7 @@ int main()
     auto first = true;
     for (auto i = 0; i <= 340; ++i)
     {
-        auto const x = XMin + (XMax - XMin) * (static_cast<double>(i) / 340.0);
+        auto const x = XMin + ((XMax - XMin) * (static_cast<double>(i) / 340.0));
         auto const px = mapX(x);
         auto const py = mapY(f(x));
         if (first)

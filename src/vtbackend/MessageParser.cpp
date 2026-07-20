@@ -61,7 +61,7 @@ void MessageParser::pass(char ch)
 
 void MessageParser::flushHeader()
 {
-    bool const hasSpaceAvailable = _headers.size() < MaxParamCount || _headers.count(_parsedKey);
+    bool const hasSpaceAvailable = _headers.size() < MaxParamCount || _headers.contains(_parsedKey);
     bool const isValidParameter = !_parsedKey.empty();
 
     if (_parsedValue.size() > 1 && _parsedValue[0] == '!')

@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <text_shaper/font.h>
 #include <text_shaper/mock_font_locator.h>
+
+#include <text_shaper/font.h>
 
 #include <string_view>
 
-using std::nullopt;
-using std::optional;
 using std::string;
 using std::string_view;
-using std::unique_ptr;
 using std::vector;
 
 using namespace std::string_view_literals;
@@ -77,7 +75,7 @@ font_source_list mock_font_locator::all()
     return output;
 }
 
-font_source_list mock_font_locator::resolve(gsl::span<const char32_t> /*codepoints*/)
+font_source_list mock_font_locator::resolve(gsl::span<char32_t const> /*codepoints*/)
 {
     // A real locator answers by charset; a test says up front what the answer is, so that a case can
     // decide whether the coverage lookup finds anything without needing real fonts on the machine.

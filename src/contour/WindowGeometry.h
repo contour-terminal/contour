@@ -108,9 +108,9 @@ struct SizeHintPolicy
 /// @return The compile-time @ref SizeHintPlatform.
 [[nodiscard]] constexpr SizeHintPlatform currentSizeHintPlatform() noexcept
 {
-#if defined(_WIN32)
+#ifdef _WIN32
     return SizeHintPlatform::Windows;
-#elif defined(__APPLE__)
+#elifdef __APPLE__
     return SizeHintPlatform::MacOS;
 #else
     return SizeHintPlatform::Other;
@@ -189,9 +189,9 @@ namespace detail
                                                               Margins marginsDevicePx) noexcept
 {
     auto const usableWidth =
-        std::max(0, unbox<int>(availableDevicePx.width) - 2 * marginsDevicePx.horizontal);
+        std::max(0, unbox<int>(availableDevicePx.width) - (2 * marginsDevicePx.horizontal));
     auto const usableHeight =
-        std::max(0, unbox<int>(availableDevicePx.height) - 2 * marginsDevicePx.vertical);
+        std::max(0, unbox<int>(availableDevicePx.height) - (2 * marginsDevicePx.vertical));
     auto const cellWidth = std::max(1, unbox<int>(cellSize.width));
     auto const cellHeight = std::max(1, unbox<int>(cellSize.height));
 

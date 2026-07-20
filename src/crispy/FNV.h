@@ -62,7 +62,7 @@ class fnv
     /// Each character in @p str is hashed sequentially before applying
     /// the remaining values in @p moreValues.
     template <typename... V>
-    constexpr U operator()(U memory, std::string_view str, V... moreValues) const noexcept
+    constexpr U operator()(U memory, std::string_view str, V const&... moreValues) const noexcept
         requires(std::same_as<T, char>)
     {
         for (auto const ch: str)

@@ -375,25 +375,25 @@ struct ring_reverse_iterator
 
 // {{{ basic_ring<T> impl
 template <typename T, typename Vector>
-typename basic_ring<T, Vector>::reverse_iterator basic_ring<T, Vector>::rbegin() noexcept
+basic_ring<T, Vector>::reverse_iterator basic_ring<T, Vector>::rbegin() noexcept
 {
     return reverse_iterator { this, 0 };
 }
 
 template <typename T, typename Vector>
-typename basic_ring<T, Vector>::reverse_iterator basic_ring<T, Vector>::rend() noexcept
+basic_ring<T, Vector>::reverse_iterator basic_ring<T, Vector>::rend() noexcept
 {
     return reverse_iterator { this, size() };
 }
 
 template <typename T, typename Vector>
-typename basic_ring<T, Vector>::const_reverse_iterator basic_ring<T, Vector>::rbegin() const noexcept
+basic_ring<T, Vector>::const_reverse_iterator basic_ring<T, Vector>::rbegin() const noexcept
 {
     return const_reverse_iterator { (basic_ring<T const, Vector>*) this, 0 };
 }
 
 template <typename T, typename Vector>
-typename basic_ring<T, Vector>::const_reverse_iterator basic_ring<T, Vector>::rend() const noexcept
+basic_ring<T, Vector>::const_reverse_iterator basic_ring<T, Vector>::rend() const noexcept
 {
     return const_reverse_iterator { (basic_ring<T const, Vector>*) this,
                                     static_cast<difference_type>(size()) };

@@ -71,7 +71,7 @@ TEST_CASE("KittyGraphics.missing_dimensions_refused", "[kitty]")
 {
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
     mock.writeToScreen("\033_Ga=T,f=24,i=5;AAAA\033\\"sv);
-    CHECK(mock.terminal.peekInput().find("EINVAL") != std::string_view::npos);
+    CHECK(mock.terminal.peekInput().contains("EINVAL"));
 }
 
 TEST_CASE("KittyGraphics.parse.ignores_unknown_keys", "[kitty]")
@@ -108,19 +108,19 @@ TEST_CASE("KittyGraphics.query_validates_what_a_transmission_would_reject", "[ki
     SECTION("unsupported medium")
     {
         mock.writeToScreen("\033_Gi=31,s=1,v=1,a=q,t=t,f=24;AAAA\033\\"sv);
-        CHECK(mock.terminal.peekInput().find("ENOTSUP") != std::string_view::npos);
+        CHECK(mock.terminal.peekInput().contains("ENOTSUP"));
     }
 
     SECTION("compressed payload")
     {
         mock.writeToScreen("\033_Gi=32,s=1,v=1,a=q,t=d,o=z,f=24;AAAA\033\\"sv);
-        CHECK(mock.terminal.peekInput().find("ENOTSUP") != std::string_view::npos);
+        CHECK(mock.terminal.peekInput().contains("ENOTSUP"));
     }
 
     SECTION("missing dimensions on a raw pixel format")
     {
         mock.writeToScreen("\033_Gi=33,a=q,t=d,f=24;AAAA\033\\"sv);
-        CHECK(mock.terminal.peekInput().find("EINVAL") != std::string_view::npos);
+        CHECK(mock.terminal.peekInput().contains("EINVAL"));
     }
 }
 
@@ -146,7 +146,7 @@ TEST_CASE("KittyGraphics.lower_case_delete_keeps_the_image_data", "[kitty]")
     // homed first: `a=T` moved it past the image it displayed, and `a=p` places at the cursor.
     mock.terminal.flushInput();
     mock.writeToScreen("\033[H\033_Ga=p,i=1\033\\"sv);
-    CHECK(mock.terminal.peekInput().find("ENOENT") == std::string_view::npos);
+    CHECK(!mock.terminal.peekInput().contains("ENOENT"));
     CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment());
 }
 
@@ -163,7 +163,7 @@ TEST_CASE("KittyGraphics.upper_case_delete_frees_the_image_data", "[kitty]")
     mock.writeToScreen("\033_Ga=d,d=A,i=1\033\\"sv);
     mock.terminal.flushInput();
     mock.writeToScreen("\033_Ga=p,i=1\033\\"sv);
-    CHECK(mock.terminal.peekInput().find("ENOENT") != std::string_view::npos);
+    CHECK(mock.terminal.peekInput().contains("ENOENT"));
 }
 
 TEST_CASE("KittyGraphics.an_endless_chunk_stream_is_abandoned_not_accumulated", "[kitty]")
@@ -181,7 +181,7 @@ TEST_CASE("KittyGraphics.an_endless_chunk_stream_is_abandoned_not_accumulated", 
     for ([[maybe_unused]] auto const i: std::views::iota(size_t { 0 }, chunksToOverrun))
         mock.writeToScreen(std::format("\033_Gm=1;{}\033\\", chunk));
 
-    CHECK(mock.terminal.peekInput().find("EINVAL") != std::string_view::npos);
+    CHECK(mock.terminal.peekInput().contains("EINVAL"));
 
     // Abandoning drops the opener, so the chunks still arriving open a fresh transmission of their
     // own -- bounded in turn. Close it, and the next complete transmission is read on its own terms.
@@ -213,7 +213,7 @@ TEST_CASE("KittyGraphics.hard_reset_drops_a_half_open_transmission", "[kitty]")
     mock.terminal.flushInput();
     mock.writeToScreen(std::format("\033_Ga=T,f=32,s=2,v=2,i=2;{}\033\\", crispy::base64::encode(pixels)));
 
-    CHECK(mock.terminal.peekInput().find("EINVAL") == std::string_view::npos);
+    CHECK(!mock.terminal.peekInput().contains("EINVAL"));
     CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment());
 }
 
@@ -247,7 +247,7 @@ TEST_CASE("KittyGraphics.mismatched_payload_size_is_refused", "[kitty]")
     mock.writeToScreen(
         std::format("\033_Ga=T,f=32,s=64,v=64,i=2;{}\033\\", crispy::base64::encode("AAAA"sv)));
 
-    CHECK(mock.terminal.peekInput().find("EINVAL") != std::string_view::npos);
+    CHECK(mock.terminal.peekInput().contains("EINVAL"));
     CHECK_FALSE(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment());
 }
 
@@ -257,7 +257,7 @@ TEST_CASE("KittyGraphics.unsupported_media_are_refused_not_ignored", "[kitty]")
     // read; saying ENOTSUP is both safer and more useful than silence.
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
     mock.writeToScreen("\033_Ga=T,f=32,s=1,v=1,t=f,i=3;L3RtcC94\033\\"sv);
-    CHECK(mock.terminal.peekInput().find("ENOTSUP") != std::string_view::npos);
+    CHECK(mock.terminal.peekInput().contains("ENOTSUP"));
 }
 
 TEST_CASE("KittyGraphics.chunked_transmission_is_reassembled", "[kitty]")
@@ -301,7 +301,7 @@ TEST_CASE("KittyGraphics.put_of_an_unknown_image_reports_ENOENT", "[kitty]")
 {
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
     mock.writeToScreen("\033_Ga=p,i=1234\033\\"sv);
-    CHECK(mock.terminal.peekInput().find("ENOENT") != std::string_view::npos);
+    CHECK(mock.terminal.peekInput().contains("ENOENT"));
 }
 
 TEST_CASE("KittyGraphics.non_kitty_APC_is_ignored", "[kitty]")
@@ -326,12 +326,12 @@ TEST_CASE("ITerm2.capabilities_are_reported", "[iterm2]")
 
     // Every advertised capability must be one Contour actually has -- an application that believes
     // a false advertisement takes a path that then fails.
-    CHECK(reply.find("Sx") != std::string::npos); // sixel
-    CHECK(reply.find("Sy") != std::string::npos); // synchronized output, DEC mode 2026
-    CHECK(reply.find("H") != std::string::npos);  // hyperlinks, OSC 8
-    CHECK(reply.find("Cw") != std::string::npos); // clipboard writable, OSC 52
-    CHECK(reply.find("Lr") != std::string::npos); // DECSLRM
-    CHECK(reply.find("No") != std::string::npos); // notifications, OSC 99
+    CHECK(reply.contains("Sx")); // sixel
+    CHECK(reply.contains("Sy")); // synchronized output, DEC mode 2026
+    CHECK(reply.contains("H"));  // hyperlinks, OSC 8
+    CHECK(reply.contains("Cw")); // clipboard writable, OSC 52
+    CHECK(reply.contains("Lr")); // DECSLRM
+    CHECK(reply.contains("No")); // notifications, OSC 99
 }
 
 TEST_CASE("ITerm2.a_download_is_not_drawn", "[iterm2]")
@@ -378,7 +378,7 @@ TEST_CASE("ITerm2.an_absurd_height_does_not_scroll_the_screen_away", "[iterm2]")
     // does not.
     auto found = false;
     for (auto const line: std::views::iota(-20, 4))
-        if (screen.grid().lineAt(LineOffset(line)).toUtf8Trimmed().find("marker") != std::string::npos)
+        if (screen.grid().lineAt(LineOffset(line)).toUtf8Trimmed().contains("marker"))
             found = true;
     CHECK(found);
 }
@@ -410,7 +410,7 @@ TEST_CASE("KittyGraphics.a_row_count_above_INT_MAX_does_not_wedge_the_terminal",
 
     // Clamped to the page, so the image is placed rather than dropped -- and only within the page.
     CHECK(screen.at(LineOffset(0), ColumnOffset(0)).imageFragment());
-    CHECK(mock.terminal.peekInput().find("EINVAL") == std::string_view::npos);
+    CHECK(!mock.terminal.peekInput().contains("EINVAL"));
 }
 
 TEST_CASE("KittyGraphics.a_column_count_above_INT_MAX_does_not_wedge_the_terminal", "[kitty]")
@@ -464,13 +464,13 @@ TEST_CASE("KittyGraphics.an_APC_body_past_the_cap_is_dropped_not_dispatched_trun
     // 100x100 RGBA is 40000 bytes, whose base64 is 53336 -- past the 50 KiB cap.
     auto pixels = std::string(100uz * 100uz * 4uz, '\xFF');
     auto const encoded = crispy::base64::encode(pixels);
-    REQUIRE(encoded.size() > 1024 * 50);
+    REQUIRE(encoded.size() > static_cast<std::size_t>(1024 * 50));
 
     mock.writeToScreen(std::format("\033_Ga=T,f=32,s=100,v=100,i=7;{}\033\\", encoded));
 
     // Nothing was placed, and nothing claimed success.
     CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(0)).imageFragment());
-    CHECK(mock.terminal.peekInput().find("OK") == std::string_view::npos);
+    CHECK(!mock.terminal.peekInput().contains("OK"));
 }
 
 TEST_CASE("KittyGraphics.a_chunked_transmission_of_the_same_size_still_works", "[kitty]")

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/Grid.h>
+
 #include <vtbackend/primitives.h>
 
 #include <crispy/assert.h>
@@ -19,15 +20,15 @@ using std::vector;
 namespace vtbackend
 {
 
-auto const inline gridLog = logstore::category(
+auto inline const gridLog = logstore::category(
     "vt.grid", "Grid related", logstore::category::state::Disabled, logstore::category::visibility::Hidden);
 
 namespace detail
 {
-    Lines createLines(PageSize pageSize,
-                      LineCount maxHistoryLineCount,
-                      bool reflowOnResize,
-                      GraphicsAttributes initialSGR)
+    static Lines createLines(PageSize pageSize,
+                             LineCount maxHistoryLineCount,
+                             bool reflowOnResize,
+                             GraphicsAttributes initialSGR)
     {
         auto const defaultLineFlags = reflowOnResize ? LineFlag::Wrappable : LineFlag::None;
         auto const totalLineCount = unbox<size_t>(pageSize.lines + maxHistoryLineCount);
@@ -46,14 +47,14 @@ namespace detail
     /// @param commandEndOffset The logical line's command-end offset, likewise carried by the head alone.
     /// @param promptEndOffset The logical line's prompt-end offset, likewise carried by the head alone.
     /// @returns number of inserted lines.
-    LineCount addNewWrappedLines(Lines& targetLines,
-                                 ColumnCount newColumnCount,
-                                 LineSoA&& logicalLineBuffer,
-                                 size_t usedColumns,
-                                 LineFlags baseFlags,
-                                 ColumnOffset commandEndOffset,
-                                 ColumnOffset promptEndOffset,
-                                 bool initialNoWrap)
+    static LineCount addNewWrappedLines(Lines& targetLines,
+                                        ColumnCount newColumnCount,
+                                        LineSoA const& logicalLineBuffer,
+                                        size_t usedColumns,
+                                        LineFlags baseFlags,
+                                        ColumnOffset commandEndOffset,
+                                        ColumnOffset promptEndOffset,
+                                        bool initialNoWrap)
     {
         auto const newCols = unbox<size_t>(newColumnCount);
         int i = 0;
@@ -142,7 +143,7 @@ void Grid::clearHistory()
 
 void Grid::verifyState() const noexcept
 {
-#if defined(CONTOUR_VERIFY_STATE)
+#ifdef CONTOUR_VERIFY_STATE
     Require(LineCount::cast_from(_lines.size()) >= totalLineCount());
     Require(LineCount::cast_from(_lines.size()) >= _linesUsed);
     Require(_linesUsed >= _pageSize.lines);
@@ -701,7 +702,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                 {
                     detail::addNewWrappedLines(grownLines,
                                                newColumnCount,
-                                               std::move(logicalLineBuffer),
+                                               logicalLineBuffer,
                                                logicalLineUsed,
                                                logicalLineFlags,
                                                logicalLineCommandEndOffset,
@@ -824,7 +825,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                         // continuation: no semantic marks, and therefore no command-end offset either.
                         auto const numLinesInserted = detail::addNewWrappedLines(shrinkedLines,
                                                                                  newColumnCount,
-                                                                                 std::move(wrappedColumns),
+                                                                                 wrappedColumns,
                                                                                  wrappedUsed,
                                                                                  previousFlags,
                                                                                  ColumnOffset(0),
@@ -858,7 +859,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
             {
                 numLinesWritten += detail::addNewWrappedLines(shrinkedLines,
                                                               newColumnCount,
-                                                              std::move(wrappedColumns),
+                                                              wrappedColumns,
                                                               wrappedUsed,
                                                               previousFlags,
                                                               ColumnOffset(0),
@@ -1038,7 +1039,7 @@ bool Grid::cellEmptyOrContainsOneOf(CellLocation position, u32string_view delimi
     position.column = min(position.column, boxed_cast<ColumnOffset>(pageSize().columns - 1));
 
     auto cell = at(position.line, position.column);
-    return CellUtil::empty(cell) || delimiters.find(cell.codepoint(0)) != std::u32string_view::npos;
+    return CellUtil::empty(cell) || delimiters.contains(cell.codepoint(0));
 }
 
 u32string Grid::extractText(CellLocationRange range) const noexcept

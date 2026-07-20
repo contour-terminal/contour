@@ -1197,7 +1197,7 @@ class Terminal
     /// Takes the terminal lock: this is called from the GUI thread (a session rebind) while the parser
     /// thread reads @c _regisTextRasterizer under the same lock in Screen::hookReGIS, so an unlocked
     /// write would race the shared_ptr control block.
-    void setReGISTextRasterizer(std::shared_ptr<regis::ReGISTextRasterizer> rasterizer)
+    void setReGISTextRasterizer(std::shared_ptr<regis::ReGISTextRasterizer> const& rasterizer)
     {
         auto const guard = std::lock_guard { *this };
         for (auto& page: _pages)

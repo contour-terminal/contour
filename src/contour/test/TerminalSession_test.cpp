@@ -317,7 +317,7 @@ TEST_CASE("TerminalSession: the context-menu actions and the state they are gate
 
         CHECK((*session)(contour::actions::SelectAll {}));
         CHECK(session->contextMenuState().hasSelection);
-        CHECK(session->terminal().extractSelectionText().find("line 0") != std::string::npos);
+        CHECK(session->terminal().extractSelectionText().contains("line 0"));
     }
 
     SECTION("a finished OSC 133 command block lights up the last-command rows")
@@ -345,8 +345,8 @@ TEST_CASE("TerminalSession: the context-menu actions and the state they are gate
         // is the sequence doing its job -- what matters is that the scrollback SURVIVES.
         CHECK((*session)(contour::actions::SoftReset {}));
         CHECK(session->terminal().primaryScreen().historyLineCount() > vtbackend::LineCount(0));
-        CHECK(session->terminal().primaryScreen().grid().lineText(vtbackend::LineOffset(-1)).find("line")
-              != std::string::npos);
+        CHECK(
+            session->terminal().primaryScreen().grid().lineText(vtbackend::LineOffset(-1)).contains("line"));
 
         // A hard reset, by contrast, throws the whole scrollback away. That is the difference the
         // Advanced submenu offers the user, so it is pinned here.
@@ -594,11 +594,11 @@ TEST_CASE("TerminalSession: pasteFromClipboard writes clipboard text and enforce
 
     clipboard->setText(QStringLiteral("pasted"));
     session->pasteFromClipboard(1, /*strip*/ false);
-    CHECK(mockPtyOf(*session).stdinBuffer().find("pasted") != std::string::npos);
+    CHECK(mockPtyOf(*session).stdinBuffer().contains("pasted"));
 
     // > 1 MB: hard-rejected — and (regression) must not crash on a display-less session.
     mockPtyOf(*session).stdinBuffer().clear();
-    clipboard->setText(QString(1024 * 1024 + 1, QChar('x')));
+    clipboard->setText(QString((1024 * 1024) + 1, QChar('x')));
     CHECK_NOTHROW(session->pasteFromClipboard(1, false));
     CHECK(mockPtyOf(*session).stdinBuffer().empty());
 
@@ -607,7 +607,7 @@ TEST_CASE("TerminalSession: pasteFromClipboard writes clipboard text and enforce
     QObject::connect(session.get(), &contour::TerminalSession::requestPermissionForPasteLargeFile, [&] {
         ++permissionRequests;
     });
-    clipboard->setText(QString(1024 * 512 + 1, QChar('y')));
+    clipboard->setText(QString((1024 * 512) + 1, QChar('y')));
     session->pasteFromClipboard(1, false);
     CHECK(permissionRequests == 1);
     CHECK(mockPtyOf(*session).stdinBuffer().empty());
@@ -624,7 +624,7 @@ TEST_CASE("TerminalSession: manager creates real tabs headlessly through the inj
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     auto* factory = factoryOwned.get();
     TestApp testApp(std::move(factoryOwned));
-    contour::test::ScopedController controller(testApp.manager());
+    contour::test::ScopedController const controller(testApp.manager());
 
     controller->createNewTab();
     controller->createNewTab();
@@ -730,7 +730,7 @@ TEST_CASE("TerminalSession: display-independent actions dispatch without a displ
     auto& pty = mockPtyOf(*session);
     pty.stdinBuffer().clear();
     CHECK((*session)(actions::SendChars { .chars = "abc" }));
-    CHECK(pty.stdinBuffer().find("abc") != std::string::npos);
+    CHECK(pty.stdinBuffer().contains("abc"));
     CHECK((*session)(actions::WriteScreen { .chars = "xyz" }));
 
     // Clipboard write action (no display: routed but harmless).
@@ -856,13 +856,13 @@ TEST_CASE("TerminalSession: key and char events encode modifiers into the PTY", 
     pty.stdinBuffer().clear();
     session->sendCharEvent(
         U'c', 0, Modifiers { Modifier::Control }, KeyboardEventType::Press, std::chrono::steady_clock::now());
-    CHECK(pty.stdinBuffer().find('\x03') != std::string::npos);
+    CHECK(pty.stdinBuffer().contains('\x03'));
 
     // A function/navigation key produces its escape sequence (CSI-prefixed).
     pty.stdinBuffer().clear();
     session->sendKeyEvent(
         Key::UpArrow, Modifiers {}, KeyboardEventType::Press, std::chrono::steady_clock::now());
-    CHECK(pty.stdinBuffer().find('\033') != std::string::npos);
+    CHECK(pty.stdinBuffer().contains('\033'));
 
     // A key RELEASE encodes nothing (the legacy protocol is press-only).
     pty.stdinBuffer().clear();
@@ -891,7 +891,7 @@ TEST_CASE("TerminalSession: mouse events encode under an active mouse protocol",
     session->sendMousePressEvent(Modifiers {}, MouseButton::Left, at);
     session->sendMouseReleaseEvent(Modifiers {}, MouseButton::Left, at);
     // SGR mouse reports are CSI < ... M/m; at minimum an escape must have been emitted.
-    CHECK(pty.stdinBuffer().find('\033') != std::string::npos);
+    CHECK(pty.stdinBuffer().contains('\033'));
 }
 
 TEST_CASE("TerminalSession: host-writable status line permission executes headlessly",
@@ -952,7 +952,7 @@ TEST_CASE("TerminalSession: clipboard, selection and notification paths are disp
         clipboard->setText(QStringLiteral("ab"));
         pty.stdinBuffer().clear();
         session->pasteFromClipboard(3, /*strip*/ false);
-        CHECK(pty.stdinBuffer().find("ababab") != std::string::npos);
+        CHECK(pty.stdinBuffer().contains("ababab"));
     }
 }
 
@@ -1455,7 +1455,7 @@ TEST_CASE("TerminalSession: openDocument routes through the injected external la
     CHECK(launcher.openedUrls.back().toString().toStdString() == "https://contour-terminal.org/");
 
     // A scheme-less path that EXISTS is resolved to an absolute file:// URL.
-    QTemporaryDir dir;
+    QTemporaryDir const dir;
     auto const filePath = std::filesystem::path(dir.path().toStdString()) / "doc.txt";
     {
         std::ofstream(filePath) << "x";
@@ -1546,7 +1546,7 @@ TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the ex
         CHECK(launcher.executed.empty());
     }
 
-#if !defined(_WIN32)
+#ifndef _WIN32
     // The "is this an executable file" branch of followHyperlink() keys off POSIX owner-execute
     // permission; Windows determines executability by extension, not filesystem perms, so this Unix
     // semantics section does not apply there.
@@ -1557,7 +1557,7 @@ TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the ex
         auto& launcher = testApp.launcher();
 
         // Create a real executable file and hover a file://<localhost>/<path> link to it.
-        QTemporaryDir tmp;
+        QTemporaryDir const tmp;
         REQUIRE(tmp.isValid());
         auto const exePath = std::filesystem::path(tmp.path().toStdString()) / "script.sh";
         {
@@ -1841,7 +1841,7 @@ TEST_CASE("TerminalSession: a tab-strip swipe follows the finger while a wheel t
     // carry the SAME sign, so any difference in where they land is the rule itself and nothing else.
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     TestApp testApp(std::move(factoryOwned));
-    contour::test::ScopedController controller(testApp.manager());
+    contour::test::ScopedController const controller(testApp.manager());
 
     controller->createNewTab();
     controller->createNewTab();

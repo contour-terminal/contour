@@ -551,6 +551,65 @@ TEST_CASE("Terminal.RIS", "[terminal]")
     CHECK(mc.terminal.statusDisplayType() == StatusDisplayType::None);
 }
 
+TEST_CASE("Terminal.RIS.keepsFrozenModesAppliedToInputGenerator", "[terminal]")
+{
+    using namespace vtbackend;
+
+    // DECCKM, DECNKM and DECBKM are mirrored inside the input generator rather than read back from
+    // the mode register, so hardReset() has to clear that mirror BEFORE it replays `frozenModes` --
+    // not after. Clearing it afterwards silently undoes the replay, and because setMode() early-
+    // returns on a frozen mode, nothing can ever resync the two again: the arrow keys would emit
+    // `ESC [ A` for the rest of the session while DECRQM kept reporting DECCKM as set.
+    auto mc = MockTerm { ColumnCount(20), LineCount(5) };
+    mc.terminal.settings().frozenModes[DECMode::UseApplicationCursorKeys] = true;
+
+    SECTION("a frozen DECCKM survives RIS")
+    {
+        mc.writeToScreen("\033[?1h"sv); // DECSET DECCKM -- refused, the mode is frozen on
+        mc.terminal.freezeMode(DECMode::UseApplicationCursorKeys, true);
+        REQUIRE(mc.terminal.applicationCursorKeys());
+
+        mc.writeToScreen("\033c"sv); // RIS
+
+        CHECK(mc.terminal.isModeEnabled(DECMode::UseApplicationCursorKeys));
+        CHECK(mc.terminal.applicationCursorKeys()); // the mirror must agree with the mode register
+    }
+
+    SECTION("an unfrozen DECCKM is still reset by RIS")
+    {
+        mc.terminal.settings().frozenModes.clear();
+        mc.writeToScreen("\033[?1h"sv); // DECSET DECCKM
+        REQUIRE(mc.terminal.applicationCursorKeys());
+
+        mc.writeToScreen("\033c"sv); // RIS
+
+        CHECK(!mc.terminal.isModeEnabled(DECMode::UseApplicationCursorKeys));
+        CHECK(!mc.terminal.applicationCursorKeys());
+    }
+}
+
+TEST_CASE("Terminal.RIS.resetsPassiveMouseTracking", "[terminal]")
+{
+    using namespace vtbackend;
+
+    // DECMode 2029 is mirrored in the input generator as well. It was the one mirror hardReset() did
+    // not clear, so after RIS the mode register read "off" while the generator still appended the
+    // passive-tracking parameter to every SGR mouse report -- a fourth field the application cannot
+    // parse -- and kept the alternate-scroll path gated shut.
+    auto mc = MockTerm { ColumnCount(20), LineCount(5) };
+
+    mc.writeToScreen("\033[?2029h"sv);
+    REQUIRE(mc.terminal.isModeEnabled(DECMode::MousePassiveTracking));
+
+    mc.writeToScreen("\033c"sv); // RIS
+
+    CHECK(!mc.terminal.isModeEnabled(DECMode::MousePassiveTracking));
+
+    // Re-enabling must take effect, which it cannot if the mirror never went back to false.
+    mc.writeToScreen("\033[?2029h"sv);
+    CHECK(mc.terminal.isModeEnabled(DECMode::MousePassiveTracking));
+}
+
 TEST_CASE("Terminal.forceRedraw keeps the cell size", "[terminal]")
 {
     using namespace vtbackend;
@@ -744,7 +803,7 @@ TEST_CASE("Terminal.DECNCSM", "[terminal]")
     {
         mc.writeToScreen("HELLO");
         mc.writeToScreen("\033[?3h"); // DECCOLM -> 132
-        CHECK(mc.terminal.primaryScreen().grid().lineText(LineOffset(0)).find('H') == std::string::npos);
+        CHECK(!mc.terminal.primaryScreen().grid().lineText(LineOffset(0)).contains('H'));
     }
 
     SECTION("DECNCSM set: DECCOLM preserves the screen")
@@ -1669,10 +1728,10 @@ TEST_CASE("Terminal.BoxDrawingCharacters", "[terminal]")
     auto const line1 = terminal.primaryScreen().grid().lineAt(LineOffset(1)).toUtf8();
 
     // Check that box-drawing characters are present (not corrupted to replacement chars)
-    CHECK(line0.find("\xE2\x94\x82") != std::string::npos); // │
-    CHECK(line1.find("\xE2\x94\x9C") != std::string::npos); // ├
-    CHECK(line0.find("file") != std::string::npos);
-    CHECK(line1.find("dir") != std::string::npos);
+    CHECK(line0.contains("\xE2\x94\x82")); // │
+    CHECK(line1.contains("\xE2\x94\x9C")); // ├
+    CHECK(line0.contains("file"));
+    CHECK(line1.contains("dir"));
 }
 
 TEST_CASE("Terminal.smoothScrollExtraLines.zero_when_no_offset", "[terminal]")
@@ -1951,12 +2010,12 @@ TEST_CASE("Terminal.momentumScroll.decelerates_over_ticks", "[terminal]")
     auto const offset3 = terminal.viewport().scrollOffset().value;
 
     // Scroll offset should advance (or pixel accumulate) over time.
-    auto const totalScroll1 = static_cast<float>(offset1) * 20.0f + pixel1;
-    auto const totalScroll0 = static_cast<float>(offsetAfterStart) * 20.0f + pixelOffsetAfterStart;
+    auto const totalScroll1 = (static_cast<float>(offset1) * 20.0f) + pixel1;
+    auto const totalScroll0 = (static_cast<float>(offsetAfterStart) * 20.0f) + pixelOffsetAfterStart;
     CHECK(totalScroll1 > totalScroll0);
 
     // Overall scroll should only increase (deceleration, not reversal).
-    auto const totalScroll2 = static_cast<float>(offset2) * 20.0f + pixel2;
+    auto const totalScroll2 = (static_cast<float>(offset2) * 20.0f) + pixel2;
     CHECK(totalScroll2 >= totalScroll1);
 
     // Scroll offset should have advanced by at least one line after several ticks.
@@ -2026,7 +2085,7 @@ namespace
 /// Total scroll displacement in pixels: whole-line offset plus the sub-cell pixel remainder.
 [[nodiscard]] float totalScrollPixels(vtbackend::Terminal const& terminal, float cellHeight) noexcept
 {
-    return static_cast<float>(terminal.viewport().scrollOffset().value) * cellHeight
+    return (static_cast<float>(terminal.viewport().scrollOffset().value) * cellHeight)
            + terminal.smoothScrollPixelOffset();
 }
 } // namespace
@@ -3440,7 +3499,7 @@ TEST_CASE("Terminal.PassiveMouseTracking_Selection", "[terminal]")
 
         // Verify mouse events were forwarded to the app via the PTY (SGR format: ESC [ < ... M/m)
         auto const& reply = mock.replyData();
-        CHECK(reply.find("\033[<") != std::string::npos);
+        CHECK(reply.contains("\033[<"));
     }
 
     SECTION("click-to-deselect works with passive tracking")
@@ -3842,7 +3901,7 @@ TEST_CASE("Terminal.Wheel.AltScreen.AppTracking.passes_through_as_SGR", "[termin
           == Handled { true });
     // SGR mouse report, not a cursor key.
     CHECK(e(mock.replyData()).starts_with(e("\033[<")));
-    CHECK(e(mock.replyData()).find(e("\033[B")) == std::string::npos);
+    CHECK(!e(mock.replyData()).contains(e("\033[B")));
 }
 
 TEST_CASE("Terminal.Wheel.PrimaryScreen.NoProtocol.local_scroll", "[terminal]")
@@ -4133,10 +4192,10 @@ TEST_CASE("Terminal.selectAll", "[terminal]")
 
     // "All" means the scrollback too, not merely the visible page.
     auto const text = mock.terminal.extractSelectionText();
-    CHECK(text.find("hist1") != std::string::npos);
-    CHECK(text.find("hist2") != std::string::npos);
-    CHECK(text.find("page1") != std::string::npos);
-    CHECK(text.find("page3") != std::string::npos);
+    CHECK(text.contains("hist1"));
+    CHECK(text.contains("hist2"));
+    CHECK(text.contains("page1"));
+    CHECK(text.contains("page3"));
 }
 
 TEST_CASE("Terminal.selectAll.completesInInsertMode", "[terminal]")

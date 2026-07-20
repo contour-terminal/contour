@@ -58,7 +58,7 @@ TEST_CASE("shortcutText renders a chord the way a user would type it", "[contour
 
 TEST_CASE("shortcutIndex maps commands to the chord that runs them", "[contour][palette]")
 {
-    auto const& defaults = config::defaultInputMappings;
+    auto const& defaults = config::defaultInputMappings();
     auto const index = shortcutIndex(defaults);
 
     SECTION("the default bindings are found under their command id")

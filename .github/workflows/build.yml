@@ -138,7 +138,6 @@ jobs:
   check_clang_tidy:
     name: "Check clang-tidy"
     runs-on: ubuntu-24.04
-    if: github.ref != 'refs/heads/master'
     steps:
     - uses: actions/checkout@v4
     - name: ccache
@@ -172,6 +171,10 @@ jobs:
         chmod +x llvm.sh
         sudo ./llvm.sh ${LLVM_VERSION}
         sudo apt-get install clang-tidy-${LLVM_VERSION}
+    # Catches stale/misspelled option keys and removed config directives in seconds,
+    # rather than letting them silently no-op through a full tidy build.
+    - name: "Verify clang-tidy configuration"
+      run: CLANG_TIDY=clang-tidy-${LLVM_VERSION} ./scripts/check-clang-tidy-config.sh
     - name: "cmake"
       run: |
         cmake \

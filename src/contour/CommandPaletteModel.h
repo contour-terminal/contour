@@ -50,7 +50,7 @@ class CommandPaletteModel: public QAbstractListModel
         All = 1,    //!< The full alphabetical list.
     };
 
-    enum Roles : std::uint16_t
+    enum class Roles : std::uint16_t
     {
         IdRole = Qt::UserRole + 1, //!< Stable command id; what runCommand() is called with.
         TitleRole,                 //!< Display name, e.g. "Split Vertical".

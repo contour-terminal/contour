@@ -26,7 +26,6 @@ add_library(vtconformance STATIC
     VtTestLog.h
     VtTestSuite.cpp
 )
-set_target_properties(vtconformance PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
 target_link_libraries(vtconformance PUBLIC
     vtbackend
     vtpty
@@ -38,7 +37,6 @@ target_include_directories(vtconformance PUBLIC
 )
 
 add_executable(vtconformance-run main.cpp)
-set_target_properties(vtconformance-run PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
 target_link_libraries(vtconformance-run PRIVATE vtconformance)
 
 option(VTCONFORMANCE_TESTING "Enables building of unittests for vtconformance [default: ON]" ${CONTOUR_TESTING})

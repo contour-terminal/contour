@@ -44,16 +44,20 @@ void copy(Container const& container, OutputIterator outputIterator)
 template <typename Container, typename Fn>
 void for_each(Container&& container, Fn fn)
 {
-    std::for_each(begin(std::forward<Container>(container)), end(std::forward<Container>(container)), fn);
+    // Bound to a named reference so the range is expanded once: forwarding into both begin() and
+    // end() would read `container` after moving from it. std::ranges::for_each is not used because
+    // it rejects a forwarded rvalue that is not a borrowed_range.
+    auto&& range = std::forward<Container>(container);
+    std::for_each(begin(range), end(range), fn);
 }
 
 template <typename ExecutionPolicy, typename Container, typename Fn>
 void for_each(ExecutionPolicy ep, Container&& container, Fn&& fn)
 {
-    std::for_each(ep,
-                  begin(std::forward<Container>(container)),
-                  end(std::forward<Container>(container)),
-                  std::forward<Fn>(fn));
+    // Note: no ranges overload takes an execution policy, so the range is expanded here. It is
+    // expanded only once — forwarding twice would read `container` after moving from it.
+    auto&& range = std::forward<Container>(container);
+    std::for_each(ep, begin(range), end(range), std::forward<Fn>(fn));
 }
 
 template <typename Container, typename T>

@@ -104,7 +104,7 @@ TEST_CASE("CommandBlocks.scan.doesNotLeakTheNextPromptIntoTheOutput", "[commandb
     auto const blocks = scanCommandBlocksBackward(lines, 1);
     REQUIRE(blocks.size() == 1);
     CHECK(blocks[0].output == "hello");
-    CHECK(blocks[0].output.find("user@host") == std::string::npos);
+    CHECK(!blocks[0].output.contains("user@host"));
     CHECK(blocks[0].outputLineCount == 1);
 }
 

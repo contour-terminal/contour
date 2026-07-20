@@ -75,7 +75,7 @@ void TerminalRenderNode::prepare()
     display->prepareFrameRhi(rhi, cb, rt, rt->renderPassDescriptor(), itemToClip, itemOriginDevice);
 }
 
-void TerminalRenderNode::render(const RenderState* state)
+void TerminalRenderNode::render(RenderState const* state)
 {
     auto* const display = this->display(); // one load; see prepare()
     if (display == nullptr)

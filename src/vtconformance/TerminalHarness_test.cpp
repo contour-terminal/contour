@@ -18,7 +18,7 @@ using namespace vtconformance;
 /// Every case in this file spawns `/bin/sh` and talks to it through a real PTY, which Windows has
 /// neither of. They are skipped rather than compiled out: a test that does not exist reads exactly
 /// like a test that passed, and this file is where the harness's process half is measured.
-#if defined(_WIN32)
+#ifdef _WIN32
     #define SKIP_WITHOUT_POSIX_SHELL() SKIP("needs a POSIX shell over a PTY, which Windows has not")
 #else
     #define SKIP_WITHOUT_POSIX_SHELL() ((void) 0)
@@ -58,7 +58,7 @@ TEST_CASE("TerminalHarness.drives a child and renders its output", "[vtconforman
     harness.start();
 
     REQUIRE(harness.waitForExit(Patience));
-    CHECK(harness.screenText().find("hello harness") != std::string::npos);
+    CHECK(harness.screenText().contains("hello harness"));
 
     harness.stop();
 }
@@ -138,7 +138,7 @@ TEST_CASE("TerminalHarness.writeInput reaches the child's stdin", "[vtconformanc
             break;
     }
 
-    CHECK(harness.screenText().find("GOT:ping") != std::string::npos);
+    CHECK(harness.screenText().contains("GOT:ping"));
 
     harness.stop();
 }
@@ -168,7 +168,7 @@ TEST_CASE("TerminalHarness.answers a query that follows a charset designation", 
     // echo. This is the full round trip: child -> pty -> engine -> reply -> pty -> child.
     auto const text = harness.screenText();
     INFO(text);
-    CHECK(text.find("CONSUMED") != std::string::npos);
+    CHECK(text.contains("CONSUMED"));
 
     harness.stop();
 }

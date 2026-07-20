@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/SpeechSynthesizer.h>
 
-#if defined(CONTOUR_WITH_TTS)
+#ifdef CONTOUR_WITH_TTS
     #include <QtTextToSpeech/QTextToSpeech>
 #endif
 
@@ -64,7 +64,7 @@ std::string speakableText(std::string_view text, size_t maxChars)
     return cut;
 }
 
-#if defined(CONTOUR_WITH_TTS)
+#ifdef CONTOUR_WITH_TTS
 
 namespace
 {

@@ -226,19 +226,19 @@ QVariant CommandPaletteModel::data(QModelIndex const& index, int role) const
 
     auto const& entry = _rows[static_cast<std::size_t>(row)];
 
-    switch (role)
+    switch (static_cast<Roles>(role))
     {
-        case IdRole: return QString::fromStdString(entry.command->id);
-        case TitleRole: return QString::fromStdString(entry.command->title);
-        case DescriptionRole: return QString::fromStdString(entry.command->description);
-        case ShortcutRole: {
+        case Roles::IdRole: return QString::fromStdString(entry.command->id);
+        case Roles::TitleRole: return QString::fromStdString(entry.command->title);
+        case Roles::DescriptionRole: return QString::fromStdString(entry.command->description);
+        case Roles::ShortcutRole: {
             auto const shortcut = _shortcuts.find(entry.command->id);
             if (shortcut == _shortcuts.end())
                 return QString {};
             return QString::fromStdString(shortcut->second);
         }
-        case SectionRole: return static_cast<int>(entry.section);
-        case TitleMatchesRole: {
+        case Roles::SectionRole: return static_cast<int>(entry.section);
+        case Roles::TitleMatchesRole: {
             // The matched title indices as a plain list of ints, which QML reads as a JS array to decide
             // which characters to bold. Empty on an unfiltered or id-only-matched row. FuzzyFilter reports
             // these as UTF-8 byte offsets, but QML indexes the title by UTF-16 code unit; translate here,
@@ -250,7 +250,7 @@ QVariant CommandPaletteModel::data(QModelIndex const& index, int role) const
                 matches.append(position);
             return matches;
         }
-        case SectionStartRole:
+        case Roles::SectionStartRole:
             // Answers the whole question the view asks — "draw a header above this row?" — rather than
             // half of it. A filtered list has no sections, so no row starts one; otherwise a header goes
             // above the first row and above any row whose section differs from its predecessor's. QML
@@ -265,13 +265,13 @@ QVariant CommandPaletteModel::data(QModelIndex const& index, int role) const
 QHash<int, QByteArray> CommandPaletteModel::roleNames() const
 {
     return {
-        { IdRole, "commandId" },
-        { TitleRole, "title" },
-        { DescriptionRole, "description" },
-        { ShortcutRole, "shortcut" },
-        { SectionRole, "section" },
-        { SectionStartRole, "sectionStart" },
-        { TitleMatchesRole, "titleMatches" },
+        { static_cast<int>(Roles::IdRole), "commandId" },
+        { static_cast<int>(Roles::TitleRole), "title" },
+        { static_cast<int>(Roles::DescriptionRole), "description" },
+        { static_cast<int>(Roles::ShortcutRole), "shortcut" },
+        { static_cast<int>(Roles::SectionRole), "section" },
+        { static_cast<int>(Roles::SectionStartRole), "sectionStart" },
+        { static_cast<int>(Roles::TitleMatchesRole), "titleMatches" },
     };
 }
 

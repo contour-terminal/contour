@@ -170,7 +170,7 @@ struct RenderDoubleBuffer
         // if (state == RenderBufferState::TrySwapBuffers)
         //     const_cast<RenderDoubleBuffer*>(this)->swapBuffers(lastUpdate);
         RenderBuffer const& frontBuffer = buffers.at((currentBackBufferIndex + 1) % 2);
-        return RenderBufferRef(frontBuffer, readerLock);
+        return { frontBuffer, readerLock };
     }
 
     void clear() { backBuffer().clear(); }

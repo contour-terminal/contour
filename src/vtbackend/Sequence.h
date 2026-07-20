@@ -9,6 +9,7 @@
 #include <array>
 #include <cassert>
 #include <concepts>
+#include <cstddef>
 #include <iterator>
 #include <optional>
 #include <string>
@@ -209,7 +210,7 @@ class SequenceParameterBuilder
             std::distance(const_cast<SequenceParameterBuilder*>(this)->_parameters->_values.begin(),
                           _currentParameter)
             + 1;
-        if (!(result == 1 && _parameters->_values[0] == 0))
+        if (result != 1 || _parameters->_values[0] != 0)
             return static_cast<size_t>(result);
         else
             return 0;
@@ -238,7 +239,8 @@ class Sequence
   public:
     // Make maximum size 50 kB since we need to support adding to the clipboard
     // and the clipboard can contain large amounts of text.
-    size_t constexpr static MaxOscLength = 1024 * 50; // NOLINT(readability-identifier-naming)
+    size_t constexpr static MaxOscLength =
+        static_cast<size_t>(1024 * 50); // NOLINT(readability-identifier-naming)
 
     using Parameter = uint16_t;
     using Intermediaries = std::string;

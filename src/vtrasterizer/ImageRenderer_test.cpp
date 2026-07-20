@@ -8,6 +8,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstddef>
 #include <ranges>
 
 using namespace vtbackend;
@@ -219,7 +220,7 @@ TEST_CASE("ImageRenderer.bounds resident texture memory", "[image][renderer]")
     // image lives as long as a grid cell references it -- so a session scrolled through hundreds of
     // sixel frames pinned one full-resolution texture per frame with no ceiling at all.
     auto constexpr Span = GridSize { .lines = LineCount(1), .columns = ColumnCount(1) };
-    auto constexpr ImageBytes = size_t { 10 * 20 * 4 }; // one cell at 4 bytes per pixel
+    auto constexpr ImageBytes = static_cast<size_t>(10 * 20 * 4); // one cell at 4 bytes per pixel
 
     auto renderTarget = MockRenderTarget {};
     auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
@@ -245,7 +246,7 @@ TEST_CASE("ImageRenderer.never evicts an image the current frame draws", "[image
     // be re-uploaded next frame only to be dropped again. A working set over budget must overshoot
     // rather than thrash.
     auto constexpr Span = GridSize { .lines = LineCount(1), .columns = ColumnCount(1) };
-    auto constexpr ImageBytes = size_t { 10 * 20 * 4 };
+    auto constexpr ImageBytes = static_cast<size_t>(10 * 20 * 4);
 
     auto renderTarget = MockRenderTarget {};
     auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
@@ -286,7 +287,7 @@ TEST_CASE("ImageRenderer.re-uploads an evicted image when it is seen again", "[i
 {
     // Eviction is a cache miss, not a loss: the mapping is dropped so the next sight uploads again.
     auto constexpr Span = GridSize { .lines = LineCount(1), .columns = ColumnCount(1) };
-    auto constexpr ImageBytes = size_t { 10 * 20 * 4 };
+    auto constexpr ImageBytes = static_cast<size_t>(10 * 20 * 4);
 
     auto renderTarget = MockRenderTarget {};
     auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
@@ -470,7 +471,7 @@ TEST_CASE("ImageRenderer.forgets a texture the backend failed to create", "[imag
     // unreported leaves an entry naming a texture that does not exist: every later frame returns the
     // cached id and draws nothing, and its bytes go on crowding out images that ARE on screen.
     auto constexpr Span = GridSize { .lines = LineCount(1), .columns = ColumnCount(1) };
-    auto constexpr ImageBytes = size_t { 10 * 20 * 4 };
+    auto constexpr ImageBytes = static_cast<size_t>(10 * 20 * 4);
 
     auto renderTarget = MockRenderTarget {};
     auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
@@ -500,7 +501,7 @@ TEST_CASE("ImageRenderer.does not evict what an earlier pass of the same frame d
     // would offer up the first pass's images -- whose quads are already scheduled and name their
     // texture -- and releasing one drops it from the very frame it is visible in.
     auto constexpr Span = GridSize { .lines = LineCount(1), .columns = ColumnCount(1) };
-    auto constexpr ImageBytes = size_t { 10 * 20 * 4 };
+    auto constexpr ImageBytes = static_cast<size_t>(10 * 20 * 4);
 
     auto renderTarget = MockRenderTarget {};
     auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };

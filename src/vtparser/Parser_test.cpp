@@ -8,6 +8,8 @@
 
 using namespace std;
 
+namespace
+{
 class MockParserEvents final: public vtparser::NullParserEvents
 {
   public:
@@ -32,6 +34,7 @@ class MockParserEvents final: public vtparser::NullParserEvents
     void putPM(char ch) override { pm += ch; }
     void dispatchPM() override { pm += "}"; }
 };
+} // namespace
 
 TEST_CASE("Parser.utf8_single", "[Parser]")
 {

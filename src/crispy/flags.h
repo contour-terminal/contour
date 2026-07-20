@@ -42,15 +42,9 @@ class flags
     constexpr void enable(flag_type flag) noexcept { _value |= static_cast<value_type>(flag); }
     constexpr void disable(flag_type flag) noexcept { _value &= ~static_cast<value_type>(flag); }
 
-    constexpr void enable(flags<flag_type> flags) noexcept
-    {
-        _value |= static_cast<value_type>(flags._value);
-    }
+    constexpr void enable(flags<flag_type> flags) noexcept { _value |= flags._value; }
 
-    constexpr void disable(flags<flag_type> flags) noexcept
-    {
-        _value &= ~static_cast<value_type>(flags._value);
-    }
+    constexpr void disable(flags<flag_type> flags) noexcept { _value &= ~flags._value; }
 
     // Tests for existence of all given flags to be present.
     // @return true if all flags are set in this flags set, false otherwise.

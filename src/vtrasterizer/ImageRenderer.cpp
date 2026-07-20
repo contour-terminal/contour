@@ -11,10 +11,6 @@
 #include <span>
 #include <vector>
 
-using crispy::times;
-
-using std::array;
-using std::nullopt;
 using std::optional;
 
 namespace vtrasterizer

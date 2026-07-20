@@ -68,18 +68,19 @@ class KeyRecordingTerminal: public QQuickItem
     }
     [[nodiscard]] double fontSize() const { return 12.0; }
 
+    QString received;
+
+  signals:
+    void sessionChanged(QObject* /*session*/);
+    void showNotification(QString const& /*title*/, QString const& /*body*/);
+    void terminated();
+
+  protected:
     void keyPressEvent(QKeyEvent* event) override
     {
         received += event->text();
         event->accept();
     }
-
-    QString received;
-
-  signals:
-    void sessionChanged(QObject* session);
-    void showNotification(QString const& title, QString const& body);
-    void terminated();
 
   private:
     QObject* _session = nullptr;
@@ -115,14 +116,14 @@ class RoutingMockSession: public QObject
     [[nodiscard]] int upTime() const { return 5; }
     [[nodiscard]] float opacity() const { return 1.0F; }
     [[nodiscard]] float dimUnfocused() const { return 0.0F; }
-    [[nodiscard]] QColor backgroundColor() const { return QColor(Qt::black); }
-    [[nodiscard]] QString bellSource() const { return QString(); }
+    [[nodiscard]] QColor backgroundColor() const { return { Qt::black }; }
+    [[nodiscard]] QString bellSource() const { return {}; }
     [[nodiscard]] bool isScrollbarRight() const { return true; }
     [[nodiscard]] bool isScrollbarVisible() const { return false; }
     [[nodiscard]] bool isImageBackground() const { return false; }
     [[nodiscard]] bool isBlurBackground() const { return false; }
     [[nodiscard]] float opacityBackground() const { return 1.0F; }
-    [[nodiscard]] QString pathToBackground() const { return QString(); }
+    [[nodiscard]] QString pathToBackground() const { return {}; }
     [[nodiscard]] QString title() const { return QStringLiteral("mock"); }
 };
 
@@ -220,15 +221,16 @@ class RoutingMockController: public QAbstractListModel
                    titleBarContextMenuModelChanged)
 
   public:
-    enum Roles : std::uint16_t
+    enum class Roles : std::uint16_t
     {
+        DisplayRole = Qt::DisplayRole,
         TitleRole = Qt::UserRole + 1,
-        ColorRole,
-        IsActiveRole,
-        PaneCountRole,
-        SessionIdRole,
-        RawTitleRole,
-        ZoomedRole,
+        ColorRole = Qt::UserRole + 2,
+        IsActiveRole = Qt::UserRole + 3,
+        PaneCountRole = Qt::UserRole + 4,
+        SessionIdRole = Qt::UserRole + 5,
+        RawTitleRole = Qt::UserRole + 6,
+        ZoomedRole = Qt::UserRole + 7,
     };
 
     [[nodiscard]] int activeTabIndex() const noexcept { return _activeTabIndex; }
@@ -316,24 +318,29 @@ class RoutingMockController: public QAbstractListModel
     {
         if (index.row() < 0 || index.row() >= 2)
             return {};
-        switch (role)
+        switch (static_cast<Roles>(role))
         {
-            case TitleRole: return QStringLiteral("Tab %1").arg(index.row() + 1);
-            case RawTitleRole: return QString();
-            case ColorRole: return QColor(Qt::transparent);
-            case IsActiveRole: return index.row() == _activeTabIndex;
-            case PaneCountRole: return 1;
-            case SessionIdRole: return index.row();
-            case ZoomedRole: return false;
+            case Roles::TitleRole: return QStringLiteral("Tab %1").arg(index.row() + 1);
+            case Roles::RawTitleRole: return QString();
+            case Roles::ColorRole: return QColor(Qt::transparent);
+            case Roles::IsActiveRole: return index.row() == _activeTabIndex;
+            case Roles::PaneCountRole: return 1;
+            case Roles::SessionIdRole: return index.row();
+            case Roles::ZoomedRole: return false;
             default: return {};
         }
     }
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override
     {
         return {
-            { Qt::DisplayRole, "display" }, { TitleRole, "title" },         { ColorRole, "accentColor" },
-            { IsActiveRole, "isActive" },   { PaneCountRole, "paneCount" }, { SessionIdRole, "sessionId" },
-            { RawTitleRole, "rawTitle" },   { ZoomedRole, "zoomed" },
+            { static_cast<int>(Roles::DisplayRole), "display" },
+            { static_cast<int>(Roles::TitleRole), "title" },
+            { static_cast<int>(Roles::ColorRole), "accentColor" },
+            { static_cast<int>(Roles::IsActiveRole), "isActive" },
+            { static_cast<int>(Roles::PaneCountRole), "paneCount" },
+            { static_cast<int>(Roles::SessionIdRole), "sessionId" },
+            { static_cast<int>(Roles::RawTitleRole), "rawTitle" },
+            { static_cast<int>(Roles::ZoomedRole), "zoomed" },
         };
     }
     // }}}
@@ -350,9 +357,9 @@ class RoutingMockController: public QAbstractListModel
     void tabBarShouldShowChanged();
     void chromeHeightChanged();
     void activeTabRootPaneChanged();
-    void tabTitleEditRequested(int index);
+    void tabTitleEditRequested(int /*index*/);
     // Matches TabItem's Connections handler; a missing signal here is a QML warning, not a silent no-op.
-    void tabColorPickRequested(int index);
+    void tabColorPickRequested(int /*index*/);
     // Matches main.qml's Connections handler for the save-layout prompt; a missing signal here is a QML
     // warning the run-wide gate turns into a suite failure.
     void saveLayoutRequested();
@@ -433,7 +440,7 @@ TEST_CASE("keyboard routing survives tab creation, tab switching, and splitting 
     rootA.setActive(true);
     controller.setActiveTabRootPane(&rootA);
 
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
 
     auto root = loadMainWindow(engine, controller);
     REQUIRE(root != nullptr);

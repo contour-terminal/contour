@@ -39,9 +39,9 @@ void clickButton(QObject* object)
 
 TEST_CASE("SettingsPage opens on the global settings pane", "[contour][gui][qml][settings]")
 {
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
 
-    QTemporaryDir dir;
+    QTemporaryDir const dir;
     auto const configDir = std::filesystem::path(dir.path().toStdString());
     auto const configPath = configDir / "contour.yml";
     {
@@ -87,9 +87,9 @@ TEST_CASE("SettingsPage opens on the global settings pane", "[contour][gui][qml]
 TEST_CASE("SettingsPage creates a profile through the QML and it lands on disk (offscreen)",
           "[contour][gui][qml][settings]")
 {
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
 
-    QTemporaryDir dir;
+    QTemporaryDir const dir;
     auto const configDir = std::filesystem::path(dir.path().toStdString());
     auto const configPath = configDir / "contour.yml";
     {

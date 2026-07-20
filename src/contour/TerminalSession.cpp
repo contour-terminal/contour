@@ -38,6 +38,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -45,20 +46,20 @@
 #include <ranges>
 #include <regex>
 
-#if defined(__OpenBSD__)
+#ifdef __OpenBSD__
     #include <pthread_np.h>
     #define pthread_setname_np pthread_set_name_np
-#elif !defined(_WIN32)
+#elifndef _WIN32
     #include <pthread.h>
 #endif
 
-#if !defined(_MSC_VER)
+#ifndef _MSC_VER
     #include <csignal>
 
     #include <unistd.h>
 #endif
 
-#if defined(_MSC_VER)
+#ifdef _MSC_VER
     #define __PRETTY_FUNCTION__ __FUNCDNAME__
 #endif
 
@@ -80,9 +81,9 @@ namespace
 
     void setThreadName(char const* name)
     {
-#if defined(__APPLE__)
+#ifdef __APPLE__
         pthread_setname_np(name);
-#elif !defined(_WIN32)
+#elifndef _WIN32
         pthread_setname_np(pthread_self(), name);
 #endif
     }
@@ -105,9 +106,9 @@ namespace
         return nullptr;
     }
 
-    string normalize_crlf(QString&& text)
+    string normalize_crlf(QString text)
     {
-#if !defined(_WIN32)
+#ifndef _WIN32
         return text.replace("\r\n", "\n").replace("\r", "\n").toUtf8().toStdString();
 #else
         return text.toUtf8().toStdString();
@@ -179,21 +180,21 @@ namespace
             // try to find Tab section in one of the status line segments
 
             std::string segment;
-            if (profile.statusLine.value().indicator.left.find("Tabs") != std::string::npos)
+            if (profile.statusLine.value().indicator.left.contains("Tabs"))
             {
                 segment = profile.statusLine.value().indicator.left;
             }
-            else if (profile.statusLine.value().indicator.middle.find("Tabs") != std::string::npos)
+            else if (profile.statusLine.value().indicator.middle.contains("Tabs"))
             {
                 segment = profile.statusLine.value().indicator.middle;
             }
-            else if (profile.statusLine.value().indicator.right.find("Tabs") != std::string::npos)
+            else if (profile.statusLine.value().indicator.right.contains("Tabs"))
             {
                 segment = profile.statusLine.value().indicator.right;
             }
 
             // check if indexing is defined
-            if (segment.find("Indexing=") != std::string::npos)
+            if (segment.contains("Indexing="))
             {
                 // cut the string after indexing=
                 std::string indexing = segment.substr(segment.find("Indexing=") + 9);
@@ -249,6 +250,7 @@ namespace
       public:
         ExitWatcherThread(TerminalSession& session): _session { session } {}
 
+      protected:
         void run() override
         {
             sessionLog()("ExitWatcherThread: Started.");
@@ -293,7 +295,7 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
         _configFileChangeWatcher = make_unique<QFileSystemWatcher>();
         _configFileChangeWatcher->addPath(QString::fromStdString(_config.configFile.generic_string()));
         connect(_configFileChangeWatcher.get(),
-                SIGNAL(fileChanged(const QString&)),
+                SIGNAL(fileChanged(QString const&)),
                 this,
                 SLOT(onConfigReload()));
     }
@@ -779,7 +781,7 @@ void TerminalSession::setPointerShape(std::string_view cssName)
     // attachDisplay() applies whatever is remembered here once a display arrives. Returning early on
     // a null display -- as the reset path above is careful not to do -- would drop the shape in
     // precisely the case this remembering exists to serve.
-    _applicationPointerShape = *shape;
+    _applicationPointerShape = shape;
 
     // The event arrives on the parser thread; the cursor belongs to the GUI thread.
     if (_display)
@@ -831,7 +833,7 @@ void TerminalSession::inspect()
 
 void TerminalSession::notify(string_view title, string_view content)
 {
-#if defined(__linux__)
+#ifdef __linux__
     auto notification = vtbackend::DesktopNotification {};
     notification.title = std::string(title);
     notification.body = std::string(content);
@@ -851,7 +853,7 @@ void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification con
                  : QStringLiteral("%1: %2").arg(QString::fromStdString(notification.title),
                                                 QString::fromStdString(notification.body)));
 
-#if defined(__linux__)
+#ifdef __linux__
     _desktopNotifier.notify(notification);
 
     // Connect close event reporting if requested.
@@ -910,7 +912,7 @@ void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification con
 
 void TerminalSession::discardDesktopNotification(std::string_view identifier)
 {
-#if defined(__linux__)
+#ifdef __linux__
     _desktopNotifier.close(std::string(identifier));
 #else
     (void) identifier;
@@ -954,7 +956,7 @@ void TerminalSession::onClosed()
         else
             sessionLog()("Process terminated after {} seconds.", diff.count());
     }
-#if defined(VTPTY_LIBSSH2)
+#ifdef VTPTY_LIBSSH2
     else if (auto* sshSession = dynamic_cast<vtpty::SshSession*>(&_terminal.device()))
     {
         auto const exitStatus = sshSession->exitStatus();
@@ -1038,7 +1040,7 @@ void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
         auto const text = clipboard->text(QClipboard::Clipboard);
 
         // 1 MB hard limit
-        if (text.size() > 1024 * 1024)
+        if (text.size() > static_cast<qsizetype>(1024 * 1024))
         {
             sessionLog()("Clipboard contains huge text. Ignoring.");
             // A display-less session (background pane, headless test) has nowhere to toast the
@@ -1050,7 +1052,7 @@ void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
             return;
         }
         // 512 KB soft limit to ask user for permission
-        if (text.size() > 1024 * 512)
+        if (text.size() > static_cast<qsizetype>(1024 * 512))
         {
             _pendingBigPaste = clipboard;
             emit requestPermissionForPasteLargeFile();
@@ -1223,7 +1225,7 @@ QString TerminalSession::title() const
     // windowTitle() reference, which would tear (or use-after-free on a string reallocation) against that
     // writer. Native tabs/splits make these GUI-thread title reads far more frequent.
     auto const windowTitle = resolvedWindowTitle();
-#if !defined(NDEBUG)
+#ifndef NDEBUG
     return QString::fromStdString(windowTitle + " - Contour (DEBUG)");
 #else
     return QString::fromStdString(windowTitle + " - Contour");
@@ -1333,7 +1335,7 @@ void TerminalSession::onScrollOffsetChanged(vtbackend::ScrollOffset value)
 // }}}
 // {{{ Input Events
 
-void handleAction(auto const& actions, auto eventType, auto callback)
+static void handleAction(auto const& actions, auto eventType, auto callback)
 {
     if (eventType == KeyboardEventType::Press)
         callback(*actions);
@@ -2148,7 +2150,7 @@ bool TerminalSession::operator()(actions::PasteClipboard paste)
 
 bool TerminalSession::operator()(actions::PasteSelection paste)
 {
-    if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
+    if (QClipboard const* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
     {
         string const text = normalize_crlf(clipboard->text(QClipboard::Selection));
         if (paste.evaluateInShell)
@@ -2164,7 +2166,10 @@ bool TerminalSession::operator()(actions::Quit)
 {
     // TODO: later warn here when more then one terminal view is open
     terminal().device().close();
-    exit(EXIT_SUCCESS);
+    // Unwind the event loop rather than calling exit(): the PTY reader thread may still be
+    // running, and exit() would run static destructors underneath it.
+    QCoreApplication::exit(EXIT_SUCCESS);
+    return true;
 }
 
 bool TerminalSession::operator()(actions::ReloadConfig const& action)
@@ -2438,9 +2443,9 @@ bool TerminalSession::operator()(actions::WriteScreen const& event)
     return true;
 }
 
-bool TerminalSession::operator()(actions::CreateNewTab action)
+bool TerminalSession::operator()(actions::CreateNewTab const& action)
 {
-    _manager->createNewTab(this, std::move(action.profileName));
+    _manager->createNewTab(this, action.profileName);
     return true;
 }
 
@@ -2801,7 +2806,7 @@ bool TerminalSession::executeAction(actions::Action const& action)
 
 std::string TerminalSession::workingDirectory() const
 {
-#if !defined(_WIN32)
+#ifndef _WIN32
     if (auto const* ptyProcess = dynamic_cast<vtpty::Process const*>(&_terminal.device()))
         return ptyProcess->workingDirectory();
 #else
@@ -2846,7 +2851,7 @@ std::string TerminalSession::displayWorkingDirectory() const
     // Nothing reported (no shell integration, or not yet): fall back to where the session was started.
     // Unlike workingDirectory() this is NOT filtered for local existence — a path worth SHOWING need not
     // be one a child could be spawned in.
-#if !defined(_WIN32)
+#ifndef _WIN32
     if (auto const* ptyProcess = dynamic_cast<vtpty::Process const*>(&_terminal.device()))
         return ptyProcess->workingDirectory();
 #endif
@@ -3135,7 +3140,7 @@ void TerminalSession::setFontSize(text::font_size size)
 bool TerminalSession::reloadConfigWithProfile(string const& profileName)
 {
     auto newConfig = config::Config {};
-    auto configFailures = int { 0 };
+    auto configFailures = 0;
 
     try
     {
@@ -3192,7 +3197,9 @@ void TerminalSession::followHyperlink(vtbackend::HyperlinkInfo const& hyperlink)
 {
     auto const fileInfo = QFileInfo(QString::fromStdString(string(hyperlink.path())));
     auto const isLocal = hyperlink.isLocal() && hyperlink.host() == QHostInfo::localHostName().toStdString();
-    auto const* const editorEnv = getenv("EDITOR");
+    // qEnvironmentVariable() rather than getenv(): this runs on the GUI thread while the PTY and
+    // render threads are live, and getenv() is not thread safe.
+    auto const editorEnv = qEnvironmentVariable("EDITOR");
 
     if (isLocal && fileInfo.isFile() && fileInfo.isExecutable())
     {
@@ -3202,12 +3209,12 @@ void TerminalSession::followHyperlink(vtbackend::HyperlinkInfo const& hyperlink)
         args.append(QString::fromUtf8(hyperlink.path().data(), static_cast<int>(hyperlink.path().size())));
         _app.externalLauncher().execute(QString::fromStdString(_app.programPath()), args);
     }
-    else if (isLocal && fileInfo.isFile() && editorEnv && *editorEnv)
+    else if (isLocal && fileInfo.isFile() && !editorEnv.isEmpty())
     {
         QStringList args;
         args.append("config");
         args.append(QString::fromStdString(_config.configFile.string()));
-        args.append(QString::fromStdString(editorEnv));
+        args.append(editorEnv);
         args.append(QString::fromUtf8(hyperlink.path().data(), static_cast<int>(hyperlink.path().size())));
         _app.externalLauncher().execute(QString::fromStdString(_app.programPath()), args);
     }
@@ -3237,14 +3244,14 @@ void TerminalSession::onConfigReload()
 
     if (_configFileChangeWatcher)
         connect(_configFileChangeWatcher.get(),
-                SIGNAL(fileChanged(const QString&)),
+                SIGNAL(fileChanged(QString const&)),
                 this,
                 SLOT(onConfigReload()));
 }
 
 // }}}
 // {{{ QAbstractItemModel impl
-QModelIndex TerminalSession::index(int row, int column, const QModelIndex& parent) const
+QModelIndex TerminalSession::index(int row, int column, QModelIndex const& parent) const
 {
     Require(row == 0);
     Require(column == 0);
@@ -3254,34 +3261,34 @@ QModelIndex TerminalSession::index(int row, int column, const QModelIndex& paren
     return createIndex(row, column, nullptr);
 }
 
-QModelIndex TerminalSession::parent(const QModelIndex& child) const
+QModelIndex TerminalSession::parent(QModelIndex const& child) const
 {
     crispy::ignore_unused(child);
-    return QModelIndex();
+    return {};
 }
 
-int TerminalSession::rowCount(const QModelIndex& parent) const
+int TerminalSession::rowCount(QModelIndex const& parent) const
 {
     crispy::ignore_unused(parent);
     return 1;
 }
 
-int TerminalSession::columnCount(const QModelIndex& parent) const
+int TerminalSession::columnCount(QModelIndex const& parent) const
 {
     crispy::ignore_unused(parent);
     return 1;
 }
 
-QVariant TerminalSession::data(const QModelIndex& index, int role) const
+QVariant TerminalSession::data(QModelIndex const& index, int role) const
 {
     crispy::ignore_unused(index, role);
     Require(index.row() == 0);
     Require(index.column() == 0);
 
-    return QVariant(_id);
+    return { _id };
 }
 
-bool TerminalSession::setData(const QModelIndex& index, const QVariant& value, int role)
+bool TerminalSession::setData(QModelIndex const& index, QVariant const& value, int role)
 {
     // NB: Session-Id is read-only.
     crispy::ignore_unused(index, value, role);

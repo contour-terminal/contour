@@ -78,7 +78,7 @@ constexpr void swap(point& a, point& b) noexcept
     b = c;
 }
 
-constexpr inline int compare(point const& a, point const& b) noexcept
+constexpr int compare(point const& a, point const& b) noexcept
 {
     if (auto const dr = a.y - b.y; dr != 0)
         return dr;
@@ -86,32 +86,32 @@ constexpr inline int compare(point const& a, point const& b) noexcept
         return a.x - b.x;
 }
 
-constexpr inline bool operator<(point const& a, point const& b) noexcept
+constexpr bool operator<(point const& a, point const& b) noexcept
 {
     return compare(a, b) < 0;
 }
 
-constexpr inline bool operator<=(point const& a, point const& b) noexcept
+constexpr bool operator<=(point const& a, point const& b) noexcept
 {
     return compare(a, b) <= 0;
 }
 
-constexpr inline bool operator>(point const& a, point const& b) noexcept
+constexpr bool operator>(point const& a, point const& b) noexcept
 {
     return compare(a, b) > 0;
 }
 
-constexpr inline bool operator>=(point const& a, point const& b) noexcept
+constexpr bool operator>=(point const& a, point const& b) noexcept
 {
     return compare(a, b) >= 0;
 }
 
-constexpr inline bool operator==(point const& a, point const& b) noexcept
+constexpr bool operator==(point const& a, point const& b) noexcept
 {
     return a.x == b.x && a.y == b.y;
 }
 
-constexpr inline bool operator!=(point const& a, point const& b) noexcept
+constexpr bool operator!=(point const& a, point const& b) noexcept
 {
     return !(a == b);
 }

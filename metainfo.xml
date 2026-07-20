@@ -223,6 +223,8 @@
           <li>Fixes the input-method (IME) candidate window opening at the wrong position: the reported cursor rectangle now honors the configured window margin and the pane's position inside a split, and widens over double-width (CJK) characters</li>
           <li>Changes the window to use a custom client-side-decorated title bar (tab strip plus window controls) by default on all platforms; set show_title_bar: true to use the native server-side window decoration instead, in which case the tab strip is kept but its window controls defer to the OS frame</li>
           <li>Fixes profile settings that only took effect after a restart: changing background_image, its blur or opacity, the background color, or the scrollbar position now applies as soon as the config is reloaded or the profile is switched</li>
+          <li>Fixes searching for text outside Latin-1: a needle such as "Привет" or an emoji drove the case handling through functions that are undefined for those codepoints, which could silently mismatch or abort the terminal. Case is now folded per the Unicode character database, so "smart case" and case-insensitive search work for non-Latin scripts as well</li>
+          <li>Fixes passive mouse tracking (DEC mode 2029) surviving a terminal reset: after RIS the mode read as off while mouse reports still carried its extra parameter, which applications cannot parse, and wheel scrolling on the alternate screen emitted nothing</li>
         </ul>
       </description>
     </release>

@@ -104,8 +104,8 @@ namespace detail
 
         outer first;
         inner second;
-        typename outer::iterator outerIt;
-        typename inner::iterator innerIt;
+        outer::iterator outerIt;
+        inner::iterator innerIt;
 
         constexpr times_2d_iterator(outer outer, inner inner, bool init) noexcept:
             first { std::move(outer) },
@@ -184,7 +184,7 @@ namespace detail
     }
 
     template <typename I, typename T1, typename T2>
-    constexpr inline detail::times_2d<I, T1, T2> operator*(detail::times<I, T1> a, detail::times<I, T2> b)
+    constexpr detail::times_2d<I, T1, T2> operator*(detail::times<I, T1> a, detail::times<I, T2> b)
     {
         return detail::times_2d<I, T1, T2> { std::move(a), std::move(b) };
     }
@@ -218,19 +218,19 @@ namespace detail
 } // namespace detail
 
 template <typename I, typename T>
-constexpr inline detail::times<I, T> times(T start, I count, T step = T(1))
+constexpr detail::times<I, T> times(T start, I count, T step = T(1))
 {
     return detail::times<I, T> { start, count, step };
 }
 
 template <typename T>
-constexpr inline detail::times<T, T> times(T count)
+constexpr detail::times<T, T> times(T count)
 {
     return detail::times<T, T> { T(0), count, T(1) };
 }
 
 template <typename T>
-constexpr inline detail::times_2d<T, T, T> times2D(T a, T b)
+constexpr detail::times_2d<T, T, T> times2D(T a, T b)
 {
     return detail::times_2d<T, T, T> { std::move(a), std::move(b) };
 }

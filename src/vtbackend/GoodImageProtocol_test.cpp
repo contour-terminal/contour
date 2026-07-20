@@ -9,6 +9,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstddef>
 #include <format>
 #include <ranges>
 #include <string>
@@ -23,14 +24,14 @@ namespace
 /// Helper: creates raw RGBA pixel data of the given size filled with the given color.
 std::vector<uint8_t> makeRGBA(int width, int height, uint8_t r, uint8_t g, uint8_t b, uint8_t a)
 {
-    auto const pixelCount = static_cast<size_t>(width * height);
+    auto const pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
     auto data = std::vector<uint8_t>(pixelCount * 4);
     for (auto const i: std::views::iota(size_t { 0 }, pixelCount))
     {
-        data[i * 4 + 0] = r;
-        data[i * 4 + 1] = g;
-        data[i * 4 + 2] = b;
-        data[i * 4 + 3] = a;
+        data[(i * 4) + 0] = r;
+        data[(i * 4) + 1] = g;
+        data[(i * 4) + 2] = b;
+        data[(i * 4) + 3] = a;
     }
     return data;
 }
@@ -155,7 +156,7 @@ TEST_CASE("GoodImageProtocol.Render.StatusSuccess", "[GIP]")
     mock.writeToScreen(gipRender("n=img,c=4,r=2,s"));
 
     // CSI > 0 i = success
-    CHECK(mock.replyData().find("\033P!gs=0\033\\") != std::string::npos);
+    CHECK(mock.replyData().contains("\033P!gs=0\033\\"));
 }
 
 TEST_CASE("GoodImageProtocol.Render.StatusFailure", "[GIP]")
@@ -165,7 +166,7 @@ TEST_CASE("GoodImageProtocol.Render.StatusFailure", "[GIP]")
     mock.writeToScreen(gipRender("n=missing,c=4,r=2,s"));
 
     // CSI > 1 i = failure
-    CHECK(mock.replyData().find("\033P!gs=1\033\\") != std::string::npos);
+    CHECK(mock.replyData().contains("\033P!gs=1\033\\"));
 }
 
 // ==================== Oneshot Tests ====================
@@ -217,7 +218,7 @@ TEST_CASE("GoodImageProtocol.Oneshot.AcceptsRgbBodyAtThreeBytesPerPixel", "[GIP]
     // The consistency check is per-format, not a hardcoded 4: GIP's `f=2` really is three bytes per
     // pixel, and holding it to an RGBA stride would reject every valid RGB image.
     auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
-    auto body = std::vector<uint8_t>(2 * 2 * 3, 0x7F);
+    auto body = std::vector<uint8_t>(static_cast<std::size_t>(2 * 2 * 3), 0x7F);
 
     mock.writeToScreen(gipOneshot("f=2,w=2,h=2,c=4,r=2", body));
 
@@ -257,7 +258,7 @@ TEST_CASE("GoodImageProtocol.DA1.IncludesGIPCode", "[GIP]")
     mock.terminal.flushInput();
 
     // Response should contain ;90 (the GIP DA1 code)
-    CHECK(mock.replyData().find(";90") != std::string::npos);
+    CHECK(mock.replyData().contains(";90"));
 }
 
 // ==================== Screen Layer Tests ====================
@@ -338,7 +339,7 @@ TEST_CASE("GoodImageProtocol.Oneshot.WithLayer", "[GIP]")
 
 TEST_CASE("GoodImageProtocol.MaxBodyLength", "[GIP]")
 {
-    CHECK(MessageParser::MaxBodyLength == 16 * 1024 * 1024);
+    CHECK(MessageParser::MaxBodyLength == static_cast<size_t>(16 * 1024 * 1024));
 }
 
 // ==================== Layer Text-Write Interaction Tests ====================
@@ -520,7 +521,7 @@ TEST_CASE("GoodImageProtocol.Upload.StatusSuccess", "[GIP]")
     mock.writeToScreen(gipUpload("n=upstat,f=3,w=2,h=2,s", pixels));
 
     // CSI > 0 i = success
-    CHECK(mock.replyData().find("\033P!gs=0\033\\") != std::string::npos);
+    CHECK(mock.replyData().contains("\033P!gs=0\033\\"));
 
     // Verify image was actually uploaded.
     auto const imageRef = mock.terminal.imagePool().findImageByName("upstat");
@@ -536,7 +537,7 @@ TEST_CASE("GoodImageProtocol.Upload.StatusInvalidData", "[GIP]")
     mock.writeToScreen(gipUpload("n=bad,f=3,w=2,h=2,s", wrongPixels));
 
     // CSI > 2 i = invalid image data
-    CHECK(mock.replyData().find("\033P!gs=2\033\\") != std::string::npos);
+    CHECK(mock.replyData().contains("\033P!gs=2\033\\"));
 
     // Image should NOT be in pool.
     CHECK(mock.terminal.imagePool().findImageByName("bad") == nullptr);
@@ -574,8 +575,8 @@ TEST_CASE("GoodImageProtocol.Query.ResourceLimits", "[GIP]")
 
     // Response should be DCS ! g s=8,m=Pm,b=Pb,w=Pw,h=Ph ST
     auto const& reply = mock.replyData();
-    CHECK(reply.find("\033P!gs=8,m=") != std::string::npos);
-    CHECK(reply.find("\033\\") != std::string::npos);
+    CHECK(reply.contains("\033P!gs=8,m="));
+    CHECK(reply.contains("\033\\"));
 }
 
 // ==================== Oneshot Update-Cursor Tests ====================
@@ -623,7 +624,7 @@ TEST_CASE("GoodImageProtocol.Oneshot.StatusResponse", "[GIP]")
 
     mock.writeToScreen(gipOneshot("f=3,w=2,h=2,c=4,r=2,s", pixels));
 
-    CHECK(mock.replyData().find("\033P!gs=0\033\\") != std::string::npos);
+    CHECK(mock.replyData().contains("\033P!gs=0\033\\"));
 }
 
 // ==================== Invalid Format Tests ====================
@@ -654,7 +655,7 @@ TEST_CASE("GoodImageProtocol.Render.SubRegion", "[GIP]")
     {
         for (auto const col: std::views::iota(0, 4))
         {
-            auto const idx = static_cast<size_t>((row * 4 + col) * 4);
+            auto const idx = (((static_cast<size_t>(row) * 4) + static_cast<size_t>(col)) * 4);
             auto const isRight = col >= 2;
             pixels[idx + 0] = isRight ? uint8_t { 0x00 } : uint8_t { 0xFF }; // R
             pixels[idx + 1] = isRight ? uint8_t { 0xFF } : uint8_t { 0x00 }; // G
@@ -683,7 +684,9 @@ TEST_CASE("GoodImageProtocol.Render.SubRegion", "[GIP]")
     // Sample the center pixel of the fragment — it should be green (from the right half).
     auto const centerX = *cellPixelSize.width / 2;
     auto const centerY = *cellPixelSize.height / 2;
-    auto const centerIdx = static_cast<size_t>((centerY * *cellPixelSize.width + centerX) * 4);
+    auto const centerIdx = (((static_cast<size_t>(centerY) * static_cast<size_t>(*cellPixelSize.width))
+                             + static_cast<size_t>(centerX))
+                            * 4);
     CHECK(fragmentData[centerIdx + 0] == 0x00); // R = 0 (green, not red)
     CHECK(fragmentData[centerIdx + 1] == 0xFF); // G = 0xFF
     CHECK(fragmentData[centerIdx + 2] == 0x00); // B = 0
@@ -693,15 +696,15 @@ TEST_CASE("GoodImageProtocol.Render.SubRegion", "[GIP]")
 // ==================== Auto Format Detection Tests ====================
 
 /// Helper: creates raw RGB pixel data of the given size filled with the given color.
-std::vector<uint8_t> makeRGB(int width, int height, uint8_t r, uint8_t g, uint8_t b)
+static std::vector<uint8_t> makeRGB(int width, int height, uint8_t r, uint8_t g, uint8_t b)
 {
-    auto const pixelCount = static_cast<size_t>(width * height);
+    auto const pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
     auto data = std::vector<uint8_t>(pixelCount * 3);
     for (auto const i: std::views::iota(size_t { 0 }, pixelCount))
     {
-        data[i * 3 + 0] = r;
-        data[i * 3 + 1] = g;
-        data[i * 3 + 2] = b;
+        data[(i * 3) + 0] = r;
+        data[(i * 3) + 1] = g;
+        data[(i * 3) + 2] = b;
     }
     return data;
 }
@@ -744,7 +747,7 @@ TEST_CASE("GoodImageProtocol.Upload.AutoFormatUnresolvable", "[GIP]")
     mock.writeToScreen(gipUpload("n=ambiguous,f=1,s", randomData));
 
     // Should fail with error code 2.
-    CHECK(mock.replyData().find("\033P!gs=2\033\\") != std::string::npos);
+    CHECK(mock.replyData().contains("\033P!gs=2\033\\"));
     CHECK(mock.terminal.imagePool().findImageByName("ambiguous") == nullptr);
 }
 

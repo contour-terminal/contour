@@ -8,7 +8,7 @@
 
 #include <vtrasterizer/GlyphScaling.h>
 
-#if defined(CONTOUR_FRONTEND_GUI)
+#ifdef CONTOUR_FRONTEND_GUI
     #include <contour/display/ShaderConfig.h>
 #endif
 
@@ -48,6 +48,7 @@
 
 #include <chrono>
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <expected>
@@ -519,48 +520,57 @@ struct Bell
     float volume = 1.0f;
 };
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
 inline auto defaultFamilyName = "Monaco";
 #else
 inline auto defaultFamilyName = "monospace";
 #endif
 
-const inline vtrasterizer::FontDescriptions defaultFont = vtrasterizer::FontDescriptions {
-    .dpiScale = 1.0,
-    .dpi = { 0, 0 },
-    .size = { 12 },
-    .regular = text::font_description { .familyName = { defaultFamilyName },
-                                        .weight = text::font_weight::normal,
-                                        .slant = text::font_slant::normal,
-                                        .spacing = text::font_spacing::mono,
-                                        .strictSpacing = false,
-                                        .features = {} },
-    .bold = text::font_description { .familyName = { defaultFamilyName },
-                                     .weight = text::font_weight::bold,
-                                     .slant = text::font_slant::normal,
-                                     .spacing = text::font_spacing::mono,
-                                     .strictSpacing = false,
-                                     .features = {} },
-    .italic = text::font_description { .familyName = { defaultFamilyName },
-                                       .weight = text::font_weight::normal,
-                                       .slant = text::font_slant::italic,
-                                       .spacing = text::font_spacing::mono,
-                                       .strictSpacing = false,
-                                       .features = {} },
-    .boldItalic = text::font_description { .familyName = { defaultFamilyName },
-                                           .weight = text::font_weight::bold,
+/// The built-in font configuration, used when the config file does not override it.
+///
+/// A function-local static rather than a namespace-scope object: its construction allocates, so a
+/// throw here is catchable by the caller instead of terminating during static initialization.
+/// @return The default font descriptions (constructed on first use).
+[[nodiscard]] inline vtrasterizer::FontDescriptions const& defaultFont()
+{
+    static auto const value = vtrasterizer::FontDescriptions {
+        .dpiScale = 1.0,
+        .dpi = { 0, 0 },
+        .size = { 12 },
+        .regular = text::font_description { .familyName = { defaultFamilyName },
+                                            .weight = text::font_weight::normal,
+                                            .slant = text::font_slant::normal,
+                                            .spacing = text::font_spacing::mono,
+                                            .strictSpacing = false,
+                                            .features = {} },
+        .bold = text::font_description { .familyName = { defaultFamilyName },
+                                         .weight = text::font_weight::bold,
+                                         .slant = text::font_slant::normal,
+                                         .spacing = text::font_spacing::mono,
+                                         .strictSpacing = false,
+                                         .features = {} },
+        .italic = text::font_description { .familyName = { defaultFamilyName },
+                                           .weight = text::font_weight::normal,
                                            .slant = text::font_slant::italic,
                                            .spacing = text::font_spacing::mono,
                                            .strictSpacing = false,
                                            .features = {} },
-    .emoji = text::font_description { .familyName = { "emoji" } },
-    .renderMode = text::render_mode::gray,
-    .textShapingEngine = vtrasterizer::TextShapingEngine::OpenShaper,
-    .fontLocator = vtrasterizer::FontLocatorEngine::Native,
-    .builtinBoxDrawing = true,
-    .maxFallbackCount = vtrasterizer::DefaultMaxFallbackCount,
-    .textOutline = {},
-};
+        .boldItalic = text::font_description { .familyName = { defaultFamilyName },
+                                               .weight = text::font_weight::bold,
+                                               .slant = text::font_slant::italic,
+                                               .spacing = text::font_spacing::mono,
+                                               .strictSpacing = false,
+                                               .features = {} },
+        .emoji = text::font_description { .familyName = { "emoji" } },
+        .renderMode = text::render_mode::gray,
+        .textShapingEngine = vtrasterizer::TextShapingEngine::OpenShaper,
+        .fontLocator = vtrasterizer::FontLocatorEngine::Native,
+        .builtinBoxDrawing = true,
+        .maxFallbackCount = vtrasterizer::DefaultMaxFallbackCount,
+        .textOutline = {},
+    };
+    return value;
+}
 
 /// A node in a layout tab's pane tree. It is EITHER a leaf (a terminal to open) OR a split (an
 /// orientation plus two or more children): an empty @c children means leaf.
@@ -655,7 +665,7 @@ struct TerminalProfile
     ConfigEntry<PermissionsConfig, documentation::Permissions> permissions {};
     ConfigEntry<bool, documentation::InputMethodEditorSupport> inputMethodEditor { true };
     ConfigEntry<bool, documentation::HighlightDoubleClickerWord> highlightDoubleClickedWord { true };
-    ConfigEntry<vtrasterizer::FontDescriptions, documentation::Fonts> fonts { defaultFont };
+    ConfigEntry<vtrasterizer::FontDescriptions, documentation::Fonts> fonts { defaultFont() };
     ConfigEntry<bool, documentation::DrawBoldTextWithBrightColors> drawBoldTextWithBrightColors { false };
     ConfigEntry<vtbackend::BlinkStyle, documentation::BlinkStyle> blinkStyle {
         vtbackend::BlinkStyle::Smooth
@@ -696,430 +706,443 @@ struct TerminalProfile
     ConfigEntry<bool, documentation::OptionKeyAsAlt> optionKeyAsAlt { false };
 };
 
-const InputMappings defaultInputMappings {
-    .keyMappings {
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
-                          .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt } },
-                          .input = vtbackend::Key::Enter,
-                          .binding = { { actions::ToggleFullscreen {} } } },
-        KeyInputMapping { .modes = []() -> vtbackend::MatchModes {
-                             auto mods = vtbackend::MatchModes();
-                             mods.enable(vtbackend::MatchModes::Select);
-                             mods.enable(vtbackend::MatchModes::Insert);
-                             return mods;
-                         }(),
-                          .modifiers { vtbackend::Modifiers {} },
-                          .input = vtbackend::Key::Escape,
-                          .binding = { { actions::CancelSelection {} } } },
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
-                          .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
-                          .input = vtbackend::Key::DownArrow,
-                          .binding = { { actions::ScrollOneDown {} } } },
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
-                          .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
-                          .input = vtbackend::Key::End,
-                          .binding = { { actions::ScrollToBottom {} } } },
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
-                          .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
-                          .input = vtbackend::Key::Home,
-                          .binding = { { actions::ScrollToTop {} } } },
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
-                          .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
-                          .input = vtbackend::Key::PageDown,
-                          .binding = { { actions::ScrollPageDown {} } } },
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
-                          .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
-                          .input = vtbackend::Key::PageUp,
-                          .binding = { { actions::ScrollPageUp {} } } },
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
-                          .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
-                          .input = vtbackend::Key::UpArrow,
-                          .binding = { { actions::ScrollOneUp {} } } },
-        KeyInputMapping { .modes = []() -> vtbackend::MatchModes {
-                             auto mods = vtbackend::MatchModes();
-                             mods.enable(vtbackend::MatchModes::Search);
-                             return mods;
-                         }(),
-                          .modifiers { vtbackend::Modifiers {} },
-                          .input = vtbackend::Key::F3,
-                          .binding = { { actions::FocusNextSearchMatch {} } } },
-        KeyInputMapping { .modes = []() -> vtbackend::MatchModes {
-                             auto mods = vtbackend::MatchModes();
-                             mods.enable(vtbackend::MatchModes::Search);
-                             return mods;
-                         }(),
-                          .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
-                          .input = vtbackend::Key::F3,
-                          .binding = { { actions::FocusPreviousSearchMatch {} } } },
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
-                          .modifiers { vtbackend::Modifier::Shift },
-                          .input = vtbackend::Key::LeftArrow,
-                          .binding = { { actions::SwitchToTabLeft {} } } },
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
-                          .modifiers { vtbackend::Modifier::Shift },
-                          .input = vtbackend::Key::RightArrow,
-                          .binding = { { actions::SwitchToTabRight {} } } },
-        // The browser chords for the same thing. They are ALSO in builtinFallbackKeyMappings(), which is
-        // what carries them to anyone whose contour.yml predates them; listing them here is what puts
-        // them in a freshly generated one, where they can be seen and rebound.
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
-                          .modifiers { vtbackend::Modifier::Control },
-                          .input = vtbackend::Key::PageUp,
-                          .binding = { { actions::SwitchToTabLeft {} } } },
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
-                          .modifiers { vtbackend::Modifier::Control },
-                          .input = vtbackend::Key::PageDown,
-                          .binding = { { actions::SwitchToTabRight {} } } },
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
-                          .modifiers { vtbackend::Modifier::Control },
-                          .input = vtbackend::Key::Tab,
-                          .binding = { { actions::SwitchToTabRight {} } } },
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
-                          .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
-                          .input = vtbackend::Key::Tab,
-                          .binding = { { actions::SwitchToTabLeft {} } } },
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
-                          .modifiers { vtbackend::Modifier::Alt, vtbackend::Modifier::Shift },
-                          .input = vtbackend::Key::LeftArrow,
-                          .binding = { { actions::FocusPaneLeft {} } } },
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
-                          .modifiers { vtbackend::Modifier::Alt, vtbackend::Modifier::Shift },
-                          .input = vtbackend::Key::RightArrow,
-                          .binding = { { actions::FocusPaneRight {} } } },
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
-                          .modifiers { vtbackend::Modifier::Alt, vtbackend::Modifier::Shift },
-                          .input = vtbackend::Key::UpArrow,
-                          .binding = { { actions::FocusPaneUp {} } } },
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
-                          .modifiers { vtbackend::Modifier::Alt, vtbackend::Modifier::Shift },
-                          .input = vtbackend::Key::DownArrow,
-                          .binding = { { actions::FocusPaneDown {} } } },
-        // Ctrl+Alt+Arrow: swap the active pane with its neighbor (the two terminals trade slots).
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
-                          .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Alt },
-                          .input = vtbackend::Key::LeftArrow,
-                          .binding = { { actions::SwapPaneLeft {} } } },
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
-                          .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Alt },
-                          .input = vtbackend::Key::RightArrow,
-                          .binding = { { actions::SwapPaneRight {} } } },
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
-                          .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Alt },
-                          .input = vtbackend::Key::UpArrow,
-                          .binding = { { actions::SwapPaneUp {} } } },
-        KeyInputMapping { .modes { vtbackend::MatchModes {} },
-                          .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Alt },
-                          .input = vtbackend::Key::DownArrow,
-                          .binding = { { actions::SwapPaneDown {} } } },
-        // Ctrl+Shift+Alt+Arrow: grow/shrink the active pane by moving the divider in that direction.
-        KeyInputMapping {
-            .modes { vtbackend::MatchModes {} },
-            .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift, vtbackend::Modifier::Alt },
-            .input = vtbackend::Key::LeftArrow,
-            .binding = { { actions::ResizePane { .direction = actions::Direction::Left } } } },
-        KeyInputMapping {
-            .modes { vtbackend::MatchModes {} },
-            .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift, vtbackend::Modifier::Alt },
-            .input = vtbackend::Key::RightArrow,
-            .binding = { { actions::ResizePane { .direction = actions::Direction::Right } } } },
-        KeyInputMapping {
-            .modes { vtbackend::MatchModes {} },
-            .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift, vtbackend::Modifier::Alt },
-            .input = vtbackend::Key::UpArrow,
-            .binding = { { actions::ResizePane { .direction = actions::Direction::Up } } } },
-        KeyInputMapping {
-            .modes { vtbackend::MatchModes {} },
-            .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift, vtbackend::Modifier::Alt },
-            .input = vtbackend::Key::DownArrow,
-            .binding = { { actions::ResizePane { .direction = actions::Direction::Down } } } },
-        //     KeyInputMapping { .modes { vtbackend::MatchModes {} },
-        //                       .modifiers { vtbackend::Modifiers {  vtbackend::Modifier {
-        //                       vtbackend::Modifier::Shift }
-        //                                    | vtbackend::Modifiers { vtbackend::Modifier::Control }
-        //                                    }
-        //                                    },
-        //                       .input { vtbackend::Key::Plus },
-        //                       .binding = { { actions::IncreaseFontSize {} } } },
-    },
-    .charMappings {
-        CharInputMapping {
-            .modes { vtbackend::MatchModes {} },
-            .modifiers { vtbackend::Modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt }
-                                                | vtbackend::Modifiers { vtbackend::Modifier::Control } } },
-            .input = ',',
-            .binding = { { actions::ToggleInputMethodHandling {} } } },
-        CharInputMapping {
-            .modes { vtbackend::MatchModes {} },
-            .modifiers { vtbackend::Modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
-                                                | vtbackend::Modifiers { vtbackend::Modifier::Control } } },
-            .input = '-',
-            .binding = { { actions::DecreaseFontSize {} } } },
-        CharInputMapping {
-            .modes { vtbackend::MatchModes {} },
-            .modifiers { vtbackend::Modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
-                                                | vtbackend::Modifiers { vtbackend::Modifier::Control } } },
-            .input = '_',
-            .binding = { { actions::DecreaseFontSize {} } } },
-        CharInputMapping {
-            .modes { vtbackend::MatchModes {} },
-            .modifiers { vtbackend::Modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
-                                                | vtbackend::Modifiers { vtbackend::Modifier::Control } } },
-            .input = 'N',
-            .binding = { actions::NewTerminal {} } },
-        CharInputMapping {
-            .modes { vtbackend::MatchModes {} },
-            .modifiers { vtbackend::Modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt }
-                                                | vtbackend::Modifiers { vtbackend::Modifier::Control } } },
-            .input = 'V',
-            .binding = { { actions::PasteClipboard { .strip = true } } } },
-        CharInputMapping {
-            .modes { vtbackend::MatchModes {} },
-            .modifiers { vtbackend::Modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
-                                                | vtbackend::Modifiers { vtbackend::Modifier::Control } } },
-            .input = 'V',
-            .binding = { { actions::PasteClipboard { .strip = false } } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt }
-                                        | vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                           .input = 'S',
-                           .binding = { { actions::ScreenshotVT {} } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                           .input = '0',
-                           .binding = { { actions::ResetFontSize {} } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
-                           .input = 'T',
-                           .binding = { { actions::CreateNewTab {} } } },
-        // Reads the selection aloud. Does nothing where no speech engine is installed, and the context
-        // menu hides its row there, so the binding is harmless on a machine without a voice.
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
-                           .input = 'S',
-                           .binding = { { actions::SpeakSelection {} } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
-                           .input = 'E',
-                           .binding = { { actions::SplitVertical {} } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
-                           .input = 'O',
-                           .binding = { { actions::SplitHorizontal {} } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
-                           .input = 'X',
-                           .binding = { { actions::ClosePane {} } } },
-        // Ctrl+Shift+P: the command palette. A CharInputMapping (not a KeyInputMapping) because
-        // Qt::Key_P is not in helper.cpp's KeyMappings table: any Ctrl+printable is routed through
-        // sendCharEvent, so the chord arrives as the character 'P' — exactly like Ctrl+Shift+T above.
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
-                           .input = 'P',
-                           .binding = { { actions::OpenCommandPalette {} } } },
-        // Ctrl+Shift+Backslash: flip the active pane's split orientation (horizontal <-> vertical).
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
-                           .input = '\\',
-                           .binding = { { actions::ToggleSplitOrientation {} } } },
-        // Ctrl+Shift+Z: zoom the active pane to fill the tab, and back. Deliberately NOT Alt+F (which
-        // issue #91 floated): Alt+F is readline/emacs forward-word, and a default binding here would
-        // swallow it before it ever reached the shell.
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
-                           .input = 'Z',
-                           .binding = { { actions::TogglePaneZoom {} } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifier::Alt },
-                           .input = '1',
-                           .binding = { { actions::SwitchToTab { .position = 1 } } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifier::Alt },
-                           .input = '2',
-                           .binding = { { actions::SwitchToTab { .position = 2 } } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifier::Alt },
-                           .input = '3',
-                           .binding = { { actions::SwitchToTab { .position = 3 } } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifier::Alt },
-                           .input = '4',
-                           .binding = { { actions::SwitchToTab { .position = 4 } } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifier::Alt },
-                           .input = '5',
-                           .binding = { { actions::SwitchToTab { .position = 5 } } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifier::Alt },
-                           .input = '6',
-                           .binding = { { actions::SwitchToTab { .position = 6 } } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifier::Alt },
-                           .input = '7',
-                           .binding = { { actions::SwitchToTab { .position = 7 } } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifier::Alt },
-                           .input = '8',
-                           .binding = { { actions::SwitchToTab { .position = 8 } } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifier::Alt },
-                           .input = '9',
-                           .binding = { { actions::SwitchToTab { .position = 9 } } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifier::Alt },
-                           .input = '0',
-                           .binding = { { actions::SwitchToTab { .position = 10 } } } },
-        CharInputMapping { .modes = []() -> vtbackend::MatchModes {
-                              auto mods = vtbackend::MatchModes();
-                              mods.enable(vtbackend::MatchModes::Select);
-                              mods.enable(vtbackend::MatchModes::Insert);
-                              return mods;
-                          }(),
-                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                           .input = 'C',
-                           .binding = { { actions::CopySelection {} } } },
-        CharInputMapping { .modes = []() -> vtbackend::MatchModes {
-                              auto mods = vtbackend::MatchModes();
-                              mods.enable(vtbackend::MatchModes::Select);
-                              mods.enable(vtbackend::MatchModes::Insert);
-                              return mods;
-                          }(),
-                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                           .input = 'C',
-                           .binding = { { actions::CancelSelection {} } } },
-        CharInputMapping { .modes = []() -> vtbackend::MatchModes {
-                              auto mods = vtbackend::MatchModes();
-                              mods.enable(vtbackend::MatchModes::Select);
-                              mods.enable(vtbackend::MatchModes::Insert);
-                              return mods;
-                          }(),
-                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                           .input = 'V',
-                           .binding = { { actions::PasteClipboard { .strip = false } } } },
-        CharInputMapping { .modes = []() -> vtbackend::MatchModes {
-                              auto mods = vtbackend::MatchModes();
-                              mods.enable(vtbackend::MatchModes::Select);
-                              mods.enable(vtbackend::MatchModes::Insert);
-                              return mods;
-                          }(),
-                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                           .input = 'V',
-                           .binding = { { actions::CancelSelection {} } } },
-        CharInputMapping { .modes = []() -> vtbackend::MatchModes {
-                              auto mods = vtbackend::MatchModes();
-                              mods.enable(vtbackend::MatchModes::Insert);
-                              return mods;
-                          }(),
-                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
-                                        | vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                           .input = ',',
-                           .binding = { { actions::OpenConfiguration {} } } },
-        CharInputMapping { .modes = []() -> vtbackend::MatchModes {
-                              auto mods = vtbackend::MatchModes();
-                              mods.enable(vtbackend::MatchModes::Insert);
-                              return mods;
-                          }(),
-                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
-                                        | vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                           .input = ' ', // SPACE
-                           .binding = { { actions::ViNormalMode {} } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
-                                        | vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                           .input = ',',
-                           .binding = { { actions::OpenConfiguration {} } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
-                                        | vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                           .input = 'Q',
-                           .binding = { { actions::Quit {} } } },
-        CharInputMapping { .modes = []() -> vtbackend::MatchModes {
-                              auto mods = vtbackend::MatchModes();
-                              mods.disable(vtbackend::MatchModes::AlternateScreen);
-                              return mods;
-                          }(),
-                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt }
-                                        | vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                           .input = 'K',
-                           .binding = { { actions::ScrollMarkUp {} } } },
-        CharInputMapping { .modes = []() -> vtbackend::MatchModes {
-                              auto mods = vtbackend::MatchModes();
-                              mods.disable(vtbackend::MatchModes::AlternateScreen);
-                              return mods;
-                          }(),
-                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt }
-                                        | vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                           .input = 'J',
-                           .binding = { { actions::ScrollMarkDown {} } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt }
-                                        | vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                           .input = 'O',
-                           .binding = { { actions::OpenFileManager {} } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt }
-                                        | vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                           .input = '.',
-                           .binding = { { actions::ToggleStatusLine {} } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
-                                        | vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                           .input = 'F',
-                           .binding = { { actions::SearchReverse {} } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
-                                        | vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                           .input = 'H',
-                           .binding = { { actions::NoSearchHighlight {} } } },
-        CharInputMapping { .modes { vtbackend::MatchModes {} },
-                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
-                                        | vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                           .input = 'U',
-                           .binding = { { actions::HintMode {
-                               .patterns = "url", .hintAction = vtbackend::HintAction::Open } } } },
-    },
-    .mouseMappings {
-        MouseInputMapping { .modes { vtbackend::MatchModes {} },
-                            .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                            .input = vtbackend::MouseButton::Left,
-                            .binding = { { actions::FollowHyperlink {} } } },
-        MouseInputMapping { .modes { vtbackend::MatchModes {} },
-                            .modifiers { vtbackend::Modifiers { vtbackend::Modifier::None } },
-                            .input = vtbackend::MouseButton::Middle,
-                            .binding = { { actions::PasteSelection {} } } },
-        MouseInputMapping { .modes { vtbackend::MatchModes {} },
-                            .modifiers { vtbackend::Modifiers { vtbackend::Modifier::None } },
-                            .input = vtbackend::MouseButton::WheelDown,
-                            .binding = { { actions::ScrollDown {} } } },
-        MouseInputMapping { .modes { vtbackend::MatchModes {} },
-                            .modifiers { vtbackend::Modifiers { vtbackend::Modifier::None } },
-                            .input = vtbackend::MouseButton::WheelUp,
-                            .binding = { { actions::ScrollUp {} } } },
-        MouseInputMapping { .modes { vtbackend::MatchModes {} },
-                            .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt } },
-                            .input = vtbackend::MouseButton::WheelDown,
-                            .binding = { { actions::DecreaseOpacity {} } } },
-        MouseInputMapping { .modes { vtbackend::MatchModes {} },
-                            .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt } },
-                            .input = vtbackend::MouseButton::WheelUp,
-                            .binding = { { actions::IncreaseOpacity {} } } },
-        MouseInputMapping { .modes { vtbackend::MatchModes {} },
-                            .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                            .input = vtbackend::MouseButton::WheelDown,
-                            .binding = { { actions::DecreaseFontSize {} } } },
-        MouseInputMapping { .modes { vtbackend::MatchModes {} },
-                            .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                            .input = vtbackend::MouseButton::WheelUp,
-                            .binding = { { actions::IncreaseFontSize {} } } },
-        MouseInputMapping { .modes { vtbackend::MatchModes {} },
-                            .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
-                            .input = vtbackend::MouseButton::WheelDown,
-                            .binding = { { actions::ScrollPageDown {} } } },
-        MouseInputMapping { .modes { vtbackend::MatchModes {} },
-                            .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
-                            .input = vtbackend::MouseButton::WheelUp,
-                            .binding = { { actions::ScrollPageUp {} } } },
-    }
-};
+/// The built-in key/mouse bindings, used when the config file does not override them.
+///
+/// A function-local static rather than a namespace-scope object: its construction allocates, so a
+/// throw here is catchable by the caller instead of terminating during static initialization.
+/// @return The default input mappings (constructed on first use).
+[[nodiscard]] inline InputMappings const& defaultInputMappings()
+{
+    static auto const value = InputMappings {
+        .keyMappings {
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt } },
+                              .input = vtbackend::Key::Enter,
+                              .binding = { { actions::ToggleFullscreen {} } } },
+            KeyInputMapping { .modes = []() -> vtbackend::MatchModes {
+                                 auto mods = vtbackend::MatchModes();
+                                 mods.enable(vtbackend::MatchModes::Select);
+                                 mods.enable(vtbackend::MatchModes::Insert);
+                                 return mods;
+                             }(),
+                              .modifiers { vtbackend::Modifiers {} },
+                              .input = vtbackend::Key::Escape,
+                              .binding = { { actions::CancelSelection {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
+                              .input = vtbackend::Key::DownArrow,
+                              .binding = { { actions::ScrollOneDown {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
+                              .input = vtbackend::Key::End,
+                              .binding = { { actions::ScrollToBottom {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
+                              .input = vtbackend::Key::Home,
+                              .binding = { { actions::ScrollToTop {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
+                              .input = vtbackend::Key::PageDown,
+                              .binding = { { actions::ScrollPageDown {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
+                              .input = vtbackend::Key::PageUp,
+                              .binding = { { actions::ScrollPageUp {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
+                              .input = vtbackend::Key::UpArrow,
+                              .binding = { { actions::ScrollOneUp {} } } },
+            KeyInputMapping { .modes = []() -> vtbackend::MatchModes {
+                                 auto mods = vtbackend::MatchModes();
+                                 mods.enable(vtbackend::MatchModes::Search);
+                                 return mods;
+                             }(),
+                              .modifiers { vtbackend::Modifiers {} },
+                              .input = vtbackend::Key::F3,
+                              .binding = { { actions::FocusNextSearchMatch {} } } },
+            KeyInputMapping { .modes = []() -> vtbackend::MatchModes {
+                                 auto mods = vtbackend::MatchModes();
+                                 mods.enable(vtbackend::MatchModes::Search);
+                                 return mods;
+                             }(),
+                              .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
+                              .input = vtbackend::Key::F3,
+                              .binding = { { actions::FocusPreviousSearchMatch {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Shift },
+                              .input = vtbackend::Key::LeftArrow,
+                              .binding = { { actions::SwitchToTabLeft {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Shift },
+                              .input = vtbackend::Key::RightArrow,
+                              .binding = { { actions::SwitchToTabRight {} } } },
+            // The browser chords for the same thing. They are ALSO in builtinFallbackKeyMappings(), which is
+            // what carries them to anyone whose contour.yml predates them; listing them here is what puts
+            // them in a freshly generated one, where they can be seen and rebound.
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Control },
+                              .input = vtbackend::Key::PageUp,
+                              .binding = { { actions::SwitchToTabLeft {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Control },
+                              .input = vtbackend::Key::PageDown,
+                              .binding = { { actions::SwitchToTabRight {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Control },
+                              .input = vtbackend::Key::Tab,
+                              .binding = { { actions::SwitchToTabRight {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                              .input = vtbackend::Key::Tab,
+                              .binding = { { actions::SwitchToTabLeft {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Alt, vtbackend::Modifier::Shift },
+                              .input = vtbackend::Key::LeftArrow,
+                              .binding = { { actions::FocusPaneLeft {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Alt, vtbackend::Modifier::Shift },
+                              .input = vtbackend::Key::RightArrow,
+                              .binding = { { actions::FocusPaneRight {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Alt, vtbackend::Modifier::Shift },
+                              .input = vtbackend::Key::UpArrow,
+                              .binding = { { actions::FocusPaneUp {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Alt, vtbackend::Modifier::Shift },
+                              .input = vtbackend::Key::DownArrow,
+                              .binding = { { actions::FocusPaneDown {} } } },
+            // Ctrl+Alt+Arrow: swap the active pane with its neighbor (the two terminals trade slots).
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Alt },
+                              .input = vtbackend::Key::LeftArrow,
+                              .binding = { { actions::SwapPaneLeft {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Alt },
+                              .input = vtbackend::Key::RightArrow,
+                              .binding = { { actions::SwapPaneRight {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Alt },
+                              .input = vtbackend::Key::UpArrow,
+                              .binding = { { actions::SwapPaneUp {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Alt },
+                              .input = vtbackend::Key::DownArrow,
+                              .binding = { { actions::SwapPaneDown {} } } },
+            // Ctrl+Shift+Alt+Arrow: grow/shrink the active pane by moving the divider in that direction.
+            KeyInputMapping {
+                .modes { vtbackend::MatchModes {} },
+                .modifiers {
+                    vtbackend::Modifier::Control, vtbackend::Modifier::Shift, vtbackend::Modifier::Alt },
+                .input = vtbackend::Key::LeftArrow,
+                .binding = { { actions::ResizePane { .direction = actions::Direction::Left } } } },
+            KeyInputMapping {
+                .modes { vtbackend::MatchModes {} },
+                .modifiers {
+                    vtbackend::Modifier::Control, vtbackend::Modifier::Shift, vtbackend::Modifier::Alt },
+                .input = vtbackend::Key::RightArrow,
+                .binding = { { actions::ResizePane { .direction = actions::Direction::Right } } } },
+            KeyInputMapping {
+                .modes { vtbackend::MatchModes {} },
+                .modifiers {
+                    vtbackend::Modifier::Control, vtbackend::Modifier::Shift, vtbackend::Modifier::Alt },
+                .input = vtbackend::Key::UpArrow,
+                .binding = { { actions::ResizePane { .direction = actions::Direction::Up } } } },
+            KeyInputMapping {
+                .modes { vtbackend::MatchModes {} },
+                .modifiers {
+                    vtbackend::Modifier::Control, vtbackend::Modifier::Shift, vtbackend::Modifier::Alt },
+                .input = vtbackend::Key::DownArrow,
+                .binding = { { actions::ResizePane { .direction = actions::Direction::Down } } } },
+            //     KeyInputMapping { .modes { vtbackend::MatchModes {} },
+            //                       .modifiers { vtbackend::Modifiers {  vtbackend::Modifier {
+            //                       vtbackend::Modifier::Shift }
+            //                                    | vtbackend::Modifiers { vtbackend::Modifier::Control }
+            //                                    }
+            //                                    },
+            //                       .input { vtbackend::Key::Plus },
+            //                       .binding = { { actions::IncreaseFontSize {} } } },
+        },
+        .charMappings {
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers {
+                                   vtbackend::Modifiers { vtbackend::Modifier::Alt }
+                                   | vtbackend::Modifiers { vtbackend::Modifier::Control } } },
+                               .input = ',',
+                               .binding = { { actions::ToggleInputMethodHandling {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers {
+                                   vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                   | vtbackend::Modifiers { vtbackend::Modifier::Control } } },
+                               .input = '-',
+                               .binding = { { actions::DecreaseFontSize {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers {
+                                   vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                   | vtbackend::Modifiers { vtbackend::Modifier::Control } } },
+                               .input = '_',
+                               .binding = { { actions::DecreaseFontSize {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers {
+                                   vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                   | vtbackend::Modifiers { vtbackend::Modifier::Control } } },
+                               .input = 'N',
+                               .binding = { actions::NewTerminal {} } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers {
+                                   vtbackend::Modifiers { vtbackend::Modifier::Alt }
+                                   | vtbackend::Modifiers { vtbackend::Modifier::Control } } },
+                               .input = 'V',
+                               .binding = { { actions::PasteClipboard { .strip = true } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers {
+                                   vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                   | vtbackend::Modifiers { vtbackend::Modifier::Control } } },
+                               .input = 'V',
+                               .binding = { { actions::PasteClipboard { .strip = false } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = 'S',
+                               .binding = { { actions::ScreenshotVT {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = '0',
+                               .binding = { { actions::ResetFontSize {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                               .input = 'T',
+                               .binding = { { actions::CreateNewTab {} } } },
+            // Reads the selection aloud. Does nothing where no speech engine is installed, and the context
+            // menu hides its row there, so the binding is harmless on a machine without a voice.
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                               .input = 'S',
+                               .binding = { { actions::SpeakSelection {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                               .input = 'E',
+                               .binding = { { actions::SplitVertical {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                               .input = 'O',
+                               .binding = { { actions::SplitHorizontal {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                               .input = 'X',
+                               .binding = { { actions::ClosePane {} } } },
+            // Ctrl+Shift+P: the command palette. A CharInputMapping (not a KeyInputMapping) because
+            // Qt::Key_P is not in helper.cpp's KeyMappings table: any Ctrl+printable is routed through
+            // sendCharEvent, so the chord arrives as the character 'P' — exactly like Ctrl+Shift+T above.
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                               .input = 'P',
+                               .binding = { { actions::OpenCommandPalette {} } } },
+            // Ctrl+Shift+Backslash: flip the active pane's split orientation (horizontal <-> vertical).
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                               .input = '\\',
+                               .binding = { { actions::ToggleSplitOrientation {} } } },
+            // Ctrl+Shift+Z: zoom the active pane to fill the tab, and back. Deliberately NOT Alt+F (which
+            // issue #91 floated): Alt+F is readline/emacs forward-word, and a default binding here would
+            // swallow it before it ever reached the shell.
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                               .input = 'Z',
+                               .binding = { { actions::TogglePaneZoom {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Alt },
+                               .input = '1',
+                               .binding = { { actions::SwitchToTab { .position = 1 } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Alt },
+                               .input = '2',
+                               .binding = { { actions::SwitchToTab { .position = 2 } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Alt },
+                               .input = '3',
+                               .binding = { { actions::SwitchToTab { .position = 3 } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Alt },
+                               .input = '4',
+                               .binding = { { actions::SwitchToTab { .position = 4 } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Alt },
+                               .input = '5',
+                               .binding = { { actions::SwitchToTab { .position = 5 } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Alt },
+                               .input = '6',
+                               .binding = { { actions::SwitchToTab { .position = 6 } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Alt },
+                               .input = '7',
+                               .binding = { { actions::SwitchToTab { .position = 7 } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Alt },
+                               .input = '8',
+                               .binding = { { actions::SwitchToTab { .position = 8 } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Alt },
+                               .input = '9',
+                               .binding = { { actions::SwitchToTab { .position = 9 } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Alt },
+                               .input = '0',
+                               .binding = { { actions::SwitchToTab { .position = 10 } } } },
+            CharInputMapping { .modes = []() -> vtbackend::MatchModes {
+                                  auto mods = vtbackend::MatchModes();
+                                  mods.enable(vtbackend::MatchModes::Select);
+                                  mods.enable(vtbackend::MatchModes::Insert);
+                                  return mods;
+                              }(),
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = 'C',
+                               .binding = { { actions::CopySelection {} } } },
+            CharInputMapping { .modes = []() -> vtbackend::MatchModes {
+                                  auto mods = vtbackend::MatchModes();
+                                  mods.enable(vtbackend::MatchModes::Select);
+                                  mods.enable(vtbackend::MatchModes::Insert);
+                                  return mods;
+                              }(),
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = 'C',
+                               .binding = { { actions::CancelSelection {} } } },
+            CharInputMapping { .modes = []() -> vtbackend::MatchModes {
+                                  auto mods = vtbackend::MatchModes();
+                                  mods.enable(vtbackend::MatchModes::Select);
+                                  mods.enable(vtbackend::MatchModes::Insert);
+                                  return mods;
+                              }(),
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = 'V',
+                               .binding = { { actions::PasteClipboard { .strip = false } } } },
+            CharInputMapping { .modes = []() -> vtbackend::MatchModes {
+                                  auto mods = vtbackend::MatchModes();
+                                  mods.enable(vtbackend::MatchModes::Select);
+                                  mods.enable(vtbackend::MatchModes::Insert);
+                                  return mods;
+                              }(),
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = 'V',
+                               .binding = { { actions::CancelSelection {} } } },
+            CharInputMapping { .modes = []() -> vtbackend::MatchModes {
+                                  auto mods = vtbackend::MatchModes();
+                                  mods.enable(vtbackend::MatchModes::Insert);
+                                  return mods;
+                              }(),
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = ',',
+                               .binding = { { actions::OpenConfiguration {} } } },
+            CharInputMapping { .modes = []() -> vtbackend::MatchModes {
+                                  auto mods = vtbackend::MatchModes();
+                                  mods.enable(vtbackend::MatchModes::Insert);
+                                  return mods;
+                              }(),
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = ' ', // SPACE
+                               .binding = { { actions::ViNormalMode {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = ',',
+                               .binding = { { actions::OpenConfiguration {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = 'Q',
+                               .binding = { { actions::Quit {} } } },
+            CharInputMapping { .modes = []() -> vtbackend::MatchModes {
+                                  auto mods = vtbackend::MatchModes();
+                                  mods.disable(vtbackend::MatchModes::AlternateScreen);
+                                  return mods;
+                              }(),
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = 'K',
+                               .binding = { { actions::ScrollMarkUp {} } } },
+            CharInputMapping { .modes = []() -> vtbackend::MatchModes {
+                                  auto mods = vtbackend::MatchModes();
+                                  mods.disable(vtbackend::MatchModes::AlternateScreen);
+                                  return mods;
+                              }(),
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = 'J',
+                               .binding = { { actions::ScrollMarkDown {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = 'O',
+                               .binding = { { actions::OpenFileManager {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = '.',
+                               .binding = { { actions::ToggleStatusLine {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = 'F',
+                               .binding = { { actions::SearchReverse {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = 'H',
+                               .binding = { { actions::NoSearchHighlight {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = 'U',
+                               .binding = { { actions::HintMode {
+                                   .patterns = "url", .hintAction = vtbackend::HintAction::Open } } } },
+        },
+        .mouseMappings {
+            MouseInputMapping { .modes { vtbackend::MatchModes {} },
+                                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                                .input = vtbackend::MouseButton::Left,
+                                .binding = { { actions::FollowHyperlink {} } } },
+            MouseInputMapping { .modes { vtbackend::MatchModes {} },
+                                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::None } },
+                                .input = vtbackend::MouseButton::Middle,
+                                .binding = { { actions::PasteSelection {} } } },
+            MouseInputMapping { .modes { vtbackend::MatchModes {} },
+                                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::None } },
+                                .input = vtbackend::MouseButton::WheelDown,
+                                .binding = { { actions::ScrollDown {} } } },
+            MouseInputMapping { .modes { vtbackend::MatchModes {} },
+                                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::None } },
+                                .input = vtbackend::MouseButton::WheelUp,
+                                .binding = { { actions::ScrollUp {} } } },
+            MouseInputMapping { .modes { vtbackend::MatchModes {} },
+                                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt } },
+                                .input = vtbackend::MouseButton::WheelDown,
+                                .binding = { { actions::DecreaseOpacity {} } } },
+            MouseInputMapping { .modes { vtbackend::MatchModes {} },
+                                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt } },
+                                .input = vtbackend::MouseButton::WheelUp,
+                                .binding = { { actions::IncreaseOpacity {} } } },
+            MouseInputMapping { .modes { vtbackend::MatchModes {} },
+                                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                                .input = vtbackend::MouseButton::WheelDown,
+                                .binding = { { actions::DecreaseFontSize {} } } },
+            MouseInputMapping { .modes { vtbackend::MatchModes {} },
+                                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                                .input = vtbackend::MouseButton::WheelUp,
+                                .binding = { { actions::IncreaseFontSize {} } } },
+            MouseInputMapping { .modes { vtbackend::MatchModes {} },
+                                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
+                                .input = vtbackend::MouseButton::WheelDown,
+                                .binding = { { actions::ScrollPageDown {} } } },
+            MouseInputMapping { .modes { vtbackend::MatchModes {} },
+                                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
+                                .input = vtbackend::MouseButton::WheelUp,
+                                .binding = { { actions::ScrollPageUp {} } } },
+        }
+    };
+    return value;
+}
 
 struct Config
 {
@@ -1194,7 +1217,7 @@ struct Config
     /// above (e.g. @ref defaultProfileName), this simply records what the GUI had persisted.
     GuiManagedSettings guiManagedSettings {};
 
-    ConfigEntry<InputMappings, documentation::InputMappings> inputMappings { defaultInputMappings };
+    ConfigEntry<InputMappings, documentation::InputMappings> inputMappings { defaultInputMappings() };
     ConfigEntry<vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle, documentation::GitDrawings>
         gitDrawings {};
     ConfigEntry<vtrasterizer::BoxDrawingRenderer::ArcStyle, documentation::BoxArcStyle> boxArcStyle {
@@ -1404,7 +1427,7 @@ struct YAMLConfigReader
     }
 
     // clang-format off
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, std::filesystem::path& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, std::filesystem::path& where) const;
     void loadFromEntry(YAML::Node const& node, std::string const& entry, RenderingBackend& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, crispy::strong_hashtable_size& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::MaxHistoryLineCount& where);
@@ -1444,7 +1467,9 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtpty::PageSize& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, WindowMargins& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::LineOffset& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtpty::Process::ExecInfo& where);
+    void loadFromEntry(YAML::Node const& node,
+                       std::string const& entry,
+                       vtpty::Process::ExecInfo& where) const;
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtpty::SshHostConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, Bell& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, std::map<vtbackend::DECMode, bool>& where);
@@ -1469,7 +1494,7 @@ struct YAMLConfigReader
     /// loader (whose `profiles/<name>.yml` document root IS the body) calls it directly.
     /// @param profileNode The profile body map; a null node is a no-op (@p where keeps its base values).
     /// @param where The profile to populate; pre-seed it with an inheritance base before calling.
-    void loadProfileBody(YAML::Node const& profileNode, TerminalProfile& where);
+    void loadProfileBody(YAML::Node const& child, TerminalProfile& where);
 
     void loadFromEntry(YAML::Node const& node, std::string const& entry, RendererConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ImagesConfig& where);
@@ -1728,11 +1753,11 @@ struct Writer
         return format(doc, unbox(v.columns), unbox(v.lines));
     }
 
-    [[nodiscard]] std::string format(std::string_view doc, ColorConfig& v)
+    [[nodiscard]] std::string format(std::string_view doc, ColorConfig const& v)
     {
-        if (auto* simple = get_if<SimpleColorConfig>(&v))
+        if (auto const* simple = get_if<SimpleColorConfig>(&v))
             return format(doc, simple->colorScheme);
-        else if (auto* dual = get_if<DualColorConfig>(&v))
+        else if (auto const* dual = get_if<DualColorConfig>(&v))
         {
             auto const formattedValue = format("\n"
                                                "    light: {}\n"
@@ -1745,12 +1770,12 @@ struct Writer
         return format(doc, "BAD");
     }
 
-    [[nodiscard]] std::string format(std::string_view doc, Bell& v)
+    [[nodiscard]] std::string format(std::string_view doc, Bell const& v)
     {
         return format(doc, v.sound, v.volume, v.alert);
     }
 
-    [[nodiscard]] std::string format(std::string_view doc, RendererConfig& v)
+    [[nodiscard]] std::string format(std::string_view doc, RendererConfig const& v)
     {
         return format(doc,
                       v.renderingBackend,
@@ -1759,17 +1784,17 @@ struct Writer
                       v.textureAtlasTileCount);
     }
 
-    [[nodiscard]] std::string format(std::string_view doc, ImagesConfig& v)
+    [[nodiscard]] std::string format(std::string_view doc, ImagesConfig const& v)
     {
         return format(doc, v.sixelScrolling, v.maxImageColorRegisters, v.goodImageProtocol);
     }
 
-    [[nodiscard]] std::string format(std::string_view doc, WindowMargins& v)
+    [[nodiscard]] std::string format(std::string_view doc, WindowMargins const& v)
     {
         return format(doc, v.horizontal, v.vertical);
     }
 
-    [[nodiscard]] std::string format(std::string_view doc, HistoryConfig& v)
+    [[nodiscard]] std::string format(std::string_view doc, HistoryConfig const& v)
     {
         return format(
             doc,
@@ -1783,17 +1808,17 @@ struct Writer
             v.historyScrollMultiplier);
     }
 
-    [[nodiscard]] std::string format(std::string_view doc, ScrollBarConfig& v)
+    [[nodiscard]] std::string format(std::string_view doc, ScrollBarConfig const& v)
     {
         return format(doc, v.position, v.hideScrollbarInAltScreen);
     }
 
-    [[nodiscard]] std::string format(std::string_view doc, MouseConfig& v)
+    [[nodiscard]] std::string format(std::string_view doc, MouseConfig const& v)
     {
         return format(doc, v.hideWhileTyping);
     }
 
-    [[nodiscard]] std::string format(std::string_view doc, StatusLineConfig& v)
+    [[nodiscard]] std::string format(std::string_view doc, StatusLineConfig const& v)
     {
         return format(doc,
                       v.initialType,
@@ -1804,17 +1829,17 @@ struct Writer
                       v.indicator.right);
     }
 
-    [[nodiscard]] std::string format(std::string_view doc, BackgroundConfig& v)
+    [[nodiscard]] std::string format(std::string_view doc, BackgroundConfig const& v)
     {
         return format(doc, v.opacity, v.blur);
     }
 
-    [[nodiscard]] std::string format(std::string_view doc, HyperlinkDecorationConfig& v)
+    [[nodiscard]] std::string format(std::string_view doc, HyperlinkDecorationConfig const& v)
     {
         return format(doc, v.normal, v.hover);
     }
 
-    [[nodiscard]] std::string format(std::string_view doc, PermissionsConfig& v)
+    [[nodiscard]] std::string format(std::string_view doc, PermissionsConfig const& v)
     {
         return format(doc, v.captureBuffer, v.changeFont, v.displayHostWritableStatusLine);
     }
@@ -1831,12 +1856,13 @@ struct Writer
             };
             return "unknown";
         }();
-        auto const blinking = v.cursor.cursorDisplay == vtbackend::CursorDisplay::Blink ? true : false;
+        auto const blinking = v.cursor.cursorDisplay == vtbackend::CursorDisplay::Blink;
         auto const blinkingInterval = v.cursor.cursorBlinkInterval.count();
         return format(doc, shape, blinking, blinkingInterval);
     }
 
-    [[nodiscard]] std::string format(std::string_view doc, vtrasterizer::BoxDrawingRenderer::ArcStyle& v)
+    [[nodiscard]] std::string format(std::string_view doc,
+                                     vtrasterizer::BoxDrawingRenderer::ArcStyle const& v)
     {
         using ArcStyle = vtrasterizer::BoxDrawingRenderer::ArcStyle;
         switch (v)
@@ -1847,7 +1873,8 @@ struct Writer
         }
     }
 
-    [[nodiscard]] std::string format(std::string_view doc, vtrasterizer::BoxDrawingRenderer::BrailleStyle& v)
+    [[nodiscard]] std::string format(std::string_view doc,
+                                     vtrasterizer::BoxDrawingRenderer::BrailleStyle const& v)
     {
         using BrailleStyle = vtrasterizer::BoxDrawingRenderer::BrailleStyle;
         switch (v)
@@ -1865,7 +1892,7 @@ struct Writer
     }
 
     [[nodiscard]] std::string format(std::string_view doc,
-                                     vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle& v)
+                                     vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle const& v)
     {
         using ArcStyle = vtrasterizer::BoxDrawingRenderer::ArcStyle;
         using DrawingStyle = vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle;
@@ -1912,7 +1939,7 @@ struct YAMLConfigWriter: Writer
 {
 
     constexpr static std::string_view FormatTemplate = "{}";
-    inline std::string replaceCommentPlaceholder(std::string const& docString) override
+    std::string replaceCommentPlaceholder(std::string const& docString) override
     {
         return std::regex_replace(docString, std::regex { "\\{comment\\}" }, "#");
     }
@@ -1926,16 +1953,18 @@ struct YAMLConfigWriter: Writer
     }
 
     template <typename... T>
-    std::string process(std::string_view doc, T... val)
+    std::string process(std::string_view doc, T const&... val)
     {
-        return format(addOffset(replaceCommentPlaceholder(std::string { doc }), Offset::Levels * OneOffset),
+        return format(addOffset(replaceCommentPlaceholder(std::string { doc }),
+                                static_cast<size_t>(Offset::Levels) * OneOffset),
                       val...);
     }
 
     template <typename... T>
-    std::string process(std::string_view doc, [[maybe_unused]] std::string_view name, T... val)
+    std::string process(std::string_view doc, [[maybe_unused]] std::string_view name, T const&... val)
     {
-        return format(addOffset(replaceCommentPlaceholder(std::string { doc }), Offset::Levels * OneOffset),
+        return format(addOffset(replaceCommentPlaceholder(std::string { doc }),
+                                static_cast<size_t>(Offset::Levels) * OneOffset),
                       val...);
     }
 
@@ -1958,7 +1987,7 @@ struct YAMLConfigWriter: Writer
 struct DocumentationWriter: Writer
 {
     constexpr static std::string_view FormatTemplate = "{}";
-    inline std::string replaceCommentPlaceholder(std::string const& docString) override
+    std::string replaceCommentPlaceholder(std::string const& docString) override
     {
         return std::regex_replace(docString, std::regex { "\\{comment\\}" }, "");
     }
@@ -1971,13 +2000,13 @@ struct DocumentationWriter: Writer
 
     using Writer::format;
     template <typename... T>
-    std::string process(std::string_view doc, T... val)
+    std::string process(std::string_view doc, T const&... val)
     {
         return process(doc, std::string_view { "" }, val...);
     }
 
     template <typename... T>
-    std::string process(std::string_view doc, std::string_view name, T... val)
+    std::string process(std::string_view doc, std::string_view name, T const&... val)
     {
         return format(
             "### `{}`\n"
@@ -2018,7 +2047,7 @@ struct DocumentationWriter: Writer
 struct PlainWriter: Writer
 {
     constexpr static std::string_view FormatTemplate = "{}";
-    inline std::string replaceCommentPlaceholder(std::string const& docString) override
+    std::string replaceCommentPlaceholder(std::string const& docString) override
     {
         return std::regex_replace(docString, std::regex { "\\{comment\\}" }, "");
     }
@@ -2203,7 +2232,7 @@ struct std::formatter<crispy::lru_capacity>: formatter<unsigned>
 template <>
 struct std::formatter<std::set<std::basic_string<char>>>: formatter<std::string_view>
 {
-    auto format(std::set<std::basic_string<char>> value, auto& ctx) const
+    auto format(std::set<std::basic_string<char>> const& value, auto& ctx) const
     {
         auto result = std::string {};
         result.append(value | crispy::views::join_with(std::string_view(", ")));

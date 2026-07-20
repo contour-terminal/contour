@@ -82,23 +82,34 @@ namespace
     // interpreting it in a single createPipeline() loop means adding a third pass tomorrow is one more
     // row here, not another near-duplicate builder function.
 
-    // QRhiVertexInputAttribute is not a literal type, so these attribute tables are file-scope const
-    // (initialized once at load time) rather than constexpr; they back the PassDescriptor::attributes span.
+    // QRhiVertexInputAttribute is not a literal type, so these attribute tables cannot be constexpr;
+    // they are function-local statics (constructed on first use, and a throw there is catchable) that
+    // back the PassDescriptor::attributes span.
 
     /// The interleaved vertex-input attributes for the background/rect pass: vec3 position @loc0,
     /// vec4 color @loc1 (single binding 0).
-    const std::array rectVertexAttributes {
-        QRhiVertexInputAttribute(0, 0, QRhiVertexInputAttribute::Float3, RectPositionOffset),
-        QRhiVertexInputAttribute(0, 1, QRhiVertexInputAttribute::Float4, RectColorOffset),
-    };
+    /// @return The attribute table, constructed on first use.
+    [[nodiscard]] std::array<QRhiVertexInputAttribute, 2> const& rectVertexAttributes()
+    {
+        static std::array const table {
+            QRhiVertexInputAttribute(0, 0, QRhiVertexInputAttribute::Float3, RectPositionOffset),
+            QRhiVertexInputAttribute(0, 1, QRhiVertexInputAttribute::Float4, RectColorOffset),
+        };
+        return table;
+    }
 
     /// The interleaved vertex-input attributes for the text/glyph pass: vec3 position @loc0,
     /// vec4 texCoords @loc1, vec4 color @loc2 (single binding 0).
-    const std::array textVertexAttributes {
-        QRhiVertexInputAttribute(0, 0, QRhiVertexInputAttribute::Float3, TextPositionOffset),
-        QRhiVertexInputAttribute(0, 1, QRhiVertexInputAttribute::Float4, TextTexCoordOffset),
-        QRhiVertexInputAttribute(0, 2, QRhiVertexInputAttribute::Float4, TextColorOffset),
-    };
+    /// @return The attribute table, constructed on first use.
+    [[nodiscard]] std::array<QRhiVertexInputAttribute, 3> const& textVertexAttributes()
+    {
+        static std::array const table {
+            QRhiVertexInputAttribute(0, 0, QRhiVertexInputAttribute::Float3, TextPositionOffset),
+            QRhiVertexInputAttribute(0, 1, QRhiVertexInputAttribute::Float4, TextTexCoordOffset),
+            QRhiVertexInputAttribute(0, 2, QRhiVertexInputAttribute::Float4, TextColorOffset),
+        };
+        return table;
+    }
     // The PassDescriptor struct itself is declared as a private member of RhiRenderer (RhiRenderer.h). The
     // concrete two-row pass table lives in RhiRenderer::passDescriptor() (defined below), so both
     // createPipelines() (swapchain) and createScreenshotPipeline() (offscreen) interpret the same data.
@@ -277,14 +288,14 @@ RhiRenderer::PassDescriptor RhiRenderer::passDescriptor(bool isText)
                                 .fragmentShaderPath = TextFragmentShaderPath,
                                 .uniformBlockSize = TextUniformBlockSize,
                                 .vertexStride = TextVertexStride,
-                                .attributes = textVertexAttributes,
+                                .attributes = textVertexAttributes(),
                                 .hasSampler = true,
                                 .debugName = "text/glyph" };
     return PassDescriptor { .vertexShaderPath = BackgroundVertexShaderPath,
                             .fragmentShaderPath = BackgroundFragmentShaderPath,
                             .uniformBlockSize = RectUniformBlockSize,
                             .vertexStride = RectVertexStride,
-                            .attributes = rectVertexAttributes,
+                            .attributes = rectVertexAttributes(),
                             .hasSampler = false,
                             .debugName = "background/rect" };
 }
@@ -1172,10 +1183,11 @@ optional<vtrasterizer::AtlasTextureScreenshot> RhiRenderer::readAtlas()
     // produced. The first call (before any frame has captured) returns a correctly-sized zero buffer.
     _atlasReadbackRequested = true;
 
-    auto output = vtrasterizer::AtlasTextureScreenshot {};
-    output.atlasInstanceId = 0;
-    output.size = _atlasTextureSize;
-    output.format = _atlasProperties.format;
+    // Aggregate-initialized rather than default-constructed + assigned: atlas::Format has no zero
+    // enumerator, so value-initializing the struct would leave `format` holding an invalid value.
+    auto output = vtrasterizer::AtlasTextureScreenshot {
+        .atlasInstanceId = 0, .size = _atlasTextureSize, .format = _atlasProperties.format, .buffer = {}
+    };
 
     auto const expectedBytes =
         static_cast<size_t>(_atlasTextureSize.area()) * element_count(_atlasProperties.format);

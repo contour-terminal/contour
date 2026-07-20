@@ -97,7 +97,8 @@ struct NormalizedTileLocation
 struct AtlasProperties
 {
     // Texture pixel format, such as monochrome, RGB, or RGBA.
-    Format format {};
+    // NB: Format has no zero enumerator; Red is the narrowest valid one.
+    Format format = Format::Red;
 
     // Size in pixels of a tile.
     vtbackend::ImageSize tileSize {};
@@ -134,7 +135,8 @@ struct UploadTile
 {
     TileLocation location;
     vtbackend::ImageSize bitmapSize;
-    Format bitmapFormat;
+    // NB: Format has no zero enumerator; Red is the narrowest valid one.
+    Format bitmapFormat = Format::Red;
     Buffer bitmap;        // texture data to be uploaded
     int rowAlignment = 1; // byte-alignment per row
 };
@@ -246,7 +248,8 @@ class TextureAtlas
     // Return type for in-place tile-construction callback.
     struct TileCreateData
     {
-        TileCreateData(): bitmapFormat {}, bitmapSize {}, metadata {} {}
+        // NB: Format has no zero enumerator; Red is the narrowest valid one.
+        TileCreateData(): bitmapFormat { Format::Red }, bitmapSize {}, metadata {} {}
 
         TileCreateData(Buffer bitmap,
                        Format bitmapFormat,
@@ -308,7 +311,7 @@ class TextureAtlas
 
   private:
     using TileCache = crispy::strong_lru_hashtable<TileAttributes<Metadata>>;
-    using TileCachePtr = typename TileCache::ptr;
+    using TileCachePtr = TileCache::ptr;
 
     template <typename CreateTileDataFn>
     std::optional<TileAttributes<Metadata>> constructTile(CreateTileDataFn createTileData,
@@ -339,7 +342,7 @@ class TextureAtlas
 template <typename Metadata = std::monostate>
 struct DirectMapping
 {
-    using TileCreateData = typename TextureAtlas<Metadata>::TileCreateData;
+    using TileCreateData = TextureAtlas<Metadata>::TileCreateData;
 
     uint32_t baseIndex = 0;
     uint32_t count = 0;
@@ -544,7 +547,8 @@ template <typename CreateTileDataFn>
 auto TextureAtlas<Metadata>::constructTile(CreateTileDataFn createTileData, uint32_t entryIndex)
     -> std::optional<TileAttributes<Metadata>>
 {
-    Require(1 <= entryIndex && entryIndex <= _tileCache->capacity());
+    Require(1 <= entryIndex);
+    Require(entryIndex <= _tileCache->capacity());
     auto const tileIndex = _atlasProperties.directMappingCount + entryIndex;
     Require(tileIndex < _tileLocations.size());
     auto const tileLocation = _tileLocations[tileIndex];

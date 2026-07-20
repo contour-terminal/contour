@@ -31,8 +31,8 @@ TEST_CASE("rhilayout: background-rect vertex layout matches the shader contract"
     CHECK(rhilayout::RectPositionOffset == 0);
     CHECK(rhilayout::RectColorOffset == 12); // after the vec3 position (3 floats)
     // The two attributes must not overlap and must fit within the stride.
-    CHECK(rhilayout::RectColorOffset == rhilayout::RectPositionOffset + 3 * rhilayout::FloatSize);
-    CHECK(rhilayout::RectColorOffset + 4 * rhilayout::FloatSize == rhilayout::RectVertexStride);
+    CHECK(rhilayout::RectColorOffset == rhilayout::RectPositionOffset + (3 * rhilayout::FloatSize));
+    CHECK(rhilayout::RectColorOffset + (4 * rhilayout::FloatSize) == rhilayout::RectVertexStride);
 }
 
 TEST_CASE("rhilayout: text-glyph vertex layout matches the shader contract", "[rhi][layout]")
@@ -44,9 +44,9 @@ TEST_CASE("rhilayout: text-glyph vertex layout matches the shader contract", "[r
     CHECK(rhilayout::TextPositionOffset == 0);
     CHECK(rhilayout::TextTexCoordOffset == 12); // after vec3 position
     CHECK(rhilayout::TextColorOffset == 28);    // after vec3 position + vec4 texCoords
-    CHECK(rhilayout::TextTexCoordOffset == rhilayout::TextPositionOffset + 3 * rhilayout::FloatSize);
-    CHECK(rhilayout::TextColorOffset == rhilayout::TextTexCoordOffset + 4 * rhilayout::FloatSize);
-    CHECK(rhilayout::TextColorOffset + 4 * rhilayout::FloatSize == rhilayout::TextVertexStride);
+    CHECK(rhilayout::TextTexCoordOffset == rhilayout::TextPositionOffset + (3 * rhilayout::FloatSize));
+    CHECK(rhilayout::TextColorOffset == rhilayout::TextTexCoordOffset + (4 * rhilayout::FloatSize));
+    CHECK(rhilayout::TextColorOffset + (4 * rhilayout::FloatSize) == rhilayout::TextVertexStride);
 }
 // }}}
 

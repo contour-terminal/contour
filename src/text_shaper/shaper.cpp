@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/primitives.h>
-
 #include <text_shaper/shaper.h>
+
+#include <vtbackend/primitives.h>
 
 #include <crispy/logstore.h>
 
@@ -16,8 +16,6 @@ using std::max;
 using std::min;
 using std::tuple;
 using std::vector;
-
-using std::views::iota;
 
 namespace text
 {
@@ -138,8 +136,8 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, vtbackend::
 
     // Horizontally center the glyph and position it slightly below vertical center for visual balance.
     output.position.x = unbox<int>(boundingBox.width - output.bitmapSize.width) / 2;
-    output.position.y =
-        unbox<int>(output.bitmapSize.height) + unbox<int>(boundingBox.height - output.bitmapSize.height) / 4;
+    output.position.y = unbox<int>(output.bitmapSize.height)
+                        + (unbox<int>(boundingBox.height - output.bitmapSize.height) / 4);
 
     return { output, static_cast<float>(ratio) };
 }

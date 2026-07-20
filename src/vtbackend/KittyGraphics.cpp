@@ -16,8 +16,10 @@ namespace
         if (value.empty())
             return false;
         auto parsed = T {};
-        auto const* const last = value.data() + value.size();
-        auto const [ptr, ec] = std::from_chars(value.data(), last, parsed);
+        // from_chars takes a [first, last) range, not a NUL-terminated string.
+        auto const* const first = value.data();
+        auto const* const last = first + value.size();
+        auto const [ptr, ec] = std::from_chars(first, last, parsed);
         if (ec != std::errc {} || ptr != last)
             return false;
         target = parsed;

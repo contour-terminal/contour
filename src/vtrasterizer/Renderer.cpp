@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtrasterizer/Renderer.h>
+
 #include <vtrasterizer/TextRenderer.h>
 #include <vtrasterizer/utils.h>
 
@@ -9,7 +10,7 @@
 #include <crispy/StrongLRUHashtable.h>
 #include <crispy/utils.h>
 
-#if defined(_WIN32)
+#ifdef _WIN32
     #include <text_shaper/directwrite_shaper.h>
 #endif
 
@@ -20,17 +21,12 @@
 #include <span>
 #include <stdexcept>
 
-using std::array;
 using std::initializer_list;
 using std::make_unique;
-using std::move;
-using std::nullopt;
 using std::optional;
 using std::scoped_lock;
-using std::tuple;
 using std::unique_ptr;
 using std::vector;
-using std::chrono::steady_clock;
 
 namespace vtrasterizer
 {
@@ -100,7 +96,7 @@ namespace
         switch (engine)
         {
             case TextShapingEngine::DWrite:
-#if defined(_WIN32)
+#ifdef _WIN32
                 rendererLog()("Using DirectWrite text shaping engine.");
                 // TODO: do we want to use custom font locator here?
                 return make_unique<text::directwrite_shaper>(dpi, locator);
@@ -110,7 +106,7 @@ namespace
 #endif
 
             case TextShapingEngine::CoreText:
-#if defined(__APPLE__)
+#ifdef __APPLE__
                 rendererLog()("CoreText not yet implemented.");
                 break;
 #else

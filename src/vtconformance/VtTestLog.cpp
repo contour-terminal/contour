@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtconformance/VtTestLog.h>
+
 #include <crispy/utils.h>
 
 #include <array>
@@ -8,8 +10,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-
-#include <vtconformance/VtTestLog.h>
 
 using namespace std::string_view_literals;
 
@@ -218,7 +218,7 @@ std::vector<Verdict> extractVerdicts(std::vector<VtTestRecord> const& records)
 
         for (auto const& pattern: VerdictPatterns)
         {
-            if (record.payload.find(pattern.needle) == std::string::npos)
+            if (!record.payload.contains(pattern.needle))
                 continue;
 
             verdicts.push_back(Verdict {

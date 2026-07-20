@@ -138,7 +138,7 @@ constexpr inline std::array<CellSize, 17> StandardTextSize = { {
 /// A named ReGIS colour: the letter used in a colour spec and its RGB value.
 struct NamedColor
 {
-    char letter;
+    char letter {};
     RGBColor rgb;
 };
 

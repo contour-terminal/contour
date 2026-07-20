@@ -1,4 +1,5 @@
 #include <crispy/StackTrace.h>
+
 #include <crispy/utils.h>
 
 #include <cctype>
@@ -8,7 +9,7 @@
 #include <optional>
 #include <regex>
 
-#if !defined(_WIN32)
+#ifndef _WIN32
     #include <sys/types.h>
     #include <sys/wait.h>
 
@@ -16,19 +17,19 @@
     #include <unistd.h>
 #endif
 
-#if defined(HAVE_CXXABI_H)
+#ifdef HAVE_CXXABI_H
     #include <cxxabi.h>
 #endif
 
-#if defined(HAVE_EXECINFO_H)
+#ifdef HAVE_EXECINFO_H
     #include <execinfo.h>
 #endif
 
-#if defined(HAVE_DLFCN_H)
+#ifdef HAVE_DLFCN_H
     #include <dlfcn.h>
 #endif
 
-#if defined(HAVE_UNWIND_H)
+#ifdef HAVE_UNWIND_H
     #include <unwind.h>
 #endif
 
@@ -45,38 +46,41 @@ constexpr size_t MAX_FRAMES { 128 }; // NOLINT
 constexpr size_t SKIP_FRAMES { 0 };  // NOLINT
 
 #if defined(__linux__) || defined(__APPLE__)
-struct system_wrap // {{{
+namespace
 {
-    int pfd[2];
-
-    system_wrap(): pfd { -1, -1 }
+    struct system_wrap // {{{
     {
-        if (pipe(pfd))
-            perror("pipe");
-    }
+        int pfd[2] { -1, -1 };
 
-    [[nodiscard]] bool good() const noexcept { return pfd[0] != -1 && pfd[1] != -1; }
-    [[nodiscard]] int reader() noexcept { return pfd[0]; }
-    [[nodiscard]] int writer() noexcept { return pfd[1]; }
+        system_wrap()
+        {
+            if (pipe(pfd))
+                perror("pipe");
+        }
 
-    ~system_wrap() { close(); }
+        [[nodiscard]] bool good() const noexcept { return pfd[0] != -1 && pfd[1] != -1; }
+        [[nodiscard]] int reader() noexcept { return pfd[0]; }
+        [[nodiscard]] int writer() noexcept { return pfd[1]; }
 
-    void close()
-    {
-        if (pfd[0] != -1)
-            ::close(pfd[0]);
-        if (pfd[1] != -1)
-            ::close(pfd[1]);
-    }
-};
-// }}}
+        ~system_wrap() { close(); }
+
+        void close()
+        {
+            if (pfd[0] != -1)
+                ::close(pfd[0]);
+            if (pfd[1] != -1)
+                ::close(pfd[1]);
+        }
+    };
+    // }}}
+} // namespace
 #endif
 
 vector<void*> stack_trace::getFrames(size_t skip, size_t max)
 {
     vector<void*> frames;
 
-#if defined(HAVE_BACKTRACE)
+#ifdef HAVE_BACKTRACE
     frames.resize(skip + max);
     frames.resize((size_t) ::backtrace(frames.data(), static_cast<int>(skip + max)));
     std::copy(std::next(frames.begin(), (int) skip), frames.end(), frames.begin());
@@ -93,7 +97,7 @@ optional<debug_info> stack_trace::getDebugInfoForFrame(void const* frameAddress)
     if (!frameAddress)
         return nullopt;
 
-#if defined(__linux__)
+#ifdef __linux__
     auto pipe = system_wrap();
     if (!pipe.good())
         return nullopt;
@@ -164,18 +168,18 @@ optional<debug_info> stack_trace::getDebugInfoForFrame(void const* frameAddress)
 }
 
 stack_trace::stack_trace():
-#if defined(HAVE_BACKTRACE)
+#ifdef HAVE_BACKTRACE
     _frames { SKIP_FRAMES + MAX_FRAMES }
 #else
     _frames {}
 #endif
 {
-#if defined(HAVE_BACKTRACE)
+#ifdef HAVE_BACKTRACE
     _frames.resize((size_t) ::backtrace(_frames.data(), SKIP_FRAMES + MAX_FRAMES));
 #endif
 }
 
-string stack_trace::demangleSymbol(const char* symbol)
+string stack_trace::demangleSymbol(char const* symbol)
 {
 #if (defined(__linux__) || defined(__APPLE__)) && defined(HAVE_CXXABI_H)
     int status = 0;
@@ -205,7 +209,7 @@ vector<string> stack_trace::symbols() const
     vector<string> output;
     for (auto const* frame: frames)
     {
-#if defined(CONTOUR_STACKTRACE_ADDR2LINE)
+#ifdef CONTOUR_STACKTRACE_ADDR2LINE
         auto debugInfo = getDebugInfoForFrame(frame);
         if (!debugInfo)
             output.emplace_back(std::format("{}", frame));

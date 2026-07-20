@@ -366,14 +366,14 @@ TEST_CASE("horizontalNavigationButton states one rule for both wheel paths", "[c
     using vtbackend::MouseButton;
 
     // A wheel tilt means what it says.
-    STATIC_CHECK(horizontalNavigationButton(/*towardsRight=*/true, /*natural=*/false)
+    STATIC_CHECK(horizontalNavigationButton(/*towardsRight=*/true, /*naturalDirection=*/false)
                  == MouseButton::WheelRight);
-    STATIC_CHECK(horizontalNavigationButton(/*towardsRight=*/false, /*natural=*/false)
+    STATIC_CHECK(horizontalNavigationButton(/*towardsRight=*/false, /*naturalDirection=*/false)
                  == MouseButton::WheelLeft);
 
     // A swipe follows the fingers: dragging the content left reveals what is to the right.
-    STATIC_CHECK(horizontalNavigationButton(/*towardsRight=*/false, /*natural=*/true)
+    STATIC_CHECK(horizontalNavigationButton(/*towardsRight=*/false, /*naturalDirection=*/true)
                  == MouseButton::WheelRight);
-    STATIC_CHECK(horizontalNavigationButton(/*towardsRight=*/true, /*natural=*/true)
+    STATIC_CHECK(horizontalNavigationButton(/*towardsRight=*/true, /*naturalDirection=*/true)
                  == MouseButton::WheelLeft);
 }

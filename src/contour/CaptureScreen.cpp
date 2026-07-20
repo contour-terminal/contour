@@ -21,7 +21,7 @@
 #include <tuple>
 
 // clang-format off
-#if defined(_WIN32)
+#ifdef _WIN32
     #include <Winsock2.h>
 #else
     #include <fcntl.h>
@@ -31,7 +31,7 @@
 #endif
 // clang-format on
 
-#if !defined(STDIN_FILENO)
+#ifndef STDIN_FILENO
     #define STDIN_FILENO 0
 #endif
 
@@ -55,50 +55,66 @@ using namespace std::string_view_literals;
 namespace contour
 {
 
-class CaptureBufferCollector: public vtparser::NullParserEvents
-{
-  public:
-    std::ostream& output;
-    bool splitByWord;
-    std::string capturedBuffer;
-    bool done = false;
-
-    CaptureBufferCollector(ostream& out, bool words): output { out }, splitByWord { words } {}
-
-    void startPM() override { capturedBuffer.clear(); }
-
-    void putPM(char t) override { capturedBuffer += t; }
-    void execute(char ch) override { putPM(ch); }
-
-    void dispatchPM() override
-    {
-        auto const [code, offset] = vtparser::extractCodePrefix(capturedBuffer);
-        if (code == vtbackend::CaptureBufferCode)
-        {
-            auto const payload = string_view(capturedBuffer.data() + offset, capturedBuffer.size() - offset);
-            if (splitByWord)
-            {
-                crispy::split(payload, ' ', [&](auto word) -> bool {
-                    output.write(word.data(), static_cast<streamsize>(word.size()));
-                    output << '\n';
-                    return true;
-                });
-            }
-            else
-                output.write(payload.data(), static_cast<streamsize>(payload.size()));
-            if (payload.empty())
-                done = true;
-        }
-    }
-};
-
 namespace
 {
+    class CaptureBufferCollector: public vtparser::NullParserEvents
+    {
+      public:
+        std::ostream& output;
+        bool splitByWord;
+        std::string capturedBuffer;
+        bool done = false;
+
+        CaptureBufferCollector(ostream& out, bool words): output { out }, splitByWord { words } {}
+
+        void startPM() override { capturedBuffer.clear(); }
+
+        void putPM(char t) override { capturedBuffer += t; }
+        void execute(char ch) override { putPM(ch); }
+
+        void dispatchPM() override
+        {
+            auto const [code, offset] = vtparser::extractCodePrefix(capturedBuffer);
+            if (code == vtbackend::CaptureBufferCode)
+            {
+                auto const payload =
+                    string_view(capturedBuffer.data() + offset, capturedBuffer.size() - offset);
+                if (splitByWord)
+                {
+                    crispy::split(payload, ' ', [&](auto word) -> bool {
+                        output.write(word.data(), static_cast<streamsize>(word.size()));
+                        output << '\n';
+                        return true;
+                    });
+                }
+                else
+                    output.write(payload.data(), static_cast<streamsize>(payload.size()));
+                if (payload.empty())
+                    done = true;
+            }
+        }
+    };
+
+#ifndef _WIN32
+    /// Opens the controlling terminal for reading and writing.
+    ///
+    /// Kept out of TTY's constructor body so the descriptor can be a default member initializer:
+    /// an assignment in the body would have to sit inside `#ifndef _WIN32`, and hoisting it into
+    /// the member-initializer list -- which is what cppcoreguidelines-prefer-member-initializer
+    /// asks for -- would place it outside that guard, where neither open() nor `fd` exists.
+    ///
+    /// @return The file descriptor for /dev/tty, or -1 if it could not be opened.
+    [[nodiscard]] int openControllingTerminal() noexcept
+    {
+        return open("/dev/tty", O_RDWR);
+    }
+#endif
+
     struct TTY final: CaptureTransport
     {
         bool configured = false;
-#if !defined(_WIN32)
-        int fd = -1;
+#ifndef _WIN32
+        int fd = openControllingTerminal();
         termios savedModes {};
 #else
         DWORD savedModes {};
@@ -106,7 +122,7 @@ namespace
 
         ~TTY() override
         {
-#if !defined(_WIN32)
+#ifndef _WIN32
             tcsetattr(fd, TCSANOW, &savedModes);
 #else
             auto stdinHandle = GetStdHandle(STD_INPUT_HANDLE);
@@ -116,8 +132,7 @@ namespace
 
         TTY()
         {
-#if !defined(_WIN32)
-            fd = open("/dev/tty", O_RDWR);
+#ifndef _WIN32
             if (fd < 0)
             {
                 cerr << "Could not open current terminal.\r\n";
@@ -155,7 +170,7 @@ namespace
 
         int wait(timeval* timeout) override
         {
-#if defined(_WIN32)
+#ifdef _WIN32
             auto const fd0 = GetStdHandle(STD_INPUT_HANDLE);
             DWORD const timeoutMillis = timeout->tv_sec * 1000 + timeout->tv_usec / 1000;
             DWORD const result = WaitForSingleObject(fd0, timeoutMillis);
@@ -182,7 +197,7 @@ namespace
 
         int write(char const* buf, size_t size) const
         {
-#if defined(_WIN32)
+#ifdef _WIN32
             DWORD nwritten {};
             if (WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buf, static_cast<DWORD>(size), &nwritten, nullptr))
                 return static_cast<int>(nwritten);
@@ -197,7 +212,7 @@ namespace
 
         int read(void* buf, size_t size) override
         {
-#if defined(_WIN32)
+#ifdef _WIN32
             DWORD nread {};
             if (ReadFile(GetStdHandle(STD_INPUT_HANDLE), buf, static_cast<DWORD>(size), &nread, nullptr))
                 return static_cast<int>(nread);

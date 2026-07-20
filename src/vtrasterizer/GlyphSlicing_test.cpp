@@ -238,7 +238,7 @@ TEST_CASE("GlyphSlicing.magnify.keeps_rgba_channels_apart", "[glyphslicing]")
     auto const source = std::vector<uint8_t> { 10, 20, 30, 40 };
     auto const magnified = magnify(source, sized(1, 1), sized(2, 2), Rgba);
 
-    REQUIRE(magnified.size() == 2 * 2 * Rgba);
+    REQUIRE(magnified.size() == 2zu * 2zu * Rgba);
     for (auto const pixel: std::views::iota(0zu, 4zu))
     {
         INFO("pixel " << pixel);

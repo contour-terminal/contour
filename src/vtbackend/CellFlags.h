@@ -88,7 +88,7 @@ inline constexpr CellFlags UnderlineMask = CellFlags { CellFlag::Underline } | C
 template <>
 struct std::formatter<vtbackend::CellFlag>: std::formatter<std::string_view>
 {
-    auto format(const vtbackend::CellFlag value, auto& ctx) const
+    auto format(vtbackend::CellFlag const value, auto& ctx) const
     {
         string_view s;
 

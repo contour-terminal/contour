@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <ranges>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace contour;
@@ -164,7 +165,7 @@ TEST_CASE("fuzzyMatch reports the exact characters the best alignment landed on"
 
     SECTION("the reported score is byte-for-byte the one fuzzyScore ranks by")
     {
-        for (auto const candidate: { "Toggle Pane Zoom", "Split Vertical", "Toggle Status Line" })
+        for (auto const* const candidate: { "Toggle Pane Zoom", "Split Vertical", "Toggle Status Line" })
         {
             auto const match = fuzzyMatch("tpz", candidate);
             auto const score = fuzzyScore("tpz", candidate);
@@ -190,7 +191,7 @@ TEST_CASE("fuzzyMatch reports the exact characters the best alignment landed on"
             INFO("query[" << i << "]='" << query[i] << "' -> candidate index " << at);
             CHECK(at > previous); // strictly ascending
             REQUIRE(at >= 0);
-            REQUIRE(at < static_cast<int>(candidate.size()));
+            REQUIRE(std::cmp_less(at, candidate.size()));
             auto const folded = [](char c) {
                 return std::tolower(static_cast<unsigned char>(c));
             };

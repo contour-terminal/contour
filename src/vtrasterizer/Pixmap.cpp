@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtrasterizer/Pixmap.h>
+
 #include <vtrasterizer/utils.h>
 
 using std::clamp;
 using std::max;
 using std::min;
-using std::move;
 using std::swap;
 
 namespace vtrasterizer
@@ -119,7 +119,7 @@ Pixmap& Pixmap::halfFilledCircleRight()
 
 Pixmap& Pixmap::segment_bar(int which)
 {
-    if (!SoftRequire(1 <= which && which <= 7))
+    if (!SoftRequire(1 <= which) || !SoftRequire(which <= 7))
         return *this;
 
     //   --1--

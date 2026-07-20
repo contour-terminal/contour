@@ -277,15 +277,15 @@ auto extractPathFromFileUrl(std::string const& url) -> std::string
     if (!remainder.empty() && remainder[0] != '/')
     {
         if (isDriveLetterPath(remainder))
-            return std::string(remainder);
+            return remainder;
         if (auto const pos = remainder.find('/'); pos != std::string::npos)
         {
             // file://host/C:/path → C:/path : strip the leading slash before a Windows drive
             // letter so a host-qualified URL still yields a valid native absolute path.
             auto pathPart = remainder.substr(pos);
             if (pathPart.size() >= 3 && isDriveLetterPath(pathPart.substr(1)))
-                return std::string(pathPart.substr(1));
-            return std::string(pathPart);
+                return pathPart.substr(1);
+            return pathPart;
         }
         return {};
     }
@@ -293,9 +293,9 @@ auto extractPathFromFileUrl(std::string const& url) -> std::string
     // file:///C:/path → C:/path : strip the leading slash before a Windows drive letter so the
     // resulting string is a valid native absolute path rather than a rooted POSIX-looking one.
     if (remainder.size() >= 3 && remainder[0] == '/' && isDriveLetterPath(remainder.substr(1)))
-        return std::string(remainder.substr(1));
+        return remainder.substr(1);
 
-    return std::string(remainder);
+    return remainder;
 }
 
 namespace

@@ -161,7 +161,7 @@ struct KeyboardModifiers
 /// @returns CSI parameter for given function key modifier
 constexpr size_t makeVirtualTerminalParam(Modifiers modifier) noexcept
 {
-#if defined(__APPLE__)
+#ifdef __APPLE__
     // Use option key as a control modifier to use
     // Ctrl-Left[Right]Arrow for word navigation.
     if (modifier == Modifier::Alt)
@@ -511,7 +511,7 @@ using KeyboardEventFlags = crispy::flags<KeyboardEventFlag>;
 class ExtendedKeyboardInputGenerator final: public StandardKeyboardInputGenerator
 {
   public:
-    static constexpr inline size_t MaxStackDepth = 32;
+    static constexpr size_t MaxStackDepth = 32;
 
     constexpr void enter(KeyboardEventFlags flags) noexcept
     {
@@ -547,7 +547,11 @@ class ExtendedKeyboardInputGenerator final: public StandardKeyboardInputGenerato
 
     constexpr void leave(size_t n = 1) noexcept { _currentStackTop -= std::min(n, _currentStackTop); }
 
-    constexpr void reset() noexcept
+    /// Empties the CSIu flag stack and clears the flags on its remaining bottom entry.
+    ///
+    /// This is deliberately narrower than StandardKeyboardInputGenerator::reset(): it touches only
+    /// the extended-protocol stack and leaves the cursor-keys/keypad/backarrow modes alone.
+    constexpr void resetProtocolStack() noexcept
     {
         _currentStackTop = 0;
         _flags.at(_currentStackTop) = KeyboardEventFlag::None;
@@ -696,8 +700,8 @@ class InputGenerator
     /// @return a view into the generated buffer sequence.
     [[nodiscard]] std::string_view peek() const noexcept
     {
-        return std::string_view(_pendingSequence.data() + _consumedBytes,
-                                size_t(_pendingSequence.size() - size_t(_consumedBytes)));
+        return { _pendingSequence.data() + _consumedBytes,
+                 size_t(_pendingSequence.size() - size_t(_consumedBytes)) };
     }
 
     void consume(int n)

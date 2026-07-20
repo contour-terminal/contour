@@ -23,6 +23,38 @@ function(subproject_version subproject_name VERSION_VAR)
 endfunction(subproject_version)
 # }}}
 
+# {{{ helper: ContourThirdParties_ClearClangTidy(<directory>)
+#
+# Clears CXX_CLANG_TIDY on every target defined at or below <directory>, skipping our own src/ and
+# examples/ trees.
+#
+# Vendored code is not ours to lint, but unsetting CMAKE_CXX_CLANG_TIDY around the dependency fetch
+# is not sufficient: the embedded projects are CMake projects in their own right and run their own
+# ClangTidy.cmake, and the ENABLE_TIDY cache variable this build is configured with is visible in
+# their scope too -- so they turn clang-tidy back on for their own targets. Clearing the per-target
+# property afterwards is order-independent and wins over any such re-enable.
+function(ContourThirdParties_ClearClangTidy directory)
+    # Our own trees are added after this module runs, so they should never be reachable here. Guard
+    # anyway: silently dropping first-party code from linting is the one failure mode worth ruling out.
+    if(directory STREQUAL "${PROJECT_SOURCE_DIR}/src" OR directory STREQUAL "${PROJECT_SOURCE_DIR}/examples")
+        return()
+    endif()
+
+    get_property(subdirectories DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
+    foreach(subdirectory IN LISTS subdirectories)
+        ContourThirdParties_ClearClangTidy("${subdirectory}")
+    endforeach()
+
+    get_property(targets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(target IN LISTS targets)
+        get_target_property(target_type ${target} TYPE)
+        if(NOT target_type STREQUAL "INTERFACE_LIBRARY" AND NOT target_type STREQUAL "UTILITY")
+            set_target_properties(${target} PROPERTIES CXX_CLANG_TIDY "")
+        endif()
+    endforeach()
+endfunction(ContourThirdParties_ClearClangTidy)
+# }}}
+
 set(ContourThirdParties_SRCDIR ${PROJECT_SOURCE_DIR}/_deps/sources)
 if(EXISTS "${ContourThirdParties_SRCDIR}/CMakeLists.txt")
     message(STATUS "Embedding 3rdparty libraries: ${ContourThirdParties_SRCDIR}")
@@ -192,6 +224,12 @@ if(COMMAND ContourThirdParties_Embed_reflection_cpp)
 else()
     HandleThirdparty(reflection-cpp "gh:contour-terminal/reflection-cpp#v${REFLECTION_CPP_VERSION}")
 endif()
+
+# Every third-party target now exists, and our own src/ and examples/ trees are not added until after
+# this module returns -- so everything reachable from the top level at this point is vendored code.
+# The embedded projects attach their targets to the scope that calls the Embed function, i.e. here,
+# rather than under _deps/sources, so the sweep has to start at the top level to reach them.
+ContourThirdParties_ClearClangTidy("${PROJECT_SOURCE_DIR}")
 
 macro(ContourThirdPartiesSummary2)
     message(STATUS "==============================================================================")

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Color.h>
-
 #include <vtrasterizer/CursorRenderer.h>
+
+#include <vtbackend/Color.h>
 
 #include <crispy/utils.h>
 
@@ -11,13 +11,7 @@
 
 using crispy::each_element;
 
-using std::array;
-using std::get;
 using std::max;
-using std::move;
-using std::nullopt;
-using std::optional;
-using std::runtime_error;
 using std::string;
 
 namespace vtrasterizer

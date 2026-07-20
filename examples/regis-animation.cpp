@@ -18,11 +18,11 @@ using namespace std::string_view_literals;
 namespace
 {
 
-std::atomic<bool> g_running { true };
+std::atomic<bool> running { true };
 
 void onSignal(int) noexcept
 {
-    g_running = false;
+    running = false;
 }
 
 void writeToTTY(std::string_view s) noexcept
@@ -58,7 +58,7 @@ int main()
     std::signal(SIGTERM, onSignal);
 
     auto frame = 0;
-    while (g_running)
+    while (running)
     {
         std::string r = "S(E)";
 

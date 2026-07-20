@@ -35,18 +35,18 @@ int main(int argc, char* argv[])
     ///   - Otherwise leave the platform untouched and let Qt pick.
     if (qgetenv("CONTOUR_TEST_DISPLAY") != "1")
     {
-#if defined(_WIN32)
+#ifdef _WIN32
         _putenv_s("QT_QPA_PLATFORM", "offscreen");
 #else
-        setenv("QT_QPA_PLATFORM", "offscreen", /*overwrite*/ 1);
+        qputenv("QT_QPA_PLATFORM", "offscreen");
 #endif
     }
-#if !defined(_WIN32)
+#ifndef _WIN32
     else if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM") && !qEnvironmentVariableIsEmpty("DISPLAY"))
-        setenv("QT_QPA_PLATFORM", "xcb", /*overwrite*/ 0);
+        qputenv("QT_QPA_PLATFORM", "xcb");
 #endif
 
-    QGuiApplication app(argc, argv);
+    QGuiApplication const app(argc, argv);
 
     // Pin the same Qt Quick Controls style the app itself pins (ContourGuiApp: QQuickStyle::setStyle).
     // The tests instantiate real Controls (SessionChrome's customized ScrollBar, the tab flyout, ...),

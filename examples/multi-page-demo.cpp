@@ -64,7 +64,7 @@ bool detectMultiPageSupport()
 
     // Expected response: CSI Ph ; Pw ; 1 ; 1 ; Pp " w
     auto const response = readResponse('w');
-    return !response.empty() && response.back() == 'w' && response.find("\"w") != std::string::npos;
+    return !response.empty() && response.back() == 'w' && response.contains("\"w");
 }
 
 // -- RAII terminal raw mode ---------------------------------------------------
@@ -163,12 +163,12 @@ void drawPopupFrame(int topRow, int leftCol)
 
     // Title
     auto constexpr Title = " Command Palette "sv;
-    auto const titleCol = leftCol + (PopupWidth - static_cast<int>(Title.size())) / 2;
+    auto const titleCol = leftCol + ((PopupWidth - static_cast<int>(Title.size())) / 2);
     writeToTTY(std::format("{}{}", moveTo(topRow, titleCol), Title));
 
     // Hint text
     auto constexpr Hint = "Loading items..."sv;
-    auto const hintCol = leftCol + (PopupWidth - static_cast<int>(Hint.size())) / 2;
+    auto const hintCol = leftCol + ((PopupWidth - static_cast<int>(Hint.size())) / 2);
     writeToTTY(
         std::format("{}{}{}{}", moveTo(topRow + 2, hintCol), setColor(153, 17), std::string(Hint), Reset));
 
@@ -194,7 +194,7 @@ void drawProgressBar(int topRow, int leftCol, int percent)
 
     // Percentage label
     auto const label = std::format("{:>3}%", percent);
-    auto const labelCol = leftCol + (PopupWidth - static_cast<int>(label.size())) / 2;
+    auto const labelCol = leftCol + ((PopupWidth - static_cast<int>(label.size())) / 2);
     writeToTTY(std::format("{}{}{}{}{}", moveTo(topRow + 6, labelCol), setColor(15, 17), Bold, label, Reset));
 }
 
@@ -235,8 +235,8 @@ int main()
     // Note: no clear — page 2 now holds a faithful copy of the original content.
 
     // -- Draw popup overlay on top of the copied content ----------------------
-    auto const topRow = (rows - PopupHeight) / 2 + 1;
-    auto const leftCol = (cols - PopupWidth) / 2 + 1;
+    auto const topRow = ((rows - PopupHeight) / 2) + 1;
+    auto const leftCol = ((cols - PopupWidth) / 2) + 1;
 
     drawPopupFrame(topRow, leftCol);
 

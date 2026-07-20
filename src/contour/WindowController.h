@@ -88,15 +88,16 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// Tab-strip roles (one row per tab). Mirrors the old TerminalSessionManager::Roles so the delegates
     /// bind the same role names. The values are small (Qt::UserRole + n), so a 16-bit base suffices and
     /// they still convert cleanly to the `int role` of the QAbstractItemModel API.
-    enum Roles : std::uint16_t
+    enum class Roles : std::uint16_t
     {
-        TitleRole = Qt::UserRole + 1, //!< Resolved (expanded) tab label; what the tab strip displays.
-        ColorRole,                    //!< Tab accent color as QColor (transparent if uncolored).
-        IsActiveRole,                 //!< Whether this tab is the active tab of this window.
-        PaneCountRole,                //!< Number of panes in this tab.
-        SessionIdRole,                //!< The session id of the tab's active leaf.
-        RawTitleRole,                 //!< Un-expanded runtime rename template (empty if never renamed).
-        ZoomedRole,                   //!< Whether this tab's active pane is zoomed (see vtmux::Tab).
+        DisplayRole = Qt::DisplayRole,    //!< Qt's built-in display role; answered like SessionIdRole.
+        TitleRole = Qt::UserRole + 1,     //!< Resolved (expanded) tab label; what the tab strip displays.
+        ColorRole = Qt::UserRole + 2,     //!< Tab accent color as QColor (transparent if uncolored).
+        IsActiveRole = Qt::UserRole + 3,  //!< Whether this tab is the active tab of this window.
+        PaneCountRole = Qt::UserRole + 4, //!< Number of panes in this tab.
+        SessionIdRole = Qt::UserRole + 5, //!< The session id of the tab's active leaf.
+        RawTitleRole = Qt::UserRole + 6,  //!< Un-expanded runtime rename template (empty if never renamed).
+        ZoomedRole = Qt::UserRole + 7,    //!< Whether this tab's active pane is zoomed (see vtmux::Tab).
     };
 
     /// @param manager  The session-lifetime service + model host (must outlive this controller).
@@ -116,6 +117,9 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     [[nodiscard]] int rowCount(QModelIndex const& parent = QModelIndex()) const override;
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
     // }}}
+
+    /// Watches the bound window for QEvent::DevicePixelRatioChange (no QWindow signal exists for it).
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
     /// Tab count of this window (one row per tab).
     [[nodiscard]] int count() const noexcept;
@@ -518,7 +522,7 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     void onTabAboutToBeMoved(int fromIndex, int toIndex);
     void onTabMoved();
     void onActiveTabChanged();
-    void notifyTabRowChanged(vtmux::TabId tab, QList<int> const& roles);
+    void notifyTabRowChanged(vtmux::TabId tab, QList<Roles> const& roles);
     void refreshAllTabTitles();
     void refreshActiveTabHighlight();
     void rebuildActiveTabPaneProxies();
@@ -613,9 +617,6 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// when it becomes the active OS window and revokes it when it stops being active, so alt-tabbing
     /// away from Contour notifies the shell (DECSET 1004) even when no display holds Qt item focus.
     void onOSWindowActiveChanged();
-
-    /// Watches the bound window for QEvent::DevicePixelRatioChange (no QWindow signal exists for it).
-    bool eventFilter(QObject* watched, QEvent* event) override;
 
     TerminalSessionManager& _manager;
     vtmux::WindowId _windowId;

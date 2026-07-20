@@ -7,6 +7,7 @@
 #include <vtpty/MockPty.h>
 
 #include <crispy/App.h>
+#include <crispy/environment.h>
 
 #include <libunicode/convert.h>
 
@@ -248,10 +249,9 @@ inline MockTerm<PtyDevice>::MockTerm(PageSize pageSize,
                createSettings(pageSize, maxHistoryLineCount, ptyReadBufferSize),
                std::chrono::steady_clock::time_point() } // explicitly start with empty timepoint
 {
-    char const* logFilterString = getenv("LOG");
-    if (logFilterString)
+    if (auto const logFilterString = crispy::environment::get("LOG"))
     {
-        logstore::configure(logFilterString);
+        logstore::configure(*logFilterString);
         crispy::app::customizeLogStoreOutput();
     }
 }

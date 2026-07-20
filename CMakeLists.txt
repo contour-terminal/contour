@@ -185,7 +185,6 @@ unset(CMAKE_CXX_CLANG_TIDY)
 include(ContourThirdParties)
 set(CMAKE_CXX_CLANG_TIDY "${_CONTOUR_SAVED_CLANG_TIDY}")
 add_subdirectory(src)
-unset(CMAKE_CXX_CLANG_TIDY)
 add_subdirectory(examples)
 
 # ----------------------------------------------------------------------------

@@ -70,10 +70,10 @@ TEST_CASE("Capabilities.keypad_caps_not_in_terminfo", "[issue-1861]")
     vtbackend::capabilities::StaticDatabase const tcap;
     auto const terminfo = tcap.terminfo();
 
-    CHECK(terminfo.find("ka1=") == std::string::npos);
-    CHECK(terminfo.find("ka3=") == std::string::npos);
-    CHECK(terminfo.find("kc1=") == std::string::npos);
-    CHECK(terminfo.find("kc3=") == std::string::npos);
+    CHECK(!terminfo.contains("ka1="));
+    CHECK(!terminfo.contains("ka3="));
+    CHECK(!terminfo.contains("kc1="));
+    CHECK(!terminfo.contains("kc3="));
 }
 
 // Verify that khlp and kund (which were also empty) are omitted.
@@ -82,8 +82,8 @@ TEST_CASE("Capabilities.help_undo_caps_not_in_terminfo", "[issue-1861]")
     vtbackend::capabilities::StaticDatabase const tcap;
     auto const terminfo = tcap.terminfo();
 
-    CHECK(terminfo.find("khlp=") == std::string::npos);
-    CHECK(terminfo.find("kund=") == std::string::npos);
+    CHECK(!terminfo.contains("khlp="));
+    CHECK(!terminfo.contains("kund="));
 }
 
 // Verify that non-empty string capabilities are still present in terminfo output.
@@ -93,13 +93,13 @@ TEST_CASE("Capabilities.non_empty_caps_still_present", "[issue-1861]")
     auto const terminfo = tcap.terminfo();
 
     // These are well-known capabilities that must still be present.
-    CHECK(terminfo.find("bold=") != std::string::npos);
-    CHECK(terminfo.find("clear=") != std::string::npos);
-    CHECK(terminfo.find("kcub1=") != std::string::npos);
-    CHECK(terminfo.find("kcud1=") != std::string::npos);
-    CHECK(terminfo.find("kf1=") != std::string::npos);
-    CHECK(terminfo.find("smkx=") != std::string::npos);
-    CHECK(terminfo.find("rmkx=") != std::string::npos);
+    CHECK(terminfo.contains("bold="));
+    CHECK(terminfo.contains("clear="));
+    CHECK(terminfo.contains("kcub1="));
+    CHECK(terminfo.contains("kcud1="));
+    CHECK(terminfo.contains("kf1="));
+    CHECK(terminfo.contains("smkx="));
+    CHECK(terminfo.contains("rmkx="));
 }
 
 // Verify that the stringCapability() API returns an empty view for removed capabilities,

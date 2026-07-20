@@ -172,10 +172,13 @@ inline void Selection::applyScroll(LineOffset value, LineCount historyLineCount)
 template <typename Renderer>
 void renderSelection(Selection const& selection, Renderer&& render)
 {
+    // @p render is invoked once per selected cell. Forward it once into a reference binding (which
+    // consumes nothing) and call through that, rather than forwarding inside the loop -- the latter
+    // would move from it on the first cell and use it again on every following one.
+    auto&& renderer = std::forward<Renderer>(render);
     for (Selection::Range const& range: selection.ranges())
         for (auto const col: crispy::times(*range.fromColumn, *range.length()))
-            std::forward<Renderer>(render)(
-                CellLocation { .line = range.line, .column = ColumnOffset::cast_from(col) });
+            renderer(CellLocation { .line = range.line, .column = ColumnOffset::cast_from(col) });
 }
 // }}}
 
@@ -202,7 +205,7 @@ struct std::formatter<vtbackend::Selection::State>: formatter<std::string_view>
 template <>
 struct std::formatter<vtbackend::Selection>: formatter<std::string>
 {
-    auto format(const vtbackend::Selection& selector, auto& ctx) const
+    auto format(vtbackend::Selection const& selector, auto& ctx) const
     {
         return formatter<std::string>::format(
             std::format(

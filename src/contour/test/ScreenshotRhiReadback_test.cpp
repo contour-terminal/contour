@@ -134,7 +134,7 @@ TextureTarget makeTextureTarget(QRhi* rhi, QSize size)
 /// @param width  The image width in pixels (its row stride in pixels).
 [[nodiscard]] RGBAColor pixelAt(std::span<uint8_t const> image, int width, int x, int y)
 {
-    auto const offset = (static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x))
+    auto const offset = ((static_cast<size_t>(y) * static_cast<size_t>(width)) + static_cast<size_t>(x))
                         * ScreenshotBytesPerPixel;
     auto const px = image.subspan(offset, ScreenshotBytesPerPixel);
     return { px[0], px[1], px[2], px[3] };

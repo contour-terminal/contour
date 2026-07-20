@@ -95,15 +95,18 @@ class MockTabController: public QAbstractListModel
 
     int lastTriggeredActionId = -1;
 
-    enum Roles : std::uint16_t
+    enum class Roles : std::uint16_t
     {
+        DisplayRole = Qt::DisplayRole,
         TitleRole = Qt::UserRole + 1,
-        ColorRole,
-        IsActiveRole,
-        PaneCountRole,
-        SessionIdRole,
-        RawTitleRole, //!< Must mirror TerminalSessionManager; TabStrip's delegate requires it.
-        ZoomedRole,   //!< Ditto: TabStrip's delegate requires it (drives TabItem's zoom badge).
+        ColorRole = Qt::UserRole + 2,
+        IsActiveRole = Qt::UserRole + 3,
+        PaneCountRole = Qt::UserRole + 4,
+        SessionIdRole = Qt::UserRole + 5,
+        RawTitleRole =
+            Qt::UserRole + 6, //!< Must mirror TerminalSessionManager; TabStrip's delegate requires it.
+        ZoomedRole =
+            Qt::UserRole + 7, //!< Ditto: TabStrip's delegate requires it (drives TabItem's zoom badge).
     };
 
     [[nodiscard]] int activeTabIndex() const noexcept { return _activeTabIndex; }
@@ -114,14 +117,15 @@ class MockTabController: public QAbstractListModel
     {
         if (index.row() < 0 || index.row() >= _count)
             return {};
-        switch (role)
+        switch (static_cast<Roles>(role))
         {
-            case TitleRole: return QStringLiteral("tab %1").arg(index.row());
-            case ColorRole: return QColor(Qt::transparent);
-            case IsActiveRole: return index.row() == _activeTabIndex;
-            case PaneCountRole: return 1;
-            case RawTitleRole: return QString {}; // never-renamed tab: empty raw template (editor blank)
-            case ZoomedRole: return false;
+            case Roles::TitleRole: return QStringLiteral("tab %1").arg(index.row());
+            case Roles::ColorRole: return QColor(Qt::transparent);
+            case Roles::IsActiveRole: return index.row() == _activeTabIndex;
+            case Roles::PaneCountRole: return 1;
+            case Roles::RawTitleRole:
+                return QString {}; // never-renamed tab: empty raw template (editor blank)
+            case Roles::ZoomedRole: return false;
             default: return index.row();
         }
     }
@@ -130,10 +134,14 @@ class MockTabController: public QAbstractListModel
     {
         // Must match TerminalSessionManager::roleNames() so the delegates bind the same roles —
         // including rawTitle, which TabStrip's delegate declares as a required property.
-        return { { Qt::DisplayRole, "display" }, { TitleRole, "title" },
-                 { ColorRole, "accentColor" },   { IsActiveRole, "isActive" },
-                 { PaneCountRole, "paneCount" }, { SessionIdRole, "sessionId" },
-                 { RawTitleRole, "rawTitle" },   { ZoomedRole, "zoomed" } };
+        return { { static_cast<int>(Roles::DisplayRole), "display" },
+                 { static_cast<int>(Roles::TitleRole), "title" },
+                 { static_cast<int>(Roles::ColorRole), "accentColor" },
+                 { static_cast<int>(Roles::IsActiveRole), "isActive" },
+                 { static_cast<int>(Roles::PaneCountRole), "paneCount" },
+                 { static_cast<int>(Roles::SessionIdRole), "sessionId" },
+                 { static_cast<int>(Roles::RawTitleRole), "rawTitle" },
+                 { static_cast<int>(Roles::ZoomedRole), "zoomed" } };
     }
 
     Q_INVOKABLE [[nodiscard]] QObject* createSession() { return nullptr; }
@@ -221,11 +229,11 @@ class MockTabController: public QAbstractListModel
   signals:
     void activeTabIndexChanged();
     void titleBarVisibleChanged();
-    void tabTitleEditRequested(int index);
+    void tabTitleEditRequested(int /*index*/);
     // TabItem's Connections declares onTabColorPickRequested; without the matching signal HERE, every
     // test that instantiates a TabItem earns a "no signal of the target matches" QML warning — which the
     // suite's message capture turns into a failure.
-    void tabColorPickRequested(int index);
+    void tabColorPickRequested(int /*index*/);
 
   private:
     int _count = 3;
@@ -275,9 +283,9 @@ class MockSession: public QObject
     [[nodiscard]] bool isImageBackground() const { return false; }
     [[nodiscard]] bool isBlurBackground() const { return false; }
     [[nodiscard]] float opacityBackground() const { return 1.0F; }
-    [[nodiscard]] QString pathToBackground() const { return QString(); }
-    [[nodiscard]] QColor backgroundColor() const { return QColor(Qt::black); }
-    [[nodiscard]] QString bellSource() const { return QString(); }
+    [[nodiscard]] QString pathToBackground() const { return {}; }
+    [[nodiscard]] QColor backgroundColor() const { return { Qt::black }; }
+    [[nodiscard]] QString bellSource() const { return {}; }
     [[nodiscard]] bool isScrollbarRight() const { return _scrollbarRight; }
     [[nodiscard]] bool isScrollbarVisible() const { return _scrollbarVisible; }
     [[nodiscard]] QString hyperlinkTooltipText() const { return _hyperlinkTooltipText; }
@@ -347,8 +355,8 @@ class MockSession: public QObject
     void dimUnfocusedChanged();
     void onBell();
     void onAlert();
-    void onShowNotification(QString const& title, QString const& body);
-    void onScrollOffsetChanged(int value);
+    void onShowNotification(QString const& /*title*/, QString const& /*body*/);
+    void onScrollOffsetChanged(int /*value*/);
     void requestPermissionForFontChange();
     void requestPermissionForBufferCapture();
     void requestPermissionForShowHostWritableStatusLine();
@@ -490,10 +498,9 @@ class StubContourTerminal: public QQuickItem
     }
     [[nodiscard]] double fontSize() const { return 12.0; }
   signals:
-    void sessionChanged(QObject* session);
-    void showNotification(QString const& title, QString const& body);
-    void opacityChanged(); //!< relayed opacity signal (single-pane).
-    void terminated();     //!< TerminalPane's onTerminated handler binds to this.
+    void sessionChanged(QObject* /*session*/);
+    void showNotification(QString const& /*title*/, QString const& /*body*/);
+    void terminated(); //!< TerminalPane's onTerminated handler binds to this.
 
   private:
     QObject* _session = nullptr;
@@ -504,7 +511,7 @@ class StubContourTerminal: public QQuickItem
 /// properties so components that require them instantiate.
 [[nodiscard]] QStringList loadErrors(QQmlEngine& engine, QString const& url)
 {
-    QQmlComponent component(&engine, QUrl(url));
+    QQmlComponent const component(&engine, QUrl(url));
     QStringList errors;
     for (auto const& e: component.errors())
         errors << e.toString();
@@ -621,7 +628,7 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
 
     // The component announces a pick rather than calling a controller, which is what lets one component
     // serve both menu surfaces; its host decides where that goes.
-    QSignalSpy pickedSpy(menu.get(), SIGNAL(picked(int)));
+    QSignalSpy const pickedSpy(menu.get(), SIGNAL(picked(int)));
 
     // Every row became an entry: separators and the "Advanced"/"Change Profile" sub-menus included. A
     // native popup (the Windows trap TabContextMenu documents) would have come up empty.
@@ -708,7 +715,7 @@ TEST_CASE("A colored TabItem fills with the user color and picks contrasting tex
     // Drives the colored-tab branch of TabItem: when tabColor is non-transparent, the fill is the
     // user's color (faded per state, via the controller's TabColorScheme helpers) and the label
     // contrasts against it. The uncolored branch is covered by the load/strip tests above.
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
@@ -845,7 +852,7 @@ TEST_CASE("The SetTabColor action opens the tab's color flyout (offscreen)", "[c
     // The keyboard half of the tab-color feature, end to end through the QML: the controller emits
     // tabColorPickRequested(row) and the delegate whose row matches opens the ONE flyout it owns. This
     // is the reason the flyout was hoisted out of TabContextMenu — there is no menu open here at all.
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockTabController controller;
 
@@ -912,7 +919,7 @@ TEST_CASE("The tab color flyout opens inside the window, wherever the tab strip 
     // The tab is hosted at the window's edge here, which is exactly what `tab_bar_position: Bottom` does
     // (main.qml anchors the TitleBar at `parent.height - titleBar.height`) — and what the tests above, all
     // of which host the tab at 0,0 in a big window, structurally cannot see.
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockTabController controller;
 
@@ -963,7 +970,7 @@ TEST_CASE("Tab color flyout picks a swatch with the cursor keys and with h/j/k/l
     // can only be finished with the mouse. Real key events go into the real window (QTest::keyClick ->
     // QWindowSystemInterface), so this exercises the same focus/grab path the user's keystrokes take —
     // an offscreen platform still delivers keys, it just draws nowhere.
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockTabController controller;
 
@@ -1152,7 +1159,7 @@ TEST_CASE("The tab color flyout's Reset Color button drops the tab's color (offs
     // keyboard cursor, the hex field — is pinned by a setTabColorCalls assertion; this one had a call
     // counter on the mock that nothing ever read, so a Reset that quietly stopped resetting (or stopped
     // closing, or reset the wrong tab) would have shipped with the suite green.
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockTabController controller;
 
@@ -1188,7 +1195,7 @@ TEST_CASE("The tab color flyout forgets an abandoned hex value between opens (of
     // A hex value typed and then abandoned with Escape must not still be sitting in the field on the next
     // open: its live preview swatch is enabled whenever the field parses, so one click on it — or one
     // Tab+Enter — would color the tab with the value from the session the user cancelled.
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockTabController controller;
 
@@ -1235,7 +1242,7 @@ TEST_CASE("A zoomed TabItem shows the zoom badge and gives it back its width whe
     // tab. The badge is the only thing telling the two apart, so assert it appears — and that it
     // costs the label nothing when absent (an invisible item still has geometry to anchors, so a
     // fixed-width badge would silently shrink every tab's title).
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
@@ -1291,7 +1298,7 @@ TEST_CASE("GUI tab strip survives controller destruction without QML errors (off
     // any unguarded `controller.` binding raises a TypeError in the shutdown log (seen live:
     // TabStrip.qml "Cannot read property 'activeTabIndex' of null"). The message capture (chained to
     // the run-wide gate) turns such a TypeError into a test failure.
-    contour::test::QmlMessageCapture capture;
+    contour::test::QmlMessageCapture const capture;
 
     QQmlEngine engine;
     auto controller = std::make_unique<MockTabController>();
@@ -1489,7 +1496,7 @@ TEST_CASE("SessionChrome scrollbar stays a thin edge overlay, whatever the sessi
     QQmlEngine engine;
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
 
     auto host = createChromeInWindow(engine);
     auto session = createScrollableSession();
@@ -1655,7 +1662,7 @@ TEST_CASE("PaneNode renders a split tree without recursive-instantiation errors 
     // component error, so we must watch the message handler).
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
 
     // A split node (vertical) with two leaf children.
     auto* leftLeaf = new MockPaneProxy(/*leaf*/ true);
@@ -1708,7 +1715,7 @@ TEST_CASE("PaneNode survives node becoming null during split teardown (offscreen
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
 
     auto* leftLeaf = new MockPaneProxy(/*leaf*/ true);
     auto* rightLeaf = new MockPaneProxy(/*leaf*/ true);
@@ -1884,7 +1891,7 @@ TEST_CASE("PaneNode renders a SINGLE leaf as the whole window without TypeErrors
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
     MockPaneProxy leaf(/*leaf*/ true);
 
     QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/PaneNode.qml")));
@@ -1918,7 +1925,7 @@ TEST_CASE("TerminalPane.onTerminated closes the window only when it is the last 
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
 
     QQmlComponent component(&engine);
     component.setData(QByteArrayLiteral("import QtQuick\n"
@@ -2016,7 +2023,7 @@ TEST_CASE("split: rebinding a leaf's session through null does not raise a TypeE
     MockPaneProxy leaf(/*leaf*/ true);
     leaf.setSession(&sessionA);
 
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
 
     auto root = instantiatePaneNode(engine, window, leaf);
     REQUIRE(root != nullptr);
@@ -2051,7 +2058,7 @@ TEST_CASE("split: a pane created already-active renders without error (offscreen
     window.resize(400, 300);
     window.show();
 
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
 
     MockSession session;
     MockPaneProxy leaf(/*leaf*/ true);
@@ -2092,7 +2099,7 @@ TEST_CASE("split: a leaf becoming a split node renders two panes without errors 
     MockPaneProxy rootNode(/*leaf*/ true);
     rootNode.setSession(&original);
 
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
 
     auto rootObj = instantiatePaneNode(engine, window, rootNode);
     REQUIRE(rootObj != nullptr);
@@ -2139,7 +2146,7 @@ TEST_CASE("split: collapsing a split node back to a leaf keeps the survivor rend
     right->setSession(&closing);
     MockPaneProxy rootNode(/*leaf*/ false, left, right);
 
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
 
     auto rootObj = instantiatePaneNode(engine, window, rootNode);
     REQUIRE(rootObj != nullptr);
@@ -2359,7 +2366,7 @@ TEST_CASE("PaneNode: a nested 3-pane tree renders three panes without warnings (
     window.resize(600, 400);
     window.show();
 
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
 
     // root = [ leaf | split(leaf, leaf) ]  -> three TerminalPane leaves.
     auto* a = new MockPaneProxy(/*leaf*/ true);
@@ -2403,7 +2410,7 @@ TEST_CASE("TerminalPane.dimOverlayColor implements the unfocused-dim policy (off
     qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
 
     QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/TerminalPane.qml")));
     while (component.status() == QQmlComponent::Loading)
@@ -2448,7 +2455,7 @@ TEST_CASE("TerminalPane dim overlay follows the session's dimUnfocused live (off
     MockSession session;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
     engine.rootContext()->setContextProperty("mockSession", &session);
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
 
     QQmlComponent component(&engine);
     component.setData(QByteArrayLiteral("import QtQuick\n"
@@ -2516,7 +2523,7 @@ class MockPaletteController: public QObject
     {
         _history.record("TogglePaneZoom");
         _model->setSources({ &_actionCommands });
-        _model->setShortcuts(contour::shortcutIndex(contour::config::defaultInputMappings));
+        _model->setShortcuts(contour::shortcutIndex(contour::config::defaultInputMappings()));
         _model->refresh();
     }
 
@@ -2631,7 +2638,7 @@ struct PaletteHost
 TEST_CASE("The command palette lists commands with their shortcut and documentation (offscreen)",
           "[contour][gui][qml][palette]")
 {
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockPaletteController controller;
 
@@ -2659,12 +2666,16 @@ TEST_CASE("The command palette lists commands with their shortcut and documentat
         REQUIRE(controller.model().rowCount() > 0);
 
         auto const index = controller.model().index(0, 0);
-        CHECK(controller.model().data(index, contour::CommandPaletteModel::TitleRole).toString()
+        CHECK(controller.model()
+                  .data(index, static_cast<int>(contour::CommandPaletteModel::Roles::TitleRole))
+                  .toString()
               == QStringLiteral("Split Vertical"));
-        CHECK(controller.model().data(index, contour::CommandPaletteModel::ShortcutRole).toString()
+        CHECK(controller.model()
+                  .data(index, static_cast<int>(contour::CommandPaletteModel::Roles::ShortcutRole))
+                  .toString()
               == QStringLiteral("Ctrl+Shift+E"));
         CHECK_FALSE(controller.model()
-                        .data(index, contour::CommandPaletteModel::DescriptionRole)
+                        .data(index, static_cast<int>(contour::CommandPaletteModel::Roles::DescriptionRole))
                         .toString()
                         .isEmpty());
     }
@@ -2677,7 +2688,7 @@ TEST_CASE("Typing in the palette filters the list through the model (offscreen)"
 {
     // The filter field is wired to the model's `filter` property, so typing must actually narrow the
     // list — a TextField that looks right but is not connected would pass a load-only test.
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockPaletteController controller;
 
@@ -2710,7 +2721,7 @@ TEST_CASE("Accepting a palette row runs that command and gives the keyboard back
     // The pick has to route all the way back to the controller with the right id — the popup is mere
     // decoration otherwise — and the terminal has to get the keyboard back, or the user is left typing
     // into a dismissed popup.
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockPaletteController controller;
 
@@ -2755,7 +2766,7 @@ TEST_CASE("Picking OpenCommandPalette re-opens the palette cleanly, not on top o
     // that is closing: WindowController::runCommand -> the manager -> openCommandPalette -> the window's
     // open(). The pick must not re-enter Popup.open() from INSIDE the popup's own closed() emission —
     // there, Qt is still unwinding the exit transition, and the palette ends up needing two dismissals.
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockPaletteController controller;
 
@@ -2769,7 +2780,8 @@ TEST_CASE("Picking OpenCommandPalette re-opens the palette cleanly, not on top o
     QCoreApplication::processEvents();
     REQUIRE(controller.model().rowCount() > 0);
     REQUIRE(controller.model()
-                .data(controller.model().index(0, 0), contour::CommandPaletteModel::IdRole)
+                .data(controller.model().index(0, 0),
+                      static_cast<int>(contour::CommandPaletteModel::Roles::IdRole))
                 .toString()
             == QStringLiteral("OpenCommandPalette"));
 
@@ -2804,7 +2816,7 @@ TEST_CASE("Dismissing the palette runs nothing and gives the keyboard back (offs
           "[contour][gui][qml][palette]")
 {
     // Escape must be a clean exit: no command runs, and the terminal is typeable again immediately.
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockPaletteController controller;
 
@@ -2829,7 +2841,7 @@ TEST_CASE("The palette survives controller destruction without QML errors (offsc
     // on window close, and QML re-evaluates every dependent binding against null on the way out. An
     // unguarded `controller.` in the popup would raise a TypeError — which the run-wide gate turns into
     // a failure of the entire suite, not just this test.
-    contour::test::QmlMessageCapture capture;
+    contour::test::QmlMessageCapture const capture;
     QQmlEngine engine;
     auto controller = std::make_unique<MockPaletteController>();
 
@@ -2956,7 +2968,7 @@ void openSaveLayoutPrompt(MockSaveLayoutController& controller)
 TEST_CASE("The save-layout prompt opens on the controller's request (offscreen)",
           "[contour][gui][qml][layout]")
 {
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockSaveLayoutController controller;
 
@@ -2976,7 +2988,7 @@ TEST_CASE("Accepting the save-layout prompt saves the typed name and gives the k
 {
     // The typed name has to route all the way to the controller — the field is decoration otherwise — and
     // the terminal has to get the keyboard back, or the user is left typing into a dismissed prompt.
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockSaveLayoutController controller;
 
@@ -3003,7 +3015,7 @@ TEST_CASE("A blank save-layout name is a no-op that keeps the prompt open (offsc
 {
     // Enter on an empty (or whitespace-only) field must neither save a nameless layout nor silently
     // dismiss the dialog — the user is asked to type a name or press Escape.
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockSaveLayoutController controller;
 
@@ -3026,7 +3038,7 @@ TEST_CASE("A blank save-layout name is a no-op that keeps the prompt open (offsc
 TEST_CASE("Dismissing the save-layout prompt saves nothing and gives the keyboard back (offscreen)",
           "[contour][gui][qml][layout]")
 {
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockSaveLayoutController controller;
 
@@ -3051,7 +3063,7 @@ TEST_CASE("The save-layout prompt survives controller destruction without QML er
     // Same teardown hazard the command palette guards against: the C++ controller is destroyed before the
     // QML tree on window close, and an unguarded `controller.` in the dialog would raise a TypeError that
     // the run-wide gate turns into a failure of the whole suite.
-    contour::test::QmlMessageCapture capture;
+    contour::test::QmlMessageCapture const capture;
     QQmlEngine engine;
     auto controller = std::make_unique<MockSaveLayoutController>();
 
@@ -3077,7 +3089,7 @@ TEST_CASE("Ctrl+J and Ctrl+K walk the palette selection, vim-style (offscreen)",
 {
     // The keyboard-only path: Ctrl+J/Ctrl+K move the selection down/up without the caret ever leaving
     // the filter box, mirroring the arrow keys the palette already handled.
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockPaletteController controller;
 
@@ -3121,7 +3133,7 @@ TEST_CASE("The palette bolds matched characters and tints only unselected rows (
 {
     // The title label renders StyledText so the filter's matches stand out: bold everywhere, and accent
     // coloured too — except on the selected row, whose accent background would swallow the tint.
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockPaletteController controller;
 
@@ -3174,7 +3186,7 @@ TEST_CASE("SessionChrome shows the hyperlink tooltip only while there is a link 
     QQmlEngine engine;
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
-    contour::test::QmlMessageCapture warnings;
+    contour::test::QmlMessageCapture const warnings;
 
     auto host = createChromeInWindow(engine);
     auto session = createScrollableSession();

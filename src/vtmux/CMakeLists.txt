@@ -9,7 +9,6 @@ add_library(vtmux STATIC
     ModelEvents.h
     Primitives.h
 )
-set_target_properties(vtmux PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
 target_link_libraries(vtmux PUBLIC
     vtbackend
     crispy::core

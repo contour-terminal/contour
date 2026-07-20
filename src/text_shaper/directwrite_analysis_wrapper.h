@@ -21,7 +21,7 @@ class dwrite_analysis_wrapper:
                         IDWriteTextAnalysisSink>
 {
   public:
-    dwrite_analysis_wrapper(const std::wstring& _text, const std::wstring& _userLocale):
+    dwrite_analysis_wrapper(std::wstring const& _text, std::wstring const& _userLocale):
         text(_text), userLocale(_userLocale)
     {
     }
@@ -122,7 +122,7 @@ class dwrite_analysis_wrapper:
     DWRITE_SCRIPT_ANALYSIS script;
 
   private:
-    const std::wstring& text;
-    const std::wstring& userLocale;
+    std::wstring const& text;
+    std::wstring const& userLocale;
 };
 } // namespace text

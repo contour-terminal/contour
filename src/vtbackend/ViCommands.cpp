@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Terminal.h>
 #include <vtbackend/ViCommands.h>
+
+#include <vtbackend/Terminal.h>
 #include <vtbackend/ViInputHandler.h>
 #include <vtbackend/logging.h>
 #include <vtbackend/primitives.h>
@@ -730,7 +731,7 @@ CellLocation ViCommands::findEndOfWordAt(CellLocation location, JumpOver jumpOve
         leftOfCurrent.column++;
     auto current = leftOfCurrent;
     while (current.column + 1 < rightMargin
-           && !(!_terminal->wordDelimited(leftOfCurrent) && _terminal->wordDelimited(current)))
+           && (_terminal->wordDelimited(leftOfCurrent) || !_terminal->wordDelimited(current)))
     {
         leftOfCurrent.column = current.column;
         current.column++;

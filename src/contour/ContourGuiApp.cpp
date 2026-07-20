@@ -51,10 +51,7 @@
 
 using std::bind;
 using std::cerr;
-using std::get;
-using std::holds_alternative;
 using std::make_unique;
-using std::prev;
 using std::string;
 using std::string_view;
 using std::vector;
@@ -231,7 +228,7 @@ void ContourGuiApp::onExit(TerminalSession& session)
 {
     if (auto const* localProcess = dynamic_cast<vtpty::Process const*>(&session.terminal().device()))
         _exitStatus = localProcess->checkStatus();
-#if defined(VTPTY_LIBSSH2)
+#ifdef VTPTY_LIBSSH2
     else if (auto const* sshSession = dynamic_cast<vtpty::SshSession const*>(&session.terminal().device()))
         _exitStatus = sshSession->exitStatus();
 #endif
@@ -296,7 +293,7 @@ QUrl ContourGuiApp::resolveResource(std::string_view path)
         return QUrl::fromLocalFile(QString::fromStdString(devPath.generic_string()));
 #endif
 
-    return QUrl("qrc:/contour/" + QString::fromLatin1(path.data(), static_cast<int>(path.size())));
+    return { "qrc:/contour/" + QString::fromLatin1(path.data(), static_cast<int>(path.size())) };
 }
 
 int ContourGuiApp::checkConfig()
@@ -318,7 +315,7 @@ bool ContourGuiApp::loadConfig(string const& target)
     auto const& flags = parameters();
     auto const prefix = "contour." + target + ".";
 
-    auto configFailures = int { 0 };
+    auto configFailures = 0;
     auto const configLogger = [&](string const& msg) {
         cerr << "Configuration failure. " << msg << '\n';
         ++configFailures;
@@ -412,7 +409,7 @@ bool ContourGuiApp::loadConfig(string const& target)
 
     if (auto const wmClass = flags.get<string>("contour.terminal.class"); !wmClass.empty())
     {
-        auto profile = _config.profile(profileName());
+        auto* profile = _config.profile(profileName());
         if (profile)
         {
             profile->wmClass = wmClass;
@@ -450,7 +447,7 @@ int ContourGuiApp::terminalGuiAction()
             return EXIT_FAILURE;
     }
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
     QGuiApplication::setAttribute(Qt::AA_MacDontSwapCtrlAndMeta, true);
 #endif
 
@@ -500,7 +497,7 @@ int ContourGuiApp::terminalGuiAction()
         }
     }
 
-#if defined(__linux__)
+#ifdef __linux__
     addQtArgIfSet("contour.terminal.display", "-display");
 #endif
 

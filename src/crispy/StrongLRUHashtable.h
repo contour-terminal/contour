@@ -92,8 +92,8 @@ class strong_lru_hashtable
 
     using ptr = std::unique_ptr<strong_lru_hashtable, std::function<void(strong_lru_hashtable*)>>;
 
-    [[nodiscard]] static constexpr inline size_t requiredMemorySize(strong_hashtable_size hashCount,
-                                                                    lru_capacity entryCount);
+    [[nodiscard]] static constexpr size_t requiredMemorySize(strong_hashtable_size hashCount,
+                                                             lru_capacity entryCount);
 
     template <typename Allocator = std::allocator<unsigned char>>
     [[nodiscard]] static ptr create(strong_hashtable_size hashCount,
@@ -211,7 +211,7 @@ class strong_lru_hashtable
 
         std::optional<Value> value = std::nullopt;
 
-#if defined(DEBUG_STRONG_LRU_HASHTABLE)
+#ifdef DEBUG_STRONG_LRU_HASHTABLE
         uint32_t ordering = 0;
 #endif
     };
@@ -262,7 +262,7 @@ class strong_lru_hashtable
     uint32_t* _hashTable;
     entry* _entries;
 
-#if defined(DEBUG_STRONG_LRU_HASHTABLE)
+#ifdef DEBUG_STRONG_LRU_HASHTABLE
     int _lastLRUCount = 0;
 #endif
 };
@@ -311,8 +311,8 @@ strong_lru_hashtable<Value>::~strong_lru_hashtable()
 }
 
 template <typename Value>
-constexpr inline size_t strong_lru_hashtable<Value>::requiredMemorySize(strong_hashtable_size hashCount,
-                                                                        lru_capacity entryCount)
+constexpr size_t strong_lru_hashtable<Value>::requiredMemorySize(strong_hashtable_size hashCount,
+                                                                 lru_capacity entryCount)
 {
     Require(detail::isPowerOfTwo(hashCount.value)); // Hash capacity must be power of 2.
     Require(hashCount.value >= 1);
@@ -778,7 +778,7 @@ inline void strong_lru_hashtable<Value>::linkToLRUChainHead(uint32_t entryIndex)
     oldHead.prevInLRU = entryIndex;
     sentinel.nextInLRU = entryIndex;
 
-#if defined(DEBUG_STRONG_LRU_HASHTABLE)
+#ifdef DEBUG_STRONG_LRU_HASHTABLE
     newHead.ordering = sentinel.ordering++;
 #endif
 
@@ -847,7 +847,7 @@ void strong_lru_hashtable<Value>::recycle()
 template <typename Value>
 inline int strong_lru_hashtable<Value>::validateChange(int adj)
 {
-#if defined(DEBUG_STRONG_LRU_HASHTABLE)
+#ifdef DEBUG_STRONG_LRU_HASHTABLE
     int count = 0;
 
     entry const& sentinel = sentinelEntry();

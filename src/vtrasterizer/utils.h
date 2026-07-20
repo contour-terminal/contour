@@ -10,9 +10,9 @@
 namespace vtrasterizer
 {
 
-auto const inline rendererLog =
+auto inline const rendererLog =
     logstore::category("vt.renderer", "Logs general information about VT renderer.");
-auto const inline rasterizerLog = logstore::category("vt.rasterizer", "Logs details about text rendering.");
+auto inline const rasterizerLog = logstore::category("vt.rasterizer", "Logs details about text rendering.");
 
 std::vector<uint8_t> downsampleRGBA(std::vector<uint8_t> const& bitmap,
                                     vtbackend::ImageSize size,

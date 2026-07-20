@@ -183,7 +183,7 @@ class CharsetMapping
         }
         else if (code != 127)
         {
-            return static_cast<char32_t>(code);
+            return code;
         }
         else
         {

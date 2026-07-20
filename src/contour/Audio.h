@@ -26,7 +26,7 @@ class Audio: public QObject
 
   private:
     /// Appends the PCM synthesis of @p notes (see contour::audio, AudioNote.h) to the playback buffer.
-    void fillBuffer(int volume, int duration, gsl::span<const int> notes);
+    void fillBuffer(int volume, int duration, gsl::span<int const> notes);
 
     QByteArray _byteArray;
     QBuffer _audioBuffer;

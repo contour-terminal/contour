@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtconformance/EscTestLog.h>
+
 #include <crispy/utils.h>
 
 #include <algorithm>
@@ -8,8 +10,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include <vtconformance/EscTestLog.h>
 
 namespace vtconformance
 {
@@ -55,8 +55,7 @@ namespace
     /// sends while tearing down -- so the shape of the line is what ends it.
     [[nodiscard]] bool looksLikeTestName(std::string_view line) noexcept
     {
-        return !line.empty() && line.find(' ') == std::string_view::npos
-               && line.find('.') != std::string_view::npos;
+        return !line.empty() && !line.contains(' ') && line.contains('.');
     }
 } // namespace
 

@@ -130,8 +130,7 @@ struct LogicalLine
         {
             for (auto line = lines.begin(); line != lines.end(); ++line)
             {
-                std::u32string_view const textOnThisLine(searchText.data(),
-                                                         lineLength - unbox<size_t>(startPosition));
+                auto const textOnThisLine = searchText.substr(0, lineLength - unbox<size_t>(startPosition));
                 // Find how much of searchText is on this line
                 auto const result = searchPartialMatch(textOnThisLine, line->get(), isCaseSensitive);
                 if (result != 0)
@@ -241,7 +240,7 @@ struct LogicalLine
   private:
     // Finds the maximum number of characters of searchText that can be matched from right end of line
     [[nodiscard]] size_t searchPartialMatch(std::u32string_view searchText,
-                                            const Line& line,
+                                            Line const& line,
                                             bool isCaseSensitive) const noexcept
     {
         auto const lineLength = unbox<size_t>(line.size());
@@ -259,7 +258,7 @@ struct LogicalLine
 
     // Finds the maximum number of characters of searchText that can be matched from left end of line
     [[nodiscard]] size_t searchPartialMatchReverse(std::u32string_view searchText,
-                                                   const Line& line,
+                                                   Line const& line,
                                                    bool isCaseSensitive) const noexcept
     {
         while (!searchText.empty())
@@ -429,11 +428,8 @@ struct LogicalLines
         bool operator!=(iterator const& other) const noexcept { return current != other.current; }
     }; // }}}
 
-    [[nodiscard]] iterator begin() const { return iterator(lines, topMostLine, topMostLine, bottomMostLine); }
-    [[nodiscard]] iterator end() const
-    {
-        return iterator(lines, topMostLine, bottomMostLine + 1, bottomMostLine);
-    }
+    [[nodiscard]] iterator begin() const { return { lines, topMostLine, topMostLine, bottomMostLine }; }
+    [[nodiscard]] iterator end() const { return { lines, topMostLine, bottomMostLine + 1, bottomMostLine }; }
 };
 
 struct ReverseLogicalLines
@@ -525,14 +521,8 @@ struct ReverseLogicalLines
         bool operator!=(iterator const& other) const noexcept { return current != other.current; }
     }; // }}}
 
-    [[nodiscard]] iterator begin() const
-    {
-        return iterator(lines, topMostLine, bottomMostLine, bottomMostLine);
-    }
-    [[nodiscard]] iterator end() const
-    {
-        return iterator(lines, topMostLine, topMostLine - 1, bottomMostLine);
-    }
+    [[nodiscard]] iterator begin() const { return { lines, topMostLine, bottomMostLine, bottomMostLine }; }
+    [[nodiscard]] iterator end() const { return { lines, topMostLine, topMostLine - 1, bottomMostLine }; }
 };
 
 /**
@@ -841,7 +831,7 @@ template <typename RendererT>
 template <>
 struct std::formatter<vtbackend::Margin::Horizontal>: std::formatter<std::string>
 {
-    auto format(const vtbackend::Margin::Horizontal range, auto& ctx) const
+    auto format(vtbackend::Margin::Horizontal const range, auto& ctx) const
     {
         return formatter<std::string>::format(std::format("{}..{}", range.from, range.to), ctx);
     }
@@ -850,7 +840,7 @@ struct std::formatter<vtbackend::Margin::Horizontal>: std::formatter<std::string
 template <>
 struct std::formatter<vtbackend::Margin::Vertical>: std::formatter<std::string>
 {
-    auto format(const vtbackend::Margin::Vertical range, auto& ctx) const
+    auto format(vtbackend::Margin::Vertical const range, auto& ctx) const
     {
         return formatter<std::string>::format(std::format("{}..{}", range.from, range.to), ctx);
     }

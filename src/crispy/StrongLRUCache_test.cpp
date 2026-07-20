@@ -224,6 +224,8 @@ TEST_CASE("strong_lru_cache.remove", "")
     REQUIRE(joinHumanReadable(cache.keys()).empty());
 }
 
+namespace
+{
 // clang-format off
 struct colliding_hasher
 {
@@ -236,6 +238,7 @@ struct colliding_hasher
     }
 };
 // clang-format on
+} // namespace
 
 TEST_CASE("strong_lru_cache.insert_with_cache_collision", "")
 {

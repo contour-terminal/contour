@@ -1,5 +1,6 @@
-#include <vtbackend/ControlCode.h>
 #include <vtbackend/Sequence.h>
+
+#include <vtbackend/ControlCode.h>
 
 #include <crispy/escape.h>
 
@@ -7,7 +8,6 @@
 #include <sstream>
 #include <string>
 
-using std::accumulate;
 using std::string;
 using std::stringstream;
 

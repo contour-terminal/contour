@@ -12,6 +12,25 @@
 #include <atomic>
 #include <mutex>
 
+namespace
+{
+
+/// Emits an accessibility event to the platform's assistive technology.
+///
+/// QAccessible::updateAccessibility() does not take ownership of the event it is handed, so the
+/// event must outlive the call but not the scope -- a stack object, never a `new` expression.
+///
+/// @tparam Event The QAccessibleEvent subclass to construct.
+/// @param args   Constructor arguments for that event.
+template <typename Event, typename... Args>
+void notifyAccessibility(Args&&... args)
+{
+    auto event = Event(std::forward<Args>(args)...);
+    QAccessible::updateAccessibility(&event);
+}
+
+} // namespace
+
 namespace contour::display
 {
 
@@ -379,25 +398,24 @@ void TerminalAccessible::reportCaret()
     if (current.prompt.has_value() && !hadPrompt)
     {
         auto* prompt = promptInterface();
-        QAccessible::updateAccessibility(new QAccessibleEvent(prompt, QAccessible::ObjectShow));
-        QAccessible::updateAccessibility(new QAccessibleEvent(prompt, QAccessible::Focus));
+        notifyAccessibility<QAccessibleEvent>(prompt, QAccessible::ObjectShow);
+        notifyAccessibility<QAccessibleEvent>(prompt, QAccessible::Focus);
     }
     else if (!current.prompt.has_value() && hadPrompt)
     {
-        QAccessible::updateAccessibility(new QAccessibleEvent(promptInterface(), QAccessible::ObjectHide));
-        QAccessible::updateAccessibility(new QAccessibleEvent(this, QAccessible::Focus));
+        notifyAccessibility<QAccessibleEvent>(promptInterface(), QAccessible::ObjectHide);
+        notifyAccessibility<QAccessibleEvent>(this, QAccessible::Focus);
     }
     else if (current.prompt.has_value())
     {
         // Same prompt region, moved: the viewport scrolled or the shell repainted it.
-        QAccessible::updateAccessibility(
-            new QAccessibleEvent(promptInterface(), QAccessible::LocationChanged));
+        notifyAccessibility<QAccessibleEvent>(promptInterface(), QAccessible::LocationChanged);
     }
 
     // Emitted alongside, never instead of: TextCaretMoved says the OFFSET changed, which does not tell a
     // magnifier that the same offset now sits at different pixels after a scroll.
-    QAccessible::updateAccessibility(new QAccessibleTextCursorEvent(object(), cursorPosition()));
-    QAccessible::updateAccessibility(new QAccessibleEvent(this, QAccessible::LocationChanged));
+    notifyAccessibility<QAccessibleTextCursorEvent>(object(), cursorPosition());
+    notifyAccessibility<QAccessibleEvent>(this, QAccessible::LocationChanged);
 }
 
 // }}}

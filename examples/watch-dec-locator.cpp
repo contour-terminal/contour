@@ -9,12 +9,14 @@
 /// Press 'q' or Ctrl+C to quit.
 
 #include <csignal>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <format>
+#include <string>
 #include <string_view>
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
     #include <util.h>
 #else
     #include <termios.h>
@@ -52,13 +54,73 @@ struct LocatorReport
     int page = 0;   ///< Page number
 };
 
-enum class ParseState
+enum class ParseState : std::uint8_t
 {
     Normal,
     Escape,
     CSI,
     Params,
 };
+
+/// Names the DECLRP event code Pe, for human-readable output.
+/// @param event The Pe parameter of a DECLRP report.
+/// @return A short description of the event, or "unknown" for codes DEC does not define.
+[[nodiscard]] std::string_view locatorEventName(int event) noexcept
+{
+    switch (event)
+    {
+        case 0: return "unavailable";
+        case 1: return "request response";
+        case 2: return "button DOWN";
+        case 3: return "button UP";
+        case 4: return "outside filter";
+        default: return "unknown";
+    }
+}
+
+/// Decodes the parameter string of a DECLRP report into its five fields.
+///
+/// A DECLRP report reaches us as `CSI Pe ; Pb ; Pr ; Pc ; Pp & w`. This function takes just the
+/// `Pe;Pb;Pr;Pc;Pp` text -- everything between the CSI introducer and the `&w` terminator -- and
+/// assigns the parameters positionally: the first is the event, the second the button state, then
+/// row, column and page.
+///
+/// Parameters may be empty (`1;;3`) or simply absent (a report may stop early); in both cases the
+/// DEC Locator protocol says the parameter takes its default value of 0, which is what the
+/// value-initialized LocatorReport already holds.
+///
+/// @param params The semicolon-separated parameter text, without introducer or terminator.
+/// @return The decoded report, with any parameter not present left at its 0 default.
+[[nodiscard]] LocatorReport parseLocatorReport(std::string const& params)
+{
+    auto report = LocatorReport {};
+    auto pos = size_t { 0 };
+    auto paramIdx = 0;
+
+    while (pos <= params.size() && paramIdx < 5)
+    {
+        auto const delim = params.find(';', pos);
+        auto const token = params.substr(pos, delim == std::string::npos ? std::string::npos : delim - pos);
+        auto const val = token.empty() ? 0 : std::stoi(token);
+
+        switch (paramIdx)
+        {
+            case 0: report.event = val; break;
+            case 1: report.button = val; break;
+            case 2: report.row = val; break;
+            case 3: report.col = val; break;
+            case 4: report.page = val; break;
+            default: break; // DECLRP defines no further parameters; ignore them.
+        }
+
+        ++paramIdx;
+        if (delim == std::string::npos)
+            break;
+        pos = delim + 1;
+    }
+
+    return report;
+}
 
 } // namespace
 
@@ -138,46 +200,13 @@ int main()
                         intermediate = '&';
                     else if (ch == 'w' && intermediate == '&')
                     {
-                        // DECLRP: CSI Pe;Pb;Pr;Pc;Pp & w
-                        auto report = LocatorReport {};
-                        auto pos = size_t { 0 };
-                        auto paramIdx = 0;
-                        while (pos <= params.size() && paramIdx < 5)
-                        {
-                            auto const delim = params.find(';', pos);
-                            auto const token = params.substr(
-                                pos, delim == std::string::npos ? std::string::npos : delim - pos);
-                            auto const val = token.empty() ? 0 : std::stoi(std::string(token));
-                            switch (paramIdx)
-                            {
-                                case 0: report.event = val; break;
-                                case 1: report.button = val; break;
-                                case 2: report.row = val; break;
-                                case 3: report.col = val; break;
-                                case 4: report.page = val; break;
-                            }
-                            ++paramIdx;
-                            if (delim == std::string::npos)
-                                break;
-                            pos = delim + 1;
-                        }
-
-                        auto const eventStr = [&]() -> std::string_view {
-                            switch (report.event)
-                            {
-                                case 0: return "unavailable";
-                                case 1: return "request response";
-                                case 2: return "button DOWN";
-                                case 3: return "button UP";
-                                case 4: return "outside filter";
-                                default: return "unknown";
-                            }
-                        }();
+                        // A complete DECLRP report has arrived: CSI Pe;Pb;Pr;Pc;Pp & w
+                        auto const report = parseLocatorReport(params);
 
                         writeToTTY(
                             std::format("\r  DECLRP: event={} ({}) button={} row={} col={} page={}\033[K\r\n",
                                         report.event,
-                                        eventStr,
+                                        locatorEventName(report.event),
                                         report.button,
                                         report.row,
                                         report.col,

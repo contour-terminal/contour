@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <text_shaper/directwrite_analysis_wrapper.h>
 #include <text_shaper/directwrite_locator.h>
+
+#include <text_shaper/directwrite_analysis_wrapper.h>
 #include <text_shaper/font.h>
 
 #include <string_view>
@@ -73,7 +74,7 @@ namespace // {{{ support
 
         ComPtr<IDWriteFontFileLoader> loader;
         fontFile->GetLoader(&loader);
-        const void* key;
+        void const* key;
         UINT32 keySize;
         fontFile->GetReferenceKey(&key, &keySize);
         ComPtr<IDWriteLocalFontFileLoader> localLoader;
@@ -133,7 +134,7 @@ font_source_list directwrite_locator::locate(font_description const& _fd)
     if (!familyExists)
     {
         // Fallback to Consolas
-        const wchar_t* consolas = L"Consolas";
+        wchar_t const* consolas = L"Consolas";
         _d->systemFontCollection->FindFamilyName(consolas, &familyIndex, &familyExists);
     }
 
@@ -168,7 +169,7 @@ font_source_list directwrite_locator::all()
     return {};
 }
 
-font_source_list directwrite_locator::resolve(gsl::span<const char32_t> codepoints)
+font_source_list directwrite_locator::resolve(gsl::span<char32_t const> codepoints)
 {
     font_source_list output;
 

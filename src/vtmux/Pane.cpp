@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <cassert>
-
 #include <vtmux/Pane.h>
+
+#include <cassert>
 
 namespace vtmux
 {
@@ -151,7 +151,7 @@ Pane* Pane::neighbor(Pane const* fromLeaf, FocusDirection direction)
     // Walk up until we find an ancestor split on the matching axis where `fromLeaf` is on the side
     // we are moving away from (so the opposite subtree lies in the requested direction).
     Pane const* node = fromLeaf;
-    Pane* ancestor = fromLeaf->parent();
+    Pane const* ancestor = fromLeaf->parent();
     while (ancestor != nullptr)
     {
         if (ancestor->splitState() == axis)

@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtconformance/TerminalEngine.h>
+
 #include <vtbackend/Screen.h>
 #include <vtbackend/Settings.h>
 
@@ -8,8 +10,6 @@
 #include <string>
 #include <string_view>
 #include <utility>
-
-#include <vtconformance/TerminalEngine.h>
 
 using namespace std::chrono_literals;
 

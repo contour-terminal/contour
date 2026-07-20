@@ -7,7 +7,6 @@
 #include <ranges>
 
 using std::clamp;
-using std::fill;
 using std::max;
 using std::min;
 using std::vector;
@@ -207,7 +206,7 @@ void SixelParser::foldDigits(std::string_view digits)
 void SixelParser::submitRaster()
 {
     // Fewer than two parameters says nothing, and more than four is not a raster attribute at all.
-    if (!(_paramCount > 1 && _paramCount < 5))
+    if (_paramCount <= 1 || _paramCount >= 5)
         return;
 
     auto const pan = _params[0];

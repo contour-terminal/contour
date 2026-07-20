@@ -39,12 +39,15 @@ class BoxDrawingRendererTest
 };
 } // namespace vtrasterizer
 
+namespace
+{
 struct TestTileData
 {
     vtbackend::ImageSize bitmapSize;
     vtrasterizer::atlas::Format bitmapFormat;
     std::vector<uint8_t> bitmap;
 };
+} // namespace
 
 /// Counts the number of non-zero pixels in a buffer.
 static size_t countLitPixels(atlas::Buffer const& buffer)
@@ -60,7 +63,7 @@ static atlas::Buffer horizontalMirror(atlas::Buffer const& buffer, ImageSize siz
     auto mirrored = atlas::Buffer(buffer.size());
     for (auto y: std::views::iota(0zu, h))
         for (auto x: std::views::iota(0zu, w))
-            mirrored[y * w + x] = buffer[y * w + (w - 1 - x)];
+            mirrored[(y * w) + x] = buffer[(y * w) + (w - 1 - x)];
     return mirrored;
 }
 
@@ -72,7 +75,7 @@ static atlas::Buffer verticalMirror(atlas::Buffer const& buffer, ImageSize size)
     auto mirrored = atlas::Buffer(buffer.size());
     for (auto y: std::views::iota(0zu, h))
         for (auto x: std::views::iota(0zu, w))
-            mirrored[y * w + x] = buffer[(h - 1 - y) * w + x];
+            mirrored[(y * w) + x] = buffer[((h - 1 - y) * w) + x];
     return mirrored;
 }
 
@@ -203,7 +206,7 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.extensions", "[renderer]")
         {
             auto rowLit = size_t { 0 };
             for (auto x: std::views::iota(0zu, w))
-                if ((*buffer)[y * w + x] > 0)
+                if ((*buffer)[(y * w) + x] > 0)
                     ++rowLit;
             INFO("Row " << y << " should have lit pixels");
             CHECK(rowLit > 0);
@@ -234,7 +237,7 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.extensions", "[renderer]")
         {
             auto colLit = size_t { 0 };
             for (auto y: std::views::iota(0zu, h))
-                if ((*buffer)[y * w + x] > 0)
+                if ((*buffer)[(y * w) + x] > 0)
                     ++colLit;
             INFO("Column " << x << " should have lit pixels");
             CHECK(colLit > 0);
@@ -441,7 +444,7 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.parenthesis_extensions", "[renderer]"
             for (auto x: std::views::iota(w / 2, w))
             {
                 INFO("Row " << y << ", Col " << x << " should be dark (right half)");
-                CHECK((*buffer)[y * w + x] == 0);
+                CHECK((*buffer)[(y * w) + x] == 0);
             }
     }
 
@@ -460,7 +463,7 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.parenthesis_extensions", "[renderer]"
             for (auto x: std::views::iota(0zu, w / 2))
             {
                 INFO("Row " << y << ", Col " << x << " should be dark (left half)");
-                CHECK((*buffer)[y * w + x] == 0);
+                CHECK((*buffer)[(y * w) + x] == 0);
             }
     }
 

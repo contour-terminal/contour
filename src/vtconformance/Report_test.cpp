@@ -189,7 +189,7 @@ TEST_CASE("Report.exitCode", "[vtconformance]")
         CHECK(judge(report.scenarios[0], report.knownGaps, report.knownFailures) == Outcome::Failed);
         CHECK(exitCode(report) == EXIT_SUCCESS);
         // ... and it must still be visible: a failure nobody can see is a failure nobody will fix.
-        CHECK(renderSummary(report).find("advisory") != std::string::npos);
+        CHECK(renderSummary(report).contains("advisory"));
     }
 
     SECTION("one gating failure fails the run even beside passing advisory scenarios")
@@ -214,7 +214,7 @@ TEST_CASE("Report.renderMarkdown", "[vtconformance]")
     report.scenarios.push_back(result);
 
     auto const markdown = renderMarkdown(report);
-    CHECK(markdown.find("### Suite: `vttest`") != std::string::npos);
-    CHECK(markdown.find("1 passed, 0 failed, 1 skipped") != std::string::npos);
-    CHECK(markdown.find("needs real key/mouse input") != std::string::npos);
+    CHECK(markdown.contains("### Suite: `vttest`"));
+    CHECK(markdown.contains("1 passed, 0 failed, 1 skipped"));
+    CHECK(markdown.contains("needs real key/mouse input"));
 }

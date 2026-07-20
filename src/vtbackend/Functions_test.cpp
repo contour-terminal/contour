@@ -8,7 +8,7 @@
 namespace vtbackend
 {
 // purely for proper diagnostic printing in Catch2
-inline std::ostream& operator<<(std::ostream& os, Function const& f)
+static inline std::ostream& operator<<(std::ostream& os, Function const& f)
 {
     return os << std::format("{}", f);
 }

@@ -74,7 +74,7 @@ constexpr inline auto HeadOnlyLineFlags =
 template <>
 struct std::formatter<vtbackend::LineFlags>: formatter<std::string>
 {
-    auto format(const vtbackend::LineFlags flags, auto& ctx) const
+    auto format(vtbackend::LineFlags const flags, auto& ctx) const
     {
         std::string s;
         auto const append = [&s, flags](vtbackend::LineFlags flag, std::string_view name) {
