@@ -8,6 +8,7 @@
 #include <gsl/span_ext>
 
 #include <array>
+#include <cctype>
 #include <concepts>
 #include <cstdint>
 #include <format>
@@ -788,8 +789,12 @@ inline std::pair<int, size_t> extractCodePrefix(T const& data) noexcept
     int code = 0;
     size_t i = 0;
 
-    while (i < data.size() && isdigit(data[i]))
-        code = (code * 10) + (int) (data[i++] - '0');
+    // NB: the cast is load-bearing. std::isdigit() is defined only for values representable as
+    // unsigned char (or EOF), and `data` is a byte range whose element type is a plain -- on most
+    // ABIs signed -- char, so any byte >= 0x80 (every UTF-8 lead byte, reachable through PM/APC
+    // payloads) would otherwise be passed as a negative int and index the ctype table out of bounds.
+    while (i < data.size() && std::isdigit(static_cast<unsigned char>(data[i])))
+        code = (code * 10) + static_cast<int>(data[i++] - '0');
 
     if (i == 0 && !data.empty() && data[0] != ';')
     {

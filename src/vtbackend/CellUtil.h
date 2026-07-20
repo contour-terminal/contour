@@ -7,6 +7,7 @@
 
 #include <crispy/times.h>
 
+#include <libunicode/case_mapping.h>
 #include <libunicode/width.h>
 
 #include <ranges>
@@ -209,7 +210,11 @@ template <typename Cell>
     auto const testMatchAt = [&](size_t i) {
         if (isCaseSensitive)
             return cell[i] == text[i];
-        return static_cast<char32_t>(std::tolower(cell[i])) == text[i];
+        // NB: std::tolower() is defined only for values representable as unsigned char, so handing it
+        // a char32_t is undefined for every codepoint above U+00FF -- and it folds by the C locale's
+        // alphabet even where it is defined, which is not the one on screen. The UCD mapping folds the
+        // actual codepoint, so a case-insensitive search matches "Привет" and "Straße" too.
+        return unicode::simple_lowercase(cell[i]) == text[i];
     };
 
     // TODO: Should use this line instead - but that breaks on Ubuntu 22.04 with Clang 15

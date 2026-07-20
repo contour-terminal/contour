@@ -29,6 +29,7 @@
 #include <libunicode/convert.h>
 #include <libunicode/emoji_segmenter.h>
 #include <libunicode/grapheme_segmenter.h>
+#include <libunicode/ucd.h>
 #include <libunicode/utf8_grapheme_segmenter.h>
 #include <libunicode/word_segmenter.h>
 
@@ -7466,11 +7467,28 @@ unique_ptr<ParserExtension> Screen::hookDECUDK(Sequence const& seq)
         [this, clearAll, locked](string_view data) { _terminal->programUDK(clearAll, locked, data); });
 }
 
+namespace
+{
+    /// Decides whether a search is case-sensitive ("smart case"): it is, as soon as the needle
+    /// contains an uppercase character.
+    ///
+    /// @param searchText The needle to inspect.
+    /// @return true if @p searchText contains at least one uppercase letter.
+    [[nodiscard]] bool isCaseSensitiveSearch(std::u32string_view searchText) noexcept
+    {
+        // NB: std::isupper() takes an *int holding an unsigned char value* (or EOF), so feeding it a
+        // char32_t is undefined for every codepoint above 0xFF -- and it would answer for the wrong
+        // alphabet anyway. The UCD lookup is the codepoint-correct test, so "Привет" and "Ünicode"
+        // now select a case-sensitive search just like "Hello" does.
+        return std::ranges::any_of(searchText, unicode::general_category::is_uppercase_letter);
+    }
+} // namespace
+
 optional<CellLocation> Screen::search(std::u32string_view searchText, CellLocation startPosition)
 {
     // TODO use LogicalLines to spawn logical lines for improving the search on wrapped lines.
 
-    auto const isCaseSensitive = std::ranges::any_of(searchText, [](auto ch) { return std::isupper(ch); });
+    auto const isCaseSensitive = isCaseSensitiveSearch(searchText);
 
     if (searchText.empty())
         return nullopt;
@@ -7495,7 +7513,7 @@ optional<CellLocation> Screen::search(std::u32string_view searchText, CellLocati
 optional<CellLocation> Screen::searchReverse(std::u32string_view searchText, CellLocation startPosition)
 {
     // TODO use LogicalLinesReverse to spawn logical lines for improving the search on wrapped lines.
-    auto const isCaseSensitive = std::ranges::any_of(searchText, [](auto ch) { return std::isupper(ch); });
+    auto const isCaseSensitive = isCaseSensitiveSearch(searchText);
 
     if (searchText.empty())
         return nullopt;

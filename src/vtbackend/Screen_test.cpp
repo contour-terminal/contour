@@ -4621,6 +4621,41 @@ TEST_CASE("searchReverse", "[screen]")
     }
 }
 
+TEST_CASE("search.smartCaseIsCodepointAware", "[screen]")
+{
+    // "Smart case" asks whether the needle holds an uppercase character, and the comparison then folds
+    // case unless it does. Both halves used to be asked of <cctype> -- std::isupper() and std::tolower()
+    // -- which are defined only for values representable as unsigned char, so every codepoint above
+    // U+00FF was undefined behaviour: an out-of-bounds read into the ctype table on glibc, an
+    // invalid-parameter abort on the MSVC debug CRT. Both now go through the UCD, which answers for the
+    // actual codepoint and so makes smart case work for non-Latin scripts as well.
+    //
+    // Cyrillic П is U+041F, far outside what either function may be asked about.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(10) };
+    mock.writeToScreen("Привет");
+
+    auto& screen = mock.terminal.primaryScreen();
+    auto const start = CellLocation { LineOffset(0), ColumnOffset(0) };
+
+    SECTION("an uppercase non-ASCII needle selects a case-sensitive search")
+    {
+        CHECK(screen.search(U"Привет", start).has_value());  // matches exactly
+        CHECK(!screen.search(U"ПРИВЕТ", start).has_value()); // case-sensitive, so this must not match
+    }
+
+    SECTION("an all-lowercase non-ASCII needle stays case-insensitive")
+    {
+        CHECK(screen.search(U"привет", start).has_value());
+    }
+
+    SECTION("codepoints far above the ctype table are safe to scan")
+    {
+        // Reaching these at all used to be the crash; not matching is the only expected outcome.
+        CHECK(!screen.search(U"\U0001F600", start).has_value()); // emoji, U+1F600
+        CHECK(!screen.search(U"\U00010400", start).has_value()); // Deseret capital, U+10400
+    }
+}
+
 TEST_CASE("findMarkerDownwards", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(4) }, LineCount(10) };
