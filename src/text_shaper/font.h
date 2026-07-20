@@ -17,6 +17,8 @@
 #endif
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <format>
 #include <optional>
 #include <string>
@@ -335,11 +337,21 @@ struct hash<text::glyph_key>
     {
         // Pack the three components into disjoint bit fields: font at bits 32..47,
         // glyph index at bits 16..31, and the size (in tenths of a point) at bits 0..15.
-        // NB: each component must be masked BEFORE it is shifted into place.
-        auto const f = static_cast<std::size_t>(key.font.value);
-        auto const i = static_cast<std::size_t>(key.index.value);
-        auto const s = static_cast<std::size_t>(static_cast<int>(key.size.pt * 10.0));
-        return ((f & 0xFFFF) << 32) | ((i & 0xFFFF) << 16) | (s & 0xFFFF);
+        // NB: each component must be masked BEFORE it is shifted into place, and the packing is done
+        // in a fixed-width uint64_t rather than in size_t. `<< 32` on a 32-bit size_t (i386, armhf,
+        // 32-bit Windows) shifts by the full width of the type, which is undefined: the compiler may
+        // fold the font term away entirely and collapse every font's glyphs into the same buckets --
+        // exactly the collision this packing exists to avoid. Where size_t cannot hold all 48 bits,
+        // the halves are folded together so that all three components still contribute.
+        auto const f = static_cast<std::uint64_t>(key.font.value);
+        auto const i = static_cast<std::uint64_t>(key.index.value);
+        auto const s = static_cast<std::uint64_t>(static_cast<int>(key.size.pt * 10.0));
+        auto const packed = ((f & 0xFFFF) << 32) | ((i & 0xFFFF) << 16) | (s & 0xFFFF);
+
+        if constexpr (sizeof(std::size_t) >= sizeof(std::uint64_t))
+            return static_cast<std::size_t>(packed);
+        else
+            return static_cast<std::size_t>(packed ^ (packed >> 32));
     }
 };
 
