@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <utility>
 #include <vector>
 
 #include <vtmux/Pane.h>
@@ -101,6 +102,21 @@ struct PaneCellRect
     [[nodiscard]] constexpr bool operator==(PaneCellRect const&) const noexcept = default;
 };
 
+/// The two children's extents when @p axisExtent cells split at @p ratio with a one-cell divider:
+/// the first child receives round(ratio * (extent - 1)) cells (clamped so both children keep at
+/// least one cell), the divider takes one, and the second child receives the rest — so
+/// `first + 1 + second == extent` exactly whenever `extent >= 3`.
+/// @param axisExtent The parent's extent along the split axis, in cells.
+/// @param ratio The first child's share in (0, 1).
+/// @return {first, second} extents in cells.
+[[nodiscard]] inline std::pair<int, int> splitCellExtents(int axisExtent, double ratio) noexcept
+{
+    auto const divisible = axisExtent - 1;
+    auto const first =
+        std::clamp(static_cast<int>(std::lround(ratio * divisible)), 1, std::max(1, divisible - 1));
+    return { first, std::max(1, divisible - first) };
+}
+
 /// Computes every leaf's cell rectangle when @p root is laid out into @p area with a ONE-CELL
 /// divider between split children — tmux's model, deliberately NOT the GUI's pixel-thick handle.
 ///
@@ -133,11 +149,7 @@ struct PaneCellRect
         }
 
         auto const axisExtent = node.splitState() == SplitState::Vertical ? width : height;
-        // One cell goes to the divider; the rest is shared with both children kept >= 1 cell.
-        auto const divisible = axisExtent - 1;
-        auto const first = std::clamp(
-            static_cast<int>(std::lround(node.ratio() * divisible)), 1, std::max(1, divisible - 1));
-        auto const second = std::max(1, divisible - first);
+        auto const [first, second] = splitCellExtents(axisExtent, node.ratio());
 
         if (node.splitState() == SplitState::Vertical)
         {
