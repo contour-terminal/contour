@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <compare>
 #include <sstream>
 #include <vector>
 
@@ -28,38 +29,14 @@ namespace
         Code code;
         std::string_view name;
         T value;
-    };
 
-    template <typename T>
-    constexpr bool operator<(Cap<T> const& a, Cap<T> const& b) noexcept
-    {
-        return a.name < b.name;
-    }
-    template <typename T>
-    constexpr bool operator>(Cap<T> const& a, Cap<T> const& b) noexcept
-    {
-        return a.name > b.name;
-    }
-    template <typename T>
-    constexpr bool operator<=(Cap<T> const& a, Cap<T> const& b) noexcept
-    {
-        return a.name <= b.name;
-    }
-    template <typename T>
-    constexpr bool operator>=(Cap<T> const& a, Cap<T> const& b) noexcept
-    {
-        return a.name >= b.name;
-    }
-    template <typename T>
-    constexpr bool operator==(Cap<T> const& a, Cap<T> const& b) noexcept
-    {
-        return a.name == b.name;
-    }
-    template <typename T>
-    constexpr bool operator!=(Cap<T> const& a, Cap<T> const& b) noexcept
-    {
-        return a.name == b.name;
-    }
+        // A capability is identified and ordered by its (unique) name alone -- `code` and `value` are
+        // payload, not identity -- so the comparison cannot be defaulted. These two replace the six
+        // hand-written operators this used to carry, one of which (`!=`) returned `a.name == b.name`
+        // and so answered "not equal" for exactly the pairs that were equal.
+        [[nodiscard]] constexpr auto operator<=>(Cap const& rhs) const noexcept { return name <=> rhs.name; }
+        [[nodiscard]] constexpr bool operator==(Cap const& rhs) const noexcept { return name == rhs.name; }
+    };
 } // namespace
 
 using Boolean = Cap<bool>;

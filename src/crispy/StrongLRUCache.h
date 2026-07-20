@@ -193,15 +193,23 @@ inline Value& strong_lru_cache<Key, Value, Hasher>::at(Key const& key)
 template <typename Key, typename Value, typename Hasher>
 inline Value& strong_lru_cache<Key, Value, Hasher>::operator[](Key const& key) noexcept
 {
-    return _hashtable->get_or_emplace(Hasher {}(key), [&](auto) { return entry { key, Value {} }; }).value;
+    // NB: the callback runs only after the hashtable may have recycled its LRU tail, which destroys
+    // that entry along with the Key it owns. Were `key` to alias the storage of the evicted entry --
+    // `cache[cache.at(other).name]` is enough -- capturing it by reference would build the new entry
+    // out of freed memory. The copy is therefore taken up front, before anything can be evicted.
+    auto keyCopy = key;
+    return _hashtable
+        ->get_or_emplace(Hasher {}(key), [&](auto) { return entry { std::move(keyCopy), Value {} }; })
+        .value;
 }
 
 template <typename Key, typename Value, typename Hasher>
 template <typename ValueConstructFn>
 inline bool strong_lru_cache<Key, Value, Hasher>::try_emplace(Key const& key, ValueConstructFn constructValue)
 {
-    return _hashtable->try_emplace(Hasher {}(key),
-                                   [&](auto v) { return entry { key, constructValue(std::move(v)) }; });
+    auto keyCopy = key; // @see operator[] for why this cannot be captured by reference.
+    return _hashtable->try_emplace(
+        Hasher {}(key), [&](auto v) { return entry { std::move(keyCopy), constructValue(std::move(v)) }; });
 }
 
 template <typename Key, typename Value, typename Hasher>
@@ -209,8 +217,10 @@ template <typename ValueConstructFn>
 inline Value& strong_lru_cache<Key, Value, Hasher>::get_or_emplace(Key const& key,
                                                                    ValueConstructFn constructValue)
 {
+    auto keyCopy = key; // @see operator[] for why this cannot be captured by reference.
     return _hashtable
-        ->get_or_emplace(Hasher {}(key), [&](auto v) { return entry { key, constructValue(v) }; })
+        ->get_or_emplace(Hasher {}(key),
+                         [&](auto v) { return entry { std::move(keyCopy), constructValue(v) }; })
         .value;
 }
 

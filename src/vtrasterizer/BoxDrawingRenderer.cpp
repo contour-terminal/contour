@@ -1877,11 +1877,21 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint,
             if (!envValue)
                 return DefaultFactor;
 
+            // atoi()'s leniency is preserved on purpose: this is a developer knob, and "+4", " 4" and
+            // "4x" all used to yield 4. std::from_chars is stricter on every one of those counts -- it
+            // rejects a leading '+', skips no leading whitespace, and reports where it stopped -- so
+            // the prefix is stripped here and whatever trails the digits is ignored.
+            auto value = std::string_view { *envValue };
+            while (!value.empty() && (value.front() == ' ' || value.front() == '\t'))
+                value.remove_prefix(1);
+            if (!value.empty() && value.front() == '+')
+                value.remove_prefix(1);
+
             auto factor = 0;
-            auto const* const first = envValue->data();
-            auto const* const last = first + envValue->size();
-            auto const [end, error] = std::from_chars(first, last, factor);
-            if (error != std::errc {} || end != last || factor < 1 || factor > 8)
+            auto const* const first = value.data();
+            auto const* const last = first + value.size();
+            auto const error = std::from_chars(first, last, factor).ec;
+            if (error != std::errc {} || factor < 1 || factor > 8)
                 return 1;
             return factor;
         }();
