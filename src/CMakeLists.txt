@@ -13,6 +13,7 @@ add_subdirectory(vtparser)
 add_subdirectory(vtbackend)
 add_subdirectory(vtconformance)
 add_subdirectory(vtmux)
+add_subdirectory(muxserver)
 add_subdirectory(vtrasterizer)
 
 add_subdirectory(contour)

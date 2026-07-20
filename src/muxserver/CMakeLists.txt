@@ -1,0 +1,38 @@
+add_library(muxserver STATIC
+    Daemon.cpp
+    Daemon.h
+    MuxServer.cpp
+    MuxServer.h
+    SessionHost.cpp
+    SessionHost.h
+    SocketPath.h
+)
+target_link_libraries(muxserver PUBLIC
+    net
+    vtmux
+    vtbackend
+    vtpty
+    crispy::core
+)
+target_include_directories(muxserver PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
+)
+
+option(MUXSERVER_TESTING "Enables building of unittests for muxserver [default: ON]" ${CONTOUR_TESTING})
+if(MUXSERVER_TESTING)
+    enable_testing()
+    add_executable(muxserver_test
+        test_main.cpp
+        SessionHost_test.cpp
+        MuxServer_test.cpp
+        SocketPath_test.cpp
+    )
+    target_link_libraries(muxserver_test muxserver crispy::core Catch2::Catch2)
+    add_test(NAME muxserver_test COMMAND $<TARGET_FILE:muxserver_test>)
+
+    if(NOT WIN32)
+        # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+        target_compile_options(muxserver_test PRIVATE -Wno-c2y-extensions)
+    endif()
+endif()

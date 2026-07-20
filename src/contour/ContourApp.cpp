@@ -28,6 +28,9 @@
 #include <memory>
 #include <utility>
 
+#include <muxserver/Daemon.h>
+#include <muxserver/SocketPath.h>
+
 #ifndef _WIN32
     #include <sys/ioctl.h>
 
@@ -173,6 +176,8 @@ ContourApp::ContourApp(): app("contour", "Contour Terminal Emulator", CONTOUR_VE
     link("contour.documentation.configuration.global", bind(&ContourApp::documentationGlobalConfig, this));
     link("contour.documentation.configuration.profile", bind(&ContourApp::documentationProfileConfig, this));
     link("contour.cat", bind(&ContourApp::catAction, this));
+    link("contour.daemon", bind(&ContourApp::daemonAction, this));
+    link("contour.attach", bind(&ContourApp::attachAction, this));
 }
 
 template <typename Callback>
@@ -551,6 +556,26 @@ namespace
     }
 } // namespace
 
+int ContourApp::daemonAction()
+{
+    auto config = muxserver::DaemonConfig {};
+    config.socketPath = muxserver::muxSocketPath(parameters().get<string>("contour.daemon.label"),
+                                                 parameters().get<string>("contour.daemon.socket"));
+
+    auto const shellCommand = vtpty::Process::loginShell(/*escapeSandbox=*/false);
+    config.shell.program = shellCommand.front();
+    config.shell.arguments.assign(std::next(shellCommand.begin()), shellCommand.end());
+    config.shell.workingDirectory = vtpty::Process::homeDirectory();
+
+    return muxserver::runDaemon(config);
+}
+
+int ContourApp::attachAction()
+{
+    return muxserver::runAttachProbe(muxserver::muxSocketPath(
+        parameters().get<string>("contour.attach.label"), parameters().get<string>("contour.attach.socket")));
+}
+
 int ContourApp::catAction()
 {
     if (parameters().verbatim.empty())
@@ -711,6 +736,33 @@ crispy::cli::command ContourApp::parameterDefinition() const
                 CLI::verbatim {
                     "IMAGE_FILE",
                     "Path to image to be displayed. Image formats supported are at least PNG, JPG." } },
+            CLI::command { "daemon",
+                           "Runs the headless terminal multiplexer daemon, serving sessions to "
+                           "attaching clients over a control socket.",
+                           CLI::option_list {
+                               CLI::option { "socket",
+                                             CLI::value { ""s },
+                                             "Path of the control socket file. Defaults to "
+                                             "$XDG_RUNTIME_DIR/contour/LABEL (respecting $CONTOUR_MUX).",
+                                             "PATH" },
+                               CLI::option { "label",
+                                             CLI::value { "default"s },
+                                             "Socket label distinguishing daemon instances.",
+                                             "NAME" },
+                           } },
+            CLI::command { "attach",
+                           "Attaches to a running multiplexer daemon (currently: probes its socket).",
+                           CLI::option_list {
+                               CLI::option { "socket",
+                                             CLI::value { ""s },
+                                             "Path of the daemon's control socket file. Defaults to "
+                                             "$XDG_RUNTIME_DIR/contour/LABEL (respecting $CONTOUR_MUX).",
+                                             "PATH" },
+                               CLI::option { "label",
+                                             CLI::value { "default"s },
+                                             "Socket label distinguishing daemon instances.",
+                                             "NAME" },
+                           } },
             CLI::command {
                 "capture",
                 "Captures the screen buffer of the currently running terminal.",

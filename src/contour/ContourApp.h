@@ -31,6 +31,10 @@ class ContourApp: public crispy::app
     int documentationProfileConfig();
     /// Displays an image in the terminal via GIP oneshot sequence.
     int catAction();
+    /// Runs the headless terminal multiplexer daemon.
+    int daemonAction();
+    /// Attaches to (currently: probes) a running multiplexer daemon.
+    int attachAction();
 };
 
 } // namespace contour

@@ -297,6 +297,7 @@ endif()
 target_link_libraries(contour_core
     PUBLIC
     crispy::core
+    muxserver
     vtbackend
     vtmux
     Qt6::Core
