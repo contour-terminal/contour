@@ -2,9 +2,12 @@ set(net_SOURCES
     EventLoop.cpp
     EventLoop.h
     EventSource.h
+    IListener.h
+    ISocket.h
     IoResult.h
     PollEventSource.cpp
     PollEventSource.h
+    Sockets.h
     WithTimeout.h
     platform/Clock.h
     platform/NativeHandle.h
@@ -12,8 +15,27 @@ set(net_SOURCES
     platform/SystemPipe.h
     platform/WinsockInit.cpp
     platform/WinsockInit.h
+    testing/InMemoryTransport.cpp
+    testing/InMemoryTransport.h
     testing/ScriptedEventSource.h
 )
+if(WIN32)
+    list(APPEND net_SOURCES
+        windows/SocketsWin32.cpp
+        windows/WindowsListener.cpp
+        windows/WindowsListener.h
+        windows/WindowsSocket.cpp
+        windows/WindowsSocket.h
+    )
+else()
+    list(APPEND net_SOURCES
+        posix/PosixListener.cpp
+        posix/PosixListener.h
+        posix/PosixSocket.cpp
+        posix/PosixSocket.h
+        posix/SocketsPosix.cpp
+    )
+endif()
 
 add_library(net STATIC ${net_SOURCES})
 target_link_libraries(net PUBLIC coro crispy::core)
@@ -31,6 +53,7 @@ if(NET_TESTING)
     add_executable(net_test
         test_main.cpp
         EventLoop_test.cpp
+        Socket_test.cpp
     )
     target_link_libraries(net_test net crispy::core Catch2::Catch2)
     add_test(NAME net_test COMMAND $<TARGET_FILE:net_test>)
