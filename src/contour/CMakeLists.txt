@@ -49,6 +49,19 @@ function(contour_note_excluded_feature FEATURE REASON)
 endfunction()
 # }}}
 
+# {{{ Optional: Qt's TextToSpeech, for reading a selection aloud
+# Optional rather than required, per AGENT.md's no-new-dependencies rule: a feature one action wide
+# must not make every packager carry another Qt module. When it is missing the feature compiles out and
+# the menu row disappears -- and the report at the bottom of this file names it, so that is visible in
+# the build log rather than discovered from a bug report.
+find_package(Qt6 COMPONENTS TextToSpeech QUIET)
+if(Qt6TextToSpeech_FOUND)
+    set(CONTOUR_WITH_TTS ON)
+else()
+    contour_note_excluded_feature("Read selection aloud" "Qt6::TextToSpeech not found")
+endif()
+# }}}
+
 if(CONTOUR_FRONTEND_GUI)
     add_subdirectory(display)
 endif()
@@ -80,6 +93,7 @@ set(_header_files
     FuzzyFilter.h
     GuiConfigStore.h
     HyperlinkTooltip.h
+    SpeechSynthesizer.h
     ModifierNames.h
     Shortcut.h
     TabBarMode.h
@@ -108,6 +122,7 @@ set(_core_source_files
     FuzzyFilter.cpp
     GuiConfigStore.cpp
     HyperlinkTooltip.cpp
+    SpeechSynthesizer.cpp
     Shortcut.cpp
     TabLabel.cpp
 )
@@ -220,6 +235,11 @@ add_custom_target(run COMMAND contour)
 
 if(CONTOUR_PERF_STATS)
     target_compile_definitions(contour_core PUBLIC CONTOUR_PERF_STATS)
+endif()
+
+if(CONTOUR_WITH_TTS)
+    target_compile_definitions(contour_core PUBLIC CONTOUR_WITH_TTS)
+    target_link_libraries(contour_core PUBLIC Qt6::TextToSpeech)
 endif()
 
 if(CONTOUR_FRONTEND_GUI)
@@ -347,6 +367,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/SettingsPageQml_test.cpp
             test/Accessibility_qml_test.cpp
             test/ContextMenu_test.cpp
+            test/SpeechSynthesizer_test.cpp
             test/TitleBarContextMenu_test.cpp
             test/FuzzyFilter_test.cpp
             test/Shortcut_test.cpp

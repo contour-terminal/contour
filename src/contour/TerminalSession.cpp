@@ -1799,6 +1799,9 @@ ContextMenuState TerminalSession::contextMenuState()
             // a session knows about itself.
             .hasSplits = false,
             .inputProtected = !terminal().allowInput(),
+            // A property of the build and the machine, asked once here so the menu itself stays a pure
+            // function of this snapshot.
+            .canSpeak = _speech->available(),
             // Taken now, while the pointer is still on the cell the user clicked. The rows built from this
             // carry the URI with them, because by the time one is picked the pointer has moved to the menu.
             .hyperlinkUnderCursor = hyperlink ? hyperlink->uri : std::string {},
@@ -2439,6 +2442,29 @@ bool TerminalSession::operator()(actions::WriteScreen const& event)
 bool TerminalSession::operator()(actions::CreateNewTab action)
 {
     _manager->createNewTab(this, std::move(action.profileName));
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SpeakSelection)
+{
+    // Bounded so a selected build log becomes a readable excerpt rather than minutes of speech with no
+    // way to skip ahead.
+    auto constexpr MaxSpokenChars = size_t { 4000 };
+
+    if (!_speech->available())
+        return false;
+
+    auto const text = speakableText(terminal().extractSelectionText(), MaxSpokenChars);
+    if (text.empty())
+        return false;
+
+    _speech->say(text);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::StopSpeaking)
+{
+    _speech->stop();
     return true;
 }
 

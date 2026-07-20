@@ -146,6 +146,8 @@ struct CopyHyperlink{ std::string uri; }; // empty uri => whatever lies under th
 struct SetTabColor{ std::optional<vtbackend::RGBColor> color; };
 struct ResetTabColor{}; // drop the user's tab color, revealing any color the application assigned
 struct CloseAllTabs{};  // close every tab in THIS window, which with one window means quitting
+struct SpeakSelection{}; // read the selected text aloud through the OS speech synthesizer
+struct StopSpeaking{};   // stop reading aloud
 struct SetTabBarVisibility{ config::TabBarVisibility mode = config::TabBarVisibility::Always; };
 struct SetTabBarPosition{ config::TabBarPosition position = config::TabBarPosition::Top; };
 // clang-format on
@@ -245,7 +247,9 @@ using Action = std::variant<CancelSelection,
                             ResetTabColor,
                             CloseAllTabs,
                             SetTabBarVisibility,
-                            SetTabBarPosition>;
+                            SetTabBarPosition,
+                            SpeakSelection,
+                            StopSpeaking>;
 
 /// Actions that must fire exactly once per physical keypress and be dropped on key auto-repeat.
 ///
@@ -515,6 +519,11 @@ namespace documentation
         "Places this window's tab bar above or below the terminal (position: top or bottom). Applies to "
         "this window until it is closed; the settings page is where the choice is made permanent."
     };
+    constexpr inline std::string_view SpeakSelection {
+        "Reads the selected text aloud through the operating system's speech synthesizer. Available "
+        "only where a speech engine and a voice are installed."
+    };
+    constexpr inline std::string_view StopSpeaking { "Stops reading aloud." };
     constexpr inline std::string_view SplitVertical {
         "Splits the active pane into two side-by-side panes (a vertical divider)."
     };
@@ -745,6 +754,8 @@ struct ActionCatalogEntry
             "SetTabBarVisibility", Action { SetTabBarVisibility {} }, documentation::SetTabBarVisibility },
         ActionCatalogEntry {
             "SetTabBarPosition", Action { SetTabBarPosition {} }, documentation::SetTabBarPosition },
+        ActionCatalogEntry { "SpeakSelection", Action { SpeakSelection {} }, documentation::SpeakSelection },
+        ActionCatalogEntry { "StopSpeaking", Action { StopSpeaking {} }, documentation::StopSpeaking },
     };
     return catalog;
 }

@@ -55,6 +55,11 @@ namespace
     {
         return state.inputProtected;
     }
+
+    bool canSpeakSelection(ContextMenuState const& state) noexcept
+    {
+        return state.canSpeak && state.hasSelection;
+    }
     // }}}
 
     /// A row acting on the hyperlink that was RIGHT-CLICKED, carried with the row rather than looked up
@@ -115,6 +120,10 @@ namespace
             Table::command(CopySelection {}, "Copy").enabledWhen(hasSelection),
             Table::command(PasteClipboard {}, "Paste").enabledWhen(clipboardHasText),
             Table::command(SelectAll {}),
+            // Hidden rather than greyed when there is no speech engine: a permanently dead row teaches
+            // the user the feature is broken, when in truth this build or this machine simply has no
+            // voice to speak with.
+            Table::command(SpeakSelection {}, "Read Aloud").shownWhen(canSpeakSelection),
 
             Table::separator(),
 

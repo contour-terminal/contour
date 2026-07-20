@@ -891,6 +891,12 @@ const InputMappings defaultInputMappings {
                            .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
                            .input = 'T',
                            .binding = { { actions::CreateNewTab {} } } },
+        // Reads the selection aloud. Does nothing where no speech engine is installed, and the context
+        // menu hides its row there, so the binding is harmless on a machine without a voice.
+        CharInputMapping { .modes { vtbackend::MatchModes {} },
+                           .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                           .input = 'S',
+                           .binding = { { actions::SpeakSelection {} } } },
         CharInputMapping { .modes { vtbackend::MatchModes {} },
                            .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
                            .input = 'E',
