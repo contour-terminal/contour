@@ -14,6 +14,7 @@
 #include <format>
 #include <optional>
 #include <ranges>
+#include <system_error>
 
 using namespace std::string_view_literals;
 
@@ -355,9 +356,14 @@ namespace
 
             auto now = std::chrono::system_clock::now();
             std::time_t const nowTimeT = std::chrono::system_clock::to_time_t(now);
-            std::tm const* tm = std::localtime(&nowTimeT);
+            std::tm tmBuf {};
+#ifdef _WIN32
+            localtime_s(&tmBuf, &nowTimeT);
+#else
+            localtime_r(&nowTimeT, &tmBuf);
+#endif
             std::stringstream out;
-            out << std::put_time(tm, "%H:%M");
+            out << std::put_time(&tmBuf, "%H:%M");
             return out.str();
         }
 
@@ -454,7 +460,7 @@ namespace
                     result.erase(pos);
             }
             else
-                result = std::strerror(errno);
+                result = std::system_category().message(errno);
             return result;
         }
 

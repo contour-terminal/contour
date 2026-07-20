@@ -4,9 +4,11 @@
 #include <vtrasterizer/Pixmap.h>
 #include <vtrasterizer/utils.h>
 
+#include <crispy/environment.h>
 #include <crispy/logstore.h>
 
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -63,7 +65,7 @@ namespace detail
             Heavy
         };
 
-        enum Line : uint8_t
+        enum class Line : uint8_t
         {
             NoLine,
             Light,  // solid light line
@@ -76,6 +78,10 @@ namespace detail
             Heavy3, // 3-dashed heavy line
             Heavy4, // 4-dashed heavy line
         };
+
+        // The box-drawing definition tables below read far better without the `Line::` prefix on
+        // every one of their several hundred entries.
+        using enum Line;
 
         [[maybe_unused]] string_view to_stringview(Line lm)
         {
@@ -95,13 +101,16 @@ namespace detail
             return "?"sv;
         }
 
-        enum Diagonal : uint8_t
+        enum class Diagonal : uint8_t
         {
             NoDiagonal = 0x00,
             Forward = 0x01,
             Backward = 0x02,
             Crossing = 0x03
         };
+
+        // As for Line: keeps the definition tables readable.
+        using enum Diagonal;
 
         void drawArcElliptic(atlas::Buffer& buffer, ImageSize imageSize, unsigned thickness, Arc arc)
         {
@@ -503,7 +512,10 @@ namespace detail
         };
         static_assert(BoxDrawingDefinitions.size() == 0x80);
 
-        auto getBranchBoxes(Line const mergeCommitLine = Line::Double, Line const branchLine = Line::Light)
+        // noexcept: builds an array of aggregates, nothing here can throw. Saying so lets the
+        // static below be recognised as safe to initialise before main().
+        constexpr auto getBranchBoxes(Line const mergeCommitLine = Line::Double,
+                                      Line const branchLine = Line::Light) noexcept
         {
             return std::array {
                 /*U+F5D0  */ Box {}.horizontal(branchLine),
@@ -570,7 +582,9 @@ namespace detail
                 /*U+F60D  */ Box {}.circle(Line::Light).horizontal(branchLine).vertical(branchLine),
             };
         }
-        auto branchDrawingDefinitions = getBranchBoxes();
+        // constinit: guarantees constant initialization, so no dynamic (and possibly throwing)
+        // initializer runs at static-init time. Still mutable -- setGitStyles() reassigns it.
+        constinit auto branchDrawingDefinitions = getBranchBoxes();
 
         constexpr bool isGitBranchDrawing(char32_t codepoint)
         {
@@ -1858,13 +1872,18 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint,
     {
         auto const supersamplingFactor = []() {
             auto constexpr EnvName = "SSA_FACTOR";
-            auto* const envValue = getenv(EnvName);
+            auto constexpr DefaultFactor = 4;
+            auto const envValue = crispy::environment::get(EnvName);
             if (!envValue)
-                return 4;
-            auto const val = atoi(envValue);
-            if (val < 1 || val > 8)
+                return DefaultFactor;
+
+            auto factor = 0;
+            auto const* const first = envValue->data();
+            auto const* const last = first + envValue->size();
+            auto const [end, error] = std::from_chars(first, last, factor);
+            if (error != std::errc {} || end != last || factor < 1 || factor > 8)
                 return 1;
-            return val;
+            return factor;
         }();
 
         auto tmp = buildBoxElements(codepoint, //
@@ -2647,8 +2666,8 @@ static auto buildBox(detail::Box box,
         {
             case Line::NoLine: return 0;
             case Line::Light: return lightTh;
-            case Line::Double: return static_cast<size_t>(lightTh * 3);
-            case Line::Heavy: return static_cast<size_t>(lightTh * 2);
+            case Line::Double: return static_cast<size_t>(lightTh) * 3;
+            case Line::Heavy: return static_cast<size_t>(lightTh) * 2;
             default: assert(false); return 0; // dashed lines are handled explicitly
         }
     };

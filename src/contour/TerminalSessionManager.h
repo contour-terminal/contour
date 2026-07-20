@@ -95,20 +95,20 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @param window      The target window.
     /// @param profileName Profile to launch the session with, or std::nullopt for the app default.
     contour::TerminalSession* createSessionInBackground(
-        vtmux::WindowId window, std::optional<std::string> profileName = std::nullopt);
+        vtmux::WindowId window, std::optional<std::string> const& profileName = std::nullopt);
 
     /// Creates a new tab in @p window (the GUI "+" button entry point, via WindowController).
     /// @param window      The target window.
     /// @param profileName Profile to launch the tab with, or std::nullopt for the app default.
     contour::TerminalSession* createSession(vtmux::WindowId window,
-                                            std::optional<std::string> profileName = std::nullopt);
+                                            std::optional<std::string> const& profileName = std::nullopt);
 
     /// Creates and activates a new tab in @p window.
     /// @param window      The target window.
     /// @param profileName Profile to launch the tab with, or std::nullopt for the app default.
-    void createNewTab(vtmux::WindowId window, std::optional<std::string> profileName = std::nullopt)
+    void createNewTab(vtmux::WindowId window, std::optional<std::string> const& profileName = std::nullopt)
     {
-        createSession(window, std::move(profileName));
+        createSession(window, profileName);
     }
 
     /// Creates and activates a new tab in the window hosting @p acting (the CreateNewTab keybinding).
@@ -116,7 +116,7 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     ///
     /// @param acting      The session the request came from.
     /// @param profileName The profile to launch under, or nullopt for the default.
-    void createNewTab(TerminalSession* acting, std::optional<std::string> profileName = std::nullopt);
+    void createNewTab(TerminalSession* acting, std::optional<std::string> const& profileName = std::nullopt);
 
     /// Closes every tab in the window the acting session belongs to.
     ///

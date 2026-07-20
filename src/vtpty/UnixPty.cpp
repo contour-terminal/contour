@@ -6,6 +6,7 @@
 
 #include <crispy/BufferObject.h>
 #include <crispy/deferred.h>
+#include <crispy/environment.h>
 #include <crispy/escape.h>
 #include <crispy/logstore.h>
 
@@ -17,6 +18,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <utility>
 
@@ -37,6 +39,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
+#include <pthread.h>
 #include <pwd.h>
 #include <unistd.h>
 
@@ -85,7 +88,7 @@ namespace
         int masterFd {};
         int slaveFd {};
         if (openpty(&masterFd, &slaveFd, nullptr, /*&term*/ nullptr, (winsize*) wsa) < 0)
-            throw runtime_error { "Failed to open PTY. "s + strerror(errno) };
+            throw runtime_error { "Failed to open PTY. "s + std::system_category().message(errno) };
 
         ptyLog()("PTY opened. master={}, slave={}", masterFd, slaveFd);
 
@@ -97,7 +100,7 @@ namespace
     char const* hostnameForUtmp()
     {
         for (auto const* env: { "DISPLAY", "WAYLAND_DISPLAY" })
-            if (auto const* value = std::getenv(env))
+            if (auto const* value = crispy::environment::getCString(env))
                 return value;
 
         return nullptr;
@@ -162,7 +165,7 @@ bool UnixPty::Slave::login()
 
     sigset_t signals;
     sigemptyset(&signals);
-    sigprocmask(SIG_SETMASK, &signals, nullptr);
+    pthread_sigmask(SIG_SETMASK, &signals, nullptr);
 
     // clang-format off
     struct sigaction act {};
@@ -223,7 +226,7 @@ void UnixPty::start()
     _slave = make_unique<Slave>(handles.slave);
 
     if (!util::setFileFlags(_masterFd, O_CLOEXEC | O_NONBLOCK))
-        throw runtime_error { "Failed to configure PTY. "s + strerror(errno) };
+        throw runtime_error { "Failed to configure PTY. "s + std::system_category().message(errno) };
 
     util::setFileFlags(_stdoutFastPipe.reader(), O_NONBLOCK);
     ptyLog()("stdout fastpipe: reader {}, writer {}", _stdoutFastPipe.reader(), _stdoutFastPipe.writer());
@@ -291,7 +294,9 @@ optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
         // Callers do not need to distinguish: they already read `errno` themselves, and every value
         // other than EAGAIN/EINTR means the same thing to them (closed). @see Terminal::processInputOnce.
         if (errno != EAGAIN && errno != EINTR && errno != EIO)
-            errorLog()("{} read failed: {}", fd == _masterFd ? "master" : "stdout-fastpipe", strerror(errno));
+            errorLog()("{} read failed: {}",
+                       fd == _masterFd ? "master" : "stdout-fastpipe",
+                       std::system_category().message(errno));
         return nullopt;
     }
 
@@ -380,7 +385,7 @@ int UnixPty::write(std::string_view data)
 
         if (rv < 0)
             // errorlog()("PTY write failed: {}", strerror(errno));
-            ptyOutLog()("PTY write of {} bytes failed. {}\n", size, strerror(errno));
+            ptyOutLog()("PTY write of {} bytes failed. {}\n", size, std::system_category().message(errno));
         else if (0 <= rv && std::cmp_less(rv, size))
             // clang-format off
             ptyOutLog()("Partial write. {} bytes written and {} bytes left.",
@@ -441,7 +446,7 @@ void UnixPty::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
     }
 
     if (ioctl(_masterFd, TIOCSWINSZ, &w) == -1)
-        throw runtime_error { strerror(errno) };
+        throw runtime_error { std::system_category().message(errno) };
 
     _pageSize = cells;
 }

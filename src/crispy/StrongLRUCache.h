@@ -64,47 +64,47 @@ class strong_lru_cache
     void clear();
 
     // Deletes the key and its associated value from the LRU cache
-    void remove(Key key);
+    void remove(Key const& key);
 
     /// Touches a given key, putting it to the front of the LRU chain.
     /// Nothing is done if the key was not found.
-    void touch(Key key) noexcept;
+    void touch(Key const& key) noexcept;
 
     /// Returns an ordered list of keys in this hash.
     /// Ordering is from most recent to least recent access.
     [[nodiscard]] std::vector<Key> keys() const;
 
     /// Tests for the exitence of the given key in this cache.
-    [[nodiscard]] bool contains(Key key) const noexcept;
+    [[nodiscard]] bool contains(Key const& key) const noexcept;
 
     /// Returns the value for the given key if found, nullptr otherwise.
-    [[nodiscard]] Value* try_get(Key key) noexcept;
-    [[nodiscard]] Value const* try_get(Key key) const noexcept;
+    [[nodiscard]] Value* try_get(Key const& key) noexcept;
+    [[nodiscard]] Value const* try_get(Key const& key) const noexcept;
 
     /// Returns the value for the given key,
     /// throwing std::out_of_range if key was not found.
-    [[nodiscard]] Value& at(Key key);
+    [[nodiscard]] Value& at(Key const& key);
 
     /// Returns the value for the given key, default-constructing it in case
     /// if it wasn't in the cache just yet.
-    [[nodiscard]] Value& operator[](Key key) noexcept;
+    [[nodiscard]] Value& operator[](Key const& key) noexcept;
 
     /// Assigns the given value to the given key.
     /// If the key was not found, it is being created, otherwise the value will
     /// be re-assigned with the new value.
-    Value& emplace(Key key, Value value) noexcept;
+    Value& emplace(Key const& key, Value value) noexcept;
 
     /// Conditionally creates a new item to the LRU-Cache iff its key was not present yet.
     ///
     /// @retval true the key did not exist in cache yet, a new value was constructed.
     /// @retval false The key is already in the cache, no entry was constructed.
     template <typename ValueConstructFn>
-    [[nodiscard]] bool try_emplace(Key key, ValueConstructFn constructValue);
+    [[nodiscard]] bool try_emplace(Key const& key, ValueConstructFn constructValue);
 
     /// Always returns either the existing item by the given key, if found,
     /// or a newly created one by invoking constructValue().
     template <typename ValueConstructFn>
-    [[nodiscard]] Value& get_or_emplace(Key key, ValueConstructFn constructValue);
+    [[nodiscard]] Value& get_or_emplace(Key const& key, ValueConstructFn constructValue);
 
     void inspect(std::ostream& output) const;
 
@@ -151,25 +151,25 @@ void strong_lru_cache<Key, Value, Hasher>::clear()
 }
 
 template <typename Key, typename Value, typename Hasher>
-void strong_lru_cache<Key, Value, Hasher>::remove(Key key)
+void strong_lru_cache<Key, Value, Hasher>::remove(Key const& key)
 {
     _hashtable->remove(Hasher {}(key));
 }
 
 template <typename Key, typename Value, typename Hasher>
-inline void strong_lru_cache<Key, Value, Hasher>::touch(Key key) noexcept
+inline void strong_lru_cache<Key, Value, Hasher>::touch(Key const& key) noexcept
 {
     _hashtable->touch(Hasher {}(key));
 }
 
 template <typename Key, typename Value, typename Hasher>
-inline bool strong_lru_cache<Key, Value, Hasher>::contains(Key key) const noexcept
+inline bool strong_lru_cache<Key, Value, Hasher>::contains(Key const& key) const noexcept
 {
     return _hashtable->contains(Hasher {}(key));
 }
 
 template <typename Key, typename Value, typename Hasher>
-inline Value* strong_lru_cache<Key, Value, Hasher>::try_get(Key key) noexcept
+inline Value* strong_lru_cache<Key, Value, Hasher>::try_get(Key const& key) noexcept
 {
     if (entry* e = _hashtable->try_get(Hasher {}(key)))
         return &e->value;
@@ -177,7 +177,7 @@ inline Value* strong_lru_cache<Key, Value, Hasher>::try_get(Key key) noexcept
 }
 
 template <typename Key, typename Value, typename Hasher>
-inline Value const* strong_lru_cache<Key, Value, Hasher>::try_get(Key key) const noexcept
+inline Value const* strong_lru_cache<Key, Value, Hasher>::try_get(Key const& key) const noexcept
 {
     if (entry const* e = _hashtable->try_get(Hasher {}(key)))
         return &e->value;
@@ -185,20 +185,20 @@ inline Value const* strong_lru_cache<Key, Value, Hasher>::try_get(Key key) const
 }
 
 template <typename Key, typename Value, typename Hasher>
-inline Value& strong_lru_cache<Key, Value, Hasher>::at(Key key)
+inline Value& strong_lru_cache<Key, Value, Hasher>::at(Key const& key)
 {
     return _hashtable->at(Hasher {}(key)).value;
 }
 
 template <typename Key, typename Value, typename Hasher>
-inline Value& strong_lru_cache<Key, Value, Hasher>::operator[](Key key) noexcept
+inline Value& strong_lru_cache<Key, Value, Hasher>::operator[](Key const& key) noexcept
 {
     return _hashtable->get_or_emplace(Hasher {}(key), [&](auto) { return entry { key, Value {} }; }).value;
 }
 
 template <typename Key, typename Value, typename Hasher>
 template <typename ValueConstructFn>
-inline bool strong_lru_cache<Key, Value, Hasher>::try_emplace(Key key, ValueConstructFn constructValue)
+inline bool strong_lru_cache<Key, Value, Hasher>::try_emplace(Key const& key, ValueConstructFn constructValue)
 {
     return _hashtable->try_emplace(Hasher {}(key),
                                    [&](auto v) { return entry { key, constructValue(std::move(v)) }; });
@@ -206,7 +206,8 @@ inline bool strong_lru_cache<Key, Value, Hasher>::try_emplace(Key key, ValueCons
 
 template <typename Key, typename Value, typename Hasher>
 template <typename ValueConstructFn>
-inline Value& strong_lru_cache<Key, Value, Hasher>::get_or_emplace(Key key, ValueConstructFn constructValue)
+inline Value& strong_lru_cache<Key, Value, Hasher>::get_or_emplace(Key const& key,
+                                                                   ValueConstructFn constructValue)
 {
     return _hashtable
         ->get_or_emplace(Hasher {}(key), [&](auto v) { return entry { key, constructValue(v) }; })
@@ -214,7 +215,7 @@ inline Value& strong_lru_cache<Key, Value, Hasher>::get_or_emplace(Key key, Valu
 }
 
 template <typename Key, typename Value, typename Hasher>
-inline Value& strong_lru_cache<Key, Value, Hasher>::emplace(Key key, Value value) noexcept
+inline Value& strong_lru_cache<Key, Value, Hasher>::emplace(Key const& key, Value value) noexcept
 {
     return _hashtable->emplace(Hasher {}(key), entry { key, std::move(value) }).value;
 }

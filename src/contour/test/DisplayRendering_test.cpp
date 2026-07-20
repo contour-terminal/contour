@@ -125,7 +125,7 @@ struct DisplayHarness
     }
 
     /// Forces one synchronous frame (scene-graph sync + render) and returns the grabbed image.
-    QImage pump()
+    QImage pump() const
     {
         QCoreApplication::processEvents();
         auto image = window->grabWindow();
@@ -134,7 +134,7 @@ struct DisplayHarness
     }
 
     /// Feeds VT output and pumps frames until the read loop consumed it (bounded).
-    void feedAndSettle(std::string_view vt)
+    void feedAndSettle(std::string_view vt) const
     {
         pty->feed(vt);
         for (int i = 0; i < 50 && pty->isStdoutPending(); ++i)
@@ -210,7 +210,7 @@ TEST_CASE("display: the display's PNG image decoder handles PNG, non-PNG and inv
 TEST_CASE("display: a live session renders real frames and content changes pixels", "[display][render]")
 {
     REQUIRE_DISPLAY_OR_SKIP();
-    DisplayHarness h;
+    DisplayHarness const h;
 
     auto const before = h.pump();
     REQUIRE_FALSE(before.isNull());
@@ -253,7 +253,7 @@ namespace
 
     if (right < 0)
         return {};
-    return QRect(QPoint(left, top), QPoint(right, bottom));
+    return { QPoint(left, top), QPoint(right, bottom) };
 }
 } // namespace
 
@@ -631,7 +631,7 @@ TEST_CASE("display: the permission machinery routes guarded roles end-to-end", "
 TEST_CASE("display: bell rings the session signals and the alert path", "[display][bell]")
 {
     REQUIRE_DISPLAY_OR_SKIP();
-    DisplayHarness h;
+    DisplayHarness const h;
 
     auto bells = 0;
     auto alerts = 0;
@@ -1412,7 +1412,7 @@ TEST_CASE("display: a Close event closes the PTY and emits terminated on the liv
           "[display][close]")
 {
     REQUIRE_DISPLAY_OR_SKIP();
-    DisplayHarness h;
+    DisplayHarness const h;
     h.pump();
 
     bool terminated = false;

@@ -95,15 +95,18 @@ class MockTabController: public QAbstractListModel
 
     int lastTriggeredActionId = -1;
 
-    enum Roles : std::uint16_t
+    enum class Roles : std::uint16_t
     {
+        DisplayRole = Qt::DisplayRole,
         TitleRole = Qt::UserRole + 1,
-        ColorRole,
-        IsActiveRole,
-        PaneCountRole,
-        SessionIdRole,
-        RawTitleRole, //!< Must mirror TerminalSessionManager; TabStrip's delegate requires it.
-        ZoomedRole,   //!< Ditto: TabStrip's delegate requires it (drives TabItem's zoom badge).
+        ColorRole = Qt::UserRole + 2,
+        IsActiveRole = Qt::UserRole + 3,
+        PaneCountRole = Qt::UserRole + 4,
+        SessionIdRole = Qt::UserRole + 5,
+        RawTitleRole =
+            Qt::UserRole + 6, //!< Must mirror TerminalSessionManager; TabStrip's delegate requires it.
+        ZoomedRole =
+            Qt::UserRole + 7, //!< Ditto: TabStrip's delegate requires it (drives TabItem's zoom badge).
     };
 
     [[nodiscard]] int activeTabIndex() const noexcept { return _activeTabIndex; }
@@ -114,14 +117,15 @@ class MockTabController: public QAbstractListModel
     {
         if (index.row() < 0 || index.row() >= _count)
             return {};
-        switch (role)
+        switch (static_cast<Roles>(role))
         {
-            case TitleRole: return QStringLiteral("tab %1").arg(index.row());
-            case ColorRole: return QColor(Qt::transparent);
-            case IsActiveRole: return index.row() == _activeTabIndex;
-            case PaneCountRole: return 1;
-            case RawTitleRole: return QString {}; // never-renamed tab: empty raw template (editor blank)
-            case ZoomedRole: return false;
+            case Roles::TitleRole: return QStringLiteral("tab %1").arg(index.row());
+            case Roles::ColorRole: return QColor(Qt::transparent);
+            case Roles::IsActiveRole: return index.row() == _activeTabIndex;
+            case Roles::PaneCountRole: return 1;
+            case Roles::RawTitleRole:
+                return QString {}; // never-renamed tab: empty raw template (editor blank)
+            case Roles::ZoomedRole: return false;
             default: return index.row();
         }
     }
@@ -130,10 +134,14 @@ class MockTabController: public QAbstractListModel
     {
         // Must match TerminalSessionManager::roleNames() so the delegates bind the same roles —
         // including rawTitle, which TabStrip's delegate declares as a required property.
-        return { { Qt::DisplayRole, "display" }, { TitleRole, "title" },
-                 { ColorRole, "accentColor" },   { IsActiveRole, "isActive" },
-                 { PaneCountRole, "paneCount" }, { SessionIdRole, "sessionId" },
-                 { RawTitleRole, "rawTitle" },   { ZoomedRole, "zoomed" } };
+        return { { static_cast<int>(Roles::DisplayRole), "display" },
+                 { static_cast<int>(Roles::TitleRole), "title" },
+                 { static_cast<int>(Roles::ColorRole), "accentColor" },
+                 { static_cast<int>(Roles::IsActiveRole), "isActive" },
+                 { static_cast<int>(Roles::PaneCountRole), "paneCount" },
+                 { static_cast<int>(Roles::SessionIdRole), "sessionId" },
+                 { static_cast<int>(Roles::RawTitleRole), "rawTitle" },
+                 { static_cast<int>(Roles::ZoomedRole), "zoomed" } };
     }
 
     Q_INVOKABLE [[nodiscard]] QObject* createSession() { return nullptr; }
@@ -221,11 +229,11 @@ class MockTabController: public QAbstractListModel
   signals:
     void activeTabIndexChanged();
     void titleBarVisibleChanged();
-    void tabTitleEditRequested(int index);
+    void tabTitleEditRequested(int /*index*/);
     // TabItem's Connections declares onTabColorPickRequested; without the matching signal HERE, every
     // test that instantiates a TabItem earns a "no signal of the target matches" QML warning — which the
     // suite's message capture turns into a failure.
-    void tabColorPickRequested(int index);
+    void tabColorPickRequested(int /*index*/);
 
   private:
     int _count = 3;
@@ -347,8 +355,8 @@ class MockSession: public QObject
     void dimUnfocusedChanged();
     void onBell();
     void onAlert();
-    void onShowNotification(QString const& title, QString const& body);
-    void onScrollOffsetChanged(int value);
+    void onShowNotification(QString const& /*title*/, QString const& /*body*/);
+    void onScrollOffsetChanged(int /*value*/);
     void requestPermissionForFontChange();
     void requestPermissionForBufferCapture();
     void requestPermissionForShowHostWritableStatusLine();
@@ -490,10 +498,9 @@ class StubContourTerminal: public QQuickItem
     }
     [[nodiscard]] double fontSize() const { return 12.0; }
   signals:
-    void sessionChanged(QObject* session);
-    void showNotification(QString const& title, QString const& body);
-    void opacityChanged(); //!< relayed opacity signal (single-pane).
-    void terminated();     //!< TerminalPane's onTerminated handler binds to this.
+    void sessionChanged(QObject* /*session*/);
+    void showNotification(QString const& /*title*/, QString const& /*body*/);
+    void terminated(); //!< TerminalPane's onTerminated handler binds to this.
 
   private:
     QObject* _session = nullptr;
@@ -2516,7 +2523,7 @@ class MockPaletteController: public QObject
     {
         _history.record("TogglePaneZoom");
         _model->setSources({ &_actionCommands });
-        _model->setShortcuts(contour::shortcutIndex(contour::config::defaultInputMappings));
+        _model->setShortcuts(contour::shortcutIndex(contour::config::defaultInputMappings()));
         _model->refresh();
     }
 
@@ -2659,12 +2666,16 @@ TEST_CASE("The command palette lists commands with their shortcut and documentat
         REQUIRE(controller.model().rowCount() > 0);
 
         auto const index = controller.model().index(0, 0);
-        CHECK(controller.model().data(index, contour::CommandPaletteModel::TitleRole).toString()
+        CHECK(controller.model()
+                  .data(index, static_cast<int>(contour::CommandPaletteModel::Roles::TitleRole))
+                  .toString()
               == QStringLiteral("Split Vertical"));
-        CHECK(controller.model().data(index, contour::CommandPaletteModel::ShortcutRole).toString()
+        CHECK(controller.model()
+                  .data(index, static_cast<int>(contour::CommandPaletteModel::Roles::ShortcutRole))
+                  .toString()
               == QStringLiteral("Ctrl+Shift+E"));
         CHECK_FALSE(controller.model()
-                        .data(index, contour::CommandPaletteModel::DescriptionRole)
+                        .data(index, static_cast<int>(contour::CommandPaletteModel::Roles::DescriptionRole))
                         .toString()
                         .isEmpty());
     }
@@ -2769,7 +2780,8 @@ TEST_CASE("Picking OpenCommandPalette re-opens the palette cleanly, not on top o
     QCoreApplication::processEvents();
     REQUIRE(controller.model().rowCount() > 0);
     REQUIRE(controller.model()
-                .data(controller.model().index(0, 0), contour::CommandPaletteModel::IdRole)
+                .data(controller.model().index(0, 0),
+                      static_cast<int>(contour::CommandPaletteModel::Roles::IdRole))
                 .toString()
             == QStringLiteral("OpenCommandPalette"));
 

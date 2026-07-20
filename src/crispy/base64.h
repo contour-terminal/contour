@@ -94,7 +94,8 @@ constexpr void finish(Alphabet const& alphabet, encoder_state& state, sink const
             state.modulo = 0;
         }
         break;
-        case 0: break;
+        case 0:
+        default: break;
     }
 }
 

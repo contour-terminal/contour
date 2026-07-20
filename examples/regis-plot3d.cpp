@@ -11,10 +11,11 @@
 /// interactively from terminal input.
 
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <complex>
 #include <csignal>
-#include <cstdio>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -37,6 +38,27 @@ void onSignal(int) noexcept
 void writeToTTY(std::string_view s) noexcept
 {
     ::write(STDOUT_FILENO, s.data(), s.size());
+}
+
+/// Parses the three decimal parameters of an SGR mouse report, i.e. the "b;x;y" text
+/// between the "ESC [ <" introducer and the final 'M' (press) or 'm' (release).
+/// @param body The parameter text to parse.
+/// @return The button/column/row parameters, or nullopt if the text is malformed.
+[[nodiscard]] std::optional<std::array<int, 3>> parseSGRMouseParams(std::string_view body)
+{
+    auto values = std::array<int, 3> {};
+    for (auto& value: values)
+    {
+        auto const semicolon = body.find(';');
+        auto const token = body.substr(0, semicolon);
+        auto const* const tokenBegin = token.data();
+        auto const* const tokenEnd = tokenBegin + token.size();
+        auto const [parseEnd, ec] = std::from_chars(tokenBegin, tokenEnd, value);
+        if (ec != std::errc {} || parseEnd != tokenEnd)
+            return std::nullopt;
+        body = semicolon == std::string_view::npos ? std::string_view {} : body.substr(semicolon + 1);
+    }
+    return values;
 }
 
 void regis(std::string const& commands)
@@ -211,12 +233,10 @@ int main()
                 auto const end = pending.find_first_of("Mm", pos + 3);
                 if (end == std::string::npos)
                     break; // incomplete; wait for more bytes
-                auto const body = pending.substr(pos + 3, end - (pos + 3));
-                auto b = 0;
-                auto x = 0;
-                auto y = 0;
-                if (std::sscanf(body.c_str(), "%d;%d;%d", &b, &x, &y) == 3)
+                auto const body = std::string_view { pending }.substr(pos + 3, end - (pos + 3));
+                if (auto const params = parseSGRMouseParams(body))
                 {
+                    auto const [b, x, y] = *params;
                     auto const isRelease = pending[end] == 'm';
                     auto const button = b & 0x43; // low button bits (ignore the motion flag 0x20)
                     if (!isRelease && button == 0 && (b & 0x20) == 0)

@@ -46,7 +46,7 @@ TEST_CASE("scale non-integer ratio RGBA", "[scale]")
     if (!scaled.bitmap.empty())
     {
         auto const lastPixelIndex =
-            static_cast<size_t>(((unbox(scaled.bitmapSize.width) * unbox(scaled.bitmapSize.height)) - 1) * 4);
+            ((static_cast<size_t>(unbox(scaled.bitmapSize.width)) * unbox(scaled.bitmapSize.height)) - 1) * 4;
         CHECK(scaled.bitmap[lastPixelIndex] == 255);
     }
 }

@@ -85,7 +85,7 @@ class NotificationRouter
         auto const it = _serverToOsc.find(serverId);
         if (it == _serverToOsc.end())
             return std::nullopt;
-        auto const oscIdentifier = it->second;
+        auto oscIdentifier = it->second;
         _oscToServer.erase(oscIdentifier);
         _serverToOsc.erase(it);
         return oscIdentifier;

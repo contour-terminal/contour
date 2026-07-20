@@ -172,7 +172,7 @@ TEST_CASE("BoundCommandSource makes a parameterized action reachable via its bin
 {
     // This is the source that carries ARGUMENTS: the catalog can only offer HintMode empty, but the
     // user's Ctrl+Shift+U binding carries patterns="url", which is a command that actually runs.
-    auto const source = BoundCommandSource { config::defaultInputMappings };
+    auto const source = BoundCommandSource { config::defaultInputMappings() };
     auto const commands = source.commands();
 
     CHECK(hasCommand(commands, "SwitchToTab:1"));
@@ -296,7 +296,7 @@ TEST_CASE("collectCommands merges the sources without offering anything twice", 
     auto const tabs = test::StubTabs { { "zsh", "vim", "htop" } };
     auto const tabCommands = TabCommandSource { tabs };
     auto const profileCommands = ProfileCommandSource { config };
-    auto const boundCommands = BoundCommandSource { config::defaultInputMappings };
+    auto const boundCommands = BoundCommandSource { config::defaultInputMappings() };
     auto const actionCommands = ActionCommandSource {};
 
     auto const sources =

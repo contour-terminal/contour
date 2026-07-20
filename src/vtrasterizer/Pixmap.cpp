@@ -119,7 +119,7 @@ Pixmap& Pixmap::halfFilledCircleRight()
 
 Pixmap& Pixmap::segment_bar(int which)
 {
-    if (!SoftRequire(1 <= which && which <= 7))
+    if (!SoftRequire(1 <= which) || !SoftRequire(which <= 7))
         return *this;
 
     //   --1--

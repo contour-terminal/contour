@@ -70,6 +70,7 @@ struct BasicParserEvents: public vtparser::NullParserEvents // {{{
             case '7':
             case '8':
             case '9': paramDigit(ch); break;
+            default: break; // Not a parameter byte; ignore.
         }
     }
 

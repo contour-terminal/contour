@@ -28,31 +28,31 @@ using namespace contour;
 namespace
 {
 /// Reads one role off a row, the way the QML delegate does.
-[[nodiscard]] QVariant roleAt(CommandPaletteModel const& model, int row, int role)
+[[nodiscard]] QVariant roleAt(CommandPaletteModel const& model, int row, CommandPaletteModel::Roles role)
 {
-    return model.data(model.index(row, 0), role);
+    return model.data(model.index(row, 0), static_cast<int>(role));
 }
 
 [[nodiscard]] std::string titleAt(CommandPaletteModel const& model, int row)
 {
-    return roleAt(model, row, CommandPaletteModel::TitleRole).toString().toStdString();
+    return roleAt(model, row, CommandPaletteModel::Roles::TitleRole).toString().toStdString();
 }
 
 [[nodiscard]] std::string idAt(CommandPaletteModel const& model, int row)
 {
-    return roleAt(model, row, CommandPaletteModel::IdRole).toString().toStdString();
+    return roleAt(model, row, CommandPaletteModel::Roles::IdRole).toString().toStdString();
 }
 
 [[nodiscard]] int sectionAt(CommandPaletteModel const& model, int row)
 {
-    return roleAt(model, row, CommandPaletteModel::SectionRole).toInt();
+    return roleAt(model, row, CommandPaletteModel::Roles::SectionRole).toInt();
 }
 
 /// The title character indices the current filter matched on a row, as the QML delegate reads them.
 [[nodiscard]] std::vector<int> titleMatchesAt(CommandPaletteModel const& model, int row)
 {
     auto result = std::vector<int> {};
-    for (auto const& entry: roleAt(model, row, CommandPaletteModel::TitleMatchesRole).toList())
+    for (auto const& entry: roleAt(model, row, CommandPaletteModel::Roles::TitleMatchesRole).toList())
         result.push_back(entry.toInt());
     return result;
 }
@@ -101,10 +101,10 @@ TEST_CASE("With no filter, the palette shows Recent first, then everything alpha
 
     SECTION("the first row of each section is marked, so QML draws exactly one header for it")
     {
-        CHECK(roleAt(model, 0, CommandPaletteModel::SectionStartRole).toBool());
-        CHECK_FALSE(roleAt(model, 1, CommandPaletteModel::SectionStartRole).toBool());
+        CHECK(roleAt(model, 0, CommandPaletteModel::Roles::SectionStartRole).toBool());
+        CHECK_FALSE(roleAt(model, 1, CommandPaletteModel::Roles::SectionStartRole).toBool());
         // Row 2 is the first of the "All" section (two recent rows precede it).
-        CHECK(roleAt(model, 2, CommandPaletteModel::SectionStartRole).toBool());
+        CHECK(roleAt(model, 2, CommandPaletteModel::Roles::SectionStartRole).toBool());
         CHECK(sectionAt(model, 2) == static_cast<int>(CommandPaletteModel::Section::All));
     }
 
@@ -323,13 +323,14 @@ TEST_CASE("The shortcut column advertises the chord that runs the command", "[co
 
     auto model = CommandPaletteModel { history };
     model.setSources({ &actionCommands });
-    model.setShortcuts(shortcutIndex(config::defaultInputMappings));
+    model.setShortcuts(shortcutIndex(config::defaultInputMappings()));
     model.refresh();
 
     model.setFilter(QStringLiteral("SplitVertical"));
     REQUIRE(model.rowCount() > 0);
     REQUIRE(idAt(model, 0) == "SplitVertical");
-    CHECK(roleAt(model, 0, CommandPaletteModel::ShortcutRole).toString().toStdString() == "Ctrl+Shift+E");
+    CHECK(roleAt(model, 0, CommandPaletteModel::Roles::ShortcutRole).toString().toStdString()
+          == "Ctrl+Shift+E");
 
     SECTION("an unbound command shows an empty shortcut, not a stale or wrong one")
     {
@@ -337,7 +338,7 @@ TEST_CASE("The shortcut column advertises the chord that runs the command", "[co
         model.setFilter(QStringLiteral("ClearHistoryAndReset"));
         REQUIRE(model.rowCount() > 0);
         REQUIRE(idAt(model, 0) == "ClearHistoryAndReset");
-        CHECK(roleAt(model, 0, CommandPaletteModel::ShortcutRole).toString().isEmpty());
+        CHECK(roleAt(model, 0, CommandPaletteModel::Roles::ShortcutRole).toString().isEmpty());
     }
 }
 

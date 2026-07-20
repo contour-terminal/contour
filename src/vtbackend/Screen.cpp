@@ -1876,7 +1876,7 @@ void Screen::insertChars(LineOffset lineOffset, ColumnCount columnsToInsert)
         return;
     auto& storage = line.materializedStorage();
     auto const cursorCol = static_cast<size_t>(*realCursorPosition().column);
-    auto const marginEnd = static_cast<size_t>(*margin().horizontal.to + 1);
+    auto const marginEnd = static_cast<size_t>(*margin().horizontal.to) + 1;
     auto const moveCount = marginEnd - cursorCol - static_cast<size_t>(sanitizedN);
 
     if (moveCount > 0)
@@ -2178,7 +2178,7 @@ void Screen::deleteChars(LineOffset lineOffset, ColumnOffset column, ColumnCount
     // did.
     auto& storage = line.materializedStorage();
     auto const leftCol = column.as<size_t>();
-    auto const rightCol = static_cast<size_t>(*margin().horizontal.to + 1);
+    auto const rightCol = static_cast<size_t>(*margin().horizontal.to) + 1;
     auto const n =
         static_cast<size_t>(std::min(columnsToDelete.as<long>(), static_cast<long>(rightCol - leftCol)));
 
@@ -4749,8 +4749,10 @@ void Screen::renderITerm2InlineImage(std::string_view arguments)
         // each need their own unit handling and are simply left at "derive from the image".
         auto const cells = [](std::string_view text) -> unsigned {
             auto result = 0u;
-            auto const* const last = text.data() + text.size();
-            auto const [ptr, ec] = std::from_chars(text.data(), last, result);
+            // from_chars takes a [first, last) range, not a NUL-terminated string.
+            auto const* const first = text.data();
+            auto const* const last = first + text.size();
+            auto const [ptr, ec] = std::from_chars(first, last, result);
             return (ec == std::errc {} && ptr == last) ? result : 0u;
         };
 
@@ -7689,7 +7691,7 @@ std::optional<Image::Data> Screen::decodePng(std::span<uint8_t const> data, Imag
     return decoded;
 }
 
-void Screen::uploadImage(string name, ImageFormat format, ImageSize imageSize, Image::Data&& pixmap)
+void Screen::uploadImage(string const& name, ImageFormat format, ImageSize imageSize, Image::Data&& pixmap)
 {
     assert(format != ImageFormat::Auto && "Auto must be resolved before upload");
     if (!isConsistentPixmap(format, imageSize, pixmap.size()))
@@ -7705,14 +7707,14 @@ void Screen::uploadImage(string name, ImageFormat format, ImageSize imageSize, I
     {
         auto decodedSize = imageSize;
         if (auto decodedData = decodePng(pixmap, decodedSize))
-            _terminal->imagePool().link(std::move(name),
+            _terminal->imagePool().link(name,
                                         uploadImage(ImageFormat::RGBA, decodedSize, std::move(*decodedData)));
         else
             errorLog()("Failed to decode PNG image for upload.");
         return;
     }
 
-    _terminal->imagePool().link(std::move(name), uploadImage(format, imageSize, std::move(pixmap)));
+    _terminal->imagePool().link(name, uploadImage(format, imageSize, std::move(pixmap)));
 }
 
 void Screen::renderImageByName(std::string const& name,

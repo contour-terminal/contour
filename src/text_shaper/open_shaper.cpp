@@ -191,7 +191,7 @@ static std::optional<text::rasterized_glyph> rasterizeWithCairo(FT_Face ftFace,
     output.format = text::bitmap_format::rgba;
     output.bitmap = std::move(buffer);
 
-    auto const pixelCount = static_cast<size_t>(width * height);
+    auto const pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
     auto* pixels = reinterpret_cast<uint32_t*>(output.bitmap.data());
     for (size_t i = 0; i < pixelCount; ++i)
     {
@@ -703,8 +703,8 @@ struct open_shaper::private_open_shaper // {{{
     /// parameters could miss forever, and shapeRunWithFallback() does not terminate if it does.
     struct coverage_cache_entry
     {
-        font_size size;
-        font_weight weight;
+        font_size size {};
+        font_weight weight = font_weight::normal;
         optional<font_key> resolved; ///< nullopt when no installed font covers the codepoint.
     };
 

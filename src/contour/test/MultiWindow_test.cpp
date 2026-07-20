@@ -48,7 +48,9 @@ void createTabs(contour::TerminalSessionManager& manager, contour::WindowControl
 
 [[nodiscard]] QString rawTitleAt(contour::WindowController& controller, int row)
 {
-    return controller.data(controller.index(row), contour::WindowController::RawTitleRole).toString();
+    return controller
+        .data(controller.index(row), static_cast<int>(contour::WindowController::Roles::RawTitleRole))
+        .toString();
 }
 
 } // namespace
@@ -231,7 +233,9 @@ TEST_CASE("settings tab: no terminal tab reads active while the settings page is
     window->activateTab(1);
 
     auto const isActive = [&](int row) {
-        return window->data(window->index(row), contour::WindowController::IsActiveRole).toBool();
+        return window
+            ->data(window->index(row), static_cast<int>(contour::WindowController::Roles::IsActiveRole))
+            .toBool();
     };
 
     // A terminal tab is active to begin with.
@@ -436,13 +440,15 @@ TEST_CASE("WindowController projects real-session tabs and routes rename/color t
 
     // roleNames exposes every projected role name.
     auto const roles = window->roleNames();
-    CHECK(roles.contains(contour::WindowController::TitleRole));
-    CHECK(roles.contains(contour::WindowController::RawTitleRole));
-    CHECK(roles.contains(contour::WindowController::IsActiveRole));
+    CHECK(roles.contains(static_cast<int>(contour::WindowController::Roles::TitleRole)));
+    CHECK(roles.contains(static_cast<int>(contour::WindowController::Roles::RawTitleRole)));
+    CHECK(roles.contains(static_cast<int>(contour::WindowController::Roles::IsActiveRole)));
 
     // A never-renamed tab has an empty raw title but a resolved (template-expanded) title.
     CHECK(rawTitleAt(*window, 0).isEmpty());
-    CHECK_NOTHROW(window->data(window->index(0), contour::WindowController::TitleRole).toString());
+    CHECK_NOTHROW(
+        window->data(window->index(0), static_cast<int>(contour::WindowController::Roles::TitleRole))
+            .toString());
 
     // Rename routes to the model and surfaces through RawTitleRole; reset restores the default.
     window->setTabTitle(0, QStringLiteral("deploy"));
@@ -502,7 +508,8 @@ TEST_CASE("a background (unfocused) tab's title updates in real time", "[contour
     QCoreApplication::processEvents();
 
     // The background tab's resolved title now reflects the change...
-    CHECK(window->data(window->index(1), contour::WindowController::TitleRole).toString()
+    CHECK(window->data(window->index(1), static_cast<int>(contour::WindowController::Roles::TitleRole))
+              .toString()
           == QStringLiteral("background-build-running"));
     // ...and a dataChanged carrying TitleRole was emitted for row 1 (not row 0, the active tab).
     auto sawRow1TitleChange = false;
@@ -510,7 +517,8 @@ TEST_CASE("a background (unfocused) tab's title updates in real time", "[contour
     {
         auto const topLeft = emission.at(0).toModelIndex();
         auto const roles = emission.at(2).value<QList<int>>();
-        if (topLeft.row() == 1 && roles.contains(contour::WindowController::TitleRole))
+        if (topLeft.row() == 1
+            && roles.contains(static_cast<int>(contour::WindowController::Roles::TitleRole)))
             sawRow1TitleChange = true;
     }
     CHECK(sawRow1TitleChange);
@@ -1017,7 +1025,9 @@ TEST_CASE("WindowController: the tab strip stops saying \"Multiple panes\" while
     REQUIRE(tab != nullptr);
 
     auto const label = [&] {
-        return window->data(window->index(0), contour::WindowController::TitleRole).toString().toStdString();
+        return window->data(window->index(0), static_cast<int>(contour::WindowController::Roles::TitleRole))
+            .toString()
+            .toStdString();
     };
     auto const multiplePanes = std::string { vtmux::Tab::MultiplePanesLabel };
 

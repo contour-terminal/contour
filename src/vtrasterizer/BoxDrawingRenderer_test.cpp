@@ -444,7 +444,7 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.parenthesis_extensions", "[renderer]"
             for (auto x: std::views::iota(w / 2, w))
             {
                 INFO("Row " << y << ", Col " << x << " should be dark (right half)");
-                CHECK((*buffer)[y * w + x] == 0);
+                CHECK((*buffer)[(y * w) + x] == 0);
             }
     }
 
@@ -463,7 +463,7 @@ TEST_CASE("BoxDrawingRenderer.math_symbols.parenthesis_extensions", "[renderer]"
             for (auto x: std::views::iota(0zu, w / 2))
             {
                 INFO("Row " << y << ", Col " << x << " should be dark (left half)");
-                CHECK((*buffer)[y * w + x] == 0);
+                CHECK((*buffer)[(y * w) + x] == 0);
             }
     }
 

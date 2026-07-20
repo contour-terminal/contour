@@ -30,19 +30,30 @@ namespace // {{{
 {
 
 // Chessboard image with each square of size 10x10 pixels
-std::string const chessBoard =
-    R"=(P0;0;0q"1;1;100;100#0;2;0;0;0#1;2;100;100;100#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-#0!10N!10o!10N!10o!10N!10o!10N!10o!10N!10o$#1!10o!10N!10o!10N!10o!10N!10o!10N!10o!10N-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10{!10B!10{!10B!10{!10B!10{!10B!10{!10B$#1!10B!10{!10B!10{!10B!10{!10B!10{!10B!10{-#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10o!10N!10o!10N!10o!10N!10o!10N!10o!10N$#1!10N!10o!10N!10o!10N!10o!10N!10o!10N!10o-#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-#0!10B!10{!10B!10{!10B!10{!10B!10{!10B!10{$#1!10{!10B!10{!10B!10{!10B!10{!10B!10{!10B-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-#0!10N!10o!10N!10o!10N!10o!10N!10o!10N!10o$#1!10o!10N!10o!10N!10o!10N!10o!10N!10o!10N-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10{!10B!10{!10B!10{!10B!10{!10B!10{!10B$#1!10B!10{!10B!10{!10B!10{!10B!10{!10B!10{-#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-#1!10N#0!10N#1!10N#0!10N#1!10N#0!10N#1!10N#0!10N#1!10N#0!10N-\)=";
+constexpr auto ChessBoard = std::string_view {
+    R"=(P0;0;0q"1;1;100;100#0;2;0;0;0#1;2;100;100;100#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-#0!10N!10o!10N!10o!10N!10o!10N!10o!10N!10o$#1!10o!10N!10o!10N!10o!10N!10o!10N!10o!10N-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10{!10B!10{!10B!10{!10B!10{!10B!10{!10B$#1!10B!10{!10B!10{!10B!10{!10B!10{!10B!10{-#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10o!10N!10o!10N!10o!10N!10o!10N!10o!10N$#1!10N!10o!10N!10o!10N!10o!10N!10o!10N!10o-#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-#0!10B!10{!10B!10{!10B!10{!10B!10{!10B!10{$#1!10{!10B!10{!10B!10{!10B!10{!10B!10{!10B-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-#0!10N!10o!10N!10o!10N!10o!10N!10o!10N!10o$#1!10o!10N!10o!10N!10o!10N!10o!10N!10o!10N-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10{!10B!10{!10B!10{!10B!10{!10B!10{!10B$#1!10B!10{!10B!10{!10B!10{!10B!10{!10B!10{-#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-#1!10N#0!10N#1!10N#0!10N#1!10N#0!10N#1!10N#0!10N#1!10N#0!10N-\)="
+};
 
-Image::Data const black10x10 = [] {
-    Image::Data ret(static_cast<std::size_t>(100 * 4), 0);
-    for (size_t i = 3; i < ret.size(); i += 4)
-    {
-        ret[i] = 255;
-    }
-    return ret;
-}();
+/// Opaque black 10x10 RGBA pixels.
+Image::Data const& black10x10()
+{
+    static Image::Data const data = [] {
+        Image::Data ret(static_cast<std::size_t>(100 * 4), 0);
+        for (size_t i = 3; i < ret.size(); i += 4)
+        {
+            ret[i] = 255;
+        }
+        return ret;
+    }();
+    return data;
+}
 
-Image::Data const white10x10(static_cast<std::size_t>(100 * 4), 255);
+/// Opaque white 10x10 RGBA pixels.
+Image::Data const& white10x10()
+{
+    static Image::Data const data(static_cast<std::size_t>(100 * 4), 255);
+    return data;
+}
 
 struct TextRenderBuilder
 {
@@ -5383,7 +5394,7 @@ TEST_CASE("Sixel.simple", "[screen]")
     auto mock = MockTerm { pageSize, LineCount(11) };
     mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(10) });
 
-    mock.writeToScreen(chessBoard);
+    mock.writeToScreen(ChessBoard);
 
     CHECK(mock.terminal.primaryScreen().cursor().position.column.value == ColumnOffset(0).value);
     CHECK(mock.terminal.primaryScreen().cursor().position.line.value == LineOffset(10).value);
@@ -5398,9 +5409,9 @@ TEST_CASE("Sixel.simple", "[screen]")
                 auto fragment = cell.imageFragment();
                 REQUIRE(fragment);
                 if ((column.value + line.value) % 2)
-                    REQUIRE(fragment->data() == white10x10);
+                    REQUIRE(fragment->data() == white10x10());
                 else
-                    REQUIRE(fragment->data() == black10x10);
+                    REQUIRE(fragment->data() == black10x10());
 
                 CHECK(fragment->offset().line == line);
                 CHECK(fragment->offset().column == column);
@@ -5422,7 +5433,7 @@ TEST_CASE("Sixel.AutoScroll-1", "[screen]")
     mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(10) });
     mock.terminal.setMode(DECMode::NoSixelScrolling, false);
 
-    mock.writeToScreen(chessBoard);
+    mock.writeToScreen(ChessBoard);
 
     CHECK(mock.terminal.primaryScreen().cursor().position.column == ColumnOffset(0));
     CHECK(mock.terminal.primaryScreen().cursor().position.line == LineOffset(8));
@@ -5439,9 +5450,9 @@ TEST_CASE("Sixel.AutoScroll-1", "[screen]")
                 auto fragment = cell.imageFragment();
                 REQUIRE(fragment);
                 if ((column.value + line.value) % 2)
-                    REQUIRE(fragment->data() == black10x10);
+                    REQUIRE(fragment->data() == black10x10());
                 else
-                    REQUIRE(fragment->data() == white10x10);
+                    REQUIRE(fragment->data() == white10x10());
                 CHECK(fragment->offset().line == line + 1);
                 CHECK(fragment->offset().column == column);
                 CHECK(!fragment->data().empty());
@@ -5462,7 +5473,7 @@ TEST_CASE("Sixel.status_line", "[screen]")
     mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(10) });
     mock.terminal.setStatusDisplay(StatusDisplayType::Indicator);
 
-    mock.writeToScreen(chessBoard);
+    mock.writeToScreen(ChessBoard);
 
     CHECK(mock.terminal.primaryScreen().cursor().position.column.value == ColumnOffset(0).value);
     CHECK(mock.terminal.primaryScreen().cursor().position.line.value == LineOffset(3).value);
@@ -5478,9 +5489,9 @@ TEST_CASE("Sixel.status_line", "[screen]")
                 auto fragment = cell.imageFragment();
                 REQUIRE(fragment);
                 if ((column.value + line.value) % 2)
-                    REQUIRE(fragment->data() == white10x10);
+                    REQUIRE(fragment->data() == white10x10());
                 else
-                    REQUIRE(fragment->data() == black10x10);
+                    REQUIRE(fragment->data() == black10x10());
 
                 CHECK(fragment->offset().line == line + 6);
                 CHECK(fragment->offset().column == column);

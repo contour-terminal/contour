@@ -10,6 +10,7 @@
 #include <crispy/App.h>
 #include <crispy/BufferObject.h>
 #include <crispy/CLI.h>
+#include <crispy/environment.h>
 #include <crispy/utils.h>
 
 #include <chrono>
@@ -18,6 +19,7 @@
 #include <iostream>
 #include <iterator>
 #include <optional>
+#include <random>
 #include <thread>
 
 #include <libtermbench/termbench.h>
@@ -30,10 +32,14 @@ namespace
 
 std::string createText(size_t bytes)
 {
+    auto entropy = std::random_device {};
+    auto engine = std::mt19937 { entropy() };
+    auto letters = std::uniform_int_distribution<int> { 0, 25 };
+
     std::string text;
     while (text.size() < bytes)
     {
-        text += char('A' + (rand() % 26));
+        text += static_cast<char>('A' + letters(engine));
         if ((text.size() % 65) == 0)
             text += '\n';
     }
@@ -189,10 +195,9 @@ class ContourHeadlessBench: public crispy::app
         link("bench-headless.pty", bind(&ContourHeadlessBench::benchPTY));
         link("bench-headless.meta", bind(&ContourHeadlessBench::showMetaInfo));
 
-        char const* logFilterString = getenv("LOG");
-        if (logFilterString)
+        if (auto const logFilterString = crispy::environment::get("LOG"))
         {
-            logstore::configure(logFilterString);
+            logstore::configure(*logFilterString);
             crispy::app::customizeLogStoreOutput();
         }
     }
@@ -468,8 +473,6 @@ class ContourHeadlessBench: public crispy::app
 
 int main(int argc, char const* argv[])
 {
-    srand(static_cast<unsigned int>(time(nullptr))); // initialize rand(). No strong seed required.
-
     ContourHeadlessBench app;
     return app.run(argc, argv);
 }

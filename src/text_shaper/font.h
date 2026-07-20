@@ -333,10 +333,13 @@ struct hash<text::glyph_key>
 {
     std::size_t operator()(text::glyph_key const& key) const noexcept
     {
-        auto const f = key.font.value;
-        auto const i = key.index.value;
-        auto const s = int(key.size.pt * 10.0);
-        return std::size_t(((size_t(f) << 32) & 0xFFFF) | ((i << 16) & 0xFFFF) | (s & 0xFF));
+        // Pack the three components into disjoint bit fields: font at bits 32..47,
+        // glyph index at bits 16..31, and the size (in tenths of a point) at bits 0..15.
+        // NB: each component must be masked BEFORE it is shifted into place.
+        auto const f = static_cast<std::size_t>(key.font.value);
+        auto const i = static_cast<std::size_t>(key.index.value);
+        auto const s = static_cast<std::size_t>(static_cast<int>(key.size.pt * 10.0));
+        return ((f & 0xFFFF) << 32) | ((i & 0xFFFF) << 16) | (s & 0xFFFF);
     }
 };
 

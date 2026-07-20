@@ -104,10 +104,14 @@ inline void set_fail_handler(fail_handler_t handler)
     std::abort();
 }
 
+// The condition is reduced to a named bool before being negated. Negating `(cond)` directly
+// would put a `!(a && b)` into every expansion, which readability-simplify-boolean-expr then
+// reports against the *call site* — a warning the caller cannot act on.
 #define Require(cond)                                                                \
     do                                                                               \
     {                                                                                \
-        if (!(cond))                                                                 \
+        bool const conditionHolds = static_cast<bool>(cond);                         \
+        if (!conditionHolds)                                                         \
         {                                                                            \
             crispy::detail::fail(#cond, "Precondition failed.", __FILE__, __LINE__); \
         }                                                                            \
@@ -116,7 +120,8 @@ inline void set_fail_handler(fail_handler_t handler)
 #define Guarantee(cond)                                                               \
     do                                                                                \
     {                                                                                 \
-        if (!(cond))                                                                  \
+        bool const conditionHolds = static_cast<bool>(cond);                          \
+        if (!conditionHolds)                                                          \
         {                                                                             \
             crispy::detail::fail(#cond, "Postcondition failed.", __FILE__, __LINE__); \
         }                                                                             \

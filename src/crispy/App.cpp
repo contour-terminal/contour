@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <crispy/App.h>
 
+#include <crispy/environment.h>
 #include <crispy/logstore.h>
+#include <crispy/user_info.h>
 #include <crispy/utils.h>
 
 #include <algorithm>
@@ -16,7 +18,6 @@
 #ifndef _WIN32
     #include <sys/ioctl.h>
 
-    #include <pwd.h>
     #include <unistd.h>
 #endif
 
@@ -80,15 +81,15 @@ unsigned screenWidth()
 
 fs::path xdgStateHome()
 {
-    if (auto const* p = getenv("XDG_STATE_HOME"); (p != nullptr) && (*p != '\0'))
-        return fs::path(p);
+    if (auto const p = crispy::environment::get("XDG_STATE_HOME"); p && !p->empty())
+        return { *p };
 
 #ifdef _WIN32
-    if (auto const* p = getenv("LOCALAPPDATA"); p && *p)
-        return fs::path(p);
+    if (auto const p = crispy::environment::get("LOCALAPPDATA"); p && !p->empty())
+        return { *p };
 #else
-    if (passwd const* pw = getpwuid(getuid()); (pw != nullptr) && (pw->pw_dir != nullptr))
-        return fs::path(pw->pw_dir) / ".local" / "state";
+    if (auto const home = crispy::userHomeDirectory(); !home.empty())
+        return fs::path(home) / ".local" / "state";
 #endif
 
     return fs::temp_directory_path();
@@ -107,9 +108,9 @@ app::app(std::string appName, std::string appTitle, std::string appVersion, std:
     _appLicense { std::move(appLicense) },
     _localStateDir { xdgStateHome() / _appName }
 {
-    if (char const* logFilterString = getenv("LOG"))
+    if (auto const logFilterString = crispy::environment::get("LOG"))
     {
-        logstore::configure(logFilterString);
+        logstore::configure(*logFilterString);
         customizeLogStoreOutput();
     }
 
@@ -288,9 +289,14 @@ void app::customizeLogStoreOutput()
                 // clang-format off
                 auto const now = chrono::system_clock::now();
                 std::time_t const nowTimeT = std::chrono::system_clock::to_time_t(now);
-                std::tm const* tm = std::localtime(&nowTimeT);
+                auto tm = std::tm {};
+#ifdef _WIN32
+                localtime_s(&tm, &nowTimeT);
+#else
+                localtime_r(&nowTimeT, &tm);
+#endif
                 std::stringstream dateTimeStrStream;
-                dateTimeStrStream << std::put_time(tm, "%Y-%m-%d %H:%M:%S");
+                dateTimeStrStream << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
                 auto const micros = duration_cast<chrono::microseconds>(now.time_since_epoch()).count() % 1'000'000;
                 result += sgrTag;
                 result += std::format("[{}.{:06}] [{}]",

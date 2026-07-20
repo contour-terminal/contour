@@ -110,7 +110,7 @@ int main(int argc, char* argv[])
 
     if (argc == 2 && argv[1] == "monitor"sv)
     {
-        struct sigaction sa;
+        struct sigaction sa {};
         sa.sa_handler = signalHandler;
         sa.sa_flags = 0; // Explicitly don't set SA_RESTART;
         sigemptyset(&sa.sa_mask);

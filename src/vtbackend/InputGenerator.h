@@ -547,7 +547,11 @@ class ExtendedKeyboardInputGenerator final: public StandardKeyboardInputGenerato
 
     constexpr void leave(size_t n = 1) noexcept { _currentStackTop -= std::min(n, _currentStackTop); }
 
-    constexpr void reset() noexcept
+    /// Empties the CSIu flag stack and clears the flags on its remaining bottom entry.
+    ///
+    /// This is deliberately narrower than StandardKeyboardInputGenerator::reset(): it touches only
+    /// the extended-protocol stack and leaves the cursor-keys/keypad/backarrow modes alone.
+    constexpr void resetProtocolStack() noexcept
     {
         _currentStackTop = 0;
         _flags.at(_currentStackTop) = KeyboardEventFlag::None;

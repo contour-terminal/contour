@@ -129,25 +129,29 @@ class Pane
     template <typename F>
     Pane* walkTree(F&& f)
     {
+        // @p f is invoked once per visited node, so it is forwarded once into a reference binding
+        // (which consumes nothing) and called through that. Forwarding at each use would move from it
+        // on the first node and use it again on every following one.
+        auto&& visit = std::forward<F>(f);
         if constexpr (std::convertible_to<std::invoke_result_t<F&, Pane&>, bool>)
         {
-            if (f(*this))
+            if (visit(*this))
                 return this;
             if (_first)
-                if (auto* found = _first->walkTree(f))
+                if (auto* found = _first->walkTree(visit))
                     return found;
             if (_second)
-                if (auto* found = _second->walkTree(f))
+                if (auto* found = _second->walkTree(visit))
                     return found;
             return nullptr;
         }
         else
         {
-            f(*this);
+            visit(*this);
             if (_first)
-                _first->walkTree(f);
+                _first->walkTree(visit);
             if (_second)
-                _second->walkTree(f);
+                _second->walkTree(visit);
             return nullptr;
         }
     }

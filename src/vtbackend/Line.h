@@ -216,7 +216,7 @@ class Line
         Require(ColumnOffset(0) <= column);
         Require(column <= ColumnOffset::cast_from(size())); // Allow off-by-one for sentinel.
         materialize();
-        return CellProxy(_storage, unbox<size_t>(column));
+        return { _storage, unbox<size_t>(column) };
     }
 
     [[nodiscard]] uint8_t cellEmptyAt(ColumnOffset column) const noexcept

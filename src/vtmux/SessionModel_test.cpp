@@ -408,7 +408,7 @@ TEST_CASE("SessionModel: moveTab reorders tabs the way the manager's MoveTab* ac
 
     SECTION("MoveTabTo(position=1) sends c to the front")
     {
-        f.model.moveTab(win->id(), c->id(), 1 - 1);
+        f.model.moveTab(win->id(), c->id(), 0);
         CHECK(win->tabAt(0) == c);
         CHECK(win->tabAt(1) == a);
         CHECK(win->tabAt(2) == b);

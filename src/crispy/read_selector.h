@@ -14,6 +14,7 @@
 #include <mutex>
 #include <optional>
 #include <ranges>
+#include <system_error>
 #include <vector>
 
 #ifndef _WIN32
@@ -83,7 +84,7 @@ class posix_read_selector
         {
             auto written = write(_breakPipeWriter, "x", 1);
             if (written == -1)
-                errorLog()("Writing to break-pipe failed. {}", strerror(errno));
+                errorLog()("Writing to break-pipe failed. {}", std::system_category().message(errno));
         }
     }
 
@@ -265,7 +266,7 @@ inline void epoll_read_selector::wakeup() const noexcept
     auto const value = eventfd_t { 1 };
     auto written = write(_eventFd, &value, sizeof(value));
     if (written == -1)
-        errorLog()("Writing to eventFd failed. {}", strerror(errno));
+        errorLog()("Writing to eventFd failed. {}", std::system_category().message(errno));
 }
 
 inline std::optional<int> epoll_read_selector::try_pop_pending() noexcept

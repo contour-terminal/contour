@@ -43,30 +43,33 @@ namespace
 class TabListModel: public QAbstractListModel, public ModelEvents
 {
   public:
-    enum Roles : std::uint16_t
+    enum class Roles : std::uint16_t
     {
+        DisplayRole = Qt::DisplayRole,
         TitleRole = Qt::UserRole + 1,
-        ColorRole,
-        IsActiveRole,
-        PaneCountRole,
-        SessionIdRole,
-        RawTitleRole,
+        ColorRole = Qt::UserRole + 2,
+        IsActiveRole = Qt::UserRole + 3,
+        PaneCountRole = Qt::UserRole + 4,
+        SessionIdRole = Qt::UserRole + 5,
+        RawTitleRole = Qt::UserRole + 6,
     };
 
     // This model's projection is a hand-copy of WindowController's (whose construction needs the full
     // session stack, so the contract is tested through this stand-in). Pin each role to the production
     // value so a reorder/insert in WindowController::Roles is a COMPILE error here rather than a
     // silently-passing stale test. If a role is added, add it here AND to data()/roleNames() below.
-    static_assert(static_cast<int>(TitleRole) == static_cast<int>(contour::WindowController::TitleRole));
-    static_assert(static_cast<int>(ColorRole) == static_cast<int>(contour::WindowController::ColorRole));
-    static_assert(static_cast<int>(IsActiveRole)
-                  == static_cast<int>(contour::WindowController::IsActiveRole));
-    static_assert(static_cast<int>(PaneCountRole)
-                  == static_cast<int>(contour::WindowController::PaneCountRole));
-    static_assert(static_cast<int>(SessionIdRole)
-                  == static_cast<int>(contour::WindowController::SessionIdRole));
-    static_assert(static_cast<int>(RawTitleRole)
-                  == static_cast<int>(contour::WindowController::RawTitleRole));
+    static_assert(static_cast<int>(Roles::TitleRole)
+                  == static_cast<int>(contour::WindowController::Roles::TitleRole));
+    static_assert(static_cast<int>(Roles::ColorRole)
+                  == static_cast<int>(contour::WindowController::Roles::ColorRole));
+    static_assert(static_cast<int>(Roles::IsActiveRole)
+                  == static_cast<int>(contour::WindowController::Roles::IsActiveRole));
+    static_assert(static_cast<int>(Roles::PaneCountRole)
+                  == static_cast<int>(contour::WindowController::Roles::PaneCountRole));
+    static_assert(static_cast<int>(Roles::SessionIdRole)
+                  == static_cast<int>(contour::WindowController::Roles::SessionIdRole));
+    static_assert(static_cast<int>(Roles::RawTitleRole)
+                  == static_cast<int>(contour::WindowController::Roles::RawTitleRole));
 
     TabListModel():
         _model { *this, [this] { return SessionId { _nextSession++ }; } }, _window { _model.createWindow() }
@@ -105,34 +108,37 @@ class TabListModel: public QAbstractListModel, public ModelEvents
         if (row < 0 || row >= rowCount())
             return {};
         auto* tab = _window != nullptr ? _window->tabAt(row) : nullptr;
-        switch (role)
+        switch (static_cast<Roles>(role))
         {
-            case Qt::DisplayRole:
-            case SessionIdRole:
+            case Roles::DisplayRole:
+            case Roles::SessionIdRole:
                 return tab != nullptr ? QVariant(static_cast<qulonglong>(tab->activePane()->session().value))
                                       : QVariant {};
-            case TitleRole: return resolvedTabLabel(tab, row);
-            case RawTitleRole:
+            case Roles::TitleRole: return resolvedTabLabel(tab, row);
+            case Roles::RawTitleRole:
                 return tab != nullptr ? QString::fromStdString(tab->runtimeTitle().value_or("")) : QString {};
-            case ColorRole:
+            case Roles::ColorRole:
                 if (tab != nullptr && tab->color().has_value())
                 {
                     auto const c = *tab->color();
                     return QColor(c.red, c.green, c.blue);
                 }
                 return QColor(Qt::transparent);
-            case IsActiveRole: return _window != nullptr && row == _window->activeTabIndex();
-            case PaneCountRole: return tab != nullptr ? tab->paneCount() : 1;
+            case Roles::IsActiveRole: return _window != nullptr && row == _window->activeTabIndex();
+            case Roles::PaneCountRole: return tab != nullptr ? tab->paneCount() : 1;
             default: return {};
         }
     }
 
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override
     {
-        return { { Qt::DisplayRole, "display" }, { TitleRole, "title" },
-                 { ColorRole, "accentColor" },   { IsActiveRole, "isActive" },
-                 { PaneCountRole, "paneCount" }, { SessionIdRole, "sessionId" },
-                 { RawTitleRole, "rawTitle" } };
+        return { { static_cast<int>(Roles::DisplayRole), "display" },
+                 { static_cast<int>(Roles::TitleRole), "title" },
+                 { static_cast<int>(Roles::ColorRole), "accentColor" },
+                 { static_cast<int>(Roles::IsActiveRole), "isActive" },
+                 { static_cast<int>(Roles::PaneCountRole), "paneCount" },
+                 { static_cast<int>(Roles::SessionIdRole), "sessionId" },
+                 { static_cast<int>(Roles::RawTitleRole), "rawTitle" } };
     }
     // }}}
 
@@ -171,7 +177,8 @@ class TabListModel: public QAbstractListModel, public ModelEvents
         // Mirror WindowController::onActiveTabChanged: invalidate IsActiveRole across all rows so
         // the previously-active and newly-active rows both re-read the tab-strip highlight.
         if (auto const rows = rowCount(); rows > 0)
-            emit dataChanged(this->index(0), this->index(rows - 1), { IsActiveRole });
+            emit dataChanged(
+                this->index(0), this->index(rows - 1), { static_cast<int>(Roles::IsActiveRole) });
     }
 
     int activeTabChangedCount = 0;
@@ -181,11 +188,17 @@ class TabListModel: public QAbstractListModel, public ModelEvents
     // window-level bindings (the window title) follow the focused pane. Mirror that so a test can
     // assert a pane-focus change notifies active-session consumers.
     int activeSessionChangedCount = 0;
-    void paneSplit(TabId tab, PaneId, PaneId) override { notifyRow(tab, { TitleRole, PaneCountRole }); }
-    void paneClosed(TabId tab, PaneId, PaneId) override { notifyRow(tab, { TitleRole, PaneCountRole }); }
+    void paneSplit(TabId tab, PaneId, PaneId) override
+    {
+        notifyRow(tab, { Roles::TitleRole, Roles::PaneCountRole });
+    }
+    void paneClosed(TabId tab, PaneId, PaneId) override
+    {
+        notifyRow(tab, { Roles::TitleRole, Roles::PaneCountRole });
+    }
     void activePaneChanged(TabId tab, PaneId) override
     {
-        notifyRow(tab, { TitleRole });
+        notifyRow(tab, { Roles::TitleRole });
         ++activeSessionChangedCount; // mirror: manager emits activeSessionChanged() here
     }
     void paneRatioChanged(TabId, PaneId splitNode, double ratio) override
@@ -208,30 +221,37 @@ class TabListModel: public QAbstractListModel, public ModelEvents
     int statusLineUpdateCount = 0;
     void tabTitleChanged(TabId tab) override
     {
-        notifyRow(tab, { TitleRole, RawTitleRole });
+        notifyRow(tab, { Roles::TitleRole, Roles::RawTitleRole });
         ++statusLineUpdateCount; // mirror: manager calls updateStatusLine() here too
     }
     void tabColorChanged(TabId tab) override
     {
-        notifyRow(tab, { ColorRole });
+        notifyRow(tab, { Roles::ColorRole });
         ++statusLineUpdateCount; // mirror: manager calls updateStatusLine() here
     }
     // }}}
 
   private:
-    void notifyRow(TabId tab, QList<int> const& roles)
+    void notifyRow(TabId tab, QList<Roles> const& roles)
     {
         if (_window == nullptr)
             return;
-        if (auto const row = _window->indexOf(tab); row >= 0)
-            emit dataChanged(index(row), index(row), roles);
+        auto const row = _window->indexOf(tab);
+        if (row < 0)
+            return;
+
+        auto roleIds = QList<int> {};
+        roleIds.reserve(roles.size());
+        for (auto const role: roles)
+            roleIds.append(static_cast<int>(role));
+        emit dataChanged(index(row), index(row), roleIds);
     }
 
     // Mirror of WindowController::refreshAllTabTitles.
     void refreshAllTabTitles()
     {
         if (auto const rows = rowCount(); rows > 0)
-            emit dataChanged(index(0), index(rows - 1), { TitleRole });
+            emit dataChanged(index(0), index(rows - 1), { static_cast<int>(Roles::TitleRole) });
     }
 
     // Mirror of WindowController::resolvedTabLabel: pick a template by precedence (rename >
@@ -260,6 +280,16 @@ class TabListModel: public QAbstractListModel, public ModelEvents
     bool _tabMoveInProgress = false; // carries beginMoveRows()'s result to tabMoved(), as in the manager
 };
 
+/// Reads one role off a row, the way the tab-strip delegate does.
+/// @param model The model under test.
+/// @param row   Row index.
+/// @param role  The role to read.
+/// @return The role's value, or an invalid QVariant for an out-of-range row.
+[[nodiscard]] QVariant roleAt(TabListModel const& model, int row, TabListModel::Roles role)
+{
+    return model.data(model.index(row), static_cast<int>(role));
+}
+
 } // namespace
 
 TEST_CASE("TabListModel: rows track tabs and a split does not add a row", "[contour][gui][model]")
@@ -284,11 +314,12 @@ TEST_CASE("TabListModel: rows track tabs and a split does not add a row", "[cont
     CHECK(m.rowCount() == 2);
 
     // The split tab now reports two panes via PaneCountRole; the other tab still one.
-    CHECK(m.data(m.index(0), TabListModel::PaneCountRole).toInt() == 1);
-    CHECK(m.data(m.index(1), TabListModel::PaneCountRole).toInt() == 2);
+    CHECK(roleAt(m, 0, TabListModel::Roles::PaneCountRole).toInt() == 1);
+    CHECK(roleAt(m, 1, TabListModel::Roles::PaneCountRole).toInt() == 2);
 
     // SessionIdRole resolves to the tab's active leaf, not a row-indexed session vector.
-    CHECK(m.data(m.index(1), TabListModel::SessionIdRole).toULongLong() == t2->activePane()->session().value);
+    CHECK(roleAt(m, 1, TabListModel::Roles::SessionIdRole).toULongLong()
+          == t2->activePane()->session().value);
     (void) t1;
 }
 
@@ -329,7 +360,7 @@ TEST_CASE("TabListModel: closing one pane of a split tab keeps the tab row", "[c
     m.model().closePane(m.window().id(), split->id(), newLeaf->id());
     CHECK(m.rowCount() == 2);       // still two tabs/rows
     CHECK(split->paneCount() == 1); // absorbed back to a single pane
-    CHECK(m.data(m.index(1), TabListModel::PaneCountRole).toInt() == 1);
+    CHECK(roleAt(m, 1, TabListModel::Roles::PaneCountRole).toInt() == 1);
 
     // Closing the last pane of that tab now removes exactly that one row.
     m.model().closePane(m.window().id(), split->id(), split->rootPane()->id());
@@ -356,8 +387,8 @@ TEST_CASE("TabListModel: activating a tab by row updates the model's active tab"
     m.model().activateTab(m.window().id(), m.window().tabAt(0)->id());
     CHECK(m.window().activeTab() == a);
     CHECK(m.window().activeTabIndex() == 0);
-    CHECK(m.data(m.index(0), TabListModel::IsActiveRole).toBool());
-    CHECK_FALSE(m.data(m.index(2), TabListModel::IsActiveRole).toBool());
+    CHECK(roleAt(m, 0, TabListModel::Roles::IsActiveRole).toBool());
+    CHECK_FALSE(roleAt(m, 2, TabListModel::Roles::IsActiveRole).toBool());
     CHECK(m.activeTabChangedCount == baseline + 1);
     CHECK(m.lastActiveTabRow == 0);
 
@@ -398,7 +429,7 @@ TEST_CASE("TabListModel: switching the active tab repaints the old and new rows'
     // in its roles list. The full-range emit (top-left row 0 .. bottom-right row 2) satisfies this; an
     // emission touching only one row, or omitting IsActiveRole, would fail. An empty roles list is
     // treated as "all roles" per Qt's dataChanged contract.
-    auto const isActiveRole = static_cast<int>(TabListModel::IsActiveRole);
+    auto const isActiveRole = static_cast<int>(TabListModel::Roles::IsActiveRole);
     auto const covered = std::ranges::any_of(spy, [&](QList<QVariant> const& args) {
         auto const top = args.at(0).value<QModelIndex>().row();
         auto const bottom = args.at(1).value<QModelIndex>().row();
@@ -410,8 +441,8 @@ TEST_CASE("TabListModel: switching the active tab repaints the old and new rows'
     CHECK(covered);
 
     // And the projected role values flipped, as the highlight binding reads them.
-    CHECK(m.data(m.index(0), TabListModel::IsActiveRole).toBool());
-    CHECK_FALSE(m.data(m.index(2), TabListModel::IsActiveRole).toBool());
+    CHECK(roleAt(m, 0, TabListModel::Roles::IsActiveRole).toBool());
+    CHECK_FALSE(roleAt(m, 2, TabListModel::Roles::IsActiveRole).toBool());
 }
 
 TEST_CASE("TabListModel: reordering a tab uses the row-move contract", "[contour][gui][model]")
@@ -532,7 +563,7 @@ TEST_CASE("TabListModel: out-of-range and parented indices yield empty data", "[
     QAbstractItemModelTester const tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
     m.model().createTab(m.window().id());
 
-    CHECK_FALSE(m.data(m.index(5), TabListModel::TitleRole).isValid());
+    CHECK_FALSE(roleAt(m, 5, TabListModel::Roles::TitleRole).isValid());
     CHECK(m.rowCount(m.index(0)) == 0); // list model: rows only under the root
 }
 
@@ -549,8 +580,8 @@ TEST_CASE("TabListModel: the default tab-label template shows the session title 
     m.setSessionTitle(a->activePane()->session(), "vim");
     m.setSessionTitle(b->activePane()->session(), "bash");
 
-    CHECK(m.data(m.index(0), TabListModel::TitleRole).toString() == "vim");
-    CHECK(m.data(m.index(1), TabListModel::TitleRole).toString() == "bash");
+    CHECK(roleAt(m, 0, TabListModel::Roles::TitleRole).toString() == "vim");
+    CHECK(roleAt(m, 1, TabListModel::Roles::TitleRole).toString() == "bash");
 }
 
 TEST_CASE("TabListModel: a positional template prefixes the 1-based tab position",
@@ -565,8 +596,8 @@ TEST_CASE("TabListModel: a positional template prefixes the 1-based tab position
     m.setSessionTitle(a->activePane()->session(), "vim");
     m.setSessionTitle(b->activePane()->session(), "bash");
 
-    CHECK(m.data(m.index(0), TabListModel::TitleRole).toString() == "1: vim");
-    CHECK(m.data(m.index(1), TabListModel::TitleRole).toString() == "2: bash");
+    CHECK(roleAt(m, 0, TabListModel::Roles::TitleRole).toString() == "1: vim");
+    CHECK(roleAt(m, 1, TabListModel::Roles::TitleRole).toString() == "2: bash");
 }
 
 TEST_CASE("TabListModel: a user rename overrides the profile template", "[contour][gui][model][tablabel]")
@@ -581,11 +612,11 @@ TEST_CASE("TabListModel: a user rename overrides the profile template", "[contou
     m.setSessionTitle(a->activePane()->session(), "vim");
     m.model().setTabTitle(a->id(), "deploy");
 
-    CHECK(m.data(m.index(0), TabListModel::TitleRole).toString() == "deploy");
+    CHECK(roleAt(m, 0, TabListModel::Roles::TitleRole).toString() == "deploy");
 
     // Clearing the rename restores the profile-templated label.
     m.model().resetTabTitle(a->id());
-    CHECK(m.data(m.index(0), TabListModel::TitleRole).toString() == "1: vim");
+    CHECK(roleAt(m, 0, TabListModel::Roles::TitleRole).toString() == "1: vim");
 }
 
 TEST_CASE("TabListModel: a rename containing placeholders is itself expanded",
@@ -604,10 +635,10 @@ TEST_CASE("TabListModel: a rename containing placeholders is itself expanded",
     m.setSessionTitle(b->activePane()->session(), "bash");
 
     m.model().setTabTitle(a->id(), "{WindowTitle}");
-    CHECK(m.data(m.index(0), TabListModel::TitleRole).toString() == "vim");
+    CHECK(roleAt(m, 0, TabListModel::Roles::TitleRole).toString() == "vim");
 
     m.model().setTabTitle(b->id(), "[{TabPosition}] {WindowTitle}");
-    CHECK(m.data(m.index(1), TabListModel::TitleRole).toString() == "[2] bash");
+    CHECK(roleAt(m, 1, TabListModel::Roles::TitleRole).toString() == "[2] bash");
 }
 
 TEST_CASE("TabListModel: a split tab shows the multi-pane sentinel, not the template",
@@ -622,7 +653,7 @@ TEST_CASE("TabListModel: a split tab shows the multi-pane sentinel, not the temp
     auto* leaf = m.model().splitActivePane(a->id(), SplitState::Vertical);
     REQUIRE(leaf != nullptr);
 
-    CHECK(m.data(m.index(0), TabListModel::TitleRole).toString() == "Multiple panes");
+    CHECK(roleAt(m, 0, TabListModel::Roles::TitleRole).toString() == "Multiple panes");
 }
 
 TEST_CASE("TabListModel: closing a tab renumbers positional labels and re-emits TitleRole",
@@ -641,7 +672,7 @@ TEST_CASE("TabListModel: closing a tab renumbers positional labels and re-emits 
     m.setSessionTitle(a->activePane()->session(), "a");
     m.setSessionTitle(b->activePane()->session(), "b");
     m.setSessionTitle(c->activePane()->session(), "c");
-    REQUIRE(m.data(m.index(2), TabListModel::TitleRole).toString() == "3: c");
+    REQUIRE(roleAt(m, 2, TabListModel::Roles::TitleRole).toString() == "3: c");
 
     QSignalSpy spy(&m, &QAbstractItemModel::dataChanged);
     REQUIRE(spy.isValid());
@@ -651,12 +682,12 @@ TEST_CASE("TabListModel: closing a tab renumbers positional labels and re-emits 
     REQUIRE(m.rowCount() == 2);
 
     // The projected labels renumbered...
-    CHECK(m.data(m.index(0), TabListModel::TitleRole).toString() == "1: b");
-    CHECK(m.data(m.index(1), TabListModel::TitleRole).toString() == "2: c");
+    CHECK(roleAt(m, 0, TabListModel::Roles::TitleRole).toString() == "1: b");
+    CHECK(roleAt(m, 1, TabListModel::Roles::TitleRole).toString() == "2: c");
 
     // ...and some dataChanged emission covered the surviving rows with TitleRole (an empty roles list
     // means "all roles" per Qt's contract, which also satisfies the renumber refresh).
-    auto const titleRole = static_cast<int>(TabListModel::TitleRole);
+    auto const titleRole = static_cast<int>(TabListModel::Roles::TitleRole);
     auto const renumbered = std::ranges::any_of(spy, [&](QList<QVariant> const& args) {
         auto const top = args.at(0).value<QModelIndex>().row();
         auto const bottom = args.at(1).value<QModelIndex>().row();
@@ -690,8 +721,8 @@ TEST_CASE("TabListModel: setting a tab title exposes the raw template and the ex
 
     m.model().setTabTitle(a->id(), "a: {WindowTitle}");
 
-    CHECK(m.data(m.index(0), TabListModel::RawTitleRole).toString() == "a: {WindowTitle}"); // editor
-    CHECK(m.data(m.index(0), TabListModel::TitleRole).toString() == "a: vim");              // displayed
+    CHECK(roleAt(m, 0, TabListModel::Roles::RawTitleRole).toString() == "a: {WindowTitle}"); // editor
+    CHECK(roleAt(m, 0, TabListModel::Roles::TitleRole).toString() == "a: vim");              // displayed
 }
 
 TEST_CASE("TabListModel: a plain rename round-trips verbatim in both roles",
@@ -705,8 +736,8 @@ TEST_CASE("TabListModel: a plain rename round-trips verbatim in both roles",
     m.setSessionTitle(a->activePane()->session(), "vim");
     m.model().setTabTitle(a->id(), "deploy");
 
-    CHECK(m.data(m.index(0), TabListModel::RawTitleRole).toString() == "deploy");
-    CHECK(m.data(m.index(0), TabListModel::TitleRole).toString() == "deploy");
+    CHECK(roleAt(m, 0, TabListModel::Roles::RawTitleRole).toString() == "deploy");
+    CHECK(roleAt(m, 0, TabListModel::Roles::TitleRole).toString() == "deploy");
 }
 
 TEST_CASE("TabListModel: a never-renamed tab has an empty raw title", "[contour][gui][model][tablabel]")
@@ -720,8 +751,8 @@ TEST_CASE("TabListModel: a never-renamed tab has an empty raw title", "[contour]
     auto* a = m.model().createTab(m.window().id());
     m.setSessionTitle(a->activePane()->session(), "vim");
 
-    CHECK(m.data(m.index(0), TabListModel::RawTitleRole).toString().isEmpty());
-    CHECK(m.data(m.index(0), TabListModel::TitleRole).toString() == "vim"); // label still resolves
+    CHECK(roleAt(m, 0, TabListModel::Roles::RawTitleRole).toString().isEmpty());
+    CHECK(roleAt(m, 0, TabListModel::Roles::TitleRole).toString() == "vim"); // label still resolves
 }
 
 TEST_CASE("TabListModel: resetting a tab title clears the raw role and restores the template",
@@ -734,11 +765,11 @@ TEST_CASE("TabListModel: resetting a tab title clears the raw role and restores 
     auto* a = m.model().createTab(m.window().id());
     m.setSessionTitle(a->activePane()->session(), "vim");
     m.model().setTabTitle(a->id(), "renamed");
-    REQUIRE(m.data(m.index(0), TabListModel::RawTitleRole).toString() == "renamed");
+    REQUIRE(roleAt(m, 0, TabListModel::Roles::RawTitleRole).toString() == "renamed");
 
     m.model().resetTabTitle(a->id());
-    CHECK(m.data(m.index(0), TabListModel::RawTitleRole).toString().isEmpty());
-    CHECK(m.data(m.index(0), TabListModel::TitleRole).toString() == "1: vim");
+    CHECK(roleAt(m, 0, TabListModel::Roles::RawTitleRole).toString().isEmpty());
+    CHECK(roleAt(m, 0, TabListModel::Roles::TitleRole).toString() == "1: vim");
 }
 
 TEST_CASE("TabListModel: setting and clearing a title emits dataChanged covering RawTitleRole",
@@ -752,7 +783,7 @@ TEST_CASE("TabListModel: setting and clearing a title emits dataChanged covering
     auto* a = m.model().createTab(m.window().id());
     m.setSessionTitle(a->activePane()->session(), "vim");
 
-    auto const rawRole = static_cast<int>(TabListModel::RawTitleRole);
+    auto const rawRole = static_cast<int>(TabListModel::Roles::RawTitleRole);
     auto coversRawTitleForRow0 = [&](QSignalSpy const& spy) {
         return std::ranges::any_of(spy, [&](QList<QVariant> const& args) {
             auto const top = args.at(0).value<QModelIndex>().row();
@@ -791,12 +822,12 @@ TEST_CASE("TabListModel: a templated rename's raw role survives a positional ren
     auto* b = m.model().createTab(m.window().id());
     m.setSessionTitle(b->activePane()->session(), "bash");
     m.model().setTabTitle(b->id(), "{TabPosition}: {WindowTitle}");
-    REQUIRE(m.data(m.index(1), TabListModel::TitleRole).toString() == "2: bash");
+    REQUIRE(roleAt(m, 1, TabListModel::Roles::TitleRole).toString() == "2: bash");
 
     m.model().closeTab(m.window().id(), a->id()); // b moves from row 1 to row 0
 
-    CHECK(m.data(m.index(0), TabListModel::RawTitleRole).toString() == "{TabPosition}: {WindowTitle}");
-    CHECK(m.data(m.index(0), TabListModel::TitleRole).toString() == "1: bash"); // renumbered
+    CHECK(roleAt(m, 0, TabListModel::Roles::RawTitleRole).toString() == "{TabPosition}: {WindowTitle}");
+    CHECK(roleAt(m, 0, TabListModel::Roles::TitleRole).toString() == "1: bash"); // renumbered
 }
 
 TEST_CASE("TabListModel: a tab rename republishes the indicator status line",

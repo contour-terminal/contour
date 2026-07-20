@@ -1204,7 +1204,8 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
                        pixelCount);
             return nullopt;
         }
-        if (!SoftRequire(0 < pixelCount && static_cast<size_t>(pixelCount) <= glyph.bitmap.size()))
+        if (!SoftRequire(0 < pixelCount)
+            || !SoftRequire(static_cast<size_t>(pixelCount) <= glyph.bitmap.size()))
             return nullopt;
         rasterizerLog()("Cropping {} underflowing bitmap rows.", rowCount);
         glyph.bitmapSize.height += vtbackend::Height::cast_from(yMin);

@@ -16,6 +16,8 @@
 #include <yaml-cpp/emitter.h>
 
 #include <QtCore/QFile>
+#include <QtCore/QString>
+#include <QtCore/QtGlobal>
 
 #include <algorithm>
 #include <array>
@@ -297,8 +299,11 @@ namespace
 
         locations.emplace_back(Process::homeDirectory() / ".terminfo");
 
-        if (auto const* value = getenv("TERMINFO_DIRS"); value && *value)
-            for (auto const dir: crispy::split(string_view(value), ':'))
+        // qEnvironmentVariable() rather than getenv(): the latter is not thread safe, and this runs
+        // on config (re)load while the PTY threads are live.
+        if (auto const terminfoDirs = qEnvironmentVariable("TERMINFO_DIRS").toStdString();
+            !terminfoDirs.empty())
+            for (auto const dir: crispy::split(string_view(terminfoDirs), ':'))
                 locations.emplace_back(string(dir));
 
         locations.emplace_back("/usr/share/terminfo");
@@ -347,8 +352,8 @@ namespace
 fs::path configHome(string const& programName)
 {
 #if defined(__unix__) || defined(__APPLE__)
-    if (auto const* value = getenv("XDG_CONFIG_HOME"); value && *value)
-        return fs::path { value } / programName;
+    if (auto const value = qEnvironmentVariable("XDG_CONFIG_HOME"); !value.isEmpty())
+        return fs::path { value.toStdString() } / programName;
     else
         return Process::homeDirectory() / ".config" / programName;
 #endif
@@ -671,8 +676,9 @@ YAMLConfigReader::YAMLConfigReader(std::string const& filename,
     if (!variableReplacer)
     {
         variableReplacer = [&log = logger](std::string_view name) -> std::string {
-            if (auto const* value = std::getenv(std::string(name).c_str()))
-                return value;
+            auto const key = std::string(name);
+            if (qEnvironmentVariableIsSet(key.c_str()))
+                return qEnvironmentVariable(key.c_str()).toStdString();
             log()("Undefined environment variable: ${{{}}}", name);
             return {};
         };
@@ -709,7 +715,7 @@ std::filesystem::path YAMLConfigReader::resolvedPath(std::string const& input) c
 // NOLINTBEGIN(readability-convert-member-functions-to-static)
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     std::filesystem::path& where)
+                                     std::filesystem::path& where) const
 {
     auto const child = node[entry];
     if (child)
@@ -1506,7 +1512,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     vtpty::Process::ExecInfo& where)
+                                     vtpty::Process::ExecInfo& where) const
 {
     if (auto const child = node[entry])
     {
@@ -3260,7 +3266,7 @@ static std::string createForGlobal(Config const& c)
 
     auto const processConfigEntry =
         [&]<typename T, documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
-            auto name,
+            auto const& name,
             contour::config::ConfigEntry<
                 T,
                 contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& v) {
@@ -3269,7 +3275,7 @@ static std::string createForGlobal(Config const& c)
 
     auto const processConfigEntryWithEscape =
         [&]<documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
-            auto name,
+            auto const& name,
             contour::config::ConfigEntry<
                 std::string,
                 contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& v) {
@@ -3280,21 +3286,21 @@ static std::string createForGlobal(Config const& c)
         processConfigEntry,
         processConfigEntryWithEscape,
         // Ignored entries
-        [&]([[maybe_unused]] auto name,
+        [&]([[maybe_unused]] auto const& name,
             [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, vtbackend::ColorPalette>,
                                          documentation::ColorSchemes> const& v) {},
-        [&]([[maybe_unused]] auto name,
+        [&]([[maybe_unused]] auto const& name,
             [[maybe_unused]] ConfigEntry<std::map<vtbackend::DECMode, bool>,
                                          documentation::FrozenDecMode> const& v) {},
-        [&]([[maybe_unused]] auto name,
+        [&]([[maybe_unused]] auto const& name,
             [[maybe_unused]] ConfigEntry<InputMappings, documentation::InputMappings> const& v) {},
-        [&]([[maybe_unused]] auto name,
+        [&]([[maybe_unused]] auto const& name,
             [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, TerminalProfile>,
                                          documentation::Profiles> const& v) {},
-        [&]([[maybe_unused]] auto name,
+        [&]([[maybe_unused]] auto const& name,
             [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, config::Layout>,
                                          documentation::Layouts> const& v) {},
-        [&]([[maybe_unused]] auto name, [[maybe_unused]] auto const& v) {},
+        [&]([[maybe_unused]] auto const& name, [[maybe_unused]] auto const& v) {},
     };
 
     Reflection::CallOnMembers(c, completeOverload);
@@ -3315,7 +3321,7 @@ static void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile co
 {
     auto const processConfigEntry =
         [&]<typename T, documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
-            auto name,
+            auto const& name,
             contour::config::ConfigEntry<
                 T,
                 contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& v) {
@@ -3326,7 +3332,7 @@ static void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile co
     // we add this lambda to handle it in overload set for now
     auto const processConfigEntryWithExecInfo =
         [&]<documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
-            auto name,
+            auto const& name,
             contour::config::ConfigEntry<
                 vtpty::Process::ExecInfo,
                 contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& vEntry) {
@@ -3347,7 +3353,7 @@ static void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile co
     auto completeOverload = crispy::overloaded {
         processConfigEntryWithExecInfo,
         processConfigEntry,
-        [&]([[maybe_unused]] auto name, [[maybe_unused]] auto const& v) {},
+        [&]([[maybe_unused]] auto const& name, [[maybe_unused]] auto const& v) {},
     };
 
     Reflection::CallOnMembers(profile, completeOverload);

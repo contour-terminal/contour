@@ -969,7 +969,7 @@ bool InputGenerator::generateWin32KeyInput(uint32_t virtualKeyCode,
 
 void InputGenerator::reset()
 {
-    _keyboardInputGenerator.reset();
+    _keyboardInputGenerator.resetProtocolStack();
     _bracketedPaste = false;
     _generateFocusEvents = false;
     _win32InputMode = false;

@@ -3,9 +3,12 @@
 #include <vtpty/Pty.h>
 #include <vtpty/UnixPty.h>
 
+#include <crispy/environment.h>
 #include <crispy/overloaded.h>
+#include <crispy/user_info.h>
 #include <crispy/utils.h>
 
+#include <array>
 #include <cassert>
 #include <cerrno>
 #include <cstddef>
@@ -14,8 +17,12 @@
 #include <filesystem>
 #include <format>
 #include <mutex>
+#include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <system_error>
+#include <type_traits>
 
 #ifndef __FreeBSD__
     #include <utmp.h>
@@ -35,8 +42,14 @@
 
 #include <csignal>
 
-#include <pwd.h>
 #include <unistd.h>
+
+// A shared library on macOS cannot link against `environ` directly; everywhere else <unistd.h>
+// already declares it.
+#ifdef __APPLE__
+    #include <crt_externs.h>
+    #define environ (*_NSGetEnviron())
+#endif
 
 using namespace std;
 using namespace std::string_view_literals;
@@ -55,7 +68,77 @@ namespace
 
     string getLastErrorAsString()
     {
-        return strerror(errno);
+        return std::system_category().message(errno);
+    }
+
+    // {{{ async-signal-safe helpers, for use between fork() and exec()
+    //
+    // Everything in this block is called from the forked child before it has exec'd. Only
+    // async-signal-safe operations are permitted there: the child shares the parent's memory
+    // image, and any lock (notably the malloc arena) that another parent thread happened to hold
+    // at the moment of fork() is held forever in the child. So no printf, no strerror, no
+    // setenv, and no allocation.
+
+    /// Normalises the two incompatible strerror_r() flavours to one shape.
+    ///
+    /// @param result What strerror_r() answered: a message pointer (GNU) or a status code (XSI).
+    /// @param buffer The buffer strerror_r() was given.
+    /// @return The message.
+    template <typename Result>
+    char const* strerrorResult(Result result, char* buffer) noexcept
+    {
+        if constexpr (std::is_pointer_v<Result>)
+            return result; // GNU: answers a pointer, which may or may not be `buffer`.
+        else
+            return result == 0 ? buffer : "unknown error"; // XSI: fills `buffer`.
+    }
+
+    /// Describes an errno value without allocating, unlike strerror() and std::system_category().
+    ///
+    /// @param errorCode errno value to describe.
+    /// @param buffer Scratch space for the message; must outlive the returned pointer.
+    /// @return Human-readable description of @p errorCode.
+    [[nodiscard]] char const* errnoText(int errorCode, std::span<char> buffer) noexcept
+    {
+        return strerrorResult(::strerror_r(errorCode, buffer.data(), buffer.size()), buffer.data());
+    }
+
+    /// Writes @p text to @p fd in full, retrying on short writes and EINTR.
+    ///
+    /// @param fd File descriptor to write to.
+    /// @param text Bytes to write.
+    void writeAll(int fd, string_view text) noexcept
+    {
+        while (!text.empty())
+        {
+            auto const written = ::write(fd, text.data(), text.size());
+            if (written > 0)
+                text.remove_prefix(static_cast<size_t>(written));
+            else if (errno != EINTR)
+                break;
+        }
+    }
+    // }}}
+
+    /// Builds the child's environment as "NAME=VALUE" entries: the current environment, with
+    /// @p overrides replacing same-named entries.
+    ///
+    /// @param overrides Variables to add to, or replace in, the inherited environment.
+    /// @return The entries, in no particular order.
+    [[nodiscard]] vector<string> createEnvironmentBlock(Process::Environment const& overrides)
+    {
+        auto entries = vector<string> {};
+        for (char** entry = environ; entry != nullptr && *entry != nullptr; ++entry)
+        {
+            auto const line = string_view { *entry };
+            auto const separator = line.find('=');
+            auto const name = separator != string_view::npos ? line.substr(0, separator) : line;
+            if (!overrides.contains(string { name }))
+                entries.emplace_back(line);
+        }
+        for (auto const& [name, value]: overrides)
+            entries.emplace_back(std::format("{}={}", name, value));
+        return entries;
     }
 
     [[nodiscard]] char** createArgv(string const& arg0, vector<string> const& args, size_t startIndex = 0)
@@ -151,13 +234,41 @@ void Process::start()
 {
     _d->pty->start();
 
-    _d->pid = fork();
-
     UnixPipe* stdoutFastPipe = [this]() -> UnixPipe* {
         if (auto* p = dynamic_cast<UnixPty*>(_d->pty.get()))
             return &p->stdoutFastPipe();
         return nullptr;
     }();
+
+    // When escaping the sandbox, flatpak-spawn is handed the variables as --env= arguments and the
+    // child keeps our environment untouched.
+    auto const passesOwnEnvironment = !isFlatpak() || !_d->escapeSandbox;
+
+    // The environment is assembled here, before the fork, so that the child can install it with a
+    // single pointer store: setenv() after fork() is neither async-signal-safe nor thread-safe.
+    auto childEnvironment = [stdoutFastPipe, passesOwnEnvironment, this]() -> vector<string> {
+        if (!passesOwnEnvironment)
+            return {};
+
+        auto overrides = Environment {};
+        if (isFlatpak())
+            overrides["TERMINFO"] = "/app/share/terminfo";
+        for (auto const& [name, value]: _d->env)
+            overrides[name] = value;
+        if (stdoutFastPipe)
+            overrides[string { StdoutFastPipeEnvironmentName }] = string { StdoutFastPipeFdStr };
+        return createEnvironmentBlock(overrides);
+    }();
+
+    // `environ` layout: pointers to each entry, terminated by a null pointer. Both vectors outlive
+    // the child's exec(), and the parent destroys them on the way out of this function.
+    auto childEnvp = vector<char*> {};
+    childEnvp.reserve(childEnvironment.size() + 1);
+    for (auto& entry: childEnvironment)
+        childEnvp.push_back(entry.data());
+    childEnvp.push_back(nullptr);
+
+    _d->pid = fork();
 
     switch (_d->pid)
     {
@@ -173,22 +284,20 @@ void Process::start()
             (void) _d->pty->slave().login();
 
             auto const& cwd = _d->cwd.generic_string();
-            if (!isFlatpak() || !_d->escapeSandbox)
+            if (passesOwnEnvironment)
             {
                 if (!_d->cwd.empty() && chdir(cwd.c_str()) != 0)
                 {
-                    printf("Failed to chdir to \"%s\". %s\n", cwd.c_str(), strerror(errno));
-                    exit(EXIT_FAILURE);
+                    auto errorTextBuffer = array<char, 256> {};
+                    writeAll(STDOUT_FILENO, "Failed to chdir to \"");
+                    writeAll(STDOUT_FILENO, cwd);
+                    writeAll(STDOUT_FILENO, "\". ");
+                    writeAll(STDOUT_FILENO, errnoText(errno, errorTextBuffer));
+                    writeAll(STDOUT_FILENO, "\n");
+                    ::_exit(EXIT_FAILURE);
                 }
 
-                if (isFlatpak() && !_d->escapeSandbox)
-                    setenv("TERMINFO", "/app/share/terminfo", true);
-
-                for (auto&& [name, value]: _d->env)
-                    setenv(name.c_str(), value.c_str(), true);
-
-                if (stdoutFastPipe)
-                    setenv(StdoutFastPipeEnvironmentName.data(), StdoutFastPipeFdStr.data(), true);
+                environ = childEnvp.data();
             }
 
             char* const* argv = [stdoutFastPipe, this]() -> char** {
@@ -244,11 +353,11 @@ void Process::start()
 
             // Fallback: Try login shell.
             auto theLoginShell = loginShell(_d->escapeSandbox);
-            fprintf(stdout,
-                    "\r\033[31;1mFailed to spawn %s\033[m\r\nTrying login shell: %s\n",
-                    argv[0],
-                    crispy::joinHumanReadableQuoted(theLoginShell, ' ').c_str());
-            fflush(stdout);
+            writeAll(STDOUT_FILENO, "\r\033[31;1mFailed to spawn ");
+            writeAll(STDOUT_FILENO, argv[0]);
+            writeAll(STDOUT_FILENO, "\033[m\r\nTrying login shell: ");
+            writeAll(STDOUT_FILENO, crispy::joinHumanReadableQuoted(theLoginShell, ' '));
+            writeAll(STDOUT_FILENO, "\n");
             if (!theLoginShell.empty())
             {
                 delete[] argv;
@@ -257,8 +366,10 @@ void Process::start()
             }
 
             // Bad luck.
-            fprintf(stdout, "\r\nOut of luck. %s\r\n\n", strerror(errno));
-            fflush(stdout);
+            auto errorTextBuffer = array<char, 256> {};
+            writeAll(STDOUT_FILENO, "\r\nOut of luck. ");
+            writeAll(STDOUT_FILENO, errnoText(errno, errorTextBuffer));
+            writeAll(STDOUT_FILENO, "\r\n\n");
             ::_exit(EXIT_FAILURE);
             break;
         }
@@ -309,7 +420,7 @@ optional<Process::ExitStatus> Process::Private::checkStatus(bool waitForExit) co
         auto const _ = lock_guard { exitStatusMutex };
         if (exitStatus.has_value())
             return exitStatus;
-        errorLog()("waitpid() failed: {}", strerror(waitPidErrorCode));
+        errorLog()("waitpid() failed: {}", std::system_category().message(waitPidErrorCode));
         return std::nullopt;
     }
     else if (rv == 0 && !waitForExit)
@@ -346,16 +457,16 @@ Process::ExitStatus Process::wait()
 
 vector<string> Process::loginShell(bool escapeSandbox)
 {
-    if (passwd const* pw = getpwuid(getuid()); pw != nullptr)
+    if (auto const pw = crispy::currentUserPasswordEntry(); pw.has_value())
     {
 #ifdef __APPLE__
         crispy::ignore_unused(escapeSandbox);
-        return { pw->pw_shell };
+        return { pw->shell };
 #else
         if (isFlatpak() && escapeSandbox)
         {
             char buf[1024];
-            auto const cmd = std::format("flatpak-spawn --host getent passwd {}", pw->pw_name);
+            auto const cmd = std::format("flatpak-spawn --host getent passwd {}", pw->name);
             FILE* fp = popen(cmd.c_str(), "r");
             auto fpCloser = crispy::finally { [fp]() { pclose(fp); } };
             size_t const nread = fread(buf, sizeof(char), sizeof(buf) / sizeof(char), fp);
@@ -368,7 +479,7 @@ vector<string> Process::loginShell(bool escapeSandbox)
             }
         }
 
-        return { pw->pw_shell };
+        return { pw->shell };
 #endif
     }
     else
@@ -377,23 +488,23 @@ vector<string> Process::loginShell(bool escapeSandbox)
 
 std::string Process::userName()
 {
-    if (passwd const* pw = getpwuid(getuid()); pw != nullptr)
-        return pw->pw_name;
+    if (auto const pw = crispy::currentUserPasswordEntry(); pw.has_value() && !pw->name.empty())
+        return pw->name;
 
-    if (char const* user = getenv("USER"); user != nullptr)
-        return user;
+    if (auto const user = crispy::environment::get("USER"); user.has_value())
+        return std::string { *user };
 
     return "unknown";
 }
 
 fs::path Process::homeDirectory()
 {
-    if (auto const* home = getenv("HOME"); home != nullptr)
-        return fs::path(home);
-    else if (passwd const* pw = getpwuid(getuid()); pw != nullptr)
-        return fs::path(pw->pw_dir);
+    if (auto const home = crispy::environment::get("HOME"); home.has_value())
+        return { *home };
+    else if (auto const pw = crispy::currentUserPasswordEntry(); pw.has_value() && !pw->homeDirectory.empty())
+        return { pw->homeDirectory };
     else
-        return fs::path("/");
+        return { "/" };
 }
 
 string Process::workingDirectory() const

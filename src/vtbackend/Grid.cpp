@@ -49,7 +49,7 @@ namespace detail
     /// @returns number of inserted lines.
     static LineCount addNewWrappedLines(Lines& targetLines,
                                         ColumnCount newColumnCount,
-                                        LineSoA&& logicalLineBuffer,
+                                        LineSoA const& logicalLineBuffer,
                                         size_t usedColumns,
                                         LineFlags baseFlags,
                                         ColumnOffset commandEndOffset,
@@ -702,7 +702,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                 {
                     detail::addNewWrappedLines(grownLines,
                                                newColumnCount,
-                                               std::move(logicalLineBuffer),
+                                               logicalLineBuffer,
                                                logicalLineUsed,
                                                logicalLineFlags,
                                                logicalLineCommandEndOffset,
@@ -825,7 +825,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                         // continuation: no semantic marks, and therefore no command-end offset either.
                         auto const numLinesInserted = detail::addNewWrappedLines(shrinkedLines,
                                                                                  newColumnCount,
-                                                                                 std::move(wrappedColumns),
+                                                                                 wrappedColumns,
                                                                                  wrappedUsed,
                                                                                  previousFlags,
                                                                                  ColumnOffset(0),
@@ -859,7 +859,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
             {
                 numLinesWritten += detail::addNewWrappedLines(shrinkedLines,
                                                               newColumnCount,
-                                                              std::move(wrappedColumns),
+                                                              wrappedColumns,
                                                               wrappedUsed,
                                                               previousFlags,
                                                               ColumnOffset(0),

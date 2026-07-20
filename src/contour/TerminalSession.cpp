@@ -106,7 +106,7 @@ namespace
         return nullptr;
     }
 
-    string normalize_crlf(QString&& text)
+    string normalize_crlf(QString text)
     {
 #ifndef _WIN32
         return text.replace("\r\n", "\n").replace("\r", "\n").toUtf8().toStdString();
@@ -250,6 +250,7 @@ namespace
       public:
         ExitWatcherThread(TerminalSession& session): _session { session } {}
 
+      protected:
         void run() override
         {
             sessionLog()("ExitWatcherThread: Started.");
@@ -780,7 +781,7 @@ void TerminalSession::setPointerShape(std::string_view cssName)
     // attachDisplay() applies whatever is remembered here once a display arrives. Returning early on
     // a null display -- as the reset path above is careful not to do -- would drop the shape in
     // precisely the case this remembering exists to serve.
-    _applicationPointerShape = *shape;
+    _applicationPointerShape = shape;
 
     // The event arrives on the parser thread; the cursor belongs to the GUI thread.
     if (_display)
@@ -2439,9 +2440,9 @@ bool TerminalSession::operator()(actions::WriteScreen const& event)
     return true;
 }
 
-bool TerminalSession::operator()(actions::CreateNewTab action)
+bool TerminalSession::operator()(actions::CreateNewTab const& action)
 {
-    _manager->createNewTab(this, std::move(action.profileName));
+    _manager->createNewTab(this, action.profileName);
     return true;
 }
 
@@ -3193,7 +3194,9 @@ void TerminalSession::followHyperlink(vtbackend::HyperlinkInfo const& hyperlink)
 {
     auto const fileInfo = QFileInfo(QString::fromStdString(string(hyperlink.path())));
     auto const isLocal = hyperlink.isLocal() && hyperlink.host() == QHostInfo::localHostName().toStdString();
-    auto const* const editorEnv = getenv("EDITOR");
+    // qEnvironmentVariable() rather than getenv(): this runs on the GUI thread while the PTY and
+    // render threads are live, and getenv() is not thread safe.
+    auto const editorEnv = qEnvironmentVariable("EDITOR");
 
     if (isLocal && fileInfo.isFile() && fileInfo.isExecutable())
     {
@@ -3203,12 +3206,12 @@ void TerminalSession::followHyperlink(vtbackend::HyperlinkInfo const& hyperlink)
         args.append(QString::fromUtf8(hyperlink.path().data(), static_cast<int>(hyperlink.path().size())));
         _app.externalLauncher().execute(QString::fromStdString(_app.programPath()), args);
     }
-    else if (isLocal && fileInfo.isFile() && editorEnv && *editorEnv)
+    else if (isLocal && fileInfo.isFile() && !editorEnv.isEmpty())
     {
         QStringList args;
         args.append("config");
         args.append(QString::fromStdString(_config.configFile.string()));
-        args.append(QString::fromStdString(editorEnv));
+        args.append(editorEnv);
         args.append(QString::fromUtf8(hyperlink.path().data(), static_cast<int>(hyperlink.path().size())));
         _app.externalLauncher().execute(QString::fromStdString(_app.programPath()), args);
     }

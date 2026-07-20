@@ -48,7 +48,8 @@ std::optional<ReGISGlyphBitmap> EmbeddedReGISTextRasterizer::rasterize(char32_t 
         {
             auto const sourceX = (((tx + 0.5) / width) * GlyphBaseSize) - 0.5;
             auto const coverage = sampleGlyph(glyph, sourceX, sourceY);
-            bitmap.coverage[static_cast<size_t>((ty * width) + tx)] =
+            bitmap
+                .coverage[(static_cast<size_t>(ty) * static_cast<size_t>(width)) + static_cast<size_t>(tx)] =
                 static_cast<uint8_t>(std::lround(std::clamp(coverage, 0.0, 1.0) * 255.0));
         }
     }

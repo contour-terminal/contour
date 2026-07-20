@@ -42,7 +42,12 @@ class MockExecutor: public HintModeHandler::Executor
     void requestRedraw() override { ++redrawCount; }
 };
 
-auto const allPatterns = HintModeHandler::builtinPatterns();
+/// The full set of built-in patterns, materialized on first use.
+auto const& allPatterns()
+{
+    static auto const patterns = HintModeHandler::builtinPatterns();
+    return patterns;
+}
 
 /// Returns only the URL pattern for precise count-based test assertions.
 auto urlOnlyPatterns() -> std::vector<HintPattern>
@@ -209,7 +214,7 @@ TEST_CASE("HintModeHandler.FilePathPattern", "[hintmode]")
 
     auto lines = std::vector<std::string> { "edit /home/user/file.txt and ./local/path" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(50) }, allPatterns, HintAction::Open);
+    handler.activate(lines, PageSize { LineCount(1), ColumnCount(50) }, allPatterns(), HintAction::Open);
 
     REQUIRE(handler.isActive());
     // Should find file paths.
@@ -233,7 +238,7 @@ TEST_CASE("HintModeHandler.GitHashPattern", "[hintmode]")
 
     auto lines = std::vector<std::string> { "commit a1b2c3d some message" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(40) }, allPatterns, HintAction::Copy);
+    handler.activate(lines, PageSize { LineCount(1), ColumnCount(40) }, allPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     auto foundHash = false;
@@ -315,7 +320,7 @@ TEST_CASE("HintModeHandler.OverlappingPatterns", "[hintmode]")
     // The overlap removal should keep only the longer URL match.
     auto lines = std::vector<std::string> { "visit https://example.com/path for info" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(50) }, allPatterns, HintAction::Copy);
+    handler.activate(lines, PageSize { LineCount(1), ColumnCount(50) }, allPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
 

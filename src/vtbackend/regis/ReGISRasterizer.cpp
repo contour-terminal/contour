@@ -320,7 +320,8 @@ void ReGISRasterizer::blendCoverage(Pen const& pen,
     for (auto ty = 0; ty < h; ++ty)
         for (auto tx = 0; tx < w; ++tx)
         {
-            auto const cov = coverage[static_cast<size_t>((ty * w) + tx)];
+            auto const cov =
+                coverage[(static_cast<size_t>(ty) * static_cast<size_t>(w)) + static_cast<size_t>(tx)];
             if (cov != 0)
                 compositePixel(origin.x + tx, origin.y + ty, pen.color, pen.mode, cov);
         }

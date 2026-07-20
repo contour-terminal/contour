@@ -358,7 +358,7 @@ class ImagePool
 
     // named image access
     //
-    void link(std::string name, std::shared_ptr<Image const> imageRef);
+    void link(std::string const& name, std::shared_ptr<Image const> imageRef);
     [[nodiscard]] std::shared_ptr<Image const> findImageByName(std::string const& name) const noexcept;
     void unlink(std::string const& name);
 

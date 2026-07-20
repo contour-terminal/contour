@@ -520,7 +520,7 @@ namespace crispy::cli
 
 namespace // {{{ helpers
 {
-    string spaces(size_t count)
+    auto spaces(size_t count)
     {
         return string(count, ' ');
     }

@@ -58,9 +58,8 @@ class StubContourTerminal: public QQuickItem
     }
     [[nodiscard]] double fontSize() const { return 12.0; }
   signals:
-    void sessionChanged(QObject* session);
-    void showNotification(QString const& title, QString const& body);
-    void opacityChanged();
+    void sessionChanged(QObject* /*session*/);
+    void showNotification(QString const& /*title*/, QString const& /*body*/);
     void terminated();
 
   private:
@@ -99,15 +98,16 @@ class MockMainController: public QAbstractListModel
                    titleBarContextMenuModelChanged)
 
   public:
-    enum Roles : std::uint16_t
+    enum class Roles : std::uint16_t
     {
+        DisplayRole = Qt::DisplayRole,
         TitleRole = Qt::UserRole + 1,
-        ColorRole,
-        IsActiveRole,
-        PaneCountRole,
-        SessionIdRole,
-        RawTitleRole,
-        ZoomedRole,
+        ColorRole = Qt::UserRole + 2,
+        IsActiveRole = Qt::UserRole + 3,
+        PaneCountRole = Qt::UserRole + 4,
+        SessionIdRole = Qt::UserRole + 5,
+        RawTitleRole = Qt::UserRole + 6,
+        ZoomedRole = Qt::UserRole + 7,
     };
 
     [[nodiscard]] int activeTabIndex() const noexcept { return 0; }
@@ -215,24 +215,29 @@ class MockMainController: public QAbstractListModel
     {
         if (index.row() < 0 || index.row() >= 2)
             return {};
-        switch (role)
+        switch (static_cast<Roles>(role))
         {
-            case TitleRole: return QStringLiteral("Tab %1").arg(index.row() + 1);
-            case RawTitleRole: return QString();
-            case ColorRole: return QColor(Qt::transparent);
-            case IsActiveRole: return index.row() == 0;
-            case PaneCountRole: return 1;
-            case SessionIdRole: return index.row();
-            case ZoomedRole: return false;
+            case Roles::TitleRole: return QStringLiteral("Tab %1").arg(index.row() + 1);
+            case Roles::RawTitleRole: return QString();
+            case Roles::ColorRole: return QColor(Qt::transparent);
+            case Roles::IsActiveRole: return index.row() == 0;
+            case Roles::PaneCountRole: return 1;
+            case Roles::SessionIdRole: return index.row();
+            case Roles::ZoomedRole: return false;
             default: return {};
         }
     }
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override
     {
         return {
-            { Qt::DisplayRole, "display" }, { TitleRole, "title" },         { ColorRole, "accentColor" },
-            { IsActiveRole, "isActive" },   { PaneCountRole, "paneCount" }, { SessionIdRole, "sessionId" },
-            { RawTitleRole, "rawTitle" },   { ZoomedRole, "zoomed" },
+            { static_cast<int>(Roles::DisplayRole), "display" },
+            { static_cast<int>(Roles::TitleRole), "title" },
+            { static_cast<int>(Roles::ColorRole), "accentColor" },
+            { static_cast<int>(Roles::IsActiveRole), "isActive" },
+            { static_cast<int>(Roles::PaneCountRole), "paneCount" },
+            { static_cast<int>(Roles::SessionIdRole), "sessionId" },
+            { static_cast<int>(Roles::RawTitleRole), "rawTitle" },
+            { static_cast<int>(Roles::ZoomedRole), "zoomed" },
         };
     }
     // }}}
@@ -251,9 +256,9 @@ class MockMainController: public QAbstractListModel
     void tabBarPositionChanged();
     void tabBarShouldShowChanged();
     void chromeHeightChanged();
-    void tabTitleEditRequested(int index);
+    void tabTitleEditRequested(int /*index*/);
     // Matches TabItem's Connections handler; a missing signal here is a QML warning, not a silent no-op.
-    void tabColorPickRequested(int index);
+    void tabColorPickRequested(int /*index*/);
     // Matches main.qml's Connections handler for the save-layout prompt; a missing signal here is a QML
     // warning, and the run-wide gate turns that into a failure of the whole suite.
     void saveLayoutRequested();

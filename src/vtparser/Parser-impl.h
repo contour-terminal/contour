@@ -12,15 +12,13 @@
 namespace vtparser
 {
 
-namespace
+// clang-format off
+/// Spells a byte constant in the parser tables below, e.g. @c 0x1B_b.
+constexpr uint8_t operator""_b(unsigned long long value)
 {
-    // clang-format off
-    constexpr uint8_t operator""_b(unsigned long long value)
-    {
-        return static_cast<uint8_t>(value);
-    }
-    // clang-format on
-} // namespace
+    return static_cast<uint8_t>(value);
+}
+// clang-format on
 
 struct ParserTable
 {
@@ -404,25 +402,21 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char cons
     }
 }
 
-namespace
+/// True for the states that collect a string body (OSC/APC/PM/SOS/DCS), where an 8-bit ST must be
+/// distinguished from a UTF-8 continuation byte.
+constexpr bool isStringCollectingState(State s) noexcept
 {
-    /// True for the states that collect a string body (OSC/APC/PM/SOS/DCS), where an 8-bit ST must be
-    /// distinguished from a UTF-8 continuation byte.
-    constexpr bool isStringCollectingState(State s) noexcept
+    switch (s)
     {
-        switch (s)
-        {
-            case State::OSC_String:
-            case State::APC_String:
-            case State::PM_String:
-            case State::IgnoreUntilST:
-            case State::DCS_PassThrough:
-            case State::DCS_Ignore: return true;
-            default: return false;
-        }
+        case State::OSC_String:
+        case State::APC_String:
+        case State::PM_String:
+        case State::IgnoreUntilST:
+        case State::DCS_PassThrough:
+        case State::DCS_Ignore: return true;
+        default: return false;
     }
-
-} // namespace
+}
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
 auto Parser<EventListener, TraceStateChanges>::parseBulkDcsPassThrough(char const* begin,

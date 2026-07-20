@@ -130,8 +130,7 @@ struct LogicalLine
         {
             for (auto line = lines.begin(); line != lines.end(); ++line)
             {
-                std::u32string_view const textOnThisLine(searchText.data(),
-                                                         lineLength - unbox<size_t>(startPosition));
+                auto const textOnThisLine = searchText.substr(0, lineLength - unbox<size_t>(startPosition));
                 // Find how much of searchText is on this line
                 auto const result = searchPartialMatch(textOnThisLine, line->get(), isCaseSensitive);
                 if (result != 0)

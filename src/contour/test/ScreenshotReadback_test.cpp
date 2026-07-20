@@ -98,11 +98,11 @@ TEST_CASE("normalizeScreenshotBuffer: shorter input zero-pads the missing rows",
     auto const out = normalizeScreenshotBuffer(full, W, H, /*flip*/ false);
     REQUIRE(out.size() == screenshotBufferSize(W, H));
     // The two supplied rows are present; the remaining two are zero-filled.
-    CHECK(out[0] == 0);                // row 0 present
-    CHECK(out[rowBytes] == 1);         // row 1 present
-    CHECK(out[rowBytes * 2] == 0);     // row 2 zero-filled
-    CHECK(out[rowBytes * 3] == 0);     // row 3 zero-filled
-    CHECK(out[rowBytes * 3 + 3] == 0); // and its alpha is zero (defensive pad, not opaque)
+    CHECK(out[0] == 0);                  // row 0 present
+    CHECK(out[rowBytes] == 1);           // row 1 present
+    CHECK(out[rowBytes * 2] == 0);       // row 2 zero-filled
+    CHECK(out[rowBytes * 3] == 0);       // row 3 zero-filled
+    CHECK(out[(rowBytes * 3) + 3] == 0); // and its alpha is zero (defensive pad, not opaque)
 }
 
 TEST_CASE("normalizeScreenshotBuffer: longer input is truncated to the expected rows", "[screenshot]")

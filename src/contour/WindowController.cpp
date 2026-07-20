@@ -227,7 +227,7 @@ std::vector<std::string> WindowController::tabTitles() const
     // label precedence (runtime rename > pane title > ...) lives in resolvedTabLabel(), and a second
     // implementation here would eventually disagree with what the user sees on the tab.
     for (auto const row: std::views::iota(0, tabCount))
-        titles.push_back(data(index(row, 0), TitleRole).toString().toStdString());
+        titles.push_back(data(index(row, 0), static_cast<int>(Roles::TitleRole)).toString().toStdString());
 
     return titles;
 }
@@ -262,9 +262,14 @@ int WindowController::rowOfTab(vtmux::TabId tab) const noexcept
 QHash<int, QByteArray> WindowController::roleNames() const
 {
     return {
-        { Qt::DisplayRole, "display" }, { TitleRole, "title" },         { ColorRole, "accentColor" },
-        { IsActiveRole, "isActive" },   { PaneCountRole, "paneCount" }, { SessionIdRole, "sessionId" },
-        { RawTitleRole, "rawTitle" },   { ZoomedRole, "zoomed" },
+        { static_cast<int>(Roles::DisplayRole), "display" },
+        { static_cast<int>(Roles::TitleRole), "title" },
+        { static_cast<int>(Roles::ColorRole), "accentColor" },
+        { static_cast<int>(Roles::IsActiveRole), "isActive" },
+        { static_cast<int>(Roles::PaneCountRole), "paneCount" },
+        { static_cast<int>(Roles::SessionIdRole), "sessionId" },
+        { static_cast<int>(Roles::RawTitleRole), "rawTitle" },
+        { static_cast<int>(Roles::ZoomedRole), "zoomed" },
     };
 }
 
@@ -277,23 +282,23 @@ QVariant WindowController::data(QModelIndex const& index, int role) const
     auto* tab = tabAtRow(row);
     auto* session = tab != nullptr ? _manager.sessionForId(tab->activePane()->session()) : nullptr;
 
-    switch (role)
+    switch (static_cast<Roles>(role))
     {
-        case Qt::DisplayRole:
-        case SessionIdRole: return session != nullptr ? QVariant(session->id()) : QVariant {};
-        case TitleRole: return resolvedTabLabel(tab, session, row);
-        case RawTitleRole:
+        case Roles::DisplayRole:
+        case Roles::SessionIdRole: return session != nullptr ? QVariant(session->id()) : QVariant {};
+        case Roles::TitleRole: return resolvedTabLabel(tab, session, row);
+        case Roles::RawTitleRole:
             return tab != nullptr ? QString::fromStdString(tab->runtimeTitle().value_or("")) : QString {};
-        case ColorRole: {
+        case Roles::ColorRole: {
             // color() resolves across the tab's color sources, so ask once.
             auto const color = tab != nullptr ? tab->color() : std::nullopt;
             return color.has_value() ? toQColor(*color) : QColor(Qt::transparent);
         }
         // No terminal tab reads as active while the settings "tab" is showing — the settings tab is the
         // active view then, so the strip must not highlight two tabs at once.
-        case IsActiveRole: return !_settingsActive && row == activeTabIndex();
-        case PaneCountRole: return tab != nullptr ? tab->paneCount() : 1;
-        case ZoomedRole: return tab != nullptr && tab->isZoomed();
+        case Roles::IsActiveRole: return !_settingsActive && row == activeTabIndex();
+        case Roles::PaneCountRole: return tab != nullptr ? tab->paneCount() : 1;
+        case Roles::ZoomedRole: return tab != nullptr && tab->isZoomed();
         default: return {};
     }
 }
@@ -352,7 +357,7 @@ void WindowController::createNewTab(QString const& profileName)
     setSettingsActive(false);
     auto profile = profileName.isEmpty() ? std::optional<std::string> { std::nullopt }
                                          : std::optional<std::string> { profileName.toStdString() };
-    _manager.createNewTab(_windowId, std::move(profile));
+    _manager.createNewTab(_windowId, profile);
 }
 
 void WindowController::activateTab(int index)
@@ -1343,22 +1348,29 @@ void WindowController::onActiveTabChanged()
     rebuildActiveTabPaneProxies();
 }
 
-void WindowController::notifyTabRowChanged(vtmux::TabId tab, QList<int> const& roles)
+void WindowController::notifyTabRowChanged(vtmux::TabId tab, QList<Roles> const& roles)
 {
-    if (auto const row = rowOfTab(tab); row >= 0)
-        emit dataChanged(index(row), index(row), roles);
+    auto const row = rowOfTab(tab);
+    if (row < 0)
+        return;
+
+    auto roleIds = QList<int> {};
+    roleIds.reserve(roles.size());
+    for (auto const role: roles)
+        roleIds.append(static_cast<int>(role));
+    emit dataChanged(index(row), index(row), roleIds);
 }
 
 void WindowController::refreshActiveTabHighlight()
 {
     if (auto const rows = rowCount(); rows > 0)
-        emit dataChanged(index(0), index(rows - 1), { IsActiveRole });
+        emit dataChanged(index(0), index(rows - 1), { static_cast<int>(Roles::IsActiveRole) });
 }
 
 void WindowController::refreshAllTabTitles()
 {
     if (auto const rows = rowCount(); rows > 0)
-        emit dataChanged(index(0), index(rows - 1), { TitleRole });
+        emit dataChanged(index(0), index(rows - 1), { static_cast<int>(Roles::TitleRole) });
 }
 
 void WindowController::updateStatusLine()

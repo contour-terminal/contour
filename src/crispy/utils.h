@@ -627,7 +627,7 @@ inline std::filesystem::path homeResolvedPath(std::string input, std::filesystem
         return homeDirectory / std::filesystem::path(subPath);
     }
 
-    return std::filesystem::path(input);
+    return { std::move(input) };
 }
 
 /// Substitutes each `${NAME}` in @p text with `replace(NAME)`.

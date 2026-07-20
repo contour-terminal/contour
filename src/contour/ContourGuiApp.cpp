@@ -293,7 +293,7 @@ QUrl ContourGuiApp::resolveResource(std::string_view path)
         return QUrl::fromLocalFile(QString::fromStdString(devPath.generic_string()));
 #endif
 
-    return QUrl("qrc:/contour/" + QString::fromLatin1(path.data(), static_cast<int>(path.size())));
+    return { "qrc:/contour/" + QString::fromLatin1(path.data(), static_cast<int>(path.size())) };
 }
 
 int ContourGuiApp::checkConfig()

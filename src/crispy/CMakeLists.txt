@@ -22,6 +22,7 @@ set(crispy_SOURCES
     base64.h
     compose.h
     defines.h
+    environment.cpp environment.h
     escape.h
     file_descriptor.h
     flags.h
@@ -31,6 +32,7 @@ set(crispy_SOURCES
     reference.h
     ring.h
     times.h
+    user_info.cpp user_info.h
     utils.cpp utils.h
 )
 

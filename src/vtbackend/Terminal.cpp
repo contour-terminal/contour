@@ -16,6 +16,7 @@
 
 #include <crispy/assert.h>
 #include <crispy/base64.h>
+#include <crispy/environment.h>
 #include <crispy/escape.h>
 #include <crispy/utils.h>
 
@@ -35,6 +36,7 @@
 #include <regex>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <variant>
 
@@ -369,7 +371,7 @@ bool Terminal::processInputOnce()
 
     if (!ptyReadResult)
     {
-        terminalLog()("PTY read failed. {}", strerror(errno));
+        terminalLog()("PTY read failed. {}", std::system_category().message(errno));
         if (errno == EINTR || errno == EAGAIN)
             return true;
 
@@ -398,7 +400,7 @@ bool Terminal::processInputOnce()
             auto const parseGuard = ParseDepthGuard {};
             _parser.parseFragment(buf);
         }
-        _parsingBuffer.reset();
+        _parsingBuffer = nullptr;
 
         // Process any macros that were queued by DECINVM during the parse.
         processPendingMacros();
@@ -1550,7 +1552,7 @@ void Terminal::parseFragmentChunked(string_view vtStream)
         // Set parsingBuffer to ensure buffer_fragment holds the correct buffer reference.
         _parsingBuffer = _currentPtyBuffer;
         _parser.parseFragment(_currentPtyBuffer->writeAtEnd(chunk));
-        _parsingBuffer.reset();
+        _parsingBuffer = nullptr;
     }
 }
 
@@ -2507,8 +2509,7 @@ std::optional<std::string> Terminal::localPathAtMousePosition() const
     auto const lineText = currentScreen().lineTextAt(mousePosition->line, false, false);
     auto const mouseColumn = static_cast<size_t>(*mousePosition->column);
     auto const cwd = extractPathFromFileUrl(currentWorkingDirectory());
-    auto const* const homeEnv = std::getenv("HOME");
-    auto const home = std::string(homeEnv ? homeEnv : "");
+    auto const home = std::string(crispy::environment::get("HOME").value_or(""));
 
     static auto const localPathRegex = [] {
         // Matches, in order: drive-letter absolute paths (C:/foo, C:\foo) for Windows,
@@ -2577,8 +2578,7 @@ void Terminal::activateHintMode(std::vector<HintPattern> const& patterns, HintAc
     auto const cwd = extractPathFromFileUrl(cwdUrl);
     if (!cwd.empty())
     {
-        auto const* const homeEnv = std::getenv("HOME");
-        auto const home = std::string(homeEnv ? homeEnv : "");
+        auto const home = std::string(crispy::environment::get("HOME").value_or(""));
         for (auto& pattern: mutablePatterns)
         {
             if (pattern.name != "filepath")
@@ -2598,7 +2598,10 @@ void Terminal::activateHintMode(std::vector<HintPattern> const& patterns, HintAc
                     return matchStr;
                 if (matchStr.starts_with("~/"))
                     return home.empty() ? matchStr : home + matchStr.substr(1);
-                return cwd + "/" + matchStr;
+                auto resolved = cwd;
+                resolved += '/';
+                resolved += matchStr;
+                return resolved;
             };
 
             pattern.validator = [resolvePath, home](std::string const& matchStr) -> bool {
@@ -2845,9 +2848,9 @@ void Terminal::reply(string_view text)
     else
         _inputGenerator.generateRaw(text);
 
-    auto const* syncReply = getenv("CONTOUR_SYNC_PTY_OUTPUT");
+    auto const syncReply = crispy::environment::get("CONTOUR_SYNC_PTY_OUTPUT");
 
-    if (syncReply && *syncReply != '0')
+    if (syncReply && !syncReply->starts_with('0'))
         flushInput();
 }
 
@@ -3914,7 +3917,7 @@ void Terminal::processPendingMacros()
             auto const parseGuard = ParseDepthGuard {};
             _parser.parseFragment(chunk);
         }
-        _parsingBuffer.reset();
+        _parsingBuffer = nullptr;
 
         --_macroRecursionDepth;
     }
@@ -3923,7 +3926,7 @@ void Terminal::processPendingMacros()
 std::shared_ptr<RasterizedImage> Terminal::createDRCSImage(DRCSGlyph const& glyph, RGBColor foregroundColor)
 {
     // Convert monochrome bitmap to RGBA
-    auto const pixelCount = static_cast<size_t>(glyph.width * glyph.height);
+    auto const pixelCount = static_cast<size_t>(glyph.width) * static_cast<size_t>(glyph.height);
     auto rgbaData = Image::Data(pixelCount * 4, 0);
 
     for (size_t i = 0; i < pixelCount && i < glyph.bitmap.size(); ++i)
@@ -3987,7 +3990,7 @@ void Terminal::defineDRCS(int fontNumber,
         if (!glyphData.empty())
         {
             auto glyph = DRCSGlyph { .width = width, .height = height, .bitmap = {} };
-            glyph.bitmap.resize(static_cast<size_t>(width * height), 0);
+            glyph.bitmap.resize(static_cast<size_t>(width) * static_cast<size_t>(height), 0);
 
             auto row = 0;
             auto colBase = size_t { 0 };
@@ -4008,7 +4011,8 @@ void Terminal::defineDRCS(int fontNumber,
                 {
                     if ((sixel >> bit) & 1)
                     {
-                        auto const idx = static_cast<size_t>(((row + bit) * width) + col);
+                        auto const idx = (static_cast<size_t>(row + bit) * static_cast<size_t>(width))
+                                         + static_cast<size_t>(col);
                         if (idx < glyph.bitmap.size())
                             glyph.bitmap[idx] = 1;
                     }

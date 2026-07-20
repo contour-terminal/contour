@@ -973,14 +973,14 @@ input_mapping:
 
     auto const& mappings = config.inputMappings.value();
 
-    auto const hasKeyAction = [&](auto actionTag) {
+    auto const hasKeyAction = [&](auto const& actionTag) {
         return std::ranges::any_of(mappings.keyMappings, [&](auto const& m) {
-            return std::holds_alternative<decltype(actionTag)>(m.binding.at(0));
+            return std::holds_alternative<std::remove_cvref_t<decltype(actionTag)>>(m.binding.at(0));
         });
     };
-    auto const hasCharAction = [&](auto actionTag) {
+    auto const hasCharAction = [&](auto const& actionTag) {
         return std::ranges::any_of(mappings.charMappings, [&](auto const& m) {
-            return std::holds_alternative<decltype(actionTag)>(m.binding.at(0));
+            return std::holds_alternative<std::remove_cvref_t<decltype(actionTag)>>(m.binding.at(0));
         });
     };
 
@@ -2070,7 +2070,7 @@ profiles:
     auto const& features = config.experimentalFeatures.value();
     CHECK(features.count("feature_a") == 1);
     CHECK(features.count("feature_b") == 1);
-    CHECK(features.count("feature_c") == 0); // disabled entries are not inserted
+    CHECK(!features.contains("feature_c")); // disabled entries are not inserted
 }
 
 TEST_CASE("Config: image max_width/max_height and color registers load from YAML", "[config]")
@@ -2115,7 +2115,7 @@ profiles:
     CHECK(frozen.at(static_cast<vtbackend::DECMode>(25)) == true);
     CHECK(frozen.at(static_cast<vtbackend::DECMode>(2004)) == false);
     // 999999 is not a valid DEC mode: skipped, so never stored.
-    CHECK(frozen.count(static_cast<vtbackend::DECMode>(999999)) == 0);
+    CHECK(!frozen.contains(static_cast<vtbackend::DECMode>(999999)));
 }
 
 TEST_CASE("Config: input_mapping match modes parse every flag arm", "[config]")
@@ -2215,7 +2215,7 @@ TEST_CASE("Config: the command palette is bound to Ctrl+Shift+P by default", "[c
     // Ctrl+Shift+P arrives as a CHARACTER, not a named key: Qt::Key_P is not in helper.cpp's
     // KeyMappings table, so any Ctrl+printable is routed through sendCharEvent. A KeyInputMapping here
     // would therefore never match, and the chord would do nothing.
-    auto const& mappings = contour::config::defaultInputMappings;
+    auto const& mappings = contour::config::defaultInputMappings();
 
     auto const bound = std::ranges::find_if(mappings.charMappings, [](auto const& mapping) {
         return !mapping.binding.empty()
@@ -2629,9 +2629,9 @@ profiles:
     std::filesystem::remove(std::filesystem::path(dir.path().toStdString()) / "profiles" / "work.yml");
     contour::config::loadConfigFromFile(config, configPath);
 
-    CHECK(config.findProfile("work") == nullptr);    // no longer in the profiles map
-    CHECK(config.profileOrigins.count("work") == 0); // and no stale SideFile provenance left behind
-    REQUIRE(config.findProfile("main") != nullptr);  // the contour.yml profile is intact
+    CHECK(config.findProfile("work") == nullptr);   // no longer in the profiles map
+    CHECK(!config.profileOrigins.contains("work")); // and no stale SideFile provenance left behind
+    REQUIRE(config.findProfile("main") != nullptr); // the contour.yml profile is intact
     CHECK(config.profileOrigins.at("main") == contour::config::SettingsOrigin::MainConfig);
 }
 
@@ -3079,7 +3079,7 @@ TEST_CASE("Config: every built-in char binding is stored folded", "[config][inpu
     //
     // A runtime CHECK rather than a static_assert: defaultInputMappings holds std::vector and is
     // therefore not usable in a constant expression.
-    for (auto const& mapping: contour::config::defaultInputMappings.charMappings)
+    for (auto const& mapping: contour::config::defaultInputMappings().charMappings)
     {
         CAPTURE(static_cast<uint32_t>(mapping.input));
         CHECK(mapping.input == contour::config::foldedBindingCodepoint(mapping.input));
