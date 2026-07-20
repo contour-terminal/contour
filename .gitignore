@@ -51,6 +51,10 @@ sandbox/**
 # Python virtual environment
 .venv
 
+# flatpak-builder: build cache and ccache compiler shims
+.flatpak-builder
+.flatpak-builder/**
+
 # debian: dpkg-buildpackage intermediates
 debian/files
 debian/tmp/**
