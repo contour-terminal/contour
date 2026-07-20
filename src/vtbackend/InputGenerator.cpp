@@ -982,6 +982,7 @@ void InputGenerator::reset()
     _mouseProtocol = std::nullopt;
     _mouseTransport = MouseTransport::Default;
     _mouseWheelMode = MouseWheelMode::Default;
+    _passiveMouseTracking = false;
     _modifyOtherKeys = 0;
 
     // _pendingSequence = {};

@@ -371,7 +371,7 @@ bool Terminal::processInputOnce()
 
     if (!ptyReadResult)
     {
-        terminalLog()("PTY read failed. {}", std::system_category().message(errno));
+        terminalLog()("PTY read failed. {}", std::generic_category().message(errno));
         if (errno == EINTR || errno == EAGAIN)
             return true;
 
@@ -3532,6 +3532,14 @@ void Terminal::hardReset()
     _parser.setVT52Mode(false);
     setOperatingLevel(_factorySettings.terminalId);
 
+    // Clear the input generator's mirrored mode state *before* the mode register is replayed below.
+    // DECCKM, DECNKM, DECBKM, DECMode::MousePassiveTracking and friends live in the generator rather
+    // than in `_modes`, and setMode() is what pushes them across. Resetting the generator afterwards
+    // would therefore undo every mode this function is about to (re-)establish -- and for a mode listed
+    // in `frozenModes` that damage is permanent, because setMode() early-returns on a frozen mode and
+    // nothing can ever resync the two halves again.
+    _inputGenerator.reset();
+
     _modes = Modes {};
 
     // SRM, set: the terminal does *not* echo what it sends -- the host does. The mode register was just
@@ -3606,7 +3614,8 @@ void Terminal::hardReset()
 
     setStatusDisplay(_factorySettings.statusDisplayType);
 
-    _inputGenerator.reset();
+    // NB: _inputGenerator.reset() deliberately runs near the top of this function, before the mode
+    // register is replayed. @see the comment there.
     _pendingLocalEcho.clear();
 }
 

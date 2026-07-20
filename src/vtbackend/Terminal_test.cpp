@@ -551,6 +551,65 @@ TEST_CASE("Terminal.RIS", "[terminal]")
     CHECK(mc.terminal.statusDisplayType() == StatusDisplayType::None);
 }
 
+TEST_CASE("Terminal.RIS.keepsFrozenModesAppliedToInputGenerator", "[terminal]")
+{
+    using namespace vtbackend;
+
+    // DECCKM, DECNKM and DECBKM are mirrored inside the input generator rather than read back from
+    // the mode register, so hardReset() has to clear that mirror BEFORE it replays `frozenModes` --
+    // not after. Clearing it afterwards silently undoes the replay, and because setMode() early-
+    // returns on a frozen mode, nothing can ever resync the two again: the arrow keys would emit
+    // `ESC [ A` for the rest of the session while DECRQM kept reporting DECCKM as set.
+    auto mc = MockTerm { ColumnCount(20), LineCount(5) };
+    mc.terminal.settings().frozenModes[DECMode::UseApplicationCursorKeys] = true;
+
+    SECTION("a frozen DECCKM survives RIS")
+    {
+        mc.writeToScreen("\033[?1h"sv); // DECSET DECCKM -- refused, the mode is frozen on
+        mc.terminal.freezeMode(DECMode::UseApplicationCursorKeys, true);
+        REQUIRE(mc.terminal.applicationCursorKeys());
+
+        mc.writeToScreen("\033c"sv); // RIS
+
+        CHECK(mc.terminal.isModeEnabled(DECMode::UseApplicationCursorKeys));
+        CHECK(mc.terminal.applicationCursorKeys()); // the mirror must agree with the mode register
+    }
+
+    SECTION("an unfrozen DECCKM is still reset by RIS")
+    {
+        mc.terminal.settings().frozenModes.clear();
+        mc.writeToScreen("\033[?1h"sv); // DECSET DECCKM
+        REQUIRE(mc.terminal.applicationCursorKeys());
+
+        mc.writeToScreen("\033c"sv); // RIS
+
+        CHECK(!mc.terminal.isModeEnabled(DECMode::UseApplicationCursorKeys));
+        CHECK(!mc.terminal.applicationCursorKeys());
+    }
+}
+
+TEST_CASE("Terminal.RIS.resetsPassiveMouseTracking", "[terminal]")
+{
+    using namespace vtbackend;
+
+    // DECMode 2029 is mirrored in the input generator as well. It was the one mirror hardReset() did
+    // not clear, so after RIS the mode register read "off" while the generator still appended the
+    // passive-tracking parameter to every SGR mouse report -- a fourth field the application cannot
+    // parse -- and kept the alternate-scroll path gated shut.
+    auto mc = MockTerm { ColumnCount(20), LineCount(5) };
+
+    mc.writeToScreen("\033[?2029h"sv);
+    REQUIRE(mc.terminal.isModeEnabled(DECMode::MousePassiveTracking));
+
+    mc.writeToScreen("\033c"sv); // RIS
+
+    CHECK(!mc.terminal.isModeEnabled(DECMode::MousePassiveTracking));
+
+    // Re-enabling must take effect, which it cannot if the mirror never went back to false.
+    mc.writeToScreen("\033[?2029h"sv);
+    CHECK(mc.terminal.isModeEnabled(DECMode::MousePassiveTracking));
+}
+
 TEST_CASE("Terminal.forceRedraw keeps the cell size", "[terminal]")
 {
     using namespace vtbackend;
