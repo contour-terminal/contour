@@ -254,8 +254,7 @@ namespace
     {
         // `auto const`, not `auto const*`: libstdc++'s array iterator is a raw pointer but MSVC's is a
         // class type. @see setDynamicColorCommand in vtbackend/primitives.h.
-        auto const* const format =
-            std::ranges::find(OldStyleFormats, text.size(), &OldStyleFormat::digitCount);
+        auto const format = std::ranges::find(OldStyleFormats, text.size(), &OldStyleFormat::digitCount);
         if (format == OldStyleFormats.end())
             return std::nullopt;
 

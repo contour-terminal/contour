@@ -3843,8 +3843,7 @@ namespace impl
 
             // `auto const`, not `auto const*`: libstdc++'s array iterator is a raw pointer but MSVC's
             // is a class type. @see setDynamicColorCommand in primitives.h.
-            auto const* const report =
-                std::ranges::find(DeviceStatusReports, request, &DeviceStatusReport::request);
+            auto const report = std::ranges::find(DeviceStatusReports, request, &DeviceStatusReport::request);
             if (report == DeviceStatusReports.end())
                 return ApplyResult::Unsupported;
 
@@ -4320,7 +4319,7 @@ namespace impl
                 auto const requested = seq.param_or(i, 0U);
                 // `auto const`, not `auto const*`: libstdc++'s array iterator is a raw pointer but
                 // MSVC's is a class type. @see setDynamicColorCommand in primitives.h.
-                auto const* const test = std::ranges::find(
+                auto const test = std::ranges::find(
                     ConfidenceTests, requested, [](ConfidenceTest const& t) { return t.id; });
                 if (test == ConfidenceTests.end())
                     return ApplyResult::Invalid;

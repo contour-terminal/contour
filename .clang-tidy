@@ -65,6 +65,12 @@
 #     readable, so it cannot block; the checker classifies by function name rather
 #     than by the descriptor's flags. Holding the lock across it is deliberate --
 #     see 52d85da9, which added it to make read() safe against a concurrent close().
+#   * `readability-qualified-auto` -- unsound for portable code. It rewrites `auto` to
+#     `auto const* const` whenever the initializer's type is a pointer, and libstdc++
+#     implements std::array's iterator AS a raw pointer -- so `std::ranges::find` over
+#     a std::array satisfies it on Linux and fails to compile on MSVC, whose STL uses
+#     a class type. Color.cpp already carried a comment warning about exactly this;
+#     the check reverted that fix and broke the Windows build.
 #   * `misc-no-recursion` (41) -- recursion is a legitimate tool in a parser and a
 #     renderer; the check flags the technique rather than any defect.
 #   * `misc-use-anonymous-namespace` (79) -- directly contradicts
@@ -162,6 +168,7 @@ Checks: >-
   -readability-inconsistent-ifelse-braces,
   -readability-magic-numbers,
   -readability-named-parameter,
+  -readability-qualified-auto,
   -readability-redundant-access-specifiers,
   -readability-redundant-member-init,
   -readability-uppercase-literal-suffix,

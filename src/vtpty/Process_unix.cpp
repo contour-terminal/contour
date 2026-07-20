@@ -73,13 +73,13 @@ namespace
 
     // {{{ async-signal-safe helpers, for use between fork() and exec()
     //
-    // Everything in this block is called from the forked child before it has exec'd. Only
+    // Everything in this block is called from the forked child before it has called exec(). Only
     // async-signal-safe operations are permitted there: the child shares the parent's memory
     // image, and any lock (notably the malloc arena) that another parent thread happened to hold
     // at the moment of fork() is held forever in the child. So no printf, no strerror, no
     // setenv, and no allocation.
 
-    /// Normalises the two incompatible strerror_r() flavours to one shape.
+    /// Normalizes the two incompatible strerror_r() flavours to one shape.
     ///
     /// @param result What strerror_r() answered: a message pointer (GNU) or a status code (XSI).
     /// @param buffer The buffer strerror_r() was given.

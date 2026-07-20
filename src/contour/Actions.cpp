@@ -19,7 +19,7 @@ optional<Action> fromString(string const& name)
     // Case-insensitive, so `input_mapping:` may spell an action however it reads best.
     auto const lowerCaseName = toLower(name);
     auto const& catalog = actionCatalog();
-    auto const* const entry = std::ranges::find_if(
+    auto const entry = std::ranges::find_if(
         catalog, [&](auto const& candidate) { return toLower(candidate.name) == lowerCaseName; });
 
     if (entry == catalog.end())

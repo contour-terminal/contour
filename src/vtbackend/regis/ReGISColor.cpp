@@ -57,7 +57,7 @@ unsigned ReGISColorRegisters::findClosest(RGBColor color) const noexcept
         auto const db = static_cast<int>(c.blue) - static_cast<int>(color.blue);
         return (dr * dr) + (dg * dg) + (db * db);
     };
-    auto const* const nearest = std::ranges::min_element(_registers, {}, squaredDistanceTo);
+    auto const nearest = std::ranges::min_element(_registers, {}, squaredDistanceTo);
     return static_cast<unsigned>(std::ranges::distance(_registers.begin(), nearest));
 }
 

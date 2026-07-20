@@ -19,6 +19,7 @@ answerback
 argless
 asprintf
 ATests
+AUTOUIC
 autowraps
 AWriter
 aws
@@ -62,6 +63,7 @@ COLSx
 contentscale
 copydoc
 cprintf
+crt
 crtdbg
 csharp
 csiu
@@ -149,10 +151,13 @@ eeee
 eeeeeeee
 eeeh
 EGL
+elifdef
+elifndef
 ellips
 emantic
 emtpy
 entrantly
+Envp
 envs
 EOTF
 ERM
@@ -241,6 +246,7 @@ libva
 libxml
 Lij
 lineflags
+linting
 livelock
 LMENU
 LMNo
@@ -257,6 +263,7 @@ LUT
 LWin
 mainwindow
 MATM
+MESSAGELOGCONTEXT
 metapackages
 midlight
 mred
@@ -303,6 +310,7 @@ nproc
 nprofiles
 nqrstuvwx
 NRCS
+NRVO
 nulmny
 nuvwxy
 nyz
@@ -334,7 +342,9 @@ pipefail
 pkcs
 Pld
 Pnbits
+pointee
 popups
+positionally
 Ppar
 precomposed
 prepends
@@ -431,6 +441,7 @@ Serialises
 sessionless
 SETSPECIALCOLPAL
 SIGABRTs
+sigmask
 soa
 soname
 sourced
@@ -523,10 +534,12 @@ xad
 xargs
 Xcms
 xefefef
+XGrid
 Xlib
 Xorg
 XParse
 xrm
+XSI
 XTPOPTITLE
 XTPUSHTITLE
 XTRMTITLE
@@ -554,3 +567,4 @@ neighbours
 bilinearly
 xaa
 xea
+YGrid

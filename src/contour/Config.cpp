@@ -3050,8 +3050,8 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
                         { "COPYANDPASTE", vtbackend::HintAction::CopyAndPaste },
                         { "SELECT", vtbackend::HintAction::Select },
                     } };
-                if (auto const* const p = std::ranges::find_if(
-                        HintActionMappings, [&](auto const& t) { return t.first == actionStr; });
+                if (auto const p = std::ranges::find_if(HintActionMappings,
+                                                        [&](auto const& t) { return t.first == actionStr; });
                     p != HintActionMappings.end())
                 {
                     hintAction = p->second;
