@@ -27,11 +27,11 @@ using namespace std::string_view_literals;
 namespace
 {
 
-std::sig_atomic_t volatile g_running = 1;
+std::sig_atomic_t volatile running = 1;
 
 void onSignal(int) noexcept
 {
-    g_running = 0;
+    running = 0;
 }
 
 void writeToTTY(std::string_view s) noexcept
@@ -187,7 +187,7 @@ int main()
     auto lastY = 0;
     std::string pending;
 
-    while (g_running)
+    while (running)
     {
         std::array<char, 64> buf {};
         auto const n = ::read(STDIN_FILENO, buf.data(), buf.size());
@@ -202,7 +202,7 @@ int main()
             auto const c = pending[pos];
             if (c == 'q')
             {
-                g_running = 0;
+                running = 0;
                 break;
             }
             if (c == '\033' && pos + 2 < pending.size() && pending[pos + 1] == '[' && pending[pos + 2] == '<')
@@ -243,7 +243,7 @@ int main()
         }
         pending.erase(0, pos);
 
-        if (redraw && g_running)
+        if (redraw && running)
             regis(render(yaw, pitch));
     }
 

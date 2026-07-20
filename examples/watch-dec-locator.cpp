@@ -9,6 +9,7 @@
 /// Press 'q' or Ctrl+C to quit.
 
 #include <csignal>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <format>
@@ -52,7 +53,7 @@ struct LocatorReport
     int page = 0;   ///< Page number
 };
 
-enum class ParseState
+enum class ParseState : std::uint8_t
 {
     Normal,
     Escape,
