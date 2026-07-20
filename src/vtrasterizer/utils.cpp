@@ -3,6 +3,7 @@
 
 #include <algorithm> // max?
 #include <cassert>
+#include <cstddef>
 #include <ranges>
 
 namespace vtrasterizer
@@ -23,7 +24,7 @@ vector<uint8_t> downsampleRGBA(vector<uint8_t> const& bitmap,
     auto const factor = static_cast<unsigned>(ceil(ratio));
 
     vector<uint8_t> dest;
-    dest.resize(*newSize.height * *newSize.width * 4);
+    dest.resize(static_cast<std::size_t>(*newSize.height * *newSize.width * 4));
 
     // RasterizerLog()("scaling from {} to {}, ratio {}x{} ({}), factor {}",
     //                 size, newSize, ratioX, ratioY, ratio, factor);
@@ -42,7 +43,8 @@ vector<uint8_t> downsampleRGBA(vector<uint8_t> const& bitmap,
             unsigned int count = 0;
             for (unsigned y = sr; y < min(sr + factor, size.height.as<unsigned>()); y++)
             {
-                uint8_t const* p = bitmap.data() + (y * unbox(size.width) * 4) + (sc * 4);
+                uint8_t const* p =
+                    bitmap.data() + (y * unbox(size.width) * 4) + (static_cast<size_t>(sc * 4));
                 for (unsigned x = sc; x < min(sc + factor, size.width.as<unsigned>()); x++, count++)
                 {
                     b += *(p++);
@@ -78,7 +80,7 @@ vector<uint8_t> downsample(vector<uint8_t> const& bitmap,
     auto const ratio = max(ratioX, ratioY);
     auto const factor = static_cast<unsigned>(ceil(ratio));
 
-    vector<uint8_t> dest(*newSize.width * *newSize.height * numComponents, 0);
+    vector<uint8_t> dest(static_cast<std::size_t>(*newSize.width * *newSize.height * numComponents), 0);
 
     rasterizerLog()("downsample from {} to {}, ratio {}x{} ({}), factor {}",
                     size,
@@ -100,7 +102,8 @@ vector<uint8_t> downsample(vector<uint8_t> const& bitmap,
             unsigned count = 0; // number of pixels being averaged
             for (auto y = sr; y < min(sr + factor, size.height.as<unsigned>()); y++)
             {
-                uint8_t const* p = bitmap.data() + (y * *size.width * numComponents) + (sc * numComponents);
+                uint8_t const* p = bitmap.data() + (y * *size.width * numComponents)
+                                   + (static_cast<size_t>(sc * numComponents));
                 for (auto x = sc; x < min(sc + factor, size.width.as<unsigned>()); x++, count++)
                     for (auto const k: std::views::iota(0u, numComponents))
                         values.at(k) += *(p++);
@@ -121,7 +124,7 @@ vector<uint8_t> downsample(vector<uint8_t> const& sourceBitmap,
                            vtbackend::ImageSize targetSize,
                            uint8_t factor)
 {
-    vector<uint8_t> targetBitmap(*targetSize.width * *targetSize.height, 0);
+    vector<uint8_t> targetBitmap(static_cast<std::size_t>(*targetSize.width * *targetSize.height), 0);
 
     auto const sourceWidth = factor * *targetSize.width;
     auto const averageIntensityInSrc = [&](unsigned destX, unsigned destY) -> unsigned {

@@ -5,6 +5,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstddef>
+
 using namespace text;
 using namespace vtbackend;
 
@@ -13,7 +15,7 @@ TEST_CASE("scale alpha mask", "[scale]")
     rasterized_glyph glyph;
     glyph.format = bitmap_format::alpha_mask;
     glyph.bitmapSize = ImageSize { Width(10), Height(10) };
-    glyph.bitmap.resize(10 * 10, 0xFF);
+    glyph.bitmap.resize(static_cast<std::size_t>(10 * 10), 0xFF);
     glyph.position = { .x = 0, .y = 0 };
 
     ImageSize const targetSize { Width(5), Height(5) };
@@ -31,7 +33,7 @@ TEST_CASE("scale non-integer ratio RGBA", "[scale]")
     rasterized_glyph glyph;
     glyph.format = bitmap_format::rgba;
     glyph.bitmapSize = ImageSize { Width(100), Height(100) };
-    glyph.bitmap.resize(100 * 100 * 4, 255); // Fill with white
+    glyph.bitmap.resize(static_cast<std::size_t>(100 * 100 * 4), 255); // Fill with white
     glyph.position = { .x = 0, .y = 0 };
 
     ImageSize const targetSize { Width(66), Height(66) };
@@ -44,7 +46,7 @@ TEST_CASE("scale non-integer ratio RGBA", "[scale]")
     if (!scaled.bitmap.empty())
     {
         size_t const lastPixelIndex =
-            ((unbox(scaled.bitmapSize.width) * unbox(scaled.bitmapSize.height)) - 1) * 4;
+            static_cast<size_t>(((unbox(scaled.bitmapSize.width) * unbox(scaled.bitmapSize.height)) - 1) * 4);
         CHECK(scaled.bitmap[lastPixelIndex] == 255);
     }
 }

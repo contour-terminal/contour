@@ -20,6 +20,7 @@
 #include <charconv>
 #include <chrono>
 #include <csignal>
+#include <cstddef>
 #include <cstdio>
 #include <format>
 #include <fstream>
@@ -503,7 +504,8 @@ namespace
                       int layer,
                       string_view fileName)
     {
-        auto constexpr MaxImageFileSize = std::uintmax_t { 16 * 1024 * 1024 }; // GIP body limit
+        auto constexpr MaxImageFileSize =
+            std::uintmax_t { static_cast<std::uintmax_t>(16 * 1024 * 1024) }; // GIP body limit
         auto const data = readFile(std::filesystem::path(string(fileName)), MaxImageFileSize);
         if (data.empty())
         {

@@ -464,7 +464,7 @@ TEST_CASE("KittyGraphics.an_APC_body_past_the_cap_is_dropped_not_dispatched_trun
     // 100x100 RGBA is 40000 bytes, whose base64 is 53336 -- past the 50 KiB cap.
     auto pixels = std::string(100uz * 100uz * 4uz, '\xFF');
     auto const encoded = crispy::base64::encode(pixels);
-    REQUIRE(encoded.size() > 1024 * 50);
+    REQUIRE(encoded.size() > static_cast<std::size_t>(1024 * 50));
 
     mock.writeToScreen(std::format("\033_Ga=T,f=32,s=100,v=100,i=7;{}\033\\", encoded));
 

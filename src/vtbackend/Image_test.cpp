@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <cstddef>
 #include <format>
 #include <iostream>
 #include <ranges>
@@ -210,7 +211,7 @@ TEST_CASE("RasterizedImage.fragmentPlacement maps a cell onto the matching sourc
 TEST_CASE("RasterizedImage.fragment", "[RasterizedImage]")
 {
     auto const imageSize = ImageSize { Width(100), Height(100) };
-    auto imageData = std::vector<uint8_t>(100 * 100 * 4, 0xFF); // White opaque
+    auto imageData = std::vector<uint8_t>(static_cast<std::size_t>(100 * 100 * 4), 0xFF); // White opaque
     auto image =
         std::make_shared<Image>(ImageId(1), ImageFormat::RGBA, std::move(imageData), imageSize, [](auto) {});
 
@@ -229,7 +230,7 @@ TEST_CASE("RasterizedImage.fragment", "[RasterizedImage]")
     // Render a fragment
     auto const fragment =
         rasterizedImage->fragment(CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
-    REQUIRE(fragment.size() == 10 * 20 * 4);
+    REQUIRE(fragment.size() == static_cast<std::size_t>(10 * 20 * 4));
 
     // Benchmark
     auto const start = std::chrono::high_resolution_clock::now();

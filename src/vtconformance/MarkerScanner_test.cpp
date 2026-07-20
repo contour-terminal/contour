@@ -152,7 +152,7 @@ TEST_CASE("MarkerScanner.retains only what a straddle could need", "[vtconforman
     // The tail is a scanning artifact, not a feeding delay -- but it still must not grow without bound
     // on a long run. One byte short of the longest marker is exactly enough. @see MarkerScanner::_tail.
     auto scanner = MarkerScanner { OneMarker };
-    (void) scanner.scan(std::string(64 * 1024, 'x'));
+    (void) scanner.scan(std::string(static_cast<std::size_t>(64 * 1024), 'x'));
 
     CHECK(scanner.tail().size() == Banner.size() - 1);
 }

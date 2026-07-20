@@ -9,6 +9,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstddef>
 #include <format>
 #include <ranges>
 #include <string>
@@ -217,7 +218,7 @@ TEST_CASE("GoodImageProtocol.Oneshot.AcceptsRgbBodyAtThreeBytesPerPixel", "[GIP]
     // The consistency check is per-format, not a hardcoded 4: GIP's `f=2` really is three bytes per
     // pixel, and holding it to an RGBA stride would reject every valid RGB image.
     auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
-    auto body = std::vector<uint8_t>(2 * 2 * 3, 0x7F);
+    auto body = std::vector<uint8_t>(static_cast<std::size_t>(2 * 2 * 3), 0x7F);
 
     mock.writeToScreen(gipOneshot("f=2,w=2,h=2,c=4,r=2", body));
 
@@ -338,7 +339,7 @@ TEST_CASE("GoodImageProtocol.Oneshot.WithLayer", "[GIP]")
 
 TEST_CASE("GoodImageProtocol.MaxBodyLength", "[GIP]")
 {
-    CHECK(MessageParser::MaxBodyLength == 16 * 1024 * 1024);
+    CHECK(MessageParser::MaxBodyLength == static_cast<size_t>(16 * 1024 * 1024));
 }
 
 // ==================== Layer Text-Write Interaction Tests ====================

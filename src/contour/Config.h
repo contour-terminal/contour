@@ -48,6 +48,7 @@
 
 #include <chrono>
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <expected>
@@ -1928,14 +1929,16 @@ struct YAMLConfigWriter: Writer
     template <typename... T>
     std::string process(std::string_view doc, T... val)
     {
-        return format(addOffset(replaceCommentPlaceholder(std::string { doc }), Offset::Levels * OneOffset),
+        return format(addOffset(replaceCommentPlaceholder(std::string { doc }),
+                                static_cast<size_t>(Offset::Levels * OneOffset)),
                       val...);
     }
 
     template <typename... T>
     std::string process(std::string_view doc, [[maybe_unused]] std::string_view name, T... val)
     {
-        return format(addOffset(replaceCommentPlaceholder(std::string { doc }), Offset::Levels * OneOffset),
+        return format(addOffset(replaceCommentPlaceholder(std::string { doc }),
+                                static_cast<size_t>(Offset::Levels * OneOffset)),
                       val...);
     }
 

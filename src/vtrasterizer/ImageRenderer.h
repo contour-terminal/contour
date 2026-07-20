@@ -10,6 +10,7 @@
 #include <crispy/point.h>
 #include <crispy/size.h>
 
+#include <cstddef>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -39,7 +40,7 @@ class ImageRenderer: public Renderable, public TextRendererEvents
     ///
     /// 256 MB holds roughly eight full-screen 4K images (3840*2160*4 = ~33 MB each), which is far
     /// more than any real working set and still a bound.
-    static constexpr size_t DefaultTextureBudgetBytes = 256u * 1024u * 1024u;
+    static constexpr size_t DefaultTextureBudgetBytes = static_cast<size_t>(256u * 1024u * 1024u);
 
     /// @param gridMetrics the grid's metrics.
     /// @param cellSize the size of one cell, in pixels.

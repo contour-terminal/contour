@@ -23,7 +23,7 @@ TEST_CASE("screenshotBufferSize: RGBA8 byte count is width*height*4", "[screensh
 {
     CHECK(screenshotBufferSize(1, 1) == 4);
     CHECK(screenshotBufferSize(10, 20) == 800);
-    CHECK(screenshotBufferSize(1920, 1080) == 1920u * 1080u * 4u);
+    CHECK(screenshotBufferSize(1920, 1080) == static_cast<std::size_t>(1920u * 1080u * 4u));
     CHECK(ScreenshotBytesPerPixel == 4);
 }
 

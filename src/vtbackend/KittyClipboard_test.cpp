@@ -9,6 +9,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstddef>
 #include <format>
 #include <ranges>
 #include <string>
@@ -129,8 +130,8 @@ TEST_CASE("KittyClipboard.an_endless_write_stream_is_abandoned_not_accumulated",
 
     // Chunks stay under Sequence::MaxOscLength; anything larger would be truncated by the parser
     // rather than reaching the accumulator.
-    auto const chunk = crispy::base64::encode(std::string(32 * 1024, 'x'));
-    auto const enough = (kitty_clipboard::MaxClipboardWriteSize / (32 * 1024)) + 2;
+    auto const chunk = crispy::base64::encode(std::string(static_cast<std::size_t>(32 * 1024), 'x'));
+    auto const enough = (kitty_clipboard::MaxClipboardWriteSize / (static_cast<size_t>(32 * 1024))) + 2;
     for ([[maybe_unused]] auto const i: std::views::iota(size_t { 0 }, enough))
         mock.writeToScreen(std::format("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==:id=9;{}\033\\", chunk));
 

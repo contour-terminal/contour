@@ -39,6 +39,10 @@
 #     the cppcoreguidelines- check of the same name, which is already disabled.
 #   * `misc-no-recursion` (41) -- recursion is a legitimate tool in a parser and a
 #     renderer; the check flags the technique rather than any defect.
+#   * `readability-convert-member-functions-to-static` (100) -- its fix is malformed at
+#     scale here: it emits `static` before `[[nodiscard]]`, where the attribute then
+#     appertains to the return type rather than the function. It also makes Qt
+#     Q_INVOKABLE methods static and strips their const, changing what QML binds to.
 #   * `readability-redundant-member-init` (272) -- its fix is unsound here. Several
 #     aggregates are built with designated initializers that omit fields, so a
 #     `T member {};` default member initializer is load-bearing: dropping the `{}`
@@ -54,7 +58,6 @@ Checks: >-
   -bugprone-branch-clone,
   -bugprone-easily-swappable-parameters,
   -bugprone-exception-escape,
-  -bugprone-implicit-widening-of-multiplication-result,
   -bugprone-reserved-identifier,
   -bugprone-suspicious-include,
   -bugprone-unchecked-optional-access,

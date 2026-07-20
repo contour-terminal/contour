@@ -197,7 +197,7 @@ TEST_CASE("display: the display's PNG image decoder handles PNG, non-PNG and inv
     REQUIRE(pixels.has_value());
     CHECK(decodedSize.width == vtbackend::Width(4));
     CHECK(decodedSize.height == vtbackend::Height(3));
-    CHECK(pixels->size() == 4u * 3u * 4u); // width * height * RGBA
+    CHECK(pixels->size() == static_cast<std::size_t>(4u * 3u * 4u)); // width * height * RGBA
 
     // A non-PNG format is declined outright.
     vtbackend::ImageSize ignored;

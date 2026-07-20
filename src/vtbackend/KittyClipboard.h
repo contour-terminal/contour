@@ -17,7 +17,7 @@ namespace vtbackend::kitty_clipboard
 /// taking every tab and split pane in the window with it. This is the same bound
 /// @c kitty_graphics::MaxChunkedPayloadSize places on the other chunked protocol; 8 MiB is far beyond
 /// any plausible clipboard payload.
-inline constexpr size_t MaxClipboardWriteSize = 8 * 1024 * 1024;
+inline constexpr size_t MaxClipboardWriteSize = static_cast<size_t>(8 * 1024 * 1024);
 
 /// Largest amount of clipboard data one read-reply `DATA` packet may carry, before base64 encoding.
 ///

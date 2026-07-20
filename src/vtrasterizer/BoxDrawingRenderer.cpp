@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <numbers>
 #include <ranges>
@@ -1538,10 +1539,12 @@ namespace detail
                     case AASquare: [[fallthrough]];
                     case AASquareEmpty:
                         return buildSquare(value, size, th, ss, CurrentStyle == AASquareEmpty);
-                    case Font: (void) SoftRequire(false); return atlas::Buffer(*size.width * *size.height);
+                    case Font:
+                        (void) SoftRequire(false);
+                        return atlas::Buffer(static_cast<std::size_t>(*size.width * *size.height));
                 }
                 (void) SoftRequire(false);
-                return atlas::Buffer(*size.width * *size.height);
+                return atlas::Buffer(static_cast<std::size_t>(*size.width * *size.height));
             }
             static auto buildSolid(uint8_t value, ImageSize size) -> atlas::Buffer
             {
@@ -2638,15 +2641,15 @@ static auto buildBox(detail::Box box,
     yOffset *= static_cast<int>(ss);
     xOffset *= static_cast<int>(ss);
     lightTh *= static_cast<int>(ss);
-    auto image = atlas::Buffer(width * height, 0x00);
+    auto image = atlas::Buffer(static_cast<std::size_t>(width * height), 0x00);
 
     auto const getThickness = [=](Line value) -> size_t {
         switch (value)
         {
             case Line::NoLine: return 0;
             case Line::Light: return lightTh;
-            case Line::Double: return lightTh * 3;
-            case Line::Heavy: return lightTh * 2;
+            case Line::Double: return static_cast<size_t>(lightTh * 3);
+            case Line::Heavy: return static_cast<size_t>(lightTh * 2);
             default: assert(false); return 0; // dashed lines are handled explicitly
         }
     };

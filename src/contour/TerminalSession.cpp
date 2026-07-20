@@ -38,6 +38,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -1038,7 +1039,7 @@ void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
         auto const text = clipboard->text(QClipboard::Clipboard);
 
         // 1 MB hard limit
-        if (text.size() > 1024 * 1024)
+        if (text.size() > static_cast<qsizetype>(1024 * 1024))
         {
             sessionLog()("Clipboard contains huge text. Ignoring.");
             // A display-less session (background pane, headless test) has nowhere to toast the
@@ -1050,7 +1051,7 @@ void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
             return;
         }
         // 512 KB soft limit to ask user for permission
-        if (text.size() > 1024 * 512)
+        if (text.size() > static_cast<qsizetype>(1024 * 512))
         {
             _pendingBigPaste = clipboard;
             emit requestPermissionForPasteLargeFile();

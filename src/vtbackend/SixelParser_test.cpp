@@ -561,13 +561,13 @@ TEST_CASE("SixelParser.explicit_raster_vertical_overflow", "[sixel]")
     ib.setColor(0, PinColor);
 
     REQUIRE(ib.size() == ImageSize { Width(10), Height(1) });
-    REQUIRE(ib.data().size() == 10u * 1u * 4u);
+    REQUIRE(ib.data().size() == static_cast<std::size_t>(10u * 1u * 4u));
 
     auto sp = SixelParser { ib };
     sp.parseFragment("~");
 
     // Storage must not have grown, and only the one row inside the raster may be painted.
-    CHECK(ib.data().size() == 10u * 1u * 4u);
+    CHECK(ib.data().size() == static_cast<std::size_t>(10u * 1u * 4u));
     CHECK(ib.at(CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) }).rgb() == PinColor);
     CHECK(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(1) });
 }
@@ -623,7 +623,7 @@ TEST_CASE("SixelParser.finalize_compacts_rows", "[sixel]")
     sp.done();
 
     REQUIRE(ib.size() == ImageSize { Width(3), Height(12) });
-    REQUIRE(ib.data().size() == 3u * 12u * 4u); // compacted to exactly the image
+    REQUIRE(ib.data().size() == static_cast<std::size_t>(3u * 12u * 4u)); // compacted to exactly the image
 
     for (auto const y: std::views::iota(0, 12))
         for (auto const x: std::views::iota(0, 3))
@@ -681,7 +681,7 @@ TEST_CASE("SixelParser.finalize_keeps_an_explicitly_declared_single_row", "[sixe
     sp.done();
 
     CHECK(ib.size() == ImageSize { Width(100), Height(1) });
-    CHECK(ib.data().size() == 100u * 1u * 4u);
+    CHECK(ib.data().size() == static_cast<std::size_t>(100u * 1u * 4u));
     CHECK(ib.at(CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) }).rgb() == PinColor);
 }
 
@@ -823,7 +823,7 @@ TEST_CASE("SixelParser.storage_is_right_sized", "[sixel]")
     {
         auto ib = SixelImageBuilder(MaxSize, 1, 1, DefaultColor, palette());
         ib.setRaster(1, 1, ImageSize { Width(20), Height(20) });
-        CHECK(ib.data().size() == 20u * 20u * 4u);
+        CHECK(ib.data().size() == static_cast<std::size_t>(20u * 20u * 4u));
         CHECK(ib.canvasSize() == ImageSize { Width(20), Height(20) });
     }
 
@@ -832,12 +832,12 @@ TEST_CASE("SixelParser.storage_is_right_sized", "[sixel]")
         auto ib = SixelImageBuilder(MaxSize, 1, 1, DefaultColor, palette());
         auto sp = SixelParser { ib };
         sp.parseFragment("#1;2;100;100;0");
-        sp.parseFragment("!20~-!20~-!20~");    // 20 x 18 pixels
-        CHECK(ib.data().size() < 64u * 1024u); // peak tracks the image, not MaxSize
+        sp.parseFragment("!20~-!20~-!20~");                              // 20 x 18 pixels
+        CHECK(ib.data().size() < static_cast<std::size_t>(64u * 1024u)); // peak tracks the image, not MaxSize
         sp.done();
         CHECK(ib.size() == ImageSize { Width(20), Height(18) });
         // The contract Screen::sixelImage() relies on when it moves the buffer into an Image.
-        CHECK(ib.data().size() == 20u * 18u * 4u);
+        CHECK(ib.data().size() == static_cast<std::size_t>(20u * 18u * 4u));
     }
 }
 
