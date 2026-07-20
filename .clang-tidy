@@ -44,6 +44,21 @@
 #     QObject plus an interface for TerminalSession, TerminalSessionManager,
 #     ContourGuiApp and TerminalAccessible, and crispy::overloaded is the standard
 #     `struct overloaded: Ts...` visitor idiom the check cannot recognise.
+#   * `cppcoreguidelines-use-enum-class` (3) -- vtbackend::Modifier, LockKey and
+#     MatchModes::Flag are bitmask enums whose values are protocol-defined bit
+#     positions, combined with bitwise operators throughout. Scoping them would
+#     require a cast at every use for no gain in type safety.
+#   * `misc-header-include-cycle` (2) -- Parser.h includes Parser-impl.h at its end,
+#     the usual template-implementation split rather than a real cycle. The
+#     Selector.h/ViInputHandler.h pair is a genuine mutual dependency and worth
+#     untangling separately; it is not a lint fix.
+#   * `clang-analyzer-optin.performance.Padding` (1) -- reordering vtbackend::Settings'
+#     44 fields by size would save 32 bytes on a single long-lived object while
+#     destroying the grouping that makes it readable.
+#   * `bugprone-command-processor` (2) -- the two popen() calls are deliberate: shell
+#     integration and process lookup both need a shell.
+#   * `readability-function-size` (1) -- Screen::apply is the VT sequence dispatch
+#     switch. Its size is the size of the protocol.
 #   * `misc-no-recursion` (41) -- recursion is a legitimate tool in a parser and a
 #     renderer; the check flags the technique rather than any defect.
 #   * `misc-use-anonymous-namespace` (79) -- directly contradicts
@@ -68,6 +83,7 @@ Checks: >-
   -*,
   bugprone-*,
   -bugprone-branch-clone,
+  -bugprone-command-processor,
   -bugprone-std-namespace-modification,
   -bugprone-easily-swappable-parameters,
   -bugprone-exception-escape,
@@ -81,6 +97,7 @@ Checks: >-
   clang-analyzer-optin.cplusplus.*,
   -clang-analyzer-optin.cplusplus.UninitializedObject,
   clang-analyzer-optin.performance.*,
+  -clang-analyzer-optin.performance.Padding,
   clang-analyzer-optin.portability.*,
   clang-analyzer-security.*,
   clang-analyzer-unix.*,
@@ -89,6 +106,7 @@ Checks: >-
   cppcoreguidelines-*,
   -cppcoreguidelines-avoid-c-arrays,
   -cppcoreguidelines-avoid-const-or-ref-data-members,
+  -cppcoreguidelines-use-enum-class,
   -cppcoreguidelines-avoid-do-while,
   -cppcoreguidelines-avoid-magic-numbers,
   -cppcoreguidelines-avoid-non-const-global-variables,
@@ -109,6 +127,7 @@ Checks: >-
   -cppcoreguidelines-special-member-functions,
   misc-*,
   -misc-include-cleaner,
+  -misc-header-include-cycle,
   -misc-multiple-inheritance,
   -misc-no-recursion,
   -misc-use-anonymous-namespace,
@@ -130,6 +149,7 @@ Checks: >-
   -readability-braces-around-statements,
   -readability-convert-member-functions-to-static,
   -readability-else-after-return,
+  -readability-function-size,
   -readability-identifier-length,
   -readability-implicit-bool-conversion,
   -readability-inconsistent-ifelse-braces,

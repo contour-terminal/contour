@@ -2166,7 +2166,10 @@ bool TerminalSession::operator()(actions::Quit)
 {
     // TODO: later warn here when more then one terminal view is open
     terminal().device().close();
-    exit(EXIT_SUCCESS);
+    // Unwind the event loop rather than calling exit(): the PTY reader thread may still be
+    // running, and exit() would run static destructors underneath it.
+    QCoreApplication::exit(EXIT_SUCCESS);
+    return true;
 }
 
 bool TerminalSession::operator()(actions::ReloadConfig const& action)

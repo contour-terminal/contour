@@ -636,7 +636,7 @@ inline std::filesystem::path homeResolvedPath(std::string input, std::filesystem
 /// would-be variable untouched, so machine-emitted config (e.g. SaveLayout) can round-trip values
 /// that contain literal `${...}` text without them being re-expanded on reload.
 template <typename VariableReplacer>
-inline std::string replaceVariables(std::string_view text, VariableReplacer replace)
+inline std::string replaceVariables(std::string_view text, VariableReplacer const& replace)
 {
     using namespace std::string_view_literals;
 
@@ -722,7 +722,7 @@ inline std::string humanReadableBytes(uint64_t bytes)
 }
 
 template <typename... Ts>
-constexpr void ignore_unused(Ts... /*values*/) noexcept
+constexpr void ignore_unused(Ts const&... /*values*/) noexcept
 {
 }
 

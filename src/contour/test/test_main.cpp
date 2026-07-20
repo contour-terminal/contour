@@ -38,12 +38,12 @@ int main(int argc, char* argv[])
 #ifdef _WIN32
         _putenv_s("QT_QPA_PLATFORM", "offscreen");
 #else
-        setenv("QT_QPA_PLATFORM", "offscreen", /*overwrite*/ 1);
+        qputenv("QT_QPA_PLATFORM", "offscreen");
 #endif
     }
 #ifndef _WIN32
     else if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM") && !qEnvironmentVariableIsEmpty("DISPLAY"))
-        setenv("QT_QPA_PLATFORM", "xcb", /*overwrite*/ 0);
+        qputenv("QT_QPA_PLATFORM", "xcb");
 #endif
 
     QGuiApplication const app(argc, argv);

@@ -127,6 +127,46 @@ namespace
         }
         return true;
     }
+
+    /// Appends the chunk's title or body text to the notification being assembled.
+    /// @param assembled The notification accumulating the chunks.
+    /// @param chunk The freshly parsed chunk whose payload type selects the target field.
+    void appendChunkPayload(DesktopNotification& assembled, DesktopNotification const& chunk)
+    {
+        switch (chunk.currentPayload)
+        {
+            case NotificationPayloadType::Title: assembled.title += chunk.title; break;
+            case NotificationPayloadType::Body: assembled.body += chunk.body; break;
+            case NotificationPayloadType::Close:
+            case NotificationPayloadType::Query:
+            case NotificationPayloadType::Alive:
+                // These payload types don't participate in chunked assembly.
+                break;
+        }
+    }
+
+    /// Carries a chunk's metadata over into the notification being assembled, overwriting
+    /// only those fields the chunk set explicitly (i.e. that differ from the defaults).
+    /// @param assembled The notification accumulating the chunks.
+    /// @param chunk The freshly parsed chunk; its application name may be moved from.
+    void mergeChunkMetadata(DesktopNotification& assembled, DesktopNotification& chunk)
+    {
+        static DesktopNotification const notificationDefaults {};
+
+        if (!chunk.applicationName.empty())
+            assembled.applicationName = std::move(chunk.applicationName);
+        if (chunk.urgency != notificationDefaults.urgency)
+            assembled.urgency = chunk.urgency;
+        if (chunk.occasion != notificationDefaults.occasion)
+            assembled.occasion = chunk.occasion;
+        assembled.closeEventRequested = assembled.closeEventRequested || chunk.closeEventRequested;
+        if (chunk.focusOnActivation != notificationDefaults.focusOnActivation)
+            assembled.focusOnActivation = chunk.focusOnActivation;
+        if (chunk.reportOnActivation != notificationDefaults.reportOnActivation)
+            assembled.reportOnActivation = chunk.reportOnActivation;
+        if (chunk.timeout != notificationDefaults.timeout)
+            assembled.timeout = chunk.timeout;
+    }
 } // namespace
 
 DesktopNotification parseOSC99(string_view raw)
@@ -209,28 +249,9 @@ void DesktopNotificationManager::handleOSC99(string_view payload, Terminal& term
                 }
                 else
                 {
-                    // Subsequent chunk — merge payload into existing notification.
-                    auto& pending = it->second;
-                    if (notification.currentPayload == NotificationPayloadType::Title)
-                        pending.title += notification.title;
-                    else if (notification.currentPayload == NotificationPayloadType::Body)
-                        pending.body += notification.body;
-                    // Only overwrite fields that were explicitly set (differ from defaults).
-                    static DesktopNotification const notificationDefaults {};
-                    if (!notification.applicationName.empty())
-                        pending.applicationName = std::move(notification.applicationName);
-                    if (notification.urgency != notificationDefaults.urgency)
-                        pending.urgency = notification.urgency;
-                    if (notification.occasion != notificationDefaults.occasion)
-                        pending.occasion = notification.occasion;
-                    pending.closeEventRequested =
-                        pending.closeEventRequested || notification.closeEventRequested;
-                    if (notification.focusOnActivation != notificationDefaults.focusOnActivation)
-                        pending.focusOnActivation = notification.focusOnActivation;
-                    if (notification.reportOnActivation != notificationDefaults.reportOnActivation)
-                        pending.reportOnActivation = notification.reportOnActivation;
-                    if (notification.timeout != notificationDefaults.timeout)
-                        pending.timeout = notification.timeout;
+                    // Subsequent chunk — merge payload and metadata into existing notification.
+                    appendChunkPayload(it->second, notification);
+                    mergeChunkMetadata(it->second, notification);
                 }
                 return;
             }
@@ -239,14 +260,9 @@ void DesktopNotificationManager::handleOSC99(string_view payload, Terminal& term
             if (auto it = _pendingNotifications.find(notification.identifier);
                 it != _pendingNotifications.end())
             {
-                auto& pending = it->second;
-                // Merge final chunk payload.
-                if (notification.currentPayload == NotificationPayloadType::Title)
-                    pending.title += notification.title;
-                else if (notification.currentPayload == NotificationPayloadType::Body)
-                    pending.body += notification.body;
-                // Take the assembled notification.
-                notification = std::move(pending);
+                // Merge final chunk payload, then take the assembled notification.
+                appendChunkPayload(it->second, notification);
+                notification = std::move(it->second);
                 notification.done = true;
                 _pendingNotifications.erase(it);
             }
