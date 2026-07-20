@@ -138,7 +138,6 @@ jobs:
   check_clang_tidy:
     name: "Check clang-tidy"
     runs-on: ubuntu-24.04
-    if: github.ref != 'refs/heads/master'
     steps:
     - uses: actions/checkout@v4
     - name: ccache
