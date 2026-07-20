@@ -1,0 +1,138 @@
+---
+# Base clang-tidy configuration for all first-party code (src/ and examples/).
+#
+# This lives at the repository root rather than in src/ so that every first-party
+# tree resolves to it by clang-tidy's normal parent-directory search, and so that
+# tools invoked from the root (run-clang-tidy, IDEs) find a config at all instead
+# of failing with "No checks enabled". Vendored third-party code under _deps/ is
+# kept out of linting by CMake, which clears CMAKE_CXX_CLANG_TIDY across the
+# dependency fetch -- see the top-level CMakeLists.txt.
+#
+# Module-local overrides live in src/<module>/.clang-tidy and use
+# `InheritParentConfig: true` so they extend rather than replace this file.
+#
+# A bare `-some-check` with no rationale is indistinguishable from an accident,
+# so record the reasoning here when disabling something. Note that YAML folded
+# scalars cannot carry `#` comments, hence this block rather than inline notes.
+#
+#   * `modernize-use-designated-initializers` -- deliberate, see commit 8cd3d714.
+#   * `portability-avoid-pragma-once` -- `#pragma once` is the house include guard.
+#   * `misc-include-cleaner` -- pursued separately via scripts/check-includes.sh.
+
+Checks: >-
+  -*,
+  bugprone-*,
+  -bugprone-branch-clone,
+  -bugprone-chained-comparison,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-exception-escape,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-reserved-identifier,
+  -bugprone-suspicious-include,
+  -bugprone-unchecked-optional-access,
+  clang-analyzer-core.*,
+  clang-analyzer-cplusplus.*,
+  clang-analyzer-deadcode.*,
+  clang-analyzer-nullability.*,
+  clang-analyzer-optin.cplusplus.*,
+  -clang-analyzer-optin.cplusplus.UninitializedObject,
+  clang-analyzer-optin.performance.*,
+  clang-analyzer-optin.portability.*,
+  clang-analyzer-security.*,
+  clang-analyzer-unix.*,
+  clang-diagnostic-*,
+  cppcoreguidelines-*,
+  -cppcoreguidelines-avoid-c-arrays,
+  -cppcoreguidelines-avoid-const-or-ref-data-members,
+  -cppcoreguidelines-avoid-do-while,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-avoid-non-const-global-variables,
+  -cppcoreguidelines-macro-usage,
+  -cppcoreguidelines-no-malloc,
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-prefer-member-initializer,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-type-const-cast,
+  -cppcoreguidelines-pro-type-cstyle-cast,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-pro-type-static-cast-downcast,
+  -cppcoreguidelines-pro-type-union-access,
+  -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-special-member-functions,
+  modernize-*,
+  -modernize-avoid-bind,
+  -modernize-avoid-c-arrays,
+  -modernize-return-braced-init-list,
+  -modernize-use-bool-literals,
+  -modernize-use-designated-initializers,
+  -modernize-use-scoped-lock,
+  -modernize-use-trailing-return-type,
+  performance-*,
+  -performance-no-int-to-ptr,
+  readability-*,
+  -readability-avoid-unconditional-preprocessor-if,
+  -readability-braces-around-statements,
+  -readability-container-contains,
+  -readability-convert-member-functions-to-static,
+  -readability-else-after-return,
+  -readability-identifier-length,
+  -readability-implicit-bool-conversion,
+  -readability-magic-numbers,
+  -readability-math-missing-parentheses,
+  -readability-named-parameter,
+  -readability-redundant-access-specifiers,
+  -readability-redundant-casting,
+  -readability-redundant-inline-specifier,
+  -readability-redundant-member-init,
+  -readability-simplify-boolean-expr,
+  -readability-uppercase-literal-suffix,
+  -readability-use-anyofallof,
+  -readability-use-concise-preprocessor-directives,
+
+# Checks promoted from warning to hard error. Everything else is advisory.
+WarningsAsErrors: >-
+  bugprone-narrowing-conversions,
+  modernize-use-constraints,
+  modernize-use-nullptr,
+  performance-enum-size,
+  readability-avoid-nested-conditional-operator,
+  readability-identifier-naming,
+
+UseColor: true
+HeaderFilterRegex: 'src/(contour|crispy|text_shaper|vtpty|vtparser|vtbackend|vtrasterizer|vtmux|vtconformance)/'
+ExcludeHeaderFilterRegex: 'wayland-.*-protocol.h'
+FormatStyle: none
+
+CheckOptions:
+  cppcoreguidelines-explicit-virtual-functions.IgnoreDestructors: '1'
+  modernize-loop-convert.MaxCopySize: '16'
+  modernize-loop-convert.MinConfidence: reasonable
+  modernize-loop-convert.NamingStyle: CamelCase
+  modernize-pass-by-value.IncludeStyle: llvm
+  modernize-replace-auto-ptr.IncludeStyle: llvm
+  modernize-use-default-member-init.UseAssignment: '1'
+  modernize-use-nullptr.NullMacros: 'NULL'
+  readability-function-cognitive-complexity.Threshold: '50'
+
+  # Identifier naming. Types are CamelCase, everything else camelBack, with a
+  # leading underscore on non-public data members. The snake_case modules
+  # (crispy, text_shaper) override the type categories in their own configs.
+  readability-identifier-naming.ClassCase: CamelCase
+  readability-identifier-naming.ClassConstantCase: CamelCase
+  readability-identifier-naming.ClassMemberCase: CamelCase
+  readability-identifier-naming.ClassMethodCase: camelBack
+  readability-identifier-naming.ConstantCase: camelBack
+  readability-identifier-naming.ConstantMemberCase: camelBack
+  readability-identifier-naming.ConstantMemberPrefix: '_'
+  readability-identifier-naming.ConstexprVariableCase: CamelCase
+  readability-identifier-naming.EnumCase: CamelCase
+  readability-identifier-naming.EnumConstantCase: CamelCase
+  readability-identifier-naming.ParameterCase: camelBack
+  readability-identifier-naming.PrivateMemberCase: camelBack
+  readability-identifier-naming.PrivateMemberPrefix: '_'
+  readability-identifier-naming.PublicMemberCase: camelBack
+  readability-identifier-naming.ScopedEnumConstantCase: CamelCase
+  readability-identifier-naming.VariableCase: camelBack
