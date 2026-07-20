@@ -969,6 +969,11 @@ bool InputGenerator::generateWin32KeyInput(uint32_t virtualKeyCode,
 
 void InputGenerator::reset()
 {
+    // Both halves of the keyboard generator's state, not just the CSIu stack. Terminal::hardReset()
+    // assigns `_modes = Modes {}`, but DECCKM, DECNKM, DECBKM and LNM are mirrored here rather than
+    // read back from that bitset -- leaving them alone would make RIS produce a terminal whose modes
+    // read as default while the generator still emitted, say, application cursor keys.
+    _keyboardInputGenerator.reset();
     _keyboardInputGenerator.resetProtocolStack();
     _bracketedPaste = false;
     _generateFocusEvents = false;
