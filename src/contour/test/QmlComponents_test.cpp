@@ -221,11 +221,11 @@ class MockTabController: public QAbstractListModel
   signals:
     void activeTabIndexChanged();
     void titleBarVisibleChanged();
-    void tabTitleEditRequested(int _t1);
+    void tabTitleEditRequested(int index);
     // TabItem's Connections declares onTabColorPickRequested; without the matching signal HERE, every
     // test that instantiates a TabItem earns a "no signal of the target matches" QML warning — which the
     // suite's message capture turns into a failure.
-    void tabColorPickRequested(int _t1);
+    void tabColorPickRequested(int index);
 
   private:
     int _count = 3;
@@ -347,8 +347,8 @@ class MockSession: public QObject
     void dimUnfocusedChanged();
     void onBell();
     void onAlert();
-    void onShowNotification(QString const& _t1, QString const& _t2);
-    void onScrollOffsetChanged(int _t1);
+    void onShowNotification(QString const& title, QString const& body);
+    void onScrollOffsetChanged(int value);
     void requestPermissionForFontChange();
     void requestPermissionForBufferCapture();
     void requestPermissionForShowHostWritableStatusLine();
@@ -490,8 +490,8 @@ class StubContourTerminal: public QQuickItem
     }
     [[nodiscard]] double fontSize() const { return 12.0; }
   signals:
-    void sessionChanged(QObject* _t1);
-    void showNotification(QString const& _t1, QString const& _t2);
+    void sessionChanged(QObject* session);
+    void showNotification(QString const& title, QString const& body);
     void opacityChanged(); //!< relayed opacity signal (single-pane).
     void terminated();     //!< TerminalPane's onTerminated handler binds to this.
 

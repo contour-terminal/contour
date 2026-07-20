@@ -58,8 +58,8 @@ class StubContourTerminal: public QQuickItem
     }
     [[nodiscard]] double fontSize() const { return 12.0; }
   signals:
-    void sessionChanged(QObject* _t1);
-    void showNotification(QString const& _t1, QString const& _t2);
+    void sessionChanged(QObject* session);
+    void showNotification(QString const& title, QString const& body);
     void opacityChanged();
     void terminated();
 
@@ -251,9 +251,9 @@ class MockMainController: public QAbstractListModel
     void tabBarPositionChanged();
     void tabBarShouldShowChanged();
     void chromeHeightChanged();
-    void tabTitleEditRequested(int _t1);
+    void tabTitleEditRequested(int index);
     // Matches TabItem's Connections handler; a missing signal here is a QML warning, not a silent no-op.
-    void tabColorPickRequested(int _t1);
+    void tabColorPickRequested(int index);
     // Matches main.qml's Connections handler for the save-layout prompt; a missing signal here is a QML
     // warning, and the run-wide gate turns that into a failure of the whole suite.
     void saveLayoutRequested();
