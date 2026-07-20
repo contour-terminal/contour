@@ -780,15 +780,18 @@ else()
 endif()
 
 if(Qt6_VERSION VERSION_LESS CONTOUR_QT_VALIDATED_VERSION)
+    # Only the second branch may claim a feature was dropped. An older Qt does not by itself exclude
+    # anything -- the gates above decide that, and each one records itself -- so a build that gated
+    # nothing must say so, or the warning teaches the reader to distrust it.
     string(CONCAT _contour_qt_notice
            "Qt ${Qt6_VERSION} was detected, which is older than Qt ${CONTOUR_QT_VALIDATED_VERSION}"
-           " — the version Contour is built and tested against. Features needing a newer Qt are"
-           " excluded from this build.")
+           " — the version Contour is built and tested against.")
     if(_contour_notice)
         message(WARNING "${_contour_qt_notice}\n${_contour_notice}"
                         "\nInstall Qt ${CONTOUR_QT_VALIDATED_VERSION} or newer to include them.")
     else()
-        message(WARNING "${_contour_qt_notice}")
+        message(WARNING "${_contour_qt_notice} Everything Contour offers is built into this binary,"
+                        " but this combination is not one CI covers.")
     endif()
 elseif(_contour_notice)
     message(WARNING "${_contour_notice}")
