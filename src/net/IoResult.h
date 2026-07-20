@@ -22,18 +22,19 @@ namespace net
 /// transport error).
 enum class NetErrorCode : std::uint8_t
 {
-    Ok = 0,       ///< No error (not normally stored in an error result).
-    Eof,          ///< The peer closed the connection cleanly.
-    Cancelled,    ///< The operation was cancelled (stop requested / listener closed).
-    Timeout,      ///< A deadline elapsed before the operation completed.
-    WouldBlock,   ///< The operation would block (transient; the reactor retries).
-    BadHandle,    ///< The socket/handle is closed or invalid.
-    ConnReset,    ///< The connection was reset by the peer.
-    ConnRefused,  ///< A connect was refused.
-    AddressInUse, ///< A bind failed because the address is in use.
-    AddressError, ///< Address resolution or parsing failed.
-    Unsupported,  ///< The operation is not supported on this platform/transport.
-    Other,        ///< An unclassified OS error (see systemCode).
+    Ok = 0,          ///< No error (not normally stored in an error result).
+    Eof,             ///< The peer closed the connection cleanly.
+    Cancelled,       ///< The operation was cancelled (stop requested / listener closed).
+    Timeout,         ///< A deadline elapsed before the operation completed.
+    WouldBlock,      ///< The operation would block (transient; the reactor retries).
+    BadHandle,       ///< The socket/handle is closed or invalid.
+    ConnReset,       ///< The connection was reset by the peer.
+    ConnRefused,     ///< A connect was refused.
+    AddressInUse,    ///< A bind failed because the address is in use.
+    AddressError,    ///< Address resolution or parsing failed.
+    Unsupported,     ///< The operation is not supported on this platform/transport.
+    MessageTooLarge, ///< A framed unit (line, PDU) exceeded its configured bound.
+    Other,           ///< An unclassified OS error (see systemCode).
 };
 
 /// @param code The error code to describe.
@@ -53,6 +54,7 @@ enum class NetErrorCode : std::uint8_t
         case NetErrorCode::AddressInUse: return "address in use";
         case NetErrorCode::AddressError: return "address error";
         case NetErrorCode::Unsupported: return "unsupported";
+        case NetErrorCode::MessageTooLarge: return "message too large";
         case NetErrorCode::Other: return "network error";
     }
     return "unknown error";

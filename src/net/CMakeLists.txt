@@ -1,10 +1,14 @@
 set(net_SOURCES
+    AsyncBufferedReader.cpp
+    AsyncBufferedReader.h
     EventLoop.cpp
     EventLoop.h
     EventSource.h
     IListener.h
     ISocket.h
     IoResult.h
+    WriteQueue.cpp
+    WriteQueue.h
     PollEventSource.cpp
     PollEventSource.h
     Sockets.h
@@ -52,8 +56,10 @@ if(NET_TESTING)
     enable_testing()
     add_executable(net_test
         test_main.cpp
+        AsyncBufferedReader_test.cpp
         EventLoop_test.cpp
         Socket_test.cpp
+        WriteQueue_test.cpp
     )
     target_link_libraries(net_test net crispy::core Catch2::Catch2)
     add_test(NAME net_test COMMAND $<TARGET_FILE:net_test>)
