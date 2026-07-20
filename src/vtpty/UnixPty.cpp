@@ -70,8 +70,8 @@ namespace
     PtyHandles createUnixPty(PageSize const& windowSize, optional<ImageSize> pixels)
     {
         // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
-        assert(std::cmp_less_equal(unbox(windowSize.lines), numeric_limits<unsigned short>::max()));
-        assert(std::cmp_less_equal(unbox(windowSize.columns), numeric_limits<unsigned short>::max()));
+        assert(std::cmp_less_equal(unbox(windowSize.lines), std::numeric_limits<unsigned short>::max()));
+        assert(std::cmp_less_equal(unbox(windowSize.columns), std::numeric_limits<unsigned short>::max()));
 
         winsize const ws { .ws_row = unbox<unsigned short>(windowSize.lines),
                            .ws_col = unbox<unsigned short>(windowSize.columns),

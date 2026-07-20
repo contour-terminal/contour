@@ -138,7 +138,7 @@ Tab* SessionModel::createTab(WindowId windowId)
 
 void SessionModel::closeTabAt(Window& win, int index)
 {
-    assert(index >= 0 && index < static_cast<int>(win._tabs.size()));
+    assert(index >= 0 && std::cmp_less(index, win._tabs.size()));
     auto const tabId = win._tabs[static_cast<size_t>(index)]->id();
 
     auto const previousActiveIndex = win._activeTabIndex;

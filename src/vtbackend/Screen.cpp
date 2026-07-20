@@ -562,7 +562,7 @@ void Screen::writeText(string_view text, size_t cellCount)
     auto const _ = crispy::finally { [&]() { _logCharTrace = true; } };
 #endif
 
-    assert(cellCount <= static_cast<size_t>(pageSize().columns.value - _cursor.position.column.value));
+    assert(std::cmp_less_equal(cellCount, pageSize().columns.value - _cursor.position.column.value));
 
     // Fast path: bulk-write ASCII directly into SoA arrays.
     // Only for pure ASCII content — non-ASCII needs the per-codepoint grapheme segmenter

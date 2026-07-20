@@ -641,7 +641,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
     if (!event->text().isEmpty())
     {
         auto const codepoints = event->text().toUcs4();
-        assert(codepoints.size() >= 1);
+        assert(!codepoints.empty());
 #ifdef __APPLE__
         // On macOS the Alt-modifier does not seem to be passed to the terminal apps
         // but rather remapped to whatever macOS is mapping them to.

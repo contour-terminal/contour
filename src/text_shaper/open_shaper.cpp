@@ -91,7 +91,7 @@ static void cleanup_cairo_font_face(void*)
 }
 
 static std::optional<text::rasterized_glyph> rasterizeWithCairo(FT_Face ftFace,
-                                                                text::glyph_key glyph,
+                                                                text::glyph_key const& glyph,
                                                                 text::render_mode /*mode*/)
 {
     // 1. Setup Cairo surface

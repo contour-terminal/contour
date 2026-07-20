@@ -59,6 +59,12 @@
 #     integration and process lookup both need a shell.
 #   * `readability-function-size` (1) -- Screen::apply is the VT sequence dispatch
 #     switch. Its size is the size of the protocol.
+#   * `clang-analyzer-unix.BlockInCriticalSection` (1) -- it flags the ::read() that
+#     UnixPty::read() performs under _mutex. The master fd is opened O_NONBLOCK
+#     (UnixPty.cpp:228) and the read only runs once the selector has reported it
+#     readable, so it cannot block; the checker classifies by function name rather
+#     than by the descriptor's flags. Holding the lock across it is deliberate --
+#     see 52d85da9, which added it to make read() safe against a concurrent close().
 #   * `misc-no-recursion` (41) -- recursion is a legitimate tool in a parser and a
 #     renderer; the check flags the technique rather than any defect.
 #   * `misc-use-anonymous-namespace` (79) -- directly contradicts
@@ -101,6 +107,7 @@ Checks: >-
   clang-analyzer-optin.portability.*,
   clang-analyzer-security.*,
   clang-analyzer-unix.*,
+  -clang-analyzer-unix.BlockInCriticalSection,
   clang-diagnostic-*,
   concurrency-*,
   cppcoreguidelines-*,
@@ -160,14 +167,9 @@ Checks: >-
   -readability-uppercase-literal-suffix,
   -readability-use-anyofallof,
 
-# Checks promoted from warning to hard error. Everything else is advisory.
-WarningsAsErrors: >-
-  bugprone-narrowing-conversions,
-  modernize-use-constraints,
-  modernize-use-nullptr,
-  performance-enum-size,
-  readability-avoid-nested-conditional-operator,
-  readability-identifier-naming,
+# Every enabled check is a hard error. The codebase is clean under this list; see
+# AGENT.md's zero-warning policy. Fix the cause rather than adding a NOLINT.
+WarningsAsErrors: '*'
 
 UseColor: true
 HeaderFilterRegex: 'src/(contour|crispy|text_shaper|vtpty|vtparser|vtbackend|vtrasterizer|vtmux|vtconformance)/'
