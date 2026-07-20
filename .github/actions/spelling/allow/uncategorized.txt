@@ -224,6 +224,7 @@ appimage
 appimagecrafters
 appimagetool
 applica
+aqtinstall
 archlinux
 arcval
 arget
