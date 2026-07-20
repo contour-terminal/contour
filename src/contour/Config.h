@@ -1831,7 +1831,7 @@ struct Writer
             };
             return "unknown";
         }();
-        auto const blinking = v.cursor.cursorDisplay == vtbackend::CursorDisplay::Blink ? true : false;
+        auto const blinking = v.cursor.cursorDisplay == vtbackend::CursorDisplay::Blink;
         auto const blinkingInterval = v.cursor.cursorBlinkInterval.count();
         return format(doc, shape, blinking, blinkingInterval);
     }

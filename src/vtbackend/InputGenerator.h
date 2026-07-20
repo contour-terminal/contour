@@ -696,8 +696,8 @@ class InputGenerator
     /// @return a view into the generated buffer sequence.
     [[nodiscard]] std::string_view peek() const noexcept
     {
-        return std::string_view(_pendingSequence.data() + _consumedBytes,
-                                size_t(_pendingSequence.size() - size_t(_consumedBytes)));
+        return { _pendingSequence.data() + _consumedBytes,
+                 size_t(_pendingSequence.size() - size_t(_consumedBytes)) };
     }
 
     void consume(int n)

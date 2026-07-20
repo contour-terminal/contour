@@ -1174,12 +1174,12 @@ class SupportedSequences
 
     [[nodiscard]] constexpr gsl::span<Function const> allSequences() const noexcept
     {
-        return gsl::span<Function const>(cbegin(), _supportedSequences.size());
+        return { cbegin(), _supportedSequences.size() };
     }
 
     [[nodiscard]] constexpr gsl::span<Function const> activeSequences() const noexcept
     {
-        return gsl::span<Function const>(cbegin(), _lastIndex);
+        return { cbegin(), _lastIndex };
     }
 
     CRISPY_CONSTEXPR void reset(VTType vt) noexcept

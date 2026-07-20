@@ -55,8 +55,7 @@ namespace
     /// sends while tearing down -- so the shape of the line is what ends it.
     [[nodiscard]] bool looksLikeTestName(std::string_view line) noexcept
     {
-        return !line.empty() && line.find(' ') == std::string_view::npos
-               && line.find('.') != std::string_view::npos;
+        return !line.empty() && !line.contains(' ') && line.contains('.');
     }
 } // namespace
 

@@ -80,7 +80,7 @@ CONTOUR_CONSTEXPR_UNLESS_MSVC inline double squareWave(double x) noexcept
         assert(note >= 0 && note < 26);
         auto const samples = createMusicalNote(volume, duration, note);
         auto const* const raw = reinterpret_cast<char const*>(samples.data());
-        bytes.insert(bytes.end(), raw, raw + samples.size() * sizeof(std::int16_t));
+        bytes.insert(bytes.end(), raw, raw + (samples.size() * sizeof(std::int16_t)));
     }
     return bytes;
 }

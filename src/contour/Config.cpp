@@ -2491,13 +2491,13 @@ void YAMLConfigReader::defaultSettings(vtpty::Process::ExecInfo& shell)
 #endif
 
     // force some default env
-    if (shell.env.find("TERM") == shell.env.end())
+    if (!shell.env.contains("TERM"))
     {
         shell.env["TERM"] = getDefaultTERM(appTerminfoDir);
         logger()("Defaulting TERM to {}.", shell.env["TERM"]);
     }
 
-    if (shell.env.find("COLORTERM") == shell.env.end())
+    if (!shell.env.contains("COLORTERM"))
         shell.env["COLORTERM"] = "truecolor";
 
     // TERM_PROGRAM / TERM_PROGRAM_VERSION are the de-facto way an application identifies WHICH

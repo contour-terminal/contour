@@ -174,7 +174,7 @@ void verifyBitmap(TileCreateData const& tileData, std::vector<std::string> const
 
         for (auto const x: std::views::iota(0zu, width))
         {
-            auto const pixelIndex = (y * width + x) * componentCount;
+            auto const pixelIndex = ((y * width) + x) * componentCount;
             auto const pixelValue = tileData.bitmap[pixelIndex];
             actualRow += (pixelValue > 0 ? '#' : '.');
         }

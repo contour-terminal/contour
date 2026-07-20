@@ -1039,7 +1039,7 @@ bool Grid::cellEmptyOrContainsOneOf(CellLocation position, u32string_view delimi
     position.column = min(position.column, boxed_cast<ColumnOffset>(pageSize().columns - 1));
 
     auto cell = at(position.line, position.column);
-    return CellUtil::empty(cell) || delimiters.find(cell.codepoint(0)) != std::u32string_view::npos;
+    return CellUtil::empty(cell) || delimiters.contains(cell.codepoint(0));
 }
 
 u32string Grid::extractText(CellLocationRange range) const noexcept

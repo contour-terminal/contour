@@ -84,7 +84,7 @@ int main()
     auto first = true;
     for (auto i = 0; i <= 340; ++i)
     {
-        auto const x = XMin + (XMax - XMin) * (static_cast<double>(i) / 340.0);
+        auto const x = XMin + ((XMax - XMin) * (static_cast<double>(i) / 340.0));
         auto const px = mapX(x);
         auto const py = mapY(f(x));
         if (first)

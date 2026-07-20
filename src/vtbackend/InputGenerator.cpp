@@ -1468,7 +1468,7 @@ bool InputGenerator::generateMousePress(
         return false;
 
     if (!isMouseWheel(button))
-        if (!_currentlyPressedMouseButtons.count(button))
+        if (!_currentlyPressedMouseButtons.contains(button))
             _currentlyPressedMouseButtons.insert(button);
 
     return logged(generateMouse(

@@ -429,11 +429,8 @@ struct LogicalLines
         bool operator!=(iterator const& other) const noexcept { return current != other.current; }
     }; // }}}
 
-    [[nodiscard]] iterator begin() const { return iterator(lines, topMostLine, topMostLine, bottomMostLine); }
-    [[nodiscard]] iterator end() const
-    {
-        return iterator(lines, topMostLine, bottomMostLine + 1, bottomMostLine);
-    }
+    [[nodiscard]] iterator begin() const { return { lines, topMostLine, topMostLine, bottomMostLine }; }
+    [[nodiscard]] iterator end() const { return { lines, topMostLine, bottomMostLine + 1, bottomMostLine }; }
 };
 
 struct ReverseLogicalLines
@@ -525,14 +522,8 @@ struct ReverseLogicalLines
         bool operator!=(iterator const& other) const noexcept { return current != other.current; }
     }; // }}}
 
-    [[nodiscard]] iterator begin() const
-    {
-        return iterator(lines, topMostLine, bottomMostLine, bottomMostLine);
-    }
-    [[nodiscard]] iterator end() const
-    {
-        return iterator(lines, topMostLine, topMostLine - 1, bottomMostLine);
-    }
+    [[nodiscard]] iterator begin() const { return { lines, topMostLine, bottomMostLine, bottomMostLine }; }
+    [[nodiscard]] iterator end() const { return { lines, topMostLine, topMostLine - 1, bottomMostLine }; }
 };
 
 /**

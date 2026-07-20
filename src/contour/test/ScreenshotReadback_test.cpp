@@ -47,7 +47,8 @@ std::vector<uint8_t> makeRowTaggedBuffer(int width, int height)
     for (int y = 0; y < height; ++y)
         for (int x = 0; x < width; ++x)
         {
-            auto const i = (static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)) * 4;
+            auto const i =
+                ((static_cast<size_t>(y) * static_cast<size_t>(width)) + static_cast<size_t>(x)) * 4;
             buf[i + 0] = static_cast<uint8_t>(y);
             buf[i + 1] = static_cast<uint8_t>(x);
             buf[i + 2] = 0;

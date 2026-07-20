@@ -158,7 +158,7 @@ std::string render(double yaw, double pitch)
     for (auto i = 0; i < GridN; ++i)
         for (auto j = 0; j < GridN; ++j)
         {
-            auto const heightColor = 2 + static_cast<int>(world[i][j].z * 3.0) % 6;
+            auto const heightColor = 2 + (static_cast<int>(world[i][j].z * 3.0) % 6);
             r += "W(I" + std::to_string(heightColor) + ")";
             if (i + 1 < GridN)
                 r += moveTo(project(world[i][j], yaw, pitch)) + lineTo(project(world[i + 1][j], yaw, pitch));

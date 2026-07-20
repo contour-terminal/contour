@@ -616,7 +616,7 @@ bool ViInputHandler::parseCount(char32_t ch, Modifiers modifiers)
         case '8':
         case '9':
             //.
-            _count = _count * 10 + (ch - '0');
+            _count = (_count * 10) + (ch - '0');
             return true;
         default:
             //.

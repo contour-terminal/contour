@@ -349,7 +349,7 @@ TEST_CASE("display: keyboard, mouse and wheel events reach the PTY through the r
 
     QTest::keyClick(h.window.get(), Qt::Key_A);
     QTest::keyClick(h.window.get(), Qt::Key_Return);
-    for (int i = 0; i < 50 && h.pty->stdinSnapshot().find('a') == std::string::npos; ++i)
+    for (int i = 0; i < 50 && !h.pty->stdinSnapshot().contains('a'); ++i)
         QTest::qWait(10);
     CHECK(h.pty->stdinSnapshot().find('a') != std::string::npos);
     CHECK(h.pty->stdinSnapshot().find('\r') != std::string::npos);
@@ -357,7 +357,7 @@ TEST_CASE("display: keyboard, mouse and wheel events reach the PTY through the r
     // Enable X10 mouse reporting, then click inside the grid: the terminal must encode a report.
     h.feedAndSettle("\033[?1000h"sv);
     QTest::mouseClick(h.window.get(), Qt::LeftButton, Qt::NoModifier, QPoint(100, 100));
-    for (int i = 0; i < 50 && h.pty->stdinSnapshot().find("\033[M") == std::string::npos; ++i)
+    for (int i = 0; i < 50 && !h.pty->stdinSnapshot().contains("\033[M"); ++i)
         QTest::qWait(10);
     CHECK(h.pty->stdinSnapshot().find("\033[M") != std::string::npos);
 
@@ -1004,7 +1004,7 @@ TEST_CASE("display: input-method events compose and query on the live display", 
         commit.setCommitString(QStringLiteral("Z"));
         QCoreApplication::sendEvent(h.display, &commit);
     }
-    for (int i = 0; i < 50 && h.pty->stdinSnapshot().find('Z') == std::string::npos; ++i)
+    for (int i = 0; i < 50 && !h.pty->stdinSnapshot().contains('Z'); ++i)
         QTest::qWait(10);
     CHECK(h.pty->stdinSnapshot().find('Z') != std::string::npos);
 

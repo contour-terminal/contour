@@ -209,7 +209,7 @@ class SequenceParameterBuilder
             std::distance(const_cast<SequenceParameterBuilder*>(this)->_parameters->_values.begin(),
                           _currentParameter)
             + 1;
-        if (!(result == 1 && _parameters->_values[0] == 0))
+        if (result != 1 || _parameters->_values[0] != 0)
             return static_cast<size_t>(result);
         else
             return 0;

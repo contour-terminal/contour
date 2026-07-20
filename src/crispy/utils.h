@@ -152,7 +152,7 @@ constexpr std::string_view trimRight(std::string_view value) noexcept
 {
     while (!value.empty())
     {
-        if (std::string_view(" \t\r\n").find(value.back()) == std::string_view::npos)
+        if (!std::string_view(" \t\r\n").contains(value.back()))
             return value;
         value.remove_suffix(1);
     }

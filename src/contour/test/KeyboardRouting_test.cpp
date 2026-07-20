@@ -115,14 +115,14 @@ class RoutingMockSession: public QObject
     [[nodiscard]] int upTime() const { return 5; }
     [[nodiscard]] float opacity() const { return 1.0F; }
     [[nodiscard]] float dimUnfocused() const { return 0.0F; }
-    [[nodiscard]] QColor backgroundColor() const { return QColor(Qt::black); }
-    [[nodiscard]] QString bellSource() const { return QString(); }
+    [[nodiscard]] QColor backgroundColor() const { return { Qt::black }; }
+    [[nodiscard]] QString bellSource() const { return {}; }
     [[nodiscard]] bool isScrollbarRight() const { return true; }
     [[nodiscard]] bool isScrollbarVisible() const { return false; }
     [[nodiscard]] bool isImageBackground() const { return false; }
     [[nodiscard]] bool isBlurBackground() const { return false; }
     [[nodiscard]] float opacityBackground() const { return 1.0F; }
-    [[nodiscard]] QString pathToBackground() const { return QString(); }
+    [[nodiscard]] QString pathToBackground() const { return {}; }
     [[nodiscard]] QString title() const { return QStringLiteral("mock"); }
 };
 

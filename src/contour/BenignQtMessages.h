@@ -42,7 +42,7 @@ inline constexpr auto BenignQtMessages = std::array {
 [[nodiscard]] inline bool isBenignQtMessage(std::string_view message) noexcept
 {
     return std::ranges::any_of(BenignQtMessages, [message](BenignQtMessage const& entry) {
-        return message.find(entry.substring) != std::string_view::npos;
+        return message.contains(entry.substring);
     });
 }
 

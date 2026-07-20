@@ -776,7 +776,7 @@ AutoScrollInfo computeAutoScrollInfo(QMouseEvent const* event, TerminalSession c
     auto const cellHeight = session.display()->cellSize().height.as<int>();
     auto const marginTop = static_cast<int>(unbox(session.profile().margins.value().vertical) * dpr);
     auto const pageLines = *session.terminal().totalPageSize().lines;
-    auto const contentBottom = marginTop + pageLines * cellHeight;
+    auto const contentBottom = marginTop + (pageLines * cellHeight);
 
     auto const mouseY = static_cast<int>(event->position().y() * dpr);
 
@@ -809,7 +809,7 @@ SpawnTerminalCommand buildSpawnTerminalCommand(string const& programPath,
         if (url.host() == QHostInfo::localHostName())
             return url.path();
         else
-            return QString();
+            return {};
     }();
 
     SpawnTerminalCommand command;

@@ -1119,8 +1119,9 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
         // Center horizontally within the emoji bounding box (numCells * cellWidth).
         glyph.position.x = unbox<int>(emojiBoundingBox.width - glyph.bitmapSize.width) / 2;
         // Center vertically within the full box height, accounting for the baseline offset.
-        glyph.position.y = (unbox<int>(_gridMetrics.cellSize.height) + glyph.bitmapSize.height.as<int>()) / 2
-                           - _gridMetrics.baseline;
+        glyph.position.y =
+            ((unbox<int>(_gridMetrics.cellSize.height) + glyph.bitmapSize.height.as<int>()) / 2)
+            - _gridMetrics.baseline;
     }
     else if (glyph.bitmapSize.height > _gridMetrics.cellSize.height)
     {

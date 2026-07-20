@@ -275,9 +275,9 @@ class MockSession: public QObject
     [[nodiscard]] bool isImageBackground() const { return false; }
     [[nodiscard]] bool isBlurBackground() const { return false; }
     [[nodiscard]] float opacityBackground() const { return 1.0F; }
-    [[nodiscard]] QString pathToBackground() const { return QString(); }
-    [[nodiscard]] QColor backgroundColor() const { return QColor(Qt::black); }
-    [[nodiscard]] QString bellSource() const { return QString(); }
+    [[nodiscard]] QString pathToBackground() const { return {}; }
+    [[nodiscard]] QColor backgroundColor() const { return { Qt::black }; }
+    [[nodiscard]] QString bellSource() const { return {}; }
     [[nodiscard]] bool isScrollbarRight() const { return _scrollbarRight; }
     [[nodiscard]] bool isScrollbarVisible() const { return _scrollbarVisible; }
     [[nodiscard]] QString hyperlinkTooltipText() const { return _hyperlinkTooltipText; }

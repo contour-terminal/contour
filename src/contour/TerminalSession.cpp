@@ -179,21 +179,21 @@ namespace
             // try to find Tab section in one of the status line segments
 
             std::string segment;
-            if (profile.statusLine.value().indicator.left.find("Tabs") != std::string::npos)
+            if (profile.statusLine.value().indicator.left.contains("Tabs"))
             {
                 segment = profile.statusLine.value().indicator.left;
             }
-            else if (profile.statusLine.value().indicator.middle.find("Tabs") != std::string::npos)
+            else if (profile.statusLine.value().indicator.middle.contains("Tabs"))
             {
                 segment = profile.statusLine.value().indicator.middle;
             }
-            else if (profile.statusLine.value().indicator.right.find("Tabs") != std::string::npos)
+            else if (profile.statusLine.value().indicator.right.contains("Tabs"))
             {
                 segment = profile.statusLine.value().indicator.right;
             }
 
             // check if indexing is defined
-            if (segment.find("Indexing=") != std::string::npos)
+            if (segment.contains("Indexing="))
             {
                 // cut the string after indexing=
                 std::string indexing = segment.substr(segment.find("Indexing=") + 9);
@@ -3257,7 +3257,7 @@ QModelIndex TerminalSession::index(int row, int column, QModelIndex const& paren
 QModelIndex TerminalSession::parent(QModelIndex const& child) const
 {
     crispy::ignore_unused(child);
-    return QModelIndex();
+    return {};
 }
 
 int TerminalSession::rowCount(QModelIndex const& parent) const
@@ -3278,7 +3278,7 @@ QVariant TerminalSession::data(QModelIndex const& index, int role) const
     Require(index.row() == 0);
     Require(index.column() == 0);
 
-    return QVariant(_id);
+    return { _id };
 }
 
 bool TerminalSession::setData(QModelIndex const& index, QVariant const& value, int role)

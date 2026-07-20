@@ -225,7 +225,7 @@ namespace
                 static_cast<double>(*digits) / std::pow(10.0, static_cast<double>(fractionText.size()));
         }
 
-        if (!(0.0 <= intensity && intensity <= 1.0))
+        if (0.0 > intensity || intensity > 1.0)
             return std::nullopt;
 
         return static_cast<uint8_t>(std::lround(intensity * 255.0));

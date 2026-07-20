@@ -337,7 +337,7 @@ std::string SshHostConfig::toString() const
     {
         if (port)
         {
-            if (hostname.find(':') != std::string::npos)
+            if (hostname.contains(':'))
                 result += std::format("[{}]:{}"sv, hostname, port);
             else
                 result += std::format("{}:{}"sv, hostname, port);
@@ -540,7 +540,7 @@ bool SshSession::requestPty()
 {
     // Mode encoding defined here: https://datatracker.ietf.org/doc/html/rfc4250#section-4.5
     auto const modes = ""sv;
-    auto const term = _config.env.count("TERM") ? _config.env.at("TERM") : ""s;
+    auto const term = _config.env.contains("TERM") ? _config.env.at("TERM") : ""s;
     auto const rc = libssh2_channel_request_pty_ex(_p->sshChannel,
                                                    term.data(),
                                                    term.size(),

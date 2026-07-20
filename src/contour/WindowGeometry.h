@@ -189,9 +189,9 @@ namespace detail
                                                               Margins marginsDevicePx) noexcept
 {
     auto const usableWidth =
-        std::max(0, unbox<int>(availableDevicePx.width) - 2 * marginsDevicePx.horizontal);
+        std::max(0, unbox<int>(availableDevicePx.width) - ((2 * marginsDevicePx.horizontal)));
     auto const usableHeight =
-        std::max(0, unbox<int>(availableDevicePx.height) - 2 * marginsDevicePx.vertical);
+        std::max(0, unbox<int>(availableDevicePx.height) - ((2 * marginsDevicePx.vertical)));
     auto const cellWidth = std::max(1, unbox<int>(cellSize.width));
     auto const cellHeight = std::max(1, unbox<int>(cellSize.height));
 

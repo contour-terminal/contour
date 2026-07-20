@@ -218,7 +218,7 @@ std::vector<Verdict> extractVerdicts(std::vector<VtTestRecord> const& records)
 
         for (auto const& pattern: VerdictPatterns)
         {
-            if (record.payload.find(pattern.needle) == std::string::npos)
+            if (!record.payload.contains(pattern.needle))
                 continue;
 
             verdicts.push_back(Verdict {

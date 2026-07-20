@@ -1118,7 +1118,7 @@ bool Terminal::handleMouseSelection(Modifiers modifiers)
 
     double const diffMs = chrono::duration<double, std::milli>(_currentTime - _lastClick).count();
     _lastClick = _currentTime;
-    _speedClicks = (diffMs >= 0.0 && diffMs <= 1000.0 ? _speedClicks : 0) % 4 + 1;
+    _speedClicks = ((diffMs >= 0.0 && diffMs <= 1000.0 ? _speedClicks : 0) % 4) + 1;
 
     auto const startPos = CellLocation {
         .line = _currentMousePosition.line - boxed_cast<LineOffset>(_viewport.scrollOffset()),
@@ -1575,7 +1575,7 @@ string_view Terminal::lockedWriteToPtyBuffer(string_view data)
     auto const chunk = data.substr(0, std::min(data.size(), _currentPtyBuffer->bytesAvailable()));
     auto const _ = std::scoped_lock { *_currentPtyBuffer };
     auto const ref = _currentPtyBuffer->writeAtEnd(chunk);
-    return string_view(ref.data(), ref.size());
+    return { ref.data(), ref.size() };
 }
 
 size_t Terminal::maxBulkTextSequenceWidth() const noexcept
@@ -1967,7 +1967,7 @@ SmoothScrollResult Terminal::applySmoothScrollPixelDelta(float pixelDelta)
     // notifications and causes visual glitches).
     auto const totalPixels = _viewport.pixelOffset() + pixelDelta;
     auto const linesDelta = static_cast<int>(std::floor(totalPixels / cellHeight));
-    auto const remainder = totalPixels - static_cast<float>(linesDelta) * cellHeight;
+    auto const remainder = totalPixels - (static_cast<float>(linesDelta) * cellHeight);
 
     auto const maxOffset = boxed_cast<ScrollOffset>(primaryScreen().historyLineCount());
     auto const unclampedOffset = _viewport.scrollOffset().value + linesDelta;
@@ -3924,10 +3924,10 @@ std::shared_ptr<RasterizedImage> Terminal::createDRCSImage(DRCSGlyph const& glyp
     {
         if (glyph.bitmap[i])
         {
-            rgbaData[i * 4 + 0] = foregroundColor.red;
-            rgbaData[i * 4 + 1] = foregroundColor.green;
-            rgbaData[i * 4 + 2] = foregroundColor.blue;
-            rgbaData[i * 4 + 3] = 0xFF;
+            rgbaData[(i * 4) + 0] = foregroundColor.red;
+            rgbaData[(i * 4) + 1] = foregroundColor.green;
+            rgbaData[(i * 4) + 2] = foregroundColor.blue;
+            rgbaData[(i * 4) + 3] = 0xFF;
         }
         // else: leave as transparent (0,0,0,0)
     }
@@ -4002,7 +4002,7 @@ void Terminal::defineDRCS(int fontNumber,
                 {
                     if ((sixel >> bit) & 1)
                     {
-                        auto const idx = static_cast<size_t>((row + bit) * width + col);
+                        auto const idx = static_cast<size_t>(((row + bit) * width) + col);
                         if (idx < glyph.bitmap.size())
                             glyph.bitmap[idx] = 1;
                     }

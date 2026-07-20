@@ -1228,7 +1228,7 @@ TEST_CASE("Renderer.reconfig.concurrent_requests_and_apply", "[renderer]")
     for (auto const i: std::views::iota(0, Iterations))
     {
         auto const lines = 10 + (i % 50);
-        renderer.applyResize(vtbackend::ImageSize { Width(640 + i % 100), Height(480 + i % 100) },
+        renderer.applyResize(vtbackend::ImageSize { Width(640 + (i % 100)), Height(480 + (i % 100)) },
                              PageSize { LineCount(lines), ColumnCount(lines * 2) },
                              vtrasterizer::PageMargin { .left = i % 5, .top = i % 7, .bottom = i % 3 });
         if (i % 3 == 0)

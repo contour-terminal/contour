@@ -85,7 +85,7 @@ template <typename S>
 [[nodiscard]] inline std::string trimRight(std::string text)
 {
     constexpr auto Whitespaces = std::string_view("\x20\t\r\n");
-    while (!text.empty() && Whitespaces.find(text.back()) != std::string_view::npos)
+    while (!text.empty() && Whitespaces.contains(text.back()))
         text.resize(text.size() - 1);
     return text;
 }

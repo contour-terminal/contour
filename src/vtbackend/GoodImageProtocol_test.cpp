@@ -27,10 +27,10 @@ std::vector<uint8_t> makeRGBA(int width, int height, uint8_t r, uint8_t g, uint8
     auto data = std::vector<uint8_t>(pixelCount * 4);
     for (auto const i: std::views::iota(size_t { 0 }, pixelCount))
     {
-        data[i * 4 + 0] = r;
-        data[i * 4 + 1] = g;
-        data[i * 4 + 2] = b;
-        data[i * 4 + 3] = a;
+        data[(i * 4) + 0] = r;
+        data[(i * 4) + 1] = g;
+        data[(i * 4) + 2] = b;
+        data[(i * 4) + 3] = a;
     }
     return data;
 }
@@ -654,7 +654,7 @@ TEST_CASE("GoodImageProtocol.Render.SubRegion", "[GIP]")
     {
         for (auto const col: std::views::iota(0, 4))
         {
-            auto const idx = static_cast<size_t>((row * 4 + col) * 4);
+            auto const idx = static_cast<size_t>(((row * 4) + col) * 4);
             auto const isRight = col >= 2;
             pixels[idx + 0] = isRight ? uint8_t { 0x00 } : uint8_t { 0xFF }; // R
             pixels[idx + 1] = isRight ? uint8_t { 0xFF } : uint8_t { 0x00 }; // G
@@ -683,7 +683,7 @@ TEST_CASE("GoodImageProtocol.Render.SubRegion", "[GIP]")
     // Sample the center pixel of the fragment — it should be green (from the right half).
     auto const centerX = *cellPixelSize.width / 2;
     auto const centerY = *cellPixelSize.height / 2;
-    auto const centerIdx = static_cast<size_t>((centerY * *cellPixelSize.width + centerX) * 4);
+    auto const centerIdx = static_cast<size_t>(((centerY * *cellPixelSize.width) + centerX) * 4);
     CHECK(fragmentData[centerIdx + 0] == 0x00); // R = 0 (green, not red)
     CHECK(fragmentData[centerIdx + 1] == 0xFF); // G = 0xFF
     CHECK(fragmentData[centerIdx + 2] == 0x00); // B = 0
@@ -699,9 +699,9 @@ static std::vector<uint8_t> makeRGB(int width, int height, uint8_t r, uint8_t g,
     auto data = std::vector<uint8_t>(pixelCount * 3);
     for (auto const i: std::views::iota(size_t { 0 }, pixelCount))
     {
-        data[i * 3 + 0] = r;
-        data[i * 3 + 1] = g;
-        data[i * 3 + 2] = b;
+        data[(i * 3) + 0] = r;
+        data[(i * 3) + 1] = g;
+        data[(i * 3) + 2] = b;
     }
     return data;
 }

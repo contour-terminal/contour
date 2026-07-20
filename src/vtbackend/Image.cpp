@@ -190,7 +190,7 @@ namespace
                     for (int i = 0; i < SimdWidth; ++i)
                     {
                         auto const sourceIndex =
-                            (static_cast<size_t>(sourceY) * static_cast<size_t>(context.imageWidth)
+                            ((static_cast<size_t>(sourceY) * static_cast<size_t>(context.imageWidth))
                              + static_cast<size_t>(sourceXVec[i]))
                             * 4;
                         if (sourceIndex + 4 <= context.imageData.size())
@@ -228,7 +228,7 @@ namespace
                                                    * static_cast<double>(context.subHeight)
                                                    / static_cast<double>(context.paramHeight));
                             auto const sourceIndex =
-                                (static_cast<size_t>(sourceY) * static_cast<size_t>(context.imageWidth)
+                                ((static_cast<size_t>(sourceY) * static_cast<size_t>(context.imageWidth))
                                  + static_cast<size_t>(sourceX))
                                 * 4;
                             if (sourceIndex + 4 <= context.imageData.size())
@@ -391,7 +391,7 @@ Image::Data RasterizedImage::fragment(CellLocation pos, ImageSize targetCellSize
                 auto const sourceY = subOffsetY
                                      + static_cast<int>((globalY - yOffset) * static_cast<double>(subHeight)
                                                         / static_cast<double>(paramHeight));
-                auto const sourceIndex = (static_cast<size_t>(sourceY) * static_cast<size_t>(imageWidth)
+                auto const sourceIndex = ((static_cast<size_t>(sourceY) * static_cast<size_t>(imageWidth))
                                           + static_cast<size_t>(sourceX))
                                          * 4;
                 if (sourceIndex + 4 <= _image->data().size())

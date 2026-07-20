@@ -18,7 +18,7 @@ namespace
 template <typename T>
 inline strong_hash h(T v)
 {
-    return strong_hash(0, 0, 0, static_cast<uint32_t>(v));
+    return { 0, 0, 0, static_cast<uint32_t>(v) };
 }
 
 template <typename T>
@@ -38,7 +38,7 @@ inline string sh(Value first, Value second, Values... remaining)
 template <typename T>
 strong_hash collidingHash(T v) noexcept
 {
-    return strong_hash(0, 0, static_cast<uint32_t>(v), 0);
+    return { 0, 0, static_cast<uint32_t>(v), 0 };
 }
 
 template <typename T>

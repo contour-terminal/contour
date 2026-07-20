@@ -973,9 +973,9 @@ namespace detail
             // naturally matches the stem width (2*halfLt), giving a consistent stroke.
             for (auto const i: Views::iota(0, numSteps + 1))
             {
-                auto const t = tStart + (tEnd - tStart) * static_cast<double>(i) / numSteps;
-                auto const px = static_cast<int>(std::round(cx + rx * std::cos(t)));
-                auto const py = static_cast<int>(std::round(cy + ry * std::sin(t)));
+                auto const t = tStart + ((tEnd - tStart) * static_cast<double>(i) / numSteps);
+                auto const px = static_cast<int>(std::round(cx + (rx * std::cos(t))));
+                auto const py = static_cast<int>(std::round(cy + (ry * std::sin(t))));
 
                 for (auto const dy: Views::iota(-halfTh, halfTh + 1))
                     for (auto const dx: Views::iota(-halfTh, halfTh + 1))
@@ -1414,25 +1414,25 @@ namespace detail
             auto const barThickness = static_cast<double>(halfLt) / h;
 
             // 2 * static_cast<double>(halfLt) / h;
-            auto const verticalGap = static_cast<double>(baseline) / h + 4 * barThickness;
+            auto const verticalGap = (static_cast<double>(baseline) / h) + (4 * barThickness);
 
             if (isTop)
             {
                 // ⎲: Horizontal bar at screen-top, diagonal going down-right toward the vertex.
                 pixmap.rect(Ratio { .x = 0.0, .y = verticalGap },
-                            Ratio { .x = 1.0, .y = verticalGap + barThickness * 2 });
+                            Ratio { .x = 1.0, .y = verticalGap + (barThickness * 2) });
                 pixmap.getlineThickness(lt * 4);
-                pixmap.line(Ratio { .x = 0.0, .y = verticalGap + barThickness * 2 },
-                            Ratio { .x = 0.5, .y = 1.0 - verticalGap + barThickness * 2 });
+                pixmap.line(Ratio { .x = 0.0, .y = verticalGap + (barThickness * 2) },
+                            Ratio { .x = 0.5, .y = 1.0 - verticalGap + (barThickness * 2) });
             }
             else
             {
                 // ⎳: Diagonal going from vertex at screen-top down-left to the bar at screen-bottom.
-                pixmap.rect(Ratio { .x = 0.0, .y = 1.0 - verticalGap - barThickness * 2 },
+                pixmap.rect(Ratio { .x = 0.0, .y = 1.0 - verticalGap - (barThickness * 2) },
                             Ratio { .x = 1.0, .y = 1.0 - verticalGap });
                 pixmap.getlineThickness(lt * 4);
                 pixmap.line(Ratio { .x = 0.5, .y = 0.0 },
-                            Ratio { .x = 0.0, .y = 1.0 - verticalGap - barThickness * 2 });
+                            Ratio { .x = 0.0, .y = 1.0 - verticalGap - (barThickness * 2) });
             }
 
             return pixmap.take();
@@ -1680,7 +1680,7 @@ namespace detail
                         {
                             auto dx = x - static_cast<double>(xi);
                             auto dy = y - static_cast<double>(yi);
-                            if (dx * dx + dy * dy <= radius * radius)
+                            if ((dx * dx) + (dy * dy) <= radius * radius)
                                 image[(yi * width) + xi] = value;
                         }
                 };
@@ -1860,7 +1860,7 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint,
             if (!envValue)
                 return 4;
             auto const val = atoi(envValue);
-            if (!(val >= 1 && val <= 8))
+            if (val < 1 || val > 8)
                 return 1;
             return val;
         }();
@@ -1908,7 +1908,7 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint,
     // Perform Copy (2D Slice)
     for (size_t y = 0; y < targetHeight; ++y)
     {
-        auto const srcOffset = (srcYBase + y) * rowSize + srcXBase;
+        auto const srcOffset = ((srcYBase + y) * rowSize) + srcXBase;
         auto const dstOffset = y * targetWidth;
         std::copy_n(pixels.data() + srcOffset, targetWidth, sliced.data() + dstOffset);
     }
@@ -2613,15 +2613,15 @@ static auto buildBox(detail::Box box,
             using enum detail::Line;
             case NoLine: return Center(xOffset * ss, xOffset * ss, yOffset * ss, yOffset * ss);
             case Light:
-                return Center { .x0 = (xOffset - lightTh / 2) * ss,
-                                .x1 = (xOffset - lightTh / 2 + lightTh) * ss,
-                                .y0 = (yOffset - lightTh / 2) * ss,
-                                .y1 = (yOffset - lightTh / 2 + lightTh) * ss };
+                return Center { .x0 = (xOffset - (lightTh / 2)) * ss,
+                                .x1 = (xOffset - (lightTh / 2) + lightTh) * ss,
+                                .y0 = (yOffset - (lightTh / 2)) * ss,
+                                .y1 = (yOffset - (lightTh / 2) + lightTh) * ss };
             case Double:
-                return Center { .x0 = (xOffset - lightTh / 2 - lightTh) * ss,
-                                .x1 = (xOffset - lightTh / 2 + 2 * lightTh) * ss,
-                                .y0 = (yOffset - lightTh / 2 - lightTh) * ss,
-                                .y1 = (yOffset - lightTh / 2 + 2 * lightTh) * ss };
+                return Center { .x0 = (xOffset - (lightTh / 2) - lightTh) * ss,
+                                .x1 = (xOffset - (lightTh / 2) + (2 * lightTh)) * ss,
+                                .y0 = (yOffset - (lightTh / 2) - lightTh) * ss,
+                                .y1 = (yOffset - (lightTh / 2) + (2 * lightTh)) * ss };
             case Heavy:
                 return Center { .x0 = (xOffset - lightTh) * ss,
                                 .x1 = (xOffset + lightTh) * ss,
@@ -2658,8 +2658,8 @@ static auto buildBox(detail::Box box,
     };
 
     auto drawArc = [=, &image](Arc arc, size_t th, uint8_t value) {
-        auto const x0 = (xOffset / ss - th / ss / 2) * ss;
-        auto const y0 = (yOffset / ss - th / ss / 2) * ss;
+        auto const x0 = ((xOffset / ss) - (th / ss / 2)) * ss;
+        auto const y0 = ((yOffset / ss) - (th / ss / 2)) * ss;
 
         auto const ro = static_cast<double>(std::min({ width - x0, height - y0, x0 + th, y0 + th }));
         auto const ri = ro - static_cast<double>(th);
@@ -2844,7 +2844,7 @@ static auto buildBox(detail::Box box,
                 {
                     auto y = static_cast<double>(yi) - static_cast<double>(yOffset);
                     auto x = static_cast<double>(xi) - static_cast<double>(xOffset);
-                    if ((x * x + y * y) <= radius * radius)
+                    if (((x * x) + (y * y)) <= radius * radius)
                         image[(yi * width) + xi] = value;
                 }
         };
@@ -2856,7 +2856,7 @@ static auto buildBox(detail::Box box,
                 constexpr auto SpaceThicknessFactor = 1.35; // empirical value
                 constexpr auto MinThicknessFactor = 3.;     // 3 = 2x center + space + outer;
                 auto space = SpaceThicknessFactor * double(getThickness(Line::Light));
-                if (radius < MinThicknessFactor * double(getThickness(Line::Light)) + space)
+                if (radius < (MinThicknessFactor * double(getThickness(Line::Light))) + space)
                 {
                     auto solidTh = radius - space;
                     if (solidTh <= 0)

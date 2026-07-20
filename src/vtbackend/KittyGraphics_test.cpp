@@ -378,7 +378,7 @@ TEST_CASE("ITerm2.an_absurd_height_does_not_scroll_the_screen_away", "[iterm2]")
     // does not.
     auto found = false;
     for (auto const line: std::views::iota(-20, 4))
-        if (screen.grid().lineAt(LineOffset(line)).toUtf8Trimmed().find("marker") != std::string::npos)
+        if (screen.grid().lineAt(LineOffset(line)).toUtf8Trimmed().contains("marker"))
             found = true;
     CHECK(found);
 }

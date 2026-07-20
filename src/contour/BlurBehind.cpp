@@ -161,7 +161,7 @@ void setEnabled(QWindow* window, bool enable, QRegion const& region)
                     {
                         if (enable)
                         {
-                            if (activeBlurs.find(window) == activeBlurs.end())
+                            if (!activeBlurs.contains(window))
                             {
                                 auto* rawBlur = blurManager->create(surface);
                                 activeBlurs[window] = std::make_unique<QtWayland::org_kde_kwin_blur>(rawBlur);

@@ -54,7 +54,7 @@ RGBAColor ReGISRasterizer::at(int x, int y) const noexcept
     auto const h = unbox<int>(_size.height);
     if (x < 0 || y < 0 || x >= w || y >= h)
         return RGBAColor { 0 };
-    auto const i = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 4;
+    auto const i = ((static_cast<size_t>(y) * static_cast<size_t>(w)) + static_cast<size_t>(x)) * 4;
     return RGBAColor { _buffer[i], _buffer[i + 1], _buffer[i + 2], _buffer[i + 3] };
 }
 
@@ -64,7 +64,7 @@ void ReGISRasterizer::blend(int x, int y, RGBColor color, WritingMode mode) noex
     auto const h = unbox<int>(_size.height);
     if (x < 0 || y < 0 || x >= w || y >= h)
         return;
-    auto const i = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 4;
+    auto const i = ((static_cast<size_t>(y) * static_cast<size_t>(w)) + static_cast<size_t>(x)) * 4;
     switch (mode)
     {
         case WritingMode::Replace:
@@ -279,7 +279,7 @@ void ReGISRasterizer::compositePixel(
     auto const h = unbox<int>(_size.height);
     if (x < 0 || y < 0 || x >= w || y >= h || coverage == 0)
         return;
-    auto const i = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 4;
+    auto const i = ((static_cast<size_t>(y) * static_cast<size_t>(w)) + static_cast<size_t>(x)) * 4;
     auto const srcAlpha = static_cast<double>(coverage) / 255.0;
 
     if (mode == WritingMode::Erase)

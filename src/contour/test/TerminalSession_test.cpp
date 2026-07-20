@@ -598,7 +598,7 @@ TEST_CASE("TerminalSession: pasteFromClipboard writes clipboard text and enforce
 
     // > 1 MB: hard-rejected — and (regression) must not crash on a display-less session.
     mockPtyOf(*session).stdinBuffer().clear();
-    clipboard->setText(QString(1024 * 1024 + 1, QChar('x')));
+    clipboard->setText(QString((1024 * 1024) + 1, QChar('x')));
     CHECK_NOTHROW(session->pasteFromClipboard(1, false));
     CHECK(mockPtyOf(*session).stdinBuffer().empty());
 
@@ -607,7 +607,7 @@ TEST_CASE("TerminalSession: pasteFromClipboard writes clipboard text and enforce
     QObject::connect(session.get(), &contour::TerminalSession::requestPermissionForPasteLargeFile, [&] {
         ++permissionRequests;
     });
-    clipboard->setText(QString(1024 * 512 + 1, QChar('y')));
+    clipboard->setText(QString((1024 * 512) + 1, QChar('y')));
     session->pasteFromClipboard(1, false);
     CHECK(permissionRequests == 1);
     CHECK(mockPtyOf(*session).stdinBuffer().empty());

@@ -217,9 +217,9 @@ TEST_CASE("HintModeHandler.FilePathPattern", "[hintmode]")
     auto foundLocal = false;
     for (auto const& m: handler.matches())
     {
-        if (m.matchedText.find("/home/user/file.txt") != std::string::npos)
+        if (m.matchedText.contains("/home/user/file.txt"))
             foundHome = true;
-        if (m.matchedText.find("./local/path") != std::string::npos)
+        if (m.matchedText.contains("./local/path"))
             foundLocal = true;
     }
     CHECK(foundHome);
@@ -361,7 +361,7 @@ TEST_CASE("HintModeHandler.BareRelativeFilePath", "[hintmode]")
     {
         if (m.matchedText == "src/vtbackend/Terminal.cpp")
             foundTerminal = true;
-        if (m.matchedText.find("lib/utils/helpers.h") != std::string::npos)
+        if (m.matchedText.contains("lib/utils/helpers.h"))
             foundHelpers = true;
     }
     CHECK(foundTerminal);
@@ -395,7 +395,7 @@ TEST_CASE("HintModeHandler.ValidatorFiltersMatches", "[hintmode]")
     for (auto& p: patterns)
     {
         p.validator = [](std::string const& matchStr) -> bool {
-            return matchStr.find("accept") != std::string::npos;
+            return matchStr.contains("accept");
         };
     }
 
@@ -759,9 +759,7 @@ TEST_CASE("HintModeHandler.TransformerRewritesMatchedText", "[hintmode]")
         HintPattern {
             .name = "filepath",
             .regex = std::regex(R"([\w./]+)", std::regex_constants::ECMAScript),
-            .validator = [](std::string const& matchStr) -> bool {
-                return matchStr.find('/') != std::string::npos;
-            },
+            .validator = [](std::string const& matchStr) -> bool { return matchStr.contains('/'); },
             .transformer = [](std::string const& matchStr) -> std::string { return "/project/" + matchStr; },
         },
     };

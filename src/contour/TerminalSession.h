@@ -160,11 +160,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     {
         if (_profile.bell.value().sound == "default")
         {
-            return QString("qrc:/contour/bell.wav");
+            return { "qrc:/contour/bell.wav" };
         }
         if (_profile.bell.value().sound == "off")
         {
-            return QString();
+            return {};
         }
 
         return QString::fromStdString(_profile.bell.value().sound);
@@ -186,12 +186,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         // practice.
         auto const& backgroundImage = _terminal.colorPalette().backgroundImage;
         if (!backgroundImage)
-            return QString();
+            return {};
 
         if (auto const* p = std::get_if<std::filesystem::path>(&backgroundImage->location))
             return QString("file:") + QString(p->string().c_str());
 
-        return QString();
+        return {};
     }
     QColor getBackgroundColor() const noexcept
     {
@@ -211,11 +211,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     }
     bool getIsImageBackground() const noexcept
     {
-        if (_terminal.colorPalette().backgroundImage)
-        {
-            return true;
-        }
-        return false;
+        return static_cast<bool>(_terminal.colorPalette().backgroundImage);
     }
 
     bool getIsBlurBackground() const noexcept

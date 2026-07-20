@@ -1951,12 +1951,12 @@ TEST_CASE("Terminal.momentumScroll.decelerates_over_ticks", "[terminal]")
     auto const offset3 = terminal.viewport().scrollOffset().value;
 
     // Scroll offset should advance (or pixel accumulate) over time.
-    auto const totalScroll1 = static_cast<float>(offset1) * 20.0f + pixel1;
-    auto const totalScroll0 = static_cast<float>(offsetAfterStart) * 20.0f + pixelOffsetAfterStart;
+    auto const totalScroll1 = (static_cast<float>(offset1) * 20.0f) + pixel1;
+    auto const totalScroll0 = (static_cast<float>(offsetAfterStart) * 20.0f) + pixelOffsetAfterStart;
     CHECK(totalScroll1 > totalScroll0);
 
     // Overall scroll should only increase (deceleration, not reversal).
-    auto const totalScroll2 = static_cast<float>(offset2) * 20.0f + pixel2;
+    auto const totalScroll2 = (static_cast<float>(offset2) * 20.0f) + pixel2;
     CHECK(totalScroll2 >= totalScroll1);
 
     // Scroll offset should have advanced by at least one line after several ticks.
@@ -2026,7 +2026,7 @@ namespace
 /// Total scroll displacement in pixels: whole-line offset plus the sub-cell pixel remainder.
 [[nodiscard]] float totalScrollPixels(vtbackend::Terminal const& terminal, float cellHeight) noexcept
 {
-    return static_cast<float>(terminal.viewport().scrollOffset().value) * cellHeight
+    return (static_cast<float>(terminal.viewport().scrollOffset().value) * cellHeight)
            + terminal.smoothScrollPixelOffset();
 }
 } // namespace

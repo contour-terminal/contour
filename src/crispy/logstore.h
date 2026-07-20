@@ -54,7 +54,7 @@ class source_location_custom
 
     static source_location_custom current() noexcept
     {
-        return source_location_custom(__builtin_FILE(), __builtin_LINE(), __builtin_FUNCTION());
+        return { __builtin_FILE(), __builtin_LINE(), __builtin_FUNCTION() };
     }
 
   private:

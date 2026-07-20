@@ -79,7 +79,7 @@ static std::optional<StatusLineDefinitions::Item> makeStatusLineItem(
     };
 
     for (auto&& [text, flag]: FlagMappings)
-        if (interpolation.flags.count(text))
+        if (interpolation.flags.contains(text))
             styles.flags.enable(flag);
 
     styles.foregroundColor = tryParseColorAttribute(interpolation, "Color");
@@ -105,7 +105,7 @@ static std::optional<StatusLineDefinitions::Item> makeStatusLineItem(
 
     if (interpolation.name == "Command")
     {
-        if (interpolation.attributes.count("Program"))
+        if (interpolation.attributes.contains("Program"))
         {
             return StatusLineDefinitions::Command {
                 styles,

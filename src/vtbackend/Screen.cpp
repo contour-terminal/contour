@@ -2123,7 +2123,7 @@ void Screen::eraseArea(int top, int left, int bottom, int right)
 void Screen::fillArea(char32_t ch, int top, int left, int bottom, int right)
 {
     // "Pch can be any value from 32 to 126 or from 160 to 255."
-    if (!(32 <= ch && ch <= 126) && !(160 <= ch && ch <= 255))
+    if ((32 > ch || ch > 126) && (160 > ch || ch > 255))
         return;
 
     auto const w = static_cast<uint8_t>(unicode::width(ch));
@@ -2548,7 +2548,7 @@ void Screen::cursorBackwardTab(TabStopCount count)
         else
         {
             auto const m = (*_cursor.position.column + 1) % *TabWidth;
-            auto const n = m ? (*count - 1) * *TabWidth + m : *count * *TabWidth + m;
+            auto const n = m ? ((*count - 1) * *TabWidth) + m : (*count * *TabWidth) + m;
             setCurrentAbsoluteColumn(ColumnOffset(std::max(0, *_cursor.position.column - (n - 1))));
         }
     }
@@ -4095,7 +4095,7 @@ namespace impl
             int out = 0;
             for (auto const ch: value)
             {
-                if (!(ch >= '0' && ch <= '9'))
+                if (ch < '0' || ch > '9')
                     return 0;
 
                 out = (out * 10) + (ch - '0');

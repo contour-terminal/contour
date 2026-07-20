@@ -1307,7 +1307,7 @@ void open_shaper::shape(font_key font,
 {
     assert(clusters.size() == codepoints.size());
     textShapingLog()("Shaping using font key: {}, text: \"{}\"", font, unicode::convert_to<char>(codepoints));
-    if (!_d->fontKeyToHbFontInfoMapping.count(font))
+    if (!_d->fontKeyToHbFontInfoMapping.contains(font))
         textShapingLog()("Font not found? {}", font);
 
     Require(_d->fontKeyToHbFontInfoMapping.count(font) == 1);
@@ -1496,14 +1496,14 @@ static optional<rasterized_glyph> rasterizeOutlined(
             auto const pixelIdx = static_cast<size_t>((row * outWidth) + col) * 4;
 
             // Outline alpha from G channel
-            auto const outlineAlpha = outlineBmp.buffer[row * outPitch + col];
+            auto const outlineAlpha = outlineBmp.buffer[(row * outPitch) + col];
 
             // Fill alpha from R channel (offset into the outline bitmap)
             auto const fillRow = row - fillOffsetY;
             auto const fillCol = col - fillOffsetX;
             uint8_t fillAlpha = 0;
             if (fillRow >= 0 && fillRow < fillH && fillCol >= 0 && fillCol < fillW)
-                fillAlpha = fillBmp.buffer[fillRow * fillPitch + fillCol];
+                fillAlpha = fillBmp.buffer[(fillRow * fillPitch) + fillCol];
 
             output.bitmap[pixelIdx + 0] = fillAlpha;                    // R = fill
             output.bitmap[pixelIdx + 1] = outlineAlpha;                 // G = outline
