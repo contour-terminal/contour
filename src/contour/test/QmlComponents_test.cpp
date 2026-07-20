@@ -37,8 +37,6 @@
 #include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_approx.hpp>
-#include <QtTest/QSignalSpy>
-
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
@@ -49,6 +47,7 @@
 #include <memory>
 #include <ranges>
 
+#include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
 #include <vtmux/PaneLayout.h>
 

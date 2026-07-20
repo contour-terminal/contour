@@ -2,8 +2,8 @@
 #pragma once
 
 #include <contour/CommandCatalog.h>
-#include <contour/ContextMenuModel.h>
 #include <contour/CommandPaletteModel.h>
+#include <contour/ContextMenuModel.h>
 #include <contour/HorizontalWheelGesture.h>
 #include <contour/display/TerminalDisplay.h>
 

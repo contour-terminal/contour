@@ -3,11 +3,11 @@
 #include <contour/BlurBehind.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/WindowController.h>
+#include <contour/display/Announcer.h>
 #include <contour/display/ContentScale.h>
 #include <contour/display/ImeQueryRect.h>
 #include <contour/display/RhiRenderer.h>
 #include <contour/display/TerminalAccessible.h>
-#include <contour/display/Announcer.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/display/TerminalRenderNode.h>
 #include <contour/helper.h>

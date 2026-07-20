@@ -1394,7 +1394,8 @@ TEST_CASE("TerminalSession: accumulated angle scroll consumes into line/column s
     // angle-only delta with no pixel delta takes the "reset pixel accumulation" branch.
     session->addToAccumulatedScroll(crispy::point { .x = 0, .y = 0 },
                                     crispy::point { .x = 0, .y = 8 * 5 * 3 },
-                                    vtbackend::ScrollPhase::NoPhase, false);
+                                    vtbackend::ScrollPhase::NoPhase,
+                                    false);
     auto const [lines, columns] = session->consumeScroll();
     CHECK(lines.value != 0);
     CHECK(columns.value == 0);

@@ -2842,8 +2842,7 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
         if (holds_alternative<actions::SetTabBarVisibility>(action))
         {
             if (auto mode = node["mode"]; mode && mode.IsScalar())
-                if (auto const parsed =
-                        tabBarModeFromToken<TabBarVisibility>(mode.as<std::string>()))
+                if (auto const parsed = tabBarModeFromToken<TabBarVisibility>(mode.as<std::string>()))
                     return actions::SetTabBarVisibility { *parsed };
             return std::nullopt;
         }

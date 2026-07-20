@@ -848,9 +848,8 @@ void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification con
     // does not read the desktop's own notifications would otherwise miss it entirely.
     announce(notification.title.empty()
                  ? QString::fromStdString(notification.body)
-                 : QStringLiteral("%1: %2")
-                       .arg(QString::fromStdString(notification.title),
-                            QString::fromStdString(notification.body)));
+                 : QStringLiteral("%1: %2").arg(QString::fromStdString(notification.title),
+                                                QString::fromStdString(notification.body)));
 
 #if defined(__linux__)
     _desktopNotifier.notify(notification);

@@ -130,12 +130,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
   private:
     /// Announces @p message, unless the user switched announcements off.
-    void announce(QString const& message,
-                  QAccessible::AnnouncementPoliteness politeness =
-                      QAccessible::AnnouncementPoliteness::Polite);
+    void announce(
+        QString const& message,
+        QAccessible::AnnouncementPoliteness politeness = QAccessible::AnnouncementPoliteness::Polite);
 
   public:
-
     /// The pointer left the terminal entirely.
     ///
     /// Withdraws the hyperlink tooltip and puts the mouse cursor back to its default shape. The shape
@@ -147,10 +146,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     ///
     /// Injected rather than constructed here, so the DECISIONS below (what is worth announcing) are
     /// assertable against a recording implementation with no accessibility bridge in sight.
-    void setAnnouncer(std::unique_ptr<display::Announcer> announcer)
-    {
-        _announcer = std::move(announcer);
-    }
+    void setAnnouncer(std::unique_ptr<display::Announcer> announcer) { _announcer = std::move(announcer); }
 
   private:
     /// Feeds the hovered-link tracker and publishes any change to QML.
@@ -160,7 +156,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void updateHyperlinkHover(std::string_view uri, vtbackend::CellLocation cell);
 
   public:
-
     QString getBellSource() const noexcept
     {
         if (_profile.bell.value().sound == "default")

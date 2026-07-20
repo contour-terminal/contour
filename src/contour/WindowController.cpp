@@ -2,7 +2,6 @@
 #include <contour/ColorConversion.h>
 #include <contour/ContextMenu.h>
 #include <contour/ContextMenuModel.h>
-#include <contour/TitleBarContextMenu.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/GuiConfigStore.h>
 #include <contour/PaneProxy.h>
@@ -12,6 +11,7 @@
 #include <contour/TabLabel.h>
 #include <contour/TerminalSession.h>
 #include <contour/TerminalSessionManager.h>
+#include <contour/TitleBarContextMenu.h>
 #include <contour/WindowController.h>
 #include <contour/helper.h>
 
