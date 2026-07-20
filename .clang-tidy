@@ -37,6 +37,13 @@
 #     scripts/check-includes.sh and the self-contained-includes workflow.
 #   * `misc-non-private-member-variables-in-classes` (1038) -- exact duplicate of
 #     the cppcoreguidelines- check of the same name, which is already disabled.
+#   * `bugprone-std-namespace-modification` (29) -- every report is a std::formatter
+#     specialization for a program-defined type, which [namespace.std] explicitly
+#     permits. The check does not distinguish that from adding new declarations.
+#   * `misc-multiple-inheritance` (14) -- unavoidable and idiomatic here. Qt requires
+#     QObject plus an interface for TerminalSession, TerminalSessionManager,
+#     ContourGuiApp and TerminalAccessible, and crispy::overloaded is the standard
+#     `struct overloaded: Ts...` visitor idiom the check cannot recognise.
 #   * `misc-no-recursion` (41) -- recursion is a legitimate tool in a parser and a
 #     renderer; the check flags the technique rather than any defect.
 #   * `misc-use-anonymous-namespace` (79) -- directly contradicts
@@ -61,6 +68,7 @@ Checks: >-
   -*,
   bugprone-*,
   -bugprone-branch-clone,
+  -bugprone-std-namespace-modification,
   -bugprone-easily-swappable-parameters,
   -bugprone-exception-escape,
   -bugprone-reserved-identifier,
@@ -101,6 +109,7 @@ Checks: >-
   -cppcoreguidelines-special-member-functions,
   misc-*,
   -misc-include-cleaner,
+  -misc-multiple-inheritance,
   -misc-no-recursion,
   -misc-use-anonymous-namespace,
   -misc-non-private-member-variables-in-classes,
@@ -142,7 +151,9 @@ WarningsAsErrors: >-
 
 UseColor: true
 HeaderFilterRegex: 'src/(contour|crispy|text_shaper|vtpty|vtparser|vtbackend|vtrasterizer|vtmux|vtconformance)/'
-ExcludeHeaderFilterRegex: 'wayland-.*-protocol.h'
+# Qt's AUTOMOC/AUTOUIC output lands under out/<preset>/src/<module>/..._autogen/, whose
+# path matches HeaderFilterRegex; it is generated code and not ours to lint.
+ExcludeHeaderFilterRegex: 'wayland-.*-protocol\.h|.*_autogen/.*|.*\.moc$'
 FormatStyle: none
 
 CheckOptions:
@@ -155,6 +166,7 @@ CheckOptions:
   modernize-use-default-member-init.UseAssignment: '1'
   modernize-use-nullptr.NullMacros: 'NULL'
   readability-function-cognitive-complexity.Threshold: '50'
+  readability-function-cognitive-complexity.IgnoreMacros: 'true'
 
   # Identifier naming. Types are CamelCase, everything else camelBack, with a
   # leading underscore on non-public data members. The snake_case modules
