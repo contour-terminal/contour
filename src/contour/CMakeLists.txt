@@ -152,6 +152,9 @@ if(CONTOUR_FRONTEND_GUI)
         TerminalSession.h
         TerminalSessionManager.h
         helper.h
+        mux/AttachController.h
+        mux/MuxLoopThread.h
+        mux/RoutingSessionFactory.h
     )
     list(APPEND _core_source_files
         Audio.cpp
@@ -170,6 +173,7 @@ if(CONTOUR_FRONTEND_GUI)
         TerminalSessionManager.cpp
         WindowController.cpp
         helper.cpp
+        mux/AttachController.cpp
     )
 endif()
 
@@ -356,6 +360,7 @@ if(CONTOUR_FRONTEND_GUI)
         add_executable(contour_gui_test
             test/test_main.cpp
             test/Actions_test.cpp
+            test/AttachController_test.cpp
             test/AudioNote_test.cpp
             test/BenignQtMessages_test.cpp
             test/CaptureScreen_test.cpp

@@ -572,8 +572,8 @@ int ContourApp::daemonAction()
 
 int ContourApp::attachAction()
 {
-    return muxserver::runAttach(muxserver::muxSocketPath(
-        parameters().get<string>("contour.attach.label"), parameters().get<string>("contour.attach.socket")));
+    return muxserver::runAttach(muxserver::muxSocketPath(parameters().get<string>("contour.attach.label"),
+                                                         parameters().get<string>("contour.attach.socket")));
 }
 
 int ContourApp::catAction()
@@ -751,7 +751,8 @@ crispy::cli::command ContourApp::parameterDefinition() const
                                              "NAME" },
                            } },
             CLI::command { "attach",
-                           "Attaches to a running multiplexer daemon (currently: probes its socket).",
+                           "Attaches to a running multiplexer daemon (thin TTY client, or the "
+                           "GUI with --gui).",
                            CLI::option_list {
                                CLI::option { "socket",
                                              CLI::value { ""s },
@@ -762,6 +763,18 @@ crispy::cli::command ContourApp::parameterDefinition() const
                                              CLI::value { "default"s },
                                              "Socket label distinguishing daemon instances.",
                                              "NAME" },
+                               CLI::option { "gui",
+                                             CLI::value { false },
+                                             "Attaches the full GUI instead of the thin TTY client: "
+                                             "every remote session becomes a local tab." },
+                               CLI::option { "profile",
+                                             CLI::value { ""s },
+                                             "Config profile the GUI renders remote sessions with.",
+                                             "NAME" },
+                               CLI::option { "config",
+                                             CLI::value { ""s },
+                                             "Path to configuration file the GUI loads.",
+                                             "FILE" },
                            } },
             CLI::command {
                 "capture",

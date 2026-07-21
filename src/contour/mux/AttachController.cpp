@@ -1,0 +1,269 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <contour/TerminalSessionManager.h>
+#include <contour/mux/AttachController.h>
+
+#include <algorithm>
+#include <utility>
+
+#include <net/Sockets.h>
+
+namespace contour
+{
+
+using muxserver::client::AttachClient;
+using muxserver::client::RemoteScreen;
+
+namespace
+{
+    auto const attachLog = logstore::category("gui.attach", "GUI native-attach controller.");
+} // namespace
+
+/// The pty handed to a remote-backed TerminalSession: unregisters itself from
+/// the controller when the terminal destroys it, so the reactor can never
+/// feed a dangling pty (the registry lookup and this unbind serialize on the
+/// controller's mutex).
+class AttachController::BoundChannelPty final: public vtpty::ChannelPty
+{
+  public:
+    BoundChannelPty(AttachController& controller, uint64_t session, vtpty::PageSize size):
+        vtpty::ChannelPty(size), _controller(controller), _session(session)
+    {
+    }
+
+    ~BoundChannelPty() override { _controller.unbind(_session); }
+
+    BoundChannelPty(BoundChannelPty const&) = delete;
+    BoundChannelPty& operator=(BoundChannelPty const&) = delete;
+    BoundChannelPty(BoundChannelPty&&) = delete;
+    BoundChannelPty& operator=(BoundChannelPty&&) = delete;
+
+  private:
+    AttachController& _controller;
+    uint64_t _session;
+};
+
+AttachController::AttachController(std::filesystem::path socketPath): _socketPath(std::move(socketPath))
+{
+}
+
+AttachController::~AttachController()
+{
+    stop();
+}
+
+std::expected<void, std::string> AttachController::connectAndWait(std::chrono::milliseconds timeout)
+{
+    _reactor.start([this](net::EventLoop* loop) { return runClient(loop); });
+
+    auto lock = std::unique_lock { _mutex };
+    if (!_connected.wait_for(lock, timeout, [this] { return _state != State::Connecting; }))
+    {
+        lock.unlock();
+        stop();
+        return std::unexpected("timed out waiting for the daemon's snapshot");
+    }
+    if (_state != State::Ready)
+        return std::unexpected(_failure.empty() ? std::string("connection closed during attach") : _failure);
+    return {};
+}
+
+void AttachController::stop()
+{
+    {
+        auto const lock = std::lock_guard { _mutex };
+        if (_stopped)
+            return;
+        _stopped = true;
+    }
+    _reactor.post([this] {
+        if (_client != nullptr)
+            _client->detach();
+    });
+    // A task still parked in connect (daemon accepting nothing) has no client
+    // to detach; cancel the whole loop so join() cannot block forever.
+    _reactor.requestStop();
+    _reactor.join();
+    closeAllBindings();
+}
+
+coro::Task<void> AttachController::runClient(net::EventLoop* loop)
+{
+    auto socket = co_await net::connectUnix(loop, _socketPath.string());
+    if (!socket)
+    {
+        {
+            auto const lock = std::lock_guard { _mutex };
+            _state = State::Failed;
+            _failure = socket.error().toString();
+        }
+        _connected.notify_all();
+        emit connectionClosed();
+        co_return;
+    }
+
+    auto client = AttachClient { *loop, std::move(*socket) };
+    client.setUpdateHandler([this](RemoteScreen const& screen, muxserver::proto::Delta const& delta) {
+        onUpdate(screen, delta);
+    });
+    {
+        auto const lock = std::lock_guard { _mutex };
+        _client = &client;
+    }
+
+    try
+    {
+        co_await client.run();
+    }
+    catch (coro::OperationCancelled const&)
+    {
+        // stop() cancelled the loop mid-serve; fall through to the normal
+        // bookkeeping so state and observers still see the closure.
+        attachLog()("Attach serve loop cancelled by stop().");
+    }
+
+    {
+        auto const lock = std::lock_guard { _mutex };
+        _client = nullptr;
+        if (_state == State::Connecting || _state == State::Ready)
+        {
+            if (client.versionMismatch())
+            {
+                _state = State::Failed;
+                _failure = "daemon speaks an incompatible protocol version";
+            }
+            else
+                _state = State::Closed;
+        }
+    }
+    _connected.notify_all();
+    emit connectionClosed();
+}
+
+void AttachController::onUpdate(RemoteScreen const& screen, muxserver::proto::Delta const& delta)
+{
+    auto lock = std::unique_lock { _mutex };
+    if (auto const it = _bindings.find(screen.session); it != _bindings.end())
+    {
+        it->second.pty->feed(it->second.mirror.apply(screen, delta));
+        return;
+    }
+
+    _pendingColumns[screen.session] = screen.columns;
+    _pendingLines[screen.session] = screen.lines;
+    if (std::ranges::contains(_pending, screen.session))
+        return;
+
+    _pending.push_back(screen.session);
+    if (_state == State::Connecting)
+        _state = State::Ready;
+    lock.unlock();
+
+    _connected.notify_all();
+    emit remoteSessionDiscovered();
+}
+
+void AttachController::primeBinding(uint64_t session)
+{
+    if (_client == nullptr)
+        return;
+    auto const screen = _client->screens().find(session);
+    if (screen == _client->screens().end())
+        return;
+
+    auto const lock = std::lock_guard { _mutex };
+    auto const binding = _bindings.find(session);
+    if (binding == _bindings.end())
+        return;
+    binding->second.pty->feed(binding->second.mirror.fullReplay(screen->second));
+}
+
+void AttachController::unbind(uint64_t session)
+{
+    auto const lock = std::lock_guard { _mutex };
+    _bindings.erase(session);
+}
+
+void AttachController::closeAllBindings()
+{
+    auto const lock = std::lock_guard { _mutex };
+    for (auto& [session, binding]: _bindings)
+        binding.pty->close();
+}
+
+std::size_t AttachController::pendingCount() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _pending.size();
+}
+
+bool AttachController::canCreateSession() const noexcept
+{
+    auto const lock = std::lock_guard { _mutex };
+    return !_pending.empty();
+}
+
+std::unique_ptr<vtpty::Pty> AttachController::createPty(std::optional<std::string> /*cwd*/,
+                                                        std::optional<vtbackend::PageSize> pageSize,
+                                                        std::optional<vtpty::Process::ExecInfo> /*command*/,
+                                                        std::optional<std::string> /*profileName*/)
+{
+    auto lock = std::unique_lock { _mutex };
+    if (_pending.empty())
+    {
+        // The creation guards should have prevented this; a session must
+        // still be born, so give it a dead-end pty it can close cleanly.
+        attachLog()("No pending remote session; handing out an unbound pty.");
+        auto const fallback =
+            pageSize.value_or(vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) });
+        return std::make_unique<vtpty::ChannelPty>(fallback);
+    }
+
+    auto const session = _pending.front();
+    _pending.pop_front();
+    auto const columns = static_cast<int>(_pendingColumns[session]);
+    auto const lines = static_cast<int>(_pendingLines[session]);
+    _pendingColumns.erase(session);
+    _pendingLines.erase(session);
+
+    // Born at the REMOTE size so the mirror's first replay paints a matching
+    // grid; the display's own resize then proposes the local size upstream.
+    auto pty = std::make_unique<BoundChannelPty>(
+        *this, session, vtpty::PageSize { vtpty::LineCount(lines), vtpty::ColumnCount(columns) });
+    pty->setWriteSink([this, session](std::string_view bytes) {
+        _reactor.post([this, session, copy = std::string { bytes }] {
+            if (_client != nullptr)
+                _client->sendInput(session, copy);
+        });
+    });
+    pty->setResizeSink([this](vtpty::PageSize cells, std::optional<vtpty::ImageSize> /*pixels*/) {
+        _reactor.post([this, cells] {
+            if (_client != nullptr)
+                _client->requestResize(unbox<uint32_t>(cells.columns), unbox<uint32_t>(cells.lines));
+        });
+    });
+    _bindings[session].pty = pty.get();
+    lock.unlock();
+
+    _reactor.post([this, session] { primeBinding(session); });
+    attachLog()("Bound remote session {} to a new local pty ({}x{}).", session, columns, lines);
+    return pty;
+}
+
+void AttachController::adoptStartupSessions(TerminalSessionManager& manager, vtmux::WindowId window)
+{
+    // Leave one pending session for the QML-created first tab if nothing is
+    // bound yet (QML may create its first tab after this hook runs).
+    while (true)
+    {
+        {
+            auto const lock = std::lock_guard { _mutex };
+            auto const reserve = _bindings.empty() ? std::size_t { 1 } : std::size_t { 0 };
+            if (_pending.size() <= reserve)
+                return;
+        }
+        if (manager.createSessionInBackground(window) == nullptr)
+            return;
+    }
+}
+
+} // namespace contour

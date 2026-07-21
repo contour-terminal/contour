@@ -36,6 +36,8 @@ namespace display
     class ForcedFontDpiProvider;
 }
 
+class AttachController;
+class RoutingSessionFactory;
 class TerminalSession;
 
 /// Extends ContourApp with terminal GUI capability.
@@ -63,6 +65,7 @@ class ContourGuiApp: public QObject, public ContourApp
                            std::unique_ptr<ExternalLauncher> externalLauncher = nullptr,
                            std::unique_ptr<LayoutStore> layoutStore = nullptr,
                            std::unique_ptr<CommandHistoryStore> commandHistoryStore = nullptr);
+    ~ContourGuiApp() override;
 
     static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(ContourApp::instance()); }
 
@@ -165,9 +168,25 @@ class ContourGuiApp: public QObject, public ContourApp
     int fontConfigAction();
     int checkConfig();
 
+    /// The GUI-aware `contour attach` verb: with --gui, boots the QML
+    /// machinery attached to a daemon; otherwise falls back to the base's
+    /// thin TTY client.
+    int attachAction();
+
+    /// The attach engine, declared FIRST so it is destroyed LAST: remote-
+    /// backed sessions hold ptys that unregister from it on destruction.
+    std::unique_ptr<AttachController> _attachController;
+
+    /// Invoked by terminalGuiAction right after the first window booted —
+    /// attach mode adopts the remaining remote sessions as tabs here.
+    std::function<void()> _onGuiBooted;
+
     config::Config _config;
     // Declared before _sessionManager: the manager holds a reference to the factory.
+    // Always a RoutingSessionFactory wrapping the injected/default factory,
+    // so attach mode can switch the route without touching the manager.
     std::unique_ptr<SessionFactory> _sessionFactory;
+    RoutingSessionFactory* _routingFactory = nullptr; ///< The concrete view of _sessionFactory.
     // The external-resource launcher (URL open / process spawn), reached by sessions via _app.
     std::unique_ptr<ExternalLauncher> _externalLauncher;
     // Declared before _sessionManager: the manager holds a reference to the store.

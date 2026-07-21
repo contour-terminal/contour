@@ -125,6 +125,12 @@ TerminalSession* TerminalSessionManager::createSessionInBackground(
     // TODO: Remove dependency on app-knowledge and pass shell / terminal-size instead.
     // The GuiApp *or* (Global)Config could be made a global to be accessible from within QML.
 
+    if (!_sessionFactory.canCreateSession())
+    {
+        managerLog()("Refusing to create a session: the session factory cannot back one right now.");
+        return nullptr;
+    }
+
     if (!_focusedWindow)
     {
         managerLog()("No focused window found. something went wrong.");
@@ -323,6 +329,11 @@ bool TerminalSessionManager::applyLayoutToWindow(vtmux::WindowId window,
     if (layout.tabs.empty())
     {
         managerLog()("Layout has no tabs; nothing to apply.");
+        return false;
+    }
+    if (!_sessionFactory.canCreateSession())
+    {
+        managerLog()("Refusing to apply a layout: the session factory cannot back new sessions right now.");
         return false;
     }
     for (auto const& tabSpec: layout.tabs)
@@ -1261,6 +1272,12 @@ QVariantList TerminalSessionManager::tabColorPalette() const
 // {{{ Split-pane operations
 void TerminalSessionManager::splitActivePane(bool vertical, TerminalSession* acting)
 {
+    if (!_sessionFactory.canCreateSession())
+    {
+        managerLog()("Refusing to split: the session factory cannot back a new session right now.");
+        return;
+    }
+
     auto* tab = paneActionTargetTab(acting);
     if (tab == nullptr)
         return;

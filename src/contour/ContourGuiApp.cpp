@@ -12,6 +12,8 @@
 #include <contour/display/ContentScale.h>
 #include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
+#include <contour/mux/AttachController.h>
+#include <contour/mux/RoutingSessionFactory.h>
 
 #include <vtpty/Process.h>
 
@@ -24,6 +26,8 @@
 #include <QtCore/QEventLoop>
 #include <QtCore/QProcess>
 #include <QtQml/qqmlextensionplugin.h>
+
+#include <muxserver/SocketPath.h>
 #if !defined(__APPLE__) && !defined(_WIN32)
     #include <QtDBus/QDBusConnection>
 #endif
@@ -72,7 +76,9 @@ ContourGuiApp::ContourGuiApp(std::unique_ptr<SessionFactory> sessionFactory,
                              std::unique_ptr<ExternalLauncher> externalLauncher,
                              std::unique_ptr<LayoutStore> layoutStore,
                              std::unique_ptr<CommandHistoryStore> commandHistoryStore):
-    _sessionFactory(sessionFactory ? std::move(sessionFactory) : std::make_unique<AppSessionFactory>(*this)),
+    _sessionFactory(std::make_unique<RoutingSessionFactory>(
+        sessionFactory ? std::move(sessionFactory) : std::make_unique<AppSessionFactory>(*this))),
+    _routingFactory(static_cast<RoutingSessionFactory*>(_sessionFactory.get())),
     _externalLauncher(externalLauncher ? std::move(externalLauncher)
                                        : std::make_unique<QtExternalLauncher>()),
     _layoutStore(layoutStore ? std::move(layoutStore) : std::make_unique<FileLayoutStore>()),
@@ -83,6 +89,85 @@ ContourGuiApp::ContourGuiApp(std::unique_ptr<SessionFactory> sessionFactory,
     link("contour.terminal", bind(&ContourGuiApp::terminalGuiAction, this));
     link("contour.font-locator", bind(&ContourGuiApp::fontConfigAction, this));
     link("contour.info.config", bind(&ContourGuiApp::checkConfig, this));
+    link("contour.attach", bind(&ContourGuiApp::attachAction, this));
+}
+
+ContourGuiApp::~ContourGuiApp() = default;
+
+int ContourGuiApp::attachAction()
+{
+    if (!parameters().get<bool>("contour.attach.gui"))
+        return ContourApp::attachAction();
+
+    // Resolve every attach-verb parameter BEFORE the re-parse below drops them.
+    auto const socketOption = parameters().get<string>("contour.attach.socket");
+    auto const label = parameters().get<string>("contour.attach.label");
+    auto const attachProfile = parameters().get<string>("contour.attach.profile");
+    auto const attachConfig = parameters().get<string>("contour.attach.config");
+
+    // The native protocol is served beside the control socket.
+    auto socketPath = muxserver::muxSocketPath(label, socketOption);
+    socketPath += "-native";
+
+    _attachController = std::make_unique<AttachController>(socketPath);
+    if (auto connected = _attachController->connectAndWait(std::chrono::seconds(5)); !connected)
+    {
+        cerr << std::format("contour attach: {} ({})\n", connected.error(), socketPath.string());
+        _attachController.reset();
+        return EXIT_FAILURE;
+    }
+    _routingFactory->setDelegate(_attachController.get());
+
+    // Boot the GUI under the terminal verb's parameter surface: re-parse a
+    // synthetic argv so every contour.terminal.* key resolves, carrying the
+    // attach-specific profile/config choices over.
+    auto argv = std::vector<char const*> { "contour", "terminal" };
+    if (!attachProfile.empty())
+    {
+        argv.push_back("profile");
+        argv.push_back(attachProfile.c_str());
+    }
+    if (!attachConfig.empty())
+    {
+        argv.push_back("config");
+        argv.push_back(attachConfig.c_str());
+    }
+    if (!reparseParameters(static_cast<int>(argv.size()), argv.data()))
+    {
+        _routingFactory->setDelegate(nullptr);
+        _attachController->stop();
+        return EXIT_FAILURE;
+    }
+
+    // A remote session appearing later becomes a tab in the focused window;
+    // a dying connection ends every mirror session (stop() closes the ptys),
+    // which closes the tabs through the ordinary shell-exit teardown.
+    connect(
+        _attachController.get(),
+        &AttachController::remoteSessionDiscovered,
+        this,
+        [this] {
+            if (auto const window = _sessionManager.focusedWindow())
+                _attachController->adoptStartupSessions(_sessionManager, *window);
+        },
+        Qt::QueuedConnection);
+    connect(
+        _attachController.get(),
+        &AttachController::connectionClosed,
+        this,
+        [this] { _attachController->stop(); },
+        Qt::QueuedConnection);
+    _onGuiBooted = [this] {
+        if (auto const window = _sessionManager.focusedWindow())
+            _attachController->adoptStartupSessions(_sessionManager, *window);
+    };
+
+    auto const rv = terminalGuiAction();
+
+    _onGuiBooted = nullptr;
+    _routingFactory->setDelegate(nullptr);
+    _attachController->stop();
+    return rv;
 }
 
 int ContourGuiApp::run(int argc, char const* argv[])
@@ -666,6 +751,11 @@ int ContourGuiApp::terminalGuiAction()
         auto const timer = ScopedTimer(startupLog, "newWindow (QML load)");
         newWindow();
     }
+
+    // Attach mode adopts the remaining remote sessions as tabs now that a
+    // window exists to put them in.
+    if (_onGuiBooted)
+        _onGuiBooted();
 
     // Run the event loop FIRST (it populates _exitStatus via onExit during the run), THEN map that
     // status to the process exit code. The mapping is the pure exitCodeFor() (ExitCode.h), extracted

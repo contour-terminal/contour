@@ -51,6 +51,13 @@ class SessionFactory
   public:
     virtual ~SessionFactory() = default;
 
+    /// Whether this factory can back a new session right now. Local factories
+    /// always can; an attach-mode factory can only hand out PTYs for remote
+    /// sessions that exist but have no local tab yet — the manager's creation
+    /// entry points (new tab, split, layout) no-op while this is false, so a
+    /// "+" click inside a mirror window cannot spawn a stray local shell.
+    [[nodiscard]] virtual bool canCreateSession() const noexcept { return true; }
+
     /// Creates a PTY for a new session, optionally inheriting @p cwd as its working directory and
     /// @p pageSize as its initial grid size.
     ///

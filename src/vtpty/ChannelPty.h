@@ -27,8 +27,9 @@
 namespace vtpty
 {
 
-/// A thread-safe, blocking-read Pty without a child process.
-class ChannelPty final: public Pty
+/// A thread-safe, blocking-read Pty without a child process. Not final:
+/// consumers subclass it to observe destruction (unbinding a registry entry).
+class ChannelPty: public Pty
 {
   public:
     /// Receives every chunk the terminal writes to its "stdin" (keyboard and
