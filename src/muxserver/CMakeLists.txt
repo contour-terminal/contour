@@ -12,6 +12,12 @@ add_library(muxserver STATIC
     TappingPty.h
     client/AttachClient.cpp
     client/AttachClient.h
+    imsg/CommandArgv.cpp
+    imsg/CommandArgv.h
+    imsg/Identify.cpp
+    imsg/Identify.h
+    imsg/ImsgCodec.cpp
+    imsg/ImsgCodec.h
     client/ScreenMirror.cpp
     client/ScreenMirror.h
     client/TtyRenderer.cpp
@@ -59,6 +65,7 @@ if(MUXSERVER_TESTING)
         SocketPath_test.cpp
         client/AttachClient_test.cpp
         client/ScreenMirror_test.cpp
+        imsg/ImsgCodec_test.cpp
         client/TtyRenderer_test.cpp
         proto/Pdu_test.cpp
         proto/Wire_test.cpp
