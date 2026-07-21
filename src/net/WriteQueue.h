@@ -65,6 +65,12 @@ class WriteQueue
     /// An in-flight frame write finishes on its own (the drain then stops).
     void close() noexcept;
 
+    /// Waits until every queued frame is written (or the queue failed), then
+    /// closes the queue — the graceful teardown epilogue every connection owner
+    /// needs. The owner still closes and out-lives the SOCKET afterwards, per
+    /// the lifetime note above.
+    [[nodiscard]] coro::Task<void> flushThenClose();
+
     /// @return The write error that stopped the queue, if any. Once set, every
     ///         subsequent enqueue fails; the caller should drop the connection.
     [[nodiscard]] std::optional<NetError> const& failure() const noexcept { return _state->failure; }
