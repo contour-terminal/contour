@@ -30,13 +30,16 @@ control mode; per-line cell deltas feed the native protocol. GUI and daemon shar
 
 ## Phase 2 — tmux control-mode server (primary use case; pin: tmux 3.7b)
 
-- [ ] line framing + `%begin/%end/%error` guards (flags bit 0 = client-originated)
+- [x] line framing + `%begin/%end/%error` guards (flags bit 0 = client-originated)
 - [x] `%output` octal escaping; notification emission machinery
 - [x] dual-queue ordering + pause/continue flow control (budget/3, floor 32)
 - [x] layout-string encoder/ingester (n-ary↔binary; tree-equality conformance against
       real `tmux select-layout` — oracle tests pass against tmux 3.7b)
-- [ ] data-driven command table → `SessionModel`
-- [ ] control-mode connection protocol (byte tap → %output; ModelEvents → notifications)
+- [x] data-driven command table → `SessionModel`
+- [x] control-mode connection protocol (byte tap → %output; ModelEvents → notifications);
+      wired into `contour daemon` and live-verified over a real Unix socket
+- [ ] polish: `refresh-client -C/-A/-B/-f`, resize bounds (reject <1, >=10000),
+      `%extended-output` age field
 
 ## Phase 3 — native protocol (cells + deltas)
 
