@@ -217,6 +217,23 @@ constexpr bool operator<(CellLocation location, PageSize pageSize) noexcept
            && location.column < boxed_cast<ColumnOffset>(pageSize.columns);
 }
 
+/// Whether @p location addresses a real cell strictly inside a page of @p pageSize.
+///
+/// Stricter than `operator<(CellLocation, PageSize)` in two ways that the bare ordering does not
+/// cover: line and column must be non-negative, and -- because the comparison is `< pageSize` -- the
+/// wrap-pending sentinel column (== page width) is rejected, as it names no cell. A position captured
+/// against one page size must never address a grid that has since shrunk; this predicate is the guard
+/// that enforces it, and it is the single source of truth for that rule (front-end IME queries and
+/// their concurrency test both reuse it, rather than hand-copying the comparison).
+///
+/// @param location Cell position in grid coordinates.
+/// @param pageSize The page the grid currently holds.
+/// @return true when every grid access at @p location is in bounds.
+[[nodiscard]] constexpr bool strictlyContains(CellLocation location, PageSize pageSize) noexcept
+{
+    return LineOffset(0) <= location.line && ColumnOffset(0) <= location.column && location < pageSize;
+}
+
 /// A rectangle of cells that form one indivisible unit -- a wide character, or a block laid out by
 /// the kitty text sizing protocol (`OSC 66`).
 ///

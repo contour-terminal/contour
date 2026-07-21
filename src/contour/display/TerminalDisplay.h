@@ -173,6 +173,15 @@ class TerminalDisplay: public QQuickItem
     void closeDisplay();
     void post(std::function<void()> fn);
 
+    /// Announces a caret move to the platform: refreshes the IME cursor rectangle and, when assistive
+    /// technology is listening, the accessible caret. The IME update is kept alongside the accessibility
+    /// path because e.g. Windows Magnifier follows the IME rectangle rather than a UIA text range.
+    ///
+    /// GUI THREAD ONLY: QInputMethod::update() is not fire-and-forget — the Wayland backend synchronously
+    /// re-queries inputMethodQuery(), which reads the grid — and the terminal-side notification arrives
+    /// on the terminal or render thread with the terminal's state mutex possibly already held.
+    void reportCursorMoved();
+
     /// Tells assistive technology where the caret is, if it moved somewhere worth announcing.
     ///
     /// GUI THREAD ONLY: the terminal-side notification posts here rather than deciding in place, because

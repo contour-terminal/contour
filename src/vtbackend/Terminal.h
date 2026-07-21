@@ -346,6 +346,13 @@ class Terminal
         virtual void inputModeChanged(ViMode /*mode*/) {}
         virtual void updateHighlights() {}
         virtual void playSound(Sequence::Parameters const&) {}
+        /// The render buffer's cursor moved (or appeared/disappeared, including the blink phase).
+        ///
+        /// May be invoked on the terminal or render thread, with the terminal's state mutex ALREADY
+        /// HELD on one of ensureFreshRenderBuffer()'s two paths — and that mutex is a plain
+        /// non-recursive std::mutex. Implementations must not read terminal state here and must not
+        /// synchronously re-enter code that does (e.g. QInputMethod::update(), whose Wayland backend
+        /// re-queries the grid on the calling thread): defer to the GUI thread instead.
         virtual void cursorPositionChanged() {}
         virtual void onScrollOffsetChanged(ScrollOffset) {}
     };

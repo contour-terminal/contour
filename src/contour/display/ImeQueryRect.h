@@ -12,6 +12,26 @@
 namespace contour::display
 {
 
+/// Whether an IME query may index the grid at the given cursor position.
+///
+/// The cursor must lie strictly inside the page: a position captured against one page size must
+/// never address a grid that has since shrunk, and the wrap-pending sentinel column (== page
+/// width) names no cell — unlike Terminal::contains(), which admits it. Line/column are also
+/// required non-negative, which the lexicographic CellLocation ordering alone would not enforce.
+///
+/// This is exactly vtbackend::strictlyContains(); it is named for the IME call site so the query
+/// code reads intent-first. The rule itself lives once, in vtbackend, so this guard and its
+/// concurrency test in Terminal_test.cpp cannot drift apart.
+///
+/// @param cursor   Cursor position in grid coordinates (viewport-relative line/column).
+/// @param pageSize The page the grid currently holds.
+/// @return true when every grid access at @p cursor is in bounds.
+[[nodiscard]] constexpr bool imeCursorAddressable(vtbackend::CellLocation cursor,
+                                                  vtbackend::PageSize pageSize) noexcept
+{
+    return vtbackend::strictlyContains(cursor, pageSize);
+}
+
 /// Computes the IME cursor rectangle (Qt::ImCursorRectangle) in ITEM-LOCAL LOGICAL coordinates.
 ///
 /// The cell grid renders in device pixels, inset by the page margin (see GridMetrics::map()), while

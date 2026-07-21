@@ -468,6 +468,8 @@ bool Terminal::ensureFreshRenderBuffer(bool locked)
                 lastCursorPos.has_value() != backBuffer.cursor.has_value()
                 || (backBuffer.cursor.has_value() && backBuffer.cursor->position != lastCursorPos->position);
             if (cursorChanged)
+                // Fired with the state mutex held on the locked path; see the
+                // Events::cursorPositionChanged contract.
                 _eventListener.cursorPositionChanged();
             _renderBuffer.state = RenderBufferState::TrySwapBuffers;
             [[fallthrough]];
