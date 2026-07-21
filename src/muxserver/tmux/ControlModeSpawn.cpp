@@ -11,7 +11,13 @@
     #include <csignal>
     #include <vector>
 
-    #include <pty.h>
+    #if defined(__APPLE__)
+        #include <util.h>
+    #elif defined(__FreeBSD__) || defined(__DragonFly__) || defined(__OpenBSD__)
+        #include <libutil.h>
+    #else
+        #include <pty.h>
+    #endif
     #include <unistd.h>
 #endif
 
