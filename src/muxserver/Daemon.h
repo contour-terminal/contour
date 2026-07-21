@@ -13,6 +13,19 @@
 #include <optional>
 #include <string>
 
+#ifndef _WIN32
+    #include <csignal>
+    #include <functional>
+
+    #include <coro/Task.hpp>
+    #include <net/platform/NativeHandle.h>
+
+namespace net
+{
+class EventLoop;
+}
+#endif
+
 namespace muxserver
 {
 
@@ -44,5 +57,66 @@ struct DaemonConfig
 ///        lives beside it).
 /// @return The process exit code (EXIT_SUCCESS on clean detach).
 [[nodiscard]] int runAttach(std::filesystem::path const& socketPath);
+
+#ifndef _WIN32
+
+/// RAII bridge turning SIGWINCH into an event-loop-waitable readiness signal.
+///
+/// On construction it creates a non-blocking, close-on-exec pipe and installs a
+/// SIGWINCH handler whose only action is an async-signal-safe one-byte @c write
+/// to the pipe's write end. A coroutine (see @c trackTtySize) awaits readability
+/// on @c readFd(), drains the coalesced bytes, and re-proposes the local TTY
+/// size. On destruction it restores the previous SIGWINCH disposition and closes
+/// the pipe. At most one instance may exist at a time: it owns a process-global
+/// handler slot the signal handler reads.
+class SigwinchNotifier
+{
+  public:
+    /// Creates the self-pipe and installs the SIGWINCH handler. On pipe-creation
+    /// failure the object is left invalid (@c valid() is false) rather than
+    /// throwing; the attach then runs without live resize propagation.
+    SigwinchNotifier();
+
+    /// Restores the previous SIGWINCH disposition and closes the pipe.
+    ~SigwinchNotifier();
+
+    SigwinchNotifier(SigwinchNotifier const&) = delete;
+    SigwinchNotifier& operator=(SigwinchNotifier const&) = delete;
+    SigwinchNotifier(SigwinchNotifier&&) = delete;
+    SigwinchNotifier& operator=(SigwinchNotifier&&) = delete;
+
+    /// @return The pipe's read end for the reactor to await, or @c net::InvalidHandle
+    ///         when the pipe could not be created (SIGWINCH tracking disabled).
+    [[nodiscard]] net::NativeHandle readFd() const noexcept { return _readFd; }
+
+    /// @return True if the self-pipe and SIGWINCH handler are installed.
+    [[nodiscard]] bool valid() const noexcept { return _readFd != net::InvalidHandle; }
+
+  private:
+    net::NativeHandle _readFd = net::InvalidHandle;
+    net::NativeHandle _writeFd = net::InvalidHandle;
+    struct sigaction _previous {};
+};
+
+/// Proposes the local TTY size to the daemon once, then again on every SIGWINCH.
+///
+/// The first @p propose call is the initial proposal — because @c whenAny starts
+/// @c AttachClient::run() (which enqueues the ClientHello) before this task, the
+/// proposal is correctly ordered after the handshake. The coroutine then parks on
+/// @p winchFd; each time a SIGWINCH byte arrives it drains the coalesced bytes and
+/// calls @p propose again. It loops until cancelled by the winning sibling of the
+/// enclosing @c whenAny. When @p winchFd is @c net::InvalidHandle (the self-pipe
+/// could not be created) it stays alive but idle, so the attach still functions
+/// without live resize propagation.
+/// @param loop The event loop the flow runs on (a pointer — coroutine parameters
+///        must not be references, they dangle when the caller's temporary dies).
+/// @param winchFd The SIGWINCH self-pipe read end (see @c SigwinchNotifier::readFd).
+/// @param propose Re-queries the local TTY size and proposes it to the daemon.
+/// @return A task that never completes normally; it unwinds on cancellation.
+[[nodiscard]] coro::Task<void> trackTtySize(net::EventLoop* loop,
+                                            net::NativeHandle winchFd,
+                                            std::function<void()> propose);
+
+#endif // !_WIN32
 
 } // namespace muxserver

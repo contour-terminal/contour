@@ -14,6 +14,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <functional>
 #include <memory>
@@ -23,6 +24,7 @@
 #include <vector>
 
 #include <coro/WhenAll.hpp>
+#include <coro/WhenAny.hpp>
 #include <muxserver/MuxServer.h>
 #include <muxserver/NativeSession.h>
 #include <muxserver/SessionHost.h>
@@ -40,8 +42,11 @@
 
     #include <csignal>
 
+    #include <fcntl.h>
     #include <termios.h>
     #include <unistd.h>
+
+    #include <net/posix/FdUtils.h>
 #endif
 
 namespace muxserver
@@ -198,6 +203,24 @@ namespace
         bool _active = false;
     };
 
+    /// The SIGWINCH handler's write end of the self-pipe, published by the live
+    /// SigwinchNotifier. A signal handler cannot carry user data, so the one active
+    /// notifier parks its write fd here; the handler's only job is a one-byte write.
+    std::atomic<int> gWinchWriteFd { -1 };
+
+    /// Async-signal-safe SIGWINCH handler: writes one byte to the self-pipe so the
+    /// reactor wakes and the resize tracker re-proposes the TTY size. A full pipe
+    /// (EAGAIN) already carries a pending wakeup, so the short write is ignored.
+    void winchSignalHandler(int /*sig*/)
+    {
+        auto const fd = gWinchWriteFd.load(std::memory_order_relaxed);
+        if (fd >= 0)
+        {
+            auto const byte = char { 0 };
+            std::ignore = ::write(fd, &byte, 1);
+        }
+    }
+
     /// Forwards local keystrokes to the attached session; Ctrl-\ detaches.
     coro::Task<void> pumpStdin(net::EventLoop* loop,
                                client::AttachClient* attach,
@@ -219,13 +242,13 @@ namespace
         attach->detach();
     }
 
-    /// Proposes the local TTY's size once the handshake is on the wire.
-    coro::Task<void> proposeLocalSize(client::AttachClient* attach)
+    /// Queries the local TTY's size and proposes it to the daemon; a no-op when the
+    /// size cannot be read. Called for the initial proposal and again on SIGWINCH.
+    void proposeLocalSize(client::AttachClient& attach)
     {
         auto size = winsize {};
         if (::ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col > 0 && size.ws_row > 0)
-            attach->requestResize(size.ws_col, size.ws_row);
-        co_return;
+            attach.requestResize(size.ws_col, size.ws_row);
     }
 
     /// The whole attach lifetime: connect, mirror, pump input, detach.
@@ -250,10 +273,16 @@ namespace
 
         {
             auto const rawMode = RawTty {};
-            // whenAll starts run() first, so its ClientHello precedes the
-            // resize proposal in the write queue.
-            co_await coro::whenAll(
-                attach.run(), pumpStdin(loop, &attach, &activeSession), proposeLocalSize(&attach));
+            auto notifier = SigwinchNotifier {};
+            // whenAny starts run() first, so its ClientHello precedes the resize
+            // proposal in the write queue, and it completes as soon as ANY child
+            // finishes — so when the daemon disconnects (run() returns) the parked
+            // input pump and resize tracker are cancelled, the RawTty guard restores
+            // the terminal, and we exit promptly instead of hanging on stdin.
+            std::ignore = co_await coro::whenAny(
+                attach.run(),
+                pumpStdin(loop, &attach, &activeSession),
+                trackTtySize(loop, notifier.readFd(), [&attach] { proposeLocalSize(attach); }));
         }
 
         std::println("\ncontour attach: detached");
@@ -264,6 +293,78 @@ namespace
         }
     }
 } // namespace
+
+SigwinchNotifier::SigwinchNotifier()
+{
+    auto fds = std::array<int, 2> {};
+    if (::pipe(fds.data()) != 0)
+        return; // stays invalid: the attach runs without live resize propagation
+
+    _readFd = fds[0];
+    _writeFd = fds[1];
+
+    // Close-on-exec so the pipe never leaks into a child; non-blocking so the
+    // handler's write and the drain read never stall the loop. Best-effort: a
+    // flag that fails to stick degrades behavior, it does not break the pipe.
+    std::ignore = net::makeNonBlockingCloexec(_readFd);
+    std::ignore = net::makeNonBlockingCloexec(_writeFd);
+
+    // Publish the write end before arming the handler, so a signal that arrives
+    // the instant the handler is installed already sees a valid fd.
+    gWinchWriteFd.store(_writeFd, std::memory_order_relaxed);
+
+    struct sigaction action = {};
+    action.sa_handler = &winchSignalHandler;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = SA_RESTART; // auto-restart other syscalls; poll re-polls on EINTR
+    if (::sigaction(SIGWINCH, &action, &_previous) != 0)
+    {
+        // Handler install failed: undo the pipe so readFd() reports InvalidHandle and
+        // trackTtySize takes its idle path instead of parking on a dead pipe.
+        gWinchWriteFd.store(-1, std::memory_order_relaxed);
+        net::platformClose(_writeFd);
+        net::platformClose(_readFd);
+        _writeFd = net::InvalidHandle;
+        _readFd = net::InvalidHandle;
+    }
+}
+
+SigwinchNotifier::~SigwinchNotifier()
+{
+    // Restore the prior disposition first so no further signal reaches our handler,
+    // then retract the fd and close the pipe: the handler can no longer race the close.
+    if (valid())
+        std::ignore = ::sigaction(SIGWINCH, &_previous, nullptr);
+    gWinchWriteFd.store(-1, std::memory_order_relaxed);
+    net::platformClose(_writeFd);
+    net::platformClose(_readFd);
+}
+
+coro::Task<void> trackTtySize(net::EventLoop* loop, net::NativeHandle winchFd, std::function<void()> propose)
+{
+    propose(); // initial proposal, ordered after run()'s ClientHello by whenAny start order
+
+    if (winchFd == net::InvalidHandle)
+    {
+        // No self-pipe: keep the flow alive (and cancellable) without live resize.
+        while (true)
+            co_await loop->delay(std::chrono::hours(1));
+    }
+
+    auto scratch = std::array<char, 64> {};
+    while (true)
+    {
+        co_await loop->waitReadable(winchFd);
+        // Coalesce the SIGWINCH burst into a single re-proposal.
+        while (true)
+        {
+            auto const n = ::read(winchFd, scratch.data(), scratch.size());
+            if (n <= 0)
+                break;
+        }
+        propose();
+    }
+}
 
 int runAttach(std::filesystem::path const& socketPath)
 {
@@ -432,9 +533,13 @@ namespace
         auto const rawMode = RawConsole {};
         auto detached = std::atomic<bool> { false };
 
-        // Console reads block; ReadFile on the input handle cannot join the
-        // socket reactor. The reader thread is detached deliberately: it may
-        // sit in a blocking ReadFile at process exit, which teardown reaps.
+        // Console reads block; ReadFile on the input handle cannot join the socket
+        // reactor, so a dedicated thread blocks in ReadFile and posts bytes onto the
+        // loop. It captures frame locals (attach, activeSession, detached) and the
+        // loop BY REFERENCE, so it MUST be joined before this frame dies — a detached
+        // thread would wake on the next keypress and dereference freed state. The
+        // ReaderGuard below sets the stop flag, aborts the in-flight ReadFile, and
+        // joins at scope exit.
         auto reader = std::thread { [loop, &attach, &activeSession, &detached] {
             auto buffer = std::array<char, 512> {};
             while (!detached.load())
@@ -460,10 +565,26 @@ namespace
                 });
             }
         } };
-        reader.detach();
+
+        // Joins the reader before the captured locals and the loop are destroyed.
+        // CancelSynchronousIo aborts a ReadFile already in flight; the retry closes
+        // the race where the thread issues a ReadFile just after the stop flag is
+        // set (the cancel is a no-op unless the thread is inside the syscall).
+        struct ReaderGuard
+        {
+            std::thread& thread;
+            std::atomic<bool>& stop;
+            ~ReaderGuard()
+            {
+                stop.store(true);
+                auto const handle = thread.native_handle();
+                while (::WaitForSingleObject(handle, 50) == WAIT_TIMEOUT)
+                    ::CancelSynchronousIo(handle);
+                thread.join();
+            }
+        } readerGuard { reader, detached };
 
         co_await coro::whenAll(attach.run(), proposeConsoleSize(&attach));
-        detached = true;
 
         std::println(stderr, "\ncontour attach: detached");
         co_return attach.versionMismatch() ? EXIT_FAILURE : EXIT_SUCCESS;
