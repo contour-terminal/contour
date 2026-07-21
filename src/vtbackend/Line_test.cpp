@@ -270,3 +270,99 @@ TEST_CASE("Line.blank.copyColumnsFromBlankSourceClearsDest", "[Line][blank]")
     CHECK(dst.cellEmptyAt(ColumnOffset(1)));
     CHECK(dst.cellEmptyAt(ColumnOffset(4)));
 }
+
+TEST_CASE("Line.revision.freshLinesArePendingAndStampOnce", "[Line][revision]")
+{
+    auto line = Line(ColumnCount(8), LineFlag::None, GraphicsAttributes {});
+    CHECK(line.isDirty()); // bootstrap self-heals: a fresh line is pending
+    CHECK(line.revision() == 0);
+
+    CHECK(line.stampRevision(7));
+    CHECK(line.revision() == 7);
+    CHECK_FALSE(line.isDirty());
+
+    // A clean line never restamps.
+    CHECK_FALSE(line.stampRevision(8));
+    CHECK(line.revision() == 7);
+}
+
+TEST_CASE("Line.revision.everyMutatorDirties", "[Line][revision]")
+{
+    auto line = Line(ColumnCount(8), LineFlag::None, GraphicsAttributes {});
+
+    auto const dirtiedBy = [&](auto&& mutate) {
+        static_cast<void>(line.stampRevision(1)); // normalize to clean
+        mutate();
+        return line.isDirty();
+    };
+
+    CHECK(dirtiedBy([&] { line.reset(LineFlag::None, GraphicsAttributes {}); }));
+    CHECK(dirtiedBy([&] { line.reset(LineFlag::None, GraphicsAttributes {}, ColumnCount(8)); }));
+    CHECK(dirtiedBy([&] { line.fill(LineFlag::None, GraphicsAttributes {}, U'x', 1); }));
+    CHECK(dirtiedBy([&] { line.fill(ColumnOffset(0), GraphicsAttributes {}, "ab"); }));
+    CHECK(dirtiedBy([&] { line.resize(ColumnCount(10)); }));
+    CHECK(dirtiedBy([&] { static_cast<void>(line.useCellAt(ColumnOffset(0))); }));
+    CHECK(dirtiedBy([&] { static_cast<void>(line.materializedStorage()); }));
+    CHECK(dirtiedBy([&] { static_cast<void>(line.storage()); })); // mutable overload
+    CHECK(dirtiedBy([&] { static_cast<void>(line.flags()); }));   // mutable overload
+    CHECK(dirtiedBy([&] { line.setFlag(LineFlag::Marked, true); }));
+    CHECK(dirtiedBy([&] { line.setCommandEndOffset(ColumnOffset(3)); }));
+    CHECK(dirtiedBy([&] { line.setPromptEndOffset(ColumnOffset(2)); }));
+}
+
+TEST_CASE("Line.revision.constReadsStayClean", "[Line][revision]")
+{
+    auto line = Line(ColumnCount(8), LineFlag::None, GraphicsAttributes {});
+    line.fill(ColumnOffset(0), GraphicsAttributes {}, "hi");
+    static_cast<void>(line.stampRevision(1));
+
+    auto const& constLine = line;
+    static_cast<void>(constLine.flags());
+    static_cast<void>(constLine.storage());
+    static_cast<void>(constLine.toUtf8());
+    static_cast<void>(constLine.isTrivialBuffer());
+    CHECK_FALSE(line.isDirty());
+}
+
+TEST_CASE("Line.revision.assignmentDirtiesTheDestination", "[Line][revision]")
+{
+    auto source = Line(ColumnCount(4), LineFlag::None, GraphicsAttributes {});
+    source.fill(ColumnOffset(0), GraphicsAttributes {}, "abcd");
+    static_cast<void>(source.stampRevision(5));
+
+    auto target = Line(ColumnCount(4), LineFlag::None, GraphicsAttributes {});
+    static_cast<void>(target.stampRevision(1));
+    REQUIRE_FALSE(target.isDirty());
+
+    SECTION("copy assignment")
+    {
+        target = source;
+    }
+    SECTION("move assignment")
+    {
+        target = std::move(source);
+    }
+    CHECK(target.isDirty());
+    CHECK(target.toUtf8() == "abcd");
+}
+
+TEST_CASE("Line.revision.rotateDirtiesEveryMovedRow", "[Line][revision]")
+{
+    // scrollDown at capacity and margin scrolls move Lines between rows via
+    // std::rotate / move assignment (Grid.cpp); the receiving rows must all
+    // come out dirty without any call-site sprinkling.
+    auto lines = std::vector<Line> {};
+    for (auto const text: { "aaaa", "bbbb", "cccc" })
+    {
+        auto line = Line(ColumnCount(4), LineFlag::None, GraphicsAttributes {});
+        line.fill(ColumnOffset(0), GraphicsAttributes {}, text);
+        static_cast<void>(line.stampRevision(1));
+        lines.push_back(std::move(line));
+    }
+
+    std::ranges::rotate(lines, lines.begin() + 1);
+
+    CHECK(lines[0].toUtf8() == "bbbb");
+    for (auto const& line: lines)
+        CHECK(line.isDirty());
+}

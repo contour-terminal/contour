@@ -94,14 +94,75 @@ class Line
 
     Line(Line const&) = default;
     Line(Line&&) noexcept = default;
-    Line& operator=(Line const&) = default;
-    Line& operator=(Line&&) noexcept = default;
+
+    /// Assignment dirties the DESTINATION row: margin scrolls and rotations move whole lines
+    /// between rows (`lineAt(t) = std::move(lineAt(s))`, std::rotate, std::fill_n in Grid.cpp),
+    /// and the receiving row is what changed from a consumer's point of view. Constructors stay
+    /// defaulted on purpose: constructing a fresh slot is not a row change, and `_dirty = true`
+    /// by default makes new lines pending anyway (bootstrap and rebuilds self-heal).
+    Line& operator=(Line const& other)
+    {
+        if (this == &other)
+            return *this;
+        _storage = other._storage;
+        _columns = other._columns;
+        _flags = other._flags;
+        _commandEndOffset = other._commandEndOffset;
+        _promptEndOffset = other._promptEndOffset;
+        _revision = other._revision;
+        _dirty = true;
+        return *this;
+    }
+
+    Line& operator=(Line&& other) noexcept
+    {
+        if (this == &other)
+            return *this;
+        _storage = std::move(other._storage);
+        _columns = other._columns;
+        _flags = other._flags;
+        _commandEndOffset = other._commandEndOffset;
+        _promptEndOffset = other._promptEndOffset;
+        _revision = other._revision;
+        _dirty = true;
+        return *this;
+    }
+
+    // --- Change tracking (the daemon's per-line delta source) -------------------------------
+    //
+    // A one-byte dirty bit set by every mutating entry point below, and a revision stamped
+    // lazily in batches by Grid::finalizeRevisions() from the grid's single monotonic
+    // sequence counter. Deliberately NOT a LineFlag: flags flow into rendering and test
+    // equality, and a transport-layer bookkeeping bit must not.
+
+    /// The batch sequence number of the last change (0 = never stamped).
+    [[nodiscard]] uint64_t revision() const noexcept { return _revision; }
+
+    /// Marks the line as changed; the next finalize pass stamps it.
+    void markDirty() noexcept { _dirty = true; }
+
+    /// @return True while a change awaits its revision stamp.
+    [[nodiscard]] bool isDirty() const noexcept { return _dirty; }
+
+    /// Stamps the line with @p seqno iff it is dirty, clearing the dirty bit.
+    /// @return True if the line was dirty (and got stamped).
+    bool stampRevision(uint64_t seqno) noexcept
+    {
+        if (!_dirty)
+            return false;
+        _revision = seqno;
+        _dirty = false;
+        return true;
+    }
+
+    // ----------------------------------------------------------------------------------------
 
     /// Reset the line to the blank state with the given fill attributes.
     /// O(1): clears the SoA arrays without re-allocating per-column storage.
     /// Skips the six vector swaps when the line is already blank with matching fillAttrs.
     void reset(LineFlags flags, GraphicsAttributes attributes) noexcept
     {
+        _dirty = true;
         _flags = flags;
         _commandEndOffset = {};
         _promptEndOffset = {};
@@ -112,6 +173,7 @@ class Line
 
     void reset(LineFlags flags, GraphicsAttributes attributes, ColumnCount count) noexcept
     {
+        _dirty = true;
         _flags = flags;
         _commandEndOffset = {};
         _promptEndOffset = {};
@@ -127,6 +189,7 @@ class Line
               char32_t codepoint,
               uint8_t width) noexcept
     {
+        _dirty = true;
         _flags = flags;
         _commandEndOffset = {};
         _promptEndOffset = {};
@@ -146,6 +209,7 @@ class Line
     void fill(ColumnOffset start, GraphicsAttributes const& sgr, std::string_view ascii)
     {
         assert(unbox<size_t>(start) + ascii.size() <= unbox<size_t>(_columns));
+        _dirty = true;
         materialize();
         auto constexpr AsciiWidth = 1;
         auto col = unbox<size_t>(start);
@@ -185,6 +249,7 @@ class Line
 
     void resize(ColumnCount count)
     {
+        _dirty = true;
         if (isBlank())
         {
             _columns = count;
@@ -205,8 +270,10 @@ class Line
 
     /// Force materialization and return a mutable reference to the underlying SoA storage.
     /// Use this in place of @c storage() at every call site that writes through SoA arrays.
+    /// Dirties pessimistically: this is the bulk-ASCII funnel (ONE store per writeText call).
     [[nodiscard]] LineSoA& materializedStorage() noexcept
     {
+        _dirty = true;
         materialize();
         return _storage;
     }
@@ -215,6 +282,8 @@ class Line
     {
         Require(ColumnOffset(0) <= column);
         Require(column <= ColumnOffset::cast_from(size())); // Allow off-by-one for sentinel.
+        // Pessimistic: the returned proxy writes after we returned; accepted for v1.
+        _dirty = true;
         materialize();
         return { _storage, unbox<size_t>(column) };
     }
@@ -237,7 +306,12 @@ class Line
     }
 
     [[nodiscard]] LineFlags flags() const noexcept { return _flags; }
-    [[nodiscard]] LineFlags& flags() noexcept { return _flags; }
+    [[nodiscard]] LineFlags& flags() noexcept
+    {
+        // Pessimistic: DECDWL/DECDHL and friends mutate through this reference.
+        _dirty = true;
+        return _flags;
+    }
 
     [[nodiscard]] bool marked() const noexcept { return isFlagEnabled(LineFlag::Marked); }
     void setMarked(bool enable) { setFlag(LineFlag::Marked, enable); }
@@ -284,7 +358,11 @@ class Line
     /// what makes it survive a resize: reflow re-chops a logical line into different physical pieces, but
     /// it never changes the line's content, so the border does not move.
     [[nodiscard]] ColumnOffset commandEndOffset() const noexcept { return _commandEndOffset; }
-    void setCommandEndOffset(ColumnOffset offset) noexcept { _commandEndOffset = offset; }
+    void setCommandEndOffset(ColumnOffset offset) noexcept
+    {
+        _dirty = true;
+        _commandEndOffset = offset;
+    }
 
     /// Where on this LOGICAL line the shell's prompt stopped printing and the user's input begins — the
     /// column OSC 133;B was emitted at. Meaningful only on a head carrying LineFlag::PromptEnd.
@@ -297,10 +375,15 @@ class Line
     /// re-chops a logical line into different physical pieces but never changes its content, so a
     /// logical column does not move when the window is resized.
     [[nodiscard]] ColumnOffset promptEndOffset() const noexcept { return _promptEndOffset; }
-    void setPromptEndOffset(ColumnOffset offset) noexcept { _promptEndOffset = offset; }
+    void setPromptEndOffset(ColumnOffset offset) noexcept
+    {
+        _dirty = true;
+        _promptEndOffset = offset;
+    }
 
     void setFlag(LineFlags flags, bool enable) noexcept
     {
+        _dirty = true;
         if (enable)
             _flags.enable(flags);
         else
@@ -363,8 +446,13 @@ class Line
         return tb;
     }
 
-    /// Access the underlying SoA storage.
-    [[nodiscard]] LineSoA& storage() noexcept { return _storage; }
+    /// Access the underlying SoA storage. The mutable overload dirties
+    /// pessimistically — callers reach it to write.
+    [[nodiscard]] LineSoA& storage() noexcept
+    {
+        _dirty = true;
+        return _storage;
+    }
     [[nodiscard]] LineSoA const& storage() const noexcept { return _storage; }
 
     // Tests if the given text can be matched in this line at the exact given start column, in sensitive
@@ -464,6 +552,8 @@ class Line
     LineFlags _flags {};
     ColumnOffset _commandEndOffset {};
     ColumnOffset _promptEndOffset {};
+    uint64_t _revision = 0; ///< Batch seqno of the last change (see revision()).
+    bool _dirty = true;     ///< Fresh lines are pending: bootstrap self-heals.
 };
 
 } // namespace vtbackend
