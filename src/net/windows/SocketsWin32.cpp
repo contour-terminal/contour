@@ -14,7 +14,11 @@
 
 #ifdef _WIN32
 
+    #include <cstring>
+    #include <filesystem>
     #include <string>
+
+    #include <afunix.h>
 
     #include <net/platform/WinsockInit.h>
     #include <net/windows/WindowsListener.h>
@@ -113,20 +117,45 @@ coro::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connect(EventLoop*
     co_return std::unexpected(lastError);
 }
 
-std::expected<std::unique_ptr<IListener>, NetError> listenUnix(EventLoop& /*loop*/,
-                                                               std::string_view /*path*/,
-                                                               int /*backlog*/)
+std::expected<std::unique_ptr<IListener>, NetError> listenUnix(EventLoop& loop,
+                                                               std::string_view path,
+                                                               int backlog)
 {
-    // Windows 10+ supports AF_UNIX via afunix.h; wiring it (and its distinct
-    // security model) up is a self-contained follow-up. Until then the daemon's
-    // Windows transport is TCP.
-    return std::unexpected(makeNetError(NetErrorCode::Unsupported, 0, "AF_UNIX on Windows"));
+    ensureWinsockInitialized();
+    // The parent directory is created but NOT permission-hardened: NTFS ACLs
+    // (the user's profile/temp tree) govern access, not POSIX mode bits.
+    auto ec = std::error_code {};
+    std::filesystem::create_directories(std::filesystem::path { std::string { path } }.parent_path(), ec);
+    return WindowsListener::bindUnix(loop, path, backlog)
+        .transform(
+            [](std::unique_ptr<WindowsListener> listener) -> std::unique_ptr<IListener> { return listener; });
 }
 
-coro::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connectUnix(EventLoop* /*loop*/,
-                                                                          std::string_view /*path*/)
+coro::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connectUnix(EventLoop* loop,
+                                                                          std::string_view path)
 {
-    co_return std::unexpected(makeNetError(NetErrorCode::Unsupported, 0, "AF_UNIX on Windows"));
+    ensureWinsockInitialized();
+    auto addr = sockaddr_un {};
+    addr.sun_family = AF_UNIX;
+    if (path.size() >= sizeof(addr.sun_path))
+        co_return std::unexpected(makeNetError(NetErrorCode::AddressError, 0, "unix socket path too long"));
+    std::memcpy(addr.sun_path, path.data(), path.size());
+
+    auto const sock = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    if (sock == INVALID_SOCKET)
+        co_return std::unexpected(
+            makeNetError(NetErrorCode::Unsupported, WSAGetLastError(), "socket(AF_UNIX)"));
+
+    // A same-machine AF_UNIX connect completes immediately (or fails); no
+    // reactor parking is needed the way the TCP path needs it.
+    if (::connect(sock, reinterpret_cast<sockaddr const*>(&addr), sizeof(addr)) != 0)
+    {
+        auto const err = WSAGetLastError();
+        closesocket(sock);
+        co_return std::unexpected(makeNetError(
+            err == WSAECONNREFUSED ? NetErrorCode::ConnRefused : NetErrorCode::Other, err, "connect unix"));
+    }
+    co_return std::unique_ptr<ISocket>(new WindowsSocket(*loop, sock));
 }
 
 std::expected<std::unique_ptr<ISocket>, NetError> adoptFd(EventLoop& /*loop*/, int /*fd*/)

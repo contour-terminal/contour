@@ -57,7 +57,7 @@ namespace muxserver
 #ifndef _WIN32
     auto const user = std::to_string(::getuid());
 #else
-    auto const user = std::string { "user" };
+    auto const user = std::string { crispy::environment::get("USERNAME").value_or("user") };
 #endif
     return fs::temp_directory_path() / ("contour-" + user) / label;
 }

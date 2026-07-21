@@ -17,7 +17,10 @@
 #ifdef _WIN32
 
     #include <array>
+    #include <cstring>
     #include <string>
+
+    #include <afunix.h>
 
 namespace net
 {
@@ -143,6 +146,45 @@ std::expected<std::unique_ptr<WindowsListener>, NetError> WindowsListener::bind(
     }
 
     return std::unique_ptr<WindowsListener>(new WindowsListener(loop, sock, event, actualPort));
+}
+
+std::expected<std::unique_ptr<WindowsListener>, NetError> WindowsListener::bindUnix(EventLoop& loop,
+                                                                                    std::string_view path,
+                                                                                    int backlog)
+{
+    auto addr = sockaddr_un {};
+    addr.sun_family = AF_UNIX;
+    if (path.size() >= sizeof(addr.sun_path))
+        return std::unexpected(makeNetError(NetErrorCode::AddressError, 0, "unix socket path too long"));
+    std::memcpy(addr.sun_path, path.data(), path.size());
+
+    ::DeleteFileA(std::string { path }.c_str()); // a stale socket file blocks bind
+
+    auto const sock = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    if (sock == INVALID_SOCKET)
+        return std::unexpected(makeNetError(NetErrorCode::Unsupported, WSAGetLastError(), "socket(AF_UNIX)"));
+
+    if (::bind(sock, reinterpret_cast<sockaddr const*>(&addr), sizeof(addr)) != 0
+        || ::listen(sock, backlog) != 0)
+    {
+        auto const err = WSAGetLastError();
+        closesocket(sock);
+        return std::unexpected(
+            makeNetError(err == WSAEADDRINUSE ? NetErrorCode::AddressInUse : NetErrorCode::Other,
+                         err,
+                         "bind/listen unix"));
+    }
+
+    auto const event = WSACreateEvent();
+    if (event == WSA_INVALID_EVENT || WSAEventSelect(sock, event, FD_ACCEPT) == SOCKET_ERROR)
+    {
+        if (event != WSA_INVALID_EVENT)
+            WSACloseEvent(event);
+        closesocket(sock);
+        return std::unexpected(makeNetError(NetErrorCode::Other, WSAGetLastError(), "WSAEventSelect"));
+    }
+
+    return std::unique_ptr<WindowsListener>(new WindowsListener(loop, sock, event, /*localPort=*/0));
 }
 
 coro::Task<AcceptResult> WindowsListener::accept()

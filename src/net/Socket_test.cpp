@@ -4,8 +4,12 @@
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <filesystem>
+#include <format>
 #include <memory>
+#include <random>
 #include <span>
+#include <string>
 #include <string_view>
 
 #include <coro/Task.hpp>
@@ -127,4 +131,53 @@ TEST_CASE("listen + connect + accept echo a request over loopback", "[net][poll]
 
     REQUIRE(served);
     REQUIRE(matched);
+}
+
+namespace
+{
+
+/// The unix-socket echo: connect by PATH rather than port.
+Task<void> unixEcho(EventLoop* loop, net::IListener* listener, std::string path, bool* served, bool* matched)
+{
+    auto client = [](EventLoop* innerLoop, std::string target, bool* ok) -> Task<void> {
+        auto socket = co_await net::connectUnix(innerLoop, target);
+        REQUIRE(socket.has_value());
+        auto const request = std::string_view { "unix-ping" };
+        std::ignore = co_await (*socket)->write(std::as_bytes(std::span { request }));
+        auto buffer = std::array<std::byte, 32> {};
+        auto const n = co_await (*socket)->read(buffer);
+        REQUIRE(n.has_value());
+        *ok = std::string_view { reinterpret_cast<char const*>(buffer.data()), *n } == "unix-ping";
+    };
+    co_await coro::whenAll(echoServer(listener, served), client(loop, path, matched));
+}
+
+} // namespace
+
+TEST_CASE("unix-domain listen + connect echo a request", "[net][poll]")
+{
+    // Runtime-gated: on platforms without AF_UNIX support this documents the
+    // Unsupported answer instead (never a crash). On Windows this is the
+    // afunix.h path's coverage.
+    auto source = PollEventSource {};
+    auto loop = EventLoop { source };
+
+    auto const path = (std::filesystem::temp_directory_path()
+                       / std::format("contour-net-{}", std::random_device {}()) / "echo.sock")
+                          .string();
+    auto listener = net::listenUnix(loop, path);
+    if (!listener.has_value())
+    {
+        REQUIRE(listener.error().code == net::NetErrorCode::Unsupported);
+        SKIP("AF_UNIX not supported on this platform");
+    }
+
+    auto served = false;
+    auto matched = false;
+    loop.blockOn(unixEcho(&loop, listener->get(), path, &served, &matched));
+    REQUIRE(served);
+    REQUIRE(matched);
+
+    auto ec = std::error_code {};
+    std::filesystem::remove_all(std::filesystem::path { path }.parent_path(), ec);
 }

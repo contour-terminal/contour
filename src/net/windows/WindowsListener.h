@@ -45,6 +45,16 @@ class WindowsListener final: public IListener
                                                                                         std::uint16_t port,
                                                                                         int backlog = 128);
 
+    /// Binds and listens on the AF_UNIX socket file @p path (Windows 10
+    /// 1803+, afunix.h). A stale socket file is removed first. POSIX-style
+    /// permission hardening does not apply: NTFS ACLs govern access.
+    /// @param loop The loop whose reactor drives accept readiness (not owned).
+    /// @param path The socket file path.
+    /// @param backlog The listen backlog.
+    /// @return The bound listener, or a @c NetError on failure.
+    [[nodiscard]] static std::expected<std::unique_ptr<WindowsListener>, NetError> bindUnix(
+        EventLoop& loop, std::string_view path, int backlog = 128);
+
     [[nodiscard]] coro::Task<AcceptResult> accept() override;
 
     [[nodiscard]] std::uint16_t localPort() const noexcept override { return _localPort; }
