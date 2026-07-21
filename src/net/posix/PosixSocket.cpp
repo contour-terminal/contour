@@ -78,13 +78,23 @@ coro::Task<IoResult> PosixSocket::read(std::span<std::byte> buffer)
         if (_closed || _fd < 0)
             co_return std::unexpected(makeNetError(NetErrorCode::BadHandle, 0, "read on closed socket"));
 
-        auto const n = ::recv(_fd, buffer.data(), buffer.size(), 0);
+        auto const n = _plainFd ? ::read(_fd, buffer.data(), buffer.size())
+                                : ::recv(_fd, buffer.data(), buffer.size(), 0);
         if (n > 0)
             co_return static_cast<std::size_t>(n);
         if (n == 0)
             co_return std::size_t { 0 }; // clean EOF
 
         auto const err = errno;
+        if (err == ENOTSOCK && !_plainFd)
+        {
+            // An adopted PTY master or pipe end (net::adoptFd): recv/send do
+            // not apply; detect once, serve via plain read/write from now on.
+            _plainFd = true;
+            continue;
+        }
+        if (err == EIO && _plainFd)
+            co_return std::size_t { 0 }; // a PTY master reports child exit as EIO
         if (isWouldBlock(err))
         {
             // Park until the fd is readable, then retry. A cancelled wait throws
@@ -110,7 +120,8 @@ coro::Task<IoResult> PosixSocket::write(std::span<std::byte const> buffer)
         auto const remaining = buffer.subspan(total);
         // MSG_NOSIGNAL: a write to a peer-closed socket returns EPIPE rather than
         // raising SIGPIPE and killing the process.
-        auto const n = ::send(_fd, remaining.data(), remaining.size(), MSG_NOSIGNAL);
+        auto const n = _plainFd ? ::write(_fd, remaining.data(), remaining.size())
+                                : ::send(_fd, remaining.data(), remaining.size(), MSG_NOSIGNAL);
         if (n > 0)
         {
             total += static_cast<std::size_t>(n);
@@ -118,6 +129,11 @@ coro::Task<IoResult> PosixSocket::write(std::span<std::byte const> buffer)
         }
 
         auto const err = errno;
+        if (err == ENOTSOCK && !_plainFd)
+        {
+            _plainFd = true;
+            continue;
+        }
         if (isWouldBlock(err))
         {
             co_await _loop.waitWritable(_fd);

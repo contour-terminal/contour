@@ -129,6 +129,11 @@ coro::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connectUnix(EventL
     co_return std::unexpected(makeNetError(NetErrorCode::Unsupported, 0, "AF_UNIX on Windows"));
 }
 
+std::expected<std::unique_ptr<ISocket>, NetError> adoptFd(EventLoop& /*loop*/, int /*fd*/)
+{
+    return std::unexpected(makeNetError(NetErrorCode::Unsupported, 0, "adoptFd on Windows"));
+}
+
 } // namespace net
 
 #endif // _WIN32

@@ -189,6 +189,19 @@ coro::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connectUnix(EventL
         makeNetError(err == ECONNREFUSED ? NetErrorCode::ConnRefused : NetErrorCode::Other, err, "connect"));
 }
 
+std::expected<std::unique_ptr<ISocket>, NetError> adoptFd(EventLoop& loop, int fd)
+{
+    if (fd < 0)
+        return std::unexpected(makeNetError(NetErrorCode::Other, EBADF, "adoptFd"));
+    // The reactor requires non-blocking I/O; the descriptor may be a PTY
+    // master or socketpair end created without it.
+    if (auto const flags = ::fcntl(fd, F_GETFL, 0); flags >= 0)
+        ::fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    if (auto const fdFlags = ::fcntl(fd, F_GETFD, 0); fdFlags >= 0)
+        ::fcntl(fd, F_SETFD, fdFlags | FD_CLOEXEC);
+    return std::unique_ptr<ISocket>(new PosixSocket(loop, fd));
+}
+
 } // namespace net
 
 #endif // !_WIN32

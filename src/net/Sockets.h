@@ -64,6 +64,14 @@ namespace net
 [[nodiscard]] coro::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connectUnix(
     EventLoop* loop, std::string_view path);
 
+/// Adopts an already-open stream file descriptor (a socketpair end, a PTY
+/// master) as an @c ISocket driven by @p loop's reactor. Ownership of the fd
+/// transfers to the returned socket.
+/// @param loop The loop whose reactor drives readiness (not owned).
+/// @param fd The open, stream-capable descriptor.
+/// @return The adopted socket; @c NetErrorCode::Unsupported on Windows.
+[[nodiscard]] std::expected<std::unique_ptr<ISocket>, NetError> adoptFd(EventLoop& loop, int fd);
+
 /// Appends one read chunk from @p socket to @p buffer — the accumulate step of
 /// every binary-framed decode loop.
 /// @param socket The transport to read from (not owned; a pointer, since

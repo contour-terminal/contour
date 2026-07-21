@@ -48,6 +48,7 @@ class PosixSocket final: public ISocket
   private:
     EventLoop& _loop;
     int _fd;
+    bool _plainFd = false; ///< Set on first ENOTSOCK: a PTY/pipe fd, served via read/write.
     std::string _peerAddress;
     bool _closed = false;
 };
