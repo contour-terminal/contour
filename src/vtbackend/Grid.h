@@ -14,6 +14,8 @@
 #include <libunicode/convert.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -668,6 +670,39 @@ class Grid
     [[nodiscard]] std::string renderAllText() const;
     // }}}
 
+    // {{{ Stable row identity (the daemon's delta addressing)
+    //
+    // A stable id names a PHYSICAL row across ring rotations: scrolling changes a row's
+    // LineOffset but never its id. Ids are only meaningful within one generation; a
+    // generation bump means row identity was destroyed wholesale (resize/reflow, history
+    // limit change, reset) and clients must resync. Plain ints, guarded by the terminal
+    // lock like all grid state.
+
+    /// The wholesale-rebuild counter: a change invalidates every stable id.
+    [[nodiscard]] uint64_t generation() const noexcept { return _generation; }
+
+    /// The stable id of the (existing) row at @p offset.
+    [[nodiscard]] int64_t stableLineIdOf(LineOffset offset) const noexcept
+    {
+        return _stableBase + unbox<int64_t>(offset);
+    }
+
+    /// The offset the stable id @p id currently maps to, or nullopt if the row was
+    /// evicted (below the floor) or does not exist yet.
+    [[nodiscard]] std::optional<LineOffset> lineOffsetOf(int64_t id) const noexcept
+    {
+        if (id < _stableFloor || id >= _stableBase + unbox<int64_t>(_pageSize.lines))
+            return std::nullopt;
+        return LineOffset::cast_from(id - _stableBase);
+    }
+
+    /// The oldest stable id still addressable; monotonic within a generation.
+    /// Deliberately NOT derived from historyLineCount(): at-capacity scrollDown wraps
+    /// destroyed page rows into the oldest history slots without resetting them, and a
+    /// derived floor would re-validate those evicted ids against garbage.
+    [[nodiscard]] int64_t stableRangeFloor() const noexcept { return _stableFloor; }
+    // }}}
+
     [[nodiscard]] constexpr LineFlags defaultLineFlags() const noexcept;
     [[nodiscard]] constexpr LineCount linesUsed() const noexcept;
 
@@ -712,7 +747,6 @@ class Grid
 
   private:
     CellLocation growLines(LineCount newHeight, CellLocation cursor);
-    void appendNewLines(LineCount count, GraphicsAttributes attr);
     void clampHistory();
 
     // {{{ buffer helpers
@@ -725,11 +759,40 @@ class Grid
 
     void rezeroBuffers() noexcept { _lines.rezero(); }
 
-    void rotateBuffers(int offset) noexcept { _lines.rotate(offset); }
+    // The ONLY ring-rotation entry points: stable-id accounting lives here so every
+    // scroll/unscroll/grow path keeps row identity by construction. (The former
+    // uncentralized rotateBuffers(int)/appendNewLines paths were dead and are gone —
+    // they would have been silent identity-desync holes.)
 
-    void rotateBuffersLeft(LineCount count) noexcept { _lines.rotate_left(unbox<size_t>(count)); }
+    void rotateBuffersLeft(LineCount count) noexcept
+    {
+        _lines.rotate_left(unbox<size_t>(count));
+        _stableBase += unbox<int64_t>(count);
+        syncStableFloor();
+    }
 
-    void rotateBuffersRight(LineCount count) noexcept { _lines.rotate_right(unbox<size_t>(count)); }
+    void rotateBuffersRight(LineCount count) noexcept
+    {
+        _lines.rotate_right(unbox<size_t>(count));
+        _stableBase -= unbox<int64_t>(count);
+        syncStableFloor();
+    }
+
+    /// Re-establishes the floor invariant `_stableFloor >= _stableBase - history` after
+    /// anything moved the base or shrank the history. max() keeps it monotonic: eviction
+    /// only ever advances it within a generation.
+    void syncStableFloor() noexcept
+    {
+        _stableFloor = std::max(_stableFloor, _stableBase - unbox<int64_t>(historyLineCount()));
+    }
+
+    /// Destroys stable row identity wholesale (resize/reflow, history-limit change,
+    /// reset): clients observe the change and resync.
+    void bumpGeneration() noexcept
+    {
+        ++_generation;
+        syncStableFloor();
+    }
 
     /// Resets the topmost @p count lines of the main page to blank.
     ///
@@ -749,6 +812,12 @@ class Grid
     MaxHistoryLineCount _historyLimit;
     Lines _lines;
     LineCount _linesUsed;
+
+    // Stable row identity (see the accessors above): maintained exclusively by the
+    // ring-rotation primitives, syncStableFloor() and bumpGeneration().
+    uint64_t _generation = 0;
+    int64_t _stableBase = 0;  ///< Stable id of page row 0; signed — SD/unscroll push it down.
+    int64_t _stableFloor = 0; ///< Oldest addressable id; monotonic within a generation.
 };
 
 std::ostream& dumpGrid(std::ostream& os, Grid const& grid);

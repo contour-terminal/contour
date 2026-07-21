@@ -1314,4 +1314,116 @@ TEST_CASE("Grid.reflow.semanticMarksStayOnTheHeadLine", "[grid]")
 }
 
 // }}}
+
+// {{{ stable row identity
+TEST_CASE("Grid.stableId.roundTripBelowCapacity", "[grid][stable-id]")
+{
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(5));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    grid.setLineText(LineOffset(1), "BBBBB");
+
+    auto const idA = grid.stableLineIdOf(LineOffset(0));
+    grid.scrollUp(LineCount(1)); // A scrolls into history
+
+    // The id names the same PHYSICAL row across the rotation.
+    auto const offset = grid.lineOffsetOf(idA);
+    REQUIRE(offset.has_value());
+    CHECK(*offset == LineOffset(-1));
+    CHECK(grid.lineText(*offset) == "AAAAA");
+    // Page row 0 is a new physical row: the id space advanced with the scroll.
+    CHECK(grid.stableLineIdOf(LineOffset(0)) == idA + 1);
+}
+
+TEST_CASE("Grid.stableId.evictionAdvancesTheFloorMonotonically", "[grid][stable-id]")
+{
+    // Ring capacity: 2 page + 1 history = 3 slots.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(1));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    auto const idA = grid.stableLineIdOf(LineOffset(0));
+    auto const floorBefore = grid.stableRangeFloor();
+
+    grid.scrollUp(LineCount(1)); // A -> history, still addressable
+    REQUIRE(grid.lineOffsetOf(idA).has_value());
+    CHECK(grid.stableRangeFloor() >= floorBefore);
+
+    grid.scrollUp(LineCount(1)); // ring full: A is evicted
+    CHECK(grid.lineOffsetOf(idA) == std::nullopt);
+    CHECK(grid.stableRangeFloor() > floorBefore);
+}
+
+TEST_CASE("Grid.stableId.scrollDownKeepsRowIdentity", "[grid][stable-id]")
+{
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(5) }, false, LineCount(5));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    auto const idA = grid.stableLineIdOf(LineOffset(0));
+
+    // A full-page scrollDown pushes row A downward: same id, new offset.
+    grid.scrollDown(LineCount(1), GraphicsAttributes {}, fullPageMargin(grid.pageSize()));
+
+    auto const offset = grid.lineOffsetOf(idA);
+    REQUIRE(offset.has_value());
+    CHECK(*offset == LineOffset(1));
+    CHECK(grid.lineText(*offset) == "AAAAA");
+}
+
+TEST_CASE("Grid.stableId.unscrollPullsHistoryRowsBackUnderTheirIds", "[grid][stable-id]")
+{
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(5) }, false, LineCount(5));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    grid.scrollUp(LineCount(1)); // A -> history
+    auto const idA = grid.stableLineIdOf(LineOffset(-1));
+    auto const floorBefore = grid.stableRangeFloor();
+
+    grid.unscroll(LineCount(1), GraphicsAttributes {});
+
+    auto const offset = grid.lineOffsetOf(idA);
+    REQUIRE(offset.has_value());
+    CHECK(*offset == LineOffset(0));
+    CHECK(grid.lineText(*offset) == "AAAAA");
+    CHECK(grid.stableRangeFloor() >= floorBefore); // the floor never regresses
+}
+
+TEST_CASE("Grid.stableId.clearHistoryEvictsAllHistoryIds", "[grid][stable-id]")
+{
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(5));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    grid.scrollUp(LineCount(2));
+    REQUIRE(grid.historyLineCount() == LineCount(2));
+
+    auto const idHistory = grid.stableLineIdOf(LineOffset(-1));
+    auto const idPage = grid.stableLineIdOf(LineOffset(0));
+    auto const generationBefore = grid.generation();
+
+    grid.clearHistory();
+
+    // History ids are evicted via the floor jump; page identity is untouched
+    // and NO generation bump happened (clients drop history without a resend).
+    CHECK(grid.lineOffsetOf(idHistory) == std::nullopt);
+    CHECK(grid.lineOffsetOf(idPage) == LineOffset(0));
+    CHECK(grid.stableRangeFloor() == grid.stableLineIdOf(LineOffset(0)));
+    CHECK(grid.generation() == generationBefore);
+}
+
+TEST_CASE("Grid.generation.bumpsOnlyOnWholesaleRebuilds", "[grid][stable-id]")
+{
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(5));
+    auto const g0 = grid.generation();
+
+    grid.scrollUp(LineCount(1));
+    CHECK(grid.generation() == g0); // scrolling never destroys identity
+
+    grid.clearHistory();
+    CHECK(grid.generation() == g0); // the floor jump suffices
+
+    std::ignore = grid.resize(PageSize { LineCount(2), ColumnCount(6) }, CellLocation {}, false);
+    CHECK(grid.generation() == g0 + 1); // reflow rebuilds the whole ring
+
+    grid.setMaxHistoryLineCount(LineCount(9));
+    CHECK(grid.generation() == g0 + 2);
+
+    grid.reset();
+    CHECK(grid.generation() == g0 + 3);
+}
+// }}}
+
 // NOLINTEND(misc-const-correctness)

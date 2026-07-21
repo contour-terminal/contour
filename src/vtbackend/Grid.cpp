@@ -132,12 +132,16 @@ void Grid::setMaxHistoryLineCount(MaxHistoryLineCount maxHistoryLineCount)
     _lines.resize(unbox<size_t>(_pageSize.lines + this->maxHistoryLineCount()),
                   Line(_pageSize.columns, defaultLineFlags(), GraphicsAttributes {}));
     _linesUsed = min(_linesUsed, _pageSize.lines + this->maxHistoryLineCount());
+    bumpGeneration();
     verifyState();
 }
 
 void Grid::clearHistory()
 {
     _linesUsed = _pageSize.lines;
+    // The floor jumps to the base: every history id is evicted, no resend needed —
+    // deliberately NOT a generation bump (page row identity is untouched).
+    syncStableFloor();
     verifyState();
 }
 
@@ -147,6 +151,8 @@ void Grid::verifyState() const noexcept
     Require(LineCount::cast_from(_lines.size()) >= totalLineCount());
     Require(LineCount::cast_from(_lines.size()) >= _linesUsed);
     Require(_linesUsed >= _pageSize.lines);
+    // A floor below base - history would re-validate evicted stable ids.
+    Require(_stableFloor >= _stableBase - unbox<int64_t>(historyLineCount()));
 #endif
 }
 
@@ -317,6 +323,7 @@ LineCount Grid::scrollUp(LineCount linesCountToScrollUp, GraphicsAttributes defa
         if (*linesAppendCount != 0)
         {
             _linesUsed += linesAppendCount;
+            syncStableFloor();
             Require(unbox<size_t>(_linesUsed) <= _lines.size());
             fill_n(next(_lines.begin(), *_pageSize.lines),
                    unbox<size_t>(linesAppendCount),
@@ -523,6 +530,7 @@ void Grid::unscroll(LineCount n, GraphicsAttributes const& defaultAttributes)
     {
         rotateBuffersRight(pullable);
         _linesUsed -= pullable;
+        syncStableFloor();
     }
 
     auto const remaining = clampedN - pullable;
@@ -562,6 +570,7 @@ void Grid::reset()
     _lines.rotate_right(_lines.zero_index());
     for (int i = 0; i < unbox(_pageSize.lines); ++i)
         _lines[i].reset(defaultLineFlags(), GraphicsAttributes {});
+    bumpGeneration();
     verifyState();
 }
 
@@ -594,6 +603,7 @@ CellLocation Grid::growLines(LineCount newHeight, CellLocation cursor)
 
     _pageSize.lines += totalLinesToExtend;
     _linesUsed = min(_linesUsed + totalLinesToExtend, LineCount::cast_from(_lines.size()));
+    syncStableFloor(); // the min() clamp can shrink the history at ring capacity
 
     Ensures(_pageSize.lines == newHeight);
     Ensures(_lines.size() >= unbox<size_t>(maxHistoryLineCount() + _pageSize.lines));
@@ -636,6 +646,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
         {
             _pageSize.lines -= cutoffCount;
             _linesUsed -= cutoffCount;
+            syncStableFloor();
             Ensures(*cursor.line < *_pageSize.lines);
             verifyState();
         }
@@ -902,6 +913,9 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
     }
 
     Ensures(_pageSize == newSize);
+    // Any page-size change destroys physical row identity (a non-reflow column resize
+    // mutates history in place; reflow rebuilds the whole ring): one bump, clients resync.
+    bumpGeneration();
     verifyState();
 
     return cursor;
@@ -910,29 +924,6 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
 void Grid::clampHistory()
 {
     // TODO: needed?
-}
-
-void Grid::appendNewLines(LineCount count, GraphicsAttributes attr)
-{
-    auto const wrappableFlag = _lines.back().wrappableFlag();
-
-    if (historyLineCount() == maxHistoryLineCount())
-    {
-        for (int i = 0; i < unbox(count); ++i)
-        {
-            auto line = std::move(_lines.front());
-            _lines.pop_front();
-            line.reset(defaultLineFlags(), attr);
-            _lines.emplace_back(std::move(line));
-        }
-        return;
-    }
-
-    if (auto const n = std::min(count, _pageSize.lines); *n > 0)
-    {
-        generate_n(back_inserter(_lines), *n, [&]() { return Line(_pageSize.columns, wrappableFlag, attr); });
-        clampHistory();
-    }
 }
 // }}}
 // {{{ dumpGrid impl
