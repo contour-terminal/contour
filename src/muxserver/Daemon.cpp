@@ -8,7 +8,9 @@
 #include <thread>
 #include <utility>
 
+#include <coro/WhenAll.hpp>
 #include <muxserver/MuxServer.h>
+#include <muxserver/NativeSession.h>
 #include <muxserver/SessionHost.h>
 #include <muxserver/tmux/ControlSession.h>
 #include <net/EventLoop.h>
@@ -23,6 +25,15 @@ namespace muxserver
 {
 
 #ifndef _WIN32
+
+namespace
+{
+    /// Drives both protocol servers' accept loops on the one reactor.
+    coro::Task<void> serveBoth(MuxServer* control, MuxServer* native)
+    {
+        co_await coro::whenAll(control->serve(), native->serve());
+    }
+} // namespace
 
 int runDaemon(DaemonConfig const& config)
 {
@@ -47,6 +58,16 @@ int runDaemon(DaemonConfig const& config)
 
     auto server = MuxServer { loop, std::move(*listener), tmux::makeControlModeHandler(loop, host) };
 
+    // The native cells+deltas protocol listens beside the control-mode socket.
+    auto const nativePath = config.socketPath.string() + "-native";
+    auto nativeListener = net::listenUnix(loop, nativePath);
+    if (!nativeListener)
+    {
+        std::println(stderr, "contour daemon: {}", nativeListener.error().toString());
+        return EXIT_FAILURE;
+    }
+    auto nativeServer = MuxServer { loop, std::move(*nativeListener), makeNativeHandler(loop, host) };
+
     // Signal handling without async-signal-safety hazards: SIGINT/SIGTERM are
     // blocked process-wide and consumed by a dedicated sigwait thread, which
     // marshals the shutdown onto the loop via post() (the loop's only
@@ -64,12 +85,14 @@ int runDaemon(DaemonConfig const& config)
         signalSeen = true;
         loop.post([&] {
             server.close();
+            nativeServer.close();
             loop.requestStop();
         });
     } };
 
-    std::println(stderr, "contour daemon: serving on {}", config.socketPath.string());
-    loop.blockOn(server.serve());
+    std::println(
+        stderr, "contour daemon: serving on {} (native: {})", config.socketPath.string(), nativePath);
+    loop.blockOn(serveBoth(&server, &nativeServer));
 
     // Unblock the watcher if shutdown came from elsewhere; if it already
     // consumed a signal, the raised one stays blocked and dies with the process.

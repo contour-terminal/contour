@@ -3,6 +3,8 @@ add_library(muxserver STATIC
     Daemon.h
     MuxServer.cpp
     MuxServer.h
+    NativeSession.cpp
+    NativeSession.h
     SessionHost.cpp
     SessionHost.h
     SocketPath.h
@@ -37,6 +39,7 @@ if(MUXSERVER_TESTING)
         test_main.cpp
         SessionHost_test.cpp
         MuxServer_test.cpp
+        NativeSession_test.cpp
         SocketPath_test.cpp
         proto/Pdu_test.cpp
         proto/Wire_test.cpp
