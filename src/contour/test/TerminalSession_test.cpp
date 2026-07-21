@@ -95,6 +95,29 @@ TEST_CASE("TerminalSession::terminate is idempotent on an already-closed display
     CHECK(session->terminal().device().isClosed());
 }
 
+TEST_CASE("TerminalSession::cursorPositionChanged is a safe no-op without a display",
+          "[contour][session][ime]")
+{
+    // Regression guard for the coalescing-flag leak. cursorPositionChanged() fires on the terminal/
+    // render thread once per frame AND on every cursor blink — including while a background tab or a
+    // collapsing split has NO display attached (the detach->attach gap). Two things must hold with no
+    // display: it must not dereference the absent display, and — the subtle half — it must not latch
+    // its coalescing flag. Latching without scheduling the post that clears it would strand the flag
+    // set forever, so once a display finally arrived every later cursorPositionChanged() would
+    // early-return, permanently freezing IME rectangle tracking and the accessibility caret. With no
+    // display the whole notification must collapse to nothing, safely, any number of times.
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    REQUIRE(session->display() == nullptr); // precondition: no display attached
+
+    // Blink/frame churn: many cursor-move notifications while no display is present.
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 8))
+        CHECK_NOTHROW(session->cursorPositionChanged());
+
+    // Still no display, still no crash: every notification stayed a pure no-op.
+    CHECK(session->display() == nullptr);
+}
+
 TEST_CASE("TerminalSession::workingDirectory falls back to \".\" for a non-process device",
           "[contour][session][cwd]")
 {

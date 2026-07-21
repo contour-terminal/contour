@@ -29,6 +29,7 @@
 #include <QtCore/QRunnable>
 #include <QtCore/QSemaphore>
 #include <QtCore/QStandardPaths>
+#include <QtCore/QThread>
 #include <QtCore/QTimer>
 #include <QtGui/QClipboard>
 #include <QtGui/QDesktopServices>
@@ -44,6 +45,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <mutex>
 #include <ranges>
 #include <string_view>
 #include <variant>
@@ -1314,38 +1316,57 @@ QVariant TerminalDisplay::inputMethodQuery(Qt::InputMethodQuery query) const
     if (!_renderer || !_session)
         return QQuickItem::inputMethodQuery(query);
 
-    // One locked GridMetrics copy per query (this fires on every keystroke with an IME active): it
-    // yields the cell size AND the page margin tear-free, where two separate reads could straddle a
-    // concurrent font apply.
-    auto const metrics = _renderer->gridMetrics();
+    // Grid-backed answers are GUI-THREAD ONLY: platform input methods query synchronously on the
+    // calling thread, and a caller on the terminal or render thread may already hold the (plain,
+    // non-recursive) state mutex taken below — answering there would deadlock or race the grid. Only
+    // the three cases that read the grid are refused off-thread; metadata queries (ImEnabled, ImHints,
+    // ImFont, ImAnchorRectangle, …) touch no grid state and must still bubble to the base class, or an
+    // off-thread ImEnabled would collapse to an empty QVariant (== false) and tell the platform input
+    // method that input is disabled.
+    auto const gridBacked =
+        query == Qt::ImCursorRectangle || query == Qt::ImCursorPosition || query == Qt::ImSurroundingText;
+    if (gridBacked && QThread::currentThread() != thread())
+        return {};
 
+    // The terminal thread mutates the grid (and, on resize, reallocates its lines) concurrently;
+    // every cursor/grid read below must sit under the state lock, in ONE scope per query so the
+    // cursor position and the page it is checked against cannot straddle a resize.
+    auto& term = terminal();
     switch (query)
     {
-        case Qt::ImCursorRectangle:
+        case Qt::ImCursorRectangle: {
             // Item-local logical coordinates (QQuickWindow maps them to window/global space, so a
             // pane inside a split needs no extra offset); the grid is inset by the page margin, and
             // a double-width character under the cursor widens the rect to the full glyph.
-            if (terminal().isCursorInViewport())
-            {
-                auto const cursor = terminal().currentScreen().cursor().position;
-                auto const cellWidth = terminal().currentScreen().cellWidthAt(cursor);
+            //
+            // One locked GridMetrics copy, for this case only: it yields the cell size AND the page
+            // margin tear-free, where two separate reads could straddle a concurrent font apply.
+            auto const metrics = _renderer->gridMetrics();
+            auto const lock = std::lock_guard { term };
+            auto const& screen = term.currentScreen();
+            auto const cursor = screen.cursor().position;
+            if (term.isCursorInViewport() && imeCursorAddressable(cursor, term.pageSize()))
                 return imeCursorRectangle(
-                    metrics.pageMargin, metrics.cellSize, cursor, cellWidth, contentScale());
-            }
+                    metrics.pageMargin, metrics.cellSize, cursor, screen.cellWidthAt(cursor), contentScale());
             return QRectF();
-        case Qt::ImCursorPosition:
+        }
+        case Qt::ImCursorPosition: {
             // Qt contract: the cursor's CHARACTER index within ImSurroundingText (the current
             // line), i.e. the grid column — not a pixel offset.
-            if (terminal().isCursorInViewport())
-                return unbox<int>(terminal().currentScreen().cursor().position.column);
+            auto const lock = std::lock_guard { term };
+            if (term.isCursorInViewport())
+                return unbox<int>(term.currentScreen().cursor().position.column);
             return 0;
-        case Qt::ImSurroundingText:
+        }
+        case Qt::ImSurroundingText: {
             // return the text from the current line
-            if (terminal().isCursorInViewport())
-                return QString::fromStdString(
-                    terminal().currentScreen().lineTextAt(terminal().currentScreen().cursor().position.line));
-
+            auto const lock = std::lock_guard { term };
+            auto const& screen = term.currentScreen();
+            auto const cursor = screen.cursor().position;
+            if (term.isCursorInViewport() && imeCursorAddressable(cursor, term.pageSize()))
+                return QString::fromStdString(screen.lineTextAt(cursor.line));
             return QString();
+        }
         case Qt::ImCurrentSelection:
             // Nothing selected.
             return QString();
@@ -1510,6 +1531,17 @@ namespace
         return dynamic_cast<TerminalAccessible*>(QAccessible::queryAccessibleInterface(display));
     }
 } // namespace
+
+void TerminalDisplay::reportCursorMoved()
+{
+#if QT_CONFIG(im)
+    // No-op unless this item has active focus; the platform re-queries inputMethodQuery()
+    // synchronously, which is why this must only ever run on the GUI thread.
+    updateInputMethod(Qt::ImCursorRectangle);
+#endif
+    if (TerminalAccessible::isActive())
+        reportAccessibleCaret();
+}
 
 void TerminalDisplay::reportAccessibleCaret()
 {

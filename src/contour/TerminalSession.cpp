@@ -4,7 +4,6 @@
 #include <contour/ExternalLauncher.h>
 #include <contour/TerminalSession.h>
 #include <contour/display/CaretGeometry.h>
-#include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/helper.h>
 
@@ -345,6 +344,12 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
 
     // We're being called by newDisplay!
     _display = &newDisplay;
+
+    // Start the freshly-attached display with clean cursor-move coalescing state. This heals the rare
+    // case where the previous display was torn down after a cursorPositionChanged() post was queued but
+    // before it drained (dropping the clear): without this, the stale-set flag would make every future
+    // cursorPositionChanged() early-return, freezing IME rectangle tracking and the a11y caret.
+    _cursorMovedPostPending.clear(std::memory_order_release);
 
     {
         // NB: Inform connected TTY and local Screen instance about initial cell pixel size.
@@ -1676,32 +1681,35 @@ void TerminalSession::playSound(vtbackend::Sequence::Parameters const& params)
 
 void TerminalSession::cursorPositionChanged()
 {
-    QGuiApplication::inputMethod()->update(Qt::ImCursorRectangle);
+    // NOTHING about the terminal is read here, and no Qt input-method call is made here either.
+    // refreshRenderBuffer() reaches this callback on the terminal or render thread — with the state
+    // mutex ALREADY HELD on one of its two paths, and that mutex is a plain non-recursive std::mutex.
+    // QInputMethod::update() is not fire-and-forget: the Wayland backend synchronously re-queries
+    // inputMethodQuery(), which reads the grid — from here that read would race the terminal thread
+    // (or self-deadlock once it locks). Both the IME rectangle update and the accessibility caret
+    // report therefore run on the GUI thread, via TerminalDisplay::reportCursorMoved().
 
-    // Kept, not replaced, by the accessibility path below: on Windows, Magnifier frequently follows the
-    // IME rectangle rather than a UIA text range.
-
-    // Nobody is listening: the whole path costs one relaxed atomic load. Read through our own flag rather
-    // than QAccessible::isActive(), which reads a Qt-internal static with no memory ordering — and this
-    // runs on the TERMINAL thread.
-    if (!display::TerminalAccessible::isActive())
+    // With no display attached (the detach->attach gap while a tab moves to another window or a split
+    // collapses) there is nothing to post to — and therefore nothing to coalesce. Snapshot and bail
+    // BEFORE latching the flag: the flag is cleared only inside the post below, so latching it here
+    // without scheduling that post would strand it set forever, and every later cursorPositionChanged()
+    // would early-return for the session's life — silently killing IME rectangle tracking and the
+    // accessibility caret. (attachDisplay() also clears the flag, healing the rarer case where the
+    // display is torn down after the post is queued but before it drains.)
+    auto* const display = _display;
+    if (display == nullptr)
         return;
 
     // This fires once per frame AND twice a second from the cursor blink (the render buffer's cursor is
     // simply absent while blinked off), so collapse repeats to at most one pending post.
-    if (_caretUpdatePending.test_and_set(std::memory_order_acq_rel))
+    if (_cursorMovedPostPending.test_and_set(std::memory_order_acq_rel))
         return;
 
-    // NOTHING about the terminal is read here. refreshRenderBuffer() reaches this callback with the state
-    // mutex ALREADY HELD on one of its two paths, and that mutex is a plain non-recursive std::mutex — so
-    // reading terminal state at this point would self-deadlock on one path and not the other, which is
-    // the worst kind of hang to diagnose. The decision is made on the GUI thread instead.
-    if (auto* display = _display)
-        display->post([this]() {
-            _caretUpdatePending.clear(std::memory_order_release);
-            if (auto* target = _display)
-                target->reportAccessibleCaret();
-        });
+    display->post([this]() {
+        _cursorMovedPostPending.clear(std::memory_order_release);
+        if (auto* target = _display)
+            target->reportCursorMoved();
+    });
 }
 // }}}
 // {{{ Actions

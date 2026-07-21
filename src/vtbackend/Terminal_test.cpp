@@ -17,11 +17,15 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <atomic>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <mutex>
 #include <ranges>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace std;
@@ -4448,4 +4452,74 @@ TEST_CASE("Terminal.focus.events_reach_the_pty_only_under_DECMode_1004", "[termi
         CHECK(mock.terminal.focused());
         CHECK(e(mock.replyData()) == e("\033[I"s));
     }
+}
+
+TEST_CASE("Terminal.IME queries answered under the state lock survive concurrent output and resize",
+          "[terminal][ime]")
+{
+    // Mirrors TerminalDisplay::inputMethodQuery(): the GUI thread answers platform input-method
+    // queries from the live grid while the terminal thread keeps parsing output and resizes
+    // reallocate the grid's lines. Every read sits under the state lock, in ONE scope per query so
+    // the cursor cannot be checked against one page and dereferenced in another, and behind the
+    // page-bounds guard. The oracle is the sanitizers: an unlocked or unguarded read here is a
+    // torn-Line dereference, which ASan/TSan turn into a hard failure.
+    auto mc = MockTerm { PageSize { LineCount(24), ColumnCount(80) }, LineCount(100) };
+    auto& terminal = mc.terminal;
+
+    auto stop = std::atomic<bool> { false };
+    auto observed = std::atomic<size_t> { 0 };
+
+    // The production bounds guard (imeCursorAddressable, in the frontend) forwards to
+    // strictlyContains(); driving the test through the SAME predicate is what keeps this concurrency
+    // reader mirroring production even if the bounds rule is later corrected. Only meaningful under the
+    // state lock.
+    auto const addressable = [&](CellLocation cursor) noexcept {
+        return strictlyContains(cursor, terminal.pageSize());
+    };
+
+    // Catch2 assertion macros are not thread-safe: the reader only collects, the main thread asserts.
+    auto imeReader = std::thread { [&]() {
+        while (!stop.load(std::memory_order_relaxed))
+        {
+            auto const lock = std::lock_guard { terminal };
+            if (!terminal.isCursorInViewport())
+                continue;
+            auto const cursor = terminal.currentScreen().cursor().position;
+            if (!addressable(cursor))
+                continue;
+            // Summed into the atomic so the grid reads stay observable — the reads ARE the test.
+            auto const cellWidth = terminal.currentScreen().cellWidthAt(cursor);
+            observed.fetch_add(terminal.currentScreen().lineTextAt(cursor.line).size() + cellWidth,
+                               std::memory_order_relaxed);
+        }
+    } };
+
+    // The writer half mirrors production: parsing mutates the grid under the state lock
+    // (processInputOnce), and the frontend resizes under an explicit lock (TerminalSession).
+    auto const usableSizes = std::array { PageSize { LineCount(6), ColumnCount(20) },
+                                          PageSize { LineCount(24), ColumnCount(80) } };
+    for (auto const round: std::views::iota(0, 200))
+    {
+        mc.writeToScreen("wide 世界 and combining ᬦᬸ é\r\n");
+        if (round % 25 == 24)
+        {
+            auto const usable = usableSizes[static_cast<size_t>((round / 25) % 2)];
+            auto const lock = std::lock_guard { terminal };
+            terminal.resizeScreen(
+                PageSize { .lines = usable.lines + terminal.statusLineHeight(), .columns = usable.columns });
+        }
+    }
+
+    stop = true;
+    imeReader.join();
+
+    // The same query sequence once more, deterministically: the cursor of a live main page must be
+    // addressable, and both grid reads must answer.
+    auto const lock = std::lock_guard { terminal };
+    INFO(std::format("concurrent reader observed {} line-text bytes and cell widths", observed.load()));
+    REQUIRE(terminal.isCursorInViewport());
+    auto const cursor = terminal.currentScreen().cursor().position;
+    REQUIRE(addressable(cursor));
+    CHECK(terminal.currentScreen().cellWidthAt(cursor) <= 2);
+    CHECK(terminal.currentScreen().lineTextAt(cursor.line).size() <= 4uz * 80);
 }

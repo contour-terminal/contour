@@ -8,10 +8,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+using contour::display::imeCursorAddressable;
 using contour::display::imeCursorRectangle;
 using vtbackend::CellLocation;
+using vtbackend::ColumnCount;
 using vtbackend::ColumnOffset;
+using vtbackend::LineCount;
 using vtbackend::LineOffset;
+using vtbackend::PageSize;
 
 namespace
 {
@@ -58,4 +62,45 @@ TEST_CASE("imeCursorRectangle.double-width cell widens the rect only", "[contour
     CHECK(wide.topLeft() == narrow.topLeft());
     CHECK(wide.height() == narrow.height());
     CHECK(wide.width() == 2 * narrow.width());
+}
+
+namespace
+{
+
+constexpr PageSize page(int lines, int columns) noexcept
+{
+    return { .lines = LineCount(lines), .columns = ColumnCount(columns) };
+}
+
+} // namespace
+
+TEST_CASE("imeCursorAddressable.every interior cell is addressable", "[contour][ime]")
+{
+    CHECK(imeCursorAddressable(cursorAt(0, 0), page(24, 80)));
+    CHECK(imeCursorAddressable(cursorAt(12, 40), page(24, 80)));
+    CHECK(imeCursorAddressable(cursorAt(23, 79), page(24, 80))); // last cell of the page
+}
+
+TEST_CASE("imeCursorAddressable.a cursor beyond a shrunk page is refused", "[contour][ime]")
+{
+    // A cursor captured against a taller page must never index a grid that has since shrunk:
+    // resizing reallocates the grid's lines, so a stale line offset dereferences freed storage.
+    CHECK(imeCursorAddressable(cursorAt(37, 0), page(40, 80)));
+    CHECK_FALSE(imeCursorAddressable(cursorAt(37, 0), page(30, 80)));
+    CHECK_FALSE(imeCursorAddressable(cursorAt(0, 100), page(24, 80)));
+}
+
+TEST_CASE("imeCursorAddressable.the wrap-pending sentinel column names no cell", "[contour][ime]")
+{
+    // Terminal::contains() admits column == page width as an off-by-one sentinel; grid access at
+    // that column would still be out of bounds, so the IME guard is strict.
+    CHECK_FALSE(imeCursorAddressable(cursorAt(0, 80), page(24, 80)));
+    CHECK_FALSE(imeCursorAddressable(cursorAt(24, 0), page(24, 80)));
+}
+
+TEST_CASE("imeCursorAddressable.negative coordinates are refused", "[contour][ime]")
+{
+    // The lexicographic CellLocation ordering alone would admit {0, -1} — the guard must not.
+    CHECK_FALSE(imeCursorAddressable(cursorAt(-1, 0), page(24, 80)));
+    CHECK_FALSE(imeCursorAddressable(cursorAt(0, -1), page(24, 80)));
 }
