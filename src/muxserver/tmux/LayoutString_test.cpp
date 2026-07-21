@@ -142,6 +142,8 @@ TEST_CASE("an n-ary container collapses into a right-leaning binary chain", "[mu
 
 #ifndef _WIN32
 
+    #include <unistd.h> // mkdtemp lives here on macOS (stdlib.h on glibc)
+
 namespace
 {
 
