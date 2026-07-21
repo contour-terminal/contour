@@ -309,4 +309,118 @@ TEST_CASE("a version mismatch answers MSG_VERSION and drops", "[muxserver][imsgs
     h.run([](ImsgHarness* inner) { return expectVersionScenario(inner); });
 }
 
+// {{{ live oracle: the REAL tmux client binary attaches to OUR imsg endpoint
+    #include <sys/wait.h>
+
+    #include <cstdio>
+    #include <filesystem>
+
+    #include <pty.h>
+
+    #include <muxserver/MuxServer.h>
+
+namespace
+{
+
+/// Runs a shell command via popen, returning captured stdout ("" on failure).
+std::string runShellCapture(std::string const& command)
+{
+    auto* pipe = ::popen(command.c_str(), "r");
+    if (pipe == nullptr)
+        return {};
+    auto output = std::string {};
+    auto buffer = std::array<char, 256> {};
+    while (::fgets(buffer.data(), buffer.size(), pipe) != nullptr)
+        output += buffer.data();
+    std::ignore = ::pclose(pipe);
+    return output;
+}
+
+/// The oracle's client side: drives the tmux binary's pty and reaps it.
+Task<void> oracleScenario(net::EventLoop* loop, int master, pid_t child, muxserver::MuxServer* server)
+{
+    makeNonBlocking(master);
+
+    // The tmux client relays our preamble and session state verbatim.
+    auto const preamble = co_await readUntil(loop, master, "%session-changed");
+    CHECK(preamble.contains("%begin"));
+    CHECK(preamble.contains("%end"));
+    CHECK(preamble.contains("%session-changed $0 0"));
+
+    // A command typed at the client round-trips through imsg-passed fds.
+    REQUIRE(::write(master, "list-sessions\n", 14) == 14);
+    auto const listing = co_await readUntil(loop, master, "(attached)");
+    CHECK(listing.contains("windows] (attached)"));
+
+    // An empty line detaches; the CLIENT prints %exit itself and exits 0.
+    REQUIRE(::write(master, "\n", 1) == 1);
+    auto const tail = co_await readUntil(loop, master, "%exit");
+    CHECK(tail.contains("%exit"));
+
+    auto status = -1;
+    for (auto i = 0; i < 15000 && ::waitpid(child, &status, WNOHANG) == 0; ++i)
+        co_await loop->delay(1ms);
+    CHECK(WIFEXITED(status));
+    CHECK(WEXITSTATUS(status) == 0);
+
+    server->close(); // ends the accept loop; the drive's whenAll completes
+}
+
+} // namespace
+
+TEST_CASE("a real tmux binary attaches over imsg", "[muxserver][imsgserver][oracle]")
+{
+    if (!runShellCapture("command -v tmux && echo have-tmux").contains("have-tmux"))
+    {
+        SKIP("tmux not available");
+    }
+    // The rewritten imsg arrived around tmux 3.6; older clients speak the
+    // classic framing and cannot talk to this endpoint.
+    auto const version = runShellCapture("tmux -V");
+    if (version.contains(" 2.") || version.contains(" 3.0") || version.contains(" 3.1")
+        || version.contains(" 3.2") || version.contains(" 3.3") || version.contains(" 3.4")
+        || version.contains(" 3.5"))
+    {
+        SKIP("tmux too old for the rewritten imsg protocol");
+    }
+
+    auto const socketDir = std::format("/tmp/contour-imsg-{}", ::getpid());
+    auto const socketPath = socketDir + "/tmux.sock";
+    std::filesystem::remove_all(socketDir);
+
+    auto source = net::PollEventSource {};
+    auto loop = net::EventLoop { source };
+    auto host = muxserver::SessionHost {
+        loop,
+        [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+        vtbackend::Settings {},
+        /*startPumps=*/false,
+    };
+    host.createTab();
+
+    auto listener = net::listenUnix(loop, socketPath);
+    REQUIRE(listener.has_value());
+    auto server =
+        muxserver::MuxServer { loop, std::move(*listener), muxserver::tmux::makeTmuxImsgHandler(loop, host) };
+
+    // The REAL tmux client on its own pty, pointed at OUR socket.
+    auto master = -1;
+    auto const child = ::forkpty(&master, nullptr, nullptr, nullptr);
+    REQUIRE(child >= 0);
+    if (child == 0)
+    {
+        ::execlp("tmux", "tmux", "-S", socketPath.c_str(), "-C", "attach-session", nullptr);
+        ::_exit(127);
+    }
+
+    auto drive = [](muxserver::MuxServer* srv, Task<void> scenario) -> Task<void> {
+        co_await coro::whenAll(srv->serve(), std::move(scenario));
+    };
+    loop.blockOn(drive(&server, oracleScenario(&loop, master, child, &server)));
+
+    ::close(master);
+    std::filesystem::remove_all(socketDir);
+}
+// }}}
+
 #endif // !_WIN32

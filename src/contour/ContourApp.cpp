@@ -567,6 +567,9 @@ int ContourApp::daemonAction()
     config.shell.arguments.assign(std::next(shellCommand.begin()), shellCommand.end());
     config.shell.workingDirectory = vtpty::Process::homeDirectory();
 
+    if (auto label = parameters().get<string>("contour.daemon.tmux-compat-socket"); !label.empty())
+        config.tmuxCompatLabel = std::move(label);
+
     return muxserver::runDaemon(config);
 }
 
@@ -749,6 +752,12 @@ crispy::cli::command ContourApp::parameterDefinition() const
                                              CLI::value { "default"s },
                                              "Socket label distinguishing daemon instances.",
                                              "NAME" },
+                               CLI::option { "tmux-compat-socket",
+                                             CLI::value { ""s },
+                                             "Additionally binds tmux's own discovery path "
+                                             "/tmp/tmux-<uid>/<LABEL> so a plain `tmux -L LABEL -C "
+                                             "attach-session` finds this daemon.",
+                                             "LABEL" },
                            } },
             CLI::command { "attach",
                            "Attaches to a running multiplexer daemon (thin TTY client, or the "

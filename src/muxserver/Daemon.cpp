@@ -15,6 +15,7 @@
 #include <muxserver/client/AttachClient.h>
 #include <muxserver/client/TtyRenderer.h>
 #include <muxserver/tmux/ControlSession.h>
+#include <muxserver/tmux/ImsgServer.h>
 #include <net/EventLoop.h>
 #include <net/PollEventSource.h>
 #include <net/Sockets.h>
@@ -36,10 +37,14 @@ namespace muxserver
 
 namespace
 {
-    /// Drives both protocol servers' accept loops on the one reactor.
-    coro::Task<void> serveBoth(MuxServer* control, MuxServer* native)
+    /// Drives every protocol server's accept loop on the one reactor.
+    coro::Task<void> serveAll(std::vector<MuxServer*> servers)
     {
-        co_await coro::whenAll(control->serve(), native->serve());
+        auto accepts = std::vector<coro::Task<void>> {};
+        accepts.reserve(servers.size());
+        for (auto* server: servers)
+            accepts.push_back(server->serve());
+        co_await coro::whenAll(std::move(accepts));
     }
 } // namespace
 
@@ -76,6 +81,38 @@ int runDaemon(DaemonConfig const& config)
     }
     auto nativeServer = MuxServer { loop, std::move(*nativeListener), makeNativeHandler(loop, host) };
 
+    // The imsg endpoint serves the REAL tmux client binary
+    // (`tmux -S <socket>-tmux -C attach-session`).
+    auto const imsgPath = config.socketPath.string() + "-tmux";
+    auto imsgListener = net::listenUnix(loop, imsgPath);
+    if (!imsgListener)
+    {
+        std::println(stderr, "contour daemon: {}", imsgListener.error().toString());
+        return EXIT_FAILURE;
+    }
+    auto imsgServer = MuxServer { loop, std::move(*imsgListener), tmux::makeTmuxImsgHandler(loop, host) };
+
+    auto servers = std::vector<MuxServer*> { &server, &nativeServer, &imsgServer };
+
+    // Opt-in: ALSO bind tmux's own discovery path, so a plain
+    // `tmux -L <label> -C attach-session` finds this daemon. Opt-in only —
+    // with the daemon down, a `new-session` on that path silently forks a
+    // REAL tmux server onto it.
+    auto compatServer = std::optional<MuxServer> {};
+    if (config.tmuxCompatLabel)
+    {
+        auto const compatPath = std::format("/tmp/tmux-{}/{}", ::getuid(), *config.tmuxCompatLabel);
+        auto compatListener = net::listenUnix(loop, compatPath);
+        if (!compatListener)
+        {
+            std::println(stderr, "contour daemon: {}", compatListener.error().toString());
+            return EXIT_FAILURE;
+        }
+        compatServer.emplace(loop, std::move(*compatListener), tmux::makeTmuxImsgHandler(loop, host));
+        servers.push_back(&*compatServer);
+        std::println(stderr, "contour daemon: tmux-compat socket at {}", compatPath);
+    }
+
     // Signal handling without async-signal-safety hazards: SIGINT/SIGTERM are
     // blocked process-wide and consumed by a dedicated sigwait thread, which
     // marshals the shutdown onto the loop via post() (the loop's only
@@ -92,15 +129,18 @@ int runDaemon(DaemonConfig const& config)
         sigwait(&signals, &sig);
         signalSeen = true;
         loop.post([&] {
-            server.close();
-            nativeServer.close();
+            for (auto* each: servers)
+                each->close();
             loop.requestStop();
         });
     } };
 
-    std::println(
-        stderr, "contour daemon: serving on {} (native: {})", config.socketPath.string(), nativePath);
-    loop.blockOn(serveBoth(&server, &nativeServer));
+    std::println(stderr,
+                 "contour daemon: serving on {} (native: {}, tmux: {})",
+                 config.socketPath.string(),
+                 nativePath,
+                 imsgPath);
+    loop.blockOn(serveAll(servers));
 
     // Unblock the watcher if shutdown came from elsewhere; if it already
     // consumed a signal, the raised one stays blocked and dies with the process.

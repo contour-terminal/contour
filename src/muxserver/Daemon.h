@@ -10,6 +10,8 @@
 #include <vtpty/Process.h>
 
 #include <filesystem>
+#include <optional>
+#include <string>
 
 namespace muxserver
 {
@@ -23,6 +25,10 @@ struct DaemonConfig
     vtbackend::Settings settings;
     /// The shell each new session runs.
     vtpty::Process::ExecInfo shell;
+    /// When set, ALSO binds tmux's own discovery path
+    /// `/tmp/tmux-<uid>/<label>` for the imsg endpoint, so a plain
+    /// `tmux -L <label> -C attach-session` finds this daemon. Opt-in only.
+    std::optional<std::string> tmuxCompatLabel;
 };
 
 /// Runs the daemon: binds the hardened control socket, serves connections until
