@@ -21,6 +21,15 @@
 namespace net
 {
 
+/// One read's payload plus an optionally received file descriptor
+/// (SCM_RIGHTS over AF_UNIX). @c fd is -1 when none arrived; ownership of a
+/// received fd transfers to the caller.
+struct ReadWithFd
+{
+    std::size_t bytesRead = 0;
+    int fd = -1;
+};
+
 /// A connected, streamed, bidirectional byte transport.
 ///
 /// The buffer passed to @c read / @c write must stay valid until the returned task
@@ -41,6 +50,21 @@ class ISocket
     /// @return A task resolving to the byte count read, 0 on clean EOF, or a
     ///         @c NetError on failure.
     [[nodiscard]] virtual coro::Task<IoResult> read(std::span<std::byte> buffer) = 0;
+
+    /// Reads like @c read but also accepts ONE SCM_RIGHTS file descriptor
+    /// when the transport supports fd passing (AF_UNIX on POSIX; the default
+    /// implementation never yields one — the documented behaviour everywhere
+    /// else, including Windows).
+    /// @param buffer Destination span; must outlive the returned task.
+    /// @return Bytes read (0 = clean EOF) plus the received fd or -1.
+    [[nodiscard]] virtual coro::Task<std::expected<ReadWithFd, NetError>> readWithFd(
+        std::span<std::byte> buffer)
+    {
+        auto const n = co_await read(buffer);
+        if (!n)
+            co_return std::unexpected(n.error());
+        co_return ReadWithFd { .bytesRead = *n, .fd = -1 };
+    }
 
     /// Writes all of @p buffer's bytes (looping over partial writes / backpressure).
     /// @param buffer Source span; must outlive the returned task.

@@ -12,6 +12,7 @@ set(net_SOURCES
     PollEventSource.cpp
     PollEventSource.h
     Sockets.h
+    SplitSocket.h
     WithTimeout.h
     platform/Clock.h
     platform/NativeHandle.h
@@ -64,7 +65,7 @@ if(NET_TESTING)
         WriteQueue_test.cpp
     )
     if(NOT WIN32)
-        list(APPEND net_TEST_SOURCES UnixSocket_test.cpp)
+        list(APPEND net_TEST_SOURCES FdPassing_test.cpp UnixSocket_test.cpp)
     endif()
     add_executable(net_test ${net_TEST_SOURCES})
     target_link_libraries(net_test net crispy::core Catch2::Catch2)

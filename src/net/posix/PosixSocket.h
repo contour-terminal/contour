@@ -34,6 +34,8 @@ class PosixSocket final: public ISocket
     PosixSocket& operator=(PosixSocket&&) = delete;
 
     [[nodiscard]] coro::Task<IoResult> read(std::span<std::byte> buffer) override;
+    [[nodiscard]] coro::Task<std::expected<ReadWithFd, NetError>> readWithFd(
+        std::span<std::byte> buffer) override;
     [[nodiscard]] coro::Task<IoResult> write(std::span<std::byte const> buffer) override;
 
     [[nodiscard]] std::string peerAddress() const override { return _peerAddress; }

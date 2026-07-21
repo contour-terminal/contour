@@ -6,6 +6,7 @@
     #include <sys/socket.h>
 
     #include <cerrno>
+    #include <cstring>
 
     #include <unistd.h>
 
@@ -106,6 +107,76 @@ coro::Task<IoResult> PosixSocket::read(std::span<std::byte> buffer)
         if (err == EINTR)
             continue;
         co_return std::unexpected(fromErrno(err, "recv"));
+    }
+}
+
+coro::Task<std::expected<ReadWithFd, NetError>> PosixSocket::readWithFd(std::span<std::byte> buffer)
+{
+    while (true)
+    {
+        if (_closed || _fd < 0)
+            co_return std::unexpected(makeNetError(NetErrorCode::BadHandle, 0, "read on closed socket"));
+
+        if (_plainFd)
+        {
+            // A PTY/pipe fd cannot carry SCM_RIGHTS; serve as a plain read.
+            auto const n = co_await read(buffer);
+            if (!n)
+                co_return std::unexpected(n.error());
+            co_return ReadWithFd { .bytesRead = *n, .fd = -1 };
+        }
+
+        auto iov = ::iovec { .iov_base = buffer.data(), .iov_len = buffer.size() };
+        alignas(::cmsghdr) char control[CMSG_SPACE(sizeof(int))] = {};
+        auto msg = ::msghdr {};
+        msg.msg_iov = &iov;
+        msg.msg_iovlen = 1;
+        msg.msg_control = control;
+        msg.msg_controllen = sizeof(control);
+
+        auto const n = ::recvmsg(_fd, &msg, MSG_CMSG_CLOEXEC);
+        if (n >= 0)
+        {
+            // Keep the FIRST received fd; close any extras (mirroring the
+            // rewritten-imsg receive semantics: one fd per message).
+            auto fd = -1;
+            for (auto* cmsg = CMSG_FIRSTHDR(&msg); cmsg != nullptr; cmsg = CMSG_NXTHDR(&msg, cmsg))
+            {
+                if (cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS)
+                    continue;
+                auto const count = (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+                for (std::size_t i = 0; i < count; ++i)
+                {
+                    auto received = -1;
+                    std::memcpy(&received, CMSG_DATA(cmsg) + (i * sizeof(int)), sizeof(int));
+                    if (fd < 0)
+                        fd = received;
+                    else
+                        ::close(received);
+                }
+            }
+            if (n == 0 && fd >= 0)
+            {
+                ::close(fd); // an fd on EOF has no message to belong to
+                fd = -1;
+            }
+            co_return ReadWithFd { .bytesRead = static_cast<std::size_t>(n), .fd = fd };
+        }
+
+        auto const err = errno;
+        if (err == ENOTSOCK)
+        {
+            _plainFd = true;
+            continue;
+        }
+        if (isWouldBlock(err))
+        {
+            co_await _loop.waitReadable(_fd);
+            continue;
+        }
+        if (err == EINTR)
+            continue;
+        co_return std::unexpected(fromErrno(err, "recvmsg"));
     }
 }
 
