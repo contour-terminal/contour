@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include <muxserver/PduPump.h>
 #include <net/Sockets.h>
 #include <vtmux/Pane.h>
 #include <vtmux/Tab.h>
@@ -262,58 +263,42 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
     // Unknown/unexpected PDUs are ignored: forward compatibility.
 }
 
+bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
+{
+    auto const* hello = std::get_if<proto::ClientHello>(&frame.pdu);
+    if (hello == nullptr || hello->codecVersion != proto::CodecVersion)
+    {
+        // Answer with our version so the peer can report the mismatch, then close.
+        send(frame.serial, proto::DecodedPdu { proto::ServerHello {} });
+        return false;
+    }
+    send(frame.serial, proto::DecodedPdu { proto::ServerHello {} });
+    _handshaken = true;
+
+    // Attaching to an empty daemon spawns the first session.
+    if (_host.model().window(_host.windowId())->tabCount() == 0)
+        std::ignore = _host.createTab();
+
+    // The attach snapshot: every hosted session, full state.
+    auto* window = _host.model().window(_host.windowId());
+    for (auto const tabIndex: std::views::iota(0, window->tabCount()))
+        window->tabAt(tabIndex)->rootPane()->walkTree([&](vtmux::Pane& pane) {
+            if (pane.isLeaf())
+                pushDelta(pane.session(), /*forceSnapshot=*/true);
+        });
+    return true;
+}
+
 coro::Task<void> NativeSession::run()
 {
-    auto buffer = std::vector<std::byte> {};
-
-    // Handshake: nothing is valid before a version-matching ClientHello.
-    while (!_handshaken)
-    {
-        auto const decoded = proto::decodePdu(buffer);
-        if (!decoded)
-        {
-            if (decoded.error() != proto::DecodeError::NeedMoreData
-                || !co_await net::appendReadChunk(_connection.get(), &buffer))
-                co_return;
-            continue;
-        }
-        buffer.erase(buffer.begin(), buffer.begin() + static_cast<long>(decoded->consumed));
-        auto const* hello = std::get_if<proto::ClientHello>(&decoded->pdu);
-        if (hello == nullptr || hello->codecVersion != proto::CodecVersion)
-        {
-            // Answer with our version so the peer can report the mismatch, then close.
-            send(decoded->serial, proto::DecodedPdu { proto::ServerHello {} });
-            break;
-        }
-        send(decoded->serial, proto::DecodedPdu { proto::ServerHello {} });
-        _handshaken = true;
-
-        // Attaching to an empty daemon spawns the first session.
-        if (_host.model().window(_host.windowId())->tabCount() == 0)
-            std::ignore = _host.createTab();
-
-        // The attach snapshot: every hosted session, full state.
-        auto* window = _host.model().window(_host.windowId());
-        for (auto const tabIndex: std::views::iota(0, window->tabCount()))
-            window->tabAt(tabIndex)->rootPane()->walkTree([&](vtmux::Pane& pane) {
-                if (pane.isLeaf())
-                    pushDelta(pane.session(), /*forceSnapshot=*/true);
-            });
-    }
-
-    while (_handshaken)
-    {
-        auto const decoded = proto::decodePdu(buffer);
-        if (!decoded)
-        {
-            if (decoded.error() != proto::DecodeError::NeedMoreData
-                || !co_await net::appendReadChunk(_connection.get(), &buffer))
-                break;
-            continue;
-        }
-        buffer.erase(buffer.begin(), buffer.begin() + static_cast<long>(decoded->consumed));
-        handlePdu(*decoded);
-    }
+    // Nothing is valid before a version-matching ClientHello; afterwards the
+    // pump serves request PDUs until the peer disconnects.
+    co_await pumpPdus(_connection.get(), [this](proto::DecodedFrame const& frame) {
+        if (!_handshaken)
+            return completeHandshake(frame);
+        handlePdu(frame);
+        return true;
+    });
 
     _closed = true;
     while (_writer.queuedBytes() > 0 || _writer.draining())

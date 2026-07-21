@@ -80,16 +80,16 @@ control mode; per-line cell deltas feed the native protocol. GUI and daemon shar
       `send-keys -l --` batches (double-quote quoting: the dialect BOTH real tmux and our
       splitCommandLine accept — single-quote `'\''` re-quoting is NOT; loopback caught it).
       Loopback test: our gateway drives our own oracle-verified control-mode server.
-- [ ] live oracle run: gateway against real `tmux -C new-session` (tmux 3.7b). Needs a
-      pipe/socketpair transport into a spawned process — net has no child-process ISocket
-      yet; either add `net::spawnPiped()` or dup2 a socketpair into the child. Gate the
-      test on tmux availability like LayoutString_test's oracle harness (popen + private
-      `-S` socket, see its `OracleServer` scope guard).
-- [ ] capture-pane history replay: on attach, `capture-pane -peqJ -t %N` per pane, body
-      replayed through a real `vtbackend::Terminal` (VT-with-escapes; SGR carries across
-      lines; NO images — inherited tmux limitation, document in mux.md).
-- [ ] client-side window/pane model: consume layoutChanged via `parseLayout` +
-      `collapseToBinary` into a vtmux-shaped tree the GUI can realize (LayoutTree exists).
+- [x] live oracle run: gateway drives a real `tmux -C new-session` on its own PTY
+      (`net::adoptFd` + PosixSocket's ENOTSOCK read/write fallback; PTY EIO = EOF).
+      list-windows layout parses with our codec; send-keys echo confirmed via
+      capture-pane polling; clean %exit detach. Self-skips without tmux.
+- [x] capture-pane history replay + client-side model: `TmuxClientModel` — per-pane
+      replay `vtbackend::Terminal` fed by raw %output; `capture-pane -peqJ` history
+      (rows joined BETWEEN lines; live output buffered until replay landed); layout
+      ingest into per-window BinaryLayout trees with pane create/resize/prune; window
+      enumeration via `list-windows -F` (the server grew a minimal #{...} table).
+      Follow-up: cursor position sync after replay (`#{cursor_x}/#{cursor_y}`).
 - [ ] GUI integration ("attach Contour to real tmux -CC, native panes mirror it"): needs
       the same remote-populated display seam as 3d's GUI half — see "GUI seams" below.
 
@@ -115,16 +115,13 @@ control mode; per-line cell deltas feed the native protocol. GUI and daemon shar
 
 ## Cross-cutting
 
-- [ ] `docs/internals/mux.md`: architecture (two taps, threading model, stable-id delta
-      design incl. the floor/generation rules, wire format v1), tmux 3.7b pin rationale,
-      endo provenance (commit 178cb496, re-sync recipe in src/coro/README.md), inherited
-      limitations (no images in pre-attach tmux history; capture-pane text+SGR only),
-      Phase 5 abort criteria. Add one nav line under `Internals:` in mkdocs.yml.
-- [ ] retire `docs/drafts/daemon-mode.md` with a pointer to mux.md (its networked-Pty
-      client design is superseded by cells+deltas).
-- [ ] `/simplify` pass over `src/muxserver` (duplication check: the three binary decode
-      loops in NativeSession/AttachClient/TmuxGateway::run share a shape; the two
-      `waitUntil` test helpers; RemoteScreen::viewportText vs TtyRenderer cell walk).
+- [x] `docs/internals/mux.md` (architecture, protocols, stable-id design, gated imsg
+      entry criteria) + mkdocs nav line; `docs/drafts/daemon-mode.md` carries a
+      supersession pointer.
+- [x] simplify: the three native-protocol decode loops share `muxserver::PduPump`
+      (NativeSession's handshake extracted into completeHandshake). Left as accepted:
+      per-test-file waitUntil helpers (test-local idiom); RemoteScreen::viewportText vs
+      TtyRenderer walk (different outputs: plain text vs VT bytes).
 - [ ] Windows: `runDaemon`/`runAttach` are stubs; net's Win32 backend compiles but
       `listenUnix/connectUnix` return Unsupported — decide AF_UNIX-on-Windows vs TCP.
 - [ ] delete this file before the branch lands.

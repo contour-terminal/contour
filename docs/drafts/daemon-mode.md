@@ -1,5 +1,11 @@
 # Contour Daemon Mode
 
+> **Superseded.** This 2020 draft sketched a networked-Pty design (clients
+> receive a VT byte stream and parse locally). The implemented architecture
+> deliberately inverts it: the daemon emulates and ships per-line cell deltas;
+> tmux control mode covers byte-stream interop. See
+> [internals/mux.md](../internals/mux.md). The draft is kept for history only.
+
 THIS IS A DRAFT DOCUMENT
 
 Let's implement a terminal multiplexing server that `Contour` can connect to.

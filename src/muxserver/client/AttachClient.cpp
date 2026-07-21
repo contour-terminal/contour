@@ -9,6 +9,7 @@
 #include <variant>
 #include <vector>
 
+#include <muxserver/PduPump.h>
 #include <net/Sockets.h>
 
 namespace muxserver::client
@@ -159,20 +160,10 @@ coro::Task<void> AttachClient::run()
 {
     send(proto::DecodedPdu { proto::ClientHello {} });
 
-    auto buffer = std::vector<std::byte> {};
-    while (!_detached && !_versionMismatch)
-    {
-        auto const decoded = proto::decodePdu(buffer);
-        if (!decoded)
-        {
-            if (decoded.error() != proto::DecodeError::NeedMoreData
-                || !co_await net::appendReadChunk(_connection.get(), &buffer))
-                break;
-            continue;
-        }
-        buffer.erase(buffer.begin(), buffer.begin() + static_cast<long>(decoded->consumed));
-        handlePdu(decoded->pdu);
-    }
+    co_await pumpPdus(_connection.get(), [this](proto::DecodedFrame const& frame) {
+        handlePdu(frame.pdu);
+        return !_detached && !_versionMismatch;
+    });
 
     if (!_detached)
     {

@@ -55,6 +55,11 @@ class NativeSession final
     void handlePdu(proto::DecodedFrame const& frame);
     void send(uint64_t serial, proto::DecodedPdu const& pdu);
 
+    /// Validates the peer's ClientHello, answers, and pushes the attach
+    /// snapshot (spawning the first session on an empty daemon).
+    /// @return False when the hello was missing or version-mismatched.
+    [[nodiscard]] bool completeHandshake(proto::DecodedFrame const& frame);
+
     /// Sends SessionState + a snapshot/delta for @p session (under its lock).
     void pushDelta(vtmux::SessionId session, bool forceSnapshot);
 

@@ -5,6 +5,7 @@ add_library(muxserver STATIC
     MuxServer.h
     NativeSession.cpp
     NativeSession.h
+    PduPump.h
     SessionHost.cpp
     SessionHost.h
     SocketPath.h
