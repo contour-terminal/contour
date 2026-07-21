@@ -155,6 +155,7 @@ if(CONTOUR_FRONTEND_GUI)
         mux/AttachController.h
         mux/MuxLoopThread.h
         mux/RoutingSessionFactory.h
+        mux/TmuxController.h
     )
     list(APPEND _core_source_files
         Audio.cpp
@@ -174,6 +175,7 @@ if(CONTOUR_FRONTEND_GUI)
         WindowController.cpp
         helper.cpp
         mux/AttachController.cpp
+        mux/TmuxController.cpp
     )
 endif()
 
@@ -361,6 +363,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/test_main.cpp
             test/Actions_test.cpp
             test/AttachController_test.cpp
+            test/TmuxController_test.cpp
             test/AudioNote_test.cpp
             test/BenignQtMessages_test.cpp
             test/CaptureScreen_test.cpp

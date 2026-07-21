@@ -767,6 +767,15 @@ crispy::cli::command ContourApp::parameterDefinition() const
                                              CLI::value { false },
                                              "Attaches the full GUI instead of the thin TTY client: "
                                              "every remote session becomes a local tab." },
+                               CLI::option { "tmux",
+                                             CLI::value { false },
+                                             "Attaches the GUI to a real tmux server (spawns "
+                                             "`tmux -C attach-session`): tmux windows become tabs, "
+                                             "panes become splits. Implies --gui." },
+                               CLI::option { "tmux-socket",
+                                             CLI::value { ""s },
+                                             "tmux server socket path (-S) for --tmux.",
+                                             "PATH" },
                                CLI::option { "profile",
                                              CLI::value { ""s },
                                              "Config profile the GUI renders remote sessions with.",

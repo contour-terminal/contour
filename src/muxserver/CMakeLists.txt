@@ -22,6 +22,8 @@ add_library(muxserver STATIC
     proto/Wire.h
     tmux/ControlModeParser.cpp
     tmux/ControlModeParser.h
+    tmux/ControlModeSpawn.cpp
+    tmux/ControlModeSpawn.h
     tmux/ControlOutput.cpp
     tmux/ControlOutput.h
     tmux/ControlSession.cpp

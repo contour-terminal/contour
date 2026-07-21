@@ -14,6 +14,7 @@
 #include <contour/display/TerminalDisplay.h>
 #include <contour/mux/AttachController.h>
 #include <contour/mux/RoutingSessionFactory.h>
+#include <contour/mux/TmuxController.h>
 
 #include <vtpty/Process.h>
 
@@ -96,7 +97,8 @@ ContourGuiApp::~ContourGuiApp() = default;
 
 int ContourGuiApp::attachAction()
 {
-    if (!parameters().get<bool>("contour.attach.gui"))
+    auto const wantsTmux = parameters().get<bool>("contour.attach.tmux");
+    if (!wantsTmux && !parameters().get<bool>("contour.attach.gui"))
         return ContourApp::attachAction();
 
     // Resolve every attach-verb parameter BEFORE the re-parse below drops them.
@@ -104,19 +106,65 @@ int ContourGuiApp::attachAction()
     auto const label = parameters().get<string>("contour.attach.label");
     auto const attachProfile = parameters().get<string>("contour.attach.profile");
     auto const attachConfig = parameters().get<string>("contour.attach.config");
+    auto const tmuxSocket = parameters().get<string>("contour.attach.tmux-socket");
 
-    // The native protocol is served beside the control socket.
-    auto socketPath = muxserver::muxSocketPath(label, socketOption);
-    socketPath += "-native";
-
-    _attachController = std::make_unique<AttachController>(socketPath);
-    if (auto connected = _attachController->connectAndWait(std::chrono::seconds(5)); !connected)
+    auto adopt = std::function<void()> {};
+    if (wantsTmux)
     {
-        cerr << std::format("contour attach: {} ({})\n", connected.error(), socketPath.string());
-        _attachController.reset();
-        return EXIT_FAILURE;
+        _tmuxController = std::make_unique<TmuxController>(tmuxSocket);
+        if (auto connected = _tmuxController->connectAndWait(std::chrono::seconds(10)); !connected)
+        {
+            cerr << std::format("contour attach --tmux: {}\n", connected.error());
+            _tmuxController.reset();
+            return EXIT_FAILURE;
+        }
+        _routingFactory->setDelegate(_tmuxController.get());
+        adopt = [this] {
+            if (auto const window = _sessionManager.focusedWindow())
+                _tmuxController->adoptPendingPanes(_sessionManager, *window);
+        };
+        connect(
+            _tmuxController.get(), &TmuxController::remotePaneDiscovered, this, adopt, Qt::QueuedConnection);
+        connect(
+            _tmuxController.get(),
+            &TmuxController::connectionClosed,
+            this,
+            [this] { _tmuxController->stop(); },
+            Qt::QueuedConnection);
     }
-    _routingFactory->setDelegate(_attachController.get());
+    else
+    {
+        // The native protocol is served beside the control socket.
+        auto socketPath = muxserver::muxSocketPath(label, socketOption);
+        socketPath += "-native";
+
+        _attachController = std::make_unique<AttachController>(socketPath);
+        if (auto connected = _attachController->connectAndWait(std::chrono::seconds(5)); !connected)
+        {
+            cerr << std::format("contour attach: {} ({})\n", connected.error(), socketPath.string());
+            _attachController.reset();
+            return EXIT_FAILURE;
+        }
+        _routingFactory->setDelegate(_attachController.get());
+        adopt = [this] {
+            if (auto const window = _sessionManager.focusedWindow())
+                _attachController->adoptStartupSessions(_sessionManager, *window);
+        };
+        // A remote session appearing later becomes a tab in the focused
+        // window; a dying connection ends every mirror session (stop() closes
+        // the ptys), closing the tabs through the shell-exit teardown.
+        connect(_attachController.get(),
+                &AttachController::remoteSessionDiscovered,
+                this,
+                adopt,
+                Qt::QueuedConnection);
+        connect(
+            _attachController.get(),
+            &AttachController::connectionClosed,
+            this,
+            [this] { _attachController->stop(); },
+            Qt::QueuedConnection);
+    }
 
     // Boot the GUI under the terminal verb's parameter surface: re-parse a
     // synthetic argv so every contour.terminal.* key resolves, carrying the
@@ -132,41 +180,25 @@ int ContourGuiApp::attachAction()
         argv.push_back("config");
         argv.push_back(attachConfig.c_str());
     }
+    auto const stopControllers = [this] {
+        if (_attachController)
+            _attachController->stop();
+        if (_tmuxController)
+            _tmuxController->stop();
+    };
     if (!reparseParameters(static_cast<int>(argv.size()), argv.data()))
     {
         _routingFactory->setDelegate(nullptr);
-        _attachController->stop();
+        stopControllers();
         return EXIT_FAILURE;
     }
 
-    // A remote session appearing later becomes a tab in the focused window;
-    // a dying connection ends every mirror session (stop() closes the ptys),
-    // which closes the tabs through the ordinary shell-exit teardown.
-    connect(
-        _attachController.get(),
-        &AttachController::remoteSessionDiscovered,
-        this,
-        [this] {
-            if (auto const window = _sessionManager.focusedWindow())
-                _attachController->adoptStartupSessions(_sessionManager, *window);
-        },
-        Qt::QueuedConnection);
-    connect(
-        _attachController.get(),
-        &AttachController::connectionClosed,
-        this,
-        [this] { _attachController->stop(); },
-        Qt::QueuedConnection);
-    _onGuiBooted = [this] {
-        if (auto const window = _sessionManager.focusedWindow())
-            _attachController->adoptStartupSessions(_sessionManager, *window);
-    };
-
+    _onGuiBooted = adopt;
     auto const rv = terminalGuiAction();
 
     _onGuiBooted = nullptr;
     _routingFactory->setDelegate(nullptr);
-    _attachController->stop();
+    stopControllers();
     return rv;
 }
 

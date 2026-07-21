@@ -39,6 +39,7 @@ namespace display
 class AttachController;
 class RoutingSessionFactory;
 class TerminalSession;
+class TmuxController;
 
 /// Extends ContourApp with terminal GUI capability.
 class ContourGuiApp: public QObject, public ContourApp
@@ -173,9 +174,10 @@ class ContourGuiApp: public QObject, public ContourApp
     /// thin TTY client.
     int attachAction();
 
-    /// The attach engine, declared FIRST so it is destroyed LAST: remote-
-    /// backed sessions hold ptys that unregister from it on destruction.
+    /// The attach engines, declared FIRST so they are destroyed LAST: remote-
+    /// backed sessions hold ptys that unregister from them on destruction.
     std::unique_ptr<AttachController> _attachController;
+    std::unique_ptr<TmuxController> _tmuxController;
 
     /// Invoked by terminalGuiAction right after the first window booted —
     /// attach mode adopts the remaining remote sessions as tabs here.
