@@ -1366,23 +1366,26 @@ TEST_CASE("Grid.stableId.scrollDownKeepsRowIdentity", "[grid][stable-id]")
     CHECK(grid.lineText(*offset) == "AAAAA");
 }
 
-TEST_CASE("Grid.stableId.reverseScrollPastHistoryRebuildsIdentity", "[grid][stable-id]")
+TEST_CASE("Grid.stableId.reverseScrollOnZeroHistoryKeepsIdentity", "[grid][stable-id]")
 {
-    // Zero history (the alternate screen's shape): any full-page reverse scroll
-    // would sink the base below the monotonic floor, so the exposed top row would
-    // reuse id space the floor already burned.
+    // Zero history (the alternate screen's shape): a full-page reverse scroll
+    // sinks the base below the floor, but with no history slots there is no
+    // garbage to re-validate and the exposed top row takes a strictly-fresh id
+    // that was never issued. Row identity survives WITHOUT a generation bump, so
+    // an attached mirror gets an incremental delta, not a whole-screen resnapshot.
     auto grid = Grid(PageSize { LineCount(3), ColumnCount(5) }, false, LineCount(0));
     grid.setLineText(LineOffset(0), "AAAAA");
     auto const generationBefore = grid.generation();
+    auto const idA = grid.stableLineIdOf(LineOffset(0));
 
     grid.scrollDown(LineCount(1), GraphicsAttributes {}, fullPageMargin(grid.pageSize()));
 
-    // One wholesale rebuild; afterwards the whole page is addressable again.
-    CHECK(grid.generation() == generationBefore + 1);
+    CHECK(grid.generation() == generationBefore); // no wholesale rebuild
     CHECK(grid.stableRangeFloor() == grid.stableLineIdOf(LineOffset(0)));
+    CHECK(grid.lineOffsetOf(idA) == LineOffset(1)); // A kept its id, moved down
+    CHECK(grid.lineText(LineOffset(1)) == "AAAAA");
     for (auto const offset: std::views::iota(0, 3))
         CHECK(grid.lineOffsetOf(grid.stableLineIdOf(LineOffset(offset))) == LineOffset(offset));
-    CHECK(grid.lineText(LineOffset(1)) == "AAAAA"); // the content still moved down
 }
 
 TEST_CASE("Grid.stableId.reverseScrollRebuildsOnlyWhenSinkingBelowTheFloor", "[grid][stable-id]")
@@ -1559,29 +1562,33 @@ TEST_CASE("Grid.delta.resizeForcesOneResyncThenDeltas", "[grid][delta]")
     CHECK(changedOffsets(grid, cursor) == std::vector { 0 });
 }
 
-TEST_CASE("Grid.delta.reverseScrollPastHistorySnapshotsTheWholePage", "[grid][delta]")
+TEST_CASE("Grid.delta.zeroHistoryReverseScrollStaysIncremental", "[grid][delta]")
 {
     // The attach-daemon scenario: a client follows the alternate screen (zero
-    // history) and the app reverse-scrolls (RI at the top). Before the fix the
-    // floor stayed above the base: the snapshot skipped the top page rows and
-    // the changed-lines clamp was handed an inverted range.
+    // history) and the app reverse-scrolls (RI at the top). With no history slots
+    // the exposed top row takes a strictly-fresh id, so this stays an INCREMENTAL
+    // delta -- only the exposed row reports, not a whole-screen resync to every
+    // mirror. (The clamp is also never handed an inverted range.)
     auto grid = Grid(PageSize { LineCount(3), ColumnCount(5) }, false, LineCount(0));
-    grid.setLineText(LineOffset(0), "AAAAA");
+    grid.setLineText(LineOffset(1), "MID");
     auto cursor = drainedCursor(grid);
+    auto const generationBefore = grid.generation();
 
     grid.scrollDown(LineCount(1), GraphicsAttributes {}, fullPageMargin(grid.pageSize()));
 
-    auto reported = 0;
-    CHECK(grid.forEachLineChangedSince(cursor, [&](LineOffset, Line const&) { ++reported; })
-          == GridDeltaResult::ResyncRequired);
-    CHECK(reported == 0); // a resync never reports lines; snapshot instead:
+    // No resync (generation held); only the freshly exposed top row reports --
+    // rows that merely shifted down kept their ids, content and revision.
+    auto reported = std::vector<int> {};
+    CHECK(grid.forEachLineChangedSince(cursor, [&](LineOffset offset, Line const&) {
+        reported.push_back(unbox<int>(offset));
+    }) == GridDeltaResult::Delta);
+    CHECK(grid.generation() == generationBefore);
+    CHECK(reported == std::vector { 0 });
 
-    // The resync snapshot covers the WHOLE page, including the fresh top row.
+    // The whole page stays addressable, and plain delta service continues.
     auto offsets = std::vector<int> {};
     grid.forEachValidLine([&](LineOffset offset, Line const&) { offsets.push_back(unbox<int>(offset)); });
     CHECK(offsets == std::vector { 0, 1, 2 });
-
-    // The re-anchored cursor resumes plain delta service.
     CHECK(changedOffsets(grid, cursor).empty());
     grid.setLineText(LineOffset(2), "after");
     CHECK(changedOffsets(grid, cursor) == std::vector { 2 });

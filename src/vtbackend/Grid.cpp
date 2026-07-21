@@ -141,8 +141,7 @@ void Grid::finalizeRevisions() noexcept
     // Scan the page plus the prefix that scrolled out since the last finalize, clamped
     // to the valid history — rows written and then scrolled away within one batch get
     // their stamp at their new negative offset.
-    auto const scrolled = std::clamp<int64_t>(
-        _stableBase - _stableBaseAtLastFinalize, std::int64_t { 0 }, _stableBase - _stableFloor);
+    auto const scrolled = scrolledOutDepthSince(_stableBaseAtLastFinalize);
     auto const next = _seqno + 1;
     auto stamped = false;
     for (auto offset = LineOffset::cast_from(-scrolled); offset < boxed_cast<LineOffset>(_pageSize.lines);

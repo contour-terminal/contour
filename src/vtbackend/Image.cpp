@@ -430,7 +430,12 @@ shared_ptr<Image const> ImagePool::create(ImageFormat format, ImageSize size, Im
         });
     {
         auto const _ = std::lock_guard { _idIndex->mutex };
-        _idIndex->images.emplace(id.value, image);
+        // insert_or_assign, not emplace: after the uint32 id counter wraps, the
+        // reused id may still carry a stale index entry (an expired weak_ptr whose
+        // remover has not yet pruned it). emplace would no-op on the existing key,
+        // leaving the new live image unindexed — findImageById would then miss it
+        // and callers would wrongly treat a present image as gone.
+        _idIndex->images.insert_or_assign(id.value, image);
     }
     return image;
 }

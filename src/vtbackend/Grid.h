@@ -751,8 +751,7 @@ class Grid
         // looked, clamped to the rows that still hold valid data (the floor excludes
         // at-capacity-wrapped garbage slots).
         auto&& report = std::forward<F>(callback);
-        auto const depth = std::clamp<int64_t>(
-            _stableBase - cursor.stableBase, std::int64_t { 0 }, _stableBase - _stableFloor);
+        auto const depth = scrolledOutDepthSince(cursor.stableBase);
         for (auto offset = LineOffset::cast_from(-depth); offset < boxed_cast<LineOffset>(_pageSize.lines);
              ++offset)
         {
@@ -854,18 +853,39 @@ class Grid
         _stableBase -= unbox<int64_t>(count);
         if (_stableBase < _stableFloor)
         {
+            if (historyLineCount() == LineCount(0))
+            {
+                // A zero-history grid (the alternate screen): there are no history
+                // slots to hold garbage and no ids were ever issued below the base,
+                // so the newly exposed top rows take strictly-fresh ids with no
+                // collision. Drop the floor to the new base and KEEP the generation,
+                // so a full-page reverse scroll stays an incremental delta instead
+                // of forcing a whole-screen resnapshot to every attached mirror.
+                _stableFloor = _stableBase;
+                return;
+            }
             // Reverse-scrolling past the addressable history sinks the base below the
             // floor: the newly exposed top page rows would take ids already issued to
-            // evicted rows (or, on a zero-history grid, ids below the watermark), and
-            // the floor cannot follow them down without re-validating garbage slots.
-            // Row identity cannot survive this — rebuild it wholesale. Every history
-            // row that was still valid provably lands in the caller's blanked region,
-            // so after the bump the page is the entire valid range.
+            // evicted rows, and the floor cannot follow them down without re-validating
+            // garbage slots. Row identity cannot survive this — rebuild it wholesale.
+            // Every history row that was still valid provably lands in the caller's
+            // blanked region, so after the bump the page is the entire valid range.
             _stableFloor = _stableBase;
             bumpGeneration(); // re-syncs the floor itself
             return;
         }
         syncStableFloor();
+    }
+
+    /// The count of rows that scrolled out of the page top since stable base @p priorBase,
+    /// clamped to the still-valid history depth (the floor excludes at-capacity-wrapped
+    /// garbage slots). This is the negative-offset span a delta or finalize scan must cover
+    /// so a row written and then scrolled away within one batch is still seen at its new
+    /// offset. Single-sources the boundary math shared by finalizeRevisions() and
+    /// forEachLineChangedSince().
+    [[nodiscard]] int64_t scrolledOutDepthSince(int64_t priorBase) const noexcept
+    {
+        return std::clamp<int64_t>(_stableBase - priorBase, std::int64_t { 0 }, _stableBase - _stableFloor);
     }
 
     /// Re-establishes the floor invariant `_stableFloor >= _stableBase - history` after
