@@ -90,28 +90,45 @@ control mode; per-line cell deltas feed the native protocol. GUI and daemon shar
       ingest into per-window BinaryLayout trees with pane create/resize/prune; window
       enumeration via `list-windows -F` (the server grew a minimal #{...} table).
       Follow-up: cursor position sync after replay (`#{cursor_x}/#{cursor_y}`).
-- [ ] GUI integration ("attach Contour to real tmux -CC, native panes mirror it"): needs
-      the same remote-populated display seam as 3d's GUI half — see "GUI seams" below.
+- [x] GUI integration ("attach Contour to real tmux, panes mirror it"): `contour attach
+      --tmux[-socket PATH]` — TmuxController spawns a real `tmux -C attach-session`
+      (ControlModeSpawn promotes the oracle harness), tmux windows become tabs, panes
+      split the tab, content mirrors via injected PaneSink ChannelPty feeders, input
+      returns as `send-keys -H` hex (quoting-proof; oracle-verified against real tmux).
+      Note: -C attach (not -CC); ratio/anchor fidelity is follow-up F3.
 
-## GUI seams (deferred from 3d/4 — the Qt half)
+## GUI seams (the Qt half) — DONE
 
-- [ ] remote-populated `TerminalSession`: a TerminalSession variant fed by
-      `client::RemoteScreen` (native attach) or a per-pane replay Terminal (tmux attach)
-      instead of a local PTY+parser. RenderBuffer must be populated from RemoteScreen
-      cells (colors/flags are raw wire words; `TtyRenderer.cpp` shows the decode via
-      `std::bit_cast<vtbackend::Color>` / CellFlag masks). Defer InputSerial/predictive
-      echo (plan decision).
-- [ ] `contour attach --gui` (or a Config/session flag) wiring the above into the
-      existing window/tab machinery; tmux windows/panes map onto vtmux::SessionModel.
+- [x] remote-populated `TerminalSession`: an ORDINARY TerminalSession over the new
+      `vtpty::ChannelPty` (promoted BlockingMockPty + write/resize sinks). The
+      recorded RenderBuffer-population idea was rejected during design: the display
+      consumes only `session->terminal()`, so `client/ScreenMirror` re-serializes
+      RemoteScreen deltas to VT and the session's own parser emulates — scrollback/
+      selection/search work natively (closed-loop grid-equality tests, incl. history
+      line-by-line, OSC 66 band rows, hyperlinks). Delta gained `setModes` (mirrored
+      DEC input modes, CodecVersion 2). InputSerial/predictive echo stays deferred.
+- [x] `contour attach --gui` — AttachController (SessionFactory + MuxLoopThread
+      reactor), always-installed RoutingSessionFactory, `canCreateSession()` guards
+      on every manager creation entry point; e2e-tested against an in-process daemon
+      over a real AF_UNIX socket; live-verified. Enabler: SessionHost's single-slot
+      screenUpdated/output handlers became a SessionStreamEvents subscriber list
+      (the second-client-clobbers/disconnect-silences defect is regression-tested).
 
-## Phase 5 — binary imsg IPC (gated; highest risk)
+## Phase 5 — binary imsg IPC — DONE
 
-- [ ] rewritten-imsg framing (16-byte header {type,len,peerid,pid} host order, len incl.
-      header, top bit = fd-present, max 16384; peerid low 8 bits = PROTOCOL_VERSION 8),
-      MSG_IDENTIFY_* handshake with STDIN/STDOUT fds via SCM_RIGHTS, three-way shutdown,
-      `/tmp/tmux-<uid>/<label>` discovery + `.lock` flock dance.
-      ABORT criteria: upstream PROTOCOL_VERSION bump; struct layout differs across
-      supported platforms; required command surface exceeds Phase 2's. Never blocks 0-4.
+- [x] rewritten-imsg codec (`muxserver/imsg/`): pure framing (16-byte host-order
+      header, fd-mark, [16,16384] bounds), fd-claim rule (first marked header after
+      the fd arrived; replaced fds close; markless-marked tolerated), MSG_COMMAND
+      argv pack/unpack, table-driven MSG_IDENTIFY_* accumulation + acceptance policy.
+- [x] ImsgServer: handshake → adoptFd(passed stdin/stdout) → combineHalves →
+      the EXISTING ControlSession over the passed fds (options: %exit suppressed —
+      the client binary prints its own; preamble guard flag 0). Lifecycle on imsg:
+      drain-then-MSG_EXIT, EXITING→EXITED, MSG_VERSION on mismatch.
+- [x] daemon serves `<socket>-tmux` + opt-in `--tmux-compat-socket LABEL` binding
+      /tmp/tmux-<uid>/LABEL. ORACLE: the real tmux binary attaches, round-trips
+      list-sessions, detaches with its own %exit, exit 0 (self-skips w/o tmux ≥ 3.6).
+      Live-verified against the shipped daemon. `.lock` flock not needed (we never
+      race a server start); socket exec-bit verified informational and skipped.
 
 ## Cross-cutting
 
@@ -122,9 +139,33 @@ control mode; per-line cell deltas feed the native protocol. GUI and daemon shar
       (NativeSession's handshake extracted into completeHandshake). Left as accepted:
       per-test-file waitUntil helpers (test-local idiom); RemoteScreen::viewportText vs
       TtyRenderer walk (different outputs: plain text vs VT bytes).
-- [ ] Windows: `runDaemon`/`runAttach` are stubs; net's Win32 backend compiles but
-      `listenUnix/connectUnix` return Unsupported — decide AF_UNIX-on-Windows vs TCP.
-- [ ] delete this file before the branch lands.
+- [x] Windows (decision: AF_UNIX via afunix.h, not TCP): listenUnix/connectUnix live on
+      the Win32 backend (parent dir created, NTFS ACLs govern access — no POSIX perm
+      hardening); runDaemon serves control+native (no imsg: no SCM_RIGHTS on Windows)
+      with SetConsoleCtrlHandler shutdown; runAttach = raw VT console mode + console-
+      size proposal + a blocking stdin-reader thread. Pty.cpp's ConPty gate fixed
+      (_MSC_VER → _WIN32). Runtime-gated unix-echo test covers the path per platform.
+      VERIFICATION IS CI-ONLY (watch the Windows job after pushing).
+- [ ] delete this file before the branch lands (user decision: keep until the PR).
+
+## Follow-ups (recorded, deliberately out of v1)
+
+- F1 LayoutState PDU: mirror the daemon's window/tab/pane layout natively (v1: one
+  tab per session). F2 session-lifecycle PDUs (GUI-initiated create/split/close;
+  v1: guarded off via canCreateSession). F3 tmux layout-ratio/anchor fidelity +
+  GUI-initiated tmux actions (v1: split direction from the tree, active-pane anchor).
+- F4 scrollback backfill PDU (history older than attach). F5 images over the native
+  protocol (AttachClient still drops ImageData/ImageGone). F6 tmux %pause handling.
+- F7 wrapped-flag fidelity in ScreenMirror (local rewrap of mirrored scrollback).
+  F8 multi-client resize policy (last proposal wins today). F9 cursor-shape
+  (DECSCUSR) propagation on the native wire. Plus: stable-id range fetch-on-demand;
+  cursor sync after tmux capture replay (`#{cursor_x}/#{cursor_y}`).
+- F10 (from the /simplify pass): extract the shared reactor/state/pending/binding
+  scaffold of AttachController+TmuxController into a MuxController base — deferred
+  because the delicate stop/teardown ordering was freshly validated and a third
+  backend is what would justify the abstraction. F11: carry OSC 66 block
+  origin/extent on the native wire so ScreenMirror repaints by block identity
+  instead of the continuation-flag scan-up heuristic.
 
 ## Resuming on another machine
 

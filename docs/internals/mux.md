@@ -122,11 +122,52 @@ pre-retrofit baseline (acceptance was < 0.5 %), `writeTextToSoA` and
 
 `NativeSession` (server) pushes an attach snapshot (SessionState + a snapshot
 Delta per session), then 20 ms-debounced deltas off the host's screen-updated
-signal. `client/AttachClient` mirrors sessions into `RemoteScreen` — plain
-data any frontend can render — and `contour attach` is a working thin client
-on top of it (`client/TtyRenderer` repaints the local TTY; Ctrl-\ detaches).
-Sessions survive detach; a reattach replays history. The daemon serves the
-native protocol on `<control-socket>-native`.
+signal. Deltas also carry the currently-SET DEC private modes of a
+single-sourced mirrored-mode table (`muxserver/MirroredModes.h`: cursor keys,
+keypad, the mouse protocols, bracketed paste, focus, cursor visibility) —
+everything a client needs to encode INPUT correctly; a pure mode flip pushes
+even when no cell changed. Output-side modes (autowrap, origin, margins) stay
+local by design: the server's emulation already applied them to the cells.
+`client/AttachClient` mirrors sessions into `RemoteScreen` — plain data any
+frontend can render — and `contour attach` is a working thin client on top of
+it (`client/TtyRenderer` repaints the local TTY; Ctrl-\ detaches). Sessions
+survive detach; a reattach replays history. The daemon serves the native
+protocol on `<control-socket>-native`.
+
+## The GUI seams (`contour attach --gui`, `contour attach --tmux`)
+
+The display stack consumes a session exclusively through
+`TerminalSession::terminal()`, so a REMOTE session is an ordinary
+`TerminalSession` whose `vtbackend::Terminal` sits on a `vtpty::ChannelPty` —
+the blocking-read, sink-driven in-memory Pty (promoted from the GUI test
+fixture, so its semantics were already test-proven). Nothing in the
+display/render/input machinery learns the session is remote:
+
+- **Input**: every keystroke funnels through the one `_pty->write()` in
+  `Terminal::flushInput`; the ChannelPty's write sink posts it onto the
+  controller's reactor (native: `AttachClient::sendInput`; tmux:
+  `send-keys -H` hex batches — the quoting-proof channel for encoded input).
+- **Resize**: `Terminal::resizeScreen`'s `_pty->resizeScreen()` routes to
+  `ResizeRequest` (native) or `resize-pane -x -y` (tmux).
+- **Output, native path**: `client/ScreenMirror` re-serializes RemoteScreen
+  deltas into VT bytes fed to the pty — the session's own parser emulates, so
+  scrollback, selection and search work natively on mirrored content. History
+  enters by scrolling rendered lines through the page (real scrollback, no
+  filler); viewport rows repaint BOTTOM-UP because erasing any continuation
+  cell of a scaled-text block (OSC 66) destroys the whole block; hyperlinks
+  re-emit as OSC 8 from the connection's side table.
+- **Output, tmux path**: the raw `%output` bytes ARE VT — `TmuxClientModel`'s
+  injectable `PaneSink` feeds them (buffering capture-pane replay until the
+  local pty binds).
+
+Each controller (`contour/mux/AttachController`, `contour/mux/TmuxController`)
+runs the Qt-free client engine on its own reactor thread (`MuxLoopThread`) and
+doubles as the app's `SessionFactory`: the manager's creation entry points ask
+`canCreateSession()` first, so a "+" click inside a mirror window cannot spawn
+a stray local shell. The app's factory is permanently a
+`RoutingSessionFactory`; attach mode switches the route, never the manager's
+reference. v1 mapping: one tab per daemon session; tmux windows become tabs
+and additional panes split the tab.
 
 ## Socket conventions
 
@@ -135,16 +176,61 @@ overridable per flag and `$CONTOUR_MUX`. The socket directory hardening
 mirrors tmux exactly: 0700 directory, owner check, refuse **world**-rwx
 (group is permitted — tmux's `TMUX_SOCK_PERM == 7`).
 
-## Binary imsg IPC (gated, not implemented)
+## Binary imsg IPC (the real tmux binary as a client)
 
-Speaking tmux's *binary* client protocol (the rewritten imsg: 16-byte
-`{type,len,peerid,pid}` header, `MSG_IDENTIFY_*` handshake with fds via
-SCM_RIGHTS, `/tmp/tmux-<uid>/<label>` discovery) remains gated: it is the
-highest-risk phase, versioned by `PROTOCOL_VERSION` (currently 8) with no
-stability guarantee. Entry criteria before starting it: upstream
-PROTOCOL_VERSION unchanged, struct layout identical across supported
-platforms, and the required command surface not exceeding what control mode
-already provides. It never blocks anything above.
+The daemon's third endpoint, `<control-socket>-tmux`, speaks tmux's binary
+client protocol — the rewritten libutil imsg tmux ≥ 3.6 uses: 16-byte
+host-order `{type,len,peerid,pid}` header, `len` including the header with
+its top bit marking one SCM_RIGHTS descriptor, masked length in [16, 16384],
+`peerid`'s low byte carrying `PROTOCOL_VERSION` (8; a mismatch answers
+`MSG_VERSION` and drops). The insight that makes this cheap: control mode
+rides ON TOP of imsg. After the `MSG_IDENTIFY_*` handshake (a data-driven
+table validates payload shapes exactly as the real server does) passes the
+client's STDIN/STDOUT via SCM_RIGHTS and an attach-shaped `MSG_COMMAND`
+arrives, the ORACLE-VERIFIED control-mode engine simply runs over the passed
+descriptors (`net::adoptFd` + `net::combineHalves`); the imsg socket carries
+only lifecycle. So `tmux -S <socket>-tmux -C attach-session` works with the
+stock tmux binary — proven by an oracle test forking the real client, and
+live against the shipped daemon.
+
+Deliberate deviations from the real server, all verified against the
+reference tree (`3.7b-617-g5ed5e360`):
+
+- acceptance requires `CLIENT_CONTROL` and refuses `-CC`
+  (`CLIENT_CONTROLCONTROL`) — we never render a full terminal client;
+  rejections answer `MSG_EXIT` with a message, as tmux's own idiom does;
+- the startup command is a table (`attach-session`/`attach`/
+  `new-session`/`new`/empty ⇒ attach); arbitrary startup commands are not
+  executed;
+- the `%exit` line is SUPPRESSED on this path — the tmux client binary
+  prints its own after its imsg loop ends — and the preamble guard pair is
+  stamped flag 0 (the MSG_COMMAND-originated command is not
+  client-originated in cmd-queue terms), while stdin-line commands keep 1;
+- a detach drains the control stdout fully, THEN sends `MSG_EXIT`
+  (mirroring `control_all_done` gating); `MSG_EXITING` is answered with
+  `MSG_EXITED`;
+- the socket's execute-bit "has attached clients" signal is not maintained
+  (verified informational: no tmux client reads it before connecting).
+
+`contour daemon --tmux-compat-socket LABEL` additionally binds tmux's own
+discovery path `/tmp/tmux-<uid>/LABEL`, so a plain
+`tmux -L LABEL -C attach-session` finds the daemon. Opt-in only: with the
+daemon down, a `new-session` on that path would silently fork a REAL tmux
+server onto it.
+
+## Windows
+
+The Win32 net backend serves AF_UNIX via `afunix.h` (Windows 10 1803+); the
+socket's parent directory is created but NOT permission-hardened — NTFS ACLs
+govern access, not POSIX mode bits. `runDaemon` serves the control and native
+endpoints (no imsg: SCM_RIGHTS does not exist on Windows), with
+`SetConsoleCtrlHandler` marshaling shutdown onto the loop. `runAttach` puts
+the console into raw VT mode (`ENABLE_VIRTUAL_TERMINAL_*`), proposes
+`GetConsoleScreenBufferInfo`'s cell size, and pumps console input from a
+dedicated blocking-read thread — console handles cannot park on the socket
+reactor. Windows code is exercised by the Windows CI job (compile under
+-Werror plus the runtime-gated unix-echo net test); it cannot run on the
+Linux development machines.
 
 ## Historical note
 

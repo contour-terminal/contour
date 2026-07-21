@@ -13,6 +13,7 @@ acdefg
 ACluster
 actionlint
 affordance
+afunix
 agentic
 ALTBUF
 answerback
@@ -52,6 +53,7 @@ CCCCCC
 cdc
 CDEFGH
 chafa
+channelpty
 charproc
 checkbox
 chown
@@ -59,6 +61,7 @@ ciexyz
 circleval
 cjk
 claude
+cmsg
 COLORHIGHLIGHTBG
 COLORHIGHLIGHTFG
 colouring
@@ -178,6 +181,7 @@ FAILCRITICALERRORS
 fcitx
 fclose
 FDiag
+fdpass
 FEAM
 FETM
 FFE
@@ -190,6 +194,7 @@ filetypes
 FIONREAD
 flyouts
 fopen
+forkpty
 fputs
 FRENCHCANADIAN
 fullstack
@@ -236,6 +241,7 @@ IJK
 IJKLMNOP
 imagesize
 imsg
+imsgserver
 inchar
 inflush
 inputline
@@ -262,6 +268,7 @@ LMNo
 lmo
 LMS
 logfile
+longflags
 longjmp
 lorem
 lossily
@@ -278,6 +285,7 @@ metapackages
 midlight
 mred
 mru
+msgtype
 multicell
 multiwindow
 muxserver
@@ -323,6 +331,7 @@ nprofiles
 nqrstuvwx
 NRCS
 NRVO
+ntfs
 nulmny
 nuvwxy
 nyz
@@ -421,6 +430,7 @@ RCOLSPECIALPAL
 readback
 readnl
 readwrite
+recvmsg
 redefinable
 regis
 relayout
@@ -435,6 +445,11 @@ REPORTFAULT
 rerasterize
 rerasterizing
 resampler
+reserialization
+reserialize
+reserializer
+reserializes
+reserializing
 resizable
 resync
 retargeted
@@ -454,10 +469,12 @@ RWin
 sanitizers
 SATM
 SBQUERY
+scm
 scrn
 SCROLLLOCK
 segfaulting
 segfaults
+sendmsg
 seqno
 Serialises
 sessionless
@@ -468,6 +485,7 @@ soa
 socketpair
 soname
 sourced
+splitsocket
 splitv
 splitvertical
 splitz
@@ -503,6 +521,7 @@ trashcan
 tso
 TTests
 TTM
+ttyname
 UBO
 ubuf
 udk
@@ -553,6 +572,7 @@ werr
 weston
 whoami
 Winops
+winsock
 worktree
 WXYZ
 xaa
