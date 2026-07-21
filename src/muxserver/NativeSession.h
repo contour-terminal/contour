@@ -12,8 +12,12 @@
 /// resync snapshot. Hyperlink URIs ship once per connection on first
 /// reference; image pixels only on FetchImage.
 
+#include <vtbackend/primitives.h>
+
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -32,10 +36,19 @@ namespace muxserver
 class NativeSession final: public SessionStreamEvents
 {
   public:
+    /// The default send-queue bound (see the constructor).
+    static constexpr std::size_t DefaultWriteQueueBytes = std::size_t { 4 } * 1024 * 1024;
+
     /// @param loop The event loop everything runs on.
     /// @param host The session host (not owned; outlives this).
     /// @param connection The client transport (owned).
-    NativeSession(net::EventLoop& loop, SessionHost& host, std::unique_ptr<net::ISocket> connection);
+    /// @param maxWriteQueueBytes Send-queue byte bound; a client whose backlog
+    ///        exceeds it is disconnected rather than under-served (its delta
+    ///        cursor has already moved past what an overflow would drop).
+    NativeSession(net::EventLoop& loop,
+                  SessionHost& host,
+                  std::unique_ptr<net::ISocket> connection,
+                  std::size_t maxWriteQueueBytes = DefaultWriteQueueBytes);
 
     /// The connection flow: handshake, initial snapshot, then serve until the
     /// peer disconnects.
@@ -52,6 +65,10 @@ class NativeSession final: public SessionStreamEvents
         vtbackend::GridDeltaCursor cursor;
         std::unordered_set<uint16_t> sentHyperlinks;
         std::vector<uint32_t> lastModes; ///< Mirrored-mode set as last sent.
+        /// The screen the cursor followed last: primary and alternate are distinct
+        /// grids with independent generations, so a flip must force a resync (and
+        /// nullopt — a session never pushed before — forces the initial snapshot).
+        std::optional<vtbackend::ScreenType> lastScreenType;
     };
 
     void handlePdu(proto::DecodedFrame const& frame);

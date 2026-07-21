@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/primitives.h>
+
 #include <vtpty/MockPty.h>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <chrono>
+#include <cstddef>
 #include <memory>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -15,9 +20,12 @@
 #include <muxserver/TappingPty.h>
 #include <net/EventLoop.h>
 #include <net/PollEventSource.h>
+#include <net/testing/CoroTestSupport.h>
 #include <net/testing/InMemoryTransport.h>
 #include <vtmux/Pane.h>
 #include <vtmux/Tab.h>
+
+using namespace std::chrono_literals;
 
 using coro::Task;
 using muxserver::NativeSession;
@@ -67,9 +75,24 @@ Task<void> driveExchange(NativeSession* session,
     co_await coro::whenAll(session->run(), feedBytes(client, request), collectPdus(client, expected, out));
 }
 
+/// Encodes @p pdus into one contiguous request, serials counting from 1.
+std::vector<std::byte> encodeRequest(std::vector<proto::DecodedPdu> const& pdus)
+{
+    auto request = proto::Writer {};
+    auto serial = uint64_t { 1 };
+    for (auto const& pdu: pdus)
+        proto::encodePdu(request, serial++, pdu);
+    return { request.view().begin(), request.view().end() };
+}
+
 /// Drives a NativeSession over an in-memory socket pair.
 struct NativeHarness
 {
+    explicit NativeHarness(std::size_t maxWriteQueueBytes = NativeSession::DefaultWriteQueueBytes):
+        writeQueueBytes { maxWriteQueueBytes }
+    {
+    }
+
     net::PollEventSource source;
     net::EventLoop loop { source };
     SessionHost host { loop,
@@ -77,24 +100,54 @@ struct NativeHarness
                        vtbackend::Settings {},
                        /*startPumps=*/false };
     net::testing::SocketPair pair = *net::testing::makeSocketPair(loop);
+    std::size_t writeQueueBytes; // set by the constructor, before `session` reads it
     std::unique_ptr<NativeSession> session =
-        std::make_unique<NativeSession>(loop, host, std::move(pair.first));
+        std::make_unique<NativeSession>(loop, host, std::move(pair.first), writeQueueBytes);
 
     /// Encodes @p pdus, runs the exchange, returns the first @p expected server PDUs.
     std::vector<proto::DecodedFrame> exchange(std::vector<proto::DecodedPdu> const& pdus,
                                               std::size_t expected)
     {
-        auto request = proto::Writer {};
-        auto serial = uint64_t { 1 };
-        for (auto const& pdu: pdus)
-            proto::encodePdu(request, serial++, pdu);
-        auto const bytes = std::vector<std::byte> { request.view().begin(), request.view().end() };
-
+        auto const bytes = encodeRequest(pdus);
         auto received = std::vector<proto::DecodedFrame> {};
         loop.blockOn(driveExchange(session.get(), pair.second.get(), &bytes, expected, &received));
         return received;
     }
 };
+
+/// Once the handshake had time to land: flips the hosted terminal to the
+/// alternate screen and kicks the debounced flush.
+Task<void> flipToAltScreen(NativeHarness* h, vtmux::SessionId id)
+{
+    co_await h->loop.delay(5ms);
+    h->host.terminal(id)->writeToScreen("\033[?1049hALT!");
+    h->session->sessionScreenUpdated(id);
+}
+
+/// Schedules a debounce flush, then disconnects before it can fire.
+Task<void> kickThenDisconnect(NativeHarness* h, vtmux::SessionId id)
+{
+    co_await h->loop.delay(5ms);
+    h->session->sessionScreenUpdated(id); // parks the 20ms debounce flush
+    h->pair.second->close();              // client gone: run() must settle the flush
+}
+
+Task<void> runThenMark(NativeSession* session, bool* done)
+{
+    co_await session->run();
+    *done = true;
+}
+
+/// Bounds the overflow test on regression: if the session never disconnects the
+/// client, close it from outside after ~1s so the test fails instead of hanging.
+Task<void> closeWatchdog(NativeHarness* h, bool const* done, bool* fired)
+{
+    if (!co_await net::testing::waitUntil(&h->loop, [done] { return *done; }))
+    {
+        *fired = true;
+        h->pair.second->close();
+    }
+}
 
 } // namespace
 
@@ -172,4 +225,81 @@ TEST_CASE("a version-mismatched hello is answered and the session ends", "[muxse
     // Only the ServerHello arrives — no snapshot follows a failed handshake.
     REQUIRE(received.size() == 1);
     CHECK(std::holds_alternative<proto::ServerHello>(received[0].pdu));
+}
+
+TEST_CASE("an alternate-screen flip forces a resync snapshot with SessionState", "[muxserver][native]")
+{
+    auto h = NativeHarness {};
+    h.host.createTab();
+    auto const sessionId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+
+    auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
+    auto received = std::vector<proto::DecodedFrame> {};
+    h.loop.blockOn(net::testing::allOf(h.session->run(),
+                                       feedBytes(h.pair.second.get(), &bytes),
+                                       collectPdus(h.pair.second.get(), 5, &received),
+                                       flipToAltScreen(&h, sessionId)));
+    REQUIRE(received.size() == 5);
+
+    auto const* primary = std::get_if<proto::SessionState>(&received[1].pdu);
+    REQUIRE(primary != nullptr);
+    CHECK(primary->screenType == std::to_underlying(vtbackend::ScreenType::Primary));
+
+    // The flip is announced (SessionState is the only carrier of the screen
+    // type) and served as a snapshot of the alternate grid — not diffed against
+    // the primary grid's unrelated delta cursor.
+    auto const* alt = std::get_if<proto::SessionState>(&received[3].pdu);
+    REQUIRE(alt != nullptr);
+    CHECK(alt->screenType == std::to_underlying(vtbackend::ScreenType::Alternate));
+
+    auto const* delta = std::get_if<proto::Delta>(&received[4].pdu);
+    REQUIRE(delta != nullptr);
+    CHECK(delta->snapshot == 1);
+    auto text = std::string {};
+    for (auto const& cell: delta->lines.front().cells)
+        if (cell.codepoint != 0)
+            text += static_cast<char>(cell.codepoint);
+    CHECK(text == "ALT!");
+}
+
+TEST_CASE("a debounce flush pending at disconnect resolves before run() returns", "[muxserver][native]")
+{
+    auto h = NativeHarness {};
+    h.host.createTab();
+    auto const sessionId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+
+    auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
+    auto received = std::vector<proto::DecodedFrame> {};
+    h.loop.blockOn(net::testing::allOf(h.session->run(),
+                                       feedBytes(h.pair.second.get(), &bytes),
+                                       collectPdus(h.pair.second.get(), 4, &received),
+                                       kickThenDisconnect(&h, sessionId)));
+
+    // The daemon frees the session the moment run() returns; a flush coroutine
+    // still parked in its debounce delay would then resume on freed memory
+    // (ASan turns that into a hard failure right here).
+    h.session.reset();
+    h.loop.blockOn(net::testing::sleepFor(&h.loop, 30ms));
+    SUCCEED("the debounce flush settled before the session was destroyed");
+}
+
+TEST_CASE("a client that overflows the write queue is disconnected", "[muxserver][native]")
+{
+    auto done = false;
+    auto watchdogFired = false;
+    // No reply fits an 8-byte bound: the very first send overflows, and the
+    // session must apply the queue's disconnect contract instead of silently
+    // under-serving the client from then on.
+    auto h = NativeHarness { 8 };
+    h.host.createTab();
+
+    auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
+    auto received = std::vector<proto::DecodedFrame> {};
+    h.loop.blockOn(net::testing::allOf(runThenMark(h.session.get(), &done),
+                                       feedBytes(h.pair.second.get(), &bytes),
+                                       collectPdus(h.pair.second.get(), 1, &received),
+                                       closeWatchdog(&h, &done, &watchdogFired)));
+
+    CHECK(!watchdogFired); // the SESSION closed the connection, not the watchdog
+    CHECK(received.empty());
 }

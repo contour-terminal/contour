@@ -7,6 +7,7 @@
 #include <bit>
 #include <chrono>
 #include <mutex>
+#include <optional>
 #include <ranges>
 #include <utility>
 #include <vector>
@@ -100,20 +101,32 @@ namespace
 
 NativeSession::NativeSession(net::EventLoop& loop,
                              SessionHost& host,
-                             std::unique_ptr<net::ISocket> connection):
+                             std::unique_ptr<net::ISocket> connection,
+                             std::size_t maxWriteQueueBytes):
     _loop(loop),
     _host(host),
     _connection(std::move(connection)),
-    _writer(loop, _connection.get(), std::size_t { 4 } * 1024 * 1024)
+    _writer(loop, _connection.get(), maxWriteQueueBytes)
 {
 }
 
 void NativeSession::send(uint64_t serial, proto::DecodedPdu const& pdu)
 {
+    if (_closed)
+        return;
     auto sink = proto::Writer {};
     proto::encodePdu(sink, serial, pdu);
     auto const bytes = sink.view();
-    std::ignore = _writer.enqueue(std::string { reinterpret_cast<char const*>(bytes.data()), bytes.size() });
+    if (!_writer.enqueue(std::string { reinterpret_cast<char const*>(bytes.data()), bytes.size() }))
+    {
+        // The queue's overflow contract: a client too slow to drain the byte bound
+        // is disconnected, not silently under-served — the delta cursor has already
+        // advanced past this frame, so dropping it would leave the mirror holey
+        // with no resync trigger. Closing the connection unparks the PDU pump.
+        _closed = true;
+        _writer.close();
+        _connection->close();
+    }
 }
 
 void NativeSession::sessionScreenUpdated(SessionId session)
@@ -149,13 +162,24 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
 
     auto delta = proto::Delta {};
     delta.session = session.value;
+    auto state = std::optional<proto::SessionState> {};
 
     auto hyperlinkIds = std::vector<uint16_t> {};
     {
         // The same lock discipline as refreshRenderBuffer: all grid queries
-        // happen under the terminal's state lock.
+        // happen under the terminal's state lock — and so does every terminal
+        // read below (pageSize/screenType/windowTitle mutate on the session's
+        // pump thread; windowTitle() in particular is an unlocked reference).
         auto const guard = std::lock_guard { *terminal };
         auto& grid = terminal->currentScreen().grid();
+
+        // The primary and alternate screens are distinct grids whose generations
+        // advance independently (and can collide), so one cursor cannot span a
+        // flip: treat it as a wholesale identity change and resync. This also
+        // gives a session's very first push its SessionState (nullopt != type).
+        auto const screenType = terminal->screenType();
+        auto snapshot = forceSnapshot || follow.lastScreenType != screenType;
+        follow.lastScreenType = screenType;
 
         auto const collect = [&](vtbackend::LineOffset offset, vtbackend::Line const& line) {
             delta.lines.push_back(toWireLine(grid, offset, line));
@@ -165,7 +189,6 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
                     hyperlinkIds.push_back(cell.hyperlink);
         };
 
-        auto snapshot = forceSnapshot;
         if (!snapshot
             && grid.forEachLineChangedSince(follow.cursor, collect)
                    == vtbackend::GridDeltaResult::ResyncRequired)
@@ -201,21 +224,23 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
             delta.hyperlinks.push_back(proto::HyperlinkEntry { .id = id, .uri = info->uri });
             follow.sentHyperlinks.insert(id);
         }
+
+        if (snapshot)
+        {
+            auto& snap = state.emplace();
+            snap.session = session.value;
+            auto const size = terminal->pageSize();
+            snap.columns = unbox<uint32_t>(size.columns);
+            snap.lines = unbox<uint32_t>(size.lines);
+            snap.screenType = std::to_underlying(screenType);
+            snap.cursorLine = delta.cursorLine;
+            snap.cursorColumn = delta.cursorColumn;
+            snap.title = terminal->windowTitle();
+        }
     }
 
-    if (delta.snapshot != 0)
-    {
-        auto state = proto::SessionState {};
-        state.session = session.value;
-        auto const size = terminal->pageSize();
-        state.columns = unbox<uint32_t>(size.columns);
-        state.lines = unbox<uint32_t>(size.lines);
-        state.screenType = std::to_underlying(terminal->screenType());
-        state.cursorLine = delta.cursorLine;
-        state.cursorColumn = delta.cursorColumn;
-        state.title = terminal->windowTitle();
-        send(0, proto::DecodedPdu { state });
-    }
+    if (state)
+        send(0, proto::DecodedPdu { *state });
     // A pure mode flip (an app enabling mouse tracking, say) changes no cell,
     // yet clients must hear about it to encode input correctly.
     auto const modesChanged = delta.setModes != follow.lastModes;
@@ -312,9 +337,13 @@ coro::Task<void> NativeSession::run()
     });
 
     _closed = true;
-    while (_writer.queuedBytes() > 0 || _writer.draining())
+    // serveNativeClient destroys this session the moment run() returns, but a
+    // debounce flush spawned before the disconnect may still be parked in its
+    // 20ms delay with `this` in its frame. Wait for it to resume (it observes
+    // _closed and backs out) before letting the frame die.
+    while (_flushScheduled)
         co_await _loop.delay(1ms);
-    _writer.close();
+    co_await _writer.flushThenClose();
     _connection->close();
 }
 
