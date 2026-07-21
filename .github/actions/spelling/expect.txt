@@ -302,7 +302,6 @@ LMNo
 lmo
 LMS
 logfile
-longflags
 LONGFLAGS
 longjmp
 lorem
@@ -622,7 +621,6 @@ UPSS
 upstat
 URval
 uvwxy
-varint
 varints
 VCenter
 vectorizable
