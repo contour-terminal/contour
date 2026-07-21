@@ -203,11 +203,11 @@ TEST_CASE("%output escapes control bytes and never breaks a guard block", "[muxs
     auto* tab = h.host.model().window(h.host.windowId())->activeTab();
     auto const paneId = tab->rootPane()->id().value;
 
-    // Feed output directly (the pump thread is disabled in the harness).
-    h.host.setOutputHandler(
-        [&](vtmux::SessionId id, std::string const& bytes) { h.session->onSessionOutput(id, bytes); });
+    // Wire the byte tap exactly like the daemon glue (the pump thread is
+    // disabled in the harness, so output is fed directly below).
+    h.host.subscribeStream(h.session.get());
     auto const lines = h.exchange({ "list-sessions" });
-    h.host.setOutputHandler(nullptr);
+    h.host.unsubscribeStream(h.session.get());
 
     // Nothing crashed and the guard block for list-sessions is intact.
     CHECK(contains(lines, "%begin"));

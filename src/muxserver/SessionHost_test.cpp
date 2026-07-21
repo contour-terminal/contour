@@ -1,17 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/MockPty.h>
 
+#include <crispy/BufferObject.h>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <format>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
+#include <coro/Task.hpp>
 #include <muxserver/SessionHost.h>
+#include <muxserver/TappingPty.h>
 #include <net/EventLoop.h>
+#include <net/PollEventSource.h>
 #include <net/testing/ScriptedEventSource.h>
 #include <vtmux/Pane.h>
 #include <vtmux/Tab.h>
@@ -165,4 +173,82 @@ TEST_CASE("an unsubscribed observer stops receiving events", "[muxserver][host]"
 
     REQUIRE(h.host.createTab() != nullptr);
     CHECK(h.recorder.log.empty());
+}
+
+namespace
+{
+
+/// Records the stream fan-out one attached client would receive.
+struct StreamRecorder final: muxserver::SessionStreamEvents
+{
+    std::vector<uint64_t> screens;
+    std::vector<std::string> output;
+
+    void sessionScreenUpdated(vtmux::SessionId session) override { screens.push_back(session.value); }
+    void sessionOutput(vtmux::SessionId session, std::string const& bytes) override
+    {
+        output.push_back(std::format("{}:{}", session.value, bytes));
+    }
+};
+
+coro::Task<void> waitFor(net::EventLoop* loop, std::function<bool()> ready)
+{
+    using namespace std::chrono_literals;
+    for (auto i = 0; i < 2000 && !ready(); ++i)
+        co_await loop->delay(1ms);
+}
+
+} // namespace
+
+TEST_CASE("stream events fan out to every subscriber independently", "[muxserver][host]")
+{
+    auto source = net::PollEventSource {};
+    auto loop = net::EventLoop { source };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                              vtbackend::Settings {},
+                              /*startPumps=*/false };
+    auto first = StreamRecorder {};
+    auto second = StreamRecorder {};
+    host.subscribeStream(&first);
+    host.subscribeStream(&second);
+
+    REQUIRE(host.createTab() != nullptr);
+    auto const session = host.model().window(host.windowId())->activeTab()->rootPane()->session();
+    auto* terminal = host.terminal(session);
+    REQUIRE(terminal != nullptr);
+
+    // A screen update reaches BOTH subscribers.
+    terminal->writeToScreen("hello");
+    loop.blockOn(waitFor(&loop, [&] { return !first.screens.empty() && !second.screens.empty(); }));
+    REQUIRE(!first.screens.empty());
+    REQUIRE(!second.screens.empty());
+    CHECK(first.screens.front() == session.value);
+    CHECK(second.screens.front() == session.value);
+
+    // The raw byte tap fans out too: drive one read through the TappingPty on
+    // this thread (standing in for the session's pump thread).
+    auto& tapped = dynamic_cast<muxserver::TappingPty&>(terminal->device());
+    auto& mock = dynamic_cast<vtpty::MockPty&>(tapped.inner());
+    mock.appendStdOutBuffer("raw-bytes");
+    auto pool = crispy::buffer_object_pool<char> { 4096 };
+    auto const storage = pool.allocateBufferObject();
+    std::ignore = tapped.read(*storage, std::nullopt, 4096);
+    loop.blockOn(waitFor(&loop, [&] { return !first.output.empty() && !second.output.empty(); }));
+    auto const expected = std::format("{}:raw-bytes", session.value);
+    REQUIRE(!first.output.empty());
+    REQUIRE(!second.output.empty());
+    CHECK(first.output.front() == expected);
+    CHECK(second.output.front() == expected);
+
+    // Unsubscribing one observer must NOT silence the other — the regression
+    // the single-slot handlers had (a disconnecting client nulled the shared
+    // slot, muting every remaining client).
+    host.unsubscribeStream(&first);
+    auto const firstScreensSeen = first.screens.size();
+    auto const secondScreensSeen = second.screens.size();
+    terminal->writeToScreen("again");
+    loop.blockOn(waitFor(&loop, [&] { return second.screens.size() > secondScreensSeen; }));
+    CHECK(second.screens.size() > secondScreensSeen);
+    CHECK(first.screens.size() == firstScreensSeen);
 }

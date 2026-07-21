@@ -67,7 +67,7 @@ Task<void> scenario(EndToEndHarness* h, vtmux::SessionId sessionId)
 
     // 2. Increment: new terminal output becomes a (debounced) delta.
     h->host.terminal(sessionId)->writeToScreen("\r\nsecond line");
-    h->server->onScreenUpdated(sessionId); // what the daemon glue wires up
+    h->server->sessionScreenUpdated(sessionId); // what the daemon glue wires up
     co_await waitUntil(&h->loop, [&] {
         return h->client->screens().at(sessionId.value).viewportText().contains("second line");
     });

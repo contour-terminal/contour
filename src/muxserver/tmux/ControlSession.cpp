@@ -234,7 +234,7 @@ void ControlSession::emitGuarded(HandlerResult const& result)
         std::format("{} {} {} 1", result.has_value() ? "%end" : "%error", time, number));
 }
 
-void ControlSession::onSessionOutput(SessionId session, std::string const& bytes)
+void ControlSession::sessionOutput(SessionId session, std::string const& bytes)
 {
     if (_noOutput)
         return; // refresh-client -f no-output: the client wants notifications only
@@ -748,15 +748,10 @@ namespace
                 .count();
         });
 
-        // Wire the byte tap for the lifetime of this connection. A single
-        // control client is the common case; multi-client fan-out arrives with
-        // the native protocol phase.
-        host->setOutputHandler([&session = *session](SessionId id, std::string const& bytes) {
-            session.onSessionOutput(id, bytes);
-        });
-
+        // Subscribe the byte tap for the lifetime of this connection; any
+        // number of clients may be attached concurrently.
+        auto const subscription = ScopedStreamSubscription { *host, *session };
         co_await session->run();
-        host->setOutputHandler(nullptr);
     }
 } // namespace
 

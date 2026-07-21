@@ -68,9 +68,8 @@ Task<void> mirrorScenario(ModelHarness* h, vtmux::SessionId sessionId, std::uint
     CHECK(h->model.pane(paneId)->pageText().contains("history-line"));
 
     // 2. Live %output lands on top of the replayed history.
-    h->host.setOutputHandler(
-        [&](vtmux::SessionId id, std::string const& bytes) { h->server->onSessionOutput(id, bytes); });
-    h->server->onSessionOutput(sessionId, "\r\nlive-line");
+    h->host.subscribeStream(h->server.get());
+    h->server->sessionOutput(sessionId, "\r\nlive-line");
     co_await waitFor(&h->loop, [&] { return h->model.pane(paneId)->pageText().contains("live-line"); });
     // The newline at the replayed page's bottom row scrolls one line — the
     // replay left the cursor exactly where a full-page capture ends.

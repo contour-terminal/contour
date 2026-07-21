@@ -117,8 +117,10 @@ std::optional<SessionId> SessionHost::seedSession()
     // into the read buffer, so the bytes are copied before crossing to the loop.
     auto tapped = std::make_unique<TappingPty>(std::move(pty), [this, id](std::string_view data) {
         _loop.post([this, id, copy = std::string { data }] {
-            if (_onOutput && _sessions.contains(id.value))
-                _onOutput(id, copy);
+            if (!_sessions.contains(id.value))
+                return;
+            for (auto* observer: _streamSubscribers)
+                observer->sessionOutput(id, copy);
         });
     });
 
@@ -136,8 +138,10 @@ std::optional<SessionId> SessionHost::seedSession()
             // Pump thread -> loop thread; the host may already be gone at
             // drain time only if the loop is too, so `this` stays valid.
             _loop.post([this, id] {
-                if (_onScreenUpdated && _sessions.contains(id.value))
-                    _onScreenUpdated(id);
+                if (!_sessions.contains(id.value))
+                    return;
+                for (auto* observer: _streamSubscribers)
+                    observer->sessionScreenUpdated(id);
             });
         },
         /*onClosed=*/
@@ -227,6 +231,16 @@ void SessionHost::subscribe(vtmux::ModelEvents* observer)
 void SessionHost::unsubscribe(vtmux::ModelEvents* observer)
 {
     std::erase(_subscribers, observer);
+}
+
+void SessionHost::subscribeStream(SessionStreamEvents* observer)
+{
+    _streamSubscribers.push_back(observer);
+}
+
+void SessionHost::unsubscribeStream(SessionStreamEvents* observer)
+{
+    std::erase(_streamSubscribers, observer);
 }
 
 void SessionHost::handleSessionExit(SessionId session)

@@ -42,7 +42,7 @@ namespace muxserver::tmux
 [[nodiscard]] std::vector<std::string> splitCommandLine(std::string_view line);
 
 /// One connected control-mode client.
-class ControlSession final: public vtmux::ModelEvents
+class ControlSession final: public vtmux::ModelEvents, public SessionStreamEvents
 {
   public:
     /// @param loop The event loop everything runs on.
@@ -79,9 +79,9 @@ class ControlSession final: public vtmux::ModelEvents
     void paneTreeRestructured(vtmux::TabId tab) override;
     void paneZoomChanged(vtmux::TabId tab, std::optional<vtmux::PaneId> zoomedLeaf) override;
 
-    /// Feeds one session's raw PTY bytes into the %output queue (wired to
-    /// SessionHost::setOutputHandler by the daemon glue).
-    void onSessionOutput(vtmux::SessionId session, std::string const& bytes);
+    /// Feeds one session's raw PTY bytes into the %output queue (the
+    /// connection subscribes itself to the host's stream fan-out).
+    void sessionOutput(vtmux::SessionId session, std::string const& bytes) override;
 
   private:
     /// A command handler: returns response body lines, or an error message.

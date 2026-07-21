@@ -115,7 +115,7 @@ void NativeSession::send(uint64_t serial, proto::DecodedPdu const& pdu)
     std::ignore = _writer.enqueue(std::string { reinterpret_cast<char const*>(bytes.data()), bytes.size() });
 }
 
-void NativeSession::onScreenUpdated(SessionId session)
+void NativeSession::sessionScreenUpdated(SessionId session)
 {
     if (!_handshaken || _closed)
         return;
@@ -316,9 +316,8 @@ namespace
                                        std::unique_ptr<net::ISocket> connection)
     {
         auto session = std::make_unique<NativeSession>(*loop, *host, std::move(connection));
-        host->setScreenUpdatedHandler([&session = *session](SessionId id) { session.onScreenUpdated(id); });
+        auto const subscription = ScopedStreamSubscription { *host, *session };
         co_await session->run();
-        host->setScreenUpdatedHandler(nullptr);
     }
 } // namespace
 

@@ -28,7 +28,7 @@ namespace muxserver
 {
 
 /// One connected native-protocol client.
-class NativeSession final
+class NativeSession final: public SessionStreamEvents
 {
   public:
     /// @param loop The event loop everything runs on.
@@ -40,9 +40,9 @@ class NativeSession final
     /// peer disconnects.
     [[nodiscard]] coro::Task<void> run();
 
-    /// Marks @p session changed and schedules a debounced delta flush (wired
-    /// to SessionHost::setScreenUpdatedHandler by the daemon glue).
-    void onScreenUpdated(vtmux::SessionId session);
+    /// Marks @p session changed and schedules a debounced delta flush (the
+    /// connection subscribes itself to the host's stream fan-out).
+    void sessionScreenUpdated(vtmux::SessionId session) override;
 
   private:
     /// Per followed grid: the delta cursor plus what this connection has seen.

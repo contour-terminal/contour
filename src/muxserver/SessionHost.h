@@ -35,6 +35,23 @@ namespace muxserver
 /// shell over a real PTY (vtpty::Process); tests inject a MockPty factory.
 using PtyFactory = std::function<std::unique_ptr<vtpty::Pty>(vtbackend::PageSize)>;
 
+/// Per-connection observer of the hosted sessions' output streams. Every
+/// callback fires on the loop thread; any number of observers may subscribe
+/// concurrently (one per attached client), so no observer ever silences
+/// another by connecting or disconnecting.
+class SessionStreamEvents
+{
+  public:
+    virtual ~SessionStreamEvents() = default;
+
+    /// @p session processed new output — the delta/notification trigger.
+    virtual void sessionScreenUpdated(vtmux::SessionId /*session*/) {}
+
+    /// A raw PTY output chunk of @p session BEFORE the parser consumed it —
+    /// the control-mode %output byte tap.
+    virtual void sessionOutput(vtmux::SessionId /*session*/, std::string const& /*bytes*/) {}
+};
+
 /// One hosted session: the terminal (owning its PTY) plus the pump thread
 /// feeding it, mirroring the GUI's TerminalSession::mainLoop.
 class HostedSession
@@ -156,19 +173,12 @@ class SessionHost final: public vtmux::ModelEvents
     /// Removes @p observer. Idempotent.
     void unsubscribe(vtmux::ModelEvents* observer);
 
-    /// Sets the callback invoked (on the loop thread) whenever a session's
-    /// screen processed new output — the delta/notification trigger.
-    void setScreenUpdatedHandler(std::function<void(vtmux::SessionId)> handler)
-    {
-        _onScreenUpdated = std::move(handler);
-    }
+    /// Registers @p observer for session output-stream events (screen updates
+    /// and the raw byte tap). Not owned; callbacks fire on the loop thread.
+    void subscribeStream(SessionStreamEvents* observer);
 
-    /// Sets the callback invoked (on the loop thread) with each raw PTY output
-    /// chunk BEFORE the parser consumed it — the control-mode %output byte tap.
-    void setOutputHandler(std::function<void(vtmux::SessionId, std::string const&)> handler)
-    {
-        _onOutput = std::move(handler);
-    }
+    /// Removes @p observer from the stream fan-out. Idempotent.
+    void unsubscribeStream(SessionStreamEvents* observer);
 
     /// Handles a session whose PTY closed (shell exited): prunes its pane from
     /// the model (prune-then-terminate) and destroys the session. Invoked on
@@ -213,11 +223,34 @@ class SessionHost final: public vtmux::ModelEvents
     std::optional<vtmux::SessionId> _pendingSessionId; ///< Consumed by the model's allocator.
     std::unordered_map<uint64_t, std::unique_ptr<HostedSession>> _sessions;
     std::vector<vtmux::ModelEvents*> _subscribers;
-    std::function<void(vtmux::SessionId)> _onScreenUpdated;
-    std::function<void(vtmux::SessionId, std::string const&)> _onOutput;
+    std::vector<SessionStreamEvents*> _streamSubscribers;
 
     vtmux::SessionModel _model; ///< Last member: its callbacks reach into the host.
     vtmux::WindowId _window;
+};
+
+/// Scoped stream subscription: connection coroutines keep one in their frame
+/// so the observer is removed even when the serve loop unwinds early.
+class ScopedStreamSubscription
+{
+  public:
+    /// Subscribes @p observer to @p host for this object's lifetime.
+    ScopedStreamSubscription(SessionHost& host, SessionStreamEvents& observer):
+        _host(host), _observer(observer)
+    {
+        _host.subscribeStream(&_observer);
+    }
+
+    ~ScopedStreamSubscription() { _host.unsubscribeStream(&_observer); }
+
+    ScopedStreamSubscription(ScopedStreamSubscription const&) = delete;
+    ScopedStreamSubscription& operator=(ScopedStreamSubscription const&) = delete;
+    ScopedStreamSubscription(ScopedStreamSubscription&&) = delete;
+    ScopedStreamSubscription& operator=(ScopedStreamSubscription&&) = delete;
+
+  private:
+    SessionHost& _host;
+    SessionStreamEvents& _observer;
 };
 
 } // namespace muxserver
