@@ -223,7 +223,7 @@ TEST_CASE("TerminalSessionManager: saveWindowLayout writes layouts.yml", "[manag
     auto const& savedLayout = parsed.layouts.value().at("saved");
     REQUIRE(savedLayout.tabs.size() == 2);
     // Commands come from TerminalSession::launchedCommand(), which the mock PTY factory does set;
-    // workingDirectory() may be empty for a BlockingMockPty-less MockPty session, so we don't assert
+    // workingDirectory() may be empty for a plain MockPty session, so we don't assert
     // on directory here.
     REQUIRE(savedLayout.tabs[0].root.command.has_value());
     CHECK(*savedLayout.tabs[0].root.command == "echo a");

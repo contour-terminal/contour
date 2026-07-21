@@ -20,15 +20,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <algorithm>
-#include <chrono>
-#include <condition_variable>
 #include <expected>
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -236,141 +232,9 @@ class RecordingExternalLauncher final: public contour::ExternalLauncher
     bool openUrlResult = true;
 };
 
-/// In-memory PTY with REAL blocking-read semantics, for a test that runs a LIVE session read loop
-/// (the render harness, where TerminalDisplay::setSession starts the session's threads).
-///
-/// vtpty::MockPty returns a zero-length chunk on an empty buffer, which the terminal loop treats as
-/// EOF (processInputOnce closes the PTY) — correct for synchronous parse-what-you-seeded tests, fatal
-/// for a session that must stay alive between feeds. This mock mirrors UnixPty instead: an empty
-/// buffer BLOCKS the reader (honoring the read timeout) until data arrives, a wakeupReader(), or
-/// close(); EOF (empty read) is reported only once closed. wakeupReader() genuinely unblocks the
-/// reader (as UnixPty's break-pipe does), so ~TerminalSession's thread join completes.
-class BlockingMockPty final: public vtpty::Pty
-{
-  public:
-    explicit BlockingMockPty(vtbackend::PageSize windowSize): _pageSize { windowSize } {}
-
-    vtpty::PtySlave& slave() noexcept override { return _slave; }
-
-    [[nodiscard]] std::optional<ReadResult> read(crispy::buffer_object<char>& storage,
-                                                 std::optional<std::chrono::milliseconds> timeout,
-                                                 size_t size) override
-    {
-        auto lock = std::unique_lock { _mutex };
-        auto const wake = [this]() {
-            return _closed || _woken || _outputReadOffset < _outputBuffer.size();
-        };
-        if (timeout.has_value())
-            _wakeup.wait_for(lock, *timeout, wake);
-        else
-            _wakeup.wait(lock, wake);
-
-        if (_outputReadOffset == _outputBuffer.size())
-        {
-            if (_closed)
-                // Drained and closed: report EOF (empty read), as a real PTY does.
-                return ReadResult { .data = std::string_view {}, .fromStdoutFastPipe = false };
-            // A bare wakeupReader() (teardown wake, no data) or a genuine timeout: return EAGAIN so
-            // the caller re-checks its _terminating flag, exactly as UnixPty's break-pipe wake does.
-            _woken = false;
-            errno = EAGAIN;
-            return std::nullopt;
-        }
-
-        auto const n = std::min({ size, _outputBuffer.size() - _outputReadOffset, storage.bytesAvailable() });
-        auto const chunk = std::string_view { _outputBuffer.data() + _outputReadOffset, n };
-        _outputReadOffset += n;
-        auto const pooled = storage.writeAtEnd(chunk);
-        return ReadResult { .data = std::string_view(pooled.data(), pooled.size()),
-                            .fromStdoutFastPipe = false };
-    }
-
-    void wakeupReader() override
-    {
-        {
-            auto const lock = std::lock_guard { _mutex };
-            _woken = true;
-        }
-        _wakeup.notify_all();
-    }
-
-    int write(std::string_view data) override
-    {
-        auto const lock = std::lock_guard { _mutex };
-        _inputBuffer.append(data);
-        return static_cast<int>(data.size());
-    }
-
-    [[nodiscard]] vtbackend::PageSize pageSize() const noexcept override { return _pageSize; }
-    void resizeScreen(vtbackend::PageSize cells, std::optional<vtpty::ImageSize> pixels) override
-    {
-        auto const lock = std::lock_guard { _mutex };
-        _pageSize = cells;
-        _pixelSize = pixels;
-    }
-
-    void start() override {}
-    void close() override
-    {
-        {
-            auto const lock = std::lock_guard { _mutex };
-            _closed = true;
-        }
-        _wakeup.notify_all();
-    }
-    void waitForClosed() override
-    {
-        auto lock = std::unique_lock { _mutex };
-        _wakeup.wait(lock, [this]() { return _closed; });
-    }
-    [[nodiscard]] bool isClosed() const noexcept override
-    {
-        auto const lock = std::lock_guard { _mutex };
-        return _closed;
-    }
-
-    /// Feeds VT output to the (possibly blocked) session read loop.
-    void feed(std::string_view data)
-    {
-        {
-            auto const lock = std::lock_guard { _mutex };
-            if (_outputReadOffset == _outputBuffer.size())
-            {
-                _outputReadOffset = 0;
-                _outputBuffer.assign(data);
-            }
-            else
-                _outputBuffer.append(data);
-        }
-        _wakeup.notify_all();
-    }
-
-    /// Snapshot of everything the terminal wrote into the PTY (keyboard/mouse encodings, replies).
-    [[nodiscard]] std::string stdinSnapshot() const
-    {
-        auto const lock = std::lock_guard { _mutex };
-        return _inputBuffer;
-    }
-
-    /// Whether fed output is still waiting to be consumed by the session's read loop.
-    [[nodiscard]] bool isStdoutPending() const
-    {
-        auto const lock = std::lock_guard { _mutex };
-        return _outputReadOffset < _outputBuffer.size();
-    }
-
-  private:
-    mutable std::mutex _mutex;
-    std::condition_variable _wakeup;
-    vtbackend::PageSize _pageSize;
-    std::optional<vtpty::ImageSize> _pixelSize;
-    std::string _inputBuffer;
-    std::string _outputBuffer;
-    std::size_t _outputReadOffset = 0;
-    bool _closed = false;
-    bool _woken = false; ///< One-shot wakeupReader() flag (teardown wake), cleared on read.
-    vtpty::PtySlaveDummy _slave;
-};
+// The former fixture-local BlockingMockPty (an in-memory PTY with real blocking-read semantics
+// for tests running a LIVE session read loop) now ships as vtpty::ChannelPty, so production
+// remote sessions run on the identical Pty.
 
 /// Builds a ContourGuiApp whose parameters() are populated with defaults (so profileName() resolves
 /// to the default "main" profile) without running the GUI. The default-constructed config already

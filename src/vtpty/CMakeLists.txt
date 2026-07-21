@@ -16,6 +16,7 @@ endif()
 set(vtpty_LIBRARIES crispy::core Microsoft.GSL::GSL)
 
 set(vtpty_SOURCES
+    ChannelPty.cpp
     MockPty.cpp
     MockViewPty.cpp
     Process${PLATFORM_SUFFIX}.cpp
@@ -23,6 +24,7 @@ set(vtpty_SOURCES
 )
 
 set(vtpty_HEADERS
+    ChannelPty.h
     ImageSize.h
     MockPty.h
     MockViewPty.h
@@ -98,6 +100,7 @@ if(VTPTY_TESTING)
     enable_testing()
     add_executable(vtpty_test
         test_main.cpp
+        ChannelPty_test.cpp
         ImageSize_test.cpp
     )
     target_link_libraries(vtpty_test vtpty crispy::core Catch2::Catch2)
