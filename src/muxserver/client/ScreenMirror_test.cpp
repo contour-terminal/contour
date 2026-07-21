@@ -228,6 +228,42 @@ TEST_CASE("wide characters and scaled text reproduce in the mirror", "[muxserver
     h.loop.blockOn(drive(&h, std::move(scenario)));
 }
 
+TEST_CASE("input-relevant DEC modes mirror into the local terminal", "[muxserver][mirror]")
+{
+    auto h = MirrorHarness {};
+    h.host.createTab();
+    auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    h.serverTerminal(session)->writeToScreen("prompt");
+
+    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+        co_await waitUntil(&h->loop, [&] {
+            return h->mirror->primaryScreen().grid().renderMainPageText().contains("prompt");
+        });
+        CHECK(h->mirror->isModeEnabled(vtbackend::DECMode::VisibleCursor));
+        CHECK(!h->mirror->isModeEnabled(vtbackend::DECMode::MouseSGR));
+
+        // The app (vim, say) flips input modes WITHOUT touching any cell —
+        // the pure-mode delta must still reach the mirror.
+        serverWrites(h, session, "\033[?1h\033[?1000h\033[?1006h\033[?2004h\033[?25l");
+        co_await waitUntil(&h->loop, [&] { return h->mirror->isModeEnabled(vtbackend::DECMode::MouseSGR); });
+        CHECK(h->mirror->isModeEnabled(vtbackend::DECMode::UseApplicationCursorKeys));
+        CHECK(h->mirror->isModeEnabled(vtbackend::DECMode::MouseProtocolNormalTracking));
+        CHECK(h->mirror->isModeEnabled(vtbackend::DECMode::BracketedPaste));
+        CHECK(!h->mirror->isModeEnabled(vtbackend::DECMode::VisibleCursor));
+
+        // And back off again.
+        serverWrites(h, session, "\033[?1l\033[?1000l\033[?1006l\033[?2004l\033[?25h");
+        co_await waitUntil(&h->loop, [&] { return !h->mirror->isModeEnabled(vtbackend::DECMode::MouseSGR); });
+        CHECK(!h->mirror->isModeEnabled(vtbackend::DECMode::UseApplicationCursorKeys));
+        CHECK(!h->mirror->isModeEnabled(vtbackend::DECMode::BracketedPaste));
+        CHECK(h->mirror->isModeEnabled(vtbackend::DECMode::VisibleCursor));
+
+        h->client->detach();
+    }(&h, session);
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+
 TEST_CASE("a resize resyncs the mirror through a full replay", "[muxserver][mirror]")
 {
     auto h = MirrorHarness {};

@@ -87,7 +87,8 @@ TEST_CASE("every catalog PDU round-trips", "[muxserver][proto]")
                                                  .imageId = 77,
                                                  .offsetLine = 0,
                                                  .offsetColumn = 1,
-                                                 .layer = 2 } } },
+                                                 .layer = 2 } },
+                .setModes = { 1, 25, 1006, 2004 } },
     };
 
     for (auto const& pdu: pdus)

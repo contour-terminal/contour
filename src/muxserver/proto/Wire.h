@@ -25,7 +25,7 @@ namespace muxserver::proto
 {
 
 /// The protocol revision exchanged in the Hello handshake before anything else.
-constexpr uint32_t CodecVersion = 1;
+constexpr uint32_t CodecVersion = 2;
 
 /// Why a decode could not produce a value. NeedMoreData is a NON-error state:
 /// the caller reads more bytes and retries.

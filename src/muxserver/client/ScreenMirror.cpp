@@ -15,6 +15,7 @@
 #include <string_view>
 #include <unordered_map>
 
+#include <muxserver/MirroredModes.h>
 #include <muxserver/client/TtyRenderer.h>
 
 namespace muxserver::client
@@ -250,10 +251,29 @@ std::string ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& 
             paintRow(out, screen, id, id - newBase + 1);
     }
 
+    syncModes(out, screen);
     out += "\033[0m";
     out += cup(delta.cursorLine + 1, delta.cursorColumn + 1);
-    out += "\033[?25h";
+    if (_setModes.contains(VisibleCursorModeNumber))
+        out += "\033[?25h";
     return out;
+}
+
+void ScreenMirror::syncModes(std::string& out, RemoteScreen const& screen)
+{
+    auto const target = std::set<uint32_t>(screen.setModes.begin(), screen.setModes.end());
+    for (auto const mode: MirroredModes)
+    {
+        auto const number = vtbackend::toDECModeNum(mode);
+        if (number == VisibleCursorModeNumber)
+            continue; // handled by the paint epilogue: hidden while painting
+        auto const want = target.contains(number);
+        if (_modesKnown && want == _setModes.contains(number))
+            continue;
+        out += std::format("\033[?{}{}", number, want ? 'h' : 'l');
+    }
+    _setModes = target;
+    _modesKnown = true;
 }
 
 std::string ScreenMirror::fullReplay(RemoteScreen const& screen)
@@ -297,9 +317,11 @@ std::string ScreenMirror::fullReplay(RemoteScreen const& screen)
         paintRow(out, screen, screen.viewportBase + line, line + 1);
 
     out += std::format("\033]0;{}\033\\", screen.title);
+    syncModes(out, screen);
     out += "\033[0m";
     out += cup(screen.cursorLine + 1, screen.cursorColumn + 1);
-    out += "\033[?25h";
+    if (_setModes.contains(VisibleCursorModeNumber))
+        out += "\033[?25h";
     return out;
 }
 

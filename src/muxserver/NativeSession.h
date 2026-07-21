@@ -16,6 +16,7 @@
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include <coro/Task.hpp>
 #include <muxserver/SessionHost.h>
@@ -50,6 +51,7 @@ class NativeSession final: public SessionStreamEvents
     {
         vtbackend::GridDeltaCursor cursor;
         std::unordered_set<uint16_t> sentHyperlinks;
+        std::vector<uint32_t> lastModes; ///< Mirrored-mode set as last sent.
     };
 
     void handlePdu(proto::DecodedFrame const& frame);

@@ -17,6 +17,7 @@
 /// page, so the mirror's scrollback is real scrollback.
 
 #include <cstdint>
+#include <set>
 #include <string>
 
 #include <muxserver/client/AttachClient.h>
@@ -43,12 +44,18 @@ class ScreenMirror
     [[nodiscard]] std::string fullReplay(RemoteScreen const& screen);
 
   private:
+    /// Emits DECSET/DECRST for every mirrored mode whose state differs from
+    /// what the mirror terminal was last told, and remembers the new state.
+    void syncModes(std::string& out, RemoteScreen const& screen);
+
     bool _primed = false;
     uint64_t _generation = 0;
     int64_t _viewportBase = 0;
     uint32_t _columns = 0;
     uint32_t _lines = 0;
     uint8_t _screenType = 0;
+    std::set<uint32_t> _setModes;
+    bool _modesKnown = false;
 };
 
 } // namespace muxserver::client

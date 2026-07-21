@@ -189,6 +189,10 @@ namespace
             out.u16(entry.offsetColumn);
             out.u8(entry.layer);
         }
+
+        out.varint(pdu.setModes.size());
+        for (auto const mode: pdu.setModes)
+            out.varint(mode);
     }
 
     // --- body decoders (one table row each) ---------------------------------
@@ -388,6 +392,18 @@ namespace
                 || !assign(in.u16(), entry.offsetColumn, error) || !assign(in.u8(), entry.layer, error))
                 return std::unexpected(error);
             pdu.imageCells.push_back(entry);
+        }
+
+        auto setModes = std::size_t {};
+        if (!assign(in.varint(), setModes, error))
+            return std::unexpected(error);
+        pdu.setModes.reserve(setModes);
+        for (std::size_t i = 0; i < setModes; ++i)
+        {
+            auto mode = uint32_t {};
+            if (!assign(in.varint(), mode, error))
+                return std::unexpected(error);
+            pdu.setModes.push_back(mode);
         }
         return pdu;
     }

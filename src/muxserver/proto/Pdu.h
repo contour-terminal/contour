@@ -190,6 +190,11 @@ struct Delta
     std::vector<WireLine> lines;
     std::vector<HyperlinkEntry> hyperlinks;
     std::vector<ImageCellEntry> imageCells;
+    /// The DEC private modes (by DECSET number) currently SET on the hosted
+    /// terminal, restricted to the mirrored-mode table — sent complete with
+    /// every delta so clients replay input-relevant state (cursor keys,
+    /// mouse, bracketed paste, focus, cursor visibility) by diffing.
+    std::vector<uint32_t> setModes;
     bool operator==(Delta const&) const = default;
 };
 

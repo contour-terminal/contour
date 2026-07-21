@@ -16,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 #include <coro/Task.hpp>
 #include <muxserver/proto/Pdu.h>
@@ -45,6 +46,8 @@ struct RemoteScreen
     std::map<int64_t, proto::WireLine> rows;
     /// Hyperlink id → URI, merged from the deltas' side tables.
     std::unordered_map<uint16_t, std::string> hyperlinks;
+    /// The mirrored DEC private modes currently SET remotely (by number).
+    std::vector<uint32_t> setModes;
 
     /// How many rows above the viewport to keep as client-side scrollback.
     static constexpr int64_t HistoryKeep = 10000;

@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include <muxserver/MirroredModes.h>
 #include <muxserver/PduPump.h>
 #include <net/Sockets.h>
 #include <vtmux/Pane.h>
@@ -188,6 +189,10 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
         delta.cursorLine = unbox<int32_t>(cursor.line);
         delta.cursorColumn = unbox<int32_t>(cursor.column);
 
+        for (auto const mode: MirroredModes)
+            if (terminal->isModeEnabled(mode))
+                delta.setModes.push_back(vtbackend::toDECModeNum(mode));
+
         for (auto const id: hyperlinkIds)
         {
             auto const info = terminal->hyperlinks().hyperlinkById(vtbackend::HyperlinkId { id });
@@ -211,8 +216,14 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
         state.title = terminal->windowTitle();
         send(0, proto::DecodedPdu { state });
     }
-    if (delta.snapshot != 0 || !delta.lines.empty())
+    // A pure mode flip (an app enabling mouse tracking, say) changes no cell,
+    // yet clients must hear about it to encode input correctly.
+    auto const modesChanged = delta.setModes != follow.lastModes;
+    if (delta.snapshot != 0 || !delta.lines.empty() || modesChanged)
+    {
+        follow.lastModes = delta.setModes;
         send(0, proto::DecodedPdu { delta });
+    }
 }
 
 void NativeSession::handlePdu(proto::DecodedFrame const& frame)

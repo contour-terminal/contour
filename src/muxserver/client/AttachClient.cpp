@@ -42,6 +42,7 @@ void RemoteScreen::apply(proto::Delta const& delta)
     viewportBase = delta.stableViewportBase;
     cursorLine = delta.cursorLine;
     cursorColumn = delta.cursorColumn;
+    setModes = delta.setModes;
 
     for (auto const& line: delta.lines)
         rows.insert_or_assign(line.stableId, line);
