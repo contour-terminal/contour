@@ -148,12 +148,16 @@ void AttachController::onUpdate(RemoteScreen const& screen, muxserver::proto::De
         return;
     }
 
-    _pendingColumns[screen.session] = screen.columns;
-    _pendingLines[screen.session] = screen.lines;
-    if (std::ranges::contains(_pending, screen.session))
+    if (auto const known = std::ranges::find(_pending, screen.session, &PendingSession::session);
+        known != _pending.end())
+    {
+        known->columns = screen.columns;
+        known->lines = screen.lines;
         return;
+    }
 
-    _pending.push_back(screen.session);
+    _pending.push_back(
+        PendingSession { .session = screen.session, .columns = screen.columns, .lines = screen.lines });
     if (_state == State::Connecting)
         _state = State::Ready;
     lock.unlock();
@@ -218,12 +222,10 @@ std::unique_ptr<vtpty::Pty> AttachController::createPty(std::optional<std::strin
         return std::make_unique<vtpty::ChannelPty>(fallback);
     }
 
-    auto const session = _pending.front();
+    auto const [session, pendingColumns, pendingLines] = _pending.front();
     _pending.pop_front();
-    auto const columns = static_cast<int>(_pendingColumns[session]);
-    auto const lines = static_cast<int>(_pendingLines[session]);
-    _pendingColumns.erase(session);
-    _pendingLines.erase(session);
+    auto const columns = static_cast<int>(pendingColumns);
+    auto const lines = static_cast<int>(pendingLines);
 
     // Born at the REMOTE size so the mirror's first replay paints a matching
     // grid; the display's own resize then proposes the local size upstream.

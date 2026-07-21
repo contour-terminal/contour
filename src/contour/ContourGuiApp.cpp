@@ -135,8 +135,7 @@ int ContourGuiApp::attachAction()
     else
     {
         // The native protocol is served beside the control socket.
-        auto socketPath = muxserver::muxSocketPath(label, socketOption);
-        socketPath += "-native";
+        auto const socketPath = muxserver::nativeSocketPath(muxserver::muxSocketPath(label, socketOption));
 
         _attachController = std::make_unique<AttachController>(socketPath);
         if (auto connected = _attachController->connectAndWait(std::chrono::seconds(5)); !connected)

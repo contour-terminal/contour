@@ -96,6 +96,14 @@ class AttachController final: public QObject, public SessionFactory
   private:
     class BoundChannelPty;
 
+    /// One discovered remote session awaiting a local tab.
+    struct PendingSession
+    {
+        uint64_t session = 0;
+        uint32_t columns = 80;
+        uint32_t lines = 25;
+    };
+
     /// One remote session's local binding: the (terminal-owned) pty the
     /// mirror feeds, plus the mirror's reserialization state.
     struct Binding
@@ -135,9 +143,7 @@ class AttachController final: public QObject, public SessionFactory
     };
     State _state = State::Connecting;
     std::string _failure;
-    std::deque<uint64_t> _pending; ///< Discovered remote sessions without a local tab.
-    std::unordered_map<uint64_t, uint32_t> _pendingColumns;
-    std::unordered_map<uint64_t, uint32_t> _pendingLines;
+    std::deque<PendingSession> _pending; ///< Discovered remote sessions without a local tab.
     std::unordered_map<uint64_t, Binding> _bindings;
     muxserver::client::AttachClient* _client = nullptr; ///< Reactor-owned; valid while serving.
     bool _stopped = false;

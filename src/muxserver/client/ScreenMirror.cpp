@@ -10,9 +10,11 @@
 #include <algorithm>
 #include <format>
 #include <iterator>
+#include <optional>
 #include <ranges>
 #include <set>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 
 #include <muxserver/MirroredModes.h>
@@ -79,6 +81,13 @@ namespace
         out += std::format("\033]8;id={};{}\033\\", id, it != uris.end() ? it->second : std::string {});
     }
 
+    /// The attribute tuple deciding whether a cell needs a fresh SGR — cheap
+    /// to compare, so runs of equal cells never re-format the sequence.
+    [[nodiscard]] constexpr auto sgrKeyOf(proto::WireCell const& cell) noexcept
+    {
+        return std::tuple { cell.flags, cell.foreground, cell.background, cell.underlineColor };
+    }
+
     /// Renders @p row's cells at the current cursor position.
     ///
     /// @p faithful selects viewport semantics: orphan continuation cells are
@@ -91,7 +100,7 @@ namespace
                      std::unordered_map<uint16_t, std::string> const& uris,
                      bool faithful)
     {
-        auto previousSgr = std::string {};
+        auto previousSgrKey = std::optional<decltype(sgrKeyOf(proto::WireCell {}))> {};
         auto currentLink = uint16_t { 0 };
         auto covered = 0;     // columns the previous emission already advanced over
         auto pendingSkip = 0; // orphan continuation columns awaiting a cursor step
@@ -129,11 +138,10 @@ namespace
                 appendHyperlink(out, cell.hyperlink, uris);
                 currentLink = cell.hyperlink;
             }
-            auto sgr = sgrFor(cell);
-            if (sgr != previousSgr)
+            if (auto const key = sgrKeyOf(cell); previousSgrKey != key)
             {
-                out += sgr;
-                previousSgr = std::move(sgr);
+                out += sgrFor(cell);
+                previousSgrKey = key;
             }
 
             if (cell.codepoint == 0)
@@ -176,11 +184,11 @@ namespace
     /// its head row must repaint afterwards.
     void expandForBlocks(std::set<int64_t>& ids, RemoteScreen const& screen, int64_t lowest)
     {
-        auto pending = std::set<int64_t> { ids };
+        auto pending = std::vector<int64_t>(ids.begin(), ids.end()); // plain worklist, no tree churn
         while (!pending.empty())
         {
-            auto const id = *pending.begin();
-            pending.erase(pending.begin());
+            auto const id = pending.back();
+            pending.pop_back();
             auto const it = screen.rows.find(id);
             if (it == screen.rows.end())
                 continue;
@@ -197,7 +205,7 @@ namespace
                 if (candidate < lowest || !screen.rows.contains(candidate))
                     break;
                 if (ids.insert(candidate).second)
-                    pending.insert(candidate);
+                    pending.push_back(candidate);
             }
         }
     }
@@ -254,25 +262,25 @@ std::string ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& 
     syncModes(out, screen);
     out += "\033[0m";
     out += cup(delta.cursorLine + 1, delta.cursorColumn + 1);
-    if (_setModes.contains(VisibleCursorModeNumber))
+    if (std::ranges::contains(_setModes, VisibleCursorModeNumber))
         out += "\033[?25h";
     return out;
 }
 
 void ScreenMirror::syncModes(std::string& out, RemoteScreen const& screen)
 {
-    auto const target = std::set<uint32_t>(screen.setModes.begin(), screen.setModes.end());
     for (auto const mode: MirroredModes)
     {
         auto const number = vtbackend::toDECModeNum(mode);
         if (number == VisibleCursorModeNumber)
             continue; // handled by the paint epilogue: hidden while painting
-        auto const want = target.contains(number);
-        if (_modesKnown && want == _setModes.contains(number))
+        auto const want = std::ranges::contains(screen.setModes, number);
+        if (_modesKnown && want == std::ranges::contains(_setModes, number))
             continue;
         out += std::format("\033[?{}{}", number, want ? 'h' : 'l');
     }
-    _setModes = target;
+    // A copy of <= 15 ints per delta beats per-delta tree allocations.
+    _setModes = screen.setModes;
     _modesKnown = true;
 }
 
@@ -320,7 +328,7 @@ std::string ScreenMirror::fullReplay(RemoteScreen const& screen)
     syncModes(out, screen);
     out += "\033[0m";
     out += cup(screen.cursorLine + 1, screen.cursorColumn + 1);
-    if (_setModes.contains(VisibleCursorModeNumber))
+    if (std::ranges::contains(_setModes, VisibleCursorModeNumber))
         out += "\033[?25h";
     return out;
 }

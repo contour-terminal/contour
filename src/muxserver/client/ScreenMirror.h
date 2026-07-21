@@ -17,8 +17,8 @@
 /// page, so the mirror's scrollback is real scrollback.
 
 #include <cstdint>
-#include <set>
 #include <string>
+#include <vector>
 
 #include <muxserver/client/AttachClient.h>
 #include <muxserver/proto/Pdu.h>
@@ -54,7 +54,7 @@ class ScreenMirror
     uint32_t _columns = 0;
     uint32_t _lines = 0;
     uint8_t _screenType = 0;
-    std::set<uint32_t> _setModes;
+    std::vector<uint32_t> _setModes;
     bool _modesKnown = false;
 };
 

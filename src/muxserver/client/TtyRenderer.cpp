@@ -10,6 +10,8 @@
 #include <bit>
 #include <format>
 #include <iterator>
+#include <optional>
+#include <tuple>
 #include <utility>
 
 namespace muxserver::client
@@ -84,11 +86,14 @@ std::string renderViewport(RemoteScreen const& screen)
 {
     auto out = std::string { "\033[?25l" }; // hide the cursor while painting
 
-    auto previousSgr = std::string {};
+    // Compare the raw attribute words, not formatted strings: runs of equal
+    // cells (the common case) then never re-format the SGR sequence.
+    using SgrKey = std::tuple<uint32_t, uint32_t, uint32_t, uint32_t>;
+    auto previousSgrKey = std::optional<SgrKey> {};
     for (auto line = int32_t { 0 }; std::cmp_less(line, screen.lines); ++line)
     {
         out += std::format("\033[{};1H\033[0m\033[2K", line + 1);
-        previousSgr.clear();
+        previousSgrKey.reset();
 
         auto const* row = screen.rowAt(line);
         if (row == nullptr)
@@ -104,11 +109,11 @@ std::string renderViewport(RemoteScreen const& screen)
                     continue; // the wide glyph already covered this column
             }
 
-            auto sgr = sgrFor(cell);
-            if (sgr != previousSgr)
+            if (auto const key = SgrKey { cell.flags, cell.foreground, cell.background, cell.underlineColor };
+                previousSgrKey != key)
             {
-                out += sgr;
-                previousSgr = std::move(sgr);
+                out += sgrFor(cell);
+                previousSgrKey = key;
             }
 
             if (cell.codepoint == 0)

@@ -179,6 +179,17 @@ TerminalSession* TerminalSessionManager::createBackingSession(
     std::optional<vtpty::Process::ExecInfo> const& commandOverride,
     std::optional<std::string> const& profileName)
 {
+    // The chokepoint guard: every creation path funnels through here, so a
+    // future entry point that forgets its own fail-fast check still cannot
+    // mint a backing pty the factory refuses (e.g. a local shell inside an
+    // attach-mode mirror window). The entry points keep their earlier checks
+    // for whole-operation fail-fast semantics.
+    if (!_sessionFactory.canCreateSession())
+    {
+        managerLog()("Refusing to create a backing session: the factory cannot back one right now.");
+        return nullptr;
+    }
+
     // The command this session ACTUALLY runs: an explicit override wins; otherwise, a session on
     // the app-default profile inherits the CLI-verbatim command (`contour terminal PROGRAM ...`),
     // which mutated that profile's shell for the whole process — so SaveLayout can capture it.
@@ -1314,7 +1325,8 @@ void TerminalSessionManager::splitActivePane(bool vertical, TerminalSession* act
     // _pendingSessionId, so the model allocator (invoked inside splitActivePane) hands back exactly
     // this id — same backing-session-first order as createSessionInBackground/createTab.
     auto const newSessionId = vtmux::SessionId { _nextSessionId++ };
-    createBackingSession(newSessionId, std::move(cwd), pageSize);
+    if (createBackingSession(newSessionId, std::move(cwd), pageSize) == nullptr)
+        return; // no backing session, no split
 
     auto const direction = vertical ? vtmux::SplitState::Vertical : vtmux::SplitState::Horizontal;
     auto* newLeaf = _model->splitActivePane(tab->id(), direction);

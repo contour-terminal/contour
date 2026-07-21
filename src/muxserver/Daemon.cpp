@@ -9,11 +9,13 @@
 #include <print>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include <coro/WhenAll.hpp>
 #include <muxserver/MuxServer.h>
 #include <muxserver/NativeSession.h>
 #include <muxserver/SessionHost.h>
+#include <muxserver/SocketPath.h>
 #include <muxserver/client/AttachClient.h>
 #include <muxserver/client/TtyRenderer.h>
 #include <muxserver/tmux/ControlSession.h>
@@ -39,8 +41,6 @@
 namespace muxserver
 {
 
-#ifndef _WIN32
-
 namespace
 {
     /// Drives every protocol server's accept loop on the one reactor.
@@ -53,6 +53,8 @@ namespace
         co_await coro::whenAll(std::move(accepts));
     }
 } // namespace
+
+#ifndef _WIN32
 
 int runDaemon(DaemonConfig const& config)
 {
@@ -78,7 +80,7 @@ int runDaemon(DaemonConfig const& config)
     auto server = MuxServer { loop, std::move(*listener), tmux::makeControlModeHandler(loop, host) };
 
     // The native cells+deltas protocol listens beside the control-mode socket.
-    auto const nativePath = config.socketPath.string() + "-native";
+    auto const nativePath = nativeSocketPath(config.socketPath).string();
     auto nativeListener = net::listenUnix(loop, nativePath);
     if (!nativeListener)
     {
@@ -89,7 +91,7 @@ int runDaemon(DaemonConfig const& config)
 
     // The imsg endpoint serves the REAL tmux client binary
     // (`tmux -S <socket>-tmux -C attach-session`).
-    auto const imsgPath = config.socketPath.string() + "-tmux";
+    auto const imsgPath = tmuxSocketPath(config.socketPath).string();
     auto imsgListener = net::listenUnix(loop, imsgPath);
     if (!imsgListener)
     {
@@ -264,7 +266,7 @@ int runAttach(std::filesystem::path const& socketPath)
 
     auto exitCode = EXIT_SUCCESS;
     // The daemon's native protocol listens beside the control-mode socket.
-    loop.blockOn(attachFlow(&loop, socketPath.string() + "-native", &exitCode));
+    loop.blockOn(attachFlow(&loop, nativeSocketPath(socketPath).string(), &exitCode));
     return exitCode;
 }
 
@@ -310,7 +312,7 @@ int runDaemon(DaemonConfig const& config)
     }
     auto server = MuxServer { loop, std::move(*listener), tmux::makeControlModeHandler(loop, host) };
 
-    auto const nativePath = config.socketPath.string() + "-native";
+    auto const nativePath = nativeSocketPath(config.socketPath).string();
     auto nativeListener = net::listenUnix(loop, nativePath);
     if (!nativeListener)
     {
@@ -332,10 +334,7 @@ int runDaemon(DaemonConfig const& config)
 
     std::println(
         stderr, "contour daemon: serving on {} (native: {})", config.socketPath.string(), nativePath);
-    auto serveBoth = [](MuxServer* control, MuxServer* native) -> coro::Task<void> {
-        co_await coro::whenAll(control->serve(), native->serve());
-    };
-    loop.blockOn(serveBoth(&server, &nativeServer));
+    loop.blockOn(serveAll({ &server, &nativeServer }));
 
     ::SetConsoleCtrlHandler(consoleCtrlHandler, FALSE);
     gConsoleShutdown = nullptr;
@@ -469,9 +468,7 @@ int runAttach(std::filesystem::path const& socketPath)
 {
     auto source = net::PollEventSource {};
     auto loop = net::EventLoop { source };
-    auto nativePath = socketPath;
-    nativePath += "-native";
-    return loop.blockOn(attachFlowWin32(&loop, nativePath));
+    return loop.blockOn(attachFlowWin32(&loop, nativeSocketPath(socketPath)));
 }
 
 #endif // _WIN32

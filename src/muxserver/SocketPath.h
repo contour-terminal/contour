@@ -75,4 +75,23 @@ namespace muxserver
                          crispy::environment::get("XDG_RUNTIME_DIR"));
 }
 
+// The daemon's sibling endpoints derive from the control-socket path by
+// suffix. These helpers are the ONLY place the convention lives; every
+// consumer (GUI, POSIX daemon, Win32 daemon, attach flows) derives through
+// them.
+
+/// @return The native cells+deltas endpoint beside @p controlSocket.
+[[nodiscard]] inline std::filesystem::path nativeSocketPath(std::filesystem::path controlSocket)
+{
+    controlSocket += "-native";
+    return controlSocket;
+}
+
+/// @return The binary-tmux (imsg) endpoint beside @p controlSocket.
+[[nodiscard]] inline std::filesystem::path tmuxSocketPath(std::filesystem::path controlSocket)
+{
+    controlSocket += "-tmux";
+    return controlSocket;
+}
+
 } // namespace muxserver
