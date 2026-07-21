@@ -13,6 +13,7 @@
     #include <fcntl.h>
     #include <unistd.h>
 
+    #include <net/posix/FdUtils.h>
     #include <net/posix/PosixSocket.h>
 
 namespace net
@@ -20,15 +21,59 @@ namespace net
 
 namespace
 {
-    /// Makes @p fd non-blocking and close-on-exec.
-    /// @return True on success.
-    [[nodiscard]] bool makeNonBlockingCloexec(int fd) noexcept
+    /// A minimal owning file-descriptor guard: closes the descriptor on
+    /// destruction. Keeps the liveness probe leak-free on every exit path without
+    /// reaching up into a higher layer's `UniqueFd`.
+    class ScopedFd
     {
-        auto flags = ::fcntl(fd, F_GETFL, 0);
-        if (flags < 0 || ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0)
-            return false;
-        auto fdFlags = ::fcntl(fd, F_GETFD, 0);
-        return fdFlags >= 0 && ::fcntl(fd, F_SETFD, fdFlags | FD_CLOEXEC) >= 0;
+      public:
+        explicit ScopedFd(int fd) noexcept: _fd(fd) {}
+        ~ScopedFd()
+        {
+            if (_fd >= 0)
+                ::close(_fd);
+        }
+
+        ScopedFd(ScopedFd const&) = delete;
+        ScopedFd& operator=(ScopedFd const&) = delete;
+        ScopedFd(ScopedFd&&) = delete;
+        ScopedFd& operator=(ScopedFd&&) = delete;
+
+        /// @return The owned descriptor (negative if the socket failed to open).
+        [[nodiscard]] int get() const noexcept { return _fd; }
+
+      private:
+        int _fd;
+    };
+
+    /// Probes whether a live server owns the socket file at @p path before it is
+    /// reclaimed for binding. Mirrors tmux: connect() to the path first, and only
+    /// let the caller unlink a socket that no server answers.
+    /// @param address The AF_UNIX address already populated for @p path.
+    /// @param path The socket file path, for diagnostics.
+    /// @return Nothing when the path is safe to (re)bind — either absent, or a
+    ///         stale socket a crashed server left behind. Otherwise a @c NetError:
+    ///         @c AddressInUse when a live server answers, or @c Other when the
+    ///         probe fails for a reason that must not lead to unlinking the file.
+    [[nodiscard]] std::expected<void, NetError> probeSocketOwner(sockaddr_un const& address,
+                                                                 std::string const& path)
+    {
+        // Non-blocking so a live-but-saturated server (full listen backlog) cannot
+        // stall startup on the connect; a pending connect still proves it is alive.
+        auto const fd = ScopedFd { makeStreamSocket(AF_UNIX, 0) };
+        if (fd.get() < 0)
+            return std::unexpected(makeNetError(NetErrorCode::Other, errno, "probe socket"));
+
+        auto const rc = ::connect(fd.get(), reinterpret_cast<sockaddr const*>(&address), sizeof(address));
+        auto const err = errno;
+        if (rc == 0 || err == EINPROGRESS || err == EAGAIN || err == EWOULDBLOCK)
+            // Connected, or a connect pending against a live listener: it is alive.
+            return std::unexpected(
+                makeNetError(NetErrorCode::AddressInUse, EADDRINUSE, "a daemon is already serving " + path));
+        if (err == ECONNREFUSED || err == ENOENT)
+            return {}; // a crashed server's stale socket, or the path is simply gone
+        // e.g. EACCES: do not unlink a file we merely cannot reach.
+        return std::unexpected(makeNetError(NetErrorCode::Other, err, "probe connect " + path));
     }
 } // namespace
 
@@ -99,8 +144,13 @@ std::expected<std::unique_ptr<UnixListener>, NetError> UnixListener::bind(EventL
     address.sun_family = AF_UNIX;
     std::memcpy(address.sun_path, pathString.c_str(), pathString.size() + 1);
 
-    // Unlink a stale socket file: a previous server that crashed leaves one
-    // behind, and bind() refuses an existing path.
+    // Never hijack a live daemon: probe the path first (tmux does the same) and
+    // reclaim it only when no server answers. A live server yields AddressInUse.
+    if (auto const probe = probeSocketOwner(address, pathString); !probe)
+        return std::unexpected(probe.error());
+
+    // Safe to reclaim: unlink a stale socket file a crashed server left behind
+    // (bind() refuses an existing path). A no-op when the path is already gone.
     ::unlink(pathString.c_str());
 
     auto const fd = ::socket(AF_UNIX, SOCK_STREAM, 0);

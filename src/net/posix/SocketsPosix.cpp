@@ -16,37 +16,13 @@
     #include <unistd.h>
 
     #include <net/platform/WinsockInit.h>
+    #include <net/posix/FdUtils.h>
     #include <net/posix/PosixListener.h>
     #include <net/posix/PosixSocket.h>
     #include <net/posix/UnixListener.h>
 
 namespace net
 {
-
-namespace
-{
-    /// Creates a non-blocking, close-on-exec stream socket portably: Linux sets the
-    /// flags atomically on socket(); macOS/BSD (which lack SOCK_NONBLOCK/SOCK_CLOEXEC
-    /// as socket() type flags) create it plain and set the flags via fcntl.
-    /// @param family Address family (AF_INET / AF_INET6).
-    /// @param protocol Protocol (usually 0).
-    /// @return The fd, or -1 on failure (errno set).
-    [[nodiscard]] int makeStreamSocket(int family, int protocol) noexcept
-    {
-    #if defined(SOCK_NONBLOCK) && defined(SOCK_CLOEXEC)
-        return ::socket(family, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, protocol);
-    #else
-        auto const fd = ::socket(family, SOCK_STREAM, protocol);
-        if (fd < 0)
-            return fd;
-        if (auto const flags = ::fcntl(fd, F_GETFL, 0); flags >= 0)
-            ::fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-        if (auto const fdFlags = ::fcntl(fd, F_GETFD, 0); fdFlags >= 0)
-            ::fcntl(fd, F_SETFD, fdFlags | FD_CLOEXEC);
-        return fd;
-    #endif
-    }
-} // namespace
 
 std::expected<std::unique_ptr<IListener>, NetError> listen(EventLoop& loop,
                                                            std::string_view host,

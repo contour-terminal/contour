@@ -40,13 +40,16 @@ class UnixListener final: public IListener
     /// Binds and listens on the socket file @p path.
     ///
     /// The parent directory is created/verified via ensureOwnedPrivateDirectory
-    /// first; a stale socket file at @p path is unlinked before binding (a live
-    /// server would be holding it — the caller is expected to have ensured no
-    /// other server owns this path). The socket file itself is chmod'd 0600.
+    /// first. The path is then probed the way tmux does — a client connect() — so
+    /// a live daemon is never hijacked: if a server answers, the bind fails with
+    /// @c NetErrorCode::AddressInUse and the existing socket is left intact; only a
+    /// stale socket (a crashed server's leftover) or an absent path is reclaimed
+    /// and rebound. The socket file itself is chmod'd 0600.
     /// @param loop The loop whose reactor drives accept readiness (not owned).
     /// @param path The socket file path (its parent is the hardened directory).
     /// @param backlog The listen backlog.
-    /// @return The bound listener, or a @c NetError on failure.
+    /// @return The bound listener, or a @c NetError on failure
+    ///         (@c NetErrorCode::AddressInUse when a live daemon already owns @p path).
     [[nodiscard]] static std::expected<std::unique_ptr<UnixListener>, NetError> bind(
         EventLoop& loop, std::filesystem::path const& path, int backlog = 128);
 

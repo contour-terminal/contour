@@ -15,6 +15,7 @@
     #include <unistd.h>
 
     #include <arpa/inet.h>
+    #include <net/posix/FdUtils.h>
     #include <netinet/in.h>
 
 namespace net
@@ -22,17 +23,6 @@ namespace net
 
 namespace
 {
-    /// Makes @p fd non-blocking and close-on-exec.
-    /// @return True on success.
-    [[nodiscard]] bool makeNonBlockingCloexec(int fd) noexcept
-    {
-        auto flags = ::fcntl(fd, F_GETFL, 0);
-        if (flags < 0 || ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0)
-            return false;
-        auto fdFlags = ::fcntl(fd, F_GETFD, 0);
-        return fdFlags >= 0 && ::fcntl(fd, F_SETFD, fdFlags | FD_CLOEXEC) >= 0;
-    }
-
     /// Formats a connected peer's address as a printable host string.
     /// @param addr The peer's address storage.
     /// @return The printable host, or "" if it cannot be formatted.
