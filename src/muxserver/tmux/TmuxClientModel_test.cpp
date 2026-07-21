@@ -3,10 +3,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <coro/WhenAll.hpp>
 #include <muxserver/SessionHost.h>
@@ -168,6 +170,10 @@ struct RecordingModelEvents final: muxserver::tmux::TmuxModelEvents
     {
         log.push_back(std::format("paneRemoved:{}:{}", window, pane));
     }
+    void paneMoved(uint64_t fromWindow, uint64_t toWindow, uint64_t pane) override
+    {
+        log.push_back(std::format("paneMoved:{}:{}:{}", fromWindow, toWindow, pane));
+    }
     void layoutTreeChanged(uint64_t window) override
     {
         log.push_back(std::format("layoutTreeChanged:{}", window));
@@ -211,10 +217,14 @@ TEST_CASE("injected sinks and observers see the mirrored structure", "[muxserver
     model.exited("done");
     model.windowClosed(7);
 
+    // %2 leaving the layout is not reported removed inside the prune ingest:
+    // that ingest cannot yet tell a close from a move to a sibling window, so
+    // the removal is confirmed at the next structural notification (the rename)
+    // once no adoption has claimed it.
     auto const expected = std::vector<std::string> {
-        "windowAdded:7",   "paneAdded:7:1:80x50", "paneAdded:7:2:79x50",     "layoutTreeChanged:7",
-        "paneRemoved:7:2", "layoutTreeChanged:7", "windowRenamed:7:renamed", "exited:done",
-        "paneRemoved:7:1", "windowClosed:7",
+        "windowAdded:7",       "paneAdded:7:1:80x50", "paneAdded:7:2:79x50",     "layoutTreeChanged:7",
+        "layoutTreeChanged:7", "paneRemoved:7:2",     "windowRenamed:7:renamed", "exited:done",
+        "paneRemoved:7:1",     "windowClosed:7",
     };
     CHECK(events.log == expected);
 
@@ -222,4 +232,55 @@ TEST_CASE("injected sinks and observers see the mirrored structure", "[muxserver
     model.unsubscribe(&events);
     model.windowAdded(9);
     CHECK(events.log == expected);
+}
+
+TEST_CASE("a pane moved between windows survives either layout-change order", "[muxserver][tmuxclient]")
+{
+    // No gateway: panes are backed by replay PaneViews (replayed immediately),
+    // so pane() resolves and %output routes to a real terminal we can inspect.
+    auto model = TmuxClientModel {};
+    auto events = RecordingModelEvents {};
+    model.subscribe(&events);
+
+    // @1 holds %1 and %2; @2 holds %3. Seed %2 with identifiable content so we
+    // can prove its terminal is re-parented, not destroyed and recreated.
+    model.layoutChanged(1, checksummedLayout("160x50,0,0{80x50,0,0,1,79x50,81,0,2}"));
+    model.layoutChanged(2, checksummedLayout("160x50,0,0,3"));
+    REQUIRE(model.paneCount() == 3);
+    model.outputReceived(2, "before-move");
+    REQUIRE(model.pane(2) != nullptr);
+    REQUIRE(model.pane(2)->pageText().contains("before-move"));
+
+    // join-pane moves %2 from @1 into @2. tmux emits a %layout-change for both
+    // windows; the model must survive whichever arrives first.
+    auto const dstAdopts = checksummedLayout("160x50,0,0{80x50,0,0,3,79x50,81,0,2}");
+    auto const srcDrops = checksummedLayout("160x50,0,0,1");
+
+    SECTION("destination-first (the reviewer's scenario)")
+    {
+        model.layoutChanged(2, dstAdopts); // @2 adopts %2 first
+        model.layoutChanged(1, srcDrops);  // @1's stale layout-change arrives after
+    }
+    SECTION("source-first (real tmux order: pane briefly in neither window)")
+    {
+        model.layoutChanged(1, srcDrops);  // @1 drops %2 first
+        model.layoutChanged(2, dstAdopts); // @2 adopts %2 after
+    }
+
+    // Whichever order: the live pane survived and now belongs to @2.
+    CHECK(model.paneCount() == 3);
+    REQUIRE(model.pane(2) != nullptr);
+    CHECK(model.windows().at(1).panes == std::vector<std::uint64_t> { 1 });
+    CHECK(model.windows().at(2).panes == std::vector<std::uint64_t> { 3, 2 });
+
+    // The move is reported as a re-parent, never as a destroy: no paneRemoved
+    // fires for the pane (its %output would otherwise be dropped afterwards).
+    CHECK(std::ranges::find(events.log, "paneMoved:1:2:2") != events.log.end());
+    CHECK(
+        std::ranges::none_of(events.log, [](std::string const& e) { return e.starts_with("paneRemoved"); }));
+
+    // The same terminal kept its prior content and still routes fresh %output.
+    CHECK(model.pane(2)->pageText().contains("before-move"));
+    model.outputReceived(2, "after-move");
+    CHECK(model.pane(2)->pageText().contains("after-move"));
 }

@@ -77,6 +77,10 @@ class TmuxModelEvents
     virtual void windowRenamed(uint64_t /*window*/, std::string const& /*name*/) {}
     virtual void paneAdded(uint64_t /*window*/, uint64_t /*pane*/, int /*columns*/, int /*lines*/) {}
     virtual void paneRemoved(uint64_t /*window*/, uint64_t /*pane*/) {}
+    /// A pane changed its owning window (tmux break-pane/join-pane) — the same
+    /// live pane, re-parented. Fired instead of a paneRemoved/paneAdded pair so
+    /// a frontend re-parents the existing view rather than destroying it.
+    virtual void paneMoved(uint64_t /*fromWindow*/, uint64_t /*toWindow*/, uint64_t /*pane*/) {}
     /// The window's split tree changed shape or ratios (after pane add/remove
     /// callbacks of the same ingest fired).
     virtual void layoutTreeChanged(uint64_t /*window*/) {}
@@ -134,15 +138,34 @@ class TmuxClientModel final: public GatewayEvents
     struct PaneEntry
     {
         std::unique_ptr<PaneSink> sink;
+        uint64_t window = 0; ///< The window currently owning this pane.
         bool replayed = false;
         std::string pendingOutput;
     };
+
+    /// Parks @p pane (removed from @p window's new layout) in `_detached`
+    /// instead of destroying it: a sibling window's next layout-change may
+    /// adopt it (tmux emits the source window's %layout-change before the
+    /// destination's, so a moved pane is briefly listed by neither). No-op if
+    /// @p pane is no longer owned by @p window.
+    void detachPane(uint64_t pane, uint64_t window);
+
+    /// Destroys every still-parked pane in `_detached`, firing paneRemoved for
+    /// each — they were not adopted by any window, so they are genuine closes.
+    ///
+    /// INVARIANT: every STRUCTURAL GatewayEvents handler (windowAdded/Closed/
+    /// Renamed, panePaused, sessionChanged, exited — and any future one) must
+    /// call this before applying its notification, so a move/close verdict is
+    /// settled first. Deliberately NOT called from outputReceived: an
+    /// interleaved %output must never destroy a pane mid-move.
+    void reconcileDetached();
 
     TmuxGateway* _gateway = nullptr;
     PaneSinkFactory _sinkFactory;
     std::vector<TmuxModelEvents*> _observers;
     std::map<uint64_t, WindowView> _windows;
     std::map<uint64_t, PaneEntry> _panes;
+    std::map<uint64_t, PaneEntry> _detached; ///< Panes awaiting a move/close verdict.
 };
 
 } // namespace muxserver::tmux

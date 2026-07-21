@@ -84,6 +84,7 @@ void TmuxClientModel::layoutChanged(uint64_t window, std::string_view layout)
 
 void TmuxClientModel::windowAdded(uint64_t window)
 {
+    reconcileDetached();
     if (_windows.try_emplace(window).second) // the layout arrives with %layout-change
         for (auto* observer: _observers)
             observer->windowAdded(window);
@@ -91,12 +92,16 @@ void TmuxClientModel::windowAdded(uint64_t window)
 
 void TmuxClientModel::windowClosed(uint64_t window)
 {
+    reconcileDetached();
     auto const it = _windows.find(window);
     if (it == _windows.end())
         return;
     for (auto const paneId: it->second.panes)
     {
-        _panes.erase(paneId);
+        auto const pane = _panes.find(paneId);
+        if (pane == _panes.end() || pane->second.window != window)
+            continue; // moved to another window before this close arrived
+        _panes.erase(pane);
         for (auto* observer: _observers)
             observer->paneRemoved(window, paneId);
     }
@@ -107,6 +112,7 @@ void TmuxClientModel::windowClosed(uint64_t window)
 
 void TmuxClientModel::windowRenamed(uint64_t window, std::string_view name)
 {
+    reconcileDetached();
     _windows[window].name = std::string { name };
     for (auto* observer: _observers)
         observer->windowRenamed(window, _windows[window].name);
@@ -114,12 +120,14 @@ void TmuxClientModel::windowRenamed(uint64_t window, std::string_view name)
 
 void TmuxClientModel::panePaused(uint64_t pane, bool paused)
 {
+    reconcileDetached();
     for (auto* observer: _observers)
         observer->panePaused(pane, paused);
 }
 
 void TmuxClientModel::exited(std::string_view reason)
 {
+    reconcileDetached();
     auto const copy = std::string { reason };
     for (auto* observer: _observers)
         observer->exited(copy);
@@ -127,6 +135,7 @@ void TmuxClientModel::exited(std::string_view reason)
 
 void TmuxClientModel::sessionChanged(uint64_t /*session*/, std::string_view /*name*/)
 {
+    reconcileDetached();
     if (_gateway == nullptr)
         return;
     // Enumerate the session's windows and ingest their layouts; new panes
@@ -169,36 +178,79 @@ void TmuxClientModel::ingestLayout(uint64_t window, std::string_view layout)
     {
         if (!leaf->paneId)
             continue;
-        view.panes.push_back(*leaf->paneId);
-        std::erase(previous, *leaf->paneId);
+        auto const paneId = *leaf->paneId;
+        view.panes.push_back(paneId);
+        std::erase(previous, paneId);
 
-        auto const it = _panes.find(*leaf->paneId);
-        if (it != _panes.end())
+        if (auto const it = _panes.find(paneId); it != _panes.end())
         {
+            if (it->second.window != window)
+            {
+                // Already adopted here from another window whose stale
+                // layout-change has not yet arrived (destination-first order).
+                auto const from = std::exchange(it->second.window, window);
+                if (auto const src = _windows.find(from); src != _windows.end())
+                    std::erase(src->second.panes, paneId);
+                for (auto* observer: _observers)
+                    observer->paneMoved(from, window, paneId);
+            }
             it->second.sink->resize(leaf->width, leaf->height);
             continue;
         }
-        auto sink = _sinkFactory ? _sinkFactory(*leaf->paneId, leaf->width, leaf->height)
+        if (auto const det = _detached.find(paneId); det != _detached.end())
+        {
+            // The source window dropped this pane first (source-first order);
+            // reclaim its live terminal and buffered output for its new home.
+            auto const from = det->second.window;
+            auto node = _detached.extract(det);
+            node.mapped().window = window;
+            node.mapped().sink->resize(leaf->width, leaf->height);
+            _panes.insert(std::move(node));
+            for (auto* observer: _observers)
+                observer->paneMoved(from, window, paneId);
+            continue;
+        }
+        auto sink = _sinkFactory ? _sinkFactory(paneId, leaf->width, leaf->height)
                                  : std::make_unique<PaneView>(leaf->width, leaf->height);
-        auto entry =
-            PaneEntry { .sink = std::move(sink), .replayed = _gateway == nullptr, .pendingOutput = {} };
-        _panes.emplace(*leaf->paneId, std::move(entry));
+        auto entry = PaneEntry {
+            .sink = std::move(sink), .window = window, .replayed = _gateway == nullptr, .pendingOutput = {}
+        };
+        _panes.emplace(paneId, std::move(entry));
         for (auto* observer: _observers)
-            observer->paneAdded(window, *leaf->paneId, leaf->width, leaf->height);
+            observer->paneAdded(window, paneId, leaf->width, leaf->height);
         if (_gateway != nullptr)
-            replayHistory(*leaf->paneId);
+            replayHistory(paneId);
     }
 
-    // Leaves gone from the layout are closed panes.
+    // Panes parked by an earlier layout-change that this one did not reclaim
+    // are confirmed closed (a move would have re-listed them above).
+    reconcileDetached();
+
+    // Panes gone from this window may have closed OR moved to a sibling whose
+    // layout-change has not arrived yet: park them for the reclaim above.
     for (auto const paneId: previous)
-    {
-        _panes.erase(paneId);
-        for (auto* observer: _observers)
-            observer->paneRemoved(window, paneId);
-    }
+        detachPane(paneId, window);
 
     for (auto* observer: _observers)
         observer->layoutTreeChanged(window);
+}
+
+void TmuxClientModel::detachPane(uint64_t pane, uint64_t window)
+{
+    auto const it = _panes.find(pane);
+    if (it == _panes.end() || it->second.window != window)
+        return; // never tracked here, or already adopted elsewhere
+    _detached.insert(_panes.extract(it));
+}
+
+void TmuxClientModel::reconcileDetached()
+{
+    if (_detached.empty())
+        return;
+    auto const stale = std::exchange(_detached, {});
+    for (auto const& [paneId, entry]: stale)
+        for (auto* observer: _observers)
+            observer->paneRemoved(entry.window, paneId);
 }
 
 void TmuxClientModel::replayHistory(uint64_t pane)
