@@ -2,13 +2,13 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
-#include <optional>
-#include <vector>
 #include <cstring>
 #include <deque>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <coro/Task.hpp>
 #include <net/AsyncBufferedReader.h>

@@ -3,6 +3,7 @@
 
     #include <catch2/catch_test_macros.hpp>
 
+    #include <algorithm>
     #include <cstddef>
     #include <filesystem>
     #include <memory>
@@ -11,8 +12,6 @@
     #include <vector>
 
     #include <unistd.h>
-
-    #include <algorithm>
 
     #include <coro/Task.hpp>
     #include <coro/WhenAll.hpp>

@@ -17,6 +17,16 @@
         #define MSG_NOSIGNAL 0
     #endif
 
+    #include <fcntl.h>
+
+    // macOS / BSD also lack MSG_CMSG_CLOEXEC (atomic close-on-exec for received
+    // descriptors); there readWithFd sets FD_CLOEXEC via fcntl right after
+    // receipt instead — a tiny fork race, matching what every portable imsg
+    // implementation accepts on those platforms.
+    #ifndef MSG_CMSG_CLOEXEC
+        #define MSG_CMSG_CLOEXEC 0
+    #endif
+
 namespace net
 {
 
@@ -154,6 +164,8 @@ coro::Task<std::expected<ReadWithFd, NetError>> PosixSocket::readWithFd(std::spa
                     else
                         ::close(received);
                 }
+                if (fd >= 0 && MSG_CMSG_CLOEXEC == 0) // no atomic close-on-exec on this platform
+                    ::fcntl(fd, F_SETFD, FD_CLOEXEC);
             }
             if (n == 0 && fd >= 0)
             {
