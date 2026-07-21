@@ -91,7 +91,6 @@ class TmuxGateway final
     void handleLine(std::string_view line);
     void dispatchNotification(ControlEvent const& event);
 
-    net::EventLoop& _loop;
     std::unique_ptr<net::ISocket> _connection;
     net::WriteQueue _writer;
     GatewayEvents& _events;

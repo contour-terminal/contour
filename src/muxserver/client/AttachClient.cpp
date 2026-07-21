@@ -90,7 +90,6 @@ std::string RemoteScreen::viewportText() const
 // AttachClient
 
 AttachClient::AttachClient(net::EventLoop& loop, std::unique_ptr<net::ISocket> connection):
-    _loop(loop),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024)
 {
@@ -101,7 +100,13 @@ void AttachClient::send(proto::DecodedPdu const& pdu)
     auto sink = proto::Writer {};
     proto::encodePdu(sink, _nextSerial++, pdu);
     auto const bytes = sink.view();
-    std::ignore = _writer.enqueue(std::string { reinterpret_cast<char const*>(bytes.data()), bytes.size() });
+    if (!_writer.enqueue(std::string { reinterpret_cast<char const*>(bytes.data()), bytes.size() }))
+    {
+        // The queue's overflow contract: dropping a frame mid-stream (a
+        // keystroke, a resize) silently desyncs the daemon — sever instead.
+        _writer.close();
+        _connection->close();
+    }
 }
 
 void AttachClient::sendInput(uint64_t session, std::string_view bytes)
@@ -168,9 +173,7 @@ coro::Task<void> AttachClient::run()
 
     if (!_detached)
     {
-        while (_writer.queuedBytes() > 0 || _writer.draining())
-            co_await _loop.delay(1ms);
-        _writer.close();
+        co_await _writer.flushThenClose();
         _connection->close();
     }
 }

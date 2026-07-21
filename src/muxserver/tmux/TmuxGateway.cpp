@@ -16,7 +16,6 @@ using namespace std::chrono_literals;
 TmuxGateway::TmuxGateway(net::EventLoop& loop,
                          std::unique_ptr<net::ISocket> connection,
                          GatewayEvents& events):
-    _loop(loop),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), std::size_t { 256 } * 1024),
     _events(events)
@@ -27,7 +26,13 @@ void TmuxGateway::sendCommand(std::string command, CommandCallback callback)
 {
     _pending.push_back(std::move(callback));
     command += '\n';
-    std::ignore = _writer.enqueue(std::move(command));
+    if (!_writer.enqueue(std::move(command)))
+    {
+        // The queue's overflow contract: a dropped command whose callback is
+        // already queued in _pending desyncs every later reply — sever instead.
+        _writer.close();
+        _connection->close();
+    }
 }
 
 void TmuxGateway::sendKeys(uint64_t pane, std::string_view text)
@@ -75,7 +80,13 @@ void TmuxGateway::sendRawInput(uint64_t pane, std::string_view bytes)
 void TmuxGateway::detach()
 {
     _detached = true;
-    std::ignore = _writer.enqueue("\n"); // an empty line detaches (control.c:547)
+    // An empty line detaches (control.c:547); if it cannot even be queued,
+    // fall back to severing the transport — teardown is wanted either way.
+    if (!_writer.enqueue("\n"))
+    {
+        _writer.close();
+        _connection->close();
+    }
 }
 
 void TmuxGateway::dispatchNotification(ControlEvent const& event)
@@ -176,9 +187,7 @@ coro::Task<void> TmuxGateway::run()
         handleLine(*line);
     }
 
-    while (_writer.queuedBytes() > 0 || _writer.draining())
-        co_await _loop.delay(1ms);
-    _writer.close();
+    co_await _writer.flushThenClose();
     _connection->close();
 }
 

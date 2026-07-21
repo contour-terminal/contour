@@ -110,7 +110,6 @@ class AttachClient final
     void handlePdu(proto::DecodedPdu const& pdu);
     void send(proto::DecodedPdu const& pdu);
 
-    net::EventLoop& _loop;
     std::unique_ptr<net::ISocket> _connection;
     net::WriteQueue _writer;
     std::function<void(RemoteScreen const&, proto::Delta const&)> _onUpdate;
