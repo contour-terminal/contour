@@ -153,14 +153,20 @@ ControlSession::ControlSession(net::EventLoop& loop,
     _connection(std::move(connection)),
     _wallClock(std::move(wallClock)),
     _options(options),
-    _writer(loop, _connection.get(), std::size_t { 256 } * 1024),
-    _output([this](std::string line) { std::ignore = _writer.enqueue(std::move(line)); })
+    _writer(loop, _connection.get(), _options.writeQueueMaxBytes),
+    _output([this](std::string line) {
+        if (_peerLost)
+            return; // the client is already gone; further lines drop silently
+        if (!_writer.enqueue(std::move(line)))
+            handlePeerLost(); // queue overflow/failure: disconnect, never drop-and-continue
+    })
 {
     _host.subscribe(this);
 }
 
 ControlSession::~ControlSession()
 {
+    *_alive = false; // any posted drain continuation now resumes into a no-op
     _host.unsubscribe(this);
 }
 
@@ -193,12 +199,13 @@ coro::Task<void> ControlSession::run()
     // The tmux client binary prints its own %exit; the imsg path suppresses ours.
     if (_options.emitExitLine)
         _output.enqueueNotification("%exit");
-    // Let the write queue flush %exit (and any trailing replies) before tearing
-    // the connection down: close() drops the backlog, so a bare close here would
-    // race the spawned drain and lose the final lines.
-    while (_writer.queuedBytes() > 0 || _writer.draining())
+    // Drain the ordering queue first — a burst still being paced out (and the
+    // notifications gated behind it) must fully reach the writer; a lost peer
+    // skips that wait. Then let the write queue flush %exit and any trailing
+    // replies before the connection dies.
+    while (!_peerLost && _output.hasPending())
         co_await _loop.delay(std::chrono::milliseconds { 1 });
-    _writer.close();
+    co_await _writer.flushThenClose();
     _connection->close();
 }
 
@@ -242,8 +249,8 @@ void ControlSession::emitGuarded(HandlerResult const& result, int flags)
 
 void ControlSession::sessionOutput(SessionId session, std::string const& bytes)
 {
-    if (_noOutput)
-        return; // refresh-client -f no-output: the client wants notifications only
+    if (_noOutput || _peerLost)
+        return; // no-output: the client wants notifications only; lost peer: nothing to send
     // Map the session to its hosting leaf pane (the %N the client knows).
     auto* window = _host.model().window(_host.windowId());
     for (auto const tabIndex: std::views::iota(0, window->tabCount()))
@@ -257,10 +264,49 @@ void ControlSession::sessionOutput(SessionId session, std::string const& bytes)
         if (paneId)
         {
             _output.enqueueOutput(*paneId, bytes, std::chrono::steady_clock::now());
-            _output.pump(_writer.queuedBytes(), std::chrono::steady_clock::now());
+            pumpOutput();
             return;
         }
     }
+}
+
+void ControlSession::pumpOutput()
+{
+    if (_peerLost)
+        return;
+    _output.pump(_writer.queuedBytes(), std::chrono::steady_clock::now());
+    // A burst clipped by this pass's byte budget must keep draining even if the
+    // PTY now goes silent (scheduleOutputDrain itself backs out on a lost peer).
+    if (_output.hasPending())
+        scheduleOutputDrain();
+}
+
+void ControlSession::scheduleOutputDrain()
+{
+    if (_outputDrainScheduled || _peerLost)
+        return;
+    _outputDrainScheduled = true;
+    // post() runs on the loop thread on the next pump: the drain is self-sustaining
+    // without new PTY output. `alive` keeps the flag object alive so a continuation
+    // that resumes after this session is destroyed reads it and no-ops.
+    _loop.post([this, alive = _alive] {
+        if (!*alive)
+            return; // the session was torn down while this continuation was queued
+        _outputDrainScheduled = false;
+        pumpOutput();
+    });
+}
+
+void ControlSession::handlePeerLost()
+{
+    if (_peerLost)
+        return;
+    _peerLost = true;
+    // The client cannot keep up (or its transport failed): drop it the way a read
+    // EOF would. Closing the queue and connection wakes run()'s parked reader with
+    // BadHandle, so it unwinds through the normal teardown epilogue.
+    _writer.close();
+    _connection->close();
 }
 
 // ---------------------------------------------------------------------------

@@ -4,8 +4,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <format>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -37,18 +39,20 @@ namespace
 /// collector (reading the same bidirectional socket) sees EOF only after every
 /// reply. Closing the client end here would instead tear down both directions
 /// and starve the collector.
+/// Views @p text as a raw byte span for ISocket::write.
+[[nodiscard]] std::span<std::byte const> asBytes(std::string_view text) noexcept
+{
+    return { reinterpret_cast<std::byte const*>(text.data()), text.size() };
+}
+
 Task<void> feedCommands(net::ISocket* client, std::vector<std::string> const* commands)
 {
     for (auto const& command: *commands)
     {
         auto const wire = command + "\n";
-        auto const bytes =
-            std::span<std::byte const> { reinterpret_cast<std::byte const*>(wire.data()), wire.size() };
-        std::ignore = co_await client->write(bytes);
+        std::ignore = co_await client->write(asBytes(wire));
     }
-    auto const detach = std::string_view { "\n" }; // empty line -> detach (control.c:547)
-    std::ignore = co_await client->write(
-        std::span<std::byte const> { reinterpret_cast<std::byte const*>(detach.data()), detach.size() });
+    std::ignore = co_await client->write(asBytes("\n")); // empty line -> detach (control.c:547)
 }
 
 /// Collects every line the session emits until the peer closes.
@@ -64,6 +68,21 @@ Task<void> collectLines(net::ISocket* client, std::vector<std::string>* out)
     }
 }
 
+/// Feeds one pane-output burst, then a notification gated behind it, then the
+/// detach line — and NO further pane output. The burst must fully reach the
+/// client and the notification must follow it, driven only by the drain
+/// continuation: the PTY stays silent after the single burst.
+Task<void> burstThenNotifyThenDetach(ControlSession* session,
+                                     net::ISocket* client,
+                                     vtmux::SessionId sessionId,
+                                     vtmux::TabId tabId,
+                                     std::string const* burst)
+{
+    session->sessionOutput(sessionId, *burst);           // a burst larger than one pump budget
+    session->tabTitleChanged(tabId);                     // %window-renamed, gated behind the burst
+    std::ignore = co_await client->write(asBytes("\n")); // empty line -> detach
+}
+
 /// Runs the session concurrently with the feeder and the collector.
 Task<void> driveExchange(ControlSession* session,
                          net::ISocket* client,
@@ -71,6 +90,19 @@ Task<void> driveExchange(ControlSession* session,
                          std::vector<std::string>* out)
 {
     co_await coro::whenAll(session->run(), feedCommands(client, commands), collectLines(client, out));
+}
+
+/// Runs the session concurrently with the burst producer and the collector.
+Task<void> driveBurst(ControlSession* session,
+                      net::ISocket* client,
+                      vtmux::SessionId sessionId,
+                      vtmux::TabId tabId,
+                      std::string const* burst,
+                      std::vector<std::string>* out)
+{
+    co_await coro::whenAll(session->run(),
+                           burstThenNotifyThenDetach(session, client, sessionId, tabId, burst),
+                           collectLines(client, out));
 }
 
 /// Drives a ControlSession over an in-memory socket pair: the test writes
@@ -87,11 +119,11 @@ struct ControlHarness
     net::testing::SocketPair pair = *net::testing::makeSocketPair(loop);
     std::unique_ptr<ControlSession> session;
 
-    ControlHarness()
+    explicit ControlHarness(ControlSession::Options options = {})
     {
         // A fixed clock so guard timestamps are deterministic.
         session = std::make_unique<ControlSession>(
-            loop, host, std::move(pair.first), [] { return std::int64_t { 1000 }; });
+            loop, host, std::move(pair.first), [] { return std::int64_t { 1000 }; }, options);
     }
 
     /// Runs @p commands (each newline-terminated), then closes the client's
@@ -283,4 +315,66 @@ TEST_CASE("refresh-client flags and subscriptions are accepted", "[muxserver][co
                                     "refresh-client -f !pause-after,!no-output",
                                     "refresh-client -B mysub:%0:#{pane_title}" });
     CHECK(!contains(lines, "%error"));
+}
+
+TEST_CASE("an output burst drains fully after the PTY goes silent", "[muxserver][control]")
+{
+    auto h = ControlHarness {};
+    h.host.createTab();
+    auto* tab = h.host.model().window(h.host.windowId())->activeTab();
+    auto const paneId = tab->rootPane()->id().value;
+    auto const sessionId = tab->rootPane()->session();
+    auto const tabId = tab->id();
+
+    // One burst far larger than a single pump's byte budget (~bufferHigh/1/3),
+    // then no further pane output. Without a self-sustaining drain, only the
+    // first pass would reach the client and the gated %window-renamed would hang.
+    auto const burst = std::string(20000, 'x');
+    auto out = std::vector<std::string> {};
+    h.loop.blockOn(driveBurst(h.session.get(), h.pair.second.get(), sessionId, tabId, &burst, &out));
+
+    // Every byte of the burst arrived, reassembled from the %output lines in order.
+    auto const prefix = std::format("%output %{} ", paneId);
+    auto reassembled = std::string {};
+    auto lastOutputIndex = std::optional<std::size_t> {};
+    auto renamedIndex = std::optional<std::size_t> {};
+    auto index = std::size_t { 0 };
+    for (auto const& line: out)
+    {
+        if (line.starts_with(prefix))
+        {
+            reassembled += line.substr(prefix.size());
+            lastOutputIndex = index;
+        }
+        else if (line.starts_with("%window-renamed"))
+            renamedIndex = index;
+        ++index;
+    }
+
+    CHECK(reassembled == burst);
+    REQUIRE(lastOutputIndex.has_value());
+    REQUIRE(renamedIndex.has_value());
+    // The notification flushed AFTER the whole burst — the ordering guarantee.
+    CHECK(*renamedIndex > *lastOutputIndex);
+    CHECK_FALSE(h.session->peerLost());
+}
+
+TEST_CASE("a control client that overflows the write queue is disconnected", "[muxserver][control]")
+{
+    // A tiny write-queue bound: the preamble fits, but the first %output frame of
+    // a burst overflows it — the session must disconnect, not drop-and-continue.
+    auto h = ControlHarness { ControlSession::Options { .writeQueueMaxBytes = 256 } };
+    h.host.createTab();
+    auto* tab = h.host.model().window(h.host.windowId())->activeTab();
+    auto const sessionId = tab->rootPane()->session();
+    auto const tabId = tab->id();
+
+    auto const burst = std::string(20000, 'x');
+    auto out = std::vector<std::string> {};
+    h.loop.blockOn(driveBurst(h.session.get(), h.pair.second.get(), sessionId, tabId, &burst, &out));
+
+    // The overflow tore the session down (no hang) and dropped the burst rather
+    // than emitting a truncated, corrupt stream.
+    CHECK(h.session->peerLost());
+    CHECK_FALSE(contains(out, "%output"));
 }

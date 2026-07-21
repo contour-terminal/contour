@@ -14,6 +14,7 @@
 /// Commands are a data-driven table (the Actions.h catalog idiom): one row per
 /// verb naming its handler; adding a verb is adding a row.
 
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <functional>
@@ -54,6 +55,12 @@ struct ControlSessionOptions
     /// peer (client-originated), 0 for the MSG_COMMAND-originated attach
     /// (cmd-queue.c stamps only stdin-line commands as client-originated).
     int initialGuardFlag = 1;
+
+    /// Byte bound of the per-connection write queue. Enqueue is refused once the
+    /// queued-but-unsent total would exceed this; the session treats that refusal
+    /// as a lost peer (a client too slow to keep up is disconnected, never
+    /// buffered without limit). Tests shrink it to force the overflow path.
+    std::size_t writeQueueMaxBytes = std::size_t { 256 } * 1024;
 };
 
 /// One connected control-mode client.
@@ -83,6 +90,11 @@ class ControlSession final: public vtmux::ModelEvents, public SessionStreamEvent
     /// The connection flow: emits the initial guard pair and session state,
     /// then serves commands until the peer disconnects or sends an empty line.
     [[nodiscard]] coro::Task<void> run();
+
+    /// @return True once the client was dropped because the write queue
+    ///         overflowed (or its transport failed): the session is tearing down.
+    ///         Diagnostics/testing. See ControlSessionOptions::writeQueueMaxBytes.
+    [[nodiscard]] bool peerLost() const noexcept { return _peerLost; }
 
     // vtmux::ModelEvents — model changes become control-mode notifications.
     void tabAdded(vtmux::WindowId window, vtmux::TabId tab, int index) override;
@@ -154,6 +166,23 @@ class ControlSession final: public vtmux::ModelEvents, public SessionStreamEvent
     /// Applies one `refresh-client -f` flag ("pause-after=5", "!no-output", …).
     void applyClientFlag(std::string_view flag);
 
+    /// Runs one fair pass of the %output/notification ordering queue, then
+    /// schedules a continuation if backlog remains — so a burst larger than one
+    /// pass's byte budget keeps draining even after the PTY falls silent, and the
+    /// notifications gated behind it are never stranded.
+    void pumpOutput();
+
+    /// Posts a single self-perpetuating drain continuation, unless one is already
+    /// in flight or the peer is gone. The continuation captures a shared alive
+    /// flag owned by this session, so one that resumes after teardown is a no-op.
+    void scheduleOutputDrain();
+
+    /// Drops the control client: closes the write queue and the connection so
+    /// run()'s parked reader unwinds (BadHandle) through the normal teardown.
+    /// Idempotent. Invoked when a write is refused — WriteQueue's disconnect
+    /// contract (WriteQueue.h) — rather than silently dropping data.
+    void handlePeerLost();
+
     net::EventLoop& _loop;
     SessionHost& _host;
     std::unique_ptr<net::ISocket> _connection;
@@ -163,6 +192,13 @@ class ControlSession final: public vtmux::ModelEvents, public SessionStreamEvent
     ControlOutput _output;
     std::uint32_t _commandNumber = 0;
     bool _noOutput = false; ///< refresh-client -f no-output: suppress %output entirely.
+
+    /// Kept alive by any posted drain continuation; the destructor clears the
+    /// pointee so a continuation resuming after teardown observes a dead session
+    /// and does nothing (guards against a use-after-free on `this`).
+    std::shared_ptr<bool> _alive = std::make_shared<bool>(true);
+    bool _outputDrainScheduled = false; ///< A drain continuation is posted (at most one in flight).
+    bool _peerLost = false;             ///< The client was dropped (write refused / transport failed).
 };
 
 /// The daemon's connection-handler factory for control-mode clients.
