@@ -1,0 +1,452 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <muxserver/proto/Pdu.h>
+
+#include <array>
+#include <utility>
+
+namespace muxserver::proto
+{
+
+namespace
+{
+    /// Assigns a checked read into @p out (narrowing deliberately, the wire type
+    /// is the authority), or records the error.
+    template <typename T, typename U>
+    [[nodiscard]] bool assign(std::expected<U, DecodeError> value, T& out, DecodeError& error)
+    {
+        if (!value)
+        {
+            error = value.error();
+            return false;
+        }
+        out = static_cast<T>(*value);
+        return true;
+    }
+
+    // --- the wire tag of each PDU type (the encode half of the catalog) -----
+
+    [[nodiscard]] constexpr uint64_t tagOf(Invalid const& pdu) noexcept
+    {
+        return pdu.ident;
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(ClientHello const&) noexcept
+    {
+        return std::to_underlying(PduType::ClientHello);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(ServerHello const&) noexcept
+    {
+        return std::to_underlying(PduType::ServerHello);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(Input const&) noexcept
+    {
+        return std::to_underlying(PduType::Input);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(ResizeRequest const&) noexcept
+    {
+        return std::to_underlying(PduType::ResizeRequest);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(FetchImage const&) noexcept
+    {
+        return std::to_underlying(PduType::FetchImage);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(ImageData const&) noexcept
+    {
+        return std::to_underlying(PduType::ImageData);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(ImageGone const&) noexcept
+    {
+        return std::to_underlying(PduType::ImageGone);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(SessionState const&) noexcept
+    {
+        return std::to_underlying(PduType::SessionState);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(Delta const&) noexcept
+    {
+        return std::to_underlying(PduType::Delta);
+    }
+
+    // --- body encoders ------------------------------------------------------
+
+    void encodeBody(Writer&, Invalid const&)
+    {
+    } // an unknown PDU has an opaque (empty) body
+
+    void encodeBody(Writer& out, ClientHello const& pdu)
+    {
+        out.u32(pdu.codecVersion);
+    }
+    void encodeBody(Writer& out, ServerHello const& pdu)
+    {
+        out.u32(pdu.codecVersion);
+    }
+
+    void encodeBody(Writer& out, Input const& pdu)
+    {
+        out.varint(pdu.session);
+        out.blob(pdu.data);
+    }
+
+    void encodeBody(Writer& out, ResizeRequest const& pdu)
+    {
+        out.varint(pdu.columns);
+        out.varint(pdu.lines);
+    }
+
+    void encodeBody(Writer& out, FetchImage const& pdu)
+    {
+        out.u32(pdu.imageId);
+    }
+
+    void encodeBody(Writer& out, ImageData const& pdu)
+    {
+        out.u32(pdu.imageId);
+        out.u8(pdu.format);
+        out.u32(pdu.width);
+        out.u32(pdu.height);
+        out.blob(pdu.data);
+    }
+
+    void encodeBody(Writer& out, ImageGone const& pdu)
+    {
+        out.u32(pdu.imageId);
+    }
+
+    void encodeBody(Writer& out, SessionState const& pdu)
+    {
+        out.varint(pdu.session);
+        out.varint(pdu.columns);
+        out.varint(pdu.lines);
+        out.u8(pdu.screenType);
+        out.svarint(pdu.cursorLine);
+        out.svarint(pdu.cursorColumn);
+        out.u8(pdu.cursorShape);
+        out.u8(pdu.cursorVisible);
+        out.string(pdu.title);
+        out.u32(pdu.defaultForeground);
+        out.u32(pdu.defaultBackground);
+        out.varint(pdu.palette.size());
+        for (auto const color: pdu.palette)
+            out.u32(color);
+    }
+
+    void encodeCell(Writer& out, WireCell const& cell)
+    {
+        out.varint(cell.codepoint);
+        out.varint(cell.clusterExtras.size());
+        for (auto const codepoint: cell.clusterExtras)
+            out.varint(codepoint);
+        out.u8(cell.width);
+        out.u8(cell.scale);
+        out.u16(cell.textScaleExtras);
+        out.u16(cell.hyperlink);
+        out.u32(cell.foreground);
+        out.u32(cell.background);
+        out.u32(cell.underlineColor);
+        out.u32(cell.flags);
+    }
+
+    void encodeLine(Writer& out, WireLine const& line)
+    {
+        out.svarint(line.stableId);
+        out.u16(line.flags);
+        out.varint(line.columns);
+        out.varint(line.cells.size());
+        for (auto const& cell: line.cells)
+            encodeCell(out, cell);
+        out.u32(line.fillForeground);
+        out.u32(line.fillBackground);
+    }
+
+    void encodeBody(Writer& out, Delta const& pdu)
+    {
+        out.varint(pdu.session);
+        out.varint(pdu.generation);
+        out.varint(pdu.seqno);
+        out.u8(pdu.snapshot);
+        out.svarint(pdu.cursorLine);
+        out.svarint(pdu.cursorColumn);
+
+        out.varint(pdu.lines.size());
+        for (auto const& line: pdu.lines)
+            encodeLine(out, line);
+
+        out.varint(pdu.hyperlinks.size());
+        for (auto const& entry: pdu.hyperlinks)
+        {
+            out.u16(entry.id);
+            out.string(entry.uri);
+        }
+
+        out.varint(pdu.imageCells.size());
+        for (auto const& entry: pdu.imageCells)
+        {
+            out.svarint(entry.stableId);
+            out.u16(entry.column);
+            out.u32(entry.imageId);
+            out.u16(entry.offsetLine);
+            out.u16(entry.offsetColumn);
+            out.u8(entry.layer);
+        }
+    }
+
+    // --- body decoders (one table row each) ---------------------------------
+
+    using DecodeResult = std::expected<DecodedPdu, DecodeError>;
+
+    DecodeResult decodeClientHello(Reader& in)
+    {
+        auto pdu = ClientHello {};
+        auto error = DecodeError {};
+        if (!assign(in.u32(), pdu.codecVersion, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeServerHello(Reader& in)
+    {
+        auto pdu = ServerHello {};
+        auto error = DecodeError {};
+        if (!assign(in.u32(), pdu.codecVersion, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeInput(Reader& in)
+    {
+        auto pdu = Input {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.session, error))
+            return std::unexpected(error);
+        auto const data = in.blob();
+        if (!data)
+            return std::unexpected(data.error());
+        pdu.data.assign(data->begin(), data->end());
+        return pdu;
+    }
+
+    DecodeResult decodeResizeRequest(Reader& in)
+    {
+        auto pdu = ResizeRequest {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.columns, error) || !assign(in.varint(), pdu.lines, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeFetchImage(Reader& in)
+    {
+        auto pdu = FetchImage {};
+        auto error = DecodeError {};
+        if (!assign(in.u32(), pdu.imageId, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeImageData(Reader& in)
+    {
+        auto pdu = ImageData {};
+        auto error = DecodeError {};
+        if (!assign(in.u32(), pdu.imageId, error) || !assign(in.u8(), pdu.format, error)
+            || !assign(in.u32(), pdu.width, error) || !assign(in.u32(), pdu.height, error))
+            return std::unexpected(error);
+        auto const data = in.blob();
+        if (!data)
+            return std::unexpected(data.error());
+        pdu.data.assign(data->begin(), data->end());
+        return pdu;
+    }
+
+    DecodeResult decodeImageGone(Reader& in)
+    {
+        auto pdu = ImageGone {};
+        auto error = DecodeError {};
+        if (!assign(in.u32(), pdu.imageId, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeSessionState(Reader& in)
+    {
+        auto pdu = SessionState {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.session, error) || !assign(in.varint(), pdu.columns, error)
+            || !assign(in.varint(), pdu.lines, error) || !assign(in.u8(), pdu.screenType, error)
+            || !assign(in.svarint(), pdu.cursorLine, error) || !assign(in.svarint(), pdu.cursorColumn, error)
+            || !assign(in.u8(), pdu.cursorShape, error) || !assign(in.u8(), pdu.cursorVisible, error)
+            || !assign(in.string(), pdu.title, error))
+            return std::unexpected(error);
+        if (!assign(in.u32(), pdu.defaultForeground, error)
+            || !assign(in.u32(), pdu.defaultBackground, error))
+            return std::unexpected(error);
+        auto paletteSize = std::size_t {};
+        if (!assign(in.varint(), paletteSize, error))
+            return std::unexpected(error);
+        pdu.palette.reserve(paletteSize);
+        for (std::size_t i = 0; i < paletteSize; ++i)
+        {
+            auto color = uint32_t {};
+            if (!assign(in.u32(), color, error))
+                return std::unexpected(error);
+            pdu.palette.push_back(color);
+        }
+        return pdu;
+    }
+
+    [[nodiscard]] std::expected<WireCell, DecodeError> decodeCell(Reader& in)
+    {
+        auto cell = WireCell {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), cell.codepoint, error))
+            return std::unexpected(error);
+        auto extras = std::size_t {};
+        if (!assign(in.varint(), extras, error))
+            return std::unexpected(error);
+        cell.clusterExtras.reserve(extras);
+        for (std::size_t i = 0; i < extras; ++i)
+        {
+            auto codepoint = char32_t {};
+            if (!assign(in.varint(), codepoint, error))
+                return std::unexpected(error);
+            cell.clusterExtras.push_back(codepoint);
+        }
+        if (!assign(in.u8(), cell.width, error) || !assign(in.u8(), cell.scale, error)
+            || !assign(in.u16(), cell.textScaleExtras, error) || !assign(in.u16(), cell.hyperlink, error)
+            || !assign(in.u32(), cell.foreground, error) || !assign(in.u32(), cell.background, error)
+            || !assign(in.u32(), cell.underlineColor, error) || !assign(in.u32(), cell.flags, error))
+            return std::unexpected(error);
+        return cell;
+    }
+
+    [[nodiscard]] std::expected<WireLine, DecodeError> decodeLine(Reader& in)
+    {
+        auto line = WireLine {};
+        auto error = DecodeError {};
+        if (!assign(in.svarint(), line.stableId, error) || !assign(in.u16(), line.flags, error)
+            || !assign(in.varint(), line.columns, error))
+            return std::unexpected(error);
+        auto cells = std::size_t {};
+        if (!assign(in.varint(), cells, error))
+            return std::unexpected(error);
+        line.cells.reserve(cells);
+        for (std::size_t i = 0; i < cells; ++i)
+        {
+            auto cell = decodeCell(in);
+            if (!cell)
+                return std::unexpected(cell.error());
+            line.cells.push_back(std::move(*cell));
+        }
+        if (!assign(in.u32(), line.fillForeground, error) || !assign(in.u32(), line.fillBackground, error))
+            return std::unexpected(error);
+        return line;
+    }
+
+    DecodeResult decodeDelta(Reader& in)
+    {
+        auto pdu = Delta {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.session, error) || !assign(in.varint(), pdu.generation, error)
+            || !assign(in.varint(), pdu.seqno, error) || !assign(in.u8(), pdu.snapshot, error)
+            || !assign(in.svarint(), pdu.cursorLine, error) || !assign(in.svarint(), pdu.cursorColumn, error))
+            return std::unexpected(error);
+
+        auto lines = std::size_t {};
+        if (!assign(in.varint(), lines, error))
+            return std::unexpected(error);
+        pdu.lines.reserve(lines);
+        for (std::size_t i = 0; i < lines; ++i)
+        {
+            auto line = decodeLine(in);
+            if (!line)
+                return std::unexpected(line.error());
+            pdu.lines.push_back(std::move(*line));
+        }
+
+        auto hyperlinks = std::size_t {};
+        if (!assign(in.varint(), hyperlinks, error))
+            return std::unexpected(error);
+        pdu.hyperlinks.reserve(hyperlinks);
+        for (std::size_t i = 0; i < hyperlinks; ++i)
+        {
+            auto entry = HyperlinkEntry {};
+            if (!assign(in.u16(), entry.id, error) || !assign(in.string(), entry.uri, error))
+                return std::unexpected(error);
+            pdu.hyperlinks.push_back(std::move(entry));
+        }
+
+        auto imageCells = std::size_t {};
+        if (!assign(in.varint(), imageCells, error))
+            return std::unexpected(error);
+        pdu.imageCells.reserve(imageCells);
+        for (std::size_t i = 0; i < imageCells; ++i)
+        {
+            auto entry = ImageCellEntry {};
+            if (!assign(in.svarint(), entry.stableId, error) || !assign(in.u16(), entry.column, error)
+                || !assign(in.u32(), entry.imageId, error) || !assign(in.u16(), entry.offsetLine, error)
+                || !assign(in.u16(), entry.offsetColumn, error) || !assign(in.u8(), entry.layer, error))
+                return std::unexpected(error);
+            pdu.imageCells.push_back(entry);
+        }
+        return pdu;
+    }
+
+    /// The decode half of the catalog: one row per known tag.
+    struct DecodeRow
+    {
+        PduType tag;
+        DecodeResult (*decode)(Reader&);
+    };
+
+    constexpr auto DecodeTable = std::array {
+        DecodeRow { PduType::ClientHello, decodeClientHello },
+        DecodeRow { PduType::ServerHello, decodeServerHello },
+        DecodeRow { PduType::Input, decodeInput },
+        DecodeRow { PduType::ResizeRequest, decodeResizeRequest },
+        DecodeRow { PduType::FetchImage, decodeFetchImage },
+        DecodeRow { PduType::ImageData, decodeImageData },
+        DecodeRow { PduType::ImageGone, decodeImageGone },
+        DecodeRow { PduType::SessionState, decodeSessionState },
+        DecodeRow { PduType::Delta, decodeDelta },
+    };
+} // namespace
+
+void encodePdu(Writer& sink, uint64_t serial, DecodedPdu const& pdu)
+{
+    auto body = Writer {};
+    auto const ident = std::visit(
+        [&body](auto const& alternative) {
+            encodeBody(body, alternative);
+            return tagOf(alternative);
+        },
+        pdu);
+    writeFrame(sink, serial, ident, body.view());
+}
+
+std::expected<DecodedFrame, DecodeError> decodePdu(std::span<std::byte const> data)
+{
+    auto const frame = readFrame(data);
+    if (!frame)
+        return std::unexpected(frame.error());
+
+    auto reader = Reader { frame->body };
+    auto pdu = [&]() -> DecodeResult {
+        for (auto const& row: DecodeTable)
+            if (std::to_underlying(row.tag) == frame->ident)
+                return row.decode(reader);
+        // Unknown idents are data, not errors: newer peers keep talking to us.
+        return DecodedPdu { Invalid { .ident = frame->ident } };
+    }();
+    if (!pdu)
+        return std::unexpected(pdu.error());
+
+    if (!std::holds_alternative<Invalid>(*pdu) && reader.remaining() != 0)
+        return std::unexpected(DecodeError::TrailingBytes);
+
+    return DecodedFrame {
+        .serial = frame->serial,
+        .pdu = std::move(*pdu),
+        .consumed = frame->consumed,
+    };
+}
+
+} // namespace muxserver::proto
