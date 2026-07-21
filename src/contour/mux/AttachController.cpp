@@ -142,17 +142,26 @@ coro::Task<void> AttachController::runClient(net::EventLoop* loop)
 void AttachController::onUpdate(RemoteScreen const& screen, muxserver::proto::Delta const& delta)
 {
     auto lock = std::unique_lock { _mutex };
-    if (auto const it = _bindings.find(screen.session); it != _bindings.end())
+
+    // Ordered by precedence: a live binding always consumes the delta, a
+    // tombstoned session is ignored, a pending one refreshes its geometry, and
+    // only a never-seen session is adopted as a new tab.
+    if (auto const binding = _bindings.find(screen.session); binding != _bindings.end())
     {
-        it->second.pty->feed(it->second.mirror.apply(screen, delta));
+        binding->second.pty->feed(binding->second.mirror.apply(screen, delta));
         return;
     }
-
-    if (auto const known = std::ranges::find(_pending, screen.session, &PendingSession::session);
-        known != _pending.end())
+    if (_closedSessions.contains(screen.session))
     {
-        known->columns = screen.columns;
-        known->lines = screen.lines;
+        // The user closed this session's tab; the remote session lives on,
+        // but its deltas must not resurrect a local tab.
+        return;
+    }
+    if (auto const pending = std::ranges::find(_pending, screen.session, &PendingSession::session);
+        pending != _pending.end())
+    {
+        pending->columns = screen.columns;
+        pending->lines = screen.lines;
         return;
     }
 
@@ -185,6 +194,14 @@ void AttachController::unbind(uint64_t session)
 {
     auto const lock = std::lock_guard { _mutex };
     _bindings.erase(session);
+
+    // A pty destroyed while the connection is still live means the user closed
+    // that one tab: tombstone the id so its still-running remote session cannot
+    // resurrect the tab through a later delta. During teardown (`_stopped`) the
+    // whole connection is ending, so tombstoning would be pointless — and it is
+    // exactly the detach path that must NOT tombstone every session.
+    if (!_stopped)
+        _closedSessions.insert(session);
 }
 
 void AttachController::closeAllBindings()

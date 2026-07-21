@@ -15,6 +15,7 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <ranges>
 #include <string>
 #include <thread>
 
@@ -207,6 +208,50 @@ TEST_CASE("attach controller mirrors a remote session over a real socket", "[att
     controller.stop();
     CHECK(pty->isClosed());
     pty.reset(); // unbind (the controller outlives its ptys' registrations)
+}
+
+// Regression: closing a mirrored tab must not resurrect it. Before the fix,
+// unbind() only forgot the binding, so the still-live remote session's next
+// delta re-registered it as pending and re-adopted a fresh tab indefinitely.
+TEST_CASE("a closed mirrored tab does not resurrect on later remote output", "[attach][controller]")
+{
+    auto daemon = DaemonFixture {};
+    auto const session = daemon.seedSession("first line");
+
+    auto controller = contour::AttachController { std::filesystem::path { daemon.socketPath } };
+    REQUIRE(controller.connectAndWait(10s).has_value());
+    REQUIRE(controller.pendingCount() == 1);
+
+    // Bind the pending remote session to a local tab, then close that tab.
+    auto pty = controller.createPty(std::nullopt);
+    REQUIRE(pty != nullptr);
+    CHECK(drainUntil(*pty, "first line").contains("first line"));
+    CHECK(controller.pendingCount() == 0);
+    pty.reset(); // the terminal destroyed its pty: the user closed the tab
+
+    // The remote session lives on (nothing closed it) and keeps producing
+    // output; a pre-fix controller would re-register it as pending here.
+    daemon.onDaemon([&] {
+        daemon.host->terminal(session)->writeToScreen("second line\r\n");
+        return 0;
+    });
+
+    // Give the daemon's 20ms debounce ample time to push at least one more
+    // delta, and confirm the closed session never came back as pending.
+    auto resurrected = false;
+    for ([[maybe_unused]] auto const iteration: std::views::iota(0, 50))
+    {
+        std::this_thread::sleep_for(10ms);
+        if (controller.pendingCount() != 0)
+        {
+            resurrected = true;
+            break;
+        }
+    }
+    CHECK(!resurrected);
+    CHECK(!controller.canCreateSession());
+
+    controller.stop();
 }
 
 TEST_CASE("attach controller reports an unreachable daemon", "[attach][controller]")

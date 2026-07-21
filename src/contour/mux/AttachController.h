@@ -30,6 +30,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 #include <muxserver/client/AttachClient.h>
 #include <muxserver/client/ScreenMirror.h>
@@ -123,7 +124,10 @@ class AttachController final: public QObject, public SessionFactory
     /// screen is already known.
     void primeBinding(uint64_t session);
 
-    /// GUI-side (from the pty's destructor): forgets a binding.
+    /// GUI-side (from the pty's destructor): forgets a binding. When this is a
+    /// user-initiated tab close (the connection is still live, i.e. not
+    /// `_stopped`), it also tombstones the session id so a still-running remote
+    /// session cannot resurrect the tab through its next delta.
     void unbind(uint64_t session);
 
     /// Closes every bound pty (EOF to its session) — the disconnect path.
@@ -145,6 +149,15 @@ class AttachController final: public QObject, public SessionFactory
     std::string _failure;
     std::deque<PendingSession> _pending; ///< Discovered remote sessions without a local tab.
     std::unordered_map<uint64_t, Binding> _bindings;
+    /// Session ids whose local tab the user closed while still attached. Their
+    /// remote sessions live on (the native protocol has no close verb) and keep
+    /// emitting deltas; `onUpdate` ignores tombstoned ids so a closed tab never
+    /// reappears. Bounded by this connection's lifetime and freed with the
+    /// controller: session ids are monotonic (never reused), so a lingering
+    /// tombstone can never suppress a genuinely new session, and — absent any
+    /// session-removed notification from the daemon — there is nothing to clear
+    /// a single id against. A reattach is a fresh controller with an empty set.
+    std::unordered_set<uint64_t> _closedSessions;
     muxserver::client::AttachClient* _client = nullptr; ///< Reactor-owned; valid while serving.
     bool _stopped = false;
 };
