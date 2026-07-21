@@ -539,6 +539,7 @@ ControlSession::HandlerResult ControlSession::commandSendKeys(std::vector<std::s
         return std::unexpected("pane has no live session");
 
     auto const literal = hasFlag(arguments, "-l");
+    auto const hex = hasFlag(arguments, "-H");
     auto bytes = std::string {};
     auto skipNext = false;
     for (auto const& argument: arguments | std::views::drop(1))
@@ -553,10 +554,21 @@ ControlSession::HandlerResult ControlSession::commandSendKeys(std::vector<std::s
             skipNext = true;
             continue;
         }
-        if (argument == "-l")
+        if (argument == "-l" || argument == "-H")
             continue;
         if (argument == "--")
             continue; // end-of-options, as tmux's argument parser accepts
+        if (hex)
+        {
+            // -H: each argument is one byte as a hexadecimal number.
+            auto value = unsigned {};
+            auto const [ptr, ec] =
+                std::from_chars(argument.data(), argument.data() + argument.size(), value, 16);
+            if (ec != std::errc {} || ptr != argument.data() + argument.size() || value > 0xFF)
+                return std::unexpected(std::format("bad hex byte: {}", argument));
+            bytes += static_cast<char>(value);
+            continue;
+        }
         bytes += literal ? argument : translateKey(argument);
     }
 

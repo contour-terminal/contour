@@ -110,6 +110,13 @@ Task<void> scenario(LoopbackHarness* h)
     co_await waitUntil(&h->loop, [&] { return !mock.stdinBuffer().empty(); });
     CHECK(mock.stdinBuffer() == "echo 'hi'");
 
+    // 5b. sendRawInput carries control bytes verbatim through send-keys -H —
+    //     ESC and CR would be mangled by any quoting path.
+    mock.stdinBuffer().clear();
+    h->gateway->sendRawInput(paneId, "\x1b[A\rok");
+    co_await waitUntil(&h->loop, [&] { return mock.stdinBuffer().size() >= 6; });
+    CHECK(mock.stdinBuffer() == "\x1b[A\rok");
+
     // 6. Detach: the server answers %exit and both loops wind down.
     h->gateway->detach();
     co_await waitUntil(&h->loop, [&] { return h->events.sawExit; });
@@ -265,6 +272,27 @@ Task<void> oracleScenario(net::EventLoop* loop, TmuxGateway* gateway, RecordingE
         }
     }
     CHECK(captured.contains("oracle-ok"));
+
+    // The hex channel (send-keys -H) must deliver raw bytes — including the
+    // CR — through the real tmux server as well.
+    gateway->sendRawInput(0, "echo oracle-hex\r");
+    captured.clear();
+    for (auto attempt = 0; attempt < 50 && !captured.contains("oracle-hex"); ++attempt)
+    {
+        auto done = false;
+        gateway->sendCommand("capture-pane -p -t %0", [&](bool, std::vector<std::string> const& body) {
+            for (auto const& line: body)
+                captured += line + "\n";
+            done = true;
+        });
+        co_await waitUntil(loop, [&] { return done; }, 15000);
+        if (!captured.contains("oracle-hex"))
+        {
+            captured.clear();
+            co_await loop->delay(100ms);
+        }
+    }
+    CHECK(captured.contains("oracle-hex"));
 
     gateway->detach();
     co_await waitUntil(loop, [&] { return events->sawExit; }, 15000);

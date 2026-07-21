@@ -61,7 +61,7 @@ namespace
 PaneView* TmuxClientModel::pane(uint64_t id) noexcept
 {
     auto const it = _panes.find(id);
-    return it != _panes.end() ? it->second.view.get() : nullptr;
+    return it != _panes.end() ? dynamic_cast<PaneView*>(it->second.sink.get()) : nullptr;
 }
 
 void TmuxClientModel::outputReceived(uint64_t pane, std::string_view bytes)
@@ -74,7 +74,7 @@ void TmuxClientModel::outputReceived(uint64_t pane, std::string_view bytes)
         it->second.pendingOutput.append(bytes);
         return;
     }
-    it->second.view->feed(bytes);
+    it->second.sink->feed(bytes);
 }
 
 void TmuxClientModel::layoutChanged(uint64_t window, std::string_view layout)
@@ -84,7 +84,9 @@ void TmuxClientModel::layoutChanged(uint64_t window, std::string_view layout)
 
 void TmuxClientModel::windowAdded(uint64_t window)
 {
-    _windows.try_emplace(window); // the layout arrives with %layout-change
+    if (_windows.try_emplace(window).second) // the layout arrives with %layout-change
+        for (auto* observer: _observers)
+            observer->windowAdded(window);
 }
 
 void TmuxClientModel::windowClosed(uint64_t window)
@@ -93,13 +95,34 @@ void TmuxClientModel::windowClosed(uint64_t window)
     if (it == _windows.end())
         return;
     for (auto const paneId: it->second.panes)
+    {
         _panes.erase(paneId);
+        for (auto* observer: _observers)
+            observer->paneRemoved(window, paneId);
+    }
     _windows.erase(it);
+    for (auto* observer: _observers)
+        observer->windowClosed(window);
 }
 
 void TmuxClientModel::windowRenamed(uint64_t window, std::string_view name)
 {
     _windows[window].name = std::string { name };
+    for (auto* observer: _observers)
+        observer->windowRenamed(window, _windows[window].name);
+}
+
+void TmuxClientModel::panePaused(uint64_t pane, bool paused)
+{
+    for (auto* observer: _observers)
+        observer->panePaused(pane, paused);
+}
+
+void TmuxClientModel::exited(std::string_view reason)
+{
+    auto const copy = std::string { reason };
+    for (auto* observer: _observers)
+        observer->exited(copy);
 }
 
 void TmuxClientModel::sessionChanged(uint64_t /*session*/, std::string_view /*name*/)
@@ -152,20 +175,30 @@ void TmuxClientModel::ingestLayout(uint64_t window, std::string_view layout)
         auto const it = _panes.find(*leaf->paneId);
         if (it != _panes.end())
         {
-            it->second.view->resize(leaf->width, leaf->height);
+            it->second.sink->resize(leaf->width, leaf->height);
             continue;
         }
-        auto entry = PaneEntry { .view = std::make_unique<PaneView>(leaf->width, leaf->height),
-                                 .replayed = _gateway == nullptr,
-                                 .pendingOutput = {} };
+        auto sink = _sinkFactory ? _sinkFactory(*leaf->paneId, leaf->width, leaf->height)
+                                 : std::make_unique<PaneView>(leaf->width, leaf->height);
+        auto entry =
+            PaneEntry { .sink = std::move(sink), .replayed = _gateway == nullptr, .pendingOutput = {} };
         _panes.emplace(*leaf->paneId, std::move(entry));
+        for (auto* observer: _observers)
+            observer->paneAdded(window, *leaf->paneId, leaf->width, leaf->height);
         if (_gateway != nullptr)
             replayHistory(*leaf->paneId);
     }
 
     // Leaves gone from the layout are closed panes.
     for (auto const paneId: previous)
+    {
         _panes.erase(paneId);
+        for (auto* observer: _observers)
+            observer->paneRemoved(window, paneId);
+    }
+
+    for (auto* observer: _observers)
+        observer->layoutTreeChanged(window);
 }
 
 void TmuxClientModel::replayHistory(uint64_t pane)
@@ -187,14 +220,14 @@ void TmuxClientModel::replayHistory(uint64_t pane)
                                   for (auto const& line: body)
                                   {
                                       if (!first)
-                                          it->second.view->feed("\r\n");
-                                      it->second.view->feed(line);
+                                          it->second.sink->feed("\r\n");
+                                      it->second.sink->feed(line);
                                       first = false;
                                   }
                               }
                               // Only now does buffered live output land on top.
                               it->second.replayed = true;
-                              it->second.view->feed(it->second.pendingOutput);
+                              it->second.sink->feed(it->second.pendingOutput);
                               it->second.pendingOutput.clear();
                           });
 }

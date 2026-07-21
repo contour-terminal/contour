@@ -28,6 +28,7 @@ add_library(muxserver STATIC
     tmux/ControlSession.h
     tmux/LayoutString.cpp
     tmux/LayoutString.h
+    tmux/PaneSink.h
     tmux/TmuxClientModel.cpp
     tmux/TmuxClientModel.h
     tmux/TmuxGateway.cpp

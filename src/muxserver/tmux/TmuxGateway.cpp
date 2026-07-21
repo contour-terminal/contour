@@ -54,6 +54,24 @@ void TmuxGateway::sendKeys(uint64_t pane, std::string_view text)
     }
 }
 
+void TmuxGateway::sendRawInput(uint64_t pane, std::string_view bytes)
+{
+    // Hex form (-H): every byte survives verbatim — control bytes, ESC, CR —
+    // with no quoting rules in the way. This is the GUI input path, where the
+    // InputGenerator's encodings are arbitrary bytes, not typed text.
+    constexpr std::size_t BatchLimit = 256;
+    while (!bytes.empty())
+    {
+        auto const batch = bytes.substr(0, BatchLimit);
+        bytes.remove_prefix(batch.size());
+
+        auto command = std::format("send-keys -t %{} -H", pane);
+        for (auto const ch: batch)
+            command += std::format(" {:02x}", static_cast<uint8_t>(ch));
+        sendCommand(std::move(command));
+    }
+}
+
 void TmuxGateway::detach()
 {
     _detached = true;

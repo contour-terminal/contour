@@ -130,3 +130,96 @@ TEST_CASE("layout ingest creates, resizes and prunes panes", "[muxserver][tmuxcl
     CHECK(model.paneCount() == 0);
     CHECK(model.windows().empty());
 }
+
+namespace
+{
+
+/// A frontend's stand-in pane backend (the GUI injects a ChannelPty feeder).
+struct RecordingSink final: muxserver::tmux::PaneSink
+{
+    std::string received;
+    int columns = 0;
+    int lines = 0;
+
+    void feed(std::string_view bytes) override { received.append(bytes); }
+    void resize(int newColumns, int newLines) override
+    {
+        columns = newColumns;
+        lines = newLines;
+    }
+};
+
+/// Records every structural notification a frontend would realize.
+struct RecordingModelEvents final: muxserver::tmux::TmuxModelEvents
+{
+    std::vector<std::string> log;
+
+    void windowAdded(uint64_t window) override { log.push_back(std::format("windowAdded:{}", window)); }
+    void windowClosed(uint64_t window) override { log.push_back(std::format("windowClosed:{}", window)); }
+    void windowRenamed(uint64_t window, std::string const& name) override
+    {
+        log.push_back(std::format("windowRenamed:{}:{}", window, name));
+    }
+    void paneAdded(uint64_t window, uint64_t pane, int columns, int lines) override
+    {
+        log.push_back(std::format("paneAdded:{}:{}:{}x{}", window, pane, columns, lines));
+    }
+    void paneRemoved(uint64_t window, uint64_t pane) override
+    {
+        log.push_back(std::format("paneRemoved:{}:{}", window, pane));
+    }
+    void layoutTreeChanged(uint64_t window) override
+    {
+        log.push_back(std::format("layoutTreeChanged:{}", window));
+    }
+    void exited(std::string const& reason) override { log.push_back(std::format("exited:{}", reason)); }
+};
+
+[[nodiscard]] std::string checksummedLayout(std::string_view body)
+{
+    return std::format("{:04x},{}", muxserver::tmux::layoutChecksum(body), std::string { body });
+}
+
+} // namespace
+
+TEST_CASE("injected sinks and observers see the mirrored structure", "[muxserver][tmuxclient]")
+{
+    auto model = TmuxClientModel {};
+    auto* lastSink = static_cast<RecordingSink*>(nullptr);
+    model.setPaneSinkFactory([&](uint64_t /*pane*/, int columns, int lines) {
+        auto sink = std::make_unique<RecordingSink>();
+        sink->columns = columns;
+        sink->lines = lines;
+        lastSink = sink.get();
+        return sink;
+    });
+    auto events = RecordingModelEvents {};
+    model.subscribe(&events);
+
+    model.windowAdded(7);
+    model.layoutChanged(7, checksummedLayout("160x50,0,0{80x50,0,0,1,79x50,81,0,2}"));
+    REQUIRE(model.paneCount() == 2);
+    CHECK(model.pane(1) == nullptr); // custom sinks are not replay views
+
+    // Live output reaches the injected sink (no gateway: panes are replayed).
+    model.outputReceived(2, "live-bytes");
+    REQUIRE(lastSink != nullptr);
+    CHECK(lastSink->received == "live-bytes");
+
+    model.layoutChanged(7, checksummedLayout("160x50,0,0,1"));
+    model.windowRenamed(7, "renamed");
+    model.exited("done");
+    model.windowClosed(7);
+
+    auto const expected = std::vector<std::string> {
+        "windowAdded:7",   "paneAdded:7:1:80x50", "paneAdded:7:2:79x50",     "layoutTreeChanged:7",
+        "paneRemoved:7:2", "layoutTreeChanged:7", "windowRenamed:7:renamed", "exited:done",
+        "paneRemoved:7:1", "windowClosed:7",
+    };
+    CHECK(events.log == expected);
+
+    // An unsubscribed observer hears nothing further.
+    model.unsubscribe(&events);
+    model.windowAdded(9);
+    CHECK(events.log == expected);
+}

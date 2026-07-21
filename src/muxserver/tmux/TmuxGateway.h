@@ -70,6 +70,10 @@ class TmuxGateway final
     /// (iTerm2's 1000-character cap per command).
     void sendKeys(uint64_t pane, std::string_view text);
 
+    /// Sends arbitrary bytes to @p pane in bounded `send-keys -H` (hex)
+    /// batches — the quoting-proof channel for encoded key/mouse input.
+    void sendRawInput(uint64_t pane, std::string_view bytes);
+
     /// Detaches: control mode ends on an empty input line.
     void detach();
 
