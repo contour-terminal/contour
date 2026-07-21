@@ -167,7 +167,9 @@ namespace
                     connection->close();
                     co_return;
                 }
-                if (!argv->empty() && !std::ranges::contains(AttachVerbs, std::string_view { argv->front() }))
+                if (!argv->empty()
+                    && std::ranges::find(AttachVerbs, std::string_view { argv->front() })
+                           == AttachVerbs.end())
                 {
                     co_await sendExit(connection.get(),
                                       1,

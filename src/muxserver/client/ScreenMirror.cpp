@@ -25,6 +25,12 @@ namespace muxserver::client
 
 namespace
 {
+    /// std::ranges::contains is not yet in Apple's libc++; find() is.
+    [[nodiscard]] bool containsValue(std::vector<uint32_t> const& values, uint32_t needle)
+    {
+        return std::ranges::find(values, needle) != values.end();
+    }
+
     constexpr uint32_t ContinuationMask = static_cast<uint32_t>(vtbackend::CellFlag::WideCharContinuation)
                                           | static_cast<uint32_t>(vtbackend::CellFlag::MulticellContinuation);
 
@@ -262,7 +268,7 @@ std::string ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& 
     syncModes(out, screen);
     out += "\033[0m";
     out += cup(delta.cursorLine + 1, delta.cursorColumn + 1);
-    if (std::ranges::contains(_setModes, VisibleCursorModeNumber))
+    if (containsValue(_setModes, VisibleCursorModeNumber))
         out += "\033[?25h";
     return out;
 }
@@ -274,8 +280,8 @@ void ScreenMirror::syncModes(std::string& out, RemoteScreen const& screen)
         auto const number = vtbackend::toDECModeNum(mode);
         if (number == VisibleCursorModeNumber)
             continue; // handled by the paint epilogue: hidden while painting
-        auto const want = std::ranges::contains(screen.setModes, number);
-        if (_modesKnown && want == std::ranges::contains(_setModes, number))
+        auto const want = containsValue(screen.setModes, number);
+        if (_modesKnown && want == containsValue(_setModes, number))
             continue;
         out += std::format("\033[?{}{}", number, want ? 'h' : 'l');
     }
@@ -328,7 +334,7 @@ std::string ScreenMirror::fullReplay(RemoteScreen const& screen)
     syncModes(out, screen);
     out += "\033[0m";
     out += cup(screen.cursorLine + 1, screen.cursorColumn + 1);
-    if (std::ranges::contains(_setModes, VisibleCursorModeNumber))
+    if (containsValue(_setModes, VisibleCursorModeNumber))
         out += "\033[?25h";
     return out;
 }
