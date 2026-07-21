@@ -2,7 +2,15 @@
 #include <net/PollEventSource.h>
 
 #ifdef _WIN32
+    #include <crispy/logstore.h>
+
+    #include <algorithm>
+    #include <cstdint>
+    #include <ranges>
+
     #include <windows.h>
+
+    #include <net/WaitChunking.h>
 #else
     #include <poll.h>
 #endif
@@ -76,6 +84,71 @@ WaitOutcome PollEventSource::wait(int timeoutMs)
 
 #else // _WIN32
 
+namespace
+{
+    /// The largest handle set a single WaitForMultipleObjects call accepts.
+    constexpr std::size_t MaxWaitObjects = MAXIMUM_WAIT_OBJECTS;
+
+    /// How long a fruitless chunked sweep blocks before re-sweeping. Bounds the
+    /// worst-case readiness latency (and CPU) of the >MaxWaitObjects slow path.
+    constexpr DWORD SweepSliceMs = 15;
+
+    /// The classification of a WaitForMultipleObjects return value.
+    enum class WaitVerdict : std::uint8_t
+    {
+        Signalled, ///< A handle in the waited range resolved the wait.
+        None,      ///< The wait timed out; nothing became ready.
+        Failed,    ///< The wait itself failed (WAIT_FAILED): a caller bug or bad handle.
+    };
+
+    /// Classifies a @c WaitForMultipleObjects result over @p count handles. An
+    /// abandoned mutex (the @c WAIT_ABANDONED_0 range) counts as readiness: the
+    /// owning thread died, so the parked reader is still resumed to observe the
+    /// handle rather than have the wait silently drop it.
+    /// @param waitResult The value @c WaitForMultipleObjects returned.
+    /// @param count The number of handles the wait covered (1..MaxWaitObjects).
+    /// @return The classification.
+    [[nodiscard]] WaitVerdict classifyWait(DWORD waitResult, DWORD count) noexcept
+    {
+        if (waitResult == WAIT_TIMEOUT)
+            return WaitVerdict::None;
+        if (waitResult == WAIT_FAILED)
+            return WaitVerdict::Failed;
+        // WAIT_OBJECT_0 is 0, so the signalled-object range is [0, count); the lower
+        // bound is implicit (waitResult is unsigned) and omitted to dodge a
+        // tautological comparison. TIMEOUT/FAILED are already handled above, and the
+        // abandoned range starts at WAIT_ABANDONED_0 (0x80), never overlapping
+        // [0, count) since count never exceeds MaxWaitObjects (64).
+        if (waitResult < WAIT_OBJECT_0 + count)
+            return WaitVerdict::Signalled;
+        if (waitResult >= WAIT_ABANDONED_0 && waitResult < WAIT_ABANDONED_0 + count)
+            return WaitVerdict::Signalled;
+        return WaitVerdict::None;
+    }
+
+    /// Appends the ready tokens of every currently-signalled registration to
+    /// @p outcome. A full rescan (rather than trusting one wait's returned index)
+    /// keeps the fast and chunked paths reporting identically and picks up every
+    /// handle ready this round, not merely the first the OS named.
+    /// @param registrations The full registration list.
+    /// @param outcome The outcome to append ready tokens to.
+    void collectSignalled(std::vector<FdRegistration> const& registrations, WaitOutcome& outcome)
+    {
+        auto const signalled = [](HANDLE handle) {
+            return handle != nullptr && WaitForSingleObject(handle, 0) == WAIT_OBJECT_0;
+        };
+        for (auto const& reg: registrations)
+        {
+            if (!signalled(reg.fd))
+                continue;
+            if (hasInterest(reg.interest, FdInterest::Read))
+                outcome.readyRead.push_back(reg.token);
+            if (hasInterest(reg.interest, FdInterest::Write))
+                outcome.readyWrite.push_back(reg.token);
+        }
+    }
+} // namespace
+
 WaitOutcome PollEventSource::wait(int timeoutMs)
 {
     auto const& registrations = _registry.registrations();
@@ -87,7 +160,6 @@ WaitOutcome PollEventSource::wait(int timeoutMs)
 
     auto outcome = WaitOutcome {};
 
-    auto const timeout = (timeoutMs < 0) ? INFINITE : static_cast<DWORD>(timeoutMs);
     if (handles.empty())
     {
         if (timeoutMs > 0)
@@ -95,24 +167,84 @@ WaitOutcome PollEventSource::wait(int timeoutMs)
         return outcome;
     }
 
-    auto const waitResult =
-        WaitForMultipleObjects(static_cast<DWORD>(handles.size()), handles.data(), FALSE, timeout);
-    if (waitResult == WAIT_TIMEOUT || waitResult == WAIT_FAILED)
-        return outcome;
+    auto const timeout = (timeoutMs < 0) ? INFINITE : static_cast<DWORD>(timeoutMs);
 
-    auto const signalled = [](HANDLE handle) {
-        return handle != nullptr && WaitForSingleObject(handle, 0) == WAIT_OBJECT_0;
-    };
-    for (auto const& reg: registrations)
+    // Fast path: the whole set fits one blocking wait — behaviour unchanged from
+    // before, except a genuine failure is surfaced instead of masqueraded as a
+    // timeout.
+    if (handles.size() <= MaxWaitObjects)
     {
-        if (!signalled(reg.fd))
-            continue;
-        if (hasInterest(reg.interest, FdInterest::Read))
-            outcome.readyRead.push_back(reg.token);
-        if (hasInterest(reg.interest, FdInterest::Write))
-            outcome.readyWrite.push_back(reg.token);
+        auto const count = static_cast<DWORD>(handles.size());
+        switch (classifyWait(WaitForMultipleObjects(count, handles.data(), FALSE, timeout), count))
+        {
+            case WaitVerdict::None: return outcome;
+            case WaitVerdict::Failed:
+                errorLog()("WaitForMultipleObjects failed: {}", GetLastError());
+                // Never let a failure return instantly as a benign timeout: with an
+                // indefinite wait that hot-spins the event loop. Yield a bounded slice
+                // (capped by the caller's timeout, skipped only for a pure poll).
+                if (timeoutMs != 0)
+                    Sleep(timeout < SweepSliceMs ? timeout : SweepSliceMs);
+                return outcome;
+            case WaitVerdict::Signalled: break;
+        }
+        collectSignalled(registrations, outcome);
+        return outcome;
     }
-    return outcome;
+
+    // Slow path: more handles than one wait accepts. Sweep the set in chunks with a
+    // 0-timeout wait each, stopping as soon as a chunk reports readiness; between
+    // fruitless sweeps block a bounded slice so the overall wait still honours its
+    // timeout without hot-spinning, and rotate the first-swept chunk every call so
+    // high-index handles are never starved.
+    auto const total = handles.size();
+    auto const chunkCount = waitChunkCount(total, MaxWaitObjects);
+    auto const infinite = timeoutMs < 0;
+    auto const budgetMs = infinite ? 0ULL : static_cast<ULONGLONG>(timeoutMs);
+    auto const startTick = GetTickCount64();
+    auto failureLogged = false;
+
+    while (true)
+    {
+        auto const start = _waitRotation % chunkCount;
+        auto anyReady = false;
+        for (auto const step: std::views::iota(std::size_t { 0 }, chunkCount))
+        {
+            auto const chunk = waitChunkAt(total, MaxWaitObjects, (start + step) % chunkCount);
+            auto const chunkSize = static_cast<DWORD>(chunk.count);
+            auto const verdict = classifyWait(
+                WaitForMultipleObjects(chunkSize, handles.data() + chunk.offset, FALSE, 0), chunkSize);
+            if (verdict == WaitVerdict::Signalled)
+            {
+                anyReady = true;
+                break;
+            }
+            if (verdict == WaitVerdict::Failed && !failureLogged)
+            {
+                errorLog()("WaitForMultipleObjects (chunk at {}) failed: {}", chunk.offset, GetLastError());
+                failureLogged = true; // log once per wait(), not once per sweep, to bound spam.
+            }
+        }
+        _waitRotation = nextWaitRotation(chunkCount, start);
+
+        if (anyReady)
+        {
+            collectSignalled(registrations, outcome);
+            return outcome;
+        }
+
+        // Nothing ready this sweep. Honour the deadline, then block a bounded slice
+        // and sweep again (an indefinite wait sleeps the full slice each round).
+        if (infinite)
+            Sleep(SweepSliceMs);
+        else
+        {
+            auto const elapsed = GetTickCount64() - startTick;
+            if (elapsed >= budgetMs)
+                return outcome;
+            Sleep(static_cast<DWORD>(std::min<ULONGLONG>(budgetMs - elapsed, SweepSliceMs)));
+        }
+    }
 }
 
 #endif

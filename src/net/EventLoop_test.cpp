@@ -3,12 +3,14 @@
 
 #include <chrono>
 #include <optional>
+#include <ranges>
 #include <thread>
 
 #include <coro/Cancellation.hpp>
 #include <coro/Task.hpp>
 #include <net/EventLoop.h>
 #include <net/PollEventSource.h>
+#include <net/WaitChunking.h>
 #include <net/WithTimeout.h>
 #include <net/platform/Clock.h>
 #include <net/platform/SystemPipe.h>
@@ -384,4 +386,66 @@ TEST_CASE("Destroying the loop unwinds a flow parked on waitReadable", "[EventLo
     } // ~EventLoop: stop + flush fd waiters + drain -> the frame unwinds, guard runs
 
     REQUIRE(destroyed);
+}
+
+// The pure chunking / rotation math that PollEventSource's Windows path uses to
+// wait on more than MAXIMUM_WAIT_OBJECTS handles. Platform-neutral (no windows.h)
+// so it is exercised here on every platform, including this Linux CI.
+TEST_CASE("WaitChunking splits a handle set into wait-sized chunks", "[WaitChunking]")
+{
+    constexpr std::size_t MaxChunk = 64; // MAXIMUM_WAIT_OBJECTS on Windows.
+
+    SECTION("chunk count is the ceiling of the total over the max chunk size")
+    {
+        CHECK(net::waitChunkCount(0, MaxChunk) == 0);
+        CHECK(net::waitChunkCount(1, MaxChunk) == 1);
+        CHECK(net::waitChunkCount(64, MaxChunk) == 1);
+        CHECK(net::waitChunkCount(65, MaxChunk) == 2);
+        CHECK(net::waitChunkCount(128, MaxChunk) == 2);
+        CHECK(net::waitChunkCount(129, MaxChunk) == 3);
+        CHECK(net::waitChunkCount(200, MaxChunk) == 4);
+    }
+
+    SECTION("the boundary case just past one wait yields a full chunk and a remainder")
+    {
+        REQUIRE(net::waitChunkCount(65, MaxChunk) == 2);
+        CHECK(net::waitChunkAt(65, MaxChunk, 0) == net::WaitChunk { .offset = 0, .count = 64 });
+        CHECK(net::waitChunkAt(65, MaxChunk, 1) == net::WaitChunk { .offset = 64, .count = 1 });
+    }
+
+    SECTION("chunks tile the handle array with no gaps, overlaps, or oversized spans")
+    {
+        constexpr std::size_t Total = 200;
+        auto const chunks = net::waitChunkCount(Total, MaxChunk);
+        REQUIRE(chunks == 4);
+
+        auto expectedOffset = std::size_t { 0 };
+        for (auto const i: std::views::iota(std::size_t { 0 }, chunks))
+        {
+            auto const chunk = net::waitChunkAt(Total, MaxChunk, i);
+            CHECK(chunk.offset == expectedOffset); // contiguous: no gap and no overlap
+            CHECK(chunk.count >= 1);
+            CHECK(chunk.count <= MaxChunk); // never larger than one wait accepts
+            expectedOffset += chunk.count;
+        }
+        CHECK(expectedOffset == Total); // every handle covered exactly once
+    }
+}
+
+TEST_CASE("WaitChunking rotates the start chunk fairly and maps indices back", "[WaitChunking]")
+{
+    SECTION("rotation advances by one and wraps at the chunk count")
+    {
+        CHECK(net::nextWaitRotation(4, 0) == 1);
+        CHECK(net::nextWaitRotation(4, 1) == 2);
+        CHECK(net::nextWaitRotation(4, 2) == 3);
+        CHECK(net::nextWaitRotation(4, 3) == 0); // wrap
+    }
+
+    SECTION("a stale cursor past the chunk count is folded back into range")
+    {
+        CHECK(net::nextWaitRotation(4, 10) == 3); // 10 % 4 == 2, then +1
+        CHECK(net::nextWaitRotation(4, 7) == 0);  // 7 % 4 == 3, then wraps
+        CHECK(net::nextWaitRotation(1, 0) == 0);  // a single chunk always stays put
+    }
 }

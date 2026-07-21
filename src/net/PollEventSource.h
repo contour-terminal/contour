@@ -44,6 +44,12 @@ class PollEventSource: public EventSource
 
   private:
     FdRegistry _registry; ///< Watched fds, in registration order.
+#ifdef _WIN32
+    /// Fair-rotation cursor over the handle chunks of the Windows >64-handle wait,
+    /// so a 0-timeout sweep (which always finds low-index chunks first) cannot
+    /// starve handles past @c MAXIMUM_WAIT_OBJECTS. Unused by the POSIX poll(2) path.
+    std::size_t _waitRotation = 0;
+#endif
 };
 
 } // namespace net
