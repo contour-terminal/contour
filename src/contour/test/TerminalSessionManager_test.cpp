@@ -359,7 +359,10 @@ TEST_CASE("TerminalSessionManager: a directory-only layout pane does not overrid
 
     contour::config::Layout layout;
     contour::config::LayoutTab tab;
-    tab.root.directory = std::filesystem::path { "/tmp" };
+    // Plain string, not std::filesystem::path: LayoutPane::directory is an
+    // optional<string>, and path only converts to string on POSIX (Windows
+    // paths are wide).
+    tab.root.directory = "/tmp";
     layout.tabs = { tab };
     REQUIRE(app.manager().applyLayoutToWindow(win.id, layout));
 
