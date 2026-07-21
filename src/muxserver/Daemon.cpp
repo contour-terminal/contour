@@ -1,4 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
+
+// winsock2.h MUST precede windows.h (which project headers like vtpty's pull
+// in), or the old winsock definitions clash with it — so this block leads
+// the translation unit, mirroring every Win32 net TU.
+// clang-format off
+#ifdef _WIN32
+    #include <winsock2.h>
+    #include <windows.h>
+#endif
+// clang-format on
+
 #include <muxserver/Daemon.h>
 
 #include <array>
@@ -31,11 +42,6 @@
 
     #include <termios.h>
     #include <unistd.h>
-#else
-// clang-format off
-    #include <winsock2.h>
-    #include <windows.h>
-// clang-format on
 #endif
 
 namespace muxserver
