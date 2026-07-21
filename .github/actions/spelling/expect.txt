@@ -32,16 +32,19 @@ BBBBB
 BCDE
 Bcolor
 BDiag
+bilinearly
 blitted
 BLval
 bpp
 brc
+Bresenham
 BRval
 BTests
 Bufs
 Buftest
 callgrind
 capslock
+Catmull
 cbrt
 cccc
 CCCCC
@@ -58,6 +61,7 @@ cjk
 claude
 COLORHIGHLIGHTBG
 COLORHIGHLIGHTFG
+colouring
 colourspaces
 COLSx
 contentscale
@@ -76,6 +80,7 @@ DBUILD
 dcx
 dddd
 DDDDD
+debounced
 DECAAM
 DECANM
 DECARSM
@@ -125,6 +130,7 @@ DECVCCM
 DECXRLM
 deduplicated
 defghijklmnop
+deltas
 dependabot
 desync
 desynchronized
@@ -156,6 +162,7 @@ elifndef
 ellips
 emantic
 emtpy
+endo
 entrantly
 Envp
 envs
@@ -228,6 +235,7 @@ ies
 IJK
 IJKLMNOP
 imagesize
+imsg
 inchar
 inflush
 inputline
@@ -238,6 +246,7 @@ istreambuf
 journalctl
 keychain
 keysym
+leb
 letterbox
 letterboxes
 libcuda
@@ -261,6 +270,7 @@ lrmm
 lthe
 LUT
 LWin
+macrographs
 mainwindow
 MATM
 MESSAGELOGCONTEXT
@@ -270,6 +280,7 @@ mred
 mru
 multicell
 multiwindow
+muxserver
 MYPC
 myscheme
 nabc
@@ -289,6 +300,7 @@ ndelta
 ndrwxr
 neeee
 nefgh
+neighbours
 nffff
 nfile
 nfoo
@@ -334,6 +346,9 @@ Pcss
 PCXAL
 PDFs
 Pdt
+pdu
+pdus
+peq
 Pflags
 Pfn
 Phe
@@ -341,6 +356,7 @@ php
 pipefail
 pkcs
 Pld
+Pmode
 Pnbits
 pointee
 popups
@@ -397,6 +413,7 @@ quer
 qulonglong
 qunsetenv
 QVar
+rasterises
 ratcheted
 ratcheting
 rbong
@@ -405,8 +422,10 @@ readback
 readnl
 readwrite
 redefinable
+regis
 relayout
 remotehost
+renditional
 repeatables
 replayable
 repointed
@@ -417,6 +436,7 @@ rerasterize
 rerasterizing
 resampler
 resizable
+resync
 retargeted
 retargets
 rewatch
@@ -425,6 +445,7 @@ rhi
 rhilayout
 rhysd
 RISOn
+RLogin
 rni
 rrrgggbbb
 RRRR
@@ -437,12 +458,14 @@ scrn
 SCROLLLOCK
 segfaulting
 segfaults
+seqno
 Serialises
 sessionless
 SETSPECIALCOLPAL
 SIGABRTs
 sigmask
 soa
+socketpair
 soname
 sourced
 splitv
@@ -455,11 +478,12 @@ SRTM
 stdlib
 Stp
 strtod
-Subresource
 subresource
+Subresource
 subspan
 supersample
 supersampled
+svarint
 swapchain
 Sxbp
 tabcolor
@@ -508,6 +532,7 @@ UPSS
 upstat
 URval
 uvwxy
+varint
 VCenter
 vectorizable
 VEM
@@ -530,9 +555,11 @@ whoami
 Winops
 worktree
 WXYZ
+xaa
 xad
 xargs
 Xcms
+xea
 xefefef
 XGrid
 Xlib
@@ -551,20 +578,8 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 xyw
 xyzw
 xzf
+YGrid
 Zabcdefghijklmnopqrstuvwxyz
+Zingl
 zleep
 zzzznotacommand
-regis
-Pmode
-Bresenham
-Catmull
-Zingl
-RLogin
-macrographs
-rasterises
-colouring
-neighbours
-bilinearly
-xaa
-xea
-YGrid
