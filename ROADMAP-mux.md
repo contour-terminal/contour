@@ -58,9 +58,11 @@ control mode; per-line cell deltas feed the native protocol. GUI and daemon shar
     Only `Grid::scrollUp` moved (+~4M Ir, 0.08% of total: assignment-op dirtying).
   - termbench-pro's `sgr` test SIGSEGVs in its own `writeNumber` (buffer underflow at
     v=0) in BOTH binaries — pre-existing third-party breakage, excluded from the runs.
-- [ ] 3b. leb128 PDU codec, version handshake, side tables (hyperlinks, image cells),
-      `FetchImage`/`ImageData`/`ImageGone`, session-state snapshot
-- [ ] 3c. delta transport (per-connection cursors, adaptive polling)
+- [x] 3b. leb128 PDU codec, version handshake, side tables (hyperlinks, image cells),
+      `FetchImage`/`ImageData`/`ImageGone`, session-state snapshot (`src/muxserver/proto/`)
+- [x] 3c. delta transport (`NativeSession`: per-connection cursors + sent-id sets, 20ms
+      debounced pushes off screenUpdated, attach/resync snapshots, FetchImage service;
+      daemon serves it on `<socket>-native` beside control mode)
 - [ ] 3d. attach client (remote-populated `TerminalSession` seam)
 
 ## Phase 4 — tmux client
