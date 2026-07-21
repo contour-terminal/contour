@@ -108,6 +108,10 @@
       <description>
         <ul>
           <li>BREAKING: `tab_bar_position` and `tab_bar_visibility` moved from a profile to the top level of contour.yml. A window shows one tab bar whichever profiles its tabs run, so the setting belongs to the application rather than to a profile. Move these two keys out of your `profiles:` block; a profile-scoped copy is no longer read</li>
+          <li>Contour can now run as a terminal multiplexer: `contour daemon` hosts shell sessions that survive their client, and `contour attach` reattaches to them — as a thin client in the current terminal, or with `--gui` as a full Contour window whose tabs mirror the daemon's sessions live, including images, hyperlinks and sized text</li>
+          <li>The daemon speaks tmux's control-mode protocol (pinned to tmux 3.7b semantics), so tmux-aware tooling can drive Contour's tabs and panes — and the stock tmux binary itself can attach to it, via `tmux -S &lt;socket&gt;-tmux -C attach-session` or plainly through `contour daemon --tmux-compat-socket`</li>
+          <li>Adds `contour attach --tmux`: the GUI attaches to a real running tmux server, its windows become tabs and its panes become splits, with content and input mirrored live</li>
+          <li>The daemon and its attach client also run on Windows (Windows 10 1803+), over AF_UNIX sockets with ConPTY-backed sessions and a raw-VT console attach</li>
           <li>Selected text can be read aloud through the operating system's speech synthesizer, from the context menu or with Ctrl+Shift+S. Needs Qt's TextToSpeech module and an installed voice; where either is missing the feature is simply not offered</li>
           <li>The bell, desktop notifications and read-only mode are now announced to screen readers, which have no other way to learn about them. Turn it off with `accessibility_announcements: false`</li>
           <li>The window chrome is now described to screen readers: the tab bar reads as a tab list whose tabs announce themselves as they are switched, the window and tab buttons say what they do instead of naming their glyph, and every settings field carries its own label</li>
