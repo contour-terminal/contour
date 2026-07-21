@@ -182,6 +182,9 @@ struct Delta
     uint64_t generation = 0;
     uint64_t seqno = 0;
     uint8_t snapshot = 0;
+    /// The stable id of page row 0 at delta time — what lets the client map
+    /// stable-id-addressed rows onto its viewport.
+    int64_t stableViewportBase = 0;
     int32_t cursorLine = 0;
     int32_t cursorColumn = 0;
     std::vector<WireLine> lines;

@@ -4,6 +4,9 @@
 #include <array>
 #include <cstring>
 #include <span>
+#include <vector>
+
+#include <net/Sockets.h>
 
 namespace net
 {
@@ -54,6 +57,16 @@ coro::Task<std::expected<std::string, NetError>> AsyncBufferedReader::readLine()
 
         _buffer.append(reinterpret_cast<char const*>(chunk.data()), *got);
     }
+}
+
+coro::Task<bool> appendReadChunk(ISocket* socket, std::vector<std::byte>* buffer)
+{
+    auto scratch = std::array<std::byte, 16384> {};
+    auto const n = co_await socket->read(scratch);
+    if (!n.has_value() || *n == 0)
+        co_return false;
+    buffer->insert(buffer->end(), scratch.begin(), scratch.begin() + static_cast<long>(*n));
+    co_return true;
 }
 
 } // namespace net

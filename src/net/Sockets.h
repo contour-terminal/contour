@@ -7,10 +7,12 @@
 /// each resolves to the right backend (PosixSocket/Listener or
 /// WindowsSocket/Listener) at compile time.
 
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 #include <coro/Task.hpp>
 #include <net/EventLoop.h>
@@ -61,5 +63,13 @@ namespace net
 ///         @c NetErrorCode::Unsupported on Windows (for now).
 [[nodiscard]] coro::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connectUnix(
     EventLoop* loop, std::string_view path);
+
+/// Appends one read chunk from @p socket to @p buffer — the accumulate step of
+/// every binary-framed decode loop.
+/// @param socket The transport to read from (not owned; a pointer, since
+///        coroutine reference parameters can dangle).
+/// @param buffer Receives the read bytes.
+/// @return False on clean EOF or error; true when bytes were appended.
+[[nodiscard]] coro::Task<bool> appendReadChunk(ISocket* socket, std::vector<std::byte>* buffer);
 
 } // namespace net

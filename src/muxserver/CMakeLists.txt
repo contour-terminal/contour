@@ -9,6 +9,10 @@ add_library(muxserver STATIC
     SessionHost.h
     SocketPath.h
     TappingPty.h
+    client/AttachClient.cpp
+    client/AttachClient.h
+    client/TtyRenderer.cpp
+    client/TtyRenderer.h
     proto/Pdu.cpp
     proto/Pdu.h
     proto/Wire.cpp
@@ -41,6 +45,8 @@ if(MUXSERVER_TESTING)
         MuxServer_test.cpp
         NativeSession_test.cpp
         SocketPath_test.cpp
+        client/AttachClient_test.cpp
+        client/TtyRenderer_test.cpp
         proto/Pdu_test.cpp
         proto/Wire_test.cpp
         tmux/ControlOutput_test.cpp

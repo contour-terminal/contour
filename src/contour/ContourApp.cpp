@@ -572,7 +572,7 @@ int ContourApp::daemonAction()
 
 int ContourApp::attachAction()
 {
-    return muxserver::runAttachProbe(muxserver::muxSocketPath(
+    return muxserver::runAttach(muxserver::muxSocketPath(
         parameters().get<string>("contour.attach.label"), parameters().get<string>("contour.attach.socket")));
 }
 

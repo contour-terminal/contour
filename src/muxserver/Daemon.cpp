@@ -12,13 +12,21 @@
 #include <muxserver/MuxServer.h>
 #include <muxserver/NativeSession.h>
 #include <muxserver/SessionHost.h>
+#include <muxserver/client/AttachClient.h>
+#include <muxserver/client/TtyRenderer.h>
 #include <muxserver/tmux/ControlSession.h>
 #include <net/EventLoop.h>
 #include <net/PollEventSource.h>
 #include <net/Sockets.h>
 
 #ifndef _WIN32
+    #include <sys/ioctl.h>
+
+    #include <array>
     #include <csignal>
+
+    #include <termios.h>
+    #include <unistd.h>
 #endif
 
 namespace muxserver
@@ -104,28 +112,113 @@ int runDaemon(DaemonConfig const& config)
     return EXIT_SUCCESS;
 }
 
-int runAttachProbe(std::filesystem::path const& socketPath)
+namespace
+{
+    /// Puts the controlling TTY into raw mode for the attach lifetime and
+    /// restores the saved settings on destruction.
+    class RawTty
+    {
+      public:
+        RawTty()
+        {
+            if (::tcgetattr(STDIN_FILENO, &_saved) != 0)
+                return;
+            auto raw = _saved;
+            ::cfmakeraw(&raw);
+            _active = ::tcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0;
+        }
+
+        ~RawTty()
+        {
+            if (_active)
+                ::tcsetattr(STDIN_FILENO, TCSANOW, &_saved);
+        }
+
+        RawTty(RawTty const&) = delete;
+        RawTty& operator=(RawTty const&) = delete;
+        RawTty(RawTty&&) = delete;
+        RawTty& operator=(RawTty&&) = delete;
+
+      private:
+        termios _saved {};
+        bool _active = false;
+    };
+
+    /// Forwards local keystrokes to the attached session; Ctrl-\ detaches.
+    coro::Task<void> pumpStdin(net::EventLoop* loop,
+                               client::AttachClient* attach,
+                               std::uint64_t const* activeSession)
+    {
+        while (true)
+        {
+            co_await loop->waitReadable(STDIN_FILENO);
+            auto buffer = std::array<char, 512> {};
+            auto const n = ::read(STDIN_FILENO, buffer.data(), buffer.size());
+            if (n <= 0)
+                break;
+            auto const bytes = std::string_view { buffer.data(), static_cast<std::size_t>(n) };
+            if (bytes.contains('\x1c')) // Ctrl-\ = detach
+                break;
+            if (*activeSession != 0)
+                attach->sendInput(*activeSession, bytes);
+        }
+        attach->detach();
+    }
+
+    /// Proposes the local TTY's size once the handshake is on the wire.
+    coro::Task<void> proposeLocalSize(client::AttachClient* attach)
+    {
+        auto size = winsize {};
+        if (::ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col > 0 && size.ws_row > 0)
+            attach->requestResize(size.ws_col, size.ws_row);
+        co_return;
+    }
+
+    /// The whole attach lifetime: connect, mirror, pump input, detach.
+    coro::Task<void> attachFlow(net::EventLoop* loop, std::string path, int* exitCode)
+    {
+        auto socket = co_await net::connectUnix(loop, path);
+        if (!socket.has_value())
+        {
+            std::println(stderr, "contour attach: {}", socket.error().toString());
+            *exitCode = EXIT_FAILURE;
+            co_return;
+        }
+
+        auto attach = client::AttachClient { *loop, std::move(*socket) };
+        auto activeSession = std::uint64_t { 0 };
+        attach.setUpdateHandler([&activeSession](client::RemoteScreen const& screen) {
+            activeSession = screen.session;
+            auto const bytes = client::renderViewport(screen);
+            std::ignore = ::write(STDOUT_FILENO, bytes.data(), bytes.size());
+        });
+
+        {
+            auto const rawMode = RawTty {};
+            // whenAll starts run() first, so its ClientHello precedes the
+            // resize proposal in the write queue.
+            co_await coro::whenAll(
+                attach.run(), pumpStdin(loop, &attach, &activeSession), proposeLocalSize(&attach));
+        }
+
+        std::println("\ncontour attach: detached");
+        if (attach.versionMismatch())
+        {
+            std::println(stderr, "contour attach: daemon speaks an incompatible protocol version");
+            *exitCode = EXIT_FAILURE;
+        }
+    }
+} // namespace
+
+int runAttach(std::filesystem::path const& socketPath)
 {
     auto source = net::PollEventSource {};
     auto loop = net::EventLoop { source };
 
-    auto probe = [](net::EventLoop* lp, std::string path, bool* connected) -> coro::Task<void> {
-        auto socket = co_await net::connectUnix(lp, path);
-        *connected = socket.has_value();
-        if (!socket.has_value())
-            std::println(stderr, "contour attach: {}", socket.error().toString());
-    };
-
-    auto connected = false;
-    loop.blockOn(probe(&loop, socketPath.string(), &connected));
-
-    if (!connected)
-        return EXIT_FAILURE;
-    std::println(stderr,
-                 "contour attach: daemon on {} is alive; interactive attach lands with the "
-                 "client protocol.",
-                 socketPath.string());
-    return EXIT_SUCCESS;
+    auto exitCode = EXIT_SUCCESS;
+    // The daemon's native protocol listens beside the control-mode socket.
+    loop.blockOn(attachFlow(&loop, socketPath.string() + "-native", &exitCode));
+    return exitCode;
 }
 
 #else // _WIN32
@@ -136,7 +229,7 @@ int runDaemon(DaemonConfig const& /*config*/)
     return EXIT_FAILURE;
 }
 
-int runAttachProbe(std::filesystem::path const& /*socketPath*/)
+int runAttach(std::filesystem::path const& /*socketPath*/)
 {
     std::println(stderr, "contour attach: not supported on Windows yet");
     return EXIT_FAILURE;

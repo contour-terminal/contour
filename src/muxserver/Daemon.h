@@ -31,10 +31,12 @@ struct DaemonConfig
 /// @return The process exit code (EXIT_SUCCESS on clean shutdown).
 [[nodiscard]] int runDaemon(DaemonConfig const& config);
 
-/// Connects to a running daemon's control socket and reports reachability —
-/// the attach handshake proper lands with the client protocol phases.
-/// @param socketPath The control-socket file to probe.
-/// @return EXIT_SUCCESS if a daemon accepted the connection.
-[[nodiscard]] int runAttachProbe(std::filesystem::path const& socketPath);
+/// Attaches this terminal to a running daemon over the native cells+deltas
+/// protocol: mirrors the remote screen onto the local TTY and forwards
+/// keystrokes until the peer disconnects or Ctrl-\ detaches.
+/// @param socketPath The daemon's control-socket file (the native socket
+///        lives beside it).
+/// @return The process exit code (EXIT_SUCCESS on clean detach).
+[[nodiscard]] int runAttach(std::filesystem::path const& socketPath);
 
 } // namespace muxserver

@@ -4,7 +4,6 @@
 #include <vtbackend/Image.h>
 #include <vtbackend/Line.h>
 
-#include <array>
 #include <bit>
 #include <chrono>
 #include <mutex>
@@ -12,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include <net/Sockets.h>
 #include <vtmux/Pane.h>
 #include <vtmux/Tab.h>
 
@@ -181,6 +181,7 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
         delta.snapshot = snapshot ? 1 : 0;
         delta.generation = grid.generation();
         delta.seqno = grid.seqno();
+        delta.stableViewportBase = grid.stableLineIdOf(vtbackend::LineOffset(0));
 
         auto const cursor = terminal->currentScreen().cursor().position;
         delta.cursorLine = unbox<int32_t>(cursor.line);
@@ -261,21 +262,6 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
     // Unknown/unexpected PDUs are ignored: forward compatibility.
 }
 
-namespace
-{
-    /// Appends one read chunk to @p buffer; false on EOF or error. A free
-    /// coroutine: a capturing lambda coroutine would dangle its closure.
-    coro::Task<bool> readChunk(net::ISocket* connection, std::vector<std::byte>* buffer)
-    {
-        auto scratch = std::array<std::byte, 16384> {};
-        auto const n = co_await connection->read(scratch);
-        if (!n.has_value() || *n == 0)
-            co_return false;
-        buffer->insert(buffer->end(), scratch.begin(), scratch.begin() + static_cast<long>(*n));
-        co_return true;
-    }
-} // namespace
-
 coro::Task<void> NativeSession::run()
 {
     auto buffer = std::vector<std::byte> {};
@@ -287,7 +273,7 @@ coro::Task<void> NativeSession::run()
         if (!decoded)
         {
             if (decoded.error() != proto::DecodeError::NeedMoreData
-                || !co_await readChunk(_connection.get(), &buffer))
+                || !co_await net::appendReadChunk(_connection.get(), &buffer))
                 co_return;
             continue;
         }
@@ -301,6 +287,10 @@ coro::Task<void> NativeSession::run()
         }
         send(decoded->serial, proto::DecodedPdu { proto::ServerHello {} });
         _handshaken = true;
+
+        // Attaching to an empty daemon spawns the first session.
+        if (_host.model().window(_host.windowId())->tabCount() == 0)
+            std::ignore = _host.createTab();
 
         // The attach snapshot: every hosted session, full state.
         auto* window = _host.model().window(_host.windowId());
@@ -317,7 +307,7 @@ coro::Task<void> NativeSession::run()
         if (!decoded)
         {
             if (decoded.error() != proto::DecodeError::NeedMoreData
-                || !co_await readChunk(_connection.get(), &buffer))
+                || !co_await net::appendReadChunk(_connection.get(), &buffer))
                 break;
             continue;
         }
