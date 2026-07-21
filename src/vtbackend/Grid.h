@@ -852,6 +852,19 @@ class Grid
     {
         _lines.rotate_right(unbox<size_t>(count));
         _stableBase -= unbox<int64_t>(count);
+        if (_stableBase < _stableFloor)
+        {
+            // Reverse-scrolling past the addressable history sinks the base below the
+            // floor: the newly exposed top page rows would take ids already issued to
+            // evicted rows (or, on a zero-history grid, ids below the watermark), and
+            // the floor cannot follow them down without re-validating garbage slots.
+            // Row identity cannot survive this — rebuild it wholesale. Every history
+            // row that was still valid provably lands in the caller's blanked region,
+            // so after the bump the page is the entire valid range.
+            _stableFloor = _stableBase;
+            bumpGeneration(); // re-syncs the floor itself
+            return;
+        }
         syncStableFloor();
     }
 

@@ -1366,6 +1366,41 @@ TEST_CASE("Grid.stableId.scrollDownKeepsRowIdentity", "[grid][stable-id]")
     CHECK(grid.lineText(*offset) == "AAAAA");
 }
 
+TEST_CASE("Grid.stableId.reverseScrollPastHistoryRebuildsIdentity", "[grid][stable-id]")
+{
+    // Zero history (the alternate screen's shape): any full-page reverse scroll
+    // would sink the base below the monotonic floor, so the exposed top row would
+    // reuse id space the floor already burned.
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(5) }, false, LineCount(0));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    auto const generationBefore = grid.generation();
+
+    grid.scrollDown(LineCount(1), GraphicsAttributes {}, fullPageMargin(grid.pageSize()));
+
+    // One wholesale rebuild; afterwards the whole page is addressable again.
+    CHECK(grid.generation() == generationBefore + 1);
+    CHECK(grid.stableRangeFloor() == grid.stableLineIdOf(LineOffset(0)));
+    for (auto const offset: std::views::iota(0, 3))
+        CHECK(grid.lineOffsetOf(grid.stableLineIdOf(LineOffset(offset))) == LineOffset(offset));
+    CHECK(grid.lineText(LineOffset(1)) == "AAAAA"); // the content still moved down
+}
+
+TEST_CASE("Grid.stableId.reverseScrollRebuildsOnlyWhenSinkingBelowTheFloor", "[grid][stable-id]")
+{
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(5) }, false, LineCount(5));
+    grid.scrollUp(LineCount(2)); // two history rows: base 2, floor 0
+    auto const generationBefore = grid.generation();
+
+    // Reverse-scrolling down TO the floor keeps row identity...
+    grid.scrollDown(LineCount(2), GraphicsAttributes {}, fullPageMargin(grid.pageSize()));
+    CHECK(grid.generation() == generationBefore);
+
+    // ...but one more line sinks the base below it: identity is rebuilt wholesale.
+    grid.scrollDown(LineCount(1), GraphicsAttributes {}, fullPageMargin(grid.pageSize()));
+    CHECK(grid.generation() == generationBefore + 1);
+    CHECK(grid.stableRangeFloor() == grid.stableLineIdOf(LineOffset(0)));
+}
+
 TEST_CASE("Grid.stableId.unscrollPullsHistoryRowsBackUnderTheirIds", "[grid][stable-id]")
 {
     auto grid = Grid(PageSize { LineCount(3), ColumnCount(5) }, false, LineCount(5));
@@ -1522,6 +1557,34 @@ TEST_CASE("Grid.delta.resizeForcesOneResyncThenDeltas", "[grid][delta]")
     CHECK(changedOffsets(grid, cursor).empty());
     grid.setLineText(LineOffset(0), "after");
     CHECK(changedOffsets(grid, cursor) == std::vector { 0 });
+}
+
+TEST_CASE("Grid.delta.reverseScrollPastHistorySnapshotsTheWholePage", "[grid][delta]")
+{
+    // The attach-daemon scenario: a client follows the alternate screen (zero
+    // history) and the app reverse-scrolls (RI at the top). Before the fix the
+    // floor stayed above the base: the snapshot skipped the top page rows and
+    // the changed-lines clamp was handed an inverted range.
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(5) }, false, LineCount(0));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    auto cursor = drainedCursor(grid);
+
+    grid.scrollDown(LineCount(1), GraphicsAttributes {}, fullPageMargin(grid.pageSize()));
+
+    auto reported = 0;
+    CHECK(grid.forEachLineChangedSince(cursor, [&](LineOffset, Line const&) { ++reported; })
+          == GridDeltaResult::ResyncRequired);
+    CHECK(reported == 0); // a resync never reports lines; snapshot instead:
+
+    // The resync snapshot covers the WHOLE page, including the fresh top row.
+    auto offsets = std::vector<int> {};
+    grid.forEachValidLine([&](LineOffset offset, Line const&) { offsets.push_back(unbox<int>(offset)); });
+    CHECK(offsets == std::vector { 0, 1, 2 });
+
+    // The re-anchored cursor resumes plain delta service.
+    CHECK(changedOffsets(grid, cursor).empty());
+    grid.setLineText(LineOffset(2), "after");
+    CHECK(changedOffsets(grid, cursor) == std::vector { 2 });
 }
 
 TEST_CASE("Grid.delta.clearHistoryNeedsNoResend", "[grid][delta]")

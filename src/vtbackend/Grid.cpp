@@ -170,6 +170,9 @@ void Grid::verifyState() const noexcept
     Require(_linesUsed >= _pageSize.lines);
     // A floor below base - history would re-validate evicted stable ids.
     Require(_stableFloor >= _stableBase - unbox<int64_t>(historyLineCount()));
+    // A floor above the base would deny live page rows their identity (and hand
+    // std::clamp an inverted range); rotateBuffersRight re-keys before that.
+    Require(_stableFloor <= _stableBase);
 #endif
 }
 
