@@ -18,7 +18,9 @@
 #include <string>
 #include <thread>
 
-#include <unistd.h>
+#ifndef _WIN32
+    #include <unistd.h>
+#endif
 
 #include <coro/Cancellation.hpp>
 #include <muxserver/MuxServer.h>
@@ -35,6 +37,8 @@ using namespace std::chrono_literals;
 
 namespace
 {
+
+#ifndef _WIN32
 
 /// An in-process `contour daemon` (native protocol only) on its own thread,
 /// serving a real AF_UNIX socket — what `attach --gui` talks to in production.
@@ -127,6 +131,8 @@ std::string drainUntil(vtpty::Pty& pty, std::string_view needle)
     return collected;
 }
 
+#endif // !_WIN32
+
 /// A factory that can never back a session (the attach guard's stand-in).
 struct RefusingFactory final: contour::SessionFactory
 {
@@ -143,6 +149,10 @@ struct RefusingFactory final: contour::SessionFactory
 
 } // namespace
 
+#ifndef _WIN32
+
+// The daemon fixture builds on POSIX /tmp + 0700-hardening semantics; the
+// afunix Windows path is covered by the runtime-gated net unix-echo test.
 TEST_CASE("attach controller mirrors a remote session over a real socket", "[attach][controller]")
 {
     auto daemon = DaemonFixture {};
@@ -207,6 +217,8 @@ TEST_CASE("attach controller reports an unreachable daemon", "[attach][controlle
     REQUIRE(!connected.has_value());
     CHECK(!connected.error().empty());
 }
+
+#endif // !_WIN32
 
 TEST_CASE("a refusing session factory blocks every creation entry point", "[attach][factory]")
 {
