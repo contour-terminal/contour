@@ -41,19 +41,38 @@ namespace muxserver::tmux
 /// @return The argument vector (possibly empty).
 [[nodiscard]] std::vector<std::string> splitCommandLine(std::string_view line);
 
+/// Per-transport dialect knobs for a ControlSession. The raw line-protocol
+/// socket keeps the defaults; the imsg path (a real tmux binary relaying to
+/// its user) deviates exactly where the real server does.
+struct ControlSessionOptions
+{
+    /// Whether run() emits its own `%exit` line — the tmux client binary
+    /// prints `%exit` itself, so the imsg path suppresses ours.
+    bool emitExitLine = true;
+
+    /// The flags field of the PREAMBLE guard pair: 1 for a line-protocol
+    /// peer (client-originated), 0 for the MSG_COMMAND-originated attach
+    /// (cmd-queue.c stamps only stdin-line commands as client-originated).
+    int initialGuardFlag = 1;
+};
+
 /// One connected control-mode client.
 class ControlSession final: public vtmux::ModelEvents, public SessionStreamEvents
 {
   public:
+    using Options = ControlSessionOptions;
+
     /// @param loop The event loop everything runs on.
     /// @param host The session host commands act upon (not owned; outlives this).
     /// @param connection The client transport (owned).
     /// @param wallClock Seconds-since-epoch source for guard timestamps
     ///        (injected so tests are deterministic).
+    /// @param options Transport-dialect knobs (defaults = line protocol).
     ControlSession(net::EventLoop& loop,
                    SessionHost& host,
                    std::unique_ptr<net::ISocket> connection,
-                   std::function<std::int64_t()> wallClock);
+                   std::function<std::int64_t()> wallClock,
+                   Options options = {});
     ~ControlSession() override;
 
     ControlSession(ControlSession const&) = delete;
@@ -102,7 +121,7 @@ class ControlSession final: public vtmux::ModelEvents, public SessionStreamEvent
     void dispatch(std::string_view line);
 
     /// Emits `%begin/%end` (or `%error`) around @p bodyLines.
-    void emitGuarded(HandlerResult const& result);
+    void emitGuarded(HandlerResult const& result, int flags = 1);
 
     /// Emits the current layout of @p tab as a %layout-change notification.
     void notifyLayoutChanged(vtmux::TabId tab);
@@ -139,6 +158,7 @@ class ControlSession final: public vtmux::ModelEvents, public SessionStreamEvent
     SessionHost& _host;
     std::unique_ptr<net::ISocket> _connection;
     std::function<std::int64_t()> _wallClock;
+    Options _options;
     net::WriteQueue _writer;
     ControlOutput _output;
     std::uint32_t _commandNumber = 0;

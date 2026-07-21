@@ -146,11 +146,13 @@ namespace
 ControlSession::ControlSession(net::EventLoop& loop,
                                SessionHost& host,
                                std::unique_ptr<net::ISocket> connection,
-                               std::function<std::int64_t()> wallClock):
+                               std::function<std::int64_t()> wallClock,
+                               Options options):
     _loop(loop),
     _host(host),
     _connection(std::move(connection)),
     _wallClock(std::move(wallClock)),
+    _options(options),
     _writer(loop, _connection.get(), std::size_t { 256 } * 1024),
     _output([this](std::string line) { std::ignore = _writer.enqueue(std::move(line)); })
 {
@@ -173,7 +175,8 @@ coro::Task<void> ControlSession::run()
 {
     // The implicit initial command's empty guard pair, then the session state —
     // the preamble iTerm2-style clients gate their notification handling on.
-    emitGuarded(HandlerResult { std::vector<std::string> {} });
+    // The imsg path stamps it flag 0 (the MSG_COMMAND-originated attach).
+    emitGuarded(HandlerResult { std::vector<std::string> {} }, _options.initialGuardFlag);
     _output.enqueueNotification("%session-changed $0 0");
 
     auto reader = net::AsyncBufferedReader { _connection.get() };
@@ -187,7 +190,9 @@ coro::Task<void> ControlSession::run()
         dispatch(*line);
     }
 
-    _output.enqueueNotification("%exit");
+    // The tmux client binary prints its own %exit; the imsg path suppresses ours.
+    if (_options.emitExitLine)
+        _output.enqueueNotification("%exit");
     // Let the write queue flush %exit (and any trailing replies) before tearing
     // the connection down: close() drops the backlog, so a bare close here would
     // race the spawned drain and lose the final lines.
@@ -218,20 +223,21 @@ void ControlSession::dispatch(std::string_view line)
     emitGuarded((this->*(entry->handler))(arguments));
 }
 
-void ControlSession::emitGuarded(HandlerResult const& result)
+void ControlSession::emitGuarded(HandlerResult const& result, int flags)
 {
     auto const time = _wallClock();
     auto const number = _commandNumber++;
     // flags bit 0 (client-originated) is SET on guard blocks answering client
-    // commands (cmd-queue.c:591); spontaneous output never uses guards.
-    _output.enqueueNotification(std::format("%begin {} {} 1", time, number));
+    // commands (cmd-queue.c:591); spontaneous output never uses guards. Only
+    // the preamble may carry 0 (see ControlSessionOptions::initialGuardFlag).
+    _output.enqueueNotification(std::format("%begin {} {} {}", time, number, flags));
     if (result.has_value())
         for (auto const& line: *result)
             _output.enqueueNotification(line);
     else
         _output.enqueueNotification(result.error());
     _output.enqueueNotification(
-        std::format("{} {} {} 1", result.has_value() ? "%end" : "%error", time, number));
+        std::format("{} {} {} {}", result.has_value() ? "%end" : "%error", time, number, flags));
 }
 
 void ControlSession::sessionOutput(SessionId session, std::string const& bytes)

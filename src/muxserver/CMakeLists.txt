@@ -34,6 +34,8 @@ add_library(muxserver STATIC
     tmux/ControlOutput.h
     tmux/ControlSession.cpp
     tmux/ControlSession.h
+    tmux/ImsgServer.cpp
+    tmux/ImsgServer.h
     tmux/LayoutString.cpp
     tmux/LayoutString.h
     tmux/PaneSink.h
@@ -72,6 +74,7 @@ if(MUXSERVER_TESTING)
         tmux/ControlModeParser_test.cpp
         tmux/ControlOutput_test.cpp
         tmux/ControlSession_test.cpp
+        tmux/ImsgServer_test.cpp
         tmux/LayoutString_test.cpp
         tmux/TmuxClientModel_test.cpp
         tmux/TmuxGateway_test.cpp
