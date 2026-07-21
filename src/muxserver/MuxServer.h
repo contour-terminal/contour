@@ -24,8 +24,10 @@ namespace muxserver
 {
 
 /// Handles one accepted client connection; owns the socket for its lifetime.
-/// move_only_function because the socket is moved into the coroutine frame.
-using ConnectionHandler = std::move_only_function<coro::Task<void>(std::unique_ptr<net::ISocket> connection)>;
+/// std::function (not move_only_function, which Apple's libc++ lacks): the
+/// handler factories return copyable closures — only the SOCKET argument
+/// moves, and that moves through the call just fine.
+using ConnectionHandler = std::function<coro::Task<void>(std::unique_ptr<net::ISocket> connection)>;
 
 /// Accepts connections on an injected listener and spawns one handler flow per
 /// connection.
