@@ -9569,3 +9569,80 @@ TEST_CASE("Reverse wraparound carries the cursor to the line above", "[screen]")
 }
 
 // }}} Backspace
+
+// {{{ Delta change tracking: advanced-feature write-path coverage
+namespace
+{
+/// Drains the grid's pending changes so a test observes only its own writes.
+GridDeltaCursor drainedDeltaCursor(Grid& grid)
+{
+    auto cursor = GridDeltaCursor {};
+    std::ignore = grid.forEachLineChangedSince(cursor, [](LineOffset, Line const&) {});
+    return cursor;
+}
+
+std::vector<int> changedLineOffsets(Grid& grid, GridDeltaCursor& cursor)
+{
+    auto out = std::vector<int> {};
+    std::ignore = grid.forEachLineChangedSince(
+        cursor, [&](LineOffset offset, Line const&) { out.push_back(unbox<int>(offset)); });
+    return out;
+}
+} // namespace
+
+TEST_CASE("Delta.imagePlacementBumpsExactlyTheCoveredLines", "[screen][delta]")
+{
+    auto const pageSize = PageSize { LineCount(11), ColumnCount(11) };
+    auto mock = MockTerm { pageSize, LineCount(11) };
+    mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(10) });
+
+    auto& grid = mock.terminal.primaryScreen().grid();
+    auto cursor = drainedDeltaCursor(grid);
+
+    mock.writeToScreen(ChessBoard); // a 10x10-cell sixel image over rows 0..9
+
+    auto const changed = changedLineOffsets(grid, cursor);
+    CHECK(changed == std::vector { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 });
+}
+
+TEST_CASE("Delta.sizedTextBumpsHeadAndContinuationRows", "[screen][delta]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
+    auto& grid = mock.terminal.primaryScreen().grid();
+    auto cursor = drainedDeltaCursor(grid);
+
+    // OSC 66 with s=2: the head lands on row 0, the continuation cells on row 1.
+    mock.writeToScreen("\033]66;s=2:w=2;W\a"sv);
+
+    CHECK(changedLineOffsets(grid, cursor) == std::vector { 0, 1 });
+}
+
+TEST_CASE("Delta.decdwlBumpsTheLine", "[screen][delta]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
+    auto& grid = mock.terminal.primaryScreen().grid();
+    auto cursor = drainedDeltaCursor(grid);
+
+    mock.writeToScreen("\033#6"sv); // DECDWL mutates the line via non-const flags()
+
+    CHECK(changedLineOffsets(grid, cursor) == std::vector { 0 });
+}
+
+TEST_CASE("Delta.hyperlinkedTextCarriesItsIdThroughADeltaCycle", "[screen][delta]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
+    auto& grid = mock.terminal.primaryScreen().grid();
+    auto cursor = drainedDeltaCursor(grid);
+
+    mock.writeToScreen("\033]8;;https://example.com\033\\ab\033]8;;\033\\"sv);
+
+    auto linkedColumns = 0;
+    std::ignore = grid.forEachLineChangedSince(cursor, [&](LineOffset offset, Line const& line) {
+        REQUIRE(offset == LineOffset(0));
+        for (auto const& id: line.storage().hyperlinks)
+            if (id != HyperlinkId {})
+                ++linkedColumns;
+    });
+    CHECK(linkedColumns == 2); // "ab" carries the hyperlink id through the delta
+}
+// }}} Delta change tracking

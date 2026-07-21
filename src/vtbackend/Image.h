@@ -11,6 +11,8 @@
 #include <format>
 #include <functional>
 #include <memory>
+#include <mutex>
+#include <unordered_map>
 #include <vector>
 
 namespace vtbackend
@@ -362,6 +364,12 @@ class ImagePool
     [[nodiscard]] std::shared_ptr<Image const> findImageByName(std::string const& name) const noexcept;
     void unlink(std::string const& name);
 
+    /// Finds a live image by its stable id.
+    /// @param id The image id as referenced by grid cells.
+    /// @return The image, or nullptr when it was never created or its last reference is
+    ///         gone (the daemon answers a FetchImage request with ImageGone then).
+    [[nodiscard]] std::shared_ptr<Image const> findImageById(ImageId id) const;
+
     void inspect(std::ostream& os) const;
 
     void clear();
@@ -371,11 +379,22 @@ class ImagePool
 
     using NameToImageIdCache = crispy::strong_lru_cache<std::string, std::shared_ptr<Image const>>;
 
+    /// The id index behind findImageById(): weak_ptrs so the index never extends image
+    /// lifetime (eviction stays refcount-driven), shared with each image's remover so
+    /// pruning is safe regardless of destruction order, and mutex-guarded because the
+    /// last reference can drop on any thread (e.g. the GUI's render thread).
+    struct IdIndex
+    {
+        std::mutex mutex;
+        std::unordered_map<uint32_t, std::weak_ptr<Image const>> images;
+    };
+
     // data members
     //
     ImageId _nextImageId;                      //!< ID for next image to be put into the pool
     NameToImageIdCache _imageNameToImageCache; //!< keeps mapping from name to raw image
     OnImageRemove _onImageRemove;              //!< Callback to be invoked when image gets removed from pool.
+    std::shared_ptr<IdIndex> _idIndex = std::make_shared<IdIndex>(); //!< id -> live image index
 };
 
 } // namespace vtbackend

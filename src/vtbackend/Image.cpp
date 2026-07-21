@@ -416,7 +416,31 @@ shared_ptr<Image const> ImagePool::create(ImageFormat format, ImageSize size, Im
     // TODO: This operation should be idempotent, i.e. if that image has been created already, return a
     // reference to that.
     auto const id = _nextImageId++;
-    return make_shared<Image>(id, format, std::move(data), size, _onImageRemove);
+    // The remover prunes the id index before the user's callback runs. It captures the
+    // index by shared_ptr, never the pool: an image's last reference may outlive the
+    // pool member order-wise, and it may drop on any thread.
+    auto image = make_shared<Image>(
+        id, format, std::move(data), size, [index = _idIndex, remover = _onImageRemove](Image const* image) {
+            {
+                auto const _ = std::lock_guard { index->mutex };
+                index->images.erase(image->id().value);
+            }
+            if (remover)
+                remover(image);
+        });
+    {
+        auto const _ = std::lock_guard { _idIndex->mutex };
+        _idIndex->images.emplace(id.value, image);
+    }
+    return image;
+}
+
+shared_ptr<Image const> ImagePool::findImageById(ImageId id) const
+{
+    auto const _ = std::lock_guard { _idIndex->mutex };
+    if (auto const it = _idIndex->images.find(id.value); it != _idIndex->images.end())
+        return it->second.lock();
+    return {};
 }
 
 shared_ptr<RasterizedImage> rasterize(shared_ptr<Image const> image,

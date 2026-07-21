@@ -259,3 +259,26 @@ TEST_CASE("RasterizedImage.fragment", "[RasterizedImage]")
     std::cout << "RasterizedImage::fragment benchmark: " << diff << "ms for " << iterations << " iterations ("
               << (double(diff) / iterations) << "ms per op) check=" << check << "\n";
 }
+
+TEST_CASE("ImagePool.idIndexTracksImageLifetime", "[image]")
+{
+    auto pool = ImagePool {};
+    auto image =
+        pool.create(ImageFormat::RGBA, ImageSize { Width(1), Height(1) }, Image::Data { 0, 0, 0, 0xFF });
+    auto const id = image->id();
+
+    // A live image is served by id.
+    auto found = pool.findImageById(id);
+    REQUIRE(found != nullptr);
+    CHECK(found->id() == id);
+    CHECK(found.get() == image.get());
+
+    // Lifetime stays refcount-driven: the index never keeps an image alive.
+    image.reset();
+    CHECK(pool.findImageById(id) != nullptr); // `found` still holds it
+    found.reset();
+    CHECK(pool.findImageById(id) == nullptr); // gone -> the daemon answers ImageGone
+
+    // An id that never existed is not an error either.
+    CHECK(pool.findImageById(ImageId(4242)) == nullptr);
+}
