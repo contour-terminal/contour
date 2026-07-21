@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <muxserver/MuxServer.h>
 
+#include <chrono>
 #include <utility>
 
 #include <net/AsyncBufferedReader.h>
 
 namespace muxserver
 {
+
+using namespace std::chrono_literals;
 
 MuxServer::MuxServer(net::EventLoop& loop,
                      std::unique_ptr<net::IListener> listener,
@@ -24,7 +27,11 @@ coro::Task<void> MuxServer::serve()
         {
             if (accepted.error().code == net::NetErrorCode::Cancelled)
                 co_return; // listener closed / shutdown requested
-            continue;      // transient accept failure; keep serving
+            // Persistent failures (EMFILE/ENFILE fd exhaustion) fail synchronously
+            // with no suspension point — a bare `continue` would spin this loop and
+            // starve every other flow on the event loop. Back off, then keep serving.
+            co_await _loop.delay(100ms);
+            continue;
         }
 
         ++_acceptedCount;

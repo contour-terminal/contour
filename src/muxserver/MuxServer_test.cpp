@@ -4,7 +4,10 @@
     #include <catch2/catch_test_macros.hpp>
 
     #include <algorithm>
+    #include <cerrno>
+    #include <chrono>
     #include <cstddef>
+    #include <cstdint>
     #include <filesystem>
     #include <memory>
     #include <span>
@@ -18,8 +21,10 @@
     #include <muxserver/MuxServer.h>
     #include <net/AsyncBufferedReader.h>
     #include <net/EventLoop.h>
+    #include <net/IListener.h>
     #include <net/PollEventSource.h>
     #include <net/Sockets.h>
+    #include <net/testing/CoroTestSupport.h>
 
 using coro::Task;
 using muxserver::MuxServer;
@@ -70,6 +75,25 @@ Task<void> echoLineHandler(std::unique_ptr<net::ISocket> connection, std::vector
         std::span<std::byte const> { reinterpret_cast<std::byte const*>(wire.data()), wire.size() };
     std::ignore = co_await connection->write(bytes);
 }
+
+/// A listener whose accept fails synchronously every time — the shape of fd
+/// exhaustion (EMFILE/ENFILE), which never suspends the accepting coroutine.
+struct ExhaustedListener final: net::IListener
+{
+    int* attempts;
+
+    explicit ExhaustedListener(int* attemptsArg) noexcept: attempts(attemptsArg) {}
+
+    coro::Task<net::AcceptResult> accept() override
+    {
+        ++*attempts;
+        co_return std::unexpected(
+            net::NetError { .code = net::NetErrorCode::Other, .systemCode = EMFILE, .context = "accept" });
+    }
+
+    [[nodiscard]] std::uint16_t localPort() const noexcept override { return 0; }
+    void close() noexcept override {}
+};
 
 /// One client's round trip: connect, send a line, await the echo.
 Task<void> clientRoundTrip(EventLoop* loop, std::string socketPath, std::string line, bool* echoed)
@@ -126,6 +150,23 @@ TEST_CASE("MuxServer serves concurrent connections through the injected handler"
     CHECK(std::ranges::count(seen, "beta") == 1);
 
     server.close(); // the parked accept resolves as cancelled; ~EventLoop reaps
+}
+
+TEST_CASE("persistent accept failures back off instead of starving the loop", "[muxserver][server]")
+{
+    auto source = net::PollEventSource {};
+    auto loop = EventLoop { source };
+
+    auto attempts = 0;
+    auto server =
+        MuxServer { loop, std::make_unique<ExhaustedListener>(&attempts), muxserver::drainConnection };
+    loop.spawn(server.serve());
+
+    // Every accept fails without suspending; serve() must yield between attempts
+    // or this blockOn would never get the loop back (the livelock this guards
+    // against). Within 50ms only the initial attempt fits into the backoff.
+    loop.blockOn(net::testing::sleepFor(&loop, std::chrono::milliseconds { 50 }));
+    CHECK(attempts <= 2);
 }
 
 TEST_CASE("closing the server ends the accept loop", "[muxserver][server]")
