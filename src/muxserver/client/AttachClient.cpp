@@ -149,7 +149,7 @@ void AttachClient::handlePdu(proto::DecodedPdu const& pdu)
         auto& screen = _screens[delta->session];
         screen.apply(*delta);
         if (_onUpdate)
-            _onUpdate(screen);
+            _onUpdate(screen, *delta);
         return;
     }
     // ImageData/ImageGone are consumed by the frontend's update handler in a

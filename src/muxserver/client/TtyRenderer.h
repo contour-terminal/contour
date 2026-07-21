@@ -19,6 +19,12 @@ namespace muxserver::client
 /// @return The `ESC [ ... m` byte sequence.
 [[nodiscard]] std::string sgrFor(proto::WireCell const& cell);
 
+/// The SGR sequence selecting @p line's fill attributes (starting from a
+/// reset) — what a blank region of that row is colored with.
+/// @param line The row whose fill colors to select.
+/// @return The `ESC [ ... m` byte sequence.
+[[nodiscard]] std::string sgrForFill(proto::WireLine const& line);
+
 /// One full repaint of @p screen's viewport: cursor hidden, every row
 /// repainted in place, then the cursor restored to the remote position.
 /// @param screen The mirrored screen to draw.

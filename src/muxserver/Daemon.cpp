@@ -187,11 +187,12 @@ namespace
 
         auto attach = client::AttachClient { *loop, std::move(*socket) };
         auto activeSession = std::uint64_t { 0 };
-        attach.setUpdateHandler([&activeSession](client::RemoteScreen const& screen) {
-            activeSession = screen.session;
-            auto const bytes = client::renderViewport(screen);
-            std::ignore = ::write(STDOUT_FILENO, bytes.data(), bytes.size());
-        });
+        attach.setUpdateHandler(
+            [&activeSession](client::RemoteScreen const& screen, proto::Delta const& /*delta*/) {
+                activeSession = screen.session;
+                auto const bytes = client::renderViewport(screen);
+                std::ignore = ::write(STDOUT_FILENO, bytes.data(), bytes.size());
+            });
 
         {
             auto const rawMode = RawTty {};

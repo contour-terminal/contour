@@ -38,11 +38,11 @@ namespace
         FlagSgr { vtbackend::CellFlag::Overline, 53 },
     };
 
-    /// Appends the SGR parameters selecting @p raw as fore- or background.
-    void appendColor(std::string& out, uint32_t raw, bool foreground)
+    /// Appends the SGR parameters selecting @p raw as fore-, back- or
+    /// underline color (SGR base 38, 48 or 58).
+    void appendColor(std::string& out, uint32_t raw, int base)
     {
         auto const color = std::bit_cast<vtbackend::Color>(raw);
-        auto const base = foreground ? 38 : 48;
         switch (color.type())
         {
             case vtbackend::ColorType::Indexed: out += std::format(";{};5;{}", base, color.index()); break;
@@ -64,8 +64,18 @@ std::string sgrFor(proto::WireCell const& cell)
     for (auto const& [flag, sgr]: FlagSgrTable)
         if ((cell.flags & static_cast<uint32_t>(flag)) != 0)
             out += std::format(";{}", sgr);
-    appendColor(out, cell.foreground, /*foreground=*/true);
-    appendColor(out, cell.background, /*foreground=*/false);
+    appendColor(out, cell.foreground, 38);
+    appendColor(out, cell.background, 48);
+    appendColor(out, cell.underlineColor, 58);
+    out += 'm';
+    return out;
+}
+
+std::string sgrForFill(proto::WireLine const& line)
+{
+    auto out = std::string { "\033[0" };
+    appendColor(out, line.fillForeground, 38);
+    appendColor(out, line.fillBackground, 48);
     out += 'm';
     return out;
 }

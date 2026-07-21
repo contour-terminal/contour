@@ -77,7 +77,7 @@ class AttachClient final
     [[nodiscard]] coro::Task<void> run();
 
     /// Invoked after every applied Delta with the updated screen.
-    void setUpdateHandler(std::function<void(RemoteScreen const&)> handler)
+    void setUpdateHandler(std::function<void(RemoteScreen const&, proto::Delta const&)> handler)
     {
         _onUpdate = std::move(handler);
     }
@@ -110,7 +110,7 @@ class AttachClient final
     net::EventLoop& _loop;
     std::unique_ptr<net::ISocket> _connection;
     net::WriteQueue _writer;
-    std::function<void(RemoteScreen const&)> _onUpdate;
+    std::function<void(RemoteScreen const&, proto::Delta const&)> _onUpdate;
     std::map<uint64_t, RemoteScreen> _screens;
     uint64_t _nextSerial = 1;
     bool _connected = false;

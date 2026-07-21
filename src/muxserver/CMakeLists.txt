@@ -12,6 +12,8 @@ add_library(muxserver STATIC
     TappingPty.h
     client/AttachClient.cpp
     client/AttachClient.h
+    client/ScreenMirror.cpp
+    client/ScreenMirror.h
     client/TtyRenderer.cpp
     client/TtyRenderer.h
     proto/Pdu.cpp
@@ -53,6 +55,7 @@ if(MUXSERVER_TESTING)
         NativeSession_test.cpp
         SocketPath_test.cpp
         client/AttachClient_test.cpp
+        client/ScreenMirror_test.cpp
         client/TtyRenderer_test.cpp
         proto/Pdu_test.cpp
         proto/Wire_test.cpp
