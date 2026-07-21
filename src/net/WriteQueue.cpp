@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <net/WriteQueue.h>
 
-#include <chrono>
 #include <span>
 #include <utility>
 
@@ -38,8 +37,7 @@ void WriteQueue::close() noexcept
 
 coro::Task<void> WriteQueue::flushThenClose()
 {
-    while (_state->queuedBytes > 0 || _state->draining)
-        co_await _loop.delay(std::chrono::milliseconds { 1 });
+    co_await pollUntil(&_loop, [state = _state] { return state->queuedBytes == 0 && !state->draining; });
     close();
 }
 

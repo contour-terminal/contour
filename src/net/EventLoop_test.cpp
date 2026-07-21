@@ -45,6 +45,25 @@ Task<int> awaitDelayThenFire(EventLoop* loop, int delayMs, bool* fired)
     co_return delayMs;
 }
 
+/// Sets *flag true after @p delayMs — a stand-in for the async condition
+/// (queue drained, debounce fired) that pollUntil waits on.
+Task<void> setFlagAfter(EventLoop* loop, int delayMs, bool* flag)
+{
+    co_await loop->delay(std::chrono::milliseconds { delayMs });
+    *flag = true;
+}
+
+/// Polls until @p flag is set, then reports how it exited (true) plus the number
+/// of poll iterations it took (via @p polls).
+Task<bool> pollForFlag(EventLoop* loop, bool* flag, int* polls)
+{
+    co_await net::pollUntil(loop, [flag, polls] {
+        ++*polls;
+        return *flag;
+    });
+    co_return *flag;
+}
+
 /// Waits for @p fd to become readable; returns 1 on readiness or @p cancelSentinel
 /// if cancelled while parked.
 Task<int> awaitReadableOrCancel(EventLoop* loop, net::NativeHandle fd, int cancelSentinel)
@@ -163,6 +182,33 @@ TEST_CASE("A pending delay bounds the wait timeout and fires deterministically",
     REQUIRE(source.waitCount() == 2);
     REQUIRE(source.recordedTimeouts().front() == 500); // exact: no real-clock jitter
     REQUIRE(source.recordedTimeouts().back() == 250);  // the remaining half
+}
+
+TEST_CASE("pollUntil returns as soon as its predicate holds", "[EventLoop][poll]")
+{
+    auto source = net::PollEventSource {};
+    auto loop = EventLoop { source };
+
+    auto flag = false;
+    auto polls = 0;
+    loop.spawn(setFlagAfter(&loop, 5, &flag)); // flips true a few poll ticks in
+    auto const done = loop.blockOn(pollForFlag(&loop, &flag, &polls));
+
+    CHECK(done);
+    CHECK(polls >= 2); // checked at least once before and once after the flag flipped
+}
+
+TEST_CASE("pollUntil returns immediately when the predicate already holds", "[EventLoop][poll]")
+{
+    auto source = net::PollEventSource {};
+    auto loop = EventLoop { source };
+
+    auto flag = true; // already satisfied: no delay should be awaited
+    auto polls = 0;
+    auto const done = loop.blockOn(pollForFlag(&loop, &flag, &polls));
+
+    CHECK(done);
+    CHECK(polls == 1); // one check, then a prompt return
 }
 
 TEST_CASE("EventSource fd registry hands out distinct tokens and reports readiness", "[EventSource]")

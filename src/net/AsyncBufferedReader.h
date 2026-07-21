@@ -58,6 +58,12 @@ class AsyncBufferedReader
     /// @return The number of bytes buffered but not yet consumed (tests/diagnostics).
     [[nodiscard]] std::size_t buffered() const noexcept { return _buffer.size(); }
 
+    /// @return True if at least one more complete (LF-terminated) line is already
+    ///         buffered, so the next @c readLine returns without touching the
+    ///         socket. Consumers use this as a burst boundary: once it is false,
+    ///         the batch that arrived together has been fully delivered.
+    [[nodiscard]] bool hasBufferedLine() const noexcept { return _buffer.contains('\n'); }
+
     /// @return The total number of bytes the line scanner has examined so far.
     ///         Tests assert this stays equal to the bytes consumed — i.e. every
     ///         byte is scanned exactly once regardless of read fragmentation.

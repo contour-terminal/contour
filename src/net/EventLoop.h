@@ -344,4 +344,19 @@ class WaitFdAwaiter
     coro::StopToken _token;
 };
 
+/// Suspends until @p predicate returns true, re-checking every @p interval on
+/// @p loop's clock. This is the shared teardown-drain idiom — wait for a write
+/// queue to flush, a debounce to fire, an output pacer to empty — in ONE place.
+///
+/// It POLLS rather than parking on a completion signal, which is acceptable on
+/// the low-frequency connection-teardown paths that use it (the cost is at most
+/// one @p interval of extra latency at close); it is NOT for hot paths.
+/// @param loop The loop whose delay drives the poll (and cancels it on shutdown).
+/// @param predicate Checked before each wait; the poll returns once it holds.
+/// @param interval How long to suspend between checks.
+[[nodiscard]] coro::Task<void> pollUntil(EventLoop* loop,
+                                         std::function<bool()> predicate,
+                                         std::chrono::milliseconds interval = std::chrono::milliseconds {
+                                             1 });
+
 } // namespace net

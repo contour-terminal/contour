@@ -278,4 +278,12 @@ WaitFdAwaiter EventLoop::waitWritable(NativeHandle fd) noexcept
     return WaitFdAwaiter { *this, fd, FdInterest::Write };
 }
 
+coro::Task<void> pollUntil(EventLoop* loop,
+                           std::function<bool()> predicate,
+                           std::chrono::milliseconds interval)
+{
+    while (!predicate())
+        co_await loop->delay(interval);
+}
+
 } // namespace net
