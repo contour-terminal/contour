@@ -528,6 +528,8 @@ ControlSession::HandlerResult ControlSession::commandSendKeys(std::vector<std::s
         }
         if (argument == "-l")
             continue;
+        if (argument == "--")
+            continue; // end-of-options, as tmux's argument parser accepts
         bytes += literal ? argument : translateKey(argument);
     }
 

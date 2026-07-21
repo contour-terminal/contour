@@ -17,12 +17,16 @@ add_library(muxserver STATIC
     proto/Pdu.h
     proto/Wire.cpp
     proto/Wire.h
+    tmux/ControlModeParser.cpp
+    tmux/ControlModeParser.h
     tmux/ControlOutput.cpp
     tmux/ControlOutput.h
     tmux/ControlSession.cpp
     tmux/ControlSession.h
     tmux/LayoutString.cpp
     tmux/LayoutString.h
+    tmux/TmuxGateway.cpp
+    tmux/TmuxGateway.h
 )
 target_link_libraries(muxserver PUBLIC
     net
@@ -49,9 +53,11 @@ if(MUXSERVER_TESTING)
         client/TtyRenderer_test.cpp
         proto/Pdu_test.cpp
         proto/Wire_test.cpp
+        tmux/ControlModeParser_test.cpp
         tmux/ControlOutput_test.cpp
         tmux/ControlSession_test.cpp
         tmux/LayoutString_test.cpp
+        tmux/TmuxGateway_test.cpp
     )
     target_link_libraries(muxserver_test muxserver crispy::core Catch2::Catch2)
     add_test(NAME muxserver_test COMMAND $<TARGET_FILE:muxserver_test>)

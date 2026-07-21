@@ -63,18 +63,99 @@ control mode; per-line cell deltas feed the native protocol. GUI and daemon shar
 - [x] 3c. delta transport (`NativeSession`: per-connection cursors + sent-id sets, 20ms
       debounced pushes off screenUpdated, attach/resync snapshots, FetchImage service;
       daemon serves it on `<socket>-native` beside control mode)
-- [ ] 3d. attach client (remote-populated `TerminalSession` seam)
+- [x] 3d. attach client: Qt-free `client/AttachClient` (RemoteScreen mirror) +
+      `TtyRenderer`; `contour attach` is a working thin client (raw TTY, input
+      forwarding, Ctrl-\ detach; live-verified incl. detach/reattach survival).
+      The GUI's remote-populated `TerminalSession` display seam remains follow-up
+      work on top of RemoteScreen.
 
 ## Phase 4 — tmux client
 
-- [ ] control-mode parser (tmux.pest port + our field-level parsing), gateway state machine,
-      layout ingest, capture-pane history replay, send-keys encoding
+- [x] `tmux/ControlModeParser`: table-driven line classifier with our field-level parsing
+      (guard triples, %output octal unescape, %extended-output's ONE age field before " : ",
+      layout/window/session/pause fields; unknown verbs tolerated, `%endless` != `%end`)
+- [x] `tmux/TmuxGateway`: the client state machine — recovery mode until the opening guard
+      (discard everything except %begin/%exit), FIFO command/response correlation,
+      notification gating until the opening guard completes, `sendKeys` in 1000-char
+      `send-keys -l --` batches (double-quote quoting: the dialect BOTH real tmux and our
+      splitCommandLine accept — single-quote `'\''` re-quoting is NOT; loopback caught it).
+      Loopback test: our gateway drives our own oracle-verified control-mode server.
+- [ ] live oracle run: gateway against real `tmux -C new-session` (tmux 3.7b). Needs a
+      pipe/socketpair transport into a spawned process — net has no child-process ISocket
+      yet; either add `net::spawnPiped()` or dup2 a socketpair into the child. Gate the
+      test on tmux availability like LayoutString_test's oracle harness (popen + private
+      `-S` socket, see its `OracleServer` scope guard).
+- [ ] capture-pane history replay: on attach, `capture-pane -peqJ -t %N` per pane, body
+      replayed through a real `vtbackend::Terminal` (VT-with-escapes; SGR carries across
+      lines; NO images — inherited tmux limitation, document in mux.md).
+- [ ] client-side window/pane model: consume layoutChanged via `parseLayout` +
+      `collapseToBinary` into a vtmux-shaped tree the GUI can realize (LayoutTree exists).
+- [ ] GUI integration ("attach Contour to real tmux -CC, native panes mirror it"): needs
+      the same remote-populated display seam as 3d's GUI half — see "GUI seams" below.
 
-## Phase 5 — binary imsg IPC (gated; abort criteria in docs/internals/mux.md)
+## GUI seams (deferred from 3d/4 — the Qt half)
 
-- [ ] rewritten-imsg framing + MSG_IDENTIFY handshake + socket discovery
+- [ ] remote-populated `TerminalSession`: a TerminalSession variant fed by
+      `client::RemoteScreen` (native attach) or a per-pane replay Terminal (tmux attach)
+      instead of a local PTY+parser. RenderBuffer must be populated from RemoteScreen
+      cells (colors/flags are raw wire words; `TtyRenderer.cpp` shows the decode via
+      `std::bit_cast<vtbackend::Color>` / CellFlag masks). Defer InputSerial/predictive
+      echo (plan decision).
+- [ ] `contour attach --gui` (or a Config/session flag) wiring the above into the
+      existing window/tab machinery; tmux windows/panes map onto vtmux::SessionModel.
+
+## Phase 5 — binary imsg IPC (gated; highest risk)
+
+- [ ] rewritten-imsg framing (16-byte header {type,len,peerid,pid} host order, len incl.
+      header, top bit = fd-present, max 16384; peerid low 8 bits = PROTOCOL_VERSION 8),
+      MSG_IDENTIFY_* handshake with STDIN/STDOUT fds via SCM_RIGHTS, three-way shutdown,
+      `/tmp/tmux-<uid>/<label>` discovery + `.lock` flock dance.
+      ABORT criteria: upstream PROTOCOL_VERSION bump; struct layout differs across
+      supported platforms; required command surface exceeds Phase 2's. Never blocks 0-4.
 
 ## Cross-cutting
 
-- [ ] `docs/internals/mux.md` + mkdocs nav; retire `docs/drafts/daemon-mode.md` pointer
-- [ ] delete this file before the branch lands
+- [ ] `docs/internals/mux.md`: architecture (two taps, threading model, stable-id delta
+      design incl. the floor/generation rules, wire format v1), tmux 3.7b pin rationale,
+      endo provenance (commit 178cb496, re-sync recipe in src/coro/README.md), inherited
+      limitations (no images in pre-attach tmux history; capture-pane text+SGR only),
+      Phase 5 abort criteria. Add one nav line under `Internals:` in mkdocs.yml.
+- [ ] retire `docs/drafts/daemon-mode.md` with a pointer to mux.md (its networked-Pty
+      client design is superseded by cells+deltas).
+- [ ] `/simplify` pass over `src/muxserver` (duplication check: the three binary decode
+      loops in NativeSession/AttachClient/TmuxGateway::run share a shape; the two
+      `waitUntil` test helpers; RemoteScreen::viewportText vs TtyRenderer cell walk).
+- [ ] Windows: `runDaemon`/`runAttach` are stubs; net's Win32 backend compiles but
+      `listenUnix/connectUnix` return Unsupported — decide AF_UNIX-on-Windows vs TCP.
+- [ ] delete this file before the branch lands.
+
+## Resuming on another machine
+
+Environment:
+- Build: `cmake --build --preset clang-asan`; tests: `ASAN_OPTIONS="hard_rss_limit_mb=4096"
+  ctest --preset=clang-asan` (always set the RSS cap). clang-tidy is a hard gate
+  (`WarningsAsErrors: '*'`): run a scoped sweep over touched files before pushing.
+- The layout/protocol oracle needs tmux 3.7b installed (`/usr/bin/tmux`); oracle tests
+  self-skip when absent. Reference trees via `$CONTOUR_VT_REFERENCE_SOURCES` (tmux tree
+  pinned next-3.8; key files: control.c, cmd-refresh-client.c, server-client.c).
+- Release perf runs: `cmake --preset clang-release -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON`.
+  termbench-pro's `sgr` grid test SIGSEGVs in its own writeNumber (both baseline and
+  branch) — use `grid size N cat long binary`.
+
+Live-verification recipes (all worked on 2026-07-21):
+- Control mode: `contour daemon --socket /tmp/x.sock`, then drive `/tmp/x.sock` with a
+  line-based client (new-window / refresh-client -C 120x40 / -A %1:pause / list-windows).
+- Native attach: `contour attach --socket /tmp/x.sock` (connects to `/tmp/x.sock-native`)
+  under a real TTY; type a command, output mirrors back; Ctrl-\ detaches; reattach
+  replays history. AF_UNIX paths must stay under ~100 bytes (sun_path).
+- Gotcha: `pkill -f contour` matches YOUR OWN shell when the cwd/cmdline contains
+  "contour" — it killed the test harness repeatedly. Use `pkill -9 -x contour`.
+
+Known state / open ends:
+- The daemon spawns the login shell; interactive shells hang at startup without the
+  pump-loop `flushInput()` (commit d8edc43d) — keep that in mind when touching the pump.
+- NativeSession serves ONE screenUpdated handler (last native client wins); multi-client
+  fan-out needs a subscriber list on SessionHost (small, planned with the GUI seam).
+- Native protocol v1 ships whole changed rows; stable-id range fetch-on-demand for
+  out-of-viewport rows is an optimization left open (plan 3c).
+- `%subscription-changed` (-B) is accepted but produces nothing (no format engine).
