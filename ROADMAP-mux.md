@@ -44,9 +44,20 @@ control mode; per-line cell deltas feed the native protocol. GUI and daemon shar
 
 ## Phase 3 — native protocol (cells + deltas)
 
-- [ ] 3a. vtbackend retrofit (lands alone + bench/Callgrind evidence): per-line
+- [x] 3a. vtbackend retrofit (lands alone + bench/Callgrind evidence): per-line
       revision/dirty, stable row ids in ring primitives, generation resync,
       `forEachLineChangedSince`/`forEachValidLine`; `ImagePool` id→image index
+
+  Perf evidence (for the PR description; baseline b1954fda vs 043d0014, clang-release,
+  `bench-headless grid size 64 cat long binary`, 3 alternating runs, taskset-pinned):
+  - Wall-clock parity: aggregate ~103.7 MB/s (base) vs ~104.5 MB/s (head); per-test
+    within noise (many_lines 79.9→80.1, long_lines 262→266, binary 79.5→80.3 MB/s).
+  - Callgrind total Ir: 4,787,184,907 → 4,801,584,280 = **+0.30%** (gate: <0.5%).
+  - Top-20 exclusive-Ir symbol sets identical; `writeTextToSoA` and `Screen::writeText`
+    Ir byte-identical (the bulk-ASCII dirty mark is one byte store per writeText call).
+    Only `Grid::scrollUp` moved (+~4M Ir, 0.08% of total: assignment-op dirtying).
+  - termbench-pro's `sgr` test SIGSEGVs in its own `writeNumber` (buffer underflow at
+    v=0) in BOTH binaries — pre-existing third-party breakage, excluded from the runs.
 - [ ] 3b. leb128 PDU codec, version handshake, side tables (hyperlinks, image cells),
       `FetchImage`/`ImageData`/`ImageGone`, session-state snapshot
 - [ ] 3c. delta transport (per-connection cursors, adaptive polling)
