@@ -18,6 +18,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace vtbackend
 {
@@ -527,6 +528,21 @@ struct ReverseLogicalLines
     [[nodiscard]] iterator end() const { return { lines, topMostLine, topMostLine - 1, bottomMostLine }; }
 };
 
+/// A consumer's position in a grid's change stream (one per followed grid per client).
+struct GridDeltaCursor
+{
+    uint64_t generation = 0; ///< The generation this cursor is valid within.
+    uint64_t seqno = 0;      ///< Every batch up to and including this one was seen.
+    int64_t stableBase = 0;  ///< The base at the last query; bounds the history scan depth.
+};
+
+/// What a delta query yielded.
+enum class GridDeltaResult : uint8_t
+{
+    Delta,          ///< Changed lines were reported and the cursor advanced.
+    ResyncRequired, ///< Row identity was rebuilt: snapshot via forEachValidLine().
+};
+
 /**
  * Manages the screen grid buffer (main screen + scrollback history).
  *
@@ -701,6 +717,67 @@ class Grid
     /// destroyed page rows into the oldest history slots without resetting them, and a
     /// derived floor would re-validate those evicted ids against garbage.
     [[nodiscard]] int64_t stableRangeFloor() const noexcept { return _stableFloor; }
+
+    /// The batch counter every line revision draws from (advanced by finalizeRevisions).
+    [[nodiscard]] uint64_t seqno() const noexcept { return _seqno; }
+
+    /// Stamps every dirty line with the next batch number in one pass over the page plus
+    /// the rows scrolled out since the last finalize (so a row written and then scrolled
+    /// away within one batch still gets stamped). Bumps the seqno only if anything was
+    /// stamped — an idle grid finalizes for free, and nothing runs at all when no
+    /// consumer queries.
+    void finalizeRevisions() noexcept;
+
+    /// Reports every line changed since @p cursor and advances it.
+    ///
+    /// Self-finalizing. On a generation mismatch the cursor is re-anchored to the
+    /// current state and ResyncRequired is returned WITHOUT reporting lines — the caller
+    /// snapshots via forEachValidLine() instead. (A resync must never be "changes since
+    /// seqno 0": post-rebuild rows legitimately keep revision 0 forever.)
+    /// @param cursor The consumer's stream position (updated).
+    /// @param callback Invoked as callback(LineOffset, Line const&) per changed line.
+    template <typename F>
+    [[nodiscard]] GridDeltaResult forEachLineChangedSince(GridDeltaCursor& cursor, F&& callback)
+    {
+        finalizeRevisions();
+        if (cursor.generation != _generation)
+        {
+            cursor =
+                GridDeltaCursor { .generation = _generation, .seqno = _seqno, .stableBase = _stableBase };
+            return GridDeltaResult::ResyncRequired;
+        }
+
+        // Scan the page plus however far the ring advanced since the consumer last
+        // looked, clamped to the rows that still hold valid data (the floor excludes
+        // at-capacity-wrapped garbage slots).
+        auto&& report = std::forward<F>(callback);
+        auto const depth = std::clamp<int64_t>(
+            _stableBase - cursor.stableBase, std::int64_t { 0 }, _stableBase - _stableFloor);
+        for (auto offset = LineOffset::cast_from(-depth); offset < boxed_cast<LineOffset>(_pageSize.lines);
+             ++offset)
+        {
+            auto const& line = lineAt(offset);
+            if (line.revision() > cursor.seqno)
+                report(offset, line);
+        }
+
+        cursor.seqno = _seqno;
+        cursor.stableBase = _stableBase;
+        return GridDeltaResult::Delta;
+    }
+
+    /// Walks every valid line — the whole addressable range, no change filter — for the
+    /// attach/resync snapshot.
+    /// @param callback Invoked as callback(LineOffset, Line const&) per line.
+    template <typename F>
+    void forEachValidLine(F&& callback) const
+    {
+        auto&& report = std::forward<F>(callback);
+        auto const top = std::max(-unbox<int64_t>(historyLineCount()), _stableFloor - _stableBase);
+        for (auto offset = LineOffset::cast_from(top); offset < boxed_cast<LineOffset>(_pageSize.lines);
+             ++offset)
+            report(offset, lineAt(offset));
+    }
     // }}}
 
     [[nodiscard]] constexpr LineFlags defaultLineFlags() const noexcept;
@@ -792,6 +869,8 @@ class Grid
     {
         ++_generation;
         syncStableFloor();
+        // Re-anchor the finalize scan: the pre-rebuild base delta is meaningless now.
+        _stableBaseAtLastFinalize = _stableBase;
     }
 
     /// Resets the topmost @p count lines of the main page to blank.
@@ -818,6 +897,10 @@ class Grid
     uint64_t _generation = 0;
     int64_t _stableBase = 0;  ///< Stable id of page row 0; signed — SD/unscroll push it down.
     int64_t _stableFloor = 0; ///< Oldest addressable id; monotonic within a generation.
+
+    // Batch stamping (see finalizeRevisions()).
+    uint64_t _seqno = 0;                   ///< The single monotonic source revisions draw from.
+    int64_t _stableBaseAtLastFinalize = 0; ///< Bounds the finalize scan to scrolled-out rows.
 };
 
 std::ostream& dumpGrid(std::ostream& os, Grid const& grid);

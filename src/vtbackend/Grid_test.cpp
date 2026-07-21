@@ -1426,4 +1426,117 @@ TEST_CASE("Grid.generation.bumpsOnlyOnWholesaleRebuilds", "[grid][stable-id]")
 }
 // }}}
 
+// {{{ delta queries
+namespace
+{
+/// Drains all pending changes so a test starts from a clean cursor.
+GridDeltaCursor drainedCursor(Grid& grid)
+{
+    auto cursor = GridDeltaCursor {};
+    std::ignore = grid.forEachLineChangedSince(cursor, [](LineOffset, Line const&) {});
+    return cursor;
+}
+
+std::vector<int> changedOffsets(Grid& grid, GridDeltaCursor& cursor)
+{
+    auto out = std::vector<int> {};
+    std::ignore = grid.forEachLineChangedSince(
+        cursor, [&](LineOffset offset, Line const&) { out.push_back(unbox<int>(offset)); });
+    return out;
+}
+} // namespace
+
+TEST_CASE("Grid.delta.bootstrapReportsEveryPageLineThenIdles", "[grid][delta]")
+{
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(5));
+
+    auto cursor = GridDeltaCursor {};
+    CHECK(changedOffsets(grid, cursor) == std::vector { 0, 1 }); // fresh lines are pending
+
+    // Idle idempotence: nothing changed, nothing reported, the seqno holds still.
+    auto const seqnoBefore = grid.seqno();
+    CHECK(changedOffsets(grid, cursor).empty());
+    CHECK(grid.seqno() == seqnoBefore);
+}
+
+TEST_CASE("Grid.delta.onlyTheWrittenLineIsReported", "[grid][delta]")
+{
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(5) }, false, LineCount(5));
+    auto cursor = drainedCursor(grid);
+
+    grid.setLineText(LineOffset(1), "hello");
+
+    CHECK(changedOffsets(grid, cursor) == std::vector { 1 });
+}
+
+TEST_CASE("Grid.delta.scrolledOutRowsReportAtTheirNegativeOffset", "[grid][delta]")
+{
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(5));
+    auto cursor = drainedCursor(grid);
+
+    grid.setLineText(LineOffset(0), "AAAAA");
+    grid.scrollUp(LineCount(1));
+
+    // The written row scrolled to -1 within the same batch and must be stamped
+    // there; the new bottom row is fresh; the untouched middle row (now at 0)
+    // moved by pure rotation -- same id, same content, NOT reported.
+    CHECK(changedOffsets(grid, cursor) == std::vector { -1, 1 });
+}
+
+TEST_CASE("Grid.delta.marginScrollMovedRowsAreReported", "[grid][delta]")
+{
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(5) }, false, LineCount(0));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    grid.setLineText(LineOffset(1), "BBBBB");
+    grid.setLineText(LineOffset(2), "CCCCC");
+    auto cursor = drainedCursor(grid);
+
+    // Scroll region rows 1..2: row 2 moves into row 1 (move assignment dirties
+    // the destination), row 2 is blanked. Row 0 is outside the region.
+    auto const margin =
+        Margin { .vertical = Margin::Vertical { .from = LineOffset(1), .to = LineOffset(2) },
+                 .horizontal = Margin::Horizontal { .from = ColumnOffset(0), .to = ColumnOffset(4) } };
+    std::ignore = grid.scrollUp(LineCount(1), GraphicsAttributes {}, margin);
+
+    CHECK(changedOffsets(grid, cursor) == std::vector { 1, 2 });
+    CHECK(grid.lineText(LineOffset(1)) == "CCCCC");
+}
+
+TEST_CASE("Grid.delta.resizeForcesOneResyncThenDeltas", "[grid][delta]")
+{
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(5));
+    auto cursor = drainedCursor(grid);
+
+    std::ignore = grid.resize(PageSize { LineCount(2), ColumnCount(7) }, CellLocation {}, false);
+
+    auto reported = 0;
+    CHECK(grid.forEachLineChangedSince(cursor, [&](LineOffset, Line const&) { ++reported; })
+          == GridDeltaResult::ResyncRequired);
+    CHECK(reported == 0); // a resync never reports lines; snapshot instead:
+
+    auto snapshot = 0;
+    grid.forEachValidLine([&](LineOffset, Line const&) { ++snapshot; });
+    CHECK(snapshot == 2);
+
+    // The re-anchored cursor resumes plain delta service.
+    CHECK(changedOffsets(grid, cursor).empty());
+    grid.setLineText(LineOffset(0), "after");
+    CHECK(changedOffsets(grid, cursor) == std::vector { 0 });
+}
+
+TEST_CASE("Grid.delta.clearHistoryNeedsNoResend", "[grid][delta]")
+{
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(5));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    grid.scrollUp(LineCount(2));
+    auto cursor = drainedCursor(grid);
+
+    grid.clearHistory();
+
+    // The floor jump evicted the history ids; nothing was rewritten, so the
+    // delta stream stays silent -- clients just drop their history.
+    CHECK(changedOffsets(grid, cursor).empty());
+}
+// }}}
+
 // NOLINTEND(misc-const-correctness)
