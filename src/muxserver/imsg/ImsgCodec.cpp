@@ -58,7 +58,10 @@ std::vector<std::byte> encodeFrame(uint32_t type,
 
     auto out = std::vector<std::byte>(HeaderSize + payload.size());
     std::memcpy(out.data(), &header, HeaderSize);
-    std::memcpy(out.data() + HeaderSize, payload.data(), payload.size());
+    // An empty payload (e.g. the MSG_VERSION mismatch reply) yields a null
+    // data() pointer, and memcpy from null is UB even for a zero count.
+    if (!payload.empty())
+        std::memcpy(out.data() + HeaderSize, payload.data(), payload.size());
     return out;
 }
 

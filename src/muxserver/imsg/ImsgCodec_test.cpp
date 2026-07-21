@@ -71,6 +71,27 @@ TEST_CASE("the header encodes 16 host-order bytes with len including itself", "[
     CHECK(pid == 1234);
 }
 
+TEST_CASE("an empty payload encodes to a bare header and decodes back", "[muxserver][imsg]")
+{
+    // ImsgServer sends a payload-less MSG_VERSION reply on a protocol mismatch;
+    // encodeFrame must not memcpy from the empty span's null data pointer (UB
+    // even for a zero count, which UBSan flags).
+    auto const wire = encodeFrame(msgtype::Version, {});
+    REQUIRE(wire.size() == HeaderSize);
+
+    auto len = uint32_t {};
+    std::memcpy(&len, wire.data() + 4, 4);
+    CHECK(len == HeaderSize); // header only, no fd mark
+
+    auto decoder = ImsgDecoder {};
+    decoder.feed(wire);
+    auto const frame = decoder.next();
+    REQUIRE(frame.has_value());
+    REQUIRE(frame->has_value());
+    CHECK((*frame)->type == msgtype::Version);
+    CHECK((*frame)->payload.empty());
+}
+
 TEST_CASE("frames round-trip and resume across byte-at-a-time feeds", "[muxserver][imsg]")
 {
     auto const wire = encodeFrame(msgtype::IdentifyTerm, cstringOf("xterm-256color"));
