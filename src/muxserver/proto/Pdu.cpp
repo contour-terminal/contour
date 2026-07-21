@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <muxserver/proto/Pdu.h>
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <utility>
+#include <vector>
 
 namespace muxserver::proto
 {
@@ -21,6 +24,18 @@ namespace
         }
         out = static_cast<T>(*value);
         return true;
+    }
+
+    /// Reserves room for @p count elements, but never more than the reader's
+    /// remaining bytes could possibly back — each element costs at least one
+    /// byte on the wire. A lie in @p count therefore cannot trigger a giant
+    /// allocation (bad_alloc/length_error escaping the std::expected path);
+    /// the decode loop still runs to @p count and trips MalformedPdu on the
+    /// short body instead.
+    template <typename T>
+    void reserveBounded(std::vector<T>& out, std::size_t count, Reader const& in)
+    {
+        out.reserve(std::min<std::size_t>(count, in.remaining()));
     }
 
     // --- the wire tag of each PDU type (the encode half of the catalog) -----
@@ -287,7 +302,7 @@ namespace
         auto paletteSize = std::size_t {};
         if (!assign(in.varint(), paletteSize, error))
             return std::unexpected(error);
-        pdu.palette.reserve(paletteSize);
+        reserveBounded(pdu.palette, paletteSize, in);
         for (std::size_t i = 0; i < paletteSize; ++i)
         {
             auto color = uint32_t {};
@@ -307,7 +322,7 @@ namespace
         auto extras = std::size_t {};
         if (!assign(in.varint(), extras, error))
             return std::unexpected(error);
-        cell.clusterExtras.reserve(extras);
+        reserveBounded(cell.clusterExtras, extras, in);
         for (std::size_t i = 0; i < extras; ++i)
         {
             auto codepoint = char32_t {};
@@ -333,7 +348,7 @@ namespace
         auto cells = std::size_t {};
         if (!assign(in.varint(), cells, error))
             return std::unexpected(error);
-        line.cells.reserve(cells);
+        reserveBounded(line.cells, cells, in);
         for (std::size_t i = 0; i < cells; ++i)
         {
             auto cell = decodeCell(in);
@@ -359,7 +374,7 @@ namespace
         auto lines = std::size_t {};
         if (!assign(in.varint(), lines, error))
             return std::unexpected(error);
-        pdu.lines.reserve(lines);
+        reserveBounded(pdu.lines, lines, in);
         for (std::size_t i = 0; i < lines; ++i)
         {
             auto line = decodeLine(in);
@@ -371,7 +386,7 @@ namespace
         auto hyperlinks = std::size_t {};
         if (!assign(in.varint(), hyperlinks, error))
             return std::unexpected(error);
-        pdu.hyperlinks.reserve(hyperlinks);
+        reserveBounded(pdu.hyperlinks, hyperlinks, in);
         for (std::size_t i = 0; i < hyperlinks; ++i)
         {
             auto entry = HyperlinkEntry {};
@@ -383,7 +398,7 @@ namespace
         auto imageCells = std::size_t {};
         if (!assign(in.varint(), imageCells, error))
             return std::unexpected(error);
-        pdu.imageCells.reserve(imageCells);
+        reserveBounded(pdu.imageCells, imageCells, in);
         for (std::size_t i = 0; i < imageCells; ++i)
         {
             auto entry = ImageCellEntry {};
@@ -397,7 +412,7 @@ namespace
         auto setModes = std::size_t {};
         if (!assign(in.varint(), setModes, error))
             return std::unexpected(error);
-        pdu.setModes.reserve(setModes);
+        reserveBounded(pdu.setModes, setModes, in);
         for (std::size_t i = 0; i < setModes; ++i)
         {
             auto mode = uint32_t {};
@@ -455,7 +470,12 @@ std::expected<DecodedFrame, DecodeError> decodePdu(std::span<std::byte const> da
         return DecodedPdu { Invalid { .ident = frame->ident } };
     }();
     if (!pdu)
-        return std::unexpected(pdu.error());
+        // readFrame already proved the whole frame is buffered, so a body that
+        // runs short mid-value is a malformed PDU, never "read more from the
+        // socket" — folding it here stops the pump retrying a complete frame
+        // forever (and its buffer growing without bound) on a lying peer.
+        return std::unexpected(pdu.error() == DecodeError::NeedMoreData ? DecodeError::MalformedPdu
+                                                                        : pdu.error());
 
     if (!std::holds_alternative<Invalid>(*pdu) && reader.remaining() != 0)
         return std::unexpected(DecodeError::TrailingBytes);

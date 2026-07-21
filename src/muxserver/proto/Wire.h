@@ -37,6 +37,9 @@ enum class DecodeError : uint8_t
     Truncated,       ///< A declared length exceeds the remaining payload.
     TrailingBytes,   ///< A PDU body decoded fine but left bytes over.
     VersionMismatch, ///< The peer speaks an incompatible CodecVersion.
+    MalformedPdu,    ///< A complete frame's body ran short mid-value: a lie in
+                     ///< the body, never "read more" — readFrame already proved
+                     ///< the whole frame is buffered, so this is fatal.
 };
 
 /// Append-only byte sink with the wire's primitive writers.

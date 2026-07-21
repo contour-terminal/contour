@@ -25,6 +25,22 @@ DecodedPdu roundTrip(DecodedPdu const& pdu, uint64_t serial = 5)
     return decoded->pdu;
 }
 
+/// A Delta body up to (but excluding) its lines-count varint: the seven fixed
+/// header fields every Delta opens with. Tests append a (possibly lying) count
+/// to probe the truncation guards without hand-rolling the whole prefix twice.
+Writer deltaHeaderBody()
+{
+    auto body = Writer {};
+    body.varint(9);   // session
+    body.varint(2);   // generation
+    body.varint(1);   // seqno
+    body.u8(1);       // snapshot
+    body.svarint(0);  // stableViewportBase
+    body.svarint(5);  // cursorLine
+    body.svarint(10); // cursorColumn
+    return body;
+}
+
 } // namespace
 
 TEST_CASE("every catalog PDU round-trips", "[muxserver][proto]")
@@ -134,6 +150,56 @@ TEST_CASE("trailing bytes after a known body are a protocol error", "[muxserver]
     writeFrame(stream, 1, std::to_underlying(PduType::FetchImage), body.view());
 
     CHECK(decodePdu(stream.view()).error() == DecodeError::TrailingBytes);
+}
+
+TEST_CASE("a complete frame whose body runs short is malformed, not incomplete", "[muxserver][proto]")
+{
+    // readFrame confirms the whole frame is buffered; a body shorter than the
+    // structure it declares must therefore be fatal, NOT NeedMoreData — else
+    // the pump co_awaits socket data that can never complete an already-whole
+    // frame and the connection wedges forever.
+    SECTION("a lying element count")
+    {
+        auto body = deltaHeaderBody();
+        body.varint(3); // declares three lines ...
+        // ... but no line bytes follow.
+        auto stream = Writer {};
+        writeFrame(stream, 1, std::to_underlying(PduType::Delta), body.view());
+
+        auto const decoded = decodePdu(stream.view());
+        REQUIRE(!decoded.has_value());
+        CHECK(decoded.error() == DecodeError::MalformedPdu);
+    }
+
+    SECTION("a truncated fixed field")
+    {
+        // FetchImage's body is a single u32; give it only two bytes so the
+        // scalar read hits end-of-body mid-value.
+        auto body = Writer {};
+        body.u16(0x1234);
+        auto stream = Writer {};
+        writeFrame(stream, 1, std::to_underlying(PduType::FetchImage), body.view());
+
+        auto const decoded = decodePdu(stream.view());
+        REQUIRE(!decoded.has_value());
+        CHECK(decoded.error() == DecodeError::MalformedPdu);
+    }
+}
+
+TEST_CASE("an absurd element count fails cleanly without a huge allocation", "[muxserver][proto]")
+{
+    // A malicious peer declares four billion lines in a byte-sized body. The
+    // decoder must not reserve() four billion elements (bad_alloc thrown out
+    // of the std::expected path kills the coroutine silently); the bounded
+    // reserve caps at the remaining bytes and the loop trips MalformedPdu.
+    auto body = deltaHeaderBody();
+    body.varint(0xFFFFFFFFU);
+    auto stream = Writer {};
+    writeFrame(stream, 1, std::to_underlying(PduType::Delta), body.view());
+
+    auto const decoded = decodePdu(stream.view());
+    REQUIRE(!decoded.has_value());
+    CHECK(decoded.error() == DecodeError::MalformedPdu);
 }
 
 TEST_CASE("serial zero marks an unsolicited push", "[muxserver][proto]")
