@@ -79,9 +79,24 @@ class ControlOutput
     /// output dropped, one `%pause %N` emitted). Disabled when nullopt.
     void setPauseAfter(std::optional<std::chrono::milliseconds> age) noexcept { _pauseAfter = age; }
 
+    /// Switches emission to `%extended-output %N <age-ms> : <data>` — tmux uses
+    /// it for every output line once the client set the pause-after flag
+    /// (CLIENT_CONTROL_PAUSEAFTER, control.c:653-658), so the client can judge
+    /// staleness itself.
+    void setExtendedOutput(bool enabled) noexcept { _extendedOutput = enabled; }
+
     /// Resumes a paused pane, emitting `%continue %N` (refresh-client -A's job).
     /// @param pane The pane to resume.
     void continuePane(std::uint64_t pane);
+
+    /// Force-pauses @p pane (refresh-client -A pane:pause): drops its pending
+    /// output and emits `%pause %N` once. Idempotent while paused.
+    void pausePane(std::uint64_t pane);
+
+    /// Enables or disables forwarding for @p pane (refresh-client -A
+    /// pane:on/off). Disabling drops pending output silently — unlike pausing
+    /// there is no %pause/%continue handshake; the client asked for silence.
+    void setPaneEnabled(std::uint64_t pane, bool enabled);
 
     /// @return True if @p pane is currently paused.
     [[nodiscard]] bool isPaused(std::uint64_t pane) const;
@@ -116,6 +131,7 @@ class ControlOutput
     std::function<void(std::string)> _sink;
     ControlOutputLimits _limits;
     std::optional<std::chrono::milliseconds> _pauseAfter;
+    bool _extendedOutput = false;
 
     /// The all-queue in arrival order — the single OWNER of every block
     /// (unique_ptr for pointer stability across deque operations). A block is
@@ -124,7 +140,8 @@ class ControlOutput
     /// Per-pane views of the output blocks still being emitted (non-owning;
     /// entries are removed at completion, strictly before the all-queue pop).
     std::unordered_map<std::uint64_t, std::deque<Block*>> _paneQueues;
-    std::unordered_map<std::uint64_t, bool> _paused; ///< Pause state per pane.
+    std::unordered_map<std::uint64_t, bool> _paused;   ///< Pause state per pane.
+    std::unordered_map<std::uint64_t, bool> _disabled; ///< -A pane:off state per pane.
 };
 
 } // namespace muxserver::tmux

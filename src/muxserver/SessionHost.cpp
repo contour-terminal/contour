@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <muxserver/SessionHost.h>
-#include <muxserver/TappingPty.h>
 
 #include <chrono>
 #include <ranges>
 #include <utility>
 #include <vector>
 
+#include <muxserver/TappingPty.h>
 #include <vtmux/Pane.h>
+#include <vtmux/PaneLayout.h>
 #include <vtmux/Tab.h>
 
 namespace muxserver
@@ -76,6 +77,7 @@ SessionHost::SessionHost(net::EventLoop& loop,
     _loop(loop),
     _ptyFactory(std::move(ptyFactory)),
     _settings(std::move(settings)),
+    _pageSize(_settings.pageSize),
     _startPumps(startPumps),
     _model(*this,
            [this]() -> SessionId {
@@ -104,7 +106,7 @@ SessionHost::~SessionHost()
 std::optional<SessionId> SessionHost::seedSession()
 {
     auto const id = SessionId { _nextSessionId++ };
-    auto pty = _ptyFactory(_settings.pageSize);
+    auto pty = _ptyFactory(_pageSize);
     if (!pty)
         return std::nullopt;
 
@@ -117,10 +119,15 @@ std::optional<SessionId> SessionHost::seedSession()
         });
     });
 
+    // The terminal must open at the same size as its PTY: the client area, not
+    // the factory settings' default.
+    auto settings = _settings;
+    settings.pageSize = _pageSize;
+
     auto session = std::make_unique<HostedSession>(
         id,
         std::move(tapped),
-        _settings,
+        std::move(settings),
         /*onScreenUpdated=*/
         [this, id] {
             // Pump thread -> loop thread; the host may already be gone at
@@ -176,6 +183,31 @@ void SessionHost::splitActivePane(TabId tab, SplitState orientation, double rati
     auto const* tabPtr = _model.findTab(tab);
     if (tabPtr == nullptr || tabPtr->paneCount() == paneCountBefore)
         _sessions.erase(seeded->value);
+}
+
+void SessionHost::applyClientSize(vtpty::PageSize size)
+{
+    _pageSize = size;
+    reprojectLayouts();
+}
+
+void SessionHost::reprojectLayouts()
+{
+    auto* window = _model.window(_window);
+    for (auto const tabIndex: std::views::iota(0, window->tabCount()))
+    {
+        auto* tab = window->tabAt(tabIndex);
+        // The underlying layout's leaves first; a zoomed leaf then overrides to
+        // the full area (tmux's zoom model: the saved layout keeps the rest).
+        for (auto const& rect: vtmux::layoutInCells(*tab->rootPane(), _pageSize))
+            if (auto const* leaf = tab->rootPane()->findPane(rect.pane))
+                if (auto* backing = terminal(leaf->session()))
+                    backing->resizeScreen(vtpty::PageSize { .lines = vtpty::LineCount(rect.height),
+                                                            .columns = vtpty::ColumnCount(rect.width) });
+        if (auto const* zoomed = tab->layoutRoot(); zoomed != tab->rootPane())
+            if (auto* backing = terminal(zoomed->session()))
+                backing->resizeScreen(_pageSize);
+    }
 }
 
 vtbackend::Terminal* SessionHost::terminal(SessionId session) noexcept
@@ -256,12 +288,16 @@ void SessionHost::activeTabChanged(WindowId window, TabId tab, int index)
 
 void SessionHost::paneSplit(TabId tab, PaneId splitNode, PaneId newLeaf)
 {
+    // Layout shape changed: bring PTY sizes in line BEFORE observers project
+    // the new layout, so what they advertise is what the shells experience.
+    reprojectLayouts();
     for (auto* observer: _subscribers)
         observer->paneSplit(tab, splitNode, newLeaf);
 }
 
 void SessionHost::paneClosed(TabId tab, PaneId closed, PaneId survivor)
 {
+    reprojectLayouts();
     for (auto* observer: _subscribers)
         observer->paneClosed(tab, closed, survivor);
 }
@@ -274,6 +310,7 @@ void SessionHost::activePaneChanged(TabId tab, PaneId leaf)
 
 void SessionHost::paneRatioChanged(TabId tab, PaneId splitNode, double ratio)
 {
+    reprojectLayouts();
     for (auto* observer: _subscribers)
         observer->paneRatioChanged(tab, splitNode, ratio);
 }
@@ -292,24 +329,28 @@ void SessionHost::tabColorChanged(TabId tab)
 
 void SessionHost::paneOrientationChanged(TabId tab, PaneId splitNode, SplitState state)
 {
+    reprojectLayouts();
     for (auto* observer: _subscribers)
         observer->paneOrientationChanged(tab, splitNode, state);
 }
 
 void SessionHost::paneSwapped(TabId tab, PaneId a, PaneId b)
 {
+    reprojectLayouts();
     for (auto* observer: _subscribers)
         observer->paneSwapped(tab, a, b);
 }
 
 void SessionHost::paneZoomChanged(TabId tab, std::optional<PaneId> zoomedLeaf)
 {
+    reprojectLayouts();
     for (auto* observer: _subscribers)
         observer->paneZoomChanged(tab, zoomedLeaf);
 }
 
 void SessionHost::paneTreeRestructured(TabId tab)
 {
+    reprojectLayouts();
     for (auto* observer: _subscribers)
         observer->paneTreeRestructured(tab);
 }

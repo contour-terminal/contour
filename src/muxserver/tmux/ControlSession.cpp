@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <chrono>
 #include <format>
 #include <ranges>
 #include <utility>
@@ -83,17 +84,33 @@ namespace
         return std::ranges::find(arguments, flag) != arguments.end();
     }
 
+    /// Collects every value of a repeatable value-carrying option (`-A x -A y`).
+    [[nodiscard]] std::vector<std::string_view> valuesOf(std::vector<std::string> const& arguments,
+                                                         std::string_view flag)
+    {
+        auto values = std::vector<std::string_view> {};
+        for (std::size_t i = 1; i + 1 < arguments.size(); ++i)
+            if (arguments[i] == flag)
+                values.emplace_back(arguments[++i]);
+        return values;
+    }
+
+    /// Parses a full decimal number; anything else (partial parse included)
+    /// yields nullopt.
+    [[nodiscard]] std::optional<std::uint64_t> parseNumber(std::string_view text)
+    {
+        auto value = std::uint64_t {};
+        auto const [ptr, ec] = std::from_chars(text.data(), text.data() + text.size(), value);
+        if (ec != std::errc {} || ptr != text.data() + text.size() || text.empty())
+            return std::nullopt;
+        return value;
+    }
+
     [[nodiscard]] std::optional<std::uint64_t> parseIdSuffix(std::string_view target, char sigil)
     {
         if (target.size() < 2 || target[0] != sigil)
             return std::nullopt;
-        auto value = std::uint64_t {};
-        auto const* begin = target.data() + 1;
-        auto const* end = target.data() + target.size();
-        auto const [ptr, ec] = std::from_chars(begin, end, value);
-        if (ec != std::errc {} || ptr != end)
-            return std::nullopt;
-        return value;
+        return parseNumber(target.substr(1));
     }
 
     /// The tiny send-keys key-name table; everything else is sent literally.
@@ -146,13 +163,9 @@ ControlSession::~ControlSession()
 
 vtpty::PageSize ControlSession::pageSize() const noexcept
 {
-    // All layout projection uses the daemon's page size; per-client resize
-    // arrives with refresh-client -C in a later slice.
-    auto const* tab = _host.model().window(_host.windowId())->activeTab();
-    if (tab != nullptr)
-        if (auto const* terminal = _host.terminal(tab->rootPane()->session()))
-            return terminal->pageSize();
-    return vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) };
+    // The host owns the authoritative client area (refresh-client -C updates
+    // it); every layout projection derives from it.
+    return _host.pageSize();
 }
 
 coro::Task<void> ControlSession::run()
@@ -222,6 +235,8 @@ void ControlSession::emitGuarded(HandlerResult const& result)
 
 void ControlSession::onSessionOutput(SessionId session, std::string const& bytes)
 {
+    if (_noOutput)
+        return; // refresh-client -f no-output: the client wants notifications only
     // Map the session to its hosting leaf pane (the %N the client knows).
     auto* window = _host.model().window(_host.windowId());
     for (auto const tabIndex: std::views::iota(0, window->tabCount()))
@@ -332,6 +347,7 @@ std::vector<ControlSession::CommandEntry> const& ControlSession::commandCatalog(
         { "list-sessions", &ControlSession::commandListSessions },
         { "list-windows", &ControlSession::commandListWindows },
         { "new-window", &ControlSession::commandNewWindow },
+        { "refresh-client", &ControlSession::commandRefreshClient },
         { "rename-window", &ControlSession::commandRenameWindow },
         { "resize-pane", &ControlSession::commandResizePane },
         { "select-pane", &ControlSession::commandSelectPane },
@@ -591,6 +607,100 @@ ControlSession::HandlerResult ControlSession::commandDisplayMessage(std::vector<
         message += argument;
     }
     return std::vector<std::string> { message };
+}
+
+ControlSession::HandlerResult ControlSession::commandRefreshClient(std::vector<std::string> const& arguments)
+{
+    for (auto const size: valuesOf(arguments, "-C"))
+    {
+        // The client's size proposal, "WxH" or "W,H" (cmd-refresh-client.c
+        // accepts both). The @W: per-window forms are not supported.
+        if (size.starts_with('@'))
+            return std::unexpected("per-window sizes are not supported");
+        auto const separator = size.find_first_of("x,");
+        if (separator == std::string_view::npos)
+            return std::unexpected("bad size argument");
+        auto const width = parseNumber(size.substr(0, separator));
+        auto const height = parseNumber(size.substr(separator + 1));
+        if (!width || !height)
+            return std::unexpected("bad size argument");
+        // WINDOW_MINIMUM (1) / WINDOW_MAXIMUM (10000), tmux.h:110-115.
+        if (*width < 1 || *width > 10000 || *height < 1 || *height > 10000)
+            return std::unexpected("size too small or too big");
+        _host.applyClientSize(vtpty::PageSize { .lines = vtpty::LineCount(static_cast<int>(*height)),
+                                                .columns = vtpty::ColumnCount(static_cast<int>(*width)) });
+        // The server decides: answer the proposal with authoritative layouts.
+        auto const* window = _host.model().window(_host.windowId());
+        for (auto const tabIndex: std::views::iota(0, window->tabCount()))
+            notifyLayoutChanged(window->tabAt(tabIndex)->id());
+    }
+
+    for (auto const value: valuesOf(arguments, "-A"))
+    {
+        // "%N:on|off|continue|pause"; malformed values are silently ignored,
+        // exactly like cmd_refresh_client_update_offset.
+        auto const colon = value.find(':');
+        if (colon == std::string_view::npos)
+            continue;
+        auto const pane = parseIdSuffix(value.substr(0, colon), '%');
+        if (!pane)
+            continue;
+        auto const state = value.substr(colon + 1);
+        if (state == "on")
+            _output.setPaneEnabled(*pane, true);
+        else if (state == "off")
+            _output.setPaneEnabled(*pane, false);
+        else if (state == "continue")
+            _output.continuePane(*pane);
+        else if (state == "pause")
+            _output.pausePane(*pane);
+    }
+
+    // -B subscriptions would need the format engine; the syntax is accepted so
+    // probing clients don't fail, but no %subscription-changed is produced.
+
+    for (auto const* option: { "-f", "-F" }) // -F is an alias for -f
+        for (auto const flags: valuesOf(arguments, option))
+            for (auto const flag: std::views::split(flags, ','))
+                applyClientFlag(std::string_view { flag });
+
+    return std::vector<std::string> {};
+}
+
+void ControlSession::applyClientFlag(std::string_view flag)
+{
+    // server_client_control_flags semantics: a "!" prefix clears the flag, an
+    // unrecognized flag changes nothing.
+    auto const negated = flag.starts_with('!');
+    if (negated)
+        flag.remove_prefix(1);
+
+    if (flag == "pause-after" || flag.starts_with("pause-after="))
+    {
+        if (negated)
+        {
+            _output.setPauseAfter(std::nullopt);
+            _output.setExtendedOutput(false);
+            return;
+        }
+        auto seconds = std::uint64_t { 0 };
+        if (auto const equals = flag.find('='); equals != std::string_view::npos)
+        {
+            auto const parsed = parseNumber(flag.substr(equals + 1));
+            if (!parsed)
+                return;
+            seconds = *parsed;
+        }
+        _output.setPauseAfter(std::chrono::milliseconds { seconds * 1000 });
+        // Every output line now carries its age (%extended-output) so the
+        // client can judge staleness itself — control.c:653-658.
+        _output.setExtendedOutput(true);
+        return;
+    }
+    if (flag == "no-output")
+        _noOutput = !negated;
+    // wait-exit and the non-control-mode client flags are accepted unchanged:
+    // run() already drains all pending replies before closing the connection.
 }
 
 // ---------------------------------------------------------------------------

@@ -155,3 +155,62 @@ TEST_CASE("a paused pane's dropped blocks do not gate later notifications", "[mu
     CHECK(h.countPrefix("%pause %4") == 1);
     CHECK(h.countPrefix("%sessions-changed") == 1);
 }
+
+TEST_CASE("extended output carries the block age before the colon", "[muxserver][control]")
+{
+    auto h = QueueHarness {};
+    h.queue.setExtendedOutput(true);
+
+    h.queue.enqueueOutput(5, "late", h.now);
+    h.now += 250ms;
+    h.queue.pump(0, h.now);
+
+    REQUIRE(h.lines.size() == 1);
+    CHECK(h.lines[0] == "%extended-output %5 250 : late\n");
+
+    // Freshly queued output reports age zero.
+    h.queue.enqueueOutput(5, "now", h.now);
+    h.queue.pump(0, h.now);
+    CHECK(h.lines.back() == "%extended-output %5 0 : now\n");
+}
+
+TEST_CASE("pausePane force-pauses with one %pause and drops the backlog", "[muxserver][control]")
+{
+    auto h = QueueHarness {};
+
+    h.queue.enqueueOutput(6, "pending", h.now);
+    h.queue.pausePane(6);
+
+    CHECK(h.queue.isPaused(6));
+    CHECK(h.countPrefix("%pause %6") == 1);
+    CHECK(h.queue.pendingBytes(6) == 0);
+
+    h.queue.pausePane(6); // idempotent while paused
+    CHECK(h.countPrefix("%pause %6") == 1);
+
+    h.queue.continuePane(6);
+    CHECK(h.countPrefix("%continue %6") == 1);
+    h.queue.enqueueOutput(6, "fresh", h.now);
+    h.queue.pump(0, h.now);
+    CHECK(h.countPrefix("%output %6 fresh") == 1);
+}
+
+TEST_CASE("a disabled pane is silenced without any pause handshake", "[muxserver][control]")
+{
+    auto h = QueueHarness {};
+
+    h.queue.enqueueOutput(7, "pending", h.now);
+    h.queue.setPaneEnabled(7, false);
+    CHECK(h.queue.pendingBytes(7) == 0);
+
+    // While off, new output is dropped at the source — silently.
+    h.queue.enqueueOutput(7, "dropped", h.now);
+    h.queue.pump(0, h.now);
+    CHECK(h.countPrefix("%output %7 ") == 0);
+    CHECK(h.countPrefix("%pause %7") == 0);
+
+    h.queue.setPaneEnabled(7, true);
+    h.queue.enqueueOutput(7, "visible", h.now);
+    h.queue.pump(0, h.now);
+    CHECK(h.countPrefix("%output %7 visible") == 1);
+}

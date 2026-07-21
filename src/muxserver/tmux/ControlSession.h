@@ -14,7 +14,6 @@
 /// Commands are a data-driven table (the Actions.h catalog idiom): one row per
 /// verb naming its handler; adding a verb is adding a row.
 
-#include <chrono>
 #include <cstdint>
 #include <expected>
 #include <functional>
@@ -122,6 +121,7 @@ class ControlSession final: public vtmux::ModelEvents
     HandlerResult commandRenameWindow(std::vector<std::string> const& arguments);
     HandlerResult commandResizePane(std::vector<std::string> const& arguments);
     HandlerResult commandDisplayMessage(std::vector<std::string> const& arguments);
+    HandlerResult commandRefreshClient(std::vector<std::string> const& arguments);
 
     // Target resolution ("-t %N" / "-t @N"; defaults to the active pane/tab).
     [[nodiscard]] std::expected<vtmux::Tab*, std::string> resolveTab(
@@ -132,6 +132,9 @@ class ControlSession final: public vtmux::ModelEvents
     /// @return The page size used for layout projection (the host's settings).
     [[nodiscard]] vtpty::PageSize pageSize() const noexcept;
 
+    /// Applies one `refresh-client -f` flag ("pause-after=5", "!no-output", …).
+    void applyClientFlag(std::string_view flag);
+
     net::EventLoop& _loop;
     SessionHost& _host;
     std::unique_ptr<net::ISocket> _connection;
@@ -139,6 +142,7 @@ class ControlSession final: public vtmux::ModelEvents
     net::WriteQueue _writer;
     ControlOutput _output;
     std::uint32_t _commandNumber = 0;
+    bool _noOutput = false; ///< refresh-client -f no-output: suppress %output entirely.
 };
 
 /// The daemon's connection-handler factory for control-mode clients.

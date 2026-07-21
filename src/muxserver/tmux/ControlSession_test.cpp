@@ -214,3 +214,73 @@ TEST_CASE("%output escapes control bytes and never breaks a guard block", "[muxs
     CHECK(contains(lines, "%end"));
     static_cast<void>(paneId);
 }
+
+TEST_CASE("refresh-client -C resizes the client area and answers with layouts", "[muxserver][control]")
+{
+    auto h = ControlHarness {};
+    h.host.createTab();
+    auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+
+    auto const lines = h.exchange({ "refresh-client -C 100x50" });
+
+    // The proposal was accepted: the host's client area changed, the single
+    // full-area pane's terminal followed, and the authoritative layout answer
+    // carries the new dimensions.
+    CHECK(h.host.pageSize() == vtpty::PageSize { vtpty::LineCount(50), vtpty::ColumnCount(100) });
+    REQUIRE(h.host.terminal(session) != nullptr);
+    CHECK(h.host.terminal(session)->pageSize()
+          == vtpty::PageSize { vtpty::LineCount(50), vtpty::ColumnCount(100) });
+    CHECK(contains(lines, "100x50"));
+    CHECK(!contains(lines, "%error"));
+}
+
+TEST_CASE("refresh-client -C rejects out-of-range and malformed sizes", "[muxserver][control]")
+{
+    auto h = ControlHarness {};
+    auto const before = h.host.pageSize();
+
+    SECTION("too small")
+    {
+        auto const lines = h.exchange({ "refresh-client -C 0x50" });
+        CHECK(contains(lines, "size too small or too big"));
+    }
+    SECTION("too big")
+    {
+        auto const lines = h.exchange({ "refresh-client -C 10001x50" });
+        CHECK(contains(lines, "size too small or too big"));
+    }
+    SECTION("malformed")
+    {
+        auto const lines = h.exchange({ "refresh-client -C bogus" });
+        CHECK(contains(lines, "bad size argument"));
+    }
+    SECTION("per-window form")
+    {
+        auto const lines = h.exchange({ "refresh-client -C @1:80x24" });
+        CHECK(contains(lines, "%error"));
+    }
+    CHECK(h.host.pageSize() == before); // a rejected proposal changes nothing
+}
+
+TEST_CASE("refresh-client -A pauses and resumes a pane over the wire", "[muxserver][control]")
+{
+    auto h = ControlHarness {};
+    h.host.createTab();
+    auto const paneId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->id().value;
+
+    auto const lines = h.exchange({ std::format("refresh-client -A %{}:pause", paneId),
+                                    std::format("refresh-client -A %{}:continue", paneId) });
+
+    CHECK(contains(lines, std::format("%pause %{}", paneId)));
+    CHECK(contains(lines, std::format("%continue %{}", paneId)));
+    CHECK(!contains(lines, "%error"));
+}
+
+TEST_CASE("refresh-client flags and subscriptions are accepted", "[muxserver][control]")
+{
+    auto h = ControlHarness {};
+    auto const lines = h.exchange({ "refresh-client -f pause-after=5,no-output",
+                                    "refresh-client -f !pause-after,!no-output",
+                                    "refresh-client -B mysub:%0:#{pane_title}" });
+    CHECK(!contains(lines, "%error"));
+}

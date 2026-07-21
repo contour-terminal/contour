@@ -44,8 +44,11 @@ void ControlOutput::enqueueOutput(std::uint64_t pane,
     if (bytes.empty())
         return;
     // A paused pane's output is dropped at the source until %continue, exactly
-    // like tmux's CONTROL_PANE_PAUSED gate.
+    // like tmux's CONTROL_PANE_PAUSED gate; a disabled pane (-A pane:off,
+    // CONTROL_PANE_OFF) is dropped the same way but without any handshake.
     if (auto const it = _paused.find(pane); it != _paused.end() && it->second)
+        return;
+    if (auto const it = _disabled.find(pane); it != _disabled.end() && it->second)
         return;
 
     auto block = std::make_unique<Block>(
@@ -102,6 +105,22 @@ void ControlOutput::continuePane(std::uint64_t pane)
     enqueueNotification(std::format("%continue %{}", pane));
 }
 
+void ControlOutput::pausePane(std::uint64_t pane)
+{
+    if (isPaused(pane))
+        return;
+    _paused[pane] = true;
+    discardPaneOutput(pane);
+    enqueueNotification(std::format("%pause %{}", pane));
+}
+
+void ControlOutput::setPaneEnabled(std::uint64_t pane, bool enabled)
+{
+    _disabled[pane] = !enabled;
+    if (!enabled)
+        discardPaneOutput(pane);
+}
+
 bool ControlOutput::isPaused(std::uint64_t pane) const
 {
     auto const it = _paused.find(pane);
@@ -132,11 +151,7 @@ void ControlOutput::pump(std::size_t buffered, std::chrono::steady_clock::time_p
             if (queue.empty() || isPaused(pane))
                 continue;
             if (now - queue.front()->enqueued > *_pauseAfter)
-            {
-                _paused[pane] = true;
-                discardPaneOutput(pane);
-                enqueueNotification(std::format("%pause %{}", pane));
-            }
+                pausePane(pane);
         }
     }
 
@@ -162,7 +177,16 @@ void ControlOutput::pump(std::size_t buffered, std::chrono::steady_clock::time_p
             auto* block = queue.front();
             auto const chunk = std::min(budget - emitted, block->data.size() - block->offset);
             auto const bytes = std::string_view { block->data }.substr(block->offset, chunk);
-            _sink(std::format("%output %{} {}\n", pane, escapeOutput(bytes)));
+            if (_extendedOutput)
+            {
+                // The single age field (milliseconds since the block was
+                // queued) before " : " — control.c:653-658.
+                auto const age = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::max(now - block->enqueued, std::chrono::steady_clock::duration::zero()));
+                _sink(std::format("%extended-output %{} {} : {}\n", pane, age.count(), escapeOutput(bytes)));
+            }
+            else
+                _sink(std::format("%output %{} {}\n", pane, escapeOutput(bytes)));
             block->offset += chunk;
             emitted += chunk;
             if (block->offset == block->data.size())

@@ -38,8 +38,9 @@ control mode; per-line cell deltas feed the native protocol. GUI and daemon shar
 - [x] data-driven command table → `SessionModel`
 - [x] control-mode connection protocol (byte tap → %output; ModelEvents → notifications);
       wired into `contour daemon` and live-verified over a real Unix socket
-- [ ] polish: `refresh-client -C/-A/-B/-f`, resize bounds (reject <1, >=10000),
-      `%extended-output` age field
+- [x] polish: `refresh-client -C/-A/-B/-f`, resize bounds ([1, 10000], mirroring tmux's
+      WINDOW_MINIMUM/MAXIMUM), `%extended-output` age field; the host reprojects PTY sizes
+      through `layoutInCells` on every layout-shape change
 
 ## Phase 3 — native protocol (cells + deltas)
 

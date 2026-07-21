@@ -123,6 +123,15 @@ class SessionHost final: public vtmux::ModelEvents
     /// @return The host's window (the daemon starts with exactly one).
     [[nodiscard]] vtmux::WindowId windowId() const noexcept { return _window; }
 
+    /// @return The authoritative client area, in cells: layout projection and
+    ///         PTY sizes derive from it. Starts at the settings' page size.
+    [[nodiscard]] vtpty::PageSize pageSize() const noexcept { return _pageSize; }
+
+    /// Applies a new client area (an accepted `refresh-client -C` proposal):
+    /// every tab's leaves are resized to their cell-space projection under the
+    /// new area, and future sessions spawn at the projected sizes.
+    void applyClientSize(vtpty::PageSize size);
+
     /// Creates a tab whose first pane is backed by a freshly spawned session,
     /// using the same pre-mint handshake as the GUI: the backing session is
     /// created first, then the model's allocator hands its id back.
@@ -189,9 +198,15 @@ class SessionHost final: public vtmux::ModelEvents
     /// @return The minted id, or nullopt if the PTY factory failed.
     [[nodiscard]] std::optional<vtmux::SessionId> seedSession();
 
+    /// Resizes every leaf's terminal to its cell-space projection under the
+    /// current client area — run after every layout-shape change so PTY sizes
+    /// never drift from the advertised layout.
+    void reprojectLayouts();
+
     net::EventLoop& _loop;
     PtyFactory _ptyFactory;
     vtbackend::Settings _settings;
+    vtpty::PageSize _pageSize; ///< The authoritative client area (see pageSize()).
     bool _startPumps;
 
     uint64_t _nextSessionId = 1;
