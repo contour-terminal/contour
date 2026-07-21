@@ -60,9 +60,12 @@ void HostedSession::terminate()
 void HostedSession::pumpLoop()
 {
     // Mirrors TerminalSession::mainLoop: block in the PTY read, parse, repeat,
-    // until the device closes (shell exit or terminate()).
+    // until the device closes (shell exit or terminate()). Each batch flushes
+    // the terminal's queued replies back into the PTY — the daemon-side stand-in
+    // for the GUI's screenUpdated->flushInput hop; without it a shell blocks in
+    // its startup terminal probes (DA1, OSC 11, kitty keyboard) forever.
     while (_terminal.processInputOnce())
-        ;
+        _terminal.flushInput();
     if (_onClosed)
         _onClosed();
 }
