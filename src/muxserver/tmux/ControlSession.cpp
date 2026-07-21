@@ -2,6 +2,7 @@
 #include <muxserver/tmux/ControlSession.h>
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <chrono>
 #include <format>
@@ -409,18 +410,44 @@ ControlSession::HandlerResult ControlSession::commandListSessions(std::vector<st
     return std::vector<std::string> { std::format("0: 0 [{} windows] (attached)", window->tabCount()) };
 }
 
-ControlSession::HandlerResult ControlSession::commandListWindows(std::vector<std::string> const& /*args*/)
+ControlSession::HandlerResult ControlSession::commandListWindows(std::vector<std::string> const& arguments)
 {
+    auto const formats = valuesOf(arguments, "-F");
     auto lines = std::vector<std::string> {};
     auto const* window = _host.model().window(_host.windowId());
     for (auto const tabIndex: std::views::iota(0, window->tabCount()))
     {
         auto const* tab = window->tabAt(tabIndex);
-        lines.push_back(std::format("{}: @{} {} [{}]",
-                                    tabIndex,
-                                    tab->id().value,
-                                    tab->runtimeTitle().value_or(""),
-                                    encodeLayout(*tab->rootPane(), pageSize())));
+        if (formats.empty())
+        {
+            lines.push_back(std::format("{}: @{} {} [{}]",
+                                        tabIndex,
+                                        tab->id().value,
+                                        tab->runtimeTitle().value_or(""),
+                                        encodeLayout(*tab->rootPane(), pageSize())));
+            continue;
+        }
+
+        // Minimal #{...} format support: one row per known variable.
+        struct FormatVariable
+        {
+            std::string_view name;
+            std::string value;
+        };
+        auto const variables = std::array {
+            FormatVariable { "#{window_id}", std::format("@{}", tab->id().value) },
+            FormatVariable { "#{window_index}", std::format("{}", tabIndex) },
+            FormatVariable { "#{window_name}", tab->runtimeTitle().value_or("") },
+            FormatVariable { "#{window_layout}", encodeLayout(*tab->rootPane(), pageSize()) },
+        };
+        auto line = std::string { formats.front() };
+        for (auto const& [name, value]: variables)
+            for (auto at = line.find(name); at != std::string::npos; at = line.find(name, at))
+            {
+                line.replace(at, name.size(), value);
+                at += value.size();
+            }
+        lines.push_back(std::move(line));
     }
     return lines;
 }

@@ -25,6 +25,8 @@ add_library(muxserver STATIC
     tmux/ControlSession.h
     tmux/LayoutString.cpp
     tmux/LayoutString.h
+    tmux/TmuxClientModel.cpp
+    tmux/TmuxClientModel.h
     tmux/TmuxGateway.cpp
     tmux/TmuxGateway.h
 )
@@ -57,6 +59,7 @@ if(MUXSERVER_TESTING)
         tmux/ControlOutput_test.cpp
         tmux/ControlSession_test.cpp
         tmux/LayoutString_test.cpp
+        tmux/TmuxClientModel_test.cpp
         tmux/TmuxGateway_test.cpp
     )
     target_link_libraries(muxserver_test muxserver crispy::core Catch2::Catch2)
