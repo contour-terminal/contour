@@ -151,7 +151,7 @@ TEST_CASE("the gateway drives our control-mode server end to end", "[muxserver][
     #include <filesystem>
     #include <format>
 
-    #if defined(__APPLE__)
+    #ifdef __APPLE__
         #include <util.h>
     #elif defined(__FreeBSD__) || defined(__DragonFly__) || defined(__OpenBSD__)
         #include <libutil.h>

@@ -315,7 +315,7 @@ TEST_CASE("a version mismatch answers MSG_VERSION and drops", "[muxserver][imsgs
     #include <cstdio>
     #include <filesystem>
 
-    #if defined(__APPLE__)
+    #ifdef __APPLE__
         #include <util.h>
     #elif defined(__FreeBSD__) || defined(__DragonFly__) || defined(__OpenBSD__)
         #include <libutil.h>

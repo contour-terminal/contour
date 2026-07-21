@@ -11,7 +11,7 @@
     #include <csignal>
     #include <vector>
 
-    #if defined(__APPLE__)
+    #ifdef __APPLE__
         #include <util.h>
     #elif defined(__FreeBSD__) || defined(__DragonFly__) || defined(__OpenBSD__)
         #include <libutil.h>
