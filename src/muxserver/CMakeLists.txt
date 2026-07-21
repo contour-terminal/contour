@@ -9,6 +9,8 @@ add_library(muxserver STATIC
     TappingPty.h
     tmux/ControlOutput.cpp
     tmux/ControlOutput.h
+    tmux/ControlSession.cpp
+    tmux/ControlSession.h
     tmux/LayoutString.cpp
     tmux/LayoutString.h
 )
@@ -33,6 +35,7 @@ if(MUXSERVER_TESTING)
         MuxServer_test.cpp
         SocketPath_test.cpp
         tmux/ControlOutput_test.cpp
+        tmux/ControlSession_test.cpp
         tmux/LayoutString_test.cpp
     )
     target_link_libraries(muxserver_test muxserver crispy::core Catch2::Catch2)

@@ -10,6 +10,7 @@
 
 #include <muxserver/MuxServer.h>
 #include <muxserver/SessionHost.h>
+#include <muxserver/tmux/ControlSession.h>
 #include <net/EventLoop.h>
 #include <net/PollEventSource.h>
 #include <net/Sockets.h>
@@ -44,7 +45,7 @@ int runDaemon(DaemonConfig const& config)
         return EXIT_FAILURE;
     }
 
-    auto server = MuxServer { loop, std::move(*listener), drainConnection };
+    auto server = MuxServer { loop, std::move(*listener), tmux::makeControlModeHandler(loop, host) };
 
     // Signal handling without async-signal-safety hazards: SIGINT/SIGTERM are
     // blocked process-wide and consumed by a dedicated sigwait thread, which

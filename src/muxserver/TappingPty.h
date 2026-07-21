@@ -59,6 +59,9 @@ class TappingPty final: public vtpty::Pty
         _inner->resizeScreen(cells, pixels);
     }
 
+    /// @return The wrapped PTY (for diagnostics/tests reaching the concrete type).
+    [[nodiscard]] vtpty::Pty& inner() noexcept { return *_inner; }
+
   private:
     std::unique_ptr<vtpty::Pty> _inner;
     Tap _tap;
