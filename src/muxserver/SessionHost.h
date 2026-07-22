@@ -224,6 +224,11 @@ class SessionHost final: public vtmux::ModelEvents
     /// @return The created tab, or nullptr on failure (nothing is leaked).
     vtmux::Tab* createTab();
 
+    /// Creates a NEW window with a first tab (an empty window is useless), backed by
+    /// a fresh session — the daemon side of a client "new window" (B4).
+    /// @return The created window, or nullptr on failure (nothing is leaked).
+    vtmux::Window* createWindow();
+
     /// Splits @p tab's active pane, backing the new leaf with a fresh session.
     /// @param tab The tab whose active pane splits.
     /// @param orientation The split axis.

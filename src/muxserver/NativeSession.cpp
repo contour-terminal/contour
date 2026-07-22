@@ -71,17 +71,14 @@ namespace
     }
 
     /// Serializes the host window's whole tab/pane layout for the LayoutState PDU.
-    [[nodiscard]] proto::LayoutState serializeLayout(SessionHost& host)
+    [[nodiscard]] proto::LayoutState serializeLayout(SessionHost& host, vtmux::Window& window)
     {
         auto layout = proto::LayoutState {};
-        auto* window = host.model().window(host.windowId());
-        if (window == nullptr)
-            return layout;
-        layout.window = host.windowId().value;
-        layout.activeTab = static_cast<uint32_t>(std::max(0, window->activeTabIndex()));
-        for (auto const tabIndex: std::views::iota(0, window->tabCount()))
+        layout.window = window.id().value;
+        layout.activeTab = static_cast<uint32_t>(std::max(0, window.activeTabIndex()));
+        for (auto const tabIndex: std::views::iota(0, window.tabCount()))
         {
-            auto* tab = window->tabAt(tabIndex);
+            auto* tab = window.tabAt(tabIndex);
             if (tab == nullptr)
                 continue;
             auto wireTab = proto::WireTab {};
@@ -258,7 +255,12 @@ void NativeSession::pushLayout()
 {
     if (!_handshaken || _closed)
         return;
-    send(0, proto::DecodedPdu { serializeLayout(_host) });
+    // One LayoutState per daemon window (B4) — the client opens a GUI window for
+    // each and reconciles its tabs/splits independently.
+    auto& model = _host.model();
+    for (auto const i: std::views::iota(0, model.windowCount()))
+        if (auto* window = model.windowAt(i))
+            send(0, proto::DecodedPdu { serializeLayout(_host, *window) });
 }
 
 coro::Task<void> NativeSession::flushSoon()
@@ -585,6 +587,11 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
     if (std::holds_alternative<proto::CreateTab>(frame.pdu))
     {
         std::ignore = _host.createTab();
+        return;
+    }
+    if (std::holds_alternative<proto::NewWindow>(frame.pdu))
+    {
+        std::ignore = _host.createWindow();
         return;
     }
     if (auto const* split = std::get_if<proto::SplitPane>(&frame.pdu))

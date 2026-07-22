@@ -127,6 +127,10 @@ namespace
     {
         return std::to_underlying(PduType::ClosePane);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(NewWindow const&) noexcept
+    {
+        return std::to_underlying(PduType::NewWindow);
+    }
 
     // --- body encoders ------------------------------------------------------
 
@@ -292,6 +296,10 @@ namespace
     }
 
     void encodeBody(Writer&, CreateTab const&)
+    {
+    }
+
+    void encodeBody(Writer&, NewWindow const&)
     {
     }
 
@@ -557,6 +565,11 @@ namespace
         return CreateTab {};
     }
 
+    DecodeResult decodeNewWindow(Reader&)
+    {
+        return NewWindow {};
+    }
+
     DecodeResult decodeSplitPane(Reader& in)
     {
         auto pdu = SplitPane {};
@@ -652,6 +665,7 @@ namespace
         DecodeRow { PduType::CreateTab, decodeCreateTab },
         DecodeRow { PduType::SplitPane, decodeSplitPane },
         DecodeRow { PduType::ClosePane, decodeClosePane },
+        DecodeRow { PduType::NewWindow, decodeNewWindow },
     };
 } // namespace
 

@@ -207,6 +207,25 @@ Tab* SessionHost::createTab()
     return tab;
 }
 
+vtmux::Window* SessionHost::createWindow()
+{
+    auto const seeded = seedSession();
+    if (!seeded)
+        return nullptr;
+
+    auto* window = _model.createWindow();
+    auto* tab = _model.createTab(window->id());
+    _pendingSessionId.reset(); // consumed by the allocator; clear any leftover
+    if (tab == nullptr)
+    {
+        // The model refused the tab: drop the orphaned session and the empty window.
+        _sessions.erase(seeded->value);
+        _model.removeWindow(window->id());
+        return nullptr;
+    }
+    return window;
+}
+
 void SessionHost::splitActivePane(TabId tab, SplitState orientation, double ratio)
 {
     auto const seeded = seedSession();

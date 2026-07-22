@@ -45,6 +45,7 @@ enum class PduType : uint8_t
     CreateTab = 12,
     SplitPane = 13,
     ClosePane = 14,
+    NewWindow = 15,
 };
 
 /// The kind of a SessionEvent — adding a transient session-app event is adding a
@@ -319,6 +320,14 @@ struct CreateTab
     bool operator==(CreateTab const&) const = default;
 };
 
+/// Client→server: create a new daemon window (with a first tab + session). The
+/// daemon then pushes that window's LayoutState; the client opens a GUI window for
+/// it (B4).
+struct NewWindow
+{
+    bool operator==(NewWindow const&) const = default;
+};
+
 /// Client→server: split the pane hosting @p session (the daemon activates it
 /// first), backing the new leaf with a fresh session.
 struct SplitPane
@@ -350,7 +359,8 @@ using DecodedPdu = std::variant<Invalid,
                                 LayoutState,
                                 CreateTab,
                                 SplitPane,
-                                ClosePane>;
+                                ClosePane,
+                                NewWindow>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

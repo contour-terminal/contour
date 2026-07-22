@@ -103,6 +103,18 @@ class SessionModel
 
     [[nodiscard]] Window* window(WindowId id) const noexcept;
 
+    /// @return How many windows the model holds.
+    [[nodiscard]] int windowCount() const noexcept { return static_cast<int>(_windows.size()); }
+
+    /// @return The window at @p index (0-based), or nullptr if out of range. For
+    ///         enumerating every window (e.g. the daemon serializing all of them).
+    [[nodiscard]] Window* windowAt(int index) const noexcept
+    {
+        return index >= 0 && std::cmp_less(index, _windows.size())
+                   ? _windows[static_cast<std::size_t>(index)].get()
+                   : nullptr;
+    }
+
     // }}}
     // {{{ Tabs
 

@@ -10,6 +10,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <variant>
@@ -613,6 +614,16 @@ Task<void> driveCreateTab(net::EventLoop* loop, AttachClient* client, int* mirro
     client->detach();
 }
 
+/// Awaits the initial single-window layout, authors a new window, and waits for
+/// the daemon to push a layout for the SECOND window before detaching.
+Task<void> driveCreateWindow(net::EventLoop* loop, AttachClient* client, std::set<uint64_t>* windows)
+{
+    co_await net::testing::waitUntil(loop, [windows] { return windows->size() == 1; });
+    client->createWindow();
+    co_await net::testing::waitUntil(loop, [windows] { return windows->size() == 2; });
+    client->detach();
+}
+
 } // namespace
 
 TEST_CASE("attach receives the daemon's tab and pane layout", "[muxserver][attach]")
@@ -679,6 +690,33 @@ TEST_CASE("a client authors a tab, honored by the daemon and mirrored back", "[m
 
     CHECK(mirroredTabs == 2);                                     // the mirrored layout grew
     CHECK(host.model().window(host.windowId())->tabCount() == 2); // the daemon really created the tab
+}
+
+TEST_CASE("a client authors a new window, honored by the daemon (B4)", "[muxserver][attach]")
+{
+    auto source = net::PollEventSource {};
+    auto loop = net::EventLoop { source };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                              vtbackend::Settings {},
+                              /*startPumps=*/false };
+    host.createTab(); // the daemon starts with one window (with one tab)
+
+    auto pair = *net::testing::makeSocketPair(loop);
+    auto server = NativeSession { loop, host, std::move(pair.first) };
+    auto client = AttachClient { loop, std::move(pair.second) };
+    auto subscription = muxserver::ScopedModelSubscription { host, server.layoutObserver() };
+
+    // Every LayoutState the client receives names its window; collect the ids.
+    auto windows = std::set<uint64_t> {};
+    client.setLayoutHandler(
+        [&windows](proto::LayoutState const& received) { windows.insert(received.window); });
+
+    loop.blockOn(
+        net::testing::allOf(server.run(), client.run(), driveCreateWindow(&loop, &client, &windows)));
+
+    CHECK(windows.size() == 2);             // the client saw two distinct windows' layouts
+    CHECK(host.model().windowCount() == 2); // the daemon really created a second window
 }
 
 // The attach-flow composition (Daemon.cpp) hard-codes STDIN/STDOUT and a real

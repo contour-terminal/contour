@@ -228,6 +228,11 @@ void AttachClient::createTab()
     send(proto::DecodedPdu { proto::CreateTab {} });
 }
 
+void AttachClient::createWindow()
+{
+    send(proto::DecodedPdu { proto::NewWindow {} });
+}
+
 void AttachClient::splitPane(uint64_t session, uint8_t orientation, uint16_t ratio)
 {
     send(proto::DecodedPdu {
