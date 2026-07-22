@@ -79,6 +79,11 @@ class AttachController final: public QObject, public SessionFactory
     /// @return How many remote sessions await a local tab.
     [[nodiscard]] std::size_t pendingCount() const;
 
+    /// @return The daemon's most recent tab/pane layout, or nullopt if none has
+    ///         arrived yet. A thread-safe copy — the reactor thread updates it.
+    ///         The GUI reconstructs its own tab/split tree from this (B2).
+    [[nodiscard]] std::optional<muxserver::proto::LayoutState> layout() const;
+
     // SessionFactory: hands out a ChannelPty bound to the next pending
     // remote session; cwd/command/profile do not apply to remote sessions.
     [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(
@@ -96,6 +101,10 @@ class AttachController final: public QObject, public SessionFactory
 
     /// The connection to the daemon ended (detach, daemon exit, error).
     void connectionClosed();
+
+    /// The daemon's tab/pane layout changed (fires on the reactor thread; connect
+    /// queued). The GUI reconstructs its tab/split tree from layout() (B2).
+    void layoutChanged();
 
   private:
     /// One discovered remote session awaiting a local tab.
@@ -121,6 +130,10 @@ class AttachController final: public QObject, public SessionFactory
     /// Reactor-side: applies @p delta through the session's mirror (if bound).
     void onUpdate(muxserver::client::RemoteScreen const& screen, muxserver::proto::Delta const& delta);
 
+    /// Reactor-side: stores the daemon's latest tab/pane layout and signals the
+    /// GUI to reconcile its own tree against it.
+    void onLayout(muxserver::proto::LayoutState const& layout);
+
     /// Reactor-side: feeds a fresh binding its full replay if the session's
     /// screen is already known.
     void primeBinding(uint64_t session);
@@ -144,6 +157,7 @@ class AttachController final: public QObject, public SessionFactory
     std::string _failure;
     std::deque<PendingSession> _pending; ///< Discovered remote sessions without a local tab.
     std::unordered_map<uint64_t, Binding> _bindings;
+    std::optional<muxserver::proto::LayoutState> _layout; ///< The daemon's latest tab/pane tree (B2).
     /// Session ids whose local tab the user closed while still attached. Their
     /// remote sessions live on (the native protocol has no close verb) and keep
     /// emitting deltas; `onUpdate` ignores tombstoned ids so a closed tab never

@@ -254,11 +254,16 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       split-pane end-to-end (attach → `LayoutState` shows the vertical split, 60/40, two distinct-session
       leaves). *Landed 2026-07-22; muxserver suite green (122/2652).* **B2 (the GUI consuming it in
       `AttachController` → `SessionModel`) is the Qt follow-up.**
-- [ ] **B2. Client applies `LayoutState` (AttachController).** Replace the
-      `onUpdate`→`PendingSession` flattening (`AttachController.cpp:108-142`) with a layout applier
-      that drives the GUI's own `SessionModel` verbs (`createTab`/`splitActivePane`/`setPaneRatio`/
-      zoom/activate) to reproduce the daemon tree; keep session↔pane binding via `_bindings`. Mirror
-      re-serialization (`onUpdate`) unchanged.
+- [~] **B2. Client applies `LayoutState` (AttachController) — capture landed; SessionModel apply
+      pending.** `AttachController` now subscribes the daemon's `LayoutState` (`setLayoutHandler` →
+      `onLayout`), stores it under the mutex, exposes a thread-safe `layout()` copy, and raises a
+      `layoutChanged()` signal on each push — the GUI was ignoring the layout entirely before. Test
+      (Linux-CI): the controller captures a split tab's tree (`AttachController_test`). **Remaining:**
+      the applier that consumes `layout()` to drive the GUI's own `SessionModel` verbs (`createTab`/
+      `splitActivePane`/`setPaneRatio`/zoom/activate) and reproduce the daemon's tree, replacing the
+      `onUpdate`→`PendingSession` flattening — pushing sessions into `_pending` in the tree's
+      depth-first order lets the existing FIFO `createPty` binding match each pane to its session with
+      no per-session binding machinery. Mirror re-serialization (`onUpdate`) stays unchanged.
 - [~] **B3. Lifecycle PDUs (F2, inbound) — server-receive half + client send verbs landed.**
       Three tag-12/13/14 PDUs (forward-compatible, no codec bump): `CreateTab{}`, `SplitPane{tab,
       orientation, ratio×10000}`, `ClosePane{session}`. `NativeSession::handlePdu` routes them to the

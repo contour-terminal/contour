@@ -15,9 +15,12 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <thread>
+#include <tuple>
+#include <utility>
 
 #ifndef _WIN32
     #include <unistd.h>
@@ -212,6 +215,44 @@ TEST_CASE("attach controller mirrors a remote session over a real socket", "[att
     controller.stop();
     CHECK(pty->isClosed());
     pty.reset(); // unbind (the controller outlives its ptys' registrations)
+}
+
+// B2 foundation: the controller captures the daemon's authoritative tab/pane
+// tree (the daemon pushes LayoutState leading the attach snapshot), so the GUI
+// can reconstruct its own split tree from it rather than flattening one tab per
+// session.
+TEST_CASE("attach controller captures the daemon's tab and pane layout", "[attach][controller]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("one");
+    // Split the seeded tab so the layout carries a non-trivial pane tree.
+    daemon.onDaemon([&daemon] {
+        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
+        daemon.host->splitActivePane(tab->id(), vtmux::SplitState::Vertical, 0.5);
+        return 0;
+    });
+
+    auto controller =
+        contour::AttachController { muxserver::UnixEndpoint { .socketPath = daemon.socketPath } };
+    auto const connected = controller.connectAndWait(10s);
+    REQUIRE(connected.has_value());
+
+    // The layout is pushed leading the snapshot; poll until the controller has it.
+    auto layout = std::optional<muxserver::proto::LayoutState> {};
+    for (auto i = 0; i < 200 && !(layout = controller.layout()).has_value(); ++i)
+        std::this_thread::sleep_for(5ms);
+    REQUIRE(layout.has_value());
+    REQUIRE(layout->tabs.size() == 1);
+
+    // The tab's root is a vertical split with two distinct-session leaves.
+    auto const& root = layout->tabs.front().root;
+    CHECK(root.split == std::to_underlying(vtmux::SplitState::Vertical));
+    REQUIRE(root.children.size() == 2);
+    CHECK(root.children[0].session != 0);
+    CHECK(root.children[1].session != 0);
+    CHECK(root.children[0].session != root.children[1].session);
+
+    controller.stop();
 }
 
 // Regression: closing a mirrored tab must not resurrect it. Before the fix,

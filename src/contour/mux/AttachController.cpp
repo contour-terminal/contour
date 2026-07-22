@@ -72,6 +72,7 @@ coro::Task<void> AttachController::runClient(net::EventLoop* loop)
     client.setUpdateHandler([this](RemoteScreen const& screen, muxserver::proto::Delta const& delta) {
         onUpdate(screen, delta);
     });
+    client.setLayoutHandler([this](muxserver::proto::LayoutState const& layout) { onLayout(layout); });
     {
         auto const lock = std::lock_guard { _mutex };
         _client = &client;
@@ -140,6 +141,23 @@ void AttachController::onUpdate(RemoteScreen const& screen, muxserver::proto::De
 
     _connected.notify_all();
     emit remoteSessionDiscovered();
+}
+
+void AttachController::onLayout(muxserver::proto::LayoutState const& layout)
+{
+    {
+        auto const lock = std::lock_guard { _mutex };
+        _layout = layout;
+    }
+    // The GUI (on its own thread, via a queued connection) reconciles its tab and
+    // split tree against layout() — the daemon's authoritative structure.
+    emit layoutChanged();
+}
+
+std::optional<muxserver::proto::LayoutState> AttachController::layout() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _layout;
 }
 
 void AttachController::primeBinding(uint64_t session)
