@@ -201,4 +201,53 @@ TEST_CASE("a split socket reads one half and writes the other", "[net][fdpass]")
     ::close(outbound[0]);
 }
 
+TEST_CASE("a split socket forwards an fd received on its read half", "[net][fdpass]")
+{
+    auto pair = Pair {};
+
+    // The read half is the fd-passing AF_UNIX socket; an outbound pipe is a real write half.
+    auto outbound = std::array<int, 2> { -1, -1 };
+    REQUIRE(::pipe(outbound.data()) == 0);
+    auto writeHalf = net::adoptFd(pair.loop, outbound[1]);
+    REQUIRE(writeHalf.has_value());
+    auto split = net::combineHalves(std::move(pair.ours), std::move(*writeHalf));
+
+    auto pipeFds = std::array<int, 2> { -1, -1 };
+    REQUIRE(::pipe(pipeFds.data()) == 0);
+    REQUIRE(::write(pipeFds[1], "thru", 4) == 4);
+    sendWithFds(pair.theirs, "hello", std::array { pipeFds[0] });
+    ::close(pipeFds[0]);
+
+    auto buffer = std::array<std::byte, 64> {};
+    auto const result = pair.loop.blockOn(split->readWithFd(buffer));
+    REQUIRE(result.has_value());
+    CHECK(result->bytesRead == 5);
+    REQUIRE(result->fd >= 0); // the base default would have dropped it as -1
+
+    auto proof = std::array<char, 8> {};
+    CHECK(::read(result->fd, proof.data(), proof.size()) == 4);
+    CHECK(std::string_view(proof.data(), 4) == "thru");
+    ::close(result->fd);
+    ::close(pipeFds[1]);
+    ::close(outbound[0]);
+}
+
+TEST_CASE("a split socket is closed once either half closes", "[net][fdpass]")
+{
+    auto pair = Pair {};
+
+    auto outbound = std::array<int, 2> { -1, -1 };
+    REQUIRE(::pipe(outbound.data()) == 0);
+    auto writeHalf = net::adoptFd(pair.loop, outbound[1]);
+    REQUIRE(writeHalf.has_value());
+
+    auto* const writeHalfPtr = writeHalf->get(); // stays valid after ownership moves
+    auto split = net::combineHalves(std::move(pair.ours), std::move(*writeHalf));
+
+    CHECK_FALSE(split->isClosed());
+    writeHalfPtr->close();    // close ONLY the write half
+    CHECK(split->isClosed()); // the duplex socket is now unusable either way
+    ::close(outbound[0]);
+}
+
 #endif // !_WIN32

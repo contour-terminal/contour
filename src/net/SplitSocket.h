@@ -32,6 +32,14 @@ class SplitSocket final: public ISocket
         return _readHalf->read(buffer);
     }
 
+    /// Forwards to the read half so an fd passed over an fd-capable read half
+    /// (SCM_RIGHTS) is not silently dropped by the base default (which reports -1).
+    [[nodiscard]] coro::Task<std::expected<ReadWithFd, NetError>> readWithFd(
+        std::span<std::byte> buffer) override
+    {
+        return _readHalf->readWithFd(buffer);
+    }
+
     [[nodiscard]] coro::Task<IoResult> write(std::span<std::byte const> buffer) override
     {
         return _writeHalf->write(buffer);
@@ -43,7 +51,12 @@ class SplitSocket final: public ISocket
         _writeHalf->close();
     }
 
-    [[nodiscard]] bool isClosed() const noexcept override { return _readHalf->isClosed(); }
+    /// Closed once EITHER half is: reading a dead read half or writing a dead write
+    /// half both make the duplex socket unusable, so a one-sided closure counts.
+    [[nodiscard]] bool isClosed() const noexcept override
+    {
+        return _readHalf->isClosed() || _writeHalf->isClosed();
+    }
 
   private:
     std::unique_ptr<ISocket> _readHalf;
