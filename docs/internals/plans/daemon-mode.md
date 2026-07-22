@@ -175,12 +175,12 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       CI/manually verified (real stdin/stdout/TTY, not headless), but its `ScreenMirror` core is
       fully unit-tested. Follow-up: a scrollback UI; ensure the outer Contour has GIP enabled for
       images.
-- [~] **A10. Full multi-page support (status-line displays + DEC pages).** *(Added 2026-07-22 — the
-      native protocol modelled only ONE grid per session; `ScreenType` predates Contour's multi-page
-      support.)* **Scope 2 (status-display state) DONE**, **Scope 1 (host-writable status CONTENT)
-      DONE**, **A10.4 (DEC pages 1–14 + decoupled display) DONE** (see the A10.4 note below and the
-      progress log). **Only remaining:** the DEC saved/pushed status-display stack (A10.3,
-      `savedStatusDisplayType`/`pushStatusDisplay`) — a niche DECSSDT save/restore refinement.
+- [x] **A10. Full multi-page support (status-line displays + DEC pages). COMPLETE (2026-07-22).**
+      *(Added 2026-07-22 — the native protocol modelled only ONE grid per session; `ScreenType`
+      predates Contour's multi-page support.)* All scopes landed: **Scope 2 (status-display state)**,
+      **Scope 1 (host-writable status CONTENT)**, **A10.3 (DEC saved/pushed status-display stack —
+      covered by construction)**, **A10.4 (DEC pages 1–14 + decoupled display)** — see the per-scope
+      notes below and the progress log.
       **Scope 2 (state):** `SessionState`/`Delta` now carry `statusDisplayType` +
       `activeStatusDisplay` (pull+diff of `Terminal::statusDisplayType()`/`activeStatusDisplay()`),
       `ScreenMirror` re-emits DECSSDT (`CSI Ps $ ~`) + DECSASD (`CSI Ps $ }`); CodecVersion → 9;
@@ -208,8 +208,16 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
          render it locally on the client from already-synced state (keeps it client-styled, matches the
          mux philosophy) vs. ship its cells. Recommend local render → only the *host-writable* page
          needs cell sync.
-      Follow-up within A10: DEC saved/pushed status-display stack (`savedStatusDisplayType`,
-      `pushStatusDisplay`).
+      **A10.3 — DEC saved/pushed status-display stack (`savedStatusDisplayType`/`pushStatusDisplay`).
+      DONE by construction (2026-07-22).** `pushStatusDisplay`/`popStatusDisplay` (driven by KAM,
+      `CSI 2 h`/`l`) both mutate `_statusDisplayType` — the exact value scope 2's pull+diff already
+      syncs — so the client mirrors the EFFECTIVE type through any push/pop; the save/restore stack
+      stays server-side (same philosophy as the DEC pages). Verified by `ScreenMirror_test` "a pushed
+      then popped status display round-trips through the mirror". Doing so **exposed and fixed a real
+      bug**: `ScreenMirror::fullReplay` only emitted DECSSDT/DECSASD when non-None, so a pop-to-None
+      (which resizes the main grid → forces a snapshot → fullReplay) never reset the mirror's status
+      line; fullReplay now asserts the status-display state unconditionally (DECSSDT 0 / DECSASD 0 are
+      no-ops when already None/Main).
       **A10.4 — DEC multi-page (`_pages`/`_cursorPage`/`_displayedPage`). DONE (2026-07-22).**
       `Terminal` holds `MaxPageCount = 16` pages (page 0 primary, 1–14 DEC pages, 15 alternate), with
       `_cursorPage` (where VT output goes) vs `_displayedPage` (what the user sees; they diverge only
@@ -452,9 +460,19 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   `Terminal` (GUI) / outer terminal (thin) encodes keys the way the app negotiated. CodecVersion → 11.
   PDU round-trip + a `ScreenMirror_test` case. **modifyOtherKeys deferred with cause:** vtbackend's
   `CSI > n m` form clashes with xterm's `CSI > 4 ; n m`, so re-emitting it would misconfigure a real
-  outer terminal (noted in `MirroredModes.h`). Suite green (128/2685). **WS-A is now fully complete**
-  (A1–A9 + A10 scopes 1/2/4) except the niche A10.3 status-display save/restore stack. Remaining
-  overall: A10.3, B2/B4 (Qt), B3-Qt, C3/C4/C5 (Qt), B5.
+  outer terminal (noted in `MirroredModes.h`). Suite green (128/2685). Remaining overall: A10.3,
+  B2/B4 (Qt), B3-Qt, C3/C4/C5 (Qt), B5.
+- 2026-07-22 · Windows/clangcl-release · **A10.3 (DEC saved/pushed status-display stack) done by
+  construction — WS-A now 100% complete.** `pushStatusDisplay`/`popStatusDisplay` (KAM `CSI 2 h`/`l`)
+  mutate the effective `statusDisplayType()`, which scope 2's pull+diff already syncs, so the client
+  mirrors any push/pop with no extra wire — the stack stays server-side (same philosophy as the DEC
+  pages). Verifying it **exposed and fixed a real bug**: `ScreenMirror::fullReplay` only emitted
+  DECSSDT/DECSASD when non-None, so a pop-to-None (which resizes the main grid → forces a snapshot →
+  fullReplay) left the mirror's status line stuck; fullReplay now asserts the status-display state
+  unconditionally. New `ScreenMirror_test` push/pop round-trip case. Suite green (129/2689). **WS-A
+  (VT feature parity, native wire → both clients) is fully complete: A1–A10 all landed.** Remaining
+  overall: B2/B4 (Qt), B3-Qt, C3/C4/C5 (Qt), B5 — the GUI/CLI-config items that build only in a full
+  Qt tree (CI-verified), plus the interop-only tmux polish.
 
 ## Open decisions / risks
 

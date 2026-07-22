@@ -382,11 +382,13 @@ std::string ScreenMirror::fullReplay(RemoteScreen const& screen)
         out += oscColor(10, screen.defaultForeground);
         out += oscColor(11, screen.defaultBackground);
     }
-    if (screen.statusDisplayType != 0 || screen.activeStatusDisplay != 0)
-    {
-        out += std::format("\033[{}$~", screen.statusDisplayType);    // DECSSDT
-        out += std::format("\033[{}$}}", screen.activeStatusDisplay); // DECSASD
-    }
+    // Assert the status-display state UNCONDITIONALLY (not only when non-None): a
+    // fullReplay may run while the mirror still shows a status line from a prior
+    // state (e.g. an app popping the indicator back to None resizes the main grid,
+    // which forces a snapshot), and only DECSSDT 0 / DECSASD 0 resets it. Both are
+    // no-ops on a mirror already in None/Main.
+    out += std::format("\033[{}$~", screen.statusDisplayType);    // DECSSDT
+    out += std::format("\033[{}$}}", screen.activeStatusDisplay); // DECSASD
     if (screen.kittyKeyboardFlags != 0)
         out += std::format("\033[={};1u", screen.kittyKeyboardFlags); // Kitty keyboard flags (set exactly)
     appendStatusLines(out, screen); // paints the host-writable status page, if any

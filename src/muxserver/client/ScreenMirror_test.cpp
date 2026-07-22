@@ -715,6 +715,40 @@ TEST_CASE("the status-display state reaches the mirror", "[muxserver][mirror]")
     h.loop.blockOn(drive(&h, std::move(scenario)));
 }
 
+TEST_CASE("a pushed then popped status display round-trips through the mirror", "[muxserver][mirror]")
+{
+    auto h = MirrorHarness {};
+    h.host.createTab();
+    auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    h.serverTerminal(session)->writeToScreen("s");
+
+    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+        co_await waitUntil(
+            &h->loop, [&] { return h->mirror->primaryScreen().grid().renderMainPageText().contains("s"); });
+        REQUIRE(h->mirror->statusDisplayType() == vtbackend::StatusDisplayType::None);
+
+        // KAM set (CSI 2 h) PUSHES the indicator status display onto the server's
+        // save/restore stack; KAM reset (CSI 2 l) POPS it back. The stack is
+        // server-side — the mirror only tracks the EFFECTIVE type (pull+diff), so a
+        // push shows the indicator and a pop restores what was displayed before.
+        serverWrites(h, session, "\033[2h"); // KAM on -> pushStatusDisplay(Indicator)
+        co_await waitUntil(&h->loop, [&] {
+            return h->mirror->statusDisplayType() == vtbackend::StatusDisplayType::Indicator;
+        });
+        CHECK(h->mirror->statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+
+        serverWrites(h, session, "\033[2l"); // KAM off -> popStatusDisplay()
+        co_await waitUntil(
+            &h->loop, [&] { return h->mirror->statusDisplayType() == vtbackend::StatusDisplayType::None; });
+        CHECK(h->mirror->statusDisplayType() == vtbackend::StatusDisplayType::None);
+        CHECK(h->serverTerminal(session)->statusDisplayType() == vtbackend::StatusDisplayType::None);
+
+        h->client->detach();
+    }(&h, session);
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+
 TEST_CASE("host-writable status-line content reaches the mirror", "[muxserver][mirror]")
 {
     auto h = MirrorHarness {};
