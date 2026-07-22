@@ -24,6 +24,7 @@
 
 #include <coro/Cancellation.hpp>
 #include <coro/Task.hpp>
+#include <coro/UniqueCoroHandle.hpp>
 
 namespace coro
 {
@@ -101,32 +102,16 @@ namespace detail
 
         explicit WhenAllRunner(handle_type handle) noexcept: _handle(handle) {}
 
-        WhenAllRunner(WhenAllRunner&& other) noexcept: _handle(std::exchange(other._handle, {})) {}
-
-        WhenAllRunner& operator=(WhenAllRunner&& other) noexcept
-        {
-            if (this != &other)
-            {
-                if (_handle)
-                    _handle.destroy();
-                _handle = std::exchange(other._handle, {});
-            }
-            return *this;
-        }
-
+        WhenAllRunner(WhenAllRunner&&) noexcept = default;
+        WhenAllRunner& operator=(WhenAllRunner&&) noexcept = default;
         WhenAllRunner(WhenAllRunner const&) = delete;
         WhenAllRunner& operator=(WhenAllRunner const&) = delete;
+        ~WhenAllRunner() = default;
 
-        ~WhenAllRunner()
-        {
-            if (_handle)
-                _handle.destroy();
-        }
-
-        [[nodiscard]] handle_type handle() const noexcept { return _handle; }
+        [[nodiscard]] handle_type handle() const noexcept { return _handle.get(); }
 
       private:
-        handle_type _handle;
+        UniqueCoroHandle<PromiseType> _handle;
     };
 
     /// Wraps one task so it participates in the join (records exceptions, does not

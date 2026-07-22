@@ -25,12 +25,14 @@
 #include <functional>
 #include <limits>
 #include <optional>
+#include <ranges>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
 #include <coro/Cancellation.hpp>
 #include <coro/Task.hpp>
+#include <coro/UniqueCoroHandle.hpp>
 
 namespace coro
 {
@@ -122,32 +124,16 @@ namespace detail
 
         explicit WhenAnyRunner(handle_type handle) noexcept: _handle(handle) {}
 
-        WhenAnyRunner(WhenAnyRunner&& other) noexcept: _handle(std::exchange(other._handle, {})) {}
-
-        WhenAnyRunner& operator=(WhenAnyRunner&& other) noexcept
-        {
-            if (this != &other)
-            {
-                if (_handle)
-                    _handle.destroy();
-                _handle = std::exchange(other._handle, {});
-            }
-            return *this;
-        }
-
+        WhenAnyRunner(WhenAnyRunner&&) noexcept = default;
+        WhenAnyRunner& operator=(WhenAnyRunner&&) noexcept = default;
         WhenAnyRunner(WhenAnyRunner const&) = delete;
         WhenAnyRunner& operator=(WhenAnyRunner const&) = delete;
+        ~WhenAnyRunner() = default;
 
-        ~WhenAnyRunner()
-        {
-            if (_handle)
-                _handle.destroy();
-        }
-
-        [[nodiscard]] handle_type handle() const noexcept { return _handle; }
+        [[nodiscard]] handle_type handle() const noexcept { return _handle.get(); }
 
       private:
-        handle_type _handle;
+        UniqueCoroHandle<PromiseType> _handle;
     };
 
     /// Wraps one task so it participates in the race. A child cancelled by the
@@ -203,7 +189,7 @@ namespace detail
                 _runners.push_back(makeWhenAnyRunner(std::move(task)));
 
             auto const childToken = _state.childStop.get_token();
-            for (std::size_t i = 0; i < _runners.size(); ++i)
+            for (auto const i: std::views::iota(std::size_t { 0 }, _runners.size()))
             {
                 auto& promise = _runners[i].handle().promise();
                 promise.state = &_state;

@@ -2,6 +2,7 @@ add_library(coro INTERFACE
     Awaitable.hpp
     Cancellation.hpp
     Task.hpp
+    UniqueCoroHandle.hpp
     WhenAll.hpp
     WhenAny.hpp
 )

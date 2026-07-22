@@ -33,6 +33,7 @@
 #include <utility>
 
 #include <coro/Cancellation.hpp>
+#include <coro/UniqueCoroHandle.hpp>
 
 #if !defined(__cpp_impl_coroutine) || __cpp_impl_coroutine < 201902L
     #error "coro::Task requires C++20 coroutine language support (__cpp_impl_coroutine)."
@@ -165,50 +166,35 @@ class [[nodiscard]] Task
 
     explicit Task(handle_type handle) noexcept: _handle(handle) {}
 
-    Task(Task&& other) noexcept: _handle(std::exchange(other._handle, {})) {}
-
-    Task& operator=(Task&& other) noexcept
-    {
-        if (this != &other)
-        {
-            if (_handle)
-                _handle.destroy();
-            _handle = std::exchange(other._handle, {});
-        }
-        return *this;
-    }
-
+    Task(Task&&) noexcept = default;
+    Task& operator=(Task&&) noexcept = default;
     Task(Task const&) = delete;
     Task& operator=(Task const&) = delete;
-
-    ~Task()
-    {
-        if (_handle)
-            _handle.destroy();
-    }
+    ~Task() = default;
 
     /// Awaiting a task consumes it; the owning value keeps the frame alive across
     /// the suspension (for a temporary, in the awaiting coroutine's frame).
-    [[nodiscard]] Awaiter operator co_await() && noexcept { return Awaiter { _handle }; }
+    [[nodiscard]] Awaiter operator co_await() && noexcept { return Awaiter { _handle.get() }; }
 
     /// @return The underlying coroutine handle (for the runtime/driver to start
     /// and inspect a root task). Prefer `co_await` for composition.
-    [[nodiscard]] handle_type handle() const noexcept { return _handle; }
+    [[nodiscard]] handle_type handle() const noexcept { return _handle.get(); }
 
     /// @return True once the coroutine has run to completion.
-    [[nodiscard]] bool done() const noexcept { return !_handle || _handle.done(); }
+    [[nodiscard]] bool done() const noexcept { return !_handle || _handle.get().done(); }
 
     /// @return The result of a completed root task, rethrowing any body exception.
     /// @pre `done()` is true.
     [[nodiscard]] T result()
     {
-        if (_handle.promise().exception)
-            std::rethrow_exception(_handle.promise().exception);
-        return std::move(*_handle.promise().result);
+        auto& promise = _handle.get().promise();
+        if (promise.exception)
+            std::rethrow_exception(promise.exception);
+        return std::move(*promise.result);
     }
 
   private:
-    handle_type _handle;
+    detail::UniqueCoroHandle<PromiseType> _handle;
 };
 
 /// Specialization for tasks producing no value.
@@ -263,44 +249,29 @@ class [[nodiscard]] Task<void>
 
     explicit Task(handle_type handle) noexcept: _handle(handle) {}
 
-    Task(Task&& other) noexcept: _handle(std::exchange(other._handle, {})) {}
-
-    Task& operator=(Task&& other) noexcept
-    {
-        if (this != &other)
-        {
-            if (_handle)
-                _handle.destroy();
-            _handle = std::exchange(other._handle, {});
-        }
-        return *this;
-    }
-
+    Task(Task&&) noexcept = default;
+    Task& operator=(Task&&) noexcept = default;
     Task(Task const&) = delete;
     Task& operator=(Task const&) = delete;
+    ~Task() = default;
 
-    ~Task()
-    {
-        if (_handle)
-            _handle.destroy();
-    }
+    [[nodiscard]] Awaiter operator co_await() && noexcept { return Awaiter { _handle.get() }; }
 
-    [[nodiscard]] Awaiter operator co_await() && noexcept { return Awaiter { _handle }; }
+    [[nodiscard]] handle_type handle() const noexcept { return _handle.get(); }
 
-    [[nodiscard]] handle_type handle() const noexcept { return _handle; }
-
-    [[nodiscard]] bool done() const noexcept { return !_handle || _handle.done(); }
+    [[nodiscard]] bool done() const noexcept { return !_handle || _handle.get().done(); }
 
     /// Rethrows any exception escaping a completed root task's body.
     /// @pre `done()` is true.
     void result()
     {
-        if (_handle.promise().exception)
-            std::rethrow_exception(_handle.promise().exception);
+        auto& promise = _handle.get().promise();
+        if (promise.exception)
+            std::rethrow_exception(promise.exception);
     }
 
   private:
-    handle_type _handle;
+    detail::UniqueCoroHandle<PromiseType> _handle;
 };
 
 } // namespace coro
