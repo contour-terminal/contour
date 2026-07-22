@@ -19,12 +19,16 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <sstream>
 
+#include <muxserver/client/LayoutReconstruction.h>
+#include <muxserver/proto/Pdu.h>
 #include <vtmux/ModelEvents.h>
+#include <vtmux/Pane.h>
 #include <vtmux/SessionModel.h>
 #include <vtmux/Tab.h>
 
@@ -164,6 +168,47 @@ TEST_CASE("TerminalSessionManager: applyLayoutToWindow builds tabs with colors",
     CHECK(factory->requestedCommandOverrides[1]->program == "echo b");
     CHECK(factory->requestedCommandOverrides[2]->program == "echo left");
     CHECK(factory->requestedCommandOverrides[3]->program == "echo right");
+}
+
+// B2: a daemon LayoutState, once converted by muxserver::client::wireToLayout,
+// realizes through the SAME applyLayoutToWindow path the config-layout feature
+// uses — proving the daemon's tab/split tree rebuilds in the GUI's model. (The
+// remote-session binding of each realized pane is the AF_UNIX-fixture layer; here
+// the MockPty factory backs the panes so the STRUCTURE is verified on Windows.)
+TEST_CASE("TerminalSessionManager: applyLayoutToWindow realizes a daemon wire layout", "[manager][layout]")
+{
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    contour::test::TestApp app { std::move(factoryOwned) };
+    contour::test::ScopedController const win { app.manager() };
+
+    // Tab 0: a single pane. Tab 1: a vertical split (60/40) of two panes.
+    auto state = muxserver::proto::LayoutState {};
+    state.tabs.push_back(
+        muxserver::proto::WireTab { .root = muxserver::proto::WirePane { .split = 0, .session = 1 } });
+    state.tabs.push_back(muxserver::proto::WireTab {
+        .root = muxserver::proto::WirePane {
+            .split = 2,
+            .ratio = 6000,
+            .children = { muxserver::proto::WirePane { .split = 0, .session = 2 },
+                          muxserver::proto::WirePane { .split = 0, .session = 3 } } } });
+
+    auto const wl = muxserver::client::wireToLayout(state);
+    REQUIRE(app.manager().applyLayoutToWindow(win.id, wl.layout));
+
+    auto* window = app.manager().model().window(win.id);
+    REQUIRE(window != nullptr);
+    CHECK(window->tabCount() == 2);
+
+    auto* single = window->tabAt(0);
+    REQUIRE(single != nullptr);
+    CHECK(single->paneCount() == 1);
+
+    auto* splitTab = window->tabAt(1);
+    REQUIRE(splitTab != nullptr);
+    CHECK(splitTab->paneCount() == 2);
+    REQUIRE_FALSE(splitTab->rootPane()->isLeaf());
+    CHECK(splitTab->rootPane()->splitState() == vtmux::SplitState::Vertical);
+    CHECK(std::lround(splitTab->rootPane()->ratio() * 10000.0) == 6000); // first child's 60% share
 }
 
 // Manager-level coverage for saveWindowLayout: builds a real, PTY-backed 2-tab window via
