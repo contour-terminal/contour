@@ -12,11 +12,13 @@
 
 #include <vtbackend/primitives.h>
 
+#include <vtpty/ChannelPty.h>
 #include <vtpty/Pty.h>
 
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -24,6 +26,38 @@
 
 namespace contour
 {
+
+class MuxLoopThread;
+
+/// A ChannelPty that runs an on-destroy callback when the owning terminal
+/// destroys it — so each controller drops the pty's binding without its own
+/// self-unbinding subclass. The callback (typically a controller's unbind,
+/// keyed by the pane/session id) fires exactly once, from the destructor,
+/// serialized against the controller by that unbind's own lock.
+class SelfUnbindingChannelPty final: public vtpty::ChannelPty
+{
+  public:
+    /// @param size The initial page size.
+    /// @param onDestroy Invoked once from the destructor (e.g. controller.unbind(id)).
+    SelfUnbindingChannelPty(vtpty::PageSize size, std::function<void()> onDestroy):
+        vtpty::ChannelPty(size), _onDestroy(std::move(onDestroy))
+    {
+    }
+
+    ~SelfUnbindingChannelPty() override
+    {
+        if (_onDestroy)
+            _onDestroy();
+    }
+
+    SelfUnbindingChannelPty(SelfUnbindingChannelPty const&) = delete;
+    SelfUnbindingChannelPty& operator=(SelfUnbindingChannelPty const&) = delete;
+    SelfUnbindingChannelPty(SelfUnbindingChannelPty&&) = delete;
+    SelfUnbindingChannelPty& operator=(SelfUnbindingChannelPty&&) = delete;
+
+  private:
+    std::function<void()> _onDestroy;
+};
 
 /// A mux controller's connection lifecycle. `connectAndWait` blocks until the
 /// phase leaves Connecting; the reactor's serve-loop epilogue settles it to
@@ -67,5 +101,21 @@ struct MuxConnectOutcome
 /// @param pageSize The requested size, if any.
 /// @return An unbound `ChannelPty` the session can drive and close cleanly.
 [[nodiscard]] std::unique_ptr<vtpty::Pty> makeUnboundFallbackPty(std::optional<vtbackend::PageSize> pageSize);
+
+/// The reactor teardown both controllers share: flips @p stopped exactly once
+/// (guarded by @p mutex), posts @p detach onto the reactor so a live client
+/// detaches cleanly, then requests stop and joins the reactor thread. A task
+/// still parked in connect has no client to detach; the stop request cancels the
+/// loop so join() cannot block forever.
+/// @param mutex Guards @p stopped (locked internally).
+/// @param stopped The controller's one-shot stop flag.
+/// @param reactor The controller's reactor thread.
+/// @param detach Posted onto the reactor to detach the live client/gateway.
+/// @return True when this call performed the teardown; false when it was already
+///         stopped — so the caller closes its own bindings only on the first stop.
+[[nodiscard]] bool stopMuxReactor(std::mutex& mutex,
+                                  bool& stopped,
+                                  MuxLoopThread& reactor,
+                                  std::function<void()> detach);
 
 } // namespace contour

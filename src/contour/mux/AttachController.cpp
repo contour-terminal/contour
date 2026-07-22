@@ -18,30 +18,6 @@ namespace
     auto const attachLog = logstore::category("gui.attach", "GUI native-attach controller.");
 } // namespace
 
-/// The pty handed to a remote-backed TerminalSession: unregisters itself from
-/// the controller when the terminal destroys it, so the reactor can never
-/// feed a dangling pty (the registry lookup and this unbind serialize on the
-/// controller's mutex).
-class AttachController::BoundChannelPty final: public vtpty::ChannelPty
-{
-  public:
-    BoundChannelPty(AttachController& controller, uint64_t session, vtpty::PageSize size):
-        vtpty::ChannelPty(size), _controller(controller), _session(session)
-    {
-    }
-
-    ~BoundChannelPty() override { _controller.unbind(_session); }
-
-    BoundChannelPty(BoundChannelPty const&) = delete;
-    BoundChannelPty& operator=(BoundChannelPty const&) = delete;
-    BoundChannelPty(BoundChannelPty&&) = delete;
-    BoundChannelPty& operator=(BoundChannelPty&&) = delete;
-
-  private:
-    AttachController& _controller;
-    uint64_t _session;
-};
-
 AttachController::AttachController(std::filesystem::path socketPath): _socketPath(std::move(socketPath))
 {
 }
@@ -69,21 +45,11 @@ std::expected<void, std::string> AttachController::connectAndWait(std::chrono::m
 
 void AttachController::stop()
 {
-    {
-        auto const lock = std::lock_guard { _mutex };
-        if (_stopped)
-            return;
-        _stopped = true;
-    }
-    _reactor.post([this] {
-        if (_client != nullptr)
-            _client->detach();
-    });
-    // A task still parked in connect (daemon accepting nothing) has no client
-    // to detach; cancel the whole loop so join() cannot block forever.
-    _reactor.requestStop();
-    _reactor.join();
-    closeAllBindings();
+    if (stopMuxReactor(_mutex, _stopped, _reactor, [this] {
+            if (_client != nullptr)
+                _client->detach();
+        }))
+        closeAllBindings();
 }
 
 coro::Task<void> AttachController::runClient(net::EventLoop* loop)
@@ -244,8 +210,9 @@ std::unique_ptr<vtpty::Pty> AttachController::createPty(std::optional<std::strin
 
     // Born at the REMOTE size so the mirror's first replay paints a matching
     // grid; the display's own resize then proposes the local size upstream.
-    auto pty = std::make_unique<BoundChannelPty>(
-        *this, session, vtpty::PageSize { vtpty::LineCount(lines), vtpty::ColumnCount(columns) });
+    auto pty = std::make_unique<SelfUnbindingChannelPty>(
+        vtpty::PageSize { vtpty::LineCount(lines), vtpty::ColumnCount(columns) },
+        [this, session] { unbind(session); });
     pty->setWriteSink([this, session](std::string_view bytes) {
         _reactor.post([this, session, copy = std::string { bytes }] {
             if (_client != nullptr)

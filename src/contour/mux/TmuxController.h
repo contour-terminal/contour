@@ -92,7 +92,6 @@ class TmuxController final: public QObject, public SessionFactory, public muxser
     void connectionClosed();
 
   private:
-    class BoundPanePty;
     class PaneFeed;
 
     struct PendingPane

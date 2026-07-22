@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/mux/MuxController.h>
+#include <contour/mux/MuxLoopThread.h>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
 #include <string>
 #include <thread>
+
+#include <coro/Task.hpp>
+#include <net/EventLoop.h>
 
 using namespace std::chrono_literals;
 using contour::awaitMuxConnect;
@@ -88,4 +93,45 @@ TEST_CASE("makeUnboundFallbackPty honors the requested size, else defaults", "[m
     auto const defaulted = makeUnboundFallbackPty(std::nullopt);
     REQUIRE(defaulted != nullptr);
     CHECK(defaulted->pageSize() == vtpty::PageSize { vtpty::LineCount(25), vtpty::ColumnCount(80) });
+}
+
+TEST_CASE("SelfUnbindingChannelPty runs its on-destroy callback exactly once", "[mux][controller]")
+{
+    auto unbinds = 0;
+    {
+        auto pty = contour::SelfUnbindingChannelPty {
+            vtpty::PageSize { vtpty::LineCount(12), vtpty::ColumnCount(40) }, [&unbinds] { ++unbinds; }
+        };
+        CHECK(pty.pageSize() == vtpty::PageSize { vtpty::LineCount(12), vtpty::ColumnCount(40) });
+        CHECK(unbinds == 0); // not until the terminal destroys it
+    }
+    CHECK(unbinds == 1); // exactly once, from the destructor
+}
+
+TEST_CASE("stopMuxReactor tears the reactor down once, idempotently", "[mux][controller]")
+{
+    auto mutex = std::mutex {};
+    auto stopped = false;
+    auto reactor = contour::MuxLoopThread {};
+
+    // A root task that parks forever, so only requestStop can end it.
+    reactor.start([](net::EventLoop* loop) -> coro::Task<void> {
+        while (true)
+            co_await loop->delay(1h);
+    });
+
+    auto detaches = std::atomic<int> { 0 };
+    auto const detach = [&detaches] {
+        detaches.fetch_add(1, std::memory_order_relaxed);
+    };
+
+    // First stop: performs the teardown (posts the detach, cancels, joins).
+    CHECK(contour::stopMuxReactor(mutex, stopped, reactor, detach));
+    CHECK(stopped);
+    CHECK(detaches.load(std::memory_order_relaxed) == 1);
+    CHECK(reactor.wasCancelled());
+
+    // Second stop: already stopped, so it neither re-posts nor re-joins.
+    CHECK_FALSE(contour::stopMuxReactor(mutex, stopped, reactor, detach));
+    CHECK(detaches.load(std::memory_order_relaxed) == 1);
 }

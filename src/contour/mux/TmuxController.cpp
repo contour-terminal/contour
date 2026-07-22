@@ -81,28 +81,6 @@ class TmuxController::PaneFeed final: public muxserver::tmux::PaneSink
     std::string _buffered;
 };
 
-/// The pty handed to a pane's TerminalSession: unregisters on destruction so
-/// neither the reactor nor the controller can feed a dangling pty.
-class TmuxController::BoundPanePty final: public vtpty::ChannelPty
-{
-  public:
-    BoundPanePty(TmuxController& controller, uint64_t pane, vtpty::PageSize size):
-        vtpty::ChannelPty(size), _controller(controller), _pane(pane)
-    {
-    }
-
-    ~BoundPanePty() override { _controller.unbindPane(_pane); }
-
-    BoundPanePty(BoundPanePty const&) = delete;
-    BoundPanePty& operator=(BoundPanePty const&) = delete;
-    BoundPanePty(BoundPanePty&&) = delete;
-    BoundPanePty& operator=(BoundPanePty&&) = delete;
-
-  private:
-    TmuxController& _controller;
-    uint64_t _pane;
-};
-
 TmuxController::TmuxController(std::string tmuxSocket): _tmuxSocket(std::move(tmuxSocket))
 {
     _model.setPaneSinkFactory([this](uint64_t pane, int /*columns*/, int /*lines*/) {
@@ -139,19 +117,11 @@ std::expected<void, std::string> TmuxController::connectAndWait(std::chrono::mil
 
 void TmuxController::stop()
 {
-    {
-        auto const lock = std::lock_guard { _mutex };
-        if (_stopped)
-            return;
-        _stopped = true;
-    }
-    _reactor.post([this] {
-        if (_gateway != nullptr)
-            _gateway->detach();
-    });
-    _reactor.requestStop();
-    _reactor.join();
-    closeAllPanes();
+    if (stopMuxReactor(_mutex, _stopped, _reactor, [this] {
+            if (_gateway != nullptr)
+                _gateway->detach();
+        }))
+        closeAllPanes();
 }
 
 coro::Task<void> TmuxController::runClient(net::EventLoop* loop)
@@ -278,10 +248,9 @@ std::unique_ptr<vtpty::Pty> TmuxController::createPty(std::optional<std::string>
     auto const record = _pending.front();
     _pending.pop_front();
 
-    auto pty = std::make_unique<BoundPanePty>(
-        *this,
-        record.pane,
-        vtpty::PageSize { vtpty::LineCount(record.lines), vtpty::ColumnCount(record.columns) });
+    auto pty = std::make_unique<SelfUnbindingChannelPty>(
+        vtpty::PageSize { vtpty::LineCount(record.lines), vtpty::ColumnCount(record.columns) },
+        [this, pane = record.pane] { unbindPane(pane); });
     pty->setWriteSink([this, pane = record.pane](std::string_view bytes) {
         _reactor.post([this, pane, copy = std::string { bytes }] {
             if (_gateway != nullptr)

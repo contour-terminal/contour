@@ -96,8 +96,6 @@ class AttachController final: public QObject, public SessionFactory
     void connectionClosed();
 
   private:
-    class BoundChannelPty;
-
     /// One discovered remote session awaiting a local tab.
     struct PendingSession
     {
