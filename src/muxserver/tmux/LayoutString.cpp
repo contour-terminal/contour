@@ -67,6 +67,14 @@ std::string encodeLayout(vtmux::Pane const& root, vtpty::PageSize area)
 
 namespace
 {
+    /// The deepest container nesting parseLayout accepts. A layout string arrives
+    /// over the (impersonable) control channel behind only a forgeable checksum, so
+    /// the recursive-descent parser — and the check()/collapse passes that recurse
+    /// over its output — must be bounded, or a maliciously deep `{`/`[` spine
+    /// overflows the call stack. Real pane trees nest a handful deep; this is far
+    /// above any legitimate layout yet well within the stack budget.
+    constexpr std::size_t MaxNestingDepth = 256;
+
     /// Recursive-descent state over the layout body.
     struct Parser
     {
@@ -94,8 +102,11 @@ namespace
             return value;
         }
 
-        [[nodiscard]] std::expected<ParsedLayout, std::string> cell()
+        [[nodiscard]] std::expected<ParsedLayout, std::string> cell(std::size_t depth = 0)
         {
+            if (depth > MaxNestingDepth)
+                return std::unexpected("layout nesting too deep");
+
             auto node = ParsedLayout {};
 
             auto const width = number();
@@ -146,7 +157,7 @@ namespace
                     ++pos;
                     while (true)
                     {
-                        auto child = cell();
+                        auto child = cell(depth + 1);
                         if (!child)
                             return child;
                         node.children.push_back(std::move(*child));
@@ -178,16 +189,21 @@ namespace
             return {};
 
         auto const sideBySide = node.kind == ParsedLayout::Kind::SideBySide;
-        auto axisSum = 0;
+        // Accumulate in 64 bits and widen each extent BEFORE the `+ 1`: the extents
+        // come from from_chars into int and can be up to INT_MAX on a hostile
+        // layout, so summing them in an int would overflow (signed-overflow UB —
+        // and a UBSan abort on dev/CI builds). node.width/height fit in int, so the
+        // widened comparison is exact.
+        auto axisSum = std::int64_t { 0 };
         for (auto const& child: node.children)
         {
             if (sideBySide ? child.height != node.height : child.width != node.width)
                 return std::unexpected("child cross-axis extent differs from parent");
-            axisSum += (sideBySide ? child.width : child.height) + 1;
+            axisSum += static_cast<std::int64_t>(sideBySide ? child.width : child.height) + 1;
             if (auto nested = check(child); !nested)
                 return nested;
         }
-        if (axisSum - 1 != (sideBySide ? node.width : node.height))
+        if (axisSum - 1 != static_cast<std::int64_t>(sideBySide ? node.width : node.height))
             return std::unexpected("children do not partition the parent");
         return {};
     }

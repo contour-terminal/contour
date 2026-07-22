@@ -6,6 +6,8 @@
 #include <array>
 #include <cstdio>
 #include <filesystem>
+#include <format>
+#include <ranges>
 #include <string>
 
 #include <muxserver/tmux/LayoutString.h>
@@ -97,6 +99,32 @@ TEST_CASE("a layout violating the partition arithmetic is rejected", "[muxserver
     auto const wire = std::format("{:04x},{}", layoutChecksum(body), body);
     auto const parsed = parseLayout(wire);
     REQUIRE_FALSE(parsed.has_value());
+    CHECK(parsed.error().contains("partition"));
+}
+
+TEST_CASE("a pathologically nested layout is refused, not crashed", "[muxserver][layout]")
+{
+    // A deep '{' spine would recurse the parser (and the check/collapse passes) once per level;
+    // unbounded, that overflows the call stack. The depth guard turns it into a clean error instead.
+    // The checksum guarding the body is forgeable, so a hostile control server can send exactly this.
+    auto body = std::string {};
+    for ([[maybe_unused]] auto const level: std::views::iota(0, 4000))
+        body += "1x1,0,0{";
+    auto const wire = std::format("{:04x},{}", layoutChecksum(body), body);
+    auto const parsed = parseLayout(wire);
+    REQUIRE_FALSE(parsed.has_value());
+    CHECK(parsed.error().contains("deep"));
+}
+
+TEST_CASE("layout dimensions near INT_MAX do not overflow the partition check", "[muxserver][layout]")
+{
+    // Child extents parse into int and are summed along the split axis. In a 32-bit accumulator two
+    // INT_MAX-wide children overflow (signed-overflow UB — a UBSan abort on dev/CI builds); the sum
+    // must be computed wide so the check rejects cleanly rather than aborting or wrapping.
+    auto const body = std::string { "5x1,0,0{2147483647x1,0,0,1,2147483647x1,2,0,2}" };
+    auto const wire = std::format("{:04x},{}", layoutChecksum(body), body);
+    auto const parsed = parseLayout(wire);
+    REQUIRE_FALSE(parsed.has_value()); // rejected, and crucially without undefined behavior
     CHECK(parsed.error().contains("partition"));
 }
 
