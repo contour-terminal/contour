@@ -216,6 +216,10 @@ struct Delta
     /// the whole string on every delta.
     uint8_t titleChanged = 0;
     std::string title;
+    /// Set (1) when the cursor shape changed in this batch; `cursorShape` then
+    /// holds the DECSCUSR Ps value (1 blink block … 6 steady bar) to re-emit.
+    uint8_t cursorShapeChanged = 0;
+    uint8_t cursorShape = 0;
     bool operator==(Delta const&) const = default;
 };
 

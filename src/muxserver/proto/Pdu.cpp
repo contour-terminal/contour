@@ -244,6 +244,8 @@ namespace
 
         out.u8(pdu.titleChanged);
         out.string(pdu.title);
+        out.u8(pdu.cursorShapeChanged);
+        out.u8(pdu.cursorShape);
     }
 
     void encodeBody(Writer& out, SessionEvent const& pdu)
@@ -439,7 +441,8 @@ namespace
             !decoded)
             return std::unexpected(decoded.error());
 
-        if (!assign(in.u8(), pdu.titleChanged, error) || !assign(in.string(), pdu.title, error))
+        if (!assign(in.u8(), pdu.titleChanged, error) || !assign(in.string(), pdu.title, error)
+            || !assign(in.u8(), pdu.cursorShapeChanged, error) || !assign(in.u8(), pdu.cursorShape, error))
             return std::unexpected(error);
         return pdu;
     }

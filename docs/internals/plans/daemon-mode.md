@@ -123,11 +123,13 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       send gate). `RemoteScreen` adopts it; `ScreenMirror::apply` emits `OSC 0` incrementally, so the
       mirror terminal's own `setWindowTitle` drives the GUI tab title. CodecVersion → 4. Closed-loop
       test (OSC 2 with no cell change → mirror re-titles). *Landed 2026-07-22; suite green (114/2612).*
-- [ ] **A3. Populate + live-sync `SessionState` color/cursor slots.** In `pushDelta`, pull
-      `cursorShape()`/`cursorDisplay()`, `colorPalette().defaultForeground/Background`, and the
-      indexed `palette`; diff against last-sent and emit an incremental state record when changed
-      (retires **F9** cursor-shape). Cursor **visibility** already rides `Delta.setModes` mode 25 —
-      no work.
+- [x] **A3. Cursor shape (DECSCUSR).** `pushDelta` pull+diffs `decscusrPs(cursorShape(),
+      cursorDisplay())` (1 blink block … 6 steady bar; Rectangle→block) into `Delta.cursorShape`
+      /`SessionState.cursorShape`; `ScreenMirror` re-emits `CSI Ps SP q`. CodecVersion → 5. Closed-loop
+      test. **Retires roadmap F9.** Cursor **visibility** already rides `Delta.setModes` mode 25.
+      *Landed 2026-07-22.* **Follow-up (A3b):** default fg/bg + indexed palette (OSC 4/10/11) — the
+      `SessionState` slots exist but stay unpopulated; cells carry explicit colors, so this only
+      affects default/indexed-colored cells resolving against the client's own palette.
 - [x] **A4. Bell.** `SessionEvent{kind=Bell}` → `ScreenMirror::applyEvent` re-emits `BEL` into the
       mirror terminal, so the frontend's own `bell()` fires. (A single data-driven `SessionEvent` PDU
       — a new tag, no codec bump — serves A4/A5/A6; adding an event kind is a row.) *Landed 2026-07-22.*
@@ -265,8 +267,11 @@ runtime-gated net tests, watch the Windows job after each push.
   captures bell/notify/clipboard → new `SessionStreamEvents` callbacks) + a data-driven `SessionEvent`
   PDU (tag 10, kind = Bell/Notify/ClipboardSet). `ScreenMirror::applyEvent` re-emits BEL / OSC 777 /
   OSC 52 into the mirror terminal, so the frontend's own handlers + permissions apply. Recording-mirror
-  closed-loop tests. Suite green (115/2619). Next: A3 (colors/cursor pull+diff), A7 (cwd), A8 (kitty
-  keyboard modes), A9 (thin client on ScreenMirror).
+  closed-loop tests. Suite green (115/2619).
+- 2026-07-22 · Windows/clangcl-release · **A3 done** — live cursor shape (DECSCUSR) via
+  `Delta.cursorShape` (pull+diff) + `ScreenMirror` `CSI Ps SP q`. CodecVersion → 5. Retires F9. Suite
+  green (116/2621). A3b (default colors/palette) deferred. Next: A7 (cwd), A8 (kitty-keyboard modes),
+  A9 (thin client on ScreenMirror), then WS-C core (TLS + token + daemon TCP, net/muxserver layer).
 
 ## Open decisions / risks
 

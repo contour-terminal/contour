@@ -502,3 +502,27 @@ TEST_CASE("bell, notification and clipboard events reach the mirror", "[muxserve
 
     h.loop.blockOn(drive(&h, std::move(scenario)));
 }
+
+TEST_CASE("a live cursor-shape change reaches the mirror", "[muxserver][mirror]")
+{
+    auto h = MirrorHarness {};
+    h.host.createTab();
+    auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    h.serverTerminal(session)->writeToScreen("x");
+
+    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+        co_await waitUntil(
+            &h->loop, [&] { return h->mirror->primaryScreen().grid().renderMainPageText().contains("x"); });
+
+        // DECSCUSR steady bar (Ps=6): a cursor-shape-only change must push and
+        // re-shape the mirror's cursor.
+        serverWrites(h, session, "\033[6 q");
+        co_await waitUntil(&h->loop, [&] { return h->mirror->cursorShape() == vtbackend::CursorShape::Bar; });
+        CHECK(h->mirror->cursorShape() == vtbackend::CursorShape::Bar);
+        CHECK(h->serverTerminal(session)->cursorShape() == vtbackend::CursorShape::Bar);
+
+        h->client->detach();
+    }(&h, session);
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}

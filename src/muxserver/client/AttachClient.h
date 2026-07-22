@@ -47,6 +47,7 @@ struct RemoteScreen
     int32_t cursorLine = 0;
     int32_t cursorColumn = 0;
     std::string title;
+    uint8_t cursorShape = 0; ///< DECSCUSR Ps (0 = unknown/default); re-emitted as CSI Ps SP q.
 
     uint64_t generation = 0;
     uint64_t seqno = 0;

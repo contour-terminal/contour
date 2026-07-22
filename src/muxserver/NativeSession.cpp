@@ -34,6 +34,22 @@ namespace
         return std::bit_cast<uint32_t>(color);
     }
 
+    /// The DECSCUSR Ps value (1 blink block … 6 steady bar) for a cursor shape and
+    /// blink state — what a client re-emits as `CSI Ps SP q`. Rectangle (a Contour
+    /// extension DECSCUSR cannot name) degrades to block.
+    [[nodiscard]] uint8_t decscusrPs(vtbackend::CursorShape shape, vtbackend::CursorDisplay display) noexcept
+    {
+        auto const blink = display == vtbackend::CursorDisplay::Blink;
+        switch (shape)
+        {
+            case vtbackend::CursorShape::Block:
+            case vtbackend::CursorShape::Rectangle: return blink ? 1 : 2;
+            case vtbackend::CursorShape::Underscore: return blink ? 3 : 4;
+            case vtbackend::CursorShape::Bar: return blink ? 5 : 6;
+        }
+        return 2;
+    }
+
     /// Converts one grid row into its wire form (caller holds the terminal lock).
     [[nodiscard]] proto::WireLine toWireLine(vtbackend::Grid const& grid,
                                              vtbackend::LineOffset offset,
@@ -294,6 +310,19 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
             follow.lastTitle = std::move(title);
         }
 
+        // Live cursor shape (DECSCUSR): pull+diff like the title; the snapshot
+        // carries it in SessionState below.
+        auto const cursorPs = decscusrPs(terminal->cursorShape(), terminal->cursorDisplay());
+        if (cursorPs != follow.lastCursorShape)
+        {
+            if (!snapshot)
+            {
+                delta.cursorShapeChanged = 1;
+                delta.cursorShape = cursorPs;
+            }
+            follow.lastCursorShape = cursorPs;
+        }
+
         if (snapshot)
         {
             auto& snap = state.emplace();
@@ -305,6 +334,7 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
             snap.cursorLine = delta.cursorLine;
             snap.cursorColumn = delta.cursorColumn;
             snap.title = terminal->windowTitle();
+            snap.cursorShape = cursorPs;
         }
     }
 
@@ -318,7 +348,8 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
     auto const modesChanged = delta.setModes != follow.lastModes;
     auto const cursorMoved =
         delta.cursorLine != follow.lastCursorLine || delta.cursorColumn != follow.lastCursorColumn;
-    if (delta.snapshot != 0 || !delta.lines.empty() || modesChanged || cursorMoved || delta.titleChanged != 0)
+    if (delta.snapshot != 0 || !delta.lines.empty() || modesChanged || cursorMoved || delta.titleChanged != 0
+        || delta.cursorShapeChanged != 0)
     {
         follow.lastModes = delta.setModes;
         follow.lastCursorLine = delta.cursorLine;

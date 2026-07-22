@@ -260,6 +260,8 @@ std::string ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& 
     appendImages(out, screen);
     if (delta.titleChanged != 0)
         out += std::format("\033]0;{}\033\\", delta.title);
+    if (delta.cursorShapeChanged != 0)
+        out += std::format("\033[{} q", delta.cursorShape); // DECSCUSR
     out += "\033[0m";
     out += cup(delta.cursorLine + 1, delta.cursorColumn + 1);
     if (containsValue(_setModes, VisibleCursorModeNumber))
@@ -326,6 +328,8 @@ std::string ScreenMirror::fullReplay(RemoteScreen const& screen)
         paintRow(out, screen, screen.viewportBase + line, line + 1);
 
     out += std::format("\033]0;{}\033\\", screen.title);
+    if (screen.cursorShape != 0)
+        out += std::format("\033[{} q", screen.cursorShape); // DECSCUSR
     syncModes(out, screen);
     appendImages(out, screen);
     out += "\033[0m";
