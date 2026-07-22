@@ -58,6 +58,31 @@ TEST_CASE("a truncated varint asks for more data, an overlong one is malformed",
     CHECK(reader2.varint().error() == DecodeError::MalformedVarint);
 }
 
+TEST_CASE("a non-canonical ten-byte varint is malformed, not truncated", "[muxserver][proto]")
+{
+    // Nine continuation bytes leave shift == 63; the tenth group may carry only
+    // bit 63, so a value above 0x01 would overflow past uint64 and must be rejected
+    // rather than silently losing its high bits to the `<< 63` shift.
+    auto const overflowing = std::vector<std::byte>(9, std::byte { 0x80 });
+
+    for (auto const terminator: { uint8_t { 0x02 }, uint8_t { 0x40 }, uint8_t { 0x7F } })
+    {
+        auto bytes = overflowing;
+        bytes.push_back(std::byte { terminator });
+        auto reader = Reader { bytes };
+        CHECK(reader.varint().error() == DecodeError::MalformedVarint);
+    }
+
+    // The canonical maximum still decodes: nine 0xFF groups plus a final 0x01 is
+    // exactly uint64::max, and the guard must not reject it.
+    auto canonicalMax = std::vector<std::byte>(9, std::byte { 0xFF });
+    canonicalMax.push_back(std::byte { 0x01 });
+    auto reader = Reader { canonicalMax };
+    auto const decoded = reader.varint();
+    REQUIRE(decoded.has_value());
+    CHECK(*decoded == std::numeric_limits<uint64_t>::max());
+}
+
 TEST_CASE("scalars and strings round-trip", "[muxserver][proto]")
 {
     auto writer = Writer {};

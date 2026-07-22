@@ -118,9 +118,14 @@ class Reader
         {
             if (_offset >= _data.size())
                 return std::unexpected(DecodeError::NeedMoreData);
-            if (shift >= 64)
+            auto const byte = static_cast<uint8_t>(_data[_offset]);
+            // A uint64 spans at most ten base-128 groups; the tenth (shift == 63)
+            // may carry only bit 63. A higher data bit — or a continuation bit that
+            // demands an eleventh group — would overflow and, under the `<< 63` shift,
+            // be silently truncated rather than surfaced, so reject it as malformed.
+            if (shift >= 64 || (shift == 63 && byte > 0x01))
                 return std::unexpected(DecodeError::MalformedVarint);
-            auto const byte = static_cast<uint8_t>(_data[_offset++]);
+            ++_offset;
             value |= static_cast<uint64_t>(byte & 0x7F) << shift;
             if ((byte & 0x80) == 0)
                 return value;
