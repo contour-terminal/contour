@@ -35,6 +35,7 @@
 
 #include <muxserver/Daemon.h>
 #include <muxserver/client/AttachClient.h>
+#include <muxserver/client/LayoutReconstruction.h>
 #include <muxserver/client/ScreenMirror.h>
 #include <vtmux/Primitives.h>
 
@@ -70,12 +71,6 @@ class AttachController final: public QObject, public SessionFactory
     /// Initiates a detach and joins the reactor thread. Idempotent.
     void stop();
 
-    /// Creates local tabs (in @p window) for every discovered remote session
-    /// that has no local tab yet — called once right after the first window
-    /// booted. Leaves one session for the QML-created first tab if none is
-    /// bound yet.
-    void adoptStartupSessions(TerminalSessionManager& manager, vtmux::WindowId window);
-
     /// @return How many remote sessions await a local tab.
     [[nodiscard]] std::size_t pendingCount() const;
 
@@ -83,6 +78,22 @@ class AttachController final: public QObject, public SessionFactory
     ///         arrived yet. A thread-safe copy — the reactor thread updates it.
     ///         The GUI reconstructs its own tab/split tree from this (B2).
     [[nodiscard]] std::optional<muxserver::proto::LayoutState> layout() const;
+
+    /// @return The captured daemon layout converted for `vtmux::realizeLayoutTab`
+    ///         (an empty layout if none has arrived), plus its leaf→remote-session
+    ///         map. The layout executor realizes this to reproduce the daemon tree.
+    [[nodiscard]] muxserver::client::WireLayout wireLayout() const;
+
+    /// Binds the NEXT createPty() to remote session @p session (instead of popping
+    /// the FIFO pending queue). The layout executor calls this — via
+    /// applyLayoutToWindow's beforeLeafSeed — right before each pane's backing
+    /// session is created, so the imminent pane binds to exactly that session.
+    void setNextBindSession(uint64_t session);
+
+    /// Brackets a layout realization. While set, canCreateSession() reports true
+    /// even with no pending session — during realization panes are bound by
+    /// setNextBindSession, not the FIFO queue.
+    void setRealizingLayout(bool realizing);
 
     // SessionFactory: hands out a ChannelPty bound to the next pending
     // remote session; cwd/command/profile do not apply to remote sessions.
@@ -158,6 +169,10 @@ class AttachController final: public QObject, public SessionFactory
     std::deque<PendingSession> _pending; ///< Discovered remote sessions without a local tab.
     std::unordered_map<uint64_t, Binding> _bindings;
     std::optional<muxserver::proto::LayoutState> _layout; ///< The daemon's latest tab/pane tree (B2).
+    /// The remote session the NEXT createPty() binds to, set by the layout
+    /// executor before each pane's backing session is created (GUI thread).
+    std::optional<uint64_t> _nextBindSession;
+    bool _realizingLayout = false; ///< canCreateSession() is true while a layout is being realized.
     /// Session ids whose local tab the user closed while still attached. Their
     /// remote sessions live on (the native protocol has no close verb) and keep
     /// emitting deltas; `onUpdate` ignores tombstoned ids so a closed tab never

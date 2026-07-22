@@ -13,6 +13,7 @@
 #include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/mux/AttachController.h>
+#include <contour/mux/RemoteLayout.h>
 #include <contour/mux/RoutingSessionFactory.h>
 #include <contour/mux/TmuxController.h>
 
@@ -182,18 +183,22 @@ int ContourGuiApp::attachAction()
             return EXIT_FAILURE;
         }
         _routingFactory->setDelegate(_attachController.get());
-        adopt = [this] {
+        // Realize the daemon's authoritative tab/split tree (B2): once a window and
+        // the layout are both available — at GUI boot or when the layout arrives —
+        // reproduce the daemon's tabs and split panes, each bound to its remote
+        // session. Applied once; a dying connection ends every mirror session
+        // (stop() closes the ptys), closing the tabs through the shell-exit teardown.
+        auto realized = std::make_shared<bool>(false);
+        adopt = [this, realized] {
+            if (*realized || !_attachController->layout().has_value())
+                return;
             if (auto const window = _sessionManager.focusedWindow())
-                _attachController->adoptStartupSessions(_sessionManager, *window);
+            {
+                contour::applyRemoteLayout(_sessionManager, *window, *_attachController);
+                *realized = true;
+            }
         };
-        // A remote session appearing later becomes a tab in the focused
-        // window; a dying connection ends every mirror session (stop() closes
-        // the ptys), closing the tabs through the shell-exit teardown.
-        connect(_attachController.get(),
-                &AttachController::remoteSessionDiscovered,
-                this,
-                adopt,
-                Qt::QueuedConnection);
+        connect(_attachController.get(), &AttachController::layoutChanged, this, adopt, Qt::QueuedConnection);
         connect(
             _attachController.get(),
             &AttachController::connectionClosed,

@@ -175,6 +175,8 @@ coro::Task<std::expected<std::unique_ptr<net::ISocket>, std::string>> connectAtt
     auto socket = co_await net::connect(loop, tcp.host, tcp.port);
     if (!socket)
         co_return std::unexpected(socket.error().toString());
+    if (!tcp.tls)
+        co_return std::move(*socket); // trusted loopback only (tests) — never from the CLI
     auto tls = net::makeTlsClientContext(tcp.caPem);
     if (!tls)
         co_return std::unexpected(tls.error());

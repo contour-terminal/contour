@@ -155,6 +155,7 @@ if(CONTOUR_FRONTEND_GUI)
         mux/AttachController.h
         mux/MuxController.h
         mux/MuxLoopThread.h
+        mux/RemoteLayout.h
         mux/RoutingSessionFactory.h
         mux/TmuxController.h
     )
@@ -177,6 +178,7 @@ if(CONTOUR_FRONTEND_GUI)
         helper.cpp
         mux/AttachController.cpp
         mux/MuxController.cpp
+        mux/RemoteLayout.cpp
         mux/TmuxController.cpp
     )
 endif()

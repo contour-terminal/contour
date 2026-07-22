@@ -9,6 +9,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <format>
@@ -26,16 +27,24 @@
     #include <unistd.h>
 #endif
 
+#include <contour/mux/RemoteLayout.h>
+
+#include <cstdint>
+
 #include <coro/Cancellation.hpp>
 #include <muxserver/MuxServer.h>
 #include <muxserver/NativeSession.h>
 #include <muxserver/SessionHost.h>
 #include <muxserver/SocketPath.h>
 #include <muxserver/TappingPty.h>
+#include <muxserver/client/LayoutReconstruction.h>
 #include <net/EventLoop.h>
+#include <net/ISocket.h>
 #include <net/PollEventSource.h>
 #include <net/Sockets.h>
+#include <net/Tls.h>
 #include <vtmux/Pane.h>
+#include <vtmux/SessionModel.h>
 #include <vtmux/Tab.h>
 
 using namespace std::chrono_literals;
@@ -43,37 +52,37 @@ using namespace std::chrono_literals;
 namespace
 {
 
-#ifndef _WIN32
-
-/// An in-process `contour daemon` (native protocol only) on its own thread,
-/// serving a real AF_UNIX socket — what `attach --gui` talks to in production.
+/// An in-process `contour daemon` (native protocol) on its own thread, serving
+/// TLS over a LOOPBACK TCP socket on an EPHEMERAL port. Using TCP (the same
+/// transport `attach --gui --connect-tcp` uses) rather than AF_UNIX lets these
+/// end-to-end tests run on every platform, Windows included.
 struct DaemonFixture
 {
-    // The socket's PARENT directory must be private (0700): listenUnix
-    // hardens it exactly like tmux and refuses a world-writable /tmp.
-    std::string socketDir = std::format("/tmp/contour-at-{}", ::getpid());
-    // The CONTROL-socket path; the native endpoint the client dials is derived
-    // beside it (see nativeSocketPath), exactly as in production.
-    std::string socketPath = socketDir + "/ctl.sock";
     net::PollEventSource source;
     net::EventLoop loop { source };
     std::unique_ptr<muxserver::SessionHost> host;
     std::unique_ptr<muxserver::MuxServer> server;
+    std::uint16_t port = 0; ///< The OS-assigned loopback port the daemon listens on.
     std::thread thread;
     bool cancelled = false; ///< Whether teardown unwound the accept loop.
 
     DaemonFixture()
     {
-        std::filesystem::remove_all(socketDir);
         host = std::make_unique<muxserver::SessionHost>(
             loop,
             [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
             vtbackend::Settings {},
             /*startPumps=*/false);
-        auto listener = net::listenUnix(loop, muxserver::nativeSocketPath(socketPath).string());
+        auto listener = net::listen(loop, "127.0.0.1", 0);
         REQUIRE(listener.has_value());
-        server = std::make_unique<muxserver::MuxServer>(
-            loop, std::move(*listener), muxserver::makeNativeHandler(loop, *host));
+        port = (*listener)->localPort();
+        // Plain native protocol over loopback TCP (no TLS): loopback is trusted, so
+        // the test exercises the attach path without the TLS layer.
+        auto native = muxserver::makeNativeHandler(loop, *host);
+        auto handler = [native](std::unique_ptr<net::ISocket> socket) {
+            return native(std::move(socket));
+        };
+        server = std::make_unique<muxserver::MuxServer>(loop, std::move(*listener), handler);
         thread = std::thread { [this] {
             try
             {
@@ -93,13 +102,20 @@ struct DaemonFixture
             loop.requestStop();
         });
         thread.join();
-        std::filesystem::remove_all(socketDir);
     }
 
     DaemonFixture(DaemonFixture const&) = delete;
     DaemonFixture& operator=(DaemonFixture const&) = delete;
     DaemonFixture(DaemonFixture&&) = delete;
     DaemonFixture& operator=(DaemonFixture&&) = delete;
+
+    /// The endpoint a client dials: plain loopback TCP, no token.
+    [[nodiscard]] muxserver::TcpEndpoint endpoint() const
+    {
+        return muxserver::TcpEndpoint {
+            .host = "127.0.0.1", .port = port, .token = {}, .caPem = {}, .tls = false
+        };
+    }
 
     /// Runs @p fn on the daemon's loop thread and waits for its result —
     /// SessionHost is confined to that thread.
@@ -138,8 +154,6 @@ std::string drainUntil(vtpty::Pty& pty, std::string_view needle)
     return collected;
 }
 
-#endif // !_WIN32
-
 /// A factory that can never back a session (the attach guard's stand-in).
 struct RefusingFactory final: contour::SessionFactory
 {
@@ -156,17 +170,12 @@ struct RefusingFactory final: contour::SessionFactory
 
 } // namespace
 
-#ifndef _WIN32
-
-// The daemon fixture builds on POSIX /tmp + 0700-hardening semantics; the
-// afunix Windows path is covered by the runtime-gated net unix-echo test.
 TEST_CASE("attach controller mirrors a remote session over a real socket", "[attach][controller]")
 {
     auto daemon = DaemonFixture {};
     auto const session = daemon.seedSession("hello attach");
 
-    auto controller =
-        contour::AttachController { muxserver::UnixEndpoint { .socketPath = daemon.socketPath } };
+    auto controller = contour::AttachController { daemon.endpoint() };
     auto const connected = controller.connectAndWait(10s);
     REQUIRE(connected.has_value());
     REQUIRE(controller.pendingCount() == 1);
@@ -232,8 +241,7 @@ TEST_CASE("attach controller captures the daemon's tab and pane layout", "[attac
         return 0;
     });
 
-    auto controller =
-        contour::AttachController { muxserver::UnixEndpoint { .socketPath = daemon.socketPath } };
+    auto controller = contour::AttachController { daemon.endpoint() };
     auto const connected = controller.connectAndWait(10s);
     REQUIRE(connected.has_value());
 
@@ -255,6 +263,53 @@ TEST_CASE("attach controller captures the daemon's tab and pane layout", "[attac
     controller.stop();
 }
 
+// B2 executor end-to-end: a split daemon layout is realized as a real 2-pane tab
+// in the GUI's own SessionModel — over a real TCP+TLS attach connection, driven by
+// the shared applyRemoteLayout. Each pane binds to its remote session through the
+// beforeLeafSeed → setNextBindSession seam (the path createPty takes here).
+TEST_CASE("attach realizes a split daemon layout as a 2-pane tab", "[attach][controller]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("root");
+    daemon.onDaemon([&daemon] {
+        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
+        daemon.host->splitActivePane(tab->id(), vtmux::SplitState::Vertical, 0.6);
+        return 0;
+    });
+
+    // The AttachController is the manager's session factory (attach mode).
+    auto acOwned = std::make_unique<contour::AttachController>(daemon.endpoint());
+    auto* ac = acOwned.get();
+    contour::test::TestApp app { std::move(acOwned) };
+    contour::test::ScopedController const win { app.manager() };
+
+    REQUIRE(ac->connectAndWait(10s).has_value());
+    // The layout leads the snapshot; poll until the split tree has arrived.
+    for (auto i = 0; i < 200; ++i)
+    {
+        auto const l = ac->layout();
+        if (l && l->tabs.size() == 1 && l->tabs.front().root.children.size() == 2)
+            break;
+        std::this_thread::sleep_for(5ms);
+    }
+    auto const wl = ac->wireLayout();
+    REQUIRE(wl.layout.tabs.size() == 1);
+
+    // Realize the daemon's tree into the GUI window.
+    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+
+    auto* window = app.manager().model().window(win.id);
+    REQUIRE(window != nullptr);
+    REQUIRE(window->tabCount() == 1);
+    auto* tab = window->tabAt(0);
+    REQUIRE(tab != nullptr);
+    CHECK(tab->paneCount() == 2); // the daemon's split reproduced locally
+    REQUIRE_FALSE(tab->rootPane()->isLeaf());
+    CHECK(tab->rootPane()->splitState() == vtmux::SplitState::Vertical);
+
+    ac->stop();
+}
+
 // Regression: closing a mirrored tab must not resurrect it. Before the fix,
 // unbind() only forgot the binding, so the still-live remote session's next
 // delta re-registered it as pending and re-adopted a fresh tab indefinitely.
@@ -263,8 +318,7 @@ TEST_CASE("a closed mirrored tab does not resurrect on later remote output", "[a
     auto daemon = DaemonFixture {};
     auto const session = daemon.seedSession("first line");
 
-    auto controller =
-        contour::AttachController { muxserver::UnixEndpoint { .socketPath = daemon.socketPath } };
+    auto controller = contour::AttachController { daemon.endpoint() };
     REQUIRE(controller.connectAndWait(10s).has_value());
     REQUIRE(controller.pendingCount() == 1);
 
@@ -302,14 +356,13 @@ TEST_CASE("a closed mirrored tab does not resurrect on later remote output", "[a
 
 TEST_CASE("attach controller reports an unreachable daemon", "[attach][controller]")
 {
-    auto controller = contour::AttachController { muxserver::UnixEndpoint {
-        .socketPath = "/tmp/contour-attach-test-nonexistent.sock" } };
+    // Port 1 on loopback has nothing listening: connect is refused before any TLS.
+    auto controller = contour::AttachController { muxserver::TcpEndpoint {
+        .host = "127.0.0.1", .port = 1, .token = {}, .caPem = {} } };
     auto const connected = controller.connectAndWait(2s);
     REQUIRE(!connected.has_value());
     CHECK(!connected.error().empty());
 }
-
-#endif // !_WIN32
 
 TEST_CASE("a refusing session factory blocks every creation entry point", "[attach][factory]")
 {

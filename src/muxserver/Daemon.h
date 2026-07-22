@@ -83,8 +83,8 @@ struct UnixEndpoint
     std::filesystem::path socketPath;
 };
 
-/// Reaching the daemon over TCP — ALWAYS TLS-encrypted, with @c token as the
-/// authentication (the TCP transport has no filesystem gate).
+/// Reaching the daemon over TCP, with @c token as the authentication (the TCP
+/// transport has no filesystem gate). TLS-encrypted by default.
 struct TcpEndpoint
 {
     std::string host;       ///< Remote host ("127.0.0.1", a hostname).
@@ -93,6 +93,9 @@ struct TcpEndpoint
     /// Trust-anchor certificate (PEM) pinning the daemon's TLS cert. Empty ⇒ the
     /// TOFU posture (encrypt but do not verify the peer; the token authenticates).
     std::string caPem;
+    /// Encrypt the connection with TLS. Defaults to true — the CLI never disables
+    /// it. Only an in-process test over a trusted loopback socket sets it false.
+    bool tls = true;
 };
 
 /// Where `contour attach` reaches the daemon: the local unix socket or TCP+TLS.

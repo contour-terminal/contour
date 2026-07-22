@@ -150,7 +150,8 @@ void AttachController::onLayout(muxserver::proto::LayoutState const& layout)
         _layout = layout;
     }
     // The GUI (on its own thread, via a queued connection) reconciles its tab and
-    // split tree against layout() — the daemon's authoritative structure.
+    // split tree against wireLayout() — the daemon's authoritative structure. (The
+    // per-session snapshot deltas that follow set State::Ready via onUpdate.)
     emit layoutChanged();
 }
 
@@ -158,6 +159,24 @@ std::optional<muxserver::proto::LayoutState> AttachController::layout() const
 {
     auto const lock = std::lock_guard { _mutex };
     return _layout;
+}
+
+muxserver::client::WireLayout AttachController::wireLayout() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _layout ? muxserver::client::wireToLayout(*_layout) : muxserver::client::WireLayout {};
+}
+
+void AttachController::setNextBindSession(uint64_t session)
+{
+    auto const lock = std::lock_guard { _mutex };
+    _nextBindSession = session;
+}
+
+void AttachController::setRealizingLayout(bool realizing)
+{
+    auto const lock = std::lock_guard { _mutex };
+    _realizingLayout = realizing;
 }
 
 void AttachController::primeBinding(uint64_t session)
@@ -205,7 +224,9 @@ std::size_t AttachController::pendingCount() const
 bool AttachController::canCreateSession() const noexcept
 {
     auto const lock = std::lock_guard { _mutex };
-    return !_pending.empty();
+    // During a layout realization the panes are bound by setNextBindSession (not
+    // the FIFO queue), so allow creation even with nothing pending.
+    return _realizingLayout || !_pending.empty();
 }
 
 std::unique_ptr<vtpty::Pty> AttachController::createPty(std::optional<std::string> /*cwd*/,
@@ -214,18 +235,36 @@ std::unique_ptr<vtpty::Pty> AttachController::createPty(std::optional<std::strin
                                                         std::optional<std::string> /*profileName*/)
 {
     auto lock = std::unique_lock { _mutex };
-    if (_pending.empty())
+    auto session = uint64_t {};
+    auto columns = 0;
+    auto lines = 0;
+    if (_nextBindSession.has_value())
+    {
+        // Layout executor: bind this pane to the remote session the beforeLeafSeed
+        // hook named. Its screen may not have arrived yet (the layout leads the
+        // snapshot), so the pane is born at the window's size and the mirror's first
+        // replay (on binding) repaints it; a resize then reconciles.
+        session = *_nextBindSession;
+        _nextBindSession.reset();
+        auto const size = pageSize.value_or(vtbackend::PageSize {});
+        columns = size.columns.value != 0 ? unbox<int>(size.columns) : 80;
+        lines = size.lines.value != 0 ? unbox<int>(size.lines) : 25;
+    }
+    else if (!_pending.empty())
+    {
+        auto const front = _pending.front();
+        _pending.pop_front();
+        session = front.session;
+        columns = static_cast<int>(front.columns);
+        lines = static_cast<int>(front.lines);
+    }
+    else
     {
         // The creation guards should have prevented this; a session must
         // still be born, so give it a dead-end pty it can close cleanly.
         attachLog()("No pending remote session; handing out an unbound pty.");
         return makeUnboundFallbackPty(pageSize);
     }
-
-    auto const [session, pendingColumns, pendingLines] = _pending.front();
-    _pending.pop_front();
-    auto const columns = static_cast<int>(pendingColumns);
-    auto const lines = static_cast<int>(pendingLines);
 
     // Born at the REMOTE size so the mirror's first replay paints a matching
     // grid; the display's own resize then proposes the local size upstream.
@@ -250,23 +289,6 @@ std::unique_ptr<vtpty::Pty> AttachController::createPty(std::optional<std::strin
     _reactor.post([this, session] { primeBinding(session); });
     attachLog()("Bound remote session {} to a new local pty ({}x{}).", session, columns, lines);
     return pty;
-}
-
-void AttachController::adoptStartupSessions(TerminalSessionManager& manager, vtmux::WindowId window)
-{
-    // Leave one pending session for the QML-created first tab if nothing is
-    // bound yet (QML may create its first tab after this hook runs).
-    while (true)
-    {
-        {
-            auto const lock = std::lock_guard { _mutex };
-            auto const reserve = _bindings.empty() ? std::size_t { 1 } : std::size_t { 0 };
-            if (_pending.size() <= reserve)
-                return;
-        }
-        if (manager.createSessionInBackground(window) == nullptr)
-            return;
-    }
 }
 
 } // namespace contour
