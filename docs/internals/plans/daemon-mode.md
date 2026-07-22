@@ -195,11 +195,13 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       no OpenSSL type appears above `net/`, and tests inject a fake context. Justified under the
       "no new deps" rule by the remote use case. Cert model: self-signed + client fingerprint pin
       (TOFU), with the token providing authentication.
-- [ ] **C2. Daemon TCP+TLS listener.** Add opt-in fields to `DaemonConfig` (`Daemon.h:33-45`,
-      mirroring the optional `tmuxCompatLabel`). Insert a TCP-bind block modeled on the
-      `compatServer` template (`Daemon.cpp:129-139` POSIX, `:418-437` Win32) using `net::listen` +
-      the existing transport-agnostic `makeNativeHandler`, wrapped in `TlsSocket`. Shutdown iterates
-      servers generically on POSIX; add to the explicit Win32 `serveAll` list + shutdown lambda.
+- [x] **C2. Daemon TCP listener.** `DaemonConfig.nativeTcp` (`NativeTcpListenerConfig`:
+      host=127.0.0.1, port, token). `runDaemon` (POSIX + Win32, the latter refactored to the same
+      `std::vector<MuxServer*>` shape) binds `net::listen` and serves the native protocol with
+      `makeNativeHandler(loop, host, token)` — no adapter, since `MuxServer` is transport-agnostic.
+      **Real-TCP end-to-end test** (ephemeral loopback port via `IListener::localPort()`, token-guarded,
+      snapshot mirrors) — proving the native protocol works over TCP. *Landed 2026-07-22; suite green
+      (119/2628).* **TLS wrapping is C1; CLI/config to populate `nativeTcp` is C3/C4 (Qt-side).**
 - [ ] **C3. Config schema.** `NativeTcpListenerConfig { bool enabled{false}; std::string
       host{"127.0.0.1"}; uint16_t port{...}; std::string tlsCertPath; std::string tlsKeyPath;
       std::string token; }` modeled on `ImagesConfig` (`Config.h:434-439,1158`;
@@ -288,8 +290,12 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
 - 2026-07-22 · Windows/clangcl-release · **C6 core done** — preshared token auth in the native
   handshake (`ClientHello.token`, `NativeSession` expectedToken + `makeNativeHandler` param,
   `AttachClient` token). CodecVersion → 7. accept/reject/no-token tests. Suite green (118/2626).
-  Daemon/client CLI wiring of the token is Qt-side (C4), CI-verified. Next: C2 (daemon TCP listener,
-  buildable here) then C1 (OpenSSL TLS `ISocket` decorator).
+  Daemon/client CLI wiring of the token is Qt-side (C4), CI-verified.
+- 2026-07-22 · Windows/clangcl-release · **C2 done** — opt-in daemon TCP listener
+  (`DaemonConfig.nativeTcp`, `runDaemon` POSIX+Win32 wiring via `net::listen` + transport-agnostic
+  `makeNativeHandler`). Real-TCP end-to-end test (native protocol + token over loopback TCP). Suite
+  green (119/2628). **The remote transport now works (plaintext + token); TLS is C1.** Next: C1
+  (OpenSSL `TlsSocket` `ISocket` decorator behind `net::ITlsContext`), then C3/C4/C5 (Qt config/CLI).
 
 ## Open decisions / risks
 

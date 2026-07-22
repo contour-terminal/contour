@@ -23,6 +23,7 @@
 #include <coro/WhenAll.hpp>
 #include <coro/WhenAny.hpp>
 #include <muxserver/Daemon.h>
+#include <muxserver/MuxServer.h>
 #include <muxserver/NativeSession.h>
 #include <muxserver/PduPump.h>
 #include <muxserver/SessionHost.h>
@@ -31,6 +32,7 @@
 #include <net/EventLoop.h>
 #include <net/ISocket.h>
 #include <net/PollEventSource.h>
+#include <net/Sockets.h>
 #include <net/WriteQueue.h>
 #include <net/testing/CoroTestSupport.h>
 #include <net/testing/InMemoryTransport.h>
@@ -409,6 +411,52 @@ TEST_CASE("attach enforces a preshared auth token", "[muxserver][attach]")
     auto open = false;
     tokenAttach("", "whatever", &open);
     CHECK(open);
+}
+
+namespace
+{
+
+/// Connects over TCP, mirrors the snapshot, detaches, then closes the server so
+/// its accept loop unwinds. Records whether a snapshot arrived.
+Task<void> tcpAttachDriver(net::EventLoop* loop, muxserver::MuxServer* server, std::uint16_t port, bool* saw)
+{
+    auto connected = co_await net::connect(loop, "127.0.0.1", port);
+    if (connected)
+    {
+        auto client = AttachClient { *loop, std::move(*connected), "tok" };
+        auto scenario = [](net::EventLoop* loop, AttachClient* client, bool* saw) -> Task<void> {
+            for (auto i = 0; i < 300 && client->screens().empty(); ++i)
+                co_await loop->delay(1ms);
+            *saw = !client->screens().empty();
+            client->detach();
+        }(loop, &client, saw);
+        co_await coro::whenAll(client.run(), std::move(scenario));
+    }
+    server->close();
+}
+
+} // namespace
+
+TEST_CASE("attach mirrors over a real TCP transport with token auth", "[muxserver][attach]")
+{
+    auto source = net::PollEventSource {};
+    auto loop = net::EventLoop { source };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                              vtbackend::Settings {},
+                              /*startPumps=*/false };
+    host.createTab();
+
+    // A native server on an ephemeral loopback TCP port, token-guarded.
+    auto listener = net::listen(loop, "127.0.0.1", 0);
+    REQUIRE(listener.has_value());
+    auto const port = (*listener)->localPort();
+    auto server =
+        muxserver::MuxServer { loop, std::move(*listener), muxserver::makeNativeHandler(loop, host, "tok") };
+
+    auto saw = false;
+    loop.blockOn(net::testing::allOf(server.serve(), tcpAttachDriver(&loop, &server, port, &saw)));
+    CHECK(saw);
 }
 
 // The attach-flow composition (Daemon.cpp) hard-codes STDIN/STDOUT and a real

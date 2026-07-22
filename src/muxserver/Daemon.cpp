@@ -138,6 +138,27 @@ int runDaemon(DaemonConfig const& config)
         std::println(stderr, "contour daemon: tmux-compat socket at {}", compatPath);
     }
 
+    // Opt-in: ALSO serve the native protocol over TCP (loopback by default). The
+    // transport is protocol-agnostic, so the same native handler serves it — with
+    // the preshared token as the authentication the filesystem gate can't provide.
+    auto nativeTcpServer = std::optional<MuxServer> {};
+    if (config.nativeTcp)
+    {
+        auto tcpListener = net::listen(loop, config.nativeTcp->host, config.nativeTcp->port);
+        if (!tcpListener)
+        {
+            std::println(
+                stderr, "contour daemon: native TCP listen failed: {}", tcpListener.error().toString());
+            return EXIT_FAILURE;
+        }
+        auto const boundPort = (*tcpListener)->localPort();
+        nativeTcpServer.emplace(
+            loop, std::move(*tcpListener), makeNativeHandler(loop, host, config.nativeTcp->token));
+        servers.push_back(&*nativeTcpServer);
+        std::println(
+            stderr, "contour daemon: native TCP listener on {}:{}", config.nativeTcp->host, boundPort);
+    }
+
     // Signal handling without async-signal-safety hazards: SIGINT/SIGTERM are
     // blocked process-wide and consumed by a dedicated sigwait thread, which
     // marshals the shutdown onto the loop via post() (the loop's only
@@ -422,10 +443,31 @@ int runDaemon(DaemonConfig const& config)
     auto nativeServer = MuxServer { loop, std::move(*nativeListener), makeNativeHandler(loop, host) };
     // No imsg endpoint on Windows: SCM_RIGHTS fd passing does not exist here.
 
+    auto servers = std::vector<MuxServer*> { &server, &nativeServer };
+
+    // Opt-in native TCP listener (loopback by default), same as the POSIX path.
+    auto nativeTcpServer = std::optional<MuxServer> {};
+    if (config.nativeTcp)
+    {
+        auto tcpListener = net::listen(loop, config.nativeTcp->host, config.nativeTcp->port);
+        if (!tcpListener)
+        {
+            std::println(
+                stderr, "contour daemon: native TCP listen failed: {}", tcpListener.error().toString());
+            return EXIT_FAILURE;
+        }
+        auto const boundPort = (*tcpListener)->localPort();
+        nativeTcpServer.emplace(
+            loop, std::move(*tcpListener), makeNativeHandler(loop, host, config.nativeTcp->token));
+        servers.push_back(&*nativeTcpServer);
+        std::println(
+            stderr, "contour daemon: native TCP listener on {}:{}", config.nativeTcp->host, boundPort);
+    }
+
     auto shutdown = std::function<void()> { [&] {
         loop.post([&] {
-            server.close();
-            nativeServer.close();
+            for (auto* each: servers)
+                each->close();
             loop.requestStop();
         });
     } };
@@ -434,7 +476,7 @@ int runDaemon(DaemonConfig const& config)
 
     std::println(
         stderr, "contour daemon: serving on {} (native: {})", config.socketPath.string(), nativePath);
-    loop.blockOn(serveAll({ &server, &nativeServer }));
+    loop.blockOn(serveAll(servers));
 
     ::SetConsoleCtrlHandler(consoleCtrlHandler, FALSE);
     gConsoleShutdown = nullptr;

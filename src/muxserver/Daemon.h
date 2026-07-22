@@ -9,6 +9,7 @@
 
 #include <vtpty/Process.h>
 
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -29,9 +30,23 @@ class EventLoop;
 namespace muxserver
 {
 
+/// Opt-in TCP listener for the native cells+deltas protocol. Absent unless the
+/// user configures it; when present it binds @c host (loopback by default) and
+/// requires @c token of every client — the TCP transport has no filesystem gate,
+/// so a non-empty token is the authentication. (TLS cert/key land with the TLS
+/// decorator; until then a non-loopback bind must be tunnelled, e.g. over SSH.)
+struct NativeTcpListenerConfig
+{
+    std::string host = "127.0.0.1"; ///< Bind address; loopback by default.
+    std::uint16_t port = 0;         ///< TCP port (0 = OS-assigned ephemeral).
+    std::string token;              ///< Preshared token required of every client.
+};
+
 /// Everything `contour daemon` needs to serve.
 struct DaemonConfig
 {
+    /// When set, ALSO serves the native protocol over TCP (opt-in; see the struct).
+    std::optional<NativeTcpListenerConfig> nativeTcp;
     /// The control-socket file (see muxSocketPath for derivation).
     std::filesystem::path socketPath;
     /// Factory settings for every hosted session's terminal.
