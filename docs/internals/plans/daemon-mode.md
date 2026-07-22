@@ -533,21 +533,26 @@ reconstruction in `src/contour/`, whose tests are **AF_UNIX/POSIX-only** (the
 **runtime-verified on the Linux/macOS harness** (`ctest --preset=clang-asan`). Land it there,
 not compile-only. Concrete steps:
 
-- **B2 executor — run the plan from `layout()`.** Capture (`AttachController::layout()` /
-  `layoutChanged()`) and the reconstruction PLANNER (`planReconstruction`, headless-tested) are DONE.
-  Add a GUI-thread executor (connect `layoutChanged` queued, in `ContourGuiApp` beside the existing
-  `remoteSessionDiscovered` wiring) that runs `planReconstruction(layout())`:
-  1. Push the plan's sessions (its `NewTab`/`Split` steps, in order) into `_pending` so the existing
-     FIFO `createPty` binds each created pane to the right remote session — **no per-session binding
-     machinery** (the planner already emits steps in exactly the order the panes are created).
-  2. Execute the steps against `TerminalSessionManager`: `NewTab` → `createSessionInBackground(window)`;
-     `Split` → `splitActivePane(vertical, actingSession)` with the step's orientation, then set the
-     wire ratio (÷10000); `Activate` → make the leaf carrying the step's session active. (Active-pane
-     restoration to `WireTab.activePane` and zoom are follow-up polish.)
-  3. Replace `adoptStartupSessions`' one-tab-per-session loop with this executor; keep `onUpdate`
-     (mirror re-serialization) unchanged — it still feeds bound ptys.
-  Test: extend `AttachController_test` — a split daemon layout reproduces a 2-pane tab in a driven
-  `TerminalSessionManager` (the harness already drives it) and both panes mirror their session.
+- **B2 executor — realize `layout()` through the shared realizer.** Capture (`AttachController::
+  layout()` / `layoutChanged()`) and the reconstruction CORE are DONE: `muxserver/client/
+  LayoutReconstruction.{h,cpp}` `wireToLayout(LayoutState)` → a `vtmux::Layout` (== `config::Layout`)
+  plus a leaf→remote-session map, headless-tested by realizing it with `vtmux::realizeLayoutTab`
+  against a real `SessionModel`. So the GUI executor is thin — no bespoke stepper, it feeds the same
+  `TerminalSessionManager::applyLayoutToWindow(window, layout)` the config-layout feature uses:
+  1. On `layoutChanged` (queued to the GUI thread, in `ContourGuiApp`), compute `wireToLayout(layout())`.
+  2. Realize it. The manager's seeder mints backing sessions and — because the factory is the
+     `AttachController` — each `createPty` binds the pane's pty to a remote session. To bind each pane
+     to the RIGHT remote session, either (a) add a seeder-taking `applyLayoutToWindow` overload and
+     supply an attach seeder that sets `AttachController`'s "next-bind remote session" =
+     `leafSession.at(&leaf)` before `createBackingSession` (single GUI thread, no race), or (b) push
+     the remote sessions into `_pending` in `realizeLayoutTab`'s seed order (capturable by realizing
+     once against a throwaway model with a recording seeder) so the existing FIFO `createPty` matches.
+     Prefer (a) — it is order-independent and robust to the layout-leads-snapshot timing.
+  3. Replace `adoptStartupSessions`' one-tab-per-session loop with this; keep `onUpdate` (mirror
+     re-serialization) unchanged — it still feeds bound ptys. (Active-pane/zoom restoration is polish.)
+  Tests: the converter is already proven headless; add a `contour_gui_test` (Windows-runnable) that
+  applies a `wireToLayout` result to a `MockPtySessionFactory`-backed manager and asserts the tab/split
+  tree, and an `AttachController_test` (Linux-CI) that a split daemon layout mirrors as a 2-pane tab.
 - **B3-Qt — author from the GUI.** On GUI create-tab / split / close-pane, call the AttachClient
   send verbs already shipped (`createTab`/`splitPane`/`closePane`, B3 server half). **Relax
   `AttachController::canCreateSession()`** from "is a session pending" to "is the connection live",
