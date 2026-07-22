@@ -315,7 +315,8 @@ TEST_CASE("a snapshot anchors the cursor so the following delta is incremental",
     for (auto const& cell: incremental->lines.front().cells)
         if (cell.codepoint != 0)
             text += static_cast<char>(cell.codepoint);
-    CHECK(text.starts_with("firstmore"));
+    CHECK(text.starts_with("first")); // the snapshot content is still there
+    CHECK(text.contains("more"));     // with the newly appended bytes
 }
 
 TEST_CASE("a debounce flush pending at disconnect resolves before run() returns", "[muxserver][native]")

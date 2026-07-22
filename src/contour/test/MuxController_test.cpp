@@ -108,7 +108,7 @@ TEST_CASE("SelfUnbindingChannelPty runs its on-destroy callback exactly once", "
     CHECK(unbinds == 1); // exactly once, from the destructor
 }
 
-TEST_CASE("stopMuxReactor tears the reactor down once, idempotently", "[mux][controller]")
+TEST_CASE("stopMuxReactor tears the reactor down once and ignores a second stop", "[mux][controller]")
 {
     auto mutex = std::mutex {};
     auto stopped = false;

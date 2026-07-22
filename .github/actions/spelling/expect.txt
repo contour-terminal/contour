@@ -156,6 +156,7 @@ desync
 desynchronized
 desyncs
 dicts
+diffed
 diffing
 diffs
 displayless
@@ -209,6 +210,7 @@ FFE
 fffff
 FFFFFFC
 fffffffffffff
+FFFFFFFFU
 FFFFu
 fiddliest
 filetypes
@@ -509,6 +511,7 @@ reserializer
 reserializes
 reserializing
 resizable
+resnapshot
 resync
 retargeted
 retargets
@@ -571,6 +574,7 @@ supersampled
 svarint
 swapchain
 Sxbp
+syscalls
 tabcolor
 tabinherit
 tablabel
@@ -583,6 +587,8 @@ tgz
 tmuxclient
 TOCTOU
 togglestatusline
+tombstoned
+tombstoning
 toolset
 tprintf
 tpz
@@ -595,6 +601,7 @@ UBO
 ubuf
 udk
 UDKs
+ULONGLONG
 ULval
 undershoots
 undriveable
@@ -603,6 +610,7 @@ ungrabbable
 uninstall
 unmaximize
 unparents
+unparks
 unparseable
 unratcheted
 unrecognised
