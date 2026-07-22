@@ -56,13 +56,16 @@ class AsyncBufferedReader
     [[nodiscard]] coro::Task<std::expected<std::string, NetError>> readLine();
 
     /// @return The number of bytes buffered but not yet consumed (tests/diagnostics).
-    [[nodiscard]] std::size_t buffered() const noexcept { return _buffer.size(); }
+    [[nodiscard]] std::size_t buffered() const noexcept { return _buffer.size() - _consumed; }
 
     /// @return True if at least one more complete (LF-terminated) line is already
     ///         buffered, so the next @c readLine returns without touching the
     ///         socket. Consumers use this as a burst boundary: once it is false,
     ///         the batch that arrived together has been fully delivered.
-    [[nodiscard]] bool hasBufferedLine() const noexcept { return _buffer.contains('\n'); }
+    [[nodiscard]] bool hasBufferedLine() const noexcept
+    {
+        return _buffer.find('\n', _consumed) != std::string::npos;
+    }
 
     /// @return The total number of bytes the line scanner has examined so far.
     ///         Tests assert this stays equal to the bytes consumed — i.e. every
@@ -72,7 +75,8 @@ class AsyncBufferedReader
   private:
     ISocket* _socket;              ///< The transport read from (not owned).
     std::size_t _maxLineLength;    ///< Reject lines longer than this.
-    std::string _buffer;           ///< Received-but-unconsumed bytes.
+    std::string _buffer;           ///< Received bytes; [0, _consumed) already delivered.
+    std::size_t _consumed = 0;     ///< First buffer index not yet delivered (a read cursor).
     std::size_t _scanOffset = 0;   ///< First buffer index not yet searched for LF.
     std::size_t _scannedBytes = 0; ///< Lifetime count of bytes examined (see scannedBytes()).
 };

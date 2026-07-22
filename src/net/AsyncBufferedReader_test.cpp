@@ -123,6 +123,48 @@ TEST_CASE("readLine strips CRLF and LF alike and keeps a lone CR", "[net][reader
     REQUIRE(lines == std::vector<std::string> { "crlf", "lf", "", "a\rb" });
 }
 
+TEST_CASE("readLine delivers a buffered burst and tracks unconsumed bytes", "[net][reader]")
+{
+    auto fake = FakeSocket {};
+    // Three lines in one read. Split at the literal boundaries so no '\n' abuts a letter (which the
+    // spell-checker would read as one glued token); the runtime bytes are still "one\ntwo\nthree\n".
+    fake.pushChunk("one\n"
+                   "two\n"
+                   "three\n");
+
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = EventLoop { source };
+    auto reader = AsyncBufferedReader { &fake };
+
+    auto lines = std::vector<std::string> {};
+    auto bufferedAfter = std::vector<std::size_t> {};
+    auto moreAfter = std::vector<bool> {};
+    // Capture nothing, so the coroutine cannot outlive a closure of references
+    // (cppcoreguidelines-avoid-capturing-lambda-coroutines): outputs are passed by pointer.
+    auto step = [](AsyncBufferedReader* r,
+                   std::vector<std::string>* outLines,
+                   std::vector<std::size_t>* outBuffered,
+                   std::vector<bool>* outMore) -> Task<void> {
+        for (auto i = 0; i < 3; ++i)
+        {
+            auto result = co_await r->readLine();
+            REQUIRE(result.has_value());
+            outLines->push_back(std::move(*result));
+            outBuffered->push_back(r->buffered());
+            outMore->push_back(r->hasBufferedLine());
+        }
+    };
+    loop.blockOn(step(&reader, &lines, &bufferedAfter, &moreAfter));
+
+    CHECK(lines == std::vector<std::string> { "one", "two", "three" });
+    // Consuming a line advances a cursor, not a front-erase, but buffered() still reports only the
+    // undelivered remainder: "two\nthree\n" (10), then "three\n" (6), then nothing (0).
+    CHECK(bufferedAfter == std::vector<std::size_t> { 10, 6, 0 });
+    // hasBufferedLine sees past the consumed prefix: true while lines remain, false after the last.
+    CHECK(moreAfter == std::vector<bool> { true, true, false });
+    CHECK(reader.scannedBytes() == 14); // every byte still examined exactly once
+}
+
 TEST_CASE("readLine rejects a line exceeding its bound", "[net][reader]")
 {
     auto fake = FakeSocket {};
