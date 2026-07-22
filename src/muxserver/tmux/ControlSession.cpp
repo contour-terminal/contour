@@ -69,6 +69,16 @@ std::vector<std::string> splitCommandLine(std::string_view line)
     return arguments;
 }
 
+std::chrono::milliseconds pauseAfterFromSeconds(std::uint64_t seconds) noexcept
+{
+    // Cap at the largest whole-second duration that fits milliseconds' signed rep,
+    // THEN multiply — so an overflowing value clamps to a huge positive threshold
+    // instead of wrapping negative (which would pause all output immediately).
+    constexpr auto MaxSeconds = static_cast<std::uint64_t>(std::chrono::milliseconds::max().count() / 1000);
+    return std::chrono::milliseconds { static_cast<std::chrono::milliseconds::rep>(
+        std::min(seconds, MaxSeconds) * 1000) };
+}
+
 namespace
 {
     /// Extracts the value of a `-t <target>` option, if present.
@@ -203,8 +213,7 @@ coro::Task<void> ControlSession::run()
     // notifications gated behind it) must fully reach the writer; a lost peer
     // skips that wait. Then let the write queue flush %exit and any trailing
     // replies before the connection dies.
-    while (!_peerLost && _output.hasPending())
-        co_await _loop.delay(std::chrono::milliseconds { 1 });
+    co_await net::pollUntil(&_loop, [this] { return _peerLost || !_output.hasPending(); });
     co_await _writer.flushThenClose();
     _connection->close();
 }
@@ -784,7 +793,7 @@ void ControlSession::applyClientFlag(std::string_view flag)
                 return;
             seconds = *parsed;
         }
-        _output.setPauseAfter(std::chrono::milliseconds { seconds * 1000 });
+        _output.setPauseAfter(pauseAfterFromSeconds(seconds));
         // Every output line now carries its age (%extended-output) so the
         // client can judge staleness itself — control.c:653-658.
         _output.setExtendedOutput(true);

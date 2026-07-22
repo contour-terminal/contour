@@ -116,6 +116,7 @@ class TmuxClientModel final: public GatewayEvents
     void sessionChanged(uint64_t session, std::string_view name) override;
     void panePaused(uint64_t pane, bool paused) override;
     void exited(std::string_view reason) override;
+    void notificationsDrained() override;
 
     [[nodiscard]] std::map<uint64_t, WindowView> const& windows() const noexcept { return _windows; }
 
@@ -153,11 +154,12 @@ class TmuxClientModel final: public GatewayEvents
     /// Destroys every still-parked pane in `_detached`, firing paneRemoved for
     /// each — they were not adopted by any window, so they are genuine closes.
     ///
-    /// INVARIANT: every STRUCTURAL GatewayEvents handler (windowAdded/Closed/
-    /// Renamed, panePaused, sessionChanged, exited — and any future one) must
-    /// call this before applying its notification, so a move/close verdict is
-    /// settled first. Deliberately NOT called from outputReceived: an
-    /// interleaved %output must never destroy a pane mid-move.
+    /// Called ONLY at a burst boundary (notificationsDrained) or after a fresh
+    /// layout-change has had its chance to reclaim (the tail of ingestLayout) —
+    /// NEVER eagerly from an incidental structural handler. A pane moved into a
+    /// NEW window is parked by the source %layout-change and reclaimed only by
+    /// the destination %layout-change; the %window-add that arrives BETWEEN them
+    /// must not settle the verdict, or the live pane is destroyed mid-move.
     void reconcileDetached();
 
     TmuxGateway* _gateway = nullptr;

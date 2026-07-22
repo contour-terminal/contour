@@ -7,7 +7,9 @@
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <coro/WhenAll.hpp>
@@ -138,6 +140,76 @@ TEST_CASE("the gateway drives our control-mode server end to end", "[muxserver][
 
     CHECK(h.events.sawExit);
     CHECK(h.host.model().window(h.host.windowId())->tabCount() == 1);
+}
+
+namespace
+{
+
+Task<void> writeAll(net::ISocket* socket, std::string_view text)
+{
+    auto const bytes =
+        std::span<std::byte const> { reinterpret_cast<std::byte const*>(text.data()), text.size() };
+    std::ignore = co_await socket->write(bytes);
+}
+
+/// Hand-writes control-mode bytes so a guard body can carry a line that reads
+/// exactly like "%end" — the raw capture-pane hazard the number match guards.
+Task<void> embeddedEndScenario(net::EventLoop* loop,
+                               net::ISocket* server,
+                               TmuxGateway* gateway,
+                               std::vector<std::string>* body,
+                               bool* done)
+{
+    // The opening guard (command number 0) un-gates the gateway.
+    co_await writeAll(server, "%begin 1000 0 0\n%end 1000 0 0\n");
+    co_await waitUntil(loop, [&] { return gateway->initialised(); });
+
+    gateway->sendCommand("capture-pane", [body, done](bool, std::vector<std::string> const& lines) {
+        *body = lines;
+        *done = true;
+    });
+
+    // The reply's guard is command number 5. Its body includes a line that reads
+    // exactly like a %end for a DIFFERENT command (999): it must stay body, and
+    // only the matching "%end ... 5 ..." may close the block.
+    co_await writeAll(server, "%begin 1000 5 0\n");
+    co_await writeAll(server, "one\n");
+    co_await writeAll(server, "%end 1000 999 0\n");
+    co_await writeAll(server, "three\n");
+    co_await writeAll(server, "%end 1000 5 0\n");
+
+    co_await waitUntil(loop, [&] { return *done; });
+    server->close(); // EOF ends gateway->run()
+}
+
+Task<void> driveEmbeddedEnd(net::EventLoop* loop,
+                            net::ISocket* server,
+                            TmuxGateway* gateway,
+                            std::vector<std::string>* body,
+                            bool* done)
+{
+    co_await coro::whenAll(gateway->run(), embeddedEndScenario(loop, server, gateway, body, done));
+}
+
+} // namespace
+
+TEST_CASE("a guard body line that looks like %end does not close the block early", "[muxserver][gateway]")
+{
+    auto source = net::PollEventSource {};
+    auto loop = net::EventLoop { source };
+    auto pair = *net::testing::makeSocketPair(loop);
+
+    auto events = RecordingEvents {};
+    auto gateway = TmuxGateway { loop, std::move(pair.second), events };
+
+    auto body = std::vector<std::string> {};
+    auto done = false;
+    auto* server = pair.first.get();
+
+    loop.blockOn(driveEmbeddedEnd(&loop, server, &gateway, &body, &done));
+
+    REQUIRE(done);
+    CHECK(body == std::vector<std::string> { "one", "%end 1000 999 0", "three" });
 }
 
 // {{{ live oracle: the gateway drives a REAL tmux -C client

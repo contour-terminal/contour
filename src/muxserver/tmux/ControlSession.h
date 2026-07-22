@@ -14,6 +14,7 @@
 /// Commands are a data-driven table (the Actions.h catalog idiom): one row per
 /// verb naming its handler; adding a verb is adding a row.
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -41,6 +42,14 @@ namespace muxserver::tmux
 /// @param line The raw command line.
 /// @return The argument vector (possibly empty).
 [[nodiscard]] std::vector<std::string> splitCommandLine(std::string_view line);
+
+/// Converts a client-supplied `pause-after` value in SECONDS to a millisecond
+/// threshold, clamped so a value large enough to overflow the signed rep cannot
+/// wrap to a NEGATIVE ("already past due") duration that would pause all output —
+/// the exact opposite of the long grace period the client asked for.
+/// @param seconds The client-supplied whole-second value (unbounded).
+/// @return The clamped millisecond duration (always >= 0).
+[[nodiscard]] std::chrono::milliseconds pauseAfterFromSeconds(std::uint64_t seconds) noexcept;
 
 /// Per-transport dialect knobs for a ControlSession. The raw line-protocol
 /// socket keeps the defaults; the imsg path (a real tmux binary relaying to

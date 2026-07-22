@@ -123,9 +123,10 @@ void TmuxGateway::handleLine(std::string_view line)
             // iTerm2's recovery rule: discard everything until the opening
             // %begin (or an immediate %exit) — the server may have queued
             // stale output before the control client was recognized.
-            if (std::holds_alternative<GuardBegin>(event))
+            if (auto const* begin = std::get_if<GuardBegin>(&event))
             {
                 _state = State::InGuard;
+                _guardNumber = begin->number;
                 _openingGuard = true;
                 _guardBody.clear();
             }
@@ -134,9 +135,10 @@ void TmuxGateway::handleLine(std::string_view line)
             return;
 
         case State::Idle:
-            if (std::holds_alternative<GuardBegin>(event))
+            if (auto const* begin = std::get_if<GuardBegin>(&event))
             {
                 _state = State::InGuard;
+                _guardNumber = begin->number;
                 _guardBody.clear();
                 _guardIsError = false;
                 return;
@@ -145,7 +147,13 @@ void TmuxGateway::handleLine(std::string_view line)
             return;
 
         case State::InGuard:
-            if (auto const* end = std::get_if<GuardEnd>(&event))
+            // The guard BODY is transmitted RAW: capture-pane content can contain
+            // a line that reads exactly like "%end N F". Match the command number
+            // (as real control clients do) so only the genuine terminator closes
+            // the block — an embedded "%end" with a different (or no) number is
+            // body, not the end, and mis-closing here desyncs every later reply.
+            if (auto const* end = std::get_if<GuardEnd>(&event);
+                end != nullptr && end->number == _guardNumber)
             {
                 _state = State::Idle;
                 if (_openingGuard)
@@ -185,6 +193,12 @@ coro::Task<void> TmuxGateway::run()
         if (!line.has_value())
             break; // disconnect
         handleLine(*line);
+        // Burst boundary: once nothing more arrived together, the batch of
+        // notifications for one server operation is fully applied, so the
+        // consumer may settle deferred verdicts (a pane parked by a move's
+        // source %layout-change has by now been reclaimed by its destination).
+        if (!reader.hasBufferedLine())
+            _events.notificationsDrained();
     }
 
     co_await _writer.flushThenClose();

@@ -84,7 +84,6 @@ void TmuxClientModel::layoutChanged(uint64_t window, std::string_view layout)
 
 void TmuxClientModel::windowAdded(uint64_t window)
 {
-    reconcileDetached();
     if (_windows.try_emplace(window).second) // the layout arrives with %layout-change
         for (auto* observer: _observers)
             observer->windowAdded(window);
@@ -92,7 +91,6 @@ void TmuxClientModel::windowAdded(uint64_t window)
 
 void TmuxClientModel::windowClosed(uint64_t window)
 {
-    reconcileDetached();
     auto const it = _windows.find(window);
     if (it == _windows.end())
         return;
@@ -112,30 +110,40 @@ void TmuxClientModel::windowClosed(uint64_t window)
 
 void TmuxClientModel::windowRenamed(uint64_t window, std::string_view name)
 {
-    reconcileDetached();
-    _windows[window].name = std::string { name };
+    // find, not operator[]: a rename for a window we have not ingested yet (its
+    // %window-add / %layout-change has not arrived) must NOT default-insert a
+    // treeless phantom window and notify the frontend to rename a tab that does
+    // not exist. The name lands once the window is genuinely added.
+    auto const it = _windows.find(window);
+    if (it == _windows.end())
+        return;
+    it->second.name = std::string { name };
     for (auto* observer: _observers)
-        observer->windowRenamed(window, _windows[window].name);
+        observer->windowRenamed(window, it->second.name);
 }
 
 void TmuxClientModel::panePaused(uint64_t pane, bool paused)
 {
-    reconcileDetached();
     for (auto* observer: _observers)
         observer->panePaused(pane, paused);
 }
 
 void TmuxClientModel::exited(std::string_view reason)
 {
-    reconcileDetached();
     auto const copy = std::string { reason };
     for (auto* observer: _observers)
         observer->exited(copy);
 }
 
+void TmuxClientModel::notificationsDrained()
+{
+    // The burst that arrived together is fully applied: any pane still parked was
+    // not reclaimed by a destination %layout-change, so it is a genuine close.
+    reconcileDetached();
+}
+
 void TmuxClientModel::sessionChanged(uint64_t /*session*/, std::string_view /*name*/)
 {
-    reconcileDetached();
     if (_gateway == nullptr)
         return;
     // Enumerate the session's windows and ingest their layouts; new panes

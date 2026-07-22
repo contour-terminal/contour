@@ -47,6 +47,13 @@ class GatewayEvents
     virtual void sessionChanged(uint64_t session, std::string_view name) { (void) session, (void) name; }
     virtual void panePaused(uint64_t pane, bool paused) { (void) pane, (void) paused; }
     virtual void exited(std::string_view reason) { (void) reason; }
+
+    /// One burst of notifications has been fully delivered (the reader has no more
+    /// buffered lines). A consumer that defers verdicts across several related
+    /// notifications — e.g. a pane move whose source and destination
+    /// %layout-change arrive back to back — settles them here, once the whole
+    /// batch is in, instead of eagerly on each incidental notification.
+    virtual void notificationsDrained() {}
 };
 
 /// One connected control-mode client endpoint.
@@ -96,6 +103,7 @@ class TmuxGateway final
     GatewayEvents& _events;
 
     State _state = State::Recovery;
+    uint32_t _guardNumber = 0; ///< The open guard's command number; only its matching %end closes it.
     bool _openingGuard = true; ///< The guard currently open is the implicit initial command's.
     bool _initialised = false;
     bool _detached = false;

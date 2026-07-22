@@ -4,8 +4,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <format>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -315,6 +318,20 @@ TEST_CASE("refresh-client flags and subscriptions are accepted", "[muxserver][co
                                     "refresh-client -f !pause-after,!no-output",
                                     "refresh-client -B mysub:%0:#{pane_title}" });
     CHECK(!contains(lines, "%error"));
+}
+
+TEST_CASE("pauseAfterFromSeconds clamps overflowing values to a positive duration", "[muxserver][control]")
+{
+    using muxserver::tmux::pauseAfterFromSeconds;
+    using std::chrono::milliseconds;
+
+    CHECK(pauseAfterFromSeconds(0) == milliseconds { 0 });
+    CHECK(pauseAfterFromSeconds(5) == milliseconds { 5000 });
+    // A value whose *1000 overflows milliseconds' signed rep must clamp to a huge
+    // POSITIVE threshold — a negative one reads as "always past due" and would
+    // pause every pane's output on the first byte.
+    CHECK(pauseAfterFromSeconds(10'000'000'000'000'000ULL) > milliseconds { 0 });
+    CHECK(pauseAfterFromSeconds(std::numeric_limits<std::uint64_t>::max()) > milliseconds { 0 });
 }
 
 TEST_CASE("an output burst drains fully after the PTY goes silent", "[muxserver][control]")

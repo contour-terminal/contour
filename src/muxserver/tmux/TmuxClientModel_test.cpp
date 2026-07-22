@@ -213,14 +213,15 @@ TEST_CASE("injected sinks and observers see the mirrored structure", "[muxserver
     CHECK(lastSink->received == "live-bytes");
 
     model.layoutChanged(7, checksummedLayout("160x50,0,0,1"));
+    // %2 leaving the layout is not reported removed inside the prune ingest: that
+    // ingest cannot yet tell a close from a move to a sibling window, so it parks
+    // %2. The verdict settles at the burst boundary — once the batch drained and
+    // no adoption claimed it, it is a genuine close.
+    model.notificationsDrained();
     model.windowRenamed(7, "renamed");
     model.exited("done");
     model.windowClosed(7);
 
-    // %2 leaving the layout is not reported removed inside the prune ingest:
-    // that ingest cannot yet tell a close from a move to a sibling window, so
-    // the removal is confirmed at the next structural notification (the rename)
-    // once no adoption has claimed it.
     auto const expected = std::vector<std::string> {
         "windowAdded:7",       "paneAdded:7:1:80x50", "paneAdded:7:2:79x50",     "layoutTreeChanged:7",
         "layoutTreeChanged:7", "paneRemoved:7:2",     "windowRenamed:7:renamed", "exited:done",
@@ -281,6 +282,41 @@ TEST_CASE("a pane moved between windows survives either layout-change order", "[
 
     // The same terminal kept its prior content and still routes fresh %output.
     CHECK(model.pane(2)->pageText().contains("before-move"));
+    model.outputReceived(2, "after-move");
+    CHECK(model.pane(2)->pageText().contains("after-move"));
+}
+
+TEST_CASE("a pane moved into a NEW window survives the interleaved %window-add", "[muxserver][tmuxclient]")
+{
+    // No gateway: replay PaneViews resolve immediately, so we can inspect content.
+    auto model = TmuxClientModel {};
+    auto events = RecordingModelEvents {};
+    model.subscribe(&events);
+
+    // @1 holds %1 and %2; seed %2 so we can prove it is re-parented, not recreated.
+    model.layoutChanged(1, checksummedLayout("160x50,0,0{80x50,0,0,1,79x50,81,0,2}"));
+    model.notificationsDrained();
+    model.outputReceived(2, "keep-me");
+    REQUIRE(model.pane(2) != nullptr);
+    REQUIRE(model.pane(2)->pageText().contains("keep-me"));
+
+    // break-pane moves %2 into a brand-new window @2. The real tmux order parks
+    // %2 (source %layout-change), THEN announces the new window, THEN adopts it —
+    // the %window-add lands mid-move and must not destroy the parked pane.
+    model.layoutChanged(1, checksummedLayout("160x50,0,0,1")); // @1 drops %2 → parked
+    model.windowAdded(2);                                      // announced BETWEEN park and reclaim
+    model.layoutChanged(2, checksummedLayout("160x50,0,0,2")); // @2 adopts %2
+    model.notificationsDrained();                              // burst boundary
+
+    CHECK(model.paneCount() == 2);
+    REQUIRE(model.pane(2) != nullptr);
+    CHECK(model.windows().at(2).panes == std::vector<std::uint64_t> { 2 });
+    // The move is a re-parent (paneMoved), never a destroy (paneRemoved).
+    CHECK(std::ranges::find(events.log, "paneMoved:1:2:2") != events.log.end());
+    CHECK(
+        std::ranges::none_of(events.log, [](std::string const& e) { return e.starts_with("paneRemoved"); }));
+    // The live terminal kept its content and still routes fresh %output.
+    CHECK(model.pane(2)->pageText().contains("keep-me"));
     model.outputReceived(2, "after-move");
     CHECK(model.pane(2)->pageText().contains("after-move"));
 }
