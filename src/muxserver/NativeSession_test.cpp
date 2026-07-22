@@ -124,6 +124,15 @@ Task<void> flipToAltScreen(NativeHarness* h, vtmux::SessionId id)
     h->session->sessionScreenUpdated(id);
 }
 
+/// Once the attach snapshot has landed: appends to the SAME primary screen and
+/// kicks the debounced flush, so a NON-snapshot (incremental) delta follows.
+Task<void> appendThenUpdate(NativeHarness* h, vtmux::SessionId id)
+{
+    co_await h->loop.delay(5ms);
+    h->host.terminal(id)->writeToScreen("more");
+    h->session->sessionScreenUpdated(id);
+}
+
 /// Schedules a debounce flush, then disconnects before it can fire.
 Task<void> kickThenDisconnect(NativeHarness* h, vtmux::SessionId id)
 {
@@ -273,6 +282,40 @@ TEST_CASE("an alternate-screen flip forces a resync snapshot with SessionState",
         if (cell.codepoint != 0)
             text += static_cast<char>(cell.codepoint);
     CHECK(text == "ALT!");
+}
+
+TEST_CASE("a snapshot anchors the cursor so the following delta is incremental", "[muxserver][native]")
+{
+    auto h = NativeHarness {};
+    h.host.createTab();
+    auto const sessionId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    h.host.terminal(sessionId)->writeToScreen("first");
+
+    auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
+    auto received = std::vector<proto::DecodedFrame> {};
+    h.loop.blockOn(net::testing::allOf(h.session->run(),
+                                       feedBytes(h.pair.second.get(), &bytes),
+                                       collectPdus(h.pair.second.get(), 4, &received),
+                                       appendThenUpdate(&h, sessionId)));
+    REQUIRE(received.size() == 4);
+
+    // [0] ServerHello, [1] SessionState, [2] Delta(snapshot), [3] Delta(incremental).
+    auto const* snapshot = std::get_if<proto::Delta>(&received[2].pdu);
+    REQUIRE(snapshot != nullptr);
+    CHECK(snapshot->snapshot == 1);
+
+    auto const* incremental = std::get_if<proto::Delta>(&received[3].pdu);
+    REQUIRE(incremental != nullptr);
+    // Anchored past the snapshot: the follow-up is a real diff, not another resync
+    // (a stale cursor would force snapshot==1) and not a rescan of every row.
+    CHECK(incremental->snapshot == 0);
+    REQUIRE(incremental->lines.size() == 1);
+
+    auto text = std::string {};
+    for (auto const& cell: incremental->lines.front().cells)
+        if (cell.codepoint != 0)
+            text += static_cast<char>(cell.codepoint);
+    CHECK(text.starts_with("firstmore"));
 }
 
 TEST_CASE("a debounce flush pending at disconnect resolves before run() returns", "[muxserver][native]")

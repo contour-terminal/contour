@@ -777,6 +777,20 @@ class Grid
              ++offset)
             report(offset, lineAt(offset));
     }
+
+    /// Re-anchors @p cursor to the change stream's current head WITHOUT a scan.
+    /// After an attach/resync snapshot (forEachValidLine reported the whole grid),
+    /// the consumer has seen everything up to now, so its cursor jumps straight to
+    /// the head — running forEachLineChangedSince purely to advance it would walk
+    /// the grid a second time. Self-finalizing exactly like forEachLineChangedSince,
+    /// and lands the cursor on the same {generation, seqno, stableBase} either of
+    /// that method's branches would, so a following delta.seqno read stays consistent.
+    /// @param cursor The consumer's stream position (re-anchored to now).
+    void anchorCursorToHead(GridDeltaCursor& cursor) noexcept
+    {
+        finalizeRevisions();
+        cursor = GridDeltaCursor { .generation = _generation, .seqno = _seqno, .stableBase = _stableBase };
+    }
     // }}}
 
     [[nodiscard]] constexpr LineFlags defaultLineFlags() const noexcept;

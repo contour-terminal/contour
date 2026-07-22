@@ -205,9 +205,10 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
             delta.imageCells.clear();
             hyperlinkIds.clear();
             grid.forEachValidLine(collect);
-            // Re-anchor the cursor past the snapshot (forEachValidLine does not).
-            std::ignore = grid.forEachLineChangedSince(follow.cursor,
-                                                       [](vtbackend::LineOffset, vtbackend::Line const&) {});
+            // The snapshot delivered the whole grid, so re-anchor the cursor to the
+            // stream head directly -- forEachValidLine leaves it untouched, and a
+            // second forEachLineChangedSince purely to advance it would rescan.
+            grid.anchorCursorToHead(follow.cursor);
         }
         delta.snapshot = snapshot ? 1 : 0;
         delta.generation = grid.generation();
