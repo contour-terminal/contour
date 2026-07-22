@@ -140,6 +140,12 @@ void NativeSession::sessionScreenUpdated(SessionId session)
     _loop.spawn(flushSoon());
 }
 
+void NativeSession::sessionClosed(SessionId session)
+{
+    _followed.erase(session.value);
+    _pendingSessions.erase(session.value);
+}
+
 coro::Task<void> NativeSession::flushSoon()
 {
     // Debounce: a busy PTY produces many screenUpdated signals per frame-worth

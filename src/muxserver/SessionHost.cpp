@@ -274,6 +274,11 @@ void SessionHost::handleSessionExit(SessionId session)
     }
 
     _sessions.erase(it);
+
+    // The session is gone: tell stream observers so they drop any per-session
+    // state (delta cursors, sent-hyperlink sets) instead of accumulating it.
+    for (auto* observer: _streamSubscribers)
+        observer->sessionClosed(session);
 }
 
 // ---------------------------------------------------------------------------

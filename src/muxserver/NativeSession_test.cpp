@@ -151,6 +151,19 @@ Task<void> closeWatchdog(NativeHarness* h, bool const* done, bool* fired)
 
 } // namespace
 
+namespace muxserver
+{
+/// Exposes NativeSession's private follow map to the leak regression test.
+struct NativeSessionFollowTester
+{
+    static bool follows(NativeSession const& session, vtmux::SessionId id)
+    {
+        return session._followed.contains(id.value);
+    }
+    static std::size_t followedCount(NativeSession const& session) { return session._followed.size(); }
+};
+} // namespace muxserver
+
 TEST_CASE("the native handshake answers ServerHello and a full snapshot", "[muxserver][native]")
 {
     auto h = NativeHarness {};
@@ -281,6 +294,27 @@ TEST_CASE("a debounce flush pending at disconnect resolves before run() returns"
     h.session.reset();
     h.loop.blockOn(net::testing::sleepFor(&h.loop, 30ms));
     SUCCEED("the debounce flush settled before the session was destroyed");
+}
+
+TEST_CASE("a closed session's follow state is pruned", "[muxserver][native]")
+{
+    auto h = NativeHarness {};
+    h.host.createTab();
+    auto const sessionId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+
+    // The handshake snapshot makes the session followed (pushDelta seeds _followed).
+    std::ignore = h.exchange({ proto::ClientHello {} }, 3);
+    REQUIRE(muxserver::NativeSessionFollowTester::follows(*h.session, sessionId));
+
+    // The host learning its own session closed must fan out to stream subscribers,
+    // and the session must drop the per-session follow state (otherwise it leaks
+    // for the connection's whole lifetime -- one entry per session ever opened).
+    h.host.subscribeStream(h.session.get());
+    h.host.handleSessionExit(sessionId);
+    h.host.unsubscribeStream(h.session.get());
+
+    CHECK_FALSE(muxserver::NativeSessionFollowTester::follows(*h.session, sessionId));
+    CHECK(muxserver::NativeSessionFollowTester::followedCount(*h.session) == 0);
 }
 
 TEST_CASE("a client that overflows the write queue is disconnected", "[muxserver][native]")

@@ -58,7 +58,13 @@ class NativeSession final: public SessionStreamEvents
     /// connection subscribes itself to the host's stream fan-out).
     void sessionScreenUpdated(vtmux::SessionId session) override;
 
+    /// Drops the follow state for a session the host destroyed, so a long-lived
+    /// connection that churns through many sessions does not accumulate it.
+    void sessionClosed(vtmux::SessionId session) override;
+
   private:
+    friend struct NativeSessionFollowTester; ///< Test-only view of _followed.
+
     /// Per followed grid: the delta cursor plus what this connection has seen.
     struct FollowState
     {

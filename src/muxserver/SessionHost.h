@@ -51,6 +51,11 @@ class SessionStreamEvents
     /// A raw PTY output chunk of @p session BEFORE the parser consumed it —
     /// the control-mode %output byte tap.
     virtual void sessionOutput(vtmux::SessionId /*session*/, std::string const& /*bytes*/) {}
+
+    /// @p session was destroyed (its shell exited); fires after the host removed
+    /// it. Observers holding per-session state must drop it here, or it leaks for
+    /// the connection's whole lifetime.
+    virtual void sessionClosed(vtmux::SessionId /*session*/) {}
 };
 
 /// One hosted session: the terminal (owning its PTY) plus the pump thread
