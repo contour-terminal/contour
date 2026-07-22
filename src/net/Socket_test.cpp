@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
@@ -101,6 +102,28 @@ Task<void> loopbackEcho(EventLoop* loop, net::IListener* listener, bool* served,
     co_await coro::whenAll(echoServer(listener, served), echoClient(loop, listener->localPort(), matched));
 }
 
+/// Parks reading an idle socket and records whether the read eventually resumed
+/// with an error (rather than hanging forever).
+Task<void> parkThenObserveClose(ISocket* sock, bool* resumedWithError)
+{
+    auto buffer = std::array<std::byte, 64> {};
+    auto const result = co_await sock->read(buffer);
+    *resumedWithError = !result.has_value();
+}
+
+/// Lets the reader reach its park, then closes the socket it is parked on.
+Task<void> closeAfterParked(EventLoop* loop, ISocket* sock)
+{
+    co_await loop->delay(std::chrono::milliseconds { 20 });
+    sock->close();
+}
+
+/// Runs the parked reader and the close concurrently on one loop.
+Task<void> closeWhileParked(EventLoop* loop, ISocket* sock, bool* resumedWithError)
+{
+    co_await coro::whenAll(parkThenObserveClose(sock, resumedWithError), closeAfterParked(loop, sock));
+}
+
 } // namespace
 
 TEST_CASE("InMemoryTransport round-trips bytes between connected endpoints", "[net]")
@@ -114,6 +137,23 @@ TEST_CASE("InMemoryTransport round-trips bytes between connected endpoints", "[n
 
     REQUIRE(wroteOk);
     REQUIRE(readOk);
+}
+
+TEST_CASE("closing a socket resumes a reader parked on it instead of hanging", "[net][poll]")
+{
+    // A reader parked on an idle socket that is then closed under it must resume with an error, not
+    // hang. On POSIX poll(2) reports POLLNVAL for the closed fd; on Windows the reactor must route the
+    // now-invalid WSAEVENT the same way. Regression guard: this deadlocked on Windows before the fix,
+    // taking the whole disconnect-while-parked path (attach clients, control clients) down with it.
+    auto source = PollEventSource {};
+    auto loop = EventLoop { source };
+    auto pair = net::testing::makeSocketPair(loop);
+    REQUIRE(pair.has_value());
+
+    auto resumedWithError = false;
+    loop.blockOn(closeWhileParked(&loop, pair->second.get(), &resumedWithError));
+
+    CHECK(resumedWithError); // it resumed at all (no hang) AND saw the close as an error
 }
 
 TEST_CASE("listen + connect + accept echo a request over loopback", "[net][poll]")

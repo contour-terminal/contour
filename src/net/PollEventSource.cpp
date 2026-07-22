@@ -130,16 +130,27 @@ namespace
     /// @p outcome. A full rescan (rather than trusting one wait's returned index)
     /// keeps the fast and chunked paths reporting identically and picks up every
     /// handle ready this round, not merely the first the OS named.
+    ///
+    /// A handle that has become INVALID (WaitForSingleObject → WAIT_FAILED) is routed
+    /// as read-ready too: it means the socket was closed while a reader was parked on
+    /// its event, so the reactor still holds the now-dead handle. Resuming that reader
+    /// lets it observe the closed socket and unwind — the Windows analogue of POSIX
+    /// poll(2) reporting POLLNVAL for a closed fd (see routePollRevents). If it is not
+    /// routed, WaitForMultipleObjects fails on the dead handle every round and the
+    /// parked reader hangs forever.
     /// @param registrations The full registration list.
     /// @param outcome The outcome to append ready tokens to.
     void collectSignalled(std::vector<FdRegistration> const& registrations, WaitOutcome& outcome)
     {
-        auto const signalled = [](HANDLE handle) {
-            return handle != nullptr && WaitForSingleObject(handle, 0) == WAIT_OBJECT_0;
+        auto const ready = [](HANDLE handle) {
+            if (handle == nullptr)
+                return false;
+            auto const status = WaitForSingleObject(handle, 0);
+            return status == WAIT_OBJECT_0 || status == WAIT_FAILED;
         };
         for (auto const& reg: registrations)
         {
-            if (!signalled(reg.fd))
+            if (!ready(reg.fd))
                 continue;
             if (hasInterest(reg.interest, FdInterest::Read))
                 outcome.readyRead.push_back(reg.token);
@@ -175,20 +186,27 @@ WaitOutcome PollEventSource::wait(int timeoutMs)
     if (handles.size() <= MaxWaitObjects)
     {
         auto const count = static_cast<DWORD>(handles.size());
-        switch (classifyWait(WaitForMultipleObjects(count, handles.data(), FALSE, timeout), count))
-        {
-            case WaitVerdict::None: return outcome;
-            case WaitVerdict::Failed:
-                errorLog()("WaitForMultipleObjects failed: {}", GetLastError());
-                // Never let a failure return instantly as a benign timeout: with an
-                // indefinite wait that hot-spins the event loop. Yield a bounded slice
-                // (capped by the caller's timeout, skipped only for a pure poll).
-                if (timeoutMs != 0)
-                    Sleep(timeout < SweepSliceMs ? timeout : SweepSliceMs);
-                return outcome;
-            case WaitVerdict::Signalled: break;
-        }
+        auto const verdict =
+            classifyWait(WaitForMultipleObjects(count, handles.data(), FALSE, timeout), count);
+        if (verdict == WaitVerdict::None)
+            return outcome;
+        // Signalled OR Failed: rescan per handle. collectSignalled routes the ready
+        // handles AND any now-invalid one (a socket closed under a parked reader), so a
+        // WAIT_FAILED resumes that reader instead of the wait failing on the dead handle
+        // every round.
         collectSignalled(registrations, outcome);
+        if (!outcome.readyRead.empty() || !outcome.readyWrite.empty())
+            return outcome;
+        // A genuine failure with no handle we can pin (rare). Never let it return
+        // instantly as a benign timeout: with an indefinite wait that hot-spins the
+        // loop. Yield a bounded slice (capped by the caller's timeout, skipped for a
+        // pure poll).
+        if (verdict == WaitVerdict::Failed)
+        {
+            errorLog()("WaitForMultipleObjects failed: {}", GetLastError());
+            if (timeoutMs != 0)
+                Sleep(timeout < SweepSliceMs ? timeout : SweepSliceMs);
+        }
         return outcome;
     }
 
@@ -214,15 +232,18 @@ WaitOutcome PollEventSource::wait(int timeoutMs)
             auto const chunkSize = static_cast<DWORD>(chunk.count);
             auto const verdict = classifyWait(
                 WaitForMultipleObjects(chunkSize, handles.data() + chunk.offset, FALSE, 0), chunkSize);
-            if (verdict == WaitVerdict::Signalled)
-            {
-                anyReady = true;
-                break;
-            }
             if (verdict == WaitVerdict::Failed && !failureLogged)
             {
                 errorLog()("WaitForMultipleObjects (chunk at {}) failed: {}", chunk.offset, GetLastError());
                 failureLogged = true; // log once per wait(), not once per sweep, to bound spam.
+            }
+            // Signalled OR Failed both hand off to collectSignalled below: a Failed chunk
+            // carries a now-invalid handle (a socket closed under a parked reader), which
+            // collectSignalled routes so that reader resumes rather than hanging.
+            if (verdict == WaitVerdict::Signalled || verdict == WaitVerdict::Failed)
+            {
+                anyReady = true;
+                break;
             }
         }
         _waitRotation = nextWaitRotation(chunkCount, start);
