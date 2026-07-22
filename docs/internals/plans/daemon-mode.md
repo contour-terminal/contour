@@ -187,14 +187,18 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
 
 ### WS-C — TCP + TLS + token transport (opt-in, loopback default)
 
-- [ ] **C1. TLS `ISocket` decorator in `net/`.** A `TlsSocket` wrapping the underlying TCP
-      `ISocket` (decorator pattern, like `TappingPty`/`SplitSocket`): performs the handshake and
-      encrypts reads/writes, exposing the same `ISocket` interface so `MuxServer`/`AttachClient`
-      stay unchanged. **TLS backend: OpenSSL** (available on all major platforms), reached
-      **exclusively through a `net::ITlsContext`/`ITlsSocket` interface (dependency injection)** —
-      no OpenSSL type appears above `net/`, and tests inject a fake context. Justified under the
-      "no new deps" rule by the remote use case. Cert model: self-signed + client fingerprint pin
-      (TOFU), with the token providing authentication.
+- [x] **C1. TLS `ISocket` decorator in `net/`.** `net/Tls.{h,cpp}`: a `TlsSocket` wrapping any
+      `ISocket`, driving OpenSSL through two memory BIOs so the handshake and records ride the same
+      coroutine reactor (async, no blocking thread) — lazy handshake on first I/O, `flushOut`/`feedIn`
+      pump ciphertext to/from the inner socket. OpenSSL is reached **only through `net::ITlsContext`**
+      (`wrap(inner)`), so no OpenSSL type crosses `net`'s headers (linked `PRIVATE`). Factories:
+      `makeTlsServerContext(certPem,keyPem)`, `makeSelfSignedServerContext()` (ephemeral RSA-2048,
+      the zero-config TOFU default), `makeTlsClientContext(caPem={})` (empty ⇒ VERIFY_NONE / TOFU,
+      the token authenticates). CMake `find_package(OpenSSL REQUIRED)`. Tests: `net` handshake+echo
+      over a socketpair, **and** the full composition — native protocol + token **over TLS over real
+      TCP** — mirrors a snapshot. *Landed 2026-07-22; net suite green (34/151), muxserver suite green
+      (120/2632).* **Remaining: wire the server context into `runDaemon`'s TCP handler and the client
+      context into the TCP connect path (C5).**
 - [x] **C2. Daemon TCP listener.** `DaemonConfig.nativeTcp` (`NativeTcpListenerConfig`:
       host=127.0.0.1, port, token). `runDaemon` (POSIX + Win32, the latter refactored to the same
       `std::vector<MuxServer*>` shape) binds `net::listen` and serves the native protocol with
@@ -294,8 +298,14 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
 - 2026-07-22 · Windows/clangcl-release · **C2 done** — opt-in daemon TCP listener
   (`DaemonConfig.nativeTcp`, `runDaemon` POSIX+Win32 wiring via `net::listen` + transport-agnostic
   `makeNativeHandler`). Real-TCP end-to-end test (native protocol + token over loopback TCP). Suite
-  green (119/2628). **The remote transport now works (plaintext + token); TLS is C1.** Next: C1
-  (OpenSSL `TlsSocket` `ISocket` decorator behind `net::ITlsContext`), then C3/C4/C5 (Qt config/CLI).
+  green (119/2628).
+- 2026-07-22 · Windows/clangcl-release · **C1 done** — async OpenSSL `TlsSocket` decorator behind
+  `net::ITlsContext` (memory-BIO handshake over the reactor); self-signed / PEM / client factories.
+  Tested in isolation (`net` handshake+echo) **and in composition** (native + token + **TLS over TCP**
+  mirrors a snapshot). net suite 34/151, muxserver suite 120/2632. **The remote use case now works
+  end-to-end, encrypted + authenticated, in the buildable layer.** Remaining for remote: wire the TLS
+  contexts into `runDaemon`/`runAttach` (server buildable; client connect + Qt `AttachController` = C5),
+  and the `--listen-tcp`/`--connect-tcp`/`--token`/config schema (C3/C4, Qt).
 
 ## Open decisions / risks
 

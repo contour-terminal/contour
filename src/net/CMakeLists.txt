@@ -13,6 +13,8 @@ set(net_SOURCES
     PollEventSource.h
     Sockets.h
     SplitSocket.h
+    Tls.cpp
+    Tls.h
     WithTimeout.h
     platform/Clock.h
     platform/NativeHandle.h
@@ -50,7 +52,11 @@ else()
 endif()
 
 add_library(net STATIC ${net_SOURCES})
+# OpenSSL backs the TLS ISocket decorator (net/Tls.*). It stays behind the
+# ITlsContext DI seam, so it is PRIVATE: no OpenSSL type crosses net's headers.
+find_package(OpenSSL REQUIRED)
 target_link_libraries(net PUBLIC coro crispy::core)
+target_link_libraries(net PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 if(WIN32)
     target_link_libraries(net PUBLIC ws2_32)
 endif()
@@ -67,6 +73,7 @@ if(NET_TESTING)
         AsyncBufferedReader_test.cpp
         EventLoop_test.cpp
         Socket_test.cpp
+        Tls_test.cpp
         WriteQueue_test.cpp
     )
     if(NOT WIN32)

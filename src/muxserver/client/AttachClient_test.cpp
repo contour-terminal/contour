@@ -33,6 +33,7 @@
 #include <net/ISocket.h>
 #include <net/PollEventSource.h>
 #include <net/Sockets.h>
+#include <net/Tls.h>
 #include <net/WriteQueue.h>
 #include <net/testing/CoroTestSupport.h>
 #include <net/testing/InMemoryTransport.h>
@@ -457,6 +458,68 @@ TEST_CASE("attach mirrors over a real TCP transport with token auth", "[muxserve
     auto saw = false;
     loop.blockOn(net::testing::allOf(server.serve(), tcpAttachDriver(&loop, &server, port, &saw)));
     CHECK(saw);
+}
+
+namespace
+{
+
+/// Connects over TCP, wraps the connection in TLS (client role), mirrors the
+/// snapshot, detaches, then closes the server. Records whether a snapshot came.
+Task<void> tlsTcpAttachDriver(net::EventLoop* loop,
+                              muxserver::MuxServer* server,
+                              std::shared_ptr<net::ITlsContext> clientTls,
+                              std::uint16_t port,
+                              bool* saw)
+{
+    auto connected = co_await net::connect(loop, "127.0.0.1", port);
+    if (connected)
+    {
+        auto client = AttachClient { *loop, clientTls->wrap(std::move(*connected)), "tok" };
+        auto scenario = [](net::EventLoop* loop, AttachClient* client, bool* saw) -> Task<void> {
+            for (auto i = 0; i < 500 && client->screens().empty(); ++i)
+                co_await loop->delay(1ms);
+            *saw = !client->screens().empty();
+            client->detach();
+        }(loop, &client, saw);
+        co_await coro::whenAll(client.run(), std::move(scenario));
+    }
+    server->close();
+}
+
+} // namespace
+
+TEST_CASE("attach mirrors over TLS-encrypted TCP with token auth", "[muxserver][attach]")
+{
+    auto source = net::PollEventSource {};
+    auto loop = net::EventLoop { source };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                              vtbackend::Settings {},
+                              /*startPumps=*/false };
+    host.createTab();
+
+    auto serverTls = net::makeSelfSignedServerContext();
+    REQUIRE(serverTls.has_value());
+    auto clientTls = net::makeTlsClientContext();
+    REQUIRE(clientTls.has_value());
+
+    auto listener = net::listen(loop, "127.0.0.1", 0);
+    REQUIRE(listener.has_value());
+    auto const port = (*listener)->localPort();
+
+    // A TLS-wrapping native handler: each accepted socket is encrypted (server
+    // role) before the native protocol runs over it — the daemon's TCP path.
+    auto nativeHandler = muxserver::makeNativeHandler(loop, host, "tok");
+    auto tlsContext = *serverTls;
+    auto handler = [tlsContext, nativeHandler](std::unique_ptr<net::ISocket> socket) {
+        return nativeHandler(tlsContext->wrap(std::move(socket)));
+    };
+    auto server = muxserver::MuxServer { loop, std::move(*listener), handler };
+
+    auto saw = false;
+    loop.blockOn(
+        net::testing::allOf(server.serve(), tlsTcpAttachDriver(&loop, &server, *clientTls, port, &saw)));
+    CHECK(saw); // snapshot mirrored across TLS-over-TCP with a valid token
 }
 
 // The attach-flow composition (Daemon.cpp) hard-codes STDIN/STDOUT and a real
