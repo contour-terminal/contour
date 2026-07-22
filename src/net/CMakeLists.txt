@@ -34,6 +34,8 @@ if(WIN32)
     )
 else()
     list(APPEND net_SOURCES
+        posix/AcceptLoop.cpp
+        posix/AcceptLoop.h
         posix/PosixListener.cpp
         posix/PosixListener.h
         posix/PosixSocket.cpp

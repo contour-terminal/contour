@@ -1,49 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <net/posix/PosixListener.h>
 
-#include <net/posix/PosixSocket.h>
-
 #ifndef _WIN32
 
     #include <sys/socket.h>
 
-    #include <array>
     #include <cerrno>
 
-    #include <fcntl.h>
     #include <netdb.h>
     #include <unistd.h>
 
     #include <arpa/inet.h>
+    #include <net/posix/AcceptLoop.h>
     #include <net/posix/FdUtils.h>
     #include <netinet/in.h>
 
 namespace net
 {
-
-namespace
-{
-    /// Formats a connected peer's address as a printable host string.
-    /// @param addr The peer's address storage.
-    /// @return The printable host, or "" if it cannot be formatted.
-    [[nodiscard]] std::string formatPeer(sockaddr_storage const& addr) noexcept
-    {
-        auto buf = std::array<char, INET6_ADDRSTRLEN> {};
-        if (addr.ss_family == AF_INET)
-        {
-            auto const* v4 = reinterpret_cast<sockaddr_in const*>(&addr);
-            if (::inet_ntop(AF_INET, &v4->sin_addr, buf.data(), buf.size()) != nullptr)
-                return buf.data();
-        }
-        else if (addr.ss_family == AF_INET6)
-        {
-            auto const* v6 = reinterpret_cast<sockaddr_in6 const*>(&addr);
-            if (::inet_ntop(AF_INET6, &v6->sin6_addr, buf.data(), buf.size()) != nullptr)
-                return buf.data();
-        }
-        return {};
-    }
-} // namespace
 
 PosixListener::PosixListener(EventLoop& loop, int fd, std::uint16_t localPort) noexcept:
     _loop(loop), _fd(fd), _localPort(localPort)
@@ -131,53 +104,8 @@ std::expected<std::unique_ptr<PosixListener>, NetError> PosixListener::bind(Even
 
 coro::Task<AcceptResult> PosixListener::accept()
 {
-    while (true)
-    {
-        if (_closed || _fd < 0)
-            co_return std::unexpected(makeNetError(NetErrorCode::Cancelled, 0, "accept on closed listener"));
-
-        auto peer = sockaddr_storage {};
-        auto peerLen = socklen_t { sizeof(peer) };
-    #ifdef __linux__
-        auto const conn =
-            ::accept4(_fd, reinterpret_cast<sockaddr*>(&peer), &peerLen, SOCK_NONBLOCK | SOCK_CLOEXEC);
-    #else
-        auto const conn = ::accept(_fd, reinterpret_cast<sockaddr*>(&peer), &peerLen);
-    #endif
-        if (conn >= 0)
-        {
-    #ifndef __linux__
-            // Portable fallback: set non-blocking + cloexec explicitly.
-            auto flags = ::fcntl(conn, F_GETFL, 0);
-            if (flags >= 0)
-                ::fcntl(conn, F_SETFL, flags | O_NONBLOCK);
-            auto fdFlags = ::fcntl(conn, F_GETFD, 0);
-            if (fdFlags >= 0)
-                ::fcntl(conn, F_SETFD, fdFlags | FD_CLOEXEC);
-    #endif
-            co_return std::unique_ptr<ISocket>(new PosixSocket(_loop, conn, formatPeer(peer)));
-        }
-
-        auto const err = errno;
-        if (err == EAGAIN || err == EWOULDBLOCK)
-        {
-            // Park until the listener fd is readable (a connection is pending). A
-            // cancelled wait (listener closed / stop requested) throws
-            // OperationCancelled, which the accept loop turns into Cancelled.
-            try
-            {
-                co_await _loop.waitReadable(_fd);
-            }
-            catch (coro::OperationCancelled const&)
-            {
-                co_return std::unexpected(makeNetError(NetErrorCode::Cancelled, 0, "accept cancelled"));
-            }
-            continue;
-        }
-        if (err == EINTR || err == ECONNABORTED)
-            continue;
-        co_return std::unexpected(makeNetError(NetErrorCode::Other, err, "accept"));
-    }
+    // The shared loop records the TCP peer's printable host via formatPeer.
+    return acceptOne(&_loop, &_fd, &_closed);
 }
 
 } // namespace net

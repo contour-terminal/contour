@@ -10,11 +10,10 @@
     #include <cerrno>
     #include <cstring>
 
-    #include <fcntl.h>
     #include <unistd.h>
 
+    #include <net/posix/AcceptLoop.h>
     #include <net/posix/FdUtils.h>
-    #include <net/posix/PosixSocket.h>
 
 namespace net
 {
@@ -182,48 +181,9 @@ std::expected<std::unique_ptr<UnixListener>, NetError> UnixListener::bind(EventL
 
 coro::Task<AcceptResult> UnixListener::accept()
 {
-    while (true)
-    {
-        if (_closed || _fd < 0)
-            co_return std::unexpected(makeNetError(NetErrorCode::Cancelled, 0, "accept on closed listener"));
-
-    #ifdef __linux__
-        auto const conn = ::accept4(_fd, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
-    #else
-        auto const conn = ::accept(_fd, nullptr, nullptr);
-    #endif
-        if (conn >= 0)
-        {
-    #ifndef __linux__
-            // Portable fallback: set non-blocking + cloexec explicitly.
-            if (auto const flags = ::fcntl(conn, F_GETFL, 0); flags >= 0)
-                ::fcntl(conn, F_SETFL, flags | O_NONBLOCK);
-            if (auto const fdFlags = ::fcntl(conn, F_GETFD, 0); fdFlags >= 0)
-                ::fcntl(conn, F_SETFD, fdFlags | FD_CLOEXEC);
-    #endif
-            co_return std::unique_ptr<ISocket>(new PosixSocket(_loop, conn));
-        }
-
-        auto const err = errno;
-        if (err == EAGAIN || err == EWOULDBLOCK)
-        {
-            // Park until the listener fd is readable (a connection is pending). A
-            // cancelled wait (listener closed / stop requested) throws
-            // OperationCancelled, which the accept loop turns into Cancelled.
-            try
-            {
-                co_await _loop.waitReadable(_fd);
-            }
-            catch (coro::OperationCancelled const&)
-            {
-                co_return std::unexpected(makeNetError(NetErrorCode::Cancelled, 0, "accept cancelled"));
-            }
-            continue;
-        }
-        if (err == EINTR || err == ECONNABORTED)
-            continue;
-        co_return std::unexpected(makeNetError(NetErrorCode::Other, err, "accept"));
-    }
+    // The AF_UNIX peer has no printable host, so the shared loop's formatPeer
+    // yields "" here -- exactly what this listener reported before.
+    return acceptOne(&_loop, &_fd, &_closed);
 }
 
 } // namespace net
