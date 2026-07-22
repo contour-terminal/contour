@@ -262,6 +262,10 @@ namespace
         out.u8(pdu.statusChanged);
         out.u8(pdu.statusDisplayType);
         out.u8(pdu.activeStatusDisplay);
+        out.u8(pdu.statusLinesChanged);
+        out.varint(pdu.statusLines.size());
+        for (auto const& line: pdu.statusLines)
+            encodeLine(out, line);
     }
 
     void encodeBody(Writer& out, SessionEvent const& pdu)
@@ -495,8 +499,11 @@ namespace
             || !assign(in.u8(), pdu.colorsChanged, error) || !assign(in.u32(), pdu.defaultForeground, error)
             || !assign(in.u32(), pdu.defaultBackground, error) || !assign(in.u8(), pdu.statusChanged, error)
             || !assign(in.u8(), pdu.statusDisplayType, error)
-            || !assign(in.u8(), pdu.activeStatusDisplay, error))
+            || !assign(in.u8(), pdu.activeStatusDisplay, error)
+            || !assign(in.u8(), pdu.statusLinesChanged, error))
             return std::unexpected(error);
+        if (auto const decoded = decodeVector(in, pdu.statusLines, decodeLine); !decoded)
+            return std::unexpected(decoded.error());
         return pdu;
     }
 

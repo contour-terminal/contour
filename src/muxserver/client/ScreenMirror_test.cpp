@@ -603,3 +603,46 @@ TEST_CASE("the status-display state reaches the mirror", "[muxserver][mirror]")
 
     h.loop.blockOn(drive(&h, std::move(scenario)));
 }
+
+TEST_CASE("host-writable status-line content reaches the mirror", "[muxserver][mirror]")
+{
+    auto h = MirrorHarness {};
+    h.host.createTab();
+    auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    h.serverTerminal(session)->writeToScreen("body");
+
+    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+        co_await waitUntil(&h->loop, [&] {
+            return h->mirror->primaryScreen().grid().renderMainPageText().contains("body");
+        });
+
+        // Show the host-writable status line (DECSSDT 2), switch writes to it
+        // (DECSASD 1), write custom content, switch back to the main display
+        // (DECSASD 0). The app's status-line text must reach the mirror's status page.
+        serverWrites(h, session, "\033[2$~\033[1$}STATUSBAR\033[0$}");
+        // Sanity: the server itself put the content on its host-writable status line.
+        REQUIRE(h->serverTerminal(session)->statusDisplayType()
+                == vtbackend::StatusDisplayType::HostWritable);
+        REQUIRE(h->serverTerminal(session)
+                    ->hostWritableStatusLineDisplay()
+                    .grid()
+                    .lineText(vtbackend::LineOffset(0))
+                    .contains("STATUSBAR"));
+        co_await waitUntil(&h->loop, [&] {
+            return h->mirror->hostWritableStatusLineDisplay()
+                .grid()
+                .lineText(vtbackend::LineOffset(0))
+                .contains("STATUSBAR");
+        });
+        CHECK(h->mirror->hostWritableStatusLineDisplay()
+                  .grid()
+                  .lineText(vtbackend::LineOffset(0))
+                  .contains("STATUSBAR"));
+        // The main grid is untouched.
+        CHECK(h->mirror->primaryScreen().grid().renderMainPageText().contains("body"));
+
+        h->client->detach();
+    }(&h, session);
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}

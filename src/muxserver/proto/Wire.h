@@ -37,7 +37,9 @@ namespace muxserver::proto
 /// v8 added Delta.defaultForeground/Background (live OSC 10/11 default colors).
 /// v9 added the status-display state (DECSSDT/DECSASD) to SessionState and Delta —
 /// the first slice of multi-page support beyond primary/alternate.
-constexpr uint32_t CodecVersion = 9;
+/// v10 added Delta.statusLines: the host-writable status line's cell content
+/// (a tiny separate page), carried whole on change.
+constexpr uint32_t CodecVersion = 10;
 
 /// The largest frame payload the decoder will accept. A peer-declared length
 /// beyond this is rejected outright (FrameTooLarge) rather than treated as

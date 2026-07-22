@@ -136,6 +136,10 @@ class HostedSession
         std::function<void()> onBell;
         std::function<void(std::string, std::string)> onNotify;
         std::function<void(std::string)> onCopyToClipboard;
+        /// The app asked to show the host-writable status line (DECSSDT 2); the
+        /// daemon honors it by switching the terminal's status display on (the
+        /// frontend decision the GUI makes too).
+        std::function<void()> onShowHostWritableStatusLine;
 
         void screenUpdated() override
         {
@@ -161,6 +165,11 @@ class HostedSession
         {
             if (onCopyToClipboard)
                 onCopyToClipboard(std::string { data });
+        }
+        void requestShowHostWritableStatusLine() override
+        {
+            if (onShowHostWritableStatusLine)
+                onShowHostWritableStatusLine();
         }
     };
 

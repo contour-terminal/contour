@@ -79,6 +79,8 @@ void RemoteScreen::apply(proto::Delta const& delta)
         statusDisplayType = delta.statusDisplayType;
         activeStatusDisplay = delta.activeStatusDisplay;
     }
+    if (delta.statusLinesChanged != 0)
+        statusLines = delta.statusLines;
 
     for (auto const& line: delta.lines)
     {

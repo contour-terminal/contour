@@ -369,9 +369,17 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
 - 2026-07-22 · Windows/clangcl-release · **A10 scope-2 (status-display state) done** — multi-page
   support beyond primary/alt: `SessionState`/`Delta` carry `statusDisplayType`/`activeStatusDisplay`
   (pull+diff); `ScreenMirror` re-emits DECSSDT/DECSASD. CodecVersion → 9. Closed-loop test (indicator
-  status line shows on the mirror, rendered locally). Suite green (123/2654). **A10 scope-1
-  (host-writable status-line CONTENT, per-page `Delta.page`) remains.** Remaining overall: A8,
-  A10-content, B2/B3/B4 (Qt), C3/C4/C5 (Qt), B5.
+  status line shows on the mirror, rendered locally). Suite green (123/2654).
+- 2026-07-22 · Windows/clangcl-release · **A10 scope-1 (host-writable status-line CONTENT) done** —
+  `Delta.statusLines` carries the host-writable status page's (tiny) grid whole-on-change;
+  `ScreenMirror` paints it (DECSASD to the status line → cells → back). **Plus the daemon-side
+  enablement:** `HostedSession::Events` now honors `requestShowHostWritableStatusLine()` (DECSSDT 2
+  only *requests* the status line — the frontend decides; the GUI does the same) by calling
+  `setStatusDisplay(HostWritable)`. CodecVersion → 10. Closed-loop test (app writes STATUSBAR to its
+  status line → the mirror's status page shows it). Suite green (124/2658). **Remaining A10: multiple
+  DEC pages (`_pages`/`_cursorPage`) — `ScreenType` collapses pages 1+ to "Alternate" and the daemon
+  serializes only `currentScreen()`; investigating whether Contour uses > 2 pages.** Remaining
+  overall: A8, A10-decpages, B2/B3/B4 (Qt), C3/C4/C5 (Qt), B5.
 
 ## Open decisions / risks
 

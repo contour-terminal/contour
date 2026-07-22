@@ -121,7 +121,9 @@ TEST_CASE("every catalog PDU round-trips", "[muxserver][proto]")
                 .defaultBackground = 0x1A1716,
                 .statusChanged = 1,
                 .statusDisplayType = 2,
-                .activeStatusDisplay = 1 },
+                .activeStatusDisplay = 1,
+                .statusLinesChanged = 1,
+                .statusLines = { line } },
         SessionEvent { .session = 4, .kind = 1, .a = "Build finished", .b = "3 warnings, 0 errors" },
         LayoutState {
             .window = 1,

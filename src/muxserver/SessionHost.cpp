@@ -37,6 +37,11 @@ HostedSession::HostedSession(SessionId id,
     _terminal(_events, std::move(pty), std::move(settings), std::chrono::steady_clock::now()),
     _onClosed(std::move(onClosed))
 {
+    // DECSSDT 2 only REQUESTS the host-writable status line; the frontend decides.
+    // The daemon honors it (the GUI does the same), so an app's status line works.
+    _events.onShowHostWritableStatusLine = [this] {
+        _terminal.setStatusDisplay(vtbackend::StatusDisplayType::HostWritable);
+    };
 }
 
 HostedSession::~HostedSession()

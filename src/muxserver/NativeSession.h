@@ -143,6 +143,9 @@ class NativeSession final: public SessionStreamEvents
         /// so a DECSSDT/DECSASD change carries (and forces) a delta only on change.
         int lastStatusDisplayType = -1;
         int lastActiveStatusDisplay = -1;
+        /// The host-writable status-line rows last sent, so the (tiny) status page
+        /// re-ships only when its content changed.
+        std::vector<proto::WireLine> lastStatusLines;
     };
 
     void handlePdu(proto::DecodedFrame const& frame);

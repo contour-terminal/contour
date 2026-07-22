@@ -209,6 +209,24 @@ namespace
             }
         }
     }
+
+    /// Paints the host-writable status line's rows onto the mirror's status page:
+    /// switch the active display to it (DECSASD 1), paint each row, switch back to
+    /// the server's active display. A no-op when there is no status-line content.
+    void appendStatusLines(std::string& out, RemoteScreen const& screen)
+    {
+        if (screen.statusLines.empty())
+            return;
+        out += "\033[1$}"; // DECSASD -> host-writable status line
+        auto row = int64_t { 1 };
+        for (auto const& line: screen.statusLines)
+        {
+            out += cup(row++, 1);
+            out += "\033[0m\033[2K";
+            renderCells(out, line, screen.hyperlinks, /*faithful=*/false);
+        }
+        out += std::format("\033[{}$}}", screen.activeStatusDisplay); // restore the server's active display
+    }
 } // namespace
 
 std::string ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
@@ -285,6 +303,8 @@ std::string ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& 
         out += std::format("\033[{}$~", delta.statusDisplayType);    // DECSSDT
         out += std::format("\033[{}$}}", delta.activeStatusDisplay); // DECSASD
     }
+    if (delta.statusLinesChanged != 0)
+        appendStatusLines(out, screen);
     out += "\033[0m";
     out += cup(delta.cursorLine + 1, delta.cursorColumn + 1);
     if (containsValue(_setModes, VisibleCursorModeNumber))
@@ -365,6 +385,7 @@ std::string ScreenMirror::fullReplay(RemoteScreen const& screen)
         out += std::format("\033[{}$~", screen.statusDisplayType);    // DECSSDT
         out += std::format("\033[{}$}}", screen.activeStatusDisplay); // DECSASD
     }
+    appendStatusLines(out, screen); // paints the host-writable status page, if any
     syncModes(out, screen);
     appendImages(out, screen);
     out += "\033[0m";

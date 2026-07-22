@@ -437,6 +437,24 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
             follow.lastActiveStatusDisplay = activeStatus;
         }
 
+        // Host-writable status-line CONTENT (a separate page): when that page is
+        // shown, carry its whole (tiny) grid so the client paints the app's custom
+        // status line. Full resend on change — no stable-id delta for one row.
+        if (terminal->statusDisplayType() == vtbackend::StatusDisplayType::HostWritable)
+        {
+            auto const& statusGrid = terminal->hostWritableStatusLineDisplay().grid();
+            auto rows = std::vector<proto::WireLine> {};
+            for (auto const i: std::views::iota(0, unbox<int>(statusGrid.pageSize().lines)))
+                rows.push_back(toWireLine(
+                    statusGrid, vtbackend::LineOffset(i), statusGrid.lineAt(vtbackend::LineOffset(i))));
+            if (snapshot || rows != follow.lastStatusLines)
+            {
+                delta.statusLinesChanged = 1;
+                delta.statusLines = rows;
+            }
+            follow.lastStatusLines = std::move(rows);
+        }
+
         if (snapshot)
         {
             auto& snap = state.emplace();
@@ -469,7 +487,7 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
         delta.cursorLine != follow.lastCursorLine || delta.cursorColumn != follow.lastCursorColumn;
     if (delta.snapshot != 0 || !delta.lines.empty() || modesChanged || cursorMoved || delta.titleChanged != 0
         || delta.cursorShapeChanged != 0 || delta.cwdChanged != 0 || delta.colorsChanged != 0
-        || delta.statusChanged != 0)
+        || delta.statusChanged != 0 || delta.statusLinesChanged != 0)
     {
         follow.lastModes = delta.setModes;
         follow.lastCursorLine = delta.cursorLine;

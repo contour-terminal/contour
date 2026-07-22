@@ -244,6 +244,11 @@ struct Delta
     uint8_t statusChanged = 0;
     uint8_t statusDisplayType = 0;
     uint8_t activeStatusDisplay = 0;
+    /// Set (1) when the host-writable status line's content changed this batch;
+    /// `statusLines` then holds its whole (tiny) grid, painted onto the mirror's
+    /// status page. A separate page from the main grid — the multi-page carrier.
+    uint8_t statusLinesChanged = 0;
+    std::vector<WireLine> statusLines;
     bool operator==(Delta const&) const = default;
 };
 
