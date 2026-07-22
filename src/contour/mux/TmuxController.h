@@ -30,6 +30,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 #include <muxserver/tmux/TmuxClientModel.h>
 #include <muxserver/tmux/TmuxGateway.h>
@@ -48,6 +49,19 @@ class TerminalSession;
 /// @param pane The tmux pane id to resume.
 /// @return The control-mode command line.
 [[nodiscard]] std::string tmuxResumePaneCommand(uint64_t pane);
+
+/// The tmux control-mode command that splits pane @p pane. tmux: `-h` splits left|right (our
+/// Vertical), the default stacks top|bottom (our Horizontal) — @see ControlSession::commandSplitWindow.
+/// Pure so the wire format the server parser consumes is unit-testable.
+/// @param pane The tmux pane id to split.
+/// @param vertical Whether to split left|right (`-h`) rather than top|bottom.
+/// @return The control-mode command line.
+[[nodiscard]] std::string tmuxSplitWindowCommand(uint64_t pane, bool vertical);
+
+/// The tmux control-mode command that closes pane @p pane (`kill-pane -t %N`).
+/// @param pane The tmux pane id to kill.
+/// @return The control-mode command line.
+[[nodiscard]] std::string tmuxKillPaneCommand(uint64_t pane);
 
 /// The tmux-mirror session factory and pane registry.
 class TmuxController final: public QObject, public SessionFactory, public muxserver::tmux::TmuxModelEvents
@@ -91,6 +105,13 @@ class TmuxController final: public QObject, public SessionFactory, public muxser
         std::optional<std::string> profileName = std::nullopt) override;
 
     [[nodiscard]] bool canCreateSession() const noexcept override;
+
+    /// SessionFactory: a GUI split of the pane backed by @p actingPty is authored on tmux
+    /// (`split-window`) rather than split locally — tmux's %layout-change re-realizes the new pane
+    /// through the mirror. A split issued BY the reconciler itself (while realizing an existing tmux
+    /// pane) is not re-authored — it builds the mirror pane locally. Returns false (a local split) if
+    /// the pty is not bound to a tmux pane.
+    [[nodiscard]] bool requestRemoteSplit(vtpty::Pty const* actingPty, bool vertical) override;
 
     // TmuxModelEvents (reactor thread) — structure changes queue realizations.
     void paneAdded(uint64_t window, uint64_t pane, int columns, int lines) override;
@@ -145,7 +166,11 @@ class TmuxController final: public QObject, public SessionFactory, public muxser
     std::unordered_map<uint64_t, vtpty::ChannelPty*> _ptys;         ///< Bound ptys, by pane.
     std::unordered_map<uint64_t, TerminalSession*> _actingByWindow; ///< Split anchor per tmux window.
     std::unordered_map<uint64_t, std::string> _pendingRenames; ///< %window-renamed titles awaiting apply.
-    muxserver::tmux::TmuxGateway* _gateway = nullptr;          ///< Reactor-owned; valid while serving.
+    std::unordered_set<uint64_t>
+        _remotelyClosed; ///< Panes tmux removed; their unbind must not echo kill-pane.
+    bool _realizing =
+        false; ///< True while adoptPendingPanes realizes tmux panes, so its splits build locally.
+    muxserver::tmux::TmuxGateway* _gateway = nullptr; ///< Reactor-owned; valid while serving.
     int _tmuxPid = -1;
     bool _stopped = false;
 

@@ -57,6 +57,42 @@ TEST_CASE("tmux resume-pane command matches the server's refresh-client format (
     CHECK(contour::tmuxResumePaneCommand(42) == "refresh-client -A %42:continue");
 }
 
+// B5: the split/kill commands must match the server's split-window/kill-pane handlers
+// (ControlSession::commandSplitWindow maps -h -> Vertical; default -> Horizontal).
+TEST_CASE("tmux split/kill commands match the server's command format (B5)", "[attach][tmux]")
+{
+    CHECK(contour::tmuxSplitWindowCommand(3, /*vertical=*/true) == "split-window -h -t %3");
+    CHECK(contour::tmuxSplitWindowCommand(3, /*vertical=*/false) == "split-window -t %3");
+    CHECK(contour::tmuxKillPaneCommand(7) == "kill-pane -t %7");
+}
+
+// B5: a GUI split of a mirrored pane is authored on the tmux server (requestRemoteSplit returns
+// true so the manager does NOT split locally); a pty not bound to a tmux pane is not routed.
+TEST_CASE("a GUI split in tmux mode is authored on the tmux server (B5)", "[attach][tmux]")
+{
+    auto ctrlOwned = std::make_unique<contour::TmuxController>(std::string {});
+    auto* ctrl = ctrlOwned.get();
+    contour::test::TestApp app { std::move(ctrlOwned) };
+    contour::test::ScopedController const win { app.manager() };
+
+    ctrl->paneAdded(/*window=*/1, /*pane=*/10, 80, 24);
+    ctrl->adoptPendingPanes(app.manager(), win.id);
+    auto* tab = app.manager().model().window(win.id)->tabAt(0);
+    REQUIRE(tab != nullptr);
+    auto* session = app.manager().sessionForId(tab->activePane()->session());
+    REQUIRE(session != nullptr);
+
+    // The pane's pty is bound to tmux pane %10 → a GUI split routes to the server.
+    CHECK(ctrl->requestRemoteSplit(&session->terminal().device(), /*vertical=*/true));
+
+    // A pty bound to no tmux pane is not routed (the manager would split it locally).
+    auto foreign =
+        vtpty::MockPty { vtbackend::PageSize { vtbackend::LineCount(24), vtbackend::ColumnCount(80) } };
+    CHECK_FALSE(ctrl->requestRemoteSplit(&foreign, /*vertical=*/true));
+
+    ctrl->stop();
+}
+
 #ifndef _WIN32
 
     #include <array>

@@ -37,6 +37,17 @@ std::string tmuxResumePaneCommand(uint64_t pane)
     return std::format("refresh-client -A %{}:continue", pane);
 }
 
+std::string tmuxSplitWindowCommand(uint64_t pane, bool vertical)
+{
+    // tmux: -h splits left|right (our Vertical); default stacks top|bottom (Horizontal).
+    return std::format("split-window {}-t %{}", vertical ? "-h " : "", pane);
+}
+
+std::string tmuxKillPaneCommand(uint64_t pane)
+{
+    return std::format("kill-pane -t %{}", pane);
+}
+
 /// The model-owned pane sink: buffers bytes until a local pty is bound, then
 /// feeds it directly. Destroyed by the model on the reactor thread; the
 /// destructor unregisters so the controller never touches a dead feed.
@@ -202,6 +213,9 @@ void TmuxController::paneRemoved(uint64_t /*window*/, uint64_t pane)
     // returns — the pty cannot be freed mid-close. Releasing the lock first would
     // reintroduce the use-after-free race between the reactor and GUI threads.
     auto const lock = std::lock_guard { _mutex };
+    // tmux removed this pane — mark it so the pty's eventual unbind does not echo a kill-pane back
+    // for a pane that is already gone.
+    _remotelyClosed.insert(pane);
     std::erase_if(_pending, [pane](PendingPane const& pending) { return pending.pane == pane; });
     if (auto const it = _ptys.find(pane); it != _ptys.end())
         it->second->close(); // the session sees EOF; the manager prunes its pane/tab
@@ -257,10 +271,23 @@ void TmuxController::exited(std::string const& reason)
 
 void TmuxController::unbindPane(uint64_t pane)
 {
-    auto const lock = std::lock_guard { _mutex };
-    _ptys.erase(pane);
-    if (auto const it = _feeds.find(pane); it != _feeds.end())
-        it->second->attach(nullptr);
+    auto killRemote = false;
+    {
+        auto const lock = std::lock_guard { _mutex };
+        _ptys.erase(pane);
+        if (auto const it = _feeds.find(pane); it != _feeds.end())
+            it->second->attach(nullptr);
+        // A pty destroyed while attached means the user closed this pane. Kill it on tmux too —
+        // unless the whole connection is tearing down (_stopped), or tmux is the one that removed
+        // the pane (then this unbind is the downstream of paneRemoved, not a user close).
+        if (!_stopped && _remotelyClosed.erase(pane) == 0)
+            killRemote = true;
+    }
+    if (killRemote)
+        _reactor.post([this, pane] {
+            if (_gateway != nullptr)
+                _gateway->sendCommand(tmuxKillPaneCommand(pane));
+        });
 }
 
 void TmuxController::dropFeed(uint64_t pane)
@@ -280,6 +307,26 @@ bool TmuxController::canCreateSession() const noexcept
 {
     auto const lock = std::lock_guard { _mutex };
     return !_pending.empty();
+}
+
+bool TmuxController::requestRemoteSplit(vtpty::Pty const* actingPty, bool vertical)
+{
+    auto const pane = [&]() -> std::optional<uint64_t> {
+        auto const lock = std::lock_guard { _mutex };
+        if (_realizing)
+            return std::nullopt; // the reconciler's own split: build the mirror pane locally
+        for (auto const& [id, pty]: _ptys)
+            if (pty == actingPty)
+                return id;
+        return std::nullopt;
+    }();
+    if (!pane)
+        return false; // unknown pty or realizing → the manager splits locally
+    _reactor.post([this, pane = *pane, vertical] {
+        if (_gateway != nullptr)
+            _gateway->sendCommand(tmuxSplitWindowCommand(pane, vertical));
+    });
+    return true;
 }
 
 std::unique_ptr<vtpty::Pty> TmuxController::createPty(std::optional<std::string> /*cwd*/,
@@ -335,6 +382,13 @@ std::unique_ptr<vtpty::Pty> TmuxController::createPty(std::optional<std::string>
 
 void TmuxController::adoptPendingPanes(TerminalSessionManager& manager, vtmux::WindowId window)
 {
+    // Each subsequent pane is realized by manager.splitActivePane, which consults requestRemoteSplit;
+    // while realizing an EXISTING tmux pane the split must build locally, not author a new one back to
+    // tmux. (Mirrors AttachController::isRealizingLayout.)
+    {
+        auto const lock = std::lock_guard { _mutex };
+        _realizing = true;
+    }
     while (true)
     {
         auto record = PendingPane {};
@@ -367,6 +421,10 @@ void TmuxController::adoptPendingPanes(TerminalSessionManager& manager, vtmux::W
             break;
         if (created != nullptr)
             _actingByWindow[record.window] = created;
+    }
+    {
+        auto const lock = std::lock_guard { _mutex };
+        _realizing = false;
     }
     // A window renamed before its first pane was realized now has a tab — title it.
     applyPendingRenames(manager);
