@@ -56,6 +56,7 @@ Condensed native-protocol gap table (Fat GUI = target). Legend: ✅ full · ⚠�
 | Scrollback | ✅ real | ⚠️ received, no UI | `ScreenMirror::fullReplay`; `TtyRenderer` viewport-only |
 | Selection/search/copy | ✅ native | ❌ | mirror drives a real `Terminal` |
 | Layout: tabs/panes/windows | ❌ flat 1-tab-per-session | ❌ | `NativeSession.cpp:353-358` leaf-walk; no LayoutState PDU |
+| Multi-page (status-line displays) | ❌ only `currentScreen()` synced | ❌ | `NativeSession.cpp:296` serializes the main grid; the host-writable/indicator status-line `Screen`s are missed |
 
 **Load-bearing architecture facts (these shrink the work):**
 - **The daemon already owns a complete `vtmux::SessionModel`** (windows→tabs→pane trees),
@@ -163,6 +164,30 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       CI/manually verified (real stdin/stdout/TTY, not headless), but its `ScreenMirror` core is
       fully unit-tested. Follow-up: a scrollback UI; ensure the outer Contour has GIP enabled for
       images.
+- [ ] **A10. Full multi-page support (status-line displays).** *(Added 2026-07-22 — the native
+      protocol models only ONE grid per session; `ScreenType` predates Contour's multi-page support.)*
+      A session has more renderable **pages** than primary/alternate: `NativeSession` serializes only
+      `terminal->currentScreen().grid()` (`NativeSession.cpp:296`), but Contour also has a
+      **host-writable status line** (`_hostWritableStatusLineScreen` — an app writes it after DECSASD
+      `CSI 1 $ }`) and an **indicator status line** (`_indicatorStatusScreen`), each a *separate*
+      `Screen`/grid, selected by `StatusDisplayType` {None,Indicator,HostWritable} + `ActiveStatusDisplay`
+      {Main,StatusLine,IndicatorStatusLine} + `StatusDisplayPosition` {Top,Bottom} (DECSSDT `$~` /
+      DECSASD `$}`). Today those pages are dropped, so a thin/GUI client shows no/stale status line.
+      **Scope (buildable/testable in muxserver + vtbackend, additive — `Terminal::pageSize` already
+      excludes the status line, so main-grid deltas are unaffected):**
+      1. Address deltas **per page**: add `Delta.page` (0 = main, 1 = host-writable status line) and a
+         `FollowState` cursor per page; the server runs the same stable-id delta over
+         `hostWritableStatusLineDisplay().grid()`; the client keeps a `RemoteScreen` per (session, page).
+      2. Carry the status-display **state** — `StatusDisplayType`, `StatusDisplayPosition`,
+         `ActiveStatusDisplay` — in `SessionState` (+ live via `Delta`, pull+diff like the colors);
+         `ScreenMirror` re-emits DECSSDT/DECSASD and paints the status page in the right position, so
+         the mirror terminal reproduces it (GUI) / the outer terminal shows it (TUI).
+      3. The **indicator** status line is Contour-rendered from state (VTType/mode/cwd/…). Decide:
+         render it locally on the client from already-synced state (keeps it client-styled, matches the
+         mux philosophy) vs. ship its cells. Recommend local render → only the *host-writable* page
+         needs cell sync.
+      Follow-up within A10: DEC saved/pushed status-display stack (`savedStatusDisplayType`,
+      `pushStatusDisplay`).
 
 ### WS-B — Layout: tabs / panes / multi-window (roadmap F1/F2)
 
