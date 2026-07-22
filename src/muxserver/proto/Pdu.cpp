@@ -237,6 +237,9 @@ namespace
         out.varint(pdu.setModes.size());
         for (auto const mode: pdu.setModes)
             out.varint(mode);
+
+        out.u8(pdu.titleChanged);
+        out.string(pdu.title);
     }
 
     // --- body decoders (one table row each) ---------------------------------
@@ -423,6 +426,9 @@ namespace
                                               });
             !decoded)
             return std::unexpected(decoded.error());
+
+        if (!assign(in.u8(), pdu.titleChanged, error) || !assign(in.string(), pdu.title, error))
+            return std::unexpected(error);
         return pdu;
     }
 

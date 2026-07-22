@@ -258,6 +258,8 @@ std::string ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& 
 
     syncModes(out, screen);
     appendImages(out, screen);
+    if (delta.titleChanged != 0)
+        out += std::format("\033]0;{}\033\\", delta.title);
     out += "\033[0m";
     out += cup(delta.cursorLine + 1, delta.cursorColumn + 1);
     if (containsValue(_setModes, VisibleCursorModeNumber))

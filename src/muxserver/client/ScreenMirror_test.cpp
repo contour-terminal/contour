@@ -408,3 +408,28 @@ TEST_CASE("inline images round-trip into the mirror via GIP", "[muxserver][mirro
 
     h.loop.blockOn(drive(&h, std::move(scenario)));
 }
+
+TEST_CASE("a live window-title change reaches the mirror", "[muxserver][mirror]")
+{
+    auto h = MirrorHarness {};
+    h.host.createTab();
+    auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    h.serverTerminal(session)->writeToScreen("work");
+
+    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+        co_await waitUntil(&h->loop, [&] {
+            return h->mirror->primaryScreen().grid().renderMainPageText().contains("work");
+        });
+
+        // Change ONLY the title (OSC 2, no cell change) — the title-only delta must
+        // still push and the mirror must re-title.
+        serverWrites(h, session, "\033]2;my-title\033\\");
+        co_await waitUntil(&h->loop, [&] { return h->mirror->windowTitle() == "my-title"; });
+        CHECK(h->mirror->windowTitle() == "my-title");
+        CHECK(h->serverTerminal(session)->windowTitle() == "my-title");
+
+        h->client->detach();
+    }(&h, session);
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}

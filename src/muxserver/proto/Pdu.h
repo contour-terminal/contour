@@ -201,6 +201,11 @@ struct Delta
     /// every delta so clients replay input-relevant state (cursor keys,
     /// mouse, bracketed paste, focus, cursor visibility) by diffing.
     std::vector<uint32_t> setModes;
+    /// Set (1) when the window title changed in this batch; `title` then holds
+    /// the new OSC 0/2 title. Gated so an unchanged title costs one byte, not
+    /// the whole string on every delta.
+    uint8_t titleChanged = 0;
+    std::string title;
     bool operator==(Delta const&) const = default;
 };
 

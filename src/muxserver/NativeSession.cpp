@@ -251,6 +251,19 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
             delta.hyperlinks.push_back(proto::HyperlinkEntry { .id = id, .uri = info->uri });
         }
 
+        // Live window title (OSC 0/2): the snapshot carries it in SessionState
+        // below; an incremental delta carries it only when it changed since last
+        // sent, so a title-only batch still re-titles the mirror.
+        if (auto title = std::string { terminal->windowTitle() }; title != follow.lastTitle)
+        {
+            if (!snapshot)
+            {
+                delta.titleChanged = 1;
+                delta.title = title;
+            }
+            follow.lastTitle = std::move(title);
+        }
+
         if (snapshot)
         {
             auto& snap = state.emplace();
@@ -275,7 +288,7 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
     auto const modesChanged = delta.setModes != follow.lastModes;
     auto const cursorMoved =
         delta.cursorLine != follow.lastCursorLine || delta.cursorColumn != follow.lastCursorColumn;
-    if (delta.snapshot != 0 || !delta.lines.empty() || modesChanged || cursorMoved)
+    if (delta.snapshot != 0 || !delta.lines.empty() || modesChanged || cursorMoved || delta.titleChanged != 0)
     {
         follow.lastModes = delta.setModes;
         follow.lastCursorLine = delta.cursorLine;

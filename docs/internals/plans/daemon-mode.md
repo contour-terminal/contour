@@ -117,10 +117,12 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       *Landed 2026-07-22; muxserver suite green (113 cases / 2610 assertions).* Completes roadmap
       **F5**. Follow-up: the source alignment/resize policy is not on the native wire yet (v1 uses
       StretchToFill), and images whose anchor scrolled into history aren't re-placed until a resync.
-- [ ] **A2. Live title.** A0 signal → promote `title` into `Delta` (or a small `TitleChanged`
-      PDU / `SessionState` re-send). `ScreenMirror` emits OSC 0/2 **incrementally** (today only in
-      `fullReplay`, `ScreenMirror.cpp:323`); GUI `TerminalSession::setWindowTitle` path drives the
-      tab title.
+- [x] **A2. Live title.** No Events tap needed — `screenUpdated` fires per input batch, so
+      `NativeSession::pushDelta` pull+diffs `windowTitle()` against `FollowState.lastTitle` and sets
+      `Delta.titleChanged`/`Delta.title` when it changed (a title-only batch now also passes the
+      send gate). `RemoteScreen` adopts it; `ScreenMirror::apply` emits `OSC 0` incrementally, so the
+      mirror terminal's own `setWindowTitle` drives the GUI tab title. CodecVersion → 4. Closed-loop
+      test (OSC 2 with no cell change → mirror re-titles). *Landed 2026-07-22; suite green (114/2612).*
 - [ ] **A3. Populate + live-sync `SessionState` color/cursor slots.** In `pushDelta`, pull
       `cursorShape()`/`cursorDisplay()`, `colorPalette().defaultForeground/Background`, and the
       indexed `palette`; diff against last-sent and emit an incremental state record when changed
@@ -250,7 +252,11 @@ runtime-gated net tests, watch the Windows job after each push.
   3 new tests; full muxserver suite green (112 cases / 2606 assertions), build `-Werror` clean.
 - 2026-07-22 · Windows/clangcl-release · **A1b done** — `ScreenMirror` re-emits images via GIP
   (upload-once-by-name + StretchToFill placement, layer-faithful); closed-loop GIP round-trip test.
-  Suite green (113 cases / 2610 assertions). **WS-A1 (images) complete.** Next: A0 (Events tap).
+  Suite green (113 cases / 2610 assertions). **WS-A1 (images) complete.**
+- 2026-07-22 · Windows/clangcl-release · **A2 done** — live window title over the wire
+  (`Delta.title`, pull+diff in `pushDelta`, `ScreenMirror` OSC 0). CodecVersion → 4. Suite green
+  (114/2612). Next: A0 + A4/A5/A6 (Events tap → bell / notifications / clipboard via a SessionEvent
+  PDU — a new tag, so no further codec bump).
 
 ## Open decisions / risks
 

@@ -106,7 +106,9 @@ TEST_CASE("every catalog PDU round-trips", "[muxserver][proto]")
                                                  .offsetLine = 0,
                                                  .offsetColumn = 1,
                                                  .layer = 2 } },
-                .setModes = { 1, 25, 1006, 2004 } },
+                .setModes = { 1, 25, 1006, 2004 },
+                .titleChanged = 1,
+                .title = "~/src/contour — vim" },
     };
 
     for (auto const& pdu: pdus)

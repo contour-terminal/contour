@@ -84,6 +84,9 @@ class NativeSession final: public SessionStreamEvents
         /// grids with independent generations, so a flip must force a resync (and
         /// nullopt — a session never pushed before — forces the initial snapshot).
         std::optional<vtbackend::ScreenType> lastScreenType;
+        /// The window title last sent to this connection, so an incremental delta
+        /// carries the title (and forces a send) only when it actually changed.
+        std::string lastTitle;
     };
 
     void handlePdu(proto::DecodedFrame const& frame);
