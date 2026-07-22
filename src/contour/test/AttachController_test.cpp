@@ -76,11 +76,16 @@ struct DaemonFixture
         auto listener = net::listen(loop, "127.0.0.1", 0);
         REQUIRE(listener.has_value());
         port = (*listener)->localPort();
-        // Plain native protocol over loopback TCP (no TLS): loopback is trusted, so
-        // the test exercises the attach path without the TLS layer.
+        // Encrypt each accepted socket (server-side TLS, self-signed) before the
+        // native protocol runs over it — the daemon's real TCP path. This exercises
+        // the two-reactor TLS handshake (client + daemon on independent reactors),
+        // which AttachClient's concurrent read+write drives.
+        auto tls = net::makeSelfSignedServerContext();
+        REQUIRE(tls.has_value());
         auto native = muxserver::makeNativeHandler(loop, *host);
-        auto handler = [native](std::unique_ptr<net::ISocket> socket) {
-            return native(std::move(socket));
+        auto context = *tls;
+        auto handler = [context, native](std::unique_ptr<net::ISocket> socket) {
+            return native(context->wrap(std::move(socket)));
         };
         server = std::make_unique<muxserver::MuxServer>(loop, std::move(*listener), handler);
         thread = std::thread { [this] {
@@ -109,12 +114,10 @@ struct DaemonFixture
     DaemonFixture(DaemonFixture&&) = delete;
     DaemonFixture& operator=(DaemonFixture&&) = delete;
 
-    /// The endpoint a client dials: plain loopback TCP, no token.
+    /// The endpoint a client dials: loopback TCP + TLS (TOFU), no token.
     [[nodiscard]] muxserver::TcpEndpoint endpoint() const
     {
-        return muxserver::TcpEndpoint {
-            .host = "127.0.0.1", .port = port, .token = {}, .caPem = {}, .tls = false
-        };
+        return muxserver::TcpEndpoint { .host = "127.0.0.1", .port = port, .token = {}, .caPem = {} };
     }
 
     /// Runs @p fn on the daemon's loop thread and waits for its result —

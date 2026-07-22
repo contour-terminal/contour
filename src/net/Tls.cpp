@@ -3,11 +3,14 @@
 
 #include <algorithm>
 #include <array>
+#include <coroutine>
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <openssl/bio.h>
 #include <openssl/err.h>
@@ -146,12 +149,40 @@ namespace
         [[nodiscard]] bool isClosed() const noexcept override { return _inner->isClosed(); }
 
       private:
-        /// Drives the handshake to completion (idempotent); both roles pump BIOs.
+        /// Suspends a caller until the in-flight handshake, driven by another
+        /// coroutine, completes. OpenSSL is not reentrant, so concurrent read() and
+        /// write() (as AttachClient does) must NOT both call SSL_do_handshake — the
+        /// single-loop path serialized them by timing; a real two-reactor connection
+        /// interleaves them and corrupts the handshake without this gate.
+        struct HandshakeGate
+        {
+            TlsSocket* self;
+            [[nodiscard]] bool await_ready() const noexcept { return !self->_handshaking; }
+            void await_suspend(std::coroutine_handle<> handle) const
+            {
+                self->_handshakeWaiters.push_back(handle);
+            }
+            void await_resume() const noexcept {}
+        };
+
+        /// Drives the handshake to completion (idempotent), or — if another coroutine
+        /// is already driving it — waits for that to finish. Both roles pump BIOs.
         coro::Task<std::expected<void, NetError>> handshake()
         {
             if (_handshakeDone)
                 co_return std::expected<void, NetError> {};
+            if (_handshakeError)
+                co_return std::unexpected(*_handshakeError);
+            if (_handshaking)
+            {
+                co_await HandshakeGate { this };
+                if (_handshakeError)
+                    co_return std::unexpected(*_handshakeError);
+                co_return std::expected<void, NetError> {};
+            }
 
+            _handshaking = true;
+            auto outcome = std::expected<void, NetError> {};
             while (true)
             {
                 auto const result = SSL_do_handshake(_ssl);
@@ -159,27 +190,46 @@ namespace
                 // Always flush whatever the last step queued (ClientHello, the
                 // server's flight, Finished, …) before deciding what to await.
                 if (auto const flushed = co_await flushOut(); !flushed)
-                    co_return std::unexpected(flushed.error());
+                {
+                    outcome = std::unexpected(flushed.error());
+                    break;
+                }
                 if (result == 1)
                 {
                     _handshakeDone = true;
-                    co_return std::expected<void, NetError> {};
+                    break;
                 }
                 if (err == SSL_ERROR_WANT_READ)
                 {
                     auto const fed = co_await feedIn();
                     if (!fed)
-                        co_return std::unexpected(fed.error());
+                    {
+                        outcome = std::unexpected(fed.error());
+                        break;
+                    }
                     if (*fed == 0)
-                        co_return std::unexpected(
-                            makeNetError(NetErrorCode::Eof, 0, "TLS handshake: peer closed"));
+                    {
+                        outcome =
+                            std::unexpected(makeNetError(NetErrorCode::Eof, 0, "TLS handshake: peer closed"));
+                        break;
+                    }
                 }
                 else if (err != SSL_ERROR_WANT_WRITE)
                 {
-                    co_return std::unexpected(
+                    outcome = std::unexpected(
                         makeNetError(NetErrorCode::Other, 0, "TLS handshake: " + opensslError()));
+                    break;
                 }
             }
+
+            _handshaking = false;
+            if (!outcome)
+                _handshakeError = outcome.error(); // parked waiters observe the same failure
+            // Resume everyone who parked on us; they re-check the flags and return.
+            for (auto const handle: std::exchange(_handshakeWaiters, {}))
+                if (handle && !handle.done())
+                    handle.resume();
+            co_return outcome;
         }
 
         /// Drains OpenSSL's outgoing BIO to the inner socket.
@@ -221,6 +271,9 @@ namespace
         BIO* _rbio; ///< Network → SSL (owned by _ssl).
         BIO* _wbio; ///< SSL → network (owned by _ssl).
         bool _handshakeDone = false;
+        bool _handshaking = false;               ///< A coroutine is currently driving the handshake.
+        std::optional<NetError> _handshakeError; ///< Set once the handshake fails (sticky).
+        std::vector<std::coroutine_handle<>> _handshakeWaiters; ///< Parked on the in-flight handshake.
     };
 
     /// The DI context: a configured SSL_CTX plus its handshake role.

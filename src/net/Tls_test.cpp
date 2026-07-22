@@ -5,11 +5,14 @@
 #include <cstddef>
 #include <span>
 #include <string>
+#include <thread>
 #include <utility>
 
 #include <net/EventLoop.h>
+#include <net/IListener.h>
 #include <net/ISocket.h>
 #include <net/PollEventSource.h>
+#include <net/Sockets.h>
 #include <net/Tls.h>
 #include <net/testing/CoroTestSupport.h>
 #include <net/testing/InMemoryTransport.h>
@@ -120,4 +123,74 @@ TEST_CASE("a server TLS context rejects mismatched certificate and key", "[net][
     REQUIRE(first.has_value());
     REQUIRE(second.has_value());
     CHECK(first->get() != second->get());
+}
+
+namespace
+{
+
+/// Writes @p message over @p socket (driving one side of the handshake).
+Task<void> justWrite(net::ISocket* socket, std::string message)
+{
+    auto const bytes =
+        std::span<std::byte const> { reinterpret_cast<std::byte const*>(message.data()), message.size() };
+    std::ignore = co_await socket->write(bytes);
+}
+
+/// Reads one record from @p socket — CONCURRENTLY with justWrite, so both enter
+/// the handshake at once — and records whether it matched @p expected.
+Task<void> justReadMatch(net::ISocket* socket, std::string expected, bool* matched)
+{
+    auto buffer = std::array<std::byte, 256> {};
+    auto const n = co_await socket->read(buffer);
+    if (n && *n == expected.size())
+        *matched = std::string { reinterpret_cast<char const*>(buffer.data()), *n } == expected;
+}
+
+} // namespace
+
+TEST_CASE("TLS completes a two-reactor handshake under concurrent client I/O", "[net][tls]")
+{
+    // The remote topology: server and client on INDEPENDENT reactors (separate
+    // threads), a real loopback TCP socket between them. The client drives the
+    // handshake from CONCURRENT write and read coroutines — the shape AttachClient
+    // uses (WriteQueue + read pump) — which deadlocked before handshake() was
+    // serialized (two coroutines calling non-reentrant SSL_do_handshake at once).
+    auto serverSource = net::PollEventSource {};
+    auto serverLoop = net::EventLoop { serverSource };
+    auto listener = net::listen(serverLoop, "127.0.0.1", 0);
+    REQUIRE(listener.has_value());
+    auto const port = (*listener)->localPort();
+    auto serverCtx = net::makeSelfSignedServerContext();
+    REQUIRE(serverCtx.has_value());
+
+    auto received = std::string {};
+    auto serverThread = std::thread { [&] {
+        serverLoop.blockOn([](net::IListener* l, net::ITlsContext* ctx, std::string* recv) -> Task<void> {
+            auto accepted = co_await l->accept();
+            if (!accepted)
+                co_return;
+            auto tls = ctx->wrap(std::move(*accepted));
+            co_await echoOnce(tls.get(), recv);
+        }(listener->get(), serverCtx->get(), &received));
+    } };
+
+    auto clientSource = net::PollEventSource {};
+    auto clientLoop = net::EventLoop { clientSource };
+    auto clientCtx = net::makeTlsClientContext();
+    REQUIRE(clientCtx.has_value());
+
+    auto matched = false;
+    clientLoop.blockOn(
+        [](net::EventLoop* loop, net::ITlsContext* ctx, std::uint16_t p, bool* ok) -> Task<void> {
+            auto connected = co_await net::connect(loop, "127.0.0.1", p);
+            if (!connected)
+                co_return;
+            auto tls = ctx->wrap(std::move(*connected));
+            co_await net::testing::allOf(justWrite(tls.get(), "two reactor tls"),
+                                         justReadMatch(tls.get(), "two reactor tls", ok));
+        }(&clientLoop, clientCtx->get(), port, &matched));
+    serverThread.join();
+
+    CHECK(received == "two reactor tls"); // the daemon-side handshake decrypted the record
+    CHECK(matched);                       // the client decrypted the echo — full duplex, two reactors
 }
