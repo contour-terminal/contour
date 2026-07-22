@@ -514,8 +514,18 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   `net` and `muxserver` levels. Suites green (net 35/160, muxserver 131/2711, contour_gui 635/9765),
   `contour.exe` links clean. **Remaining overall: B2/B4 (GUI layout apply + multi-window), B3-Qt (GUI
   calls the lifecycle verbs), B5 (interop-only tmux polish).**
+- 2026-07-22 · Windows/clangcl-release · **B2 layout capture + reconstruction PLANNER done.**
+  `AttachController` now captures the daemon `LayoutState` (thread-safe `layout()` + `layoutChanged()`
+  signal), and — the hard part — `muxserver/client/LayoutReconstruction.{h,cpp}` turns a `LayoutState`
+  into an ordered `NewTab`/`Split`/`Activate` plan (`planReconstruction`). The flattening algorithm is
+  **verified headless** by replaying the plan against a real `vtmux::SessionModel` (controlled session
+  allocator) and asserting the rebuilt tree matches — single pane, single split, a nested tree
+  (re-activation path), multi-tab, empty. muxserver suite 136/2763. **Remaining B2 (Linux-CI):** the
+  thin GUI executor that runs the plan against `TerminalSessionManager` and binds each reconstructed
+  pane to its remote session (the `MockPtySessionFactory` harness can headless-test the tree-building;
+  the remote-session binding needs the AF_UNIX daemon fixture). Plus B3-Qt, B4, B5.
 
-## Remaining GUI work — turnkey implementation plan (B2 apply · B3-Qt · B4)
+## Remaining GUI work — turnkey implementation plan (B2 executor · B3-Qt · B4)
 
 All protocol/transport/parity work is done and verified. What is left is GUI-side
 reconstruction in `src/contour/`, whose tests are **AF_UNIX/POSIX-only** (the
@@ -523,17 +533,18 @@ reconstruction in `src/contour/`, whose tests are **AF_UNIX/POSIX-only** (the
 **runtime-verified on the Linux/macOS harness** (`ctest --preset=clang-asan`). Land it there,
 not compile-only. Concrete steps:
 
-- **B2 apply — reconstruct the tree from `layout()`.** `AttachController` already captures the
-  daemon `LayoutState` and raises `layoutChanged()` (done). Add a GUI-thread applier (connect
-  `layoutChanged` queued, in `ContourGuiApp` beside the existing `remoteSessionDiscovered` wiring)
-  that reconciles the GUI `SessionModel` against `layout()`:
-  1. Order `_pending` (or a new authoritative list) in the tree's **depth-first, tab-by-tab** order
-     so the existing FIFO `createPty` binds each created pane to the right remote session with **no
-     per-session binding machinery** — this is the key simplification the capture note calls out.
-  2. Per tab: `createSessionInBackground(window)` for the tab's first leaf; then for each additional
-     leaf, `splitActivePane(vertical, actingSession)` with the node's orientation, then
-     `setPaneRatio` from the wire ratio (÷10000). Honor `WireTab.activePane`/`zoomedPane`.
-  3. Replace `adoptStartupSessions`' one-tab-per-session loop with this applier; keep `onUpdate`
+- **B2 executor — run the plan from `layout()`.** Capture (`AttachController::layout()` /
+  `layoutChanged()`) and the reconstruction PLANNER (`planReconstruction`, headless-tested) are DONE.
+  Add a GUI-thread executor (connect `layoutChanged` queued, in `ContourGuiApp` beside the existing
+  `remoteSessionDiscovered` wiring) that runs `planReconstruction(layout())`:
+  1. Push the plan's sessions (its `NewTab`/`Split` steps, in order) into `_pending` so the existing
+     FIFO `createPty` binds each created pane to the right remote session — **no per-session binding
+     machinery** (the planner already emits steps in exactly the order the panes are created).
+  2. Execute the steps against `TerminalSessionManager`: `NewTab` → `createSessionInBackground(window)`;
+     `Split` → `splitActivePane(vertical, actingSession)` with the step's orientation, then set the
+     wire ratio (÷10000); `Activate` → make the leaf carrying the step's session active. (Active-pane
+     restoration to `WireTab.activePane` and zoom are follow-up polish.)
+  3. Replace `adoptStartupSessions`' one-tab-per-session loop with this executor; keep `onUpdate`
      (mirror re-serialization) unchanged — it still feeds bound ptys.
   Test: extend `AttachController_test` — a split daemon layout reproduces a 2-pane tab in a driven
   `TerminalSessionManager` (the harness already drives it) and both panes mirror their session.
