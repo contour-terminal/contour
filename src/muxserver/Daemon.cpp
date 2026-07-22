@@ -17,9 +17,13 @@
 #include <chrono>
 #include <cstdlib>
 #include <expected>
+#include <fstream>
 #include <functional>
+#include <iterator>
 #include <memory>
+#include <optional>
 #include <print>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -37,6 +41,7 @@
 #include <net/EventLoop.h>
 #include <net/PollEventSource.h>
 #include <net/Sockets.h>
+#include <net/Tls.h>
 
 #ifndef _WIN32
     #include <sys/ioctl.h>
@@ -72,6 +77,61 @@ namespace
         return [shell = std::move(shell)](vtbackend::PageSize pageSize) -> std::unique_ptr<vtpty::Pty> {
             return std::make_unique<vtpty::Process>(
                 shell, vtpty::createPty(pageSize, std::nullopt), /*escapeSandbox=*/true);
+        };
+    }
+
+    /// Reads the whole file at @p path, or nullopt if it cannot be opened.
+    [[nodiscard]] std::optional<std::string> readFileToString(std::string const& path)
+    {
+        auto file = std::ifstream { path, std::ios::binary };
+        if (!file)
+            return std::nullopt;
+        return std::string { std::istreambuf_iterator<char> { file }, std::istreambuf_iterator<char> {} };
+    }
+
+    /// Builds the TLS server context for the native TCP listener: an ephemeral
+    /// self-signed certificate when none is configured (the TOFU default), else
+    /// the configured PEM cert + key. The TCP transport is always encrypted.
+    /// @return The context, or nullptr after printing why it could not be built.
+    [[nodiscard]] std::shared_ptr<net::ITlsContext> makeNativeTcpTls(NativeTcpListenerConfig const& config)
+    {
+        if (config.tlsCertPath.empty() && config.tlsKeyPath.empty())
+        {
+            auto context = net::makeSelfSignedServerContext();
+            if (!context)
+            {
+                std::println(stderr, "contour daemon: TLS: {}", context.error());
+                return nullptr;
+            }
+            std::println(stderr, "contour daemon: native TCP using an ephemeral self-signed certificate");
+            return *context;
+        }
+        auto const cert = readFileToString(config.tlsCertPath);
+        auto const key = readFileToString(config.tlsKeyPath);
+        if (!cert || !key)
+        {
+            std::println(stderr, "contour daemon: cannot read TLS certificate or key file");
+            return nullptr;
+        }
+        auto context = net::makeTlsServerContext(*cert, *key);
+        if (!context)
+        {
+            std::println(stderr, "contour daemon: TLS: {}", context.error());
+            return nullptr;
+        }
+        return *context;
+    }
+
+    /// Composes a native connection handler that FIRST encrypts each accepted
+    /// socket (server-side TLS), then serves the native protocol over it.
+    [[nodiscard]] ConnectionHandler makeTlsNativeHandler(net::EventLoop& loop,
+                                                         SessionHost& host,
+                                                         std::shared_ptr<net::ITlsContext> tls,
+                                                         std::string token)
+    {
+        auto base = makeNativeHandler(loop, host, std::move(token));
+        return [tls = std::move(tls), base = std::move(base)](std::unique_ptr<net::ISocket> socket) {
+            return base(tls->wrap(std::move(socket)));
         };
     }
 
@@ -151,9 +211,13 @@ int runDaemon(DaemonConfig const& config)
                 stderr, "contour daemon: native TCP listen failed: {}", tcpListener.error().toString());
             return EXIT_FAILURE;
         }
+        auto tls = makeNativeTcpTls(*config.nativeTcp);
+        if (!tls)
+            return EXIT_FAILURE;
         auto const boundPort = (*tcpListener)->localPort();
-        nativeTcpServer.emplace(
-            loop, std::move(*tcpListener), makeNativeHandler(loop, host, config.nativeTcp->token));
+        nativeTcpServer.emplace(loop,
+                                std::move(*tcpListener),
+                                makeTlsNativeHandler(loop, host, std::move(tls), config.nativeTcp->token));
         servers.push_back(&*nativeTcpServer);
         std::println(
             stderr, "contour daemon: native TCP listener on {}:{}", config.nativeTcp->host, boundPort);
@@ -456,9 +520,13 @@ int runDaemon(DaemonConfig const& config)
                 stderr, "contour daemon: native TCP listen failed: {}", tcpListener.error().toString());
             return EXIT_FAILURE;
         }
+        auto tls = makeNativeTcpTls(*config.nativeTcp);
+        if (!tls)
+            return EXIT_FAILURE;
         auto const boundPort = (*tcpListener)->localPort();
-        nativeTcpServer.emplace(
-            loop, std::move(*tcpListener), makeNativeHandler(loop, host, config.nativeTcp->token));
+        nativeTcpServer.emplace(loop,
+                                std::move(*tcpListener),
+                                makeTlsNativeHandler(loop, host, std::move(tls), config.nativeTcp->token));
         servers.push_back(&*nativeTcpServer);
         std::println(
             stderr, "contour daemon: native TCP listener on {}:{}", config.nativeTcp->host, boundPort);

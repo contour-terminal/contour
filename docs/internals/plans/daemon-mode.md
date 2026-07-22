@@ -205,7 +205,11 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       `makeNativeHandler(loop, host, token)` — no adapter, since `MuxServer` is transport-agnostic.
       **Real-TCP end-to-end test** (ephemeral loopback port via `IListener::localPort()`, token-guarded,
       snapshot mirrors) — proving the native protocol works over TCP. *Landed 2026-07-22; suite green
-      (119/2628).* **TLS wrapping is C1; CLI/config to populate `nativeTcp` is C3/C4 (Qt-side).**
+      (119/2628).* **TLS wrapping now applied** (below); CLI/config to populate `nativeTcp` is C3/C4.
+      **`runDaemon` (POSIX + Win32) now wraps each accepted TCP socket in server-side TLS**
+      (`makeNativeTcpTls`: configured PEM cert/key, else an ephemeral self-signed cert) before the
+      native handler — so the TCP transport is always encrypted. `NativeTcpListenerConfig` grew
+      `tlsCertPath`/`tlsKeyPath`. *Landed 2026-07-22.*
 - [ ] **C3. Config schema.** `NativeTcpListenerConfig { bool enabled{false}; std::string
       host{"127.0.0.1"}; uint16_t port{...}; std::string tlsCertPath; std::string tlsKeyPath;
       std::string token; }` modeled on `ImagesConfig` (`Config.h:434-439,1158`;

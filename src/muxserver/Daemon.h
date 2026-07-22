@@ -40,6 +40,11 @@ struct NativeTcpListenerConfig
     std::string host = "127.0.0.1"; ///< Bind address; loopback by default.
     std::uint16_t port = 0;         ///< TCP port (0 = OS-assigned ephemeral).
     std::string token;              ///< Preshared token required of every client.
+    /// PEM certificate + private key files for TLS. When both are empty the
+    /// daemon generates an ephemeral self-signed certificate (the TOFU default);
+    /// the TCP transport is ALWAYS encrypted.
+    std::string tlsCertPath;
+    std::string tlsKeyPath;
 };
 
 /// Everything `contour daemon` needs to serve.
