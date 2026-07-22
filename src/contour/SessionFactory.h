@@ -96,6 +96,13 @@ class SessionFactory
         (void) vertical;
         return false;
     }
+
+    /// Attach mode: authors a new window on the DAEMON rather than opening a purely
+    /// local one — the daemon honors it and pushes the new window's layout, which the
+    /// GUI maps onto a fresh OS window (B4). A local factory returns false so the app
+    /// opens an ordinary window.
+    /// @return true if routed to the daemon; false for a local factory.
+    [[nodiscard]] virtual bool requestRemoteWindow() { return false; }
 };
 
 /// The production SessionFactory: consults the app's active profile and produces either a local

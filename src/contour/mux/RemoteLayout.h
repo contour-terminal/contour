@@ -13,6 +13,7 @@
 
 #include <vtbackend/primitives.h>
 
+#include <cstdint>
 #include <optional>
 
 #include <vtmux/Primitives.h>
@@ -23,19 +24,22 @@ namespace contour
 class AttachController;
 class TerminalSessionManager;
 
-/// Realizes @p controller's current daemon layout into @p window of @p manager,
+/// Reconciles one daemon window's tab/pane tree into @p window of @p manager,
 /// binding each realized pane to its remote session (via the controller's
-/// beforeLeafSeed → `setNextBindSession` seam). A no-op when no layout has arrived.
-/// Call once per authoritative layout — it CREATES tabs; it does not reconcile an
-/// already-built tree.
+/// beforeLeafSeed → `setNextBindSession` seam). Incremental: realizes tabs not yet
+/// shown, catches up intra-tab splits, and closes panes whose remote session
+/// vanished. A no-op when the target window's layout has not arrived.
 /// @param manager The GUI's session/tab/pane manager (its factory is @p controller).
-/// @param window The window to build the daemon's tabs into.
-/// @param controller The attach controller holding the captured layout + bindings.
+/// @param window The OS window to build the daemon window's tabs into.
+/// @param controller The attach controller holding the captured layouts + bindings.
+/// @param daemonWindow Which daemon window to reconcile; nullopt selects the primary
+///        (lowest-id) window — the single-window path.
 /// @param pageSize The size each realized pane's grid/pty is born at (the live
 ///        window size), or nullopt for the profile default.
 void applyRemoteLayout(TerminalSessionManager& manager,
                        vtmux::WindowId window,
                        AttachController& controller,
+                       std::optional<uint64_t> daemonWindow = std::nullopt,
                        std::optional<vtbackend::PageSize> pageSize = std::nullopt);
 
 } // namespace contour

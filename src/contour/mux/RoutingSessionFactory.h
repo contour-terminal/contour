@@ -49,6 +49,8 @@ class RoutingSessionFactory final: public SessionFactory
         return active().requestRemoteSplit(actingPty, vertical);
     }
 
+    [[nodiscard]] bool requestRemoteWindow() override { return active().requestRemoteWindow(); }
+
   private:
     [[nodiscard]] SessionFactory& active() const noexcept { return _delegate ? *_delegate : *_default; }
 

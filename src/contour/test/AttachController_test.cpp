@@ -485,6 +485,62 @@ TEST_CASE("attach authors a tab on the daemon and reconciles it locally", "[atta
     ac->stop();
 }
 
+// B4: a second daemon window (authored via requestRemoteWindow) is reconciled into
+// its OWN GUI window — the client maps one OS window per daemon window, each mirroring
+// only that window's tabs, with no cross-window session bleed.
+TEST_CASE("attach maps each daemon window onto its own GUI window", "[attach][controller]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("win one"); // the primary daemon window
+
+    auto acOwned = std::make_unique<contour::AttachController>(daemon.endpoint());
+    auto* ac = acOwned.get();
+    contour::test::TestApp app { std::move(acOwned) };
+    contour::test::ScopedController const win1 { app.manager() };
+
+    REQUIRE(ac->connectAndWait(10s).has_value());
+    for (auto i = 0; i < 200 && ac->windowIds().empty(); ++i)
+        std::this_thread::sleep_for(5ms);
+    REQUIRE(ac->windowIds().size() == 1);
+
+    // A GUI "new window" in attach mode authors it on the daemon (requestRemoteWindow
+    // -> requestCreateWindow) rather than opening a stray local one; wait for the
+    // daemon to grow and push the second window's layout.
+    REQUIRE(ac->requestRemoteWindow());
+    for (auto i = 0; i < 200 && ac->windowIds().size() < 2; ++i)
+        std::this_thread::sleep_for(5ms);
+    REQUIRE(ac->windowIds().size() == 2);
+    auto const ids = ac->windowIds();
+
+    // The two windows carry distinct leaf sessions — reconciling them into separate
+    // GUI windows must not bind one session into both.
+    auto const sessionOf = [&](uint64_t window) {
+        return ac->layout(window)->tabs.front().root.session;
+    };
+    CHECK(sessionOf(ids[0]) != sessionOf(ids[1]));
+
+    // Reconcile each daemon window into its own GUI window.
+    contour::test::ScopedController const win2 { app.manager() };
+    contour::applyRemoteLayout(app.manager(), win1.id, *ac, ids[0]);
+    contour::applyRemoteLayout(app.manager(), win2.id, *ac, ids[1]);
+
+    // Each GUI window mirrors exactly its daemon window's single tab...
+    REQUIRE(app.manager().model().window(win1.id)->tabCount() == 1);
+    REQUIRE(app.manager().model().window(win2.id)->tabCount() == 1);
+    // ...bound to that window's own remote session (via the pane's pty).
+    auto const boundSession = [&](vtmux::WindowId window) -> std::optional<uint64_t> {
+        auto* tab = app.manager().model().window(window)->tabAt(0);
+        auto const sessions = app.manager().sessionsOfTab(tab);
+        if (sessions.empty())
+            return std::nullopt;
+        return ac->sessionForPty(&sessions.front()->terminal().device());
+    };
+    CHECK(boundSession(win1.id) == sessionOf(ids[0]));
+    CHECK(boundSession(win2.id) == sessionOf(ids[1]));
+
+    ac->stop();
+}
+
 // Regression: closing a mirrored tab must not resurrect it. Before the fix,
 // unbind() only forgot the binding, so the still-live remote session's next
 // delta re-registered it as pending and re-adopted a fresh tab indefinitely.

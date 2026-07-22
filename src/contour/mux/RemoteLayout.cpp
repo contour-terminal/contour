@@ -126,9 +126,12 @@ namespace
 void applyRemoteLayout(TerminalSessionManager& manager,
                        vtmux::WindowId window,
                        AttachController& controller,
+                       std::optional<uint64_t> daemonWindow,
                        std::optional<vtbackend::PageSize> pageSize)
 {
-    auto const layout = controller.layout();
+    // Select the daemon window to reconcile: the caller's, or the primary (lowest-id)
+    // window for the single-window path.
+    auto const layout = daemonWindow ? controller.layout(*daemonWindow) : controller.layout();
     if (!layout)
         return;
 

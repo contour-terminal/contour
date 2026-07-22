@@ -147,24 +147,53 @@ void AttachController::onLayout(muxserver::proto::LayoutState const& layout)
 {
     {
         auto const lock = std::lock_guard { _mutex };
-        _layout = layout;
+        _layouts[layout.window] = layout;
     }
-    // The GUI (on its own thread, via a queued connection) reconciles its tab and
-    // split tree against wireLayout() — the daemon's authoritative structure. (The
-    // per-session snapshot deltas that follow set State::Ready via onUpdate.)
+    // The GUI (on its own thread, via a queued connection) reconciles each daemon
+    // window's tab/split tree against wireLayout(window) — the authoritative
+    // structure — mapping one OS window to each (B4). (The per-session snapshot
+    // deltas that follow set State::Ready via onUpdate.)
     emit layoutChanged();
+}
+
+std::vector<uint64_t> AttachController::windowIds() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    auto ids = std::vector<uint64_t> {};
+    ids.reserve(_layouts.size());
+    for (auto const& [window, _]: _layouts) // std::map keeps them ascending
+        ids.push_back(window);
+    return ids;
+}
+
+std::optional<muxserver::proto::LayoutState> AttachController::layout(uint64_t daemonWindow) const
+{
+    auto const lock = std::lock_guard { _mutex };
+    auto const it = _layouts.find(daemonWindow);
+    return it != _layouts.end() ? std::optional { it->second } : std::nullopt;
 }
 
 std::optional<muxserver::proto::LayoutState> AttachController::layout() const
 {
     auto const lock = std::lock_guard { _mutex };
-    return _layout;
+    if (_layouts.empty())
+        return std::nullopt;
+    return _layouts.begin()->second; // the primary (lowest-id) window
+}
+
+muxserver::client::WireLayout AttachController::wireLayout(uint64_t daemonWindow) const
+{
+    auto const lock = std::lock_guard { _mutex };
+    auto const it = _layouts.find(daemonWindow);
+    return it != _layouts.end() ? muxserver::client::wireToLayout(it->second)
+                                : muxserver::client::WireLayout {};
 }
 
 muxserver::client::WireLayout AttachController::wireLayout() const
 {
     auto const lock = std::lock_guard { _mutex };
-    return _layout ? muxserver::client::wireToLayout(*_layout) : muxserver::client::WireLayout {};
+    return _layouts.empty() ? muxserver::client::WireLayout {}
+                            : muxserver::client::wireToLayout(_layouts.begin()->second);
 }
 
 void AttachController::setNextBindSession(uint64_t session)
@@ -206,6 +235,14 @@ void AttachController::requestCreateTab()
     _reactor.post([this] {
         if (_client != nullptr)
             _client->createTab();
+    });
+}
+
+void AttachController::requestCreateWindow()
+{
+    _reactor.post([this] {
+        if (_client != nullptr)
+            _client->createWindow();
     });
 }
 

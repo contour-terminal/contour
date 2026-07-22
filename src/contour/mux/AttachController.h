@@ -27,11 +27,13 @@
 #include <deque>
 #include <expected>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include <muxserver/Daemon.h>
 #include <muxserver/client/AttachClient.h>
@@ -88,6 +90,11 @@ class AttachController final: public QObject, public SessionFactory
     /// once detached.
     void requestCreateTab();
 
+    /// Asks the daemon to create a new window (B4). The daemon honors it and pushes
+    /// that window's LayoutState; the GUI opens a matching OS window and reconciles
+    /// the window's tabs into it. A no-op once detached.
+    void requestCreateWindow();
+
     /// Asks the daemon to split the pane hosting the remote session bound to local
     /// pty @p actingPty (@p vertical orientation). The daemon honors it and
     /// re-pushes its layout, which reconciles into a local split. A no-op if the pty
@@ -99,14 +106,27 @@ class AttachController final: public QObject, public SessionFactory
     /// removed rather than left running headless.
     void requestClosePane(uint64_t session);
 
-    /// @return The daemon's most recent tab/pane layout, or nullopt if none has
-    ///         arrived yet. A thread-safe copy — the reactor thread updates it.
-    ///         The GUI reconstructs its own tab/split tree from this (B2).
+    /// @return The daemon window ids currently known, ascending. The daemon starts
+    ///         with one window and grows via NewWindow; the GUI maps one OS window to
+    ///         each (B4). A thread-safe snapshot.
+    [[nodiscard]] std::vector<uint64_t> windowIds() const;
+
+    /// @return The daemon's most recent tab/pane layout for @p daemonWindow, or
+    ///         nullopt if that window is unknown. A thread-safe copy — the reactor
+    ///         thread updates it. The GUI reconstructs one OS window's tree from it.
+    [[nodiscard]] std::optional<muxserver::proto::LayoutState> layout(uint64_t daemonWindow) const;
+
+    /// @return The primary (lowest-id) daemon window's layout, or nullopt if none has
+    ///         arrived yet. Convenience for the single-window path.
     [[nodiscard]] std::optional<muxserver::proto::LayoutState> layout() const;
 
-    /// @return The captured daemon layout converted for `vtmux::realizeLayoutTab`
-    ///         (an empty layout if none has arrived), plus its leaf→remote-session
+    /// @return @p daemonWindow's layout converted for `vtmux::realizeLayoutTab` (an
+    ///         empty layout if that window is unknown), plus its leaf→remote-session
     ///         map. The layout executor realizes this to reproduce the daemon tree.
+    [[nodiscard]] muxserver::client::WireLayout wireLayout(uint64_t daemonWindow) const;
+
+    /// @return The primary (lowest-id) daemon window's converted layout. Convenience
+    ///         for the single-window path.
     [[nodiscard]] muxserver::client::WireLayout wireLayout() const;
 
     /// Binds the NEXT createPty() to remote session @p session (instead of popping
@@ -150,6 +170,18 @@ class AttachController final: public QObject, public SessionFactory
         if (isRealizingLayout())
             return false;
         requestSplitPane(actingPty, vertical);
+        return true;
+    }
+
+    /// SessionFactory: a GUI "new window" is authored on the daemon
+    /// (requestCreateWindow); the daemon's new-window layout push maps it onto a
+    /// fresh OS window. A window spawned BY the reconciler itself (while realizing) is
+    /// not re-authored — it is the local half of a daemon window that already exists.
+    [[nodiscard]] bool requestRemoteWindow() override
+    {
+        if (isRealizingLayout())
+            return false;
+        requestCreateWindow();
         return true;
     }
 
@@ -216,7 +248,9 @@ class AttachController final: public QObject, public SessionFactory
     std::string _failure;
     std::deque<PendingSession> _pending; ///< Discovered remote sessions without a local tab.
     std::unordered_map<uint64_t, Binding> _bindings;
-    std::optional<muxserver::proto::LayoutState> _layout; ///< The daemon's latest tab/pane tree (B2).
+    /// The daemon's latest tab/pane tree per window id (B2/B4). Ordered so windowIds()
+    /// yields a stable ascending order (the primary window is the lowest id).
+    std::map<uint64_t, muxserver::proto::LayoutState> _layouts;
     /// The remote session the NEXT createPty() binds to, set by the layout
     /// executor before each pane's backing session is created (GUI thread).
     std::optional<uint64_t> _nextBindSession;
