@@ -197,7 +197,12 @@ coro::Task<void> TmuxGateway::run()
         // notifications for one server operation is fully applied, so the
         // consumer may settle deferred verdicts (a pane parked by a move's
         // source %layout-change has by now been reclaimed by its destination).
-        if (!reader.hasBufferedLine())
+        //
+        // Gate on the whole buffer being empty, not merely on there being no
+        // COMPLETE line: a partial (unterminated) trailing line is a mid-burst read
+        // split, and draining then would reconcile before the rest of that line
+        // (e.g. a pane move's destination %layout-change) has been parsed.
+        if (reader.buffered() == 0)
             _events.notificationsDrained();
     }
 

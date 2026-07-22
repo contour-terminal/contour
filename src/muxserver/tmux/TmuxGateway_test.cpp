@@ -212,6 +212,74 @@ TEST_CASE("a guard body line that looks like %end does not close the block early
     CHECK(body == std::vector<std::string> { "one", "%end 1000 999 0", "three" });
 }
 
+namespace
+{
+
+/// Counts notification drains alongside window-adds, so the burst boundary's
+/// exact timing relative to a partial trailing line is observable.
+struct DrainCountingEvents final: GatewayEvents
+{
+    std::vector<uint64_t> windowsAdded;
+    int drains = 0;
+
+    void windowAdded(uint64_t window) override { windowsAdded.push_back(window); }
+    void notificationsDrained() override { ++drains; }
+};
+
+Task<void> partialBurstScenario(net::EventLoop* loop,
+                                net::ISocket* server,
+                                TmuxGateway* gateway,
+                                DrainCountingEvents* events)
+{
+    // Un-gate the gateway (opening guard, command number 0).
+    co_await writeAll(server, "%begin 1000 0 0\n%end 1000 0 0\n");
+    co_await waitUntil(loop, [&] { return gateway->initialised(); });
+
+    // One socket write carrying a COMPLETE notification followed by a PARTIAL
+    // (unterminated) one: the single-threaded loop resumes the gateway only after
+    // the whole write lands, so the reader delivers @1 with "%window-add @2" still
+    // buffered WITHOUT a newline. Gating on hasBufferedLine() alone would drain here
+    // -- mid-burst -- because a partial line contains no '\n'.
+    auto const drainsBefore = events->drains;
+    co_await writeAll(server, "%window-add @1\n%window-add @2");
+    co_await waitUntil(loop, [&] { return !events->windowsAdded.empty(); });
+    REQUIRE(events->windowsAdded == std::vector<uint64_t> { 1 });
+    CHECK(events->drains == drainsBefore); // no drain while @2 is a partial trailing line
+
+    // Completing @2 empties the buffer, so exactly one drain fires now.
+    co_await writeAll(server, "\n");
+    co_await waitUntil(loop, [&] { return events->windowsAdded.size() == 2; });
+    REQUIRE(events->windowsAdded == (std::vector<uint64_t> { 1, 2 }));
+    CHECK(events->drains == drainsBefore + 1);
+
+    server->close(); // EOF ends gateway->run()
+}
+
+Task<void> drivePartialBurst(net::EventLoop* loop,
+                             net::ISocket* server,
+                             TmuxGateway* gateway,
+                             DrainCountingEvents* events)
+{
+    co_await coro::whenAll(gateway->run(), partialBurstScenario(loop, server, gateway, events));
+}
+
+} // namespace
+
+TEST_CASE("a partial trailing line does not trigger a premature notification drain", "[muxserver][gateway]")
+{
+    auto source = net::PollEventSource {};
+    auto loop = net::EventLoop { source };
+    auto pair = *net::testing::makeSocketPair(loop);
+
+    auto events = DrainCountingEvents {};
+    auto gateway = TmuxGateway { loop, std::move(pair.second), events };
+    auto* server = pair.first.get();
+
+    loop.blockOn(drivePartialBurst(&loop, server, &gateway, &events));
+
+    CHECK(events.windowsAdded == (std::vector<uint64_t> { 1, 2 }));
+}
+
 // {{{ live oracle: the gateway drives a REAL tmux -C client
 #ifndef _WIN32
 
