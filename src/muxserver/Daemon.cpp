@@ -16,6 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <expected>
 #include <functional>
 #include <memory>
 #include <print>
@@ -63,6 +64,31 @@ namespace
             accepts.push_back(server->serve());
         co_await coro::whenAll(std::move(accepts));
     }
+
+    /// The daemon's PTY factory: every session spawns the configured shell over a
+    /// fresh PTY. Shared by the POSIX and Windows runDaemon paths.
+    [[nodiscard]] PtyFactory makeShellPtyFactory(vtpty::Process::ExecInfo shell)
+    {
+        return [shell = std::move(shell)](vtbackend::PageSize pageSize) -> std::unique_ptr<vtpty::Pty> {
+            return std::make_unique<vtpty::Process>(
+                shell, vtpty::createPty(pageSize, std::nullopt), /*escapeSandbox=*/true);
+        };
+    }
+
+    /// Binds a unix listener at @p path, or prints the error and yields the process
+    /// exit code the caller should return. Collapses the bind/report/return block
+    /// every daemon endpoint otherwise repeats verbatim.
+    [[nodiscard]] std::expected<std::unique_ptr<net::IListener>, int> bindDaemonEndpoint(
+        net::EventLoop& loop, std::string const& path)
+    {
+        auto listener = net::listenUnix(loop, path);
+        if (!listener)
+        {
+            std::println(stderr, "contour daemon: {}", listener.error().toString());
+            return std::unexpected(EXIT_FAILURE);
+        }
+        return std::move(*listener);
+    }
 } // namespace
 
 #ifndef _WIN32
@@ -72,43 +98,26 @@ int runDaemon(DaemonConfig const& config)
     auto source = net::PollEventSource {};
     auto loop = net::EventLoop { source };
 
-    auto host = SessionHost {
-        loop,
-        [shell = config.shell](vtbackend::PageSize pageSize) -> std::unique_ptr<vtpty::Pty> {
-            return std::make_unique<vtpty::Process>(
-                shell, vtpty::createPty(pageSize, std::nullopt), /*escapeSandbox=*/true);
-        },
-        config.settings,
-    };
+    auto host = SessionHost { loop, makeShellPtyFactory(config.shell), config.settings };
 
-    auto listener = net::listenUnix(loop, config.socketPath.string());
+    auto listener = bindDaemonEndpoint(loop, config.socketPath.string());
     if (!listener)
-    {
-        std::println(stderr, "contour daemon: {}", listener.error().toString());
-        return EXIT_FAILURE;
-    }
-
+        return listener.error();
     auto server = MuxServer { loop, std::move(*listener), tmux::makeControlModeHandler(loop, host) };
 
     // The native cells+deltas protocol listens beside the control-mode socket.
     auto const nativePath = nativeSocketPath(config.socketPath).string();
-    auto nativeListener = net::listenUnix(loop, nativePath);
+    auto nativeListener = bindDaemonEndpoint(loop, nativePath);
     if (!nativeListener)
-    {
-        std::println(stderr, "contour daemon: {}", nativeListener.error().toString());
-        return EXIT_FAILURE;
-    }
+        return nativeListener.error();
     auto nativeServer = MuxServer { loop, std::move(*nativeListener), makeNativeHandler(loop, host) };
 
     // The imsg endpoint serves the REAL tmux client binary
     // (`tmux -S <socket>-tmux -C attach-session`).
     auto const imsgPath = tmuxSocketPath(config.socketPath).string();
-    auto imsgListener = net::listenUnix(loop, imsgPath);
+    auto imsgListener = bindDaemonEndpoint(loop, imsgPath);
     if (!imsgListener)
-    {
-        std::println(stderr, "contour daemon: {}", imsgListener.error().toString());
-        return EXIT_FAILURE;
-    }
+        return imsgListener.error();
     auto imsgServer = MuxServer { loop, std::move(*imsgListener), tmux::makeTmuxImsgHandler(loop, host) };
 
     auto servers = std::vector<MuxServer*> { &server, &nativeServer, &imsgServer };
@@ -121,12 +130,9 @@ int runDaemon(DaemonConfig const& config)
     if (config.tmuxCompatLabel)
     {
         auto const compatPath = std::format("/tmp/tmux-{}/{}", ::getuid(), *config.tmuxCompatLabel);
-        auto compatListener = net::listenUnix(loop, compatPath);
+        auto compatListener = bindDaemonEndpoint(loop, compatPath);
         if (!compatListener)
-        {
-            std::println(stderr, "contour daemon: {}", compatListener.error().toString());
-            return EXIT_FAILURE;
-        }
+            return compatListener.error();
         compatServer.emplace(loop, std::move(*compatListener), tmux::makeTmuxImsgHandler(loop, host));
         servers.push_back(&*compatServer);
         std::println(stderr, "contour daemon: tmux-compat socket at {}", compatPath);
@@ -402,30 +408,17 @@ int runDaemon(DaemonConfig const& config)
     auto source = net::PollEventSource {};
     auto loop = net::EventLoop { source };
 
-    auto host = SessionHost {
-        loop,
-        [shell = config.shell](vtbackend::PageSize pageSize) -> std::unique_ptr<vtpty::Pty> {
-            return std::make_unique<vtpty::Process>(
-                shell, vtpty::createPty(pageSize, std::nullopt), /*escapeSandbox=*/true);
-        },
-        config.settings,
-    };
+    auto host = SessionHost { loop, makeShellPtyFactory(config.shell), config.settings };
 
-    auto listener = net::listenUnix(loop, config.socketPath.string());
+    auto listener = bindDaemonEndpoint(loop, config.socketPath.string());
     if (!listener)
-    {
-        std::println(stderr, "contour daemon: {}", listener.error().toString());
-        return EXIT_FAILURE;
-    }
+        return listener.error();
     auto server = MuxServer { loop, std::move(*listener), tmux::makeControlModeHandler(loop, host) };
 
     auto const nativePath = nativeSocketPath(config.socketPath).string();
-    auto nativeListener = net::listenUnix(loop, nativePath);
+    auto nativeListener = bindDaemonEndpoint(loop, nativePath);
     if (!nativeListener)
-    {
-        std::println(stderr, "contour daemon: {}", nativeListener.error().toString());
-        return EXIT_FAILURE;
-    }
+        return nativeListener.error();
     auto nativeServer = MuxServer { loop, std::move(*nativeListener), makeNativeHandler(loop, host) };
     // No imsg endpoint on Windows: SCM_RIGHTS fd passing does not exist here.
 
