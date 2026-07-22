@@ -57,12 +57,30 @@ void WindowsSocket::close() noexcept
     }
 }
 
+std::optional<NetError> WindowsSocket::closedError(char const* op) const noexcept
+{
+    if (_closed || _socket == INVALID_SOCKET)
+        return makeNetError(NetErrorCode::BadHandle, 0, op);
+    return std::nullopt;
+}
+
+coro::Task<void> WindowsSocket::parkUntilReady(Ready kind)
+{
+    // Reset then park on the event; WSAEventSelect re-signals while the condition
+    // holds, and the next recv/send re-arms FD_READ/FD_WRITE if work remains.
+    WSAResetEvent(_event);
+    if (kind == Ready::Read)
+        co_await _loop.waitReadable(static_cast<HANDLE>(_event));
+    else
+        co_await _loop.waitWritable(static_cast<HANDLE>(_event));
+}
+
 coro::Task<IoResult> WindowsSocket::read(std::span<std::byte> buffer)
 {
     while (true)
     {
-        if (_closed || _socket == INVALID_SOCKET)
-            co_return std::unexpected(makeNetError(NetErrorCode::BadHandle, 0, "read on closed socket"));
+        if (auto const closed = closedError("read on closed socket"))
+            co_return std::unexpected(*closed);
 
         auto const n =
             ::recv(_socket, reinterpret_cast<char*>(buffer.data()), static_cast<int>(buffer.size()), 0);
@@ -74,10 +92,7 @@ coro::Task<IoResult> WindowsSocket::read(std::span<std::byte> buffer)
         auto const err = WSAGetLastError();
         if (err == WSAEWOULDBLOCK)
         {
-            // Reset then park on the event; WSAEventSelect re-signals while the
-            // condition holds, and recv re-arms FD_READ if data remains.
-            WSAResetEvent(_event);
-            co_await _loop.waitReadable(static_cast<HANDLE>(_event));
+            co_await parkUntilReady(Ready::Read);
             continue;
         }
         co_return std::unexpected(fromWsa(err, "recv"));
@@ -89,8 +104,8 @@ coro::Task<IoResult> WindowsSocket::write(std::span<std::byte const> buffer)
     std::size_t total = 0;
     while (total < buffer.size())
     {
-        if (_closed || _socket == INVALID_SOCKET)
-            co_return std::unexpected(makeNetError(NetErrorCode::BadHandle, 0, "write on closed socket"));
+        if (auto const closed = closedError("write on closed socket"))
+            co_return std::unexpected(*closed);
 
         auto const remaining = buffer.subspan(total);
         auto const n = ::send(
@@ -104,8 +119,7 @@ coro::Task<IoResult> WindowsSocket::write(std::span<std::byte const> buffer)
         auto const err = WSAGetLastError();
         if (err == WSAEWOULDBLOCK)
         {
-            WSAResetEvent(_event);
-            co_await _loop.waitWritable(static_cast<HANDLE>(_event));
+            co_await parkUntilReady(Ready::Write);
             continue;
         }
         co_return std::unexpected(fromWsa(err, "send"));

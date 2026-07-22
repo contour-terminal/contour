@@ -11,6 +11,7 @@
 // clang-format on
 
     #include <cstddef>
+    #include <optional>
     #include <span>
     #include <string>
 
@@ -51,6 +52,21 @@ class WindowsSocket final: public ISocket
     [[nodiscard]] bool isClosed() const noexcept override { return _closed; }
 
   private:
+    /// Which readiness a park waits for.
+    enum class Ready
+    {
+        Read,
+        Write
+    };
+
+    /// @return A BadHandle error described by @p op when the socket is closed,
+    ///         else nullopt — the guard read() and write() both open with.
+    [[nodiscard]] std::optional<NetError> closedError(char const* op) const noexcept;
+
+    /// Resets the readiness event and parks the caller until it signals @p kind:
+    /// the WSAEWOULDBLOCK retry path read() and write() share.
+    [[nodiscard]] coro::Task<void> parkUntilReady(Ready kind);
+
     EventLoop& _loop;
     SOCKET _socket;
     WSAEVENT _event;
