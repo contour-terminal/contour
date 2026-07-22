@@ -194,6 +194,18 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
          needs cell sync.
       Follow-up within A10: DEC saved/pushed status-display stack (`savedStatusDisplayType`,
       `pushStatusDisplay`).
+      **A10.4 — DEC multi-page (`_pages`/`_cursorPage`/`_displayedPage`).** *(Recorded 2026-07-22 —
+      status-line pages above are DONE; this is the remaining page dimension.)* `Terminal` holds
+      `MaxPageCount = 16` pages (page 0 primary, 1–14 DEC pages, 15 alternate), with `_cursorPage`
+      (where VT output goes) vs `_displayedPage` (what the user sees; they diverge only when DECPCCM
+      page-cursor coupling is OFF), navigated by NP/PP/PPA. `SessionState.screenType` is binary
+      (primary/alt) and predates this. Today the daemon serializes `currentScreen()` = the **cursor
+      page**, so the **common case works** (DECPCCM on ⇒ cursor == displayed; sequential NP/PP just
+      re-snapshots the new page's grid). Gaps: (a) when `_displayedPage != _cursorPage` the client
+      shows the wrong page; (b) no page-navigation state is carried. Scope: carry `cursorPage` +
+      `displayedPage` (SessionState/Delta), serialize the **displayed** page for the viewport (or all
+      touched pages, per-page delta), re-emit NP/PP/DECPPA on the mirror. Legacy/rare (DEC apps), so
+      lower priority than the status-line pages already landed.
 
 ### WS-B — Layout: tabs / panes / multi-window (roadmap F1/F2)
 
