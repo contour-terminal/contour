@@ -276,9 +276,12 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       asserts it realizes as a 2-pane vertical split in the GUI's own `SessionModel`. (Active-pane/zoom
       restoration to `WireTab.activePane` is follow-up polish.) **Bonus:** switching the fixture to real
       TCP exposed and fixed a two-reactor TLS handshake deadlock — see the progress log.
-- [~] **B3. Lifecycle PDUs (F2, inbound) — server-receive half + client send verbs landed.**
-      Three tag-12/13/14 PDUs (forward-compatible, no codec bump): `CreateTab{}`, `SplitPane{tab,
-      orientation, ratio×10000}`, `ClosePane{session}`. `NativeSession::handlePdu` routes them to the
+- [x] **B3. Lifecycle PDUs (F2) — COMPLETE (2026-07-23), both directions, verified.** GUI authoring
+      of tabs, splits, and closes all round-trip through the daemon and reconcile back; see the B3-Qt
+      note at the end of this bullet and the progress log. Server-receive half + wire below.
+      Three tag-12/13/14 PDUs (forward-compatible, no codec bump): `CreateTab{}`, `SplitPane{session,
+      orientation, ratio×10000}` (targets the pane by session — the daemon activates it, then splits),
+      `ClosePane{session}`. `NativeSession::handlePdu` routes them to the
       existing `SessionHost` verbs (`createTab`/`splitActivePane`/`handleSessionExit`); the resulting
       `ModelEvents` fan out through **every** client's `LayoutObserver`, so the change mirrors back to
       all attached clients (incl. the author) as a fresh `LayoutState`. `AttachClient` grew the
@@ -290,12 +293,17 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       `requestCreateTab()` → `AttachClient::createTab()`; `RoutingSessionFactory` forwards it;
       `TerminalSessionManager::createNewTab` consults it and skips local creation. So a GUI "new tab"
       is authored on the daemon, whose layout re-push the incremental reconciler realizes locally.
-      `canCreateSession()` **relaxed** (done with B2). Verified end-to-end over a two-reactor TLS attach
-      (`manager.createNewTab` → daemon → 2 local tabs). **Remaining GUI authoring:** split-pane and
-      close-pane (need a pane→daemon-tab map from the layout, and — for a multi-pane tab — an
-      `ActivatePane` verb so the daemon splits/closes the intended pane, since `SplitPane`/`ClosePane`
-      act on the tab's active pane), then **retire the `_closedSessions` tombstone** once close
-      authoring lands. `MoveTab`/`ActivateTab`/`SetPaneRatio` are additive tags (no codec bump).
+      `canCreateSession()` **relaxed** (done with B2). **GUI authoring — ALL of tab/split/close DONE
+      (2026-07-22..23), verified over a two-reactor TLS attach:** `SessionFactory` gained
+      `requestRemoteTab`/`requestRemoteSplit` (forwarded by `RoutingSessionFactory`, consulted by
+      `TerminalSessionManager::createNewTab`/`splitActivePane`); `AttachController` routes them to
+      `AttachClient::createTab`/`splitPane`, and `unbind` (user pane close) authors `closePane`. The
+      reconciler `applyRemoteLayout` is fully incremental now: whole new tabs, new splits WITHIN a tab
+      (via a remote-session→`TerminalSession` map, `sessionForPty`), and a SUBTRACTIVE pass that closes
+      local panes whose session left the layout — so authoring here or on another client round-trips.
+      No `ActivatePane` PDU was needed: `SplitPane` carries the target session and the daemon activates
+      it. `_closedSessions` is **kept** (still guards the local-close→daemon-drop race), not retired.
+      `MoveTab`/`ActivateTab`/`SetPaneRatio` are additive tags (no codec bump) to add as the GUI needs.
 - [ ] **B4. Multi-window onto one daemon.** Decide the window model: v1 = client opens multiple GUI
       windows, each bound to a daemon window via `LayoutState` (the daemon starts with one window;
       grow to multiple via lifecycle PDUs). Note **F8** multi-client resize policy (last-proposal-wins
@@ -563,6 +571,16 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   attach (`manager.createNewTab` → daemon grows to 2 tabs → reconciler realizes the second). contour_gui
   9827, muxserver 136/2769. **Remaining: split/close authoring (needs a pane→daemon-tab map and an
   ActivatePane verb for multi-pane tabs) + retire `_closedSessions`; B4 multi-window; B5 tmux polish.**
+- 2026-07-23 · Windows/clangcl-release · **B3-Qt COMPLETE — split + close authoring done.** Split:
+  `SplitPane` now targets a SESSION (daemon activates that pane, then splits — no `ActivatePane` PDU
+  needed); `applyRemoteLayout` reconciles WITHIN a tab (remote→`TerminalSession` map via `sessionForPty`,
+  find a daemon split with a bound first child + unbound second, split the local pane); GUI splits route
+  via `SessionFactory::requestRemoteSplit` (guarded by `isRealizingLayout` so the reconciler's own
+  splits build locally). Close: `unbind` authors `closePane` on user close; a SUBTRACTIVE reconciler pass
+  closes local panes whose session left the layout (`closeActivePane` after activating the target).
+  `_closedSessions` kept (guards the close race). Four new controller tests over the TLS fixture
+  (split-reconcile, split-author, close-reconcile, tab-author). contour_gui 9850, muxserver 136/2769,
+  net 36/165. **Remaining: B4 multi-window, B5 interop-only tmux polish.**
 
 ## Remaining work — turnkey implementation plan (B3-Qt split/close · B4 · B5)
 
