@@ -503,6 +503,42 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   `contour.exe` links clean. **Remaining overall: B2/B4 (GUI layout apply + multi-window), B3-Qt (GUI
   calls the lifecycle verbs), B5 (interop-only tmux polish).**
 
+## Remaining GUI work — turnkey implementation plan (B2 apply · B3-Qt · B4)
+
+All protocol/transport/parity work is done and verified. What is left is GUI-side
+reconstruction in `src/contour/`, whose tests are **AF_UNIX/POSIX-only** (the
+`DaemonFixture` in `AttachController_test.cpp`) — so it compiles on Windows but must be
+**runtime-verified on the Linux/macOS harness** (`ctest --preset=clang-asan`). Land it there,
+not compile-only. Concrete steps:
+
+- **B2 apply — reconstruct the tree from `layout()`.** `AttachController` already captures the
+  daemon `LayoutState` and raises `layoutChanged()` (done). Add a GUI-thread applier (connect
+  `layoutChanged` queued, in `ContourGuiApp` beside the existing `remoteSessionDiscovered` wiring)
+  that reconciles the GUI `SessionModel` against `layout()`:
+  1. Order `_pending` (or a new authoritative list) in the tree's **depth-first, tab-by-tab** order
+     so the existing FIFO `createPty` binds each created pane to the right remote session with **no
+     per-session binding machinery** — this is the key simplification the capture note calls out.
+  2. Per tab: `createSessionInBackground(window)` for the tab's first leaf; then for each additional
+     leaf, `splitActivePane(vertical, actingSession)` with the node's orientation, then
+     `setPaneRatio` from the wire ratio (÷10000). Honor `WireTab.activePane`/`zoomedPane`.
+  3. Replace `adoptStartupSessions`' one-tab-per-session loop with this applier; keep `onUpdate`
+     (mirror re-serialization) unchanged — it still feeds bound ptys.
+  Test: extend `AttachController_test` — a split daemon layout reproduces a 2-pane tab in a driven
+  `TerminalSessionManager` (the harness already drives it) and both panes mirror their session.
+- **B3-Qt — author from the GUI.** On GUI create-tab / split / close-pane, call the AttachClient
+  send verbs already shipped (`createTab`/`splitPane`/`closePane`, B3 server half). **Relax
+  `AttachController::canCreateSession()`** from "is a session pending" to "is the connection live",
+  which lifts the four `TerminalSessionManager` gates; **retire `_closedSessions`** now that a real
+  `closePane` verb exists (the daemon removes the session, so no tombstone is needed). The daemon's
+  `ModelEvents` fan-out then re-pushes `LayoutState`, and the B2 applier reflects the change — closing
+  the loop.
+- **B4 — multi-window.** v1: the client opens one GUI window per daemon window in `LayoutState`
+  (the daemon starts with one; grow via lifecycle PDUs). Decide the multi-client resize policy
+  (F8): shared grid (last-proposal-wins, today) vs per-client server-side viewports.
+- **B5 (interop-only, lower priority).** tmux-path polish: F3 ratio/anchor fidelity, GUI→tmux
+  `split-window`/`kill-pane`, `%window-renamed`→tab title, `capture-pane` SGR + `-S -` scrollback,
+  F6 `%pause` reaction.
+
 ## Open decisions / risks
 
 - **TLS backend** (C1): **decided — OpenSSL, behind a `net::ITlsContext` DI seam.** Remaining
