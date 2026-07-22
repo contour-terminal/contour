@@ -304,10 +304,20 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       No `ActivatePane` PDU was needed: `SplitPane` carries the target session and the daemon activates
       it. `_closedSessions` is **kept** (still guards the local-close→daemon-drop race), not retired.
       `MoveTab`/`ActivateTab`/`SetPaneRatio` are additive tags (no codec bump) to add as the GUI needs.
-- [ ] **B4. Multi-window onto one daemon.** Decide the window model: v1 = client opens multiple GUI
-      windows, each bound to a daemon window via `LayoutState` (the daemon starts with one window;
-      grow to multiple via lifecycle PDUs). Note **F8** multi-client resize policy (last-proposal-wins
-      today) — pick per-client viewport vs shared-grid.
+- [x] **B4. Multi-window onto one daemon.** Window model chosen (v1): the client opens one OS window
+      per daemon window, each bound via its own per-window `LayoutState`. **Daemon** (part 1): `NewWindow`
+      PDU (tag 15; renamed from `CreateWindow` to dodge the Win32 macro) → `SessionHost::createWindow()`
+      mints a window **and** a first tab; `pushLayout` serializes **every** window (`serializeLayout(host,
+      window)` looped over `SessionModel::windowCount()`/`windowAt()`). **Client** (part 2):
+      `AttachController` tracks layouts in a `map<windowId, LayoutState>` (`windowIds()`/`layout(id)`/
+      `wireLayout(id)`); `applyRemoteLayout` gained a daemon-window selector; `requestCreateWindow` +
+      `SessionFactory::requestRemoteWindow` author a window. **GUI** (part 3):
+      `TerminalSessionManager::setAttachWindowBinder`/`consumeAttachWindow` (a main.qml
+      `Component.onCompleted` hook) + `ContourGuiApp::reconcileAttachWindows`/`bindPendingAttachWindow`
+      keep a daemon-window→OS-window map, spawn one OS window per new daemon window, and route the
+      NewTerminalWindow action to `requestRemoteWindow`. **F8 resize policy decided (v1): shared grid,
+      last-proposal-wins** (the current behavior) — per-client server-side viewports deferred (only
+      matters when 2+ clients attach the *same* session at once; a larger server-render change).
 - [ ] **B5. (parallel, lower priority) tmux-path polish.** F3 ratio/anchor fidelity + GUI→tmux
       `split-window`/`kill-pane`; wire `%window-renamed`→tab title; fix Contour's own `capture-pane`
       to preserve SGR and support `-S -` scrollback; F6 client-side `%pause` reaction. Interop-only.
@@ -374,7 +384,7 @@ NTFS ACLs, not POSIX bits; macOS resolves the socket dir under `$TMPDIR` (no `$X
 | | Linux | macOS | Windows |
 |---|---|---|---|
 | WS-A parity (GUI + thin) | ☐ | ☐ | ☑ (muxserver+contour_gui suites green) |
-| WS-B layout | ☐ | ☐ | ☑ B1/B3 wire + B2 GUI apply (split tab e2e over TCP); B4/B5 pending |
+| WS-B layout | ☐ | ☐ | ☑ B1/B3 wire + B2 GUI apply + B4 multi-window (per-window reconcile e2e over TCP); B5 pending |
 | WS-C TCP+TLS (daemon + client) | ☐ | ☐ | ☑ (net+muxserver+contour e2e incl. two-reactor TLS) |
 
 Windows verification is **CI-gated** (no Windows dev box): compile under `-Werror`, run the
@@ -581,32 +591,31 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   `_closedSessions` kept (guards the close race). Four new controller tests over the TLS fixture
   (split-reconcile, split-author, close-reconcile, tab-author). contour_gui 9850, muxserver 136/2769,
   net 36/165. **Remaining: B4 multi-window, B5 interop-only tmux polish.**
+- 2026-07-23 · Windows/clangcl-release · **B4 COMPLETE — multi-window onto one daemon.** Three parts.
+  *Daemon:* `NewWindow` PDU (tag 15; renamed from `CreateWindow` for the Win32 macro) →
+  `SessionHost::createWindow()` (window + first tab + session); `SessionModel::windowCount()`/
+  `windowAt()`; `pushLayout` serializes EVERY window (`serializeLayout(host, window)`). *Client:*
+  `AttachController` layouts now a `map<windowId, LayoutState>` (`windowIds()`/`layout(id)`/
+  `wireLayout(id)`); `applyRemoteLayout` gained an optional daemon-window selector; `requestCreateWindow`
+  + `SessionFactory::requestRemoteWindow` (through `RoutingSessionFactory`). *GUI:*
+  `TerminalSessionManager::setAttachWindowBinder`/`consumeAttachWindow` (main.qml Component.onCompleted
+  hook) + `ContourGuiApp::reconcileAttachWindows`/`bindPendingAttachWindow` keep a daemon→OS-window map,
+  spawn one OS window per new daemon window, and route NewTerminalWindow to `requestRemoteWindow`.
+  **F8 decided (v1): shared grid, last-proposal-wins**; per-client viewports deferred. Tests: a client
+  authors NewWindow → daemon grows to 2 windows/pushes 2 layouts (muxserver 137/2775); each daemon
+  window reconciles into its own GUI window with no cross-window session bleed; the consumeAttachWindow
+  binder seam (contour_gui 9870, all green; contour.exe links clean). **Remaining: B5 interop-only tmux
+  polish.**
 
-## Remaining work — turnkey implementation plan (B4 · B5)
+## Remaining work — turnkey implementation plan (B5)
 
 **Done & verified (Windows, real two-reactor TLS attach):** all of WS-A, WS-C, B1, **B2 (full layout
-reconstruction)**, and **B3 (server verbs + GUI authoring of tabs, splits, closes with full incremental
-reconciliation)**. The `AttachController_test` fixture is a loopback-TCP+TLS daemon, so B4/B5 are
-Windows-verifiable too — no AF_UNIX/POSIX gate. What remains:
+reconstruction)**, **B3 (server verbs + GUI authoring of tabs, splits, closes with full incremental
+reconciliation)**, and **B4 (multi-window onto one daemon — daemon `NewWindow`, per-window client
+tracking, GUI window mapping; F8 = shared grid, last-proposal-wins)**. The `AttachController_test`
+fixture is a loopback-TCP+TLS daemon, so B5 is Windows-verifiable too — no AF_UNIX/POSIX gate. What
+remains:
 
-- **B4 — multi-window onto one daemon.** Today the daemon has ONE window and the client shows one; the
-  wire's `LayoutState` is already per-window (it carries `window`). To grow to N windows:
-  1. **Daemon.** `SessionModel` already supports `createWindow()`; add a `CreateWindow` lifecycle PDU
-     (tag 16) → a `SessionHost::createWindow()` that mints a window **and** a first tab (an empty window
-     is useless). `pushLayout` must serialize **every** window (refactor `serializeLayout(host)` to
-     `serializeLayout(host, windowId)` and loop), and the `LayoutObserver` fire on any window's change.
-     `SessionModel` may need a window-enumeration accessor.
-  2. **Client.** Track layouts BY window: `AttachController._layout` (single) → a `map<windowId,
-     LayoutState>`; `onLayout` updates the entry for `layout.window`. `applyRemoteLayout` reconciles
-     PER daemon window, mapping each to a GUI window — reuse `TerminalSessionManager::
-     createWindowController()` (mints a `vtmux::Window` + its OS window) for a daemon window not yet
-     shown, and keep a daemon-window→GUI-window map. A "new window" GUI action routes a `CreateWindow`
-     verb (a `SessionFactory::requestRemoteWindow` hook, like `requestRemoteTab`).
-  3. **Resize policy (F8):** shared grid (last-proposal-wins, today) vs per-client server-side
-     viewports — decide when >1 client attaches.
-  Tests (Windows, over the TLS fixture, `MultiWindow_test` harness): a `CreateWindow` grows the daemon
-  to two windows and the client opens a second GUI window bound to it; each window's tabs/splits
-  reconcile independently.
 - **B5 (interop-only, lower priority).** tmux-path polish: F3 ratio/anchor fidelity, GUI→tmux
   `split-window`/`kill-pane`, `%window-renamed`→tab title, `capture-pane` SGR + `-S -` scrollback,
   F6 `%pause` reaction.
