@@ -313,6 +313,86 @@ TEST_CASE("attach realizes a split daemon layout as a 2-pane tab", "[attach][con
     ac->stop();
 }
 
+// B3-Qt: a split authored on the daemon AFTER attach reconciles into the already-
+// shown tab as a second pane (intra-tab incremental reconciliation), rather than
+// only whole new tabs.
+TEST_CASE("attach reconciles a split authored on the daemon after attach", "[attach][controller]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("only");
+
+    auto acOwned = std::make_unique<contour::AttachController>(daemon.endpoint());
+    auto* ac = acOwned.get();
+    contour::test::TestApp app { std::move(acOwned) };
+    contour::test::ScopedController const win { app.manager() };
+
+    REQUIRE(ac->connectAndWait(10s).has_value());
+    for (auto i = 0; i < 200 && !ac->layout().has_value(); ++i)
+        std::this_thread::sleep_for(5ms);
+    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    REQUIRE(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 1);
+
+    // Split the tab on the daemon (after the client attached) and wait for the
+    // split to reach the client's layout.
+    daemon.onDaemon([&daemon] {
+        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
+        daemon.host->splitActivePane(tab->id(), vtmux::SplitState::Horizontal, 0.5);
+        return 0;
+    });
+    for (auto i = 0; i < 200; ++i)
+    {
+        if (auto const l = ac->layout(); l && !l->tabs.front().root.children.empty())
+            break;
+        std::this_thread::sleep_for(5ms);
+    }
+    REQUIRE_FALSE(ac->layout()->tabs.front().root.children.empty());
+
+    // Reconcile: the already-shown tab grows a second pane.
+    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    CHECK(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 2);
+    CHECK(app.manager().model().window(win.id)->tabCount() == 1); // it stayed one tab, now split
+
+    ac->stop();
+}
+
+// B3-Qt: a GUI split in attach mode is authored on the daemon (routed by
+// requestRemoteSplit), which splits the right pane and re-pushes its layout; the
+// reconciler realizes the new pane locally — the full split-authoring loop.
+TEST_CASE("attach authors a split on the daemon and reconciles it locally", "[attach][controller]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("only");
+
+    auto acOwned = std::make_unique<contour::AttachController>(daemon.endpoint());
+    auto* ac = acOwned.get();
+    contour::test::TestApp app { std::move(acOwned) };
+    contour::test::ScopedController const win { app.manager() };
+
+    REQUIRE(ac->connectAndWait(10s).has_value());
+    for (auto i = 0; i < 200 && !ac->layout().has_value(); ++i)
+        std::this_thread::sleep_for(5ms);
+    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    auto* tab = app.manager().model().window(win.id)->tabAt(0);
+    REQUIRE(app.manager().sessionsOfTab(tab).size() == 1);
+
+    // A GUI split of the only pane routes to the daemon (requestRemoteSplit).
+    app.manager().splitActivePane(/*vertical=*/true, app.manager().sessionsOfTab(tab).front());
+    for (auto i = 0; i < 200; ++i)
+    {
+        if (auto const l = ac->layout(); l && !l->tabs.front().root.children.empty())
+            break;
+        std::this_thread::sleep_for(5ms);
+    }
+    REQUIRE_FALSE(ac->layout()->tabs.front().root.children.empty());
+
+    // Reconcile: the local tab grows a second pane, still one tab.
+    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    CHECK(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 2);
+    CHECK(app.manager().model().window(win.id)->tabCount() == 1);
+
+    ac->stop();
+}
+
 // B3-Qt: the client authors a tab on the daemon; the daemon honors it and
 // re-pushes its layout, which the incremental reconciler realizes as a new local
 // tab — closing the create loop over a real attach connection.

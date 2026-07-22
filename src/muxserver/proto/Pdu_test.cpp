@@ -148,7 +148,7 @@ TEST_CASE("every catalog PDU round-trips", "[muxserver][proto]")
                                     } } },
         },
         CreateTab {},
-        SplitPane { .tab = 5, .orientation = 2, .ratio = 6000 },
+        SplitPane { .session = 5, .orientation = 2, .ratio = 6000 },
         ClosePane { .session = 100 },
     };
 

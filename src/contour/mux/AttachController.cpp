@@ -179,10 +179,25 @@ void AttachController::setRealizingLayout(bool realizing)
     _realizingLayout = realizing;
 }
 
+bool AttachController::isRealizingLayout() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _realizingLayout;
+}
+
 bool AttachController::isBound(uint64_t session) const
 {
     auto const lock = std::lock_guard { _mutex };
     return _bindings.contains(session);
+}
+
+std::optional<uint64_t> AttachController::sessionForPty(vtpty::Pty const* pty) const
+{
+    auto const lock = std::lock_guard { _mutex };
+    for (auto const& [session, binding]: _bindings)
+        if (binding.pty == pty)
+            return session;
+    return std::nullopt;
 }
 
 void AttachController::requestCreateTab()
@@ -191,6 +206,18 @@ void AttachController::requestCreateTab()
     _reactor.post([this] {
         if (_client != nullptr)
             _client->createTab();
+    });
+}
+
+void AttachController::requestSplitPane(vtpty::Pty const* actingPty, bool vertical)
+{
+    auto const session = sessionForPty(actingPty);
+    if (!session)
+        return;
+    auto const orientation = static_cast<uint8_t>(vertical ? 2 : 1); // vtmux::SplitState
+    _reactor.post([this, session = *session, orientation] {
+        if (_client != nullptr)
+            _client->splitPane(session, orientation, 5000);
     });
 }
 

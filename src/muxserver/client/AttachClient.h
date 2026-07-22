@@ -167,7 +167,7 @@ class AttachClient final
     /// close the pane hosting @p session. The daemon honors it and re-pushes a
     /// LayoutState to every attached client.
     void createTab();
-    void splitPane(uint64_t tab, uint8_t orientation, uint16_t ratio);
+    void splitPane(uint64_t session, uint8_t orientation, uint16_t ratio);
     void closePane(uint64_t session);
 
     /// Closes the connection; run() finishes.

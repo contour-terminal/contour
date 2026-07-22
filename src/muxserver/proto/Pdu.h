@@ -319,11 +319,11 @@ struct CreateTab
     bool operator==(CreateTab const&) const = default;
 };
 
-/// Client→server: split @p tab's active pane, backing the new leaf with a fresh
-/// session.
+/// Client→server: split the pane hosting @p session (the daemon activates it
+/// first), backing the new leaf with a fresh session.
 struct SplitPane
 {
-    uint64_t tab = 0;
+    uint64_t session = 0;    ///< The pane to split, by the session it hosts.
     uint8_t orientation = 1; ///< vtmux::SplitState: 1 horizontal, 2 vertical.
     uint16_t ratio = 5000;   ///< First child's share × 10000.
     bool operator==(SplitPane const&) const = default;

@@ -78,10 +78,21 @@ class AttachController final: public QObject, public SessionFactory
     ///         the incremental layout reconciler to skip tabs it already realized.
     [[nodiscard]] bool isBound(uint64_t session) const;
 
+    /// @return The remote session bound to local pty @p pty, or nullopt. Lets the
+    ///         reconciler map a GUI pane back to its daemon session (to split/close
+    ///         the right pane).
+    [[nodiscard]] std::optional<uint64_t> sessionForPty(vtpty::Pty const* pty) const;
+
     /// Asks the daemon to create a new tab (B3-Qt). The daemon honors it and
     /// re-pushes its layout, which the GUI reconciles into a new local tab. A no-op
     /// once detached.
     void requestCreateTab();
+
+    /// Asks the daemon to split the pane hosting the remote session bound to local
+    /// pty @p actingPty (@p vertical orientation). The daemon honors it and
+    /// re-pushes its layout, which reconciles into a local split. A no-op if the pty
+    /// is not bound or the connection is gone.
+    void requestSplitPane(vtpty::Pty const* actingPty, bool vertical);
 
     /// @return The daemon's most recent tab/pane layout, or nullopt if none has
     ///         arrived yet. A thread-safe copy — the reactor thread updates it.
@@ -104,6 +115,10 @@ class AttachController final: public QObject, public SessionFactory
     /// setNextBindSession, not the FIFO queue.
     void setRealizingLayout(bool realizing);
 
+    /// @return Whether a layout realization is in progress (so a split it triggers
+    ///         is built locally, not re-authored on the daemon).
+    [[nodiscard]] bool isRealizingLayout() const;
+
     // SessionFactory: hands out a ChannelPty bound to the next pending
     // remote session; cwd/command/profile do not apply to remote sessions.
     [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(
@@ -119,6 +134,17 @@ class AttachController final: public QObject, public SessionFactory
     [[nodiscard]] bool requestRemoteTab() override
     {
         requestCreateTab();
+        return true;
+    }
+
+    /// SessionFactory: a GUI split is authored on the daemon; the layout re-push
+    /// reconciles the new pane in. A split issued BY the reconciler itself (while
+    /// realizing) is not re-authored — it builds the pane locally.
+    [[nodiscard]] bool requestRemoteSplit(vtpty::Pty const* actingPty, bool vertical) override
+    {
+        if (isRealizingLayout())
+            return false;
+        requestSplitPane(actingPty, vertical);
         return true;
     }
 

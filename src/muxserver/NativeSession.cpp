@@ -589,9 +589,22 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
     }
     if (auto const* split = std::get_if<proto::SplitPane>(&frame.pdu))
     {
-        _host.splitActivePane(vtmux::TabId { split->tab },
-                              static_cast<vtmux::SplitState>(split->orientation),
-                              static_cast<double>(split->ratio) / 10000.0);
+        // Split the pane hosting the target session: find its tab, make that pane
+        // active, then split (splitActivePane acts on the tab's active pane).
+        auto& model = _host.model();
+        if (auto* window = model.window(_host.windowId()))
+            for (auto const i: std::views::iota(0, window->tabCount()))
+            {
+                auto* tab = window->tabAt(i);
+                if (auto* leaf = tab->rootPane()->findLeaf(vtmux::SessionId { split->session }))
+                {
+                    model.setActivePane(tab->id(), leaf->id());
+                    _host.splitActivePane(tab->id(),
+                                          static_cast<vtmux::SplitState>(split->orientation),
+                                          static_cast<double>(split->ratio) / 10000.0);
+                    break;
+                }
+            }
         return;
     }
     if (auto const* close = std::get_if<proto::ClosePane>(&frame.pdu))

@@ -1293,6 +1293,12 @@ QVariantList TerminalSessionManager::tabColorPalette() const
 // {{{ Split-pane operations
 void TerminalSessionManager::splitActivePane(bool vertical, TerminalSession* acting)
 {
+    // Attach mode: author the split on the daemon (B3-Qt); its layout re-push
+    // reconciles the new pane in. A reconciliation-driven split (during realization)
+    // returns false and builds locally below, as does a local factory.
+    if (acting != nullptr && _sessionFactory.requestRemoteSplit(&acting->terminal().device(), vertical))
+        return;
+
     if (!_sessionFactory.canCreateSession())
     {
         managerLog()("Refusing to split: the session factory cannot back a new session right now.");

@@ -297,7 +297,7 @@ namespace
 
     void encodeBody(Writer& out, SplitPane const& pdu)
     {
-        out.varint(pdu.tab);
+        out.varint(pdu.session);
         out.u8(pdu.orientation);
         out.u16(pdu.ratio);
     }
@@ -561,7 +561,7 @@ namespace
     {
         auto pdu = SplitPane {};
         auto error = DecodeError {};
-        if (!assign(in.varint(), pdu.tab, error) || !assign(in.u8(), pdu.orientation, error)
+        if (!assign(in.varint(), pdu.session, error) || !assign(in.u8(), pdu.orientation, error)
             || !assign(in.u16(), pdu.ratio, error))
             return std::unexpected(error);
         return pdu;

@@ -82,6 +82,20 @@ class SessionFactory
     /// @return true if the request was routed to the daemon (the manager must NOT
     ///         also create a local tab); false for a local factory.
     [[nodiscard]] virtual bool requestRemoteTab() { return false; }
+
+    /// Attach mode: authors a split of the pane backed by @p actingPty on the
+    /// DAEMON (@p vertical orientation) rather than splitting locally — the daemon's
+    /// layout re-push reconciles the new pane in (B3-Qt). A local factory returns
+    /// false so the manager performs the split itself.
+    /// @param actingPty The pty of the pane to split.
+    /// @param vertical  The split orientation.
+    /// @return true if routed to the daemon; false for a local factory.
+    [[nodiscard]] virtual bool requestRemoteSplit(vtpty::Pty const* actingPty, bool vertical)
+    {
+        (void) actingPty;
+        (void) vertical;
+        return false;
+    }
 };
 
 /// The production SessionFactory: consults the app's active profile and produces either a local

@@ -44,6 +44,11 @@ class RoutingSessionFactory final: public SessionFactory
 
     [[nodiscard]] bool requestRemoteTab() override { return active().requestRemoteTab(); }
 
+    [[nodiscard]] bool requestRemoteSplit(vtpty::Pty const* actingPty, bool vertical) override
+    {
+        return active().requestRemoteSplit(actingPty, vertical);
+    }
+
   private:
     [[nodiscard]] SessionFactory& active() const noexcept { return _delegate ? *_delegate : *_default; }
 
