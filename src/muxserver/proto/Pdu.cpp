@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <expected>
+#include <ranges>
 #include <utility>
 #include <vector>
 
@@ -36,6 +38,31 @@ namespace
     void reserveBounded(std::vector<T>& out, std::size_t count, Reader const& in)
     {
         out.reserve(std::min<std::size_t>(count, in.remaining()));
+    }
+
+    /// Decodes a varint-length-prefixed vector into @p out: the count, a bounded
+    /// reserve (see reserveBounded), then that many elements via @p decodeElement.
+    /// Collapses the count/reserve/loop/push_back block that every length-prefixed
+    /// field otherwise repeats verbatim, so the shared decode discipline lives once.
+    /// @return The DecodeError of the count read or the first failing element.
+    template <typename T, typename DecodeElement>
+    [[nodiscard]] std::expected<void, DecodeError> decodeVector(Reader& in,
+                                                                std::vector<T>& out,
+                                                                DecodeElement decodeElement)
+    {
+        auto count = std::size_t {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), count, error))
+            return std::unexpected(error);
+        reserveBounded(out, count, in);
+        for ([[maybe_unused]] auto const index: std::views::iota(std::size_t { 0 }, count))
+        {
+            auto element = decodeElement(in);
+            if (!element)
+                return std::unexpected(element.error());
+            out.push_back(std::move(*element));
+        }
+        return {};
     }
 
     // --- the wire tag of each PDU type (the encode half of the catalog) -----
@@ -301,17 +328,9 @@ namespace
         if (!assign(in.u32(), pdu.defaultForeground, error)
             || !assign(in.u32(), pdu.defaultBackground, error))
             return std::unexpected(error);
-        auto paletteSize = std::size_t {};
-        if (!assign(in.varint(), paletteSize, error))
-            return std::unexpected(error);
-        reserveBounded(pdu.palette, paletteSize, in);
-        for (std::size_t i = 0; i < paletteSize; ++i)
-        {
-            auto color = uint32_t {};
-            if (!assign(in.u32(), color, error))
-                return std::unexpected(error);
-            pdu.palette.push_back(color);
-        }
+        if (auto const decoded = decodeVector(in, pdu.palette, [](Reader& reader) { return reader.u32(); });
+            !decoded)
+            return std::unexpected(decoded.error());
         return pdu;
     }
 
@@ -321,17 +340,14 @@ namespace
         auto error = DecodeError {};
         if (!assign(in.varint(), cell.codepoint, error))
             return std::unexpected(error);
-        auto extras = std::size_t {};
-        if (!assign(in.varint(), extras, error))
-            return std::unexpected(error);
-        reserveBounded(cell.clusterExtras, extras, in);
-        for (std::size_t i = 0; i < extras; ++i)
-        {
-            auto codepoint = char32_t {};
-            if (!assign(in.varint(), codepoint, error))
-                return std::unexpected(error);
-            cell.clusterExtras.push_back(codepoint);
-        }
+        if (auto const decoded = decodeVector(in,
+                                              cell.clusterExtras,
+                                              [](Reader& reader) {
+                                                  return reader.varint().transform(
+                                                      [](uint64_t v) { return static_cast<char32_t>(v); });
+                                              });
+            !decoded)
+            return std::unexpected(decoded.error());
         if (!assign(in.u8(), cell.width, error) || !assign(in.u8(), cell.scale, error)
             || !assign(in.u16(), cell.textScaleExtras, error) || !assign(in.u16(), cell.hyperlink, error)
             || !assign(in.u32(), cell.foreground, error) || !assign(in.u32(), cell.background, error)
@@ -347,17 +363,8 @@ namespace
         if (!assign(in.svarint(), line.stableId, error) || !assign(in.u16(), line.flags, error)
             || !assign(in.varint(), line.columns, error))
             return std::unexpected(error);
-        auto cells = std::size_t {};
-        if (!assign(in.varint(), cells, error))
-            return std::unexpected(error);
-        reserveBounded(line.cells, cells, in);
-        for (std::size_t i = 0; i < cells; ++i)
-        {
-            auto cell = decodeCell(in);
-            if (!cell)
-                return std::unexpected(cell.error());
-            line.cells.push_back(std::move(*cell));
-        }
+        if (auto const decoded = decodeVector(in, line.cells, decodeCell); !decoded)
+            return std::unexpected(decoded.error());
         if (!assign(in.u32(), line.fillForeground, error) || !assign(in.u32(), line.fillBackground, error))
             return std::unexpected(error);
         return line;
@@ -374,55 +381,48 @@ namespace
             || !assign(in.svarint(), pdu.cursorColumn, error))
             return std::unexpected(error);
 
-        auto lines = std::size_t {};
-        if (!assign(in.varint(), lines, error))
-            return std::unexpected(error);
-        reserveBounded(pdu.lines, lines, in);
-        for (std::size_t i = 0; i < lines; ++i)
-        {
-            auto line = decodeLine(in);
-            if (!line)
-                return std::unexpected(line.error());
-            pdu.lines.push_back(std::move(*line));
-        }
+        if (auto const decoded = decodeVector(in, pdu.lines, decodeLine); !decoded)
+            return std::unexpected(decoded.error());
 
-        auto hyperlinks = std::size_t {};
-        if (!assign(in.varint(), hyperlinks, error))
-            return std::unexpected(error);
-        reserveBounded(pdu.hyperlinks, hyperlinks, in);
-        for (std::size_t i = 0; i < hyperlinks; ++i)
-        {
-            auto entry = HyperlinkEntry {};
-            if (!assign(in.u16(), entry.id, error) || !assign(in.string(), entry.uri, error))
-                return std::unexpected(error);
-            pdu.hyperlinks.push_back(std::move(entry));
-        }
+        if (auto const decoded = decodeVector(
+                in,
+                pdu.hyperlinks,
+                [](Reader& reader) -> std::expected<HyperlinkEntry, DecodeError> {
+                    auto entry = HyperlinkEntry {};
+                    auto error = DecodeError {};
+                    if (!assign(reader.u16(), entry.id, error) || !assign(reader.string(), entry.uri, error))
+                        return std::unexpected(error);
+                    return entry;
+                });
+            !decoded)
+            return std::unexpected(decoded.error());
 
-        auto imageCells = std::size_t {};
-        if (!assign(in.varint(), imageCells, error))
-            return std::unexpected(error);
-        reserveBounded(pdu.imageCells, imageCells, in);
-        for (std::size_t i = 0; i < imageCells; ++i)
-        {
-            auto entry = ImageCellEntry {};
-            if (!assign(in.svarint(), entry.stableId, error) || !assign(in.u16(), entry.column, error)
-                || !assign(in.u32(), entry.imageId, error) || !assign(in.u16(), entry.offsetLine, error)
-                || !assign(in.u16(), entry.offsetColumn, error) || !assign(in.u8(), entry.layer, error))
-                return std::unexpected(error);
-            pdu.imageCells.push_back(entry);
-        }
+        if (auto const decoded =
+                decodeVector(in,
+                             pdu.imageCells,
+                             [](Reader& reader) -> std::expected<ImageCellEntry, DecodeError> {
+                                 auto entry = ImageCellEntry {};
+                                 auto error = DecodeError {};
+                                 if (!assign(reader.svarint(), entry.stableId, error)
+                                     || !assign(reader.u16(), entry.column, error)
+                                     || !assign(reader.u32(), entry.imageId, error)
+                                     || !assign(reader.u16(), entry.offsetLine, error)
+                                     || !assign(reader.u16(), entry.offsetColumn, error)
+                                     || !assign(reader.u8(), entry.layer, error))
+                                     return std::unexpected(error);
+                                 return entry;
+                             });
+            !decoded)
+            return std::unexpected(decoded.error());
 
-        auto setModes = std::size_t {};
-        if (!assign(in.varint(), setModes, error))
-            return std::unexpected(error);
-        reserveBounded(pdu.setModes, setModes, in);
-        for (std::size_t i = 0; i < setModes; ++i)
-        {
-            auto mode = uint32_t {};
-            if (!assign(in.varint(), mode, error))
-                return std::unexpected(error);
-            pdu.setModes.push_back(mode);
-        }
+        if (auto const decoded = decodeVector(in,
+                                              pdu.setModes,
+                                              [](Reader& reader) {
+                                                  return reader.varint().transform(
+                                                      [](uint64_t v) { return static_cast<uint32_t>(v); });
+                                              });
+            !decoded)
+            return std::unexpected(decoded.error());
         return pdu;
     }
 
