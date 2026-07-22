@@ -35,7 +35,7 @@
 #include <muxserver/SessionHost.h>
 #include <muxserver/SocketPath.h>
 #include <muxserver/client/AttachClient.h>
-#include <muxserver/client/TtyRenderer.h>
+#include <muxserver/client/ScreenMirror.h>
 #include <muxserver/tmux/ControlSession.h>
 #include <muxserver/tmux/ImsgServer.h>
 #include <net/EventLoop.h>
@@ -355,11 +355,27 @@ namespace
 
         auto attach = client::AttachClient { *loop, std::move(*socket) };
         auto activeSession = std::uint64_t { 0 };
-        attach.setUpdateHandler(
-            [&activeSession](client::RemoteScreen const& screen, proto::Delta const& /*delta*/) {
-                activeSession = screen.session;
-                auto const bytes = client::renderViewport(screen);
-                std::ignore = ::write(STDOUT_FILENO, bytes.data(), bytes.size());
+        // The thin client drives the OUTER terminal directly with the same
+        // ScreenMirror re-serialization the GUI feeds its mirror Terminal — so
+        // OSC 8 hyperlinks, images, mouse-mode propagation, title, colors and
+        // cursor shape all reach the real terminal (bounded by its capabilities),
+        // not the display-only TtyRenderer repaint.
+        auto mirror = client::ScreenMirror {};
+        auto const writeOut = [](std::string const& bytes) {
+            std::ignore = ::write(STDOUT_FILENO, bytes.data(), bytes.size());
+        };
+        attach.setUpdateHandler([&activeSession, &mirror, &writeOut](client::RemoteScreen const& screen,
+                                                                     proto::Delta const& delta) {
+            activeSession = screen.session;
+            writeOut(mirror.apply(screen, delta));
+        });
+        attach.setImageHandler(
+            [&mirror, &writeOut](client::RemoteScreen const& screen, std::uint32_t imageId) {
+                writeOut(mirror.applyImage(screen, imageId));
+            });
+        attach.setSessionEventHandler(
+            [&writeOut](client::RemoteScreen const& /*screen*/, proto::SessionEvent const& event) {
+                writeOut(client::ScreenMirror::applyEvent(event));
             });
 
         {
@@ -621,16 +637,28 @@ namespace
 
         auto attach = client::AttachClient { *loop, std::move(*socket) };
         auto activeSession = std::uint64_t { 0 };
-        attach.setUpdateHandler(
-            [&activeSession](client::RemoteScreen const& screen, proto::Delta const& /*delta*/) {
-                activeSession = screen.session;
-                auto const bytes = client::renderViewport(screen);
-                auto written = DWORD { 0 };
-                ::WriteFile(::GetStdHandle(STD_OUTPUT_HANDLE),
-                            bytes.data(),
-                            static_cast<DWORD>(bytes.size()),
-                            &written,
-                            nullptr);
+        // Drive the outer console with ScreenMirror (see the POSIX attachFlow note).
+        auto mirror = client::ScreenMirror {};
+        auto const writeOut = [](std::string const& bytes) {
+            auto written = DWORD { 0 };
+            ::WriteFile(::GetStdHandle(STD_OUTPUT_HANDLE),
+                        bytes.data(),
+                        static_cast<DWORD>(bytes.size()),
+                        &written,
+                        nullptr);
+        };
+        attach.setUpdateHandler([&activeSession, &mirror, &writeOut](client::RemoteScreen const& screen,
+                                                                     proto::Delta const& delta) {
+            activeSession = screen.session;
+            writeOut(mirror.apply(screen, delta));
+        });
+        attach.setImageHandler(
+            [&mirror, &writeOut](client::RemoteScreen const& screen, std::uint32_t imageId) {
+                writeOut(mirror.applyImage(screen, imageId));
+            });
+        attach.setSessionEventHandler(
+            [&writeOut](client::RemoteScreen const& /*screen*/, proto::SessionEvent const& event) {
+                writeOut(client::ScreenMirror::applyEvent(event));
             });
 
         auto const rawMode = RawConsole {};

@@ -153,10 +153,16 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
 - [ ] **A8. Input-encoding modes beyond `MirroredModes`.** Add Kitty keyboard (`CSI>u`) and
       `modifyOtherKeys` to the mirrored set (or a negotiated-modes sub-channel) so client input
       encoding matches the server-side app's negotiation (`MirroredModes.h:25-41`).
-- [ ] **A9. Unify the thin client on `ScreenMirror`.** Replace `TtyRenderer`'s simplified repaint
-      with ScreenMirror VT re-serialization to the outer TTY; `syncModes` enables mouse reporting on
-      the outer terminal so `pumpStdin` forwards real mouse/OSC-8/image-capable input. Optional:
-      a minimal scrollback UI. Retires `TtyRenderer` as the primary path.
+- [x] **A9. Unify the thin client on `ScreenMirror`.** `attachFlow` (POSIX + Win32) now drives the
+      OUTER terminal with `ScreenMirror::apply`/`applyImage`/`applyEvent` (the same re-serialization
+      the GUI feeds its mirror Terminal) instead of `TtyRenderer::renderViewport` — so the raw-TTY
+      `contour attach` gains OSC 8 hyperlinks, images (GIP; bounded by the outer terminal),
+      mouse-mode propagation (via `syncModes` → outer terminal reports → `pumpStdin` forwards),
+      live title, default colors and cursor shape. `TtyRenderer` is retired as the primary path
+      (files/tests kept). *Landed 2026-07-22.* Build clean; the `runAttach` flow itself stays
+      CI/manually verified (real stdin/stdout/TTY, not headless), but its `ScreenMirror` core is
+      fully unit-tested. Follow-up: a scrollback UI; ensure the outer Contour has GIP enabled for
+      images.
 
 ### WS-B — Layout: tabs / panes / multi-window (roadmap F1/F2)
 
@@ -316,10 +322,14 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   and the `--listen-tcp`/`--connect-tcp`/`--token`/config schema (C3/C4, Qt).
 - 2026-07-22 · Windows/clangcl-release · **A3b done** — live default fg/bg (OSC 10/11) over
   `Delta.defaultForeground/Background`; `ScreenMirror` re-emits. CodecVersion → 8. Suite green
-  (121/2635). Indexed-palette (OSC 4) sync deferred. **WS-A native VT parity now covers images,
-  title, cursor, cwd, bell/notify/clipboard, default colors** — remaining WS-A: A8 (kitty keyboard,
-  needs a vtbackend getter), A9 (thin client on ScreenMirror). Remaining overall is Qt-gated
-  (C3/C4/C5-client, WS-B layout) — see the per-task notes.
+  (121/2635). Indexed-palette (OSC 4) sync deferred.
+- 2026-07-22 · Windows/clangcl-release · **A9 done** — thin `contour attach` unified on `ScreenMirror`
+  (POSIX + Win32 `attachFlow`), so the raw-TTY client gains OSC 8 / images / mouse-modes / title /
+  colors / cursor; `TtyRenderer` retired as primary path. Build clean; suite green (121/2635).
+  **WS-A is now complete except A8** (kitty-keyboard/modifyOtherKeys mirroring — niche, needs a new
+  vtbackend getter). **Remaining overall: A8, WS-B layout (Qt payoff), C3/C4/C5-client (Qt CLI/config
+  + client TCP+TLS connect), B5 tmux polish.** The buildable/testable native-parity + remote-transport
+  core (both headline goals) is done and verified here.
 
 ## Open decisions / risks
 
