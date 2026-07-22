@@ -21,6 +21,7 @@
 
 #include <functional>
 #include <memory>
+#include <string>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -56,6 +57,21 @@ class SessionStreamEvents
     /// it. Observers holding per-session state must drop it here, or it leaks for
     /// the connection's whole lifetime.
     virtual void sessionClosed(vtmux::SessionId /*session*/) {}
+
+    /// @p session rang the bell (BEL).
+    virtual void sessionBell(vtmux::SessionId /*session*/) {}
+
+    /// @p session raised a desktop notification (OSC 9 / OSC 777 / OSC 99).
+    virtual void sessionNotify(vtmux::SessionId /*session*/,
+                               std::string const& /*title*/,
+                               std::string const& /*body*/)
+    {
+    }
+
+    /// @p session wrote the clipboard (OSC 52); @p data is the raw, decoded text.
+    /// The daemon forwards it unconditionally — the CLIENT applies its own
+    /// clipboard-write permission.
+    virtual void sessionCopyToClipboard(vtmux::SessionId /*session*/, std::string const& /*data*/) {}
 };
 
 /// One hosted session: the terminal (owning its PTY) plus the pump thread
@@ -74,6 +90,9 @@ class HostedSession
                   std::unique_ptr<vtpty::Pty> pty,
                   vtbackend::Settings settings,
                   std::function<void()> onScreenUpdated,
+                  std::function<void()> onBell,
+                  std::function<void(std::string, std::string)> onNotify,
+                  std::function<void(std::string)> onCopyToClipboard,
                   std::function<void()> onClosed);
 
     /// Joins the pump thread; the PTY must have been closed first (terminate()).
@@ -95,18 +114,53 @@ class HostedSession
     [[nodiscard]] vtbackend::Terminal& terminal() noexcept { return _terminal; }
 
   private:
-    /// The Terminal::Events glue: forwards the per-batch screen update to the
-    /// host's callback; everything else keeps the Null default.
+    /// The Terminal::Events glue: forwards the terminal events the daemon
+    /// mirrors — the per-batch screen update, the bell, desktop notifications
+    /// (OSC 9/777/99) and OSC 52 clipboard writes — to the host's callbacks;
+    /// everything else keeps the Null default. Adding a mirrored event is a
+    /// callback here plus a row in SessionStreamEvents.
     struct Events final: vtbackend::Terminal::NullEvents
     {
-        explicit Events(std::function<void()> handler): onScreenUpdated(std::move(handler)) {}
+        Events(std::function<void()> screenUpdated,
+               std::function<void()> bell,
+               std::function<void(std::string, std::string)> notify,
+               std::function<void(std::string)> copyToClipboard):
+            onScreenUpdated(std::move(screenUpdated)),
+            onBell(std::move(bell)),
+            onNotify(std::move(notify)),
+            onCopyToClipboard(std::move(copyToClipboard))
+        {
+        }
 
         std::function<void()> onScreenUpdated;
+        std::function<void()> onBell;
+        std::function<void(std::string, std::string)> onNotify;
+        std::function<void(std::string)> onCopyToClipboard;
 
         void screenUpdated() override
         {
             if (onScreenUpdated)
                 onScreenUpdated();
+        }
+        void bell() override
+        {
+            if (onBell)
+                onBell();
+        }
+        void notify(std::string_view title, std::string_view body) override
+        {
+            if (onNotify)
+                onNotify(std::string { title }, std::string { body });
+        }
+        void showDesktopNotification(vtbackend::DesktopNotification const& notification) override
+        {
+            if (onNotify)
+                onNotify(notification.title, notification.body);
+        }
+        void copyToClipboard(std::string_view data) override
+        {
+            if (onCopyToClipboard)
+                onCopyToClipboard(std::string { data });
         }
     };
 

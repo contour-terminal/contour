@@ -95,11 +95,11 @@ clipboard) route through **new `SessionStreamEvents` signals** that `SessionHost
 overriding the corresponding `Terminal::Events` methods it currently drops; state features
 (cursor-shape/cwd/palette) are **pulled+diffed** in `pushDelta`.
 
-- [ ] **A0. Enabler — widen the daemon's Events tap.** Extend `SessionHost::HostedSession::Events`
-      to override `setWindowTitle`/`setIconTitle`/`setTabName`, `bell`, `notify`/
-      `showDesktopNotification`/`discardDesktopNotification`, `copyToClipboard`/`getClipboard`, and
-      fan them to new `SessionStreamEvents` callbacks (`SessionHost.h:43-59,100-111`). `NativeSession`
-      subscribes and emits the PDUs below. Keeps the pull path for state features.
+- [x] **A0. Enabler — widen the daemon's Events tap.** `HostedSession::Events` now overrides `bell`,
+      `notify`, `showDesktopNotification`, and `copyToClipboard` (title stayed on the pull path, A2),
+      fanning each to new `SessionStreamEvents` callbacks (`sessionBell`/`sessionNotify`/
+      `sessionCopyToClipboard`) that `NativeSession` (a stream subscriber) turns into `SessionEvent`
+      PDUs. *Landed 2026-07-22 with A4/A5/A6.*
 - [x] **A1a. Images — client protocol half.** `RemoteScreen` stores `imageCells` (row→column→entry)
       and a per-session `images` pixel cache; `AttachClient` fetches unknown ids on each delta
       (guarded by `requestedImages`), routes the **session-less** `ImageData`/`ImageGone` reply by
@@ -128,13 +128,18 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       indexed `palette`; diff against last-sent and emit an incremental state record when changed
       (retires **F9** cursor-shape). Cursor **visibility** already rides `Delta.setModes` mode 25 —
       no work.
-- [ ] **A4. Bell.** A0 `bell()` → `BellEvent` PDU → client rings (GUI `TerminalSession::bell`).
-- [ ] **A5. Desktop notifications.** A0 `notify`/`showDesktopNotification`/`discard…` →
-      `NotificationEvent` PDU reusing the `vtbackend::DesktopNotification` struct + enums
-      (`DesktopNotification.h:16-58`) → client `notify`/`showDesktopNotification`/`discard`.
-- [ ] **A6. OSC 52 clipboard.** A0 `copyToClipboard`/`getClipboard` → `SetClipboard` (server→client)
-      and `RequestClipboard`/`ClipboardData` (client↔server) PDUs, gated by the client's existing
-      `Settings::allowClipboardRead`/write policy. No always-on exposure.
+- [x] **A4. Bell.** `SessionEvent{kind=Bell}` → `ScreenMirror::applyEvent` re-emits `BEL` into the
+      mirror terminal, so the frontend's own `bell()` fires. (A single data-driven `SessionEvent` PDU
+      — a new tag, no codec bump — serves A4/A5/A6; adding an event kind is a row.) *Landed 2026-07-22.*
+- [x] **A5. Desktop notifications.** `notify`/`showDesktopNotification` → `SessionEvent{kind=Notify,
+      a=title, b=body}` → `applyEvent` re-emits `OSC 777 notify;title;body`, so the mirror raises
+      `notify()`. *Landed 2026-07-22.* Follow-up: `;` in title/body isn't escaped (OSC 777 splits on
+      it); discard/replace (OSC 99 identifier) not yet carried.
+- [x] **A6. OSC 52 clipboard.** `copyToClipboard` → `SessionEvent{kind=ClipboardSet, a=selection,
+      b=data}` → `applyEvent` re-emits `OSC 52` (base64), so the mirror's `copyToClipboard` fires
+      **under the client's own permission** (the daemon forwards unconditionally — `Terminal::
+      copyToClipboard` is ungated; read stays gated by `Settings::allowClipboardRead`). *Landed
+      2026-07-22.* Closed-loop tests for all three (bell/notify/clipboard) via a recording mirror.
 - [ ] **A7. OSC 7 cwd.** Add a `cwd` field to `SessionState`; pull `currentWorkingDirectory()` +
       diff live. Feeds split-in-same-dir semantics on the client.
 - [ ] **A8. Input-encoding modes beyond `MirroredModes`.** Add Kitty keyboard (`CSI>u`) and
@@ -255,8 +260,13 @@ runtime-gated net tests, watch the Windows job after each push.
   Suite green (113 cases / 2610 assertions). **WS-A1 (images) complete.**
 - 2026-07-22 · Windows/clangcl-release · **A2 done** — live window title over the wire
   (`Delta.title`, pull+diff in `pushDelta`, `ScreenMirror` OSC 0). CodecVersion → 4. Suite green
-  (114/2612). Next: A0 + A4/A5/A6 (Events tap → bell / notifications / clipboard via a SessionEvent
-  PDU — a new tag, so no further codec bump).
+  (114/2612).
+- 2026-07-22 · Windows/clangcl-release · **A0 + A4/A5/A6 done** — Events tap (`HostedSession` now
+  captures bell/notify/clipboard → new `SessionStreamEvents` callbacks) + a data-driven `SessionEvent`
+  PDU (tag 10, kind = Bell/Notify/ClipboardSet). `ScreenMirror::applyEvent` re-emits BEL / OSC 777 /
+  OSC 52 into the mirror terminal, so the frontend's own handlers + permissions apply. Recording-mirror
+  closed-loop tests. Suite green (115/2619). Next: A3 (colors/cursor pull+diff), A7 (cwd), A8 (kitty
+  keyboard modes), A9 (thin client on ScreenMirror).
 
 ## Open decisions / risks
 

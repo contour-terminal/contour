@@ -107,6 +107,10 @@ namespace
     {
         return std::to_underlying(PduType::Delta);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(SessionEvent const&) noexcept
+    {
+        return std::to_underlying(PduType::SessionEvent);
+    }
 
     // --- body encoders ------------------------------------------------------
 
@@ -240,6 +244,14 @@ namespace
 
         out.u8(pdu.titleChanged);
         out.string(pdu.title);
+    }
+
+    void encodeBody(Writer& out, SessionEvent const& pdu)
+    {
+        out.varint(pdu.session);
+        out.u8(pdu.kind);
+        out.string(pdu.a);
+        out.string(pdu.b);
     }
 
     // --- body decoders (one table row each) ---------------------------------
@@ -432,6 +444,16 @@ namespace
         return pdu;
     }
 
+    DecodeResult decodeSessionEvent(Reader& in)
+    {
+        auto pdu = SessionEvent {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.session, error) || !assign(in.u8(), pdu.kind, error)
+            || !assign(in.string(), pdu.a, error) || !assign(in.string(), pdu.b, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
     /// The decode half of the catalog: one row per known tag.
     struct DecodeRow
     {
@@ -449,6 +471,7 @@ namespace
         DecodeRow { PduType::ImageGone, decodeImageGone },
         DecodeRow { PduType::SessionState, decodeSessionState },
         DecodeRow { PduType::Delta, decodeDelta },
+        DecodeRow { PduType::SessionEvent, decodeSessionEvent },
     };
 } // namespace
 

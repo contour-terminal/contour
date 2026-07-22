@@ -148,6 +148,36 @@ void NativeSession::sessionClosed(SessionId session)
     _pendingSessions.erase(session.value);
 }
 
+void NativeSession::sessionBell(SessionId session)
+{
+    emitSessionEvent(session, proto::SessionEventKind::Bell, {}, {});
+}
+
+void NativeSession::sessionNotify(SessionId session, std::string const& title, std::string const& body)
+{
+    emitSessionEvent(session, proto::SessionEventKind::Notify, title, body);
+}
+
+void NativeSession::sessionCopyToClipboard(SessionId session, std::string const& data)
+{
+    // "c" = the CLIPBOARD selection; the client applies its own write permission.
+    emitSessionEvent(session, proto::SessionEventKind::ClipboardSet, "c", data);
+}
+
+void NativeSession::emitSessionEvent(SessionId session,
+                                     proto::SessionEventKind kind,
+                                     std::string a,
+                                     std::string b)
+{
+    if (!_handshaken || _closed)
+        return;
+    send(0,
+         proto::DecodedPdu { proto::SessionEvent { .session = session.value,
+                                                   .kind = std::to_underlying(kind),
+                                                   .a = std::move(a),
+                                                   .b = std::move(b) } });
+}
+
 coro::Task<void> NativeSession::flushSoon()
 {
     // Debounce: a busy PTY produces many screenUpdated signals per frame-worth

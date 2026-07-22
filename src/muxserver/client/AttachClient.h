@@ -126,6 +126,14 @@ class AttachClient final
         _onImage = std::move(handler);
     }
 
+    /// Invoked when a transient session event (bell / desktop notification /
+    /// OSC 52 clipboard write) arrives for @p screen's session — the frontend
+    /// re-emits the matching VT into its mirror terminal or acts on it directly.
+    void setSessionEventHandler(std::function<void(RemoteScreen const&, proto::SessionEvent const&)> handler)
+    {
+        _onSessionEvent = std::move(handler);
+    }
+
     /// Sends keyboard/paste bytes to @p session's PTY.
     void sendInput(uint64_t session, std::string_view bytes);
 
@@ -158,6 +166,7 @@ class AttachClient final
     net::WriteQueue _writer;
     std::function<void(RemoteScreen const&, proto::Delta const&)> _onUpdate;
     std::function<void(RemoteScreen const&, uint32_t)> _onImage;
+    std::function<void(RemoteScreen const&, proto::SessionEvent const&)> _onSessionEvent;
     std::map<uint64_t, RemoteScreen> _screens;
     /// Outstanding image fetches: request serial → (session, imageId). The reply
     /// carries no session, so the serial is what routes it to the right screen.

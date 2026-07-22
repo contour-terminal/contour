@@ -50,6 +50,12 @@ class ScreenMirror
     /// Empty when the image's anchor is not in the current viewport.
     [[nodiscard]] std::string applyImage(RemoteScreen const& screen, uint32_t imageId);
 
+    /// Re-emits a transient session event (bell / desktop notification / OSC 52
+    /// clipboard write) as the matching VT for the mirror terminal, so the
+    /// frontend's own bell, notify and clipboard handling — and its permissions —
+    /// apply. Stateless: the event carries everything it needs.
+    [[nodiscard]] static std::string applyEvent(proto::SessionEvent const& event);
+
   private:
     /// Emits DECSET/DECRST for every mirrored mode whose state differs from
     /// what the mirror terminal was last told, and remembers the new state.

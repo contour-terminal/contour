@@ -28,9 +28,12 @@ HostedSession::HostedSession(SessionId id,
                              std::unique_ptr<vtpty::Pty> pty,
                              vtbackend::Settings settings,
                              std::function<void()> onScreenUpdated,
+                             std::function<void()> onBell,
+                             std::function<void(std::string, std::string)> onNotify,
+                             std::function<void(std::string)> onCopyToClipboard,
                              std::function<void()> onClosed):
     _id(id),
-    _events(std::move(onScreenUpdated)),
+    _events(std::move(onScreenUpdated), std::move(onBell), std::move(onNotify), std::move(onCopyToClipboard)),
     _terminal(_events, std::move(pty), std::move(settings), std::chrono::steady_clock::now()),
     _onClosed(std::move(onClosed))
 {
@@ -142,6 +145,33 @@ std::optional<SessionId> SessionHost::seedSession()
                     return;
                 for (auto* observer: _streamSubscribers)
                     observer->sessionScreenUpdated(id);
+            });
+        },
+        /*onBell=*/
+        [this, id] {
+            _loop.post([this, id] {
+                if (!_sessions.contains(id.value))
+                    return;
+                for (auto* observer: _streamSubscribers)
+                    observer->sessionBell(id);
+            });
+        },
+        /*onNotify=*/
+        [this, id](std::string title, std::string body) {
+            _loop.post([this, id, title = std::move(title), body = std::move(body)] {
+                if (!_sessions.contains(id.value))
+                    return;
+                for (auto* observer: _streamSubscribers)
+                    observer->sessionNotify(id, title, body);
+            });
+        },
+        /*onCopyToClipboard=*/
+        [this, id](std::string data) {
+            _loop.post([this, id, data = std::move(data)] {
+                if (!_sessions.contains(id.value))
+                    return;
+                for (auto* observer: _streamSubscribers)
+                    observer->sessionCopyToClipboard(id, data);
             });
         },
         /*onClosed=*/

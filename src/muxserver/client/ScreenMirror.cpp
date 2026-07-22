@@ -426,4 +426,20 @@ std::string ScreenMirror::applyImage(RemoteScreen const& screen, uint32_t imageI
     return out;
 }
 
+std::string ScreenMirror::applyEvent(proto::SessionEvent const& event)
+{
+    switch (static_cast<proto::SessionEventKind>(event.kind))
+    {
+        case proto::SessionEventKind::Bell: return "\a";
+        case proto::SessionEventKind::Notify:
+            // OSC 777 notify;title;body — the mirror terminal raises notify().
+            return std::format("\033]777;notify;{};{}\033\\", event.a, event.b);
+        case proto::SessionEventKind::ClipboardSet:
+            // OSC 52 write, data re-encoded as base64; the mirror's copyToClipboard
+            // fires under the client's own write permission.
+            return std::format("\033]52;{};{}\033\\", event.a, crispy::base64::encode(event.b));
+    }
+    return {}; // unknown kind: ignore (forward compatibility)
+}
+
 } // namespace muxserver::client

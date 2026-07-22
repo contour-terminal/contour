@@ -109,6 +109,7 @@ TEST_CASE("every catalog PDU round-trips", "[muxserver][proto]")
                 .setModes = { 1, 25, 1006, 2004 },
                 .titleChanged = 1,
                 .title = "~/src/contour — vim" },
+        SessionEvent { .session = 4, .kind = 1, .a = "Build finished", .b = "3 warnings, 0 errors" },
     };
 
     for (auto const& pdu: pdus)

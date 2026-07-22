@@ -40,6 +40,16 @@ enum class PduType : uint8_t
     ImageGone = 7,
     SessionState = 8,
     Delta = 9,
+    SessionEvent = 10,
+};
+
+/// The kind of a SessionEvent — adding a transient session-app event is adding a
+/// row here plus a case in the client's re-emit. `a`/`b` are the kind's payload.
+enum class SessionEventKind : uint8_t
+{
+    Bell = 0,         ///< The bell rang (BEL). `a`/`b` unused.
+    Notify = 1,       ///< A desktop notification: `a` = title, `b` = body.
+    ClipboardSet = 2, ///< An OSC 52 clipboard write: `a` = selection, `b` = raw data.
 };
 
 /// An ident this decoder does not know (yet). Carried, never fatal.
@@ -209,6 +219,19 @@ struct Delta
     bool operator==(Delta const&) const = default;
 };
 
+/// A transient session-app event carrying no screen state (bell, desktop
+/// notification, OSC 52 clipboard write) — pushed unsolicited (serial 0). The
+/// client re-emits it as the matching VT into its mirror terminal, so the
+/// frontend's own bell/notify/clipboard handling (and permissions) apply.
+struct SessionEvent
+{
+    uint64_t session = 0;
+    uint8_t kind = 0; ///< A SessionEventKind value.
+    std::string a;    ///< Notify title / clipboard selection; kind-specific.
+    std::string b;    ///< Notify body / clipboard data; kind-specific.
+    bool operator==(SessionEvent const&) const = default;
+};
+
 using DecodedPdu = std::variant<Invalid,
                                 ClientHello,
                                 ServerHello,
@@ -218,7 +241,8 @@ using DecodedPdu = std::variant<Invalid,
                                 ImageData,
                                 ImageGone,
                                 SessionState,
-                                Delta>;
+                                Delta,
+                                SessionEvent>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

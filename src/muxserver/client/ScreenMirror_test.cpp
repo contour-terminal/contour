@@ -49,6 +49,24 @@ vtbackend::Settings gipSettings()
     return settings;
 }
 
+/// A mirror-terminal event sink recording the transient events (bell,
+/// notification, clipboard write) the re-emit is expected to reproduce.
+struct RecordingEvents final: vtbackend::Terminal::NullEvents
+{
+    int bells = 0;
+    std::string notifyTitle;
+    std::string notifyBody;
+    std::string clipboard;
+
+    void bell() override { ++bells; }
+    void notify(std::string_view title, std::string_view body) override
+    {
+        notifyTitle = title;
+        notifyBody = body;
+    }
+    void copyToClipboard(std::string_view data) override { clipboard = data; }
+};
+
 /// The full closed loop: the REAL server serves deltas of a REAL terminal,
 /// the REAL client mirrors them into RemoteScreen, and the ScreenMirror
 /// re-serializes every update into a LOCAL mirror terminal — whose content
@@ -66,7 +84,7 @@ struct MirrorHarness
         std::make_unique<NativeSession>(loop, host, std::move(pair.first));
     std::unique_ptr<AttachClient> client = std::make_unique<AttachClient>(loop, std::move(pair.second));
 
-    vtbackend::Terminal::NullEvents mirrorEvents;
+    RecordingEvents mirrorEvents;
     std::unique_ptr<vtbackend::Terminal> mirror;
     ScreenMirror reserializer;
 
@@ -84,7 +102,24 @@ struct MirrorHarness
         client->setImageHandler([this](muxserver::client::RemoteScreen const& screen, uint32_t imageId) {
             mirror->writeToScreen(reserializer.applyImage(screen, imageId));
         });
+        client->setSessionEventHandler(
+            [this](muxserver::client::RemoteScreen const& screen, proto::SessionEvent const& event) {
+                std::ignore = screen;
+                mirror->writeToScreen(ScreenMirror::applyEvent(event));
+            });
+        // Deliver the host's stream fan-out (bell / notify / clipboard, and screen
+        // updates) to the session, exactly as the daemon's serveNativeClient does —
+        // so the transient-event path (Terminal::Events -> host -> NativeSession) is
+        // exercised, not just the manually-poked sessionScreenUpdated.
+        host.subscribeStream(server.get());
     }
+
+    ~MirrorHarness() { host.unsubscribeStream(server.get()); }
+
+    MirrorHarness(MirrorHarness const&) = delete;
+    MirrorHarness& operator=(MirrorHarness const&) = delete;
+    MirrorHarness(MirrorHarness&&) = delete;
+    MirrorHarness& operator=(MirrorHarness&&) = delete;
 
     [[nodiscard]] vtbackend::Terminal* serverTerminal(vtmux::SessionId session)
     {
@@ -427,6 +462,40 @@ TEST_CASE("a live window-title change reaches the mirror", "[muxserver][mirror]"
         co_await waitUntil(&h->loop, [&] { return h->mirror->windowTitle() == "my-title"; });
         CHECK(h->mirror->windowTitle() == "my-title");
         CHECK(h->serverTerminal(session)->windowTitle() == "my-title");
+
+        h->client->detach();
+    }(&h, session);
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+
+TEST_CASE("bell, notification and clipboard events reach the mirror", "[muxserver][mirror]")
+{
+    auto h = MirrorHarness {};
+    h.host.createTab();
+    auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    h.serverTerminal(session)->writeToScreen("ready");
+
+    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+        co_await waitUntil(&h->loop, [&] {
+            return h->mirror->primaryScreen().grid().renderMainPageText().contains("ready");
+        });
+
+        // Bell (BEL) — a transient event, re-emitted as BEL into the mirror.
+        serverWrites(h, session, "\a");
+        co_await waitUntil(&h->loop, [&] { return h->mirrorEvents.bells > 0; });
+        CHECK(h->mirrorEvents.bells > 0);
+
+        // Desktop notification (OSC 777 notify;title;body) → mirror's notify().
+        serverWrites(h, session, "\033]777;notify;Build;done ok\033\\");
+        co_await waitUntil(&h->loop, [&] { return h->mirrorEvents.notifyTitle == "Build"; });
+        CHECK(h->mirrorEvents.notifyBody == "done ok");
+
+        // Clipboard write (OSC 52) → mirror's copyToClipboard() with decoded text.
+        auto const encoded = crispy::base64::encode(std::string_view { "clip-text" });
+        serverWrites(h, session, std::format("\033]52;c;{}\033\\", encoded));
+        co_await waitUntil(&h->loop, [&] { return h->mirrorEvents.clipboard == "clip-text"; });
+        CHECK(h->mirrorEvents.clipboard == "clip-text");
 
         h->client->detach();
     }(&h, session);

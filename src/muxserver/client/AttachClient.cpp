@@ -264,6 +264,12 @@ void AttachClient::handlePdu(proto::DecodedFrame const& frame)
             _onImage(screen, imageId);
         return;
     }
+    if (auto const* event = std::get_if<proto::SessionEvent>(&pdu))
+    {
+        if (_onSessionEvent)
+            _onSessionEvent(_screens[event->session], *event);
+        return;
+    }
     // Unknown PDUs are ignored for forward compatibility.
 }
 

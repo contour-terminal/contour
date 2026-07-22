@@ -63,6 +63,10 @@ class NativeSession final: public SessionStreamEvents
     /// connection that churns through many sessions does not accumulate it.
     void sessionClosed(vtmux::SessionId session) override;
 
+    void sessionBell(vtmux::SessionId session) override;
+    void sessionNotify(vtmux::SessionId session, std::string const& title, std::string const& body) override;
+    void sessionCopyToClipboard(vtmux::SessionId session, std::string const& data) override;
+
   private:
     friend struct NativeSessionFollowTester; ///< Test-only view of _followed.
 
@@ -91,6 +95,13 @@ class NativeSession final: public SessionStreamEvents
 
     void handlePdu(proto::DecodedFrame const& frame);
     void send(uint64_t serial, proto::DecodedPdu const& pdu);
+
+    /// Pushes a transient SessionEvent (bell / notification / clipboard) as an
+    /// unsolicited frame (serial 0), once the handshake completed.
+    void emitSessionEvent(vtmux::SessionId session,
+                          proto::SessionEventKind kind,
+                          std::string a,
+                          std::string b);
 
     /// Validates the peer's ClientHello, answers, and pushes the attach
     /// snapshot (spawning the first session on an empty daemon).
