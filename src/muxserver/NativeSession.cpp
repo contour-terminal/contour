@@ -421,6 +421,22 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
             follow.lastDefaultBackground = bg;
         }
 
+        // Live status-display state (DECSSDT/DECSASD) — the first slice of
+        // multi-page support: which status line is shown and where the app writes.
+        auto const statusType = static_cast<int>(std::to_underlying(terminal->statusDisplayType()));
+        auto const activeStatus = static_cast<int>(std::to_underlying(terminal->activeStatusDisplay()));
+        if (statusType != follow.lastStatusDisplayType || activeStatus != follow.lastActiveStatusDisplay)
+        {
+            if (!snapshot)
+            {
+                delta.statusChanged = 1;
+                delta.statusDisplayType = static_cast<uint8_t>(statusType);
+                delta.activeStatusDisplay = static_cast<uint8_t>(activeStatus);
+            }
+            follow.lastStatusDisplayType = statusType;
+            follow.lastActiveStatusDisplay = activeStatus;
+        }
+
         if (snapshot)
         {
             auto& snap = state.emplace();
@@ -436,6 +452,8 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
             snap.cwd = terminal->currentWorkingDirectory();
             snap.defaultForeground = colors.defaultForeground.value();
             snap.defaultBackground = colors.defaultBackground.value();
+            snap.statusDisplayType = static_cast<uint8_t>(statusType);
+            snap.activeStatusDisplay = static_cast<uint8_t>(activeStatus);
         }
     }
 
@@ -450,7 +468,8 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
     auto const cursorMoved =
         delta.cursorLine != follow.lastCursorLine || delta.cursorColumn != follow.lastCursorColumn;
     if (delta.snapshot != 0 || !delta.lines.empty() || modesChanged || cursorMoved || delta.titleChanged != 0
-        || delta.cursorShapeChanged != 0 || delta.cwdChanged != 0 || delta.colorsChanged != 0)
+        || delta.cursorShapeChanged != 0 || delta.cwdChanged != 0 || delta.colorsChanged != 0
+        || delta.statusChanged != 0)
     {
         follow.lastModes = delta.setModes;
         follow.lastCursorLine = delta.cursorLine;

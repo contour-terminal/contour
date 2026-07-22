@@ -577,3 +577,29 @@ TEST_CASE("a live default-color change reaches the mirror", "[muxserver][mirror]
 
     h.loop.blockOn(drive(&h, std::move(scenario)));
 }
+
+TEST_CASE("the status-display state reaches the mirror", "[muxserver][mirror]")
+{
+    auto h = MirrorHarness {};
+    h.host.createTab();
+    auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    h.serverTerminal(session)->writeToScreen("s");
+
+    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+        co_await waitUntil(
+            &h->loop, [&] { return h->mirror->primaryScreen().grid().renderMainPageText().contains("s"); });
+
+        // DECSSDT 1: show the indicator status line (no change to the main grid) —
+        // the first slice of multi-page support beyond primary/alternate.
+        serverWrites(h, session, "\033[1$~");
+        co_await waitUntil(&h->loop, [&] {
+            return h->mirror->statusDisplayType() == vtbackend::StatusDisplayType::Indicator;
+        });
+        CHECK(h->mirror->statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+        CHECK(h->serverTerminal(session)->statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+
+        h->client->detach();
+    }(&h, session);
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}

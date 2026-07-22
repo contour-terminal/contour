@@ -164,8 +164,14 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       CI/manually verified (real stdin/stdout/TTY, not headless), but its `ScreenMirror` core is
       fully unit-tested. Follow-up: a scrollback UI; ensure the outer Contour has GIP enabled for
       images.
-- [ ] **A10. Full multi-page support (status-line displays).** *(Added 2026-07-22 — the native
+- [~] **A10. Full multi-page support (status-line displays).** *(Added 2026-07-22 — the native
       protocol models only ONE grid per session; `ScreenType` predates Contour's multi-page support.)*
+      **Scope 2 (state) DONE:** `SessionState`/`Delta` now carry `statusDisplayType` +
+      `activeStatusDisplay` (pull+diff of `Terminal::statusDisplayType()`/`activeStatusDisplay()`),
+      `ScreenMirror` re-emits DECSSDT (`CSI Ps $ ~`) + DECSASD (`CSI Ps $ }`); CodecVersion → 9;
+      closed-loop test (DECSSDT 1 → the mirror shows the indicator status line, rendered locally from
+      its own state — matching the mux philosophy). *Landed 2026-07-22; suite green (123/2654).*
+      **Scope 1 (host-writable CONTENT) REMAINS** — the per-page delta below. Original scope:
       A session has more renderable **pages** than primary/alternate: `NativeSession` serializes only
       `terminal->currentScreen().grid()` (`NativeSession.cpp:296`), but Contour also has a
       **host-writable status line** (`_hostWritableStatusLineScreen` — an app writes it after DECSASD
@@ -359,9 +365,13 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
 - 2026-07-22 · Windows/clangcl-release · **B1 done** — `LayoutState` PDU (recursive tab/pane tree,
   tag 11, no codec bump) + `NativeSession` serialize/emit (snapshot-leading + live via a
   `LayoutObserver`/`ScopedModelSubscription`) + `AttachClient::setLayoutHandler`. Split-pane
-  end-to-end test. muxserver suite green (122/2652). **The daemon's tabs/panes are now on the wire;**
-  **B2 (GUI apply in `AttachController`) is the Qt follow-up.** Remaining: A8, A10 (multi-page — see
-  WS-A), B2/B3/B4 (Qt), C3/C4/C5 (Qt CLI/config + client connect), B5 tmux polish.
+  end-to-end test. muxserver suite green (122/2652).
+- 2026-07-22 · Windows/clangcl-release · **A10 scope-2 (status-display state) done** — multi-page
+  support beyond primary/alt: `SessionState`/`Delta` carry `statusDisplayType`/`activeStatusDisplay`
+  (pull+diff); `ScreenMirror` re-emits DECSSDT/DECSASD. CodecVersion → 9. Closed-loop test (indicator
+  status line shows on the mirror, rendered locally). Suite green (123/2654). **A10 scope-1
+  (host-writable status-line CONTENT, per-page `Delta.page`) remains.** Remaining overall: A8,
+  A10-content, B2/B3/B4 (Qt), C3/C4/C5 (Qt), B5.
 
 ## Open decisions / risks
 

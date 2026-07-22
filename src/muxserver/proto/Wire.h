@@ -35,7 +35,9 @@ namespace muxserver::proto
 /// v7 added ClientHello.token (preshared auth for the opt-in TCP transport; empty
 /// over the hardened AF_UNIX socket, where filesystem permissions are the gate).
 /// v8 added Delta.defaultForeground/Background (live OSC 10/11 default colors).
-constexpr uint32_t CodecVersion = 8;
+/// v9 added the status-display state (DECSSDT/DECSASD) to SessionState and Delta —
+/// the first slice of multi-page support beyond primary/alternate.
+constexpr uint32_t CodecVersion = 9;
 
 /// The largest frame payload the decoder will accept. A peer-declared length
 /// beyond this is rejected outright (FrameTooLarge) rather than treated as

@@ -139,6 +139,10 @@ class NativeSession final: public SessionStreamEvents
         /// so an OSC 10/11 change carries (and forces) a delta only on change.
         int lastDefaultForeground = -1;
         int lastDefaultBackground = -1;
+        /// The status-display type/active last sent (-1 until the first snapshot),
+        /// so a DECSSDT/DECSASD change carries (and forces) a delta only on change.
+        int lastStatusDisplayType = -1;
+        int lastActiveStatusDisplay = -1;
     };
 
     void handlePdu(proto::DecodedFrame const& frame);

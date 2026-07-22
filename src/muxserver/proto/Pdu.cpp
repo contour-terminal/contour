@@ -181,6 +181,8 @@ namespace
         for (auto const color: pdu.palette)
             out.u32(color);
         out.string(pdu.cwd);
+        out.u8(pdu.statusDisplayType);
+        out.u8(pdu.activeStatusDisplay);
     }
 
     void encodeCell(Writer& out, WireCell const& cell)
@@ -257,6 +259,9 @@ namespace
         out.u8(pdu.colorsChanged);
         out.u32(pdu.defaultForeground);
         out.u32(pdu.defaultBackground);
+        out.u8(pdu.statusChanged);
+        out.u8(pdu.statusDisplayType);
+        out.u8(pdu.activeStatusDisplay);
     }
 
     void encodeBody(Writer& out, SessionEvent const& pdu)
@@ -388,7 +393,8 @@ namespace
         if (auto const decoded = decodeVector(in, pdu.palette, [](Reader& reader) { return reader.u32(); });
             !decoded)
             return std::unexpected(decoded.error());
-        if (!assign(in.string(), pdu.cwd, error))
+        if (!assign(in.string(), pdu.cwd, error) || !assign(in.u8(), pdu.statusDisplayType, error)
+            || !assign(in.u8(), pdu.activeStatusDisplay, error))
             return std::unexpected(error);
         return pdu;
     }
@@ -487,7 +493,9 @@ namespace
             || !assign(in.u8(), pdu.cursorShapeChanged, error) || !assign(in.u8(), pdu.cursorShape, error)
             || !assign(in.u8(), pdu.cwdChanged, error) || !assign(in.string(), pdu.cwd, error)
             || !assign(in.u8(), pdu.colorsChanged, error) || !assign(in.u32(), pdu.defaultForeground, error)
-            || !assign(in.u32(), pdu.defaultBackground, error))
+            || !assign(in.u32(), pdu.defaultBackground, error) || !assign(in.u8(), pdu.statusChanged, error)
+            || !assign(in.u8(), pdu.statusDisplayType, error)
+            || !assign(in.u8(), pdu.activeStatusDisplay, error))
             return std::unexpected(error);
         return pdu;
     }

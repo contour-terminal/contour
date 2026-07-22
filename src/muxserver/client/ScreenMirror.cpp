@@ -280,6 +280,11 @@ std::string ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& 
         out += oscColor(10, delta.defaultForeground);
         out += oscColor(11, delta.defaultBackground);
     }
+    if (delta.statusChanged != 0)
+    {
+        out += std::format("\033[{}$~", delta.statusDisplayType);    // DECSSDT
+        out += std::format("\033[{}$}}", delta.activeStatusDisplay); // DECSASD
+    }
     out += "\033[0m";
     out += cup(delta.cursorLine + 1, delta.cursorColumn + 1);
     if (containsValue(_setModes, VisibleCursorModeNumber))
@@ -354,6 +359,11 @@ std::string ScreenMirror::fullReplay(RemoteScreen const& screen)
     {
         out += oscColor(10, screen.defaultForeground);
         out += oscColor(11, screen.defaultBackground);
+    }
+    if (screen.statusDisplayType != 0 || screen.activeStatusDisplay != 0)
+    {
+        out += std::format("\033[{}$~", screen.statusDisplayType);    // DECSSDT
+        out += std::format("\033[{}$}}", screen.activeStatusDisplay); // DECSASD
     }
     syncModes(out, screen);
     appendImages(out, screen);

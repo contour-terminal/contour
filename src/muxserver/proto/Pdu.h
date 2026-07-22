@@ -138,6 +138,10 @@ struct SessionState
     uint32_t defaultBackground = 0; ///< Raw RGBA.
     std::vector<uint32_t> palette;  ///< Indexed colors, raw RGBA.
     std::string cwd;                ///< The OSC 7 working-directory URL, if known.
+    /// The status-display state (multi-page support): which status line is shown
+    /// (DECSSDT) and which display the app writes to (DECSASD).
+    uint8_t statusDisplayType = 0;   ///< StatusDisplayType: 0 none, 1 indicator, 2 host-writable.
+    uint8_t activeStatusDisplay = 0; ///< ActiveStatusDisplay: 0 main, 1 status-line, 2 indicator.
     bool operator==(SessionState const&) const = default;
 };
 
@@ -235,6 +239,11 @@ struct Delta
     uint8_t colorsChanged = 0;
     uint32_t defaultForeground = 0;
     uint32_t defaultBackground = 0;
+    /// Set (1) when the status-display state changed in this batch (DECSSDT /
+    /// DECSASD); the two bytes below then hold the new state to re-emit.
+    uint8_t statusChanged = 0;
+    uint8_t statusDisplayType = 0;
+    uint8_t activeStatusDisplay = 0;
     bool operator==(Delta const&) const = default;
 };
 
