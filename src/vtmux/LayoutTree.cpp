@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <numeric>
+#include <tuple>
 
 #include <vtmux/Pane.h>
 #include <vtmux/Tab.h>
@@ -55,49 +56,59 @@ double ratioForFirst(LayoutPane const& splitNode)
 
 namespace
 {
-    void realizePane(SessionModel& model, TabId tab, LayoutPane const& node, PaneSeeder const& seed);
+    [[nodiscard]] bool realizePane(SessionModel& model,
+                                   TabId tab,
+                                   LayoutPane const& node,
+                                   PaneSeeder const& seed);
 
     /// Realizes @p children as the siblings of one split, splitting the model's active leaf once
     /// per child. Walks a span rather than materializing a "tail group" node at each level: the
     /// tail is the rest of the SAME children vector, so no subtree is ever copied.
     /// Precondition: the model's active leaf is a freshly created leaf seeded with
     /// leftmostLeaf(children.front()).
-    void realizeSiblings(SessionModel& model,
-                         TabId tab,
-                         SplitState orientation,
-                         std::span<LayoutPane const> children,
-                         PaneSeeder const& seed)
+    /// @return False if a seed failed (a backing session was refused): realization stops so no pane
+    ///         is ever allocated without one.
+    [[nodiscard]] bool realizeSiblings(SessionModel& model,
+                                       TabId tab,
+                                       SplitState orientation,
+                                       std::span<LayoutPane const> children,
+                                       PaneSeeder const& seed)
     {
         if (children.size() == 1)
         {
             // No sibling left to split against: the active leaf hosts this child's subtree.
-            realizePane(model, tab, children.front(), seed);
-            return;
+            return realizePane(model, tab, children.front(), seed);
         }
 
         // The current active leaf will host children[0]'s subtree; remember its id to return to it.
         auto const firstLeafId = model.findTab(tab)->activePane()->id();
 
         auto const tail = children.subspan(1);
-        // Stage the backing session for the NEW pane = leftmost leaf of the tail group.
-        seed(leftmostLeaf(tail.front()));
+        // Stage the backing session for the NEW pane = leftmost leaf of the tail group. If it is
+        // refused, stop BEFORE splitActivePane allocates an unbacked pane.
+        if (!seed(leftmostLeaf(tail.front())))
+            return false;
         model.splitActivePane(tab, orientation, ratioForFirst(children));
 
         // Active is now the tail's leftmost leaf: build the remaining siblings in place.
-        realizeSiblings(model, tab, orientation, tail, seed);
+        if (!realizeSiblings(model, tab, orientation, tail, seed))
+            return false;
 
         // Return to the first child's slot and build it.
         model.setActivePane(tab, firstLeafId);
-        realizePane(model, tab, children.front(), seed);
+        return realizePane(model, tab, children.front(), seed);
     }
 
     // Precondition: model's active leaf is a freshly created leaf seeded with leftmostLeaf(node).
-    void realizePane(SessionModel& model, TabId tab, LayoutPane const& node, PaneSeeder const& seed)
+    [[nodiscard]] bool realizePane(SessionModel& model,
+                                   TabId tab,
+                                   LayoutPane const& node,
+                                   PaneSeeder const& seed)
     {
         if (node.isLeaf())
-            return; // active leaf already carries this command
+            return true; // active leaf already carries this command
 
-        realizeSiblings(model, tab, node.orientation, node.children, seed);
+        return realizeSiblings(model, tab, node.orientation, node.children, seed);
     }
 } // namespace
 
@@ -109,8 +120,10 @@ Tab* realizeLayoutTab(SessionModel& model, WindowId window, LayoutTab const& tab
     if (model.window(window) == nullptr)
         return nullptr;
 
-    // Seed + create the tab's first pane (the root's leftmost leaf).
-    seed(leftmostLeaf(tab.root));
+    // Seed + create the tab's first pane (the root's leftmost leaf). A refused first seed yields no
+    // tab at all (nothing was allocated to back).
+    if (!seed(leftmostLeaf(tab.root)))
+        return nullptr;
     auto* modelTab = model.createTab(window);
     if (modelTab == nullptr)
         return nullptr;
@@ -120,7 +133,9 @@ Tab* realizeLayoutTab(SessionModel& model, WindowId window, LayoutTab const& tab
     if (tab.color)
         model.setTabColor(modelTab->id(), TabColorSource::User, *tab.color);
 
-    realizePane(model, modelTab->id(), tab.root, seed);
+    // A refused seed mid-tree leaves the tab with the panes realized so far — every one backed, none
+    // blank — which is a better failure than allocating panes with no session behind them.
+    std::ignore = realizePane(model, modelTab->id(), tab.root, seed);
     return modelTab;
 }
 

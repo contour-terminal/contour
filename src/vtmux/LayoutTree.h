@@ -75,11 +75,16 @@ struct Layout
 
 /// Invoked immediately before each model allocation to stage the backing session for that leaf's
 /// command/profile/dir. It must arrange for the model's SessionAllocator to return the id it created.
-using PaneSeeder = std::function<void(LayoutPane const& leaf)>;
+/// @return True if the backing session was staged; false if it could not be (e.g. the factory
+///         refuses to back another session), which stops the realizer before it allocates a pane with
+///         no backing session.
+using PaneSeeder = std::function<bool(LayoutPane const& leaf)>;
 
 /// Creates a tab in @p window from @p tab: seeds+creates the first pane, applies title/color, then
 /// builds the pane tree. @p seed is invoked immediately before each model allocation to stage that
-/// pane's backing session (it must make the model's allocator return the id it created).
+/// pane's backing session (it must make the model's allocator return the id it created). If a seed
+/// fails, realization stops: the first pane's failure yields no tab (nullptr); a later pane's failure
+/// leaves the tab with the panes realized so far — every one backed, none blank.
 Tab* realizeLayoutTab(SessionModel& model, WindowId window, LayoutTab const& tab, PaneSeeder const& seed);
 
 /// A leaf pane's resolved runtime data, as reported by a LeafResolver for serializing live panes.

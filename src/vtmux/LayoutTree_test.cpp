@@ -53,6 +53,8 @@ struct RealizeHarness
     uint64_t nextSession = 1000;
     std::optional<SessionId> pending;
     std::map<uint64_t, std::string> commandBySession;
+    std::size_t seedCount = 0;            ///< How many seeds have been accepted so far.
+    std::optional<std::size_t> seedLimit; ///< If set, seeds beyond this many are refused.
 
     SessionModel model { events, [this]() -> SessionId {
                             if (pending)
@@ -66,10 +68,16 @@ struct RealizeHarness
 
     PaneSeeder seeder()
     {
-        return [this](LayoutPane const& leaf) {
+        return [this](LayoutPane const& leaf) -> bool {
+            // Model a factory that can back only seedLimit sessions: once exhausted, refuse
+            // (without staging a pending id), exactly like AttachController's drained pool.
+            if (seedLimit && seedCount >= *seedLimit)
+                return false;
+            ++seedCount;
             auto const id = SessionId { nextSession++ };
             pending = id;
             commandBySession[id.value] = leaf.command.value_or("");
+            return true;
         };
     }
 };
@@ -117,6 +125,50 @@ TEST_CASE("realizeLayoutTab: two side-by-side panes build a Vertical split", "[l
     CHECK(root->splitState() == SplitState::Vertical);
     CHECK(h.commandBySession.at(root->first()->session().value) == "left");
     CHECK(h.commandBySession.at(root->second()->session().value) == "right");
+}
+
+TEST_CASE("realizeLayoutTab: a refused seed mid-tree stops without allocating an unbacked pane",
+          "[layout][realize]")
+{
+    RealizeHarness h;
+    h.seedLimit = 1; // the factory can back the first pane only, then runs dry
+    auto* win = h.model.createWindow();
+
+    LayoutTab tab;
+    tab.root.orientation = SplitState::Vertical;
+    tab.root.children = { [] {
+                             LayoutPane p;
+                             p.command = "left";
+                             return p;
+                         }(),
+                          [] {
+                              LayoutPane p;
+                              p.command = "right";
+                              return p;
+                          }() };
+
+    auto* modelTab = realizeLayoutTab(h.model, win->id(), tab, h.seeder());
+    REQUIRE(modelTab != nullptr);
+    // The sibling's seed was refused, so no second (permanently blank) pane was allocated.
+    CHECK(modelTab->paneCount() == 1);
+    CHECK(modelTab->rootPane()->isLeaf());
+    // Exactly one session was seeded, and it backs the single surviving pane.
+    CHECK(h.commandBySession.size() == 1);
+    CHECK(h.commandBySession.at(modelTab->rootPane()->session().value) == "left");
+}
+
+TEST_CASE("realizeLayoutTab: a refused first seed creates no tab at all", "[layout][realize]")
+{
+    RealizeHarness h;
+    h.seedLimit = 0; // the factory can back nothing
+    auto* win = h.model.createWindow();
+
+    LayoutTab tab;
+    tab.root.command = "nvim";
+
+    auto* modelTab = realizeLayoutTab(h.model, win->id(), tab, h.seeder());
+    CHECK(modelTab == nullptr);
+    CHECK(h.commandBySession.empty()); // nothing was seeded, nothing orphaned
 }
 
 TEST_CASE("realizeLayoutTab: nested split produces the right tree and commands", "[layout][realize]")

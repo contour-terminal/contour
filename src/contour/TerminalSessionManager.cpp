@@ -351,7 +351,7 @@ bool TerminalSessionManager::applyLayoutToWindow(vtmux::WindowId window,
     {
         // The seeder stages a backing session for each pane right before the model allocates it,
         // exactly like createBackingSession's use in splitActivePane/createSessionInBackground.
-        auto seeder = [&](config::LayoutPane const& leaf) {
+        auto seeder = [&](config::LayoutPane const& leaf) -> bool {
             auto const sessionId = vtmux::SessionId { _nextSessionId++ };
             // A command override ONLY when the pane actually names a program to run. A pane that
             // just picks a directory still runs the profile's shell — it travels through `cwd`,
@@ -371,7 +371,10 @@ bool TerminalSessionManager::applyLayoutToWindow(vtmux::WindowId window,
                 managerLog()("Layout references unknown profile '{}'; using window profile.", *profileName);
                 profileName.reset();
             }
-            createBackingSession(sessionId, leaf.directory, pageSize, command, profileName);
+            // Report whether the backing session was actually created: a nullptr (the factory
+            // refused, e.g. an attach-mode pool that ran dry) stops the realizer before it
+            // allocates a pane with no session behind it — the same guard the split path uses.
+            return createBackingSession(sessionId, leaf.directory, pageSize, command, profileName) != nullptr;
         };
 
         auto* modelTab = realizeLayoutTab(*_model, window, tabSpec, seeder);
