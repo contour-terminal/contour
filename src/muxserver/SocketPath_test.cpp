@@ -32,7 +32,7 @@ TEST_CASE("an empty env value counts as unset", "[muxserver][socketpath]")
 
 TEST_CASE("without a runtime dir the path falls back to a per-uid temp dir", "[muxserver][socketpath]")
 {
-    auto const path = muxSocketPath("fallback", "", std::nullopt, std::nullopt).string();
-    CHECK(path.contains("contour-"));
-    CHECK(path.ends_with("/fallback"));
+    auto const path = muxSocketPath("fallback", "", std::nullopt, std::nullopt);
+    CHECK(path.string().contains("contour-")); // the per-uid temp dir carries the prefix
+    CHECK(path.filename() == "fallback");      // the label is the leaf, whatever the OS separator
 }
