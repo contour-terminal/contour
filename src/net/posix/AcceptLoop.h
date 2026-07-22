@@ -8,10 +8,6 @@
 
 #ifndef _WIN32
 
-    #include <sys/socket.h>
-
-    #include <string>
-
     #include <coro/Task.hpp>
     #include <net/IListener.h>
 
@@ -19,12 +15,6 @@ namespace net
 {
 
 class EventLoop;
-
-/// Formats a connected peer's address as a printable host string.
-/// @param addr The peer's address storage.
-/// @return The printable host ("127.0.0.1", "::1"), or "" when the peer is not
-///         an IPv4/IPv6 endpoint (e.g. an AF_UNIX connection) or cannot format.
-[[nodiscard]] std::string formatPeer(sockaddr_storage const& addr) noexcept;
 
 /// One shared accept turn-loop: accepts a connection (recording the peer via
 /// formatPeer -- empty for AF_UNIX), parking on the listener fd until it is

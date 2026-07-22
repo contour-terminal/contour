@@ -16,36 +16,15 @@
 
 #ifdef _WIN32
 
-    #include <array>
     #include <cstring>
     #include <string>
 
     #include <afunix.h>
 
+    #include <net/platform/PeerAddress.h>
+
 namespace net
 {
-
-namespace
-{
-    /// Formats a connected peer's address as a printable host string.
-    [[nodiscard]] std::string formatPeer(sockaddr_storage const& addr) noexcept
-    {
-        auto buf = std::array<char, INET6_ADDRSTRLEN> {};
-        if (addr.ss_family == AF_INET)
-        {
-            auto const* v4 = reinterpret_cast<sockaddr_in const*>(&addr);
-            if (InetNtopA(AF_INET, &v4->sin_addr, buf.data(), buf.size()) != nullptr)
-                return buf.data();
-        }
-        else if (addr.ss_family == AF_INET6)
-        {
-            auto const* v6 = reinterpret_cast<sockaddr_in6 const*>(&addr);
-            if (InetNtopA(AF_INET6, &v6->sin6_addr, buf.data(), buf.size()) != nullptr)
-                return buf.data();
-        }
-        return {};
-    }
-} // namespace
 
 WindowsListener::WindowsListener(EventLoop& loop,
                                  SOCKET socket,

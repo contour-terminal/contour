@@ -16,6 +16,7 @@ set(net_SOURCES
     WithTimeout.h
     platform/Clock.h
     platform/NativeHandle.h
+    platform/PeerAddress.h
     platform/SystemPipe.cpp
     platform/SystemPipe.h
     platform/WinsockInit.cpp
