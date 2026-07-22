@@ -27,6 +27,11 @@ std::expected<Frame, DecodeError> readFrame(std::span<std::byte const> data)
         return std::unexpected(DecodeError::CompressedFrame);
 
     auto const payloadLength = *taggedLength >> 1;
+    // Reject an over-large declared length BEFORE the NeedMoreData check: a peer
+    // that declares a huge payload and then trickles bytes must not make the read
+    // loop keep buffering toward it (an unbounded-memory DoS).
+    if (payloadLength > MaxFrameSize)
+        return std::unexpected(DecodeError::FrameTooLarge);
     if (reader.remaining() < payloadLength)
         return std::unexpected(DecodeError::NeedMoreData);
 

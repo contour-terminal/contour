@@ -29,6 +29,15 @@ namespace muxserver::proto
 /// and Delta.stableFloor (so mirrors evict history the server discarded).
 constexpr uint32_t CodecVersion = 3;
 
+/// The largest frame payload the decoder will accept. A peer-declared length
+/// beyond this is rejected outright (FrameTooLarge) rather than treated as
+/// NeedMoreData, so a hostile header claiming a huge payload cannot make the
+/// read loop buffer toward it and exhaust memory. Sized well above any frame
+/// the byte-bounded WriteQueues (≤ 4 MiB) can emit — images and full-grid
+/// snapshots included — so it never rejects legitimate traffic. This is the
+/// native-protocol analogue of imsg's MaxMessageSize.
+constexpr uint64_t MaxFrameSize = uint64_t { 64 } * 1024 * 1024;
+
 /// Why a decode could not produce a value. NeedMoreData is a NON-error state:
 /// the caller reads more bytes and retries.
 enum class DecodeError : uint8_t
@@ -39,6 +48,9 @@ enum class DecodeError : uint8_t
     Truncated,       ///< A declared length exceeds the remaining payload.
     TrailingBytes,   ///< A PDU body decoded fine but left bytes over.
     VersionMismatch, ///< The peer speaks an incompatible CodecVersion.
+    FrameTooLarge,   ///< A frame's declared payload exceeds MaxFrameSize: a fatal
+                     ///< protocol violation, NOT "read more" — a peer must never
+                     ///< make the reader buffer an unbounded declared length.
     MalformedPdu,    ///< A complete frame's body ran short mid-value: a lie in
                      ///< the body, never "read more" — readFrame already proved
                      ///< the whole frame is buffered, so this is fatal.

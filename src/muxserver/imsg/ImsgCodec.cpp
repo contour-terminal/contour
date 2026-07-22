@@ -92,9 +92,14 @@ void ImsgDecoder::feed(std::span<std::byte const> bytes, int fd)
         _pendingFd = fd;
     }
 
-    if (_consumed > 0 && _consumed == _buffer.size())
+    // Reclaim the already-decoded prefix before appending. Compacting on every
+    // feed (rather than only when the buffer happened to drain exactly) bounds
+    // _buffer to the single partial frame still pending plus the new chunk: a peer
+    // that always leaves a fragment mid-frame can no longer make the consumed
+    // prefix accumulate forever and exhaust the connection's memory.
+    if (_consumed > 0)
     {
-        _buffer.clear();
+        _buffer.erase(_buffer.begin(), _buffer.begin() + static_cast<std::ptrdiff_t>(_consumed));
         _consumed = 0;
     }
     _buffer.insert(_buffer.end(), bytes.begin(), bytes.end());

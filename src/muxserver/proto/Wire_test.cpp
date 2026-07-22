@@ -143,3 +143,32 @@ TEST_CASE("the reserved compression bit is rejected, not misread", "[muxserver][
     stream.varint(1); // tagged length with the compressed bit set (value 1 = len 0 | bit)
     CHECK(readFrame(stream.view()).error() == DecodeError::CompressedFrame);
 }
+
+TEST_CASE("an over-large declared frame length is rejected, not buffered toward", "[muxserver][proto]")
+{
+    // A peer declares a payload beyond MaxFrameSize and sends only the header. Without the cap this
+    // returns NeedMoreData and the read loop keeps buffering toward the (huge) declared length — an
+    // unbounded-memory DoS. With the cap it is a hard FrameTooLarge, so the loop tears the peer down.
+    auto stream = Writer {};
+    stream.varint((MaxFrameSize + 1) << 1); // tagged length: payload = MaxFrameSize + 1, no compression
+
+    auto const frame = readFrame(stream.view());
+    REQUIRE_FALSE(frame.has_value());
+    CHECK(frame.error() == DecodeError::FrameTooLarge);
+
+    // Even declaring the largest representable payload (the 2^63-class attack) is rejected outright
+    // rather than mistaken for "read more".
+    auto huge = Writer {};
+    huge.varint(std::numeric_limits<uint64_t>::max() & ~uint64_t { 1 }); // max payload, compression bit clear
+    CHECK(readFrame(huge.view()).error() == DecodeError::FrameTooLarge);
+}
+
+TEST_CASE("a frame at exactly the size cap still decodes", "[muxserver][proto]")
+{
+    // The bound is inclusive: a payload of exactly MaxFrameSize is legal, so the cap never rejects a
+    // frame a compliant peer could send. (Check the boundary arithmetic without materializing 64 MiB:
+    // a header declaring MaxFrameSize with the body absent must ask for more data, not FrameTooLarge.)
+    auto stream = Writer {};
+    stream.varint(MaxFrameSize << 1);
+    CHECK(readFrame(stream.view()).error() == DecodeError::NeedMoreData);
+}

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstring>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -109,6 +111,41 @@ TEST_CASE("frames round-trip and resume across byte-at-a-time feeds", "[muxserve
     CHECK((*frame)->type == msgtype::IdentifyTerm);
     CHECK((*frame)->payload == cstringOf("xterm-256color"));
     CHECK(!(*frame)->fd.valid());
+}
+
+TEST_CASE("a stream fragmented mid-frame decodes every frame without unbounded buffering",
+          "[muxserver][imsg]")
+{
+    // Every chunk deliberately ends mid-frame, so the decoder always holds a partial trailing frame.
+    // The old compaction (only when the buffer drained EXACTLY) never fired here, letting the consumed
+    // prefix accumulate for the connection's whole life. Compacting on every feed bounds memory; this
+    // asserts the harder-to-break half — that the compaction preserves correctness across many frames.
+    auto const one = encodeFrame(msgtype::IdentifyTerm, cstringOf("xterm"));
+    auto constexpr FrameCount = 500;
+
+    auto stream = std::vector<std::byte> {};
+    for ([[maybe_unused]] auto const i: std::views::iota(0, FrameCount))
+        stream.insert(stream.end(), one.begin(), one.end());
+
+    auto decoder = ImsgDecoder {};
+    auto decoded = 0;
+    auto const chunk = one.size() + 1; // one full frame plus a byte: each feed leaves a fragment
+    for (std::size_t offset = 0; offset < stream.size(); offset += chunk)
+    {
+        auto const take = std::min(chunk, stream.size() - offset);
+        decoder.feed(std::span { stream.data() + offset, take });
+        while (true)
+        {
+            auto const frame = decoder.next();
+            REQUIRE(frame.has_value()); // never a decode error
+            if (!frame->has_value())
+                break; // needs more bytes
+            CHECK((*frame)->type == msgtype::IdentifyTerm);
+            CHECK((*frame)->payload == cstringOf("xterm"));
+            ++decoded;
+        }
+    }
+    CHECK(decoded == FrameCount);
 }
 
 TEST_CASE("out-of-range lengths are fatal", "[muxserver][imsg]")
