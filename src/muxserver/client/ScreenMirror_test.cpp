@@ -229,6 +229,83 @@ TEST_CASE("the mirror terminal reproduces text, SGR and cursor", "[muxserver][mi
     h.loop.blockOn(drive(&h, std::move(scenario)));
 }
 
+TEST_CASE("DEC pages beyond primary/alternate mirror faithfully", "[muxserver][mirror]")
+{
+    auto h = MirrorHarness {};
+    h.host.createTab();
+    auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    h.serverTerminal(session)->writeToScreen("page-zero-here");
+
+    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+        // Page 0 (primary) mirrors onto the mirror's primary buffer.
+        co_await waitUntil(&h->loop, [&] {
+            return h->mirror->primaryScreen().grid().renderMainPageText().contains("page-zero-here");
+        });
+        CHECK(!h->mirror->isAlternateScreen());
+
+        // Live-switch to DEC page 1 (NP) and write there. DECPCCM couples the
+        // display by default, so the user now sees page 1 — which shares the
+        // "Alternate" wire screen-type with pages 2..14 and the xterm alt page, yet
+        // is a distinct grid. The daemon must force a resync onto it (the page-index
+        // gate, not the primary-vs-alt one, is what catches this).
+        serverWrites(h, session, "\033[1Upage-one-here"); // NP -> page 1, then write
+        co_await waitUntil(&h->loop, [&] {
+            return h->mirror->isAlternateScreen()
+                   && h->mirror->alternateScreen().grid().renderMainPageText().contains("page-one-here");
+        });
+        // The mirror shows page 1's content, not page 0's bleeding through.
+        CHECK(!h->mirror->alternateScreen().grid().renderMainPageText().contains("page-zero-here"));
+        CHECK(h->mirror->alternateScreen().grid().renderMainPageText()
+              == h->serverTerminal(session)->pageAt(vtbackend::PageIndex(1)).grid().renderMainPageText());
+
+        // Switch back to page 0 (PP): the mirror leaves the alternate buffer and
+        // page 0's preserved content returns from the daemon's fresh snapshot.
+        serverWrites(h, session, "\033[1V"); // PP -> page 0
+        co_await waitUntil(&h->loop, [&] {
+            return !h->mirror->isAlternateScreen()
+                   && h->mirror->primaryScreen().grid().renderMainPageText().contains("page-zero-here");
+        });
+        CHECK(!h->mirror->primaryScreen().grid().renderMainPageText().contains("page-one-here"));
+
+        h->client->detach();
+    }(&h, session);
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+
+TEST_CASE("a decoupled cursor page hides the mirror's cursor", "[muxserver][mirror]")
+{
+    auto h = MirrorHarness {};
+    h.host.createTab();
+    auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    h.serverTerminal(session)->writeToScreen("visible-page-zero");
+
+    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+        // Coupled (the default): the mirror shows page 0 with a visible cursor.
+        co_await waitUntil(&h->loop, [&] {
+            return h->mirror->primaryScreen().grid().renderMainPageText().contains("visible-page-zero");
+        });
+        CHECK(h->mirror->isModeEnabled(vtbackend::DECMode::VisibleCursor));
+
+        // Decouple the display from the cursor (DECPCCM reset), then move VT output
+        // to page 1. The user keeps looking at page 0, so the fat GUI hides the
+        // cursor (it now belongs to an off-screen page) — the daemon must mirror that
+        // by withholding DECTCEM even though the app never hid the cursor itself.
+        serverWrites(h, session, "\033[?64l\033[1Uhidden-on-page-one"); // DECPCCM off, NP, write
+        co_await waitUntil(&h->loop,
+                           [&] { return !h->mirror->isModeEnabled(vtbackend::DECMode::VisibleCursor); });
+        // The displayed page is still 0: its content stands and page 1 does not bleed
+        // through — VT output landed on a page the user is not looking at.
+        CHECK(h->mirror->primaryScreen().grid().renderMainPageText().contains("visible-page-zero"));
+        CHECK(!h->mirror->primaryScreen().grid().renderMainPageText().contains("hidden-on-page-one"));
+        CHECK(!h->mirror->isAlternateScreen());
+
+        h->client->detach();
+    }(&h, session);
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+
 TEST_CASE("scrolled-out rows land in the mirror's local scrollback", "[muxserver][mirror]")
 {
     auto h = MirrorHarness {};

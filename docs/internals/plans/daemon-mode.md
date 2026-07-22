@@ -164,14 +164,19 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       CI/manually verified (real stdin/stdout/TTY, not headless), but its `ScreenMirror` core is
       fully unit-tested. Follow-up: a scrollback UI; ensure the outer Contour has GIP enabled for
       images.
-- [~] **A10. Full multi-page support (status-line displays).** *(Added 2026-07-22 — the native
-      protocol models only ONE grid per session; `ScreenType` predates Contour's multi-page support.)*
-      **Scope 2 (state) DONE:** `SessionState`/`Delta` now carry `statusDisplayType` +
+- [~] **A10. Full multi-page support (status-line displays + DEC pages).** *(Added 2026-07-22 — the
+      native protocol modelled only ONE grid per session; `ScreenType` predates Contour's multi-page
+      support.)* **Scope 2 (status-display state) DONE**, **Scope 1 (host-writable status CONTENT)
+      DONE**, **A10.4 (DEC pages 1–14 + decoupled display) DONE** (see the A10.4 note below and the
+      progress log). **Only remaining:** the DEC saved/pushed status-display stack (A10.3,
+      `savedStatusDisplayType`/`pushStatusDisplay`) — a niche DECSSDT save/restore refinement.
+      **Scope 2 (state):** `SessionState`/`Delta` now carry `statusDisplayType` +
       `activeStatusDisplay` (pull+diff of `Terminal::statusDisplayType()`/`activeStatusDisplay()`),
       `ScreenMirror` re-emits DECSSDT (`CSI Ps $ ~`) + DECSASD (`CSI Ps $ }`); CodecVersion → 9;
       closed-loop test (DECSSDT 1 → the mirror shows the indicator status line, rendered locally from
       its own state — matching the mux philosophy). *Landed 2026-07-22; suite green (123/2654).*
-      **Scope 1 (host-writable CONTENT) REMAINS** — the per-page delta below. Original scope:
+      **Scope 1 (host-writable CONTENT) landed** — see the progress log (`Delta.statusLines`,
+      CodecVersion → 10). Original scope:
       A session has more renderable **pages** than primary/alternate: `NativeSession` serializes only
       `terminal->currentScreen().grid()` (`NativeSession.cpp:296`), but Contour also has a
       **host-writable status line** (`_hostWritableStatusLineScreen` — an app writes it after DECSASD
@@ -194,18 +199,28 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
          needs cell sync.
       Follow-up within A10: DEC saved/pushed status-display stack (`savedStatusDisplayType`,
       `pushStatusDisplay`).
-      **A10.4 — DEC multi-page (`_pages`/`_cursorPage`/`_displayedPage`).** *(Recorded 2026-07-22 —
-      status-line pages above are DONE; this is the remaining page dimension.)* `Terminal` holds
-      `MaxPageCount = 16` pages (page 0 primary, 1–14 DEC pages, 15 alternate), with `_cursorPage`
-      (where VT output goes) vs `_displayedPage` (what the user sees; they diverge only when DECPCCM
-      page-cursor coupling is OFF), navigated by NP/PP/PPA. `SessionState.screenType` is binary
-      (primary/alt) and predates this. Today the daemon serializes `currentScreen()` = the **cursor
-      page**, so the **common case works** (DECPCCM on ⇒ cursor == displayed; sequential NP/PP just
-      re-snapshots the new page's grid). Gaps: (a) when `_displayedPage != _cursorPage` the client
-      shows the wrong page; (b) no page-navigation state is carried. Scope: carry `cursorPage` +
-      `displayedPage` (SessionState/Delta), serialize the **displayed** page for the viewport (or all
-      touched pages, per-page delta), re-emit NP/PP/DECPPA on the mirror. Legacy/rare (DEC apps), so
-      lower priority than the status-line pages already landed.
+      **A10.4 — DEC multi-page (`_pages`/`_cursorPage`/`_displayedPage`). DONE (2026-07-22).**
+      `Terminal` holds `MaxPageCount = 16` pages (page 0 primary, 1–14 DEC pages, 15 alternate), with
+      `_cursorPage` (where VT output goes) vs `_displayedPage` (what the user sees; they diverge only
+      when DECPCCM page-cursor coupling is OFF), navigated by NP/PP/PPA. The daemon used to serialize
+      `currentScreen()` = the **cursor page**, keyed only on the binary `screenType`. Fixed in
+      `NativeSession::pushDelta` to mirror **exactly what the fat GUI paints**:
+      • serialize `pageAt(displayedPageIndex())` — the **displayed** page — for both the grid and the
+        cursor (also fixes a latent bug where an active status display made `currentScreen()` the
+        status screen);
+      • **force a resync on the displayed-page IDENTITY** (`FollowState.lastDisplayedPage`, a
+        `PageIndex`), not on primary-vs-alt — this is what makes DEC-page↔DEC-page switches (all of
+        which share `screenType==Alternate`) mirror, since each page is a distinct grid with its own
+        colliding generation;
+      • **withhold DECTCEM (mode 25)** while `cursorPageIndex() != displayedPageIndex()`, matching the
+        GUI's `effectiveCursorPosition` hiding of an off-screen cursor.
+      No wire/codec change — the mirror's existing `screenType` (0=primary / 1=alt-like) drives its
+      `?1049` toggle and a snapshot-forced `fullReplay` repaints whichever page is displayed (the
+      daemon re-sends the page's whole grid, so the mirror needs no per-page memory). Tests:
+      `ScreenMirror_test` "DEC pages beyond primary/alternate mirror faithfully" (NP→page 1 content
+      shows on the mirror's alt buffer, equals the server's page 1, page 0 restores on PP) and "a
+      decoupled cursor page hides the mirror's cursor" (DECPCCM off + NP → mirror hides the cursor and
+      keeps showing the displayed page). muxserver suite green (127/2680).
 
 ### WS-B — Layout: tabs / panes / multi-window (roadmap F1/F2)
 
@@ -408,6 +423,18 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   (125/2672). **Remaining B3 (Qt, CI-verified):** GUI calls the verbs from `AttachController`, relax
   `canCreateSession()`, retire the `_closedSessions` tombstone. Remaining overall: A8, A10-decpages,
   B2/B4 (Qt), B3-Qt, C3/C4/C5 (Qt), B5.
+- 2026-07-22 · Windows/clangcl-release · **A10.4 (DEC multi-page) done** — the daemon now mirrors the
+  **displayed** page (`pageAt(displayedPageIndex())`) rather than the cursor page, forces a resync on
+  the displayed-page IDENTITY (`FollowState.lastDisplayedPage`, a `PageIndex`, replacing the binary
+  `lastScreenType` gate that collapsed DEC pages 1–14 to "Alternate"), and withholds DECTCEM while the
+  cursor page ≠ the displayed page — reproducing the fat GUI's page selection and off-screen-cursor
+  hiding. No wire/codec change (the mirror's existing `?1049` alt-toggle + snapshot-forced fullReplay
+  repaints whichever page is shown). Also fixes a latent bug: an active status display no longer leaks
+  the status screen into the main-grid delta. Two `ScreenMirror_test` cases (DEC-page content mirrors
+  and restores across NP/PP; a decoupled cursor hides on the mirror). Suite green (127/2680).
+  **WS-A multi-page (A10) is now complete except the niche DEC saved/pushed status-display stack
+  (A10.3).** Remaining overall: A8, A10.3 (status-display save/restore stack), B2/B4 (Qt), B3-Qt,
+  C3/C4/C5 (Qt), B5.
 
 ## Open decisions / risks
 

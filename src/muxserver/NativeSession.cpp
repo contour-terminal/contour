@@ -293,15 +293,27 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
         // read below (pageSize/screenType/windowTitle mutate on the session's
         // pump thread; windowTitle() in particular is an unlocked reference).
         auto const guard = std::lock_guard { *terminal };
-        auto& grid = terminal->currentScreen().grid();
 
-        // The primary and alternate screens are distinct grids whose generations
-        // advance independently (and can collide), so one cursor cannot span a
-        // flip: treat it as a wholesale identity change and resync. This also
-        // gives a session's very first push its SessionState (nullopt != type).
-        auto const screenType = terminal->screenType();
-        auto snapshot = forceSnapshot || follow.lastScreenType != screenType;
-        follow.lastScreenType = screenType;
+        // Mirror exactly what the fat GUI paints: the DISPLAYED page, which is what
+        // the user sees. It coincides with the cursor page while DECPCCM couples
+        // them, but a decoupled display — or any DEC page 1..14 reached via NPP/PP/
+        // PPA — shows a different page than VT output currently targets. Serializing
+        // currentScreen() (the cursor page, and during an active status display the
+        // status screen) would mirror the wrong grid.
+        auto const displayedPage = terminal->displayedPageIndex();
+        auto& grid = terminal->pageAt(displayedPage).grid();
+
+        // Each of the 16 pages is a distinct grid whose generation advances
+        // independently (and can collide across pages), so one cursor cannot span a
+        // page flip: treat it as a wholesale identity change and resync. Keying on
+        // the page INDEX (not screenType, which collapses DEC pages 1..14 to
+        // "Alternate") is what makes page<->page switches mirror correctly. This
+        // also gives a session's very first push its SessionState (nullopt != page).
+        // screenTypeFromPage then maps the displayed page to the wire's primary(0)/
+        // alt-like(1) discriminator the mirror uses to toggle ?1049 and scrollback.
+        auto const screenType = vtbackend::screenTypeFromPage(displayedPage);
+        auto snapshot = forceSnapshot || follow.lastDisplayedPage != displayedPage;
+        follow.lastDisplayedPage = displayedPage;
 
         auto const collect = [&](vtbackend::LineOffset offset, vtbackend::Line const& line) {
             delta.lines.push_back(toWireLine(grid, offset, line));
@@ -340,13 +352,22 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
         // tells the mirror to drop the history the real terminal discarded.
         delta.stableFloor = grid.stableRangeFloor();
 
-        auto const cursor = terminal->currentScreen().cursor().position;
+        auto const cursor = terminal->pageAt(displayedPage).cursor().position;
         delta.cursorLine = unbox<int32_t>(cursor.line);
         delta.cursorColumn = unbox<int32_t>(cursor.column);
 
+        // When DECPCCM is reset and the cursor sits on a page other than the one
+        // displayed, the fat GUI hides the cursor (it belongs to a page the user is
+        // not looking at). Mirror that by withholding VisibleCursor (DECTCEM/mode
+        // 25) from the mode set, exactly as if the app had hidden it.
+        auto const cursorOnDisplayedPage = terminal->cursorPageIndex() == displayedPage;
         for (auto const mode: MirroredModes)
+        {
+            if (mode == vtbackend::DECMode::VisibleCursor && !cursorOnDisplayedPage)
+                continue;
             if (terminal->isModeEnabled(mode))
                 delta.setModes.push_back(vtbackend::toDECModeNum(mode));
+        }
 
         for (auto const id: hyperlinkIds)
         {

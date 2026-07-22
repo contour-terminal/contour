@@ -120,10 +120,13 @@ class NativeSession final: public SessionStreamEvents
         /// stays put; -1 until the first (always-snapshot) delta sends one.
         int32_t lastCursorLine = -1;
         int32_t lastCursorColumn = -1;
-        /// The screen the cursor followed last: primary and alternate are distinct
-        /// grids with independent generations, so a flip must force a resync (and
-        /// nullopt — a session never pushed before — forces the initial snapshot).
-        std::optional<vtbackend::ScreenType> lastScreenType;
+        /// The displayed page last mirrored. Every one of the 16 pages (primary,
+        /// the DEC pages 1..14, the xterm alternate at 15) is a distinct grid with
+        /// its own, independently-advancing generation, so a page flip is a
+        /// wholesale identity change that must force a resync — keyed on the page
+        /// index, not on primary-vs-alternate (which collapses DEC pages 1..14).
+        /// nullopt — a session never pushed before — forces the initial snapshot.
+        std::optional<vtbackend::PageIndex> lastDisplayedPage;
         /// The window title last sent to this connection, so an incremental delta
         /// carries the title (and forces a send) only when it actually changed.
         std::string lastTitle;
