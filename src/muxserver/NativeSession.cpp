@@ -9,6 +9,8 @@
 #include <mutex>
 #include <optional>
 #include <ranges>
+#include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -171,6 +173,7 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
     auto state = std::optional<proto::SessionState> {};
 
     auto hyperlinkIds = std::vector<uint16_t> {};
+    auto referencedLinks = std::unordered_set<uint16_t> {}; ///< Deduplicates ids within THIS delta.
     {
         // The same lock discipline as refreshRenderBuffer: all grid queries
         // happen under the terminal's state lock — and so does every terminal
@@ -190,8 +193,12 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
         auto const collect = [&](vtbackend::LineOffset offset, vtbackend::Line const& line) {
             delta.lines.push_back(toWireLine(grid, offset, line));
             appendImageCells(delta.imageCells, delta.lines.back().stableId, line);
+            // Collect every referenced id (deduped within this delta), NOT only
+            // never-sent ones: the send loop below decides per id whether its URI
+            // actually needs (re)sending, which is what catches an id reused for a
+            // different URI after the 16-bit counter wrapped.
             for (auto const& cell: delta.lines.back().cells)
-                if (cell.hyperlink != 0 && !follow.sentHyperlinks.contains(cell.hyperlink))
+                if (cell.hyperlink != 0 && referencedLinks.insert(cell.hyperlink).second)
                     hyperlinkIds.push_back(cell.hyperlink);
         };
 
@@ -204,6 +211,7 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
             delta.lines.clear();
             delta.imageCells.clear();
             hyperlinkIds.clear();
+            referencedLinks.clear();
             grid.forEachValidLine(collect);
             // The snapshot delivered the whole grid, so re-anchor the cursor to the
             // stream head directly -- forEachValidLine leaves it untouched, and a
@@ -232,8 +240,15 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
             auto const info = terminal->hyperlinks().hyperlinkById(vtbackend::HyperlinkId { id });
             if (!info)
                 continue;
+            // Send only when this id is new, or its URI changed since we last sent
+            // it. The terminal's HyperlinkId is a uint16_t that wraps and reuses
+            // ids, so an id keyed once and never revisited would pin the mirror to
+            // a stale URI after wraparound.
+            auto const [it, inserted] = follow.sentHyperlinks.try_emplace(id, info->uri);
+            if (!inserted && it->second == info->uri)
+                continue; // already sent this exact id->URI mapping
+            it->second = info->uri;
             delta.hyperlinks.push_back(proto::HyperlinkEntry { .id = id, .uri = info->uri });
-            follow.sentHyperlinks.insert(id);
         }
 
         if (snapshot)
@@ -253,11 +268,18 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
     if (state)
         send(0, proto::DecodedPdu { *state });
     // A pure mode flip (an app enabling mouse tracking, say) changes no cell,
-    // yet clients must hear about it to encode input correctly.
+    // yet clients must hear about it to encode input correctly. A pure cursor move
+    // (a full-screen app repositioning with no visible cell change) likewise
+    // carries only the new cursor position, but the mirror must still get it or its
+    // cursor lags until the next cell write.
     auto const modesChanged = delta.setModes != follow.lastModes;
-    if (delta.snapshot != 0 || !delta.lines.empty() || modesChanged)
+    auto const cursorMoved =
+        delta.cursorLine != follow.lastCursorLine || delta.cursorColumn != follow.lastCursorColumn;
+    if (delta.snapshot != 0 || !delta.lines.empty() || modesChanged || cursorMoved)
     {
         follow.lastModes = delta.setModes;
+        follow.lastCursorLine = delta.cursorLine;
+        follow.lastCursorColumn = delta.cursorColumn;
         send(0, proto::DecodedPdu { delta });
     }
 }

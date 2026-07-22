@@ -133,6 +133,15 @@ Task<void> appendThenUpdate(NativeHarness* h, vtmux::SessionId id)
     h->session->sessionScreenUpdated(id);
 }
 
+/// Once the attach snapshot has landed: repositions ONLY the cursor (writing no
+/// cell content) and kicks the debounced flush.
+Task<void> moveCursorThenUpdate(NativeHarness* h, vtmux::SessionId id)
+{
+    co_await h->loop.delay(5ms);
+    h->host.terminal(id)->writeToScreen("\033[10;5H"); // CUP: move cursor to row 10, col 5
+    h->session->sessionScreenUpdated(id);
+}
+
 /// Schedules a debounce flush, then disconnects before it can fire.
 Task<void> kickThenDisconnect(NativeHarness* h, vtmux::SessionId id)
 {
@@ -317,6 +326,47 @@ TEST_CASE("a snapshot anchors the cursor so the following delta is incremental",
             text += static_cast<char>(cell.codepoint);
     CHECK(text.starts_with("first")); // the snapshot content is still there
     CHECK(text.contains("more"));     // with the newly appended bytes
+}
+
+TEST_CASE("a cursor-only move still produces a delta so the mirror's cursor tracks", "[muxserver][native]")
+{
+    auto h = NativeHarness {};
+    h.host.createTab();
+    auto const sessionId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    h.host.terminal(sessionId)->writeToScreen("first"); // leaves the cursor after the text
+
+    auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
+    auto received = std::vector<proto::DecodedFrame> {};
+    h.loop.blockOn(net::testing::allOf(h.session->run(),
+                                       feedBytes(h.pair.second.get(), &bytes),
+                                       collectPdus(h.pair.second.get(), 4, &received),
+                                       moveCursorThenUpdate(&h, sessionId)));
+    REQUIRE(received.size() == 4);
+
+    // [0] ServerHello, [1] SessionState, [2] Delta(snapshot), [3] Delta from the cursor-only move.
+    // Without the cursor gate the [3] send is suppressed (no changed cell, no mode flip) and the
+    // mirror's cursor would stay where the snapshot left it.
+    auto const* delta = std::get_if<proto::Delta>(&received[3].pdu);
+    REQUIRE(delta != nullptr);
+    CHECK(delta->snapshot == 0);
+    CHECK(delta->cursorLine == 9);   // CUP row 10, 0-based
+    CHECK(delta->cursorColumn == 4); // CUP column 5, 0-based
+}
+
+TEST_CASE("a hyperlink URI is delivered on first reference", "[muxserver][native]")
+{
+    auto h = NativeHarness {};
+    h.host.createTab();
+    auto const sessionId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    // OSC 8 hyperlink around "link"; the URI must ride the snapshot's side table.
+    h.host.terminal(sessionId)->writeToScreen("\033]8;;https://contour.example\033\\link\033]8;;\033\\");
+
+    auto const received = h.exchange({ proto::ClientHello {} }, 3);
+    REQUIRE(received.size() == 3);
+    auto const* delta = std::get_if<proto::Delta>(&received[2].pdu);
+    REQUIRE(delta != nullptr);
+    REQUIRE(delta->hyperlinks.size() == 1);
+    CHECK(delta->hyperlinks.front().uri == "https://contour.example");
 }
 
 TEST_CASE("a debounce flush pending at disconnect resolves before run() returns", "[muxserver][native]")

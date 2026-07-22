@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -69,8 +70,16 @@ class NativeSession final: public SessionStreamEvents
     struct FollowState
     {
         vtbackend::GridDeltaCursor cursor;
-        std::unordered_set<uint16_t> sentHyperlinks;
+        /// id -> the URI last sent for it. A map, not a set: the terminal's 16-bit
+        /// HyperlinkId counter wraps and reuses ids, so an id whose URI changed
+        /// must be resent — keyed by id alone the mirror would keep the stale URI.
+        std::unordered_map<uint16_t, std::string> sentHyperlinks;
         std::vector<uint32_t> lastModes; ///< Mirrored-mode set as last sent.
+        /// The cursor position last sent to the mirror. A cursor-only move (no cell
+        /// change, no mode flip) must still produce a delta, or the mirror's cursor
+        /// stays put; -1 until the first (always-snapshot) delta sends one.
+        int32_t lastCursorLine = -1;
+        int32_t lastCursorColumn = -1;
         /// The screen the cursor followed last: primary and alternate are distinct
         /// grids with independent generations, so a flip must force a resync (and
         /// nullopt — a session never pushed before — forces the initial snapshot).
