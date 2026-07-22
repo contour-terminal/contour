@@ -43,7 +43,12 @@ void RemoteScreen::apply(proto::Delta const& delta)
 {
     session = delta.session;
     if (delta.snapshot != 0)
+    {
         rows.clear(); // a snapshot replaces everything the client held
+        imageCells.clear();
+        // The pixel caches stay valid: image ids are pool-scoped, not
+        // generation-scoped, so a rebuild does not invalidate a fetched image.
+    }
 
     generation = delta.generation;
     seqno = delta.seqno;
@@ -54,7 +59,15 @@ void RemoteScreen::apply(proto::Delta const& delta)
     setModes = delta.setModes;
 
     for (auto const& line: delta.lines)
+    {
         rows.insert_or_assign(line.stableId, line);
+        // The row was redrawn: its previous image cells are stale. The server
+        // re-sends any that survived in delta.imageCells (which only references
+        // rows present in delta.lines), so clearing first is loss-free.
+        imageCells.erase(line.stableId);
+    }
+    for (auto const& entry: delta.imageCells)
+        imageCells[entry.stableId][entry.column] = entry;
     for (auto const& entry: delta.hyperlinks)
         hyperlinks.insert_or_assign(entry.id, entry.uri);
 
@@ -65,6 +78,43 @@ void RemoteScreen::apply(proto::Delta const& delta)
     // the floor sits far below the viewport.
     auto const evictBelow = std::max(stableFloor, viewportBase - HistoryKeep);
     rows.erase(rows.begin(), rows.lower_bound(evictBelow));
+    imageCells.erase(imageCells.begin(), imageCells.lower_bound(evictBelow));
+}
+
+proto::ImageCellEntry const* RemoteScreen::imageAt(int64_t stableId, uint16_t column) const
+{
+    auto const rowIt = imageCells.find(stableId);
+    if (rowIt == imageCells.end())
+        return nullptr;
+    auto const colIt = rowIt->second.find(column);
+    return colIt != rowIt->second.end() ? &colIt->second : nullptr;
+}
+
+proto::ImageData const* RemoteScreen::imageData(uint32_t imageId) const
+{
+    auto const it = images.find(imageId);
+    return it != images.end() ? &it->second : nullptr;
+}
+
+void RemoteScreen::dropImage(uint32_t imageId)
+{
+    images.erase(imageId);
+    requestedImages.erase(imageId);
+    for (auto rowIt = imageCells.begin(); rowIt != imageCells.end();)
+    {
+        auto& columns = rowIt->second;
+        for (auto colIt = columns.begin(); colIt != columns.end();)
+        {
+            if (colIt->second.imageId == imageId)
+                colIt = columns.erase(colIt);
+            else
+                ++colIt;
+        }
+        if (columns.empty())
+            rowIt = imageCells.erase(rowIt);
+        else
+            ++rowIt;
+    }
 }
 
 proto::WireLine const* RemoteScreen::rowAt(int32_t line) const
@@ -105,10 +155,11 @@ AttachClient::AttachClient(net::EventLoop& loop, std::unique_ptr<net::ISocket> c
 {
 }
 
-void AttachClient::send(proto::DecodedPdu const& pdu)
+uint64_t AttachClient::send(proto::DecodedPdu const& pdu)
 {
+    auto const serial = _nextSerial++;
     auto sink = proto::Writer {};
-    proto::encodePdu(sink, _nextSerial++, pdu);
+    proto::encodePdu(sink, serial, pdu);
     auto const bytes = sink.view();
     if (!_writer.enqueue(std::string { reinterpret_cast<char const*>(bytes.data()), bytes.size() }))
     {
@@ -117,6 +168,7 @@ void AttachClient::send(proto::DecodedPdu const& pdu)
         _writer.close();
         _connection->close();
     }
+    return serial;
 }
 
 void AttachClient::sendInput(uint64_t session, std::string_view bytes)
@@ -135,7 +187,11 @@ void AttachClient::requestResize(uint32_t columns, uint32_t lines)
 
 void AttachClient::fetchImage(uint64_t session, uint32_t imageId)
 {
-    send(proto::DecodedPdu { proto::FetchImage { .session = session, .imageId = imageId } });
+    auto const serial =
+        send(proto::DecodedPdu { proto::FetchImage { .session = session, .imageId = imageId } });
+    // The ImageData/ImageGone answer carries no session — remember which one this
+    // serial belongs to so the reply lands in the right screen's cache.
+    _pendingImages.insert_or_assign(serial, std::pair { session, imageId });
 }
 
 void AttachClient::detach()
@@ -145,8 +201,9 @@ void AttachClient::detach()
     _connection->close();
 }
 
-void AttachClient::handlePdu(proto::DecodedPdu const& pdu)
+void AttachClient::handlePdu(proto::DecodedFrame const& frame)
 {
+    auto const& pdu = frame.pdu;
     if (auto const* hello = std::get_if<proto::ServerHello>(&pdu))
     {
         if (hello->codecVersion == proto::CodecVersion)
@@ -164,12 +221,48 @@ void AttachClient::handlePdu(proto::DecodedPdu const& pdu)
     {
         auto& screen = _screens[delta->session];
         screen.apply(*delta);
+        // Pull pixels for any image this delta newly referenced that we neither
+        // hold nor have a request in flight for. The cells render blank until the
+        // ImageData answer lands and fires the image handler.
+        for (auto const& entry: delta->imageCells)
+        {
+            if (screen.images.contains(entry.imageId) || screen.requestedImages.contains(entry.imageId))
+                continue;
+            screen.requestedImages.insert(entry.imageId);
+            fetchImage(delta->session, entry.imageId);
+        }
         if (_onUpdate)
             _onUpdate(screen, *delta);
         return;
     }
-    // ImageData/ImageGone are consumed by the frontend's update handler in a
-    // later slice; unknown PDUs are ignored for forward compatibility.
+    if (auto const* image = std::get_if<proto::ImageData>(&pdu))
+    {
+        // The reply carries no session; the request serial is what routes it.
+        auto const it = _pendingImages.find(frame.serial);
+        if (it == _pendingImages.end())
+            return;
+        auto const [session, imageId] = it->second;
+        _pendingImages.erase(it);
+        auto& screen = _screens[session];
+        screen.images.insert_or_assign(imageId, *image);
+        if (_onImage)
+            _onImage(screen, imageId);
+        return;
+    }
+    if (std::holds_alternative<proto::ImageGone>(pdu))
+    {
+        auto const it = _pendingImages.find(frame.serial);
+        if (it == _pendingImages.end())
+            return;
+        auto const [session, imageId] = it->second;
+        _pendingImages.erase(it);
+        auto& screen = _screens[session];
+        screen.dropImage(imageId);
+        if (_onImage)
+            _onImage(screen, imageId);
+        return;
+    }
+    // Unknown PDUs are ignored for forward compatibility.
 }
 
 coro::Task<void> AttachClient::run()
@@ -177,7 +270,7 @@ coro::Task<void> AttachClient::run()
     send(proto::DecodedPdu { proto::ClientHello {} });
 
     co_await pumpPdus(_connection.get(), [this](proto::DecodedFrame const& frame) {
-        handlePdu(frame.pdu);
+        handlePdu(frame);
         return !_detached && !_versionMismatch;
     });
 

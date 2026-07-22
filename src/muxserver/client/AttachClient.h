@@ -16,6 +16,8 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <coro/Task.hpp>
@@ -58,6 +60,18 @@ struct RemoteScreen
     /// The mirrored DEC private modes currently SET remotely (by number).
     std::vector<uint32_t> setModes;
 
+    /// Image-covered cells, keyed by stable row id then column: which image tile
+    /// (pool-local id + in-image cell offset + layer) is shown at that cell.
+    /// Replaced per row as deltas redraw it; trimmed with the row eviction.
+    std::map<int64_t, std::map<uint16_t, proto::ImageCellEntry>> imageCells;
+    /// Fetched image pixels by pool-local image id. The id pool is per session,
+    /// so this map is already session-scoped. Filled on ImageData, dropped on
+    /// ImageGone.
+    std::unordered_map<uint32_t, proto::ImageData> images;
+    /// Image ids already requested (or delivered): avoids re-issuing a FetchImage
+    /// whose answer is still in flight. Cleared for an id on ImageGone.
+    std::unordered_set<uint32_t> requestedImages;
+
     /// How many rows above the viewport to keep as client-side scrollback.
     static constexpr int64_t HistoryKeep = 10000;
 
@@ -74,6 +88,16 @@ struct RemoteScreen
     /// The viewport as plain text (one LF-terminated line per row, trailing
     /// blanks trimmed) — the test- and debug-friendly projection.
     [[nodiscard]] std::string viewportText() const;
+
+    /// @return The image-cell entry at (@p stableId, @p column), or nullptr.
+    [[nodiscard]] proto::ImageCellEntry const* imageAt(int64_t stableId, uint16_t column) const;
+
+    /// @return The cached pixels for @p imageId, or nullptr if not fetched yet.
+    [[nodiscard]] proto::ImageData const* imageData(uint32_t imageId) const;
+
+    /// Drops @p imageId: forgets its pixels and clears every cell referencing it
+    /// (those cells render blank until redrawn). Called on ImageGone.
+    void dropImage(uint32_t imageId);
 };
 
 /// One attached native-protocol connection.
@@ -92,6 +116,14 @@ class AttachClient final
     void setUpdateHandler(std::function<void(RemoteScreen const&, proto::Delta const&)> handler)
     {
         _onUpdate = std::move(handler);
+    }
+
+    /// Invoked when an image's pixels arrive (ImageData) or the image is dropped
+    /// (ImageGone) for @p imageId in @p screen — so the frontend can repaint the
+    /// cells referencing it. After a drop, `screen.imageData(imageId)` is null.
+    void setImageHandler(std::function<void(RemoteScreen const&, uint32_t imageId)> handler)
+    {
+        _onImage = std::move(handler);
     }
 
     /// Sends keyboard/paste bytes to @p session's PTY.
@@ -117,13 +149,19 @@ class AttachClient final
     [[nodiscard]] bool versionMismatch() const noexcept { return _versionMismatch; }
 
   private:
-    void handlePdu(proto::DecodedPdu const& pdu);
-    void send(proto::DecodedPdu const& pdu);
+    void handlePdu(proto::DecodedFrame const& frame);
+    /// Encodes @p pdu with the next serial, enqueues it, and returns that serial
+    /// so image fetches can correlate the (session-less) ImageData/ImageGone reply.
+    uint64_t send(proto::DecodedPdu const& pdu);
 
     std::unique_ptr<net::ISocket> _connection;
     net::WriteQueue _writer;
     std::function<void(RemoteScreen const&, proto::Delta const&)> _onUpdate;
+    std::function<void(RemoteScreen const&, uint32_t)> _onImage;
     std::map<uint64_t, RemoteScreen> _screens;
+    /// Outstanding image fetches: request serial → (session, imageId). The reply
+    /// carries no session, so the serial is what routes it to the right screen.
+    std::unordered_map<uint64_t, std::pair<uint64_t, uint32_t>> _pendingImages;
     uint64_t _nextSerial = 1;
     bool _connected = false;
     bool _versionMismatch = false;

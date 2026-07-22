@@ -5,10 +5,13 @@
 
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
+#include <variant>
 
 #ifndef _WIN32
     #include <csignal>
@@ -21,12 +24,14 @@
 #include <coro/WhenAny.hpp>
 #include <muxserver/Daemon.h>
 #include <muxserver/NativeSession.h>
+#include <muxserver/PduPump.h>
 #include <muxserver/SessionHost.h>
 #include <muxserver/TappingPty.h>
 #include <muxserver/client/AttachClient.h>
 #include <net/EventLoop.h>
 #include <net/ISocket.h>
 #include <net/PollEventSource.h>
+#include <net/WriteQueue.h>
 #include <net/testing/CoroTestSupport.h>
 #include <net/testing/InMemoryTransport.h>
 #include <vtmux/Pane.h>
@@ -175,6 +180,184 @@ TEST_CASE("RemoteScreen drops history the server discarded via the floor", "[mux
     CHECK_FALSE(screen.rows.contains(7));
     CHECK_FALSE(screen.rows.contains(9));
     CHECK(screen.rows.contains(10)); // the viewport row survives
+}
+
+TEST_CASE("RemoteScreen tracks, replaces and evicts image cells", "[muxserver][attach]")
+{
+    auto screen = RemoteScreen {};
+    screen.columns = 5;
+    screen.lines = 1;
+
+    // A snapshot with an image tile on a history row (7) and the viewport row (10).
+    auto seed = proto::Delta {};
+    seed.snapshot = 1;
+    seed.stableViewportBase = 10;
+    seed.stableFloor = 7;
+    for (auto const id: { 7, 8, 9, 10 })
+    {
+        auto line = proto::WireLine {};
+        line.stableId = id;
+        line.columns = 5;
+        seed.lines.push_back(line);
+    }
+    seed.imageCells.push_back(proto::ImageCellEntry { .stableId = 7, .column = 1, .imageId = 3 });
+    seed.imageCells.push_back(proto::ImageCellEntry { .stableId = 10, .column = 0, .imageId = 3 });
+    screen.apply(seed);
+
+    REQUIRE(screen.imageAt(7, 1) != nullptr);
+    CHECK(screen.imageAt(7, 1)->imageId == 3);
+    CHECK(screen.imageAt(10, 0) != nullptr);
+    CHECK(screen.imageAt(10, 4) == nullptr); // no entry at that column
+
+    // Redrawing row 10 without an image cell clears that row's image coverage,
+    // while an untouched row keeps its own.
+    auto redraw = proto::Delta {};
+    redraw.stableViewportBase = 10;
+    redraw.stableFloor = 7;
+    auto redrawn = proto::WireLine {};
+    redrawn.stableId = 10;
+    redrawn.columns = 5;
+    redraw.lines.push_back(redrawn);
+    screen.apply(redraw);
+    CHECK(screen.imageAt(10, 0) == nullptr);
+    CHECK(screen.imageAt(7, 1) != nullptr);
+
+    // A floor jump evicts history row 7, taking its image cells with it.
+    auto cleared = proto::Delta {};
+    cleared.stableViewportBase = 10;
+    cleared.stableFloor = 10;
+    screen.apply(cleared);
+    CHECK(screen.imageAt(7, 1) == nullptr);
+}
+
+TEST_CASE("RemoteScreen.dropImage clears pixels and the cells that referenced it", "[muxserver][attach]")
+{
+    auto screen = RemoteScreen {};
+
+    auto seed = proto::Delta {};
+    seed.snapshot = 1;
+    seed.stableViewportBase = 0;
+    for (auto const id: { 0, 1 })
+    {
+        auto line = proto::WireLine {};
+        line.stableId = id;
+        seed.lines.push_back(line);
+    }
+    seed.imageCells.push_back(proto::ImageCellEntry { .stableId = 0, .column = 1, .imageId = 3 });
+    seed.imageCells.push_back(proto::ImageCellEntry { .stableId = 0, .column = 2, .imageId = 3 });
+    seed.imageCells.push_back(proto::ImageCellEntry { .stableId = 1, .column = 0, .imageId = 4 });
+    screen.apply(seed);
+
+    // Pretend both images were fetched.
+    screen.images.insert_or_assign(3u,
+                                   proto::ImageData { .imageId = 3, .width = 1, .height = 1, .data = {} });
+    screen.images.insert_or_assign(4u,
+                                   proto::ImageData { .imageId = 4, .width = 1, .height = 1, .data = {} });
+    screen.requestedImages.insert(3u);
+    screen.requestedImages.insert(4u);
+
+    screen.dropImage(3u);
+
+    CHECK(screen.imageData(3) == nullptr);
+    CHECK_FALSE(screen.requestedImages.contains(3u));
+    CHECK(screen.imageAt(0, 1) == nullptr);
+    CHECK(screen.imageAt(0, 2) == nullptr);
+    CHECK(screen.imageAt(1, 0) != nullptr); // image 4 is untouched
+    CHECK(screen.imageData(4) != nullptr);
+}
+
+namespace
+{
+
+/// Encodes @p pdu with @p serial and enqueues it onto @p writer (test-only helper).
+void enqueuePdu(net::WriteQueue& writer, uint64_t serial, proto::DecodedPdu const& pdu)
+{
+    auto sink = proto::Writer {};
+    proto::encodePdu(sink, serial, pdu);
+    auto const bytes = sink.view();
+    REQUIRE(writer.enqueue(std::string { reinterpret_cast<char const*>(bytes.data()), bytes.size() }));
+}
+
+/// A hand-driven server: answers the handshake, pushes a snapshot whose single
+/// row carries an image cell (id 7), then serves the client's FetchImage with
+/// @p reply. Exercises the serial-correlated (session-less) image reply path
+/// without needing a real rasterized image.
+Task<void> fakeImageServer(net::EventLoop* loop, net::ISocket* socket, proto::ImageData reply)
+{
+    auto writer = net::WriteQueue { *loop, socket, std::size_t { 1 } * 1024 * 1024 };
+    co_await muxserver::pumpPdus(socket, [&](proto::DecodedFrame const& frame) {
+        if (std::holds_alternative<proto::ClientHello>(frame.pdu))
+        {
+            enqueuePdu(writer, frame.serial, proto::DecodedPdu { proto::ServerHello {} });
+            auto delta = proto::Delta {};
+            delta.session = 1;
+            delta.snapshot = 1;
+            delta.stableViewportBase = 0;
+            auto line = proto::WireLine {};
+            line.stableId = 0;
+            line.columns = 4;
+            delta.lines.push_back(line);
+            delta.imageCells.push_back(proto::ImageCellEntry { .stableId = 0, .column = 1, .imageId = 7 });
+            enqueuePdu(writer, 0, proto::DecodedPdu { delta });
+            return true;
+        }
+        if (auto const* fetch = std::get_if<proto::FetchImage>(&frame.pdu))
+        {
+            CHECK(fetch->session == 1);
+            CHECK(fetch->imageId == 7);
+            reply.imageId = fetch->imageId;
+            // The reply deliberately carries NO session: only the serial routes it.
+            enqueuePdu(writer, frame.serial, proto::DecodedPdu { reply });
+            return true;
+        }
+        return true;
+    });
+}
+
+/// Waits for image 7's pixels to reach the client's cache, then detaches.
+Task<void> awaitImageThenDetach(net::EventLoop* loop, AttachClient* client, bool* seen)
+{
+    co_await net::testing::waitUntil(loop, [&] {
+        auto const it = client->screens().find(1);
+        return it != client->screens().end() && it->second.imageData(7) != nullptr;
+    });
+    auto const& screen = client->screens().at(1);
+    auto const* data = screen.imageData(7);
+    REQUIRE(data != nullptr);
+    CHECK(data->imageId == 7);
+    CHECK(data->width == 2);
+    CHECK(data->height == 3);
+    CHECK(screen.imageAt(0, 1) != nullptr);
+    *seen = true;
+    client->detach();
+}
+
+} // namespace
+
+TEST_CASE("attach fetches image pixels on demand and caches them", "[muxserver][attach]")
+{
+    auto source = net::PollEventSource {};
+    auto loop = net::EventLoop { source };
+    auto pair = *net::testing::makeSocketPair(loop);
+    auto* serverSock = pair.first.get();
+    auto client = AttachClient { loop, std::move(pair.second) };
+
+    auto imageEvent = false;
+    client.setImageHandler([&](RemoteScreen const&, uint32_t id) {
+        if (id == 7)
+            imageEvent = true;
+    });
+
+    auto reply = proto::ImageData { .imageId = 0, .width = 2, .height = 3, .data = {} };
+    reply.data.resize(static_cast<std::size_t>(2 * 3 * 4), std::byte { 0x80 });
+
+    auto seen = false;
+    loop.blockOn(net::testing::allOf(client.run(),
+                                     fakeImageServer(&loop, serverSock, reply),
+                                     awaitImageThenDetach(&loop, &client, &seen)));
+
+    CHECK(seen);
+    CHECK(imageEvent);
 }
 
 // The attach-flow composition (Daemon.cpp) hard-codes STDIN/STDOUT and a real
