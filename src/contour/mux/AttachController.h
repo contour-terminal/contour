@@ -74,6 +74,15 @@ class AttachController final: public QObject, public SessionFactory
     /// @return How many remote sessions await a local tab.
     [[nodiscard]] std::size_t pendingCount() const;
 
+    /// @return True if @p session already has a local pane bound to it — used by
+    ///         the incremental layout reconciler to skip tabs it already realized.
+    [[nodiscard]] bool isBound(uint64_t session) const;
+
+    /// Asks the daemon to create a new tab (B3-Qt). The daemon honors it and
+    /// re-pushes its layout, which the GUI reconciles into a new local tab. A no-op
+    /// once detached.
+    void requestCreateTab();
+
     /// @return The daemon's most recent tab/pane layout, or nullopt if none has
     ///         arrived yet. A thread-safe copy — the reactor thread updates it.
     ///         The GUI reconstructs its own tab/split tree from this (B2).

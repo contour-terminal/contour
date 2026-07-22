@@ -179,6 +179,21 @@ void AttachController::setRealizingLayout(bool realizing)
     _realizingLayout = realizing;
 }
 
+bool AttachController::isBound(uint64_t session) const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _bindings.contains(session);
+}
+
+void AttachController::requestCreateTab()
+{
+    // The client's send verbs must run on the reactor thread that owns it.
+    _reactor.post([this] {
+        if (_client != nullptr)
+            _client->createTab();
+    });
+}
+
 void AttachController::primeBinding(uint64_t session)
 {
     if (_client == nullptr)

@@ -183,20 +183,15 @@ int ContourGuiApp::attachAction()
             return EXIT_FAILURE;
         }
         _routingFactory->setDelegate(_attachController.get());
-        // Realize the daemon's authoritative tab/split tree (B2): once a window and
-        // the layout are both available — at GUI boot or when the layout arrives —
-        // reproduce the daemon's tabs and split panes, each bound to its remote
-        // session. Applied once; a dying connection ends every mirror session
-        // (stop() closes the ptys), closing the tabs through the shell-exit teardown.
-        auto realized = std::make_shared<bool>(false);
-        adopt = [this, realized] {
-            if (*realized || !_attachController->layout().has_value())
-                return;
+        // Reconcile the GUI against the daemon's authoritative tab/split tree (B2):
+        // whenever the layout arrives or changes (GUI boot, or a tab/split authored
+        // on the daemon), realize any tab not yet shown, each pane bound to its
+        // remote session. Incremental — tabs already shown are left untouched. A
+        // dying connection ends every mirror session (stop() closes the ptys),
+        // closing the tabs through the shell-exit teardown.
+        adopt = [this] {
             if (auto const window = _sessionManager.focusedWindow())
-            {
                 contour::applyRemoteLayout(_sessionManager, *window, *_attachController);
-                *realized = true;
-            }
         };
         connect(_attachController.get(), &AttachController::layoutChanged, this, adopt, Qt::QueuedConnection);
         connect(

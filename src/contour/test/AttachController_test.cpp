@@ -313,6 +313,42 @@ TEST_CASE("attach realizes a split daemon layout as a 2-pane tab", "[attach][con
     ac->stop();
 }
 
+// B3-Qt: the client authors a tab on the daemon; the daemon honors it and
+// re-pushes its layout, which the incremental reconciler realizes as a new local
+// tab — closing the create loop over a real attach connection.
+TEST_CASE("attach authors a tab on the daemon and reconciles it locally", "[attach][controller]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+
+    auto acOwned = std::make_unique<contour::AttachController>(daemon.endpoint());
+    auto* ac = acOwned.get();
+    contour::test::TestApp app { std::move(acOwned) };
+    contour::test::ScopedController const win { app.manager() };
+
+    REQUIRE(ac->connectAndWait(10s).has_value());
+    for (auto i = 0; i < 200 && !ac->layout().has_value(); ++i)
+        std::this_thread::sleep_for(5ms);
+    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    REQUIRE(app.manager().model().window(win.id)->tabCount() == 1);
+
+    // Author a new tab on the daemon and wait for the two-tab layout to arrive.
+    ac->requestCreateTab();
+    for (auto i = 0; i < 200; ++i)
+    {
+        if (auto const l = ac->layout(); l && l->tabs.size() == 2)
+            break;
+        std::this_thread::sleep_for(5ms);
+    }
+    REQUIRE(ac->layout()->tabs.size() == 2);
+
+    // Reconcile: the daemon's new tab appears locally (the first is left untouched).
+    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    CHECK(app.manager().model().window(win.id)->tabCount() == 2);
+
+    ac->stop();
+}
+
 // Regression: closing a mirrored tab must not resurrect it. Before the fix,
 // unbind() only forgot the binding, so the still-live remote session's next
 // delta re-registered it as pending and re-adopted a fresh tab indefinitely.
