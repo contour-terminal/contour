@@ -19,9 +19,12 @@
 #include <QtGui/QScreen>
 #include <QtQml/QQmlApplicationEngine>
 
+#include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 
 namespace contour
 {
@@ -40,6 +43,7 @@ class AttachController;
 class RoutingSessionFactory;
 class TerminalSession;
 class TmuxController;
+class WindowController;
 
 /// Extends ContourApp with terminal GUI capability.
 class ContourGuiApp: public QObject, public ContourApp
@@ -82,6 +86,13 @@ class ContourGuiApp: public QObject, public ContourApp
     /// Consumes the pending spawn target screen staged by newWindow().
     /// @return The staged screen, or nullptr (already consumed / never staged / screen unplugged).
     [[nodiscard]] QScreen* takePendingSpawnScreen() noexcept;
+
+    /// Attach mode: authors a new window on the daemon (routed through the session factory's
+    /// requestRemoteWindow) instead of opening a purely local one. The daemon's new-window layout push
+    /// then spawns and binds the matching OS window (B4). Called by the NewTerminalWindow action.
+    /// @return true if the request was routed to the daemon (do NOT open a local window); false for a
+    ///         local factory.
+    [[nodiscard]] bool requestRemoteWindow();
 
     /// The app-wide forced-font-DPI provider (single instance; see display/ContentScale.h), created
     /// lazily on first use (requires a constructed QGuiApplication for platform detection).
@@ -174,6 +185,20 @@ class ContourGuiApp: public QObject, public ContourApp
     /// thin TTY client.
     int attachAction();
 
+    /// Native attach: brings the local OS windows in line with the daemon's windows (B4). Maps the
+    /// primary daemon window onto the boot window and, for each additional daemon window, spawns an OS
+    /// window (which binds itself via bindPendingAttachWindow) then reconciles each window's tab/pane
+    /// tree. Idempotent — re-run on every layoutChanged. No-op when not attached.
+    void reconcileAttachWindows();
+
+    /// Attach-window binder installed on the manager: called from a freshly-spawned window's main.qml
+    /// (via consumeAttachWindow). If a daemon window is staged for it, records the daemon→OS-window
+    /// mapping, reconciles that window's layout into it, and returns true so the window does NOT create
+    /// its own first tab.
+    /// @param controller The freshly-created controller of the just-spawned OS window.
+    /// @return true if @p controller's window was bound to a pending daemon window.
+    bool bindPendingAttachWindow(WindowController* controller);
+
     /// The attach engines, declared FIRST so they are destroyed LAST: remote-
     /// backed sessions hold ptys that unregister from them on destruction.
     std::unique_ptr<AttachController> _attachController;
@@ -182,6 +207,14 @@ class ContourGuiApp: public QObject, public ContourApp
     /// Invoked by terminalGuiAction right after the first window booted —
     /// attach mode adopts the remaining remote sessions as tabs here.
     std::function<void()> _onGuiBooted;
+
+    /// Native attach (B4): each daemon window id mapped to the OS window that mirrors it. The primary
+    /// daemon window maps to the boot window; additional ones map to spawned windows.
+    std::unordered_map<uint64_t, vtmux::WindowId> _attachWindowMap;
+    /// Daemon windows for which an OS window has been spawned but not yet bound (FIFO): the next
+    /// window's main.qml pops the front via bindPendingAttachWindow. Guards against re-spawning while a
+    /// spawn is in flight.
+    std::deque<uint64_t> _attachWindowsPendingSpawn;
 
     config::Config _config;
     // Declared before _sessionManager: the manager holds a reference to the factory.

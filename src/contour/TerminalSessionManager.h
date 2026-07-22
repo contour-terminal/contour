@@ -445,6 +445,26 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     ///         the window should create its usual first tab.
     Q_INVOKABLE bool consumeDefaultLayout(contour::WindowController* controller);
 
+    /// Installs the attach-mode window binder (ContourGuiApp installs it once attached). It decides
+    /// whether a freshly-spawned OS window should adopt a pending daemon window's layout instead of
+    /// creating the usual fresh first tab. Cleared (nullptr) when detaching. @see consumeAttachWindow.
+    /// @param binder Invoked with each spawned window's controller; returns true if it adopted it.
+    void setAttachWindowBinder(std::function<bool(contour::WindowController*)> binder)
+    {
+        _attachWindowBinder = std::move(binder);
+    }
+
+    /// main.qml calls this in Component.onCompleted (like consumeDefaultLayout): in attach mode a
+    /// window may have been spawned to host a specific daemon window (B4). If the installed binder
+    /// adopts @p controller's window for that daemon window, this returns true and the window must NOT
+    /// create its own first tab — its tabs come from reconciling the daemon window's layout instead.
+    /// @param controller The freshly-created controller of the just-spawned window.
+    /// @return true if the window was bound to a pending daemon window; false otherwise.
+    Q_INVOKABLE bool consumeAttachWindow(contour::WindowController* controller)
+    {
+        return _attachWindowBinder && controller != nullptr ? _attachWindowBinder(controller) : false;
+    }
+
     /// The controller adapting @p window, or nullptr. Used by the ModelEvents router to forward each Qt
     /// row/signal emission to the owning window's controller.
     [[nodiscard]] WindowController* controllerFor(vtmux::WindowId window) const noexcept;
@@ -725,6 +745,11 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     // window should adopt as its sole tab instead of creating a fresh one. Consumed exactly once by
     // consumePendingTransplant() from that window's main.qml. Mirrors ContourGuiApp::_pendingSpawnScreen.
     std::optional<std::pair<vtmux::WindowId, vtmux::TabId>> _pendingTransplant;
+
+    // Attach-mode window binder installed by ContourGuiApp (B4): a freshly-spawned window asks it
+    // (via consumeAttachWindow, from main.qml) whether it hosts a pending daemon window. Empty when
+    // not attached, so consumeAttachWindow is a no-op for ordinary local windows.
+    std::function<bool(contour::WindowController*)> _attachWindowBinder;
 
     // Cached QVariantList of the (immutable) tab-color palette, built lazily on first request.
     mutable QVariantList _tabColorPaletteCache;

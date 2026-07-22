@@ -2880,6 +2880,10 @@ void TerminalSession::spawnNewTerminal(string const& profileName)
     }
     else
     {
+        // Attach mode: author the window on the daemon (B4); its new-window layout push spawns and
+        // binds the matching OS window. A local factory returns false and we open an ordinary window.
+        if (_app.requestRemoteWindow())
+            return;
         sessionLog()("spawning new in-process window");
         _app.config().profile(_profileName)->shell.value().workingDirectory = fs::path(wd);
         // The new window mints its own WindowController + first tab in main.qml's Component.onCompleted,

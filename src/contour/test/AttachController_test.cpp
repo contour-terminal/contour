@@ -595,6 +595,37 @@ TEST_CASE("attach controller reports an unreachable daemon", "[attach][controlle
     CHECK(!connected.error().empty());
 }
 
+// B4: the manager's attach-window seam (consumeAttachWindow) routes a freshly-spawned
+// window to the binder ContourGuiApp installs — the QML-side hook that lets a spawned
+// window adopt a daemon window instead of creating a fresh first tab. Without a binder
+// it is inert (like an ordinary local window).
+TEST_CASE("consumeAttachWindow routes a spawned window to the installed binder", "[attach][factory]")
+{
+    auto app = contour::test::TestApp { std::make_unique<RefusingFactory>() };
+    auto controller = contour::test::ScopedController { app.manager() };
+
+    // No binder installed (an ordinary local run): the seam is a no-op.
+    CHECK_FALSE(app.manager().consumeAttachWindow(controller.controller));
+    CHECK_FALSE(app.manager().consumeAttachWindow(nullptr));
+
+    // An installed binder is consulted with the exact window being bootstrapped, and its
+    // verdict is returned verbatim.
+    contour::WindowController* seen = nullptr;
+    auto verdict = false;
+    app.manager().setAttachWindowBinder([&](contour::WindowController* c) {
+        seen = c;
+        return verdict;
+    });
+    CHECK_FALSE(app.manager().consumeAttachWindow(controller.controller));
+    CHECK(seen == controller.controller);
+    verdict = true;
+    CHECK(app.manager().consumeAttachWindow(controller.controller));
+    // A null controller never reaches the binder.
+    seen = nullptr;
+    CHECK_FALSE(app.manager().consumeAttachWindow(nullptr));
+    CHECK(seen == nullptr);
+}
+
 TEST_CASE("a refusing session factory blocks every creation entry point", "[attach][factory]")
 {
     auto app = contour::test::TestApp { std::make_unique<RefusingFactory>() };

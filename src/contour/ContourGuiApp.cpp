@@ -183,15 +183,19 @@ int ContourGuiApp::attachAction()
             return EXIT_FAILURE;
         }
         _routingFactory->setDelegate(_attachController.get());
-        // Reconcile the GUI against the daemon's authoritative tab/split tree (B2):
-        // whenever the layout arrives or changes (GUI boot, or a tab/split authored
-        // on the daemon), realize any tab not yet shown, each pane bound to its
-        // remote session. Incremental — tabs already shown are left untouched. A
-        // dying connection ends every mirror session (stop() closes the ptys),
+        // A window spawned to host a daemon window binds itself here (from its
+        // main.qml, via consumeAttachWindow) instead of creating a fresh first tab.
+        _sessionManager.setAttachWindowBinder(
+            [this](WindowController* controller) { return bindPendingAttachWindow(controller); });
+        // Reconcile the GUI against the daemon's authoritative window→tab→split tree
+        // (B2/B4): whenever a layout arrives or changes (GUI boot, or a window/tab/
+        // split authored on the daemon, here or by another client), map each daemon
+        // window onto an OS window and realize any tab not yet shown, each pane bound
+        // to its remote session. Incremental — what is already shown is left untouched.
+        // A dying connection ends every mirror session (stop() closes the ptys),
         // closing the tabs through the shell-exit teardown.
         adopt = [this] {
-            if (auto const window = _sessionManager.focusedWindow())
-                contour::applyRemoteLayout(_sessionManager, *window, *_attachController);
+            reconcileAttachWindows();
         };
         connect(_attachController.get(), &AttachController::layoutChanged, this, adopt, Qt::QueuedConnection);
         connect(
@@ -923,6 +927,61 @@ QScreen* ContourGuiApp::takePendingSpawnScreen() noexcept
     auto* screen = _pendingSpawnScreen.data();
     _pendingSpawnScreen.clear();
     return screen;
+}
+
+bool ContourGuiApp::requestRemoteWindow()
+{
+    return _routingFactory != nullptr && _routingFactory->requestRemoteWindow();
+}
+
+void ContourGuiApp::reconcileAttachWindows()
+{
+    if (!_attachController)
+        return;
+
+    // Daemon window ids come ascending, so the primary (lowest-id) window is handled
+    // first — it maps to the boot window; the rest each get their own OS window.
+    for (auto const daemonWindow: _attachController->windowIds())
+    {
+        if (auto const mapped = _attachWindowMap.find(daemonWindow); mapped != _attachWindowMap.end())
+        {
+            // Already shown: bring its tree up to date.
+            contour::applyRemoteLayout(_sessionManager, mapped->second, *_attachController, daemonWindow);
+            continue;
+        }
+        if (std::ranges::find(_attachWindowsPendingSpawn, daemonWindow) != _attachWindowsPendingSpawn.end())
+            continue; // an OS window is already spawning for this daemon window
+
+        if (_attachWindowMap.empty())
+        {
+            // The primary daemon window adopts the boot window (already created before
+            // the first layout arrived). A missing focused window (mid-boot) just retries
+            // on the next layout push.
+            if (auto const boot = _sessionManager.focusedWindow())
+            {
+                _attachWindowMap.emplace(daemonWindow, *boot);
+                contour::applyRemoteLayout(_sessionManager, *boot, *_attachController, daemonWindow);
+            }
+            continue;
+        }
+
+        // A new daemon window: spawn an OS window to host it. Its main.qml pops the
+        // staged id (consumeAttachWindow → bindPendingAttachWindow), records the mapping
+        // and reconciles — so it never creates a stray fresh tab.
+        _attachWindowsPendingSpawn.push_back(daemonWindow);
+        newWindow();
+    }
+}
+
+bool ContourGuiApp::bindPendingAttachWindow(WindowController* controller)
+{
+    if (!_attachController || controller == nullptr || _attachWindowsPendingSpawn.empty())
+        return false;
+    auto const daemonWindow = _attachWindowsPendingSpawn.front();
+    _attachWindowsPendingSpawn.pop_front();
+    _attachWindowMap.emplace(daemonWindow, controller->windowId());
+    contour::applyRemoteLayout(_sessionManager, controller->windowId(), *_attachController, daemonWindow);
+    return true;
 }
 
 display::ForcedFontDpiProvider* ContourGuiApp::forcedFontDpiProvider()

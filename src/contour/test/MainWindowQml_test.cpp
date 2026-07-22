@@ -181,6 +181,12 @@ class MockMainController: public QAbstractListModel
         calls << QStringLiteral("consumePendingTransplant");
         return false;
     }
+    // Not attached in these tests, so no daemon window is adopted (the window falls through).
+    Q_INVOKABLE bool consumeAttachWindow(QObject*)
+    {
+        calls << QStringLiteral("consumeAttachWindow");
+        return false;
+    }
     // No startup layout is configured in these tests, so the window creates its own first tab.
     Q_INVOKABLE bool consumeDefaultLayout(QObject*)
     {
@@ -318,12 +324,14 @@ TEST_CASE("main.qml startup: sized-before-shown ordering and declared chrome (of
     auto root = loadMainWindow(engine, controller, warnings);
 
     // 1. Startup order: mint the controller, bind THIS window, check for a torn-off tab to adopt
-    //    (none here -> returns false), create the first tab (so the window can be sized from real
-    //    metrics), and only then map it.
+    //    (none here -> false), then a daemon window to adopt (not attached -> false), then a startup
+    //    layout (none -> false), create the first tab (so the window can be sized from real metrics),
+    //    and only then map it.
     CHECK(controller.calls
           == QStringList { QStringLiteral("createWindowController"),
                            QStringLiteral("bindWindow"),
                            QStringLiteral("consumePendingTransplant"),
+                           QStringLiteral("consumeAttachWindow"),
                            QStringLiteral("consumeDefaultLayout"),
                            QStringLiteral("createNewTab"),
                            QStringLiteral("showInitial") });
