@@ -223,10 +223,14 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     ///                 window's running size (LaunchLayout into an existing window) so commands that
     ///                 read the terminal size at startup see the real one; @c std::nullopt (a
     ///                 brand-new window at startup) uses the profile's configured terminalSize.
+    /// @param beforeLeafSeed Invoked (when set) with each leaf pane immediately before its backing
+    ///                 session is created — the hook attach mode uses to bind the pane about to be born
+    ///                 to a specific remote session (via muxserver::client::WireLayout::leafSession).
     /// @return false if @p layout has no tabs (nothing to apply); true otherwise.
     bool applyLayoutToWindow(vtmux::WindowId window,
                              config::Layout const& layout,
-                             std::optional<vtbackend::PageSize> pageSize = std::nullopt);
+                             std::optional<vtbackend::PageSize> pageSize = std::nullopt,
+                             std::function<void(config::LayoutPane const&)> const& beforeLeafSeed = {});
 
     // Keyboard tab navigation/reordering. Every entry point takes the ACTING session (the one that
     // received the keybinding) and targets that session's hosting window, so a keybinding in any

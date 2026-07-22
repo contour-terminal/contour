@@ -333,9 +333,11 @@ void TerminalSessionManager::closeAllTabs(TerminalSession* acting)
         controller->closeWindow();
 }
 
-bool TerminalSessionManager::applyLayoutToWindow(vtmux::WindowId window,
-                                                 config::Layout const& layout,
-                                                 std::optional<vtbackend::PageSize> pageSize)
+bool TerminalSessionManager::applyLayoutToWindow(
+    vtmux::WindowId window,
+    config::Layout const& layout,
+    std::optional<vtbackend::PageSize> pageSize,
+    std::function<void(config::LayoutPane const&)> const& beforeLeafSeed)
 {
     if (layout.tabs.empty())
     {
@@ -352,6 +354,11 @@ bool TerminalSessionManager::applyLayoutToWindow(vtmux::WindowId window,
         // The seeder stages a backing session for each pane right before the model allocates it,
         // exactly like createBackingSession's use in splitActivePane/createSessionInBackground.
         auto seeder = [&](config::LayoutPane const& leaf) -> bool {
+            // Attach mode binds the pane about to be born to a specific remote
+            // session here, before its backing session (and thus its ChannelPty) is
+            // created — see AttachController.
+            if (beforeLeafSeed)
+                beforeLeafSeed(leaf);
             auto const sessionId = vtmux::SessionId { _nextSessionId++ };
             // A command override ONLY when the pane actually names a program to run. A pane that
             // just picks a directory still runs the profile's shell — it travels through `cwd`,

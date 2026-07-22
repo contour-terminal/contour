@@ -19,11 +19,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <sstream>
+#include <vector>
 
 #include <muxserver/client/LayoutReconstruction.h>
 #include <muxserver/proto/Pdu.h>
@@ -193,7 +196,19 @@ TEST_CASE("TerminalSessionManager: applyLayoutToWindow realizes a daemon wire la
                           muxserver::proto::WirePane { .split = 0, .session = 3 } } } });
 
     auto const wl = muxserver::client::wireToLayout(state);
-    REQUIRE(app.manager().applyLayoutToWindow(win.id, wl.layout));
+
+    // The beforeLeafSeed hook fires once per leaf, right before its backing session
+    // is created — resolving each leaf to its remote session exactly as the attach
+    // binding will (leafSession keyed by the realized leaf's address).
+    auto boundSessions = std::vector<uint64_t> {};
+    auto const seedHook = [&](contour::config::LayoutPane const& leaf) {
+        boundSessions.push_back(wl.leafSession.at(&leaf));
+    };
+    REQUIRE(app.manager().applyLayoutToWindow(win.id, wl.layout, std::nullopt, seedHook));
+
+    // Every leaf (across both tabs) was bound to its remote session.
+    std::ranges::sort(boundSessions);
+    CHECK(boundSessions == std::vector<uint64_t> { 1, 2, 3 });
 
     auto* window = app.manager().model().window(win.id);
     REQUIRE(window != nullptr);
