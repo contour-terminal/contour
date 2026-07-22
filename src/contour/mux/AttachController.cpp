@@ -3,6 +3,7 @@
 #include <contour/mux/AttachController.h>
 
 #include <algorithm>
+#include <ranges>
 #include <utility>
 
 #include <net/Sockets.h>
@@ -159,11 +160,8 @@ void AttachController::onLayout(muxserver::proto::LayoutState const& layout)
 std::vector<uint64_t> AttachController::windowIds() const
 {
     auto const lock = std::lock_guard { _mutex };
-    auto ids = std::vector<uint64_t> {};
-    ids.reserve(_layouts.size());
-    for (auto const& [window, _]: _layouts) // std::map keeps them ascending
-        ids.push_back(window);
-    return ids;
+    // std::map keeps the keys ascending, so the primary (lowest-id) window comes first.
+    return std::ranges::to<std::vector>(_layouts | std::views::keys);
 }
 
 std::optional<muxserver::proto::LayoutState> AttachController::layout(uint64_t daemonWindow) const
@@ -179,14 +177,6 @@ std::optional<muxserver::proto::LayoutState> AttachController::layout() const
     if (_layouts.empty())
         return std::nullopt;
     return _layouts.begin()->second; // the primary (lowest-id) window
-}
-
-muxserver::client::WireLayout AttachController::wireLayout(uint64_t daemonWindow) const
-{
-    auto const lock = std::lock_guard { _mutex };
-    auto const it = _layouts.find(daemonWindow);
-    return it != _layouts.end() ? muxserver::client::wireToLayout(it->second)
-                                : muxserver::client::WireLayout {};
 }
 
 muxserver::client::WireLayout AttachController::wireLayout() const

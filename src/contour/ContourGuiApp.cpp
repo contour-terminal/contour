@@ -949,7 +949,7 @@ void ContourGuiApp::reconcileAttachWindows()
             contour::applyRemoteLayout(_sessionManager, mapped->second, *_attachController, daemonWindow);
             continue;
         }
-        if (std::ranges::find(_attachWindowsPendingSpawn, daemonWindow) != _attachWindowsPendingSpawn.end())
+        if (_pendingAttachWindow == daemonWindow)
             continue; // an OS window is already spawning for this daemon window
 
         if (_attachWindowMap.empty())
@@ -958,30 +958,33 @@ void ContourGuiApp::reconcileAttachWindows()
             // the first layout arrived). A missing focused window (mid-boot) just retries
             // on the next layout push.
             if (auto const boot = _sessionManager.focusedWindow())
-            {
-                _attachWindowMap.emplace(daemonWindow, *boot);
-                contour::applyRemoteLayout(_sessionManager, *boot, *_attachController, daemonWindow);
-            }
+                bindDaemonWindow(daemonWindow, *boot);
             continue;
         }
 
-        // A new daemon window: spawn an OS window to host it. Its main.qml pops the
+        // A new daemon window: spawn an OS window to host it. Its main.qml claims the
         // staged id (consumeAttachWindow → bindPendingAttachWindow), records the mapping
-        // and reconciles — so it never creates a stray fresh tab.
-        _attachWindowsPendingSpawn.push_back(daemonWindow);
+        // and reconciles — so it never creates a stray fresh tab. The QML load is
+        // synchronous, so the stage is consumed before this returns.
+        _pendingAttachWindow = daemonWindow;
         newWindow();
     }
 }
 
 bool ContourGuiApp::bindPendingAttachWindow(WindowController* controller)
 {
-    if (!_attachController || controller == nullptr || _attachWindowsPendingSpawn.empty())
+    if (!_attachController || controller == nullptr || !_pendingAttachWindow)
         return false;
-    auto const daemonWindow = _attachWindowsPendingSpawn.front();
-    _attachWindowsPendingSpawn.pop_front();
-    _attachWindowMap.emplace(daemonWindow, controller->windowId());
-    contour::applyRemoteLayout(_sessionManager, controller->windowId(), *_attachController, daemonWindow);
+    auto const daemonWindow = *_pendingAttachWindow;
+    _pendingAttachWindow.reset();
+    bindDaemonWindow(daemonWindow, controller->windowId());
     return true;
+}
+
+void ContourGuiApp::bindDaemonWindow(std::uint64_t daemonWindow, vtmux::WindowId osWindow)
+{
+    _attachWindowMap.emplace(daemonWindow, osWindow);
+    contour::applyRemoteLayout(_sessionManager, osWindow, *_attachController, daemonWindow);
 }
 
 display::ForcedFontDpiProvider* ContourGuiApp::forcedFontDpiProvider()

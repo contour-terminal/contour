@@ -120,13 +120,10 @@ class AttachController final: public QObject, public SessionFactory
     ///         arrived yet. Convenience for the single-window path.
     [[nodiscard]] std::optional<muxserver::proto::LayoutState> layout() const;
 
-    /// @return @p daemonWindow's layout converted for `vtmux::realizeLayoutTab` (an
-    ///         empty layout if that window is unknown), plus its leaf→remote-session
-    ///         map. The layout executor realizes this to reproduce the daemon tree.
-    [[nodiscard]] muxserver::client::WireLayout wireLayout(uint64_t daemonWindow) const;
-
-    /// @return The primary (lowest-id) daemon window's converted layout. Convenience
-    ///         for the single-window path.
+    /// @return The primary (lowest-id) daemon window's layout converted for
+    ///         `vtmux::realizeLayoutTab` (an empty layout if none has arrived), plus
+    ///         its leaf→remote-session map. The layout executor realizes this to
+    ///         reproduce the daemon tree.
     [[nodiscard]] muxserver::client::WireLayout wireLayout() const;
 
     /// Binds the NEXT createPty() to remote session @p session (instead of popping

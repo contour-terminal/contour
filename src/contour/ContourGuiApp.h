@@ -20,7 +20,6 @@
 #include <QtQml/QQmlApplicationEngine>
 
 #include <cstdint>
-#include <deque>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -199,6 +198,13 @@ class ContourGuiApp: public QObject, public ContourApp
     /// @return true if @p controller's window was bound to a pending daemon window.
     bool bindPendingAttachWindow(WindowController* controller);
 
+    /// Records the daemon-window → OS-window mapping and immediately reconciles that daemon window's
+    /// tab/pane tree into @p osWindow — the one place the "a mapping always implies a reconcile"
+    /// invariant lives (shared by the primary-window and spawned-window paths).
+    /// @param daemonWindow The daemon window id.
+    /// @param osWindow The OS window that mirrors it.
+    void bindDaemonWindow(std::uint64_t daemonWindow, vtmux::WindowId osWindow);
+
     /// The attach engines, declared FIRST so they are destroyed LAST: remote-
     /// backed sessions hold ptys that unregister from them on destruction.
     std::unique_ptr<AttachController> _attachController;
@@ -211,10 +217,11 @@ class ContourGuiApp: public QObject, public ContourApp
     /// Native attach (B4): each daemon window id mapped to the OS window that mirrors it. The primary
     /// daemon window maps to the boot window; additional ones map to spawned windows.
     std::unordered_map<uint64_t, vtmux::WindowId> _attachWindowMap;
-    /// Daemon windows for which an OS window has been spawned but not yet bound (FIFO): the next
-    /// window's main.qml pops the front via bindPendingAttachWindow. Guards against re-spawning while a
-    /// spawn is in flight.
-    std::deque<uint64_t> _attachWindowsPendingSpawn;
+    /// The daemon window whose OS window is being spawned right now: reconcileAttachWindows stages it
+    /// just before newWindow(), and that window's main.qml claims it via bindPendingAttachWindow.
+    /// Single-slot (like _pendingTransplant / _pendingSpawnScreen): the QML load is synchronous, so a
+    /// stage is always consumed before the next is made.
+    std::optional<uint64_t> _pendingAttachWindow;
 
     config::Config _config;
     // Declared before _sessionManager: the manager holds a reference to the factory.
