@@ -254,28 +254,28 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       split-pane end-to-end (attach → `LayoutState` shows the vertical split, 60/40, two distinct-session
       leaves). *Landed 2026-07-22; muxserver suite green (122/2652).* **B2 (the GUI consuming it in
       `AttachController` → `SessionModel`) is the Qt follow-up.**
-- [~] **B2. Client applies `LayoutState` — capture + reconstruction PLANNER landed; GUI glue
-      pending.** Two of the three pieces are done and tested:
-      1. **Capture:** `AttachController` subscribes the daemon's `LayoutState` (`setLayoutHandler` →
-         `onLayout`), stores it under the mutex, exposes a thread-safe `layout()` copy, and raises a
-         `layoutChanged()` signal — the GUI ignored the layout entirely before. (Linux-CI test.)
-      2. **The reconstruction decision (the hard part) — extracted, pure, and headless-verified.**
-         `muxserver/client/LayoutReconstruction.{h,cpp}`: `planReconstruction(LayoutState)` turns the
-         daemon tree into an ordered `vector<ReconstructStep>` (`NewTab`/`Split`/`Activate`). It relies
-         on the daemon's own split invariant (`vtmux::Pane::split` keeps the OLD session in the first
-         child, the NEW in the now-active second), so a subtree's leftmost leaf is always its seed —
-         "split the active leaf, give the new pane the right subtree's leftmost session, build the
-         right (active) subtree, then re-activate the left leaf and build the left subtree (only when
-         the left child is itself a split)". **Unit-tested by replaying the plan against a real
-         `vtmux::SessionModel` and asserting the rebuilt tree matches** — single pane, single split,
-         nested (re-activation path), multi-tab, empty. This runs headless on Windows, no GUI needed.
-      **Remaining (Linux-CI, thin GUI glue):** an applier on the GUI thread (connect `layoutChanged`
-      queued in `ContourGuiApp`) that executes the plan by driving `TerminalSessionManager`
-      (`createSessionInBackground` for `NewTab`, `splitActivePane` for `Split`, `setActivePane` for
-      `Activate`), pushing the plan's sessions into `_pending` in step order so the existing FIFO
-      `createPty` binds each pane to its remote session with no new binding machinery. It replaces the
-      `onUpdate`→`PendingSession` flattening; mirror re-serialization (`onUpdate`) stays unchanged.
-      (Active-pane restoration to `WireTab.activePane` and zoom are a follow-up polish.)
+- [x] **B2. Client applies `LayoutState` — DONE, verified end-to-end (2026-07-22).** The GUI now
+      reproduces the daemon's full tab/split tree instead of flattening one tab per session:
+      1. **Capture:** `AttachController` subscribes the daemon's `LayoutState` (`onLayout` → thread-safe
+         `layout()`/`wireLayout()` + `layoutChanged()` signal).
+      2. **Reconstruction — reuses the SHARED realizer, not a bespoke stepper.** `muxserver/client/
+         LayoutReconstruction`: `wireToLayout(LayoutState)` converts the wire tree to a `vtmux::Layout`
+         (== `config::Layout`) plus a leaf→remote-session map, so it feeds the same `vtmux::
+         realizeLayoutTab` the daemon and config-layout loader use. Headless-tested against a real
+         `vtmux::SessionModel`.
+      3. **Binding seam:** `TerminalSessionManager::applyLayoutToWindow(..., beforeLeafSeed)` calls the
+         hook just before each pane's backing session is created; `contour/mux/RemoteLayout`
+         `applyRemoteLayout` supplies a seeder that binds the pane to `leafSession.at(&leaf)` via
+         `AttachController::setNextBindSession` (createPty binds there instead of the FIFO queue).
+         `canCreateSession()` is relaxed during realization (**also the B3-Qt relaxation**).
+      4. **Wiring:** `ContourGuiApp` connects `layoutChanged` → `applyRemoteLayout` (once a window +
+         layout exist), replacing the `remoteSessionDiscovered`→`adoptStartupSessions` flattening
+         (now removed).
+      **Verified on Windows** end-to-end: the `AttachController_test` daemon fixture is a real
+      TLS-over-loopback-TCP daemon (two independent reactors); a test drives a split daemon layout and
+      asserts it realizes as a 2-pane vertical split in the GUI's own `SessionModel`. (Active-pane/zoom
+      restoration to `WireTab.activePane` is follow-up polish.) **Bonus:** switching the fixture to real
+      TCP exposed and fixed a two-reactor TLS handshake deadlock — see the progress log.
 - [~] **B3. Lifecycle PDUs (F2, inbound) — server-receive half + client send verbs landed.**
       Three tag-12/13/14 PDUs (forward-compatible, no codec bump): `CreateTab{}`, `SplitPane{tab,
       orientation, ratio×10000}`, `ClosePane{session}`. `NativeSession::handlePdu` routes them to the
@@ -361,8 +361,8 @@ NTFS ACLs, not POSIX bits; macOS resolves the socket dir under `$TMPDIR` (no `$X
 | | Linux | macOS | Windows |
 |---|---|---|---|
 | WS-A parity (GUI + thin) | ☐ | ☐ | ☑ (muxserver+contour_gui suites green) |
-| WS-B layout | ☐ | ☐ | ☑ server half (B1/B3 wire); GUI apply pending |
-| WS-C TCP+TLS (daemon + client) | ☐ | ☐ | ☑ (net+muxserver TLS/dev-cert e2e green; contour links) |
+| WS-B layout | ☐ | ☐ | ☑ B1/B3 wire + B2 GUI apply (split tab e2e over TCP); B4/B5 pending |
+| WS-C TCP+TLS (daemon + client) | ☐ | ☐ | ☑ (net+muxserver+contour e2e incl. two-reactor TLS) |
 
 Windows verification is **CI-gated** (no Windows dev box): compile under `-Werror`, run the
 runtime-gated net tests, watch the Windows job after each push.
@@ -534,8 +534,23 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   is one cohesive AttachController+ContourGuiApp integration** (bind-on-seed, relax `canCreateSession`,
   wire the executor) that alters the working attach path — runtime-verified on the AF_UNIX Linux
   fixture, per AGENT.md's "run the tests" rule. Plus B3-Qt, B4, B5.
+- 2026-07-22 · Windows/clangcl-release · **B2 COMPLETE, verified end-to-end — and a two-reactor TLS
+  bug fixed along the way.** Landed the AttachController+ContourGuiApp integration: `setNextBindSession`
+  + createPty bind-on-seed, `wireLayout()`, relaxed `canCreateSession()` (the B3-Qt relaxation),
+  `applyRemoteLayout` (drives `applyLayoutToWindow` with the binding seeder), and `layoutChanged` →
+  `applyRemoteLayout` in `ContourGuiApp` (removed the one-tab-per-session `adoptStartupSessions`).
+  **Per the user's suggestion, the `AttachController_test` daemon fixture is now a loopback-TCP daemon
+  on an ephemeral port — so the whole attach path runs on Windows, not just POSIX.** A new end-to-end
+  test drives a real two-reactor TCP attach to a split daemon layout and asserts a 2-pane split tab in
+  the GUI's `SessionModel`. **That exercise exposed a real bug in the remote use case:** the two-reactor
+  TLS handshake deadlocked because AttachClient's concurrent read+write both called non-reentrant
+  `SSL_do_handshake` (single-loop timing hid it). Fixed by serializing `TlsSocket::handshake()` (one
+  driver; others park on a gate). TcpEndpoint is TLS-only again; the fixture uses real TLS-over-TCP, so
+  every attach test now covers the two-reactor handshake, plus a focused `net` regression test. All
+  suites green (net 36/165, muxserver 136/2769, contour_gui 9820). **Remaining: B4 (multi-window),
+  B3-Qt authoring verbs (canCreateSession already relaxed), B5 (interop-only tmux polish).**
 
-## Remaining GUI work — turnkey implementation plan (B2 executor · B3-Qt · B4)
+## Remaining GUI work — turnkey implementation plan (B4 · B3-Qt authoring · B5)
 
 All protocol/transport/parity work is done and verified. What is left is GUI-side
 reconstruction in `src/contour/`, whose tests are **AF_UNIX/POSIX-only** (the
