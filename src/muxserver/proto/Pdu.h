@@ -229,6 +229,11 @@ struct Delta
     /// the new OSC 7 URL to re-emit.
     uint8_t cwdChanged = 0;
     std::string cwd;
+    /// Set (1) when the default fg/bg changed in this batch (OSC 10/11);
+    /// `defaultForeground`/`defaultBackground` then hold the new 0xRRGGBB colors.
+    uint8_t colorsChanged = 0;
+    uint32_t defaultForeground = 0;
+    uint32_t defaultBackground = 0;
     bool operator==(Delta const&) const = default;
 };
 

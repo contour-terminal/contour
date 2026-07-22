@@ -127,9 +127,13 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       cursorDisplay())` (1 blink block … 6 steady bar; Rectangle→block) into `Delta.cursorShape`
       /`SessionState.cursorShape`; `ScreenMirror` re-emits `CSI Ps SP q`. CodecVersion → 5. Closed-loop
       test. **Retires roadmap F9.** Cursor **visibility** already rides `Delta.setModes` mode 25.
-      *Landed 2026-07-22.* **Follow-up (A3b):** default fg/bg + indexed palette (OSC 4/10/11) — the
-      `SessionState` slots exist but stay unpopulated; cells carry explicit colors, so this only
-      affects default/indexed-colored cells resolving against the client's own palette.
+      *Landed 2026-07-22.*
+- [x] **A3b. Default colors (OSC 10/11).** `Delta.defaultForeground/Background` + `colorsChanged`
+      (pull+diff of `colorPalette().defaultForeground/Background`), populated on the `SessionState`
+      snapshot; `ScreenMirror` re-emits `OSC 10/11` (`rgb:RR/GG/BB`). CodecVersion → 8. Closed-loop
+      test. *Landed 2026-07-22; suite green (121/2635).* **Follow-up:** the indexed **palette** (OSC 4,
+      256 entries) is still not synced — cells carry explicit colors, so this only affects
+      *indexed*-colored cells resolving against the client's own palette (deferred: 256 seqs/replay).
 - [x] **A4. Bell.** `SessionEvent{kind=Bell}` → `ScreenMirror::applyEvent` re-emits `BEL` into the
       mirror terminal, so the frontend's own `bell()` fires. (A single data-driven `SessionEvent` PDU
       — a new tag, no codec bump — serves A4/A5/A6; adding an event kind is a row.) *Landed 2026-07-22.*
@@ -310,6 +314,12 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   end-to-end, encrypted + authenticated, in the buildable layer.** Remaining for remote: wire the TLS
   contexts into `runDaemon`/`runAttach` (server buildable; client connect + Qt `AttachController` = C5),
   and the `--listen-tcp`/`--connect-tcp`/`--token`/config schema (C3/C4, Qt).
+- 2026-07-22 · Windows/clangcl-release · **A3b done** — live default fg/bg (OSC 10/11) over
+  `Delta.defaultForeground/Background`; `ScreenMirror` re-emits. CodecVersion → 8. Suite green
+  (121/2635). Indexed-palette (OSC 4) sync deferred. **WS-A native VT parity now covers images,
+  title, cursor, cwd, bell/notify/clipboard, default colors** — remaining WS-A: A8 (kitty keyboard,
+  needs a vtbackend getter), A9 (thin client on ScreenMirror). Remaining overall is Qt-gated
+  (C3/C4/C5-client, WS-B layout) — see the per-task notes.
 
 ## Open decisions / risks
 

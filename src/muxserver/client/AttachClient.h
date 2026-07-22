@@ -47,8 +47,10 @@ struct RemoteScreen
     int32_t cursorLine = 0;
     int32_t cursorColumn = 0;
     std::string title;
-    uint8_t cursorShape = 0; ///< DECSCUSR Ps (0 = unknown/default); re-emitted as CSI Ps SP q.
-    std::string cwd;         ///< OSC 7 working-directory URL, re-emitted as OSC 7.
+    uint8_t cursorShape = 0;        ///< DECSCUSR Ps (0 = unknown/default); re-emitted as CSI Ps SP q.
+    std::string cwd;                ///< OSC 7 working-directory URL, re-emitted as OSC 7.
+    uint32_t defaultForeground = 0; ///< 0xRRGGBB default foreground, re-emitted as OSC 10.
+    uint32_t defaultBackground = 0; ///< 0xRRGGBB default background, re-emitted as OSC 11.
 
     uint64_t generation = 0;
     uint64_t seqno = 0;

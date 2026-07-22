@@ -39,6 +39,8 @@ void RemoteScreen::apply(proto::SessionState const& state)
     title = state.title;
     cursorShape = state.cursorShape;
     cwd = state.cwd;
+    defaultForeground = state.defaultForeground;
+    defaultBackground = state.defaultBackground;
 }
 
 void RemoteScreen::apply(proto::Delta const& delta)
@@ -65,6 +67,11 @@ void RemoteScreen::apply(proto::Delta const& delta)
         cursorShape = delta.cursorShape;
     if (delta.cwdChanged != 0)
         cwd = delta.cwd;
+    if (delta.colorsChanged != 0)
+    {
+        defaultForeground = delta.defaultForeground;
+        defaultBackground = delta.defaultBackground;
+    }
 
     for (auto const& line: delta.lines)
     {

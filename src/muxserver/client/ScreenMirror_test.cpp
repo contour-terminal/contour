@@ -551,3 +551,29 @@ TEST_CASE("a live working-directory change reaches the mirror", "[muxserver][mir
 
     h.loop.blockOn(drive(&h, std::move(scenario)));
 }
+
+TEST_CASE("a live default-color change reaches the mirror", "[muxserver][mirror]")
+{
+    auto h = MirrorHarness {};
+    h.host.createTab();
+    auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    h.serverTerminal(session)->writeToScreen("z");
+
+    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+        co_await waitUntil(
+            &h->loop, [&] { return h->mirror->primaryScreen().grid().renderMainPageText().contains("z"); });
+
+        // OSC 10/11: change the default foreground/background (no cell change).
+        serverWrites(h, session, "\033]10;rgb:12/34/56\033\\\033]11;rgb:ab/cd/ef\033\\");
+        co_await waitUntil(&h->loop,
+                           [&] { return h->mirror->colorPalette().defaultForeground.value() == 0x123456; });
+        CHECK(h->mirror->colorPalette().defaultForeground.value() == 0x123456);
+        CHECK(h->mirror->colorPalette().defaultBackground.value() == 0xABCDEF);
+        // The server saw the same change.
+        CHECK(h->serverTerminal(session)->colorPalette().defaultForeground.value() == 0x123456);
+
+        h->client->detach();
+    }(&h, session);
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}

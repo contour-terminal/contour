@@ -113,7 +113,10 @@ TEST_CASE("every catalog PDU round-trips", "[muxserver][proto]")
                 .cursorShapeChanged = 1,
                 .cursorShape = 4,
                 .cwdChanged = 1,
-                .cwd = "file:///home/user" },
+                .cwd = "file:///home/user",
+                .colorsChanged = 1,
+                .defaultForeground = 0xD0D0D0,
+                .defaultBackground = 0x1A1716 },
         SessionEvent { .session = 4, .kind = 1, .a = "Build finished", .b = "3 warnings, 0 errors" },
     };
 

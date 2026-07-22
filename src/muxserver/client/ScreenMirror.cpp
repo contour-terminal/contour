@@ -36,6 +36,17 @@ namespace
         return std::format("\033[{};{}H", line, column);
     }
 
+    /// Emits `OSC <code> ; rgb:RR/GG/BB` for a 0xRRGGBB color (code 10 = default
+    /// foreground, 11 = default background).
+    [[nodiscard]] std::string oscColor(int code, uint32_t rgb)
+    {
+        return std::format("\033]{};rgb:{:02x}/{:02x}/{:02x}\033\\",
+                           code,
+                           (rgb >> 16) & 0xFFu,
+                           (rgb >> 8) & 0xFFu,
+                           rgb & 0xFFu);
+    }
+
     [[nodiscard]] bool isScaled(proto::WireCell const& cell)
     {
         return cell.scale > 1 || cell.textScaleExtras != 0;
@@ -264,6 +275,11 @@ std::string ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& 
         out += std::format("\033[{} q", delta.cursorShape); // DECSCUSR
     if (delta.cwdChanged != 0)
         out += std::format("\033]7;{}\033\\", delta.cwd); // OSC 7 working directory
+    if (delta.colorsChanged != 0)
+    {
+        out += oscColor(10, delta.defaultForeground);
+        out += oscColor(11, delta.defaultBackground);
+    }
     out += "\033[0m";
     out += cup(delta.cursorLine + 1, delta.cursorColumn + 1);
     if (containsValue(_setModes, VisibleCursorModeNumber))
@@ -334,6 +350,11 @@ std::string ScreenMirror::fullReplay(RemoteScreen const& screen)
         out += std::format("\033[{} q", screen.cursorShape); // DECSCUSR
     if (!screen.cwd.empty())
         out += std::format("\033]7;{}\033\\", screen.cwd); // OSC 7 working directory
+    if (screen.defaultForeground != 0 || screen.defaultBackground != 0)
+    {
+        out += oscColor(10, screen.defaultForeground);
+        out += oscColor(11, screen.defaultBackground);
+    }
     syncModes(out, screen);
     appendImages(out, screen);
     out += "\033[0m";

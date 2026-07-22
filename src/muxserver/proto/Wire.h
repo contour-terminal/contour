@@ -34,7 +34,8 @@ namespace muxserver::proto
 /// v6 added Delta.cwd / SessionState.cwd (live OSC 7 working-directory propagation).
 /// v7 added ClientHello.token (preshared auth for the opt-in TCP transport; empty
 /// over the hardened AF_UNIX socket, where filesystem permissions are the gate).
-constexpr uint32_t CodecVersion = 7;
+/// v8 added Delta.defaultForeground/Background (live OSC 10/11 default colors).
+constexpr uint32_t CodecVersion = 8;
 
 /// The largest frame payload the decoder will accept. A peer-declared length
 /// beyond this is rejected outright (FrameTooLarge) rather than treated as

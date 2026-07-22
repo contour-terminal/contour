@@ -250,6 +250,9 @@ namespace
         out.u8(pdu.cursorShape);
         out.u8(pdu.cwdChanged);
         out.string(pdu.cwd);
+        out.u8(pdu.colorsChanged);
+        out.u32(pdu.defaultForeground);
+        out.u32(pdu.defaultBackground);
     }
 
     void encodeBody(Writer& out, SessionEvent const& pdu)
@@ -449,7 +452,9 @@ namespace
 
         if (!assign(in.u8(), pdu.titleChanged, error) || !assign(in.string(), pdu.title, error)
             || !assign(in.u8(), pdu.cursorShapeChanged, error) || !assign(in.u8(), pdu.cursorShape, error)
-            || !assign(in.u8(), pdu.cwdChanged, error) || !assign(in.string(), pdu.cwd, error))
+            || !assign(in.u8(), pdu.cwdChanged, error) || !assign(in.string(), pdu.cwd, error)
+            || !assign(in.u8(), pdu.colorsChanged, error) || !assign(in.u32(), pdu.defaultForeground, error)
+            || !assign(in.u32(), pdu.defaultBackground, error))
             return std::unexpected(error);
         return pdu;
     }

@@ -339,6 +339,23 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
             follow.cwdKnown = true;
         }
 
+        // Live default fg/bg (OSC 10/11): pull+diff; the snapshot carries them in
+        // SessionState below.
+        auto const& colors = terminal->colorPalette();
+        auto const fg = static_cast<int>(colors.defaultForeground.value());
+        auto const bg = static_cast<int>(colors.defaultBackground.value());
+        if (fg != follow.lastDefaultForeground || bg != follow.lastDefaultBackground)
+        {
+            if (!snapshot)
+            {
+                delta.colorsChanged = 1;
+                delta.defaultForeground = static_cast<uint32_t>(fg);
+                delta.defaultBackground = static_cast<uint32_t>(bg);
+            }
+            follow.lastDefaultForeground = fg;
+            follow.lastDefaultBackground = bg;
+        }
+
         if (snapshot)
         {
             auto& snap = state.emplace();
@@ -352,6 +369,8 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
             snap.title = terminal->windowTitle();
             snap.cursorShape = cursorPs;
             snap.cwd = terminal->currentWorkingDirectory();
+            snap.defaultForeground = colors.defaultForeground.value();
+            snap.defaultBackground = colors.defaultBackground.value();
         }
     }
 
@@ -366,7 +385,7 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
     auto const cursorMoved =
         delta.cursorLine != follow.lastCursorLine || delta.cursorColumn != follow.lastCursorColumn;
     if (delta.snapshot != 0 || !delta.lines.empty() || modesChanged || cursorMoved || delta.titleChanged != 0
-        || delta.cursorShapeChanged != 0 || delta.cwdChanged != 0)
+        || delta.cursorShapeChanged != 0 || delta.cwdChanged != 0 || delta.colorsChanged != 0)
     {
         follow.lastModes = delta.setModes;
         follow.lastCursorLine = delta.cursorLine;
