@@ -423,7 +423,15 @@ shared_ptr<Image const> ImagePool::create(ImageFormat format, ImageSize size, Im
         id, format, std::move(data), size, [index = _idIndex, remover = _onImageRemove](Image const* image) {
             {
                 auto const _ = std::lock_guard { index->mutex };
-                index->images.erase(image->id().value);
+                // Prune only if this dying image still owns its slot. After the uint32
+                // id counter wraps, a live image may have re-taken this id via
+                // insert_or_assign (see create() below); its weak_ptr is unexpired, so
+                // erasing by id unconditionally would drop the LIVE entry. Our own slot's
+                // weak_ptr is already expired once the destructor's remover runs, so
+                // expired() precisely selects the entry to remove.
+                if (auto const it = index->images.find(image->id().value);
+                    it != index->images.end() && it->second.expired())
+                    index->images.erase(it);
             }
             if (remover)
                 remover(image);

@@ -375,6 +375,10 @@ class ImagePool
     void clear();
 
   private:
+    /// Test-only seam: rewinds _nextImageId to reproduce the uint32 id-counter wrap
+    /// (a reused id colliding with a still-live image) without four billion allocations.
+    friend struct ImagePoolIdWrapTester;
+
     void removeRasterizedImage(RasterizedImage* image); //!< Removes a rasterized image from pool.
 
     using NameToImageIdCache = crispy::strong_lru_cache<std::string, std::shared_ptr<Image const>>;

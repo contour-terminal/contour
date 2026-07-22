@@ -260,6 +260,15 @@ TEST_CASE("RasterizedImage.fragment", "[RasterizedImage]")
               << (double(diff) / iterations) << "ms per op) check=" << check << "\n";
 }
 
+namespace vtbackend
+{
+/// Grants the wrap regression test access to ImagePool's private id counter.
+struct ImagePoolIdWrapTester
+{
+    static void rewindNextId(ImagePool& pool, ImageId id) noexcept { pool._nextImageId = id; }
+};
+} // namespace vtbackend
+
 TEST_CASE("ImagePool.idIndexTracksImageLifetime", "[image]")
 {
     auto pool = ImagePool {};
@@ -281,4 +290,36 @@ TEST_CASE("ImagePool.idIndexTracksImageLifetime", "[image]")
 
     // An id that never existed is not an error either.
     CHECK(pool.findImageById(ImageId(4242)) == nullptr);
+}
+
+TEST_CASE("ImagePool.idIndexSurvivesIdWrapReuse", "[image]")
+{
+    auto pool = ImagePool {};
+    auto first =
+        pool.create(ImageFormat::RGBA, ImageSize { Width(1), Height(1) }, Image::Data { 0, 0, 0, 0xFF });
+    auto const reusedId = first->id();
+
+    // Rewind the counter so the next create() re-issues the SAME id while `first` is
+    // still alive -- exactly the state a real uint32 id-counter wrap produces.
+    ImagePoolIdWrapTester::rewindNextId(pool, reusedId);
+    auto second =
+        pool.create(ImageFormat::RGBA, ImageSize { Width(1), Height(1) }, Image::Data { 0, 0, 0, 0xFF });
+    REQUIRE(second->id() == reusedId);
+    CHECK(second.get() != first.get());
+
+    // insert_or_assign points the shared id at the live `second`.
+    CHECK(pool.findImageById(reusedId).get() == second.get());
+
+    // Dropping the OLDER `first` must not evict the live `second`: its remover may only
+    // prune a slot it still owns, and `second` now owns this id.
+    first.reset();
+    {
+        auto const stillThere = pool.findImageById(reusedId);
+        REQUIRE(stillThere != nullptr);
+        CHECK(stillThere.get() == second.get());
+    }
+
+    // Once every reference to `second` goes, the slot is pruned as normal.
+    second.reset();
+    CHECK(pool.findImageById(reusedId) == nullptr);
 }
