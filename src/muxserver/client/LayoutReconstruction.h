@@ -2,55 +2,49 @@
 #pragma once
 
 /// @file
-/// Turns the daemon's `LayoutState` into an ordered plan of model operations that
-/// rebuild its tab/pane trees locally. This is the pure, GUI-free decision at the
-/// heart of B2: a frontend replays the plan against its own tab/split model
-/// (`createTab` / `splitActivePane` / `setActivePane`) — or a thin client ignores
-/// it — while the mirror keeps feeding cells. Kept dependency-free and headless so
-/// the tree-flattening logic is unit-tested against a real `vtmux::SessionModel`
-/// without standing up the Qt GUI.
+/// Converts the daemon's `LayoutState` into a `vtmux::Layout` that the shared
+/// realizer (`vtmux::realizeLayoutTab`) rebuilds locally — the GUI-free half of
+/// B2. Reusing `realizeLayoutTab` (the same primitive the daemon and the config
+/// loader use) keeps ONE tree-reconstruction path in the codebase; a frontend
+/// only supplies a seeder that binds each realized pane to its remote session,
+/// while the mirror keeps feeding cells. Kept dependency-free so it is unit-tested
+/// headless against a real `vtmux::SessionModel`.
 
 #include <cstdint>
-#include <vector>
+#include <unordered_map>
 
 #include <muxserver/proto/Pdu.h>
+#include <vtmux/LayoutTree.h>
 
 namespace muxserver::client
 {
 
-/// One step to rebuild a daemon tab/pane tree. Replaying a tab's steps in order
-/// against a fresh model reproduces that tab's split tree — structure,
-/// orientations, ratios and per-leaf sessions.
-struct ReconstructStep
+/// A daemon layout ready for `vtmux::realizeLayoutTab`, plus the map from each
+/// realized LEAF (keyed by its address inside @ref layout) to the remote session
+/// that backs it. The realizer's seeder receives each leaf by const reference, so
+/// it recovers the session with `leafSession.at(&leaf)`.
+///
+/// The addresses are stable for the whole object's lifetime — the map is built
+/// only after the tree is complete, and moving the struct preserves the pane
+/// addresses (a moved `std::vector` steals its buffer). Do not mutate @ref layout
+/// after conversion.
+struct WireLayout
 {
-    enum class Kind : uint8_t
-    {
-        NewTab,   ///< Create a new tab; its single root leaf takes @ref session.
-        Split,    ///< Split the ACTIVE pane (@ref orientation, @ref ratio); the new pane takes @ref session.
-        Activate, ///< Make the leaf carrying @ref session active (so the next Split targets it).
-    };
-
-    Kind kind;
-    uint64_t session = 0;    ///< NewTab/Split: the placed leaf's session. Activate: the leaf to activate.
-    uint8_t orientation = 0; ///< Split only: vtmux::SplitState (1 horizontal, 2 vertical).
-    uint16_t ratio = 5000;   ///< Split only: the split ratio × 10000.
-
-    bool operator==(ReconstructStep const&) const = default;
+    vtmux::Layout layout;
+    std::unordered_map<vtmux::LayoutPane const*, uint64_t> leafSession;
 };
 
-/// Produces the reconstruction plan for @p layout: the steps for tab 0, then tab
-/// 1, and so on.
-///
-/// The plan relies on the split invariant the daemon itself used (see
-/// `vtmux::Pane::split`): splitting a leaf keeps the OLD session in the first
-/// child and puts the NEW session in the second — which then becomes active. So a
-/// subtree's leftmost leaf is always the pane that seeded it, and rebuilding a
-/// split means "split the active (leftmost) pane, giving the new pane the right
-/// subtree's leftmost session, then build the right subtree (now active), then
-/// re-activate the left leaf and build the left subtree".
-///
-/// @param layout The daemon's whole window layout.
-/// @return The ordered steps; empty when the layout has no tabs.
-[[nodiscard]] std::vector<ReconstructStep> planReconstruction(proto::LayoutState const& layout);
+/// Converts a single daemon wire pane subtree into a `vtmux::LayoutPane`: a split
+/// keeps its orientation and gives the FIRST child the wire ratio (the second
+/// takes the rest, matching `vtmux::ratioForFirst`); a leaf becomes an empty,
+/// command-less pane (a remote session backs it — the seeder binds it). The
+/// per-leaf remote session is not recorded here; use @ref wireToLayout for that.
+[[nodiscard]] vtmux::LayoutPane wireToLayoutPane(proto::WirePane const& pane);
+
+/// Converts the daemon's whole layout into a realizable `vtmux::Layout` (one
+/// `LayoutTab` per wire tab) and records each leaf's remote session.
+/// @param state The daemon's window layout.
+/// @return The converted layout plus its leaf → remote-session map.
+[[nodiscard]] WireLayout wireToLayout(proto::LayoutState const& state);
 
 } // namespace muxserver::client

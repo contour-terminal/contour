@@ -2,19 +2,19 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
-#include <deque>
 #include <memory>
 #include <utility>
 #include <vector>
 
 #include <muxserver/client/LayoutReconstruction.h>
+#include <vtmux/LayoutTree.h>
 #include <vtmux/ModelEvents.h>
 #include <vtmux/Pane.h>
 #include <vtmux/SessionModel.h>
 #include <vtmux/Tab.h>
 
-using muxserver::client::planReconstruction;
-using muxserver::client::ReconstructStep;
+using muxserver::client::WireLayout;
+using muxserver::client::wireToLayout;
 namespace proto = muxserver::proto;
 
 namespace
@@ -69,9 +69,10 @@ void requireMatches(vtmux::Pane const& pane, proto::WirePane const& wire)
     requireMatches(*pane.second(), wire.children[1]);
 }
 
-/// Replays a reconstruction plan against a fresh model whose session allocator
-/// hands out the plan's sessions in NewTab/Split order — so the rebuilt leaves
-/// carry the very ids the layout named.
+/// Realizes a WireLayout against a fresh model via the shared realizeLayoutTab,
+/// binding each leaf to the remote session `wireToLayout` recorded — so the
+/// rebuilt leaves carry the very ids the layout named. Returns the model plus its
+/// realized tabs.
 struct Rebuilt
 {
     NoopEvents events;
@@ -79,107 +80,90 @@ struct Rebuilt
     std::vector<vtmux::Tab*> tabs;
 };
 
-std::unique_ptr<Rebuilt> replay(std::vector<ReconstructStep> const& steps)
+std::unique_ptr<Rebuilt> realize(WireLayout const& wl)
 {
-    auto queue = std::make_shared<std::deque<uint64_t>>();
-    for (auto const& step: steps)
-        if (step.kind == ReconstructStep::Kind::NewTab || step.kind == ReconstructStep::Kind::Split)
-            queue->push_back(step.session);
-
     auto rebuilt = std::make_unique<Rebuilt>();
-    rebuilt->model = std::make_unique<vtmux::SessionModel>(rebuilt->events, [queue] {
-        auto const id = queue->front();
-        queue->pop_front();
-        return vtmux::SessionId { id };
-    });
+    auto pending = vtmux::SessionId {};
+    rebuilt->model = std::make_unique<vtmux::SessionModel>(rebuilt->events, [&pending] { return pending; });
     auto const window = rebuilt->model->createWindow()->id();
 
-    auto* current = static_cast<vtmux::Tab*>(nullptr);
-    for (auto const& step: steps)
+    // The seeder stages each leaf's remote session so the model allocator hands it
+    // back for that pane — exactly what a GUI seeder would do before binding.
+    auto const seed = [&](vtmux::LayoutPane const& leafPane) {
+        pending = vtmux::SessionId { wl.leafSession.at(&leafPane) };
+        return true;
+    };
+    for (auto const& tab: wl.layout.tabs)
     {
-        switch (step.kind)
-        {
-            case ReconstructStep::Kind::NewTab:
-                current = rebuilt->model->createTab(window);
-                rebuilt->tabs.push_back(current);
-                break;
-            case ReconstructStep::Kind::Split:
-                rebuilt->model->splitActivePane(
-                    current->id(), static_cast<vtmux::SplitState>(step.orientation), step.ratio / 10000.0);
-                break;
-            case ReconstructStep::Kind::Activate: {
-                auto* leafPane = current->rootPane()->findLeaf(vtmux::SessionId { step.session });
-                REQUIRE(leafPane != nullptr);
-                rebuilt->model->setActivePane(current->id(), leafPane->id());
-                break;
-            }
-        }
+        auto* modelTab = vtmux::realizeLayoutTab(*rebuilt->model, window, tab, seed);
+        REQUIRE(modelTab != nullptr);
+        rebuilt->tabs.push_back(modelTab);
     }
     return rebuilt;
 }
 
 } // namespace
 
-TEST_CASE("planReconstruction rebuilds a single-pane tab", "[muxserver][layout]")
+TEST_CASE("wireToLayout realizes a single-pane tab", "[muxserver][layout]")
 {
-    auto layout = proto::LayoutState {};
-    layout.tabs.push_back(proto::WireTab { .root = leaf(100) });
+    auto state = proto::LayoutState {};
+    state.tabs.push_back(proto::WireTab { .root = leaf(100) });
 
-    auto const steps = planReconstruction(layout);
-    REQUIRE(steps.size() == 1);
-    CHECK(steps[0].kind == ReconstructStep::Kind::NewTab);
-    CHECK(steps[0].session == 100);
+    auto const wl = wireToLayout(state);
+    REQUIRE(wl.layout.tabs.size() == 1);
+    CHECK(wl.layout.tabs[0].root.isLeaf());
 
-    auto const rebuilt = replay(steps);
+    auto const rebuilt = realize(wl);
     REQUIRE(rebuilt->tabs.size() == 1);
-    requireMatches(*rebuilt->tabs[0]->rootPane(), layout.tabs[0].root);
+    requireMatches(*rebuilt->tabs[0]->rootPane(), state.tabs[0].root);
 }
 
-TEST_CASE("planReconstruction rebuilds a single split", "[muxserver][layout]")
+TEST_CASE("wireToLayout realizes a single split", "[muxserver][layout]")
 {
-    auto layout = proto::LayoutState {};
-    layout.tabs.push_back(proto::WireTab { .root = split(2, 6000, leaf(100), leaf(101)) });
+    auto state = proto::LayoutState {};
+    state.tabs.push_back(proto::WireTab { .root = split(2, 6000, leaf(100), leaf(101)) });
 
-    auto const steps = planReconstruction(layout);
-    REQUIRE(steps.size() == 2);
-    CHECK(steps[0] == ReconstructStep { .kind = ReconstructStep::Kind::NewTab, .session = 100 });
-    CHECK(steps[1]
-          == ReconstructStep {
-              .kind = ReconstructStep::Kind::Split, .session = 101, .orientation = 2, .ratio = 6000 });
+    auto const wl = wireToLayout(state);
+    REQUIRE(wl.layout.tabs.size() == 1);
+    auto const& root = wl.layout.tabs[0].root;
+    REQUIRE_FALSE(root.isLeaf());
+    CHECK(root.orientation == vtmux::SplitState::Vertical);
+    REQUIRE(root.children.size() == 2);
+    REQUIRE(root.children[0].ratio.has_value());
+    CHECK(std::lround(*root.children[0].ratio * 10000.0) == 6000); // first child's share
 
-    auto const rebuilt = replay(steps);
-    REQUIRE(rebuilt->tabs.size() == 1);
-    requireMatches(*rebuilt->tabs[0]->rootPane(), layout.tabs[0].root);
+    auto const rebuilt = realize(wl);
+    requireMatches(*rebuilt->tabs[0]->rootPane(), state.tabs[0].root);
 }
 
-TEST_CASE("planReconstruction rebuilds a nested split tree (re-activation path)", "[muxserver][layout]")
+TEST_CASE("wireToLayout realizes a nested split tree", "[muxserver][layout]")
 {
     // root = H-split( V-split(leaf 1, leaf 2), leaf 3 ) — the left child is itself
-    // a split, which forces the plan to re-activate the left leaf and recurse.
-    auto layout = proto::LayoutState {};
-    layout.tabs.push_back(
+    // a split, exercising realizeLayoutTab's return-to-first-child recursion.
+    auto state = proto::LayoutState {};
+    state.tabs.push_back(
         proto::WireTab { .root = split(1, 4000, split(2, 7000, leaf(1), leaf(2)), leaf(3)) });
 
-    auto const rebuilt = replay(planReconstruction(layout));
+    auto const rebuilt = realize(wireToLayout(state));
     REQUIRE(rebuilt->tabs.size() == 1);
-    requireMatches(*rebuilt->tabs[0]->rootPane(), layout.tabs[0].root);
+    requireMatches(*rebuilt->tabs[0]->rootPane(), state.tabs[0].root);
 }
 
-TEST_CASE("planReconstruction rebuilds multiple tabs", "[muxserver][layout]")
+TEST_CASE("wireToLayout realizes multiple tabs", "[muxserver][layout]")
 {
-    auto layout = proto::LayoutState {};
-    layout.tabs.push_back(proto::WireTab { .root = leaf(10) });
-    layout.tabs.push_back(proto::WireTab { .root = split(2, 5000, leaf(20), leaf(21)) });
-    layout.tabs.push_back(proto::WireTab { .root = leaf(30) });
+    auto state = proto::LayoutState {};
+    state.tabs.push_back(proto::WireTab { .root = leaf(10) });
+    state.tabs.push_back(proto::WireTab { .root = split(2, 5000, leaf(20), leaf(21)) });
+    state.tabs.push_back(proto::WireTab { .root = leaf(30) });
 
-    auto const rebuilt = replay(planReconstruction(layout));
+    auto const rebuilt = realize(wireToLayout(state));
     REQUIRE(rebuilt->tabs.size() == 3);
-    requireMatches(*rebuilt->tabs[0]->rootPane(), layout.tabs[0].root);
-    requireMatches(*rebuilt->tabs[1]->rootPane(), layout.tabs[1].root);
-    requireMatches(*rebuilt->tabs[2]->rootPane(), layout.tabs[2].root);
+    requireMatches(*rebuilt->tabs[0]->rootPane(), state.tabs[0].root);
+    requireMatches(*rebuilt->tabs[1]->rootPane(), state.tabs[1].root);
+    requireMatches(*rebuilt->tabs[2]->rootPane(), state.tabs[2].root);
 }
 
-TEST_CASE("planReconstruction yields nothing for an empty layout", "[muxserver][layout]")
+TEST_CASE("wireToLayout yields no tabs for an empty layout", "[muxserver][layout]")
 {
-    CHECK(planReconstruction(proto::LayoutState {}).empty());
+    CHECK(wireToLayout(proto::LayoutState {}).layout.tabs.empty());
 }
