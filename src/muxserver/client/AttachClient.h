@@ -108,7 +108,9 @@ class AttachClient final
   public:
     /// @param loop The event loop everything runs on.
     /// @param connection The server transport (owned).
-    AttachClient(net::EventLoop& loop, std::unique_ptr<net::ISocket> connection);
+    /// @param token The preshared auth token sent in the ClientHello (empty over
+    ///        AF_UNIX, where the socket permissions are the gate).
+    AttachClient(net::EventLoop& loop, std::unique_ptr<net::ISocket> connection, std::string token = {});
 
     /// The connection flow: sends ClientHello, mirrors server pushes until the
     /// server disconnects or detach() is called.
@@ -166,6 +168,7 @@ class AttachClient final
 
     std::unique_ptr<net::ISocket> _connection;
     net::WriteQueue _writer;
+    std::string _token; ///< Sent in the ClientHello to authenticate on TCP.
     std::function<void(RemoteScreen const&, proto::Delta const&)> _onUpdate;
     std::function<void(RemoteScreen const&, uint32_t)> _onImage;
     std::function<void(RemoteScreen const&, proto::SessionEvent const&)> _onSessionEvent;

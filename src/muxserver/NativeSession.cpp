@@ -120,11 +120,13 @@ namespace
 NativeSession::NativeSession(net::EventLoop& loop,
                              SessionHost& host,
                              std::unique_ptr<net::ISocket> connection,
-                             std::size_t maxWriteQueueBytes):
+                             std::size_t maxWriteQueueBytes,
+                             std::string expectedToken):
     _loop(loop),
     _host(host),
     _connection(std::move(connection)),
-    _writer(loop, _connection.get(), maxWriteQueueBytes)
+    _writer(loop, _connection.get(), maxWriteQueueBytes),
+    _expectedToken(std::move(expectedToken))
 {
 }
 
@@ -431,6 +433,14 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
         send(frame.serial, proto::DecodedPdu { proto::ServerHello {} });
         return false;
     }
+    // Preshared-token auth (empty _expectedToken accepts any — the AF_UNIX default,
+    // where the socket's permissions are the gate). A mismatch answers the version
+    // handshake and drops, exactly as a version mismatch does, revealing nothing.
+    if (!_expectedToken.empty() && hello->token != _expectedToken)
+    {
+        send(frame.serial, proto::DecodedPdu { proto::ServerHello {} });
+        return false;
+    }
     send(frame.serial, proto::DecodedPdu { proto::ServerHello {} });
     _handshaken = true;
 
@@ -475,22 +485,29 @@ namespace
     /// lambda coroutine would dangle its closure; pointers live in the frame).
     coro::Task<void> serveNativeClient(net::EventLoop* loop,
                                        SessionHost* host,
-                                       std::unique_ptr<net::ISocket> connection)
+                                       std::unique_ptr<net::ISocket> connection,
+                                       std::string expectedToken)
     {
-        auto session = std::make_unique<NativeSession>(*loop, *host, std::move(connection));
+        auto session = std::make_unique<NativeSession>(*loop,
+                                                       *host,
+                                                       std::move(connection),
+                                                       NativeSession::DefaultWriteQueueBytes,
+                                                       std::move(expectedToken));
         auto const subscription = ScopedStreamSubscription { *host, *session };
         co_await session->run();
     }
 } // namespace
 
 std::function<coro::Task<void>(std::unique_ptr<net::ISocket>)> makeNativeHandler(net::EventLoop& loop,
-                                                                                 SessionHost& host)
+                                                                                 SessionHost& host,
+                                                                                 std::string expectedToken)
 {
     // NOT a coroutine itself: it merely constructs the free coroutine's task,
     // so the captures never outlive an activation frame.
-    return [&loop, &host](std::unique_ptr<net::ISocket> connection) {
-        return serveNativeClient(&loop, &host, std::move(connection));
-    };
+    return
+        [&loop, &host, expectedToken = std::move(expectedToken)](std::unique_ptr<net::ISocket> connection) {
+            return serveNativeClient(&loop, &host, std::move(connection), expectedToken);
+        };
 }
 
 } // namespace muxserver

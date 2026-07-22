@@ -158,8 +158,10 @@ std::string RemoteScreen::viewportText() const
 // ---------------------------------------------------------------------------
 // AttachClient
 
-AttachClient::AttachClient(net::EventLoop& loop, std::unique_ptr<net::ISocket> connection):
-    _connection(std::move(connection)), _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024)
+AttachClient::AttachClient(net::EventLoop& loop, std::unique_ptr<net::ISocket> connection, std::string token):
+    _connection(std::move(connection)),
+    _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024),
+    _token(std::move(token))
 {
 }
 
@@ -281,7 +283,7 @@ void AttachClient::handlePdu(proto::DecodedFrame const& frame)
 
 coro::Task<void> AttachClient::run()
 {
-    send(proto::DecodedPdu { proto::ClientHello {} });
+    send(proto::DecodedPdu { proto::ClientHello { .codecVersion = proto::CodecVersion, .token = _token } });
 
     co_await pumpPdus(_connection.get(), [this](proto::DecodedFrame const& frame) {
         handlePdu(frame);

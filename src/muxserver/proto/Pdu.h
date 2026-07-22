@@ -59,10 +59,14 @@ struct Invalid
     bool operator==(Invalid const&) const = default;
 };
 
-/// Client's first PDU: its codec revision. Anything before it is a protocol error.
+/// Client's first PDU: its codec revision and (for TCP) a preshared auth token.
+/// Anything before it is a protocol error.
 struct ClientHello
 {
     uint32_t codecVersion = CodecVersion;
+    /// Preshared token authenticating the client on the opt-in TCP transport.
+    /// Empty over AF_UNIX, where the hardened socket's permissions are the gate.
+    std::string token;
     bool operator==(ClientHello const&) const = default;
 };
 

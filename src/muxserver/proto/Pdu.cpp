@@ -121,6 +121,7 @@ namespace
     void encodeBody(Writer& out, ClientHello const& pdu)
     {
         out.u32(pdu.codecVersion);
+        out.string(pdu.token);
     }
     void encodeBody(Writer& out, ServerHello const& pdu)
     {
@@ -267,7 +268,7 @@ namespace
     {
         auto pdu = ClientHello {};
         auto error = DecodeError {};
-        if (!assign(in.u32(), pdu.codecVersion, error))
+        if (!assign(in.u32(), pdu.codecVersion, error) || !assign(in.string(), pdu.token, error))
             return std::unexpected(error);
         return pdu;
     }

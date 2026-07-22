@@ -213,11 +213,14 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       through `runAttach` (`Daemon.h:59`) and `AttachController` (replace the bare `_socketPath`,
       `AttachController.cpp:55-57`; also `Daemon.cpp:263` POSIX / `:505` Win32). Branch
       `connectUnix` vs `connect`+`TlsSocket`.
-- [ ] **C6. Token auth in the native handshake.** Add a `token` field to `ClientHello`
-      (`Pdu.h:53-57`); check it in `NativeSession::completeHandshake` right after the version check
-      and before `_handshaken = true` (`NativeSession.cpp:339-346`), rejecting with the existing
-      `ServerHello`+close idiom. (No peer-credential check exists today; over TCP the filesystem
-      gate is gone, so the token is the auth.) Bump `CodecVersion`.
+- [x] **C6. Token auth in the native handshake (core).** `ClientHello.token` (CodecVersion → 7);
+      `NativeSession` gained an `expectedToken` (ctor + `makeNativeHandler` param), checked in
+      `completeHandshake` right after the version check — a mismatch answers `ServerHello` and drops,
+      revealing nothing (empty token accepts any: the AF_UNIX default). `AttachClient` gained a token
+      ctor param it sends in the ClientHello. Tests: accept / reject / no-token-configured. *Landed
+      2026-07-22.* **Remaining (C4, Qt-side):** the daemon must read the configured token (CLI/config)
+      and pass it to `makeNativeHandler`; the client must read `--token` and pass it to
+      `AttachController`/`runAttach` — CI-verified (Qt not buildable in the muxserver-only tree here).
 
 ## Cross-platform verification matrix
 
@@ -232,6 +235,12 @@ NTFS ACLs, not POSIX bits; macOS resolves the socket dir under `$TMPDIR` (no `$X
 
 Windows verification is **CI-gated** (no Windows dev box): compile under `-Werror`, run the
 runtime-gated net tests, watch the Windows job after each push.
+
+**Build note (this machine):** the configured tree is `out/build/clangcl-release`, which builds the
+`muxserver`/`net`/`vtbackend` libraries and their Catch2 tests (`muxserver_test`, …) but **not the Qt
+`contour` GUI**. So the WS-A/B/C work in `src/muxserver`, `src/net`, `src/vtbackend` is built+tested
+here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManager`, `Config`,
+`ContourApp` CLI) are implemented but **CI-verified**, and are called out per task.
 
 ## Testing / verification
 
@@ -275,8 +284,12 @@ runtime-gated net tests, watch the Windows job after each push.
   green (116/2621). A3b (default colors/palette) deferred.
 - 2026-07-22 · Windows/clangcl-release · **A7 done** — live OSC 7 cwd (`SessionState.cwd` +
   `Delta.cwd`, pull+diff, `ScreenMirror` re-emit). CodecVersion → 6. Suite green (117/2623).
-  **WS-A VT features now: A1/A2/A3/A4/A5/A6/A7 done; A3b, A8, A9 remain.** Next: A8 (kitty-keyboard/
-  modifyOtherKeys mirroring), A9 (thin client on ScreenMirror), then WS-C core (TLS + token + TCP).
+  **WS-A VT features now: A1/A2/A3/A4/A5/A6/A7 done; A3b, A8, A9 remain.**
+- 2026-07-22 · Windows/clangcl-release · **C6 core done** — preshared token auth in the native
+  handshake (`ClientHello.token`, `NativeSession` expectedToken + `makeNativeHandler` param,
+  `AttachClient` token). CodecVersion → 7. accept/reject/no-token tests. Suite green (118/2626).
+  Daemon/client CLI wiring of the token is Qt-side (C4), CI-verified. Next: C2 (daemon TCP listener,
+  buildable here) then C1 (OpenSSL TLS `ISocket` decorator).
 
 ## Open decisions / risks
 

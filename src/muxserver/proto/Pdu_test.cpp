@@ -68,7 +68,7 @@ TEST_CASE("every catalog PDU round-trips", "[muxserver][proto]")
     };
 
     auto const pdus = std::vector<DecodedPdu> {
-        ClientHello { .codecVersion = CodecVersion },
+        ClientHello { .codecVersion = CodecVersion, .token = "s3cr3t-token" },
         ServerHello { .codecVersion = CodecVersion },
         Input { .session = 9, .data = { std::byte { 0x1B }, std::byte { '[' }, std::byte { 'A' } } },
         ResizeRequest { .columns = 120, .lines = 40 },

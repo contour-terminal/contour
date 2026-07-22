@@ -32,7 +32,9 @@ namespace muxserver::proto
 /// and forward-compatible on its own, but the Delta field change bumps the wire.
 /// v5 added Delta.cursorShape (live DECSCUSR propagation).
 /// v6 added Delta.cwd / SessionState.cwd (live OSC 7 working-directory propagation).
-constexpr uint32_t CodecVersion = 6;
+/// v7 added ClientHello.token (preshared auth for the opt-in TCP transport; empty
+/// over the hardened AF_UNIX socket, where filesystem permissions are the gate).
+constexpr uint32_t CodecVersion = 7;
 
 /// The largest frame payload the decoder will accept. A peer-declared length
 /// beyond this is rejected outright (FrameTooLarge) rather than treated as

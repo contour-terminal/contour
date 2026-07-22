@@ -360,6 +360,57 @@ TEST_CASE("attach fetches image pixels on demand and caches them", "[muxserver][
     CHECK(imageEvent);
 }
 
+namespace
+{
+
+/// Attaches a client (bearing @p clientToken) to a server that requires
+/// @p serverToken, and reports whether a snapshot arrived (accept) or not
+/// (reject: the server answers the handshake then drops the connection).
+void tokenAttach(std::string serverToken, std::string clientToken, bool* gotSnapshot)
+{
+    auto source = net::PollEventSource {};
+    auto loop = net::EventLoop { source };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                              vtbackend::Settings {},
+                              /*startPumps=*/false };
+    host.createTab();
+    auto pair = *net::testing::makeSocketPair(loop);
+    auto server = NativeSession {
+        loop, host, std::move(pair.first), NativeSession::DefaultWriteQueueBytes, std::move(serverToken)
+    };
+    auto client = AttachClient { loop, std::move(pair.second), std::move(clientToken) };
+
+    auto scenario = [](net::EventLoop* loop, AttachClient* client, bool* got) -> Task<void> {
+        // On accept a snapshot arrives quickly; on reject the server drops us and
+        // no snapshot ever comes. Bounded poll either way.
+        for (auto i = 0; i < 300 && client->screens().empty(); ++i)
+            co_await loop->delay(1ms);
+        *got = !client->screens().empty();
+        client->detach();
+    }(&loop, &client, gotSnapshot);
+
+    loop.blockOn(net::testing::allOf(server.run(), client.run(), std::move(scenario)));
+}
+
+} // namespace
+
+TEST_CASE("attach enforces a preshared auth token", "[muxserver][attach]")
+{
+    auto accepted = false;
+    tokenAttach("s3cr3t", "s3cr3t", &accepted);
+    CHECK(accepted);
+
+    auto rejected = false;
+    tokenAttach("s3cr3t", "wrong", &rejected);
+    CHECK_FALSE(rejected);
+
+    // No token configured accepts any client (the AF_UNIX default).
+    auto open = false;
+    tokenAttach("", "whatever", &open);
+    CHECK(open);
+}
+
 // The attach-flow composition (Daemon.cpp) hard-codes STDIN/STDOUT and a real
 // socket connect, so it is not headless-constructible. These tests drive the same
 // building blocks it composes — whenAny(run(), parked-input, trackTtySize) and the

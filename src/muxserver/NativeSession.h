@@ -46,10 +46,14 @@ class NativeSession final: public SessionStreamEvents
     /// @param maxWriteQueueBytes Send-queue byte bound; a client whose backlog
     ///        exceeds it is disconnected rather than under-served (its delta
     ///        cursor has already moved past what an overflow would drop).
+    /// @param expectedToken The preshared token this endpoint requires in the
+    ///        ClientHello; empty accepts any (the AF_UNIX default, where the
+    ///        socket permissions are the gate).
     NativeSession(net::EventLoop& loop,
                   SessionHost& host,
                   std::unique_ptr<net::ISocket> connection,
-                  std::size_t maxWriteQueueBytes = DefaultWriteQueueBytes);
+                  std::size_t maxWriteQueueBytes = DefaultWriteQueueBytes,
+                  std::string expectedToken = {});
 
     /// The connection flow: handshake, initial snapshot, then serve until the
     /// peer disconnects.
@@ -125,6 +129,7 @@ class NativeSession final: public SessionStreamEvents
     SessionHost& _host;
     std::unique_ptr<net::ISocket> _connection;
     net::WriteQueue _writer;
+    std::string _expectedToken; ///< Required ClientHello token; empty accepts any.
     std::unordered_map<uint64_t, FollowState> _followed;
     std::unordered_set<uint64_t> _pendingSessions;
     bool _flushScheduled = false;
@@ -133,7 +138,9 @@ class NativeSession final: public SessionStreamEvents
 };
 
 /// The daemon's connection-handler factory for native-protocol clients.
+/// @param expectedToken The preshared token required in each ClientHello (empty
+///        accepts any — the AF_UNIX default).
 [[nodiscard]] std::function<coro::Task<void>(std::unique_ptr<net::ISocket>)> makeNativeHandler(
-    net::EventLoop& loop, SessionHost& host);
+    net::EventLoop& loop, SessionHost& host, std::string expectedToken = {});
 
 } // namespace muxserver
