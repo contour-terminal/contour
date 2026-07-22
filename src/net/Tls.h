@@ -41,6 +41,23 @@ class ITlsContext
     ITlsContext() = default;
 };
 
+/// A self-signed certificate and its matching private key, both PEM-encoded.
+struct CertKeyPem
+{
+    std::string certPem; ///< The X.509 certificate in PEM.
+    std::string keyPem;  ///< The private key in PEM (unencrypted).
+};
+
+/// Generates a fresh self-signed certificate and key (RSA-2048, 10-year
+/// validity, CN=@p commonName) entirely through the OpenSSL library — no
+/// `openssl` CLI, so it works identically on Windows and every UNIX. Use it to
+/// mint dev certificates for the daemon's `--tls-cert`/`--tls-key`, or as a test
+/// fixture; the same material backs `makeSelfSignedServerContext()`.
+/// @param commonName The subject/issuer CN to stamp into the certificate.
+/// @return The PEM cert+key pair, or a human-readable error on a crypto failure.
+[[nodiscard]] std::expected<CertKeyPem, std::string> generateSelfSignedCertificate(
+    std::string_view commonName = "contour-daemon");
+
 /// Builds a SERVER TLS context from a PEM certificate (chain) and private key.
 /// @param certPem The certificate chain in PEM.
 /// @param keyPem The matching private key in PEM.

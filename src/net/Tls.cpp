@@ -285,7 +285,18 @@ std::expected<std::shared_ptr<ITlsContext>, std::string> makeTlsServerContext(st
     return std::make_shared<TlsContext>(std::move(ctx), /*server=*/true);
 }
 
-std::expected<std::shared_ptr<ITlsContext>, std::string> makeSelfSignedServerContext()
+namespace
+{
+    /// Reads a BIO's whole content out as a string (for PEM export).
+    [[nodiscard]] std::string bioToString(BIO* bio)
+    {
+        auto* data = static_cast<char const*>(nullptr);
+        auto const length = BIO_get_mem_data(bio, &data);
+        return std::string { data, static_cast<std::size_t>(length) };
+    }
+} // namespace
+
+std::expected<CertKeyPem, std::string> generateSelfSignedCertificate(std::string_view commonName)
 {
     auto const key = PKeyPtr { EVP_RSA_gen(2048), EVP_PKEY_free };
     if (!key)
@@ -299,20 +310,33 @@ std::expected<std::shared_ptr<ITlsContext>, std::string> makeSelfSignedServerCon
     X509_gmtime_adj(X509_getm_notAfter(cert.get()), 60L * 60 * 24 * 3650); // ~10 years
     X509_set_pubkey(cert.get(), key.get());
     auto* name = X509_get_subject_name(cert.get());
+    auto const cn = std::string { commonName };
     X509_NAME_add_entry_by_txt(
-        name, "CN", MBSTRING_ASC, reinterpret_cast<unsigned char const*>("contour-daemon"), -1, -1, 0);
+        name, "CN", MBSTRING_ASC, reinterpret_cast<unsigned char const*>(cn.c_str()), -1, -1, 0);
     X509_set_issuer_name(cert.get(), name); // self-signed: issuer == subject
     if (X509_sign(cert.get(), key.get(), EVP_sha256()) == 0)
         return std::unexpected("X509_sign failed: " + opensslError());
 
-    auto ctx = newCtx(TLS_server_method());
-    if (!ctx)
-        return std::unexpected("SSL_CTX_new failed: " + opensslError());
-    if (SSL_CTX_use_certificate(ctx.get(), cert.get()) != 1
-        || SSL_CTX_use_PrivateKey(ctx.get(), key.get()) != 1)
-        return std::unexpected("installing the self-signed material failed: " + opensslError());
+    auto certBio = BioPtr { BIO_new(BIO_s_mem()), BIO_free };
+    auto keyBio = BioPtr { BIO_new(BIO_s_mem()), BIO_free };
+    if (!certBio || !keyBio)
+        return std::unexpected("BIO_new failed: " + opensslError());
+    if (PEM_write_bio_X509(certBio.get(), cert.get()) != 1)
+        return std::unexpected("PEM_write_bio_X509 failed: " + opensslError());
+    if (PEM_write_bio_PrivateKey(keyBio.get(), key.get(), nullptr, nullptr, 0, nullptr, nullptr) != 1)
+        return std::unexpected("PEM_write_bio_PrivateKey failed: " + opensslError());
 
-    return std::make_shared<TlsContext>(std::move(ctx), /*server=*/true);
+    return CertKeyPem { .certPem = bioToString(certBio.get()), .keyPem = bioToString(keyBio.get()) };
+}
+
+std::expected<std::shared_ptr<ITlsContext>, std::string> makeSelfSignedServerContext()
+{
+    // Single-source the self-signed material through the PEM generator, then reuse
+    // the same file-backed path the daemon takes with --tls-cert/--tls-key.
+    auto material = generateSelfSignedCertificate();
+    if (!material)
+        return std::unexpected(material.error());
+    return makeTlsServerContext(material->certPem, material->keyPem);
 }
 
 std::expected<std::shared_ptr<ITlsContext>, std::string> makeTlsClientContext(std::string_view caPem)

@@ -76,6 +76,40 @@ TEST_CASE("TLS handshakes and echoes application data over the reactor", "[net][
     CHECK(matched);                      // the client decrypted the echo — full duplex through TLS
 }
 
+TEST_CASE("a generated dev certificate drives a verified TLS handshake", "[net][tls]")
+{
+    auto source = net::PollEventSource {};
+    auto loop = net::EventLoop { source };
+    auto pair = *net::testing::makeSocketPair(loop);
+
+    // Generate a self-signed dev certificate (library-only — no `openssl` CLI, so
+    // identical on Windows and every UNIX), build the SERVER context from its PEM
+    // cert+key (the daemon's --tls-cert/--tls-key path), and have the CLIENT PIN
+    // that exact certificate as its trust anchor — real peer verification, not the
+    // TOFU (VERIFY_NONE) path above.
+    auto material = net::generateSelfSignedCertificate("contour-dev");
+    REQUIRE(material.has_value());
+    CHECK(material->certPem.starts_with("-----BEGIN CERTIFICATE-----"));
+    CHECK(material->keyPem.contains("PRIVATE KEY"));
+
+    auto serverCtx = net::makeTlsServerContext(material->certPem, material->keyPem);
+    REQUIRE(serverCtx.has_value());
+    auto clientCtx = net::makeTlsClientContext(material->certPem);
+    REQUIRE(clientCtx.has_value());
+
+    auto serverTls = (*serverCtx)->wrap(std::move(pair.first));
+    auto clientTls = (*clientCtx)->wrap(std::move(pair.second));
+    REQUIRE(serverTls != nullptr);
+    REQUIRE(clientTls != nullptr);
+
+    auto received = std::string {};
+    auto matched = false;
+    loop.blockOn(net::testing::allOf(echoOnce(serverTls.get(), &received),
+                                     sendAndVerify(clientTls.get(), "verified dev cert", &matched)));
+    CHECK(received == "verified dev cert"); // handshake completed with the peer cert verified
+    CHECK(matched);
+}
+
 TEST_CASE("a server TLS context rejects mismatched certificate and key", "[net][tls]")
 {
     // Two independent self-signed contexts succeed; loading a cert with the wrong
