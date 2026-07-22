@@ -221,15 +221,14 @@ void TmuxController::paneAdded(uint64_t window, uint64_t pane, int columns, int 
 
 void TmuxController::paneRemoved(uint64_t /*window*/, uint64_t pane)
 {
-    auto* pty = static_cast<vtpty::ChannelPty*>(nullptr);
-    {
-        auto const lock = std::lock_guard { _mutex };
-        std::erase_if(_pending, [pane](PendingPane const& pending) { return pending.pane == pane; });
-        if (auto const it = _ptys.find(pane); it != _ptys.end())
-            pty = it->second;
-    }
-    if (pty != nullptr)
-        pty->close(); // the session sees EOF; the manager prunes its pane/tab
+    // Close under the lock, like closeAllPanes(): ~BoundPanePty (GUI thread) unbinds
+    // through the same _mutex, so holding it here blocks that destructor until close()
+    // returns — the pty cannot be freed mid-close. Releasing the lock first would
+    // reintroduce the use-after-free race between the reactor and GUI threads.
+    auto const lock = std::lock_guard { _mutex };
+    std::erase_if(_pending, [pane](PendingPane const& pending) { return pending.pane == pane; });
+    if (auto const it = _ptys.find(pane); it != _ptys.end())
+        it->second->close(); // the session sees EOF; the manager prunes its pane/tab
 }
 
 void TmuxController::exited(std::string const& reason)
