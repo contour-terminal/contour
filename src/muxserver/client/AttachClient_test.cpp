@@ -143,6 +143,40 @@ TEST_CASE("RemoteScreen renders blank rows and trims trailing space", "[muxserve
     CHECK(screen.rowAt(1) == nullptr);
 }
 
+TEST_CASE("RemoteScreen drops history the server discarded via the floor", "[muxserver][attach]")
+{
+    auto screen = RemoteScreen {};
+    screen.columns = 5;
+    screen.lines = 1;
+
+    // A screen with scrollback: viewport row 10, history rows 7..9 above it.
+    auto seed = proto::Delta {};
+    seed.stableViewportBase = 10;
+    seed.stableFloor = 7; // the server still holds rows >= 7
+    for (auto const id: { 7, 8, 9, 10 })
+    {
+        auto line = proto::WireLine {};
+        line.stableId = id;
+        line.columns = 5;
+        seed.lines.push_back(line);
+    }
+    screen.apply(seed);
+    CHECK(screen.rows.contains(7));
+    CHECK(screen.rows.contains(9));
+
+    // A `clear`/CSI 3 J on the server jumps the floor to the viewport base with NO
+    // line changes and NO generation bump — the floor is the only signal, and the
+    // client must drop the evicted history instead of showing ghost scrollback.
+    auto cleared = proto::Delta {};
+    cleared.stableViewportBase = 10;
+    cleared.stableFloor = 10;
+    screen.apply(cleared);
+
+    CHECK_FALSE(screen.rows.contains(7));
+    CHECK_FALSE(screen.rows.contains(9));
+    CHECK(screen.rows.contains(10)); // the viewport row survives
+}
+
 // The attach-flow composition (Daemon.cpp) hard-codes STDIN/STDOUT and a real
 // socket connect, so it is not headless-constructible. These tests drive the same
 // building blocks it composes — whenAny(run(), parked-input, trackTtySize) and the

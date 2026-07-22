@@ -4,14 +4,10 @@
 #include <vtbackend/CellFlags.h>
 #include <vtbackend/Color.h>
 
-#include <libunicode/convert.h>
-
 #include <array>
 #include <bit>
 #include <format>
-#include <iterator>
 #include <optional>
-#include <tuple>
 #include <utility>
 
 namespace muxserver::client
@@ -88,7 +84,6 @@ std::string renderViewport(RemoteScreen const& screen)
 
     // Compare the raw attribute words, not formatted strings: runs of equal
     // cells (the common case) then never re-format the SGR sequence.
-    using SgrKey = std::tuple<uint32_t, uint32_t, uint32_t, uint32_t>;
     auto previousSgrKey = std::optional<SgrKey> {};
     for (auto line = int32_t { 0 }; std::cmp_less(line, screen.lines); ++line)
     {
@@ -109,8 +104,7 @@ std::string renderViewport(RemoteScreen const& screen)
                     continue; // the wide glyph already covered this column
             }
 
-            if (auto const key = SgrKey { cell.flags, cell.foreground, cell.background, cell.underlineColor };
-                previousSgrKey != key)
+            if (auto const key = sgrKeyOf(cell); previousSgrKey != key)
             {
                 out += sgrFor(cell);
                 previousSgrKey = key;
@@ -121,9 +115,7 @@ std::string renderViewport(RemoteScreen const& screen)
                 out += ' ';
                 continue;
             }
-            unicode::convert_to<char>(std::u32string_view(&cell.codepoint, 1), std::back_inserter(out));
-            for (auto const extra: cell.clusterExtras)
-                unicode::convert_to<char>(std::u32string_view(&extra, 1), std::back_inserter(out));
+            appendCluster(out, cell);
             skipContinuation = cell.width == 2;
         }
     }

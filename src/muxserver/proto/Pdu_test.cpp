@@ -25,7 +25,7 @@ DecodedPdu roundTrip(DecodedPdu const& pdu, uint64_t serial = 5)
     return decoded->pdu;
 }
 
-/// A Delta body up to (but excluding) its lines-count varint: the seven fixed
+/// A Delta body up to (but excluding) its lines-count varint: the eight fixed
 /// header fields every Delta opens with. Tests append a (possibly lying) count
 /// to probe the truncation guards without hand-rolling the whole prefix twice.
 Writer deltaHeaderBody()
@@ -36,6 +36,7 @@ Writer deltaHeaderBody()
     body.varint(1);   // seqno
     body.u8(1);       // snapshot
     body.svarint(0);  // stableViewportBase
+    body.svarint(0);  // stableFloor
     body.svarint(5);  // cursorLine
     body.svarint(10); // cursorColumn
     return body;
@@ -71,7 +72,7 @@ TEST_CASE("every catalog PDU round-trips", "[muxserver][proto]")
         ServerHello { .codecVersion = CodecVersion },
         Input { .session = 9, .data = { std::byte { 0x1B }, std::byte { '[' }, std::byte { 'A' } } },
         ResizeRequest { .columns = 120, .lines = 40 },
-        FetchImage { .imageId = 77 },
+        FetchImage { .session = 9, .imageId = 77 },
         ImageData { .imageId = 77,
                     .format = 1,
                     .width = 2,
@@ -94,6 +95,7 @@ TEST_CASE("every catalog PDU round-trips", "[muxserver][proto]")
                 .generation = 2,
                 .seqno = 1234,
                 .snapshot = 1,
+                .stableFloor = -5,
                 .cursorLine = 5,
                 .cursorColumn = 10,
                 .lines = { line },
@@ -144,8 +146,9 @@ TEST_CASE("an unknown ident decodes to Invalid and keeps the stream in sync", "[
 TEST_CASE("trailing bytes after a known body are a protocol error", "[muxserver][proto]")
 {
     auto body = Writer {};
-    body.u32(1); // FetchImage's body ...
-    body.u8(0);  // ... plus a stray byte
+    body.varint(0); // FetchImage's body: session ...
+    body.u32(1);    // ... then imageId ...
+    body.u8(0);     // ... plus a stray byte
     auto stream = Writer {};
     writeFrame(stream, 1, std::to_underlying(PduType::FetchImage), body.view());
 
@@ -173,9 +176,10 @@ TEST_CASE("a complete frame whose body runs short is malformed, not incomplete",
 
     SECTION("a truncated fixed field")
     {
-        // FetchImage's body is a single u32; give it only two bytes so the
-        // scalar read hits end-of-body mid-value.
+        // FetchImage's body is a session varint then a u32 imageId; give the
+        // u32 only two bytes so the scalar read hits end-of-body mid-value.
         auto body = Writer {};
+        body.varint(0);
         body.u16(0x1234);
         auto stream = Writer {};
         writeFrame(stream, 1, std::to_underlying(PduType::FetchImage), body.view());

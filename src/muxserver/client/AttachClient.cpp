@@ -3,6 +3,7 @@
 
 #include <libunicode/convert.h>
 
+#include <algorithm>
 #include <chrono>
 #include <iterator>
 #include <utility>
@@ -16,6 +17,13 @@ namespace muxserver::client
 {
 
 using namespace std::chrono_literals;
+
+void appendCluster(std::string& out, proto::WireCell const& cell)
+{
+    unicode::convert_to<char>(std::u32string_view(&cell.codepoint, 1), std::back_inserter(out));
+    for (auto const extra: cell.clusterExtras)
+        unicode::convert_to<char>(std::u32string_view(&extra, 1), std::back_inserter(out));
+}
 
 // ---------------------------------------------------------------------------
 // RemoteScreen
@@ -40,6 +48,7 @@ void RemoteScreen::apply(proto::Delta const& delta)
     generation = delta.generation;
     seqno = delta.seqno;
     viewportBase = delta.stableViewportBase;
+    stableFloor = delta.stableFloor;
     cursorLine = delta.cursorLine;
     cursorColumn = delta.cursorColumn;
     setModes = delta.setModes;
@@ -49,8 +58,13 @@ void RemoteScreen::apply(proto::Delta const& delta)
     for (auto const& entry: delta.hyperlinks)
         hyperlinks.insert_or_assign(entry.id, entry.uri);
 
-    // Trim client-side scrollback: everything HistoryKeep above the viewport.
-    rows.erase(rows.begin(), rows.lower_bound(viewportBase - HistoryKeep));
+    // Trim client-side scrollback. The server's floor is authoritative — a
+    // `clear`/CSI 3 J jumps it up with no line changes, so honoring it is what
+    // drops history the real terminal already discarded (otherwise the mirror
+    // keeps showing ghost scrollback). The HistoryKeep cap bounds memory when
+    // the floor sits far below the viewport.
+    auto const evictBelow = std::max(stableFloor, viewportBase - HistoryKeep);
+    rows.erase(rows.begin(), rows.lower_bound(evictBelow));
 }
 
 proto::WireLine const* RemoteScreen::rowAt(int32_t line) const
@@ -73,10 +87,7 @@ std::string RemoteScreen::viewportText() const
                     rendered += ' ';
                     continue;
                 }
-                unicode::convert_to<char>(std::u32string_view(&cell.codepoint, 1),
-                                          std::back_inserter(rendered));
-                for (auto const extra: cell.clusterExtras)
-                    unicode::convert_to<char>(std::u32string_view(&extra, 1), std::back_inserter(rendered));
+                appendCluster(rendered, cell);
             }
         while (!rendered.empty() && rendered.back() == ' ')
             rendered.pop_back();
@@ -90,8 +101,7 @@ std::string RemoteScreen::viewportText() const
 // AttachClient
 
 AttachClient::AttachClient(net::EventLoop& loop, std::unique_ptr<net::ISocket> connection):
-    _connection(std::move(connection)),
-    _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024)
+    _connection(std::move(connection)), _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024)
 {
 }
 
@@ -123,9 +133,9 @@ void AttachClient::requestResize(uint32_t columns, uint32_t lines)
     send(proto::DecodedPdu { proto::ResizeRequest { .columns = columns, .lines = lines } });
 }
 
-void AttachClient::fetchImage(uint32_t imageId)
+void AttachClient::fetchImage(uint64_t session, uint32_t imageId)
 {
-    send(proto::DecodedPdu { proto::FetchImage { .imageId = imageId } });
+    send(proto::DecodedPdu { proto::FetchImage { .session = session, .imageId = imageId } });
 }
 
 void AttachClient::detach()

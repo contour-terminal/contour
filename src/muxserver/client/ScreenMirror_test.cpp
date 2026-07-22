@@ -6,11 +6,13 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <format>
 #include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <tuple>
 
 #include <coro/WhenAll.hpp>
 #include <muxserver/NativeSession.h>
@@ -92,7 +94,54 @@ void serverWrites(MirrorHarness* h, vtmux::SessionId session, std::string_view b
     h->server->sessionScreenUpdated(session);
 }
 
+/// One 5x1 wire row at @p stableId.
+proto::WireLine rowAt(int64_t stableId)
+{
+    auto line = proto::WireLine {};
+    line.stableId = stableId;
+    line.columns = 5;
+    return line;
+}
+
 } // namespace
+
+TEST_CASE("a server-side clear drops the mirror's local scrollback", "[muxserver][mirror]")
+{
+    // Unit-level: drive ScreenMirror directly. The mirror is primed with a screen
+    // that has scrollback (floor below the viewport).
+    auto mirror = ScreenMirror {};
+    auto screen = muxserver::client::RemoteScreen {};
+    screen.columns = 5;
+    screen.lines = 1;
+
+    auto seed = proto::Delta {};
+    seed.snapshot = 1;
+    seed.stableViewportBase = 10;
+    seed.stableFloor = 7;
+    seed.lines.push_back(rowAt(10));
+    screen.apply(seed);
+    std::ignore = mirror.apply(screen, seed); // primes (full replay), remembers floor 7
+
+    // An ordinary incremental delta (floor unchanged) stays incremental: it must
+    // NOT clear scrollback.
+    auto tick = proto::Delta {};
+    tick.stableViewportBase = 10;
+    tick.stableFloor = 7;
+    tick.lines.push_back(rowAt(10));
+    screen.apply(tick);
+    auto const incremental = mirror.apply(screen, tick);
+    CHECK_FALSE(incremental.contains("\033[3J"));
+
+    // A `clear`/CSI 3 J jumps the floor to the viewport base with NO line change
+    // and NO generation bump. The incremental path would leave ghost scrollback,
+    // so the mirror must fall back to a full replay that re-emits ESC[3J.
+    auto cleared = proto::Delta {};
+    cleared.stableViewportBase = 10;
+    cleared.stableFloor = 10;
+    screen.apply(cleared);
+    auto const out = mirror.apply(screen, cleared);
+    CHECK(out.contains("\033[3J"));
+}
 
 TEST_CASE("the mirror terminal reproduces text, SGR and cursor", "[muxserver][mirror]")
 {

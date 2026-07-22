@@ -82,6 +82,7 @@ struct ResizeRequest
 /// On-demand image pixel fetch by stable image id.
 struct FetchImage
 {
+    uint64_t session = 0; ///< Image ids are per-session pools; scope the lookup.
     uint32_t imageId = 0;
     bool operator==(FetchImage const&) const = default;
 };
@@ -185,6 +186,11 @@ struct Delta
     /// The stable id of page row 0 at delta time — what lets the client map
     /// stable-id-addressed rows onto its viewport.
     int64_t stableViewportBase = 0;
+    /// The oldest stable id the server still holds (its scrollback floor). Rows
+    /// below it were evicted server-side — a `clear`/CSI 3 J jumps this up with
+    /// no line changes, so the client MUST drop history below it or keep showing
+    /// scrollback the real terminal already threw away.
+    int64_t stableFloor = 0;
     int32_t cursorLine = 0;
     int32_t cursorColumn = 0;
     std::vector<WireLine> lines;

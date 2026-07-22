@@ -110,6 +110,7 @@ namespace
 
     void encodeBody(Writer& out, FetchImage const& pdu)
     {
+        out.varint(pdu.session);
         out.u32(pdu.imageId);
     }
 
@@ -180,6 +181,7 @@ namespace
         out.varint(pdu.seqno);
         out.u8(pdu.snapshot);
         out.svarint(pdu.stableViewportBase);
+        out.svarint(pdu.stableFloor);
         out.svarint(pdu.cursorLine);
         out.svarint(pdu.cursorColumn);
 
@@ -258,7 +260,7 @@ namespace
     {
         auto pdu = FetchImage {};
         auto error = DecodeError {};
-        if (!assign(in.u32(), pdu.imageId, error))
+        if (!assign(in.varint(), pdu.session, error) || !assign(in.u32(), pdu.imageId, error))
             return std::unexpected(error);
         return pdu;
     }
@@ -368,7 +370,8 @@ namespace
         if (!assign(in.varint(), pdu.session, error) || !assign(in.varint(), pdu.generation, error)
             || !assign(in.varint(), pdu.seqno, error) || !assign(in.u8(), pdu.snapshot, error)
             || !assign(in.svarint(), pdu.stableViewportBase, error)
-            || !assign(in.svarint(), pdu.cursorLine, error) || !assign(in.svarint(), pdu.cursorColumn, error))
+            || !assign(in.svarint(), pdu.stableFloor, error) || !assign(in.svarint(), pdu.cursorLine, error)
+            || !assign(in.svarint(), pdu.cursorColumn, error))
             return std::unexpected(error);
 
         auto lines = std::size_t {};

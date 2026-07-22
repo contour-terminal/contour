@@ -27,6 +27,14 @@
 namespace muxserver::client
 {
 
+/// Appends @p cell's grapheme cluster (base codepoint plus any combining extras)
+/// to @p out as UTF-8. The empty-codepoint (blank) case is the caller's to
+/// handle. Shared by every wire-cell → text/tty path so cluster emission lives
+/// in exactly one place.
+/// @param out The byte stream to append to.
+/// @param cell The wire cell whose cluster to emit.
+void appendCluster(std::string& out, proto::WireCell const& cell);
+
 /// The client-side mirror of one remote session's screen.
 struct RemoteScreen
 {
@@ -41,6 +49,7 @@ struct RemoteScreen
     uint64_t generation = 0;
     uint64_t seqno = 0;
     int64_t viewportBase = 0; ///< Stable id of viewport row 0.
+    int64_t stableFloor = 0;  ///< Oldest stable id the server still holds; rows below are evicted.
 
     /// Rows by stable id (ordered, so eviction trims the oldest first).
     std::map<int64_t, proto::WireLine> rows;
@@ -91,8 +100,9 @@ class AttachClient final
     /// Proposes a client size; the server answers with fresh snapshots.
     void requestResize(uint32_t columns, uint32_t lines);
 
-    /// Requests an image's pixels by stable id.
-    void fetchImage(uint32_t imageId);
+    /// Requests an image's pixels: @p session scopes the per-session image pool,
+    /// @p imageId is the pool-local id carried by the cell's ImageCellEntry.
+    void fetchImage(uint64_t session, uint32_t imageId);
 
     /// Closes the connection; run() finishes.
     void detach();

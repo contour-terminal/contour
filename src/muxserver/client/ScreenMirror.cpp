@@ -5,16 +5,11 @@
 #include <vtbackend/TextScale.h>
 #include <vtbackend/TextSizing.h>
 
-#include <libunicode/convert.h>
-
 #include <algorithm>
 #include <format>
-#include <iterator>
 #include <optional>
 #include <ranges>
 #include <set>
-#include <string_view>
-#include <tuple>
 #include <unordered_map>
 
 #include <muxserver/MirroredModes.h>
@@ -42,13 +37,6 @@ namespace
     [[nodiscard]] bool isScaled(proto::WireCell const& cell)
     {
         return cell.scale > 1 || cell.textScaleExtras != 0;
-    }
-
-    void appendCluster(std::string& out, proto::WireCell const& cell)
-    {
-        unicode::convert_to<char>(std::u32string_view(&cell.codepoint, 1), std::back_inserter(out));
-        for (auto const extra: cell.clusterExtras)
-            unicode::convert_to<char>(std::u32string_view(&extra, 1), std::back_inserter(out));
     }
 
     /// Emits the `OSC 66` request recreating @p cell's scaled-text block.
@@ -85,13 +73,6 @@ namespace
         }
         auto const it = uris.find(id);
         out += std::format("\033]8;id={};{}\033\\", id, it != uris.end() ? it->second : std::string {});
-    }
-
-    /// The attribute tuple deciding whether a cell needs a fresh SGR — cheap
-    /// to compare, so runs of equal cells never re-format the sequence.
-    [[nodiscard]] constexpr auto sgrKeyOf(proto::WireCell const& cell) noexcept
-    {
-        return std::tuple { cell.flags, cell.foreground, cell.background, cell.underlineColor };
     }
 
     /// Renders @p row's cells at the current cursor position.
@@ -219,14 +200,22 @@ namespace
 
 std::string ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
 {
+    // A floor that jumped further than the viewport advanced means the server
+    // discarded history WITHOUT scrolling it through the page (a `clear`/CSI 3 J,
+    // which the incremental path — no line changes, no viewport move — would
+    // otherwise leave as ghost scrollback). fullReplay re-emits ESC[3J and
+    // rebuilds local scrollback from what the server still holds.
+    auto const floorOutranScroll = screen.stableFloor - _floor > screen.viewportBase - _viewportBase;
     if (!_primed || delta.snapshot != 0 || screen.generation != _generation || screen.columns != _columns
-        || screen.lines != _lines || screen.screenType != _screenType || screen.viewportBase < _viewportBase)
+        || screen.lines != _lines || screen.screenType != _screenType || screen.viewportBase < _viewportBase
+        || floorOutranScroll)
         return fullReplay(screen);
 
     auto const oldBase = _viewportBase;
     auto const newBase = screen.viewportBase;
     auto const lines = static_cast<int64_t>(screen.lines);
     _viewportBase = newBase;
+    _floor = screen.stableFloor;
 
     auto out = std::string { "\033[?25l" };
 
@@ -295,6 +284,7 @@ std::string ScreenMirror::fullReplay(RemoteScreen const& screen)
     _primed = true;
     _generation = screen.generation;
     _viewportBase = screen.viewportBase;
+    _floor = screen.stableFloor;
     _columns = screen.columns;
     _lines = screen.lines;
     _screenType = screen.screenType;

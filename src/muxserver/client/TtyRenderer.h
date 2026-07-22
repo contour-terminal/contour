@@ -6,13 +6,25 @@
 /// thin-client display path of `contour attach`. Pure functions: bytes in,
 /// bytes out, golden-testable without a TTY.
 
+#include <cstdint>
 #include <string>
+#include <tuple>
 
 #include <muxserver/client/AttachClient.h>
 #include <muxserver/proto/Pdu.h>
 
 namespace muxserver::client
 {
+
+/// The attribute word tuple deciding whether a cell needs a fresh SGR emission.
+/// Cheap to compare, so runs of equal cells never re-format the sequence.
+using SgrKey = std::tuple<uint32_t, uint32_t, uint32_t, uint32_t>;
+
+/// @return @p cell's SGR key (flags, fore-, back- and underline color).
+[[nodiscard]] constexpr SgrKey sgrKeyOf(proto::WireCell const& cell) noexcept
+{
+    return SgrKey { cell.flags, cell.foreground, cell.background, cell.underlineColor };
+}
 
 /// The SGR sequence selecting @p cell's rendition (starting from a reset).
 /// @param cell The cell whose attributes to select.

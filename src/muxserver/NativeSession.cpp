@@ -207,6 +207,10 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
         delta.generation = grid.generation();
         delta.seqno = grid.seqno();
         delta.stableViewportBase = grid.stableLineIdOf(vtbackend::LineOffset(0));
+        // The scrollback floor: a `clear`/CSI 3 J evicts history without a
+        // generation bump or any line change, so this is the ONLY signal that
+        // tells the mirror to drop the history the real terminal discarded.
+        delta.stableFloor = grid.stableRangeFloor();
 
         auto const cursor = terminal->currentScreen().cursor().position;
         delta.cursorLine = unbox<int32_t>(cursor.line);
@@ -274,11 +278,13 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
     }
     if (auto const* fetch = std::get_if<proto::FetchImage>(&frame.pdu))
     {
-        for (auto& [session, follow]: _followed)
-        {
-            auto* terminal = _host.terminal(SessionId { session });
-            if (terminal == nullptr)
-                continue;
+        // Image ids are per-session ImagePool counters (each starts at 1), so the
+        // SAME numeric id names different images in different sessions. The lookup
+        // must be scoped to the session the requested cell belongs to — scanning
+        // every followed session and returning the first match paints the wrong
+        // picture whenever two sessions minted the same id.
+        auto* terminal = _host.terminal(SessionId { fetch->session });
+        if (terminal != nullptr)
             if (auto const image = terminal->imagePool().findImageById(vtbackend::ImageId { fetch->imageId }))
             {
                 auto data = proto::ImageData {};
@@ -292,7 +298,6 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
                 send(frame.serial, proto::DecodedPdu { data });
                 return;
             }
-        }
         send(frame.serial, proto::DecodedPdu { proto::ImageGone { .imageId = fetch->imageId } });
         return;
     }
@@ -341,8 +346,7 @@ coro::Task<void> NativeSession::run()
     // debounce flush spawned before the disconnect may still be parked in its
     // 20ms delay with `this` in its frame. Wait for it to resume (it observes
     // _closed and backs out) before letting the frame die.
-    while (_flushScheduled)
-        co_await _loop.delay(1ms);
+    co_await net::pollUntil(&_loop, [this] { return !_flushScheduled; });
     co_await _writer.flushThenClose();
     _connection->close();
 }

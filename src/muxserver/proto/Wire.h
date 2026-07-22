@@ -25,7 +25,9 @@ namespace muxserver::proto
 {
 
 /// The protocol revision exchanged in the Hello handshake before anything else.
-constexpr uint32_t CodecVersion = 2;
+/// v3 added FetchImage.session (per-pool image ids need a session to disambiguate)
+/// and Delta.stableFloor (so mirrors evict history the server discarded).
+constexpr uint32_t CodecVersion = 3;
 
 /// Why a decode could not produce a value. NeedMoreData is a NON-error state:
 /// the caller reads more bytes and retries.

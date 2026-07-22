@@ -51,6 +51,7 @@ class ScreenMirror
     bool _primed = false;
     uint64_t _generation = 0;
     int64_t _viewportBase = 0;
+    int64_t _floor = 0; ///< Last applied scrollback floor (see apply()).
     uint32_t _columns = 0;
     uint32_t _lines = 0;
     uint8_t _screenType = 0;
