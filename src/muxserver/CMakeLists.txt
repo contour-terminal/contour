@@ -12,6 +12,8 @@ add_library(muxserver STATIC
     TappingPty.h
     client/AttachClient.cpp
     client/AttachClient.h
+    client/LayoutReconstruction.cpp
+    client/LayoutReconstruction.h
     imsg/CommandArgv.cpp
     imsg/CommandArgv.h
     imsg/Identify.cpp
@@ -66,6 +68,7 @@ if(MUXSERVER_TESTING)
         NativeSession_test.cpp
         SocketPath_test.cpp
         client/AttachClient_test.cpp
+        client/LayoutReconstruction_test.cpp
         client/ScreenMirror_test.cpp
         imsg/ImsgCodec_test.cpp
         client/TtyRenderer_test.cpp

@@ -254,16 +254,28 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       split-pane end-to-end (attach → `LayoutState` shows the vertical split, 60/40, two distinct-session
       leaves). *Landed 2026-07-22; muxserver suite green (122/2652).* **B2 (the GUI consuming it in
       `AttachController` → `SessionModel`) is the Qt follow-up.**
-- [~] **B2. Client applies `LayoutState` (AttachController) — capture landed; SessionModel apply
-      pending.** `AttachController` now subscribes the daemon's `LayoutState` (`setLayoutHandler` →
-      `onLayout`), stores it under the mutex, exposes a thread-safe `layout()` copy, and raises a
-      `layoutChanged()` signal on each push — the GUI was ignoring the layout entirely before. Test
-      (Linux-CI): the controller captures a split tab's tree (`AttachController_test`). **Remaining:**
-      the applier that consumes `layout()` to drive the GUI's own `SessionModel` verbs (`createTab`/
-      `splitActivePane`/`setPaneRatio`/zoom/activate) and reproduce the daemon's tree, replacing the
-      `onUpdate`→`PendingSession` flattening — pushing sessions into `_pending` in the tree's
-      depth-first order lets the existing FIFO `createPty` binding match each pane to its session with
-      no per-session binding machinery. Mirror re-serialization (`onUpdate`) stays unchanged.
+- [~] **B2. Client applies `LayoutState` — capture + reconstruction PLANNER landed; GUI glue
+      pending.** Two of the three pieces are done and tested:
+      1. **Capture:** `AttachController` subscribes the daemon's `LayoutState` (`setLayoutHandler` →
+         `onLayout`), stores it under the mutex, exposes a thread-safe `layout()` copy, and raises a
+         `layoutChanged()` signal — the GUI ignored the layout entirely before. (Linux-CI test.)
+      2. **The reconstruction decision (the hard part) — extracted, pure, and headless-verified.**
+         `muxserver/client/LayoutReconstruction.{h,cpp}`: `planReconstruction(LayoutState)` turns the
+         daemon tree into an ordered `vector<ReconstructStep>` (`NewTab`/`Split`/`Activate`). It relies
+         on the daemon's own split invariant (`vtmux::Pane::split` keeps the OLD session in the first
+         child, the NEW in the now-active second), so a subtree's leftmost leaf is always its seed —
+         "split the active leaf, give the new pane the right subtree's leftmost session, build the
+         right (active) subtree, then re-activate the left leaf and build the left subtree (only when
+         the left child is itself a split)". **Unit-tested by replaying the plan against a real
+         `vtmux::SessionModel` and asserting the rebuilt tree matches** — single pane, single split,
+         nested (re-activation path), multi-tab, empty. This runs headless on Windows, no GUI needed.
+      **Remaining (Linux-CI, thin GUI glue):** an applier on the GUI thread (connect `layoutChanged`
+      queued in `ContourGuiApp`) that executes the plan by driving `TerminalSessionManager`
+      (`createSessionInBackground` for `NewTab`, `splitActivePane` for `Split`, `setActivePane` for
+      `Activate`), pushing the plan's sessions into `_pending` in step order so the existing FIFO
+      `createPty` binds each pane to its remote session with no new binding machinery. It replaces the
+      `onUpdate`→`PendingSession` flattening; mirror re-serialization (`onUpdate`) stays unchanged.
+      (Active-pane restoration to `WireTab.activePane` and zoom are a follow-up polish.)
 - [~] **B3. Lifecycle PDUs (F2, inbound) — server-receive half + client send verbs landed.**
       Three tag-12/13/14 PDUs (forward-compatible, no codec bump): `CreateTab{}`, `SplitPane{tab,
       orientation, ratio×10000}`, `ClosePane{session}`. `NativeSession::handlePdu` routes them to the
