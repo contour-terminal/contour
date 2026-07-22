@@ -225,14 +225,21 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       that drives the GUI's own `SessionModel` verbs (`createTab`/`splitActivePane`/`setPaneRatio`/
       zoom/activate) to reproduce the daemon tree; keep session↔pane binding via `_bindings`. Mirror
       re-serialization (`onUpdate`) unchanged.
-- [ ] **B3. Lifecycle PDUs (F2, inbound).** `CreateTab`/`SplitPane`/`ClosePane`/`MoveTab`/
-      `ActivateTab`/`SetPaneRatio`/… routed to the existing `SessionHost`/`SessionModel` verbs; the
-      resulting `ModelEvents` fan-out mirrors the change to every client (incl. the B1 emitter).
-      Add outbound send verbs on the client next to `sendInput`/`requestResize`
-      (`AttachController.cpp:216-227`). **Relax `canCreateSession()`** from "is a session pending" to
-      "is the connection live" (`AttachController.cpp:186`), which lifts the four
-      `TerminalSessionManager` gates (`:128,:187,:345,:1289`); **retire the `_closedSessions`
-      tombstone** once a real close verb exists (`AttachController.h:147-153`).
+- [~] **B3. Lifecycle PDUs (F2, inbound) — server-receive half + client send verbs landed.**
+      Three tag-12/13/14 PDUs (forward-compatible, no codec bump): `CreateTab{}`, `SplitPane{tab,
+      orientation, ratio×10000}`, `ClosePane{session}`. `NativeSession::handlePdu` routes them to the
+      existing `SessionHost` verbs (`createTab`/`splitActivePane`/`handleSessionExit`); the resulting
+      `ModelEvents` fan out through **every** client's `LayoutObserver`, so the change mirrors back to
+      all attached clients (incl. the author) as a fresh `LayoutState`. `AttachClient` grew the
+      outbound send verbs `createTab()`/`splitPane()`/`closePane()`. Tests: PDU round-trip + an
+      end-to-end where the client authors a tab and the daemon honors it (subscribed observer re-pushes
+      a two-tab `LayoutState`; the daemon's `SessionModel` really grew). *Landed 2026-07-22; muxserver
+      suite green (125/2672).* **Remaining (Qt follow-up, CI-verified):** wire the GUI to call these
+      verbs from `AttachController`, **relax `canCreateSession()`** from "is a session pending" to "is
+      the connection live" (`AttachController.cpp:186`, lifting the four `TerminalSessionManager` gates
+      at `:128,:187,:345,:1289`), and **retire the `_closedSessions` tombstone** now that a real close
+      verb exists (`AttachController.h:147-153`). `MoveTab`/`ActivateTab`/`SetPaneRatio` are additive
+      tags to add as the GUI needs them (no codec bump).
 - [ ] **B4. Multi-window onto one daemon.** Decide the window model: v1 = client opens multiple GUI
       windows, each bound to a daemon window via `LayoutState` (the daemon starts with one window;
       grow to multiple via lifecycle PDUs). Note **F8** multi-client resize policy (last-proposal-wins
@@ -392,6 +399,15 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   DEC pages (`_pages`/`_cursorPage`) — `ScreenType` collapses pages 1+ to "Alternate" and the daemon
   serializes only `currentScreen()`; investigating whether Contour uses > 2 pages.** Remaining
   overall: A8, A10-decpages, B2/B3/B4 (Qt), C3/C4/C5 (Qt), B5.
+- 2026-07-22 · Windows/clangcl-release · **B3 server-receive half done** — layout-authoring PDUs
+  `CreateTab`/`SplitPane`/`ClosePane` (tags 12/13/14, no codec bump) routed in
+  `NativeSession::handlePdu` to `SessionHost::createTab`/`splitActivePane`/`handleSessionExit`; the
+  model change fans out to every client's `LayoutObserver` as a fresh `LayoutState`. `AttachClient`
+  grew `createTab()`/`splitPane()`/`closePane()`. PDU round-trip + end-to-end test (client authors a
+  tab → subscribed daemon re-pushes a two-tab layout and its `SessionModel` really grew). Suite green
+  (125/2672). **Remaining B3 (Qt, CI-verified):** GUI calls the verbs from `AttachController`, relax
+  `canCreateSession()`, retire the `_closedSessions` tombstone. Remaining overall: A8, A10-decpages,
+  B2/B4 (Qt), B3-Qt, C3/C4/C5 (Qt), B5.
 
 ## Open decisions / risks
 

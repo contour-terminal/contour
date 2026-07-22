@@ -161,6 +161,14 @@ class AttachClient final
     /// @p imageId is the pool-local id carried by the cell's ImageCellEntry.
     void fetchImage(uint64_t session, uint32_t imageId);
 
+    /// Layout authoring (F2): ask the daemon to create a tab, split @p tab's
+    /// active pane (orientation 1 horizontal / 2 vertical, ratio × 10000), or
+    /// close the pane hosting @p session. The daemon honors it and re-pushes a
+    /// LayoutState to every attached client.
+    void createTab();
+    void splitPane(uint64_t tab, uint8_t orientation, uint16_t ratio);
+    void closePane(uint64_t session);
+
     /// Closes the connection; run() finishes.
     void detach();
 

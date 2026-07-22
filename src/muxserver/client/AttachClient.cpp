@@ -220,6 +220,21 @@ void AttachClient::fetchImage(uint64_t session, uint32_t imageId)
     _pendingImages.insert_or_assign(serial, std::pair { session, imageId });
 }
 
+void AttachClient::createTab()
+{
+    send(proto::DecodedPdu { proto::CreateTab {} });
+}
+
+void AttachClient::splitPane(uint64_t tab, uint8_t orientation, uint16_t ratio)
+{
+    send(proto::DecodedPdu { proto::SplitPane { .tab = tab, .orientation = orientation, .ratio = ratio } });
+}
+
+void AttachClient::closePane(uint64_t session)
+{
+    send(proto::DecodedPdu { proto::ClosePane { .session = session } });
+}
+
 void AttachClient::detach()
 {
     _detached = true;

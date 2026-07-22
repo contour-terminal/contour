@@ -42,6 +42,9 @@ enum class PduType : uint8_t
     Delta = 9,
     SessionEvent = 10,
     LayoutState = 11,
+    CreateTab = 12,
+    SplitPane = 13,
+    ClosePane = 14,
 };
 
 /// The kind of a SessionEvent — adding a transient session-app event is adding a
@@ -302,6 +305,30 @@ struct LayoutState
     bool operator==(LayoutState const&) const = default;
 };
 
+/// Client→server: create a new tab (with a fresh session) in the daemon window.
+/// The resulting model change re-pushes LayoutState to every attached client.
+struct CreateTab
+{
+    bool operator==(CreateTab const&) const = default;
+};
+
+/// Client→server: split @p tab's active pane, backing the new leaf with a fresh
+/// session.
+struct SplitPane
+{
+    uint64_t tab = 0;
+    uint8_t orientation = 1; ///< vtmux::SplitState: 1 horizontal, 2 vertical.
+    uint16_t ratio = 5000;   ///< First child's share × 10000.
+    bool operator==(SplitPane const&) const = default;
+};
+
+/// Client→server: close the pane hosting @p session (and destroy that session).
+struct ClosePane
+{
+    uint64_t session = 0;
+    bool operator==(ClosePane const&) const = default;
+};
+
 using DecodedPdu = std::variant<Invalid,
                                 ClientHello,
                                 ServerHello,
@@ -313,7 +340,10 @@ using DecodedPdu = std::variant<Invalid,
                                 SessionState,
                                 Delta,
                                 SessionEvent,
-                                LayoutState>;
+                                LayoutState,
+                                CreateTab,
+                                SplitPane,
+                                ClosePane>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

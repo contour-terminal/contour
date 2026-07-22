@@ -115,6 +115,18 @@ namespace
     {
         return std::to_underlying(PduType::LayoutState);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(CreateTab const&) noexcept
+    {
+        return std::to_underlying(PduType::CreateTab);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(SplitPane const&) noexcept
+    {
+        return std::to_underlying(PduType::SplitPane);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(ClosePane const&) noexcept
+    {
+        return std::to_underlying(PduType::ClosePane);
+    }
 
     // --- body encoders ------------------------------------------------------
 
@@ -274,6 +286,22 @@ namespace
         out.u8(pdu.kind);
         out.string(pdu.a);
         out.string(pdu.b);
+    }
+
+    void encodeBody(Writer&, CreateTab const&)
+    {
+    }
+
+    void encodeBody(Writer& out, SplitPane const& pdu)
+    {
+        out.varint(pdu.tab);
+        out.u8(pdu.orientation);
+        out.u16(pdu.ratio);
+    }
+
+    void encodeBody(Writer& out, ClosePane const& pdu)
+    {
+        out.varint(pdu.session);
     }
 
     /// Encodes one split-tree node pre-order (recurses into its children).
@@ -517,6 +545,30 @@ namespace
         return pdu;
     }
 
+    DecodeResult decodeCreateTab(Reader&)
+    {
+        return CreateTab {};
+    }
+
+    DecodeResult decodeSplitPane(Reader& in)
+    {
+        auto pdu = SplitPane {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.tab, error) || !assign(in.u8(), pdu.orientation, error)
+            || !assign(in.u16(), pdu.ratio, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeClosePane(Reader& in)
+    {
+        auto pdu = ClosePane {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.session, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
     /// Decodes one split-tree node (recursing into its children). @p depth bounds
     /// the recursion so a hostile deeply-nested tree cannot overflow the stack.
     std::expected<WirePane, DecodeError> decodePane(Reader& in, int depth)
@@ -590,6 +642,9 @@ namespace
         DecodeRow { PduType::Delta, decodeDelta },
         DecodeRow { PduType::SessionEvent, decodeSessionEvent },
         DecodeRow { PduType::LayoutState, decodeLayoutState },
+        DecodeRow { PduType::CreateTab, decodeCreateTab },
+        DecodeRow { PduType::SplitPane, decodeSplitPane },
+        DecodeRow { PduType::ClosePane, decodeClosePane },
     };
 } // namespace
 

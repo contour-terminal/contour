@@ -533,6 +533,16 @@ Task<void> awaitLayout(net::EventLoop* loop, AttachClient* client, std::optional
     client->detach();
 }
 
+/// Awaits the initial one-tab layout, authors a second tab, and waits for the
+/// daemon to honor it and re-push a two-tab layout before detaching.
+Task<void> driveCreateTab(net::EventLoop* loop, AttachClient* client, int* mirroredTabs)
+{
+    co_await net::testing::waitUntil(loop, [mirroredTabs] { return *mirroredTabs == 1; });
+    client->createTab();
+    co_await net::testing::waitUntil(loop, [mirroredTabs] { return *mirroredTabs == 2; });
+    client->detach();
+}
+
 } // namespace
 
 TEST_CASE("attach receives the daemon's tab and pane layout", "[muxserver][attach]")
@@ -568,6 +578,37 @@ TEST_CASE("attach receives the daemon's tab and pane layout", "[muxserver][attac
     CHECK(root.children[0].session != 0);
     CHECK(root.children[1].session != 0);
     CHECK(root.children[0].session != root.children[1].session);
+}
+
+TEST_CASE("a client authors a tab, honored by the daemon and mirrored back", "[muxserver][attach]")
+{
+    auto source = net::PollEventSource {};
+    auto loop = net::EventLoop { source };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                              vtbackend::Settings {},
+                              /*startPumps=*/false };
+    host.createTab(); // the daemon starts with one tab
+
+    auto pair = *net::testing::makeSocketPair(loop);
+    auto server = NativeSession { loop, host, std::move(pair.first) };
+    auto client = AttachClient { loop, std::move(pair.second) };
+
+    // Subscribe the session's layout observer so the tab the client authors below
+    // fans back out as a fresh LayoutState — production wires this in
+    // serveNativeClient; the socket-pair tests construct NativeSession directly.
+    auto subscription = muxserver::ScopedModelSubscription { host, server.layoutObserver() };
+
+    auto mirroredTabs = int {};
+    client.setLayoutHandler([&mirroredTabs](proto::LayoutState const& received) {
+        mirroredTabs = static_cast<int>(received.tabs.size());
+    });
+
+    loop.blockOn(
+        net::testing::allOf(server.run(), client.run(), driveCreateTab(&loop, &client, &mirroredTabs)));
+
+    CHECK(mirroredTabs == 2);                                     // the mirrored layout grew
+    CHECK(host.model().window(host.windowId())->tabCount() == 2); // the daemon really created the tab
 }
 
 // The attach-flow composition (Daemon.cpp) hard-codes STDIN/STDOUT and a real

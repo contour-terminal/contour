@@ -144,6 +144,9 @@ TEST_CASE("every catalog PDU round-trips", "[muxserver][proto]")
                                                       WirePane { .paneId = 12, .session = 101 } },
                                     } } },
         },
+        CreateTab {},
+        SplitPane { .tab = 5, .orientation = 2, .ratio = 6000 },
+        ClosePane { .session = 100 },
     };
 
     for (auto const& pdu: pdus)

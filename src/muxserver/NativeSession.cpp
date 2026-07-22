@@ -542,6 +542,26 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
         send(frame.serial, proto::DecodedPdu { proto::ImageGone { .imageId = fetch->imageId } });
         return;
     }
+    // Layout-authoring verbs (F2): route to the model. The resulting ModelEvents
+    // fan out through every client's LayoutObserver, so the change mirrors to all
+    // attached clients (including this one) as a fresh LayoutState.
+    if (std::holds_alternative<proto::CreateTab>(frame.pdu))
+    {
+        std::ignore = _host.createTab();
+        return;
+    }
+    if (auto const* split = std::get_if<proto::SplitPane>(&frame.pdu))
+    {
+        _host.splitActivePane(vtmux::TabId { split->tab },
+                              static_cast<vtmux::SplitState>(split->orientation),
+                              static_cast<double>(split->ratio) / 10000.0);
+        return;
+    }
+    if (auto const* close = std::get_if<proto::ClosePane>(&frame.pdu))
+    {
+        _host.handleSessionExit(vtmux::SessionId { close->session });
+        return;
+    }
     // Unknown/unexpected PDUs are ignored: forward compatibility.
 }
 
