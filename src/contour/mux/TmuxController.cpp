@@ -5,6 +5,7 @@
 
 #include <format>
 #include <utility>
+#include <vector>
 
 #include <muxserver/tmux/ControlModeSpawn.h>
 
@@ -201,6 +202,39 @@ void TmuxController::paneRemoved(uint64_t /*window*/, uint64_t pane)
         it->second->close(); // the session sees EOF; the manager prunes its pane/tab
 }
 
+void TmuxController::windowRenamed(uint64_t window, std::string const& name)
+{
+    {
+        auto const lock = std::lock_guard { _mutex };
+        _pendingRenames[window] = name; // latest name wins; applied on the GUI thread
+    }
+    emit tabTitleChanged();
+}
+
+void TmuxController::applyPendingRenames(TerminalSessionManager& manager)
+{
+    // Resolve each pending rename to its tab's session under the lock (the acting-session
+    // map is shared with the reactor thread), then apply outside it — setTabTitleForSession
+    // touches the GUI model and could re-enter the controller.
+    auto renames = std::vector<std::pair<vtmux::SessionId, std::string>> {};
+    {
+        auto const lock = std::lock_guard { _mutex };
+        for (auto it = _pendingRenames.begin(); it != _pendingRenames.end();)
+        {
+            auto const acting = _actingByWindow.find(it->first);
+            if (acting != _actingByWindow.end() && acting->second != nullptr)
+            {
+                renames.emplace_back(acting->second->modelSessionId(), std::move(it->second));
+                it = _pendingRenames.erase(it);
+            }
+            else
+                ++it; // window not realized yet; adoptPendingPanes drains it once it is
+        }
+    }
+    for (auto& [session, name]: renames)
+        manager.setTabTitleForSession(session, std::move(name));
+}
+
 void TmuxController::exited(std::string const& reason)
 {
     tmuxLog()("tmux control mode exited: {}", reason);
@@ -292,7 +326,7 @@ void TmuxController::adoptPendingPanes(TerminalSessionManager& manager, vtmux::W
         {
             auto const lock = std::lock_guard { _mutex };
             if (_pending.empty())
-                return;
+                break;
             record = _pending.front(); // consumed by createPty inside the calls below
         }
 
@@ -315,10 +349,12 @@ void TmuxController::adoptPendingPanes(TerminalSessionManager& manager, vtmux::W
         // The manager consumes the pending pane through createPty; if it did
         // not (creation refused or failed), stop instead of spinning.
         if (!_pending.empty() && _pending.front().pane == record.pane)
-            return;
+            break;
         if (created != nullptr)
             _actingByWindow[record.window] = created;
     }
+    // A window renamed before its first pane was realized now has a tab — title it.
+    applyPendingRenames(manager);
 }
 
 } // namespace contour

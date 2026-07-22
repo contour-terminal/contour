@@ -562,6 +562,41 @@ TEST_CASE("setTabColorForSession routes a DECAC frame color to the session's tab
         window->closeTabAtIndex(row);
 }
 
+TEST_CASE("setTabTitleForSession routes a tmux %window-renamed to the session's tab",
+          "[contour][multiwindow][model]")
+{
+    // The tmux mirror's %window-renamed path calls TerminalSessionManager::setTabTitleForSession(
+    // sessionId, name) (posted from TmuxController::applyPendingRenames). This is the direct unit test
+    // of that routing: a session's model id resolves to its hosting tab and lands the runtime title.
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    TestApp app(std::move(factoryOwned));
+    auto& manager = app.manager();
+    ScopedController window { manager };
+
+    window->createNewTab();
+    REQUIRE(window->count() == 1);
+
+    auto* tab = manager.model().window(window.id)->tabAt(0);
+    REQUIRE(tab != nullptr);
+    auto const sessionId = tab->activePane()->session();
+    REQUIRE_FALSE(tab->runtimeTitle().has_value());
+
+    manager.setTabTitleForSession(sessionId, "build");
+    REQUIRE(tab->runtimeTitle().has_value());
+    CHECK(*tab->runtimeTitle() == "build");
+
+    // A later rename overwrites it.
+    manager.setTabTitleForSession(sessionId, "deploy");
+    CHECK(*tab->runtimeTitle() == "deploy");
+
+    // An unknown session id is a harmless no-op (the null-tab guard).
+    CHECK_NOTHROW(manager.setTabTitleForSession(vtmux::SessionId { 999999 }, "ghost"));
+    CHECK(*tab->runtimeTitle() == "deploy");
+
+    for (int row = window->count() - 1; row >= 0; --row)
+        window->closeTabAtIndex(row);
+}
+
 TEST_CASE("the SetTabColor / ResetTabColor actions color the acting session's tab",
           "[contour][multiwindow][model]")
 {

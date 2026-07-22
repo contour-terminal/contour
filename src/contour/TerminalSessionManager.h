@@ -394,6 +394,14 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @param session The session whose hosting tab should refresh its label.
     void refreshTabForSession(vtmux::SessionId session);
 
+    /// Sets an explicit @p title on the tab hosting @p session, through the authoritative SessionModel
+    /// (which repaints the owning window's tab strip). Used by the tmux mirror to reflect a
+    /// `%window-renamed` onto the tab (a tmux window maps to a tab). No-op if no tab hosts @p session.
+    /// MUST be called on the GUI thread (it mutates the GUI-facing model).
+    /// @param session The session (by model id) whose hosting tab to title.
+    /// @param title The new tab title.
+    void setTabTitleForSession(vtmux::SessionId session, std::string title);
+
     /// Assigns @p color to the tab hosting @p session (DECAC item 2 "window frame"), routing through
     /// the authoritative SessionModel so the existing tab-color pipeline repaints the tab strip. The
     /// color is recorded under vtmux::TabColorSource::Application, so it stays hidden behind a color the

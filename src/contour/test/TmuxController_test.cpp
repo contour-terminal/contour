@@ -1,11 +1,52 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/mux/TmuxController.h>
+#include <contour/test/GuiTestFixtures.h>
 
 #include <vtpty/ChannelPty.h>
 
 #include <crispy/BufferObject.h>
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <vtmux/Pane.h>
+#include <vtmux/SessionModel.h>
+#include <vtmux/Tab.h>
+
+// The tmux mirror's structural reactions are driven through the TmuxModelEvents overrides, which
+// are pure C++ (no tmux process) — so this maps to a real GUI SessionModel headlessly, on every
+// platform. The oracle tests below (real `tmux` binary) are POSIX-only.
+TEST_CASE("tmux %window-renamed retitles the mirrored tab (B5)", "[attach][tmux]")
+{
+    auto ctrlOwned = std::make_unique<contour::TmuxController>(std::string {}); // not connected
+    auto* ctrl = ctrlOwned.get();
+    contour::test::TestApp app { std::move(ctrlOwned) };
+    contour::test::ScopedController const win { app.manager() };
+
+    // A pane in tmux window 1 appears and is realized as the first tab.
+    ctrl->paneAdded(/*window=*/1, /*pane=*/10, 80, 24);
+    ctrl->adoptPendingPanes(app.manager(), win.id);
+    auto* tab = app.manager().model().window(win.id)->tabAt(0);
+    REQUIRE(tab != nullptr);
+    REQUIRE_FALSE(tab->runtimeTitle().has_value());
+
+    // tmux renames the window AFTER it was realized → reflected onto the tab on the next drain.
+    ctrl->windowRenamed(1, "editor");
+    ctrl->applyPendingRenames(app.manager());
+    REQUIRE(tab->runtimeTitle().has_value());
+    CHECK(*tab->runtimeTitle() == "editor");
+
+    // A rename that arrives BEFORE its window is realized is held, then applied when the pane is
+    // adopted (adoptPendingPanes drains pending renames).
+    ctrl->windowRenamed(2, "logs");
+    ctrl->paneAdded(/*window=*/2, /*pane=*/20, 80, 24);
+    ctrl->adoptPendingPanes(app.manager(), win.id);
+    auto* second = app.manager().model().window(win.id)->tabAt(1);
+    REQUIRE(second != nullptr);
+    REQUIRE(second->runtimeTitle().has_value());
+    CHECK(*second->runtimeTitle() == "logs");
+
+    ctrl->stop();
+}
 
 #ifndef _WIN32
 

@@ -70,6 +70,11 @@ class TmuxController final: public QObject, public SessionFactory, public muxser
     /// its tmux window) or a split (subsequent panes) in @p window.
     void adoptPendingPanes(TerminalSessionManager& manager, vtmux::WindowId window);
 
+    /// Applies any pending `%window-renamed` titles to the tabs of realized tmux
+    /// windows (a tmux window maps to a tab). A rename for a not-yet-realized window
+    /// stays pending until its first pane is adopted. Runs on the GUI thread.
+    void applyPendingRenames(TerminalSessionManager& manager);
+
     // SessionFactory: hands out a ChannelPty bound to the next pending pane.
     [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(
         std::optional<std::string> cwd,
@@ -82,11 +87,15 @@ class TmuxController final: public QObject, public SessionFactory, public muxser
     // TmuxModelEvents (reactor thread) — structure changes queue realizations.
     void paneAdded(uint64_t window, uint64_t pane, int columns, int lines) override;
     void paneRemoved(uint64_t window, uint64_t pane) override;
+    void windowRenamed(uint64_t window, std::string const& name) override;
     void exited(std::string const& reason) override;
 
   signals:
     /// A remote pane appeared that has no local realization yet.
     void remotePaneDiscovered();
+
+    /// A tmux window was renamed (%window-renamed); the GUI reflects it onto the tab.
+    void tabTitleChanged();
 
     /// The tmux client ended (%exit, error, or disconnect).
     void connectionClosed();
@@ -126,7 +135,8 @@ class TmuxController final: public QObject, public SessionFactory, public muxser
     std::unordered_map<uint64_t, PaneFeed*> _feeds;                 ///< Model-owned sinks, by pane.
     std::unordered_map<uint64_t, vtpty::ChannelPty*> _ptys;         ///< Bound ptys, by pane.
     std::unordered_map<uint64_t, TerminalSession*> _actingByWindow; ///< Split anchor per tmux window.
-    muxserver::tmux::TmuxGateway* _gateway = nullptr;               ///< Reactor-owned; valid while serving.
+    std::unordered_map<uint64_t, std::string> _pendingRenames; ///< %window-renamed titles awaiting apply.
+    muxserver::tmux::TmuxGateway* _gateway = nullptr;          ///< Reactor-owned; valid while serving.
     int _tmuxPid = -1;
     bool _stopped = false;
 

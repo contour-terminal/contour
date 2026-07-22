@@ -129,6 +129,13 @@ int ContourGuiApp::attachAction()
         };
         connect(
             _tmuxController.get(), &TmuxController::remotePaneDiscovered, this, adopt, Qt::QueuedConnection);
+        // A %window-renamed reflects onto the owning tab's title (a tmux window is a tab).
+        connect(
+            _tmuxController.get(),
+            &TmuxController::tabTitleChanged,
+            this,
+            [this] { _tmuxController->applyPendingRenames(_sessionManager); },
+            Qt::QueuedConnection);
         connect(
             _tmuxController.get(),
             &TmuxController::connectionClosed,

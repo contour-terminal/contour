@@ -1092,6 +1092,12 @@ void TerminalSessionManager::refreshTabForSession(vtmux::SessionId session)
             c->notifyTabRowChanged(tab->id(), { WindowController::Roles::TitleRole });
 }
 
+void TerminalSessionManager::setTabTitleForSession(vtmux::SessionId session, std::string title)
+{
+    if (auto* tab = findTabHostingSession(session))
+        _model->setTabTitle(tab->id(), std::move(title));
+}
+
 void TerminalSessionManager::setTabColorForSession(vtmux::SessionId session, vtbackend::RGBColor color)
 {
     // Reuse the authoritative tab-color path: SessionModel::setTabColor fires tabColorChanged, which
