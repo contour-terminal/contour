@@ -108,6 +108,11 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @param profileName Profile to launch the tab with, or std::nullopt for the app default.
     void createNewTab(vtmux::WindowId window, std::optional<std::string> const& profileName = std::nullopt)
     {
+        // Attach mode: author the tab on the daemon (B3-Qt); its layout re-push
+        // reconciles it into a local tab. A local factory returns false and the
+        // tab is created here as usual.
+        if (_sessionFactory.requestRemoteTab())
+            return;
         createSession(window, profileName);
     }
 

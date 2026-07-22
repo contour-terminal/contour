@@ -42,6 +42,8 @@ class RoutingSessionFactory final: public SessionFactory
 
     [[nodiscard]] bool canCreateSession() const noexcept override { return active().canCreateSession(); }
 
+    [[nodiscard]] bool requestRemoteTab() override { return active().requestRemoteTab(); }
+
   private:
     [[nodiscard]] SessionFactory& active() const noexcept { return _delegate ? *_delegate : *_default; }
 

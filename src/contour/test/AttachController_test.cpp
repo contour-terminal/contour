@@ -332,8 +332,10 @@ TEST_CASE("attach authors a tab on the daemon and reconciles it locally", "[atta
     contour::applyRemoteLayout(app.manager(), win.id, *ac);
     REQUIRE(app.manager().model().window(win.id)->tabCount() == 1);
 
-    // Author a new tab on the daemon and wait for the two-tab layout to arrive.
-    ac->requestCreateTab();
+    // A GUI "new tab" in attach mode routes to the daemon (requestRemoteTab ->
+    // requestCreateTab) instead of creating a local tab; wait for the two-tab
+    // layout to arrive.
+    app.manager().createNewTab(win.id);
     for (auto i = 0; i < 200; ++i)
     {
         if (auto const l = ac->layout(); l && l->tabs.size() == 2)

@@ -114,6 +114,14 @@ class AttachController final: public QObject, public SessionFactory
 
     [[nodiscard]] bool canCreateSession() const noexcept override;
 
+    /// SessionFactory: a GUI "new tab" is authored on the daemon (requestCreateTab)
+    /// rather than created locally; the daemon's layout re-push reconciles it in.
+    [[nodiscard]] bool requestRemoteTab() override
+    {
+        requestCreateTab();
+        return true;
+    }
+
   signals:
     /// A remote session appeared that has no local tab yet (fires on the
     /// reactor thread; connect queued).

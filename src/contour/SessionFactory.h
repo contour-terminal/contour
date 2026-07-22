@@ -74,6 +74,14 @@ class SessionFactory
         std::optional<vtbackend::PageSize> pageSize = std::nullopt,
         std::optional<vtpty::Process::ExecInfo> commandOverride = std::nullopt,
         std::optional<std::string> profileName = std::nullopt) = 0;
+
+    /// Attach mode: authors a new tab on the DAEMON rather than creating one
+    /// locally — the daemon honors it and re-pushes its layout, which reconciles
+    /// into a local tab (B3-Qt). A local factory does nothing and returns false, so
+    /// the manager creates the tab itself.
+    /// @return true if the request was routed to the daemon (the manager must NOT
+    ///         also create a local tab); false for a local factory.
+    [[nodiscard]] virtual bool requestRemoteTab() { return false; }
 };
 
 /// The production SessionFactory: consults the app's active profile and produces either a local
