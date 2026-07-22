@@ -403,6 +403,16 @@ class Line
     [[nodiscard]] std::string toUtf8Trimmed() const;
     [[nodiscard]] std::string toUtf8Trimmed(bool stripLeadingSpaces, bool stripTrailingSpaces) const;
 
+    /// The text of columns [@p begin, @p end) with per-cell SGR escape sequences interleaved so each
+    /// cell's rendition (colours + style flags) is preserved — the shape `capture-pane -e` wants. An
+    /// SGR sequence is emitted only where the rendition CHANGES (reset-first, so nothing leaks), and a
+    /// trailing reset closes any rendition still open at the end. A blank line renders as spaces at the
+    /// default rendition (no escapes).
+    /// @param begin First column to render; clamped to the line.
+    /// @param end One past the last column to render; clamped to the line.
+    /// @return The columns as UTF-8 with interleaved SGR.
+    [[nodiscard]] std::string toUtf8WithSgr(ColumnOffset begin, ColumnOffset end) const;
+
     /// Check if all cells share the same graphics attributes (uniform SGR).
     /// O(1) — reads a cached flag maintained by writeCellToSoA/resetLine. Blank lines
     /// are trivial by definition (uniformly filled with @c fillAttrs).

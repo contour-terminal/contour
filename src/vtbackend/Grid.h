@@ -684,6 +684,17 @@ class Grid
 
     [[nodiscard]] std::string renderMainPageText() const;
     [[nodiscard]] std::string renderAllText() const;
+
+    /// Renders the inclusive row range [@p start, @p end] (LineOffsets: 0 = top of the page, negative =
+    /// into scrollback, positive = down the page) as one string per row, optionally with per-cell SGR
+    /// escapes (@p withSgr). The range is clamped to the addressable rows
+    /// [-historyLineCount(), pageSize().lines - 1]; an empty/inverted range yields no rows. Backs
+    /// `capture-pane` (including `-e` for SGR and `-S -`/`-E` for scrollback).
+    /// @param start First row (inclusive).
+    /// @param end Last row (inclusive).
+    /// @param withSgr Whether to interleave SGR escape sequences preserving each cell's rendition.
+    /// @return One captured line per row.
+    [[nodiscard]] std::vector<std::string> renderRange(LineOffset start, LineOffset end, bool withSgr) const;
     // }}}
 
     // {{{ Stable row identity (the daemon's delta addressing)

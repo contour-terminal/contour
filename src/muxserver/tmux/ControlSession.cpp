@@ -95,6 +95,33 @@ namespace
         return std::ranges::find(arguments, flag) != arguments.end();
     }
 
+    /// Whether the boolean short-flag @p flag is present, honouring tmux's BUNDLED form: `-peqJ` sets
+    /// p, e, q and J. A lone value option in @p valueOptions (e.g. `-S`, `-E`, `-t`) consumes the next
+    /// token as its value, so that value (which may itself begin with `-`, like `-S -`) is not mistaken
+    /// for a flag bundle.
+    /// @param arguments The split command line.
+    /// @param flag The boolean flag character (e.g. 'e').
+    /// @param valueOptions The single-char options that take a following value.
+    [[nodiscard]] bool hasBooleanFlag(std::vector<std::string> const& arguments,
+                                      char flag,
+                                      std::string_view valueOptions)
+    {
+        for (std::size_t i = 1; i < arguments.size(); ++i)
+        {
+            auto const& arg = arguments[i];
+            if (arg.size() < 2 || arg[0] != '-')
+                continue; // a value or bare token
+            if (arg.size() == 2 && valueOptions.contains(arg[1]))
+            {
+                ++i; // a lone value option: skip its value
+                continue;
+            }
+            if (arg.find(flag, 1) != std::string::npos)
+                return true; // present in this bundle of boolean flags
+        }
+        return false;
+    }
+
     /// Collects every value of a repeatable value-carrying option (`-A x -A y`).
     [[nodiscard]] std::vector<std::string_view> valuesOf(std::vector<std::string> const& arguments,
                                                          std::string_view flag)
@@ -640,21 +667,40 @@ ControlSession::HandlerResult ControlSession::commandSendKeys(std::vector<std::s
 
 ControlSession::HandlerResult ControlSession::commandCapturePane(std::vector<std::string> const& arguments)
 {
+    constexpr auto valueOptions = std::string_view { "tSEb" };       // capture-pane's value-taking options
+    auto const quiet = hasBooleanFlag(arguments, 'q', valueOptions); // swallow errors → empty capture
     auto pane = resolvePane(arguments);
     if (!pane)
-        return std::unexpected(pane.error());
+        return quiet ? HandlerResult { std::vector<std::string> {} } : std::unexpected(pane.error());
     auto* terminal = _host.terminal((*pane)->session());
     if (terminal == nullptr)
-        return std::unexpected("pane has no live session");
+        return quiet ? HandlerResult { std::vector<std::string> {} }
+                     : std::unexpected("pane has no live session");
 
-    auto lines = std::vector<std::string> {};
-    auto const text = terminal->primaryScreen().renderMainPageText();
-    for (auto const line: std::views::split(text, '\n'))
-        lines.emplace_back(std::string_view { line });
-    // renderMainPageText ends each row with LF; drop the trailing empty piece.
-    if (!lines.empty() && lines.back().empty())
-        lines.pop_back();
-    return lines;
+    auto const& grid = terminal->primaryScreen().grid();
+    // tmux capture rows: 0 = top of the visible page, negative = into scrollback — the same coordinates
+    // as the grid's LineOffset. `-S -` starts at the top of history; `-E -` ends at the visible bottom.
+    // `-e` interleaves SGR. `-p`/`-J` are accepted (the reply IS the printed text; wrapped-line joining
+    // is not yet implemented). renderRange clamps the range to the addressable rows.
+    auto const historyTop = -boxed_cast<vtbackend::LineOffset>(grid.historyLineCount());
+    auto const visibleBottom = unbox<vtbackend::LineOffset>(grid.pageSize().lines) - vtbackend::LineOffset(1);
+    auto const rowOf =
+        [&](std::string_view flag, vtbackend::LineOffset dash, vtbackend::LineOffset fallback) {
+            auto const values = valuesOf(arguments, flag);
+            if (values.empty())
+                return fallback;
+            if (values.front() == "-")
+                return dash;
+            auto row = std::int64_t {};
+            auto const text = values.front();
+            auto const [ptr, ec] = std::from_chars(text.data(), text.data() + text.size(), row);
+            if (ec != std::errc {} || ptr != text.data() + text.size())
+                return fallback;
+            return vtbackend::LineOffset(static_cast<int>(row));
+        };
+    auto const start = rowOf("-S", historyTop, vtbackend::LineOffset(0));
+    auto const end = rowOf("-E", visibleBottom, visibleBottom);
+    return grid.renderRange(start, end, /*withSgr=*/hasBooleanFlag(arguments, 'e', valueOptions));
 }
 
 ControlSession::HandlerResult ControlSession::commandRenameWindow(std::vector<std::string> const& arguments)

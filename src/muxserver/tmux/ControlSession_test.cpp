@@ -115,14 +115,15 @@ struct ControlHarness
 {
     net::PollEventSource source;
     net::EventLoop loop { source };
-    SessionHost host { loop,
-                       [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
-                       vtbackend::Settings {},
-                       /*startPumps=*/false };
+    SessionHost host;
     net::testing::SocketPair pair = *net::testing::makeSocketPair(loop);
     std::unique_ptr<ControlSession> session;
 
-    explicit ControlHarness(ControlSession::Options options = {})
+    explicit ControlHarness(ControlSession::Options options = {}, vtbackend::Settings settings = {}):
+        host { loop,
+               [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+               std::move(settings),
+               /*startPumps=*/false }
     {
         // A fixed clock so guard timestamps are deterministic.
         session = std::make_unique<ControlSession>(
@@ -229,6 +230,71 @@ TEST_CASE("send-keys writes into the target pane's PTY", "[muxserver][control]")
     auto& tapped = dynamic_cast<muxserver::TappingPty&>(terminal->device());
     auto& mock = dynamic_cast<vtpty::MockPty&>(tapped.inner());
     CHECK(mock.stdinBuffer() == "echo hi\r");
+}
+
+TEST_CASE("capture-pane returns the visible text, without SGR by default", "[muxserver][control]")
+{
+    auto h = ControlHarness {};
+    h.host.createTab();
+    auto* tab = h.host.model().window(h.host.windowId())->activeTab();
+    auto const paneId = tab->rootPane()->id().value;
+    auto const session = tab->rootPane()->session();
+    h.host.terminal(session)->writeToScreen("\033[1;31mRED\033[0m plain\r\n");
+
+    auto const lines = h.exchange({ std::format("capture-pane -p -t %{}", paneId) });
+
+    CHECK(contains(lines, "RED plain")); // the visible text, SGR consumed by the parser
+    // No escape sequences leak into a plain capture (the guard/notification lines carry none either).
+    CHECK(std::ranges::none_of(lines, [](auto const& l) { return l.contains("\x1b["); }));
+}
+
+TEST_CASE("capture-pane -e preserves each cell's SGR rendition", "[muxserver][control]")
+{
+    auto h = ControlHarness {};
+    h.host.createTab();
+    auto* tab = h.host.model().window(h.host.windowId())->activeTab();
+    auto const paneId = tab->rootPane()->id().value;
+    auto const session = tab->rootPane()->session();
+    h.host.terminal(session)->writeToScreen("\033[1;31mRED\033[0m plain\r\n");
+
+    auto const lines = h.exchange({ std::format("capture-pane -pe -t %{}", paneId) });
+
+    // The bold-red run is re-emitted as SGR (bundled -pe, so the -e is honoured), reset before the
+    // default " plain" run.
+    CHECK(contains(lines, "\x1b[0;1;31mRED"));
+    CHECK(contains(lines, "\x1b[0m plain"));
+}
+
+TEST_CASE("capture-pane -S - includes scrollback beyond the visible page", "[muxserver][control]")
+{
+    auto settings = vtbackend::Settings {};
+    settings.maxHistoryLineCount = vtbackend::LineCount(1000);
+    auto h = ControlHarness { {}, settings };
+    h.host.createTab();
+    auto* tab = h.host.model().window(h.host.windowId())->activeTab();
+    auto const paneId = tab->rootPane()->id().value;
+    auto const session = tab->rootPane()->session();
+
+    // Push a distinctive first line far above the 25-row visible page, into scrollback.
+    auto* terminal = h.host.terminal(session);
+    terminal->writeToScreen("MARKER-FIRST\r\n");
+    for (auto const i: std::views::iota(0, 100))
+        terminal->writeToScreen(std::format("filler-{}\r\n", i));
+
+    auto const visible = h.exchange({ std::format("capture-pane -p -t %{}", paneId) });
+    // A second harness for the history capture (exchange() closes the session).
+    auto h2 = ControlHarness { {}, settings };
+    h2.host.createTab();
+    auto* tab2 = h2.host.model().window(h2.host.windowId())->activeTab();
+    auto const paneId2 = tab2->rootPane()->id().value;
+    auto* terminal2 = h2.host.terminal(tab2->rootPane()->session());
+    terminal2->writeToScreen("MARKER-FIRST\r\n");
+    for (auto const i: std::views::iota(0, 100))
+        terminal2->writeToScreen(std::format("filler-{}\r\n", i));
+    auto const history = h2.exchange({ std::format("capture-pane -p -S - -t %{}", paneId2) });
+
+    CHECK_FALSE(contains(visible, "MARKER-FIRST")); // scrolled out of the visible page
+    CHECK(contains(history, "MARKER-FIRST"));       // but retained in, and captured from, history
 }
 
 TEST_CASE("%output escapes control bytes and never breaks a guard block", "[muxserver][control]")

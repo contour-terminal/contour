@@ -202,6 +202,24 @@ std::string Grid::renderMainPageText() const
     return text;
 }
 
+std::vector<std::string> Grid::renderRange(LineOffset start, LineOffset end, bool withSgr) const
+{
+    auto const top = -boxed_cast<LineOffset>(historyLineCount());
+    auto const bottom = unbox<LineOffset>(_pageSize.lines) - LineOffset(1);
+    auto const from = std::clamp(start, top, bottom);
+    auto const to = std::clamp(end, top, bottom);
+
+    auto lines = std::vector<std::string> {};
+    if (from > to)
+        return lines;
+    lines.reserve(unbox<size_t>(to - from) + 1);
+    auto const columns = unbox<ColumnOffset>(_pageSize.columns);
+    for (auto y = from; y <= to; ++y)
+        lines.push_back(withSgr ? lineAt(y).toUtf8WithSgr(ColumnOffset(0), columns)
+                                : lineAt(y).toUtf8(ColumnOffset(0), columns));
+    return lines;
+}
+
 Line& Grid::lineAt(LineOffset line) noexcept
 {
     return _lines[unbox<long>(line)];
