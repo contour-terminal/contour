@@ -323,6 +323,20 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
             follow.lastCursorShape = cursorPs;
         }
 
+        // Live working directory (OSC 7): pull+diff; the snapshot carries it in
+        // SessionState below. Only propagate once one was actually set.
+        auto const& cwd = terminal->currentWorkingDirectory();
+        if (!cwd.empty() && (!follow.cwdKnown || cwd != follow.lastCwd))
+        {
+            if (!snapshot)
+            {
+                delta.cwdChanged = 1;
+                delta.cwd = cwd;
+            }
+            follow.lastCwd = cwd;
+            follow.cwdKnown = true;
+        }
+
         if (snapshot)
         {
             auto& snap = state.emplace();
@@ -335,6 +349,7 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
             snap.cursorColumn = delta.cursorColumn;
             snap.title = terminal->windowTitle();
             snap.cursorShape = cursorPs;
+            snap.cwd = terminal->currentWorkingDirectory();
         }
     }
 
@@ -349,7 +364,7 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
     auto const cursorMoved =
         delta.cursorLine != follow.lastCursorLine || delta.cursorColumn != follow.lastCursorColumn;
     if (delta.snapshot != 0 || !delta.lines.empty() || modesChanged || cursorMoved || delta.titleChanged != 0
-        || delta.cursorShapeChanged != 0)
+        || delta.cursorShapeChanged != 0 || delta.cwdChanged != 0)
     {
         follow.lastModes = delta.setModes;
         follow.lastCursorLine = delta.cursorLine;

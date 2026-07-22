@@ -142,8 +142,10 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       **under the client's own permission** (the daemon forwards unconditionally — `Terminal::
       copyToClipboard` is ungated; read stays gated by `Settings::allowClipboardRead`). *Landed
       2026-07-22.* Closed-loop tests for all three (bell/notify/clipboard) via a recording mirror.
-- [ ] **A7. OSC 7 cwd.** Add a `cwd` field to `SessionState`; pull `currentWorkingDirectory()` +
-      diff live. Feeds split-in-same-dir semantics on the client.
+- [x] **A7. OSC 7 cwd.** `SessionState.cwd` + `Delta.cwd`/`cwdChanged`; `pushDelta` pull+diffs
+      `currentWorkingDirectory()`; `ScreenMirror` re-emits `OSC 7`, so the mirror terminal's
+      `currentWorkingDirectory()` (which the GUI queries for split-in-same-dir) tracks the server.
+      CodecVersion → 6. Closed-loop test. *Landed 2026-07-22.*
 - [ ] **A8. Input-encoding modes beyond `MirroredModes`.** Add Kitty keyboard (`CSI>u`) and
       `modifyOtherKeys` to the mirrored set (or a negotiated-modes sub-channel) so client input
       encoding matches the server-side app's negotiation (`MirroredModes.h:25-41`).
@@ -270,8 +272,11 @@ runtime-gated net tests, watch the Windows job after each push.
   closed-loop tests. Suite green (115/2619).
 - 2026-07-22 · Windows/clangcl-release · **A3 done** — live cursor shape (DECSCUSR) via
   `Delta.cursorShape` (pull+diff) + `ScreenMirror` `CSI Ps SP q`. CodecVersion → 5. Retires F9. Suite
-  green (116/2621). A3b (default colors/palette) deferred. Next: A7 (cwd), A8 (kitty-keyboard modes),
-  A9 (thin client on ScreenMirror), then WS-C core (TLS + token + daemon TCP, net/muxserver layer).
+  green (116/2621). A3b (default colors/palette) deferred.
+- 2026-07-22 · Windows/clangcl-release · **A7 done** — live OSC 7 cwd (`SessionState.cwd` +
+  `Delta.cwd`, pull+diff, `ScreenMirror` re-emit). CodecVersion → 6. Suite green (117/2623).
+  **WS-A VT features now: A1/A2/A3/A4/A5/A6/A7 done; A3b, A8, A9 remain.** Next: A8 (kitty-keyboard/
+  modifyOtherKeys mirroring), A9 (thin client on ScreenMirror), then WS-C core (TLS + token + TCP).
 
 ## Open decisions / risks
 

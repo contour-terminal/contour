@@ -94,6 +94,11 @@ class NativeSession final: public SessionStreamEvents
         /// The DECSCUSR Ps last sent (-1 until the first snapshot), so a cursor-shape
         /// change carries (and forces) a delta only when it actually changed.
         int lastCursorShape = -1;
+        /// The OSC 7 working-directory URL last sent, so a cwd change carries (and
+        /// forces) a delta only when it actually changed. `_cwdKnown` distinguishes
+        /// "never sent" from "sent empty".
+        std::string lastCwd;
+        bool cwdKnown = false;
     };
 
     void handlePdu(proto::DecodedFrame const& frame);

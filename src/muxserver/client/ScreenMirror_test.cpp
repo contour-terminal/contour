@@ -526,3 +526,28 @@ TEST_CASE("a live cursor-shape change reaches the mirror", "[muxserver][mirror]"
 
     h.loop.blockOn(drive(&h, std::move(scenario)));
 }
+
+TEST_CASE("a live working-directory change reaches the mirror", "[muxserver][mirror]")
+{
+    auto h = MirrorHarness {};
+    h.host.createTab();
+    auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    h.serverTerminal(session)->writeToScreen("y");
+
+    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+        co_await waitUntil(
+            &h->loop, [&] { return h->mirror->primaryScreen().grid().renderMainPageText().contains("y"); });
+
+        // OSC 7: a cwd-only change must push and reach the mirror terminal's
+        // currentWorkingDirectory (which the GUI queries for split-in-same-dir).
+        serverWrites(h, session, "\033]7;file:///home/user/project\033\\");
+        co_await waitUntil(
+            &h->loop, [&] { return h->mirror->currentWorkingDirectory() == "file:///home/user/project"; });
+        CHECK(h->mirror->currentWorkingDirectory() == "file:///home/user/project");
+        CHECK(h->serverTerminal(session)->currentWorkingDirectory() == "file:///home/user/project");
+
+        h->client->detach();
+    }(&h, session);
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}

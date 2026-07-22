@@ -38,6 +38,7 @@ void RemoteScreen::apply(proto::SessionState const& state)
     cursorColumn = state.cursorColumn;
     title = state.title;
     cursorShape = state.cursorShape;
+    cwd = state.cwd;
 }
 
 void RemoteScreen::apply(proto::Delta const& delta)
@@ -62,6 +63,8 @@ void RemoteScreen::apply(proto::Delta const& delta)
         title = delta.title; // keep it current so a later fullReplay re-titles correctly
     if (delta.cursorShapeChanged != 0)
         cursorShape = delta.cursorShape;
+    if (delta.cwdChanged != 0)
+        cwd = delta.cwd;
 
     for (auto const& line: delta.lines)
     {

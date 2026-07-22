@@ -262,6 +262,8 @@ std::string ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& 
         out += std::format("\033]0;{}\033\\", delta.title);
     if (delta.cursorShapeChanged != 0)
         out += std::format("\033[{} q", delta.cursorShape); // DECSCUSR
+    if (delta.cwdChanged != 0)
+        out += std::format("\033]7;{}\033\\", delta.cwd); // OSC 7 working directory
     out += "\033[0m";
     out += cup(delta.cursorLine + 1, delta.cursorColumn + 1);
     if (containsValue(_setModes, VisibleCursorModeNumber))
@@ -330,6 +332,8 @@ std::string ScreenMirror::fullReplay(RemoteScreen const& screen)
     out += std::format("\033]0;{}\033\\", screen.title);
     if (screen.cursorShape != 0)
         out += std::format("\033[{} q", screen.cursorShape); // DECSCUSR
+    if (!screen.cwd.empty())
+        out += std::format("\033]7;{}\033\\", screen.cwd); // OSC 7 working directory
     syncModes(out, screen);
     appendImages(out, screen);
     out += "\033[0m";

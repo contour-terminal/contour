@@ -90,7 +90,8 @@ TEST_CASE("every catalog PDU round-trips", "[muxserver][proto]")
                        .title = "vim",
                        .defaultForeground = 0xDDDDDDFF,
                        .defaultBackground = 0x000000FF,
-                       .palette = { 0x000000FF, 0xFF0000FF } },
+                       .palette = { 0x000000FF, 0xFF0000FF },
+                       .cwd = "file:///home/user/src" },
         Delta { .session = 9,
                 .generation = 2,
                 .seqno = 1234,
@@ -110,7 +111,9 @@ TEST_CASE("every catalog PDU round-trips", "[muxserver][proto]")
                 .titleChanged = 1,
                 .title = "~/src/contour — vim",
                 .cursorShapeChanged = 1,
-                .cursorShape = 4 },
+                .cursorShape = 4,
+                .cwdChanged = 1,
+                .cwd = "file:///home/user" },
         SessionEvent { .session = 4, .kind = 1, .a = "Build finished", .b = "3 warnings, 0 errors" },
     };
 

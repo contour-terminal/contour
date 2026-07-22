@@ -132,6 +132,7 @@ struct SessionState
     uint32_t defaultForeground = 0; ///< Raw RGBA.
     uint32_t defaultBackground = 0; ///< Raw RGBA.
     std::vector<uint32_t> palette;  ///< Indexed colors, raw RGBA.
+    std::string cwd;                ///< The OSC 7 working-directory URL, if known.
     bool operator==(SessionState const&) const = default;
 };
 
@@ -220,6 +221,10 @@ struct Delta
     /// holds the DECSCUSR Ps value (1 blink block … 6 steady bar) to re-emit.
     uint8_t cursorShapeChanged = 0;
     uint8_t cursorShape = 0;
+    /// Set (1) when the working directory changed in this batch; `cwd` then holds
+    /// the new OSC 7 URL to re-emit.
+    uint8_t cwdChanged = 0;
+    std::string cwd;
     bool operator==(Delta const&) const = default;
 };
 

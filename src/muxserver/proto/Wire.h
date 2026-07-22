@@ -31,7 +31,8 @@ namespace muxserver::proto
 /// (bell / desktop notifications / OSC 52 clipboard); the latter is a new tag
 /// and forward-compatible on its own, but the Delta field change bumps the wire.
 /// v5 added Delta.cursorShape (live DECSCUSR propagation).
-constexpr uint32_t CodecVersion = 5;
+/// v6 added Delta.cwd / SessionState.cwd (live OSC 7 working-directory propagation).
+constexpr uint32_t CodecVersion = 6;
 
 /// The largest frame payload the decoder will accept. A peer-declared length
 /// beyond this is rejected outright (FrameTooLarge) rather than treated as
