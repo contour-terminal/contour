@@ -94,6 +94,11 @@ class AttachController final: public QObject, public SessionFactory
     /// is not bound or the connection is gone.
     void requestSplitPane(vtpty::Pty const* actingPty, bool vertical);
 
+    /// Asks the daemon to close the pane hosting @p session (destroying that remote
+    /// session). Sent when the user closes a mirror pane, so the session is really
+    /// removed rather than left running headless.
+    void requestClosePane(uint64_t session);
+
     /// @return The daemon's most recent tab/pane layout, or nullopt if none has
     ///         arrived yet. A thread-safe copy — the reactor thread updates it.
     ///         The GUI reconstructs its own tab/split tree from this (B2).

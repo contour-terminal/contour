@@ -221,6 +221,14 @@ void AttachController::requestSplitPane(vtpty::Pty const* actingPty, bool vertic
     });
 }
 
+void AttachController::requestClosePane(uint64_t session)
+{
+    _reactor.post([this, session] {
+        if (_client != nullptr)
+            _client->closePane(session);
+    });
+}
+
 void AttachController::primeBinding(uint64_t session)
 {
     if (_client == nullptr)
@@ -238,16 +246,25 @@ void AttachController::primeBinding(uint64_t session)
 
 void AttachController::unbind(uint64_t session)
 {
-    auto const lock = std::lock_guard { _mutex };
-    _bindings.erase(session);
-
-    // A pty destroyed while the connection is still live means the user closed
-    // that one tab: tombstone the id so its still-running remote session cannot
-    // resurrect the tab through a later delta. During teardown (`_stopped`) the
-    // whole connection is ending, so tombstoning would be pointless — and it is
-    // exactly the detach path that must NOT tombstone every session.
-    if (!_stopped)
-        _closedSessions.insert(session);
+    auto userClosed = false;
+    {
+        auto const lock = std::lock_guard { _mutex };
+        _bindings.erase(session);
+        // A pty destroyed while the connection is still live means the user closed
+        // that one pane. Tombstone the id so its still-running remote session cannot
+        // resurrect the pane through a later delta before the daemon removes it.
+        // During teardown (`_stopped`) the whole connection is ending, so neither the
+        // tombstone nor authoring a close applies — the detach path must do neither.
+        if (!_stopped)
+        {
+            _closedSessions.insert(session);
+            userClosed = true;
+        }
+    }
+    // Author the close on the daemon so the remote session is actually destroyed —
+    // otherwise it lingers headless. (Post is thread-safe; done outside the lock.)
+    if (userClosed)
+        requestClosePane(session);
 }
 
 void AttachController::closeAllBindings()

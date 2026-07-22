@@ -8,9 +8,12 @@
 #include <optional>
 #include <ranges>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #include <muxserver/client/LayoutReconstruction.h>
 #include <muxserver/proto/Pdu.h>
+#include <vtmux/Pane.h>
 #include <vtmux/SessionModel.h>
 #include <vtmux/Tab.h>
 
@@ -26,6 +29,18 @@ namespace
         while (node->split != 0 && !node->children.empty())
             node = &node->children.front();
         return node->session;
+    }
+
+    /// Collects every leaf session of @p pane into @p out.
+    void collectSessions(muxserver::proto::WirePane const& pane, std::unordered_set<uint64_t>& out)
+    {
+        if (pane.split == 0)
+        {
+            out.insert(pane.session);
+            return;
+        }
+        for (auto const& child: pane.children)
+            collectSessions(child, out);
     }
 
     /// @return True if any leaf of @p pane carries a remote session already bound to
@@ -141,6 +156,35 @@ void applyRemoteLayout(TerminalSessionManager& manager,
             manager.splitActivePane(op->vertical, acting->second);
         }
     }
+
+    // Subtractive: close any local pane whose remote session vanished from the
+    // layout — a pane closed on the daemon (by this or another client) or that
+    // exited. Collect first (closing mutates the model), then activate each target
+    // pane and close it (closeActivePane removes the tab's ACTIVE pane).
+    auto layoutSessions = std::unordered_set<uint64_t> {};
+    for (auto const& wireTab: layout->tabs)
+        collectSessions(wireTab.root, layoutSessions);
+    auto toClose = std::vector<TerminalSession*> {};
+    for (auto const& [remote, local]: remoteToLocal(manager, window, controller))
+        if (!layoutSessions.contains(remote))
+            toClose.push_back(local);
+    for (auto* local: toClose)
+    {
+        auto* win = manager.model().window(window);
+        if (win == nullptr)
+            break;
+        for (auto const i: std::views::iota(0, win->tabCount()))
+        {
+            auto* tab = win->tabAt(i);
+            if (auto* leaf = tab->rootPane()->findLeaf(local->modelSessionId()))
+            {
+                manager.model().setActivePane(tab->id(), leaf->id());
+                manager.closeActivePane(local);
+                break;
+            }
+        }
+    }
+
     controller.setRealizingLayout(false);
 }
 

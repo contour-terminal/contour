@@ -355,6 +355,60 @@ TEST_CASE("attach reconciles a split authored on the daemon after attach", "[att
     ac->stop();
 }
 
+// B3-Qt: a pane closed on the daemon (here, or by another client) is removed
+// locally by the subtractive reconciler — the remote session leaves the layout,
+// so its local pane is terminated.
+TEST_CASE("attach reconciles a pane closed on the daemon by removing it locally", "[attach][controller]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto const second = daemon.onDaemon([&daemon]() -> vtmux::SessionId {
+        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
+        daemon.host->splitActivePane(tab->id(), vtmux::SplitState::Vertical, 0.5);
+        return tab->activePane()->session(); // the new (active) pane's session
+    });
+
+    auto acOwned = std::make_unique<contour::AttachController>(daemon.endpoint());
+    auto* ac = acOwned.get();
+    contour::test::TestApp app { std::move(acOwned) };
+    contour::test::ScopedController const win { app.manager() };
+    REQUIRE(ac->connectAndWait(10s).has_value());
+    for (auto i = 0; i < 200 && !ac->layout().has_value(); ++i)
+        std::this_thread::sleep_for(5ms);
+    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    REQUIRE(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 2);
+
+    // Close the second pane ON THE DAEMON; wait for the layout to drop it.
+    daemon.onDaemon([&daemon, second] {
+        daemon.host->handleSessionExit(second);
+        return 0;
+    });
+    for (auto i = 0; i < 200; ++i)
+    {
+        if (auto const l = ac->layout(); l && l->tabs.front().root.children.empty())
+            break;
+        std::this_thread::sleep_for(5ms);
+    }
+    REQUIRE(ac->layout()->tabs.front().root.children.empty());
+
+    // Reconcile: the local pane for the vanished session is terminated (async
+    // teardown, so pump the event loop until the tab is back to a single pane).
+    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    auto const closed = [&] {
+        for (auto i = 0; i < 200; ++i)
+        {
+            QCoreApplication::processEvents();
+            if (app.manager().model().window(win.id)->tabAt(0)->paneCount() == 1)
+                return true;
+            std::this_thread::sleep_for(5ms);
+        }
+        return false;
+    }();
+    CHECK(closed);
+
+    ac->stop();
+}
+
 // B3-Qt: a GUI split in attach mode is authored on the daemon (routed by
 // requestRemoteSplit), which splits the right pane and re-pushes its layout; the
 // reconciler realizes the new pane locally — the full split-authoring loop.
