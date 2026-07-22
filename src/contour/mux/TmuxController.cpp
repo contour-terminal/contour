@@ -32,6 +32,11 @@ namespace
     }
 } // namespace
 
+std::string tmuxResumePaneCommand(uint64_t pane)
+{
+    return std::format("refresh-client -A %{}:continue", pane);
+}
+
 /// The model-owned pane sink: buffers bytes until a local pty is bound, then
 /// feeds it directly. Destroyed by the model on the reactor thread; the
 /// destructor unregisters so the controller never touches a dead feed.
@@ -233,6 +238,16 @@ void TmuxController::applyPendingRenames(TerminalSessionManager& manager)
     }
     for (auto& [session, name]: renames)
         manager.setTabTitleForSession(session, std::move(name));
+}
+
+void TmuxController::panePaused(uint64_t pane, bool paused)
+{
+    // %continue needs nothing (the pane already resumed). On %pause, resume at once: the mirror
+    // consumes output as fast as it arrives, so a pause only stalls it. This fires on the reactor
+    // thread that owns the gateway, so the command can be sent directly.
+    if (!paused || _gateway == nullptr)
+        return;
+    _gateway->sendCommand(tmuxResumePaneCommand(pane));
 }
 
 void TmuxController::exited(std::string const& reason)

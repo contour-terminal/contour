@@ -41,6 +41,14 @@ namespace contour
 class TerminalSessionManager;
 class TerminalSession;
 
+/// The tmux control-mode command that resumes a paused pane. tmux sends `%pause` for a pane whose
+/// output it is buffering; the mirror consumes output as fast as it arrives, so it always wants the
+/// pane resumed. The server parses this as `refresh-client -A %N:continue` (@see ControlSession).
+/// Pure so the exact wire string the server parser consumes is unit-testable.
+/// @param pane The tmux pane id to resume.
+/// @return The control-mode command line.
+[[nodiscard]] std::string tmuxResumePaneCommand(uint64_t pane);
+
 /// The tmux-mirror session factory and pane registry.
 class TmuxController final: public QObject, public SessionFactory, public muxserver::tmux::TmuxModelEvents
 {
@@ -88,6 +96,7 @@ class TmuxController final: public QObject, public SessionFactory, public muxser
     void paneAdded(uint64_t window, uint64_t pane, int columns, int lines) override;
     void paneRemoved(uint64_t window, uint64_t pane) override;
     void windowRenamed(uint64_t window, std::string const& name) override;
+    void panePaused(uint64_t pane, bool paused) override;
     void exited(std::string const& reason) override;
 
   signals:

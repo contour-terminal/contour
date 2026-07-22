@@ -48,6 +48,15 @@ TEST_CASE("tmux %window-renamed retitles the mirrored tab (B5)", "[attach][tmux]
     ctrl->stop();
 }
 
+// F6: the pause-resume command the mirror sends on %pause must be exactly what the server's
+// refresh-client parser consumes (`%N:continue`), so pin the wire string here. The server side of
+// the same contract is covered in ControlSession_test ("refresh-client -A pauses and resumes ...").
+TEST_CASE("tmux resume-pane command matches the server's refresh-client format (B5)", "[attach][tmux]")
+{
+    CHECK(contour::tmuxResumePaneCommand(1) == "refresh-client -A %1:continue");
+    CHECK(contour::tmuxResumePaneCommand(42) == "refresh-client -A %42:continue");
+}
+
 #ifndef _WIN32
 
     #include <array>
