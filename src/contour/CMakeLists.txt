@@ -153,6 +153,7 @@ if(CONTOUR_FRONTEND_GUI)
         TerminalSessionManager.h
         helper.h
         mux/AttachController.h
+        mux/MuxController.h
         mux/MuxLoopThread.h
         mux/RoutingSessionFactory.h
         mux/TmuxController.h
@@ -175,6 +176,7 @@ if(CONTOUR_FRONTEND_GUI)
         WindowController.cpp
         helper.cpp
         mux/AttachController.cpp
+        mux/MuxController.cpp
         mux/TmuxController.cpp
     )
 endif()
@@ -363,6 +365,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/test_main.cpp
             test/Actions_test.cpp
             test/AttachController_test.cpp
+            test/MuxController_test.cpp
             test/TmuxController_test.cpp
             test/AudioNote_test.cpp
             test/BenignQtMessages_test.cpp

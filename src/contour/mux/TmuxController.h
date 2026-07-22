@@ -14,6 +14,7 @@
 /// panes split the tab; ratio/anchor fidelity is a named follow-up.
 
 #include <contour/SessionFactory.h>
+#include <contour/mux/MuxController.h>
 #include <contour/mux/MuxLoopThread.h>
 
 #include <vtpty/ChannelPty.h>
@@ -119,13 +120,7 @@ class TmuxController final: public QObject, public SessionFactory, public muxser
 
     mutable std::mutex _mutex;
     std::condition_variable _connected;
-    enum class State : uint8_t
-    {
-        Connecting,
-        Ready,
-        Failed,
-        Closed
-    };
+    using State = MuxConnectPhase;
     State _state = State::Connecting;
     std::string _failure;
     std::deque<PendingPane> _pending;

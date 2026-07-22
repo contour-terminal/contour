@@ -125,15 +125,15 @@ std::expected<void, std::string> TmuxController::connectAndWait(std::chrono::mil
 {
     _reactor.start([this](net::EventLoop* loop) { return runClient(loop); });
 
-    auto lock = std::unique_lock { _mutex };
-    if (!_connected.wait_for(lock, timeout, [this] { return _state != State::Connecting; }))
+    auto const outcome = awaitMuxConnect(_mutex, _connected, _state, _failure, timeout);
+    if (outcome.timedOut)
     {
-        lock.unlock();
         stop();
         return std::unexpected("timed out waiting for the tmux session's first pane");
     }
-    if (_state != State::Ready)
-        return std::unexpected(_failure.empty() ? std::string("tmux client ended during attach") : _failure);
+    if (!outcome.ready)
+        return std::unexpected(outcome.failure.empty() ? std::string("tmux client ended during attach")
+                                                       : outcome.failure);
     return {};
 }
 
@@ -273,9 +273,7 @@ std::unique_ptr<vtpty::Pty> TmuxController::createPty(std::optional<std::string>
     if (_pending.empty())
     {
         tmuxLog()("No pending tmux pane; handing out an unbound pty.");
-        auto const fallback =
-            pageSize.value_or(vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) });
-        return std::make_unique<vtpty::ChannelPty>(fallback);
+        return makeUnboundFallbackPty(pageSize);
     }
 
     auto const record = _pending.front();

@@ -55,15 +55,15 @@ std::expected<void, std::string> AttachController::connectAndWait(std::chrono::m
 {
     _reactor.start([this](net::EventLoop* loop) { return runClient(loop); });
 
-    auto lock = std::unique_lock { _mutex };
-    if (!_connected.wait_for(lock, timeout, [this] { return _state != State::Connecting; }))
+    auto const outcome = awaitMuxConnect(_mutex, _connected, _state, _failure, timeout);
+    if (outcome.timedOut)
     {
-        lock.unlock();
         stop();
         return std::unexpected("timed out waiting for the daemon's snapshot");
     }
-    if (_state != State::Ready)
-        return std::unexpected(_failure.empty() ? std::string("connection closed during attach") : _failure);
+    if (!outcome.ready)
+        return std::unexpected(outcome.failure.empty() ? std::string("connection closed during attach")
+                                                       : outcome.failure);
     return {};
 }
 
@@ -234,9 +234,7 @@ std::unique_ptr<vtpty::Pty> AttachController::createPty(std::optional<std::strin
         // The creation guards should have prevented this; a session must
         // still be born, so give it a dead-end pty it can close cleanly.
         attachLog()("No pending remote session; handing out an unbound pty.");
-        auto const fallback =
-            pageSize.value_or(vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) });
-        return std::make_unique<vtpty::ChannelPty>(fallback);
+        return makeUnboundFallbackPty(pageSize);
     }
 
     auto const [session, pendingColumns, pendingLines] = _pending.front();

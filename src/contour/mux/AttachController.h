@@ -14,6 +14,7 @@
 /// Input and resize flow back through the pty's sinks onto the reactor.
 
 #include <contour/SessionFactory.h>
+#include <contour/mux/MuxController.h>
 #include <contour/mux/MuxLoopThread.h>
 
 #include <vtpty/ChannelPty.h>
@@ -138,13 +139,7 @@ class AttachController final: public QObject, public SessionFactory
 
     mutable std::mutex _mutex;
     std::condition_variable _connected;
-    enum class State : uint8_t
-    {
-        Connecting,
-        Ready,
-        Failed,
-        Closed
-    };
+    using State = MuxConnectPhase;
     State _state = State::Connecting;
     std::string _failure;
     std::deque<PendingSession> _pending; ///< Discovered remote sessions without a local tab.
