@@ -16,6 +16,12 @@ TEST_CASE("unescapeOutput reverses tmux's octal escaping exactly", "[muxserver][
     // A backslash NOT followed by three octal digits passes through raw.
     CHECK(unescapeOutput("\\9x") == "\\9x");
     CHECK(unescapeOutput("\\01") == "\\01");
+    // The largest byte tmux emits, \377 (0xFF), decodes exactly.
+    CHECK(unescapeOutput("\\377") == "\xff");
+    // An octal sequence that would decode ABOVE 0xFF (a leading digit of 4-7) is not one tmux emits;
+    // it must pass through literally, NOT be truncated to a wrong byte (\400 would become 0x00).
+    CHECK(unescapeOutput("\\400") == "\\400");
+    CHECK(unescapeOutput("\\777") == "\\777");
     // UTF-8 passes through untouched (tmux never escapes >= 0x80).
     CHECK(unescapeOutput("caf\xc3\xa9") == "caf\xc3\xa9");
 }

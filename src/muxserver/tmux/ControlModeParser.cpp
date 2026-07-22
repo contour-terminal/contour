@@ -187,9 +187,16 @@ std::string unescapeOutput(std::string_view escaped)
         {
             auto const value =
                 ((escaped[i + 1] - '0') * 64) + ((escaped[i + 2] - '0') * 8) + (escaped[i + 3] - '0');
-            out += static_cast<char>(value);
-            i += 3;
-            continue;
+            // tmux only octal-escapes bytes (\000-\377). A sequence that decodes
+            // above 0xFF (a leading digit of 4-7) is not one tmux emits, so copy it
+            // through literally rather than truncating to a wrong byte (e.g. \400
+            // would otherwise become 0x00).
+            if (value <= 0xFF)
+            {
+                out += static_cast<char>(value);
+                i += 3;
+                continue;
+            }
         }
         out += escaped[i];
     }
