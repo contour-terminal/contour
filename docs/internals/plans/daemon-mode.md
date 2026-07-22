@@ -285,12 +285,17 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       outbound send verbs `createTab()`/`splitPane()`/`closePane()`. Tests: PDU round-trip + an
       end-to-end where the client authors a tab and the daemon honors it (subscribed observer re-pushes
       a two-tab `LayoutState`; the daemon's `SessionModel` really grew). *Landed 2026-07-22; muxserver
-      suite green (125/2672).* **Remaining (Qt follow-up, CI-verified):** wire the GUI to call these
-      verbs from `AttachController`, **relax `canCreateSession()`** from "is a session pending" to "is
-      the connection live" (`AttachController.cpp:186`, lifting the four `TerminalSessionManager` gates
-      at `:128,:187,:345,:1289`), and **retire the `_closedSessions` tombstone** now that a real close
-      verb exists (`AttachController.h:147-153`). `MoveTab`/`ActivateTab`/`SetPaneRatio` are additive
-      tags to add as the GUI needs them (no codec bump).
+      suite green (125/2672).* **GUI authoring — tab creation DONE (2026-07-22):** `SessionFactory`
+      gained `requestRemoteTab()` (default false = local); `AttachController` overrides it to
+      `requestCreateTab()` → `AttachClient::createTab()`; `RoutingSessionFactory` forwards it;
+      `TerminalSessionManager::createNewTab` consults it and skips local creation. So a GUI "new tab"
+      is authored on the daemon, whose layout re-push the incremental reconciler realizes locally.
+      `canCreateSession()` **relaxed** (done with B2). Verified end-to-end over a two-reactor TLS attach
+      (`manager.createNewTab` → daemon → 2 local tabs). **Remaining GUI authoring:** split-pane and
+      close-pane (need a pane→daemon-tab map from the layout, and — for a multi-pane tab — an
+      `ActivatePane` verb so the daemon splits/closes the intended pane, since `SplitPane`/`ClosePane`
+      act on the tab's active pane), then **retire the `_closedSessions` tombstone** once close
+      authoring lands. `MoveTab`/`ActivateTab`/`SetPaneRatio` are additive tags (no codec bump).
 - [ ] **B4. Multi-window onto one daemon.** Decide the window model: v1 = client opens multiple GUI
       windows, each bound to a daemon window via `LayoutState` (the daemon starts with one window;
       grow to multiple via lifecycle PDUs). Note **F8** multi-client resize policy (last-proposal-wins
@@ -549,8 +554,17 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   every attach test now covers the two-reactor handshake, plus a focused `net` regression test. All
   suites green (net 36/165, muxserver 136/2769, contour_gui 9820). **Remaining: B4 (multi-window),
   B3-Qt authoring verbs (canCreateSession already relaxed), B5 (interop-only tmux polish).**
+- 2026-07-22 · Windows/clangcl-release · **B3-Qt tab authoring + incremental reconciliation done.**
+  `applyRemoteLayout` is now incremental (realizes each daemon tab not already shown; `isBound` gates
+  it), so a tab authored on the daemon appears locally without rebuilding existing tabs.
+  `AttachController::requestCreateTab()` sends `CreateTab`; `SessionFactory::requestRemoteTab()`
+  (forwarded by `RoutingSessionFactory`, consulted by `TerminalSessionManager::createNewTab`) routes a
+  GUI "new tab" to the daemon instead of a local shell. Verified end-to-end over a two-reactor TLS
+  attach (`manager.createNewTab` → daemon grows to 2 tabs → reconciler realizes the second). contour_gui
+  9827, muxserver 136/2769. **Remaining: split/close authoring (needs a pane→daemon-tab map and an
+  ActivatePane verb for multi-pane tabs) + retire `_closedSessions`; B4 multi-window; B5 tmux polish.**
 
-## Remaining GUI work — turnkey implementation plan (B4 · B3-Qt authoring · B5)
+## Remaining GUI work — turnkey implementation plan (B3-Qt split/close · B4 · B5)
 
 All protocol/transport/parity work is done and verified. What is left is GUI-side
 reconstruction in `src/contour/`, whose tests are **AF_UNIX/POSIX-only** (the
