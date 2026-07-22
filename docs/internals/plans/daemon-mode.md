@@ -166,14 +166,17 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
 
 ### WS-B — Layout: tabs / panes / multi-window (roadmap F1/F2)
 
-- [ ] **B1. `LayoutState` PDU (F1, outbound).** New PDU carrying the window→tab→pane tree:
-      per-node `{orientation, ratio}`, per-leaf `{sessionId, paneId}`, plus active-pane, zoom
-      (`Tab::zoomedLeafId()`), active-tab, and tab title/color. `NativeSession` subscribes to
-      `ModelEvents` via `SessionHost::subscribe` (`SessionHost.h:177`) and emits on each callback +
-      in the attach snapshot. Reuse the recursive orientation/ratio capture of
-      `serializePane`/`serializeTab` (`LayoutTree.cpp:142-172`) **but add the ids** the existing
-      `LayoutPane` intentionally omits. The daemon already reprojects PTY sizes before fan-out
-      (`fanOutAfterReproject`), so geometry is correct for free.
+- [x] **B1. `LayoutState` PDU (F1, outbound).** New tag-11 PDU (forward-compatible, no codec bump):
+      `LayoutState{window, activeTab, tabs[]}` where each `WireTab` carries `{tabId, activePane,
+      zoomedPane, title, color, root}` and `WirePane` is a recursive `{paneId, split, session,
+      ratio×10000, children[]}` (depth-bounded decoder). `NativeSession` serializes the daemon's
+      `vtmux::SessionModel` (`serializeLayout`/`serializePaneTree`), pushes it **leading the attach
+      snapshot** (so the client builds tabs before content streams in) and **on every model change**
+      via a `LayoutObserver` (a `vtmux::ModelEvents` subscribed through a new `ScopedModelSubscription`
+      in `serveNativeClient`). `AttachClient` grew `setLayoutHandler`. Tests: PDU round-trip + a
+      split-pane end-to-end (attach → `LayoutState` shows the vertical split, 60/40, two distinct-session
+      leaves). *Landed 2026-07-22; muxserver suite green (122/2652).* **B2 (the GUI consuming it in
+      `AttachController` → `SessionModel`) is the Qt follow-up.**
 - [ ] **B2. Client applies `LayoutState` (AttachController).** Replace the
       `onUpdate`→`PendingSession` flattening (`AttachController.cpp:108-142`) with a layout applier
       that drives the GUI's own `SessionModel` verbs (`createTab`/`splitActivePane`/`setPaneRatio`/
@@ -327,9 +330,13 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   (POSIX + Win32 `attachFlow`), so the raw-TTY client gains OSC 8 / images / mouse-modes / title /
   colors / cursor; `TtyRenderer` retired as primary path. Build clean; suite green (121/2635).
   **WS-A is now complete except A8** (kitty-keyboard/modifyOtherKeys mirroring — niche, needs a new
-  vtbackend getter). **Remaining overall: A8, WS-B layout (Qt payoff), C3/C4/C5-client (Qt CLI/config
-  + client TCP+TLS connect), B5 tmux polish.** The buildable/testable native-parity + remote-transport
-  core (both headline goals) is done and verified here.
+  vtbackend getter).
+- 2026-07-22 · Windows/clangcl-release · **B1 done** — `LayoutState` PDU (recursive tab/pane tree,
+  tag 11, no codec bump) + `NativeSession` serialize/emit (snapshot-leading + live via a
+  `LayoutObserver`/`ScopedModelSubscription`) + `AttachClient::setLayoutHandler`. Split-pane
+  end-to-end test. muxserver suite green (122/2652). **The daemon's tabs/panes are now on the wire;**
+  **B2 (GUI apply in `AttachController`) is the Qt follow-up.** Remaining: A8, A10 (multi-page — see
+  WS-A), B2/B3/B4 (Qt), C3/C4/C5 (Qt CLI/config + client connect), B5 tmux polish.
 
 ## Open decisions / risks
 

@@ -140,6 +140,14 @@ class AttachClient final
         _onSessionEvent = std::move(handler);
     }
 
+    /// Invoked when the daemon's tab/pane layout arrives — a GUI frontend
+    /// reconstructs its tabs and split trees from it. Pushed on attach and on
+    /// every model change. (A thin single-session client may ignore it.)
+    void setLayoutHandler(std::function<void(proto::LayoutState const&)> handler)
+    {
+        _onLayout = std::move(handler);
+    }
+
     /// Sends keyboard/paste bytes to @p session's PTY.
     void sendInput(uint64_t session, std::string_view bytes);
 
@@ -174,6 +182,7 @@ class AttachClient final
     std::function<void(RemoteScreen const&, proto::Delta const&)> _onUpdate;
     std::function<void(RemoteScreen const&, uint32_t)> _onImage;
     std::function<void(RemoteScreen const&, proto::SessionEvent const&)> _onSessionEvent;
+    std::function<void(proto::LayoutState const&)> _onLayout;
     std::map<uint64_t, RemoteScreen> _screens;
     /// Outstanding image fetches: request serial → (session, imageId). The reply
     /// carries no session, so the serial is what routes it to the right screen.

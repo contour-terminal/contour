@@ -189,21 +189,27 @@ TEST_CASE("the native handshake answers ServerHello and a full snapshot", "[muxs
     auto const sessionId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
     h.host.terminal(sessionId)->writeToScreen("hello native");
 
-    // Expect: ServerHello, SessionState, Delta (snapshot).
-    auto const received = h.exchange({ proto::ClientHello {} }, 3);
-    REQUIRE(received.size() == 3);
+    // Expect: ServerHello, LayoutState, SessionState, Delta (snapshot).
+    auto const received = h.exchange({ proto::ClientHello {} }, 4);
+    REQUIRE(received.size() == 4);
 
     auto const* hello = std::get_if<proto::ServerHello>(&received[0].pdu);
     REQUIRE(hello != nullptr);
     CHECK(hello->codecVersion == proto::CodecVersion);
 
-    auto const* state = std::get_if<proto::SessionState>(&received[1].pdu);
+    // The layout leads the snapshot so the client builds its tabs before content.
+    auto const* layout = std::get_if<proto::LayoutState>(&received[1].pdu);
+    REQUIRE(layout != nullptr);
+    REQUIRE(layout->tabs.size() == 1);
+    CHECK(layout->tabs.front().root.session == sessionId.value);
+
+    auto const* state = std::get_if<proto::SessionState>(&received[2].pdu);
     REQUIRE(state != nullptr);
     CHECK(state->session == sessionId.value);
     CHECK(state->columns == 80);
     CHECK(state->lines == 25);
 
-    auto const* delta = std::get_if<proto::Delta>(&received[2].pdu);
+    auto const* delta = std::get_if<proto::Delta>(&received[3].pdu);
     REQUIRE(delta != nullptr);
     CHECK(delta->snapshot == 1);
     REQUIRE(delta->lines.size() == 25); // the whole page ships on attach
@@ -238,13 +244,14 @@ TEST_CASE("FetchImage for an unknown id answers ImageGone", "[muxserver][native]
     auto h = NativeHarness {};
     h.host.createTab();
 
+    // ServerHello, LayoutState, SessionState, Delta (snapshot), then ImageGone.
     auto const received =
-        h.exchange({ proto::ClientHello {}, proto::DecodedPdu { proto::FetchImage { .imageId = 4242 } } }, 4);
-    REQUIRE(received.size() == 4);
-    auto const* gone = std::get_if<proto::ImageGone>(&received[3].pdu);
+        h.exchange({ proto::ClientHello {}, proto::DecodedPdu { proto::FetchImage { .imageId = 4242 } } }, 5);
+    REQUIRE(received.size() == 5);
+    auto const* gone = std::get_if<proto::ImageGone>(&received[4].pdu);
     REQUIRE(gone != nullptr);
     CHECK(gone->imageId == 4242);
-    CHECK(received[3].serial == 2); // correlated to the request's serial
+    CHECK(received[4].serial == 2); // correlated to the request's serial
 }
 
 TEST_CASE("a version-mismatched hello is answered and the session ends", "[muxserver][native]")
@@ -268,22 +275,24 @@ TEST_CASE("an alternate-screen flip forces a resync snapshot with SessionState",
     auto received = std::vector<proto::DecodedFrame> {};
     h.loop.blockOn(net::testing::allOf(h.session->run(),
                                        feedBytes(h.pair.second.get(), &bytes),
-                                       collectPdus(h.pair.second.get(), 5, &received),
+                                       collectPdus(h.pair.second.get(), 6, &received),
                                        flipToAltScreen(&h, sessionId)));
-    REQUIRE(received.size() == 5);
+    REQUIRE(received.size() == 6);
 
-    auto const* primary = std::get_if<proto::SessionState>(&received[1].pdu);
+    // [0] ServerHello, [1] LayoutState, [2] SessionState(primary), [3] Delta,
+    // [4] SessionState(alternate), [5] Delta.
+    auto const* primary = std::get_if<proto::SessionState>(&received[2].pdu);
     REQUIRE(primary != nullptr);
     CHECK(primary->screenType == std::to_underlying(vtbackend::ScreenType::Primary));
 
     // The flip is announced (SessionState is the only carrier of the screen
     // type) and served as a snapshot of the alternate grid — not diffed against
     // the primary grid's unrelated delta cursor.
-    auto const* alt = std::get_if<proto::SessionState>(&received[3].pdu);
+    auto const* alt = std::get_if<proto::SessionState>(&received[4].pdu);
     REQUIRE(alt != nullptr);
     CHECK(alt->screenType == std::to_underlying(vtbackend::ScreenType::Alternate));
 
-    auto const* delta = std::get_if<proto::Delta>(&received[4].pdu);
+    auto const* delta = std::get_if<proto::Delta>(&received[5].pdu);
     REQUIRE(delta != nullptr);
     CHECK(delta->snapshot == 1);
     auto text = std::string {};
@@ -304,16 +313,17 @@ TEST_CASE("a snapshot anchors the cursor so the following delta is incremental",
     auto received = std::vector<proto::DecodedFrame> {};
     h.loop.blockOn(net::testing::allOf(h.session->run(),
                                        feedBytes(h.pair.second.get(), &bytes),
-                                       collectPdus(h.pair.second.get(), 4, &received),
+                                       collectPdus(h.pair.second.get(), 5, &received),
                                        appendThenUpdate(&h, sessionId)));
-    REQUIRE(received.size() == 4);
+    REQUIRE(received.size() == 5);
 
-    // [0] ServerHello, [1] SessionState, [2] Delta(snapshot), [3] Delta(incremental).
-    auto const* snapshot = std::get_if<proto::Delta>(&received[2].pdu);
+    // [0] ServerHello, [1] LayoutState, [2] SessionState, [3] Delta(snapshot),
+    // [4] Delta(incremental).
+    auto const* snapshot = std::get_if<proto::Delta>(&received[3].pdu);
     REQUIRE(snapshot != nullptr);
     CHECK(snapshot->snapshot == 1);
 
-    auto const* incremental = std::get_if<proto::Delta>(&received[3].pdu);
+    auto const* incremental = std::get_if<proto::Delta>(&received[4].pdu);
     REQUIRE(incremental != nullptr);
     // Anchored past the snapshot: the follow-up is a real diff, not another resync
     // (a stale cursor would force snapshot==1) and not a rescan of every row.
@@ -339,14 +349,14 @@ TEST_CASE("a cursor-only move still produces a delta so the mirror's cursor trac
     auto received = std::vector<proto::DecodedFrame> {};
     h.loop.blockOn(net::testing::allOf(h.session->run(),
                                        feedBytes(h.pair.second.get(), &bytes),
-                                       collectPdus(h.pair.second.get(), 4, &received),
+                                       collectPdus(h.pair.second.get(), 5, &received),
                                        moveCursorThenUpdate(&h, sessionId)));
-    REQUIRE(received.size() == 4);
+    REQUIRE(received.size() == 5);
 
-    // [0] ServerHello, [1] SessionState, [2] Delta(snapshot), [3] Delta from the cursor-only move.
-    // Without the cursor gate the [3] send is suppressed (no changed cell, no mode flip) and the
+    // [0] ServerHello, [1] LayoutState, [2] SessionState, [3] Delta(snapshot), [4] cursor-only move.
+    // Without the cursor gate the [4] send is suppressed (no changed cell, no mode flip) and the
     // mirror's cursor would stay where the snapshot left it.
-    auto const* delta = std::get_if<proto::Delta>(&received[3].pdu);
+    auto const* delta = std::get_if<proto::Delta>(&received[4].pdu);
     REQUIRE(delta != nullptr);
     CHECK(delta->snapshot == 0);
     CHECK(delta->cursorLine == 9);   // CUP row 10, 0-based
@@ -361,9 +371,9 @@ TEST_CASE("a hyperlink URI is delivered on first reference", "[muxserver][native
     // OSC 8 hyperlink around "link"; the URI must ride the snapshot's side table.
     h.host.terminal(sessionId)->writeToScreen("\033]8;;https://contour.example\033\\link\033]8;;\033\\");
 
-    auto const received = h.exchange({ proto::ClientHello {} }, 3);
-    REQUIRE(received.size() == 3);
-    auto const* delta = std::get_if<proto::Delta>(&received[2].pdu);
+    auto const received = h.exchange({ proto::ClientHello {} }, 4);
+    REQUIRE(received.size() == 4);
+    auto const* delta = std::get_if<proto::Delta>(&received[3].pdu);
     REQUIRE(delta != nullptr);
     REQUIRE(delta->hyperlinks.size() == 1);
     CHECK(delta->hyperlinks.front().uri == "https://contour.example");

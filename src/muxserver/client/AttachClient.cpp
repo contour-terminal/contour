@@ -285,6 +285,12 @@ void AttachClient::handlePdu(proto::DecodedFrame const& frame)
             _onSessionEvent(_screens[event->session], *event);
         return;
     }
+    if (auto const* layout = std::get_if<proto::LayoutState>(&pdu))
+    {
+        if (_onLayout)
+            _onLayout(*layout);
+        return;
+    }
     // Unknown PDUs are ignored for forward compatibility.
 }
 

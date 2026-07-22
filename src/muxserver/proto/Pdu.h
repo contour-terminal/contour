@@ -41,6 +41,7 @@ enum class PduType : uint8_t
     SessionState = 8,
     Delta = 9,
     SessionEvent = 10,
+    LayoutState = 11,
 };
 
 /// The kind of a SessionEvent — adding a transient session-app event is adding a
@@ -250,6 +251,43 @@ struct SessionEvent
     bool operator==(SessionEvent const&) const = default;
 };
 
+/// One node of a tab's split tree on the wire (pre-order): a leaf carries a
+/// session and no children; a split carries a ratio and exactly two children.
+struct WirePane
+{
+    uint64_t paneId = 0;
+    uint8_t split = 0;              ///< vtmux::SplitState: 0 leaf, 1 horizontal, 2 vertical.
+    uint64_t session = 0;           ///< Leaf only: the SessionId.
+    uint16_t ratio = 5000;          ///< Split only: first child's share × 10000 (0.05..0.95).
+    std::vector<WirePane> children; ///< 0 for a leaf, 2 for a split.
+    bool operator==(WirePane const&) const = default;
+};
+
+/// One tab's layout: its id, active/zoomed pane, optional rename + color, and
+/// its split tree — everything a client needs to reproduce the tab.
+struct WireTab
+{
+    uint64_t tabId = 0;
+    uint64_t activePane = 0;
+    uint64_t zoomedPane = 0; ///< 0 = not zoomed.
+    std::string title;       ///< The runtime-title override; empty if none.
+    uint8_t hasColor = 0;
+    uint32_t color = 0; ///< 0xRRGGBB tab color when hasColor.
+    WirePane root;
+    bool operator==(WireTab const&) const = default;
+};
+
+/// The window's whole tab/pane layout — replayed on attach and re-pushed on
+/// every model change, so a client reproduces the daemon's tabs and split trees
+/// instead of flattening to one tab per session.
+struct LayoutState
+{
+    uint64_t window = 0;
+    uint32_t activeTab = 0; ///< The active tab's INDEX within `tabs`.
+    std::vector<WireTab> tabs;
+    bool operator==(LayoutState const&) const = default;
+};
+
 using DecodedPdu = std::variant<Invalid,
                                 ClientHello,
                                 ServerHello,
@@ -260,7 +298,8 @@ using DecodedPdu = std::variant<Invalid,
                                 ImageGone,
                                 SessionState,
                                 Delta,
-                                SessionEvent>;
+                                SessionEvent,
+                                LayoutState>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

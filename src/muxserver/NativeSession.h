@@ -16,6 +16,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -71,6 +72,37 @@ class NativeSession final: public SessionStreamEvents
     void sessionNotify(vtmux::SessionId session, std::string const& title, std::string const& body) override;
     void sessionCopyToClipboard(vtmux::SessionId session, std::string const& data) override;
 
+    /// Adapts the host's model-change fan-out into a single "layout changed"
+    /// callback: every structural change re-pushes the whole LayoutState. It is a
+    /// `vtmux::ModelEvents` the caller subscribes to the host (see @ref
+    /// layoutObserver), so the model stays transport-agnostic.
+    struct LayoutObserver final: vtmux::ModelEvents
+    {
+        std::function<void()> onChange;
+        void tabAdded(vtmux::WindowId, vtmux::TabId, int) override { onChange(); }
+        void tabClosed(vtmux::WindowId, vtmux::TabId, int) override { onChange(); }
+        void tabMoved(vtmux::WindowId, vtmux::TabId, int, int) override { onChange(); }
+        void tabMovedToWindow(vtmux::WindowId, vtmux::TabId, int, vtmux::WindowId, int) override
+        {
+            onChange();
+        }
+        void activeTabChanged(vtmux::WindowId, vtmux::TabId, int) override { onChange(); }
+        void paneSplit(vtmux::TabId, vtmux::PaneId, vtmux::PaneId) override { onChange(); }
+        void paneClosed(vtmux::TabId, vtmux::PaneId, vtmux::PaneId) override { onChange(); }
+        void activePaneChanged(vtmux::TabId, vtmux::PaneId) override { onChange(); }
+        void paneRatioChanged(vtmux::TabId, vtmux::PaneId, double) override { onChange(); }
+        void paneOrientationChanged(vtmux::TabId, vtmux::PaneId, vtmux::SplitState) override { onChange(); }
+        void paneSwapped(vtmux::TabId, vtmux::PaneId, vtmux::PaneId) override { onChange(); }
+        void paneZoomChanged(vtmux::TabId, std::optional<vtmux::PaneId>) override { onChange(); }
+        void paneTreeRestructured(vtmux::TabId) override { onChange(); }
+        void tabTitleChanged(vtmux::TabId) override { onChange(); }
+        void tabColorChanged(vtmux::TabId) override { onChange(); }
+    };
+
+    /// The layout observer to subscribe to the host's model fan-out (see
+    /// serveNativeClient) so live tab/pane changes reach this connection.
+    [[nodiscard]] LayoutObserver& layoutObserver() noexcept { return _layoutObserver; }
+
   private:
     friend struct NativeSessionFollowTester; ///< Test-only view of _followed.
 
@@ -119,6 +151,10 @@ class NativeSession final: public SessionStreamEvents
                           std::string a,
                           std::string b);
 
+    /// Serializes the host's window/tab/pane tree into a LayoutState and pushes it
+    /// (serial 0), once the handshake completed — on attach and on every change.
+    void pushLayout();
+
     /// Validates the peer's ClientHello, answers, and pushes the attach
     /// snapshot (spawning the first session on an empty daemon).
     /// @return False when the hello was missing or version-mismatched.
@@ -134,6 +170,7 @@ class NativeSession final: public SessionStreamEvents
     std::unique_ptr<net::ISocket> _connection;
     net::WriteQueue _writer;
     std::string _expectedToken; ///< Required ClientHello token; empty accepts any.
+    LayoutObserver _layoutObserver;
     std::unordered_map<uint64_t, FollowState> _followed;
     std::unordered_set<uint64_t> _pendingSessions;
     bool _flushScheduled = false;

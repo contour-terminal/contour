@@ -111,6 +111,10 @@ namespace
     {
         return std::to_underlying(PduType::SessionEvent);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(LayoutState const&) noexcept
+    {
+        return std::to_underlying(PduType::LayoutState);
+    }
 
     // --- body encoders ------------------------------------------------------
 
@@ -261,6 +265,35 @@ namespace
         out.u8(pdu.kind);
         out.string(pdu.a);
         out.string(pdu.b);
+    }
+
+    /// Encodes one split-tree node pre-order (recurses into its children).
+    void encodePane(Writer& out, WirePane const& pane)
+    {
+        out.varint(pane.paneId);
+        out.u8(pane.split);
+        out.varint(pane.session);
+        out.u16(pane.ratio);
+        out.varint(pane.children.size());
+        for (auto const& child: pane.children)
+            encodePane(out, child);
+    }
+
+    void encodeBody(Writer& out, LayoutState const& pdu)
+    {
+        out.varint(pdu.window);
+        out.u32(pdu.activeTab);
+        out.varint(pdu.tabs.size());
+        for (auto const& tab: pdu.tabs)
+        {
+            out.varint(tab.tabId);
+            out.varint(tab.activePane);
+            out.varint(tab.zoomedPane);
+            out.string(tab.title);
+            out.u8(tab.hasColor);
+            out.u32(tab.color);
+            encodePane(out, tab.root);
+        }
     }
 
     // --- body decoders (one table row each) ---------------------------------
@@ -469,6 +502,60 @@ namespace
         return pdu;
     }
 
+    /// Decodes one split-tree node (recursing into its children). @p depth bounds
+    /// the recursion so a hostile deeply-nested tree cannot overflow the stack.
+    std::expected<WirePane, DecodeError> decodePane(Reader& in, int depth)
+    {
+        if (depth <= 0)
+            return std::unexpected(DecodeError::MalformedPdu);
+        auto pane = WirePane {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pane.paneId, error) || !assign(in.u8(), pane.split, error)
+            || !assign(in.varint(), pane.session, error) || !assign(in.u16(), pane.ratio, error))
+            return std::unexpected(error);
+        auto childCount = uint64_t { 0 };
+        if (!assign(in.varint(), childCount, error))
+            return std::unexpected(error);
+        if (childCount > 2) // a pane is a leaf (0) or a binary split (2)
+            return std::unexpected(DecodeError::MalformedPdu);
+        for (auto i = uint64_t { 0 }; i < childCount; ++i)
+        {
+            auto child = decodePane(in, depth - 1);
+            if (!child)
+                return std::unexpected(child.error());
+            pane.children.push_back(std::move(*child));
+        }
+        return pane;
+    }
+
+    DecodeResult decodeLayoutState(Reader& in)
+    {
+        auto pdu = LayoutState {};
+        auto error = DecodeError {};
+        auto tabCount = uint64_t { 0 };
+        if (!assign(in.varint(), pdu.window, error) || !assign(in.u32(), pdu.activeTab, error)
+            || !assign(in.varint(), tabCount, error))
+            return std::unexpected(error);
+        // tmux's WINDOW_MAXIMUM is 10000; a count far beyond that is a lie (the
+        // frame-size bound already caps real payloads, but reject early).
+        if (tabCount > 100000)
+            return std::unexpected(DecodeError::MalformedPdu);
+        for (auto i = uint64_t { 0 }; i < tabCount; ++i)
+        {
+            auto tab = WireTab {};
+            if (!assign(in.varint(), tab.tabId, error) || !assign(in.varint(), tab.activePane, error)
+                || !assign(in.varint(), tab.zoomedPane, error) || !assign(in.string(), tab.title, error)
+                || !assign(in.u8(), tab.hasColor, error) || !assign(in.u32(), tab.color, error))
+                return std::unexpected(error);
+            auto root = decodePane(in, /*depth=*/256);
+            if (!root)
+                return std::unexpected(root.error());
+            tab.root = std::move(*root);
+            pdu.tabs.push_back(std::move(tab));
+        }
+        return pdu;
+    }
+
     /// The decode half of the catalog: one row per known tag.
     struct DecodeRow
     {
@@ -487,6 +574,7 @@ namespace
         DecodeRow { PduType::SessionState, decodeSessionState },
         DecodeRow { PduType::Delta, decodeDelta },
         DecodeRow { PduType::SessionEvent, decodeSessionEvent },
+        DecodeRow { PduType::LayoutState, decodeLayoutState },
     };
 } // namespace
 

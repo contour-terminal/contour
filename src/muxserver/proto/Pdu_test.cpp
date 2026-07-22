@@ -118,6 +118,25 @@ TEST_CASE("every catalog PDU round-trips", "[muxserver][proto]")
                 .defaultForeground = 0xD0D0D0,
                 .defaultBackground = 0x1A1716 },
         SessionEvent { .session = 4, .kind = 1, .a = "Build finished", .b = "3 warnings, 0 errors" },
+        LayoutState {
+            .window = 1,
+            .activeTab = 0,
+            .tabs = { WireTab { .tabId = 5,
+                                .activePane = 12,
+                                .zoomedPane = 0,
+                                .title = "editor",
+                                .hasColor = 1,
+                                .color = 0x336699,
+                                .root =
+                                    WirePane {
+                                        .paneId = 10,
+                                        .split = 2, // vertical split
+                                        .session = 0,
+                                        .ratio = 6000,
+                                        .children = { WirePane { .paneId = 11, .session = 100 },
+                                                      WirePane { .paneId = 12, .session = 101 } },
+                                    } } },
+        },
     };
 
     for (auto const& pdu: pdus)

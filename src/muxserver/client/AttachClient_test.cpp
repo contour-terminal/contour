@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <variant>
@@ -520,6 +521,53 @@ TEST_CASE("attach mirrors over TLS-encrypted TCP with token auth", "[muxserver][
     loop.blockOn(
         net::testing::allOf(server.serve(), tlsTcpAttachDriver(&loop, &server, *clientTls, port, &saw)));
     CHECK(saw); // snapshot mirrored across TLS-over-TCP with a valid token
+}
+
+namespace
+{
+
+/// Waits for the daemon's layout to arrive on the client, then detaches.
+Task<void> awaitLayout(net::EventLoop* loop, AttachClient* client, std::optional<proto::LayoutState>* layout)
+{
+    co_await net::testing::waitUntil(loop, [layout] { return layout->has_value(); });
+    client->detach();
+}
+
+} // namespace
+
+TEST_CASE("attach receives the daemon's tab and pane layout", "[muxserver][attach]")
+{
+    auto source = net::PollEventSource {};
+    auto loop = net::EventLoop { source };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                              vtbackend::Settings {},
+                              /*startPumps=*/false };
+    auto* tab = host.createTab();
+    // Split the tab into two panes (a vertical divider at 60/40).
+    host.splitActivePane(tab->id(), vtmux::SplitState::Vertical, 0.6);
+
+    auto pair = *net::testing::makeSocketPair(loop);
+    auto server = NativeSession { loop, host, std::move(pair.first) };
+    auto client = AttachClient { loop, std::move(pair.second) };
+
+    auto layout = std::optional<proto::LayoutState> {};
+    client.setLayoutHandler([&layout](proto::LayoutState const& received) { layout = received; });
+
+    loop.blockOn(net::testing::allOf(server.run(), client.run(), awaitLayout(&loop, &client, &layout)));
+
+    REQUIRE(layout.has_value());
+    REQUIRE(layout->tabs.size() == 1);
+    auto const& root = layout->tabs.front().root;
+    CHECK(root.split == std::to_underlying(vtmux::SplitState::Vertical)); // an internal split node
+    CHECK(root.ratio == 6000);                                            // 0.6 x 10000
+    REQUIRE(root.children.size() == 2);
+    // Both children are leaves carrying distinct sessions.
+    CHECK(root.children[0].split == 0);
+    CHECK(root.children[1].split == 0);
+    CHECK(root.children[0].session != 0);
+    CHECK(root.children[1].session != 0);
+    CHECK(root.children[0].session != root.children[1].session);
 }
 
 // The attach-flow composition (Daemon.cpp) hard-codes STDIN/STDOUT and a real

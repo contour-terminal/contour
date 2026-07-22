@@ -339,4 +339,27 @@ class ScopedStreamSubscription
     SessionStreamEvents& _observer;
 };
 
+/// Scoped model-events subscription: a native client keeps one in its frame so
+/// its layout observer is removed even when the serve loop unwinds early.
+class ScopedModelSubscription
+{
+  public:
+    /// Subscribes @p observer to @p host's model fan-out for this object's lifetime.
+    ScopedModelSubscription(SessionHost& host, vtmux::ModelEvents& observer): _host(host), _observer(observer)
+    {
+        _host.subscribe(&_observer);
+    }
+
+    ~ScopedModelSubscription() { _host.unsubscribe(&_observer); }
+
+    ScopedModelSubscription(ScopedModelSubscription const&) = delete;
+    ScopedModelSubscription& operator=(ScopedModelSubscription const&) = delete;
+    ScopedModelSubscription(ScopedModelSubscription&&) = delete;
+    ScopedModelSubscription& operator=(ScopedModelSubscription&&) = delete;
+
+  private:
+    SessionHost& _host;
+    vtmux::ModelEvents& _observer;
+};
+
 } // namespace muxserver

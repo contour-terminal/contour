@@ -4,6 +4,7 @@
 #include <vtbackend/Image.h>
 #include <vtbackend/Line.h>
 
+#include <algorithm>
 #include <bit>
 #include <chrono>
 #include <mutex>
@@ -48,6 +49,58 @@ namespace
             case vtbackend::CursorShape::Bar: return blink ? 5 : 6;
         }
         return 2;
+    }
+
+    /// Serializes one split-tree node onto the wire (recurses into its children).
+    [[nodiscard]] proto::WirePane serializePaneTree(vtmux::Pane const& pane)
+    {
+        auto wire = proto::WirePane {};
+        wire.paneId = pane.id().value;
+        wire.split = std::to_underlying(pane.splitState());
+        if (pane.isLeaf())
+            wire.session = pane.session().value;
+        else
+        {
+            wire.ratio = static_cast<uint16_t>((pane.ratio() * 10000.0) + 0.5);
+            if (pane.first() != nullptr)
+                wire.children.push_back(serializePaneTree(*pane.first()));
+            if (pane.second() != nullptr)
+                wire.children.push_back(serializePaneTree(*pane.second()));
+        }
+        return wire;
+    }
+
+    /// Serializes the host window's whole tab/pane layout for the LayoutState PDU.
+    [[nodiscard]] proto::LayoutState serializeLayout(SessionHost& host)
+    {
+        auto layout = proto::LayoutState {};
+        auto* window = host.model().window(host.windowId());
+        if (window == nullptr)
+            return layout;
+        layout.window = host.windowId().value;
+        layout.activeTab = static_cast<uint32_t>(std::max(0, window->activeTabIndex()));
+        for (auto const tabIndex: std::views::iota(0, window->tabCount()))
+        {
+            auto* tab = window->tabAt(tabIndex);
+            if (tab == nullptr)
+                continue;
+            auto wireTab = proto::WireTab {};
+            wireTab.tabId = tab->id().value;
+            if (auto const* active = tab->activePane())
+                wireTab.activePane = active->id().value;
+            if (auto const zoomed = tab->zoomedLeafId())
+                wireTab.zoomedPane = zoomed->value;
+            if (auto const& title = tab->runtimeTitle())
+                wireTab.title = *title;
+            if (auto const color = tab->color())
+            {
+                wireTab.hasColor = 1;
+                wireTab.color = color->value();
+            }
+            wireTab.root = serializePaneTree(*tab->rootPane());
+            layout.tabs.push_back(std::move(wireTab));
+        }
+        return layout;
     }
 
     /// Converts one grid row into its wire form (caller holds the terminal lock).
@@ -128,6 +181,11 @@ NativeSession::NativeSession(net::EventLoop& loop,
     _writer(loop, _connection.get(), maxWriteQueueBytes),
     _expectedToken(std::move(expectedToken))
 {
+    // Every model change (the host fans them here once subscribed) re-pushes the
+    // whole layout — infrequent, so a full resend beats a granular diff.
+    _layoutObserver.onChange = [this] {
+        pushLayout();
+    };
 }
 
 void NativeSession::send(uint64_t serial, proto::DecodedPdu const& pdu)
@@ -194,6 +252,13 @@ void NativeSession::emitSessionEvent(SessionId session,
                                                    .kind = std::to_underlying(kind),
                                                    .a = std::move(a),
                                                    .b = std::move(b) } });
+}
+
+void NativeSession::pushLayout()
+{
+    if (!_handshaken || _closed)
+        return;
+    send(0, proto::DecodedPdu { serializeLayout(_host) });
 }
 
 coro::Task<void> NativeSession::flushSoon()
@@ -467,6 +532,10 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
     if (_host.model().window(_host.windowId())->tabCount() == 0)
         std::ignore = _host.createTab();
 
+    // The window/tab/pane layout first, so the client builds its tabs and split
+    // trees before the per-session content streams into them.
+    pushLayout();
+
     // The attach snapshot: every hosted session, full state.
     auto* window = _host.model().window(_host.windowId());
     for (auto const tabIndex: std::views::iota(0, window->tabCount()))
@@ -513,6 +582,7 @@ namespace
                                                        NativeSession::DefaultWriteQueueBytes,
                                                        std::move(expectedToken));
         auto const subscription = ScopedStreamSubscription { *host, *session };
+        auto const layoutSubscription = ScopedModelSubscription { *host, session->layoutObserver() };
         co_await session->run();
     }
 } // namespace
