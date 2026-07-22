@@ -145,6 +145,9 @@ struct SessionState
     /// (DECSSDT) and which display the app writes to (DECSASD).
     uint8_t statusDisplayType = 0;   ///< StatusDisplayType: 0 none, 1 indicator, 2 host-writable.
     uint8_t activeStatusDisplay = 0; ///< ActiveStatusDisplay: 0 main, 1 status-line, 2 indicator.
+    /// The Kitty keyboard protocol flags currently active (top of the app's flag
+    /// stack), re-emitted so the client encodes keys the way the app negotiated.
+    uint8_t kittyKeyboardFlags = 0;
     bool operator==(SessionState const&) const = default;
 };
 
@@ -252,6 +255,10 @@ struct Delta
     /// status page. A separate page from the main grid — the multi-page carrier.
     uint8_t statusLinesChanged = 0;
     std::vector<WireLine> statusLines;
+    /// Set (1) when the Kitty keyboard flags changed in this batch;
+    /// `kittyKeyboardFlags` then holds the new flag set to re-emit (CSI = flags ; 1 u).
+    uint8_t kittyKeyboardChanged = 0;
+    uint8_t kittyKeyboardFlags = 0;
     bool operator==(Delta const&) const = default;
 };
 

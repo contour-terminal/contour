@@ -12,6 +12,14 @@
 /// origin, margins, alt-screen) deliberately stay local: the server's
 /// emulation already applied them to the cells on the wire, and the mirror
 /// manages its own screen with them.
+///
+/// The Kitty keyboard protocol (CSI u) also changes input encoding, but it is
+/// NOT a DEC private mode — it is a numeric flag set with its own stack. It
+/// rides its own SessionState/Delta field (`kittyKeyboardFlags`, pull+diff in
+/// NativeSession, re-emitted as `CSI = flags ; 1 u` by ScreenMirror), not this
+/// table. modifyOtherKeys is intentionally NOT mirrored: vtbackend parses it as
+/// `CSI > n m` (n = level), which collides with xterm's `CSI > 4 ; n m` form, so
+/// re-emitting it would misconfigure a real outer terminal in the thin client.
 
 #include <vtbackend/primitives.h>
 

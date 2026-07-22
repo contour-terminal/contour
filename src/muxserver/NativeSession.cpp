@@ -476,6 +476,21 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
             follow.lastStatusLines = std::move(rows);
         }
 
+        // Live Kitty keyboard protocol flags (pull+diff): the top of the app's
+        // CSI-u flag stack governs how KEYS are encoded, so the client must track
+        // it to send input the way the app negotiated. Only the effective (current)
+        // flags matter to a mirror — the stack itself stays server-side.
+        auto const kittyFlags = static_cast<int>(terminal->keyboardProtocol().flags().value());
+        if (kittyFlags != follow.lastKittyKeyboardFlags)
+        {
+            if (!snapshot)
+            {
+                delta.kittyKeyboardChanged = 1;
+                delta.kittyKeyboardFlags = static_cast<uint8_t>(kittyFlags);
+            }
+            follow.lastKittyKeyboardFlags = kittyFlags;
+        }
+
         if (snapshot)
         {
             auto& snap = state.emplace();
@@ -493,6 +508,7 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
             snap.defaultBackground = colors.defaultBackground.value();
             snap.statusDisplayType = static_cast<uint8_t>(statusType);
             snap.activeStatusDisplay = static_cast<uint8_t>(activeStatus);
+            snap.kittyKeyboardFlags = static_cast<uint8_t>(kittyFlags);
         }
     }
 
@@ -508,7 +524,7 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
         delta.cursorLine != follow.lastCursorLine || delta.cursorColumn != follow.lastCursorColumn;
     if (delta.snapshot != 0 || !delta.lines.empty() || modesChanged || cursorMoved || delta.titleChanged != 0
         || delta.cursorShapeChanged != 0 || delta.cwdChanged != 0 || delta.colorsChanged != 0
-        || delta.statusChanged != 0 || delta.statusLinesChanged != 0)
+        || delta.statusChanged != 0 || delta.statusLinesChanged != 0 || delta.kittyKeyboardChanged != 0)
     {
         follow.lastModes = delta.setModes;
         follow.lastCursorLine = delta.cursorLine;

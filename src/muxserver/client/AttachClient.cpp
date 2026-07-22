@@ -43,6 +43,7 @@ void RemoteScreen::apply(proto::SessionState const& state)
     defaultBackground = state.defaultBackground;
     statusDisplayType = state.statusDisplayType;
     activeStatusDisplay = state.activeStatusDisplay;
+    kittyKeyboardFlags = state.kittyKeyboardFlags;
 }
 
 void RemoteScreen::apply(proto::Delta const& delta)
@@ -81,6 +82,8 @@ void RemoteScreen::apply(proto::Delta const& delta)
     }
     if (delta.statusLinesChanged != 0)
         statusLines = delta.statusLines;
+    if (delta.kittyKeyboardChanged != 0)
+        kittyKeyboardFlags = delta.kittyKeyboardFlags;
 
     for (auto const& line: delta.lines)
     {

@@ -294,11 +294,45 @@ TEST_CASE("a decoupled cursor page hides the mirror's cursor", "[muxserver][mirr
         serverWrites(h, session, "\033[?64l\033[1Uhidden-on-page-one"); // DECPCCM off, NP, write
         co_await waitUntil(&h->loop,
                            [&] { return !h->mirror->isModeEnabled(vtbackend::DECMode::VisibleCursor); });
+        CHECK(!h->mirror->isModeEnabled(vtbackend::DECMode::VisibleCursor));
         // The displayed page is still 0: its content stands and page 1 does not bleed
         // through — VT output landed on a page the user is not looking at.
         CHECK(h->mirror->primaryScreen().grid().renderMainPageText().contains("visible-page-zero"));
         CHECK(!h->mirror->primaryScreen().grid().renderMainPageText().contains("hidden-on-page-one"));
         CHECK(!h->mirror->isAlternateScreen());
+
+        h->client->detach();
+    }(&h, session);
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+
+TEST_CASE("Kitty keyboard flags mirror so the client encodes keys alike", "[muxserver][mirror]")
+{
+    auto h = MirrorHarness {};
+    h.host.createTab();
+    auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    h.serverTerminal(session)->writeToScreen("shell-ready");
+
+    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+        co_await waitUntil(&h->loop, [&] {
+            return h->mirror->primaryScreen().grid().renderMainPageText().contains("shell-ready");
+        });
+        // Neither side has negotiated the Kitty keyboard protocol yet.
+        REQUIRE(h->mirror->keyboardProtocol().flags().value() == 0);
+
+        // The app pushes Kitty flags (CSI > flags u). The mirror must adopt the same
+        // flags, or a keypress it encodes would not match what the app negotiated.
+        serverWrites(h, session, "\033[>5u"); // push flags 5 (disambiguate | report-alternate)
+        co_await waitUntil(&h->loop, [&] { return h->mirror->keyboardProtocol().flags().value() == 5; });
+        CHECK(h->serverTerminal(session)->keyboardProtocol().flags().value() == 5);
+        CHECK(h->mirror->keyboardProtocol().flags().value() == 5);
+
+        // A later change propagates too: the app raises the flags (here via the
+        // set-exactly form, mode 1).
+        serverWrites(h, session, "\033[=13;1u"); // set flags to 13 (adds report-all-keys)
+        co_await waitUntil(&h->loop, [&] { return h->mirror->keyboardProtocol().flags().value() == 13; });
+        CHECK(h->mirror->keyboardProtocol().flags().value() == 13);
 
         h->client->detach();
     }(&h, session);

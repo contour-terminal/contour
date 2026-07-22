@@ -39,7 +39,7 @@ namespace muxserver::proto
 /// the first slice of multi-page support beyond primary/alternate.
 /// v10 added Delta.statusLines: the host-writable status line's cell content
 /// (a tiny separate page), carried whole on change.
-constexpr uint32_t CodecVersion = 10;
+constexpr uint32_t CodecVersion = 11;
 
 /// The largest frame payload the decoder will accept. A peer-declared length
 /// beyond this is rejected outright (FrameTooLarge) rather than treated as

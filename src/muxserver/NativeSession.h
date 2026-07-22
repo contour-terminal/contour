@@ -149,6 +149,9 @@ class NativeSession final: public SessionStreamEvents
         /// The host-writable status-line rows last sent, so the (tiny) status page
         /// re-ships only when its content changed.
         std::vector<proto::WireLine> lastStatusLines;
+        /// The Kitty keyboard protocol flags last sent (-1 until the first snapshot),
+        /// so a change carries (and forces) a delta only when it actually changed.
+        int lastKittyKeyboardFlags = -1;
     };
 
     void handlePdu(proto::DecodedFrame const& frame);

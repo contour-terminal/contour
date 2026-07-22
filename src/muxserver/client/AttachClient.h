@@ -53,6 +53,7 @@ struct RemoteScreen
     uint32_t defaultBackground = 0;  ///< 0xRRGGBB default background, re-emitted as OSC 11.
     uint8_t statusDisplayType = 0;   ///< StatusDisplayType, re-emitted as DECSSDT.
     uint8_t activeStatusDisplay = 0; ///< ActiveStatusDisplay, re-emitted as DECSASD.
+    uint8_t kittyKeyboardFlags = 0;  ///< Kitty keyboard flags, re-emitted as CSI = flags ; 1 u.
     std::vector<proto::WireLine> statusLines; ///< Host-writable status-line rows, painted on the status page.
 
     uint64_t generation = 0;

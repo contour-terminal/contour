@@ -305,6 +305,8 @@ std::string ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& 
     }
     if (delta.statusLinesChanged != 0)
         appendStatusLines(out, screen);
+    if (delta.kittyKeyboardChanged != 0)
+        out += std::format("\033[={};1u", delta.kittyKeyboardFlags); // Kitty: set flags exactly (mode 1)
     out += "\033[0m";
     out += cup(delta.cursorLine + 1, delta.cursorColumn + 1);
     if (containsValue(_setModes, VisibleCursorModeNumber))
@@ -385,6 +387,8 @@ std::string ScreenMirror::fullReplay(RemoteScreen const& screen)
         out += std::format("\033[{}$~", screen.statusDisplayType);    // DECSSDT
         out += std::format("\033[{}$}}", screen.activeStatusDisplay); // DECSASD
     }
+    if (screen.kittyKeyboardFlags != 0)
+        out += std::format("\033[={};1u", screen.kittyKeyboardFlags); // Kitty keyboard flags (set exactly)
     appendStatusLines(out, screen); // paints the host-writable status page, if any
     syncModes(out, screen);
     appendImages(out, screen);

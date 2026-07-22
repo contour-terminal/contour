@@ -195,6 +195,7 @@ namespace
         out.string(pdu.cwd);
         out.u8(pdu.statusDisplayType);
         out.u8(pdu.activeStatusDisplay);
+        out.u8(pdu.kittyKeyboardFlags);
     }
 
     void encodeCell(Writer& out, WireCell const& cell)
@@ -278,6 +279,8 @@ namespace
         out.varint(pdu.statusLines.size());
         for (auto const& line: pdu.statusLines)
             encodeLine(out, line);
+        out.u8(pdu.kittyKeyboardChanged);
+        out.u8(pdu.kittyKeyboardFlags);
     }
 
     void encodeBody(Writer& out, SessionEvent const& pdu)
@@ -426,7 +429,8 @@ namespace
             !decoded)
             return std::unexpected(decoded.error());
         if (!assign(in.string(), pdu.cwd, error) || !assign(in.u8(), pdu.statusDisplayType, error)
-            || !assign(in.u8(), pdu.activeStatusDisplay, error))
+            || !assign(in.u8(), pdu.activeStatusDisplay, error)
+            || !assign(in.u8(), pdu.kittyKeyboardFlags, error))
             return std::unexpected(error);
         return pdu;
     }
@@ -532,6 +536,9 @@ namespace
             return std::unexpected(error);
         if (auto const decoded = decodeVector(in, pdu.statusLines, decodeLine); !decoded)
             return std::unexpected(decoded.error());
+        if (!assign(in.u8(), pdu.kittyKeyboardChanged, error)
+            || !assign(in.u8(), pdu.kittyKeyboardFlags, error))
+            return std::unexpected(error);
         return pdu;
     }
 
