@@ -26,6 +26,8 @@ set(net_SOURCES
 )
 if(WIN32)
     list(APPEND net_SOURCES
+        platform/WindowsLoopback.cpp
+        platform/WindowsLoopback.h
         windows/SocketsWin32.cpp
         windows/WindowsListener.cpp
         windows/WindowsListener.h

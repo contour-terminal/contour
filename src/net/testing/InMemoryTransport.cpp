@@ -23,6 +23,7 @@
 
     #include <net/posix/PosixSocket.h>
 #else
+    #include <net/platform/WindowsLoopback.h>
     #include <net/windows/WindowsSocket.h>
 #endif
 
@@ -53,65 +54,16 @@ std::expected<SocketPair, NetError> makeSocketPair(EventLoop& loop)
 
 #else // _WIN32
 
-namespace
-{
-    /// Creates a connected loopback TCP socket pair (Windows lacks socketpair).
-    [[nodiscard]] bool makeLoopbackPair(SOCKET& a, SOCKET& b) noexcept
-    {
-        auto listener = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (listener == INVALID_SOCKET)
-            return false;
-
-        sockaddr_in addr {};
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        addr.sin_port = 0;
-
-        int len = sizeof(addr);
-        if (::bind(listener, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR
-            || ::listen(listener, 1) == SOCKET_ERROR
-            || ::getsockname(listener, reinterpret_cast<sockaddr*>(&addr), &len) == SOCKET_ERROR)
-        {
-            closesocket(listener);
-            return false;
-        }
-
-        auto client = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (client == INVALID_SOCKET)
-        {
-            closesocket(listener);
-            return false;
-        }
-        if (::connect(client, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR)
-        {
-            closesocket(client);
-            closesocket(listener);
-            return false;
-        }
-        auto server = ::accept(listener, nullptr, nullptr);
-        closesocket(listener);
-        if (server == INVALID_SOCKET)
-        {
-            closesocket(client);
-            return false;
-        }
-        a = server;
-        b = client;
-        return true;
-    }
-} // namespace
-
 std::expected<SocketPair, NetError> makeSocketPair(EventLoop& loop)
 {
     ensureWinsockInitialized();
-    SOCKET a = INVALID_SOCKET;
-    SOCKET b = INVALID_SOCKET;
-    if (!makeLoopbackPair(a, b))
+    auto pair = std::array<SOCKET, 2> {};
+    if (!makeLoopbackPair(pair)) // the shared production helper (net/platform/WindowsLoopback)
         return std::unexpected(makeNetError(NetErrorCode::Other, WSAGetLastError(), "loopback pair"));
 
     return SocketPair {
-        .first = std::unique_ptr<ISocket>(new WindowsSocket(loop, a)),
-        .second = std::unique_ptr<ISocket>(new WindowsSocket(loop, b)),
+        .first = std::unique_ptr<ISocket>(new WindowsSocket(loop, pair[0])),
+        .second = std::unique_ptr<ISocket>(new WindowsSocket(loop, pair[1])),
     };
 }
 
