@@ -606,6 +606,19 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   window reconciles into its own GUI window with no cross-window session bleed; the consumeAttachWindow
   binder seam (contour_gui 9870, all green; contour.exe links clean). **Remaining: B5 interop-only tmux
   polish.**
+- 2026-07-23 · Windows/clangcl-release · **B5 partial — 3 of 5 tmux-interop items done.** (3)
+  `%window-renamed` → tab title: `TmuxController::windowRenamed` stores the name and (via a queued
+  `tabTitleChanged` signal) `applyPendingRenames` retitles the tab through a new
+  `TerminalSessionManager::setTabTitleForSession`; `adoptPendingPanes` drains renames that arrived
+  before realization. (5, F6) `%pause` auto-resume: `panePaused` sends `refresh-client -A %N:continue`
+  (pure `tmuxResumePaneCommand`, reactor-thread direct send). (2) GUI→tmux split/close:
+  `requestRemoteSplit` sends `split-window [-h] -t %N` (a `_realizing` guard keeps the reconciler's own
+  splits local, mirroring `isRealizingLayout`); `unbindPane` sends `kill-pane -t %N` on user close
+  (guarded by `_stopped` + a `_remotelyClosed` set so a tmux-initiated removal doesn't echo a kill).
+  Command builders are pure/testable. All new tests headless (drive the `TmuxModelEvents` overrides —
+  no tmux process), plus the existing POSIX oracle path. contour_gui 9897/9897. **Remaining B5: (4)
+  capture-pane SGR + `-S -` scrollback (server-side, in progress), (1, F3) split ratio/anchor
+  fidelity.**
 
 ## Remaining work — turnkey implementation plan (B5)
 
