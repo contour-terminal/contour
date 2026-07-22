@@ -582,38 +582,31 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   (split-reconcile, split-author, close-reconcile, tab-author). contour_gui 9850, muxserver 136/2769,
   net 36/165. **Remaining: B4 multi-window, B5 interop-only tmux polish.**
 
-## Remaining work — turnkey implementation plan (B3-Qt split/close · B4 · B5)
+## Remaining work — turnkey implementation plan (B4 · B5)
 
-**Done & verified (Windows, real two-reactor TLS attach):** all of WS-A, WS-C, B1, B3-server, **B2
-(full layout reconstruction)**, and **B3-Qt tab authoring + incremental (additive, whole-tab)
-reconciliation**. The `AttachController_test` fixture is a loopback-TCP+TLS daemon, so every step
-below is now Windows-verifiable — no AF_UNIX/POSIX gate. What remains:
+**Done & verified (Windows, real two-reactor TLS attach):** all of WS-A, WS-C, B1, **B2 (full layout
+reconstruction)**, and **B3 (server verbs + GUI authoring of tabs, splits, closes with full incremental
+reconciliation)**. The `AttachController_test` fixture is a loopback-TCP+TLS daemon, so B4/B5 are
+Windows-verifiable too — no AF_UNIX/POSIX gate. What remains:
 
-- **B3-Qt split/close authoring — needs FINER reconciliation + a cross-layer map (the real feature).**
-  Tab authoring works because a whole new tab has no bound leaves; split/close change panes *inside* an
-  already-realized tab, which the current whole-tab reconciler skips. Concretely:
-  1. **Intra-tab reconciliation.** In `applyRemoteLayout`, for a tab already represented locally, diff
-     its daemon leaves against the bound ones: for each **new** daemon leaf, find its bound sibling
-     (the split node's other child's leftmost leaf, which IS bound), activate that sibling's local
-     pane, `splitActivePane(orientation)`, and bind the new leaf via `setNextBindSession`; for each
-     **vanished** bound leaf (no longer in the layout), close its local pane.
-  2. **Cross-layer map.** Step 1 needs the local `TerminalSession`/pane for a *remote* session. Add it:
-     when `createPty` binds remote session R, record R→pty; expose `AttachController::paneForSession(R)`
-     (or have the manager offer `sessionForPty`), so the reconciler can target the right pane.
-  3. **Authoring verbs.** `requestSplitPane(actingRemoteSession, vertical)` and
-     `requestClosePane(remoteSession)` on `AttachController` (→ the shipped `splitPane`/`closePane`);
-     make `SplitPane` carry the target **session** (not just tab) so the daemon `setActivePane`+splits
-     the intended pane — no separate `ActivatePane` PDU needed (`ClosePane{session}` already targets a
-     session). Route the GUI actions via `SessionFactory::requestRemoteSplit`/`requestRemoteClose`
-     hooks (mirroring `requestRemoteTab`), consulted by `TerminalSessionManager::splitActivePane`/close.
-  4. **Retire `_closedSessions`.** With subtractive reconciliation the daemon is the source of truth; a
-     closed pane leaves the layout and stays gone — the tombstone (and the flattening-era resurrect
-     test) can go. Update the resurrect test to the layout-driven close path.
-  Tests (Windows, over the TLS fixture): author a split → 2-pane tab; close a pane → back to 1;
-  another client's split/close reconciles in.
-- **B4 — multi-window.** v1: one GUI window per daemon window in `LayoutState` (the daemon starts with
-  one; grow via lifecycle PDUs). Decide the multi-client resize policy (F8): shared grid
-  (last-proposal-wins, today) vs per-client server-side viewports.
+- **B4 — multi-window onto one daemon.** Today the daemon has ONE window and the client shows one; the
+  wire's `LayoutState` is already per-window (it carries `window`). To grow to N windows:
+  1. **Daemon.** `SessionModel` already supports `createWindow()`; add a `CreateWindow` lifecycle PDU
+     (tag 16) → a `SessionHost::createWindow()` that mints a window **and** a first tab (an empty window
+     is useless). `pushLayout` must serialize **every** window (refactor `serializeLayout(host)` to
+     `serializeLayout(host, windowId)` and loop), and the `LayoutObserver` fire on any window's change.
+     `SessionModel` may need a window-enumeration accessor.
+  2. **Client.** Track layouts BY window: `AttachController._layout` (single) → a `map<windowId,
+     LayoutState>`; `onLayout` updates the entry for `layout.window`. `applyRemoteLayout` reconciles
+     PER daemon window, mapping each to a GUI window — reuse `TerminalSessionManager::
+     createWindowController()` (mints a `vtmux::Window` + its OS window) for a daemon window not yet
+     shown, and keep a daemon-window→GUI-window map. A "new window" GUI action routes a `CreateWindow`
+     verb (a `SessionFactory::requestRemoteWindow` hook, like `requestRemoteTab`).
+  3. **Resize policy (F8):** shared grid (last-proposal-wins, today) vs per-client server-side
+     viewports — decide when >1 client attaches.
+  Tests (Windows, over the TLS fixture, `MultiWindow_test` harness): a `CreateWindow` grows the daemon
+  to two windows and the client opens a second GUI window bound to it; each window's tabs/splits
+  reconcile independently.
 - **B5 (interop-only, lower priority).** tmux-path polish: F3 ratio/anchor fidelity, GUI→tmux
   `split-window`/`kill-pane`, `%window-renamed`→tab title, `capture-pane` SGR + `-S -` scrollback,
   F6 `%pause` reaction.
