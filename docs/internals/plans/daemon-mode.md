@@ -307,19 +307,26 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       (`makeNativeTcpTls`: configured PEM cert/key, else an ephemeral self-signed cert) before the
       native handler — so the TCP transport is always encrypted. `NativeTcpListenerConfig` grew
       `tlsCertPath`/`tlsKeyPath`. *Landed 2026-07-22.*
-- [ ] **C3. Config schema.** `NativeTcpListenerConfig { bool enabled{false}; std::string
-      host{"127.0.0.1"}; uint16_t port{...}; std::string tlsCertPath; std::string tlsKeyPath;
-      std::string token; }` modeled on `ImagesConfig` (`Config.h:434-439,1158`;
-      `ConfigDocumentation.h:1046-1057,2369`; `Config.cpp:793,1792-1814`). **Note:** the Qt-free
-      daemon builds `DaemonConfig` from CLI only (`ContourApp.cpp:561-571`) — either feed via CLI
-      (lower friction) or have `daemonAction()` load `config::Config` and copy the sub-struct.
-- [ ] **C4. CLI flags.** `daemon`: `--listen-tcp HOST:PORT` (+ `--tls-cert`/`--tls-key`/`--token`)
-      at `ContourApp.cpp:742-761`, read in `daemonAction()`. `attach`: `--connect-tcp HOST:PORT`
-      (+ `--token`, `--tls-fingerprint`) at the `attach` block, read in `attachAction()`.
-- [ ] **C5. Client connect branch.** Thread a transport/endpoint (unix path OR host:port+tls+token)
-      through `runAttach` (`Daemon.h:59`) and `AttachController` (replace the bare `_socketPath`,
-      `AttachController.cpp:55-57`; also `Daemon.cpp:263` POSIX / `:505` Win32). Branch
-      `connectUnix` vs `connect`+`TlsSocket`.
+- [x] **C3. Config (via CLI). DONE (2026-07-22).** Took the lower-friction path the note flagged:
+      the Qt-free daemon builds `DaemonConfig` from the CLI, so `daemonAction()` populates
+      `config.nativeTcp` (`NativeTcpListenerConfig`) directly from the flags below — no `config::Config`
+      round-trip needed. (A YAML schema can graft on later if persisting the listener is wanted.)
+- [x] **C4. CLI flags. DONE (2026-07-22).** `daemon`: `--listen-tcp HOST:PORT` (+ `--token`,
+      `--tls-cert`, `--tls-key`), parsed in `daemonAction()` via `muxserver::parseHostPort` into
+      `config.nativeTcp`. `attach`: `--connect-tcp HOST:PORT` (+ `--token`, `--tls-ca`), read in
+      `attachAction()` (thin) and `ContourGuiApp::attachAction()` (GUI). `--tls-ca` pins the daemon's
+      cert as the trust anchor; omitted ⇒ TOFU. `parseHostPort` handles `HOST:PORT` and `[v6]:PORT`
+      with a unit test.
+- [x] **C5. Client connect branch. DONE (2026-07-22).** Introduced `muxserver::AttachEndpoint`
+      (a `std::variant<UnixEndpoint, TcpEndpoint>`) and a shared `connectAttach(loop, endpoint)`
+      coroutine that branches `connectUnix` (native socket resolved beside the control path) vs
+      `net::connect` + `makeTlsClientContext(caPem)->wrap` (TLS). `runAttach` (POSIX + Win32),
+      `attachFlow`/`attachFlowWin32`, AND the GUI `AttachController` (its `_socketPath` replaced by an
+      `AttachEndpoint`) all route through it, so the thin TTY client and the GUI client reach a TCP+TLS
+      daemon identically. Token flows to the `AttachClient` via `endpointToken`. Tests: `parseHostPort`
+      unit; a full **native-protocol-over-TLS-over-TCP mirror using a generated dev cert the client
+      VERIFIES** (`AttachClient_test`); `AttachController_test` adjusted to the control-path convention.
+      All suites green (net 35/160, muxserver 131/2711, contour_gui 635 cases/9765).
 - [x] **C6. Token auth in the native handshake (core).** `ClientHello.token` (CodecVersion → 7);
       `NativeSession` gained an `expectedToken` (ctor + `makeNativeHandler` param), checked in
       `completeHandshake` right after the version check — a mismatch answers `ServerHello` and drops,
@@ -336,9 +343,9 @@ NTFS ACLs, not POSIX bits; macOS resolves the socket dir under `$TMPDIR` (no `$X
 
 | | Linux | macOS | Windows |
 |---|---|---|---|
-| WS-A parity (GUI + thin) | ☐ | ☐ | ☐ |
-| WS-B layout | ☐ | ☐ | ☐ |
-| WS-C TCP+TLS (daemon + client) | ☐ | ☐ | ☐ |
+| WS-A parity (GUI + thin) | ☐ | ☐ | ☑ (muxserver+contour_gui suites green) |
+| WS-B layout | ☐ | ☐ | ☑ server half (B1/B3 wire); GUI apply pending |
+| WS-C TCP+TLS (daemon + client) | ☐ | ☐ | ☑ (net+muxserver TLS/dev-cert e2e green; contour links) |
 
 Windows verification is **CI-gated** (no Windows dev box): compile under `-Werror`, run the
 runtime-gated net tests, watch the Windows job after each push.
@@ -473,6 +480,23 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   (VT feature parity, native wire → both clients) is fully complete: A1–A10 all landed.** Remaining
   overall: B2/B4 (Qt), B3-Qt, C3/C4/C5 (Qt), B5 — the GUI/CLI-config items that build only in a full
   Qt tree (CI-verified), plus the interop-only tmux polish.
+- 2026-07-22 · Windows/clangcl-release · **The Qt GUI DOES build here** (Qt6 6.11.1 present;
+  `contour.exe` + `contour_gui_test.exe` link and `contour_gui_test` runs green — 635 cases / 9765
+  assertions, 2 skipped). The earlier "Qt items are CI-only" assumption was wrong, so C3/C4/C5 and
+  the GUI attach path are now buildable AND verifiable on this box (offscreen Qt platform;
+  `Qt6Test.dll` must be copied beside the test binary — a one-time deploy gap, not a code fault).
+- 2026-07-22 · Windows/clangcl-release · **WS-C COMPLETE — C3/C4/C5 done; the remote use case is
+  reachable from the CLI end-to-end.** `contour daemon --listen-tcp HOST:PORT [--token …] [--tls-cert
+  … --tls-key …]` opens the opt-in, always-TLS, token-authenticated TCP listener (self-signed when no
+  cert/key); `contour attach --connect-tcp HOST:PORT [--token …] [--tls-ca …]` (thin) and
+  `contour attach --gui --connect-tcp …` (GUI) dial it. Shared plumbing: `muxserver::AttachEndpoint`
+  = `variant<UnixEndpoint, TcpEndpoint>`, `parseHostPort`, and one `connectAttach` coroutine that both
+  `runAttach`/`attachFlow(Win32)` and the GUI `AttachController` route through (its `_socketPath`
+  became an `AttachEndpoint`). Also delivered the operator's ask: `net::generateSelfSignedCertificate`
+  (library-only dev certs, cross-platform) with a client-VERIFIED (pinned) TLS e2e test at both the
+  `net` and `muxserver` levels. Suites green (net 35/160, muxserver 131/2711, contour_gui 635/9765),
+  `contour.exe` links clean. **Remaining overall: B2/B4 (GUI layout apply + multi-window), B3-Qt (GUI
+  calls the lifecycle verbs), B5 (interop-only tmux polish).**
 
 ## Open decisions / risks
 

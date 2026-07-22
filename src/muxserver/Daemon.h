@@ -10,21 +10,27 @@
 #include <vtpty/Process.h>
 
 #include <cstdint>
+#include <expected>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
+#include <utility>
+#include <variant>
 
-#ifndef _WIN32
-    #include <csignal>
-    #include <functional>
-
-    #include <coro/Task.hpp>
-    #include <net/platform/NativeHandle.h>
+#include <coro/Task.hpp>
+#include <net/ISocket.h>
 
 namespace net
 {
 class EventLoop;
 }
+
+#ifndef _WIN32
+    #include <csignal>
+    #include <functional>
+
+    #include <net/platform/NativeHandle.h>
 #endif
 
 namespace muxserver
@@ -70,13 +76,54 @@ struct DaemonConfig
 /// @return The process exit code (EXIT_SUCCESS on clean shutdown).
 [[nodiscard]] int runDaemon(DaemonConfig const& config);
 
+/// Reaching the daemon over its local AF_UNIX control socket (the default).
+struct UnixEndpoint
+{
+    /// The daemon's control-socket file; the native socket lives beside it.
+    std::filesystem::path socketPath;
+};
+
+/// Reaching the daemon over TCP — ALWAYS TLS-encrypted, with @c token as the
+/// authentication (the TCP transport has no filesystem gate).
+struct TcpEndpoint
+{
+    std::string host;       ///< Remote host ("127.0.0.1", a hostname).
+    std::uint16_t port = 0; ///< Remote port.
+    std::string token;      ///< Preshared token sent in the ClientHello.
+    /// Trust-anchor certificate (PEM) pinning the daemon's TLS cert. Empty ⇒ the
+    /// TOFU posture (encrypt but do not verify the peer; the token authenticates).
+    std::string caPem;
+};
+
+/// Where `contour attach` reaches the daemon: the local unix socket or TCP+TLS.
+using AttachEndpoint = std::variant<UnixEndpoint, TcpEndpoint>;
+
+/// Splits a `HOST:PORT` (or `[v6]:PORT`) string into its parts.
+/// @param spec The endpoint string; the port must be a decimal in [1, 65535].
+/// @return The host and port, or nullopt if @p spec is malformed.
+[[nodiscard]] std::optional<std::pair<std::string, std::uint16_t>> parseHostPort(std::string_view spec);
+
+/// The preshared token an endpoint carries (empty for the unix socket, whose
+/// filesystem permissions are the gate; the ClientHello sends it verbatim).
+[[nodiscard]] std::string endpointToken(AttachEndpoint const& endpoint);
+
+/// Connects to the daemon per @p endpoint: the local unix control socket (its
+/// native socket resolved beside it), or a TLS-encrypted TCP connection whose
+/// peer trust follows the endpoint's @c caPem (empty ⇒ TOFU). This establishes —
+/// and for TCP encrypts — the transport; the caller's AttachClient sends the
+/// token. Shared by the thin `contour attach` flow and the GUI AttachController.
+/// @param loop The event loop whose reactor drives the connect (not owned).
+/// @param endpoint The daemon endpoint.
+/// @return The ready transport, or a human-readable error string.
+[[nodiscard]] coro::Task<std::expected<std::unique_ptr<net::ISocket>, std::string>> connectAttach(
+    net::EventLoop* loop, AttachEndpoint endpoint);
+
 /// Attaches this terminal to a running daemon over the native cells+deltas
 /// protocol: mirrors the remote screen onto the local TTY and forwards
 /// keystrokes until the peer disconnects or Ctrl-\ detaches.
-/// @param socketPath The daemon's control-socket file (the native socket
-///        lives beside it).
+/// @param endpoint The daemon endpoint (unix socket or TCP+TLS).
 /// @return The process exit code (EXIT_SUCCESS on clean detach).
-[[nodiscard]] int runAttach(std::filesystem::path const& socketPath);
+[[nodiscard]] int runAttach(AttachEndpoint const& endpoint);
 
 #ifndef _WIN32
 

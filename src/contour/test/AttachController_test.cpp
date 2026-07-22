@@ -27,6 +27,7 @@
 #include <muxserver/MuxServer.h>
 #include <muxserver/NativeSession.h>
 #include <muxserver/SessionHost.h>
+#include <muxserver/SocketPath.h>
 #include <muxserver/TappingPty.h>
 #include <net/EventLoop.h>
 #include <net/PollEventSource.h>
@@ -48,7 +49,9 @@ struct DaemonFixture
     // The socket's PARENT directory must be private (0700): listenUnix
     // hardens it exactly like tmux and refuses a world-writable /tmp.
     std::string socketDir = std::format("/tmp/contour-at-{}", ::getpid());
-    std::string socketPath = socketDir + "/native.sock";
+    // The CONTROL-socket path; the native endpoint the client dials is derived
+    // beside it (see nativeSocketPath), exactly as in production.
+    std::string socketPath = socketDir + "/ctl.sock";
     net::PollEventSource source;
     net::EventLoop loop { source };
     std::unique_ptr<muxserver::SessionHost> host;
@@ -64,7 +67,7 @@ struct DaemonFixture
             [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
             vtbackend::Settings {},
             /*startPumps=*/false);
-        auto listener = net::listenUnix(loop, socketPath);
+        auto listener = net::listenUnix(loop, muxserver::nativeSocketPath(socketPath).string());
         REQUIRE(listener.has_value());
         server = std::make_unique<muxserver::MuxServer>(
             loop, std::move(*listener), muxserver::makeNativeHandler(loop, *host));
@@ -159,7 +162,8 @@ TEST_CASE("attach controller mirrors a remote session over a real socket", "[att
     auto daemon = DaemonFixture {};
     auto const session = daemon.seedSession("hello attach");
 
-    auto controller = contour::AttachController { std::filesystem::path { daemon.socketPath } };
+    auto controller =
+        contour::AttachController { muxserver::UnixEndpoint { .socketPath = daemon.socketPath } };
     auto const connected = controller.connectAndWait(10s);
     REQUIRE(connected.has_value());
     REQUIRE(controller.pendingCount() == 1);
@@ -218,7 +222,8 @@ TEST_CASE("a closed mirrored tab does not resurrect on later remote output", "[a
     auto daemon = DaemonFixture {};
     auto const session = daemon.seedSession("first line");
 
-    auto controller = contour::AttachController { std::filesystem::path { daemon.socketPath } };
+    auto controller =
+        contour::AttachController { muxserver::UnixEndpoint { .socketPath = daemon.socketPath } };
     REQUIRE(controller.connectAndWait(10s).has_value());
     REQUIRE(controller.pendingCount() == 1);
 
@@ -256,8 +261,8 @@ TEST_CASE("a closed mirrored tab does not resurrect on later remote output", "[a
 
 TEST_CASE("attach controller reports an unreachable daemon", "[attach][controller]")
 {
-    auto controller =
-        contour::AttachController { std::filesystem::path { "/tmp/contour-attach-test-nonexistent.sock" } };
+    auto controller = contour::AttachController { muxserver::UnixEndpoint {
+        .socketPath = "/tmp/contour-attach-test-nonexistent.sock" } };
     auto const connected = controller.connectAndWait(2s);
     REQUIRE(!connected.has_value());
     CHECK(!connected.error().empty());

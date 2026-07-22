@@ -14,6 +14,7 @@
 
 #include <array>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <cstdlib>
 #include <expected>
@@ -26,6 +27,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <coro/WhenAll.hpp>
@@ -150,6 +152,59 @@ namespace
         return std::move(*listener);
     }
 } // namespace
+
+std::string endpointToken(AttachEndpoint const& endpoint)
+{
+    if (auto const* tcp = std::get_if<TcpEndpoint>(&endpoint))
+        return tcp->token;
+    return {};
+}
+
+coro::Task<std::expected<std::unique_ptr<net::ISocket>, std::string>> connectAttach(net::EventLoop* loop,
+                                                                                    AttachEndpoint endpoint)
+{
+    if (auto const* unixEp = std::get_if<UnixEndpoint>(&endpoint))
+    {
+        auto socket = co_await net::connectUnix(loop, nativeSocketPath(unixEp->socketPath).string());
+        if (!socket)
+            co_return std::unexpected(socket.error().toString());
+        co_return std::move(*socket);
+    }
+
+    auto const& tcp = std::get<TcpEndpoint>(endpoint);
+    auto socket = co_await net::connect(loop, tcp.host, tcp.port);
+    if (!socket)
+        co_return std::unexpected(socket.error().toString());
+    auto tls = net::makeTlsClientContext(tcp.caPem);
+    if (!tls)
+        co_return std::unexpected(tls.error());
+    auto encrypted = (*tls)->wrap(std::move(*socket));
+    if (!encrypted)
+        co_return std::unexpected(std::string { "TLS handshake setup failed" });
+    co_return std::move(encrypted);
+}
+
+std::optional<std::pair<std::string, std::uint16_t>> parseHostPort(std::string_view spec)
+{
+    // Split on the LAST colon so bare IPv6 works when bracketed as [addr]:port.
+    auto const colon = spec.rfind(':');
+    if (colon == std::string_view::npos || colon == 0 || colon + 1 == spec.size())
+        return std::nullopt;
+    auto host = spec.substr(0, colon);
+    auto const portText = spec.substr(colon + 1);
+    // Strip one layer of [] around an IPv6 literal.
+    if (host.size() >= 2 && host.front() == '[' && host.back() == ']')
+        host = host.substr(1, host.size() - 2);
+    if (host.empty())
+        return std::nullopt;
+    auto port = 0U;
+    auto const* const first = portText.data();
+    auto const* const last = portText.data() + portText.size();
+    auto const [ptr, ec] = std::from_chars(first, last, port);
+    if (ec != std::errc {} || ptr != last || port == 0 || port > 65535)
+        return std::nullopt;
+    return std::pair { std::string { host }, static_cast<std::uint16_t>(port) };
+}
 
 #ifndef _WIN32
 
@@ -343,17 +398,18 @@ namespace
     }
 
     /// The whole attach lifetime: connect, mirror, pump input, detach.
-    coro::Task<void> attachFlow(net::EventLoop* loop, std::string path, int* exitCode)
+    coro::Task<void> attachFlow(net::EventLoop* loop, AttachEndpoint endpoint, int* exitCode)
     {
-        auto socket = co_await net::connectUnix(loop, path);
+        auto const token = endpointToken(endpoint);
+        auto socket = co_await connectAttach(loop, std::move(endpoint));
         if (!socket.has_value())
         {
-            std::println(stderr, "contour attach: {}", socket.error().toString());
+            std::println(stderr, "contour attach: {}", socket.error());
             *exitCode = EXIT_FAILURE;
             co_return;
         }
 
-        auto attach = client::AttachClient { *loop, std::move(*socket) };
+        auto attach = client::AttachClient { *loop, std::move(*socket), token };
         auto activeSession = std::uint64_t { 0 };
         // The thin client drives the OUTER terminal directly with the same
         // ScreenMirror re-serialization the GUI feeds its mirror Terminal — so
@@ -473,14 +529,15 @@ coro::Task<void> trackTtySize(net::EventLoop* loop, net::NativeHandle winchFd, s
     }
 }
 
-int runAttach(std::filesystem::path const& socketPath)
+int runAttach(AttachEndpoint const& endpoint)
 {
     auto source = net::PollEventSource {};
     auto loop = net::EventLoop { source };
 
     auto exitCode = EXIT_SUCCESS;
-    // The daemon's native protocol listens beside the control-mode socket.
-    loop.blockOn(attachFlow(&loop, nativeSocketPath(socketPath).string(), &exitCode));
+    // connectAttach resolves the native socket beside the control socket (unix) or
+    // dials TCP+TLS, per the endpoint.
+    loop.blockOn(attachFlow(&loop, endpoint, &exitCode));
     return exitCode;
 }
 
@@ -626,16 +683,17 @@ namespace
     /// The attach flow on Windows: mirrors POSIX attachFlow, but console
     /// input cannot park on the socket reactor — a dedicated blocking-read
     /// thread posts the bytes onto the loop instead.
-    coro::Task<int> attachFlowWin32(net::EventLoop* loop, std::filesystem::path path)
+    coro::Task<int> attachFlowWin32(net::EventLoop* loop, AttachEndpoint endpoint)
     {
-        auto socket = co_await net::connectUnix(loop, path.string());
+        auto const token = endpointToken(endpoint);
+        auto socket = co_await connectAttach(loop, std::move(endpoint));
         if (!socket)
         {
-            std::println(stderr, "contour attach: {}", socket.error().toString());
+            std::println(stderr, "contour attach: {}", socket.error());
             co_return EXIT_FAILURE;
         }
 
-        auto attach = client::AttachClient { *loop, std::move(*socket) };
+        auto attach = client::AttachClient { *loop, std::move(*socket), token };
         auto activeSession = std::uint64_t { 0 };
         // Drive the outer console with ScreenMirror (see the POSIX attachFlow note).
         auto mirror = client::ScreenMirror {};
@@ -722,11 +780,13 @@ namespace
     }
 } // namespace
 
-int runAttach(std::filesystem::path const& socketPath)
+int runAttach(AttachEndpoint const& endpoint)
 {
     auto source = net::PollEventSource {};
     auto loop = net::EventLoop { source };
-    return loop.blockOn(attachFlowWin32(&loop, nativeSocketPath(socketPath)));
+    // connectAttach resolves the native socket beside the control socket (unix) or
+    // dials TCP+TLS, per the endpoint.
+    return loop.blockOn(attachFlowWin32(&loop, endpoint));
 }
 
 #endif // _WIN32

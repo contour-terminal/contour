@@ -107,6 +107,9 @@ int ContourGuiApp::attachAction()
     auto const attachProfile = parameters().get<string>("contour.attach.profile");
     auto const attachConfig = parameters().get<string>("contour.attach.config");
     auto const tmuxSocket = parameters().get<string>("contour.attach.tmux-socket");
+    auto const connectTcp = parameters().get<string>("contour.attach.connect-tcp");
+    auto const tcpToken = parameters().get<string>("contour.attach.token");
+    auto const tlsCaPath = parameters().get<string>("contour.attach.tls-ca");
 
     auto adopt = std::function<void()> {};
     if (wantsTmux)
@@ -134,13 +137,47 @@ int ContourGuiApp::attachAction()
     }
     else
     {
-        // The native protocol is served beside the control socket.
-        auto const socketPath = muxserver::nativeSocketPath(muxserver::muxSocketPath(label, socketOption));
+        // Build the daemon endpoint: a TLS-encrypted TCP connection when
+        // --connect-tcp is given, otherwise the local control socket (connectAttach
+        // resolves the native socket beside it).
+        auto endpoint = muxserver::AttachEndpoint {};
+        auto endpointLabel = std::string {};
+        if (!connectTcp.empty())
+        {
+            auto const hostPort = muxserver::parseHostPort(connectTcp);
+            if (!hostPort)
+            {
+                cerr << std::format("contour attach: invalid --connect-tcp '{}' (expected HOST:PORT)\n",
+                                    connectTcp);
+                return EXIT_FAILURE;
+            }
+            auto tcp = muxserver::TcpEndpoint {
+                .host = hostPort->first, .port = hostPort->second, .token = tcpToken, .caPem = {}
+            };
+            if (!tlsCaPath.empty())
+            {
+                auto const path = std::filesystem::path(tlsCaPath);
+                if (!std::filesystem::is_regular_file(path))
+                {
+                    cerr << std::format("contour attach: cannot read --tls-ca file '{}'\n", tlsCaPath);
+                    return EXIT_FAILURE;
+                }
+                tcp.caPem = crispy::readFileAsString(path);
+            }
+            endpointLabel = std::format("{}:{}", tcp.host, tcp.port);
+            endpoint = std::move(tcp);
+        }
+        else
+        {
+            auto const controlPath = muxserver::muxSocketPath(label, socketOption);
+            endpointLabel = controlPath.string();
+            endpoint = muxserver::UnixEndpoint { .socketPath = controlPath };
+        }
 
-        _attachController = std::make_unique<AttachController>(socketPath);
+        _attachController = std::make_unique<AttachController>(std::move(endpoint));
         if (auto connected = _attachController->connectAndWait(std::chrono::seconds(5)); !connected)
         {
-            cerr << std::format("contour attach: {} ({})\n", connected.error(), socketPath.string());
+            cerr << std::format("contour attach: {} ({})\n", connected.error(), endpointLabel);
             _attachController.reset();
             return EXIT_FAILURE;
         }

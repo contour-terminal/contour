@@ -415,6 +415,34 @@ TEST_CASE("attach enforces a preshared auth token", "[muxserver][attach]")
     CHECK(open);
 }
 
+TEST_CASE("parseHostPort accepts HOST:PORT and rejects malformed input", "[muxserver][attach]")
+{
+    using muxserver::parseHostPort;
+
+    auto const ipv4 = parseHostPort("127.0.0.1:9090");
+    REQUIRE(ipv4.has_value());
+    CHECK(ipv4->first == "127.0.0.1");
+    CHECK(ipv4->second == 9090);
+
+    auto const named = parseHostPort("daemon.example.com:65535");
+    REQUIRE(named.has_value());
+    CHECK(named->first == "daemon.example.com");
+    CHECK(named->second == 65535);
+
+    // A bracketed IPv6 literal keeps its colons; only the final :PORT is split off.
+    auto const ipv6 = parseHostPort("[::1]:443");
+    REQUIRE(ipv6.has_value());
+    CHECK(ipv6->first == "::1");
+    CHECK(ipv6->second == 443);
+
+    CHECK_FALSE(parseHostPort("no-port").has_value());
+    CHECK_FALSE(parseHostPort("host:").has_value());
+    CHECK_FALSE(parseHostPort(":9090").has_value());
+    CHECK_FALSE(parseHostPort("host:0").has_value());     // port 0 is not a dialable target
+    CHECK_FALSE(parseHostPort("host:70000").has_value()); // out of range
+    CHECK_FALSE(parseHostPort("host:12x").has_value());   // trailing garbage
+}
+
 namespace
 {
 
@@ -521,6 +549,48 @@ TEST_CASE("attach mirrors over TLS-encrypted TCP with token auth", "[muxserver][
     loop.blockOn(
         net::testing::allOf(server.serve(), tlsTcpAttachDriver(&loop, &server, *clientTls, port, &saw)));
     CHECK(saw); // snapshot mirrored across TLS-over-TCP with a valid token
+}
+
+TEST_CASE("attach mirrors over TLS with a generated self-signed dev certificate", "[muxserver][attach]")
+{
+    auto source = net::PollEventSource {};
+    auto loop = net::EventLoop { source };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                              vtbackend::Settings {},
+                              /*startPumps=*/false };
+    host.createTab();
+
+    // Mint a dev certificate exactly as an operator would to feed --tls-cert/--tls-key.
+    // Library-only (no `openssl` CLI), so this runs identically on Windows and UNIX.
+    auto material = net::generateSelfSignedCertificate("contour-daemon");
+    REQUIRE(material.has_value());
+    CHECK(material->certPem.starts_with("-----BEGIN CERTIFICATE-----"));
+    CHECK(material->keyPem.contains("PRIVATE KEY"));
+
+    // Server context from the PEM cert+key (the file-content path). The client PINS
+    // that exact certificate as its trust anchor and VERIFIES the peer against it —
+    // stronger than the TOFU path above (which does not verify at all).
+    auto serverTls = net::makeTlsServerContext(material->certPem, material->keyPem);
+    REQUIRE(serverTls.has_value());
+    auto clientTls = net::makeTlsClientContext(material->certPem);
+    REQUIRE(clientTls.has_value());
+
+    auto listener = net::listen(loop, "127.0.0.1", 0);
+    REQUIRE(listener.has_value());
+    auto const port = (*listener)->localPort();
+
+    auto nativeHandler = muxserver::makeNativeHandler(loop, host, "tok");
+    auto tlsContext = *serverTls;
+    auto handler = [tlsContext, nativeHandler](std::unique_ptr<net::ISocket> socket) {
+        return nativeHandler(tlsContext->wrap(std::move(socket)));
+    };
+    auto server = muxserver::MuxServer { loop, std::move(*listener), handler };
+
+    auto saw = false;
+    loop.blockOn(
+        net::testing::allOf(server.serve(), tlsTcpAttachDriver(&loop, &server, *clientTls, port, &saw)));
+    CHECK(saw); // snapshot mirrored across TLS whose peer cert the client verified against the dev cert
 }
 
 namespace

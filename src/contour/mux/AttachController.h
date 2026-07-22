@@ -33,6 +33,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include <muxserver/Daemon.h>
 #include <muxserver/client/AttachClient.h>
 #include <muxserver/client/ScreenMirror.h>
 #include <vtmux/Primitives.h>
@@ -48,8 +49,9 @@ class AttachController final: public QObject, public SessionFactory
     Q_OBJECT
 
   public:
-    /// @param socketPath The daemon's NATIVE-protocol socket path.
-    explicit AttachController(std::filesystem::path socketPath);
+    /// @param endpoint How to reach the daemon: the local unix control socket, or
+    ///        a TLS-encrypted, token-authenticated TCP endpoint.
+    explicit AttachController(muxserver::AttachEndpoint endpoint);
 
     /// Stops the reactor (detaching if still connected) and joins.
     ~AttachController() override;
@@ -132,7 +134,7 @@ class AttachController final: public QObject, public SessionFactory
     /// Closes every bound pty (EOF to its session) — the disconnect path.
     void closeAllBindings();
 
-    std::filesystem::path _socketPath;
+    muxserver::AttachEndpoint _endpoint;
     MuxLoopThread _reactor;
 
     mutable std::mutex _mutex;

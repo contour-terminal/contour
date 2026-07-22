@@ -570,13 +570,61 @@ int ContourApp::daemonAction()
     if (auto label = parameters().get<string>("contour.daemon.tmux-compat-socket"); !label.empty())
         config.tmuxCompatLabel = std::move(label);
 
+    // Opt-in TCP listener: absent unless --listen-tcp is given; always TLS-encrypted
+    // (self-signed when no cert/key), token-authenticated, loopback-bound unless the
+    // host part says otherwise.
+    if (auto const listen = parameters().get<string>("contour.daemon.listen-tcp"); !listen.empty())
+    {
+        auto const hostPort = muxserver::parseHostPort(listen);
+        if (!hostPort)
+        {
+            cerr << std::format("contour daemon: invalid --listen-tcp '{}' (expected HOST:PORT)\n", listen);
+            return EXIT_FAILURE;
+        }
+        config.nativeTcp = muxserver::NativeTcpListenerConfig {
+            .host = hostPort->first,
+            .port = hostPort->second,
+            .token = parameters().get<string>("contour.daemon.token"),
+            .tlsCertPath = parameters().get<string>("contour.daemon.tls-cert"),
+            .tlsKeyPath = parameters().get<string>("contour.daemon.tls-key"),
+        };
+    }
+
     return muxserver::runDaemon(config);
 }
 
 int ContourApp::attachAction()
 {
-    return muxserver::runAttach(muxserver::muxSocketPath(parameters().get<string>("contour.attach.label"),
-                                                         parameters().get<string>("contour.attach.socket")));
+    // Default endpoint: the local control socket. --connect-tcp switches to a
+    // TLS-encrypted, token-authenticated TCP connection.
+    if (auto const connect = parameters().get<string>("contour.attach.connect-tcp"); !connect.empty())
+    {
+        auto const hostPort = muxserver::parseHostPort(connect);
+        if (!hostPort)
+        {
+            cerr << std::format("contour attach: invalid --connect-tcp '{}' (expected HOST:PORT)\n", connect);
+            return EXIT_FAILURE;
+        }
+        auto tcp = muxserver::TcpEndpoint { .host = hostPort->first,
+                                            .port = hostPort->second,
+                                            .token = parameters().get<string>("contour.attach.token"),
+                                            .caPem = {} };
+        if (auto const caPath = parameters().get<string>("contour.attach.tls-ca"); !caPath.empty())
+        {
+            auto const ca = readFile(std::filesystem::path(caPath));
+            if (ca.empty())
+            {
+                cerr << std::format("contour attach: cannot read --tls-ca file '{}'\n", caPath);
+                return EXIT_FAILURE;
+            }
+            tcp.caPem.assign(ca.begin(), ca.end());
+        }
+        return muxserver::runAttach(muxserver::AttachEndpoint { std::move(tcp) });
+    }
+
+    return muxserver::runAttach(muxserver::AttachEndpoint { muxserver::UnixEndpoint {
+        .socketPath = muxserver::muxSocketPath(parameters().get<string>("contour.attach.label"),
+                                               parameters().get<string>("contour.attach.socket")) } });
 }
 
 int ContourApp::catAction()
@@ -739,26 +787,46 @@ crispy::cli::command ContourApp::parameterDefinition() const
                 CLI::verbatim {
                     "IMAGE_FILE",
                     "Path to image to be displayed. Image formats supported are at least PNG, JPG." } },
-            CLI::command { "daemon",
-                           "Runs the headless terminal multiplexer daemon, serving sessions to "
-                           "attaching clients over a control socket.",
-                           CLI::option_list {
-                               CLI::option { "socket",
-                                             CLI::value { ""s },
-                                             "Path of the control socket file. Defaults to "
-                                             "$XDG_RUNTIME_DIR/contour/LABEL (respecting $CONTOUR_MUX).",
-                                             "PATH" },
-                               CLI::option { "label",
-                                             CLI::value { "default"s },
-                                             "Socket label distinguishing daemon instances.",
-                                             "NAME" },
-                               CLI::option { "tmux-compat-socket",
-                                             CLI::value { ""s },
-                                             "Additionally binds tmux's own discovery path "
-                                             "/tmp/tmux-<uid>/<LABEL> so a plain `tmux -L LABEL -C "
-                                             "attach-session` finds this daemon.",
-                                             "LABEL" },
-                           } },
+            CLI::command {
+                "daemon",
+                "Runs the headless terminal multiplexer daemon, serving sessions to "
+                "attaching clients over a control socket.",
+                CLI::option_list {
+                    CLI::option { "socket",
+                                  CLI::value { ""s },
+                                  "Path of the control socket file. Defaults to "
+                                  "$XDG_RUNTIME_DIR/contour/LABEL (respecting $CONTOUR_MUX).",
+                                  "PATH" },
+                    CLI::option { "label",
+                                  CLI::value { "default"s },
+                                  "Socket label distinguishing daemon instances.",
+                                  "NAME" },
+                    CLI::option { "tmux-compat-socket",
+                                  CLI::value { ""s },
+                                  "Additionally binds tmux's own discovery path "
+                                  "/tmp/tmux-<uid>/<LABEL> so a plain `tmux -L LABEL -C "
+                                  "attach-session` finds this daemon.",
+                                  "LABEL" },
+                    CLI::option { "listen-tcp",
+                                  CLI::value { ""s },
+                                  "Also serve the native protocol over TCP at HOST:PORT "
+                                  "(opt-in; loopback e.g. 127.0.0.1:9090 by default). Always "
+                                  "TLS-encrypted and token-authenticated.",
+                                  "HOST:PORT" },
+                    CLI::option { "token",
+                                  CLI::value { ""s },
+                                  "Preshared token every TCP client must present (the TCP "
+                                  "transport has no filesystem gate).",
+                                  "TOKEN" },
+                    CLI::option { "tls-cert",
+                                  CLI::value { ""s },
+                                  "PEM certificate for the TCP listener. When omitted (with "
+                                  "--tls-key) the daemon generates an ephemeral self-signed "
+                                  "certificate (TOFU).",
+                                  "FILE" },
+                    CLI::option {
+                        "tls-key", CLI::value { ""s }, "PEM private key matching --tls-cert.", "FILE" },
+                } },
             CLI::command { "attach",
                            "Attaches to a running multiplexer daemon (thin TTY client, or the "
                            "GUI with --gui).",
@@ -792,6 +860,21 @@ crispy::cli::command ContourApp::parameterDefinition() const
                                CLI::option { "config",
                                              CLI::value { ""s },
                                              "Path to configuration file the GUI loads.",
+                                             "FILE" },
+                               CLI::option { "connect-tcp",
+                                             CLI::value { ""s },
+                                             "Connect to a TCP daemon at HOST:PORT (TLS-encrypted, "
+                                             "token-authenticated) instead of the local socket.",
+                                             "HOST:PORT" },
+                               CLI::option { "token",
+                                             CLI::value { ""s },
+                                             "Preshared token sent to a --connect-tcp daemon.",
+                                             "TOKEN" },
+                               CLI::option { "tls-ca",
+                                             CLI::value { ""s },
+                                             "PEM trust anchor pinning the daemon's TLS certificate "
+                                             "for --connect-tcp. Omitted ⇒ TOFU (encrypt, don't verify; "
+                                             "the token authenticates).",
                                              "FILE" },
                            } },
             CLI::command {

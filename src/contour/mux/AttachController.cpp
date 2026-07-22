@@ -18,7 +18,7 @@ namespace
     auto const attachLog = logstore::category("gui.attach", "GUI native-attach controller.");
 } // namespace
 
-AttachController::AttachController(std::filesystem::path socketPath): _socketPath(std::move(socketPath))
+AttachController::AttachController(muxserver::AttachEndpoint endpoint): _endpoint(std::move(endpoint))
 {
 }
 
@@ -54,20 +54,21 @@ void AttachController::stop()
 
 coro::Task<void> AttachController::runClient(net::EventLoop* loop)
 {
-    auto socket = co_await net::connectUnix(loop, _socketPath.string());
+    auto const token = muxserver::endpointToken(_endpoint);
+    auto socket = co_await muxserver::connectAttach(loop, _endpoint);
     if (!socket)
     {
         {
             auto const lock = std::lock_guard { _mutex };
             _state = State::Failed;
-            _failure = socket.error().toString();
+            _failure = socket.error();
         }
         _connected.notify_all();
         emit connectionClosed();
         co_return;
     }
 
-    auto client = AttachClient { *loop, std::move(*socket) };
+    auto client = AttachClient { *loop, std::move(*socket), token };
     client.setUpdateHandler([this](RemoteScreen const& screen, muxserver::proto::Delta const& delta) {
         onUpdate(screen, delta);
     });
