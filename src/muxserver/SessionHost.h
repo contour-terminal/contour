@@ -219,6 +219,32 @@ class SessionHost final: public vtmux::ModelEvents
     /// never drift from the advertised layout.
     void reprojectLayouts();
 
+    /// Fans one completed model change out to every subscriber, invoking @p method
+    /// on each with @p args. Single-sources the observer loop the ModelEvents
+    /// overrides below all share.
+    /// @param method A vtmux::ModelEvents member function pointer.
+    /// @param args The event arguments (copied once here, then passed to each observer).
+    template <typename Method, typename... Args>
+    void fanOut(Method method, Args... args)
+    {
+        for (auto* observer: _subscribers)
+            (observer->*method)(args...);
+    }
+
+    /// Reprojects PTY sizes onto the new layout, THEN fans the event out — the
+    /// required order for every layout-shape change, so shells never see a size
+    /// that lags what observers are about to advertise. Spelling the reproject at
+    /// the call site keeps a newly added shape-changing event from silently
+    /// forgetting it.
+    /// @param method A vtmux::ModelEvents member function pointer.
+    /// @param args The event arguments (forwarded to fanOut).
+    template <typename Method, typename... Args>
+    void fanOutAfterReproject(Method method, Args... args)
+    {
+        reprojectLayouts();
+        fanOut(method, args...);
+    }
+
     net::EventLoop& _loop;
     PtyFactory _ptyFactory;
     vtbackend::Settings _settings;
