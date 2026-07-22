@@ -5,6 +5,8 @@
 #include <vtbackend/TextScale.h>
 #include <vtbackend/TextSizing.h>
 
+#include <crispy/base64.h>
+
 #include <algorithm>
 #include <format>
 #include <optional>
@@ -255,6 +257,7 @@ std::string ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& 
     }
 
     syncModes(out, screen);
+    appendImages(out, screen);
     out += "\033[0m";
     out += cup(delta.cursorLine + 1, delta.cursorColumn + 1);
     if (containsValue(_setModes, VisibleCursorModeNumber))
@@ -322,7 +325,99 @@ std::string ScreenMirror::fullReplay(RemoteScreen const& screen)
 
     out += std::format("\033]0;{}\033\\", screen.title);
     syncModes(out, screen);
+    appendImages(out, screen);
     out += "\033[0m";
+    out += cup(screen.cursorLine + 1, screen.cursorColumn + 1);
+    if (containsValue(_setModes, VisibleCursorModeNumber))
+        out += "\033[?25h";
+    return out;
+}
+
+void ScreenMirror::appendImages(std::string& out, RemoteScreen const& screen)
+{
+    if (screen.imageCells.empty())
+        return;
+
+    auto const base = _viewportBase;
+    auto const lines = static_cast<int64_t>(_lines);
+
+    /// One image's placement, accumulated from its covered cells in the viewport.
+    struct Placement
+    {
+        int64_t anchorLine = 0;    ///< 1-based mirror row of the image's top-left cell.
+        uint16_t anchorColumn = 0; ///< 1-based mirror column of that cell.
+        uint32_t rows = 0;         ///< Cell rows the image spans.
+        uint32_t cols = 0;         ///< Cell columns the image spans.
+        uint8_t layer = 1;         ///< ImageLayer underlying (0 Below, 1 Replace, 2 Above).
+        bool anchored = false;     ///< The (0,0) tile is inside the viewport.
+    };
+    auto placements = std::unordered_map<uint32_t, Placement> {};
+
+    for (auto const& [stableId, columns]: screen.imageCells)
+    {
+        if (stableId < base || stableId >= base + lines)
+            continue;
+        for (auto const& [column, entry]: columns)
+        {
+            auto& placement = placements[entry.imageId];
+            placement.layer = entry.layer;
+            placement.rows = std::max(placement.rows, static_cast<uint32_t>(entry.offsetLine) + 1);
+            placement.cols = std::max(placement.cols, static_cast<uint32_t>(entry.offsetColumn) + 1);
+            if (entry.offsetLine == 0 && entry.offsetColumn == 0)
+            {
+                placement.anchorLine = stableId - base + 1;
+                placement.anchorColumn = static_cast<uint16_t>(column + 1);
+                placement.anchored = true;
+            }
+        }
+    }
+
+    for (auto const& [imageId, placement]: placements)
+    {
+        if (!placement.anchored)
+            continue; // the image's top scrolled into history — a resync re-places it
+        auto const* data = screen.imageData(imageId);
+        if (data == nullptr)
+            continue; // pixels not fetched yet; the image handler places it once they land
+
+        if (_storedImages.insert(imageId).second)
+        {
+            auto const body = crispy::base64::encode(
+                std::string_view { reinterpret_cast<char const*>(data->data.data()), data->data.size() });
+            // GIP f = ImageFormat underlying + 1 (Auto=1, RGB=2, RGBA=3, PNG=4).
+            out += std::format("\033P!go=u,n=muximg_{},f={},w={},h={};!{}\033\\",
+                               imageId,
+                               data->format + 1,
+                               data->width,
+                               data->height,
+                               body);
+        }
+        out += cup(placement.anchorLine, placement.anchorColumn);
+        // z=3 StretchToFill fills the reported cell box; L carries the layer; no `u`
+        // header, so the placement must not move the cursor. (The source alignment/
+        // resize policy is not on the native wire yet — a fidelity follow-up.)
+        out += std::format("\033P!go=r,n=muximg_{},c={},r={},z=3,L={}\033\\",
+                           imageId,
+                           placement.cols,
+                           placement.rows,
+                           placement.layer);
+    }
+}
+
+std::string ScreenMirror::applyImage(RemoteScreen const& screen, uint32_t imageId)
+{
+    auto out = std::string {};
+    if (screen.imageData(imageId) == nullptr)
+    {
+        // Dropped server-side: release it so a reused id can never show stale pixels.
+        if (_storedImages.erase(imageId) != 0)
+            out += std::format("\033P!go=d,n=muximg_{}\033\\", imageId);
+        return out;
+    }
+    // The pixels arrived after the delta that referenced them was already painted:
+    // hide the cursor, (re)place the cached images, restore the cursor.
+    out += "\033[?25l";
+    appendImages(out, screen);
     out += cup(screen.cursorLine + 1, screen.cursorColumn + 1);
     if (containsValue(_setModes, VisibleCursorModeNumber))
         out += "\033[?25h";

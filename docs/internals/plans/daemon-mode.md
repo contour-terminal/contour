@@ -107,11 +107,16 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       `ImageGone`. New `setImageHandler` fires a repaint hook. Unit-tested (RemoteScreen apply/evict/
       dropImage + a socket-level fake-server fetch/cache test). *Landed 2026-07-22; muxserver suite
       green (2606 assertions).*
-- [ ] **A1b. Images — render half.** `ScreenMirror` re-emits image bytes into the mirror terminal
-      (reassemble tiles by `offsetLine/offsetColumn`, honor `layer`) on delta apply and on the
-      `setImageHandler` repaint; thin client inherits this via WS-A9. Reuse: the cached `ImageData`
-      (format/width/height/data). Add a real-image e2e test (drive Sixel/Kitty through a hosted
-      session). Completes roadmap **F5**.
+- [x] **A1b. Images — render half.** `ScreenMirror` re-emits cached pixels via the **Good Image
+      Protocol** (both ends are Contour, so GIP is guaranteed and its `L=` layer maps 1:1 to the
+      captured `ImageLayer` — no z-index loss): upload once per id by name `muximg_<id>`
+      (`o=u`, `f`=fmt+1), then place per visible image at its `(0,0)` anchor spanning the reported
+      `c×r` cell box (`o=r`, `z=3` StretchToFill, no cursor move), released on drop (`o=d`). Wired
+      into `apply`/`fullReplay` (after paint) and the new `setImageHandler` repaint. Closed-loop
+      test drives a real GIP image through the server and asserts the mirror covers the same cells.
+      *Landed 2026-07-22; muxserver suite green (113 cases / 2610 assertions).* Completes roadmap
+      **F5**. Follow-up: the source alignment/resize policy is not on the native wire yet (v1 uses
+      StretchToFill), and images whose anchor scrolled into history aren't re-placed until a resync.
 - [ ] **A2. Live title.** A0 signal → promote `title` into `Delta` (or a small `TitleChanged`
       PDU / `SessionState` re-send). `ScreenMirror` emits OSC 0/2 **incrementally** (today only in
       `fullReplay`, `ScreenMirror.cpp:323`); GUI `TerminalSession::setWindowTitle` path drives the
@@ -243,7 +248,9 @@ runtime-gated net tests, watch the Windows job after each push.
 - 2026-07-22 · Windows/clangcl-release · **A1a done** — native image fetch/cache/drop on the client
   (`AttachClient`/`RemoteScreen`); serial-correlated session routing for the session-less reply.
   3 new tests; full muxserver suite green (112 cases / 2606 assertions), build `-Werror` clean.
-  Next: A1b (ScreenMirror re-emit) then A0 (Events tap enabler).
+- 2026-07-22 · Windows/clangcl-release · **A1b done** — `ScreenMirror` re-emits images via GIP
+  (upload-once-by-name + StretchToFill placement, layer-faithful); closed-loop GIP round-trip test.
+  Suite green (113 cases / 2610 assertions). **WS-A1 (images) complete.** Next: A0 (Events tap).
 
 ## Open decisions / risks
 

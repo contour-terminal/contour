@@ -3,9 +3,12 @@
 
 #include <vtpty/MockPty.h>
 
+#include <crispy/base64.h>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <format>
 #include <functional>
@@ -13,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <vector>
 
 #include <coro/WhenAll.hpp>
 #include <muxserver/NativeSession.h>
@@ -36,6 +40,15 @@ using namespace std::chrono_literals;
 namespace
 {
 
+/// Settings with the Good Image Protocol enabled on both ends, so an inline
+/// image drawn on the server round-trips through the mirror's re-emit.
+vtbackend::Settings gipSettings()
+{
+    auto settings = vtbackend::Settings {};
+    settings.goodImageProtocol = true;
+    return settings;
+}
+
 /// The full closed loop: the REAL server serves deltas of a REAL terminal,
 /// the REAL client mirrors them into RemoteScreen, and the ScreenMirror
 /// re-serializes every update into a LOCAL mirror terminal — whose content
@@ -46,7 +59,7 @@ struct MirrorHarness
     net::EventLoop loop { source };
     SessionHost host { loop,
                        [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
-                       vtbackend::Settings {},
+                       gipSettings(),
                        /*startPumps=*/false };
     net::testing::SocketPair pair = *net::testing::makeSocketPair(loop);
     std::unique_ptr<NativeSession> server =
@@ -59,7 +72,7 @@ struct MirrorHarness
 
     MirrorHarness()
     {
-        auto settings = vtbackend::Settings {};
+        auto settings = gipSettings();
         mirror = std::make_unique<vtbackend::Terminal>(mirrorEvents,
                                                        std::make_unique<vtpty::MockPty>(settings.pageSize),
                                                        std::move(settings),
@@ -68,6 +81,9 @@ struct MirrorHarness
             [this](muxserver::client::RemoteScreen const& screen, proto::Delta const& delta) {
                 mirror->writeToScreen(reserializer.apply(screen, delta));
             });
+        client->setImageHandler([this](muxserver::client::RemoteScreen const& screen, uint32_t imageId) {
+            mirror->writeToScreen(reserializer.applyImage(screen, imageId));
+        });
     }
 
     [[nodiscard]] vtbackend::Terminal* serverTerminal(vtmux::SessionId session)
@@ -346,6 +362,46 @@ TEST_CASE("a resize resyncs the mirror through a full replay", "[muxserver][mirr
         auto const& serverGrid = h->serverTerminal(session)->primaryScreen().grid();
         auto const& mirrorGrid = h->mirror->primaryScreen().grid();
         CHECK(mirrorGrid.renderMainPageText() == serverGrid.renderMainPageText());
+
+        h->client->detach();
+    }(&h, session);
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+
+TEST_CASE("inline images round-trip into the mirror via GIP", "[muxserver][mirror]")
+{
+    auto h = MirrorHarness {};
+    h.host.createTab();
+    auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+
+    // Draw a 2-cell-wide, 1-cell-tall image at the home position on the server via a
+    // GIP oneshot (StretchToFill, so both cells are covered). The client fetches the
+    // pixels and the mirror re-emits them as GIP, materialising image fragments.
+    auto const pixels = std::vector<uint8_t>(static_cast<std::size_t>(8 * 8 * 4), 0xC0);
+    auto const body = crispy::base64::encode(
+        std::string_view { reinterpret_cast<char const*>(pixels.data()), pixels.size() });
+    h.serverTerminal(session)->writeToScreen(
+        std::format("\033P!go=s,f=3,w=8,h=8,c=2,r=1,z=3;!{}\033\\", body));
+
+    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+        co_await waitUntil(&h->loop, [&] {
+            auto const& row = h->mirror->primaryScreen().grid().lineAt(vtbackend::LineOffset(0)).storage();
+            return row.imageFragments.has_value() && row.imageFragments->contains(0)
+                   && row.imageFragments->contains(1);
+        });
+
+        auto const& serverRow =
+            h->serverTerminal(session)->primaryScreen().grid().lineAt(vtbackend::LineOffset(0)).storage();
+        auto const& mirrorRow = h->mirror->primaryScreen().grid().lineAt(vtbackend::LineOffset(0)).storage();
+        REQUIRE(serverRow.imageFragments.has_value());
+        REQUIRE(mirrorRow.imageFragments.has_value());
+        // Every cell the server covered with the image is covered in the mirror.
+        for (auto const& [column, fragment]: *serverRow.imageFragments)
+        {
+            std::ignore = fragment;
+            CHECK(mirrorRow.imageFragments->contains(column));
+        }
 
         h->client->detach();
     }(&h, session);
