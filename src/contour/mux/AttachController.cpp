@@ -11,15 +11,15 @@
 namespace contour
 {
 
-using muxserver::client::AttachClient;
-using muxserver::client::RemoteScreen;
+using vthost::client::AttachClient;
+using vthost::client::RemoteScreen;
 
 namespace
 {
     auto const attachLog = logstore::category("gui.attach", "GUI native-attach controller.");
 } // namespace
 
-AttachController::AttachController(muxserver::AttachEndpoint endpoint): _endpoint(std::move(endpoint))
+AttachController::AttachController(vthost::AttachEndpoint endpoint): _endpoint(std::move(endpoint))
 {
 }
 
@@ -33,8 +33,8 @@ AttachController::~AttachController()
 
 coro::Task<void> AttachController::runClient(net::EventLoop* loop)
 {
-    auto const token = muxserver::endpointToken(_endpoint);
-    auto socket = co_await muxserver::connectAttach(loop, _endpoint);
+    auto const token = vthost::endpointToken(_endpoint);
+    auto socket = co_await vthost::connectAttach(loop, _endpoint);
     if (!socket)
     {
         {
@@ -48,10 +48,10 @@ coro::Task<void> AttachController::runClient(net::EventLoop* loop)
     }
 
     auto client = AttachClient { *loop, std::move(*socket), token };
-    client.setUpdateHandler([this](RemoteScreen const& screen, muxserver::proto::Delta const& delta) {
+    client.setUpdateHandler([this](RemoteScreen const& screen, vthost::proto::Delta const& delta) {
         onUpdate(screen, delta);
     });
-    client.setLayoutHandler([this](muxserver::proto::LayoutState const& layout) { onLayout(layout); });
+    client.setLayoutHandler([this](vthost::proto::LayoutState const& layout) { onLayout(layout); });
     {
         auto const lock = std::lock_guard { _mutex };
         _client = &client;
@@ -86,7 +86,7 @@ coro::Task<void> AttachController::runClient(net::EventLoop* loop)
     emit connectionClosed();
 }
 
-void AttachController::onUpdate(RemoteScreen const& screen, muxserver::proto::Delta const& delta)
+void AttachController::onUpdate(RemoteScreen const& screen, vthost::proto::Delta const& delta)
 {
     auto lock = std::unique_lock { _mutex };
 
@@ -122,7 +122,7 @@ void AttachController::onUpdate(RemoteScreen const& screen, muxserver::proto::De
     emit remoteSessionDiscovered();
 }
 
-void AttachController::onLayout(muxserver::proto::LayoutState const& layout)
+void AttachController::onLayout(vthost::proto::LayoutState const& layout)
 {
     {
         auto const lock = std::lock_guard { _mutex };
@@ -142,14 +142,14 @@ std::vector<uint64_t> AttachController::windowIds() const
     return std::ranges::to<std::vector>(_layouts | std::views::keys);
 }
 
-std::optional<muxserver::proto::LayoutState> AttachController::layout(uint64_t daemonWindow) const
+std::optional<vthost::proto::LayoutState> AttachController::layout(uint64_t daemonWindow) const
 {
     auto const lock = std::lock_guard { _mutex };
     auto const it = _layouts.find(daemonWindow);
     return it != _layouts.end() ? std::optional { it->second } : std::nullopt;
 }
 
-std::optional<muxserver::proto::LayoutState> AttachController::layout() const
+std::optional<vthost::proto::LayoutState> AttachController::layout() const
 {
     auto const lock = std::lock_guard { _mutex };
     if (_layouts.empty())
@@ -157,11 +157,11 @@ std::optional<muxserver::proto::LayoutState> AttachController::layout() const
     return _layouts.begin()->second; // the primary (lowest-id) window
 }
 
-muxserver::client::WireLayout AttachController::wireLayout() const
+vthost::client::WireLayout AttachController::wireLayout() const
 {
     auto const lock = std::lock_guard { _mutex };
-    return _layouts.empty() ? muxserver::client::WireLayout {}
-                            : muxserver::client::wireToLayout(_layouts.begin()->second);
+    return _layouts.empty() ? vthost::client::WireLayout {}
+                            : vthost::client::wireToLayout(_layouts.begin()->second);
 }
 
 void AttachController::setNextBindSession(uint64_t session)

@@ -34,9 +34,9 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include <muxserver/tmux/LayoutString.h>
-#include <muxserver/tmux/TmuxClientModel.h>
-#include <muxserver/tmux/TmuxGateway.h>
+#include <vthost/tmux/LayoutString.h>
+#include <vthost/tmux/TmuxClientModel.h>
+#include <vthost/tmux/TmuxGateway.h>
 #include <vtworkspace/LayoutTree.h>
 #include <vtworkspace/Primitives.h>
 
@@ -76,7 +76,7 @@ class TerminalSession;
 /// A tmux window's binary layout tree converted for realization through
 /// `TerminalSessionManager::applyLayoutToWindow`: a single-tab `vtworkspace::Layout` carrying the split
 /// orientations and ratios, plus the map from each converted leaf pane (by its stable address inside
-/// `layout`) to the tmux pane id that backs it. Mirrors `muxserver::client::WireLayout`.
+/// `layout`) to the tmux pane id that backs it. Mirrors `vthost::client::WireLayout`.
 struct TmuxWindowLayout
 {
     vtworkspace::Layout layout;                                            ///< A single tab: the window's tree.
@@ -85,18 +85,18 @@ struct TmuxWindowLayout
 
 /// Converts a tmux `BinaryLayout` tree into a realizable single-tab `vtworkspace::Layout` (splits keep their
 /// orientation and first-child ratio) plus the leaf→pane map — the tmux analogue of
-/// `muxserver::client::wireToLayout`. Pure, so the tree conversion is unit-testable. The leaf map is
+/// `vthost::client::wireToLayout`. Pure, so the tree conversion is unit-testable. The leaf map is
 /// keyed by addresses inside the returned `layout`; a move preserves them (build the map only once the
 /// tree is in place), so pass the SAME object to `applyLayoutToWindow`.
 /// @param tree The window's binary layout tree.
 /// @return The realizable layout and its leaf→tmux-pane map.
-[[nodiscard]] TmuxWindowLayout tmuxLayoutToWindowLayout(muxserver::tmux::BinaryLayout const& tree);
+[[nodiscard]] TmuxWindowLayout tmuxLayoutToWindowLayout(vthost::tmux::BinaryLayout const& tree);
 
 /// The tmux-mirror session factory and pane registry.
 class TmuxController final:
     public QObject,
     public SessionFactory,
-    public muxserver::tmux::TmuxModelEvents,
+    public vthost::tmux::TmuxModelEvents,
     public MuxControllerBase
 {
     Q_OBJECT
@@ -191,7 +191,7 @@ class TmuxController final:
     void realizeWindowLayout(TerminalSessionManager& manager,
                              vtworkspace::WindowId guiWindow,
                              uint64_t tmuxWindow,
-                             muxserver::tmux::BinaryLayout const& tree);
+                             vthost::tmux::BinaryLayout const& tree);
 
     /// Realizes ONE pending pane of @p window incrementally: its first pane as a background tab, a
     /// later pane as a split of the window's anchor (at the pane's remote ratio). Runs on the GUI
@@ -243,18 +243,18 @@ class TmuxController final:
     /// A deep copy of each not-yet-realized window's tmux layout tree, captured on the reactor thread
     /// (paneAdded) so the GUI thread can realize the whole tree without racing the model. Keyed by tmux
     /// window; dropped once the window is realized.
-    std::unordered_map<uint64_t, muxserver::tmux::BinaryLayout> _pendingTrees;
+    std::unordered_map<uint64_t, vthost::tmux::BinaryLayout> _pendingTrees;
     std::optional<uint64_t> _nextBindPane; ///< The tmux pane the next createPty() binds to (whole-tree).
     bool _realizing =
         false; ///< True while adoptPendingPanes realizes tmux panes, so its splits build locally.
-    muxserver::tmux::TmuxGateway* _gateway = nullptr; ///< Reactor-owned; valid while serving.
+    vthost::tmux::TmuxGateway* _gateway = nullptr; ///< Reactor-owned; valid while serving.
     int _tmuxPid = -1;
 
     /// LAST member, destroyed FIRST: its pane sinks (PaneFeed) unregister from _feeds and the
     /// (base-owned) _mutex in their destructors, which must still be alive — _feeds is destroyed
     /// after _model, and _mutex lives in MuxControllerBase (destroyed last of all). The destructor
     /// body's stop() has already joined the reactor by then.
-    muxserver::tmux::TmuxClientModel _model;
+    vthost::tmux::TmuxClientModel _model;
 };
 
 } // namespace contour

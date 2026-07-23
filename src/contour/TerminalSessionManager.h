@@ -230,7 +230,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///                 brand-new window at startup) uses the profile's configured terminalSize.
     /// @param beforeLeafSeed Invoked (when set) with each leaf pane immediately before its backing
     ///                 session is created — the hook attach mode uses to bind the pane about to be born
-    ///                 to a specific remote session (via muxserver::client::WireLayout::leafSession).
+    ///                 to a specific remote session (via vthost::client::WireLayout::leafSession).
     /// @return false if @p layout has no tabs (nothing to apply); true otherwise.
     bool applyLayoutToWindow(vtworkspace::WindowId window,
                              config::Layout const& layout,

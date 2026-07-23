@@ -29,7 +29,7 @@
 #include <QtCore/QProcess>
 #include <QtQml/qqmlextensionplugin.h>
 
-#include <muxserver/SocketPath.h>
+#include <vthost/SocketPath.h>
 #if !defined(__APPLE__) && !defined(_WIN32)
     #include <QtDBus/QDBusConnection>
 #endif
@@ -148,18 +148,18 @@ int ContourGuiApp::attachAction()
         // Build the daemon endpoint: a TLS-encrypted TCP connection when
         // --connect-tcp is given, otherwise the local control socket (connectAttach
         // resolves the native socket beside it).
-        auto endpoint = muxserver::AttachEndpoint {};
+        auto endpoint = vthost::AttachEndpoint {};
         auto endpointLabel = std::string {};
         if (!connectTcp.empty())
         {
-            auto const hostPort = muxserver::parseHostPort(connectTcp);
+            auto const hostPort = vthost::parseHostPort(connectTcp);
             if (!hostPort)
             {
                 cerr << std::format("contour attach: invalid --connect-tcp '{}' (expected HOST:PORT)\n",
                                     connectTcp);
                 return EXIT_FAILURE;
             }
-            auto tcp = muxserver::TcpEndpoint {
+            auto tcp = vthost::TcpEndpoint {
                 .host = hostPort->first, .port = hostPort->second, .token = tcpToken, .caPem = {}
             };
             if (!tlsCaPath.empty())
@@ -183,9 +183,9 @@ int ContourGuiApp::attachAction()
         }
         else
         {
-            auto const controlPath = muxserver::muxSocketPath(label, socketOption);
+            auto const controlPath = vthost::muxSocketPath(label, socketOption);
             endpointLabel = controlPath.string();
-            endpoint = muxserver::UnixEndpoint { .socketPath = controlPath };
+            endpoint = vthost::UnixEndpoint { .socketPath = controlPath };
         }
 
         _attachController = std::make_unique<AttachController>(std::move(endpoint));

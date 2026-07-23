@@ -5,7 +5,7 @@
 /// `AttachController` — the GUI's native-protocol attach engine.
 ///
 /// One controller = one connection to a `contour daemon`. It runs the
-/// Qt-free `muxserver::client::AttachClient` on its own reactor thread
+/// Qt-free `vthost::client::AttachClient` on its own reactor thread
 /// (MuxLoopThread) and doubles as the app's `SessionFactory` while attached:
 /// every locally created tab is backed by a `vtpty::ChannelPty` bound to one
 /// remote session. Remote deltas re-serialize through a per-session
@@ -35,10 +35,10 @@
 #include <unordered_set>
 #include <vector>
 
-#include <muxserver/Daemon.h>
-#include <muxserver/client/AttachClient.h>
-#include <muxserver/client/LayoutReconstruction.h>
-#include <muxserver/client/ScreenMirror.h>
+#include <vthost/Daemon.h>
+#include <vthost/client/AttachClient.h>
+#include <vthost/client/LayoutReconstruction.h>
+#include <vthost/client/ScreenMirror.h>
 #include <vtworkspace/Primitives.h>
 
 namespace contour
@@ -54,7 +54,7 @@ class AttachController final: public QObject, public SessionFactory, public MuxC
   public:
     /// @param endpoint How to reach the daemon: the local unix control socket, or
     ///        a TLS-encrypted, token-authenticated TCP endpoint.
-    explicit AttachController(muxserver::AttachEndpoint endpoint);
+    explicit AttachController(vthost::AttachEndpoint endpoint);
 
     /// Stops the reactor (detaching if still connected) and joins.
     ~AttachController() override;
@@ -114,17 +114,17 @@ class AttachController final: public QObject, public SessionFactory, public MuxC
     /// @return The daemon's most recent tab/pane layout for @p daemonWindow, or
     ///         nullopt if that window is unknown. A thread-safe copy — the reactor
     ///         thread updates it. The GUI reconstructs one OS window's tree from it.
-    [[nodiscard]] std::optional<muxserver::proto::LayoutState> layout(uint64_t daemonWindow) const;
+    [[nodiscard]] std::optional<vthost::proto::LayoutState> layout(uint64_t daemonWindow) const;
 
     /// @return The primary (lowest-id) daemon window's layout, or nullopt if none has
     ///         arrived yet. Convenience for the single-window path.
-    [[nodiscard]] std::optional<muxserver::proto::LayoutState> layout() const;
+    [[nodiscard]] std::optional<vthost::proto::LayoutState> layout() const;
 
     /// @return The primary (lowest-id) daemon window's layout converted for
     ///         `vtworkspace::realizeLayoutTab` (an empty layout if none has arrived), plus
     ///         its leaf→remote-session map. The layout executor realizes this to
     ///         reproduce the daemon tree.
-    [[nodiscard]] muxserver::client::WireLayout wireLayout() const;
+    [[nodiscard]] vthost::client::WireLayout wireLayout() const;
 
     /// Binds the NEXT createPty() to remote session @p session (instead of popping
     /// the FIFO pending queue). The layout executor calls this — via
@@ -208,7 +208,7 @@ class AttachController final: public QObject, public SessionFactory, public MuxC
     struct Binding
     {
         vtpty::ChannelPty* pty = nullptr;
-        muxserver::client::ScreenMirror mirror;
+        vthost::client::ScreenMirror mirror;
     };
 
   protected:
@@ -234,11 +234,11 @@ class AttachController final: public QObject, public SessionFactory, public MuxC
 
   private:
     /// Reactor-side: applies @p delta through the session's mirror (if bound).
-    void onUpdate(muxserver::client::RemoteScreen const& screen, muxserver::proto::Delta const& delta);
+    void onUpdate(vthost::client::RemoteScreen const& screen, vthost::proto::Delta const& delta);
 
     /// Reactor-side: stores the daemon's latest tab/pane layout and signals the
     /// GUI to reconcile its own tree against it.
-    void onLayout(muxserver::proto::LayoutState const& layout);
+    void onLayout(vthost::proto::LayoutState const& layout);
 
     /// Reactor-side: feeds a fresh binding its full replay if the session's
     /// screen is already known.
@@ -255,12 +255,12 @@ class AttachController final: public QObject, public SessionFactory, public MuxC
 
     // The reactor and the connect state machine (_reactor, _mutex, _connected, _state, _failure,
     // _stopped) live in MuxControllerBase; the registry below is attach-specific.
-    muxserver::AttachEndpoint _endpoint;
+    vthost::AttachEndpoint _endpoint;
     std::deque<PendingSession> _pending; ///< Discovered remote sessions without a local tab.
     std::unordered_map<uint64_t, Binding> _bindings;
     /// The daemon's latest tab/pane tree per window id (B2/B4). Ordered so windowIds()
     /// yields a stable ascending order (the primary window is the lowest id).
-    std::map<uint64_t, muxserver::proto::LayoutState> _layouts;
+    std::map<uint64_t, vthost::proto::LayoutState> _layouts;
     /// The remote session the NEXT createPty() binds to, set by the layout
     /// executor before each pane's backing session is created (GUI thread).
     std::optional<uint64_t> _nextBindSession;
@@ -274,7 +274,7 @@ class AttachController final: public QObject, public SessionFactory, public MuxC
     /// session-removed notification from the daemon — there is nothing to clear
     /// a single id against. A reattach is a fresh controller with an empty set.
     std::unordered_set<uint64_t> _closedSessions;
-    muxserver::client::AttachClient* _client = nullptr; ///< Reactor-owned; valid while serving.
+    vthost::client::AttachClient* _client = nullptr; ///< Reactor-owned; valid while serving.
 };
 
 } // namespace contour

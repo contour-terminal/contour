@@ -3,7 +3,7 @@
 
 /// @file
 /// Generic binary-layout-tree conversion into a `vtworkspace::LayoutPane` tree, single-sourced so the
-/// native-attach (`muxserver::client`) and tmux-mirror (`contour`) paths share ONE implementation of
+/// native-attach (`vthost::client`) and tmux-mirror (`contour`) paths share ONE implementation of
 /// the "first child carries the ratio; the second is left unset so `ratioForFirst` gives it the rest"
 /// convention plus the lockstep leaf→id map. Each caller supplies a small adapter exposing its own
 /// node type's accessors, so a change to the convention (or the map) is made in one place instead of

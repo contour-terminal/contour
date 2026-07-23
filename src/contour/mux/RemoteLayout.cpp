@@ -11,8 +11,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include <muxserver/client/LayoutReconstruction.h>
-#include <muxserver/proto/Pdu.h>
+#include <vthost/client/LayoutReconstruction.h>
+#include <vthost/proto/Pdu.h>
 #include <vtworkspace/Pane.h>
 #include <vtworkspace/SessionModel.h>
 #include <vtworkspace/Tab.h>
@@ -23,7 +23,7 @@ namespace contour
 namespace
 {
     /// The leftmost leaf's session of a subtree (the pane that seeded it).
-    [[nodiscard]] uint64_t leftmostSession(muxserver::proto::WirePane const& pane)
+    [[nodiscard]] uint64_t leftmostSession(vthost::proto::WirePane const& pane)
     {
         auto const* node = &pane;
         while (node->split != 0 && !node->children.empty())
@@ -32,7 +32,7 @@ namespace
     }
 
     /// Collects every leaf session of @p pane into @p out.
-    void collectSessions(muxserver::proto::WirePane const& pane, std::unordered_set<uint64_t>& out)
+    void collectSessions(vthost::proto::WirePane const& pane, std::unordered_set<uint64_t>& out)
     {
         if (pane.split == 0)
         {
@@ -46,7 +46,7 @@ namespace
     /// @return True if any leaf of @p pane carries a remote session already claimed
     ///         locally — bound to a pane, or tombstoned by a user close the daemon
     ///         has not acknowledged yet (a stale layout push must not resurrect it).
-    [[nodiscard]] bool anyLeafClaimed(muxserver::proto::WirePane const& pane,
+    [[nodiscard]] bool anyLeafClaimed(vthost::proto::WirePane const& pane,
                                       AttachController const& controller)
     {
         if (pane.split == 0)
@@ -82,7 +82,7 @@ namespace
     /// a daemon `splitActivePane` leaves — old session in the first child, new in
     /// the second). Recurses through already-claimed subtrees to find nested new
     /// splits.
-    [[nodiscard]] std::optional<SplitOp> findNewSplit(muxserver::proto::WirePane const& node,
+    [[nodiscard]] std::optional<SplitOp> findNewSplit(vthost::proto::WirePane const& node,
                                                       AttachController const& controller)
     {
         if (node.split == 0 || node.children.size() < 2)
@@ -124,12 +124,12 @@ namespace
     void realizeWholeTab(TerminalSessionManager& manager,
                          vtworkspace::WindowId window,
                          AttachController& controller,
-                         muxserver::proto::WireTab const& wireTab,
+                         vthost::proto::WireTab const& wireTab,
                          std::optional<vtbackend::PageSize> pageSize)
     {
-        auto single = muxserver::proto::LayoutState {};
+        auto single = vthost::proto::LayoutState {};
         single.tabs.push_back(wireTab);
-        auto const wl = muxserver::client::wireToLayout(single);
+        auto const wl = vthost::client::wireToLayout(single);
         manager.applyLayoutToWindow(window, wl.layout, pageSize, [&](config::LayoutPane const& leaf) {
             auto const it = wl.leafSession.find(&leaf);
             if (it != wl.leafSession.end())

@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include <muxserver/tmux/ControlModeSpawn.h>
+#include <vthost/tmux/ControlModeSpawn.h>
 #include <vtworkspace/LayoutConvert.h>
 
 namespace contour
@@ -18,7 +18,7 @@ namespace contour
 
 namespace
 {
-    using muxserver::tmux::BinaryLayout;
+    using vthost::tmux::BinaryLayout;
 
     auto const tmuxLog = logstore::category("gui.tmux", "GUI tmux -CC mirroring controller.");
 
@@ -71,7 +71,7 @@ namespace
     }
 
     /// Adapts a tmux `BinaryLayout` for the shared layout converter (@ref vtworkspace::convertLayoutPane) —
-    /// the tmux analogue of muxserver::client's WirePaneAdapter, so both paths share ONE conversion.
+    /// the tmux analogue of vthost::client's WirePaneAdapter, so both paths share ONE conversion.
     struct BinaryLayoutAdapter
     {
         [[nodiscard]] bool isSplit(BinaryLayout const& node) const noexcept
@@ -98,7 +98,7 @@ namespace
     };
 } // namespace
 
-TmuxWindowLayout tmuxLayoutToWindowLayout(muxserver::tmux::BinaryLayout const& tree)
+TmuxWindowLayout tmuxLayoutToWindowLayout(vthost::tmux::BinaryLayout const& tree)
 {
     auto result = TmuxWindowLayout {};
     auto const adapter = BinaryLayoutAdapter {};
@@ -133,7 +133,7 @@ std::string tmuxNewWindowCommand()
 /// The model-owned pane sink: buffers bytes until a local pty is bound, then
 /// feeds it directly. Destroyed by the model on the reactor thread; the
 /// destructor unregisters so the controller never touches a dead feed.
-class TmuxController::PaneFeed final: public muxserver::tmux::PaneSink
+class TmuxController::PaneFeed final: public vthost::tmux::PaneSink
 {
   public:
     PaneFeed(TmuxController& controller, uint64_t pane): _controller(controller), _pane(pane) {}
@@ -203,7 +203,7 @@ TmuxController::~TmuxController()
 
 coro::Task<void> TmuxController::runClient(net::EventLoop* loop)
 {
-    auto spawned = muxserver::tmux::spawnControlMode(*loop, _tmuxSocket);
+    auto spawned = vthost::tmux::spawnControlMode(*loop, _tmuxSocket);
     if (!spawned)
     {
         {
@@ -217,7 +217,7 @@ coro::Task<void> TmuxController::runClient(net::EventLoop* loop)
     }
     _tmuxPid = spawned->pid;
 
-    auto gateway = muxserver::tmux::TmuxGateway { *loop, std::move(spawned->transport), _model };
+    auto gateway = vthost::tmux::TmuxGateway { *loop, std::move(spawned->transport), _model };
     _model.bind(gateway);
     {
         auto const lock = std::lock_guard { _mutex };
@@ -245,7 +245,7 @@ coro::Task<void> TmuxController::runClient(net::EventLoop* loop)
             _state = State::Closed;
     }
     _connected.notify_all();
-    muxserver::tmux::reapControlMode(std::exchange(_tmuxPid, -1));
+    vthost::tmux::reapControlMode(std::exchange(_tmuxPid, -1));
     emit connectionClosed();
 }
 
@@ -558,7 +558,7 @@ void TmuxController::adoptPendingPanes(TerminalSessionManager& manager, vtworksp
 void TmuxController::realizeWindowLayout(TerminalSessionManager& manager,
                                          vtworkspace::WindowId guiWindow,
                                          uint64_t tmuxWindow,
-                                         muxserver::tmux::BinaryLayout const& tree)
+                                         vthost::tmux::BinaryLayout const& tree)
 {
     auto const converted = tmuxLayoutToWindowLayout(tree);
     manager.applyLayoutToWindow(

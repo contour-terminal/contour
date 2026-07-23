@@ -32,12 +32,12 @@
 #include <cstdint>
 
 #include <coro/Cancellation.hpp>
-#include <muxserver/MuxServer.h>
-#include <muxserver/NativeSession.h>
-#include <muxserver/SessionHost.h>
-#include <muxserver/SocketPath.h>
-#include <muxserver/TappingPty.h>
-#include <muxserver/client/LayoutReconstruction.h>
+#include <vthost/MuxServer.h>
+#include <vthost/NativeSession.h>
+#include <vthost/SessionHost.h>
+#include <vthost/SocketPath.h>
+#include <vthost/TappingPty.h>
+#include <vthost/client/LayoutReconstruction.h>
 #include <net/EventLoop.h>
 #include <net/ISocket.h>
 #include <net/PollEventSource.h>
@@ -60,15 +60,15 @@ struct DaemonFixture
 {
     net::PollEventSource source;
     net::EventLoop loop { source };
-    std::unique_ptr<muxserver::SessionHost> host;
-    std::unique_ptr<muxserver::MuxServer> server;
+    std::unique_ptr<vthost::SessionHost> host;
+    std::unique_ptr<vthost::MuxServer> server;
     std::uint16_t port = 0; ///< The OS-assigned loopback port the daemon listens on.
     std::thread thread;
     bool cancelled = false; ///< Whether teardown unwound the accept loop.
 
     DaemonFixture()
     {
-        host = std::make_unique<muxserver::SessionHost>(
+        host = std::make_unique<vthost::SessionHost>(
             loop,
             [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
             vtbackend::Settings {},
@@ -82,12 +82,12 @@ struct DaemonFixture
         // which AttachClient's concurrent read+write drives.
         auto tls = net::makeSelfSignedServerContext();
         REQUIRE(tls.has_value());
-        auto native = muxserver::makeNativeHandler(loop, *host);
+        auto native = vthost::makeNativeHandler(loop, *host);
         auto const& context = *tls;
         auto handler = [context, native](std::unique_ptr<net::ISocket> socket) {
             return native(context->wrap(std::move(socket)));
         };
-        server = std::make_unique<muxserver::MuxServer>(loop, std::move(*listener), handler);
+        server = std::make_unique<vthost::MuxServer>(loop, std::move(*listener), handler);
         thread = std::thread { [this] {
             try
             {
@@ -115,9 +115,9 @@ struct DaemonFixture
     DaemonFixture& operator=(DaemonFixture&&) = delete;
 
     /// The endpoint a client dials: loopback TCP + TLS (TOFU), no token.
-    [[nodiscard]] muxserver::TcpEndpoint endpoint() const
+    [[nodiscard]] vthost::TcpEndpoint endpoint() const
     {
-        return muxserver::TcpEndpoint { .host = "127.0.0.1", .port = port, .token = {}, .caPem = {} };
+        return vthost::TcpEndpoint { .host = "127.0.0.1", .port = port, .token = {}, .caPem = {} };
     }
 
     /// Runs @p fn on the daemon's loop thread and waits for its result —
@@ -198,7 +198,7 @@ TEST_CASE("attach controller mirrors a remote session over a real socket", "[att
         for (auto i = 0; i < 200; ++i)
         {
             auto const bytes = daemon.onDaemon([&] {
-                auto& tapped = dynamic_cast<muxserver::TappingPty&>(daemon.host->terminal(session)->device());
+                auto& tapped = dynamic_cast<vthost::TappingPty&>(daemon.host->terminal(session)->device());
                 return dynamic_cast<vtpty::MockPty&>(tapped.inner()).stdinBuffer();
             });
             if (bytes == "ls\r")
@@ -249,7 +249,7 @@ TEST_CASE("attach controller captures the daemon's tab and pane layout", "[attac
     REQUIRE(connected.has_value());
 
     // The layout is pushed leading the snapshot; poll until the controller has it.
-    auto layout = std::optional<muxserver::proto::LayoutState> {};
+    auto layout = std::optional<vthost::proto::LayoutState> {};
     for (auto i = 0; i < 200 && !(layout = controller.layout()).has_value(); ++i)
         std::this_thread::sleep_for(5ms);
     REQUIRE(layout.has_value());
@@ -631,7 +631,7 @@ TEST_CASE("a closed mirrored tab does not resurrect on later remote output", "[a
 TEST_CASE("attach controller reports an unreachable daemon", "[attach][controller]")
 {
     // Port 1 on loopback has nothing listening: connect is refused before any TLS.
-    auto controller = contour::AttachController { muxserver::TcpEndpoint {
+    auto controller = contour::AttachController { vthost::TcpEndpoint {
         .host = "127.0.0.1", .port = 1, .token = {}, .caPem = {} } };
     auto const connected = controller.connectAndWait(2s);
     REQUIRE(!connected.has_value());

@@ -332,7 +332,7 @@ msgtype
 multicell
 multiwindow
 muximg
-muxserver
+vthost
 muxsrv
 MYPC
 myscheme

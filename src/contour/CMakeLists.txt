@@ -312,7 +312,7 @@ target_link_libraries(contour_core
     Qt6::Core
     ${YAML_CPP_LIBRARIES}
     PRIVATE
-    muxserver
+    vthost
 )
 
 # {{{ GUI: Declare Qt build dependencies

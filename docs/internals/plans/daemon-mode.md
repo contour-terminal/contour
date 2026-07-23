@@ -7,7 +7,7 @@
 
 ## Context
 
-Contour's daemon (`src/muxserver`) hosts sessions Qt-free and serves two protocols over "one
+Contour's daemon (`src/vthost`) hosts sessions Qt-free and serves two protocols over "one
 session, two taps": **tmux control mode** (byte-exact interop) and the **native cells+deltas
 protocol** (the daemon emulates; the client renders). A prior analysis established two problems
 this plan fixes:
@@ -106,7 +106,7 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       (guarded by `requestedImages`), routes the **session-less** `ImageData`/`ImageGone` reply by
       the request **serial** (`_pendingImages`), caches on `ImageData`, and clears cells + cache on
       `ImageGone`. New `setImageHandler` fires a repaint hook. Unit-tested (RemoteScreen apply/evict/
-      dropImage + a socket-level fake-server fetch/cache test). *Landed 2026-07-22; muxserver suite
+      dropImage + a socket-level fake-server fetch/cache test). *Landed 2026-07-22; vthost suite
       green (2606 assertions).*
 - [x] **A1b. Images — render half.** `ScreenMirror` re-emits cached pixels via the **Good Image
       Protocol** (both ends are Contour, so GIP is guaranteed and its `L=` layer maps 1:1 to the
@@ -115,7 +115,7 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       `c×r` cell box (`o=r`, `z=3` StretchToFill, no cursor move), released on drop (`o=d`). Wired
       into `apply`/`fullReplay` (after paint) and the new `setImageHandler` repaint. Closed-loop
       test drives a real GIP image through the server and asserts the mirror covers the same cells.
-      *Landed 2026-07-22; muxserver suite green (113 cases / 2610 assertions).* Completes roadmap
+      *Landed 2026-07-22; vthost suite green (113 cases / 2610 assertions).* Completes roadmap
       **F5**. Follow-up: the source alignment/resize policy is not on the native wire yet (v1 uses
       StretchToFill), and images whose anchor scrolled into history aren't re-placed until a resync.
 - [x] **A2. Live title.** No Events tap needed — `screenUpdated` fires per input batch, so
@@ -164,7 +164,7 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       vtbackend parses it as `CSI > n m` (single param = level), which collides with xterm's
       `CSI > 4 ; n m` form, so re-emitting it would misconfigure a real outer terminal in the thin
       client — noted in `MirroredModes.h`. Revisit only if a shared wire-form is settled. *Landed
-      2026-07-22; muxserver suite green (128/2685).*
+      2026-07-22; vthost suite green (128/2685).*
 - [x] **A9. Unify the thin client on `ScreenMirror`.** `attachFlow` (POSIX + Win32) now drives the
       OUTER terminal with `ScreenMirror::apply`/`applyImage`/`applyEvent` (the same re-serialization
       the GUI feeds its mirror Terminal) instead of `TtyRenderer::renderViewport` — so the raw-TTY
@@ -195,7 +195,7 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       `Screen`/grid, selected by `StatusDisplayType` {None,Indicator,HostWritable} + `ActiveStatusDisplay`
       {Main,StatusLine,IndicatorStatusLine} + `StatusDisplayPosition` {Top,Bottom} (DECSSDT `$~` /
       DECSASD `$}`). Today those pages are dropped, so a thin/GUI client shows no/stale status line.
-      **Scope (buildable/testable in muxserver + vtbackend, additive — `Terminal::pageSize` already
+      **Scope (buildable/testable in vthost + vtbackend, additive — `Terminal::pageSize` already
       excludes the status line, so main-grid deltas are unaffected):**
       1. Address deltas **per page**: add `Delta.page` (0 = main, 1 = host-writable status line) and a
          `FollowState` cursor per page; the server runs the same stable-id delta over
@@ -239,7 +239,7 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       `ScreenMirror_test` "DEC pages beyond primary/alternate mirror faithfully" (NP→page 1 content
       shows on the mirror's alt buffer, equals the server's page 1, page 0 restores on PP) and "a
       decoupled cursor page hides the mirror's cursor" (DECPCCM off + NP → mirror hides the cursor and
-      keeps showing the displayed page). muxserver suite green (127/2680).
+      keeps showing the displayed page). vthost suite green (127/2680).
 
 ### WS-B — Layout: tabs / panes / multi-window (roadmap F1/F2)
 
@@ -252,13 +252,13 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       via a `LayoutObserver` (a `vtworkspace::ModelEvents` subscribed through a new `ScopedModelSubscription`
       in `serveNativeClient`). `AttachClient` grew `setLayoutHandler`. Tests: PDU round-trip + a
       split-pane end-to-end (attach → `LayoutState` shows the vertical split, 60/40, two distinct-session
-      leaves). *Landed 2026-07-22; muxserver suite green (122/2652).* **B2 (the GUI consuming it in
+      leaves). *Landed 2026-07-22; vthost suite green (122/2652).* **B2 (the GUI consuming it in
       `AttachController` → `SessionModel`) is the Qt follow-up.**
 - [x] **B2. Client applies `LayoutState` — DONE, verified end-to-end (2026-07-22).** The GUI now
       reproduces the daemon's full tab/split tree instead of flattening one tab per session:
       1. **Capture:** `AttachController` subscribes the daemon's `LayoutState` (`onLayout` → thread-safe
          `layout()`/`wireLayout()` + `layoutChanged()` signal).
-      2. **Reconstruction — reuses the SHARED realizer, not a bespoke stepper.** `muxserver/client/
+      2. **Reconstruction — reuses the SHARED realizer, not a bespoke stepper.** `vthost/client/
          LayoutReconstruction`: `wireToLayout(LayoutState)` converts the wire tree to a `vtworkspace::Layout`
          (== `config::Layout`) plus a leaf→remote-session map, so it feeds the same `vtworkspace::
          realizeLayoutTab` the daemon and config-layout loader use. Headless-tested against a real
@@ -287,7 +287,7 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       all attached clients (incl. the author) as a fresh `LayoutState`. `AttachClient` grew the
       outbound send verbs `createTab()`/`splitPane()`/`closePane()`. Tests: PDU round-trip + an
       end-to-end where the client authors a tab and the daemon honors it (subscribed observer re-pushes
-      a two-tab `LayoutState`; the daemon's `SessionModel` really grew). *Landed 2026-07-22; muxserver
+      a two-tab `LayoutState`; the daemon's `SessionModel` really grew). *Landed 2026-07-22; vthost
       suite green (125/2672).* **GUI authoring — tab creation DONE (2026-07-22):** `SessionFactory`
       gained `requestRemoteTab()` (default false = local); `AttachController` overrides it to
       `requestCreateTab()` → `AttachClient::createTab()`; `RoutingSessionFactory` forwards it;
@@ -345,7 +345,7 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       the zero-config TOFU default), `makeTlsClientContext(caPem={})` (empty ⇒ VERIFY_NONE / TOFU,
       the token authenticates). CMake `find_package(OpenSSL REQUIRED)`. Tests: `net` handshake+echo
       over a socketpair, **and** the full composition — native protocol + token **over TLS over real
-      TCP** — mirrors a snapshot. *Landed 2026-07-22; net suite green (34/151), muxserver suite green
+      TCP** — mirrors a snapshot. *Landed 2026-07-22; net suite green (34/151), vthost suite green
       (120/2632).* **Remaining: wire the server context into `runDaemon`'s TCP handler and the client
       context into the TCP connect path (C5).**
 - [x] **C2. Daemon TCP listener.** `DaemonConfig.nativeTcp` (`NativeTcpListenerConfig`:
@@ -364,12 +364,12 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       `config.nativeTcp` (`NativeTcpListenerConfig`) directly from the flags below — no `config::Config`
       round-trip needed. (A YAML schema can graft on later if persisting the listener is wanted.)
 - [x] **C4. CLI flags. DONE (2026-07-22).** `daemon`: `--listen-tcp HOST:PORT` (+ `--token`,
-      `--tls-cert`, `--tls-key`), parsed in `daemonAction()` via `muxserver::parseHostPort` into
+      `--tls-cert`, `--tls-key`), parsed in `daemonAction()` via `vthost::parseHostPort` into
       `config.nativeTcp`. `attach`: `--connect-tcp HOST:PORT` (+ `--token`, `--tls-ca`), read in
       `attachAction()` (thin) and `ContourGuiApp::attachAction()` (GUI). `--tls-ca` pins the daemon's
       cert as the trust anchor; omitted ⇒ TOFU. `parseHostPort` handles `HOST:PORT` and `[v6]:PORT`
       with a unit test.
-- [x] **C5. Client connect branch. DONE (2026-07-22).** Introduced `muxserver::AttachEndpoint`
+- [x] **C5. Client connect branch. DONE (2026-07-22).** Introduced `vthost::AttachEndpoint`
       (a `std::variant<UnixEndpoint, TcpEndpoint>`) and a shared `connectAttach(loop, endpoint)`
       coroutine that branches `connectUnix` (native socket resolved beside the control path) vs
       `net::connect` + `makeTlsClientContext(caPem)->wrap` (TLS). `runAttach` (POSIX + Win32),
@@ -378,7 +378,7 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       daemon identically. Token flows to the `AttachClient` via `endpointToken`. Tests: `parseHostPort`
       unit; a full **native-protocol-over-TLS-over-TCP mirror using a generated dev cert the client
       VERIFIES** (`AttachClient_test`); `AttachController_test` adjusted to the control-path convention.
-      All suites green (net 35/160, muxserver 131/2711, contour_gui 635 cases/9765).
+      All suites green (net 35/160, vthost 131/2711, contour_gui 635 cases/9765).
 - [x] **C6. Token auth in the native handshake (core).** `ClientHello.token` (CodecVersion → 7);
       `NativeSession` gained an `expectedToken` (ctor + `makeNativeHandler` param), checked in
       `completeHandshake` right after the version check — a mismatch answers `ServerHello` and drops,
@@ -386,7 +386,7 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       ctor param it sends in the ClientHello. Tests: accept / reject / no-token-configured. *Landed
       2026-07-22.* **Remaining (C4, Qt-side):** the daemon must read the configured token (CLI/config)
       and pass it to `makeNativeHandler`; the client must read `--token` and pass it to
-      `AttachController`/`runAttach` — CI-verified (Qt not buildable in the muxserver-only tree here).
+      `AttachController`/`runAttach` — CI-verified (Qt not buildable in the vthost-only tree here).
 
 ## Cross-platform verification matrix
 
@@ -395,17 +395,17 @@ NTFS ACLs, not POSIX bits; macOS resolves the socket dir under `$TMPDIR` (no `$X
 
 | | Linux | macOS | Windows |
 |---|---|---|---|
-| WS-A parity (GUI + thin) | ☐ | ☐ | ☑ (muxserver+contour_gui suites green) |
+| WS-A parity (GUI + thin) | ☐ | ☐ | ☑ (vthost+contour_gui suites green) |
 | WS-B layout | ☐ | ☐ | ☑ B1/B3 wire + B2 GUI apply + B4 multi-window (per-window reconcile e2e over TCP) |
-| WS-C TCP+TLS (daemon + client) | ☐ | ☐ | ☑ (net+muxserver+contour e2e incl. two-reactor TLS) |
+| WS-C TCP+TLS (daemon + client) | ☐ | ☐ | ☑ (net+vthost+contour e2e incl. two-reactor TLS) |
 | B5 tmux interop (all 5 items) | ☐ oracle | ☐ oracle | ☑ headless (pure converter/serializer/command tests); live path is Linux-oracle-only |
 
 Windows verification is **CI-gated** (no Windows dev box): compile under `-Werror`, run the
 runtime-gated net tests, watch the Windows job after each push.
 
 **Build note (this machine):** the configured tree is `out/build/clangcl-release`, which builds the
-`muxserver`/`net`/`vtbackend` libraries and their Catch2 tests (`muxserver_test`, …) but **not the Qt
-`contour` GUI**. So the WS-A/B/C work in `src/muxserver`, `src/net`, `src/vtbackend` is built+tested
+`vthost`/`net`/`vtbackend` libraries and their Catch2 tests (`vthost_test`, …) but **not the Qt
+`contour` GUI**. So the WS-A/B/C work in `src/vthost`, `src/net`, `src/vtbackend` is built+tested
 here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManager`, `Config`,
 `ContourApp` CLI) are implemented but **CI-verified**, and are called out per task.
 
@@ -434,7 +434,7 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   via OpenSSL behind a `net::ITlsContext` DI seam, thin=ScreenMirror, clipboard=existing settings).
 - 2026-07-22 · Windows/clangcl-release · **A1a done** — native image fetch/cache/drop on the client
   (`AttachClient`/`RemoteScreen`); serial-correlated session routing for the session-less reply.
-  3 new tests; full muxserver suite green (112 cases / 2606 assertions), build `-Werror` clean.
+  3 new tests; full vthost suite green (112 cases / 2606 assertions), build `-Werror` clean.
 - 2026-07-22 · Windows/clangcl-release · **A1b done** — `ScreenMirror` re-emits images via GIP
   (upload-once-by-name + StretchToFill placement, layer-faithful); closed-loop GIP round-trip test.
   Suite green (113 cases / 2610 assertions). **WS-A1 (images) complete.**
@@ -463,7 +463,7 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
 - 2026-07-22 · Windows/clangcl-release · **C1 done** — async OpenSSL `TlsSocket` decorator behind
   `net::ITlsContext` (memory-BIO handshake over the reactor); self-signed / PEM / client factories.
   Tested in isolation (`net` handshake+echo) **and in composition** (native + token + **TLS over TCP**
-  mirrors a snapshot). net suite 34/151, muxserver suite 120/2632. **The remote use case now works
+  mirrors a snapshot). net suite 34/151, vthost suite 120/2632. **The remote use case now works
   end-to-end, encrypted + authenticated, in the buildable layer.** Remaining for remote: wire the TLS
   contexts into `runDaemon`/`runAttach` (server buildable; client connect + Qt `AttachController` = C5),
   and the `--listen-tcp`/`--connect-tcp`/`--token`/config schema (C3/C4, Qt).
@@ -478,7 +478,7 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
 - 2026-07-22 · Windows/clangcl-release · **B1 done** — `LayoutState` PDU (recursive tab/pane tree,
   tag 11, no codec bump) + `NativeSession` serialize/emit (snapshot-leading + live via a
   `LayoutObserver`/`ScopedModelSubscription`) + `AttachClient::setLayoutHandler`. Split-pane
-  end-to-end test. muxserver suite green (122/2652).
+  end-to-end test. vthost suite green (122/2652).
 - 2026-07-22 · Windows/clangcl-release · **A10 scope-2 (status-display state) done** — multi-page
   support beyond primary/alt: `SessionState`/`Delta` carry `statusDisplayType`/`activeStatusDisplay`
   (pull+diff); `ScreenMirror` re-emits DECSSDT/DECSASD. CodecVersion → 9. Closed-loop test (indicator
@@ -542,21 +542,21 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   reachable from the CLI end-to-end.** `contour daemon --listen-tcp HOST:PORT [--token …] [--tls-cert
   … --tls-key …]` opens the opt-in, always-TLS, token-authenticated TCP listener (self-signed when no
   cert/key); `contour attach --connect-tcp HOST:PORT [--token …] [--tls-ca …]` (thin) and
-  `contour attach --gui --connect-tcp …` (GUI) dial it. Shared plumbing: `muxserver::AttachEndpoint`
+  `contour attach --gui --connect-tcp …` (GUI) dial it. Shared plumbing: `vthost::AttachEndpoint`
   = `variant<UnixEndpoint, TcpEndpoint>`, `parseHostPort`, and one `connectAttach` coroutine that both
   `runAttach`/`attachFlow(Win32)` and the GUI `AttachController` route through (its `_socketPath`
   became an `AttachEndpoint`). Also delivered the operator's ask: `net::generateSelfSignedCertificate`
   (library-only dev certs, cross-platform) with a client-VERIFIED (pinned) TLS e2e test at both the
-  `net` and `muxserver` levels. Suites green (net 35/160, muxserver 131/2711, contour_gui 635/9765),
+  `net` and `vthost` levels. Suites green (net 35/160, vthost 131/2711, contour_gui 635/9765),
   `contour.exe` links clean. **Remaining overall: B2/B4 (GUI layout apply + multi-window), B3-Qt (GUI
   calls the lifecycle verbs), B5 (interop-only tmux polish).**
 - 2026-07-22 · Windows/clangcl-release · **B2 layout capture + reconstruction PLANNER done.**
   `AttachController` now captures the daemon `LayoutState` (thread-safe `layout()` + `layoutChanged()`
-  signal), and — the hard part — `muxserver/client/LayoutReconstruction.{h,cpp}` turns a `LayoutState`
+  signal), and — the hard part — `vthost/client/LayoutReconstruction.{h,cpp}` turns a `LayoutState`
   into an ordered `NewTab`/`Split`/`Activate` plan (`planReconstruction`). The flattening algorithm is
   **verified headless** by replaying the plan against a real `vtworkspace::SessionModel` (controlled session
   allocator) and asserting the rebuilt tree matches — single pane, single split, a nested tree
-  (re-activation path), multi-tab, empty. muxserver suite 136/2763. **Remaining B2 (Linux-CI):** the
+  (re-activation path), multi-tab, empty. vthost suite 136/2763. **Remaining B2 (Linux-CI):** the
   thin GUI executor that runs the plan against `TerminalSessionManager` and binds each reconstructed
   pane to its remote session (the `MockPtySessionFactory` harness can headless-test the tree-building;
   the remote-session binding needs the AF_UNIX daemon fixture). Plus B3-Qt, B4, B5.
@@ -566,7 +566,7 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   config-layout loader), headless-tested against a real `SessionModel`. Proved the daemon-layout → GUI
   realization through `TerminalSessionManager::applyLayoutToWindow` (`MockPtySessionFactory` structure
   test), and added the per-leaf binding seam `applyLayoutToWindow(..., beforeLeafSeed)` (test asserts
-  every leaf resolves to its remote session). muxserver 136/2769, contour_gui 636/9777. **Remaining B2
+  every leaf resolves to its remote session). vthost 136/2769, contour_gui 636/9777. **Remaining B2
   is one cohesive AttachController+ContourGuiApp integration** (bind-on-seed, relax `canCreateSession`,
   wire the executor) that alters the working attach path — runtime-verified on the AF_UNIX Linux
   fixture, per AGENT.md's "run the tests" rule. Plus B3-Qt, B4, B5.
@@ -583,7 +583,7 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   `SSL_do_handshake` (single-loop timing hid it). Fixed by serializing `TlsSocket::handshake()` (one
   driver; others park on a gate). TcpEndpoint is TLS-only again; the fixture uses real TLS-over-TCP, so
   every attach test now covers the two-reactor handshake, plus a focused `net` regression test. All
-  suites green (net 36/165, muxserver 136/2769, contour_gui 9820). **Remaining: B4 (multi-window),
+  suites green (net 36/165, vthost 136/2769, contour_gui 9820). **Remaining: B4 (multi-window),
   B3-Qt authoring verbs (canCreateSession already relaxed), B5 (interop-only tmux polish).**
 - 2026-07-22 · Windows/clangcl-release · **B3-Qt tab authoring + incremental reconciliation done.**
   `applyRemoteLayout` is now incremental (realizes each daemon tab not already shown; `isBound` gates
@@ -592,7 +592,7 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   (forwarded by `RoutingSessionFactory`, consulted by `TerminalSessionManager::createNewTab`) routes a
   GUI "new tab" to the daemon instead of a local shell. Verified end-to-end over a two-reactor TLS
   attach (`manager.createNewTab` → daemon grows to 2 tabs → reconciler realizes the second). contour_gui
-  9827, muxserver 136/2769. **Remaining: split/close authoring (needs a pane→daemon-tab map and an
+  9827, vthost 136/2769. **Remaining: split/close authoring (needs a pane→daemon-tab map and an
   ActivatePane verb for multi-pane tabs) + retire `_closedSessions`; B4 multi-window; B5 tmux polish.**
 - 2026-07-23 · Windows/clangcl-release · **B3-Qt COMPLETE — split + close authoring done.** Split:
   `SplitPane` now targets a SESSION (daemon activates that pane, then splits — no `ActivatePane` PDU
@@ -602,7 +602,7 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   splits build locally). Close: `unbind` authors `closePane` on user close; a SUBTRACTIVE reconciler pass
   closes local panes whose session left the layout (`closeActivePane` after activating the target).
   `_closedSessions` kept (guards the close race). Four new controller tests over the TLS fixture
-  (split-reconcile, split-author, close-reconcile, tab-author). contour_gui 9850, muxserver 136/2769,
+  (split-reconcile, split-author, close-reconcile, tab-author). contour_gui 9850, vthost 136/2769,
   net 36/165. **Remaining: B4 multi-window, B5 interop-only tmux polish.**
 - 2026-07-23 · Windows/clangcl-release · **B4 COMPLETE — multi-window onto one daemon.** Three parts.
   *Daemon:* `NewWindow` PDU (tag 15; renamed from `CreateWindow` for the Win32 macro) →
@@ -615,7 +615,7 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   hook) + `ContourGuiApp::reconcileAttachWindows`/`bindPendingAttachWindow` keep a daemon→OS-window map,
   spawn one OS window per new daemon window, and route NewTerminalWindow to `requestRemoteWindow`.
   **F8 decided (v1): shared grid, last-proposal-wins**; per-client viewports deferred. Tests: a client
-  authors NewWindow → daemon grows to 2 windows/pushes 2 layouts (muxserver 137/2775); each daemon
+  authors NewWindow → daemon grows to 2 windows/pushes 2 layouts (vthost 137/2775); each daemon
   window reconciles into its own GUI window with no cross-window session bleed; the consumeAttachWindow
   binder seam (contour_gui 9870, all green; contour.exe links clean). **Remaining: B5 interop-only tmux
   polish.**
@@ -640,7 +640,7 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   `paneAdded` snapshots the window tree under the lock; `adoptPendingPanes` whole-tree-realizes an
   unrealized multi-pane window (faithful ratio + shape) and falls back to the incremental (now
   ratio-bearing) path otherwise; `splitActivePane` gained a `ratio` param. Pure converter/serializer
-  tests headless; live tmux path Linux-oracle-only. Final suites: muxserver 140/2781, vtbackend
+  tests headless; live tmux path Linux-oracle-only. Final suites: vthost 140/2781, vtbackend
   1214/113972, contour_gui 654 cases / 9922 assertions, net 36/165 — all green, `-Werror` clean,
   `contour.exe` links. **Nothing remains: WS-A, WS-B (B1–B4), WS-C, and B5 (all 5 items) are done.**
 

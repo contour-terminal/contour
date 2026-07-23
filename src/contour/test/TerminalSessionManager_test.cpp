@@ -28,8 +28,8 @@
 #include <sstream>
 #include <vector>
 
-#include <muxserver/client/LayoutReconstruction.h>
-#include <muxserver/proto/Pdu.h>
+#include <vthost/client/LayoutReconstruction.h>
+#include <vthost/proto/Pdu.h>
 #include <vtworkspace/ModelEvents.h>
 #include <vtworkspace/Pane.h>
 #include <vtworkspace/SessionModel.h>
@@ -173,7 +173,7 @@ TEST_CASE("TerminalSessionManager: applyLayoutToWindow builds tabs with colors",
     CHECK(factory->requestedCommandOverrides[3]->program == "echo right");
 }
 
-// B2: a daemon LayoutState, once converted by muxserver::client::wireToLayout,
+// B2: a daemon LayoutState, once converted by vthost::client::wireToLayout,
 // realizes through the SAME applyLayoutToWindow path the config-layout feature
 // uses — proving the daemon's tab/split tree rebuilds in the GUI's model. (The
 // remote-session binding of each realized pane is the AF_UNIX-fixture layer; here
@@ -185,17 +185,17 @@ TEST_CASE("TerminalSessionManager: applyLayoutToWindow realizes a daemon wire la
     contour::test::ScopedController const win { app.manager() };
 
     // Tab 0: a single pane. Tab 1: a vertical split (60/40) of two panes.
-    auto state = muxserver::proto::LayoutState {};
+    auto state = vthost::proto::LayoutState {};
     state.tabs.push_back(
-        muxserver::proto::WireTab { .root = muxserver::proto::WirePane { .split = 0, .session = 1 } });
-    state.tabs.push_back(muxserver::proto::WireTab {
-        .root = muxserver::proto::WirePane {
+        vthost::proto::WireTab { .root = vthost::proto::WirePane { .split = 0, .session = 1 } });
+    state.tabs.push_back(vthost::proto::WireTab {
+        .root = vthost::proto::WirePane {
             .split = 2,
             .ratio = 6000,
-            .children = { muxserver::proto::WirePane { .split = 0, .session = 2 },
-                          muxserver::proto::WirePane { .split = 0, .session = 3 } } } });
+            .children = { vthost::proto::WirePane { .split = 0, .session = 2 },
+                          vthost::proto::WirePane { .split = 0, .session = 3 } } } });
 
-    auto const wl = muxserver::client::wireToLayout(state);
+    auto const wl = vthost::client::wireToLayout(state);
 
     // The beforeLeafSeed hook fires once per leaf, right before its backing session
     // is created — resolving each leaf to its remote session exactly as the attach

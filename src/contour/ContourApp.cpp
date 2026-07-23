@@ -28,8 +28,8 @@
 #include <memory>
 #include <utility>
 
-#include <muxserver/Daemon.h>
-#include <muxserver/SocketPath.h>
+#include <vthost/Daemon.h>
+#include <vthost/SocketPath.h>
 
 #ifndef _WIN32
     #include <sys/ioctl.h>
@@ -558,8 +558,8 @@ namespace
 
 int ContourApp::daemonAction()
 {
-    auto config = muxserver::DaemonConfig {};
-    config.socketPath = muxserver::muxSocketPath(parameters().get<string>("contour.daemon.label"),
+    auto config = vthost::DaemonConfig {};
+    config.socketPath = vthost::muxSocketPath(parameters().get<string>("contour.daemon.label"),
                                                  parameters().get<string>("contour.daemon.socket"));
 
     auto const shellCommand = vtpty::Process::loginShell(/*escapeSandbox=*/false);
@@ -575,13 +575,13 @@ int ContourApp::daemonAction()
     // host part says otherwise.
     if (auto const listen = parameters().get<string>("contour.daemon.listen-tcp"); !listen.empty())
     {
-        auto const hostPort = muxserver::parseHostPort(listen);
+        auto const hostPort = vthost::parseHostPort(listen);
         if (!hostPort)
         {
             cerr << std::format("contour daemon: invalid --listen-tcp '{}' (expected HOST:PORT)\n", listen);
             return EXIT_FAILURE;
         }
-        config.nativeTcp = muxserver::NativeTcpListenerConfig {
+        config.nativeTcp = vthost::NativeTcpListenerConfig {
             .host = hostPort->first,
             .port = hostPort->second,
             .token = parameters().get<string>("contour.daemon.token"),
@@ -590,7 +590,7 @@ int ContourApp::daemonAction()
         };
     }
 
-    return muxserver::runDaemon(config);
+    return vthost::runDaemon(config);
 }
 
 int ContourApp::attachAction()
@@ -599,13 +599,13 @@ int ContourApp::attachAction()
     // TLS-encrypted, token-authenticated TCP connection.
     if (auto const connect = parameters().get<string>("contour.attach.connect-tcp"); !connect.empty())
     {
-        auto const hostPort = muxserver::parseHostPort(connect);
+        auto const hostPort = vthost::parseHostPort(connect);
         if (!hostPort)
         {
             cerr << std::format("contour attach: invalid --connect-tcp '{}' (expected HOST:PORT)\n", connect);
             return EXIT_FAILURE;
         }
-        auto tcp = muxserver::TcpEndpoint { .host = hostPort->first,
+        auto tcp = vthost::TcpEndpoint { .host = hostPort->first,
                                             .port = hostPort->second,
                                             .token = parameters().get<string>("contour.attach.token"),
                                             .caPem = {} };
@@ -619,11 +619,11 @@ int ContourApp::attachAction()
             }
             tcp.caPem.assign(ca.begin(), ca.end());
         }
-        return muxserver::runAttach(muxserver::AttachEndpoint { std::move(tcp) });
+        return vthost::runAttach(vthost::AttachEndpoint { std::move(tcp) });
     }
 
-    return muxserver::runAttach(muxserver::AttachEndpoint { muxserver::UnixEndpoint {
-        .socketPath = muxserver::muxSocketPath(parameters().get<string>("contour.attach.label"),
+    return vthost::runAttach(vthost::AttachEndpoint { vthost::UnixEndpoint {
+        .socketPath = vthost::muxSocketPath(parameters().get<string>("contour.attach.label"),
                                                parameters().get<string>("contour.attach.socket")) } });
 }
 

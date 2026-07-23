@@ -10,7 +10,7 @@
 
 #include <format>
 
-#include <muxserver/tmux/LayoutString.h>
+#include <vthost/tmux/LayoutString.h>
 #include <vtworkspace/Pane.h>
 #include <vtworkspace/SessionModel.h>
 #include <vtworkspace/Tab.h>
@@ -118,13 +118,13 @@ TEST_CASE("a GUI split in tmux mode is authored on the tmux server (B5)", "[atta
 TEST_CASE("tmux binary layout converts to a ratio-bearing vtworkspace layout (F3)", "[attach][tmux]")
 {
     auto const wireOf = [](std::string const& body) {
-        return std::format("{:04x},{}", muxserver::tmux::layoutChecksum(body), body);
+        return std::format("{:04x},{}", vthost::tmux::layoutChecksum(body), body);
     };
 
     // A 2-pane side-by-side window split 70 | 29 (+1 divider) — an asymmetric split.
-    auto const parsed2 = muxserver::tmux::parseLayout(wireOf("100x50,0,0{70x50,0,0,1,29x50,71,0,2}"));
+    auto const parsed2 = vthost::tmux::parseLayout(wireOf("100x50,0,0{70x50,0,0,1,29x50,71,0,2}"));
     REQUIRE(parsed2.has_value());
-    auto const tree2 = muxserver::tmux::collapseToBinary(*parsed2);
+    auto const tree2 = vthost::tmux::collapseToBinary(*parsed2);
     REQUIRE(tree2.leafCount() == 2);
 
     auto const conv2 = contour::tmuxLayoutToWindowLayout(tree2);
@@ -141,9 +141,9 @@ TEST_CASE("tmux binary layout converts to a ratio-bearing vtworkspace layout (F3
 
     // A 3-pane right-leaning chain: head leaf + a nested tail split.
     auto const parsed3 =
-        muxserver::tmux::parseLayout(wireOf("160x50,0,0{53x50,0,0,1,52x50,54,0,2,53x50,107,0,3}"));
+        vthost::tmux::parseLayout(wireOf("160x50,0,0{53x50,0,0,1,52x50,54,0,2,53x50,107,0,3}"));
     REQUIRE(parsed3.has_value());
-    auto const tree3 = muxserver::tmux::collapseToBinary(*parsed3);
+    auto const tree3 = vthost::tmux::collapseToBinary(*parsed3);
     auto const conv3 = contour::tmuxLayoutToWindowLayout(tree3);
     auto const& root3 = conv3.layout.tabs.front().root;
     REQUIRE(root3.children.size() == 2);
@@ -166,9 +166,9 @@ TEST_CASE("tmux whole-tree realize reproduces the split ratio and shape (F3)", "
 
     auto const body = std::string { "100x50,0,0{70x50,0,0,1,29x50,71,0,2}" };
     auto const parsed =
-        muxserver::tmux::parseLayout(std::format("{:04x},{}", muxserver::tmux::layoutChecksum(body), body));
+        vthost::tmux::parseLayout(std::format("{:04x},{}", vthost::tmux::layoutChecksum(body), body));
     REQUIRE(parsed.has_value());
-    auto const tree = muxserver::tmux::collapseToBinary(*parsed);
+    auto const tree = vthost::tmux::collapseToBinary(*parsed);
     auto const converted = contour::tmuxLayoutToWindowLayout(tree);
 
     // Both leaf panes discovered, so createPty can size them.
