@@ -153,6 +153,8 @@ class [[nodiscard]] Task
         /// @return The value produced by the child, or rethrows its exception.
         T await_resume()
         {
+            if (!_child)
+                return T {};
             if (_child.promise().exception)
                 std::rethrow_exception(_child.promise().exception);
             return std::move(*_child.promise().result);
@@ -237,6 +239,8 @@ class [[nodiscard]] Task<void>
         /// Rethrows any exception escaping the child body.
         void await_resume() const
         {
+            if (!_child)
+                return;
             if (_child.promise().exception)
                 std::rethrow_exception(_child.promise().exception);
         }
