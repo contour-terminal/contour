@@ -389,15 +389,18 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
 
         // Live window title (OSC 0/2): the snapshot carries it in SessionState
         // below; an incremental delta carries it only when it changed since last
-        // sent, so a title-only batch still re-titles the mirror.
-        if (auto title = std::string { terminal->windowTitle() }; title != follow.lastTitle)
+        // sent, so a title-only batch still re-titles the mirror. Compare the
+        // string_view windowTitle() returns directly and allocate only when it
+        // actually changed — the title almost never differs frame-to-frame, so a
+        // per-delta heap copy just to compare it was pure waste under a busy PTY.
+        if (auto const title = terminal->windowTitle(); title != follow.lastTitle)
         {
             if (!snapshot)
             {
                 delta.titleChanged = 1;
-                delta.title = title;
+                delta.title = std::string { title };
             }
-            follow.lastTitle = std::move(title);
+            follow.lastTitle = title;
         }
 
         // Live cursor shape (DECSCUSR): pull+diff like the title; the snapshot

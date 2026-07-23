@@ -142,6 +142,15 @@ Task<void> moveCursorThenUpdate(NativeHarness* h, vtmux::SessionId id)
     h->session->sessionScreenUpdated(id);
 }
 
+/// Once the attach snapshot has landed: sets the window title (OSC 2) and kicks the
+/// debounced flush, so an incremental delta carrying the new title follows.
+Task<void> setTitleThenUpdate(NativeHarness* h, vtmux::SessionId id)
+{
+    co_await h->loop.delay(5ms);
+    h->host.terminal(id)->writeToScreen("\033]2;my-title\033\\"); // OSC 2: set window title
+    h->session->sessionScreenUpdated(id);
+}
+
 /// Schedules a debounce flush, then disconnects before it can fire.
 Task<void> kickThenDisconnect(NativeHarness* h, vtmux::SessionId id)
 {
@@ -361,6 +370,30 @@ TEST_CASE("a cursor-only move still produces a delta so the mirror's cursor trac
     CHECK(delta->snapshot == 0);
     CHECK(delta->cursorLine == 9);   // CUP row 10, 0-based
     CHECK(delta->cursorColumn == 4); // CUP column 5, 0-based
+}
+
+TEST_CASE("a window-title change is carried in the following incremental delta", "[muxserver][native]")
+{
+    auto h = NativeHarness {};
+    h.host.createTab();
+    auto const sessionId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    h.host.terminal(sessionId)->writeToScreen("first");
+
+    auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
+    auto received = std::vector<proto::DecodedFrame> {};
+    h.loop.blockOn(net::testing::allOf(h.session->run(),
+                                       feedBytes(h.pair.second.get(), &bytes),
+                                       collectPdus(h.pair.second.get(), 5, &received),
+                                       setTitleThenUpdate(&h, sessionId)));
+    REQUIRE(received.size() == 5);
+
+    // [4] the incremental delta carries the title, gated on the diff against the last-sent one
+    // (windowTitle() is compared as a string_view, so an UNCHANGED title allocates nothing).
+    auto const* delta = std::get_if<proto::Delta>(&received[4].pdu);
+    REQUIRE(delta != nullptr);
+    CHECK(delta->snapshot == 0);
+    CHECK(delta->titleChanged == 1);
+    CHECK(delta->title == "my-title");
 }
 
 TEST_CASE("a hyperlink URI is delivered on first reference", "[muxserver][native]")
