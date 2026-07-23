@@ -416,6 +416,35 @@ TEST_CASE("withTimeout returns nullopt and cancels the work when the deadline fi
     REQUIRE(source.attachedCount() == 1); // the cancelled work detached its fd; self-pipe remains
 }
 
+TEST_CASE("withTimeout drops the loser's timer entry when the work wins after parking",
+          "[EventLoop][timeout][clock]")
+{
+    // Regression: the work first PARKS on a timer, then wins before the deadline.
+    // The timeout arm is therefore genuinely scheduled on the timer heap (unlike the
+    // synchronous-work case above, where it never parks). When the work wins, whenAny
+    // cancels the timeout arm via requeueForCancellation, which MUST drop its heap
+    // entry — otherwise the arm's frame is destroyed with a live timer entry still
+    // pointing at it, and the loop later dereferences that dangling handle
+    // (fireExpiredTimers() at the deadline, or ~EventLoop's wakeAllWaiters at teardown
+    // below) — a use-after-free.
+    auto clock = ManualClock {};
+    auto source = ClockAdvancingSource { clock, std::chrono::milliseconds { 20 } };
+    source.pushTimeout(); // one wait: advances the clock past the work's 10ms delay
+    source.pushTimeout(); // spare, should the drain need another pump
+    auto loop = EventLoop { source, clock };
+
+    auto fired = false;
+    auto const result = loop.blockOn(
+        net::withTimeout(&loop, awaitDelayThenFire(&loop, 10, &fired), std::chrono::milliseconds { 500 }));
+
+    REQUIRE(fired);
+    REQUIRE(result.has_value());
+    REQUIRE(*result == 10);
+    // The cancelled timeout arm left NO timer entry behind, so no dangling handle
+    // survives for the loop teardown (and ASan) to trip over.
+    REQUIRE(loop.pendingTimerCount() == 0);
+}
+
 TEST_CASE("Destroying the loop unwinds a flow parked on waitReadable", "[EventLoop][fd]")
 {
     auto pipe = net::createSystemPipe();

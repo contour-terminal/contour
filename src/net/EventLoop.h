@@ -93,6 +93,13 @@ class EventLoop
     ///         (completed flows are reaped at the top of every pump).
     [[nodiscard]] std::size_t spawnedCount() const noexcept { return _roots.size(); }
 
+    /// @return The number of coroutines currently parked on a timer. A cancelled
+    ///         timer-parked flow detaches its entry here (see requeueForCancellation),
+    ///         so a leaked entry after a `whenAny`/`withTimeout` loser unwinds is
+    ///         observable as a nonzero count — the invariant the cancellation path
+    ///         must preserve.
+    [[nodiscard]] std::size_t pendingTimerCount() const noexcept { return _timers.size(); }
+
     /// Enqueues @p callback to run on the loop thread and wakes the loop if it is
     /// blocked inside a wait. The ONLY EventLoop entry point that is safe to call
     /// from other threads; everything else must run on the loop thread (use post
@@ -162,9 +169,10 @@ class EventLoop
     /// it was parked on a timer or fd. Used by the timed/fd awaiters' stop-callbacks
     /// so a `whenAny`/`withTimeout` loser parked on `delay`/`waitReadable` unwinds
     /// promptly instead of only when its deadline/fd eventually fires. The awaiter
-    /// then observes stop_requested() in await_resume and throws OperationCancelled;
-    /// its stale timer entry / fd registration is skipped (handle already done) or
-    /// detached by the awaiter. Safe to call once per parked waiter.
+    /// then observes stop_requested() in await_resume and throws OperationCancelled.
+    /// Its timer entry / fd registration is detached HERE (not left for a later fire),
+    /// so no stale coroutine_handle can outlive the awaiter's frame once it unwinds.
+    /// Safe to call once per parked waiter.
     /// @param waiter The parked coroutine to resume for cancellation.
     void requeueForCancellation(std::coroutine_handle<> waiter);
 
@@ -240,8 +248,8 @@ class EventLoop
 /// While parked it registers a stop-callback so that if its cancellation token is
 /// stopped before the deadline (e.g. a `whenAny`/`withTimeout` sibling won), the
 /// parked coroutine is re-queued promptly and unwinds via @c OperationCancelled,
-/// rather than lingering until the deadline elapses. The stale timer entry is
-/// skipped when it later fires (the handle is already done).
+/// rather than lingering until the deadline elapses. Its timer entry is removed
+/// when it is re-queued, so no handle dangles once the frame unwinds.
 class DelayAwaiter
 {
   public:

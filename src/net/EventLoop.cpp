@@ -130,8 +130,7 @@ void EventLoop::requeueForCancellation(std::coroutine_handle<> waiter)
         return;
 
     // If parked as an fd waiter, drop and detach its registration so the stale
-    // entry cannot also fire. A timer-parked handle has no index here; its heap
-    // entry is left in place and skipped later (the handle will be done by then).
+    // entry cannot also fire.
     for (auto it = _fdWaiters.begin(); it != _fdWaiters.end(); ++it)
     {
         if (it->second == waiter)
@@ -142,8 +141,17 @@ void EventLoop::requeueForCancellation(std::coroutine_handle<> waiter)
         }
     }
 
-    // Re-queue once. drainReadyQueue skips already-done handles, and a later stale
-    // timer fire will see done() and skip it, so a single push is safe.
+    // If parked on a timer, remove its heap entry too. We re-queue the waiter below
+    // so it unwinds via OperationCancelled and its frame is then destroyed; a
+    // lingering entry would leave a dangling coroutine_handle that fireExpiredTimers()
+    // or wakeAllWaiters() later dereference through .done()/.resume() — a
+    // use-after-free. Detaching it here mirrors the fd branch above. (A coroutine is
+    // parked on at most one source, so at most one of these two branches matches.)
+    if (std::erase_if(_timers, [waiter](TimerEntry const& entry) { return entry.handle == waiter; }) != 0)
+        std::ranges::make_heap(_timers, soonestFirst);
+
+    // Re-queue once. drainReadyQueue skips already-done handles, so a single push
+    // is safe.
     _ready.push_back(waiter);
 }
 
