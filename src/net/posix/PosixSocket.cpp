@@ -111,7 +111,7 @@ coro::Task<IoResult> PosixSocket::read(std::span<std::byte> buffer)
         }
         if (err == EINTR)
             continue;
-        co_return std::unexpected(fromErrno(err, "recv"));
+        co_return std::unexpected(fromErrno(err, _plainFd ? "read" : "recv"));
     }
 }
 
@@ -226,7 +226,7 @@ coro::Task<IoResult> PosixSocket::write(std::span<std::byte const> buffer)
         }
         if (err == EINTR)
             continue;
-        co_return std::unexpected(fromErrno(err, "send"));
+        co_return std::unexpected(fromErrno(err, _plainFd ? "write" : "send"));
     }
     co_return total;
 }
