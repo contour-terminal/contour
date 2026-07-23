@@ -3,8 +3,8 @@
 
 #include <vtbackend/CellFlags.h>
 #include <vtbackend/Color.h>
+#include <vtbackend/SgrWriter.h>
 
-#include <array>
 #include <bit>
 #include <format>
 #include <optional>
@@ -15,27 +15,6 @@ namespace muxserver::client
 
 namespace
 {
-    /// One SGR rendition flag: the wire bit and the SGR parameter selecting it.
-    struct FlagSgr
-    {
-        vtbackend::CellFlag flag;
-        int sgr;
-    };
-
-    /// The renditions a plain terminal can reproduce, in SGR order.
-    constexpr auto FlagSgrTable = std::array {
-        FlagSgr { vtbackend::CellFlag::Bold, 1 },
-        FlagSgr { vtbackend::CellFlag::Faint, 2 },
-        FlagSgr { vtbackend::CellFlag::Italic, 3 },
-        FlagSgr { vtbackend::CellFlag::Underline, 4 },
-        FlagSgr { vtbackend::CellFlag::Blinking, 5 },
-        FlagSgr { vtbackend::CellFlag::Inverse, 7 },
-        FlagSgr { vtbackend::CellFlag::Hidden, 8 },
-        FlagSgr { vtbackend::CellFlag::CrossedOut, 9 },
-        FlagSgr { vtbackend::CellFlag::DoublyUnderlined, 21 },
-        FlagSgr { vtbackend::CellFlag::Overline, 53 },
-    };
-
     /// Appends the SGR parameters selecting @p raw as fore-, back- or
     /// underline color (SGR base 38, 48 or 58).
     void appendColor(std::string& out, uint32_t raw, int base)
@@ -59,7 +38,10 @@ namespace
 std::string sgrFor(proto::WireCell const& cell)
 {
     auto out = std::string { "\033[0" };
-    for (auto const& [flag, sgr]: FlagSgrTable)
+    // The single shared flag→SGR table (vtbackend::SgrWriter) keeps this mirror renderer and
+    // capture-pane's makeSgrSequence in lockstep, so curly/dotted/dashed underlines and rapid blink
+    // reproduce identically on both paths.
+    for (auto const& [flag, sgr]: vtbackend::SgrFlagCodes)
         if ((cell.flags & static_cast<uint32_t>(flag)) != 0)
             out += std::format(";{}", sgr);
     appendColor(out, cell.foreground, 38);

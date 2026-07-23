@@ -36,6 +36,23 @@ TEST_CASE("sgrFor selects renditions and colors from a reset", "[muxserver][atta
     CHECK(sgrFor(cell) == "\033[0;1;4;38;5;1;48;2;16;32;48m");
 }
 
+TEST_CASE("sgrFor reproduces the underline variants and rapid blink", "[muxserver][attach]")
+{
+    // Regression: TtyRenderer's own flag table omitted these, so a cell styled with only a curly/
+    // dotted/dashed underline or rapid blink rendered as PLAIN text in a native attach mirror, while
+    // capture-pane showed it styled. The now-shared vtbackend::SgrFlagCodes table maps them (the
+    // underline variants collapse onto 4, rapid blink onto 6), matching makeSgrSequence.
+    auto styled = [](vtbackend::CellFlag flag) {
+        auto cell = proto::WireCell {};
+        cell.flags = static_cast<uint32_t>(flag);
+        return sgrFor(cell);
+    };
+    CHECK(styled(vtbackend::CellFlag::CurlyUnderlined) == "\033[0;4m");
+    CHECK(styled(vtbackend::CellFlag::DottedUnderline) == "\033[0;4m");
+    CHECK(styled(vtbackend::CellFlag::DashedUnderline) == "\033[0;4m");
+    CHECK(styled(vtbackend::CellFlag::RapidBlinking) == "\033[0;6m");
+}
+
 TEST_CASE("renderViewport repaints rows, skips wide continuations, places the cursor", "[muxserver][attach]")
 {
     auto screen = RemoteScreen {};

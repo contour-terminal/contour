@@ -5,11 +5,40 @@
 #include <vtbackend/Color.h>
 #include <vtbackend/GraphicsAttributes.h>
 
+#include <array>
 #include <format>
 #include <string>
 
 namespace vtbackend
 {
+
+/// One SGR rendition flag: the CellFlag and the SGR parameter that selects it on a plain terminal.
+struct SgrFlagCode
+{
+    CellFlag flag;
+    int code;
+};
+
+/// The renditions a plain terminal can reproduce, in SGR order — the SINGLE source of truth shared by
+/// makeSgrSequence (capture-pane) and the native-attach mirror's TtyRenderer, so the two can never
+/// drift out of step (an added attribute renders on both paths or neither). The underline variants
+/// (curly/dotted/dashed) collapse onto plain underline (4); rapid blink onto 6.
+inline constexpr auto SgrFlagCodes = std::array {
+    SgrFlagCode { CellFlag::Bold, 1 },
+    SgrFlagCode { CellFlag::Faint, 2 },
+    SgrFlagCode { CellFlag::Italic, 3 },
+    SgrFlagCode { CellFlag::Underline, 4 },
+    SgrFlagCode { CellFlag::DoublyUnderlined, 21 },
+    SgrFlagCode { CellFlag::CurlyUnderlined, 4 },
+    SgrFlagCode { CellFlag::DottedUnderline, 4 },
+    SgrFlagCode { CellFlag::DashedUnderline, 4 },
+    SgrFlagCode { CellFlag::Blinking, 5 },
+    SgrFlagCode { CellFlag::RapidBlinking, 6 },
+    SgrFlagCode { CellFlag::Inverse, 7 },
+    SgrFlagCode { CellFlag::Hidden, 8 },
+    SgrFlagCode { CellFlag::CrossedOut, 9 },
+    SgrFlagCode { CellFlag::Overline, 53 },
+};
 
 /// Appends the SGR parameters that select @p color as a foreground (@p foreground true) or background
 /// colour to @p params (a semicolon-separated CSI parameter list, without the leading/trailing punct).
@@ -61,25 +90,9 @@ inline void appendSgrColor(std::string& params, Color color, bool foreground)
 [[nodiscard]] inline std::string makeSgrSequence(GraphicsAttributes const& attrs)
 {
     auto params = std::string { "0" };
-    auto const addFlag = [&](CellFlag flag, int code) {
+    for (auto const& [flag, code]: SgrFlagCodes)
         if (attrs.flags.contains(flag))
             params += std::format(";{}", code);
-    };
-    // SGR order; the underline variants collapse onto their nearest standard code.
-    addFlag(CellFlag::Bold, 1);
-    addFlag(CellFlag::Faint, 2);
-    addFlag(CellFlag::Italic, 3);
-    addFlag(CellFlag::Underline, 4);
-    addFlag(CellFlag::DoublyUnderlined, 21);
-    addFlag(CellFlag::CurlyUnderlined, 4);
-    addFlag(CellFlag::DottedUnderline, 4);
-    addFlag(CellFlag::DashedUnderline, 4);
-    addFlag(CellFlag::Blinking, 5);
-    addFlag(CellFlag::RapidBlinking, 6);
-    addFlag(CellFlag::Inverse, 7);
-    addFlag(CellFlag::Hidden, 8);
-    addFlag(CellFlag::CrossedOut, 9);
-    addFlag(CellFlag::Overline, 53);
     appendSgrColor(params, attrs.foregroundColor, /*foreground=*/true);
     appendSgrColor(params, attrs.backgroundColor, /*foreground=*/false);
     return std::format("\033[{}m", params);
