@@ -5,19 +5,14 @@
 
     #include <sys/socket.h>
 
+    #include <algorithm>
     #include <cerrno>
     #include <cstring>
 
+    #include <fcntl.h>
     #include <unistd.h>
 
-    // macOS / BSD lack MSG_NOSIGNAL; they suppress SIGPIPE via the SO_NOSIGPIPE
-    // socket option instead (set in the constructor). Fall back to 0 for the send
-    // flag there so the call still compiles and behaves.
-    #ifndef MSG_NOSIGNAL
-        #define MSG_NOSIGNAL 0
-    #endif
-
-    #include <fcntl.h>
+    #include <net/posix/FdUtils.h> // MSG_NOSIGNAL fallback, makeNonBlockingCloexec
 
     // macOS / BSD also lack MSG_CMSG_CLOEXEC (atomic close-on-exec for received
     // descriptors); there readWithFd sets FD_CLOEXEC via fcntl right after
@@ -150,16 +145,23 @@ coro::Task<std::expected<ReadWithFd, NetError>> PosixSocket::readWithFd(std::spa
             // Keep the FIRST received fd; close any extras (mirroring the
             // rewritten-imsg receive semantics: one fd per message).
             auto fd = -1;
+            // A peer advertising more fds than the one-fd contract allows must not
+            // let cmsg_len drive reads (or closes) past the control buffer: on
+            // MSG_CTRUNC the kernel reports the FULL sent length even though only
+            // part of it landed. Clamp to capacity, and distrust the whole set on
+            // truncation — close what arrived, keep nothing.
+            auto const capacity = (sizeof(control) - CMSG_LEN(0)) / sizeof(int);
+            auto const truncated = (msg.msg_flags & MSG_CTRUNC) != 0;
             for (auto* cmsg = CMSG_FIRSTHDR(&msg); cmsg != nullptr; cmsg = CMSG_NXTHDR(&msg, cmsg))
             {
                 if (cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS)
                     continue;
-                auto const count = (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+                auto const count = std::min((cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int), capacity);
                 for (std::size_t i = 0; i < count; ++i)
                 {
                     auto received = -1;
                     std::memcpy(&received, CMSG_DATA(cmsg) + (i * sizeof(int)), sizeof(int));
-                    if (fd < 0)
+                    if (fd < 0 && !truncated)
                         fd = received;
                     else
                         ::close(received);

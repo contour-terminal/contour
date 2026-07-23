@@ -10,6 +10,13 @@
 
 #include <fcntl.h>
 
+// macOS / BSD lack MSG_NOSIGNAL; they suppress SIGPIPE via the SO_NOSIGPIPE
+// socket option instead (set in the PosixSocket constructor). Fall back to 0 for
+// the send flag there so call sites still compile and behave.
+#ifndef MSG_NOSIGNAL
+    #define MSG_NOSIGNAL 0
+#endif
+
 namespace net
 {
 
