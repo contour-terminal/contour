@@ -24,6 +24,7 @@
 #include <memory>
 #include <optional>
 #include <unordered_map>
+#include <vector>
 
 namespace contour
 {
@@ -43,6 +44,17 @@ class RoutingSessionFactory;
 class TerminalSession;
 class TmuxController;
 class WindowController;
+
+/// The daemon window the boot (first) OS window should adopt when attaching, rather than authoring
+/// a fresh tab. In attach mode the boot window mirrors the daemon's primary (lowest-id) window; a
+/// later OS window is not a boot window (@p anyWindowMapped is then true). Pure so the boot-adoption
+/// rule is unit-testable without the QML boot flow.
+/// @param anyWindowMapped True if at least one OS window is already bound to a daemon window.
+/// @param daemonWindowIds The daemon's known window ids, ascending (windowIds() ordering).
+/// @return The daemon window to adopt, or nullopt if this is not the boot window, or the daemon has
+///         not reported a window yet.
+[[nodiscard]] std::optional<std::uint64_t> primaryDaemonWindowToAdopt(
+    bool anyWindowMapped, std::vector<std::uint64_t> const& daemonWindowIds);
 
 /// Extends ContourApp with terminal GUI capability.
 class ContourGuiApp: public QObject, public ContourApp

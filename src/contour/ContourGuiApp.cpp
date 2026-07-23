@@ -978,14 +978,41 @@ void ContourGuiApp::reconcileAttachWindows()
     }
 }
 
+std::optional<std::uint64_t> primaryDaemonWindowToAdopt(bool anyWindowMapped,
+                                                        std::vector<std::uint64_t> const& daemonWindowIds)
+{
+    if (anyWindowMapped || daemonWindowIds.empty())
+        return std::nullopt;
+    return daemonWindowIds.front(); // windowIds() is ascending, so front() is the primary window
+}
+
 bool ContourGuiApp::bindPendingAttachWindow(WindowController* controller)
 {
-    if (!_attachController || controller == nullptr || !_pendingAttachWindow)
+    if (!_attachController || controller == nullptr)
         return false;
-    auto const daemonWindow = *_pendingAttachWindow;
-    _pendingAttachWindow.reset();
-    bindDaemonWindow(daemonWindow, controller->windowId());
-    return true;
+
+    // A reconcile-spawned secondary OS window claims the daemon window staged for it.
+    if (_pendingAttachWindow)
+    {
+        auto const daemonWindow = *_pendingAttachWindow;
+        _pendingAttachWindow.reset();
+        bindDaemonWindow(daemonWindow, controller->windowId());
+        return true;
+    }
+
+    // The boot (first) OS window in attach mode ADOPTS the daemon's primary window instead of
+    // authoring a fresh tab. Claiming it here makes main.qml skip win.createNewTab(), which in
+    // attach mode would author a spurious extra tab on the daemon (and create no local first tab).
+    // Bind the primary window now if the daemon already reported one; otherwise still claim the boot
+    // window (return true) and let reconcileAttachWindows bind it once the first layout arrives.
+    if (_attachWindowMap.empty())
+    {
+        if (auto const adopt = primaryDaemonWindowToAdopt(false, _attachController->windowIds()))
+            bindDaemonWindow(*adopt, controller->windowId());
+        return true;
+    }
+
+    return false;
 }
 
 void ContourGuiApp::bindDaemonWindow(std::uint64_t daemonWindow, vtmux::WindowId osWindow)
