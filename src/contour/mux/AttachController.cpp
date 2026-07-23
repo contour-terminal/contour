@@ -188,6 +188,12 @@ bool AttachController::isBound(uint64_t session) const
     return _bindings.contains(session);
 }
 
+bool AttachController::isClaimed(uint64_t session) const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _bindings.contains(session) || _closedSessions.contains(session);
+}
+
 std::optional<uint64_t> AttachController::sessionForPty(vtpty::Pty const* pty) const
 {
     auto const lock = std::lock_guard { _mutex };
@@ -300,8 +306,7 @@ std::unique_ptr<vtpty::Pty> AttachController::createPty(std::optional<std::strin
 {
     auto lock = std::unique_lock { _mutex };
     auto session = uint64_t {};
-    auto columns = 0;
-    auto lines = 0;
+    auto taken = std::optional<PendingSession> {};
     if (_nextBindSession.has_value())
     {
         // Layout executor: bind this pane to the remote session the beforeLeafSeed
@@ -310,17 +315,21 @@ std::unique_ptr<vtpty::Pty> AttachController::createPty(std::optional<std::strin
         // replay (on binding) repaints it; a resize then reconciles.
         session = *_nextBindSession;
         _nextBindSession.reset();
-        auto const size = pageSize.value_or(vtbackend::PageSize {});
-        columns = size.columns.value != 0 ? unbox<int>(size.columns) : 80;
-        lines = size.lines.value != 0 ? unbox<int>(size.lines) : 25;
+        // A realized session must leave the pending queue (as TmuxController's
+        // parallel branch does): left behind, a later hook-less creation pops the
+        // stale entry and rebinds an already-live session, hijacking its feed.
+        if (auto const pending = std::ranges::find(_pending, session, &PendingSession::session);
+            pending != _pending.end())
+        {
+            taken = *pending;
+            _pending.erase(pending);
+        }
     }
     else if (!_pending.empty())
     {
-        auto const front = _pending.front();
+        taken = _pending.front();
         _pending.pop_front();
-        session = front.session;
-        columns = static_cast<int>(front.columns);
-        lines = static_cast<int>(front.lines);
+        session = taken->session;
     }
     else
     {
@@ -330,8 +339,15 @@ std::unique_ptr<vtpty::Pty> AttachController::createPty(std::optional<std::strin
         return makeUnboundFallbackPty(pageSize);
     }
 
-    // Born at the REMOTE size so the mirror's first replay paints a matching
-    // grid; the display's own resize then proposes the local size upstream.
+    // Born at the REMOTE size (the pending record carries the remote screen's
+    // geometry) so the mirror's first replay paints a matching grid; without a
+    // record the window's size stands in and a resize then reconciles.
+    auto const fallback = pageSize.value_or(vtbackend::PageSize {});
+    auto const columns = taken ? static_cast<int>(taken->columns)
+                               : (fallback.columns.value != 0 ? unbox<int>(fallback.columns) : 80);
+    auto const lines = taken ? static_cast<int>(taken->lines)
+                             : (fallback.lines.value != 0 ? unbox<int>(fallback.lines) : 25);
+
     auto pty = std::make_unique<SelfUnbindingChannelPty>(
         vtpty::PageSize { vtpty::LineCount(lines), vtpty::ColumnCount(columns) },
         [this, session] { unbind(session); });

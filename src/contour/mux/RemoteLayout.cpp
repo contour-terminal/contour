@@ -43,15 +43,16 @@ namespace
             collectSessions(child, out);
     }
 
-    /// @return True if any leaf of @p pane carries a remote session already bound to
-    ///         a local pane — i.e. this subtree is already realized locally.
-    [[nodiscard]] bool anyLeafBound(muxserver::proto::WirePane const& pane,
-                                    AttachController const& controller)
+    /// @return True if any leaf of @p pane carries a remote session already claimed
+    ///         locally — bound to a pane, or tombstoned by a user close the daemon
+    ///         has not acknowledged yet (a stale layout push must not resurrect it).
+    [[nodiscard]] bool anyLeafClaimed(muxserver::proto::WirePane const& pane,
+                                      AttachController const& controller)
     {
         if (pane.split == 0)
-            return controller.isBound(pane.session);
+            return controller.isClaimed(pane.session);
         return std::ranges::any_of(pane.children,
-                                   [&](auto const& child) { return anyLeafBound(child, controller); });
+                                   [&](auto const& child) { return anyLeafClaimed(child, controller); });
     }
 
     /// The acting (first) child's space share for a wire split ratio (units of
@@ -77,9 +78,10 @@ namespace
     };
 
     /// Finds ONE not-yet-realized split in @p node: a split whose first child is a
-    /// BOUND leaf and whose second child's subtree is entirely UNBOUND (the shape a
-    /// daemon `splitActivePane` leaves — old session in the first child, new in the
-    /// second). Recurses through already-bound subtrees to find nested new splits.
+    /// BOUND leaf and whose second child's subtree is entirely UNCLAIMED (the shape
+    /// a daemon `splitActivePane` leaves — old session in the first child, new in
+    /// the second). Recurses through already-claimed subtrees to find nested new
+    /// splits.
     [[nodiscard]] std::optional<SplitOp> findNewSplit(muxserver::proto::WirePane const& node,
                                                       AttachController const& controller)
     {
@@ -87,15 +89,15 @@ namespace
             return std::nullopt;
         auto const& first = node.children[0];
         auto const& second = node.children[1];
-        if (first.split == 0 && controller.isBound(first.session) && !anyLeafBound(second, controller))
+        if (first.split == 0 && controller.isBound(first.session) && !anyLeafClaimed(second, controller))
             return SplitOp { .actingSession = first.session,
                              .newSession = leftmostSession(second),
                              .vertical = node.split == 2,
                              .ratio = firstChildShare(node.ratio) };
-        if (anyLeafBound(first, controller))
+        if (anyLeafClaimed(first, controller))
             if (auto op = findNewSplit(first, controller))
                 return op;
-        if (anyLeafBound(second, controller))
+        if (anyLeafClaimed(second, controller))
             if (auto op = findNewSplit(second, controller))
                 return op;
         return std::nullopt;
@@ -154,7 +156,7 @@ void applyRemoteLayout(TerminalSessionManager& manager,
     controller.setRealizingLayout(true);
     for (auto const& wireTab: layout->tabs)
     {
-        if (!anyLeafBound(wireTab.root, controller))
+        if (!anyLeafClaimed(wireTab.root, controller))
         {
             realizeWholeTab(manager, window, controller, wireTab, pageSize);
             continue;

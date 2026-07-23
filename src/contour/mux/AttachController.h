@@ -74,6 +74,12 @@ class AttachController final: public QObject, public SessionFactory, public MuxC
     ///         the incremental layout reconciler to skip tabs it already realized.
     [[nodiscard]] bool isBound(uint64_t session) const;
 
+    /// @return True if @p session is claimed locally either way — bound to a pane,
+    ///         or tombstoned by a user close the daemon has not acknowledged yet
+    ///         (a stale layout push must not resurrect it). One lock acquisition
+    ///         for the reconciler walks that check per leaf.
+    [[nodiscard]] bool isClaimed(uint64_t session) const;
+
     /// @return The remote session bound to local pty @p pty, or nullopt. Lets the
     ///         reconciler map a GUI pane back to its daemon session (to split/close
     ///         the right pane).
