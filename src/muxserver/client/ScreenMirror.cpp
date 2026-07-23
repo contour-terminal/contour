@@ -265,6 +265,11 @@ std::string ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& 
     _floor = screen.stableFloor;
 
     auto out = std::string { "\033[?25l" };
+    // Upper bound on the output size: each cell emits an SGR sequence (~20 bytes),
+    // the cursor moves, and there may be a few hundred bytes of header/trailer.
+    // Reserving avoids repeated reallocations as rows stream in.
+    out.reserve((static_cast<std::size_t>(screen.lines) * static_cast<std::size_t>(screen.columns) * 25)
+                + 1024);
 
     // 1. Repaint changed rows still inside the OLD viewport at their old
     //    positions — including rows about to scroll into history, so local
@@ -365,6 +370,11 @@ std::string ScreenMirror::fullReplay(RemoteScreen const& screen)
     // -9 leaves DECSTBM/DECOM behind, which would make every address and scroll
     // below margin-relative (the exact state `reset(1)` exists for).
     auto out = std::string { "\033[?25l\033[?7l\033[r\033[?6l" };
+    // Upper-bound estimate: each cell produces ~20 bytes of SGR; the header/CSI
+    // sequences and OSC colour/title commands add a few hundred more. Reserving
+    // avoids repeated reallocations as rows stream in.
+    out.reserve((static_cast<std::size_t>(screen.lines) * static_cast<std::size_t>(screen.columns) * 25)
+                + 2048);
     out += screen.screenType == 1 ? "\033[?1049h" : "\033[?1049l";
     out += "\033[0m\033[H\033[2J";
     if (screen.screenType == 0)

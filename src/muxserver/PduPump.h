@@ -26,9 +26,15 @@ inline coro::Task<void> pumpPdus(net::ISocket* socket,
                                  std::function<bool(proto::DecodedFrame const&)> handler)
 {
     auto buffer = std::vector<std::byte> {};
+    auto consumed = std::size_t { 0 };
+    // Compact only when the consumed prefix grows past a threshold, so the
+    // common case — many small PDUs — never shifts the buffer. The threshold
+    // is low enough that the accumulated "waste" on a connection that keeps
+    // streaming but never hits it stays well under the worst-case frame size.
+    static constexpr auto CompactThreshold = std::size_t { 65536 };
     while (true)
     {
-        auto const decoded = proto::decodePdu(buffer);
+        auto const decoded = proto::decodePdu(std::span { buffer }.subspan(consumed));
         if (!decoded)
         {
             if (decoded.error() != proto::DecodeError::NeedMoreData
@@ -36,7 +42,12 @@ inline coro::Task<void> pumpPdus(net::ISocket* socket,
                 co_return;
             continue;
         }
-        buffer.erase(buffer.begin(), buffer.begin() + static_cast<long>(decoded->consumed));
+        consumed += decoded->consumed;
+        if (consumed >= CompactThreshold)
+        {
+            buffer.erase(buffer.begin(), buffer.begin() + static_cast<long>(consumed));
+            consumed = 0;
+        }
         if (!handler(*decoded))
             co_return;
     }

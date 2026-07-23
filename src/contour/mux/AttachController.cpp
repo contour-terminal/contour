@@ -225,10 +225,13 @@ void AttachController::requestSplitPane(vtpty::Pty const* actingPty, bool vertic
     auto const session = sessionForPty(actingPty);
     if (!session)
         return;
-    auto const orientation = static_cast<uint8_t>(vertical ? 2 : 1); // vtmux::SplitState
+    auto const orientation = static_cast<uint8_t>(
+        std::to_underlying(vertical ? vtmux::SplitState::Vertical : vtmux::SplitState::Horizontal));
+    // 5000 = 0.5 × 10000, the wire encoding for an even split (see proto/Pdu.h).
+    constexpr uint16_t EvenSplitRatio = 5000;
     _reactor.post([this, session = *session, orientation] {
         if (_client != nullptr)
-            _client->splitPane(session, orientation, 5000);
+            _client->splitPane(session, orientation, EvenSplitRatio);
     });
 }
 
