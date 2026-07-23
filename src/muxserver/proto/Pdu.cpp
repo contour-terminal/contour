@@ -620,7 +620,7 @@ namespace
         // hostile PDU.
         if (pane.split > 2 || childCount != (pane.split == 0 ? uint64_t { 0 } : uint64_t { 2 }))
             return std::unexpected(DecodeError::MalformedPdu);
-        for (auto i = uint64_t { 0 }; i < childCount; ++i)
+        for ([[maybe_unused]] auto const _: std::views::iota(uint64_t { 0 }, childCount))
         {
             auto child = decodePane(in, depth - 1);
             if (!child)
@@ -642,7 +642,7 @@ namespace
         // frame-size bound already caps real payloads, but reject early).
         if (tabCount > 100000)
             return std::unexpected(DecodeError::MalformedPdu);
-        for (auto i = uint64_t { 0 }; i < tabCount; ++i)
+        for ([[maybe_unused]] auto const _: std::views::iota(uint64_t { 0 }, tabCount))
         {
             auto tab = WireTab {};
             if (!assign(in.varint(), tab.tabId, error) || !assign(in.varint(), tab.activePane, error)

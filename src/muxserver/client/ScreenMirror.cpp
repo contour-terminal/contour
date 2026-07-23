@@ -205,7 +205,8 @@ namespace
                 });
             if (!holdsContinuation)
                 continue;
-            for (auto above = int64_t { 1 }; above < int64_t { vtbackend::text_sizing::MaxScale }; ++above)
+            for (auto const above:
+                 std::views::iota(int64_t { 1 }, int64_t { vtbackend::text_sizing::MaxScale }))
             {
                 auto const candidate = id - above;
                 if (candidate < lowest || !screen.rows.contains(candidate))
@@ -242,7 +243,10 @@ std::string ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& 
     // which the incremental path — no line changes, no viewport move — would
     // otherwise leave as ghost scrollback). fullReplay re-emits ESC[3J and
     // rebuilds local scrollback from what the server still holds.
-    auto const floorOutranScroll = screen.stableFloor - _floor > screen.viewportBase - _viewportBase;
+    // Rearranged to avoid signed int64_t overflow: A - B > C - D  ⇔  A + D > C + B.
+    // All four values are non-negative line counts, so the sums cannot overflow
+    // (INT64_MAX is ~9e18 — no terminal history approaches that).
+    auto const floorOutranScroll = screen.stableFloor + _viewportBase > _floor + screen.viewportBase;
     if (!_primed || delta.snapshot != 0 || screen.generation != _generation || screen.columns != _columns
         || screen.lines != _lines || screen.screenType != _screenType || screen.viewportBase < _viewportBase
         || floorOutranScroll)
@@ -274,7 +278,7 @@ std::string ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& 
     {
         out += "\033[0m";
         out += cup(lines, 1);
-        for (auto id = oldBase + lines; id < newBase + lines; ++id)
+        for (auto const id: std::views::iota(oldBase + lines, newBase + lines))
         {
             out += "\n\r";
             if (id < newBase)
@@ -366,7 +370,7 @@ std::string ScreenMirror::fullReplay(RemoteScreen const& screen)
     if (firstId < screen.viewportBase && screen.screenType == 0)
     {
         auto row = int64_t { 1 };
-        for (auto id = firstId; id < screen.viewportBase + lines; ++id)
+        for (auto const id: std::views::iota(firstId, screen.viewportBase + lines))
         {
             if (row <= lines)
                 out += cup(row++, 1);
@@ -379,7 +383,7 @@ std::string ScreenMirror::fullReplay(RemoteScreen const& screen)
     }
 
     // Faithful viewport paint, bottom-up (see the file comment on blocks).
-    for (auto line = lines - 1; line >= 0; --line)
+    for (auto const line: std::views::iota(int64_t { 0 }, lines) | std::views::reverse)
         paintRow(out, screen, screen.viewportBase + line, line + 1);
 
     out += std::format("\033]0;{}\033\\", screen.title);

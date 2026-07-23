@@ -2,6 +2,7 @@
 #include <muxserver/imsg/CommandArgv.h>
 
 #include <cstring>
+#include <ranges>
 
 namespace muxserver::imsg
 {
@@ -32,7 +33,7 @@ std::expected<std::vector<std::string>, ImsgError> unpackArgv(std::span<std::byt
     auto arguments = std::vector<std::string> {};
     arguments.reserve(static_cast<std::size_t>(argc));
     auto rest = payload.subspan(sizeof(int));
-    for (auto i = 0; i < argc; ++i)
+    for ([[maybe_unused]] auto const _: std::views::iota(0, argc))
     {
         auto terminator = std::size_t { 0 };
         while (terminator < rest.size() && rest[terminator] != std::byte { 0 })
