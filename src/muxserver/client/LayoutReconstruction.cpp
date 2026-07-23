@@ -11,7 +11,11 @@ namespace muxserver::client
 vtmux::LayoutPane wireToLayoutPane(proto::WirePane const& pane)
 {
     auto out = vtmux::LayoutPane {};
-    if (pane.split == 0)
+    // A leaf (split None) has no children; neither does a malformed split missing its
+    // two children — either way there is nothing to recurse into. The decoder already
+    // rejects the malformed case (decodePane cross-checks split against child count);
+    // this guard is defense-in-depth for any WirePane not built through it.
+    if (pane.split == 0 || pane.children.size() < 2)
         return out; // a leaf: no children, no command — a remote session backs it
 
     out.orientation = static_cast<vtmux::SplitState>(pane.split);
@@ -37,6 +41,11 @@ namespace
             out.emplace(&pane, wire.session);
             return;
         }
+        // A converted non-leaf only exists where wireToLayoutPane recursed, i.e. the
+        // wire node carried its two children; guard anyway so this never indexes out
+        // of bounds even if the two trees ever fall out of step.
+        if (wire.children.size() < 2)
+            return;
         mapLeaves(pane.children[0], wire.children[0], out);
         mapLeaves(pane.children[1], wire.children[1], out);
     }

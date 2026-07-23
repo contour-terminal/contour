@@ -157,6 +157,50 @@ TEST_CASE("every catalog PDU round-trips", "[muxserver][proto]")
         CHECK(roundTrip(pdu) == pdu);
 }
 
+TEST_CASE("a layout split pane must carry exactly two children", "[muxserver][proto]")
+{
+    // A split pane (split != None) with the wrong child count, or an out-of-range
+    // split state, must be rejected at decode: otherwise the layout converters index
+    // children[0]/[1] out of bounds on the reconstructed tree.
+    auto layoutWith = [](uint8_t split, std::vector<WirePane> children) {
+        return DecodedPdu { LayoutState {
+            .window = 1,
+            .activeTab = 0,
+            .tabs = { WireTab {
+                .tabId = 1,
+                .root = WirePane {
+                    .paneId = 1, .split = split, .session = 0, .children = std::move(children) } } } } };
+    };
+    auto encodeThenDecode = [](DecodedPdu const& pdu) {
+        auto stream = Writer {};
+        encodePdu(stream, 5, pdu);
+        return decodePdu(stream.view());
+    };
+    auto const leafA = WirePane { .paneId = 2, .session = 100 };
+    auto const leafB = WirePane { .paneId = 3, .session = 101 };
+
+    SECTION("a split with no children is malformed")
+    {
+        CHECK(encodeThenDecode(layoutWith(2, {})).error() == DecodeError::MalformedPdu);
+    }
+    SECTION("a split with a single child is malformed")
+    {
+        CHECK(encodeThenDecode(layoutWith(2, { leafA })).error() == DecodeError::MalformedPdu);
+    }
+    SECTION("an out-of-range split state is malformed")
+    {
+        CHECK(encodeThenDecode(layoutWith(7, { leafA, leafB })).error() == DecodeError::MalformedPdu);
+    }
+    SECTION("a leaf carrying children is malformed")
+    {
+        CHECK(encodeThenDecode(layoutWith(0, { leafA, leafB })).error() == DecodeError::MalformedPdu);
+    }
+    SECTION("a well-formed binary split still decodes")
+    {
+        CHECK(encodeThenDecode(layoutWith(2, { leafA, leafB })).has_value());
+    }
+}
+
 TEST_CASE("a blank line needs no cells on the wire", "[muxserver][proto]")
 {
     auto blank = WireLine {};

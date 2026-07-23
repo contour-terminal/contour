@@ -167,3 +167,33 @@ TEST_CASE("wireToLayout yields no tabs for an empty layout", "[muxserver][layout
 {
     CHECK(wireToLayout(proto::LayoutState {}).layout.tabs.empty());
 }
+
+TEST_CASE("wireToLayout tolerates a malformed split node without reading out of bounds",
+          "[muxserver][layout]")
+{
+    // The wire decoder rejects a split with the wrong child count (see Pdu_test), but
+    // the converter must be robust on its own too: a split node missing a child
+    // collapses to a leaf rather than indexing children[0]/[1] out of bounds.
+    auto rootWith = [](std::vector<proto::WirePane> children) {
+        auto root = proto::WirePane { .paneId = 1, .split = 2, .session = 5 };
+        root.children = std::move(children);
+        return root;
+    };
+
+    SECTION("a split with no children")
+    {
+        auto state = proto::LayoutState {};
+        state.tabs.push_back(proto::WireTab { .root = rootWith({}) });
+        auto const wl = wireToLayout(state); // must not read OOB
+        REQUIRE(wl.layout.tabs.size() == 1);
+        CHECK(wl.layout.tabs[0].root.isLeaf());
+    }
+    SECTION("a split with a single child")
+    {
+        auto state = proto::LayoutState {};
+        state.tabs.push_back(proto::WireTab { .root = rootWith({ leaf(9) }) });
+        auto const wl = wireToLayout(state); // must not read OOB
+        REQUIRE(wl.layout.tabs.size() == 1);
+        CHECK(wl.layout.tabs[0].root.isLeaf());
+    }
+}

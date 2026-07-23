@@ -603,7 +603,14 @@ namespace
         auto childCount = uint64_t { 0 };
         if (!assign(in.varint(), childCount, error))
             return std::unexpected(error);
-        if (childCount > 2) // a pane is a leaf (0) or a binary split (2)
+        // A pane node's split state and child count must agree (SplitState in
+        // vtmux/Primitives.h): split 0 (None) is a leaf with no children; split 1/2
+        // (Horizontal/Vertical) is a binary split with exactly two. Reject any other
+        // combination — an out-of-range split, or a split lacking its two children —
+        // so the layout converters (wireToLayoutPane/mapLeaves) can index
+        // children[0]/[1] unconditionally instead of reading out of bounds on a
+        // hostile PDU.
+        if (pane.split > 2 || childCount != (pane.split == 0 ? uint64_t { 0 } : uint64_t { 2 }))
             return std::unexpected(DecodeError::MalformedPdu);
         for (auto i = uint64_t { 0 }; i < childCount; ++i)
         {
