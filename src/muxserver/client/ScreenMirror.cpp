@@ -88,6 +88,12 @@ namespace
         out += std::format("\033]8;id={};{}\033\\", id, it != uris.end() ? it->second : std::string {});
     }
 
+    /// Emits the GIP delete releasing the stored upload named after @p imageId.
+    void appendImageDelete(std::string& out, uint32_t imageId)
+    {
+        out += std::format("\033P!go=d,n=muximg_{}\033\\", imageId);
+    }
+
     /// Renders @p row's cells at the current cursor position.
     ///
     /// @p faithful selects viewport semantics: orphan continuation cells are
@@ -342,7 +348,11 @@ std::string ScreenMirror::fullReplay(RemoteScreen const& screen)
     _screenType = screen.screenType;
 
     auto const lines = static_cast<int64_t>(screen.lines);
-    auto out = std::string { "\033[?25l\033[?7l" };
+    // Reset the scroll region and origin mode before driving the outer terminal
+    // with absolute CUP and bottom-row \n scrolls: a full-screen app killed with
+    // -9 leaves DECSTBM/DECOM behind, which would make every address and scroll
+    // below margin-relative (the exact state `reset(1)` exists for).
+    auto out = std::string { "\033[?25l\033[?7l\033[r\033[?6l" };
     out += screen.screenType == 1 ? "\033[?1049h" : "\033[?1049l";
     out += "\033[0m\033[H\033[2J";
     if (screen.screenType == 0)
@@ -479,7 +489,7 @@ std::string ScreenMirror::applyImage(RemoteScreen const& screen, uint32_t imageI
     {
         // Dropped server-side: release it so a reused id can never show stale pixels.
         if (_storedImages.erase(imageId) != 0)
-            out += std::format("\033P!go=d,n=muximg_{}\033\\", imageId);
+            appendImageDelete(out, imageId);
         return out;
     }
     // The pixels arrived after the delta that referenced them was already painted:
@@ -489,6 +499,33 @@ std::string ScreenMirror::applyImage(RemoteScreen const& screen, uint32_t imageI
     out += cup(screen.cursorLine + 1, screen.cursorColumn + 1);
     if (containsValue(_setModes, VisibleCursorModeNumber))
         out += "\033[?25h";
+    return out;
+}
+
+std::string ScreenMirror::detachRestore() const
+{
+    auto out = std::string {};
+    // Release the stored image uploads (the mirror terminal's memory), then
+    // restore every persistent mode the paint paths may have asserted.
+    for (auto const imageId: _storedImages)
+        appendImageDelete(out, imageId);
+    out += "\033[0m";
+    // Every input-side mode the mirror syncs from the server returns to its
+    // default (off); cursor visibility is the one mode whose default is SET.
+    for (auto const mode: MirroredModes)
+    {
+        auto const number = vtbackend::toDECModeNum(mode);
+        out += std::format("\033[?{}{}", number, number == VisibleCursorModeNumber ? 'h' : 'l');
+    }
+    out += "\033[=0;1u"; // kitty keyboard: no enhancements
+    out += "\033[0 q";   // DECSCUSR: default cursor shape
+    out += "\033]110\033\\"
+           "\033]111\033\\"; // default foreground/background
+    out += "\033[0$}";       // DECSASD: main display
+    out += "\033[0$~";       // DECSSDT: no status line
+    out += "\033[r\033[?6l"; // full scroll region, absolute origin
+    out += "\033[?7h";       // autowrap on
+    out += "\033[?1049l";    // leave the alt screen, restoring the pre-attach page
     return out;
 }
 

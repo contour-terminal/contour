@@ -465,6 +465,8 @@ namespace
                 trackTtySize(loop, notifier.readFd(), [&attach] { proposeLocalSize(attach); }));
         }
 
+        // Restore the outer terminal's persistent state (RawTty only restores termios).
+        writeOut(mirror.detachRestore());
         std::println("\ncontour attach: detached");
         if (attach.versionMismatch())
         {
@@ -780,6 +782,8 @@ namespace
 
         co_await coro::whenAll(attach.run(), proposeConsoleSize(&attach));
 
+        // Restore the outer console's persistent state before RawConsole hands the modes back.
+        writeOut(mirror.detachRestore());
         std::println(stderr, "\ncontour attach: detached");
         co_return attach.versionMismatch() ? EXIT_FAILURE : EXIT_SUCCESS;
     }

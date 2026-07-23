@@ -56,6 +56,14 @@ class ScreenMirror
     /// apply. Stateless: the event carries everything it needs.
     [[nodiscard]] static std::string applyEvent(proto::SessionEvent const& event);
 
+    /// The teardown stream for a THIN client driving a real outer terminal:
+    /// restores every persistent mode the mirror may have asserted (autowrap,
+    /// alt screen, cursor visibility/shape, margins, origin, the synced
+    /// input-side modes, kitty keyboard flags, default colors, status display)
+    /// and deletes the stored image uploads. Emit it on detach — the mirror
+    /// never resets these itself, so without it the user's shell inherits them.
+    [[nodiscard]] std::string detachRestore() const;
+
   private:
     /// Emits DECSET/DECRST for every mirrored mode whose state differs from
     /// what the mirror terminal was last told, and remembers the new state.
