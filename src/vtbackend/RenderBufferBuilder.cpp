@@ -139,8 +139,10 @@ RenderBufferBuilder::RenderBufferBuilder(Terminal const& terminal,
 
 optional<RenderCursor> RenderBufferBuilder::renderCursor() const
 {
-    if (!_cursorPosition || !_terminal->cursorCurrentlyVisible()
-        || !_terminal->viewport().isLineVisible(_cursorPosition->line))
+    // When IME composition is active, the cursor must be rendered regardless of blink phase:
+    // the IME preedit text is displayed AT the cursor position, so the cursor is its anchor.
+    auto const cursorVisible = _terminal->cursorCurrentlyVisible() || !_inputMethodData.preeditString.empty();
+    if (!_cursorPosition || !cursorVisible || !_terminal->viewport().isLineVisible(_cursorPosition->line))
         return nullopt;
 
     // TODO: check if CursorStyle has changed, and update render context accordingly.
@@ -662,7 +664,8 @@ bool RenderBufferBuilder::tryRenderInputMethodEditor(CellLocation screenPosition
             renderUtf8Text(screenPosition, textAttributes, _inputMethodData.preeditString, false);
         if (_inputMethodSkipColumns > ColumnCount(0))
         {
-            _output->cursor->position.column += ColumnOffset::cast_from(_inputMethodSkipColumns);
+            if (_output->cursor.has_value())
+                _output->cursor->position.column += ColumnOffset::cast_from(_inputMethodSkipColumns);
             _output->cells.at(_output->cells.size() - unbox<size_t>(_inputMethodSkipColumns)).groupStart =
                 true;
             _output->cells.back().groupEnd = true;

@@ -101,6 +101,45 @@ TEST_CASE("Terminal.BlinkingCursor", "[terminal]")
     }
 }
 
+// IME preedit text renders at the cursor position. While the IME is composing, the cursor must be
+// visible in the render buffer even when the blink phase is "off" -- without it, the IME path
+// dereferences a null optional and crashes. This test reproduces the crash reported via
+// SIGABRT on `std::optional<RenderCursor>::operator->()` in tryRenderInputMethodEditor().
+TEST_CASE("Terminal.IME.CursorVisibleDuringComposition", "[terminal]")
+{
+    auto mc = MockTerm { ColumnCount { 6 }, LineCount { 4 } };
+    auto& terminal = mc.terminal;
+    terminal.setCursorDisplay(vtbackend::CursorDisplay::Blink);
+    auto constexpr BlinkInterval = chrono::milliseconds(500);
+    terminal.setCursorBlinkingInterval(BlinkInterval);
+
+    auto const clockBase = chrono::steady_clock::time_point();
+
+    // Advance time past the first blink toggle so the cursor is in its "off" phase.
+    auto const clockBlinkOff = clockBase + BlinkInterval + chrono::milliseconds(1);
+    terminal.tick(clockBlinkOff);
+    terminal.ensureFreshRenderBuffer();
+    CHECK(!terminal.cursorCurrentlyVisible());
+
+    // Activate IME composition. Prior to the fix, the next line crashed inside
+    // tryRenderInputMethodEditor() because _output->cursor was nullopt while
+    // _cursorPosition was set.
+    terminal.updateInputMethodPreeditString("test");
+
+    // Advance the clock past the refresh interval so ensureFreshRenderBuffer
+    // actually rebuilds the buffer rather than skipping as a duplicate.
+    auto const clockAfterRefreshInterval = clockBlinkOff + chrono::milliseconds(100);
+    terminal.tick(clockAfterRefreshInterval);
+    terminal.ensureFreshRenderBuffer();
+
+    // Post-fix: the render buffer cursor must be present -- IME composition
+    // overrides the blink-off state so the cursor anchors the preedit text.
+    auto const renderBuffer = terminal.renderBuffer();
+    REQUIRE(renderBuffer.get().cursor.has_value());
+    CHECK(renderBuffer.get().cursor->position.column == ColumnOffset(0));
+    CHECK(renderBuffer.get().cursor->position.line == LineOffset(0));
+}
+
 TEST_CASE("Terminal.ModifierKeysDoNotScrollViewport", "[terminal]")
 {
     // Set up a terminal with history capacity to allow scrollback
