@@ -22,6 +22,8 @@
     #include <sys/socket.h>
 
     #include <unistd.h>
+
+    #include <net/posix/FdUtils.h>
 #endif
 
 namespace net
@@ -60,7 +62,12 @@ namespace
 
         [[nodiscard]] IoResult write(void const* data, std::size_t size) override
         {
-            auto const n = ::send(_writeFd, data, size, 0);
+            auto const n = ::send(_writeFd, data, size, MSG_NOSIGNAL);
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+                // The pair is non-blocking: a full buffer means a wakeup is already
+                // pending, which is all this byte would have signaled. Report the
+                // write as done so a busy loop never stalls a producer thread.
+                return size;
             if (n < 0)
                 return std::unexpected(makeNetError(NetErrorCode::Other, errno, "SystemPipe send"));
             return static_cast<std::size_t>(n);
@@ -167,6 +174,16 @@ std::expected<std::unique_ptr<SystemPipe>, NetError> createSystemPipe()
     auto fds = std::array<int, 2> {};
     if (::socketpair(AF_UNIX, SOCK_STREAM, 0, fds.data()) != 0)
         return std::unexpected(makeNetError(NetErrorCode::Other, errno, "socketpair"));
+    // Non-blocking on both ends: producers must never stall on a full wakeup pipe,
+    // and the loop's bounded drain must never park on a spurious readiness. The
+    // write side reports EAGAIN as success (a wakeup is already pending then).
+    if (!makeNonBlockingCloexec(fds[0]) || !makeNonBlockingCloexec(fds[1]))
+    {
+        auto const err = errno;
+        ::close(fds[0]);
+        ::close(fds[1]);
+        return std::unexpected(makeNetError(NetErrorCode::Other, err, "socketpair non-blocking"));
+    }
     return std::make_unique<PosixSystemPipe>(fds[0], fds[1]);
 #else
     auto pair = std::array<SOCKET, 2> {};
