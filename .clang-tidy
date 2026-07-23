@@ -224,3 +224,5 @@ CheckOptions:
   readability-identifier-naming.PublicMemberCase: camelBack
   readability-identifier-naming.ScopedEnumConstantCase: CamelCase
   readability-identifier-naming.VariableCase: camelBack
+  readability-identifier-naming.GlobalVariableCase: camelBack
+  # No Hungarian notation: no g/s_/k prefixes. Globals are plain camelBack.
