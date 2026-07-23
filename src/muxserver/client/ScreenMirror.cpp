@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <format>
+#include <iterator>
 #include <optional>
 #include <ranges>
 #include <set>
@@ -56,21 +57,21 @@ namespace
     void appendSizedText(std::string& out, proto::WireCell const& cell)
     {
         auto const scale = vtbackend::unpackTextScale(cell.scale, cell.textScaleExtras);
-        out += std::format("\033]66;s={}", std::max<uint8_t>(scale.scale, 1));
+        std::format_to(std::back_inserter(out), "\033]66;s={}", std::max<uint8_t>(scale.scale, 1));
         // An explicit width pins the block to exactly the columns the server
         // claimed, immune to any re-measuring difference.
         if (scale.scale > 0 && cell.width % scale.scale == 0)
         {
             auto const width = static_cast<uint8_t>(cell.width / scale.scale);
             if (width >= 1 && width <= vtbackend::text_sizing::MaxWidth)
-                out += std::format(":w={}", width);
+                std::format_to(std::back_inserter(out), ":w={}", width);
         }
         if (scale.numerator != 0 || scale.denominator != 0)
-            out += std::format(":n={}:d={}", scale.numerator, scale.denominator);
+            std::format_to(std::back_inserter(out), ":n={}:d={}", scale.numerator, scale.denominator);
         if (scale.verticalAlignment != 0)
-            out += std::format(":v={}", scale.verticalAlignment);
+            std::format_to(std::back_inserter(out), ":v={}", scale.verticalAlignment);
         if (scale.horizontalAlignment != 0)
-            out += std::format(":h={}", scale.horizontalAlignment);
+            std::format_to(std::back_inserter(out), ":h={}", scale.horizontalAlignment);
         out += ';';
         appendCluster(out, cell);
         out += "\033\\";
@@ -85,13 +86,16 @@ namespace
             return;
         }
         auto const it = uris.find(id);
-        out += std::format("\033]8;id={};{}\033\\", id, it != uris.end() ? it->second : std::string {});
+        std::format_to(std::back_inserter(out),
+                       "\033]8;id={};{}\033\\",
+                       id,
+                       it != uris.end() ? it->second : std::string {});
     }
 
     /// Emits the GIP delete releasing the stored upload named after @p imageId.
     void appendImageDelete(std::string& out, uint32_t imageId)
     {
-        out += std::format("\033P!go=d,n=muximg_{}\033\\", imageId);
+        std::format_to(std::back_inserter(out), "\033P!go=d,n=muximg_{}\033\\", imageId);
     }
 
     /// Renders @p row's cells at the current cursor position.
@@ -136,7 +140,7 @@ namespace
 
             if (pendingSkip > 0)
             {
-                out += std::format("\033[{}C", pendingSkip);
+                std::format_to(std::back_inserter(out), "\033[{}C", pendingSkip);
                 pendingSkip = 0;
             }
             if (cell.hyperlink != currentLink)
@@ -232,7 +236,9 @@ namespace
             out += "\033[0m\033[2K";
             renderCells(out, line, screen.hyperlinks, /*faithful=*/false);
         }
-        out += std::format("\033[{}$}}", screen.activeStatusDisplay); // restore the server's active display
+        std::format_to(std::back_inserter(out),
+                       "\033[{}$}}",
+                       screen.activeStatusDisplay); // restore the server's active display
     }
 } // namespace
 
@@ -298,11 +304,11 @@ std::string ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& 
     syncModes(out, screen);
     appendImages(out, screen);
     if (delta.titleChanged != 0)
-        out += std::format("\033]0;{}\033\\", delta.title);
+        std::format_to(std::back_inserter(out), "\033]0;{}\033\\", delta.title);
     if (delta.cursorShapeChanged != 0)
-        out += std::format("\033[{} q", delta.cursorShape); // DECSCUSR
+        std::format_to(std::back_inserter(out), "\033[{} q", delta.cursorShape); // DECSCUSR
     if (delta.cwdChanged != 0)
-        out += std::format("\033]7;{}\033\\", delta.cwd); // OSC 7 working directory
+        std::format_to(std::back_inserter(out), "\033]7;{}\033\\", delta.cwd); // OSC 7 working directory
     if (delta.colorsChanged != 0)
     {
         out += oscColor(10, delta.defaultForeground);
@@ -310,13 +316,15 @@ std::string ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& 
     }
     if (delta.statusChanged != 0)
     {
-        out += std::format("\033[{}$~", delta.statusDisplayType);    // DECSSDT
-        out += std::format("\033[{}$}}", delta.activeStatusDisplay); // DECSASD
+        std::format_to(std::back_inserter(out), "\033[{}$~", delta.statusDisplayType);    // DECSSDT
+        std::format_to(std::back_inserter(out), "\033[{}$}}", delta.activeStatusDisplay); // DECSASD
     }
     if (delta.statusLinesChanged != 0)
         appendStatusLines(out, screen);
     if (delta.kittyKeyboardChanged != 0)
-        out += std::format("\033[={};1u", delta.kittyKeyboardFlags); // Kitty: set flags exactly (mode 1)
+        std::format_to(std::back_inserter(out),
+                       "\033[={};1u",
+                       delta.kittyKeyboardFlags); // Kitty: set flags exactly (mode 1)
     out += "\033[0m";
     out += cup(delta.cursorLine + 1, delta.cursorColumn + 1);
     if (containsValue(_setModes, VisibleCursorModeNumber))
@@ -334,7 +342,7 @@ void ScreenMirror::syncModes(std::string& out, RemoteScreen const& screen)
         auto const want = containsValue(screen.setModes, number);
         if (_modesKnown && want == containsValue(_setModes, number))
             continue;
-        out += std::format("\033[?{}{}", number, want ? 'h' : 'l');
+        std::format_to(std::back_inserter(out), "\033[?{}{}", number, want ? 'h' : 'l');
     }
     // A copy of <= 15 ints per delta beats per-delta tree allocations.
     _setModes = screen.setModes;
@@ -386,11 +394,11 @@ std::string ScreenMirror::fullReplay(RemoteScreen const& screen)
     for (auto const line: std::views::iota(int64_t { 0 }, lines) | std::views::reverse)
         paintRow(out, screen, screen.viewportBase + line, line + 1);
 
-    out += std::format("\033]0;{}\033\\", screen.title);
+    std::format_to(std::back_inserter(out), "\033]0;{}\033\\", screen.title);
     if (screen.cursorShape != 0)
-        out += std::format("\033[{} q", screen.cursorShape); // DECSCUSR
+        std::format_to(std::back_inserter(out), "\033[{} q", screen.cursorShape); // DECSCUSR
     if (!screen.cwd.empty())
-        out += std::format("\033]7;{}\033\\", screen.cwd); // OSC 7 working directory
+        std::format_to(std::back_inserter(out), "\033]7;{}\033\\", screen.cwd); // OSC 7 working directory
     if (screen.defaultForeground != 0 || screen.defaultBackground != 0)
     {
         out += oscColor(10, screen.defaultForeground);
@@ -401,11 +409,13 @@ std::string ScreenMirror::fullReplay(RemoteScreen const& screen)
     // state (e.g. an app popping the indicator back to None resizes the main grid,
     // which forces a snapshot), and only DECSSDT 0 / DECSASD 0 resets it. Both are
     // no-ops on a mirror already in None/Main.
-    out += std::format("\033[{}$~", screen.statusDisplayType);    // DECSSDT
-    out += std::format("\033[{}$}}", screen.activeStatusDisplay); // DECSASD
+    std::format_to(std::back_inserter(out), "\033[{}$~", screen.statusDisplayType);    // DECSSDT
+    std::format_to(std::back_inserter(out), "\033[{}$}}", screen.activeStatusDisplay); // DECSASD
     if (screen.kittyKeyboardFlags != 0)
-        out += std::format("\033[={};1u", screen.kittyKeyboardFlags); // Kitty keyboard flags (set exactly)
-    appendStatusLines(out, screen); // paints the host-writable status page, if any
+        std::format_to(std::back_inserter(out),
+                       "\033[={};1u",
+                       screen.kittyKeyboardFlags); // Kitty keyboard flags (set exactly)
+    appendStatusLines(out, screen);                // paints the host-writable status page, if any
     syncModes(out, screen);
     appendImages(out, screen);
     out += "\033[0m";
@@ -467,22 +477,24 @@ void ScreenMirror::appendImages(std::string& out, RemoteScreen const& screen)
             auto const body = crispy::base64::encode(
                 std::string_view { reinterpret_cast<char const*>(data->data.data()), data->data.size() });
             // GIP f = ImageFormat underlying + 1 (Auto=1, RGB=2, RGBA=3, PNG=4).
-            out += std::format("\033P!go=u,n=muximg_{},f={},w={},h={};!{}\033\\",
-                               imageId,
-                               data->format + 1,
-                               data->width,
-                               data->height,
-                               body);
+            std::format_to(std::back_inserter(out),
+                           "\033P!go=u,n=muximg_{},f={},w={},h={};!{}\033\\",
+                           imageId,
+                           data->format + 1,
+                           data->width,
+                           data->height,
+                           body);
         }
         out += cup(placement.anchorLine, placement.anchorColumn);
         // z=3 StretchToFill fills the reported cell box; L carries the layer; no `u`
         // header, so the placement must not move the cursor. (The source alignment/
         // resize policy is not on the native wire yet — a fidelity follow-up.)
-        out += std::format("\033P!go=r,n=muximg_{},c={},r={},z=3,L={}\033\\",
-                           imageId,
-                           placement.cols,
-                           placement.rows,
-                           placement.layer);
+        std::format_to(std::back_inserter(out),
+                       "\033P!go=r,n=muximg_{},c={},r={},z=3,L={}\033\\",
+                       imageId,
+                       placement.cols,
+                       placement.rows,
+                       placement.layer);
     }
 }
 
@@ -519,7 +531,8 @@ std::string ScreenMirror::detachRestore() const
     for (auto const mode: MirroredModes)
     {
         auto const number = vtbackend::toDECModeNum(mode);
-        out += std::format("\033[?{}{}", number, number == VisibleCursorModeNumber ? 'h' : 'l');
+        std::format_to(
+            std::back_inserter(out), "\033[?{}{}", number, number == VisibleCursorModeNumber ? 'h' : 'l');
     }
     out += "\033[=0;1u"; // kitty keyboard: no enhancements
     out += "\033[0 q";   // DECSCUSR: default cursor shape

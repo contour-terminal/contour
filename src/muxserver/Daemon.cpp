@@ -13,6 +13,7 @@
 #include <muxserver/Daemon.h>
 
 #include <crispy/algorithm.h>
+#include <crispy/utils.h>
 
 #include <array>
 #include <atomic>
@@ -20,9 +21,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <expected>
-#include <fstream>
 #include <functional>
-#include <iterator>
 #include <memory>
 #include <optional>
 #include <print>
@@ -116,10 +115,10 @@ namespace
     /// Reads the whole file at @p path, or nullopt if it cannot be opened.
     [[nodiscard]] std::optional<std::string> readFileToString(std::string const& path)
     {
-        auto file = std::ifstream { path, std::ios::binary };
-        if (!file)
+        std::error_code ec;
+        if (!std::filesystem::exists(path, ec))
             return std::nullopt;
-        return std::string { std::istreambuf_iterator<char> { file }, std::istreambuf_iterator<char> {} };
+        return crispy::readFileAsString(path);
     }
 
     /// Builds the TLS server context for the native TCP listener: an ephemeral

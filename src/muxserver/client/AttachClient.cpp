@@ -127,21 +127,9 @@ void RemoteScreen::dropImage(uint32_t imageId)
 {
     images.erase(imageId);
     requestedImages.erase(imageId);
-    for (auto rowIt = imageCells.begin(); rowIt != imageCells.end();)
-    {
-        auto& columns = rowIt->second;
-        for (auto colIt = columns.begin(); colIt != columns.end();)
-        {
-            if (colIt->second.imageId == imageId)
-                colIt = columns.erase(colIt);
-            else
-                ++colIt;
-        }
-        if (columns.empty())
-            rowIt = imageCells.erase(rowIt);
-        else
-            ++rowIt;
-    }
+    for (auto& [stableId, columns]: imageCells)
+        std::erase_if(columns, [imageId](auto const& pair) { return pair.second.imageId == imageId; });
+    std::erase_if(imageCells, [](auto const& pair) { return pair.second.empty(); });
 }
 
 proto::WireLine const* RemoteScreen::rowAt(int32_t line) const
@@ -203,9 +191,8 @@ uint64_t AttachClient::send(proto::DecodedPdu const& pdu)
 void AttachClient::sendInput(uint64_t session, std::string_view bytes)
 {
     auto input = proto::Input { .session = session, .data = {} };
-    input.data.reserve(bytes.size());
-    for (auto const ch: bytes)
-        input.data.push_back(static_cast<std::byte>(ch));
+    auto const* src = reinterpret_cast<std::byte const*>(bytes.data());
+    input.data.assign(src, src + bytes.size());
     send(proto::DecodedPdu { input });
 }
 
