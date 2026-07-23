@@ -129,13 +129,14 @@ using AttachEndpoint = std::variant<UnixEndpoint, TcpEndpoint>;
 
 /// RAII bridge turning SIGWINCH into an event-loop-waitable readiness signal.
 ///
-/// On construction it creates a non-blocking, close-on-exec pipe and installs a
-/// SIGWINCH handler whose only action is an async-signal-safe one-byte @c write
-/// to the pipe's write end. A coroutine (see @c trackTtySize) awaits readability
-/// on @c readFd(), drains the coalesced bytes, and re-proposes the local TTY
-/// size. On destruction it restores the previous SIGWINCH disposition and closes
-/// the pipe. At most one instance may exist at a time: it owns a process-global
-/// handler slot the signal handler reads.
+/// On construction it creates a non-blocking, close-on-exec pipe and registers
+/// its write end in a shared, lock-free registry. A SIGWINCH handler — installed
+/// once, process-wide — writes a byte to every registered pipe in the registry.
+/// A coroutine (see @c trackTtySize) awaits readability on @c readFd(), drains
+/// the coalesced bytes, and re-proposes the local TTY size. On destruction it
+/// unregisters the fd, restores the previous SIGWINCH disposition (when it was
+/// the last instance), and closes the pipe. Multiple instances may coexist:
+/// the shared registry makes the handler fan out to all live notifiers.
 class SigwinchNotifier
 {
   public:
@@ -162,6 +163,7 @@ class SigwinchNotifier
   private:
     net::NativeHandle _readFd = net::InvalidHandle;
     net::NativeHandle _writeFd = net::InvalidHandle;
+    int _slotIndex = -1; ///< Index in the shared gWinchWriteFds registry, or -1 if invalid.
     struct sigaction _previous {};
 };
 

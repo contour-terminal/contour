@@ -378,21 +378,27 @@ namespace
         bool _active = false;
     };
 
-    /// The SIGWINCH handler's write end of the self-pipe, published by the live
-    /// SigwinchNotifier. A signal handler cannot carry user data, so the one active
-    /// notifier parks its write fd here; the handler's only job is a one-byte write.
-    std::atomic<int> gWinchWriteFd { -1 };
+    /// Shared registry of SIGWINCH self-pipe write ends. A signal handler cannot
+    /// carry user data, so each SigwinchNotifier registers its write fd in a free
+    /// slot. The handler writes to every valid fd in the registry, fanning out to
+    /// all live notifiers without allocation or locking inside the signal handler.
+    constexpr auto MaxWinchNotifiers = size_t { 8 };
+    // std::atomic<int> is not copyable, so init via the (int) constructor.
+    std::array<std::atomic<int>, MaxWinchNotifiers> gWinchWriteFds = { -1, -1, -1, -1, -1, -1, -1, -1 };
 
-    /// Async-signal-safe SIGWINCH handler: writes one byte to the self-pipe so the
-    /// reactor wakes and the resize tracker re-proposes the TTY size. A full pipe
-    /// (EAGAIN) already carries a pending wakeup, so the short write is ignored.
+    /// Async-signal-safe SIGWINCH handler: writes one byte to every registered
+    /// self-pipe so all live notifiers wake and re-propose the TTY size. A full
+    /// pipe (EAGAIN) already carries a pending wakeup, so short writes are ignored.
     void winchSignalHandler(int /*sig*/)
     {
-        auto const fd = gWinchWriteFd.load(std::memory_order_relaxed);
-        if (fd >= 0)
+        for (auto const& entry: gWinchWriteFds)
         {
-            auto const byte = char { 0 };
-            std::ignore = ::write(fd, &byte, 1);
+            auto const fd = entry.load(std::memory_order_relaxed);
+            if (fd >= 0)
+            {
+                auto const byte = char { 0 };
+                std::ignore = ::write(fd, &byte, 1);
+            }
         }
     }
 
@@ -491,9 +497,27 @@ SigwinchNotifier::SigwinchNotifier()
     std::ignore = net::makeNonBlockingCloexec(_readFd);
     std::ignore = net::makeNonBlockingCloexec(_writeFd);
 
-    // Publish the write end before arming the handler, so a signal that arrives
-    // the instant the handler is installed already sees a valid fd.
-    gWinchWriteFd.store(_writeFd, std::memory_order_relaxed);
+    // Find a free slot in the shared registry and publish the write end before
+    // arming the handler, so a signal that arrives the instant the handler is
+    // installed already sees a valid fd.
+    for (auto i = size_t { 0 }; i < gWinchWriteFds.size(); ++i)
+    {
+        auto expected = -1;
+        if (gWinchWriteFds[i].compare_exchange_strong(expected, _writeFd, std::memory_order_relaxed))
+        {
+            _slotIndex = static_cast<int>(i);
+            break;
+        }
+    }
+    if (_slotIndex < 0)
+    {
+        // All slots occupied: fall back without live resize propagation.
+        net::platformClose(_writeFd);
+        net::platformClose(_readFd);
+        _writeFd = net::InvalidHandle;
+        _readFd = net::InvalidHandle;
+        return;
+    }
 
     struct sigaction action = {};
     action.sa_handler = &winchSignalHandler;
@@ -503,7 +527,8 @@ SigwinchNotifier::SigwinchNotifier()
     {
         // Handler install failed: undo the pipe so readFd() reports InvalidHandle and
         // trackTtySize takes its idle path instead of parking on a dead pipe.
-        gWinchWriteFd.store(-1, std::memory_order_relaxed);
+        gWinchWriteFds[static_cast<size_t>(_slotIndex)].store(-1, std::memory_order_relaxed);
+        _slotIndex = -1;
         net::platformClose(_writeFd);
         net::platformClose(_readFd);
         _writeFd = net::InvalidHandle;
@@ -513,11 +538,29 @@ SigwinchNotifier::SigwinchNotifier()
 
 SigwinchNotifier::~SigwinchNotifier()
 {
-    // Restore the prior disposition first so no further signal reaches our handler,
-    // then retract the fd and close the pipe: the handler can no longer race the close.
-    if (valid())
+    if (!valid())
+        return;
+
+    // Unregister from the shared registry first so the handler stops writing to
+    // this pipe. Restore the previous disposition only if the handler is still
+    // the one we installed (another notifier may have replaced it — the registry
+    // covers that case transparently).
+    gWinchWriteFds[static_cast<size_t>(_slotIndex)].store(-1, std::memory_order_relaxed);
+
+    // Check whether we were the last active notifier; only then restore the
+    // previous disposition to avoid stealing the handler from a still-live one.
+    auto anyActive = false;
+    for (auto const& entry: gWinchWriteFds)
+    {
+        if (entry.load(std::memory_order_relaxed) >= 0)
+        {
+            anyActive = true;
+            break;
+        }
+    }
+    if (!anyActive)
         std::ignore = ::sigaction(SIGWINCH, &_previous, nullptr);
-    gWinchWriteFd.store(-1, std::memory_order_relaxed);
+
     net::platformClose(_writeFd);
     net::platformClose(_readFd);
 }
