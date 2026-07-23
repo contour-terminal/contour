@@ -710,8 +710,12 @@ namespace
                                                        std::move(connection),
                                                        NativeSession::DefaultWriteQueueBytes,
                                                        std::move(expectedToken));
-        auto const subscription = ScopedStreamSubscription { *host, *session };
-        auto const layoutSubscription = ScopedModelSubscription { *host, session->layoutObserver() };
+        auto const subscription = ScopedStreamSubscription {
+            *host, *session, &SessionHost::subscribeStream, &SessionHost::unsubscribeStream
+        };
+        auto const layoutSubscription = ScopedModelSubscription {
+            *host, session->layoutObserver(), &SessionHost::subscribe, &SessionHost::unsubscribe
+        };
         co_await session->run();
     }
 } // namespace

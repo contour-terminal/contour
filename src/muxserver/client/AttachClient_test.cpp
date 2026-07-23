@@ -678,7 +678,10 @@ TEST_CASE("a client authors a tab, honored by the daemon and mirrored back", "[m
     // Subscribe the session's layout observer so the tab the client authors below
     // fans back out as a fresh LayoutState — production wires this in
     // serveNativeClient; the socket-pair tests construct NativeSession directly.
-    auto subscription = muxserver::ScopedModelSubscription { host, server.layoutObserver() };
+    auto subscription = muxserver::ScopedModelSubscription { host,
+                                                             server.layoutObserver(),
+                                                             &muxserver::SessionHost::subscribe,
+                                                             &muxserver::SessionHost::unsubscribe };
 
     auto mirroredTabs = int {};
     client.setLayoutHandler([&mirroredTabs](proto::LayoutState const& received) {
@@ -705,7 +708,10 @@ TEST_CASE("a client authors a new window, honored by the daemon (B4)", "[muxserv
     auto pair = *net::testing::makeSocketPair(loop);
     auto server = NativeSession { loop, host, std::move(pair.first) };
     auto client = AttachClient { loop, std::move(pair.second) };
-    auto subscription = muxserver::ScopedModelSubscription { host, server.layoutObserver() };
+    auto subscription = muxserver::ScopedModelSubscription { host,
+                                                             server.layoutObserver(),
+                                                             &muxserver::SessionHost::subscribe,
+                                                             &muxserver::SessionHost::unsubscribe };
 
     // Every LayoutState the client receives names its window; collect the ids.
     auto windows = std::set<uint64_t> {};

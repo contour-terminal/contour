@@ -859,7 +859,9 @@ namespace
 
         // Subscribe the byte tap for the lifetime of this connection; any
         // number of clients may be attached concurrently.
-        auto const subscription = ScopedStreamSubscription { *host, *session };
+        auto const subscription = ScopedStreamSubscription {
+            *host, *session, &SessionHost::subscribeStream, &SessionHost::unsubscribeStream
+        };
         co_await session->run();
     }
 } // namespace

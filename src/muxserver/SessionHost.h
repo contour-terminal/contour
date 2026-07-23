@@ -329,51 +329,42 @@ class SessionHost final: public vtmux::ModelEvents
     vtmux::WindowId _window;
 };
 
-/// Scoped stream subscription: connection coroutines keep one in their frame
-/// so the observer is removed even when the serve loop unwinds early.
-class ScopedStreamSubscription
+/// Scoped subscription: keeps @p Observer subscribed to @p Host for this object's
+/// lifetime. The Host's subscribe/unsubscribe methods are passed as callables so the
+/// same template serves both stream and model-event subscriptions.
+template <typename Host, typename Observer>
+class ScopedSubscription
 {
   public:
-    /// Subscribes @p observer to @p host for this object's lifetime.
-    ScopedStreamSubscription(SessionHost& host, SessionStreamEvents& observer):
-        _host(host), _observer(observer)
+    using SubscribeFn = void (Host::*)(Observer*);
+    using UnsubscribeFn = void (Host::*)(Observer*);
+
+    /// Subscribes @p observer to @p host via @p subscribe for this object's lifetime.
+    ScopedSubscription(Host& host, Observer& observer, SubscribeFn subscribe, UnsubscribeFn unsubscribe):
+        _host(host), _observer(observer), _unsubscribe(unsubscribe)
     {
-        _host.subscribeStream(&_observer);
+        (_host.*subscribe)(&_observer);
     }
 
-    ~ScopedStreamSubscription() { _host.unsubscribeStream(&_observer); }
+    ~ScopedSubscription() { (_host.*_unsubscribe)(&_observer); }
 
-    ScopedStreamSubscription(ScopedStreamSubscription const&) = delete;
-    ScopedStreamSubscription& operator=(ScopedStreamSubscription const&) = delete;
-    ScopedStreamSubscription(ScopedStreamSubscription&&) = delete;
-    ScopedStreamSubscription& operator=(ScopedStreamSubscription&&) = delete;
+    ScopedSubscription(ScopedSubscription const&) = delete;
+    ScopedSubscription& operator=(ScopedSubscription const&) = delete;
+    ScopedSubscription(ScopedSubscription&&) = delete;
+    ScopedSubscription& operator=(ScopedSubscription&&) = delete;
 
   private:
-    SessionHost& _host;
-    SessionStreamEvents& _observer;
+    Host& _host;
+    Observer& _observer;
+    UnsubscribeFn _unsubscribe;
 };
+
+/// Scoped stream subscription: connection coroutines keep one in their frame
+/// so the observer is removed even when the serve loop unwinds early.
+using ScopedStreamSubscription = ScopedSubscription<SessionHost, SessionStreamEvents>;
 
 /// Scoped model-events subscription: a native client keeps one in its frame so
 /// its layout observer is removed even when the serve loop unwinds early.
-class ScopedModelSubscription
-{
-  public:
-    /// Subscribes @p observer to @p host's model fan-out for this object's lifetime.
-    ScopedModelSubscription(SessionHost& host, vtmux::ModelEvents& observer): _host(host), _observer(observer)
-    {
-        _host.subscribe(&_observer);
-    }
-
-    ~ScopedModelSubscription() { _host.unsubscribe(&_observer); }
-
-    ScopedModelSubscription(ScopedModelSubscription const&) = delete;
-    ScopedModelSubscription& operator=(ScopedModelSubscription const&) = delete;
-    ScopedModelSubscription(ScopedModelSubscription&&) = delete;
-    ScopedModelSubscription& operator=(ScopedModelSubscription&&) = delete;
-
-  private:
-    SessionHost& _host;
-    vtmux::ModelEvents& _observer;
-};
+using ScopedModelSubscription = ScopedSubscription<SessionHost, vtmux::ModelEvents>;
 
 } // namespace muxserver
