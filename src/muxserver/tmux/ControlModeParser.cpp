@@ -44,15 +44,24 @@ namespace
         }
     };
 
-    [[nodiscard]] ControlEvent parseGuard(std::string_view tail, bool isBegin, bool isError)
+    enum class GuardFlavor : std::uint8_t
+    {
+        Begin,
+        End,
+        Error
+    };
+
+    [[nodiscard]] ControlEvent parseGuard(std::string_view tail, GuardFlavor flavor)
     {
         auto fields = FieldReader { tail };
         auto const time = fields.number<int64_t>().value_or(0);
         auto const number = fields.number<uint32_t>().value_or(0);
         auto const flags = fields.number<uint32_t>().value_or(0);
-        if (isBegin)
+        if (flavor == GuardFlavor::Begin)
             return GuardBegin { .time = time, .number = number, .flags = flags };
-        return GuardEnd { .time = time, .number = number, .flags = flags, .isError = isError };
+        return GuardEnd {
+            .time = time, .number = number, .flags = flags, .isError = flavor == GuardFlavor::Error
+        };
     }
 
     [[nodiscard]] ControlEvent parseOutput(std::string_view tail)
@@ -157,9 +166,9 @@ namespace
     };
 
     constexpr auto NotificationTable = std::array {
-        NotificationRow { "begin", [](std::string_view t) { return parseGuard(t, true, false); } },
-        NotificationRow { "end", [](std::string_view t) { return parseGuard(t, false, false); } },
-        NotificationRow { "error", [](std::string_view t) { return parseGuard(t, false, true); } },
+        NotificationRow { "begin", [](std::string_view t) { return parseGuard(t, GuardFlavor::Begin); } },
+        NotificationRow { "end", [](std::string_view t) { return parseGuard(t, GuardFlavor::End); } },
+        NotificationRow { "error", [](std::string_view t) { return parseGuard(t, GuardFlavor::Error); } },
         NotificationRow { "output", parseOutput },
         NotificationRow { "extended-output", parseExtendedOutput },
         NotificationRow { "layout-change", parseLayoutChange },

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <format>
+#include <iterator>
 #include <utility>
 
 namespace muxserver::tmux
@@ -18,7 +19,7 @@ std::string escapeOutput(std::string_view bytes)
         // tmux escapes ONLY control bytes and the backslash; 0x7F and every
         // byte >= 0x80 (UTF-8 continuation included) pass through untouched.
         if (byte < 0x20 || byte == '\\')
-            out += std::format("\\{:03o}", byte);
+            std::format_to(std::back_inserter(out), "\\{:03o}", byte);
         else
             out += raw;
     }

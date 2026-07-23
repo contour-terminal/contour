@@ -10,7 +10,6 @@ target_include_directories(coro INTERFACE
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
 )
-target_compile_features(coro INTERFACE cxx_std_23)
 
 option(CORO_TESTING "Enables building of unittests for coro [default: ON]" ${CONTOUR_TESTING})
 if(CORO_TESTING)

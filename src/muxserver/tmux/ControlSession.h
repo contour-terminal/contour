@@ -25,7 +25,6 @@
 #include <vector>
 
 #include <coro/Task.hpp>
-#include <coro/WhenAll.hpp>
 #include <muxserver/SessionHost.h>
 #include <muxserver/tmux/ControlOutput.h>
 #include <net/AsyncBufferedReader.h>

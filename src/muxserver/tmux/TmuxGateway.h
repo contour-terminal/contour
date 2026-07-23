@@ -109,7 +109,6 @@ class TmuxGateway final
     bool _detached = false;
     bool _exited = false;
     std::vector<std::string> _guardBody;
-    bool _guardIsError = false;
     std::deque<CommandCallback> _pending; ///< FIFO command correlation.
 };
 

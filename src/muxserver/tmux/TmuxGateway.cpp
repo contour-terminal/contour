@@ -71,8 +71,9 @@ void TmuxGateway::sendRawInput(uint64_t pane, std::string_view bytes)
         bytes.remove_prefix(batch.size());
 
         auto command = std::format("send-keys -t %{} -H", pane);
+        command.reserve(command.size() + (batch.size() * 3));
         for (auto const ch: batch)
-            command += std::format(" {:02x}", static_cast<uint8_t>(ch));
+            std::format_to(std::back_inserter(command), " {:02x}", static_cast<uint8_t>(ch));
         sendCommand(std::move(command));
     }
 }
@@ -140,7 +141,6 @@ void TmuxGateway::handleLine(std::string_view line)
                 _state = State::InGuard;
                 _guardNumber = begin->number;
                 _guardBody.clear();
-                _guardIsError = false;
                 return;
             }
             dispatchNotification(event);
