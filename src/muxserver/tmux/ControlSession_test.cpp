@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -13,6 +14,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <coro/WhenAll.hpp>
@@ -245,6 +247,43 @@ TEST_CASE("capture-pane returns the visible text, without SGR by default", "[mux
 
     CHECK(contains(lines, "RED plain")); // the visible text, SGR consumed by the parser
     // No escape sequences leak into a plain capture (the guard/notification lines carry none either).
+    CHECK(std::ranges::none_of(lines, [](auto const& l) { return l.contains("\x1b["); }));
+}
+
+TEST_CASE("capture-pane stays race-free while the pane is written concurrently",
+          "[muxserver][control][concurrency]")
+{
+    auto h = ControlHarness {};
+    h.host.createTab();
+    auto* tab = h.host.model().window(h.host.windowId())->activeTab();
+    auto const paneId = tab->rootPane()->id().value;
+    auto* terminal = h.host.terminal(tab->rootPane()->session());
+    REQUIRE(terminal != nullptr);
+
+    // A concurrent writer mutates the same grid under _stateMutex (writeToScreen);
+    // each capture-pane below reads it under that same lock (the fix). Under TSan an
+    // unlocked capture would be flagged racing this writer's line-storage
+    // reallocation. (The screen-update writeToScreen posts is drained by the
+    // exchange()'s loop, matching the production pump->loop hop.)
+    auto stop = std::atomic<bool> { false };
+    auto writer = std::thread { [&] {
+        for (auto i = 0; !stop.load(std::memory_order_relaxed); ++i)
+            terminal->writeToScreen(std::format("line-{}\r\n", i));
+    } };
+
+    // exchange() runs the session exactly once (it detaches at the end), so batch
+    // many captures into it; each races the writer.
+    auto commands = std::vector<std::string> {};
+    for (auto i = 0; i < 100; ++i)
+        commands.push_back(std::format("capture-pane -p -t %{}", paneId));
+    auto const lines = h.exchange(commands);
+
+    stop.store(true, std::memory_order_relaxed);
+    writer.join();
+
+    // The captures completed without crashing or deadlocking and produced content;
+    // a plain (-p) capture never leaks escape sequences, even mid-write.
+    CHECK(!lines.empty());
     CHECK(std::ranges::none_of(lines, [](auto const& l) { return l.contains("\x1b["); }));
 }
 

@@ -6,6 +6,7 @@
 #include <charconv>
 #include <chrono>
 #include <format>
+#include <mutex>
 #include <ranges>
 #include <utility>
 
@@ -677,6 +678,12 @@ ControlSession::HandlerResult ControlSession::commandCapturePane(std::vector<std
         return quiet ? HandlerResult { std::vector<std::string> {} }
                      : std::unexpected("pane has no live session");
 
+    // The session's pump thread mutates this grid (writeText/resize reallocate the
+    // line storage) under the terminal's _stateMutex. Hold that lock across every
+    // read below — historyLineCount/pageSize and the renderRange walk — so we never
+    // read the line SoA vectors while they are being reallocated. Mirrors the locked
+    // grid reads NativeSession::pushDelta performs on the same state.
+    auto const guard = std::lock_guard { *terminal };
     auto const& grid = terminal->primaryScreen().grid();
     // tmux capture rows: 0 = top of the visible page, negative = into scrollback — the same coordinates
     // as the grid's LineOffset. `-S -` starts at the top of history; `-E -` ends at the visible bottom.
