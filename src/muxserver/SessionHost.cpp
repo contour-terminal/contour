@@ -255,31 +255,31 @@ void SessionHost::applyClientSize(vtpty::PageSize size)
 
 void SessionHost::reprojectLayouts()
 {
-    auto* window = _model.window(_window);
-    for (auto const tabIndex: std::views::iota(0, window->tabCount()))
-    {
-        auto* tab = window->tabAt(tabIndex);
+    // resizeScreen mutates shared terminal state and does NOT lock internally; the
+    // session's pump thread writes the same grid under _stateMutex. Hold the
+    // terminal lock across the resize, exactly as the GUI's sole caller does
+    // (TerminalSession::attachDisplay).
+    auto const resizeLocked = [](vtbackend::Terminal& backing, vtpty::PageSize size) {
+        auto const guard = std::lock_guard { backing };
+        backing.resizeScreen(size);
+    };
+
+    // Every window's panes track the (daemon-wide) client area — a client resize
+    // must reach the PTYs of secondary windows too, or their apps keep rendering
+    // at stale dimensions while the layout advertises the new geometry.
+    _model.forEachTab([&](vtmux::Window&, vtmux::Tab& tab) {
         // The underlying layout's leaves first; a zoomed leaf then overrides to
         // the full area (tmux's zoom model: the saved layout keeps the rest).
-        for (auto const& rect: vtmux::layoutInCells(*tab->rootPane(), _pageSize))
-            if (auto const* leaf = tab->rootPane()->findPane(rect.pane))
+        for (auto const& rect: vtmux::layoutInCells(*tab.rootPane(), _pageSize))
+            if (auto const* leaf = tab.rootPane()->findPane(rect.pane))
                 if (auto* backing = terminal(leaf->session()))
-                {
-                    // resizeScreen mutates shared terminal state and does NOT lock
-                    // internally; the session's pump thread writes the same grid under
-                    // _stateMutex. Hold the terminal lock across the resize, exactly as
-                    // the GUI's sole caller does (TerminalSession::attachDisplay).
-                    auto const guard = std::lock_guard { *backing };
-                    backing->resizeScreen(vtpty::PageSize { .lines = vtpty::LineCount(rect.height),
-                                                            .columns = vtpty::ColumnCount(rect.width) });
-                }
-        if (auto const* zoomed = tab->layoutRoot(); zoomed != tab->rootPane())
+                    resizeLocked(*backing,
+                                 vtpty::PageSize { .lines = vtpty::LineCount(rect.height),
+                                                   .columns = vtpty::ColumnCount(rect.width) });
+        if (auto const* zoomed = tab.layoutRoot(); zoomed != tab.rootPane())
             if (auto* backing = terminal(zoomed->session()))
-            {
-                auto const guard = std::lock_guard { *backing };
-                backing->resizeScreen(_pageSize);
-            }
-    }
+                resizeLocked(*backing, _pageSize);
+    });
 }
 
 vtbackend::Terminal* SessionHost::terminal(SessionId session) noexcept
@@ -316,28 +316,10 @@ void SessionHost::handleSessionExit(SessionId session)
 
     // Prune the pane from the model FIRST (prune-then-terminate): closing the
     // pane may fire paneClosed or tabClosed to subscribers while the session
-    // still exists; only then destroy the terminal.
-    auto* window = _model.window(_window);
-    for (auto const tabIndex: std::views::iota(0, window->tabCount()))
-    {
-        auto* tab = window->tabAt(tabIndex);
-        if (tab == nullptr)
-            continue;
-        PaneId leaf {};
-        auto found = false;
-        tab->rootPane()->walkTree([&](vtmux::Pane& pane) {
-            if (pane.isLeaf() && pane.session() == session)
-            {
-                leaf = pane.id();
-                found = true;
-            }
-        });
-        if (found)
-        {
-            _model.closePane(_window, tab->id(), leaf);
-            break;
-        }
-    }
+    // still exists; only then destroy the terminal. The session may live in ANY
+    // window (a client-created secondary window included).
+    if (auto const [window, tab, leaf] = _model.findSessionLeaf(session); leaf != nullptr)
+        _model.closePane(window->id(), tab->id(), leaf->id());
 
     _sessions.erase(it);
 

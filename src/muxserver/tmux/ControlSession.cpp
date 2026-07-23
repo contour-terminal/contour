@@ -288,22 +288,12 @@ void ControlSession::sessionOutput(SessionId session, std::string const& bytes)
 {
     if (_noOutput || _peerLost)
         return; // no-output: the client wants notifications only; lost peer: nothing to send
-    // Map the session to its hosting leaf pane (the %N the client knows).
-    auto* window = _host.model().window(_host.windowId());
-    for (auto const tabIndex: std::views::iota(0, window->tabCount()))
+    // Map the session to its hosting leaf pane (the %N the client knows), in
+    // whichever window hosts it — or output for secondary-window panes is dropped.
+    if (auto const [window, tab, leaf] = _host.model().findSessionLeaf(session); leaf != nullptr)
     {
-        auto* tab = window->tabAt(tabIndex);
-        auto paneId = std::optional<std::uint64_t> {};
-        tab->rootPane()->walkTree([&](Pane& pane) {
-            if (pane.isLeaf() && pane.session() == session)
-                paneId = pane.id().value;
-        });
-        if (paneId)
-        {
-            _output.enqueueOutput(*paneId, bytes, std::chrono::steady_clock::now());
-            pumpOutput();
-            return;
-        }
+        _output.enqueueOutput(leaf->id().value, bytes, std::chrono::steady_clock::now());
+        pumpOutput();
     }
 }
 
@@ -474,17 +464,10 @@ std::expected<Pane*, std::string> ControlSession::resolvePane(std::vector<std::s
         auto const id = parseIdSuffix(*target, '%');
         if (!id)
             return std::unexpected(std::format("bad pane target: {}", *target));
-        auto* window = _host.model().window(_host.windowId());
-        for (auto const tabIndex: std::views::iota(0, window->tabCount()))
-        {
-            Pane* found = nullptr;
-            window->tabAt(tabIndex)->rootPane()->walkTree([&](Pane& pane) {
-                if (pane.isLeaf() && pane.id().value == *id)
-                    found = &pane;
-            });
-            if (found != nullptr)
-                return found;
-        }
+        // tmux %N ids are model-global leaf panes; the target may live in ANY
+        // window, not just the primary one.
+        if (auto* pane = _host.model().findLeafPane(PaneId { *id }); pane != nullptr)
+            return pane;
         return std::unexpected(std::format("pane not found: {}", *target));
     }
     auto* active = _host.model().window(_host.windowId())->activeTab();

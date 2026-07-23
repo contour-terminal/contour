@@ -613,22 +613,20 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
     }
     if (auto const* split = std::get_if<proto::SplitPane>(&frame.pdu))
     {
-        // Split the pane hosting the target session: find its tab, make that pane
-        // active, then split (splitActivePane acts on the tab's active pane).
+        // The decoder guarantees the orientation is Horizontal or Vertical (any
+        // other wire byte is MalformedPdu at the protocol boundary), so the cast
+        // below is provably safe. Split the pane hosting the target session (in
+        // whichever window hosts it): make that pane active, then split
+        // (splitActivePane acts on the tab's active pane).
         auto& model = _host.model();
-        if (auto* window = model.window(_host.windowId()))
-            for (auto const i: std::views::iota(0, window->tabCount()))
-            {
-                auto* tab = window->tabAt(i);
-                if (auto* leaf = tab->rootPane()->findLeaf(vtmux::SessionId { split->session }))
-                {
-                    model.setActivePane(tab->id(), leaf->id());
-                    _host.splitActivePane(tab->id(),
-                                          static_cast<vtmux::SplitState>(split->orientation),
-                                          static_cast<double>(split->ratio) / 10000.0);
-                    break;
-                }
-            }
+        if (auto const [window, tab, leaf] = model.findSessionLeaf(vtmux::SessionId { split->session });
+            leaf != nullptr)
+        {
+            model.setActivePane(tab->id(), leaf->id());
+            _host.splitActivePane(tab->id(),
+                                  static_cast<vtmux::SplitState>(split->orientation),
+                                  static_cast<double>(split->ratio) / 10000.0);
+        }
         return;
     }
     if (auto const* close = std::get_if<proto::ClosePane>(&frame.pdu))
@@ -667,13 +665,13 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
     // trees before the per-session content streams into them.
     pushLayout();
 
-    // The attach snapshot: every hosted session, full state.
-    auto* window = _host.model().window(_host.windowId());
-    for (auto const tabIndex: std::views::iota(0, window->tabCount()))
-        window->tabAt(tabIndex)->rootPane()->walkTree([&](vtmux::Pane& pane) {
+    // The attach snapshot: every hosted session of every window, full state.
+    _host.model().forEachTab([this](vtmux::Window&, vtmux::Tab& tab) {
+        tab.rootPane()->walkTree([&](vtmux::Pane& pane) {
             if (pane.isLeaf())
                 pushDelta(pane.session(), /*forceSnapshot=*/true);
         });
+    });
     return true;
 }
 
