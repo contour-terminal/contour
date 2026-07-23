@@ -165,12 +165,18 @@ int ContourGuiApp::attachAction()
             if (!tlsCaPath.empty())
             {
                 auto const path = std::filesystem::path(tlsCaPath);
-                if (!std::filesystem::is_regular_file(path))
+                // An empty CA read must hard-fail exactly like the thin client:
+                // makeTlsClientContext treats "" as the TOFU/no-verify posture, so
+                // accepting it would silently strip the pinning the user asked for.
+                auto caPem = std::string {};
+                if (std::filesystem::is_regular_file(path))
+                    caPem = crispy::readFileAsString(path);
+                if (caPem.empty())
                 {
                     cerr << std::format("contour attach: cannot read --tls-ca file '{}'\n", tlsCaPath);
                     return EXIT_FAILURE;
                 }
-                tcp.caPem = crispy::readFileAsString(path);
+                tcp.caPem = std::move(caPem);
             }
             endpointLabel = std::format("{}:{}", tcp.host, tcp.port);
             endpoint = std::move(tcp);
