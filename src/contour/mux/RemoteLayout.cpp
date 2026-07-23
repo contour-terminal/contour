@@ -54,14 +54,26 @@ namespace
                                    [&](auto const& child) { return anyLeafBound(child, controller); });
     }
 
+    /// The acting (first) child's space share for a wire split ratio (units of
+    /// 1/10000, the same encoding wireToLayoutPane decodes). Falls back to an even
+    /// split for a missing or degenerate value, so a mirrored split never collapses
+    /// to a zero-width pane.
+    [[nodiscard]] double firstChildShare(uint16_t wireRatio)
+    {
+        auto const share = static_cast<double>(wireRatio) / 10000.0;
+        return (share > 0.0 && share < 1.0) ? share : 0.5;
+    }
+
     /// One local split to perform to catch up with a daemon-side split: split the
     /// pane hosting @c actingSession (the split's surviving first child) to add a
-    /// pane for @c newSession (the freshly created second child).
+    /// pane for @c newSession (the freshly created second child), reproducing the
+    /// daemon split's @c ratio.
     struct SplitOp
     {
         uint64_t actingSession = 0;
         uint64_t newSession = 0;
         bool vertical = false;
+        double ratio = 0.5; ///< The acting (first) child's space share on the daemon.
     };
 
     /// Finds ONE not-yet-realized split in @p node: a split whose first child is a
@@ -78,7 +90,8 @@ namespace
         if (first.split == 0 && controller.isBound(first.session) && !anyLeafBound(second, controller))
             return SplitOp { .actingSession = first.session,
                              .newSession = leftmostSession(second),
-                             .vertical = node.split == 2 };
+                             .vertical = node.split == 2,
+                             .ratio = firstChildShare(node.ratio) };
         if (anyLeafBound(first, controller))
             if (auto op = findNewSplit(first, controller))
                 return op;
@@ -156,7 +169,7 @@ void applyRemoteLayout(TerminalSessionManager& manager,
             if (acting == map.end())
                 break; // the acting pane is not (yet) local — try again next push
             controller.setNextBindSession(op->newSession);
-            manager.splitActivePane(op->vertical, acting->second);
+            manager.splitActivePane(op->vertical, acting->second, op->ratio);
         }
     }
 

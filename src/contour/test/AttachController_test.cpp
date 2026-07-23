@@ -355,6 +355,49 @@ TEST_CASE("attach reconciles a split authored on the daemon after attach", "[att
     ac->stop();
 }
 
+// The incremental reconcile must reproduce the daemon split's ACTUAL ratio, not a
+// hard-coded even split — a non-even split authored on the daemon should mirror
+// with matching proportions (regression: the SplitOp discarded node.ratio).
+TEST_CASE("attach reconciles an uneven daemon split with matching proportions", "[attach][controller]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("only");
+
+    auto acOwned = std::make_unique<contour::AttachController>(daemon.endpoint());
+    auto* ac = acOwned.get();
+    contour::test::TestApp app { std::move(acOwned) };
+    contour::test::ScopedController const win { app.manager() };
+
+    REQUIRE(ac->connectAndWait(10s).has_value());
+    for (auto i = 0; i < 200 && !ac->layout().has_value(); ++i)
+        std::this_thread::sleep_for(5ms);
+    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    REQUIRE(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 1);
+
+    // A distinctly uneven split (0.7 to the first/acting child) authored on the daemon.
+    daemon.onDaemon([&daemon] {
+        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
+        daemon.host->splitActivePane(tab->id(), vtmux::SplitState::Vertical, 0.7);
+        return 0;
+    });
+    for (auto i = 0; i < 200; ++i)
+    {
+        if (auto const l = ac->layout(); l && !l->tabs.front().root.children.empty())
+            break;
+        std::this_thread::sleep_for(5ms);
+    }
+    REQUIRE_FALSE(ac->layout()->tabs.front().root.children.empty());
+
+    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    auto* root = app.manager().model().window(win.id)->tabAt(0)->rootPane();
+    REQUIRE_FALSE(root->isLeaf());
+    // The first child's share is ~0.7, NOT the 0.5 default the dropped ratio produced.
+    CHECK(root->ratio() > 0.6);
+    CHECK(root->ratio() < 0.8);
+
+    ac->stop();
+}
+
 // B3-Qt: a pane closed on the daemon (here, or by another client) is removed
 // locally by the subtractive reconciler — the remote session leaves the layout,
 // so its local pane is terminated.
