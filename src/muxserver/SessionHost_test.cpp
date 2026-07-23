@@ -6,12 +6,15 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <format>
 #include <functional>
 #include <memory>
+#include <ranges>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <tuple>
 #include <vector>
 
@@ -173,6 +176,53 @@ TEST_CASE("an unsubscribed observer stops receiving events", "[muxserver][host]"
 
     REQUIRE(h.host.createTab() != nullptr);
     CHECK(h.recorder.log.empty());
+}
+
+TEST_CASE("applyClientSize reprojects the leaves onto the new client area", "[muxserver][host]")
+{
+    auto h = HostHarness {};
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+
+    h.host.applyClientSize(
+        vtpty::PageSize { .lines = vtpty::LineCount(40), .columns = vtpty::ColumnCount(100) });
+
+    // The sole full-area leaf now spans the whole client width (columns are
+    // unaffected by the status-line height, so this is exact).
+    auto* terminal = h.host.terminal(tab->rootPane()->session());
+    REQUIRE(terminal != nullptr);
+    CHECK(terminal->totalPageSize().columns.value == 100);
+}
+
+TEST_CASE("applyClientSize is race-free against a concurrent terminal writer",
+          "[muxserver][host][concurrency]")
+{
+    auto h = HostHarness {};
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    REQUIRE(h.host.sessionCount() == 2);
+
+    auto* firstTerm = h.host.terminal(tab->rootPane()->first()->session());
+    REQUIRE(firstTerm != nullptr);
+
+    // The writer mutates a leaf's grid under _stateMutex (writeToScreen); reproject
+    // now resizes the same terminal under that lock too (the fix). Under TSan an
+    // unlocked resizeScreen would be flagged racing this writer's grid mutation.
+    auto stop = std::atomic<bool> { false };
+    auto writer = std::thread { [&] {
+        for (auto i = 0; !stop.load(std::memory_order_relaxed); ++i)
+            firstTerm->writeToScreen(std::format("row-{}\r\n", i));
+    } };
+
+    for (auto const i: std::views::iota(0, 300))
+        h.host.applyClientSize(vtpty::PageSize { .lines = vtpty::LineCount(20 + (i % 20)),
+                                                 .columns = vtpty::ColumnCount(60 + (i % 40)) });
+
+    stop.store(true, std::memory_order_relaxed);
+    writer.join();
+
+    CHECK(h.host.sessionCount() == 2); // no state torn: both sessions intact
 }
 
 namespace

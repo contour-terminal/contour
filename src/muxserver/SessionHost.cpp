@@ -2,6 +2,7 @@
 #include <muxserver/SessionHost.h>
 
 #include <chrono>
+#include <mutex>
 #include <ranges>
 #include <utility>
 #include <vector>
@@ -263,11 +264,21 @@ void SessionHost::reprojectLayouts()
         for (auto const& rect: vtmux::layoutInCells(*tab->rootPane(), _pageSize))
             if (auto const* leaf = tab->rootPane()->findPane(rect.pane))
                 if (auto* backing = terminal(leaf->session()))
+                {
+                    // resizeScreen mutates shared terminal state and does NOT lock
+                    // internally; the session's pump thread writes the same grid under
+                    // _stateMutex. Hold the terminal lock across the resize, exactly as
+                    // the GUI's sole caller does (TerminalSession::attachDisplay).
+                    auto const guard = std::lock_guard { *backing };
                     backing->resizeScreen(vtpty::PageSize { .lines = vtpty::LineCount(rect.height),
                                                             .columns = vtpty::ColumnCount(rect.width) });
+                }
         if (auto const* zoomed = tab->layoutRoot(); zoomed != tab->rootPane())
             if (auto* backing = terminal(zoomed->session()))
+            {
+                auto const guard = std::lock_guard { *backing };
                 backing->resizeScreen(_pageSize);
+            }
     }
 }
 
