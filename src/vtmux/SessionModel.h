@@ -6,6 +6,8 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include <vtmux/ModelEvents.h>
@@ -229,6 +231,36 @@ class SessionModel
     /// The id of the window owning @p tab, or a default WindowId{} (value 0) if @p tab is unknown. Lets
     /// the Qt host route a pane event (which carries only a TabId) to the owning window's controller.
     [[nodiscard]] WindowId windowOfTab(TabId tab) const noexcept;
+
+    /// Locates the leaf pane hosting @p session, searching every window. For hosts that resolve a
+    /// session to its pane without knowing which window owns it (the daemon's session-exit pruning,
+    /// per-session output mapping, and client-authored split verbs).
+    /// @param session The session to locate.
+    /// @return The {window, tab, pane} triple; all nullptr when @p session is unknown.
+    [[nodiscard]] std::tuple<Window*, Tab*, Pane*> findSessionLeaf(SessionId session) const;
+
+    /// Locates the LEAF pane with id @p pane, searching every window (pane ids are minted
+    /// model-globally). For hosts resolving a wire pane reference without knowing which window owns
+    /// it (the tmux control session's %N targets — tmux names leaf panes only, so internal split
+    /// nodes deliberately do not match).
+    /// @param pane The leaf pane id to locate.
+    /// @return The leaf pane, or nullptr when @p pane is unknown.
+    [[nodiscard]] Pane* findLeafPane(PaneId pane) const;
+
+    /// Invokes @p f(Window&, Tab&) for every tab of every window, in window order. Single-sources
+    /// the windows×tabs traversal for hosts that project the whole model (the daemon's resize
+    /// reprojection and attach snapshots).
+    /// @param f The per-tab visitor.
+    template <typename F>
+    void forEachTab(F&& f) const
+    {
+        // @p f is invoked once per tab, so it is forwarded once into a reference binding and
+        // called through that (the same idiom Pane::walkTree documents).
+        auto&& visit = std::forward<F>(f);
+        for (auto const& win: _windows)
+            for (auto const& tab: win->_tabs)
+                visit(*win, *tab);
+    }
 
     /// The predefined tab-color palette offered to the user (a grid of swatches, WT-style). Both the
     /// GUI and a future daemon expose the same set so all clients see identical choices. Backed by a

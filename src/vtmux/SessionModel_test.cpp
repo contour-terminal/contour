@@ -1980,3 +1980,33 @@ TEST_CASE("SessionModel: zoom travels with a tab moved to another window", "[vtm
     CHECK(tab->zoomedLeafId() == zoomedLeaf);
     CHECK(tab->layoutRoot() == tab->activePane());
 }
+
+TEST_CASE("SessionModel: findSessionLeaf locates a session in any window", "[vtmux][model][pane]")
+{
+    Fixture f;
+    auto* win1 = f.model.createWindow();
+    auto* win2 = f.model.createWindow();
+    auto* tab1 = f.model.createTab(win1->id()); // session 1000
+    auto* tab2 = f.model.createTab(win2->id()); // session 1001
+    auto* splitLeaf = f.model.splitActivePane(tab2->id(), SplitState::Vertical); // session 1002
+    REQUIRE(splitLeaf != nullptr);
+
+    // A session in the primary window resolves to its only leaf.
+    auto const [w1, t1, l1] = f.model.findSessionLeaf(SessionId { 1000 });
+    CHECK(w1 == win1);
+    CHECK(t1 == tab1);
+    CHECK(l1 == tab1->rootPane());
+
+    // A session in a SECONDARY window, behind a split, resolves just the same
+    // (the daemon's session-exit pruning and output mapping depend on it).
+    auto const [w2, t2, l2] = f.model.findSessionLeaf(SessionId { 1002 });
+    CHECK(w2 == win2);
+    CHECK(t2 == tab2);
+    CHECK(l2 == splitLeaf);
+
+    // An unknown session finds nothing.
+    auto const [w3, t3, l3] = f.model.findSessionLeaf(SessionId { 4242 });
+    CHECK(w3 == nullptr);
+    CHECK(t3 == nullptr);
+    CHECK(l3 == nullptr);
+}

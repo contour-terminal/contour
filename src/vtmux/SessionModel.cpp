@@ -366,6 +366,26 @@ WindowId SessionModel::windowOfTab(TabId tabId) const noexcept
     return win != nullptr ? win->id() : WindowId {};
 }
 
+std::tuple<Window*, Tab*, Pane*> SessionModel::findSessionLeaf(SessionId session) const
+{
+    for (auto const& win: _windows)
+        for (auto const& tab: win->_tabs)
+            if (auto* leaf = tab->rootPane()->findLeaf(session); leaf != nullptr)
+                return { win.get(), tab.get(), leaf };
+    return { nullptr, nullptr, nullptr };
+}
+
+Pane* SessionModel::findLeafPane(PaneId pane) const
+{
+    for (auto const& win: _windows)
+        for (auto const& tab: win->_tabs)
+            if (auto* leaf = tab->rootPane()->walkTree(
+                    [pane](Pane& node) { return node.isLeaf() && node.id() == pane; });
+                leaf != nullptr)
+                return leaf;
+    return nullptr;
+}
+
 Pane* SessionModel::splitActivePane(TabId tabId, SplitState direction, double ratio)
 {
     auto* tab = findTab(tabId);
