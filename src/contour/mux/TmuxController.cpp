@@ -312,9 +312,9 @@ void TmuxController::applyPendingRenames(TerminalSessionManager& manager)
         for (auto it = _pendingRenames.begin(); it != _pendingRenames.end();)
         {
             auto const acting = _actingByWindow.find(it->first);
-            if (acting != _actingByWindow.end() && acting->second != nullptr)
+            if (acting != _actingByWindow.end())
             {
-                renames.emplace_back(acting->second->modelSessionId(), std::move(it->second));
+                renames.emplace_back(acting->second, std::move(it->second));
                 it = _pendingRenames.erase(it);
             }
             else
@@ -568,13 +568,14 @@ void TmuxController::realizeWindowLayout(TerminalSessionManager& manager,
         });
 
     // Seed the split anchor so a later incremental split of this window has a session to split beside.
+    // The ID is stored (not the pointer): the anchor is resolved back to a live session at use time,
+    // so a pane dying in between can never leave a dangling pointer behind.
     if (auto* win = manager.model().window(guiWindow); win != nullptr && win->tabCount() > 0)
         if (auto* tab = win->tabAt(win->tabCount() - 1); tab != nullptr)
-            if (auto* session = manager.sessionForId(tab->activePane()->session()); session != nullptr)
-            {
-                auto const lock = std::lock_guard { _mutex };
-                _actingByWindow.insert_or_assign(tmuxWindow, session);
-            }
+        {
+            auto const lock = std::lock_guard { _mutex };
+            _actingByWindow.insert_or_assign(tmuxWindow, tab->activePane()->session());
+        }
 }
 
 bool TmuxController::realizeOnePane(TerminalSessionManager& manager, vtmux::WindowId guiWindow)
@@ -593,11 +594,16 @@ bool TmuxController::realizeOnePane(TerminalSessionManager& manager, vtmux::Wind
         }
     }
 
-    auto* acting = [&]() -> TerminalSession* {
+    // Resolve the anchor id back to a LIVE session: a stale anchor (its session died since it was
+    // seeded — tab closed, or tmux removed the pane) resolves to nullptr (SessionId{} never resolves,
+    // ids start at 1) and falls back to a fresh session instead of dereferencing a dead pane or
+    // no-op-splitting forever.
+    auto const anchor = [&] {
         auto const lock = std::lock_guard { _mutex };
         auto const it = _actingByWindow.find(record.window);
-        return it != _actingByWindow.end() ? it->second : nullptr;
+        return it != _actingByWindow.end() ? it->second : vtmux::SessionId {};
     }();
+    auto* acting = manager.sessionForId(anchor);
 
     auto* created = static_cast<TerminalSession*>(nullptr);
     if (acting == nullptr)
@@ -614,7 +620,7 @@ bool TmuxController::realizeOnePane(TerminalSessionManager& manager, vtmux::Wind
     if (!_pending.empty() && _pending.front().pane == record.pane)
         return false;
     if (created != nullptr)
-        _actingByWindow[record.window] = created;
+        _actingByWindow[record.window] = created->modelSessionId();
     return true;
 }
 

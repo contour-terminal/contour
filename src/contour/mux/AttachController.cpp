@@ -343,10 +343,16 @@ std::unique_ptr<vtpty::Pty> AttachController::createPty(std::optional<std::strin
     // geometry) so the mirror's first replay paints a matching grid; without a
     // record the window's size stands in and a resize then reconciles.
     auto const fallback = pageSize.value_or(vtbackend::PageSize {});
-    auto const columns = taken ? static_cast<int>(taken->columns)
-                               : (fallback.columns.value != 0 ? unbox<int>(fallback.columns) : 80);
-    auto const lines = taken ? static_cast<int>(taken->lines)
-                             : (fallback.lines.value != 0 ? unbox<int>(fallback.lines) : 25);
+
+    // Resolve a dimension from the pending record if available; otherwise fall
+    // back to the pageSize field, defaulting to the given value when unset.
+    auto const sizeField = [](auto const& dim, int defaultValue) noexcept -> int {
+        if (dim.value != 0)
+            return unbox<int>(dim);
+        return defaultValue;
+    };
+    auto const columns = taken ? static_cast<int>(taken->columns) : sizeField(fallback.columns, 80);
+    auto const lines = taken ? static_cast<int>(taken->lines) : sizeField(fallback.lines, 25);
 
     auto pty = std::make_unique<SelfUnbindingChannelPty>(
         vtpty::PageSize { vtpty::LineCount(lines), vtpty::ColumnCount(columns) },

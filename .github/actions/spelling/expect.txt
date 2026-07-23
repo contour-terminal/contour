@@ -386,6 +386,7 @@ NRCS
 NRVO
 nsecond
 ntfs
+ntifs
 ntohs
 nulmny
 NUMERICSERV
@@ -508,6 +509,7 @@ replayable
 repointed
 repointing
 repoints
+reprojection
 REPORTFAULT
 reprojects
 rerasterize
@@ -661,6 +663,7 @@ vzd
 waitable
 wakeable
 wbio
+WDK
 werr
 weston
 whoami

@@ -231,9 +231,12 @@ class TmuxController final:
     // _stopped) live in MuxControllerBase; the registry below is tmux-specific.
     std::string _tmuxSocket;
     std::deque<PendingPane> _pending;
-    std::unordered_map<uint64_t, PaneFeed*> _feeds;                 ///< Model-owned sinks, by pane.
-    std::unordered_map<uint64_t, vtpty::ChannelPty*> _ptys;         ///< Bound ptys, by pane.
-    std::unordered_map<uint64_t, TerminalSession*> _actingByWindow; ///< Split anchor per tmux window.
+    std::unordered_map<uint64_t, PaneFeed*> _feeds;         ///< Model-owned sinks, by pane.
+    std::unordered_map<uint64_t, vtpty::ChannelPty*> _ptys; ///< Bound ptys, by pane.
+    /// Split anchor per tmux window, as a session ID resolved back to a live
+    /// TerminalSession at use time — a raw pointer would dangle the moment the
+    /// anchored pane dies (tab close, or tmux removing the pane).
+    std::unordered_map<uint64_t, vtmux::SessionId> _actingByWindow;
     std::unordered_map<uint64_t, std::string> _pendingRenames; ///< %window-renamed titles awaiting apply.
     std::unordered_set<uint64_t>
         _remotelyClosed; ///< Panes tmux removed; their unbind must not echo kill-pane.

@@ -1986,8 +1986,8 @@ TEST_CASE("SessionModel: findSessionLeaf locates a session in any window", "[vtm
     Fixture f;
     auto* win1 = f.model.createWindow();
     auto* win2 = f.model.createWindow();
-    auto* tab1 = f.model.createTab(win1->id()); // session 1000
-    auto* tab2 = f.model.createTab(win2->id()); // session 1001
+    auto* tab1 = f.model.createTab(win1->id());                                  // session 1000
+    auto* tab2 = f.model.createTab(win2->id());                                  // session 1001
     auto* splitLeaf = f.model.splitActivePane(tab2->id(), SplitState::Vertical); // session 1002
     REQUIRE(splitLeaf != nullptr);
 
