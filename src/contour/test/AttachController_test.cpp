@@ -83,7 +83,7 @@ struct DaemonFixture
         auto tls = net::makeSelfSignedServerContext();
         REQUIRE(tls.has_value());
         auto native = muxserver::makeNativeHandler(loop, *host);
-        auto context = *tls;
+        auto const& context = *tls;
         auto handler = [context, native](std::unique_ptr<net::ISocket> socket) {
             return native(context->wrap(std::move(socket)));
         };

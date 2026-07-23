@@ -77,7 +77,7 @@ TEST_CASE("a GUI new tab in tmux mode is authored on the tmux server", "[attach]
 {
     auto ctrlOwned = std::make_unique<contour::TmuxController>(std::string {});
     auto* ctrl = ctrlOwned.get();
-    contour::test::TestApp app { std::move(ctrlOwned) };
+    contour::test::TestApp const app { std::move(ctrlOwned) };
 
     // The delegate claims the request (true = authored remotely). Before the override, the base
     // returned false and the "new tab" gesture did nothing in mirror mode.
@@ -136,7 +136,7 @@ TEST_CASE("tmux binary layout converts to a ratio-bearing vtmux layout (F3)", "[
     REQUIRE(root2.children[0].ratio.has_value());
     CHECK(*root2.children[0].ratio == tree2.ratio); // the exact tmux ratio, copied faithfully
     CHECK(*root2.children[0].ratio > 0.6);          // and it is the real asymmetric one (~0.71), not 0.5
-    CHECK(conv2.leafPane.at(&root2.children[0]) == 1);
+    CHECK(conv2.leafPane.at(root2.children.data()) == 1);
     CHECK(conv2.leafPane.at(&root2.children[1]) == 2);
 
     // A 3-pane right-leaning chain: head leaf + a nested tail split.
@@ -147,10 +147,10 @@ TEST_CASE("tmux binary layout converts to a ratio-bearing vtmux layout (F3)", "[
     auto const conv3 = contour::tmuxLayoutToWindowLayout(tree3);
     auto const& root3 = conv3.layout.tabs.front().root;
     REQUIRE(root3.children.size() == 2);
-    CHECK(conv3.leafPane.at(&root3.children[0]) == 1); // head leaf
-    REQUIRE_FALSE(root3.children[1].isLeaf());         // right-leaning tail is itself a split
+    CHECK(conv3.leafPane.at(root3.children.data()) == 1); // head leaf
+    REQUIRE_FALSE(root3.children[1].isLeaf());            // right-leaning tail is itself a split
     REQUIRE(root3.children[1].children.size() == 2);
-    CHECK(conv3.leafPane.at(&root3.children[1].children[0]) == 2);
+    CHECK(conv3.leafPane.at(root3.children[1].children.data()) == 2);
     CHECK(conv3.leafPane.at(&root3.children[1].children[1]) == 3);
 }
 
@@ -197,7 +197,6 @@ TEST_CASE("tmux whole-tree realize reproduces the split ratio and shape (F3)", "
     #include <chrono>
     #include <cstdio>
     #include <filesystem>
-    #include <format>
     #include <string>
     #include <thread>
     #include <tuple>
