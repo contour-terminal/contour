@@ -233,7 +233,9 @@ class EventLoop
     std::deque<std::coroutine_handle<>> _ready; ///< Coroutines ready to resume now.
     std::vector<TimerEntry> _timers;            ///< Min-heap by deadline (soonest at front).
     std::unordered_map<FdToken, std::coroutine_handle<>>
-        _fdWaiters;                       ///< Flows parked on a generic fd, by token.
+        _fdWaiters; ///< Flows parked on a generic fd, by token.
+    std::unordered_map<std::coroutine_handle<>, FdToken>
+        _waiterToToken;                   ///< Reverse map for O(1) cancellation.
     std::vector<coro::Task<void>> _roots; ///< Keeps live spawned background flows alive.
     coro::StopSource _rootStop;           ///< Root cancellation source.
 

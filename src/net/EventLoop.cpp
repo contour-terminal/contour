@@ -113,6 +113,7 @@ FdToken EventLoop::registerFdWaiter(NativeHandle fd, FdInterest interest, std::c
     if (!token)
         return FdToken::invalid();
     _fdWaiters.emplace(token, waiter);
+    _waiterToToken.emplace(waiter, token);
     return token;
 }
 
@@ -121,7 +122,11 @@ void EventLoop::unregisterFdWaiter(FdToken token) noexcept
     if (!token)
         return;
     _source.detach(token);
-    _fdWaiters.erase(token);
+    if (auto const it = _fdWaiters.find(token); it != _fdWaiters.end())
+    {
+        _waiterToToken.erase(it->second);
+        _fdWaiters.erase(it);
+    }
 }
 
 void EventLoop::requeueForCancellation(std::coroutine_handle<> waiter)
@@ -130,15 +135,12 @@ void EventLoop::requeueForCancellation(std::coroutine_handle<> waiter)
         return;
 
     // If parked as an fd waiter, drop and detach its registration so the stale
-    // entry cannot also fire.
-    for (auto it = _fdWaiters.begin(); it != _fdWaiters.end(); ++it)
+    // entry cannot also fire. Use the reverse map for O(1) lookup.
+    if (auto const rt = _waiterToToken.find(waiter); rt != _waiterToToken.end())
     {
-        if (it->second == waiter)
-        {
-            _source.detach(it->first);
-            _fdWaiters.erase(it);
-            break;
-        }
+        _source.detach(rt->second);
+        _fdWaiters.erase(rt->second);
+        _waiterToToken.erase(rt);
     }
 
     // If parked on a timer, remove its heap entry too. We re-queue the waiter below
@@ -166,6 +168,7 @@ void EventLoop::wakeFdWaiters(std::vector<FdToken> const& tokens)
         // Drop the parked slot now; the awaiter detaches the source registration in
         // its await_resume. Erasing first keeps the map consistent if the resumed
         // frame re-enters the loop.
+        _waiterToToken.erase(it->second);
         _fdWaiters.erase(it);
         if (handle && !handle.done())
             _ready.push_back(handle);
@@ -224,6 +227,7 @@ void EventLoop::wakeAllWaiters()
     // stop and throws OperationCancelled. Move the slots out first so a resumed
     // frame re-entering the loop cannot mutate the container mid-iteration.
     auto parked = std::exchange(_fdWaiters, {});
+    _waiterToToken.clear();
     for (auto const& [token, handle]: parked)
     {
         _source.detach(token);
