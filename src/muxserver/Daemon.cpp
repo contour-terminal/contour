@@ -12,6 +12,8 @@
 
 #include <muxserver/Daemon.h>
 
+#include <crispy/algorithm.h>
+
 #include <array>
 #include <atomic>
 #include <charconv>
@@ -549,16 +551,9 @@ SigwinchNotifier::~SigwinchNotifier()
 
     // Check whether we were the last active notifier; only then restore the
     // previous disposition to avoid stealing the handler from a still-live one.
-    auto anyActive = false;
-    for (auto const& entry: gWinchWriteFds)
-    {
-        if (entry.load(std::memory_order_relaxed) >= 0)
-        {
-            anyActive = true;
-            break;
-        }
-    }
-    if (!anyActive)
+    if (!crispy::any_of(gWinchWriteFds, [](std::atomic<int> const& entry) noexcept {
+            return entry.load(std::memory_order_relaxed) >= 0;
+        }))
         std::ignore = ::sigaction(SIGWINCH, &_previous, nullptr);
 
     net::platformClose(_writeFd);

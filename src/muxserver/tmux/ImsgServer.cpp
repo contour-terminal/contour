@@ -202,9 +202,7 @@ namespace
                     .count();
             },
             ControlSessionOptions { .emitExitLine = false, .initialGuardFlag = 0 });
-        auto const subscription = ScopedStreamSubscription {
-            *host, *session, &SessionHost::subscribeStream, &SessionHost::unsubscribeStream
-        };
+        auto const subscription = makeScopedStreamSubscription(*host, *session);
 
         // run() drains its stdout before returning (the control_all_done
         // gating); only then does MSG_EXIT go out on the imsg socket.

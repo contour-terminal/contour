@@ -367,4 +367,19 @@ using ScopedStreamSubscription = ScopedSubscription<SessionHost, SessionStreamEv
 /// its layout observer is removed even when the serve loop unwinds early.
 using ScopedModelSubscription = ScopedSubscription<SessionHost, vtmux::ModelEvents>;
 
+/// Factory for stream subscriptions — avoids repeating the member-function
+/// pointers at every call site.
+inline ScopedStreamSubscription makeScopedStreamSubscription(SessionHost& host, SessionStreamEvents& observer)
+{
+    return ScopedStreamSubscription {
+        host, observer, &SessionHost::subscribeStream, &SessionHost::unsubscribeStream
+    };
+}
+
+/// Factory for model-event subscriptions.
+inline ScopedModelSubscription makeScopedModelSubscription(SessionHost& host, vtmux::ModelEvents& observer)
+{
+    return ScopedModelSubscription { host, observer, &SessionHost::subscribe, &SessionHost::unsubscribe };
+}
+
 } // namespace muxserver
