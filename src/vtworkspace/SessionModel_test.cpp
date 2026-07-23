@@ -9,10 +9,10 @@
 #include <string>
 #include <vector>
 
-#include <vtmux/ModelEvents.h>
-#include <vtmux/SessionModel.h>
+#include <vtworkspace/ModelEvents.h>
+#include <vtworkspace/SessionModel.h>
 
-using namespace vtmux;
+using namespace vtworkspace;
 
 namespace
 {
@@ -134,7 +134,7 @@ struct Fixture
 };
 } // namespace
 
-TEST_CASE("SessionModel: creating tabs notifies and tracks the active tab", "[vtmux][model][tab]")
+TEST_CASE("SessionModel: creating tabs notifies and tracks the active tab", "[vtworkspace][model][tab]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -151,7 +151,7 @@ TEST_CASE("SessionModel: creating tabs notifies and tracks the active tab", "[vt
 }
 
 TEST_CASE("SessionModel: createTab fires tabAdded immediately followed by activeTabChanged",
-          "[vtmux][model][tab]")
+          "[vtworkspace][model][tab]")
 {
     // The manager relies on this exact ordering to avoid double work: tabAdded does only the Qt row
     // insert and activeTabChanged does the active-index signal + PaneProxy rebuild. If createTab ever
@@ -172,7 +172,7 @@ TEST_CASE("SessionModel: createTab fires tabAdded immediately followed by active
     CHECK(std::next(addedIt) == activeIt); // immediately after, nothing in between
 }
 
-TEST_CASE("SessionModel: structural tab events bracket the mutation", "[vtmux][model][tab]")
+TEST_CASE("SessionModel: structural tab events bracket the mutation", "[vtworkspace][model][tab]")
 {
     // Every structural change fires a paired about-to/after event so a Qt QAbstractItemModel host can map
     // them to beginInsertRows/endInsertRows (etc.), whose contract requires the "begin" call while the
@@ -213,7 +213,7 @@ TEST_CASE("SessionModel: structural tab events bracket the mutation", "[vtmux][m
     CHECK(std::next(aboutRemove) == closed);
 }
 
-TEST_CASE("SessionModel: activateTab and closeTab keep the active index sane", "[vtmux][model][tab]")
+TEST_CASE("SessionModel: activateTab and closeTab keep the active index sane", "[vtworkspace][model][tab]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -232,7 +232,7 @@ TEST_CASE("SessionModel: activateTab and closeTab keep the active index sane", "
     CHECK((win->activeTab() == b || win->activeTab() == c));
 }
 
-TEST_CASE("SessionModel: closeTabAt keeps the active index on the same tab", "[vtmux][model][tab]")
+TEST_CASE("SessionModel: closeTabAt keeps the active index on the same tab", "[vtworkspace][model][tab]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -291,7 +291,7 @@ TEST_CASE("SessionModel: closeTabAt keeps the active index on the same tab", "[v
     }
 }
 
-TEST_CASE("SessionModel: closeOtherTabs and closeTabsToRight", "[vtmux][model][tab]")
+TEST_CASE("SessionModel: closeOtherTabs and closeTabsToRight", "[vtworkspace][model][tab]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -347,7 +347,7 @@ TEST_CASE("SessionModel: closeOtherTabs and closeTabsToRight", "[vtmux][model][t
     }
 }
 
-TEST_CASE("SessionModel: moveTab on an empty or unknown tab is a safe no-op", "[vtmux][model][tab]")
+TEST_CASE("SessionModel: moveTab on an empty or unknown tab is a safe no-op", "[vtworkspace][model][tab]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -376,7 +376,7 @@ TEST_CASE("SessionModel: moveTab on an empty or unknown tab is a safe no-op", "[
 }
 
 TEST_CASE("SessionModel: moveTab reorders tabs the way the manager's MoveTab* actions route",
-          "[vtmux][model][tab]")
+          "[vtworkspace][model][tab]")
 {
     // The TerminalSessionManager keyboard actions delegate to SessionModel::moveTab:
     //   MoveTabTo(position)  -> moveTab(tab, position - 1)   (position is 1-based)
@@ -415,7 +415,7 @@ TEST_CASE("SessionModel: moveTab reorders tabs the way the manager's MoveTab* ac
     }
 }
 
-TEST_CASE("SessionModel: moveTab reorders tabs regardless of per-tab pane counts", "[vtmux][model][tab]")
+TEST_CASE("SessionModel: moveTab reorders tabs regardless of per-tab pane counts", "[vtworkspace][model][tab]")
 {
     // The QML drag path (TerminalSessionManager::moveTab) used to reorder a pane-space _sessions
     // vector by tab-row indices, which scrambled once a tab had multiple panes. Reordering through
@@ -442,7 +442,7 @@ TEST_CASE("SessionModel: moveTab reorders tabs regardless of per-tab pane counts
     CHECK(t0->paneCount() == 3);
 }
 
-TEST_CASE("SessionModel: moveTab preserves the active tab across reorder", "[vtmux][model][tab]")
+TEST_CASE("SessionModel: moveTab preserves the active tab across reorder", "[vtworkspace][model][tab]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -458,7 +458,7 @@ TEST_CASE("SessionModel: moveTab preserves the active tab across reorder", "[vtm
     CHECK(win->tabAt(1) == c);
 }
 
-TEST_CASE("SessionModel: moveTab fires activeTabChanged when the active index shifts", "[vtmux][model][tab]")
+TEST_CASE("SessionModel: moveTab fires activeTabChanged when the active index shifts", "[vtworkspace][model][tab]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -505,7 +505,7 @@ TEST_CASE("SessionModel: moveTab fires activeTabChanged when the active index sh
     }
 }
 
-TEST_CASE("SessionModel: splitting a tab's pane fires the expected events", "[vtmux][model][split]")
+TEST_CASE("SessionModel: splitting a tab's pane fires the expected events", "[vtworkspace][model][split]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -525,7 +525,7 @@ TEST_CASE("SessionModel: splitting a tab's pane fires the expected events", "[vt
     CHECK(f.events.sawPrefix(std::format("title:{}", tab->id().value)));
 }
 
-TEST_CASE("SessionModel: pane ops target the named tab, not the active one", "[vtmux][model][split]")
+TEST_CASE("SessionModel: pane ops target the named tab, not the active one", "[vtworkspace][model][split]")
 {
     // The manager's pane actions (split/close/focus) now pass the *acting* session's tab id, which
     // can differ from the model's active tab. The model already keys every pane op on an explicit
@@ -571,7 +571,7 @@ struct SplitTimingEvents: RecordingEvents
 };
 } // namespace
 
-TEST_CASE("SessionModel: a split assigns the new leaf's session before notifying", "[vtmux][model][split]")
+TEST_CASE("SessionModel: a split assigns the new leaf's session before notifying", "[vtworkspace][model][split]")
 {
     // The manager registers the backing session for the new leaf's id BEFORE calling
     // splitActivePane, because the model fires activePaneChanged synchronously and the GUI binds the
@@ -601,7 +601,7 @@ TEST_CASE("SessionModel: a split assigns the new leaf's session before notifying
     CHECK(*events.leafSessionAtActiveChange == newLeaf->session().value);
 }
 
-TEST_CASE("SessionModel: closing the last pane closes the tab", "[vtmux][model][close]")
+TEST_CASE("SessionModel: closing the last pane closes the tab", "[vtworkspace][model][close]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -614,7 +614,7 @@ TEST_CASE("SessionModel: closing the last pane closes the tab", "[vtmux][model][
     CHECK(f.events.sawPrefix(std::format("tabClosed:{}", tabId.value)));
 }
 
-TEST_CASE("SessionModel: closing a non-last pane keeps the tab and absorbs", "[vtmux][model][close]")
+TEST_CASE("SessionModel: closing a non-last pane keeps the tab and absorbs", "[vtworkspace][model][close]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -628,7 +628,7 @@ TEST_CASE("SessionModel: closing a non-last pane keeps the tab and absorbs", "[v
     CHECK(f.events.sawPrefix(std::format("paneClosed:{}", tab->id().value)));
 }
 
-TEST_CASE("SessionModel: closing every leaf of a multi-pane tab closes the tab", "[vtmux][model][close]")
+TEST_CASE("SessionModel: closing every leaf of a multi-pane tab closes the tab", "[vtworkspace][model][close]")
 {
     // This is the whole-tab close path the manager's CloseTab action now uses (close each of a
     // tab's pane sessions): the model must keep the tab alive while panes survive and tear it down
@@ -670,7 +670,7 @@ TEST_CASE("SessionModel: closing every leaf of a multi-pane tab closes the tab",
     }
 }
 
-TEST_CASE("SessionModel: removeWindow tears the whole window down", "[vtmux][model][window]")
+TEST_CASE("SessionModel: removeWindow tears the whole window down", "[vtworkspace][model][window]")
 {
     // The manager's closeWindow() delegates the structural teardown to removeWindow and then clears
     // its own registries. removeWindow must close every tab (firing tabClosed so the Qt rows are
@@ -700,7 +700,7 @@ TEST_CASE("SessionModel: removeWindow tears the whole window down", "[vtmux][mod
     CHECK(f.events.log.empty());
 }
 
-TEST_CASE("SessionModel: setPaneRatio updates the split node", "[vtmux][model][split]")
+TEST_CASE("SessionModel: setPaneRatio updates the split node", "[vtworkspace][model][split]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -713,7 +713,7 @@ TEST_CASE("SessionModel: setPaneRatio updates the split node", "[vtmux][model][s
     CHECK(f.events.sawPrefix(std::format("ratio:{}", splitNodeId.value)));
 }
 
-TEST_CASE("SessionModel: tab title and color mutations notify", "[vtmux][model][title][color]")
+TEST_CASE("SessionModel: tab title and color mutations notify", "[vtworkspace][model][title][color]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -733,7 +733,7 @@ TEST_CASE("SessionModel: tab title and color mutations notify", "[vtmux][model][
 }
 
 TEST_CASE("SessionModel: a tab color is tracked per source, and both changes are announced",
-          "[vtmux][model][color]")
+          "[vtworkspace][model][color]")
 {
     // Both sources reach the same tab and both fire tabColorChanged, but they write different slots, so
     // an application's DECAC color and a color the user picked never overwrite one another.
@@ -760,7 +760,7 @@ TEST_CASE("SessionModel: a tab color is tracked per source, and both changes are
     CHECK_FALSE(tab->color().has_value());
 }
 
-TEST_CASE("SessionModel: an empty or blank tab title resets to the default template", "[vtmux][model][title]")
+TEST_CASE("SessionModel: an empty or blank tab title resets to the default template", "[vtworkspace][model][title]")
 {
     // The GUI's inline rename editor opens pre-filled with the RAW override — empty for a
     // never-renamed tab — and commits verbatim on click-away. Without normalization that stored ""
@@ -782,7 +782,7 @@ TEST_CASE("SessionModel: an empty or blank tab title resets to the default templ
     CHECK_FALSE(tab->runtimeTitle().has_value());
 }
 
-TEST_CASE("SessionModel: color palette is non-empty and shared", "[vtmux][model][color]")
+TEST_CASE("SessionModel: color palette is non-empty and shared", "[vtworkspace][model][color]")
 {
     Fixture const f;
     CHECK_FALSE(f.model.colorPalette().empty());
@@ -825,7 +825,7 @@ struct TabSetup
 } // namespace
 
 TEST_CASE("SessionModel: focusDirection moves the active pane across a nested split and names the neighbor",
-          "[vtmux][model][focus]")
+          "[vtworkspace][model][focus]")
 {
     // focusDirection had ZERO coverage. Build a nested tree and assert each direction activates the
     // geometrically-correct neighbor, a no-neighbor direction is a silent no-op, and bad ids do nothing.
@@ -873,7 +873,7 @@ TEST_CASE("SessionModel: focusDirection moves the active pane across a nested sp
 }
 
 TEST_CASE("SessionModel: closePane reports the correct survivor and reactivates it (both children)",
-          "[vtmux][model][fold]")
+          "[vtworkspace][model][fold]")
 {
     // The collapse/fold contract: closing one leaf of a 2-pane tab must report the sibling as survivor and
     // make it the active pane, and the tab survives with one pane. Cover closing BOTH the original and the
@@ -927,7 +927,7 @@ TEST_CASE("SessionModel: closePane reports the correct survivor and reactivates 
 }
 
 TEST_CASE("SessionModel: setPaneRatio clamps stored ratio AND emitted value, no-op on leaf/unknown",
-          "[vtmux][model][resize]")
+          "[vtworkspace][model][resize]")
 {
     // Confirmed bug fix: the model clamped the stored ratio but emitted the RAW request, so the GUI divider
     // and the model disagreed at the extremes. Assert both the stored node ratio and the emitted event value
@@ -973,7 +973,7 @@ TEST_CASE("SessionModel: setPaneRatio clamps stored ratio AND emitted value, no-
 }
 
 TEST_CASE("SessionModel: setActivePane fires activePaneChanged, no-op on already-active/internal/unknown",
-          "[vtmux][model][focus]")
+          "[vtworkspace][model][focus]")
 {
     // setActivePane (click-to-focus routing) had ZERO coverage. Assert it activates a leaf, is a no-op on the
     // already-active leaf, and rejects internal split-node ids and unknown ids (the spurious-event/bad-id
@@ -1009,7 +1009,7 @@ TEST_CASE("SessionModel: setActivePane fires activePaneChanged, no-op on already
 }
 
 TEST_CASE("SessionModel: splitActivePane fires paneSplit->activePaneChanged->tabTitleChanged, once, in order",
-          "[vtmux][model][split]")
+          "[vtworkspace][model][split]")
 {
     // The manager/GUI depend on this exact ordering and multiplicity; today only an order-agnostic prefix
     // check exists, so a duplicate/reordered emission would slip through.
@@ -1045,7 +1045,7 @@ TEST_CASE("SessionModel: splitActivePane fires paneSplit->activePaneChanged->tab
     CHECK(f.events.log.empty());
 }
 
-TEST_CASE("SessionModel: closePane guard and last-pane paths", "[vtmux][model][fold]")
+TEST_CASE("SessionModel: closePane guard and last-pane paths", "[vtworkspace][model][fold]")
 {
     Fixture f;
     auto const [win, tab, rootLeaf] = makeTab(f.model);
@@ -1077,7 +1077,7 @@ TEST_CASE("SessionModel: closePane guard and last-pane paths", "[vtmux][model][f
 }
 
 TEST_CASE("SessionModel: a second split preserves every earlier leaf's id and session (no theft)",
-          "[vtmux][model][split]")
+          "[vtworkspace][model][split]")
 {
     // Regression for "the first pane goes black after the second split": at the MODEL layer, splitting the
     // active (2nd) pane to make a 3rd must leave the FIRST pane's leaf id AND session completely untouched —
@@ -1126,13 +1126,13 @@ TEST_CASE("SessionModel: a second split preserves every earlier leaf's id and se
 
 // {{{ Multi-window contract (safety net for the per-OS-window refactor)
 //
-// The GUI is moving from one shared vtmux::Window (all OS windows rendered the same tabs) to one Window
+// The GUI is moving from one shared vtworkspace::Window (all OS windows rendered the same tabs) to one Window
 // per OS window. These tests lock the model's per-window isolation and teardown contract BEFORE the
 // TerminalSessionManager/WindowController start depending on it for N windows. All assertions read the
 // model directly (each Window's own tabCount/activeTab), so they do not depend on the shared event log.
 
 TEST_CASE("SessionModel: windows are created with distinct ids and are independent containers",
-          "[vtmux][model][window]")
+          "[vtworkspace][model][window]")
 {
     Fixture f;
     auto* a = f.model.createWindow();
@@ -1153,7 +1153,7 @@ TEST_CASE("SessionModel: windows are created with distinct ids and are independe
 }
 
 TEST_CASE("SessionModel: tabs and panes added to one window do not appear in another",
-          "[vtmux][model][window]")
+          "[vtworkspace][model][window]")
 {
     Fixture f;
     auto* a = f.model.createWindow();
@@ -1187,7 +1187,7 @@ TEST_CASE("SessionModel: tabs and panes added to one window do not appear in ano
     CHECK(b1->paneCount() == 1);
 }
 
-TEST_CASE("SessionModel: active-tab state is tracked per window", "[vtmux][model][window]")
+TEST_CASE("SessionModel: active-tab state is tracked per window", "[vtworkspace][model][window]")
 {
     Fixture f;
     auto* a = f.model.createWindow();
@@ -1210,7 +1210,7 @@ TEST_CASE("SessionModel: active-tab state is tracked per window", "[vtmux][model
 }
 
 TEST_CASE("SessionModel: removeWindow tears down only that window and leaves others intact",
-          "[vtmux][model][window]")
+          "[vtworkspace][model][window]")
 {
     Fixture f;
     auto* a = f.model.createWindow();
@@ -1245,10 +1245,10 @@ TEST_CASE("SessionModel: removeWindow tears down only that window and leaves oth
 
 // {{{ Previous-active-tab (model-level "switch to previous tab" memory)
 //
-// Replaces DisplayState::previousSession as the source for switchToPreviousTab. Lives on vtmux::Window
+// Replaces DisplayState::previousSession as the source for switchToPreviousTab. Lives on vtworkspace::Window
 // so it is per-window, Qt-free, and unit-testable. Must never dangle at a wrong slot after a close/move.
 
-TEST_CASE("SessionModel: previousActiveTab follows the last activation and toggles", "[vtmux][model][tab]")
+TEST_CASE("SessionModel: previousActiveTab follows the last activation and toggles", "[vtworkspace][model][tab]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -1272,7 +1272,7 @@ TEST_CASE("SessionModel: previousActiveTab follows the last activation and toggl
     CHECK(win->previousActiveTabIndex() == 2);
 }
 
-TEST_CASE("SessionModel: closing the previous tab invalidates the previous-tab memory", "[vtmux][model][tab]")
+TEST_CASE("SessionModel: closing the previous tab invalidates the previous-tab memory", "[vtworkspace][model][tab]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -1289,7 +1289,7 @@ TEST_CASE("SessionModel: closing the previous tab invalidates the previous-tab m
 }
 
 TEST_CASE("SessionModel: closing a lower-indexed tab shifts the previous-tab slot down",
-          "[vtmux][model][tab]")
+          "[vtworkspace][model][tab]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -1307,7 +1307,7 @@ TEST_CASE("SessionModel: closing a lower-indexed tab shifts the previous-tab slo
     CHECK(win->previousActiveTabIndex() == 0); // t1 is now slot 0
 }
 
-TEST_CASE("SessionModel: moving a tab keeps the previous-tab pointer on the same tab", "[vtmux][model][tab]")
+TEST_CASE("SessionModel: moving a tab keeps the previous-tab pointer on the same tab", "[vtworkspace][model][tab]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -1326,7 +1326,7 @@ TEST_CASE("SessionModel: moving a tab keeps the previous-tab pointer on the same
 
 // {{{ Guard no-ops (unknown ids / no-op requests never fire events or mutate state)
 
-TEST_CASE("SessionModel: tab operations on an unknown window are safe no-ops", "[vtmux][model][tab]")
+TEST_CASE("SessionModel: tab operations on an unknown window are safe no-ops", "[vtworkspace][model][tab]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -1347,7 +1347,7 @@ TEST_CASE("SessionModel: tab operations on an unknown window are safe no-ops", "
 }
 
 TEST_CASE("SessionModel: closeTab and closeTabsToRight with an unknown tab id are safe no-ops",
-          "[vtmux][model][tab]")
+          "[vtworkspace][model][tab]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -1364,7 +1364,7 @@ TEST_CASE("SessionModel: closeTab and closeTabsToRight with an unknown tab id ar
     CHECK(win->tabAt(1) == b);
 }
 
-TEST_CASE("SessionModel: moveTab to the tab's current index is a silent no-op", "[vtmux][model][tab]")
+TEST_CASE("SessionModel: moveTab to the tab's current index is a silent no-op", "[vtworkspace][model][tab]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -1385,7 +1385,7 @@ TEST_CASE("SessionModel: moveTab to the tab's current index is a silent no-op", 
 }
 
 TEST_CASE("SessionModel: title and color mutations on an unknown tab are safe no-ops",
-          "[vtmux][model][title][color]")
+          "[vtworkspace][model][title][color]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -1436,7 +1436,7 @@ struct CompletedChangesOnlyEvents: ModelEvents
 } // namespace
 
 TEST_CASE("SessionModel: hosts observing only completed changes may inherit the no-op bracket defaults",
-          "[vtmux][model][events]")
+          "[vtworkspace][model][events]")
 {
     CompletedChangesOnlyEvents events;
     uint64_t nextSession = 1;
@@ -1469,7 +1469,7 @@ TEST_CASE("SessionModel: hosts observing only completed changes may inherit the 
 }
 
 TEST_CASE("SessionModel: resizeActivePane nudges the ancestor split ratio in the pressed direction",
-          "[vtmux][model][resize]")
+          "[vtworkspace][model][resize]")
 {
     Fixture f;
     auto const [win, tab, rootLeaf] = makeTab(f.model);
@@ -1510,7 +1510,7 @@ TEST_CASE("SessionModel: resizeActivePane nudges the ancestor split ratio in the
 }
 
 TEST_CASE("SessionModel: toggleActivePaneOrientation flips the parent split and emits the new state",
-          "[vtmux][model][orientation]")
+          "[vtworkspace][model][orientation]")
 {
     Fixture f;
     auto const [win, tab, rootLeaf] = makeTab(f.model);
@@ -1534,7 +1534,7 @@ TEST_CASE("SessionModel: toggleActivePaneOrientation flips the parent split and 
 }
 
 TEST_CASE("SessionModel: swapActivePane swaps sessions and fires paneSwapped + activePaneChanged",
-          "[vtmux][model][swap]")
+          "[vtworkspace][model][swap]")
 {
     Fixture f;
     auto const [win, tab, rootLeaf] = makeTab(f.model);
@@ -1564,7 +1564,7 @@ TEST_CASE("SessionModel: swapActivePane swaps sessions and fires paneSwapped + a
 }
 
 TEST_CASE("SessionModel: moveActivePane re-parents and fires paneTreeRestructured + activePaneChanged",
-          "[vtmux][model][move]")
+          "[vtworkspace][model][move]")
 {
     Fixture f;
     auto const [win, tab, rootLeaf] = makeTab(f.model);
@@ -1594,7 +1594,7 @@ TEST_CASE("SessionModel: moveActivePane re-parents and fires paneTreeRestructure
 }
 
 TEST_CASE("SessionModel: moveTabToWindow transplants a tab between windows, sessions intact",
-          "[vtmux][model][window][move]")
+          "[vtworkspace][model][window][move]")
 {
     Fixture f;
     auto* a = f.model.createWindow();
@@ -1657,7 +1657,7 @@ TEST_CASE("SessionModel: moveTabToWindow transplants a tab between windows, sess
 // leaving zoom, and when zoom follows focus to a different leaf — and never for an unzoomed tab.
 
 TEST_CASE("SessionModel: toggling pane zoom announces the zoomed leaf, then its clearing",
-          "[vtmux][model][zoom]")
+          "[vtworkspace][model][zoom]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -1680,7 +1680,7 @@ TEST_CASE("SessionModel: toggling pane zoom announces the zoomed leaf, then its 
     CHECK_FALSE(tab->isZoomed());
 }
 
-TEST_CASE("SessionModel: zooming a single-pane tab announces nothing", "[vtmux][model][zoom]")
+TEST_CASE("SessionModel: zooming a single-pane tab announces nothing", "[vtworkspace][model][zoom]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -1695,7 +1695,7 @@ TEST_CASE("SessionModel: zooming a single-pane tab announces nothing", "[vtmux][
     CHECK_FALSE(tab->isZoomed());
 }
 
-TEST_CASE("SessionModel: a focus move while zoomed re-announces the new leaf", "[vtmux][model][zoom]")
+TEST_CASE("SessionModel: a focus move while zoomed re-announces the new leaf", "[vtworkspace][model][zoom]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -1719,7 +1719,7 @@ TEST_CASE("SessionModel: a focus move while zoomed re-announces the new leaf", "
     CHECK(f.events.countPrefix("title:") == 1);
 }
 
-TEST_CASE("SessionModel: a focus move on an unzoomed tab announces no zoom change", "[vtmux][model][zoom]")
+TEST_CASE("SessionModel: a focus move on an unzoomed tab announces no zoom change", "[vtworkspace][model][zoom]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -1736,7 +1736,7 @@ TEST_CASE("SessionModel: a focus move on an unzoomed tab announces no zoom chang
 }
 
 TEST_CASE("SessionModel: restructuring a zoomed tab announces the zoom clearing exactly once",
-          "[vtmux][model][zoom]")
+          "[vtworkspace][model][zoom]")
 {
     auto const zoomedTab = [](Fixture& f) {
         auto* win = f.model.createWindow();
@@ -1805,7 +1805,7 @@ TEST_CASE("SessionModel: restructuring a zoomed tab announces the zoom clearing 
     }
 }
 
-TEST_CASE("SessionModel: an unzoomed restructure does not retitle a multi-pane tab", "[vtmux][model][zoom]")
+TEST_CASE("SessionModel: an unzoomed restructure does not retitle a multi-pane tab", "[vtworkspace][model][zoom]")
 {
     // The mirror of the sections above: with no zoom to clear, orientation/swap/move leave the resolved
     // title ("Multiple panes") untouched, so they must stay silent. This keeps announceZoomChange()'s
@@ -1825,7 +1825,7 @@ TEST_CASE("SessionModel: an unzoomed restructure does not retitle a multi-pane t
     CHECK(f.events.countPrefix("title:") == 0);
 }
 
-TEST_CASE("SessionModel: mutating an unzoomed tab announces no zoom change at all", "[vtmux][model][zoom]")
+TEST_CASE("SessionModel: mutating an unzoomed tab announces no zoom change at all", "[vtworkspace][model][zoom]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -1846,7 +1846,7 @@ TEST_CASE("SessionModel: mutating an unzoomed tab announces no zoom change at al
     CHECK(f.events.countPrefix("zoom:") == 0);
 }
 
-TEST_CASE("SessionModel: closing the last pane of a zoomed tab closes the tab", "[vtmux][model][zoom]")
+TEST_CASE("SessionModel: closing the last pane of a zoomed tab closes the tab", "[vtworkspace][model][zoom]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -1869,7 +1869,7 @@ TEST_CASE("SessionModel: closing the last pane of a zoomed tab closes the tab", 
 }
 // }}}
 
-TEST_CASE("SessionModel: resizing a zoomed pane announces the zoom clearing", "[vtmux][model][zoom]")
+TEST_CASE("SessionModel: resizing a zoomed pane announces the zoom clearing", "[vtworkspace][model][zoom]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -1888,7 +1888,7 @@ TEST_CASE("SessionModel: resizing a zoomed pane announces the zoom clearing", "[
 }
 
 TEST_CASE("SessionModel: splitting or closing a zoomed tab retitles it exactly once",
-          "[vtmux][model][zoom][title]")
+          "[vtworkspace][model][zoom][title]")
 {
     // Both mutators retitle for their OWN reason (the pane count crossing 1<->many) and would retitle
     // again for the zoom they cleared. The host's tabTitleChanged fan-out rebuilds and republishes the
@@ -1938,7 +1938,7 @@ TEST_CASE("SessionModel: splitting or closing a zoomed tab retitles it exactly o
     }
 }
 
-TEST_CASE("SessionModel: zoom is per-tab state that survives switching away and back", "[vtmux][model][zoom]")
+TEST_CASE("SessionModel: zoom is per-tab state that survives switching away and back", "[vtworkspace][model][zoom]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -1960,7 +1960,7 @@ TEST_CASE("SessionModel: zoom is per-tab state that survives switching away and 
     CHECK(zoomed->layoutRoot() == zoomed->activePane());
 }
 
-TEST_CASE("SessionModel: zoom travels with a tab moved to another window", "[vtmux][model][zoom]")
+TEST_CASE("SessionModel: zoom travels with a tab moved to another window", "[vtworkspace][model][zoom]")
 {
     Fixture f;
     auto* a = f.model.createWindow();
@@ -1981,7 +1981,7 @@ TEST_CASE("SessionModel: zoom travels with a tab moved to another window", "[vtm
     CHECK(tab->layoutRoot() == tab->activePane());
 }
 
-TEST_CASE("SessionModel: findSessionLeaf locates a session in any window", "[vtmux][model][pane]")
+TEST_CASE("SessionModel: findSessionLeaf locates a session in any window", "[vtworkspace][model][pane]")
 {
     Fixture f;
     auto* win1 = f.model.createWindow();

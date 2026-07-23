@@ -1038,9 +1038,9 @@ void YAMLConfigReader::parseLayoutPane(YAML::Node const& node, config::LayoutPan
         {
             auto const value = crispy::toLower(orientation.as<std::string>());
             if (value == "horizontal")
-                where.orientation = vtmux::SplitState::Horizontal;
+                where.orientation = vtworkspace::SplitState::Horizontal;
             else if (value == "vertical")
-                where.orientation = vtmux::SplitState::Vertical;
+                where.orientation = vtworkspace::SplitState::Vertical;
             else
                 logger()("Unknown split orientation '{}' (expected 'horizontal' or 'vertical'); "
                          "using vertical.",

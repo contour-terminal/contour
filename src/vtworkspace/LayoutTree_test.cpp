@@ -8,11 +8,11 @@
 #include <span>
 #include <string>
 
-#include <vtmux/LayoutTree.h>
-#include <vtmux/ModelEvents.h>
-#include <vtmux/SessionModel.h>
+#include <vtworkspace/LayoutTree.h>
+#include <vtworkspace/ModelEvents.h>
+#include <vtworkspace/SessionModel.h>
 
-using namespace vtmux;
+using namespace vtworkspace;
 
 namespace
 {

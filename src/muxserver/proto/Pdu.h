@@ -281,7 +281,7 @@ struct SessionEvent
 struct WirePane
 {
     uint64_t paneId = 0;
-    uint8_t split = 0;                   ///< vtmux::SplitState: 0 leaf, 1 horizontal, 2 vertical.
+    uint8_t split = 0;                   ///< vtworkspace::SplitState: 0 leaf, 1 horizontal, 2 vertical.
     uint64_t session = 0;                ///< Leaf only: the SessionId.
     uint16_t ratio = 5000;               ///< Split only: first child's share × 10000 (0.05..0.95).
     std::vector<WirePane> children = {}; ///< 0 for a leaf, 2 for a split.
@@ -333,7 +333,7 @@ struct NewWindow
 struct SplitPane
 {
     uint64_t session = 0;    ///< The pane to split, by the session it hosts.
-    uint8_t orientation = 1; ///< vtmux::SplitState: 1 horizontal, 2 vertical.
+    uint8_t orientation = 1; ///< vtworkspace::SplitState: 1 horizontal, 2 vertical.
     uint16_t ratio = 5000;   ///< First child's share × 10000.
     bool operator==(SplitPane const&) const = default;
 };

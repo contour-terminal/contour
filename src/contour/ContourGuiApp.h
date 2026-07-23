@@ -215,7 +215,7 @@ class ContourGuiApp: public QObject, public ContourApp
     /// invariant lives (shared by the primary-window and spawned-window paths).
     /// @param daemonWindow The daemon window id.
     /// @param osWindow The OS window that mirrors it.
-    void bindDaemonWindow(std::uint64_t daemonWindow, vtmux::WindowId osWindow);
+    void bindDaemonWindow(std::uint64_t daemonWindow, vtworkspace::WindowId osWindow);
 
     /// The attach engines, declared FIRST so they are destroyed LAST: remote-
     /// backed sessions hold ptys that unregister from them on destruction.
@@ -228,7 +228,7 @@ class ContourGuiApp: public QObject, public ContourApp
 
     /// Native attach (B4): each daemon window id mapped to the OS window that mirrors it. The primary
     /// daemon window maps to the boot window; additional ones map to spawned windows.
-    std::unordered_map<uint64_t, vtmux::WindowId> _attachWindowMap;
+    std::unordered_map<uint64_t, vtworkspace::WindowId> _attachWindowMap;
     /// The daemon window whose OS window is being spawned right now: reconcileAttachWindows stages it
     /// just before newWindow(), and that window's main.qml claims it via bindPendingAttachWindow.
     /// Single-slot (like _pendingTransplant / _pendingSpawnScreen): the QML load is synchronous, so a

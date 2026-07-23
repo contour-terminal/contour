@@ -5,9 +5,9 @@
 #include <string>
 #include <vector>
 
-#include <vtmux/Tab.h>
+#include <vtworkspace/Tab.h>
 
-using namespace vtmux;
+using namespace vtworkspace;
 
 namespace
 {
@@ -28,7 +28,7 @@ Tab::SessionTitleResolver makeResolver()
 }
 } // namespace
 
-TEST_CASE("Tab: a new tab has one pane and derives its title from the session", "[vtmux][tab]")
+TEST_CASE("Tab: a new tab has one pane and derives its title from the session", "[vtworkspace][tab]")
 {
     Ids ids;
     auto const rootPaneId = ids.pane();
@@ -41,7 +41,7 @@ TEST_CASE("Tab: a new tab has one pane and derives its title from the session", 
     CHECK(tab.title(makeResolver()) == std::format("session-{}", session.value));
 }
 
-TEST_CASE("Tab: title precedence is runtime > MultiplePanes > active-leaf", "[vtmux][tab][title]")
+TEST_CASE("Tab: title precedence is runtime > MultiplePanes > active-leaf", "[vtworkspace][tab][title]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
@@ -70,7 +70,7 @@ TEST_CASE("Tab: title precedence is runtime > MultiplePanes > active-leaf", "[vt
     }
 }
 
-TEST_CASE("Tab: splitting makes the new pane active", "[vtmux][tab][split]")
+TEST_CASE("Tab: splitting makes the new pane active", "[vtworkspace][tab][split]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
@@ -84,7 +84,7 @@ TEST_CASE("Tab: splitting makes the new pane active", "[vtmux][tab][split]")
     CHECK(tab.paneCount() == 2);
 }
 
-TEST_CASE("Tab: closing a pane absorbs the sibling and updates the active pane", "[vtmux][tab][close]")
+TEST_CASE("Tab: closing a pane absorbs the sibling and updates the active pane", "[vtworkspace][tab][close]")
 {
     Ids ids;
     auto const rootId = ids.pane();
@@ -104,7 +104,7 @@ TEST_CASE("Tab: closing a pane absorbs the sibling and updates the active pane",
     CHECK(tab.isLastPane(tab.activePane()));
 }
 
-TEST_CASE("Tab: closing the non-active sibling keeps the absorbed active leaf", "[vtmux][tab][close]")
+TEST_CASE("Tab: closing the non-active sibling keeps the absorbed active leaf", "[vtworkspace][tab][close]")
 {
     // Regression for the dangling-pointer read in closePane(): with the active leaf being the sibling
     // that closeChild() absorbs (and destroys the old Pane object of), the active-leaf reselection must
@@ -132,7 +132,7 @@ TEST_CASE("Tab: closing the non-active sibling keeps the absorbed active leaf", 
     CHECK(tab.isLastPane(tab.activePane()));
 }
 
-TEST_CASE("Tab: isLastPane is true only for a single-pane tab", "[vtmux][tab][close]")
+TEST_CASE("Tab: isLastPane is true only for a single-pane tab", "[vtworkspace][tab][close]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
@@ -142,7 +142,7 @@ TEST_CASE("Tab: isLastPane is true only for a single-pane tab", "[vtmux][tab][cl
     CHECK_FALSE(tab.isLastPane(tab.activePane()));
 }
 
-TEST_CASE("Tab: directional focus moves between panes", "[vtmux][tab][focus]")
+TEST_CASE("Tab: directional focus moves between panes", "[vtworkspace][tab][focus]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
@@ -161,7 +161,7 @@ TEST_CASE("Tab: directional focus moves between panes", "[vtmux][tab][focus]")
     CHECK(tab.activePane() == left); // unchanged
 }
 
-TEST_CASE("Tab: color override can be set and reset", "[vtmux][tab][color]")
+TEST_CASE("Tab: color override can be set and reset", "[vtworkspace][tab][color]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
@@ -178,7 +178,7 @@ TEST_CASE("Tab: color override can be set and reset", "[vtmux][tab][color]")
 }
 
 TEST_CASE("Tab: the user's color outranks the application's, and each survives the other's reset",
-          "[vtmux][tab][color]")
+          "[vtworkspace][tab][color]")
 {
     // The two sources are independent slots, not one shared cell. This is what lets a terminal reset
     // (RIS -> DECAC reset -> Application source) leave a color the user picked alone, and what makes
@@ -214,7 +214,7 @@ TEST_CASE("Tab: the user's color outranks the application's, and each survives t
 }
 
 TEST_CASE("Tab: closing the active leaf of a 3-pane tab reselects the most-recently-used survivor",
-          "[vtmux][tab][close][focus]")
+          "[vtworkspace][tab][close][focus]")
 {
     // The MRU-driven reselection loop is never run with >2 panes, so its ORDERING is unverified — this is
     // where "closed a pane and focus jumped to the wrong pane" bugs live. Build 3 leaves, seed a known MRU by
@@ -272,7 +272,7 @@ TEST_CASE("Tab: closing the active leaf of a 3-pane tab reselects the most-recen
     CHECK(tab.activePane()->session() == activeSessionBefore);
 }
 
-TEST_CASE("Tab: focusDirection has no wrap-around and returns nullptr at every edge", "[vtmux][tab][focus]")
+TEST_CASE("Tab: focusDirection has no wrap-around and returns nullptr at every edge", "[vtworkspace][tab][focus]")
 {
     // Per-edge null and non-wrap are the boundary cases users hit constantly; only Left-null was covered.
     // Build root Vertical [ left | right ], then split the active `right` Horizontally -> [ rtTop / rtBottom
@@ -315,7 +315,7 @@ TEST_CASE("Tab: focusDirection has no wrap-around and returns nullptr at every e
     CHECK(tab.focusDirection(FocusDirection::Down) == nullptr);
 }
 
-TEST_CASE("Tab: splitting an already-split tab adds a third leaf and activates it", "[vtmux][tab][split]")
+TEST_CASE("Tab: splitting an already-split tab adds a third leaf and activates it", "[vtworkspace][tab][split]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
@@ -328,7 +328,7 @@ TEST_CASE("Tab: splitting an already-split tab adds a third leaf and activates i
     CHECK(tab.activePane() == third); // the new leaf is active
 }
 
-TEST_CASE("Tab: toggleActivePaneOrientation flips the active pane's parent split", "[vtmux][tab][split]")
+TEST_CASE("Tab: toggleActivePaneOrientation flips the active pane's parent split", "[vtworkspace][tab][split]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
@@ -349,7 +349,7 @@ TEST_CASE("Tab: toggleActivePaneOrientation flips the active pane's parent split
 }
 
 TEST_CASE("Tab: swapActivePane trades sessions with a neighbor and follows the moved pane",
-          "[vtmux][tab][swap]")
+          "[vtworkspace][tab][swap]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
@@ -385,7 +385,7 @@ TEST_CASE("Tab: swapActivePane trades sessions with a neighbor and follows the m
 }
 
 TEST_CASE("Tab: moveActivePane re-parents the active pane across a non-sibling neighbor",
-          "[vtmux][tab][move]")
+          "[vtworkspace][tab][move]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
@@ -445,7 +445,7 @@ TEST_CASE("Tab: moveActivePane re-parents the active pane across a non-sibling n
 // The contract under test: zoom always applies to the ACTIVE pane. That single rule is what gives
 // "zoom follows focus" for free and what every restructuring operation cancels.
 
-TEST_CASE("Tab: zooming a single-pane tab is a no-op", "[vtmux][tab][zoom]")
+TEST_CASE("Tab: zooming a single-pane tab is a no-op", "[vtworkspace][tab][zoom]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
@@ -458,7 +458,7 @@ TEST_CASE("Tab: zooming a single-pane tab is a no-op", "[vtmux][tab][zoom]")
     CHECK(tab.layoutRoot() == tab.rootPane());
 }
 
-TEST_CASE("Tab: zoom re-roots the layout at the active pane and back", "[vtmux][tab][zoom]")
+TEST_CASE("Tab: zoom re-roots the layout at the active pane and back", "[vtworkspace][tab][zoom]")
 {
     Ids ids;
     auto const rootId = ids.pane();
@@ -482,7 +482,7 @@ TEST_CASE("Tab: zoom re-roots the layout at the active pane and back", "[vtmux][
     CHECK_FALSE(tab.zoomedLeafId().has_value());
 }
 
-TEST_CASE("Tab: zoom follows focus", "[vtmux][tab][zoom]")
+TEST_CASE("Tab: zoom follows focus", "[vtworkspace][tab][zoom]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
@@ -506,7 +506,7 @@ TEST_CASE("Tab: zoom follows focus", "[vtmux][tab][zoom]")
     CHECK(tab.layoutRoot() == right);
 }
 
-TEST_CASE("Tab: a focus move with no neighbor leaves the zoom where it was", "[vtmux][tab][zoom]")
+TEST_CASE("Tab: a focus move with no neighbor leaves the zoom where it was", "[vtworkspace][tab][zoom]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
@@ -519,7 +519,7 @@ TEST_CASE("Tab: a focus move with no neighbor leaves the zoom where it was", "[v
     CHECK(tab.layoutRoot() == right);
 }
 
-TEST_CASE("Tab: splitting while zoomed unzooms", "[vtmux][tab][zoom]")
+TEST_CASE("Tab: splitting while zoomed unzooms", "[vtworkspace][tab][zoom]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
@@ -534,7 +534,7 @@ TEST_CASE("Tab: splitting while zoomed unzooms", "[vtmux][tab][zoom]")
     CHECK(tab.paneCount() == 3);
 }
 
-TEST_CASE("Tab: closing a pane while zoomed unzooms without dangling", "[vtmux][tab][zoom]")
+TEST_CASE("Tab: closing a pane while zoomed unzooms without dangling", "[vtworkspace][tab][zoom]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
@@ -551,7 +551,7 @@ TEST_CASE("Tab: closing a pane while zoomed unzooms without dangling", "[vtmux][
     CHECK(tab.layoutRoot() == tab.activePane());
 }
 
-TEST_CASE("Tab: restructuring the tree while zoomed unzooms", "[vtmux][tab][zoom]")
+TEST_CASE("Tab: restructuring the tree while zoomed unzooms", "[vtworkspace][tab][zoom]")
 {
     auto const zoomedThreePaneTab = [](Ids& ids, Tab& tab) {
         tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
@@ -593,7 +593,7 @@ TEST_CASE("Tab: restructuring the tree while zoomed unzooms", "[vtmux][tab][zoom
     }
 }
 
-TEST_CASE("Tab: an operation that does nothing leaves the zoom alone", "[vtmux][tab][zoom]")
+TEST_CASE("Tab: an operation that does nothing leaves the zoom alone", "[vtworkspace][tab][zoom]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
@@ -610,7 +610,7 @@ TEST_CASE("Tab: an operation that does nothing leaves the zoom alone", "[vtmux][
     CHECK(tab.layoutRoot() == right);
 }
 
-TEST_CASE("Tab: a zoomed tab is titled after the pane on screen", "[vtmux][tab][zoom][title]")
+TEST_CASE("Tab: a zoomed tab is titled after the pane on screen", "[vtworkspace][tab][zoom][title]")
 {
     Ids ids;
     auto const resolver = makeResolver();
@@ -631,7 +631,7 @@ TEST_CASE("Tab: a zoomed tab is titled after the pane on screen", "[vtmux][tab][
 }
 // }}}
 
-TEST_CASE("Tab: resizing while zoomed unzooms rather than moving an invisible divider", "[vtmux][tab][zoom]")
+TEST_CASE("Tab: resizing while zoomed unzooms rather than moving an invisible divider", "[vtworkspace][tab][zoom]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
@@ -649,7 +649,7 @@ TEST_CASE("Tab: resizing while zoomed unzooms rather than moving an invisible di
     CHECK(split->ratio() < ratioBefore); // ...and the resize itself still happened, now visibly
 }
 
-TEST_CASE("Tab: resizing with no ancestor split on the axis leaves the zoom alone", "[vtmux][tab][zoom]")
+TEST_CASE("Tab: resizing with no ancestor split on the axis leaves the zoom alone", "[vtworkspace][tab][zoom]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
@@ -662,7 +662,7 @@ TEST_CASE("Tab: resizing with no ancestor split on the axis leaves the zoom alon
 }
 
 TEST_CASE("Tab: usesMultiplePanesLabel is the one rule behind every consumer's tab label",
-          "[vtmux][tab][zoom][title]")
+          "[vtworkspace][tab][zoom][title]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };

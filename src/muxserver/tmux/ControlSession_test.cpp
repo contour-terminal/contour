@@ -25,8 +25,8 @@
 #include <net/EventLoop.h>
 #include <net/PollEventSource.h>
 #include <net/testing/InMemoryTransport.h>
-#include <vtmux/Pane.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/Tab.h>
 
 using coro::Task;
 using muxserver::SessionHost;
@@ -79,8 +79,8 @@ Task<void> collectLines(net::ISocket* client, std::vector<std::string>* out)
 /// continuation: the PTY stays silent after the single burst.
 Task<void> burstThenNotifyThenDetach(ControlSession* session,
                                      net::ISocket* client,
-                                     vtmux::SessionId sessionId,
-                                     vtmux::TabId tabId,
+                                     vtworkspace::SessionId sessionId,
+                                     vtworkspace::TabId tabId,
                                      std::string const* burst)
 {
     session->sessionOutput(sessionId, *burst);           // a burst larger than one pump budget
@@ -100,8 +100,8 @@ Task<void> driveExchange(ControlSession* session,
 /// Runs the session concurrently with the burst producer and the collector.
 Task<void> driveBurst(ControlSession* session,
                       net::ISocket* client,
-                      vtmux::SessionId sessionId,
-                      vtmux::TabId tabId,
+                      vtworkspace::SessionId sessionId,
+                      vtworkspace::TabId tabId,
                       std::string const* burst,
                       std::vector<std::string>* out)
 {

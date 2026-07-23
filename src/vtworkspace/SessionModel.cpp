@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtmux/SessionModel.h>
+#include <vtworkspace/SessionModel.h>
 
 #include <algorithm>
 #include <cassert>
@@ -7,7 +7,7 @@
 #include <ranges>
 #include <utility>
 
-namespace vtmux
+namespace vtworkspace
 {
 
 // {{{ Window
@@ -622,4 +622,4 @@ void SessionModel::resetTabColor(TabId tabId, TabColorSource source)
 
 // }}}
 
-} // namespace vtmux
+} // namespace vtworkspace

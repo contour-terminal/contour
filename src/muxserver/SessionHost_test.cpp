@@ -24,45 +24,45 @@
 #include <net/EventLoop.h>
 #include <net/PollEventSource.h>
 #include <net/testing/ScriptedEventSource.h>
-#include <vtmux/Pane.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/Tab.h>
 
 using muxserver::SessionHost;
-using vtmux::SplitState;
+using vtworkspace::SplitState;
 
 namespace
 {
 
 /// Records every fanned-out model event so tests can assert what subscribers saw.
-struct RecordingEvents final: vtmux::ModelEvents
+struct RecordingEvents final: vtworkspace::ModelEvents
 {
     std::vector<std::string> log;
 
-    void tabAdded(vtmux::WindowId, vtmux::TabId, int index) override
+    void tabAdded(vtworkspace::WindowId, vtworkspace::TabId, int index) override
     {
         log.push_back(std::format("tabAdded:{}", index));
     }
-    void tabClosed(vtmux::WindowId, vtmux::TabId, int index) override
+    void tabClosed(vtworkspace::WindowId, vtworkspace::TabId, int index) override
     {
         log.push_back(std::format("tabClosed:{}", index));
     }
-    void tabMoved(vtmux::WindowId, vtmux::TabId, int from, int to) override
+    void tabMoved(vtworkspace::WindowId, vtworkspace::TabId, int from, int to) override
     {
         log.push_back(std::format("tabMoved:{}->{}", from, to));
     }
-    void activeTabChanged(vtmux::WindowId, vtmux::TabId, int index) override
+    void activeTabChanged(vtworkspace::WindowId, vtworkspace::TabId, int index) override
     {
         log.push_back(std::format("activeTabChanged:{}", index));
     }
-    void paneSplit(vtmux::TabId, vtmux::PaneId, vtmux::PaneId) override { log.emplace_back("paneSplit"); }
-    void paneClosed(vtmux::TabId, vtmux::PaneId, vtmux::PaneId) override { log.emplace_back("paneClosed"); }
-    void activePaneChanged(vtmux::TabId, vtmux::PaneId) override { log.emplace_back("activePaneChanged"); }
-    void paneRatioChanged(vtmux::TabId, vtmux::PaneId, double) override
+    void paneSplit(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override { log.emplace_back("paneSplit"); }
+    void paneClosed(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override { log.emplace_back("paneClosed"); }
+    void activePaneChanged(vtworkspace::TabId, vtworkspace::PaneId) override { log.emplace_back("activePaneChanged"); }
+    void paneRatioChanged(vtworkspace::TabId, vtworkspace::PaneId, double) override
     {
         log.emplace_back("paneRatioChanged");
     }
-    void tabTitleChanged(vtmux::TabId) override { log.emplace_back("tabTitleChanged"); }
-    void tabColorChanged(vtmux::TabId) override { log.emplace_back("tabColorChanged"); }
+    void tabTitleChanged(vtworkspace::TabId) override { log.emplace_back("tabTitleChanged"); }
+    void tabColorChanged(vtworkspace::TabId) override { log.emplace_back("tabColorChanged"); }
 
     [[nodiscard]] bool saw(std::string_view needle) const
     {
@@ -128,7 +128,7 @@ TEST_CASE("a refused split reaps the orphaned backing session", "[muxserver][hos
     REQUIRE(tab != nullptr);
     REQUIRE(h.host.sessionCount() == 1);
 
-    h.host.splitActivePane(vtmux::TabId { 4711 }, SplitState::Vertical, 0.5);
+    h.host.splitActivePane(vtworkspace::TabId { 4711 }, SplitState::Vertical, 0.5);
 
     // The unknown tab refused the split; the pre-spawned session must not leak.
     CHECK(h.host.sessionCount() == 1);
@@ -234,8 +234,8 @@ struct StreamRecorder final: muxserver::SessionStreamEvents
     std::vector<uint64_t> screens;
     std::vector<std::string> output;
 
-    void sessionScreenUpdated(vtmux::SessionId session) override { screens.push_back(session.value); }
-    void sessionOutput(vtmux::SessionId session, std::string const& bytes) override
+    void sessionScreenUpdated(vtworkspace::SessionId session) override { screens.push_back(session.value); }
+    void sessionOutput(vtworkspace::SessionId session, std::string const& bytes) override
     {
         output.push_back(std::format("{}:{}", session.value, bytes));
     }

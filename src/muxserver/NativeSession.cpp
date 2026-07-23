@@ -19,14 +19,14 @@
 #include <muxserver/MirroredModes.h>
 #include <muxserver/PduPump.h>
 #include <net/Sockets.h>
-#include <vtmux/Pane.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/Tab.h>
 
 namespace muxserver
 {
 
 using namespace std::chrono_literals;
-using vtmux::SessionId;
+using vtworkspace::SessionId;
 
 namespace
 {
@@ -53,7 +53,7 @@ namespace
     }
 
     /// Serializes one split-tree node onto the wire (recurses into its children).
-    [[nodiscard]] proto::WirePane serializePaneTree(vtmux::Pane const& pane)
+    [[nodiscard]] proto::WirePane serializePaneTree(vtworkspace::Pane const& pane)
     {
         auto wire = proto::WirePane {};
         wire.paneId = pane.id().value;
@@ -72,7 +72,7 @@ namespace
     }
 
     /// Serializes the host window's whole tab/pane layout for the LayoutState PDU.
-    [[nodiscard]] proto::LayoutState serializeLayout(vtmux::Window& window)
+    [[nodiscard]] proto::LayoutState serializeLayout(vtworkspace::Window& window)
     {
         auto layout = proto::LayoutState {};
         layout.window = window.id().value;
@@ -619,19 +619,19 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
         // whichever window hosts it): make that pane active, then split
         // (splitActivePane acts on the tab's active pane).
         auto& model = _host.model();
-        if (auto const [window, tab, leaf] = model.findSessionLeaf(vtmux::SessionId { split->session });
+        if (auto const [window, tab, leaf] = model.findSessionLeaf(vtworkspace::SessionId { split->session });
             leaf != nullptr)
         {
             model.setActivePane(tab->id(), leaf->id());
             _host.splitActivePane(tab->id(),
-                                  static_cast<vtmux::SplitState>(split->orientation),
+                                  static_cast<vtworkspace::SplitState>(split->orientation),
                                   static_cast<double>(split->ratio) / 10000.0);
         }
         return;
     }
     if (auto const* close = std::get_if<proto::ClosePane>(&frame.pdu))
     {
-        _host.handleSessionExit(vtmux::SessionId { close->session });
+        _host.handleSessionExit(vtworkspace::SessionId { close->session });
         return;
     }
     // Unknown/unexpected PDUs are ignored: forward compatibility.
@@ -666,8 +666,8 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
     pushLayout();
 
     // The attach snapshot: every hosted session of every window, full state.
-    _host.model().forEachTab([this](vtmux::Window&, vtmux::Tab& tab) {
-        tab.rootPane()->walkTree([&](vtmux::Pane& pane) {
+    _host.model().forEachTab([this](vtworkspace::Window&, vtworkspace::Tab& tab) {
+        tab.rootPane()->walkTree([&](vtworkspace::Pane& pane) {
             if (pane.isLeaf())
                 pushDelta(pane.session(), /*forceSnapshot=*/true);
         });

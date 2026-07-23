@@ -24,12 +24,12 @@
 #include <unordered_map>
 #include <vector>
 
-#include <vtmux/ModelEvents.h>
-#include <vtmux/Pane.h>
-#include <vtmux/PaneLayout.h>
-#include <vtmux/Primitives.h>
-#include <vtmux/SessionModel.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/ModelEvents.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/PaneLayout.h>
+#include <vtworkspace/Primitives.h>
+#include <vtworkspace/SessionModel.h>
+#include <vtworkspace/Tab.h>
 
 class QScreen;
 
@@ -42,22 +42,22 @@ class WindowController;
 /**
  * Session-lifetime service, SessionModel host, and per-window ModelEvents router.
  *
- * The manager owns the single Qt-free vtmux::SessionModel (the authoritative window/tab/pane tree,
+ * The manager owns the single Qt-free vtworkspace::SessionModel (the authoritative window/tab/pane tree,
  * including per-tab title and color, so a future daemon and its network clients share the same
  * state) and the SessionId <-> TerminalSession* registry, and it creates/tears down the backing
  * TerminalSessions. It is NOT the GUI adapter: each OS window has its own WindowController (a
  * QAbstractListModel + PaneProxy tree + window services) that the QML binds to. The manager mints
- * those controllers (createWindowController) and, as the vtmux::ModelEvents implementer, ROUTES each
+ * those controllers (createWindowController) and, as the vtworkspace::ModelEvents implementer, ROUTES each
  * model change to the owning window's controller (tab events by WindowId; pane events resolve
  * TabId -> WindowId). Session -> display ownership lives solely on the pane tree (the QML `session:`
  * binding -> TerminalDisplay::setSession); the manager holds no per-display session map.
  *
  * It is NOT a list model: the GUI tab strip renders from the per-window WindowController's
  * QAbstractListModel (WindowController::Roles). Every tab/pane operation here is routed by an
- * explicit window identity — either the calling controller's vtmux::WindowId or the acting
+ * explicit window identity — either the calling controller's vtworkspace::WindowId or the acting
  * session's hosting tab — never by an implicit "the" window.
  */
-class TerminalSessionManager: public QObject, public vtmux::ModelEvents
+class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 {
     Q_OBJECT
     Q_PROPERTY(bool multimediaReady READ isMultimediaReady NOTIFY multimediaReadyChanged)
@@ -83,30 +83,30 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     [[nodiscard]] ContourGuiApp& app() noexcept { return _app; }
 
     /// Thickness of the split divider handle in logical pixels, single-sourced from
-    /// vtmux::DefaultSplitHandleThickness. PaneNode.qml's explicit SplitView `handle:` binds its
+    /// vtworkspace::DefaultSplitHandleThickness. PaneNode.qml's explicit SplitView `handle:` binds its
     /// implicit size to this property so the rendered handle and the pane-layout solver (which
-    /// passes the same constant to vtmux::contentSizeForLeaf) cannot diverge.
+    /// passes the same constant to vtworkspace::contentSizeForLeaf) cannot diverge.
     [[nodiscard]] constexpr int splitHandleThickness() const noexcept
     {
-        return vtmux::DefaultSplitHandleThickness;
+        return vtworkspace::DefaultSplitHandleThickness;
     }
 
     /// Creates a backing session + its model tab in @p window (the calling controller's window).
     /// @param window      The target window.
     /// @param profileName Profile to launch the session with, or std::nullopt for the app default.
     contour::TerminalSession* createSessionInBackground(
-        vtmux::WindowId window, std::optional<std::string> const& profileName = std::nullopt);
+        vtworkspace::WindowId window, std::optional<std::string> const& profileName = std::nullopt);
 
     /// Creates a new tab in @p window (the GUI "+" button entry point, via WindowController).
     /// @param window      The target window.
     /// @param profileName Profile to launch the tab with, or std::nullopt for the app default.
-    contour::TerminalSession* createSession(vtmux::WindowId window,
+    contour::TerminalSession* createSession(vtworkspace::WindowId window,
                                             std::optional<std::string> const& profileName = std::nullopt);
 
     /// Creates and activates a new tab in @p window.
     /// @param window      The target window.
     /// @param profileName Profile to launch the tab with, or std::nullopt for the app default.
-    void createNewTab(vtmux::WindowId window, std::optional<std::string> const& profileName = std::nullopt)
+    void createNewTab(vtworkspace::WindowId window, std::optional<std::string> const& profileName = std::nullopt)
     {
         // Attach mode: author the tab on the daemon (B3-Qt); its layout re-push
         // reconciles it into a local tab. A local factory returns false and the
@@ -154,7 +154,7 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @param window The window whose tabs/panes to serialize.
     /// @param name   The key to save the layout under.
     /// @return Nothing on success, or the reason the layout could not be saved.
-    [[nodiscard]] std::expected<void, LayoutSaveError> saveWindowLayout(vtmux::WindowId window,
+    [[nodiscard]] std::expected<void, LayoutSaveError> saveWindowLayout(vtworkspace::WindowId window,
                                                                         std::string const& name);
 
     /// Where layouts are persisted: the `layouts.yml` sibling of the loaded config file — which is
@@ -232,7 +232,7 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     ///                 session is created — the hook attach mode uses to bind the pane about to be born
     ///                 to a specific remote session (via muxserver::client::WireLayout::leafSession).
     /// @return false if @p layout has no tabs (nothing to apply); true otherwise.
-    bool applyLayoutToWindow(vtmux::WindowId window,
+    bool applyLayoutToWindow(vtworkspace::WindowId window,
                              config::Layout const& layout,
                              std::optional<vtbackend::PageSize> pageSize = std::nullopt,
                              std::function<void(config::LayoutPane const&)> const& beforeLeafSeed = {});
@@ -270,31 +270,31 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     void currentSessionIsTerminated();
 
     // {{{ Tab-strip operations (window-routed; called by WindowController with its own WindowId)
-    void activateTab(vtmux::WindowId window, int index);
-    void moveTab(vtmux::WindowId window, int fromIndex, int toIndex);
+    void activateTab(vtworkspace::WindowId window, int index);
+    void moveTab(vtworkspace::WindowId window, int fromIndex, int toIndex);
     /// Moves the tab at row @p fromIndex of window @p from into window @p to at row @p toIndex,
     /// transplanting it intact (its sessions survive). Drives the drag of a tab between windows.
     /// @param from      The source window's id.
     /// @param fromIndex The tab's row in @p from.
     /// @param to        The destination window's id.
     /// @param toIndex   The destination row.
-    void moveTabToWindow(vtmux::WindowId from, int fromIndex, vtmux::WindowId to, int toIndex);
+    void moveTabToWindow(vtworkspace::WindowId from, int fromIndex, vtworkspace::WindowId to, int toIndex);
     /// Tears the tab at row @p fromIndex of window @p from into a brand-new OS window. The new window
     /// is spawned (on @p targetScreen if given) and adopts the tab as its sole tab; if that empties the
     /// source window, it is closed. Drives dropping a dragged tab onto empty desktop.
     /// @param from         The source window's id.
     /// @param fromIndex    The tab's row in @p from.
     /// @param targetScreen The screen the new window should open on (may be nullptr).
-    void tearOffTabToNewWindow(vtmux::WindowId from, int fromIndex, QScreen* targetScreen);
-    void closeTabAtIndex(vtmux::WindowId window, int index);
-    void closeOtherTabs(vtmux::WindowId window, int index);
-    void closeTabsToRight(vtmux::WindowId window, int index);
+    void tearOffTabToNewWindow(vtworkspace::WindowId from, int fromIndex, QScreen* targetScreen);
+    void closeTabAtIndex(vtworkspace::WindowId window, int index);
+    void closeOtherTabs(vtworkspace::WindowId window, int index);
+    void closeTabsToRight(vtworkspace::WindowId window, int index);
 
     /// The predefined tab-color palette (a grid of swatches) the user picks from, as QColors.
     [[nodiscard]] QVariantList tabColorPalette() const;
     // }}}
 
-    // {{{ Split-pane operations (drive the vtmux model; Phase 2)
+    // {{{ Split-pane operations (drive the vtworkspace model; Phase 2)
     /// Splits the acting session's tab's active pane along @p vertical (true: side-by-side;
     /// false: stacked), creating a backing TerminalSession for the new leaf.
     /// @param vertical Split orientation.
@@ -309,17 +309,17 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// Moves pane focus within the acting session's tab in the given direction.
     /// @param direction The direction to move pane focus.
     /// @param acting The session that received the keybinding; its hosting tab is the target.
-    void focusPane(vtmux::FocusDirection direction, TerminalSession* acting);
+    void focusPane(vtworkspace::FocusDirection direction, TerminalSession* acting);
     /// Swaps the acting session's active pane with its neighbor in @p direction (see
-    /// vtmux::SessionModel::swapActivePane).
+    /// vtworkspace::SessionModel::swapActivePane).
     /// @param direction The direction of the neighbor to swap with.
     /// @param acting The session that received the keybinding; its hosting tab is the target.
-    void swapPane(vtmux::FocusDirection direction, TerminalSession* acting);
+    void swapPane(vtworkspace::FocusDirection direction, TerminalSession* acting);
     /// Moves (re-parents) the acting session's active pane across its neighbor in @p direction (see
-    /// vtmux::SessionModel::moveActivePane).
+    /// vtworkspace::SessionModel::moveActivePane).
     /// @param direction The direction to move the active pane.
     /// @param acting The session that received the keybinding; its hosting tab is the target.
-    void movePane(vtmux::FocusDirection direction, TerminalSession* acting);
+    void movePane(vtworkspace::FocusDirection direction, TerminalSession* acting);
     /// Flips the orientation of the acting session's active pane's split.
     /// @param acting The session that received the keybinding; its hosting tab is the target.
     void toggleActivePaneOrientation(TerminalSession* acting);
@@ -327,21 +327,21 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @param direction The side the active pane grows toward.
     /// @param fraction The ratio delta magnitude in (0, 1).
     /// @param acting The session that received the keybinding; its hosting tab is the target.
-    void resizeActivePane(vtmux::FocusDirection direction, double fraction, TerminalSession* acting);
-    /// Toggles zoom on the acting session's active pane (see vtmux::SessionModel::toggleActivePaneZoom).
+    void resizeActivePane(vtworkspace::FocusDirection direction, double fraction, TerminalSession* acting);
+    /// Toggles zoom on the acting session's active pane (see vtworkspace::SessionModel::toggleActivePaneZoom).
     /// @param acting The session that received the keybinding; its hosting tab is the target.
     void toggleActivePaneZoom(TerminalSession* acting);
     // }}}
 
     // {{{ Model service used by PaneProxy + WindowController
     /// The TerminalSession backing @p id, or nullptr. (Public for PaneProxy.)
-    [[nodiscard]] TerminalSession* sessionForId(vtmux::SessionId id) const noexcept;
+    [[nodiscard]] TerminalSession* sessionForId(vtworkspace::SessionId id) const noexcept;
     /// Whether @p id is the active leaf of tab @p tab.
-    [[nodiscard]] bool isActivePane(vtmux::TabId tab, vtmux::PaneId id) const noexcept;
+    [[nodiscard]] bool isActivePane(vtworkspace::TabId tab, vtworkspace::PaneId id) const noexcept;
     /// Sets the split ratio of node @p id in tab @p tab.
-    void setPaneRatio(vtmux::TabId tab, vtmux::PaneId id, double ratio);
+    void setPaneRatio(vtworkspace::TabId tab, vtworkspace::PaneId id, double ratio);
     /// Makes leaf @p id the active pane of tab @p tab.
-    void activatePane(vtmux::TabId tab, vtmux::PaneId id);
+    void activatePane(vtworkspace::TabId tab, vtworkspace::PaneId id);
     // }}}
 
     void updateColorPreference(vtbackend::ColorPreference const& preference);
@@ -364,20 +364,20 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// VT focus only ever moves within this window, so a model event raised in a background window (a
     /// layout applying its tabs, a tab dropped in by a drag) cannot steal the focused terminal.
     /// @return The focus-owning window, or std::nullopt when no window of this process owns focus.
-    [[nodiscard]] std::optional<vtmux::WindowId> focusedWindow() const noexcept { return _focusedWindow; }
+    [[nodiscard]] std::optional<vtworkspace::WindowId> focusedWindow() const noexcept { return _focusedWindow; }
 
     /// Records @p window as the focus-owning OS window AND re-points terminal focus at its active leaf.
     /// Idempotent. Ownership is also recorded — without re-pointing, since there is no session to point
     /// at yet or the caller supplies its own — when a window is spawned (createWindowController) and
     /// when one of its displays takes Qt focus (FocusOnDisplay). @see clearFocusedWindow.
     /// @param window The window that just became the active OS window.
-    void setFocusedWindow(vtmux::WindowId window);
+    void setFocusedWindow(vtworkspace::WindowId window);
 
     /// Revokes focus ownership iff @p window currently holds it, leaving no window focused and no
     /// terminal focused. A no-op for any other window, so a background window deactivating cannot
     /// clear the focused window's terminal focus.
     /// @param window The window that just stopped being the active OS window (or is being destroyed).
-    void clearFocusedWindow(vtmux::WindowId window);
+    void clearFocusedWindow(vtworkspace::WindowId window);
 
     void update() { updateStatusLine(); }
 
@@ -394,7 +394,7 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// the label simply stays the same). No-op if no tab hosts @p session. MUST be called on the
     /// GUI thread (it emits dataChanged on the owning controller).
     /// @param session The session whose hosting tab should refresh its label.
-    void refreshTabForSession(vtmux::SessionId session);
+    void refreshTabForSession(vtworkspace::SessionId session);
 
     /// Sets an explicit @p title on the tab hosting @p session, through the authoritative SessionModel
     /// (which repaints the owning window's tab strip). Used by the tmux mirror to reflect a
@@ -402,22 +402,22 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// MUST be called on the GUI thread (it mutates the GUI-facing model).
     /// @param session The session (by model id) whose hosting tab to title.
     /// @param title The new tab title.
-    void setTabTitleForSession(vtmux::SessionId session, std::string title);
+    void setTabTitleForSession(vtworkspace::SessionId session, std::string title);
 
     /// Assigns @p color to the tab hosting @p session (DECAC item 2 "window frame"), routing through
     /// the authoritative SessionModel so the existing tab-color pipeline repaints the tab strip. The
-    /// color is recorded under vtmux::TabColorSource::Application, so it stays hidden behind a color the
+    /// color is recorded under vtworkspace::TabColorSource::Application, so it stays hidden behind a color the
     /// user picked themselves and surfaces once the user clears theirs. No-op if no tab hosts
     /// @p session. MUST be called on the GUI thread (it mutates the GUI-facing model).
     /// @param session The session (by model id) whose hosting tab should be colored.
     /// @param color The color to assign.
-    void setTabColorForSession(vtmux::SessionId session, vtbackend::RGBColor color);
+    void setTabColorForSession(vtworkspace::SessionId session, vtbackend::RGBColor color);
 
     /// Resets the tab hosting @p session back to no application-assigned color (DECAC item 2 with no
     /// colors, or a hard reset). A color the user picked is left alone. No-op if no tab hosts
     /// @p session. MUST be called on the GUI thread.
     /// @param session The session (by model id) whose hosting tab color should be cleared.
-    void resetTabColorForSession(vtmux::SessionId session);
+    void resetTabColorForSession(vtworkspace::SessionId session);
 
     /// Clears the destroyed @p display from any controller that held it as its focused display. Called
     /// when the display's QML item / pane is torn down. Session->display ownership lives on the pane
@@ -427,7 +427,7 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     void detachDisplay(display::TerminalDisplay* display) noexcept;
 
     // {{{ Per-OS-window controllers (Stage 2 of the per-window refactor)
-    /// Mints a fresh vtmux::Window, creates its per-OS-window WindowController and registers it. The
+    /// Mints a fresh vtworkspace::Window, creates its per-OS-window WindowController and registers it. The
     /// controller is the QML-facing adapter for one ApplicationWindow: it owns that window's tab-strip
     /// list-model, PaneProxy tree and window services, and delegates structural / session-lifetime
     /// operations back to this manager tagged with its WindowId. Owned via QQmlEngine CppOwnership
@@ -477,7 +477,7 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
 
     /// The controller adapting @p window, or nullptr. Used by the ModelEvents router to forward each Qt
     /// row/signal emission to the owning window's controller.
-    [[nodiscard]] WindowController* controllerFor(vtmux::WindowId window) const noexcept;
+    [[nodiscard]] WindowController* controllerFor(vtworkspace::WindowId window) const noexcept;
 
     /// The controller owning @p display's OS window, for routing focus. Matches the controller that has
     /// adopted this display's QQuickWindow (ownsOSWindow); falls back to the sole controller before any
@@ -490,14 +490,14 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// window" is _controllersByWindow.size() == 1; when it is, the manager clears residual session
     /// registries. deleteLater()s the controller.
     /// @param windowId The window whose controller is being removed.
-    void removeWindowController(vtmux::WindowId windowId);
+    void removeWindowController(vtworkspace::WindowId windowId);
 
     // Narrow SERVICE interface the WindowController reads through (the manager stays the SessionModel host
     // + SessionId<->TerminalSession registry). These expose the shared model/registry without moving
     // session lifetime out of the manager.
-    [[nodiscard]] vtmux::SessionModel& model() const noexcept { return *_model; }
+    [[nodiscard]] vtworkspace::SessionModel& model() const noexcept { return *_model; }
     /// The backing sessions of every leaf pane in @p tab (public for WindowController::closeTab paths).
-    [[nodiscard]] std::vector<TerminalSession*> sessionsOfTab(vtmux::Tab* tab) const
+    [[nodiscard]] std::vector<TerminalSession*> sessionsOfTab(vtworkspace::Tab* tab) const
     {
         return sessionsInTab(tab);
     }
@@ -518,32 +518,32 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
         }
     }
 
-    // {{{ vtmux::ModelEvents — turn model changes into Qt model/signal notifications
-    void tabAboutToBeAdded(vtmux::WindowId window, int index) override;
-    void tabAdded(vtmux::WindowId window, vtmux::TabId tab, int index) override;
-    void tabAboutToBeRemoved(vtmux::WindowId window, int index) override;
-    void tabClosed(vtmux::WindowId window, vtmux::TabId tab, int index) override;
-    void tabAboutToBeMoved(vtmux::WindowId window, int fromIndex, int toIndex) override;
-    void tabMoved(vtmux::WindowId window, vtmux::TabId tab, int fromIndex, int toIndex) override;
-    void tabAboutToBeMovedToWindow(vtmux::WindowId from,
+    // {{{ vtworkspace::ModelEvents — turn model changes into Qt model/signal notifications
+    void tabAboutToBeAdded(vtworkspace::WindowId window, int index) override;
+    void tabAdded(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
+    void tabAboutToBeRemoved(vtworkspace::WindowId window, int index) override;
+    void tabClosed(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
+    void tabAboutToBeMoved(vtworkspace::WindowId window, int fromIndex, int toIndex) override;
+    void tabMoved(vtworkspace::WindowId window, vtworkspace::TabId tab, int fromIndex, int toIndex) override;
+    void tabAboutToBeMovedToWindow(vtworkspace::WindowId from,
                                    int fromIndex,
-                                   vtmux::WindowId to,
+                                   vtworkspace::WindowId to,
                                    int toIndex) override;
     void tabMovedToWindow(
-        vtmux::WindowId from, vtmux::TabId tab, int fromIndex, vtmux::WindowId to, int toIndex) override;
-    void activeTabChanged(vtmux::WindowId window, vtmux::TabId tab, int index) override;
-    void paneSplit(vtmux::TabId tab, vtmux::PaneId splitNode, vtmux::PaneId newLeaf) override;
-    void paneClosed(vtmux::TabId tab, vtmux::PaneId closed, vtmux::PaneId survivor) override;
-    void activePaneChanged(vtmux::TabId tab, vtmux::PaneId leaf) override;
-    void paneRatioChanged(vtmux::TabId tab, vtmux::PaneId splitNode, double ratio) override;
-    void paneOrientationChanged(vtmux::TabId tab,
-                                vtmux::PaneId splitNode,
-                                vtmux::SplitState newState) override;
-    void paneSwapped(vtmux::TabId tab, vtmux::PaneId a, vtmux::PaneId b) override;
-    void paneZoomChanged(vtmux::TabId tab, std::optional<vtmux::PaneId> zoomedLeaf) override;
-    void paneTreeRestructured(vtmux::TabId tab) override;
-    void tabTitleChanged(vtmux::TabId tab) override;
-    void tabColorChanged(vtmux::TabId tab) override;
+        vtworkspace::WindowId from, vtworkspace::TabId tab, int fromIndex, vtworkspace::WindowId to, int toIndex) override;
+    void activeTabChanged(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
+    void paneSplit(vtworkspace::TabId tab, vtworkspace::PaneId splitNode, vtworkspace::PaneId newLeaf) override;
+    void paneClosed(vtworkspace::TabId tab, vtworkspace::PaneId closed, vtworkspace::PaneId survivor) override;
+    void activePaneChanged(vtworkspace::TabId tab, vtworkspace::PaneId leaf) override;
+    void paneRatioChanged(vtworkspace::TabId tab, vtworkspace::PaneId splitNode, double ratio) override;
+    void paneOrientationChanged(vtworkspace::TabId tab,
+                                vtworkspace::PaneId splitNode,
+                                vtworkspace::SplitState newState) override;
+    void paneSwapped(vtworkspace::TabId tab, vtworkspace::PaneId a, vtworkspace::PaneId b) override;
+    void paneZoomChanged(vtworkspace::TabId tab, std::optional<vtworkspace::PaneId> zoomedLeaf) override;
+    void paneTreeRestructured(vtworkspace::TabId tab) override;
+    void tabTitleChanged(vtworkspace::TabId tab) override;
+    void tabColorChanged(vtworkspace::TabId tab) override;
     // }}}
 
   signals:
@@ -561,7 +561,7 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// state. Called after a cross-window tab move; MUST run after the transplant so removeWindow (via
     /// closeWindow) never tears down the moved tab's now-relocated sessions.
     /// @param window The source window a tab was just moved out of.
-    void closeWindowIfEmpty(vtmux::WindowId window);
+    void closeWindowIfEmpty(vtworkspace::WindowId window);
 
     /// Re-syncs terminal focus after an active-tab/-pane change in @p controller: if it owns the
     /// focused display, moves focus to its new active-leaf session (symmetric out/in). A background
@@ -569,10 +569,10 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @param controller The window whose active tab/pane just changed.
     void syncFocusForWindow(WindowController* controller);
 
-    /// Creates a TerminalSession backing the given vtmux session id, registers it in the
+    /// Creates a TerminalSession backing the given vtworkspace session id, registers it in the
     /// SessionId<->TerminalSession maps, and claims C++ ownership. Does NOT touch the model (the
     /// caller has already created the corresponding tab or split leaf).
-    /// @param sessionId The pre-minted vtmux session id to back.
+    /// @param sessionId The pre-minted vtworkspace session id to back.
     /// @param cwd       Working directory the new shell inherits, if any.
     /// @param pageSize  Initial grid size for the child PTY, if the caller inherits the live window's
     ///                  page size (a new tab/split); @c std::nullopt lets the factory use the profile
@@ -581,7 +581,7 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @param profileName Profile to run this session under, if any; @c std::nullopt (the default)
     ///                    selects the application's default profile.
     contour::TerminalSession* createBackingSession(
-        vtmux::SessionId sessionId,
+        vtworkspace::SessionId sessionId,
         std::optional<std::string> cwd,
         std::optional<vtbackend::PageSize> pageSize = std::nullopt,
         std::optional<vtpty::Process::ExecInfo> const& commandOverride = std::nullopt,
@@ -596,18 +596,18 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// The 0-based row of @p tab within its OWNING window, or -1. Window-agnostic: the owning
     /// window is resolved through the model (windowOfTab), so this is correct for any tab of any
     /// window.
-    [[nodiscard]] int rowOfTab(vtmux::TabId tab) const noexcept;
+    [[nodiscard]] int rowOfTab(vtworkspace::TabId tab) const noexcept;
 
     /// The model tab whose tree contains a leaf hosting @p session, or nullptr.
-    [[nodiscard]] vtmux::Tab* findTabHostingSession(vtmux::SessionId session) const noexcept;
+    [[nodiscard]] vtworkspace::Tab* findTabHostingSession(vtworkspace::SessionId session) const noexcept;
 
     /// The model tab backing tab-strip row @p index of @p window, or nullptr.
-    [[nodiscard]] vtmux::Tab* tabAtRow(vtmux::WindowId window, int index) const noexcept;
+    [[nodiscard]] vtworkspace::Tab* tabAtRow(vtworkspace::WindowId window, int index) const noexcept;
 
     /// Collects the backing TerminalSessions of every leaf pane in @p tab (empty if @p tab is null).
     /// @param tab The tab whose pane sessions to gather.
     /// @return The backing sessions, in pane-tree order.
-    [[nodiscard]] std::vector<TerminalSession*> sessionsInTab(vtmux::Tab* tab) const;
+    [[nodiscard]] std::vector<TerminalSession*> sessionsInTab(vtworkspace::Tab* tab) const;
 
     /// Gathers the backing sessions of every tab in @p window matching @p predicate, in row order.
     /// Shared by the bulk-close operations (closeOtherTabs / closeTabsToRight), which snapshot the doomed
@@ -618,7 +618,7 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     ///                  rowOfTab() lookup, and the tab itself.
     /// @return The matching tabs' backing sessions.
     [[nodiscard]] std::vector<TerminalSession*> gatherSessionsOfTabsWhere(
-        vtmux::Window& window, std::function<bool(int row, vtmux::Tab*)> const& predicate) const;
+        vtworkspace::Window& window, std::function<bool(int row, vtworkspace::Tab*)> const& predicate) const;
 
     /// Terminates each of @p sessions, the single whole-tab close primitive shared by all close
     /// paths (CloseTab, the tab ✕ button, "Close Other Tabs", "Close Tabs to the Right").
@@ -633,7 +633,7 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// session is unknown to the registries or has no model tab.
     /// @param session The backing session whose hosting tab to locate.
     /// @return The hosting tab, or nullptr.
-    [[nodiscard]] vtmux::Tab* tabHostingSession(TerminalSession* session) const noexcept
+    [[nodiscard]] vtworkspace::Tab* tabHostingSession(TerminalSession* session) const noexcept
     {
         if (session == nullptr)
             return nullptr;
@@ -643,7 +643,7 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// Resolves the model window hosting @p session (through its tab), or nullptr.
     /// @param session The backing session whose hosting window to locate.
     /// @return The hosting window, or nullptr.
-    [[nodiscard]] vtmux::Window* windowHostingSession(TerminalSession* session) const noexcept
+    [[nodiscard]] vtworkspace::Window* windowHostingSession(TerminalSession* session) const noexcept
     {
         auto* tab = tabHostingSession(session);
         return tab != nullptr ? _model->window(_model->windowOfTab(tab->id())) : nullptr;
@@ -676,14 +676,14 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// so the post-move refresh lives in exactly one place.
     /// @param tab       The tab to move (nullptr is a no-op).
     /// @param targetRow The destination row in 0-based model tab-space.
-    void moveTabByTab(vtmux::Tab* tab, int targetRow);
+    void moveTabByTab(vtworkspace::Tab* tab, int targetRow);
 
     /// The tab a pane action should target: the tab hosting @p acting (the session that received
     /// the keybinding). Keyboard pane actions act on the tab the user is typing in — there is no
     /// "the active tab" fallback, since with several OS windows that would be ambiguous.
     /// @param acting The acting session (nullptr or unknown yields nullptr).
     /// @return The target tab, or nullptr.
-    [[nodiscard]] vtmux::Tab* paneActionTargetTab(TerminalSession* acting) const noexcept
+    [[nodiscard]] vtworkspace::Tab* paneActionTargetTab(TerminalSession* acting) const noexcept
     {
         return tabHostingSession(acting);
     }
@@ -691,7 +691,7 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// Activates the tab at tab-strip row @p row of @p window: makes it that window's active tab
     /// (so the rendered split tree and subsequent pane operations target it). No-op if @p row is
     /// out of range.
-    void activateModelTabByRow(vtmux::WindowId window, int row);
+    void activateModelTabByRow(vtworkspace::WindowId window, int row);
 
     /// Refreshes every window's indicator status line. The per-window tab list + per-pane marker fan-out
     /// lives on each WindowController (WindowController::updateStatusLine), so this simply routes to every
@@ -723,29 +723,29 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     // whether a model event may move VT focus. A pointer to the focused display cannot serve, because
     // it is null between a display teardown and the next Qt focus-in -- and a tab switch in that gap
     // notified nobody. @see syncFocusForWindow.
-    std::optional<vtmux::WindowId> _focusedWindow;
+    std::optional<vtworkspace::WindowId> _focusedWindow;
 
     bool _multimediaReady = false;
 
-    // {{{ vtmux model integration
+    // {{{ vtworkspace model integration
     // The Qt-free layout model: the authoritative window/tab/pane tree. The model owns the
     // authoritative tab title and color; _sessionsById maps each leaf's SessionId to its backing
     // TerminalSession.
-    std::unique_ptr<vtmux::SessionModel> _model;
-    // Per-OS-window QML adapters, keyed by vtmux::WindowId. The ModelEvents router forwards each Qt
+    std::unique_ptr<vtworkspace::SessionModel> _model;
+    // Per-OS-window QML adapters, keyed by vtworkspace::WindowId. The ModelEvents router forwards each Qt
     // row/signal emission to the controller for the event's window. Owned via QQmlEngine CppOwnership.
     std::unordered_map<uint64_t, WindowController*> _controllersByWindow;
-    // Registry mapping a vtmux session id to the Qt TerminalSession that backs it. The reverse
+    // Registry mapping a vtworkspace session id to the Qt TerminalSession that backs it. The reverse
     // (TerminalSession -> SessionId) needs no map: each TerminalSession stores its own
     // modelSessionId().
     std::unordered_map<uint64_t, TerminalSession*> _sessionsById;
     // SessionId -> the tab hosting that session's leaf, so updateStatusLine() and
     // findTabHostingSession() resolve a session's tab in O(1) instead of walking every tab's tree.
-    std::unordered_map<uint64_t, vtmux::TabId> _tabBySession;
+    std::unordered_map<uint64_t, vtworkspace::TabId> _tabBySession;
     uint64_t _nextSessionId { 1 };
     // The id pre-minted for the next tab the model is about to create, consumed by the model's
     // SessionAllocator so a model tab and its backing TerminalSession share one id.
-    std::optional<vtmux::SessionId> _pendingSessionId;
+    std::optional<vtworkspace::SessionId> _pendingSessionId;
     // Whether a window already consumed the startup layout (--layout / default_layout). The app's
     // layout name is stable for the whole process, but the layout must apply to the FIRST window
     // only — not to every window spawned later (see consumeDefaultLayout()).
@@ -754,7 +754,7 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     // A tab tear-off staged by tearOffTabToNewWindow(): the (source window, tab) the next spawned
     // window should adopt as its sole tab instead of creating a fresh one. Consumed exactly once by
     // consumePendingTransplant() from that window's main.qml. Mirrors ContourGuiApp::_pendingSpawnScreen.
-    std::optional<std::pair<vtmux::WindowId, vtmux::TabId>> _pendingTransplant;
+    std::optional<std::pair<vtworkspace::WindowId, vtworkspace::TabId>> _pendingTransplant;
 
     // Attach-mode window binder installed by ContourGuiApp (B4): a freshly-spawned window asks it
     // (via consumeAttachWindow, from main.qml) whether it hosts a pending daemon window. Empty when

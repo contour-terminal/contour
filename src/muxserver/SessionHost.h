@@ -4,12 +4,12 @@
 /// @file
 /// `SessionHost` — the daemon-side owner of terminal sessions.
 ///
-/// This is the second consumer the vtmux model was designed for (see
-/// vtmux/ModelEvents.h): where the Qt GUI maps a SessionId to a TerminalSession,
+/// This is the second consumer the vtworkspace model was designed for (see
+/// vtworkspace/ModelEvents.h): where the Qt GUI maps a SessionId to a TerminalSession,
 /// the host maps it to an owned {Pty, Terminal} pair pumped by a dedicated
 /// thread, exactly like the GUI's per-session Terminal::mainLoop split.
 ///
-/// Threading: the vtmux::SessionModel and all SessionHost methods are confined
+/// Threading: the vtworkspace::SessionModel and all SessionHost methods are confined
 /// to the event-loop thread. Session pump threads never touch the model — they
 /// marshal completion (PTY closed) through EventLoop::post().
 
@@ -27,8 +27,8 @@
 #include <vector>
 
 #include <net/EventLoop.h>
-#include <vtmux/ModelEvents.h>
-#include <vtmux/SessionModel.h>
+#include <vtworkspace/ModelEvents.h>
+#include <vtworkspace/SessionModel.h>
 
 namespace muxserver
 {
@@ -47,22 +47,22 @@ class SessionStreamEvents
     virtual ~SessionStreamEvents() = default;
 
     /// @p session processed new output — the delta/notification trigger.
-    virtual void sessionScreenUpdated(vtmux::SessionId /*session*/) {}
+    virtual void sessionScreenUpdated(vtworkspace::SessionId /*session*/) {}
 
     /// A raw PTY output chunk of @p session BEFORE the parser consumed it —
     /// the control-mode %output byte tap.
-    virtual void sessionOutput(vtmux::SessionId /*session*/, std::string const& /*bytes*/) {}
+    virtual void sessionOutput(vtworkspace::SessionId /*session*/, std::string const& /*bytes*/) {}
 
     /// @p session was destroyed (its shell exited); fires after the host removed
     /// it. Observers holding per-session state must drop it here, or it leaks for
     /// the connection's whole lifetime.
-    virtual void sessionClosed(vtmux::SessionId /*session*/) {}
+    virtual void sessionClosed(vtworkspace::SessionId /*session*/) {}
 
     /// @p session rang the bell (BEL).
-    virtual void sessionBell(vtmux::SessionId /*session*/) {}
+    virtual void sessionBell(vtworkspace::SessionId /*session*/) {}
 
     /// @p session raised a desktop notification (OSC 9 / OSC 777 / OSC 99).
-    virtual void sessionNotify(vtmux::SessionId /*session*/,
+    virtual void sessionNotify(vtworkspace::SessionId /*session*/,
                                std::string const& /*title*/,
                                std::string const& /*body*/)
     {
@@ -71,7 +71,7 @@ class SessionStreamEvents
     /// @p session wrote the clipboard (OSC 52); @p data is the raw, decoded text.
     /// The daemon forwards it unconditionally — the CLIENT applies its own
     /// clipboard-write permission.
-    virtual void sessionCopyToClipboard(vtmux::SessionId /*session*/, std::string const& /*data*/) {}
+    virtual void sessionCopyToClipboard(vtworkspace::SessionId /*session*/, std::string const& /*data*/) {}
 };
 
 /// One hosted session: the terminal (owning its PTY) plus the pump thread
@@ -86,7 +86,7 @@ class HostedSession
     ///        input batch (the host marshals it onto the loop).
     /// @param onClosed Invoked on the PUMP thread once the PTY closed and the
     ///        pump loop ended (the host marshals it onto the loop).
-    HostedSession(vtmux::SessionId id,
+    HostedSession(vtworkspace::SessionId id,
                   std::unique_ptr<vtpty::Pty> pty,
                   vtbackend::Settings settings,
                   std::function<void()> onScreenUpdated,
@@ -110,7 +110,7 @@ class HostedSession
     /// Closes the PTY device, which ends the pump loop.
     void terminate();
 
-    [[nodiscard]] vtmux::SessionId id() const noexcept { return _id; }
+    [[nodiscard]] vtworkspace::SessionId id() const noexcept { return _id; }
     [[nodiscard]] vtbackend::Terminal& terminal() noexcept { return _terminal; }
 
   private:
@@ -175,16 +175,16 @@ class HostedSession
 
     void pumpLoop();
 
-    vtmux::SessionId _id;
+    vtworkspace::SessionId _id;
     Events _events; ///< Must outlive _terminal (referenced by it).
     vtbackend::Terminal _terminal;
     std::function<void()> _onClosed;
     std::unique_ptr<std::thread> _pumpThread;
 };
 
-/// Owns every hosted session and the authoritative vtmux::SessionModel,
+/// Owns every hosted session and the authoritative vtworkspace::SessionModel,
 /// fanning each completed model change out to subscribed observers.
-class SessionHost final: public vtmux::ModelEvents
+class SessionHost final: public vtworkspace::ModelEvents
 {
   public:
     /// @param loop The event loop all model mutation is confined to.
@@ -204,10 +204,10 @@ class SessionHost final: public vtmux::ModelEvents
     SessionHost& operator=(SessionHost&&) = delete;
 
     /// @return The authoritative session/layout model.
-    [[nodiscard]] vtmux::SessionModel& model() noexcept { return _model; }
+    [[nodiscard]] vtworkspace::SessionModel& model() noexcept { return _model; }
 
     /// @return The host's window (the daemon starts with exactly one).
-    [[nodiscard]] vtmux::WindowId windowId() const noexcept { return _window; }
+    [[nodiscard]] vtworkspace::WindowId windowId() const noexcept { return _window; }
 
     /// @return The authoritative client area, in cells: layout projection and
     ///         PTY sizes derive from it. Starts at the settings' page size.
@@ -222,30 +222,30 @@ class SessionHost final: public vtmux::ModelEvents
     /// using the same pre-mint handshake as the GUI: the backing session is
     /// created first, then the model's allocator hands its id back.
     /// @return The created tab, or nullptr on failure (nothing is leaked).
-    vtmux::Tab* createTab();
+    vtworkspace::Tab* createTab();
 
     /// Creates a NEW window with a first tab (an empty window is useless), backed by
     /// a fresh session — the daemon side of a client "new window" (B4).
     /// @return The created window, or nullptr on failure (nothing is leaked).
-    vtmux::Window* createWindow();
+    vtworkspace::Window* createWindow();
 
     /// Splits @p tab's active pane, backing the new leaf with a fresh session.
     /// @param tab The tab whose active pane splits.
     /// @param orientation The split axis.
     /// @param ratio The first child's share.
-    void splitActivePane(vtmux::TabId tab, vtmux::SplitState orientation, double ratio = 0.5);
+    void splitActivePane(vtworkspace::TabId tab, vtworkspace::SplitState orientation, double ratio = 0.5);
 
     /// @return The terminal backing @p session, or nullptr if unknown.
-    [[nodiscard]] vtbackend::Terminal* terminal(vtmux::SessionId session) noexcept;
+    [[nodiscard]] vtbackend::Terminal* terminal(vtworkspace::SessionId session) noexcept;
 
     /// @return The number of live hosted sessions.
     [[nodiscard]] std::size_t sessionCount() const noexcept { return _sessions.size(); }
 
     /// Registers @p observer for every completed model change. Not owned.
-    void subscribe(vtmux::ModelEvents* observer);
+    void subscribe(vtworkspace::ModelEvents* observer);
 
     /// Removes @p observer. Idempotent.
-    void unsubscribe(vtmux::ModelEvents* observer);
+    void unsubscribe(vtworkspace::ModelEvents* observer);
 
     /// Registers @p observer for session output-stream events (screen updates
     /// and the raw byte tap). Not owned; callbacks fire on the loop thread.
@@ -258,29 +258,29 @@ class SessionHost final: public vtmux::ModelEvents
     /// the model (prune-then-terminate) and destroys the session. Invoked on
     /// the loop thread — by the pump's posted completion in production, or
     /// directly by tests.
-    void handleSessionExit(vtmux::SessionId session);
+    void handleSessionExit(vtworkspace::SessionId session);
 
-    // vtmux::ModelEvents — every completed change fans out to subscribers.
-    void tabAdded(vtmux::WindowId window, vtmux::TabId tab, int index) override;
-    void tabClosed(vtmux::WindowId window, vtmux::TabId tab, int index) override;
-    void tabMoved(vtmux::WindowId window, vtmux::TabId tab, int fromIndex, int toIndex) override;
-    void activeTabChanged(vtmux::WindowId window, vtmux::TabId tab, int index) override;
-    void paneSplit(vtmux::TabId tab, vtmux::PaneId splitNode, vtmux::PaneId newLeaf) override;
-    void paneClosed(vtmux::TabId tab, vtmux::PaneId closed, vtmux::PaneId survivor) override;
-    void activePaneChanged(vtmux::TabId tab, vtmux::PaneId leaf) override;
-    void paneRatioChanged(vtmux::TabId tab, vtmux::PaneId splitNode, double ratio) override;
-    void tabTitleChanged(vtmux::TabId tab) override;
-    void tabColorChanged(vtmux::TabId tab) override;
-    void paneOrientationChanged(vtmux::TabId tab, vtmux::PaneId splitNode, vtmux::SplitState state) override;
-    void paneSwapped(vtmux::TabId tab, vtmux::PaneId a, vtmux::PaneId b) override;
-    void paneZoomChanged(vtmux::TabId tab, std::optional<vtmux::PaneId> zoomedLeaf) override;
-    void paneTreeRestructured(vtmux::TabId tab) override;
+    // vtworkspace::ModelEvents — every completed change fans out to subscribers.
+    void tabAdded(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
+    void tabClosed(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
+    void tabMoved(vtworkspace::WindowId window, vtworkspace::TabId tab, int fromIndex, int toIndex) override;
+    void activeTabChanged(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
+    void paneSplit(vtworkspace::TabId tab, vtworkspace::PaneId splitNode, vtworkspace::PaneId newLeaf) override;
+    void paneClosed(vtworkspace::TabId tab, vtworkspace::PaneId closed, vtworkspace::PaneId survivor) override;
+    void activePaneChanged(vtworkspace::TabId tab, vtworkspace::PaneId leaf) override;
+    void paneRatioChanged(vtworkspace::TabId tab, vtworkspace::PaneId splitNode, double ratio) override;
+    void tabTitleChanged(vtworkspace::TabId tab) override;
+    void tabColorChanged(vtworkspace::TabId tab) override;
+    void paneOrientationChanged(vtworkspace::TabId tab, vtworkspace::PaneId splitNode, vtworkspace::SplitState state) override;
+    void paneSwapped(vtworkspace::TabId tab, vtworkspace::PaneId a, vtworkspace::PaneId b) override;
+    void paneZoomChanged(vtworkspace::TabId tab, std::optional<vtworkspace::PaneId> zoomedLeaf) override;
+    void paneTreeRestructured(vtworkspace::TabId tab) override;
 
   private:
     /// Spawns and registers the backing session for the next model allocation
     /// (the pre-mint half of the handshake).
     /// @return The minted id, or nullopt if the PTY factory failed.
-    [[nodiscard]] std::optional<vtmux::SessionId> seedSession();
+    [[nodiscard]] std::optional<vtworkspace::SessionId> seedSession();
 
     /// Resizes every leaf's terminal to its cell-space projection under the
     /// current client area — run after every layout-shape change so PTY sizes
@@ -290,7 +290,7 @@ class SessionHost final: public vtmux::ModelEvents
     /// Fans one completed model change out to every subscriber, invoking @p method
     /// on each with @p args. Single-sources the observer loop the ModelEvents
     /// overrides below all share.
-    /// @param method A vtmux::ModelEvents member function pointer.
+    /// @param method A vtworkspace::ModelEvents member function pointer.
     /// @param args The event arguments (copied once here, then passed to each observer).
     template <typename Method, typename... Args>
     void fanOut(Method method, Args... args)
@@ -304,7 +304,7 @@ class SessionHost final: public vtmux::ModelEvents
     /// that lags what observers are about to advertise. Spelling the reproject at
     /// the call site keeps a newly added shape-changing event from silently
     /// forgetting it.
-    /// @param method A vtmux::ModelEvents member function pointer.
+    /// @param method A vtworkspace::ModelEvents member function pointer.
     /// @param args The event arguments (forwarded to fanOut).
     template <typename Method, typename... Args>
     void fanOutAfterReproject(Method method, Args... args)
@@ -320,13 +320,13 @@ class SessionHost final: public vtmux::ModelEvents
     bool _startPumps;
 
     uint64_t _nextSessionId = 1;
-    std::optional<vtmux::SessionId> _pendingSessionId; ///< Consumed by the model's allocator.
+    std::optional<vtworkspace::SessionId> _pendingSessionId; ///< Consumed by the model's allocator.
     std::unordered_map<uint64_t, std::unique_ptr<HostedSession>> _sessions;
-    std::vector<vtmux::ModelEvents*> _subscribers;
+    std::vector<vtworkspace::ModelEvents*> _subscribers;
     std::vector<SessionStreamEvents*> _streamSubscribers;
 
-    vtmux::SessionModel _model; ///< Last member: its callbacks reach into the host.
-    vtmux::WindowId _window;
+    vtworkspace::SessionModel _model; ///< Last member: its callbacks reach into the host.
+    vtworkspace::WindowId _window;
 };
 
 /// Scoped subscription: keeps @p Observer subscribed to @p Host for this object's
@@ -365,7 +365,7 @@ using ScopedStreamSubscription = ScopedSubscription<SessionHost, SessionStreamEv
 
 /// Scoped model-events subscription: a native client keeps one in its frame so
 /// its layout observer is removed even when the serve loop unwinds early.
-using ScopedModelSubscription = ScopedSubscription<SessionHost, vtmux::ModelEvents>;
+using ScopedModelSubscription = ScopedSubscription<SessionHost, vtworkspace::ModelEvents>;
 
 /// Factory for stream subscriptions — avoids repeating the member-function
 /// pointers at every call site.
@@ -377,7 +377,7 @@ inline ScopedStreamSubscription makeScopedStreamSubscription(SessionHost& host, 
 }
 
 /// Factory for model-event subscriptions.
-inline ScopedModelSubscription makeScopedModelSubscription(SessionHost& host, vtmux::ModelEvents& observer)
+inline ScopedModelSubscription makeScopedModelSubscription(SessionHost& host, vtworkspace::ModelEvents& observer)
 {
     return ScopedModelSubscription { host, observer, &SessionHost::subscribe, &SessionHost::unsubscribe };
 }

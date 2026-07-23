@@ -21,7 +21,7 @@ reverse.
 A hosted session is `{Pty, vtbackend::Terminal}` owned by the daemon's
 `SessionHost`, pumped by a dedicated blocking-read thread exactly like the
 GUI's `TerminalSession::mainLoop`. Everything else — sockets, protocol state,
-the `vtmux::SessionModel` — is confined to one reactor thread; the pump
+the `vtworkspace::SessionModel` — is confined to one reactor thread; the pump
 threads marshal onto it via `EventLoop::post()`.
 
 Each session's output is observable at two points:
@@ -57,7 +57,7 @@ layout codec's conformance tests drive real `tmux select-layout`:
   containers into right-leaning binary chains (round-trips compare trees, not
   strings);
 - `refresh-client -C` resizes within tmux's `[1, 10000]` bounds; the host then
-  reprojects every pane's PTY size through `vtmux::layoutInCells`, so
+  reprojects every pane's PTY size through `vtworkspace::layoutInCells`, so
   advertised layouts and actual shell dimensions never drift.
 
 The client side (`tmux/ControlModeParser` + `tmux/TmuxGateway` +

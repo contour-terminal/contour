@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtmux/LayoutTree.h>
+#include <vtworkspace/LayoutTree.h>
 
 #include <algorithm>
 #include <numeric>
 #include <tuple>
 
-#include <vtmux/Pane.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/Tab.h>
 
-namespace vtmux
+namespace vtworkspace
 {
 
 LayoutPane const& leftmostLeaf(LayoutPane const& node)
@@ -171,4 +171,4 @@ LayoutTab serializeTab(Tab const& tab, LeafResolver const& resolve)
     return out;
 }
 
-} // namespace vtmux
+} // namespace vtworkspace

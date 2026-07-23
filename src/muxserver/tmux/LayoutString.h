@@ -8,7 +8,7 @@
 ///
 /// Grammar and checksum are byte-verified against tmux's layout-custom.c (and
 /// iTerm2's independent re-implementation). tmux containers are N-ARY while
-/// vtmux's pane tree is BINARY: emission is always exact (nested binary output
+/// vtworkspace's pane tree is BINARY: emission is always exact (nested binary output
 /// is valid tmux), but ingest must accept n-ary containers — so round trips
 /// compare TREES, never strings.
 
@@ -22,7 +22,7 @@
 #include <string_view>
 #include <vector>
 
-#include <vtmux/Pane.h>
+#include <vtworkspace/Pane.h>
 
 namespace muxserver::tmux
 {
@@ -30,7 +30,7 @@ namespace muxserver::tmux
 /// One node of a parsed (n-ary) tmux layout.
 struct ParsedLayout
 {
-    /// Container orientation, mapping to vtmux::SplitState on collapse.
+    /// Container orientation, mapping to vtworkspace::SplitState on collapse.
     enum class Kind : std::uint8_t
     {
         Leaf,       ///< A pane: carries paneId.
@@ -55,11 +55,11 @@ struct ParsedLayout
 [[nodiscard]] std::uint16_t layoutChecksum(std::string_view body) noexcept;
 
 /// Serializes @p root projected into @p area as a checksummed tmux layout
-/// string. Pane ids are the vtmux PaneId values.
+/// string. Pane ids are the vtworkspace PaneId values.
 /// @param root The pane (sub)tree occupying the whole area (Tab::layoutRoot()).
 /// @param area The content grid, in cells.
 /// @return The layout string, e.g. `b25f,160x50,0,0{80x50,0,0,1,79x50,81,0,2}`.
-[[nodiscard]] std::string encodeLayout(vtmux::Pane const& root, vtpty::PageSize area);
+[[nodiscard]] std::string encodeLayout(vtworkspace::Pane const& root, vtpty::PageSize area);
 
 /// Parses and validates a checksummed tmux layout string.
 ///
@@ -73,12 +73,12 @@ struct ParsedLayout
 [[nodiscard]] std::expected<ParsedLayout, std::string> parseLayout(std::string_view text);
 
 /// A binary split tree recovered from a parsed layout, ready to apply onto a
-/// vtmux pane tree: n-ary containers collapse into right-leaning chains, with
+/// vtworkspace pane tree: n-ary containers collapse into right-leaning chains, with
 /// each split's ratio derived from the children's cell extents.
 struct BinaryLayout
 {
     std::optional<std::uint64_t> paneId;                     ///< Set for leaves.
-    vtmux::SplitState orientation = vtmux::SplitState::None; ///< None for leaves.
+    vtworkspace::SplitState orientation = vtworkspace::SplitState::None; ///< None for leaves.
     double ratio = 0.5;                                      ///< First child's share (splits only).
     std::unique_ptr<BinaryLayout> first {};                  ///< Splits only.
     std::unique_ptr<BinaryLayout> second {};                 ///< Splits only.

@@ -48,9 +48,9 @@
 #include <unordered_map>
 
 #include <QtTest/QTest>
-#include <vtmux/Pane.h>
-#include <vtmux/SessionModel.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/SessionModel.h>
+#include <vtworkspace/Tab.h>
 
 using namespace std::string_view_literals;
 using namespace std::chrono_literals;
@@ -1267,7 +1267,7 @@ TEST_CASE("display: content-driven resize refuses, then resizes once the session
 {
     // The content-driven-resize choke point (applyContentDrivenResize) solves the pane tree against the
     // model: it resizes only if the requesting display's session is the active tab's leaf. The harness
-    // builds a live session+display but does NOT register it in the controller's vtmux window, so the
+    // builds a live session+display but does NOT register it in the controller's vtworkspace window, so the
     // resize is refused until we mint a model tab whose leaf carries this session's id. This exercises
     // BOTH the refusal branch and the real happy path (contentSizeForLeaf -> osWindow->resize()), which
     // need a live renderer (cellSize) and so are only reachable through this display-gated harness.

@@ -9,9 +9,9 @@
 #include <ranges>
 #include <vector>
 
-#include <vtmux/PaneLayout.h>
+#include <vtworkspace/PaneLayout.h>
 
-using namespace vtmux;
+using namespace vtworkspace;
 using vtpty::ColumnCount;
 using vtpty::LineCount;
 
@@ -49,14 +49,14 @@ LayoutSize simulateAllocation(Pane& root, Pane const& leaf, LayoutSize content)
 
 } // namespace
 
-TEST_CASE("PaneLayout: unsplit leaf passes the requirement through", "[vtmux][layout]")
+TEST_CASE("PaneLayout: unsplit leaf passes the requirement through", "[vtworkspace][layout]")
 {
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
     CHECK(contentSizeForLeaf(root, { .width = 640, .height = 480 }, Handle, root)
           == LayoutSize { .width = 640, .height = 480 });
 }
 
-TEST_CASE("PaneLayout: side-by-side split solves the width axis only", "[vtmux][layout]")
+TEST_CASE("PaneLayout: side-by-side split solves the width axis only", "[vtworkspace][layout]")
 {
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
     auto const [first, second] =
@@ -71,7 +71,7 @@ TEST_CASE("PaneLayout: side-by-side split solves the width axis only", "[vtmux][
           == LayoutSize { .width = 812, .height = 300 });
 }
 
-TEST_CASE("PaneLayout: stacked split solves the height axis only", "[vtmux][layout]")
+TEST_CASE("PaneLayout: stacked split solves the height axis only", "[vtworkspace][layout]")
 {
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
     auto const [first, second] =
@@ -85,7 +85,7 @@ TEST_CASE("PaneLayout: stacked split solves the height axis only", "[vtmux][layo
           == LayoutSize { .width = 640, .height = 142 });
 }
 
-TEST_CASE("PaneLayout: nested splits compose per traversed level", "[vtmux][layout]")
+TEST_CASE("PaneLayout: nested splits compose per traversed level", "[vtworkspace][layout]")
 {
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
     auto const [left, right] =
@@ -101,7 +101,7 @@ TEST_CASE("PaneLayout: nested splits compose per traversed level", "[vtmux][layo
           == LayoutSize { .width = 412, .height = 209 });
 }
 
-TEST_CASE("PaneLayout: solved content never allocates the leaf below its requirement", "[vtmux][layout]")
+TEST_CASE("PaneLayout: solved content never allocates the leaf below its requirement", "[vtworkspace][layout]")
 {
     // Adversarial ratios at the clamp extremes, three levels deep.
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
@@ -125,7 +125,7 @@ TEST_CASE("PaneLayout: solved content never allocates the leaf below its require
     }
 }
 
-TEST_CASE("PaneLayout: the layout root bounds the ratio walk", "[vtmux][layout][zoom]")
+TEST_CASE("PaneLayout: the layout root bounds the ratio walk", "[vtworkspace][layout][zoom]")
 {
     // A three-leaf tree: root splits side-by-side, its second child splits top/bottom.
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
@@ -164,7 +164,7 @@ TEST_CASE("PaneLayout: the layout root bounds the ratio walk", "[vtmux][layout][
     }
 }
 
-TEST_CASE("layoutInCells: a single leaf fills the whole area", "[vtmux][layout][cells]")
+TEST_CASE("layoutInCells: a single leaf fills the whole area", "[vtworkspace][layout][cells]")
 {
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
     auto const rects = layoutInCells(root, { .lines = LineCount(24), .columns = ColumnCount(80) });
@@ -172,7 +172,7 @@ TEST_CASE("layoutInCells: a single leaf fills the whole area", "[vtmux][layout][
     CHECK(rects[0] == PaneCellRect { .pane = PaneId { 1 }, .x = 0, .y = 0, .width = 80, .height = 24 });
 }
 
-TEST_CASE("layoutInCells: a side-by-side split spends one column on the divider", "[vtmux][layout][cells]")
+TEST_CASE("layoutInCells: a side-by-side split spends one column on the divider", "[vtworkspace][layout][cells]")
 {
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
     auto const [first, second] =
@@ -188,7 +188,7 @@ TEST_CASE("layoutInCells: a side-by-side split spends one column on the divider"
     CHECK(rects[0].width + 1 + rects[1].width == 80);
 }
 
-TEST_CASE("layoutInCells: a stacked split spends one line on the divider", "[vtmux][layout][cells]")
+TEST_CASE("layoutInCells: a stacked split spends one line on the divider", "[vtworkspace][layout][cells]")
 {
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
     auto const [top, bottom] =
@@ -202,7 +202,7 @@ TEST_CASE("layoutInCells: a stacked split spends one line on the divider", "[vtm
 }
 
 TEST_CASE("layoutInCells: an asymmetric ratio rounds and the remainder goes to the second child",
-          "[vtmux][layout][cells]")
+          "[vtworkspace][layout][cells]")
 {
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
     root.split(SplitState::Vertical, PaneId { 2 }, PaneId { 3 }, SessionId { 2 }, 0.7);
@@ -216,7 +216,7 @@ TEST_CASE("layoutInCells: an asymmetric ratio rounds and the remainder goes to t
     CHECK(rects[0].width + 1 + rects[1].width == 100);
 }
 
-TEST_CASE("layoutInCells: nested splits keep the cell arithmetic exact per level", "[vtmux][layout][cells]")
+TEST_CASE("layoutInCells: nested splits keep the cell arithmetic exact per level", "[vtworkspace][layout][cells]")
 {
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
     auto const [left, right] =
@@ -237,7 +237,7 @@ TEST_CASE("layoutInCells: nested splits keep the cell arithmetic exact per level
     CHECK(rects[1].height + 1 + rects[2].height == 50);
 }
 
-TEST_CASE("layoutInCells: an extreme ratio still leaves the small child one cell", "[vtmux][layout][cells]")
+TEST_CASE("layoutInCells: an extreme ratio still leaves the small child one cell", "[vtworkspace][layout][cells]")
 {
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
     // Pane::setRatio itself clamps into [0.05, 0.95], so 0.999 arrives as 0.95. In a 4-column area
@@ -252,7 +252,7 @@ TEST_CASE("layoutInCells: an extreme ratio still leaves the small child one cell
     CHECK(rects[0].width + 1 + rects[1].width == 4);
 }
 
-TEST_CASE("layoutInCells: an area too small for a split degrades without crashing", "[vtmux][layout][cells]")
+TEST_CASE("layoutInCells: an area too small for a split degrades without crashing", "[vtworkspace][layout][cells]")
 {
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
     root.split(SplitState::Vertical, PaneId { 2 }, PaneId { 3 }, SessionId { 2 }, 0.5);

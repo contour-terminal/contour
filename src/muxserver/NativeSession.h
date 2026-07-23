@@ -62,41 +62,41 @@ class NativeSession final: public SessionStreamEvents
 
     /// Marks @p session changed and schedules a debounced delta flush (the
     /// connection subscribes itself to the host's stream fan-out).
-    void sessionScreenUpdated(vtmux::SessionId session) override;
+    void sessionScreenUpdated(vtworkspace::SessionId session) override;
 
     /// Drops the follow state for a session the host destroyed, so a long-lived
     /// connection that churns through many sessions does not accumulate it.
-    void sessionClosed(vtmux::SessionId session) override;
+    void sessionClosed(vtworkspace::SessionId session) override;
 
-    void sessionBell(vtmux::SessionId session) override;
-    void sessionNotify(vtmux::SessionId session, std::string const& title, std::string const& body) override;
-    void sessionCopyToClipboard(vtmux::SessionId session, std::string const& data) override;
+    void sessionBell(vtworkspace::SessionId session) override;
+    void sessionNotify(vtworkspace::SessionId session, std::string const& title, std::string const& body) override;
+    void sessionCopyToClipboard(vtworkspace::SessionId session, std::string const& data) override;
 
     /// Adapts the host's model-change fan-out into a single "layout changed"
     /// callback: every structural change re-pushes the whole LayoutState. It is a
-    /// `vtmux::ModelEvents` the caller subscribes to the host (see @ref
+    /// `vtworkspace::ModelEvents` the caller subscribes to the host (see @ref
     /// layoutObserver), so the model stays transport-agnostic.
-    struct LayoutObserver final: vtmux::ModelEvents
+    struct LayoutObserver final: vtworkspace::ModelEvents
     {
         std::function<void()> onChange;
-        void tabAdded(vtmux::WindowId, vtmux::TabId, int) override { onChange(); }
-        void tabClosed(vtmux::WindowId, vtmux::TabId, int) override { onChange(); }
-        void tabMoved(vtmux::WindowId, vtmux::TabId, int, int) override { onChange(); }
-        void tabMovedToWindow(vtmux::WindowId, vtmux::TabId, int, vtmux::WindowId, int) override
+        void tabAdded(vtworkspace::WindowId, vtworkspace::TabId, int) override { onChange(); }
+        void tabClosed(vtworkspace::WindowId, vtworkspace::TabId, int) override { onChange(); }
+        void tabMoved(vtworkspace::WindowId, vtworkspace::TabId, int, int) override { onChange(); }
+        void tabMovedToWindow(vtworkspace::WindowId, vtworkspace::TabId, int, vtworkspace::WindowId, int) override
         {
             onChange();
         }
-        void activeTabChanged(vtmux::WindowId, vtmux::TabId, int) override { onChange(); }
-        void paneSplit(vtmux::TabId, vtmux::PaneId, vtmux::PaneId) override { onChange(); }
-        void paneClosed(vtmux::TabId, vtmux::PaneId, vtmux::PaneId) override { onChange(); }
-        void activePaneChanged(vtmux::TabId, vtmux::PaneId) override { onChange(); }
-        void paneRatioChanged(vtmux::TabId, vtmux::PaneId, double) override { onChange(); }
-        void paneOrientationChanged(vtmux::TabId, vtmux::PaneId, vtmux::SplitState) override { onChange(); }
-        void paneSwapped(vtmux::TabId, vtmux::PaneId, vtmux::PaneId) override { onChange(); }
-        void paneZoomChanged(vtmux::TabId, std::optional<vtmux::PaneId>) override { onChange(); }
-        void paneTreeRestructured(vtmux::TabId) override { onChange(); }
-        void tabTitleChanged(vtmux::TabId) override { onChange(); }
-        void tabColorChanged(vtmux::TabId) override { onChange(); }
+        void activeTabChanged(vtworkspace::WindowId, vtworkspace::TabId, int) override { onChange(); }
+        void paneSplit(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override { onChange(); }
+        void paneClosed(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override { onChange(); }
+        void activePaneChanged(vtworkspace::TabId, vtworkspace::PaneId) override { onChange(); }
+        void paneRatioChanged(vtworkspace::TabId, vtworkspace::PaneId, double) override { onChange(); }
+        void paneOrientationChanged(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::SplitState) override { onChange(); }
+        void paneSwapped(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override { onChange(); }
+        void paneZoomChanged(vtworkspace::TabId, std::optional<vtworkspace::PaneId>) override { onChange(); }
+        void paneTreeRestructured(vtworkspace::TabId) override { onChange(); }
+        void tabTitleChanged(vtworkspace::TabId) override { onChange(); }
+        void tabColorChanged(vtworkspace::TabId) override { onChange(); }
     };
 
     /// The layout observer to subscribe to the host's model fan-out (see
@@ -159,7 +159,7 @@ class NativeSession final: public SessionStreamEvents
 
     /// Pushes a transient SessionEvent (bell / notification / clipboard) as an
     /// unsolicited frame (serial 0), once the handshake completed.
-    void emitSessionEvent(vtmux::SessionId session,
+    void emitSessionEvent(vtworkspace::SessionId session,
                           proto::SessionEventKind kind,
                           std::string a,
                           std::string b);
@@ -174,7 +174,7 @@ class NativeSession final: public SessionStreamEvents
     [[nodiscard]] bool completeHandshake(proto::DecodedFrame const& frame);
 
     /// Sends SessionState + a snapshot/delta for @p session (under its lock).
-    void pushDelta(vtmux::SessionId session, bool forceSnapshot);
+    void pushDelta(vtworkspace::SessionId session, bool forceSnapshot);
 
     /// Pulls the session's live renditional state (title, cursor shape, cwd,
     /// colours, status display, Kitty-keyboard flags) into @p delta as diffs and —
@@ -186,7 +186,7 @@ class NativeSession final: public SessionStreamEvents
                                  FollowState& follow,
                                  proto::Delta& delta,
                                  std::optional<proto::SessionState>& state,
-                                 vtmux::SessionId session,
+                                 vtworkspace::SessionId session,
                                  uint8_t screenTypeValue,
                                  bool snapshot);
 

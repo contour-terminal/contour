@@ -9,10 +9,10 @@
 #include <string>
 #include <unordered_map>
 
-#include <vtmux/LayoutTree.h>
+#include <vtworkspace/LayoutTree.h>
 
 // The pure layout tree model (structs, realize, serialize, ratio math) is tested in
-// src/vtmux/LayoutTree_test.cpp; this file covers only the contour-side YAML emission
+// src/vtworkspace/LayoutTree_test.cpp; this file covers only the contour-side YAML emission
 // (emitLayoutsYaml) and its round trip through the config parser.
 
 using namespace contour;
@@ -45,9 +45,9 @@ TEST_CASE("emitLayoutsYaml: round-trips a leaf + bare + split layout through the
     config::LayoutTab t2;
     t2.title = "servers";
     config::LayoutPane nested;
-    nested.orientation = vtmux::SplitState::Horizontal;
+    nested.orientation = vtworkspace::SplitState::Horizontal;
     nested.children = { mk("htop"), mk("journalctl -f") };
-    t2.root.orientation = vtmux::SplitState::Vertical;
+    t2.root.orientation = vtworkspace::SplitState::Vertical;
     t2.root.children = { mk("npm run dev"), nested };
 
     work.tabs = { t0, t1, t2 };
@@ -83,12 +83,12 @@ TEST_CASE("emitLayoutsYaml: round-trips a leaf + bare + split layout through the
     auto const& p2 = parsed.tabs[2];
     CHECK(p2.title == "servers");
     REQUIRE_FALSE(p2.root.isLeaf());
-    CHECK(p2.root.orientation == vtmux::SplitState::Vertical);
+    CHECK(p2.root.orientation == vtworkspace::SplitState::Vertical);
     REQUIRE(p2.root.children.size() == 2);
     CHECK(*p2.root.children[0].command == "npm run dev");
     auto const& nestedParsed = p2.root.children[1];
     REQUIRE_FALSE(nestedParsed.isLeaf());
-    CHECK(nestedParsed.orientation == vtmux::SplitState::Horizontal);
+    CHECK(nestedParsed.orientation == vtworkspace::SplitState::Horizontal);
     REQUIRE(nestedParsed.children.size() == 2);
     CHECK(*nestedParsed.children[0].command == "htop");
     CHECK(*nestedParsed.children[1].command == "journalctl -f");
@@ -134,7 +134,7 @@ TEST_CASE("emitLayoutsYaml: round-trips an asymmetric split ratio through save",
     };
 
     config::LayoutTab tab;
-    tab.root.orientation = vtmux::SplitState::Vertical;
+    tab.root.orientation = vtworkspace::SplitState::Vertical;
     tab.root.children = { mk("left", 0.7), mk("right", 0.3) };
 
     config::Layout work;
@@ -201,7 +201,7 @@ TEST_CASE("emitLayoutsYaml: a fully-default tab terminates its line", "[layout][
 
     // Same for a default child pane inside a split.
     config::LayoutTab splitTab;
-    splitTab.root.orientation = vtmux::SplitState::Vertical;
+    splitTab.root.orientation = vtworkspace::SplitState::Vertical;
     splitTab.root.children = { config::LayoutPane {}, config::LayoutPane {} };
     splitTab.root.children[1].command = std::string { "htop" };
     config::Layout dev;

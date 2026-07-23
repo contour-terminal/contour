@@ -203,7 +203,7 @@ TEST_CASE("a layout split pane must carry exactly two children", "[muxserver][pr
 
 TEST_CASE("a SplitPane verb with an out-of-range orientation is malformed", "[muxserver][proto]")
 {
-    // The verb's orientation is a vtmux::SplitState value: exactly 1 (Horizontal)
+    // The verb's orientation is a vtworkspace::SplitState value: exactly 1 (Horizontal)
     // or 2 (Vertical), rejected at decode exactly like WirePane.split. An invalid
     // SplitState reaching the layout tree renders as a phantom leaf (orientation
     // 0 with children) or re-serializes as garbage every client rejects.

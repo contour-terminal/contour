@@ -39,7 +39,7 @@
 #include <muxserver/client/AttachClient.h>
 #include <muxserver/client/LayoutReconstruction.h>
 #include <muxserver/client/ScreenMirror.h>
-#include <vtmux/Primitives.h>
+#include <vtworkspace/Primitives.h>
 
 namespace contour
 {
@@ -121,7 +121,7 @@ class AttachController final: public QObject, public SessionFactory, public MuxC
     [[nodiscard]] std::optional<muxserver::proto::LayoutState> layout() const;
 
     /// @return The primary (lowest-id) daemon window's layout converted for
-    ///         `vtmux::realizeLayoutTab` (an empty layout if none has arrived), plus
+    ///         `vtworkspace::realizeLayoutTab` (an empty layout if none has arrived), plus
     ///         its leaf→remote-session map. The layout executor realizes this to
     ///         reproduce the daemon tree.
     [[nodiscard]] muxserver::client::WireLayout wireLayout() const;

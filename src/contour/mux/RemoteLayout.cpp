@@ -13,9 +13,9 @@
 
 #include <muxserver/client/LayoutReconstruction.h>
 #include <muxserver/proto/Pdu.h>
-#include <vtmux/Pane.h>
-#include <vtmux/SessionModel.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/SessionModel.h>
+#include <vtworkspace/Tab.h>
 
 namespace contour
 {
@@ -107,7 +107,7 @@ namespace
     /// pty against the controller's bindings. Rebuilt after each split so a
     /// just-created pane is available to seed the next.
     [[nodiscard]] std::unordered_map<uint64_t, TerminalSession*> remoteToLocal(
-        TerminalSessionManager& manager, vtmux::WindowId window, AttachController const& controller)
+        TerminalSessionManager& manager, vtworkspace::WindowId window, AttachController const& controller)
     {
         auto out = std::unordered_map<uint64_t, TerminalSession*> {};
         auto* win = manager.model().window(window);
@@ -122,7 +122,7 @@ namespace
 
     /// Realizes ONE whole daemon tab (no leaf yet bound) via the shared realizer.
     void realizeWholeTab(TerminalSessionManager& manager,
-                         vtmux::WindowId window,
+                         vtworkspace::WindowId window,
                          AttachController& controller,
                          muxserver::proto::WireTab const& wireTab,
                          std::optional<vtbackend::PageSize> pageSize)
@@ -139,7 +139,7 @@ namespace
 } // namespace
 
 void applyRemoteLayout(TerminalSessionManager& manager,
-                       vtmux::WindowId window,
+                       vtworkspace::WindowId window,
                        AttachController& controller,
                        std::optional<uint64_t> daemonWindow,
                        std::optional<vtbackend::PageSize> pageSize)

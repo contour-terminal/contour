@@ -13,7 +13,7 @@
 // These are also the regression pins for the focus-ownership refactor. syncFocusForWindow used to
 // gate on `_activeDisplay != nullptr` — a raw Qt pointer that is null between a display teardown and
 // the next Qt focus-in, and null in every headless test. A tab switch in that gap notified nobody,
-// and the path was untestable. Ownership is now a modelled vtmux::WindowId, so the production path
+// and the path was untestable. Ownership is now a modelled vtworkspace::WindowId, so the production path
 // is the tested path. All cases here run headless: no [display] tag, nothing skips offscreen.
 
 #include <contour/ContourGuiApp.h>
@@ -36,9 +36,9 @@
 #include <memory>
 #include <string>
 
-#include <vtmux/Pane.h>
-#include <vtmux/SessionModel.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/SessionModel.h>
+#include <vtworkspace/Tab.h>
 
 namespace
 {
@@ -69,7 +69,7 @@ void clearPtyInput(contour::TerminalSession& session)
 
 /// The session backing the active pane of tab @p index in @p window.
 [[nodiscard]] contour::TerminalSession* sessionOfTabAt(contour::TerminalSessionManager& manager,
-                                                       vtmux::WindowId window,
+                                                       vtworkspace::WindowId window,
                                                        int index)
 {
     auto* modelWindow = manager.model().window(window);

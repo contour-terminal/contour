@@ -21,8 +21,8 @@
 #include <net/EventLoop.h>
 #include <net/PollEventSource.h>
 #include <net/testing/InMemoryTransport.h>
-#include <vtmux/Pane.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/Tab.h>
 
 using coro::Task;
 using muxserver::SessionHost;

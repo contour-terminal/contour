@@ -80,7 +80,7 @@ namespace
 
         out << YAML::Key << "split" << YAML::Value << YAML::BeginMap;
         out << YAML::Key << "orientation" << YAML::Value
-            << (pane.orientation == vtmux::SplitState::Horizontal ? "horizontal" : "vertical");
+            << (pane.orientation == vtworkspace::SplitState::Horizontal ? "horizontal" : "vertical");
         out << YAML::Key << "panes" << YAML::Value << YAML::BeginSeq;
         for (auto const& child: pane.children)
             emitPane(out, child, /* emitRatio */ true);

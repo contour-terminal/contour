@@ -17,8 +17,8 @@
 #include <net/EventLoop.h>
 #include <net/PollEventSource.h>
 #include <net/testing/InMemoryTransport.h>
-#include <vtmux/Pane.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/Tab.h>
 
 using coro::Task;
 using muxserver::SessionHost;
@@ -56,7 +56,7 @@ struct ModelHarness
     ModelHarness() { model.bind(*gateway); }
 };
 
-Task<void> mirrorScenario(ModelHarness* h, vtmux::SessionId sessionId, std::uint64_t paneId)
+Task<void> mirrorScenario(ModelHarness* h, vtworkspace::SessionId sessionId, std::uint64_t paneId)
 {
     // 1. Attach: %session-changed triggers window enumeration; the pane's
     //    history (written before attach) arrives via capture-pane replay.
@@ -80,7 +80,7 @@ Task<void> mirrorScenario(ModelHarness* h, vtmux::SessionId sessionId, std::uint
     h->gateway->detach();
 }
 
-Task<void> driveMirror(ModelHarness* h, vtmux::SessionId sessionId, std::uint64_t paneId)
+Task<void> driveMirror(ModelHarness* h, vtworkspace::SessionId sessionId, std::uint64_t paneId)
 {
     co_await coro::whenAll(h->server->run(), h->gateway->run(), mirrorScenario(h, sessionId, paneId));
 }

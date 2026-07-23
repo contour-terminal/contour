@@ -9,9 +9,9 @@
 #include <utility>
 #include <vector>
 
-#include <vtmux/Pane.h>
+#include <vtworkspace/Pane.h>
 
-namespace vtmux
+namespace vtworkspace
 {
 
 /// A 2D extent in the host's pixel unit. The solver is unit-agnostic; hosts pass logical pixels.
@@ -166,4 +166,4 @@ struct PaneCellRect
     return out;
 }
 
-} // namespace vtmux
+} // namespace vtworkspace

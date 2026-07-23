@@ -8,7 +8,7 @@
 /// responses (`%begin/%end/%error <time> <number> <flags>`, flags bit 0 =
 /// client-originated), asynchronous notifications, and byte-exact %output via
 /// the ControlOutput ordering queue. The id mapping is fixed: the host's single
-/// window is session `$0`, a vtmux Tab is a window `@N` (its TabId), a vtmux
+/// window is session `$0`, a vtworkspace Tab is a window `@N` (its TabId), a vtworkspace
 /// leaf Pane is `%N` (its PaneId).
 ///
 /// Commands are a data-driven table (the Actions.h catalog idiom): one row per
@@ -31,7 +31,7 @@
 #include <net/EventLoop.h>
 #include <net/ISocket.h>
 #include <net/WriteQueue.h>
-#include <vtmux/ModelEvents.h>
+#include <vtworkspace/ModelEvents.h>
 
 namespace muxserver::tmux
 {
@@ -72,7 +72,7 @@ struct ControlSessionOptions
 };
 
 /// One connected control-mode client.
-class ControlSession final: public vtmux::ModelEvents, public SessionStreamEvents
+class ControlSession final: public vtworkspace::ModelEvents, public SessionStreamEvents
 {
   public:
     using Options = ControlSessionOptions;
@@ -104,23 +104,23 @@ class ControlSession final: public vtmux::ModelEvents, public SessionStreamEvent
     ///         Diagnostics/testing. See ControlSessionOptions::writeQueueMaxBytes.
     [[nodiscard]] bool peerLost() const noexcept { return _peerLost; }
 
-    // vtmux::ModelEvents — model changes become control-mode notifications.
-    void tabAdded(vtmux::WindowId window, vtmux::TabId tab, int index) override;
-    void tabClosed(vtmux::WindowId window, vtmux::TabId tab, int index) override;
-    void tabMoved(vtmux::WindowId window, vtmux::TabId tab, int fromIndex, int toIndex) override;
-    void activeTabChanged(vtmux::WindowId window, vtmux::TabId tab, int index) override;
-    void paneSplit(vtmux::TabId tab, vtmux::PaneId splitNode, vtmux::PaneId newLeaf) override;
-    void paneClosed(vtmux::TabId tab, vtmux::PaneId closed, vtmux::PaneId survivor) override;
-    void activePaneChanged(vtmux::TabId tab, vtmux::PaneId leaf) override;
-    void paneRatioChanged(vtmux::TabId tab, vtmux::PaneId splitNode, double ratio) override;
-    void tabTitleChanged(vtmux::TabId tab) override;
-    void tabColorChanged(vtmux::TabId tab) override;
-    void paneTreeRestructured(vtmux::TabId tab) override;
-    void paneZoomChanged(vtmux::TabId tab, std::optional<vtmux::PaneId> zoomedLeaf) override;
+    // vtworkspace::ModelEvents — model changes become control-mode notifications.
+    void tabAdded(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
+    void tabClosed(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
+    void tabMoved(vtworkspace::WindowId window, vtworkspace::TabId tab, int fromIndex, int toIndex) override;
+    void activeTabChanged(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
+    void paneSplit(vtworkspace::TabId tab, vtworkspace::PaneId splitNode, vtworkspace::PaneId newLeaf) override;
+    void paneClosed(vtworkspace::TabId tab, vtworkspace::PaneId closed, vtworkspace::PaneId survivor) override;
+    void activePaneChanged(vtworkspace::TabId tab, vtworkspace::PaneId leaf) override;
+    void paneRatioChanged(vtworkspace::TabId tab, vtworkspace::PaneId splitNode, double ratio) override;
+    void tabTitleChanged(vtworkspace::TabId tab) override;
+    void tabColorChanged(vtworkspace::TabId tab) override;
+    void paneTreeRestructured(vtworkspace::TabId tab) override;
+    void paneZoomChanged(vtworkspace::TabId tab, std::optional<vtworkspace::PaneId> zoomedLeaf) override;
 
     /// Feeds one session's raw PTY bytes into the %output queue (the
     /// connection subscribes itself to the host's stream fan-out).
-    void sessionOutput(vtmux::SessionId session, std::string const& bytes) override;
+    void sessionOutput(vtworkspace::SessionId session, std::string const& bytes) override;
 
   private:
     /// A command handler: returns response body lines, or an error message.
@@ -144,7 +144,7 @@ class ControlSession final: public vtmux::ModelEvents, public SessionStreamEvent
     void emitGuarded(HandlerResult const& result, int flags = 1);
 
     /// Emits the current layout of @p tab as a %layout-change notification.
-    void notifyLayoutChanged(vtmux::TabId tab);
+    void notifyLayoutChanged(vtworkspace::TabId tab);
 
     // Command handlers (the catalog's rows).
     HandlerResult commandListSessions(std::vector<std::string> const& arguments);
@@ -163,9 +163,9 @@ class ControlSession final: public vtmux::ModelEvents, public SessionStreamEvent
     HandlerResult commandRefreshClient(std::vector<std::string> const& arguments);
 
     // Target resolution ("-t %N" / "-t @N"; defaults to the active pane/tab).
-    [[nodiscard]] std::expected<vtmux::Tab*, std::string> resolveTab(
+    [[nodiscard]] std::expected<vtworkspace::Tab*, std::string> resolveTab(
         std::vector<std::string> const& arguments) const;
-    [[nodiscard]] std::expected<vtmux::Pane*, std::string> resolvePane(
+    [[nodiscard]] std::expected<vtworkspace::Pane*, std::string> resolvePane(
         std::vector<std::string> const& arguments) const;
 
     /// @return The page size used for layout projection (the host's settings).

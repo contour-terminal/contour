@@ -25,15 +25,15 @@
 #include <ranges>
 #include <utility>
 
-#include <vtmux/Pane.h>
-#include <vtmux/PaneLayout.h>
-#include <vtmux/SessionModel.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/PaneLayout.h>
+#include <vtworkspace/SessionModel.h>
+#include <vtworkspace/Tab.h>
 
 namespace contour
 {
 
-WindowController::WindowController(TerminalSessionManager& manager, vtmux::WindowId windowId):
+WindowController::WindowController(TerminalSessionManager& manager, vtworkspace::WindowId windowId):
     _manager { manager },
     _windowId { windowId },
     // The palette's sources. They hold references into the app's Config, which outlives every window
@@ -232,27 +232,27 @@ std::vector<std::string> WindowController::tabTitles() const
     return titles;
 }
 
-vtmux::Window* WindowController::window() const noexcept
+vtworkspace::Window* WindowController::window() const noexcept
 {
-    // Resolve the backing vtmux::Window strictly by this controller's own WindowId, so each controller
+    // Resolve the backing vtworkspace::Window strictly by this controller's own WindowId, so each controller
     // adapts exactly its window (correct for N windows). For the first controller this is the same object
     // the manager's ctor minted as _modelWindow.
     return _manager.model().window(_windowId);
 }
 
-vtmux::Tab* WindowController::activeModelTab() const noexcept
+vtworkspace::Tab* WindowController::activeModelTab() const noexcept
 {
     auto* win = window();
     return win != nullptr ? win->activeTab() : nullptr;
 }
 
-vtmux::Tab* WindowController::tabAtRow(int index) const noexcept
+vtworkspace::Tab* WindowController::tabAtRow(int index) const noexcept
 {
     auto* win = window();
     return win != nullptr ? win->tabAt(index) : nullptr;
 }
 
-int WindowController::rowOfTab(vtmux::TabId tab) const noexcept
+int WindowController::rowOfTab(vtworkspace::TabId tab) const noexcept
 {
     auto* win = window();
     return win != nullptr ? win->indexOf(tab) : -1;
@@ -323,14 +323,14 @@ int WindowController::activeTabIndex() const noexcept
     return win != nullptr ? win->activeTabIndex() : -1;
 }
 
-QString WindowController::resolvedTabLabel(vtmux::Tab* tab, TerminalSession* session, int row) const
+QString WindowController::resolvedTabLabel(vtworkspace::Tab* tab, TerminalSession* session, int row) const
 {
     if (tab == nullptr)
         return session != nullptr ? QString::fromStdString(session->name().value_or("")) : QString {};
 
     auto const windowTitle = session != nullptr ? session->resolvedWindowTitle() : std::string {};
 
-    // Same precedence as vtmux::Tab::title(), templated rather than resolved (the strip expands
+    // Same precedence as vtworkspace::Tab::title(), templated rather than resolved (the strip expands
     // {index}/{title} placeholders, so it needs the raw template). The "is this tab named after one of
     // its panes?" decision is Tab's — read it, do not restate it, or the strip and the status line end
     // up disagreeing about what a zoomed tab is called.
@@ -338,7 +338,7 @@ QString WindowController::resolvedTabLabel(vtmux::Tab* tab, TerminalSession* ses
     if (auto const& renamed = tab->runtimeTitle(); renamed.has_value())
         templ = *renamed;
     else if (tab->usesMultiplePanesLabel())
-        templ = vtmux::Tab::MultiplePanesLabel;
+        templ = vtworkspace::Tab::MultiplePanesLabel;
     else if (session != nullptr)
         templ = session->profile().tabLabel.value();
     else
@@ -436,7 +436,7 @@ void WindowController::moveTab(int fromIndex, int toIndex)
 
 void WindowController::moveTabIntoThisWindow(quint64 sourceWindowId, int fromIndex, int toIndex)
 {
-    _manager.moveTabToWindow(vtmux::WindowId { sourceWindowId }, fromIndex, _windowId, toIndex);
+    _manager.moveTabToWindow(vtworkspace::WindowId { sourceWindowId }, fromIndex, _windowId, toIndex);
 }
 
 void WindowController::tearOffTab(int index)
@@ -510,7 +510,7 @@ void WindowController::resetActiveTabColor()
 void WindowController::setTabColor(int index, QColor const& color)
 {
     if (auto* tab = tabAtRow(index); tab != nullptr)
-        _manager.model().setTabColor(tab->id(), vtmux::TabColorSource::User, toRGBColor(color));
+        _manager.model().setTabColor(tab->id(), vtworkspace::TabColorSource::User, toRGBColor(color));
 }
 
 void WindowController::resetTabColor(int index)
@@ -518,7 +518,7 @@ void WindowController::resetTabColor(int index)
     // Clears only the user's own choice. If the application assigned a color via DECAC, the tab falls
     // back to it; otherwise to the host default. "Default" therefore means "whatever I did not choose".
     if (auto* tab = tabAtRow(index); tab != nullptr)
-        _manager.model().resetTabColor(tab->id(), vtmux::TabColorSource::User);
+        _manager.model().resetTabColor(tab->id(), vtworkspace::TabColorSource::User);
 }
 
 void WindowController::closeTabAtIndex(int index)
@@ -601,7 +601,7 @@ void WindowController::closeWindow()
     // runs before deleteLater() takes effect sees no stale pointer, then drop the root.
     for (auto const& [id, proxy]: _paneProxies)
     {
-        proxy->setPane(nullptr, vtmux::TabId {});
+        proxy->setPane(nullptr, vtworkspace::TabId {});
         proxy->deleteLater();
     }
     _paneProxies.clear();
@@ -1151,10 +1151,10 @@ bool WindowController::applyContentDrivenResize(display::TerminalDisplay& reques
     // manager's splitHandleThickness property), so solver and rendered handle cannot diverge. The
     // layout root bounds the ratio walk: while zoomed it IS the leaf, so the leaf owns the whole
     // content area and no split ratio above it applies.
-    auto const content = vtmux::contentSizeForLeaf(
+    auto const content = vtworkspace::contentSizeForLeaf(
         *leaf,
-        vtmux::LayoutSize { .width = leafContentLogical.width, .height = leafContentLogical.height },
-        vtmux::DefaultSplitHandleThickness,
+        vtworkspace::LayoutSize { .width = leafContentLogical.width, .height = leafContentLogical.height },
+        vtworkspace::DefaultSplitHandleThickness,
         *layoutRoot);
 
     displayLog()("Content-driven window resize: leaf {}x{} -> content {}x{} + {} chrome.",
@@ -1206,7 +1206,7 @@ void WindowController::onDisplayDetached(display::TerminalDisplay* display) noex
 }
 
 // {{{ PaneProxy tree
-PaneProxy* WindowController::getProxy(vtmux::PaneId id)
+PaneProxy* WindowController::getProxy(vtworkspace::PaneId id)
 {
     auto it = _paneProxies.find(id.value);
     if (it != _paneProxies.end())
@@ -1223,18 +1223,18 @@ PaneProxy* WindowController::getProxy(vtmux::PaneId id)
 
 void WindowController::rebuildActiveTabPaneProxies()
 {
-    vtmux::Tab const* tab = activeModelTab();
+    vtworkspace::Tab const* tab = activeModelTab();
 
     // Walk from rootPane(), NOT layoutRoot(): the liveness set below decides which proxies survive, and
     // every pane of the tab stays live even while a zoom hides all but one. Walking the layout root
     // instead would prune the hidden panes' proxies and tear their terminals down on every zoom.
-    std::unordered_map<uint64_t, vtmux::Pane*> live;
+    std::unordered_map<uint64_t, vtworkspace::Pane*> live;
     if (tab != nullptr)
-        tab->rootPane()->walkTree([&](vtmux::Pane& p) { live[p.id().value] = &p; });
+        tab->rootPane()->walkTree([&](vtworkspace::Pane& p) { live[p.id().value] = &p; });
 
     for (auto const& [idValue, p]: live)
     {
-        auto* proxy = getProxy(vtmux::PaneId { idValue });
+        auto* proxy = getProxy(vtworkspace::PaneId { idValue });
         // live is only populated when tab != nullptr, so tab->id() is safe here. The tab id keys the
         // proxy's write-backs (setRatio/activate) to exactly this tab.
         proxy->setPane(p, tab->id());
@@ -1250,7 +1250,7 @@ void WindowController::rebuildActiveTabPaneProxies()
     {
         if (!live.contains(it->first))
         {
-            it->second->setPane(nullptr, vtmux::TabId {});
+            it->second->setPane(nullptr, vtworkspace::TabId {});
             it->second->deleteLater();
             it = _paneProxies.erase(it);
         }
@@ -1286,7 +1286,7 @@ void WindowController::notifyActivePaneChanged()
         proxy->notifyActiveChanged();
 }
 
-void WindowController::notifyRatioChanged(vtmux::PaneId splitNode)
+void WindowController::notifyRatioChanged(vtworkspace::PaneId splitNode)
 {
     if (auto const it = _paneProxies.find(splitNode.value); it != _paneProxies.end())
         it->second->notifyRatioChanged();
@@ -1348,7 +1348,7 @@ void WindowController::onActiveTabChanged()
     rebuildActiveTabPaneProxies();
 }
 
-void WindowController::notifyTabRowChanged(vtmux::TabId tab, QList<Roles> const& roles)
+void WindowController::notifyTabRowChanged(vtworkspace::TabId tab, QList<Roles> const& roles)
 {
     auto const row = rowOfTab(tab);
     if (row < 0)

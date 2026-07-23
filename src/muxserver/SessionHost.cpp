@@ -8,19 +8,19 @@
 #include <vector>
 
 #include <muxserver/TappingPty.h>
-#include <vtmux/Pane.h>
-#include <vtmux/PaneLayout.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/PaneLayout.h>
+#include <vtworkspace/Tab.h>
 
 namespace muxserver
 {
 
-using vtmux::PaneId;
-using vtmux::SessionId;
-using vtmux::SplitState;
-using vtmux::Tab;
-using vtmux::TabId;
-using vtmux::WindowId;
+using vtworkspace::PaneId;
+using vtworkspace::SessionId;
+using vtworkspace::SplitState;
+using vtworkspace::Tab;
+using vtworkspace::TabId;
+using vtworkspace::WindowId;
 
 // ---------------------------------------------------------------------------
 // HostedSession
@@ -208,7 +208,7 @@ Tab* SessionHost::createTab()
     return tab;
 }
 
-vtmux::Window* SessionHost::createWindow()
+vtworkspace::Window* SessionHost::createWindow()
 {
     auto const seeded = seedSession();
     if (!seeded)
@@ -267,10 +267,10 @@ void SessionHost::reprojectLayouts()
     // Every window's panes track the (daemon-wide) client area — a client resize
     // must reach the PTYs of secondary windows too, or their apps keep rendering
     // at stale dimensions while the layout advertises the new geometry.
-    _model.forEachTab([&](vtmux::Window&, vtmux::Tab& tab) {
+    _model.forEachTab([&](vtworkspace::Window&, vtworkspace::Tab& tab) {
         // The underlying layout's leaves first; a zoomed leaf then overrides to
         // the full area (tmux's zoom model: the saved layout keeps the rest).
-        for (auto const& rect: vtmux::layoutInCells(*tab.rootPane(), _pageSize))
+        for (auto const& rect: vtworkspace::layoutInCells(*tab.rootPane(), _pageSize))
             if (auto const* leaf = tab.rootPane()->findPane(rect.pane))
                 if (auto* backing = terminal(leaf->session()))
                     resizeLocked(*backing,
@@ -288,12 +288,12 @@ vtbackend::Terminal* SessionHost::terminal(SessionId session) noexcept
     return it != _sessions.end() ? &it->second->terminal() : nullptr;
 }
 
-void SessionHost::subscribe(vtmux::ModelEvents* observer)
+void SessionHost::subscribe(vtworkspace::ModelEvents* observer)
 {
     _subscribers.push_back(observer);
 }
 
-void SessionHost::unsubscribe(vtmux::ModelEvents* observer)
+void SessionHost::unsubscribe(vtworkspace::ModelEvents* observer)
 {
     std::erase(_subscribers, observer);
 }
@@ -338,72 +338,72 @@ void SessionHost::handleSessionExit(SessionId session)
 
 void SessionHost::tabAdded(WindowId window, TabId tab, int index)
 {
-    fanOut(&vtmux::ModelEvents::tabAdded, window, tab, index);
+    fanOut(&vtworkspace::ModelEvents::tabAdded, window, tab, index);
 }
 
 void SessionHost::tabClosed(WindowId window, TabId tab, int index)
 {
-    fanOut(&vtmux::ModelEvents::tabClosed, window, tab, index);
+    fanOut(&vtworkspace::ModelEvents::tabClosed, window, tab, index);
 }
 
 void SessionHost::tabMoved(WindowId window, TabId tab, int fromIndex, int toIndex)
 {
-    fanOut(&vtmux::ModelEvents::tabMoved, window, tab, fromIndex, toIndex);
+    fanOut(&vtworkspace::ModelEvents::tabMoved, window, tab, fromIndex, toIndex);
 }
 
 void SessionHost::activeTabChanged(WindowId window, TabId tab, int index)
 {
-    fanOut(&vtmux::ModelEvents::activeTabChanged, window, tab, index);
+    fanOut(&vtworkspace::ModelEvents::activeTabChanged, window, tab, index);
 }
 
 void SessionHost::paneSplit(TabId tab, PaneId splitNode, PaneId newLeaf)
 {
-    fanOutAfterReproject(&vtmux::ModelEvents::paneSplit, tab, splitNode, newLeaf);
+    fanOutAfterReproject(&vtworkspace::ModelEvents::paneSplit, tab, splitNode, newLeaf);
 }
 
 void SessionHost::paneClosed(TabId tab, PaneId closed, PaneId survivor)
 {
-    fanOutAfterReproject(&vtmux::ModelEvents::paneClosed, tab, closed, survivor);
+    fanOutAfterReproject(&vtworkspace::ModelEvents::paneClosed, tab, closed, survivor);
 }
 
 void SessionHost::activePaneChanged(TabId tab, PaneId leaf)
 {
-    fanOut(&vtmux::ModelEvents::activePaneChanged, tab, leaf);
+    fanOut(&vtworkspace::ModelEvents::activePaneChanged, tab, leaf);
 }
 
 void SessionHost::paneRatioChanged(TabId tab, PaneId splitNode, double ratio)
 {
-    fanOutAfterReproject(&vtmux::ModelEvents::paneRatioChanged, tab, splitNode, ratio);
+    fanOutAfterReproject(&vtworkspace::ModelEvents::paneRatioChanged, tab, splitNode, ratio);
 }
 
 void SessionHost::tabTitleChanged(TabId tab)
 {
-    fanOut(&vtmux::ModelEvents::tabTitleChanged, tab);
+    fanOut(&vtworkspace::ModelEvents::tabTitleChanged, tab);
 }
 
 void SessionHost::tabColorChanged(TabId tab)
 {
-    fanOut(&vtmux::ModelEvents::tabColorChanged, tab);
+    fanOut(&vtworkspace::ModelEvents::tabColorChanged, tab);
 }
 
 void SessionHost::paneOrientationChanged(TabId tab, PaneId splitNode, SplitState state)
 {
-    fanOutAfterReproject(&vtmux::ModelEvents::paneOrientationChanged, tab, splitNode, state);
+    fanOutAfterReproject(&vtworkspace::ModelEvents::paneOrientationChanged, tab, splitNode, state);
 }
 
 void SessionHost::paneSwapped(TabId tab, PaneId a, PaneId b)
 {
-    fanOutAfterReproject(&vtmux::ModelEvents::paneSwapped, tab, a, b);
+    fanOutAfterReproject(&vtworkspace::ModelEvents::paneSwapped, tab, a, b);
 }
 
 void SessionHost::paneZoomChanged(TabId tab, std::optional<PaneId> zoomedLeaf)
 {
-    fanOutAfterReproject(&vtmux::ModelEvents::paneZoomChanged, tab, zoomedLeaf);
+    fanOutAfterReproject(&vtworkspace::ModelEvents::paneZoomChanged, tab, zoomedLeaf);
 }
 
 void SessionHost::paneTreeRestructured(TabId tab)
 {
-    fanOutAfterReproject(&vtmux::ModelEvents::paneTreeRestructured, tab);
+    fanOutAfterReproject(&vtworkspace::ModelEvents::paneTreeRestructured, tab);
 }
 
 } // namespace muxserver

@@ -184,7 +184,7 @@ Checks: >-
 WarningsAsErrors: '*'
 
 UseColor: true
-HeaderFilterRegex: 'src/(contour|coro|net|muxserver|crispy|text_shaper|vtpty|vtparser|vtbackend|vtrasterizer|vtmux|vtconformance)/'
+HeaderFilterRegex: 'src/(contour|coro|net|muxserver|crispy|text_shaper|vtpty|vtparser|vtbackend|vtrasterizer|vtworkspace|vtconformance)/'
 # Qt's AUTOMOC/AUTOUIC output lands under out/<preset>/src/<module>/..._autogen/, whose
 # path matches HeaderFilterRegex; it is generated code and not ours to lint.
 ExcludeHeaderFilterRegex: 'wayland-.*-protocol\.h|.*_autogen/.*|.*\.moc$'

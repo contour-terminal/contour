@@ -10,12 +10,12 @@
 #include <utility>
 #include <vector>
 
-#include <vtmux/ModelEvents.h>
-#include <vtmux/Pane.h>
-#include <vtmux/Primitives.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/ModelEvents.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/Primitives.h>
+#include <vtworkspace/Tab.h>
 
-namespace vtmux
+namespace vtworkspace
 {
 
 /// A logical window: an ordered list of tabs with one active tab.
@@ -308,4 +308,4 @@ class SessionModel
     PaneId _nextPaneId { 1 };
 };
 
-} // namespace vtmux
+} // namespace vtworkspace

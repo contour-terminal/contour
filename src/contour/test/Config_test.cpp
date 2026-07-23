@@ -360,7 +360,7 @@ layouts:
     auto const& tab = config.layouts.value().at("dev").tabs.at(0);
     auto const& root = tab.root;
     REQUIRE_FALSE(root.isLeaf());
-    CHECK(root.orientation == vtmux::SplitState::Vertical);
+    CHECK(root.orientation == vtworkspace::SplitState::Vertical);
     REQUIRE(root.children.size() == 2);
 
     CHECK(root.children[0].isLeaf());
@@ -376,7 +376,7 @@ layouts:
 
     auto const& nested = root.children[1];
     REQUIRE_FALSE(nested.isLeaf());
-    CHECK(nested.orientation == vtmux::SplitState::Horizontal);
+    CHECK(nested.orientation == vtworkspace::SplitState::Horizontal);
     REQUIRE(nested.children.size() == 2);
     CHECK(*nested.children[0].command == "htop");
     CHECK(nested.children[0].arguments.empty());
@@ -574,9 +574,9 @@ layouts:
     auto const& tabs = config.layouts.value().at("work").tabs;
     REQUIRE(tabs.size() == 2);
     // Natural capitalization must work like every other enum-ish config value.
-    CHECK(tabs.at(0).root.orientation == vtmux::SplitState::Horizontal);
+    CHECK(tabs.at(0).root.orientation == vtworkspace::SplitState::Horizontal);
     // An unknown value falls back to the vertical default (with a log line, not silently).
-    CHECK(tabs.at(1).root.orientation == vtmux::SplitState::Vertical);
+    CHECK(tabs.at(1).root.orientation == vtworkspace::SplitState::Vertical);
 }
 
 TEST_CASE("Config: an invalid tab color is ignored instead of turning black", "[config][layout]")

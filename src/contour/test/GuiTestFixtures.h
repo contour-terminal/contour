@@ -30,7 +30,7 @@
 #include <string_view>
 #include <vector>
 
-#include <vtmux/Primitives.h>
+#include <vtworkspace/Primitives.h>
 
 namespace contour::test
 {
@@ -240,7 +240,7 @@ class RecordingExternalLauncher final: public contour::ExternalLauncher
 /// to the default "main" profile) without running the GUI. The default-constructed config already
 /// seeds a "main" profile and a "default" colorscheme, so no config file is needed. The app's real
 /// session manager is usable headlessly as long as no PTY is spawned (tabs minted straight through
-/// the vtmux model have no backing sessions).
+/// the vtworkspace model have no backing sessions).
 class TestApp
 {
   public:
@@ -307,7 +307,7 @@ struct ScopedController
 {
     contour::TerminalSessionManager& manager;
     contour::WindowController* controller;
-    vtmux::WindowId id;
+    vtworkspace::WindowId id;
 
     explicit ScopedController(contour::TerminalSessionManager& m):
         manager(m), controller(m.createWindowController()), id(controller->windowId())

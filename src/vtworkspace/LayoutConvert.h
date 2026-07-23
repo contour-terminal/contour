@@ -2,7 +2,7 @@
 #pragma once
 
 /// @file
-/// Generic binary-layout-tree conversion into a `vtmux::LayoutPane` tree, single-sourced so the
+/// Generic binary-layout-tree conversion into a `vtworkspace::LayoutPane` tree, single-sourced so the
 /// native-attach (`muxserver::client`) and tmux-mirror (`contour`) paths share ONE implementation of
 /// the "first child carries the ratio; the second is left unset so `ratioForFirst` gives it the rest"
 /// convention plus the lockstep leaf→id map. Each caller supplies a small adapter exposing its own
@@ -13,9 +13,9 @@
 #include <unordered_map>
 #include <utility>
 
-#include <vtmux/LayoutTree.h>
+#include <vtworkspace/LayoutTree.h>
 
-namespace vtmux
+namespace vtworkspace
 {
 
 /// Converts one node of an arbitrary binary layout tree into a `LayoutPane` subtree. A leaf (the
@@ -68,4 +68,4 @@ void mapLayoutLeaves(LayoutPane const& pane,
     mapLayoutLeaves(pane.children[1], adapter.second(node), adapter, out);
 }
 
-} // namespace vtmux
+} // namespace vtworkspace

@@ -39,8 +39,8 @@
 #include <net/WriteQueue.h>
 #include <net/testing/CoroTestSupport.h>
 #include <net/testing/InMemoryTransport.h>
-#include <vtmux/Pane.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/Tab.h>
 
 using coro::Task;
 using muxserver::NativeSession;
@@ -70,7 +70,7 @@ struct EndToEndHarness
     std::unique_ptr<AttachClient> client = std::make_unique<AttachClient>(loop, std::move(pair.second));
 };
 
-Task<void> scenario(EndToEndHarness* h, vtmux::SessionId sessionId)
+Task<void> scenario(EndToEndHarness* h, vtworkspace::SessionId sessionId)
 {
     // 1. Attach: the handshake answers and the snapshot mirrors the screen.
     co_await net::testing::waitUntil(&h->loop, [&] { return !h->client->screens().empty(); });
@@ -108,7 +108,7 @@ Task<void> scenario(EndToEndHarness* h, vtmux::SessionId sessionId)
     h->client->detach(); // ends both run() loops
 }
 
-Task<void> driveEndToEnd(EndToEndHarness* h, vtmux::SessionId sessionId)
+Task<void> driveEndToEnd(EndToEndHarness* h, vtworkspace::SessionId sessionId)
 {
     co_await coro::whenAll(h->server->run(), h->client->run(), scenario(h, sessionId));
 }
@@ -636,7 +636,7 @@ TEST_CASE("attach receives the daemon's tab and pane layout", "[muxserver][attac
                               /*startPumps=*/false };
     auto* tab = host.createTab();
     // Split the tab into two panes (a vertical divider at 60/40).
-    host.splitActivePane(tab->id(), vtmux::SplitState::Vertical, 0.6);
+    host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.6);
 
     auto pair = *net::testing::makeSocketPair(loop);
     auto server = NativeSession { loop, host, std::move(pair.first) };
@@ -650,7 +650,7 @@ TEST_CASE("attach receives the daemon's tab and pane layout", "[muxserver][attac
     REQUIRE(layout.has_value());
     REQUIRE(layout->tabs.size() == 1);
     auto const& root = layout->tabs.front().root;
-    CHECK(root.split == std::to_underlying(vtmux::SplitState::Vertical)); // an internal split node
+    CHECK(root.split == std::to_underlying(vtworkspace::SplitState::Vertical)); // an internal split node
     CHECK(root.ratio == 6000);                                            // 0.6 x 10000
     REQUIRE(root.children.size() == 2);
     // Both children are leaves carrying distinct sessions.

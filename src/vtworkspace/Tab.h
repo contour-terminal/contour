@@ -14,10 +14,10 @@
 #include <utility>
 #include <vector>
 
-#include <vtmux/Pane.h>
-#include <vtmux/Primitives.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/Primitives.h>
 
-namespace vtmux
+namespace vtworkspace
 {
 
 /// Who assigned a tab's color.
@@ -41,7 +41,7 @@ inline constexpr size_t TabColorSourceCount = std::to_underlying(TabColorSource:
 /// The tab owns the root Pane, tracks which leaf is active (with an MRU list for focus
 /// navigation), whether that active leaf is **zoomed**, and — importantly — owns the authoritative
 /// **runtime title** and **runtime color**.
-/// These live here, in Qt-free vtmux, deliberately *below* the GUI: the Contour GUI and any future
+/// These live here, in Qt-free vtworkspace, deliberately *below* the GUI: the Contour GUI and any future
 /// network-connected client are pure views of this state. They read title()/color() and request
 /// mutations (setRuntimeTitle/setColor); they never hold their own authoritative copy. That is what
 /// lets every client agree on the same title and color.
@@ -270,4 +270,4 @@ class Tab
     void forgetFromMru(PaneId id);
 };
 
-} // namespace vtmux
+} // namespace vtworkspace

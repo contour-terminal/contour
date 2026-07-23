@@ -11,9 +11,9 @@
 #include <format>
 
 #include <muxserver/tmux/LayoutString.h>
-#include <vtmux/Pane.h>
-#include <vtmux/SessionModel.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/SessionModel.h>
+#include <vtworkspace/Tab.h>
 
 // The tmux mirror's structural reactions are driven through the TmuxModelEvents overrides, which
 // are pure C++ (no tmux process) — so this maps to a real GUI SessionModel headlessly, on every
@@ -113,9 +113,9 @@ TEST_CASE("a GUI split in tmux mode is authored on the tmux server (B5)", "[atta
     ctrl->stop();
 }
 
-// F3: the pure converter turns a tmux BinaryLayout into a realizable vtmux::Layout that preserves the
+// F3: the pure converter turns a tmux BinaryLayout into a realizable vtworkspace::Layout that preserves the
 // split orientation, the first-child ratio, and each leaf's tmux pane id.
-TEST_CASE("tmux binary layout converts to a ratio-bearing vtmux layout (F3)", "[attach][tmux]")
+TEST_CASE("tmux binary layout converts to a ratio-bearing vtworkspace layout (F3)", "[attach][tmux]")
 {
     auto const wireOf = [](std::string const& body) {
         return std::format("{:04x},{}", muxserver::tmux::layoutChecksum(body), body);
@@ -131,7 +131,7 @@ TEST_CASE("tmux binary layout converts to a ratio-bearing vtmux layout (F3)", "[
     REQUIRE(conv2.layout.tabs.size() == 1);
     auto const& root2 = conv2.layout.tabs.front().root;
     REQUIRE_FALSE(root2.isLeaf());
-    CHECK(root2.orientation == vtmux::SplitState::Vertical); // side-by-side
+    CHECK(root2.orientation == vtworkspace::SplitState::Vertical); // side-by-side
     REQUIRE(root2.children.size() == 2);
     REQUIRE(root2.children[0].ratio.has_value());
     CHECK(*root2.children[0].ratio == tree2.ratio); // the exact tmux ratio, copied faithfully
@@ -185,7 +185,7 @@ TEST_CASE("tmux whole-tree realize reproduces the split ratio and shape (F3)", "
     REQUIRE(tab != nullptr);
     CHECK(tab->paneCount() == 2); // both panes realized as one split tab
     REQUIRE_FALSE(tab->rootPane()->isLeaf());
-    CHECK(tab->rootPane()->splitState() == vtmux::SplitState::Vertical); // faithful orientation
+    CHECK(tab->rootPane()->splitState() == vtworkspace::SplitState::Vertical); // faithful orientation
     CHECK(tab->rootPane()->ratio() > 0.6);                               // faithful ~0.71 ratio, not 0.5
 
     ctrl->stop();

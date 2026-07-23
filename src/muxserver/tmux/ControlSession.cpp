@@ -11,19 +11,19 @@
 #include <utility>
 
 #include <muxserver/tmux/LayoutString.h>
-#include <vtmux/Pane.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/Tab.h>
 
 namespace muxserver::tmux
 {
 
-using vtmux::Pane;
-using vtmux::PaneId;
-using vtmux::SessionId;
-using vtmux::SplitState;
-using vtmux::Tab;
-using vtmux::TabId;
-using vtmux::WindowId;
+using vtworkspace::Pane;
+using vtworkspace::PaneId;
+using vtworkspace::SessionId;
+using vtworkspace::SplitState;
+using vtworkspace::Tab;
+using vtworkspace::TabId;
+using vtworkspace::WindowId;
 
 std::vector<std::string> splitCommandLine(std::string_view line)
 {

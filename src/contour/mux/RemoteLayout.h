@@ -16,7 +16,7 @@
 #include <cstdint>
 #include <optional>
 
-#include <vtmux/Primitives.h>
+#include <vtworkspace/Primitives.h>
 
 namespace contour
 {
@@ -37,7 +37,7 @@ class TerminalSessionManager;
 /// @param pageSize The size each realized pane's grid/pty is born at (the live
 ///        window size), or nullopt for the profile default.
 void applyRemoteLayout(TerminalSessionManager& manager,
-                       vtmux::WindowId window,
+                       vtworkspace::WindowId window,
                        AttachController& controller,
                        std::optional<uint64_t> daemonWindow = std::nullopt,
                        std::optional<vtbackend::PageSize> pageSize = std::nullopt);

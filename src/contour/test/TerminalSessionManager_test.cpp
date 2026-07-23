@@ -5,7 +5,7 @@
 // QQuickWindow), and the per-display session bookkeeping it used to carry (DisplayState /
 // detachSessionFromState / isLastActiveDisplay) is gone: session->display ownership now lives on the
 // pane tree, and window identity is the manager's WindowController registry ("last window" ==
-// controllers.size() == 1). The identity that decision derives from is the vtmux::SessionModel's window
+// controllers.size() == 1). The identity that decision derives from is the vtworkspace::SessionModel's window
 // set, so the testable invariant — window count as windows are created and removed — is exercised here
 // against the Qt-free model. (Per-window tab/pane isolation is covered in SessionModel_test.cpp.)
 
@@ -30,12 +30,12 @@
 
 #include <muxserver/client/LayoutReconstruction.h>
 #include <muxserver/proto/Pdu.h>
-#include <vtmux/ModelEvents.h>
-#include <vtmux/Pane.h>
-#include <vtmux/SessionModel.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/ModelEvents.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/SessionModel.h>
+#include <vtworkspace/Tab.h>
 
-using namespace vtmux;
+using namespace vtworkspace;
 
 namespace
 {
@@ -98,7 +98,7 @@ TEST_CASE("SessionModel: the last-window decision tracks the live window set", "
 TEST_CASE("SessionModel: removing a window with tabs closes only that window's tabs",
           "[contour][manager][window]")
 {
-    // The manager terminates a closing window's sessions and removes its vtmux::Window; a sibling window's
+    // The manager terminates a closing window's sessions and removes its vtworkspace::Window; a sibling window's
     // tabs/sessions must be untouched. This is the model half of the per-window teardown invariant.
     SilentEvents events;
     uint64_t nextSession = 1;
@@ -126,7 +126,7 @@ TEST_CASE("SessionModel: removing a window with tabs closes only that window's t
 // Manager-level coverage for applyLayoutToWindow, exercised directly (rather than through
 // launchLayout) so the test needs no config injection or acting-session setup: it builds a
 // contour::config::Layout by hand and asserts the resulting real, PTY-backed tabs/colors on the
-// manager's authoritative vtmux::SessionModel.
+// manager's authoritative vtworkspace::SessionModel.
 TEST_CASE("TerminalSessionManager: applyLayoutToWindow builds tabs with colors", "[manager][layout]")
 {
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
@@ -143,7 +143,7 @@ TEST_CASE("TerminalSessionManager: applyLayoutToWindow builds tabs with colors",
     t1.root.command = "echo b";
     t1.color = vtbackend::RGBColor { "#112233" };
     contour::config::LayoutTab t2;
-    t2.root.orientation = vtmux::SplitState::Vertical;
+    t2.root.orientation = vtworkspace::SplitState::Vertical;
     contour::config::LayoutPane left;
     left.command = "echo left";
     contour::config::LayoutPane right;
@@ -158,7 +158,7 @@ TEST_CASE("TerminalSessionManager: applyLayoutToWindow builds tabs with colors",
     CHECK(window->tabCount() == 3); // three tabs created from the layout
     auto* colored = window->tabAt(1);
     REQUIRE(colored != nullptr);
-    CHECK(colored->color(vtmux::TabColorSource::User).has_value()); // second tab got its color
+    CHECK(colored->color(vtworkspace::TabColorSource::User).has_value()); // second tab got its color
     auto* split = window->tabAt(2);
     REQUIRE(split != nullptr);
     CHECK(split->paneCount() == 2); // the split tab realized both leaves
@@ -222,7 +222,7 @@ TEST_CASE("TerminalSessionManager: applyLayoutToWindow realizes a daemon wire la
     REQUIRE(splitTab != nullptr);
     CHECK(splitTab->paneCount() == 2);
     REQUIRE_FALSE(splitTab->rootPane()->isLeaf());
-    CHECK(splitTab->rootPane()->splitState() == vtmux::SplitState::Vertical);
+    CHECK(splitTab->rootPane()->splitState() == vtworkspace::SplitState::Vertical);
     CHECK(std::lround(splitTab->rootPane()->ratio() * 10000.0) == 6000); // first child's 60% share
 }
 
@@ -391,7 +391,7 @@ TEST_CASE("TerminalSessionManager: SaveLayout reports why a save failed", "[mana
 
     // Each failure is a distinct, reportable cause — not a bare "false".
     CHECK(app.manager().saveWindowLayout(win.id, "").error() == contour::LayoutSaveError::EmptyName);
-    CHECK(app.manager().saveWindowLayout(vtmux::WindowId { 4711 }, "x").error()
+    CHECK(app.manager().saveWindowLayout(vtworkspace::WindowId { 4711 }, "x").error()
           == contour::LayoutSaveError::UnknownWindow);
 
     store->loadError = "corrupt";

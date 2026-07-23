@@ -7,11 +7,11 @@
 #include <vector>
 
 #include <muxserver/client/LayoutReconstruction.h>
-#include <vtmux/LayoutTree.h>
-#include <vtmux/ModelEvents.h>
-#include <vtmux/Pane.h>
-#include <vtmux/SessionModel.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/LayoutTree.h>
+#include <vtworkspace/ModelEvents.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/SessionModel.h>
+#include <vtworkspace/Tab.h>
 
 using muxserver::client::WireLayout;
 using muxserver::client::wireToLayout;
@@ -22,19 +22,19 @@ namespace
 
 /// The minimal ModelEvents: overrides only the pure-virtual "completed change"
 /// callbacks (the bracket hooks keep their no-op defaults).
-struct NoopEvents: vtmux::ModelEvents
+struct NoopEvents: vtworkspace::ModelEvents
 {
-    void tabAdded(vtmux::WindowId, vtmux::TabId, int) override {}
-    void tabClosed(vtmux::WindowId, vtmux::TabId, int) override {}
-    void tabMoved(vtmux::WindowId, vtmux::TabId, int, int) override {}
-    void tabMovedToWindow(vtmux::WindowId, vtmux::TabId, int, vtmux::WindowId, int) override {}
-    void activeTabChanged(vtmux::WindowId, vtmux::TabId, int) override {}
-    void paneSplit(vtmux::TabId, vtmux::PaneId, vtmux::PaneId) override {}
-    void paneClosed(vtmux::TabId, vtmux::PaneId, vtmux::PaneId) override {}
-    void activePaneChanged(vtmux::TabId, vtmux::PaneId) override {}
-    void paneRatioChanged(vtmux::TabId, vtmux::PaneId, double) override {}
-    void tabTitleChanged(vtmux::TabId) override {}
-    void tabColorChanged(vtmux::TabId) override {}
+    void tabAdded(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
+    void tabClosed(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
+    void tabMoved(vtworkspace::WindowId, vtworkspace::TabId, int, int) override {}
+    void tabMovedToWindow(vtworkspace::WindowId, vtworkspace::TabId, int, vtworkspace::WindowId, int) override {}
+    void activeTabChanged(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
+    void paneSplit(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override {}
+    void paneClosed(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override {}
+    void activePaneChanged(vtworkspace::TabId, vtworkspace::PaneId) override {}
+    void paneRatioChanged(vtworkspace::TabId, vtworkspace::PaneId, double) override {}
+    void tabTitleChanged(vtworkspace::TabId) override {}
+    void tabColorChanged(vtworkspace::TabId) override {}
 };
 
 /// A wire leaf carrying @p session.
@@ -52,7 +52,7 @@ proto::WirePane split(uint8_t orientation, uint16_t ratio, proto::WirePane first
 }
 
 /// Asserts a model pane subtree reproduces a wire pane subtree exactly.
-void requireMatches(vtmux::Pane const& pane, proto::WirePane const& wire)
+void requireMatches(vtworkspace::Pane const& pane, proto::WirePane const& wire)
 {
     if (wire.split == 0)
     {
@@ -76,26 +76,26 @@ void requireMatches(vtmux::Pane const& pane, proto::WirePane const& wire)
 struct Rebuilt
 {
     NoopEvents events;
-    std::unique_ptr<vtmux::SessionModel> model;
-    std::vector<vtmux::Tab*> tabs;
+    std::unique_ptr<vtworkspace::SessionModel> model;
+    std::vector<vtworkspace::Tab*> tabs;
 };
 
 std::unique_ptr<Rebuilt> realize(WireLayout const& wl)
 {
     auto rebuilt = std::make_unique<Rebuilt>();
-    auto pending = vtmux::SessionId {};
-    rebuilt->model = std::make_unique<vtmux::SessionModel>(rebuilt->events, [&pending] { return pending; });
+    auto pending = vtworkspace::SessionId {};
+    rebuilt->model = std::make_unique<vtworkspace::SessionModel>(rebuilt->events, [&pending] { return pending; });
     auto const window = rebuilt->model->createWindow()->id();
 
     // The seeder stages each leaf's remote session so the model allocator hands it
     // back for that pane — exactly what a GUI seeder would do before binding.
-    auto const seed = [&](vtmux::LayoutPane const& leafPane) {
-        pending = vtmux::SessionId { wl.leafSession.at(&leafPane) };
+    auto const seed = [&](vtworkspace::LayoutPane const& leafPane) {
+        pending = vtworkspace::SessionId { wl.leafSession.at(&leafPane) };
         return true;
     };
     for (auto const& tab: wl.layout.tabs)
     {
-        auto* modelTab = vtmux::realizeLayoutTab(*rebuilt->model, window, tab, seed);
+        auto* modelTab = vtworkspace::realizeLayoutTab(*rebuilt->model, window, tab, seed);
         REQUIRE(modelTab != nullptr);
         rebuilt->tabs.push_back(modelTab);
     }
@@ -127,7 +127,7 @@ TEST_CASE("wireToLayout realizes a single split", "[muxserver][layout]")
     REQUIRE(wl.layout.tabs.size() == 1);
     auto const& root = wl.layout.tabs[0].root;
     REQUIRE_FALSE(root.isLeaf());
-    CHECK(root.orientation == vtmux::SplitState::Vertical);
+    CHECK(root.orientation == vtworkspace::SplitState::Vertical);
     REQUIRE(root.children.size() == 2);
     REQUIRE(root.children[0].ratio.has_value());
     CHECK(std::lround(*root.children[0].ratio * 10000.0) == 6000); // first child's share

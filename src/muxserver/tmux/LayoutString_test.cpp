@@ -11,7 +11,7 @@
 #include <string>
 
 #include <muxserver/tmux/LayoutString.h>
-#include <vtmux/Pane.h>
+#include <vtworkspace/Pane.h>
 
 using muxserver::tmux::BinaryLayout;
 using muxserver::tmux::collapseToBinary;
@@ -19,10 +19,10 @@ using muxserver::tmux::encodeLayout;
 using muxserver::tmux::layoutChecksum;
 using muxserver::tmux::ParsedLayout;
 using muxserver::tmux::parseLayout;
-using vtmux::Pane;
-using vtmux::PaneId;
-using vtmux::SessionId;
-using vtmux::SplitState;
+using vtworkspace::Pane;
+using vtworkspace::PaneId;
+using vtworkspace::SessionId;
+using vtworkspace::SplitState;
 using vtpty::ColumnCount;
 using vtpty::LineCount;
 using vtpty::PageSize;

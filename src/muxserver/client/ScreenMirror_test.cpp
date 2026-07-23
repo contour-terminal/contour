@@ -26,8 +26,8 @@
 #include <net/EventLoop.h>
 #include <net/PollEventSource.h>
 #include <net/testing/InMemoryTransport.h>
-#include <vtmux/Pane.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/Tab.h>
 
 using coro::Task;
 using muxserver::NativeSession;
@@ -121,7 +121,7 @@ struct MirrorHarness
     MirrorHarness(MirrorHarness&&) = delete;
     MirrorHarness& operator=(MirrorHarness&&) = delete;
 
-    [[nodiscard]] vtbackend::Terminal* serverTerminal(vtmux::SessionId session)
+    [[nodiscard]] vtbackend::Terminal* serverTerminal(vtworkspace::SessionId session)
     {
         return host.terminal(session);
     }
@@ -139,7 +139,7 @@ Task<void> drive(MirrorHarness* h, Task<void> scenario)
 }
 
 /// Writes @p bytes on the server terminal and pushes the resulting delta.
-void serverWrites(MirrorHarness* h, vtmux::SessionId session, std::string_view bytes)
+void serverWrites(MirrorHarness* h, vtworkspace::SessionId session, std::string_view bytes)
 {
     h->serverTerminal(session)->writeToScreen(bytes);
     h->server->sessionScreenUpdated(session);
@@ -201,7 +201,7 @@ TEST_CASE("the mirror terminal reproduces text, SGR and cursor", "[muxserver][mi
     auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
     h.serverTerminal(session)->writeToScreen("plain \033[1;31mbold-red\033[0m \033[4;58;5;33munder\033[0m");
 
-    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
         co_await waitUntil(&h->loop, [&] {
             return h->mirror->primaryScreen().grid().renderMainPageText().contains("bold-red");
         });
@@ -236,7 +236,7 @@ TEST_CASE("DEC pages beyond primary/alternate mirror faithfully", "[muxserver][m
     auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
     h.serverTerminal(session)->writeToScreen("page-zero-here");
 
-    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
         // Page 0 (primary) mirrors onto the mirror's primary buffer.
         co_await waitUntil(&h->loop, [&] {
             return h->mirror->primaryScreen().grid().renderMainPageText().contains("page-zero-here");
@@ -280,7 +280,7 @@ TEST_CASE("a decoupled cursor page hides the mirror's cursor", "[muxserver][mirr
     auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
     h.serverTerminal(session)->writeToScreen("visible-page-zero");
 
-    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
         // Coupled (the default): the mirror shows page 0 with a visible cursor.
         co_await waitUntil(&h->loop, [&] {
             return h->mirror->primaryScreen().grid().renderMainPageText().contains("visible-page-zero");
@@ -314,7 +314,7 @@ TEST_CASE("Kitty keyboard flags mirror so the client encodes keys alike", "[muxs
     auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
     h.serverTerminal(session)->writeToScreen("shell-ready");
 
-    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
         co_await waitUntil(&h->loop, [&] {
             return h->mirror->primaryScreen().grid().renderMainPageText().contains("shell-ready");
         });
@@ -347,7 +347,7 @@ TEST_CASE("scrolled-out rows land in the mirror's local scrollback", "[muxserver
     auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
     h.serverTerminal(session)->writeToScreen("first-line");
 
-    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
         co_await waitUntil(&h->loop, [&] {
             return h->mirror->primaryScreen().grid().renderMainPageText().contains("first-line");
         });
@@ -410,7 +410,7 @@ TEST_CASE("wide characters and scaled text reproduce in the mirror", "[muxserver
     auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
     h.serverTerminal(session)->writeToScreen("wide: 你好 end\r\n\033]66;s=2;Big\033\\ tail");
 
-    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
         co_await waitUntil(&h->loop, [&] {
             return h->mirror->primaryScreen().grid().renderMainPageText().contains("tail");
         });
@@ -446,7 +446,7 @@ TEST_CASE("input-relevant DEC modes mirror into the local terminal", "[muxserver
     auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
     h.serverTerminal(session)->writeToScreen("prompt");
 
-    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
         co_await waitUntil(&h->loop, [&] {
             return h->mirror->primaryScreen().grid().renderMainPageText().contains("prompt");
         });
@@ -482,7 +482,7 @@ TEST_CASE("a resize resyncs the mirror through a full replay", "[muxserver][mirr
     auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
     h.serverTerminal(session)->writeToScreen("before-resize");
 
-    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
         co_await waitUntil(&h->loop, [&] {
             return h->mirror->primaryScreen().grid().renderMainPageText().contains("before-resize");
         });
@@ -530,7 +530,7 @@ TEST_CASE("inline images round-trip into the mirror via GIP", "[muxserver][mirro
     h.serverTerminal(session)->writeToScreen(
         std::format("\033P!go=s,f=3,w=8,h=8,c=2,r=1,z=3;!{}\033\\", body));
 
-    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
         co_await waitUntil(&h->loop, [&] {
             auto const& row = h->mirror->primaryScreen().grid().lineAt(vtbackend::LineOffset(0)).storage();
             return row.imageFragments.has_value() && row.imageFragments->contains(0)
@@ -562,7 +562,7 @@ TEST_CASE("a live window-title change reaches the mirror", "[muxserver][mirror]"
     auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
     h.serverTerminal(session)->writeToScreen("work");
 
-    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
         co_await waitUntil(&h->loop, [&] {
             return h->mirror->primaryScreen().grid().renderMainPageText().contains("work");
         });
@@ -587,7 +587,7 @@ TEST_CASE("bell, notification and clipboard events reach the mirror", "[muxserve
     auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
     h.serverTerminal(session)->writeToScreen("ready");
 
-    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
         co_await waitUntil(&h->loop, [&] {
             return h->mirror->primaryScreen().grid().renderMainPageText().contains("ready");
         });
@@ -621,7 +621,7 @@ TEST_CASE("a live cursor-shape change reaches the mirror", "[muxserver][mirror]"
     auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
     h.serverTerminal(session)->writeToScreen("x");
 
-    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
         co_await waitUntil(
             &h->loop, [&] { return h->mirror->primaryScreen().grid().renderMainPageText().contains("x"); });
 
@@ -645,7 +645,7 @@ TEST_CASE("a live working-directory change reaches the mirror", "[muxserver][mir
     auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
     h.serverTerminal(session)->writeToScreen("y");
 
-    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
         co_await waitUntil(
             &h->loop, [&] { return h->mirror->primaryScreen().grid().renderMainPageText().contains("y"); });
 
@@ -670,7 +670,7 @@ TEST_CASE("a live default-color change reaches the mirror", "[muxserver][mirror]
     auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
     h.serverTerminal(session)->writeToScreen("z");
 
-    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
         co_await waitUntil(
             &h->loop, [&] { return h->mirror->primaryScreen().grid().renderMainPageText().contains("z"); });
 
@@ -696,7 +696,7 @@ TEST_CASE("the status-display state reaches the mirror", "[muxserver][mirror]")
     auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
     h.serverTerminal(session)->writeToScreen("s");
 
-    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
         co_await waitUntil(
             &h->loop, [&] { return h->mirror->primaryScreen().grid().renderMainPageText().contains("s"); });
 
@@ -722,7 +722,7 @@ TEST_CASE("a pushed then popped status display round-trips through the mirror", 
     auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
     h.serverTerminal(session)->writeToScreen("s");
 
-    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
         co_await waitUntil(
             &h->loop, [&] { return h->mirror->primaryScreen().grid().renderMainPageText().contains("s"); });
         REQUIRE(h->mirror->statusDisplayType() == vtbackend::StatusDisplayType::None);
@@ -756,7 +756,7 @@ TEST_CASE("host-writable status-line content reaches the mirror", "[muxserver][m
     auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
     h.serverTerminal(session)->writeToScreen("body");
 
-    auto scenario = [](MirrorHarness* h, vtmux::SessionId session) -> Task<void> {
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
         co_await waitUntil(&h->loop, [&] {
             return h->mirror->primaryScreen().grid().renderMainPageText().contains("body");
         });

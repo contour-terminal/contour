@@ -48,7 +48,7 @@ add_library(muxserver STATIC
 )
 target_link_libraries(muxserver PUBLIC
     net
-    vtmux
+    vtworkspace
     vtbackend
     vtpty
     crispy::core

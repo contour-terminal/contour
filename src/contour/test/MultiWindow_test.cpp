@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Multi-window coverage at the manager + WindowController layer, headless (offscreen QGuiApplication
-// from test_main, no PTY: tabs are minted straight through the vtmux model, which never spawns a
+// from test_main, no PTY: tabs are minted straight through the vtworkspace model, which never spawns a
 // backing session).
 //
 // The headline cases are REGRESSION PINS for the WindowId-routing refactor: before it, the manager
@@ -29,9 +29,9 @@
 
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
-#include <vtmux/Pane.h>
-#include <vtmux/SessionModel.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/SessionModel.h>
+#include <vtworkspace/Tab.h>
 
 namespace
 {
@@ -367,8 +367,8 @@ TEST_CASE("REGRESSION: pane-proxy writes (ratio, activate) target their own wind
     auto* tabB = manager.model().window(windowB.id)->activeTab();
     REQUIRE(tabA != nullptr);
     REQUIRE(tabB != nullptr);
-    REQUIRE(manager.model().splitActivePane(tabA->id(), vtmux::SplitState::Vertical) != nullptr);
-    REQUIRE(manager.model().splitActivePane(tabB->id(), vtmux::SplitState::Vertical) != nullptr);
+    REQUIRE(manager.model().splitActivePane(tabA->id(), vtworkspace::SplitState::Vertical) != nullptr);
+    REQUIRE(manager.model().splitActivePane(tabB->id(), vtworkspace::SplitState::Vertical) != nullptr);
     REQUIRE(tabA->rootPane()->ratio() == Catch::Approx(0.5));
     REQUIRE(tabB->rootPane()->ratio() == Catch::Approx(0.5));
 
@@ -456,7 +456,7 @@ TEST_CASE("WindowController projects real-session tabs and routes rename/color t
     window->resetTabTitle(0);
     CHECK(rawTitleAt(*window, 0).isEmpty());
 
-    // An empty rename resets rather than blanking (the vtmux-layer invariant, via the controller).
+    // An empty rename resets rather than blanking (the vtworkspace-layer invariant, via the controller).
     window->setTabTitle(0, QStringLiteral("x"));
     window->setTabTitle(0, QString {});
     CHECK(rawTitleAt(*window, 0).isEmpty());
@@ -555,7 +555,7 @@ TEST_CASE("setTabColorForSession routes a DECAC frame color to the session's tab
     CHECK_FALSE(tab->color().has_value());
 
     // An unknown session id is a harmless no-op (the null-tab guard).
-    CHECK_NOTHROW(manager.setTabColorForSession(vtmux::SessionId { 999999 }, red));
+    CHECK_NOTHROW(manager.setTabColorForSession(vtworkspace::SessionId { 999999 }, red));
     CHECK_FALSE(tab->color().has_value());
 
     for (int row = window->count() - 1; row >= 0; --row)
@@ -590,7 +590,7 @@ TEST_CASE("setTabTitleForSession routes a tmux %window-renamed to the session's 
     CHECK(*tab->runtimeTitle() == "deploy");
 
     // An unknown session id is a harmless no-op (the null-tab guard).
-    CHECK_NOTHROW(manager.setTabTitleForSession(vtmux::SessionId { 999999 }, "ghost"));
+    CHECK_NOTHROW(manager.setTabTitleForSession(vtworkspace::SessionId { 999999 }, "ghost"));
     CHECK(*tab->runtimeTitle() == "deploy");
 
     for (int row = window->count() - 1; row >= 0; --row)
@@ -896,8 +896,8 @@ TEST_CASE("TerminalSessionManager splits, focuses and closes panes through the a
     CHECK_FALSE(tab->rootPane()->isLeaf());
 
     // Focus movement across the split does not throw and keeps the tab consistent.
-    CHECK_NOTHROW(manager.focusPane(vtmux::FocusDirection::Left, acting));
-    CHECK_NOTHROW(manager.focusPane(vtmux::FocusDirection::Right, acting));
+    CHECK_NOTHROW(manager.focusPane(vtworkspace::FocusDirection::Left, acting));
+    CHECK_NOTHROW(manager.focusPane(vtworkspace::FocusDirection::Right, acting));
 
     // Closing the active pane collapses the split back to a single leaf.
     manager.closeActivePane(window->activeSession());
@@ -930,23 +930,23 @@ TEST_CASE("TerminalSessionManager swap/move/toggle/resize route through the acti
     CHECK(tab->paneCount() == 3);
 
     // Resize the active pane in each direction: no throw, pane count preserved (ratio nudge only).
-    CHECK_NOTHROW(manager.resizeActivePane(vtmux::FocusDirection::Left, 0.05, window->activeSession()));
-    CHECK_NOTHROW(manager.resizeActivePane(vtmux::FocusDirection::Right, 0.05, window->activeSession()));
+    CHECK_NOTHROW(manager.resizeActivePane(vtworkspace::FocusDirection::Left, 0.05, window->activeSession()));
+    CHECK_NOTHROW(manager.resizeActivePane(vtworkspace::FocusDirection::Right, 0.05, window->activeSession()));
     CHECK(tab->paneCount() == 3);
 
     // Swap the active pane with its left neighbor: pane count preserved (sessions trade slots).
-    CHECK_NOTHROW(manager.swapPane(vtmux::FocusDirection::Left, window->activeSession()));
+    CHECK_NOTHROW(manager.swapPane(vtworkspace::FocusDirection::Left, window->activeSession()));
     CHECK(tab->paneCount() == 3);
 
     // Move (re-parent) the active pane: pane count preserved, tree still valid.
-    CHECK_NOTHROW(manager.movePane(vtmux::FocusDirection::Left, window->activeSession()));
+    CHECK_NOTHROW(manager.movePane(vtworkspace::FocusDirection::Left, window->activeSession()));
     CHECK(tab->paneCount() == 3);
 
     // Guard paths: a null acting session is a no-op, never a crash.
-    CHECK_NOTHROW(manager.swapPane(vtmux::FocusDirection::Left, nullptr));
-    CHECK_NOTHROW(manager.movePane(vtmux::FocusDirection::Left, nullptr));
+    CHECK_NOTHROW(manager.swapPane(vtworkspace::FocusDirection::Left, nullptr));
+    CHECK_NOTHROW(manager.movePane(vtworkspace::FocusDirection::Left, nullptr));
     CHECK_NOTHROW(manager.toggleActivePaneOrientation(nullptr));
-    CHECK_NOTHROW(manager.resizeActivePane(vtmux::FocusDirection::Left, 0.05, nullptr));
+    CHECK_NOTHROW(manager.resizeActivePane(vtworkspace::FocusDirection::Left, 0.05, nullptr));
     CHECK_NOTHROW(manager.toggleActivePaneZoom(nullptr));
 
     window->closeTabAtIndex(0);
@@ -1025,7 +1025,7 @@ TEST_CASE("TerminalSessionManager zoom follows focus and is cleared by restructu
 
     // Moving focus while zoomed keeps the zoom and shows the newly focused pane, so the rendered root
     // must move with it.
-    manager.focusPane(vtmux::FocusDirection::Left, window->activeSession());
+    manager.focusPane(vtworkspace::FocusDirection::Left, window->activeSession());
     CHECK(tab->isZoomed());
     auto* nowRendered = window->activeTabRootPane();
     REQUIRE(nowRendered != nullptr);
@@ -1064,7 +1064,7 @@ TEST_CASE("WindowController: the tab strip stops saying \"Multiple panes\" while
             .toString()
             .toStdString();
     };
-    auto const multiplePanes = std::string { vtmux::Tab::MultiplePanesLabel };
+    auto const multiplePanes = std::string { vtworkspace::Tab::MultiplePanesLabel };
 
     manager.splitActivePane(/*vertical*/ true, window->activeSession());
     REQUIRE(tab->paneCount() == 2);
@@ -1220,7 +1220,7 @@ TEST_CASE("manager tab switching and moving route for the acting session", "[con
     manager.closeTab(nullptr);
     manager.splitActivePane(true, nullptr);
     manager.closeActivePane(nullptr);
-    manager.focusPane(vtmux::FocusDirection::Left, nullptr);
+    manager.focusPane(vtworkspace::FocusDirection::Left, nullptr);
     CHECK(window->activeTabIndex() == before);
 
     // Out-of-range positional switches are no-ops.
@@ -1270,7 +1270,7 @@ TEST_CASE("manager pane split/close/focus operate on the acting session's tab", 
     CHECK(tab->hasMultiplePanes());
 
     // Focus movement across the split (Left from the new right-hand pane).
-    manager.focusPane(vtmux::FocusDirection::Left, window->activeSession());
+    manager.focusPane(vtworkspace::FocusDirection::Left, window->activeSession());
     QCoreApplication::processEvents();
 
     // Close the active pane; the tab collapses back to a single pane.
@@ -1293,7 +1293,7 @@ TEST_CASE("manager guards unknown windows and null acting sessions", "[contour][
     auto& manager = app.manager();
 
     // Creating a session in a window id that was never minted resolves to no model window -> nullptr.
-    CHECK(manager.createSessionInBackground(vtmux::WindowId { 9999 }) == nullptr);
+    CHECK(manager.createSessionInBackground(vtworkspace::WindowId { 9999 }) == nullptr);
 
     // Tab/pane operations with a null acting session resolve to no target tab -> safe no-ops.
     CHECK_NOTHROW(manager.switchToTab(0, nullptr));
@@ -1301,6 +1301,6 @@ TEST_CASE("manager guards unknown windows and null acting sessions", "[contour][
     CHECK_NOTHROW(manager.moveTabToLeft(nullptr));
     CHECK_NOTHROW(manager.moveTabToRight(nullptr));
     CHECK_NOTHROW(manager.splitActivePane(/*vertical*/ true, nullptr));
-    CHECK_NOTHROW(manager.focusPane(vtmux::FocusDirection::Left, nullptr));
+    CHECK_NOTHROW(manager.focusPane(vtworkspace::FocusDirection::Left, nullptr));
     CHECK_NOTHROW(manager.closeActivePane(nullptr));
 }

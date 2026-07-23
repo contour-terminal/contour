@@ -7,12 +7,12 @@
 #include <format>
 #include <ranges>
 
-#include <vtmux/PaneLayout.h>
+#include <vtworkspace/PaneLayout.h>
 
 namespace muxserver::tmux
 {
 
-using vtmux::SplitState;
+using vtworkspace::SplitState;
 
 std::uint16_t layoutChecksum(std::string_view body) noexcept
 {
@@ -28,7 +28,7 @@ std::uint16_t layoutChecksum(std::string_view body) noexcept
 
 namespace
 {
-    void encodeNode(std::string& out, vtmux::Pane const& node, int x, int y, int width, int height)
+    void encodeNode(std::string& out, vtworkspace::Pane const& node, int x, int y, int width, int height)
     {
         out += std::format("{}x{},{},{}", width, height, x, y);
         if (node.isLeaf())
@@ -39,7 +39,7 @@ namespace
 
         auto const sideBySide = node.splitState() == SplitState::Vertical;
         auto const axisExtent = sideBySide ? width : height;
-        auto const [first, second] = vtmux::splitCellExtents(axisExtent, node.ratio());
+        auto const [first, second] = vtworkspace::splitCellExtents(axisExtent, node.ratio());
 
         out += sideBySide ? '{' : '[';
         if (sideBySide)
@@ -58,7 +58,7 @@ namespace
     }
 } // namespace
 
-std::string encodeLayout(vtmux::Pane const& root, vtpty::PageSize area)
+std::string encodeLayout(vtworkspace::Pane const& root, vtpty::PageSize area)
 {
     auto body = std::string {};
     encodeNode(body, root, 0, 0, unbox(area.columns), unbox(area.lines));

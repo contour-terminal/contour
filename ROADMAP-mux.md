@@ -7,13 +7,13 @@ Goal: Contour as a terminal multiplexer — a Qt-free daemon owning sessions/lay
 clients over `AF_UNIX`/`AF_INET`, tmux-protocol compatibility in all three directions, and a
 native cells+deltas protocol (wezterm's model). One session, two taps: raw PTY bytes feed tmux
 control mode; per-line cell deltas feed the native protocol. GUI and daemon share
-`vtmux::SessionModel`.
+`vtworkspace::SessionModel`.
 
 ## Phase 0 — foundations
 
-- [x] 0a. `vtmux::LayoutTree`: move `LayoutPane`/`LayoutTab`/`Layout` + serialize/realize
-      helpers out of `src/contour/` (yaml emission stays behind); tests move to `vtmux_test`
-- [x] 0b. `vtmux::layoutInCells` forward solver (1-cell divider, tmux `layout_check` exact)
+- [x] 0a. `vtworkspace::LayoutTree`: move `LayoutPane`/`LayoutTab`/`Layout` + serialize/realize
+      helpers out of `src/contour/` (yaml emission stays behind); tests move to `vtworkspace_test`
+- [x] 0b. `vtworkspace::layoutInCells` forward solver (1-cell divider, tmux `layout_check` exact)
 - [x] 0c-1. `src/coro` — verbatim endo port (`endo::coro`→`coro`), + `WhenAll_test`
 - [x] 0c-2. `src/net` reactor core — `EventLoop` (ex-TuiRuntime) with spawn-reap +
       `SystemPipe`-backed `post()`, `EventSource`/`PollEventSource`, `net/platform/`
@@ -23,7 +23,7 @@ control mode; per-line cell deltas feed the native protocol. GUI and daemon shar
 
 ## Phase 1 — headless session host
 
-- [x] `muxserver::SessionHost` (SessionId → {Pty, Terminal}, implements `vtmux::ModelEvents`,
+- [x] `muxserver::SessionHost` (SessionId → {Pty, Terminal}, implements `vtworkspace::ModelEvents`,
       pre-mint id handshake); one reactor thread + per-session PTY threads bridged by `post()`
 - [x] CLI verbs: `contour daemon`, `contour attach` (probe); socket path
       `$XDG_RUNTIME_DIR/contour/<label>`, `$CONTOUR_MUX` override

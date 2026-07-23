@@ -655,7 +655,7 @@ VSRM
 vtconformance
 vtdocs
 VTID
-vtmux
+vtworkspace
 VTparse
 vttest
 vwx

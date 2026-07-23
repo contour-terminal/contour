@@ -37,8 +37,8 @@
 #include <muxserver/tmux/LayoutString.h>
 #include <muxserver/tmux/TmuxClientModel.h>
 #include <muxserver/tmux/TmuxGateway.h>
-#include <vtmux/LayoutTree.h>
-#include <vtmux/Primitives.h>
+#include <vtworkspace/LayoutTree.h>
+#include <vtworkspace/Primitives.h>
 
 namespace contour
 {
@@ -74,16 +74,16 @@ class TerminalSession;
 [[nodiscard]] std::string tmuxNewWindowCommand();
 
 /// A tmux window's binary layout tree converted for realization through
-/// `TerminalSessionManager::applyLayoutToWindow`: a single-tab `vtmux::Layout` carrying the split
+/// `TerminalSessionManager::applyLayoutToWindow`: a single-tab `vtworkspace::Layout` carrying the split
 /// orientations and ratios, plus the map from each converted leaf pane (by its stable address inside
 /// `layout`) to the tmux pane id that backs it. Mirrors `muxserver::client::WireLayout`.
 struct TmuxWindowLayout
 {
-    vtmux::Layout layout;                                            ///< A single tab: the window's tree.
-    std::unordered_map<vtmux::LayoutPane const*, uint64_t> leafPane; ///< Converted leaf → tmux pane id.
+    vtworkspace::Layout layout;                                            ///< A single tab: the window's tree.
+    std::unordered_map<vtworkspace::LayoutPane const*, uint64_t> leafPane; ///< Converted leaf → tmux pane id.
 };
 
-/// Converts a tmux `BinaryLayout` tree into a realizable single-tab `vtmux::Layout` (splits keep their
+/// Converts a tmux `BinaryLayout` tree into a realizable single-tab `vtworkspace::Layout` (splits keep their
 /// orientation and first-child ratio) plus the leaf→pane map — the tmux analogue of
 /// `muxserver::client::wireToLayout`. Pure, so the tree conversion is unit-testable. The leaf map is
 /// keyed by addresses inside the returned `layout`; a move preserves them (build the map only once the
@@ -121,7 +121,7 @@ class TmuxController final:
     /// multi-pane layout (all its panes pending) is realized as its WHOLE tree via
     /// applyLayoutToWindow — faithful split ratios and shape. A window's first (or only) pane, or a
     /// pane arriving after the window is already shown, is realized as a tab / an incremental split.
-    void adoptPendingPanes(TerminalSessionManager& manager, vtmux::WindowId window);
+    void adoptPendingPanes(TerminalSessionManager& manager, vtworkspace::WindowId window);
 
     /// Binds the NEXT createPty() to tmux pane @p pane rather than popping the FIFO pending queue. The
     /// whole-tree realizer calls this — via applyLayoutToWindow's beforeLeafSeed — right before each
@@ -189,14 +189,14 @@ class TmuxController final:
     /// Realizes tmux window @p tmuxWindow's whole layout @p tree as a tab in @p guiWindow, binding each
     /// leaf to its tmux pane and seeding the window's split anchor. Runs on the GUI thread.
     void realizeWindowLayout(TerminalSessionManager& manager,
-                             vtmux::WindowId guiWindow,
+                             vtworkspace::WindowId guiWindow,
                              uint64_t tmuxWindow,
                              muxserver::tmux::BinaryLayout const& tree);
 
     /// Realizes ONE pending pane of @p window incrementally: its first pane as a background tab, a
     /// later pane as a split of the window's anchor (at the pane's remote ratio). Runs on the GUI
     /// thread. @return true if a pane was consumed (progress made); false if creation stalled.
-    [[nodiscard]] bool realizeOnePane(TerminalSessionManager& manager, vtmux::WindowId guiWindow);
+    [[nodiscard]] bool realizeOnePane(TerminalSessionManager& manager, vtworkspace::WindowId guiWindow);
 
   protected:
     [[nodiscard]] coro::Task<void> runClient(net::EventLoop* loop) override;
@@ -236,7 +236,7 @@ class TmuxController final:
     /// Split anchor per tmux window, as a session ID resolved back to a live
     /// TerminalSession at use time — a raw pointer would dangle the moment the
     /// anchored pane dies (tab close, or tmux removing the pane).
-    std::unordered_map<uint64_t, vtmux::SessionId> _actingByWindow;
+    std::unordered_map<uint64_t, vtworkspace::SessionId> _actingByWindow;
     std::unordered_map<uint64_t, std::string> _pendingRenames; ///< %window-renamed titles awaiting apply.
     std::unordered_set<uint64_t>
         _remotelyClosed; ///< Panes tmux removed; their unbind must not echo kill-pane.

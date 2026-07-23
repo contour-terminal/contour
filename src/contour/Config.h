@@ -70,7 +70,7 @@
 #include <variant>
 
 #include <reflection-cpp/reflection.hpp>
-#include <vtmux/LayoutTree.h> // layout tree structs (LayoutPane, LayoutTab, Layout)
+#include <vtworkspace/LayoutTree.h> // layout tree structs (LayoutPane, LayoutTab, Layout)
 
 namespace contour::config
 {
@@ -572,11 +572,11 @@ inline auto defaultFamilyName = "monospace";
     return value;
 }
 
-/// The layout tree model (structs + realize/serialize helpers) lives in vtmux::LayoutTree so the
+/// The layout tree model (structs + realize/serialize helpers) lives in vtworkspace::LayoutTree so the
 /// Qt-free daemon shares it; these aliases keep the config-side spellings working.
-using LayoutPane = vtmux::LayoutPane;
-using LayoutTab = vtmux::LayoutTab;
-using Layout = vtmux::Layout;
+using LayoutPane = vtworkspace::LayoutPane;
+using LayoutTab = vtworkspace::LayoutTab;
+using Layout = vtworkspace::Layout;
 
 struct TerminalProfile
 {

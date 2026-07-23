@@ -577,7 +577,7 @@ namespace
         if (!assign(in.varint(), pdu.session, error) || !assign(in.u8(), pdu.orientation, error)
             || !assign(in.u16(), pdu.ratio, error))
             return std::unexpected(error);
-        // The wire orientation is a vtmux::SplitState value: exactly 1 (Horizontal)
+        // The wire orientation is a vtworkspace::SplitState value: exactly 1 (Horizontal)
         // or 2 (Vertical) — rejected here, at the protocol boundary, exactly as
         // decodePane rejects an out-of-range WirePane.split. Fail closed on any
         // other byte so no invalid SplitState can ever reach the layout tree (a
@@ -612,7 +612,7 @@ namespace
         if (!assign(in.varint(), childCount, error))
             return std::unexpected(error);
         // A pane node's split state and child count must agree (SplitState in
-        // vtmux/Primitives.h): split 0 (None) is a leaf with no children; split 1/2
+        // vtworkspace/Primitives.h): split 0 (None) is a leaf with no children; split 1/2
         // (Horizontal/Vertical) is a binary split with exactly two. Reject any other
         // combination — an out-of-range split, or a split lacking its two children —
         // so the layout converters (wireToLayoutPane/mapLeaves) can index

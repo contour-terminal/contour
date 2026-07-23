@@ -10,9 +10,9 @@
 #include <string>
 #include <vector>
 
-#include <vtmux/SessionModel.h>
+#include <vtworkspace/SessionModel.h>
 
-namespace vtmux
+namespace vtworkspace
 {
 
 /// A node in a layout tab's pane tree. It is EITHER a leaf (a terminal to open) OR a split (an
@@ -31,7 +31,7 @@ struct LayoutPane
     /// Per-pane profile override (terminal-level settings only — not window ones).
     std::optional<std::string> profile;
     /// Fraction (0, 1] of the parent split this pane occupies. Unset means "share whatever the
-    /// explicitly-sized siblings leave over, equally" (see vtmux::ratioForFirst).
+    /// explicitly-sized siblings leave over, equally" (see vtworkspace::ratioForFirst).
     std::optional<double> ratio;
 
     /// How this pane's children are arranged (splits only).
@@ -112,4 +112,4 @@ using LeafResolver = std::function<PaneLeafData(SessionId)>;
 /// Serializes @p tab (title/color/pane tree) into a LayoutTab, for save-layout use.
 [[nodiscard]] LayoutTab serializeTab(Tab const& tab, LeafResolver const& resolve);
 
-} // namespace vtmux
+} // namespace vtworkspace

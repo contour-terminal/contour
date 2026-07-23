@@ -22,8 +22,8 @@
 #include <net/PollEventSource.h>
 #include <net/testing/CoroTestSupport.h>
 #include <net/testing/InMemoryTransport.h>
-#include <vtmux/Pane.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/Tab.h>
 
 using namespace std::chrono_literals;
 
@@ -117,7 +117,7 @@ struct NativeHarness
 
 /// Once the handshake had time to land: flips the hosted terminal to the
 /// alternate screen and kicks the debounced flush.
-Task<void> flipToAltScreen(NativeHarness* h, vtmux::SessionId id)
+Task<void> flipToAltScreen(NativeHarness* h, vtworkspace::SessionId id)
 {
     co_await h->loop.delay(5ms);
     h->host.terminal(id)->writeToScreen("\033[?1049hALT!");
@@ -126,7 +126,7 @@ Task<void> flipToAltScreen(NativeHarness* h, vtmux::SessionId id)
 
 /// Once the attach snapshot has landed: appends to the SAME primary screen and
 /// kicks the debounced flush, so a NON-snapshot (incremental) delta follows.
-Task<void> appendThenUpdate(NativeHarness* h, vtmux::SessionId id)
+Task<void> appendThenUpdate(NativeHarness* h, vtworkspace::SessionId id)
 {
     co_await h->loop.delay(5ms);
     h->host.terminal(id)->writeToScreen("more");
@@ -135,7 +135,7 @@ Task<void> appendThenUpdate(NativeHarness* h, vtmux::SessionId id)
 
 /// Once the attach snapshot has landed: repositions ONLY the cursor (writing no
 /// cell content) and kicks the debounced flush.
-Task<void> moveCursorThenUpdate(NativeHarness* h, vtmux::SessionId id)
+Task<void> moveCursorThenUpdate(NativeHarness* h, vtworkspace::SessionId id)
 {
     co_await h->loop.delay(5ms);
     h->host.terminal(id)->writeToScreen("\033[10;5H"); // CUP: move cursor to row 10, col 5
@@ -144,7 +144,7 @@ Task<void> moveCursorThenUpdate(NativeHarness* h, vtmux::SessionId id)
 
 /// Once the attach snapshot has landed: sets the window title (OSC 2) and kicks the
 /// debounced flush, so an incremental delta carrying the new title follows.
-Task<void> setTitleThenUpdate(NativeHarness* h, vtmux::SessionId id)
+Task<void> setTitleThenUpdate(NativeHarness* h, vtworkspace::SessionId id)
 {
     co_await h->loop.delay(5ms);
     h->host.terminal(id)->writeToScreen("\033]2;my-title\033\\"); // OSC 2: set window title
@@ -152,7 +152,7 @@ Task<void> setTitleThenUpdate(NativeHarness* h, vtmux::SessionId id)
 }
 
 /// Schedules a debounce flush, then disconnects before it can fire.
-Task<void> kickThenDisconnect(NativeHarness* h, vtmux::SessionId id)
+Task<void> kickThenDisconnect(NativeHarness* h, vtworkspace::SessionId id)
 {
     co_await h->loop.delay(5ms);
     h->session->sessionScreenUpdated(id); // parks the 20ms debounce flush
@@ -183,7 +183,7 @@ namespace muxserver
 /// Exposes NativeSession's private follow map to the leak regression test.
 struct NativeSessionFollowTester
 {
-    static bool follows(NativeSession const& session, vtmux::SessionId id)
+    static bool follows(NativeSession const& session, vtworkspace::SessionId id)
     {
         return session._followed.contains(id.value);
     }

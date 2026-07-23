@@ -26,7 +26,7 @@ Item {
     required property color tabColor
     required property bool tabActive
     required property int tabPaneCount
-    required property bool tabZoomed     // active pane is zoomed: only it is on screen (see vtmux::Tab)
+    required property bool tabZoomed     // active pane is zoomed: only it is on screen (see vtworkspace::Tab)
 
     implicitWidth: Math.min(240, Math.max(120,
         label.implicitWidth + 56 + zoomBadge.width + zoomBadge.anchors.rightMargin))

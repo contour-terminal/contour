@@ -6,22 +6,22 @@
 #include <string>
 #include <unordered_map>
 
-#include <vtmux/LayoutTree.h>
+#include <vtworkspace/LayoutTree.h>
 
 namespace contour
 {
 
-// The layout tree model (structs, realize, serialize) lives in vtmux::LayoutTree so the Qt-free
+// The layout tree model (structs, realize, serialize) lives in vtworkspace::LayoutTree so the Qt-free
 // daemon shares it; these aliases keep the GUI's historical spellings working. Only the YAML
 // emission below is contour-specific (it is the sole yaml-cpp-coupled piece).
-using vtmux::LeafResolver;
-using vtmux::leftmostLeaf;
-using vtmux::PaneLeafData;
-using vtmux::PaneSeeder;
-using vtmux::ratioForFirst;
-using vtmux::realizeLayoutTab;
-using vtmux::serializePane;
-using vtmux::serializeTab;
+using vtworkspace::LeafResolver;
+using vtworkspace::leftmostLeaf;
+using vtworkspace::PaneLeafData;
+using vtworkspace::PaneSeeder;
+using vtworkspace::ratioForFirst;
+using vtworkspace::realizeLayoutTab;
+using vtworkspace::serializePane;
+using vtworkspace::serializeTab;
 
 /// Renders a full `layouts:` YAML document (the exact text later written to `layouts.yml`) from
 /// @p layouts, via yaml-cpp's YAML::Emitter — so quoting/escaping of names, commands, arguments and

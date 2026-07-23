@@ -11,7 +11,7 @@
 #include <vector>
 
 #include <muxserver/tmux/ControlModeSpawn.h>
-#include <vtmux/LayoutConvert.h>
+#include <vtworkspace/LayoutConvert.h>
 
 namespace contour
 {
@@ -30,7 +30,7 @@ namespace
 
     /// Finds the split (orientation + first-child ratio) that joins @p pane into @p node's tree — the
     /// proportions the pane's incremental split should reproduce.
-    [[nodiscard]] std::optional<std::pair<vtmux::SplitState, double>> parentSplitOf(BinaryLayout const& node,
+    [[nodiscard]] std::optional<std::pair<vtworkspace::SplitState, double>> parentSplitOf(BinaryLayout const& node,
                                                                                     uint64_t pane)
     {
         if (!isSplit(node))
@@ -70,7 +70,7 @@ namespace
         return out;
     }
 
-    /// Adapts a tmux `BinaryLayout` for the shared layout converter (@ref vtmux::convertLayoutPane) —
+    /// Adapts a tmux `BinaryLayout` for the shared layout converter (@ref vtworkspace::convertLayoutPane) —
     /// the tmux analogue of muxserver::client's WirePaneAdapter, so both paths share ONE conversion.
     struct BinaryLayoutAdapter
     {
@@ -78,7 +78,7 @@ namespace
         {
             return node.first != nullptr && node.second != nullptr;
         }
-        [[nodiscard]] vtmux::SplitState orientation(BinaryLayout const& node) const noexcept
+        [[nodiscard]] vtworkspace::SplitState orientation(BinaryLayout const& node) const noexcept
         {
             return node.orientation;
         }
@@ -102,10 +102,10 @@ TmuxWindowLayout tmuxLayoutToWindowLayout(muxserver::tmux::BinaryLayout const& t
 {
     auto result = TmuxWindowLayout {};
     auto const adapter = BinaryLayoutAdapter {};
-    result.layout.tabs.push_back(vtmux::LayoutTab { .root = vtmux::convertLayoutPane(tree, adapter) });
+    result.layout.tabs.push_back(vtworkspace::LayoutTab { .root = vtworkspace::convertLayoutPane(tree, adapter) });
     // Build the leaf → pane map only now that the tree is in place: the pane addresses are stable and
     // a move of the result preserves them (the vectors' buffers move intact).
-    vtmux::mapLayoutLeaves(result.layout.tabs.front().root, tree, adapter, result.leafPane);
+    vtworkspace::mapLayoutLeaves(result.layout.tabs.front().root, tree, adapter, result.leafPane);
     return result;
 }
 
@@ -259,7 +259,7 @@ void TmuxController::paneAdded(uint64_t window, uint64_t pane, int columns, int 
     {
         if (auto const split = parentSplitOf(*it->second.tree, pane))
         {
-            record.vertical = split->first == vtmux::SplitState::Vertical;
+            record.vertical = split->first == vtworkspace::SplitState::Vertical;
             record.ratio = split->second;
         }
         tree = cloneBinaryLayout(*it->second.tree);
@@ -306,7 +306,7 @@ void TmuxController::applyPendingRenames(TerminalSessionManager& manager)
     // Resolve each pending rename to its tab's session under the lock (the acting-session
     // map is shared with the reactor thread), then apply outside it — setTabTitleForSession
     // touches the GUI model and could re-enter the controller.
-    auto renames = std::vector<std::pair<vtmux::SessionId, std::string>> {};
+    auto renames = std::vector<std::pair<vtworkspace::SessionId, std::string>> {};
     {
         auto const lock = std::lock_guard { _mutex };
         for (auto it = _pendingRenames.begin(); it != _pendingRenames.end();)
@@ -497,7 +497,7 @@ std::unique_ptr<vtpty::Pty> TmuxController::createPty(std::optional<std::string>
     return pty;
 }
 
-void TmuxController::adoptPendingPanes(TerminalSessionManager& manager, vtmux::WindowId guiWindow)
+void TmuxController::adoptPendingPanes(TerminalSessionManager& manager, vtworkspace::WindowId guiWindow)
 {
     // Splits performed here (whole-tree realize, or an incremental split of an existing tmux pane)
     // must build the mirror pane locally, not author a new split back to tmux. (Mirrors
@@ -556,7 +556,7 @@ void TmuxController::adoptPendingPanes(TerminalSessionManager& manager, vtmux::W
 }
 
 void TmuxController::realizeWindowLayout(TerminalSessionManager& manager,
-                                         vtmux::WindowId guiWindow,
+                                         vtworkspace::WindowId guiWindow,
                                          uint64_t tmuxWindow,
                                          muxserver::tmux::BinaryLayout const& tree)
 {
@@ -578,7 +578,7 @@ void TmuxController::realizeWindowLayout(TerminalSessionManager& manager,
         }
 }
 
-bool TmuxController::realizeOnePane(TerminalSessionManager& manager, vtmux::WindowId guiWindow)
+bool TmuxController::realizeOnePane(TerminalSessionManager& manager, vtworkspace::WindowId guiWindow)
 {
     auto record = PendingPane {};
     {
@@ -601,7 +601,7 @@ bool TmuxController::realizeOnePane(TerminalSessionManager& manager, vtmux::Wind
     auto const anchor = [&] {
         auto const lock = std::lock_guard { _mutex };
         auto const it = _actingByWindow.find(record.window);
-        return it != _actingByWindow.end() ? it->second : vtmux::SessionId {};
+        return it != _actingByWindow.end() ? it->second : vtworkspace::SessionId {};
     }();
     auto* acting = manager.sessionForId(anchor);
 

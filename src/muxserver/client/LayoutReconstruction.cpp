@@ -4,14 +4,14 @@
 #include <cstddef>
 #include <ranges>
 
-#include <vtmux/LayoutConvert.h>
+#include <vtworkspace/LayoutConvert.h>
 
 namespace muxserver::client
 {
 
 namespace
 {
-    /// Adapts a daemon `WirePane` for the shared layout converter (@ref vtmux::convertLayoutPane).
+    /// Adapts a daemon `WirePane` for the shared layout converter (@ref vtworkspace::convertLayoutPane).
     struct WirePaneAdapter
     {
         /// A split needs its two children. The decoder already rejects an under-populated split
@@ -22,9 +22,9 @@ namespace
         {
             return pane.split != 0 && pane.children.size() >= 2;
         }
-        [[nodiscard]] vtmux::SplitState orientation(proto::WirePane const& pane) const noexcept
+        [[nodiscard]] vtworkspace::SplitState orientation(proto::WirePane const& pane) const noexcept
         {
-            return static_cast<vtmux::SplitState>(pane.split);
+            return static_cast<vtworkspace::SplitState>(pane.split);
         }
         /// The first child's share; the wire ratio is in units of 1/10000.
         [[nodiscard]] double firstRatio(proto::WirePane const& pane) const noexcept
@@ -43,9 +43,9 @@ namespace
     };
 } // namespace
 
-vtmux::LayoutPane wireToLayoutPane(proto::WirePane const& pane)
+vtworkspace::LayoutPane wireToLayoutPane(proto::WirePane const& pane)
 {
-    return vtmux::convertLayoutPane(pane, WirePaneAdapter {});
+    return vtworkspace::convertLayoutPane(pane, WirePaneAdapter {});
 }
 
 WireLayout wireToLayout(proto::LayoutState const& state)
@@ -55,13 +55,13 @@ WireLayout wireToLayout(proto::LayoutState const& state)
     result.layout.tabs.reserve(state.tabs.size());
     for (auto const& tab: state.tabs)
         result.layout.tabs.push_back(
-            vtmux::LayoutTab { .root = vtmux::convertLayoutPane(tab.root, adapter) });
+            vtworkspace::LayoutTab { .root = vtworkspace::convertLayoutPane(tab.root, adapter) });
 
     // Build the leaf → session map only now that the tree is complete AND in its final location: the
     // pane addresses are stable (further pushes would have reallocated the children vectors), and
     // NRVO / a move of the result preserves them.
     for (auto const i: std::views::iota(std::size_t { 0 }, state.tabs.size()))
-        vtmux::mapLayoutLeaves(result.layout.tabs[i].root, state.tabs[i].root, adapter, result.leafSession);
+        vtworkspace::mapLayoutLeaves(result.layout.tabs[i].root, state.tabs[i].root, adapter, result.leafSession);
     return result;
 }
 

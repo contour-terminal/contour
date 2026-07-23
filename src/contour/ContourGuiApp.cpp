@@ -1021,7 +1021,7 @@ bool ContourGuiApp::bindPendingAttachWindow(WindowController* controller)
     return false;
 }
 
-void ContourGuiApp::bindDaemonWindow(std::uint64_t daemonWindow, vtmux::WindowId osWindow)
+void ContourGuiApp::bindDaemonWindow(std::uint64_t daemonWindow, vtworkspace::WindowId osWindow)
 {
     _attachWindowMap.emplace(daemonWindow, osWindow);
     contour::applyRemoteLayout(_sessionManager, osWindow, *_attachController, daemonWindow);

@@ -9,7 +9,7 @@
 /// forwards bytes; the client emulates — images and OSC 66 parse natively
 /// while attached). History arrives once per pane via `capture-pane -peqJ`
 /// replay: text + SGR only, tmux's own inherited limitation. Layout strings
-/// ingest through parseLayout/collapseToBinary into a vtmux-shaped tree a
+/// ingest through parseLayout/collapseToBinary into a vtworkspace-shaped tree a
 /// frontend can realize.
 
 #include <vtbackend/Terminal.h>
@@ -61,7 +61,7 @@ struct WindowView
 {
     std::string name;
     std::string layout;                 ///< The last ingested layout string.
-    std::unique_ptr<BinaryLayout> tree; ///< Its binary split tree (vtmux-shaped).
+    std::unique_ptr<BinaryLayout> tree; ///< Its binary split tree (vtworkspace-shaped).
     std::vector<uint64_t> panes;        ///< Leaf pane ids, layout order.
 };
 

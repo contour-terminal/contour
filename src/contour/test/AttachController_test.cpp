@@ -43,9 +43,9 @@
 #include <net/PollEventSource.h>
 #include <net/Sockets.h>
 #include <net/Tls.h>
-#include <vtmux/Pane.h>
-#include <vtmux/SessionModel.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/SessionModel.h>
+#include <vtworkspace/Tab.h>
 
 using namespace std::chrono_literals;
 
@@ -132,7 +132,7 @@ struct DaemonFixture
     }
 
     /// Seeds one session and writes @p text on its terminal.
-    [[nodiscard]] vtmux::SessionId seedSession(std::string text)
+    [[nodiscard]] vtworkspace::SessionId seedSession(std::string text)
     {
         return onDaemon([this, text = std::move(text)] {
             host->createTab();
@@ -240,7 +240,7 @@ TEST_CASE("attach controller captures the daemon's tab and pane layout", "[attac
     // Split the seeded tab so the layout carries a non-trivial pane tree.
     daemon.onDaemon([&daemon] {
         auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtmux::SplitState::Vertical, 0.5);
+        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return 0;
     });
 
@@ -257,7 +257,7 @@ TEST_CASE("attach controller captures the daemon's tab and pane layout", "[attac
 
     // The tab's root is a vertical split with two distinct-session leaves.
     auto const& root = layout->tabs.front().root;
-    CHECK(root.split == std::to_underlying(vtmux::SplitState::Vertical));
+    CHECK(root.split == std::to_underlying(vtworkspace::SplitState::Vertical));
     REQUIRE(root.children.size() == 2);
     CHECK(root.children[0].session != 0);
     CHECK(root.children[1].session != 0);
@@ -276,7 +276,7 @@ TEST_CASE("attach realizes a split daemon layout as a 2-pane tab", "[attach][con
     std::ignore = daemon.seedSession("root");
     daemon.onDaemon([&daemon] {
         auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtmux::SplitState::Vertical, 0.6);
+        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.6);
         return 0;
     });
 
@@ -308,7 +308,7 @@ TEST_CASE("attach realizes a split daemon layout as a 2-pane tab", "[attach][con
     REQUIRE(tab != nullptr);
     CHECK(tab->paneCount() == 2); // the daemon's split reproduced locally
     REQUIRE_FALSE(tab->rootPane()->isLeaf());
-    CHECK(tab->rootPane()->splitState() == vtmux::SplitState::Vertical);
+    CHECK(tab->rootPane()->splitState() == vtworkspace::SplitState::Vertical);
 
     ac->stop();
 }
@@ -336,7 +336,7 @@ TEST_CASE("attach reconciles a split authored on the daemon after attach", "[att
     // split to reach the client's layout.
     daemon.onDaemon([&daemon] {
         auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtmux::SplitState::Horizontal, 0.5);
+        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Horizontal, 0.5);
         return 0;
     });
     for (auto i = 0; i < 200; ++i)
@@ -377,7 +377,7 @@ TEST_CASE("attach reconciles an uneven daemon split with matching proportions", 
     // A distinctly uneven split (0.7 to the first/acting child) authored on the daemon.
     daemon.onDaemon([&daemon] {
         auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtmux::SplitState::Vertical, 0.7);
+        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.7);
         return 0;
     });
     for (auto i = 0; i < 200; ++i)
@@ -405,9 +405,9 @@ TEST_CASE("attach reconciles a pane closed on the daemon by removing it locally"
 {
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("first");
-    auto const second = daemon.onDaemon([&daemon]() -> vtmux::SessionId {
+    auto const second = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
         auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtmux::SplitState::Vertical, 0.5);
+        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return tab->activePane()->session(); // the new (active) pane's session
     });
 
@@ -571,7 +571,7 @@ TEST_CASE("attach maps each daemon window onto its own GUI window", "[attach][co
     REQUIRE(app.manager().model().window(win1.id)->tabCount() == 1);
     REQUIRE(app.manager().model().window(win2.id)->tabCount() == 1);
     // ...bound to that window's own remote session (via the pane's pty).
-    auto const boundSession = [&](vtmux::WindowId window) -> std::optional<uint64_t> {
+    auto const boundSession = [&](vtworkspace::WindowId window) -> std::optional<uint64_t> {
         auto* tab = app.manager().model().window(window)->tabAt(0);
         auto const sessions = app.manager().sessionsOfTab(tab);
         if (sessions.empty())

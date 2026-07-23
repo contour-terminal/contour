@@ -3,9 +3,9 @@
 
 #include <optional>
 
-#include <vtmux/Primitives.h>
+#include <vtworkspace/Primitives.h>
 
-namespace vtmux
+namespace vtworkspace
 {
 
 /// Observer interface for changes to the session/layout model.
@@ -157,4 +157,4 @@ class ModelEvents
     virtual void tabColorChanged(TabId tab) = 0;
 };
 
-} // namespace vtmux
+} // namespace vtworkspace
