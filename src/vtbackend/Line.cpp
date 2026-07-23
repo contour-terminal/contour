@@ -7,6 +7,8 @@
 #include <libunicode/utf8.h>
 #include <libunicode/width.h>
 
+#include <ranges>
+
 namespace vtbackend
 {
 
@@ -94,7 +96,7 @@ std::string Line::toUtf8(ColumnOffset begin, ColumnOffset end) const
     str.reserve(last - first); // exact for ASCII, a sound floor for anything wider
 
     int skipCount = 0;
-    for (auto i = first; i < last; ++i)
+    for (auto const i: std::views::iota(first, last))
     {
         if (skipCount > 0)
         {
@@ -133,7 +135,7 @@ std::string Line::toUtf8WithSgr(ColumnOffset begin, ColumnOffset end) const
 
     auto current = GraphicsAttributes {}; // the default rendition is "in effect" at line start
     auto skipCount = 0;
-    for (auto i = first; i < last; ++i)
+    for (auto const i: std::views::iota(first, last))
     {
         if (skipCount > 0)
         {

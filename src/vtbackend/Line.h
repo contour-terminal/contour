@@ -282,10 +282,11 @@ class Line
     {
         Require(ColumnOffset(0) <= column);
         Require(column <= ColumnOffset::cast_from(size())); // Allow off-by-one for sentinel.
-        // Pessimistic: the returned proxy writes after we returned; accepted for v1.
-        _dirty = true;
+        // Dirtying is deferred to the CellProxy write methods: a read-only proxy
+        // (cast from non-const Line, or a const-qualified comparison path) no longer
+        // dirties the line spuriously.
         materialize();
-        return { _storage, unbox<size_t>(column) };
+        return { _storage, unbox<size_t>(column), &_dirty };
     }
 
     [[nodiscard]] uint8_t cellEmptyAt(ColumnOffset column) const noexcept

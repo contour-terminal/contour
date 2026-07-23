@@ -301,7 +301,11 @@ TEST_CASE("Line.revision.everyMutatorDirties", "[Line][revision]")
     CHECK(dirtiedBy([&] { line.fill(LineFlag::None, GraphicsAttributes {}, U'x', 1); }));
     CHECK(dirtiedBy([&] { line.fill(ColumnOffset(0), GraphicsAttributes {}, "ab"); }));
     CHECK(dirtiedBy([&] { line.resize(ColumnCount(10)); }));
-    CHECK(dirtiedBy([&] { static_cast<void>(line.useCellAt(ColumnOffset(0))); }));
+    // useCellAt defers dirtying to the proxy's write methods: a read-only
+    // CellProxy (the return value discarded here) does NOT dirty the line.
+    CHECK_FALSE(dirtiedBy([&] { static_cast<void>(line.useCellAt(ColumnOffset(0))); }));
+    // Writing through the proxy dirties the line.
+    CHECK(dirtiedBy([&] { line.useCellAt(ColumnOffset(0)).write(GraphicsAttributes {}, U'x', 1); }));
     CHECK(dirtiedBy([&] { static_cast<void>(line.materializedStorage()); }));
     CHECK(dirtiedBy([&] { static_cast<void>(line.storage()); })); // mutable overload
     CHECK(dirtiedBy([&] { static_cast<void>(line.flags()); }));   // mutable overload

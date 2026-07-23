@@ -40,7 +40,8 @@ class BasicCellProxy
 
     using LineType = std::conditional_t<IsConst, LineSoA const, LineSoA>;
 
-    BasicCellProxy(LineType& line, size_t col) noexcept: _line(&line), _col(col)
+    BasicCellProxy(LineType& line, size_t col, bool* dirty = nullptr) noexcept:
+        _line(&line), _col(col), _dirty(dirty)
     {
         // CellProxy must never be constructed on a blank (un-materialized) line:
         // every accessor below dereferences the SoA arrays. Callers must materialize
@@ -141,6 +142,7 @@ class BasicCellProxy
     void write(GraphicsAttributes const& attrs, char32_t ch, uint8_t cellWidth) noexcept
         requires(!IsConst)
     {
+        markDirty();
         writeCellToSoA(*_line, _col, ch, cellWidth, attrs);
     }
 
@@ -150,12 +152,14 @@ class BasicCellProxy
                HyperlinkId hyperlinkId) noexcept
         requires(!IsConst)
     {
+        markDirty();
         writeCellToSoA(*_line, _col, ch, cellWidth, attrs, hyperlinkId);
     }
 
     void writeTextOnly(char32_t ch, uint8_t cellWidth) noexcept
         requires(!IsConst)
     {
+        markDirty();
         auto const oldClusterSize = _line->clusterSize[_col];
         _line->codepoints[_col] = ch;
         _line->widths[_col] = cellWidth;
@@ -167,6 +171,7 @@ class BasicCellProxy
     void reset() noexcept
         requires(!IsConst)
     {
+        markDirty();
         auto const oldClusterSize = _line->clusterSize[_col];
         _line->codepoints[_col] = 0;
         _line->widths[_col] = 1;
@@ -184,6 +189,7 @@ class BasicCellProxy
     void reset(GraphicsAttributes const& attrs) noexcept
         requires(!IsConst)
     {
+        markDirty();
         auto const oldClusterSize = _line->clusterSize[_col];
         _line->codepoints[_col] = 0;
         _line->widths[_col] = 1;
@@ -211,12 +217,14 @@ class BasicCellProxy
                                       ClusterWidthPolicy policy = ClusterWidthPolicy::ClusterAware) noexcept
         requires(!IsConst)
     {
+        markDirty();
         return appendCodepointToCluster(*_line, _col, ch, policy);
     }
 
     void setCharacter(char32_t ch) noexcept
         requires(!IsConst)
     {
+        markDirty();
         _line->codepoints[_col] = ch;
         clearClusterExtras(*_line, _col);
         _line->clusterSize[_col] = (ch != 0) ? uint8_t { 1 } : uint8_t { 0 };
@@ -234,6 +242,7 @@ class BasicCellProxy
     void setScale(uint8_t s) noexcept
         requires(!IsConst)
     {
+        markDirty();
         _line->scales[_col] = s;
         invalidateTrivialIfNeeded();
     }
@@ -242,6 +251,7 @@ class BasicCellProxy
     void setTextScale(CellScale const& cellScale) noexcept
         requires(!IsConst)
     {
+        markDirty();
         _line->scales[_col] = cellScale.scale;
         _line->textScaleExtras[_col] = packTextScaleExtras(cellScale);
 
@@ -259,12 +269,14 @@ class BasicCellProxy
     void setWidth(uint8_t w) noexcept
         requires(!IsConst)
     {
+        markDirty();
         _line->widths[_col] = w;
     }
 
     void resetFlags() noexcept
         requires(!IsConst)
     {
+        markDirty();
         _line->sgr[_col].flags = CellFlag::None;
         invalidateTrivialIfNeeded();
     }
@@ -272,6 +284,7 @@ class BasicCellProxy
     void resetFlags(CellFlags f) noexcept
         requires(!IsConst)
     {
+        markDirty();
         _line->sgr[_col].flags = f;
         invalidateTrivialIfNeeded();
     }
@@ -279,6 +292,7 @@ class BasicCellProxy
     void setForegroundColor(Color c) noexcept
         requires(!IsConst)
     {
+        markDirty();
         _line->sgr[_col].foregroundColor = c;
         invalidateTrivialIfNeeded();
     }
@@ -286,6 +300,7 @@ class BasicCellProxy
     void setBackgroundColor(Color c) noexcept
         requires(!IsConst)
     {
+        markDirty();
         _line->sgr[_col].backgroundColor = c;
         invalidateTrivialIfNeeded();
     }
@@ -293,6 +308,7 @@ class BasicCellProxy
     void setUnderlineColor(Color c) noexcept
         requires(!IsConst)
     {
+        markDirty();
         _line->sgr[_col].underlineColor = c;
         invalidateTrivialIfNeeded();
     }
@@ -300,6 +316,7 @@ class BasicCellProxy
     void setHyperlink(HyperlinkId hyperlinkId) noexcept
         requires(!IsConst)
     {
+        markDirty();
         _line->hyperlinks[_col] = hyperlinkId;
         invalidateTrivialIfNeeded();
     }
@@ -307,6 +324,7 @@ class BasicCellProxy
     void setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, CellLocation offset)
         requires(!IsConst)
     {
+        markDirty();
         if (!_line->imageFragments)
             _line->imageFragments.emplace();
         (*_line->imageFragments)[static_cast<uint16_t>(_col)] =
@@ -321,6 +339,7 @@ class BasicCellProxy
     void clearImageFragment() noexcept
         requires(!IsConst)
     {
+        markDirty();
         if (_line->imageFragments)
             _line->imageFragments->erase(static_cast<uint16_t>(_col));
     }
@@ -328,11 +347,19 @@ class BasicCellProxy
     void setGraphicsRendition(GraphicsRendition sgr) noexcept
         requires(!IsConst)
     {
+        markDirty();
         _line->sgr[_col].flags = CellUtil::makeCellFlags(sgr, _line->sgr[_col].flags);
         invalidateTrivialIfNeeded();
     }
 
   private:
+    void markDirty() noexcept
+        requires(!IsConst)
+    {
+        if (_dirty)
+            *_dirty = true;
+    }
+
     /// Invalidate the trivial flag if this cell's SGR or hyperlink differs from another cell.
     /// When at col 0, compare against col 1 (an unwritten cell).
     /// When at col > 0, compare against col 0.
@@ -353,6 +380,7 @@ class BasicCellProxy
 
     LineType* _line;
     size_t _col;
+    bool* _dirty = nullptr; ///< Optional back-pointer to Line::_dirty for write-through dirtying.
 };
 
 /// Mutable proxy — read-write access to a LineSoA cell.
