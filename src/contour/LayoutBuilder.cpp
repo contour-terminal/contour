@@ -72,8 +72,7 @@ namespace
             if (pane.directory)
                 // generic_string() (forward slashes) so a Windows path never carries a literal
                 // backslash into the emitted YAML in the first place.
-                out << YAML::Key << "directory" << YAML::Value
-                    << std::filesystem::path { *pane.directory }.generic_string();
+                out << YAML::Key << "directory" << YAML::Value << pane.directory->generic_string();
             if (pane.profile)
                 out << YAML::Key << "profile" << YAML::Value << *pane.profile;
             return;

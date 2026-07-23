@@ -267,6 +267,31 @@ layouts:
     CHECK_FALSE(t1.root.directory.has_value());
 }
 
+TEST_CASE("Config: a layout directory with non-ASCII characters loads losslessly", "[config][layout]")
+{
+    // Regression: the layout directory is stored as a lossless std::filesystem::path, not narrowed to
+    // a std::string at parse time. On Windows the old .string() narrowing threw std::system_error for a
+    // path outside the active code page (e.g. a Unicode profile directory), failing the ENTIRE config
+    // load; now such a path is preserved and only its own pane's launch would be affected.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    work:
+        tabs:
+            - title: "editor"
+              directory: "/tmp/naïve project"
+              command: "nvim"
+)"sv);
+
+    // The config loaded (no parse-time throw) and the directory was preserved intact.
+    auto const& layouts = config.layouts.value();
+    REQUIRE(layouts.contains("work"));
+    auto const& work = layouts.at("work");
+    REQUIRE(work.tabs.size() == 1);
+    REQUIRE(work.tabs[0].root.directory.has_value());
+    CHECK(*work.tabs[0].root.directory == std::filesystem::path { "/tmp/naïve project" });
+}
+
 TEST_CASE("Config: shellSplit tokenizes a command line respecting quotes", "[config][layout]")
 {
     using contour::config::shellSplit;

@@ -3,6 +3,7 @@
 
 #include <vtbackend/Color.h>
 
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <span>
@@ -22,8 +23,11 @@ struct LayoutPane
     std::optional<std::string> command;
     /// Arguments passed to @c command.
     std::vector<std::string> arguments;
-    /// Working directory the pane's shell starts in. Unset uses the profile's.
-    std::optional<std::string> directory;
+    /// Working directory the pane's shell starts in. Unset uses the profile's. Kept as a lossless
+    /// filesystem::path (like every other resolved config path) rather than an eagerly narrowed
+    /// std::string: on Windows path::string() throws for a path outside the active code page, and
+    /// narrowing at parse time would fail the WHOLE config load instead of just this pane's launch.
+    std::optional<std::filesystem::path> directory;
     /// Per-pane profile override (terminal-level settings only — not window ones).
     std::optional<std::string> profile;
     /// Fraction (0, 1] of the parent split this pane occupies. Unset means "share whatever the
