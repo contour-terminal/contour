@@ -72,6 +72,35 @@ namespace
         co_await coro::whenAll(std::move(accepts));
     }
 
+    /// Wires the three mirror handlers (screen delta, image, session event) onto @p attach, all
+    /// re-serializing through @p mirror and emitting via @p writeOut. Single-sources the identical
+    /// wiring the POSIX and Windows attach flows share — only @p writeOut (the platform's stdout /
+    /// console emit) differs — so the two cannot silently drift.
+    /// @param attach The client whose handlers are set.
+    /// @param mirror The re-serialization state feeding the outer terminal.
+    /// @param activeSession Tracks the session of each screen delta (the focused pane).
+    /// @param writeOut Emits the reserialized bytes to the platform's stdout/console.
+    template <typename WriteOut>
+    void wireMirrorHandlers(client::AttachClient& attach,
+                            client::ScreenMirror& mirror,
+                            std::uint64_t& activeSession,
+                            WriteOut const& writeOut)
+    {
+        attach.setUpdateHandler([&activeSession, &mirror, &writeOut](client::RemoteScreen const& screen,
+                                                                     proto::Delta const& delta) {
+            activeSession = screen.session;
+            writeOut(mirror.apply(screen, delta));
+        });
+        attach.setImageHandler(
+            [&mirror, &writeOut](client::RemoteScreen const& screen, std::uint32_t imageId) {
+                writeOut(mirror.applyImage(screen, imageId));
+            });
+        attach.setSessionEventHandler(
+            [&writeOut](client::RemoteScreen const& /*screen*/, proto::SessionEvent const& event) {
+                writeOut(client::ScreenMirror::applyEvent(event));
+            });
+    }
+
     /// The daemon's PTY factory: every session spawns the configured shell over a
     /// fresh PTY. Shared by the POSIX and Windows runDaemon paths.
     [[nodiscard]] PtyFactory makeShellPtyFactory(vtpty::Process::ExecInfo shell)
@@ -420,19 +449,7 @@ namespace
         auto const writeOut = [](std::string const& bytes) {
             std::ignore = ::write(STDOUT_FILENO, bytes.data(), bytes.size());
         };
-        attach.setUpdateHandler([&activeSession, &mirror, &writeOut](client::RemoteScreen const& screen,
-                                                                     proto::Delta const& delta) {
-            activeSession = screen.session;
-            writeOut(mirror.apply(screen, delta));
-        });
-        attach.setImageHandler(
-            [&mirror, &writeOut](client::RemoteScreen const& screen, std::uint32_t imageId) {
-                writeOut(mirror.applyImage(screen, imageId));
-            });
-        attach.setSessionEventHandler(
-            [&writeOut](client::RemoteScreen const& /*screen*/, proto::SessionEvent const& event) {
-                writeOut(client::ScreenMirror::applyEvent(event));
-            });
+        wireMirrorHandlers(attach, mirror, activeSession, writeOut);
 
         {
             auto const rawMode = RawTty {};
@@ -705,19 +722,7 @@ namespace
                         &written,
                         nullptr);
         };
-        attach.setUpdateHandler([&activeSession, &mirror, &writeOut](client::RemoteScreen const& screen,
-                                                                     proto::Delta const& delta) {
-            activeSession = screen.session;
-            writeOut(mirror.apply(screen, delta));
-        });
-        attach.setImageHandler(
-            [&mirror, &writeOut](client::RemoteScreen const& screen, std::uint32_t imageId) {
-                writeOut(mirror.applyImage(screen, imageId));
-            });
-        attach.setSessionEventHandler(
-            [&writeOut](client::RemoteScreen const& /*screen*/, proto::SessionEvent const& event) {
-                writeOut(client::ScreenMirror::applyEvent(event));
-            });
+        wireMirrorHandlers(attach, mirror, activeSession, writeOut);
 
         auto const rawMode = RawConsole {};
         auto detached = std::atomic<bool> { false };
