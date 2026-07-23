@@ -127,6 +127,11 @@ std::string tmuxKillPaneCommand(uint64_t pane)
     return std::format("kill-pane -t %{}", pane);
 }
 
+std::string tmuxNewWindowCommand()
+{
+    return "new-window";
+}
+
 /// The model-owned pane sink: buffers bytes until a local pty is bound, then
 /// feeds it directly. Destroyed by the model on the reactor thread; the
 /// destructor unregisters so the controller never touches a dead feed.
@@ -423,6 +428,22 @@ bool TmuxController::requestRemoteSplit(vtpty::Pty const* actingPty, bool vertic
     _reactor.post([this, pane = *pane, vertical] {
         if (_gateway != nullptr)
             _gateway->sendCommand(tmuxSplitWindowCommand(pane, vertical));
+    });
+    return true;
+}
+
+bool TmuxController::requestRemoteTab()
+{
+    {
+        auto const lock = std::lock_guard { _mutex };
+        if (_realizing)
+            return false; // a tab realized by the reconciler is not re-authored on the server
+    }
+    // Author a new tmux window; its %window-add + layout push realizes as a new tab through the
+    // mirror. A no-op if the connection is gone (the gateway is torn down).
+    _reactor.post([this] {
+        if (_gateway != nullptr)
+            _gateway->sendCommand(tmuxNewWindowCommand());
     });
     return true;
 }

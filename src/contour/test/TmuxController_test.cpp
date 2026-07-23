@@ -67,6 +67,23 @@ TEST_CASE("tmux split/kill commands match the server's command format (B5)", "[a
     CHECK(contour::tmuxSplitWindowCommand(3, /*vertical=*/true) == "split-window -h -t %3");
     CHECK(contour::tmuxSplitWindowCommand(3, /*vertical=*/false) == "split-window -t %3");
     CHECK(contour::tmuxKillPaneCommand(7) == "kill-pane -t %7");
+    CHECK(contour::tmuxNewWindowCommand() == "new-window");
+}
+
+// A GUI "new tab" in tmux mirror mode is authored on the server as a new window (requestRemoteTab
+// returns true so createNewTab does NOT fall through to a local createSession that canCreateSession()
+// refuses in steady state) — the regression that made the "+"/new-tab gesture a silent no-op.
+TEST_CASE("a GUI new tab in tmux mode is authored on the tmux server", "[attach][tmux]")
+{
+    auto ctrlOwned = std::make_unique<contour::TmuxController>(std::string {});
+    auto* ctrl = ctrlOwned.get();
+    contour::test::TestApp app { std::move(ctrlOwned) };
+
+    // The delegate claims the request (true = authored remotely). Before the override, the base
+    // returned false and the "new tab" gesture did nothing in mirror mode.
+    CHECK(ctrl->requestRemoteTab());
+
+    ctrl->stop();
 }
 
 // B5: a GUI split of a mirrored pane is authored on the tmux server (requestRemoteSplit returns

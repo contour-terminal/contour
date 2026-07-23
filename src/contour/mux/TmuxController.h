@@ -67,6 +67,12 @@ class TerminalSession;
 /// @return The control-mode command line.
 [[nodiscard]] std::string tmuxKillPaneCommand(uint64_t pane);
 
+/// The tmux control-mode command that creates a new window (`new-window`) — a new TAB in Contour's
+/// model. tmux emits %window-add plus a layout for it, which the mirror realizes as a fresh tab.
+/// Pure so the wire string the server parser consumes is unit-testable.
+/// @return The control-mode command line.
+[[nodiscard]] std::string tmuxNewWindowCommand();
+
 /// A tmux window's binary layout tree converted for realization through
 /// `TerminalSessionManager::applyLayoutToWindow`: a single-tab `vtmux::Layout` carrying the split
 /// orientations and ratios, plus the map from each converted leaf pane (by its stable address inside
@@ -142,6 +148,13 @@ class TmuxController final: public QObject, public SessionFactory, public muxser
     /// pane) is not re-authored — it builds the mirror pane locally. Returns false (a local split) if
     /// the pty is not bound to a tmux pane.
     [[nodiscard]] bool requestRemoteSplit(vtpty::Pty const* actingPty, bool vertical) override;
+
+    /// SessionFactory: a GUI "new tab" is authored on the tmux server as a new window
+    /// (`new-window`) rather than created locally; tmux's %window-add + layout re-realizes it through
+    /// the mirror as a new tab. Without this override the base returns false and a "new tab" gesture is
+    /// a silent no-op in mirror mode (canCreateSession() is false in steady state). A tab created BY the
+    /// reconciler itself (while realizing) is not re-authored.
+    [[nodiscard]] bool requestRemoteTab() override;
 
     // TmuxModelEvents (reactor thread) — structure changes queue realizations.
     void paneAdded(uint64_t window, uint64_t pane, int columns, int lines) override;
