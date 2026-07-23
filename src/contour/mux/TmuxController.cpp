@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <muxserver/tmux/ControlModeSpawn.h>
+#include <vtmux/LayoutConvert.h>
 
 namespace contour
 {
@@ -69,45 +70,42 @@ namespace
         return out;
     }
 
-    /// Converts a tmux layout node into a vtmux::LayoutPane subtree: a leaf becomes an empty pane; a
-    /// split records its orientation with the first child carrying the node's ratio (the second is left
-    /// unset, so ratioForFirst gives it the rest). Mirrors muxserver::client::wireToLayoutPane.
-    [[nodiscard]] vtmux::LayoutPane binaryToLayoutPane(BinaryLayout const& node)
+    /// Adapts a tmux `BinaryLayout` for the shared layout converter (@ref vtmux::convertLayoutPane) —
+    /// the tmux analogue of muxserver::client's WirePaneAdapter, so both paths share ONE conversion.
+    struct BinaryLayoutAdapter
     {
-        auto out = vtmux::LayoutPane {};
-        if (!isSplit(node))
-            return out; // a leaf: a mirror session backs it
-        out.orientation = node.orientation;
-        auto first = binaryToLayoutPane(*node.first);
-        first.ratio = node.ratio;
-        out.children.push_back(std::move(first));
-        out.children.push_back(binaryToLayoutPane(*node.second));
-        return out;
-    }
-
-    /// Lockstep-walks the converted pane tree and the tmux tree, recording each converted leaf's tmux
-    /// pane id by the leaf's (now stable) address. Mirrors muxserver::client's mapLeaves.
-    void mapBinaryLeaves(vtmux::LayoutPane const& pane,
-                         BinaryLayout const& node,
-                         std::unordered_map<vtmux::LayoutPane const*, uint64_t>& out)
-    {
-        if (pane.isLeaf())
+        [[nodiscard]] bool isSplit(BinaryLayout const& node) const noexcept
         {
-            out.emplace(&pane, node.paneId.value_or(0));
-            return;
+            return node.first != nullptr && node.second != nullptr;
         }
-        mapBinaryLeaves(pane.children[0], *node.first, out);
-        mapBinaryLeaves(pane.children[1], *node.second, out);
-    }
+        [[nodiscard]] vtmux::SplitState orientation(BinaryLayout const& node) const noexcept
+        {
+            return node.orientation;
+        }
+        [[nodiscard]] double firstRatio(BinaryLayout const& node) const noexcept { return node.ratio; }
+        [[nodiscard]] BinaryLayout const& first(BinaryLayout const& node) const noexcept
+        {
+            return *node.first;
+        }
+        [[nodiscard]] BinaryLayout const& second(BinaryLayout const& node) const noexcept
+        {
+            return *node.second;
+        }
+        [[nodiscard]] uint64_t leafId(BinaryLayout const& node) const noexcept
+        {
+            return node.paneId.value_or(0);
+        }
+    };
 } // namespace
 
 TmuxWindowLayout tmuxLayoutToWindowLayout(muxserver::tmux::BinaryLayout const& tree)
 {
     auto result = TmuxWindowLayout {};
-    result.layout.tabs.push_back(vtmux::LayoutTab { .root = binaryToLayoutPane(tree) });
+    auto const adapter = BinaryLayoutAdapter {};
+    result.layout.tabs.push_back(vtmux::LayoutTab { .root = vtmux::convertLayoutPane(tree, adapter) });
     // Build the leaf → pane map only now that the tree is in place: the pane addresses are stable and
     // a move of the result preserves them (the vectors' buffers move intact).
-    mapBinaryLeaves(result.layout.tabs.front().root, tree, result.leafPane);
+    vtmux::mapLayoutLeaves(result.layout.tabs.front().root, tree, adapter, result.leafPane);
     return result;
 }
 

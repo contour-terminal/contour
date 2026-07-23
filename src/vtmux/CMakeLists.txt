@@ -1,4 +1,5 @@
 add_library(vtmux STATIC
+    LayoutConvert.h
     LayoutTree.cpp
     LayoutTree.h
     Pane.cpp
