@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <net/Tls.h>
 
+#include <crispy/utils.h>
+
 #include <algorithm>
 #include <array>
 #include <coroutine>
@@ -183,6 +185,10 @@ namespace
 
             _handshaking = true;
             auto outcome = std::expected<void, NetError> {};
+            // If a co_await below throws OperationCancelled (whenAny sibling won
+            // or loop shutdown), reset _handshaking so future I/O on this socket
+            // can re-enter the handshake path instead of parking forever.
+            auto const resetHandshaking = crispy::finally([this]() noexcept { _handshaking = false; });
             while (true)
             {
                 auto const result = SSL_do_handshake(_ssl);
@@ -222,7 +228,6 @@ namespace
                 }
             }
 
-            _handshaking = false;
             if (!outcome)
                 _handshakeError = outcome.error(); // parked waiters observe the same failure
             // Resume everyone who parked on us; they re-check the flags and return.
@@ -262,7 +267,10 @@ namespace
                 co_return std::unexpected(n.error());
             if (*n == 0)
                 co_return std::size_t { 0 };
-            BIO_write(_rbio, chunk.data(), static_cast<int>(*n));
+            auto const written = BIO_write(_rbio, chunk.data(), static_cast<int>(*n));
+            if (written <= 0)
+                co_return std::unexpected(
+                    makeNetError(NetErrorCode::Other, 0, "TLS feedIn: BIO_write failed"));
             co_return *n;
         }
 
