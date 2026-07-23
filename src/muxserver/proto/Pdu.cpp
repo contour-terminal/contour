@@ -577,6 +577,14 @@ namespace
         if (!assign(in.varint(), pdu.session, error) || !assign(in.u8(), pdu.orientation, error)
             || !assign(in.u16(), pdu.ratio, error))
             return std::unexpected(error);
+        // The wire orientation is a vtmux::SplitState value: exactly 1 (Horizontal)
+        // or 2 (Vertical) — rejected here, at the protocol boundary, exactly as
+        // decodePane rejects an out-of-range WirePane.split. Fail closed on any
+        // other byte so no invalid SplitState can ever reach the layout tree (a
+        // "None" split with children renders as a leaf; anything else re-serializes
+        // as garbage every client rejects).
+        if (pdu.orientation != 1 && pdu.orientation != 2)
+            return std::unexpected(DecodeError::MalformedPdu);
         return pdu;
     }
 

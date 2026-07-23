@@ -201,6 +201,35 @@ TEST_CASE("a layout split pane must carry exactly two children", "[muxserver][pr
     }
 }
 
+TEST_CASE("a SplitPane verb with an out-of-range orientation is malformed", "[muxserver][proto]")
+{
+    // The verb's orientation is a vtmux::SplitState value: exactly 1 (Horizontal)
+    // or 2 (Vertical), rejected at decode exactly like WirePane.split. An invalid
+    // SplitState reaching the layout tree renders as a phantom leaf (orientation
+    // 0 with children) or re-serializes as garbage every client rejects.
+    auto encodeThenDecode = [](uint8_t orientation) {
+        auto stream = Writer {};
+        encodePdu(
+            stream, 5, DecodedPdu { SplitPane { .session = 5, .orientation = orientation, .ratio = 5000 } });
+        return decodePdu(stream.view());
+    };
+
+    SECTION("a None orientation is malformed")
+    {
+        CHECK(encodeThenDecode(0).error() == DecodeError::MalformedPdu);
+    }
+    SECTION("an out-of-range orientation is malformed")
+    {
+        CHECK(encodeThenDecode(3).error() == DecodeError::MalformedPdu);
+        CHECK(encodeThenDecode(255).error() == DecodeError::MalformedPdu);
+    }
+    SECTION("Horizontal and Vertical still decode")
+    {
+        CHECK(encodeThenDecode(1).has_value());
+        CHECK(encodeThenDecode(2).has_value());
+    }
+}
+
 TEST_CASE("a blank line needs no cells on the wire", "[muxserver][proto]")
 {
     auto blank = WireLine {};
