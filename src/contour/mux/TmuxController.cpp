@@ -198,30 +198,8 @@ TmuxController::~TmuxController()
     stop();
 }
 
-std::expected<void, std::string> TmuxController::connectAndWait(std::chrono::milliseconds timeout)
-{
-    _reactor.start([this](net::EventLoop* loop) { return runClient(loop); });
-
-    auto const outcome = awaitMuxConnect(_mutex, _connected, _state, _failure, timeout);
-    if (outcome.timedOut)
-    {
-        stop();
-        return std::unexpected("timed out waiting for the tmux session's first pane");
-    }
-    if (!outcome.ready)
-        return std::unexpected(outcome.failure.empty() ? std::string("tmux client ended during attach")
-                                                       : outcome.failure);
-    return {};
-}
-
-void TmuxController::stop()
-{
-    if (stopMuxReactor(_mutex, _stopped, _reactor, [this] {
-            if (_gateway != nullptr)
-                _gateway->detach();
-        }))
-        closeAllPanes();
-}
+// connectAndWait() and stop() are provided by MuxControllerBase; this controller supplies runClient()
+// and the detach / binding-teardown / message hooks (see TmuxController.h).
 
 coro::Task<void> TmuxController::runClient(net::EventLoop* loop)
 {

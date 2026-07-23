@@ -668,8 +668,8 @@ ControlSession::HandlerResult ControlSession::commandSendKeys(std::vector<std::s
 
 ControlSession::HandlerResult ControlSession::commandCapturePane(std::vector<std::string> const& arguments)
 {
-    constexpr auto valueOptions = std::string_view { "tSEb" };       // capture-pane's value-taking options
-    auto const quiet = hasBooleanFlag(arguments, 'q', valueOptions); // swallow errors → empty capture
+    constexpr auto ValueOptions = std::string_view { "tSEb" };       // capture-pane's value-taking options
+    auto const quiet = hasBooleanFlag(arguments, 'q', ValueOptions); // swallow errors → empty capture
     auto pane = resolvePane(arguments);
     if (!pane)
         return quiet ? HandlerResult { std::vector<std::string> {} } : std::unexpected(pane.error());
@@ -707,7 +707,7 @@ ControlSession::HandlerResult ControlSession::commandCapturePane(std::vector<std
         };
     auto const start = rowOf("-S", historyTop, vtbackend::LineOffset(0));
     auto const end = rowOf("-E", visibleBottom, visibleBottom);
-    return grid.renderRange(start, end, /*withSgr=*/hasBooleanFlag(arguments, 'e', valueOptions));
+    return grid.renderRange(start, end, /*withSgr=*/hasBooleanFlag(arguments, 'e', ValueOptions));
 }
 
 ControlSession::HandlerResult ControlSession::commandRenameWindow(std::vector<std::string> const& arguments)

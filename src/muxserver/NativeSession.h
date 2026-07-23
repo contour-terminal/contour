@@ -176,6 +176,20 @@ class NativeSession final: public SessionStreamEvents
     /// Sends SessionState + a snapshot/delta for @p session (under its lock).
     void pushDelta(vtmux::SessionId session, bool forceSnapshot);
 
+    /// Pulls the session's live renditional state (title, cursor shape, cwd,
+    /// colours, status display, Kitty-keyboard flags) into @p delta as diffs and —
+    /// on a snapshot — captures the full state into @p state. Called by pushDelta
+    /// with the terminal already locked; split out to keep pushDelta within the
+    /// cognitive-complexity budget. Static: it reads only its arguments.
+    /// @param screenTypeValue The wire screen-type discriminator (std::to_underlying).
+    static void collectLiveState(vtbackend::Terminal& terminal,
+                                 FollowState& follow,
+                                 proto::Delta& delta,
+                                 std::optional<proto::SessionState>& state,
+                                 vtmux::SessionId session,
+                                 uint8_t screenTypeValue,
+                                 bool snapshot);
+
     [[nodiscard]] coro::Task<void> flushSoon();
 
     net::EventLoop& _loop;

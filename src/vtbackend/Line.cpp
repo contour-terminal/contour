@@ -122,11 +122,15 @@ std::string Line::toUtf8WithSgr(ColumnOffset begin, ColumnOffset end) const
     if (first >= last)
         return {};
 
+    auto str = std::string {};
+
     // A blank line is uniformly the default rendition — no escapes, just spaces.
     if (isBlank())
-        return std::string(static_cast<size_t>(last - first), ' ');
+    {
+        str.append(static_cast<size_t>(last - first), ' ');
+        return str;
+    }
 
-    auto str = std::string {};
     auto current = GraphicsAttributes {}; // the default rendition is "in effect" at line start
     auto skipCount = 0;
     for (auto i = first; i < last; ++i)

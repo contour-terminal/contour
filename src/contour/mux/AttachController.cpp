@@ -28,30 +28,8 @@ AttachController::~AttachController()
     stop();
 }
 
-std::expected<void, std::string> AttachController::connectAndWait(std::chrono::milliseconds timeout)
-{
-    _reactor.start([this](net::EventLoop* loop) { return runClient(loop); });
-
-    auto const outcome = awaitMuxConnect(_mutex, _connected, _state, _failure, timeout);
-    if (outcome.timedOut)
-    {
-        stop();
-        return std::unexpected("timed out waiting for the daemon's snapshot");
-    }
-    if (!outcome.ready)
-        return std::unexpected(outcome.failure.empty() ? std::string("connection closed during attach")
-                                                       : outcome.failure);
-    return {};
-}
-
-void AttachController::stop()
-{
-    if (stopMuxReactor(_mutex, _stopped, _reactor, [this] {
-            if (_client != nullptr)
-                _client->detach();
-        }))
-        closeAllBindings();
-}
+// connectAndWait() and stop() are provided by MuxControllerBase; this controller supplies runClient()
+// and the detach / binding-teardown / message hooks (see AttachController.h).
 
 coro::Task<void> AttachController::runClient(net::EventLoop* loop)
 {

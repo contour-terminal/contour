@@ -71,7 +71,7 @@ struct ClientHello
     uint32_t codecVersion = CodecVersion;
     /// Preshared token authenticating the client on the opt-in TCP transport.
     /// Empty over AF_UNIX, where the hardened socket's permissions are the gate.
-    std::string token;
+    std::string token = {};
     bool operator==(ClientHello const&) const = default;
 };
 
@@ -281,10 +281,10 @@ struct SessionEvent
 struct WirePane
 {
     uint64_t paneId = 0;
-    uint8_t split = 0;              ///< vtmux::SplitState: 0 leaf, 1 horizontal, 2 vertical.
-    uint64_t session = 0;           ///< Leaf only: the SessionId.
-    uint16_t ratio = 5000;          ///< Split only: first child's share × 10000 (0.05..0.95).
-    std::vector<WirePane> children; ///< 0 for a leaf, 2 for a split.
+    uint8_t split = 0;                   ///< vtmux::SplitState: 0 leaf, 1 horizontal, 2 vertical.
+    uint64_t session = 0;                ///< Leaf only: the SessionId.
+    uint16_t ratio = 5000;               ///< Split only: first child's share × 10000 (0.05..0.95).
+    std::vector<WirePane> children = {}; ///< 0 for a leaf, 2 for a split.
     bool operator==(WirePane const&) const = default;
 };
 
@@ -295,7 +295,7 @@ struct WireTab
     uint64_t tabId = 0;
     uint64_t activePane = 0;
     uint64_t zoomedPane = 0; ///< 0 = not zoomed.
-    std::string title;       ///< The runtime-title override; empty if none.
+    std::string title = {};  ///< The runtime-title override; empty if none.
     uint8_t hasColor = 0;
     uint32_t color = 0; ///< 0xRRGGBB tab color when hasColor.
     WirePane root;

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <bit>
 #include <chrono>
+#include <cmath>
 #include <mutex>
 #include <optional>
 #include <ranges>
@@ -61,7 +62,7 @@ namespace
             wire.session = pane.session().value;
         else
         {
-            wire.ratio = static_cast<uint16_t>((pane.ratio() * 10000.0) + 0.5);
+            wire.ratio = static_cast<uint16_t>(std::lround(pane.ratio() * 10000.0));
             if (pane.first() != nullptr)
                 wire.children.push_back(serializePaneTree(*pane.first()));
             if (pane.second() != nullptr)
@@ -71,7 +72,7 @@ namespace
     }
 
     /// Serializes the host window's whole tab/pane layout for the LayoutState PDU.
-    [[nodiscard]] proto::LayoutState serializeLayout(SessionHost& host, vtmux::Window& window)
+    [[nodiscard]] proto::LayoutState serializeLayout(vtmux::Window& window)
     {
         auto layout = proto::LayoutState {};
         layout.window = window.id().value;
@@ -260,7 +261,7 @@ void NativeSession::pushLayout()
     auto& model = _host.model();
     for (auto const i: std::views::iota(0, model.windowCount()))
         if (auto* window = model.windowAt(i))
-            send(0, proto::DecodedPdu { serializeLayout(_host, *window) });
+            send(0, proto::DecodedPdu { serializeLayout(*window) });
 }
 
 coro::Task<void> NativeSession::flushSoon()
@@ -274,6 +275,146 @@ coro::Task<void> NativeSession::flushSoon()
     auto pending = std::exchange(_pendingSessions, {});
     for (auto const session: pending)
         pushDelta(SessionId { session }, /*forceSnapshot=*/false);
+}
+
+void NativeSession::collectLiveState(vtbackend::Terminal& terminal,
+                                     FollowState& follow,
+                                     proto::Delta& delta,
+                                     std::optional<proto::SessionState>& state,
+                                     SessionId session,
+                                     uint8_t screenTypeValue,
+                                     bool snapshot)
+{
+    // Live window title (OSC 0/2): the snapshot carries it in SessionState
+    // below; an incremental delta carries it only when it changed since last
+    // sent, so a title-only batch still re-titles the mirror. Compare the
+    // string_view windowTitle() returns directly and allocate only when it
+    // actually changed — the title almost never differs frame-to-frame, so a
+    // per-delta heap copy just to compare it was pure waste under a busy PTY.
+    if (auto const title = terminal.windowTitle(); title != follow.lastTitle)
+    {
+        if (!snapshot)
+        {
+            delta.titleChanged = 1;
+            delta.title = std::string { title };
+        }
+        follow.lastTitle = title;
+    }
+
+    // Live cursor shape (DECSCUSR): pull+diff like the title; the snapshot
+    // carries it in SessionState below.
+    auto const cursorPs = decscusrPs(terminal.cursorShape(), terminal.cursorDisplay());
+    auto const cursorShapePs =
+        static_cast<int>(cursorPs); // widened to diff against the -1 "unknown" sentinel
+    if (cursorShapePs != follow.lastCursorShape)
+    {
+        if (!snapshot)
+        {
+            delta.cursorShapeChanged = 1;
+            delta.cursorShape = cursorPs;
+        }
+        follow.lastCursorShape = cursorShapePs;
+    }
+
+    // Live working directory (OSC 7): pull+diff; the snapshot carries it in
+    // SessionState below. Only propagate once one was actually set.
+    auto const& cwd = terminal.currentWorkingDirectory();
+    if (!cwd.empty() && (!follow.cwdKnown || cwd != follow.lastCwd))
+    {
+        if (!snapshot)
+        {
+            delta.cwdChanged = 1;
+            delta.cwd = cwd;
+        }
+        follow.lastCwd = cwd;
+        follow.cwdKnown = true;
+    }
+
+    // Live default fg/bg (OSC 10/11): pull+diff; the snapshot carries them in
+    // SessionState below.
+    auto const& colors = terminal.colorPalette();
+    auto const fg = static_cast<int>(colors.defaultForeground.value());
+    auto const bg = static_cast<int>(colors.defaultBackground.value());
+    if (fg != follow.lastDefaultForeground || bg != follow.lastDefaultBackground)
+    {
+        if (!snapshot)
+        {
+            delta.colorsChanged = 1;
+            delta.defaultForeground = static_cast<uint32_t>(fg);
+            delta.defaultBackground = static_cast<uint32_t>(bg);
+        }
+        follow.lastDefaultForeground = fg;
+        follow.lastDefaultBackground = bg;
+    }
+
+    // Live status-display state (DECSSDT/DECSASD) — the first slice of
+    // multi-page support: which status line is shown and where the app writes.
+    auto const statusType = static_cast<int>(std::to_underlying(terminal.statusDisplayType()));
+    auto const activeStatus = static_cast<int>(std::to_underlying(terminal.activeStatusDisplay()));
+    if (statusType != follow.lastStatusDisplayType || activeStatus != follow.lastActiveStatusDisplay)
+    {
+        if (!snapshot)
+        {
+            delta.statusChanged = 1;
+            delta.statusDisplayType = static_cast<uint8_t>(statusType);
+            delta.activeStatusDisplay = static_cast<uint8_t>(activeStatus);
+        }
+        follow.lastStatusDisplayType = statusType;
+        follow.lastActiveStatusDisplay = activeStatus;
+    }
+
+    // Host-writable status-line CONTENT (a separate page): when that page is
+    // shown, carry its whole (tiny) grid so the client paints the app's custom
+    // status line. Full resend on change — no stable-id delta for one row.
+    if (terminal.statusDisplayType() == vtbackend::StatusDisplayType::HostWritable)
+    {
+        auto const& statusGrid = terminal.hostWritableStatusLineDisplay().grid();
+        auto rows = std::vector<proto::WireLine> {};
+        for (auto const i: std::views::iota(0, unbox<int>(statusGrid.pageSize().lines)))
+            rows.push_back(toWireLine(
+                statusGrid, vtbackend::LineOffset(i), statusGrid.lineAt(vtbackend::LineOffset(i))));
+        if (snapshot || rows != follow.lastStatusLines)
+        {
+            delta.statusLinesChanged = 1;
+            delta.statusLines = rows;
+        }
+        follow.lastStatusLines = std::move(rows);
+    }
+
+    // Live Kitty keyboard protocol flags (pull+diff): the top of the app's
+    // CSI-u flag stack governs how KEYS are encoded, so the client must track
+    // it to send input the way the app negotiated. Only the effective (current)
+    // flags matter to a mirror — the stack itself stays server-side.
+    auto const kittyFlags = static_cast<int>(terminal.keyboardProtocol().flags().value());
+    if (kittyFlags != follow.lastKittyKeyboardFlags)
+    {
+        if (!snapshot)
+        {
+            delta.kittyKeyboardChanged = 1;
+            delta.kittyKeyboardFlags = static_cast<uint8_t>(kittyFlags);
+        }
+        follow.lastKittyKeyboardFlags = kittyFlags;
+    }
+
+    if (snapshot)
+    {
+        auto& snap = state.emplace();
+        snap.session = session.value;
+        auto const size = terminal.pageSize();
+        snap.columns = unbox<uint32_t>(size.columns);
+        snap.lines = unbox<uint32_t>(size.lines);
+        snap.screenType = screenTypeValue;
+        snap.cursorLine = delta.cursorLine;
+        snap.cursorColumn = delta.cursorColumn;
+        snap.title = terminal.windowTitle();
+        snap.cursorShape = cursorPs;
+        snap.cwd = terminal.currentWorkingDirectory();
+        snap.defaultForeground = colors.defaultForeground.value();
+        snap.defaultBackground = colors.defaultBackground.value();
+        snap.statusDisplayType = static_cast<uint8_t>(statusType);
+        snap.activeStatusDisplay = static_cast<uint8_t>(activeStatus);
+        snap.kittyKeyboardFlags = static_cast<uint8_t>(kittyFlags);
+    }
 }
 
 void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
@@ -387,134 +528,7 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
             delta.hyperlinks.push_back(proto::HyperlinkEntry { .id = id, .uri = info->uri });
         }
 
-        // Live window title (OSC 0/2): the snapshot carries it in SessionState
-        // below; an incremental delta carries it only when it changed since last
-        // sent, so a title-only batch still re-titles the mirror. Compare the
-        // string_view windowTitle() returns directly and allocate only when it
-        // actually changed — the title almost never differs frame-to-frame, so a
-        // per-delta heap copy just to compare it was pure waste under a busy PTY.
-        if (auto const title = terminal->windowTitle(); title != follow.lastTitle)
-        {
-            if (!snapshot)
-            {
-                delta.titleChanged = 1;
-                delta.title = std::string { title };
-            }
-            follow.lastTitle = title;
-        }
-
-        // Live cursor shape (DECSCUSR): pull+diff like the title; the snapshot
-        // carries it in SessionState below.
-        auto const cursorPs = decscusrPs(terminal->cursorShape(), terminal->cursorDisplay());
-        if (cursorPs != follow.lastCursorShape)
-        {
-            if (!snapshot)
-            {
-                delta.cursorShapeChanged = 1;
-                delta.cursorShape = cursorPs;
-            }
-            follow.lastCursorShape = cursorPs;
-        }
-
-        // Live working directory (OSC 7): pull+diff; the snapshot carries it in
-        // SessionState below. Only propagate once one was actually set.
-        auto const& cwd = terminal->currentWorkingDirectory();
-        if (!cwd.empty() && (!follow.cwdKnown || cwd != follow.lastCwd))
-        {
-            if (!snapshot)
-            {
-                delta.cwdChanged = 1;
-                delta.cwd = cwd;
-            }
-            follow.lastCwd = cwd;
-            follow.cwdKnown = true;
-        }
-
-        // Live default fg/bg (OSC 10/11): pull+diff; the snapshot carries them in
-        // SessionState below.
-        auto const& colors = terminal->colorPalette();
-        auto const fg = static_cast<int>(colors.defaultForeground.value());
-        auto const bg = static_cast<int>(colors.defaultBackground.value());
-        if (fg != follow.lastDefaultForeground || bg != follow.lastDefaultBackground)
-        {
-            if (!snapshot)
-            {
-                delta.colorsChanged = 1;
-                delta.defaultForeground = static_cast<uint32_t>(fg);
-                delta.defaultBackground = static_cast<uint32_t>(bg);
-            }
-            follow.lastDefaultForeground = fg;
-            follow.lastDefaultBackground = bg;
-        }
-
-        // Live status-display state (DECSSDT/DECSASD) — the first slice of
-        // multi-page support: which status line is shown and where the app writes.
-        auto const statusType = static_cast<int>(std::to_underlying(terminal->statusDisplayType()));
-        auto const activeStatus = static_cast<int>(std::to_underlying(terminal->activeStatusDisplay()));
-        if (statusType != follow.lastStatusDisplayType || activeStatus != follow.lastActiveStatusDisplay)
-        {
-            if (!snapshot)
-            {
-                delta.statusChanged = 1;
-                delta.statusDisplayType = static_cast<uint8_t>(statusType);
-                delta.activeStatusDisplay = static_cast<uint8_t>(activeStatus);
-            }
-            follow.lastStatusDisplayType = statusType;
-            follow.lastActiveStatusDisplay = activeStatus;
-        }
-
-        // Host-writable status-line CONTENT (a separate page): when that page is
-        // shown, carry its whole (tiny) grid so the client paints the app's custom
-        // status line. Full resend on change — no stable-id delta for one row.
-        if (terminal->statusDisplayType() == vtbackend::StatusDisplayType::HostWritable)
-        {
-            auto const& statusGrid = terminal->hostWritableStatusLineDisplay().grid();
-            auto rows = std::vector<proto::WireLine> {};
-            for (auto const i: std::views::iota(0, unbox<int>(statusGrid.pageSize().lines)))
-                rows.push_back(toWireLine(
-                    statusGrid, vtbackend::LineOffset(i), statusGrid.lineAt(vtbackend::LineOffset(i))));
-            if (snapshot || rows != follow.lastStatusLines)
-            {
-                delta.statusLinesChanged = 1;
-                delta.statusLines = rows;
-            }
-            follow.lastStatusLines = std::move(rows);
-        }
-
-        // Live Kitty keyboard protocol flags (pull+diff): the top of the app's
-        // CSI-u flag stack governs how KEYS are encoded, so the client must track
-        // it to send input the way the app negotiated. Only the effective (current)
-        // flags matter to a mirror — the stack itself stays server-side.
-        auto const kittyFlags = static_cast<int>(terminal->keyboardProtocol().flags().value());
-        if (kittyFlags != follow.lastKittyKeyboardFlags)
-        {
-            if (!snapshot)
-            {
-                delta.kittyKeyboardChanged = 1;
-                delta.kittyKeyboardFlags = static_cast<uint8_t>(kittyFlags);
-            }
-            follow.lastKittyKeyboardFlags = kittyFlags;
-        }
-
-        if (snapshot)
-        {
-            auto& snap = state.emplace();
-            snap.session = session.value;
-            auto const size = terminal->pageSize();
-            snap.columns = unbox<uint32_t>(size.columns);
-            snap.lines = unbox<uint32_t>(size.lines);
-            snap.screenType = std::to_underlying(screenType);
-            snap.cursorLine = delta.cursorLine;
-            snap.cursorColumn = delta.cursorColumn;
-            snap.title = terminal->windowTitle();
-            snap.cursorShape = cursorPs;
-            snap.cwd = terminal->currentWorkingDirectory();
-            snap.defaultForeground = colors.defaultForeground.value();
-            snap.defaultBackground = colors.defaultBackground.value();
-            snap.statusDisplayType = static_cast<uint8_t>(statusType);
-            snap.activeStatusDisplay = static_cast<uint8_t>(activeStatus);
-            snap.kittyKeyboardFlags = static_cast<uint8_t>(kittyFlags);
-        }
+        collectLiveState(*terminal, follow, delta, state, session, std::to_underlying(screenType), snapshot);
     }
 
     if (state)

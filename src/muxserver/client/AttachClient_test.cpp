@@ -540,7 +540,7 @@ TEST_CASE("attach mirrors over TLS-encrypted TCP with token auth", "[muxserver][
     // A TLS-wrapping native handler: each accepted socket is encrypted (server
     // role) before the native protocol runs over it — the daemon's TCP path.
     auto nativeHandler = muxserver::makeNativeHandler(loop, host, "tok");
-    auto tlsContext = *serverTls;
+    auto const& tlsContext = *serverTls;
     auto handler = [tlsContext, nativeHandler](std::unique_ptr<net::ISocket> socket) {
         return nativeHandler(tlsContext->wrap(std::move(socket)));
     };
@@ -582,7 +582,7 @@ TEST_CASE("attach mirrors over TLS with a generated self-signed dev certificate"
     auto const port = (*listener)->localPort();
 
     auto nativeHandler = muxserver::makeNativeHandler(loop, host, "tok");
-    auto tlsContext = *serverTls;
+    auto const& tlsContext = *serverTls;
     auto handler = [tlsContext, nativeHandler](std::unique_ptr<net::ISocket> socket) {
         return nativeHandler(tlsContext->wrap(std::move(socket)));
     };
@@ -606,7 +606,7 @@ Task<void> awaitLayout(net::EventLoop* loop, AttachClient* client, std::optional
 
 /// Awaits the initial one-tab layout, authors a second tab, and waits for the
 /// daemon to honor it and re-push a two-tab layout before detaching.
-Task<void> driveCreateTab(net::EventLoop* loop, AttachClient* client, int* mirroredTabs)
+Task<void> driveCreateTab(net::EventLoop* loop, AttachClient* client, int const* mirroredTabs)
 {
     co_await net::testing::waitUntil(loop, [mirroredTabs] { return *mirroredTabs == 1; });
     client->createTab();

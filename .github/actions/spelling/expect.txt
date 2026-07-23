@@ -130,6 +130,7 @@ DECNAKB
 DECNCSM
 DECNULM
 DECOSCNM
+decpages
 DECPCCM
 DECPFF
 DECREPTPARM
@@ -140,6 +141,7 @@ DECRQDE
 DECRQLP
 DECRQUPSS
 DECRST
+decscusr
 decset
 DECSLE
 DECSMKR
@@ -155,6 +157,7 @@ dependabot
 desync
 desynchronized
 desyncs
+dialable
 dicts
 diffed
 diffing
@@ -196,6 +199,7 @@ ESCP
 esctest
 euo
 Euv
+evp
 executability
 Exy
 FAILCRITICALERRORS
@@ -225,6 +229,7 @@ frobnicate
 fullstack
 GATM
 gcda
+getm
 GGGG
 GGGGG
 gggggg
@@ -285,6 +290,7 @@ ipsum
 isakbm
 isocket
 istreambuf
+ITls
 journalctl
 keychain
 keysym
@@ -325,6 +331,7 @@ msghdr
 msgtype
 multicell
 multiwindow
+muximg
 muxserver
 muxsrv
 MYPC
@@ -484,6 +491,7 @@ QVar
 rasterises
 ratcheted
 ratcheting
+rbio
 rbong
 RCOLSPECIALPAL
 readback
@@ -507,6 +515,7 @@ rerasterizing
 resampler
 reserialization
 reserialize
+reserialized
 reserializer
 reserializes
 reserializing
@@ -535,6 +544,7 @@ SBQUERY
 scm
 scrn
 SCROLLLOCK
+SEb
 segfaulting
 segfaults
 sendmsg
@@ -601,6 +611,7 @@ UBO
 ubuf
 udk
 UDKs
+Uhidden
 ULONGLONG
 ULval
 undershoots
@@ -624,6 +635,7 @@ unwaitable
 unzoom
 unzoomed
 unzooms
+Upage
 upscales
 UPSS
 upstat
@@ -648,11 +660,14 @@ vwx
 vzd
 waitable
 wakeable
+wbio
 werr
 weston
 whoami
 Winops
 winsock
+workstream
+workstreams
 worktree
 writequeue
 WSAEVENT

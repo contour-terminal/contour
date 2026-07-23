@@ -93,7 +93,11 @@ struct TmuxWindowLayout
 [[nodiscard]] TmuxWindowLayout tmuxLayoutToWindowLayout(muxserver::tmux::BinaryLayout const& tree);
 
 /// The tmux-mirror session factory and pane registry.
-class TmuxController final: public QObject, public SessionFactory, public muxserver::tmux::TmuxModelEvents
+class TmuxController final:
+    public QObject,
+    public SessionFactory,
+    public muxserver::tmux::TmuxModelEvents,
+    public MuxControllerBase
 {
     Q_OBJECT
 
@@ -110,12 +114,8 @@ class TmuxController final: public QObject, public SessionFactory, public muxser
     TmuxController(TmuxController&&) = delete;
     TmuxController& operator=(TmuxController&&) = delete;
 
-    /// Starts the reactor, spawns the tmux client, and blocks until the
-    /// first remote pane was discovered (or failure/timeout).
-    [[nodiscard]] std::expected<void, std::string> connectAndWait(std::chrono::milliseconds timeout);
-
-    /// Detaches and joins the reactor thread. Idempotent.
-    void stop();
+    // connectAndWait() and stop() are inherited from MuxControllerBase; this
+    // controller supplies the hooks below.
 
     /// Realizes discovered-but-unrealized panes into @p window. A tmux window first seen with a
     /// multi-pane layout (all its panes pending) is realized as its WHOLE tree via
@@ -198,8 +198,26 @@ class TmuxController final: public QObject, public SessionFactory, public muxser
     /// thread. @return true if a pane was consumed (progress made); false if creation stalled.
     [[nodiscard]] bool realizeOnePane(TerminalSessionManager& manager, vtmux::WindowId guiWindow);
 
-    [[nodiscard]] coro::Task<void> runClient(net::EventLoop* loop);
+  protected:
+    [[nodiscard]] coro::Task<void> runClient(net::EventLoop* loop) override;
 
+    // MuxControllerBase hooks: the tmux-specific half of the shared connect lifecycle.
+    void detachOnReactor() override
+    {
+        if (_gateway != nullptr)
+            _gateway->detach();
+    }
+    void closeReactorBindings() override { closeAllPanes(); }
+    [[nodiscard]] std::string connectTimeoutMessage() const override
+    {
+        return "timed out waiting for the tmux session's first pane";
+    }
+    [[nodiscard]] std::string connectClosedMessage() const override
+    {
+        return "tmux client ended during attach";
+    }
+
+  private:
     /// GUI-side (pty destructor): forgets a pane's pty binding.
     void unbindPane(uint64_t pane);
 
@@ -209,14 +227,9 @@ class TmuxController final: public QObject, public SessionFactory, public muxser
     /// Closes every bound pty (EOF to its session) — the disconnect path.
     void closeAllPanes();
 
+    // The reactor and the connect state machine (_reactor, _mutex, _connected, _state, _failure,
+    // _stopped) live in MuxControllerBase; the registry below is tmux-specific.
     std::string _tmuxSocket;
-    MuxLoopThread _reactor;
-
-    mutable std::mutex _mutex;
-    std::condition_variable _connected;
-    using State = MuxConnectPhase;
-    State _state = State::Connecting;
-    std::string _failure;
     std::deque<PendingPane> _pending;
     std::unordered_map<uint64_t, PaneFeed*> _feeds;                 ///< Model-owned sinks, by pane.
     std::unordered_map<uint64_t, vtpty::ChannelPty*> _ptys;         ///< Bound ptys, by pane.
@@ -233,11 +246,11 @@ class TmuxController final: public QObject, public SessionFactory, public muxser
         false; ///< True while adoptPendingPanes realizes tmux panes, so its splits build locally.
     muxserver::tmux::TmuxGateway* _gateway = nullptr; ///< Reactor-owned; valid while serving.
     int _tmuxPid = -1;
-    bool _stopped = false;
 
-    /// LAST member, destroyed FIRST: its pane sinks (PaneFeed) unregister
-    /// from _feeds/_mutex in their destructors, which must still be alive.
-    /// (The destructor body's stop() has already joined the reactor by then.)
+    /// LAST member, destroyed FIRST: its pane sinks (PaneFeed) unregister from _feeds and the
+    /// (base-owned) _mutex in their destructors, which must still be alive — _feeds is destroyed
+    /// after _model, and _mutex lives in MuxControllerBase (destroyed last of all). The destructor
+    /// body's stop() has already joined the reactor by then.
     muxserver::tmux::TmuxClientModel _model;
 };
 

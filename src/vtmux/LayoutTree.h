@@ -37,7 +37,7 @@ struct LayoutPane
     /// How this pane's children are arranged (splits only).
     SplitState orientation = SplitState::Vertical;
     /// The child panes of a split, in layout order. Empty for a leaf.
-    std::vector<LayoutPane> children;
+    std::vector<LayoutPane> children = {};
 
     /// @return true when this node is a terminal pane rather than a split.
     [[nodiscard]] bool isLeaf() const noexcept { return children.empty(); }
@@ -47,11 +47,11 @@ struct LayoutPane
 struct LayoutTab
 {
     /// Seeds the tab's name.
-    std::optional<std::string> title;
+    std::optional<std::string> title = {};
     /// Sets the tab's User color.
-    std::optional<vtbackend::RGBColor> color;
+    std::optional<vtbackend::RGBColor> color = {};
     /// Default profile for this tab's panes; a pane's own @c profile still wins.
-    std::optional<std::string> profile;
+    std::optional<std::string> profile = {};
     /// The tab's pane tree: a leaf for a plain single-pane tab, a split node otherwise.
     LayoutPane root;
 };

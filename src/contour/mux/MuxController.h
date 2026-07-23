@@ -10,6 +10,8 @@
 /// connect-and-wait, and the fallback pty handed out when a session must be born
 /// with nothing pending.
 
+#include <contour/mux/MuxLoopThread.h>
+
 #include <vtbackend/primitives.h>
 
 #include <vtpty/ChannelPty.h>
@@ -18,16 +20,22 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 
+#include <coro/Task.hpp>
+
+namespace net
+{
+class EventLoop;
+}
+
 namespace contour
 {
-
-class MuxLoopThread;
 
 /// A ChannelPty that runs an on-destroy callback when the owning terminal
 /// destroys it — so each controller drops the pty's binding without its own
@@ -117,5 +125,59 @@ struct MuxConnectOutcome
                                   bool& stopped,
                                   MuxLoopThread& reactor,
                                   std::function<void()> detach);
+
+/// The connect state machine both GUI mux controllers share: the reactor thread plus the
+/// connection-phase handshake, with `connectAndWait()` / `stop()` implemented ONCE on top of the
+/// free functions above. A concrete controller (native attach, tmux mirror) supplies its own client
+/// lifetime, detach, binding teardown, and connect messages through the protected hooks; the
+/// per-remote PENDING/BINDING registry stays in the derived controller, since the remote unit — a
+/// native session vs a tmux pane — differs.
+///
+/// Threading & lifetime: `_reactor` and the sync state live here as protected members with the
+/// SAME names the controllers already use. A derived controller MUST call `stop()` from its own
+/// destructor (both do) so the reactor is joined while the derived vtable and members are still
+/// alive — the hooks run on the reactor thread up to that join.
+class MuxControllerBase
+{
+  public:
+    MuxControllerBase(MuxControllerBase const&) = delete;
+    MuxControllerBase& operator=(MuxControllerBase const&) = delete;
+    MuxControllerBase(MuxControllerBase&&) = delete;
+    MuxControllerBase& operator=(MuxControllerBase&&) = delete;
+
+    /// Starts the reactor on `runClient()`, then blocks the calling (GUI) thread until the handshake
+    /// completes, fails, or times out. On timeout it stops and returns `connectTimeoutMessage()`; a
+    /// non-ready close returns the recorded failure or `connectClosedMessage()`.
+    /// @param timeout How long to wait before giving up.
+    /// @return Nothing on success; a human-readable reason on failure.
+    [[nodiscard]] std::expected<void, std::string> connectAndWait(std::chrono::milliseconds timeout);
+
+    /// Detaches the live client (`detachOnReactor`, posted onto the reactor) and joins the reactor
+    /// thread. Idempotent; `closeReactorBindings()` runs once, on the first stop.
+    void stop();
+
+  protected:
+    MuxControllerBase() = default;
+    ~MuxControllerBase() = default;
+
+    /// The reactor's whole lifetime (connect, serve, notify); runs on the reactor thread.
+    [[nodiscard]] virtual coro::Task<void> runClient(net::EventLoop* loop) = 0;
+    /// Posted onto the reactor by `stop()` to detach the live client/gateway (a no-op if none).
+    virtual void detachOnReactor() = 0;
+    /// Closes every bound pty on the FIRST stop (EOF to each backing session).
+    virtual void closeReactorBindings() = 0;
+    /// The failure message when the wait times out before the handshake completes.
+    [[nodiscard]] virtual std::string connectTimeoutMessage() const = 0;
+    /// The failure message when the connection closes before reaching Ready.
+    [[nodiscard]] virtual std::string connectClosedMessage() const = 0;
+
+    using State = MuxConnectPhase;
+    MuxLoopThread _reactor;
+    mutable std::mutex _mutex;          ///< Guards the phase/failure AND each controller's registry.
+    std::condition_variable _connected; ///< Notified by the reactor on every phase transition.
+    State _state = State::Connecting;
+    std::string _failure;
+    bool _stopped = false;
+};
 
 } // namespace contour

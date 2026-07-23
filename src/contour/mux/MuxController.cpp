@@ -42,4 +42,25 @@ bool stopMuxReactor(std::mutex& mutex, bool& stopped, MuxLoopThread& reactor, st
     return true;
 }
 
+std::expected<void, std::string> MuxControllerBase::connectAndWait(std::chrono::milliseconds timeout)
+{
+    _reactor.start([this](net::EventLoop* loop) { return runClient(loop); });
+
+    auto const outcome = awaitMuxConnect(_mutex, _connected, _state, _failure, timeout);
+    if (outcome.timedOut)
+    {
+        stop();
+        return std::unexpected(connectTimeoutMessage());
+    }
+    if (!outcome.ready)
+        return std::unexpected(outcome.failure.empty() ? connectClosedMessage() : outcome.failure);
+    return {};
+}
+
+void MuxControllerBase::stop()
+{
+    if (stopMuxReactor(_mutex, _stopped, _reactor, [this] { detachOnReactor(); }))
+        closeReactorBindings();
+}
+
 } // namespace contour

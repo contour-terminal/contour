@@ -47,7 +47,7 @@ namespace contour
 class TerminalSessionManager;
 
 /// The attach-mode session factory and remote-session registry.
-class AttachController final: public QObject, public SessionFactory
+class AttachController final: public QObject, public SessionFactory, public MuxControllerBase
 {
     Q_OBJECT
 
@@ -64,14 +64,8 @@ class AttachController final: public QObject, public SessionFactory
     AttachController(AttachController&&) = delete;
     AttachController& operator=(AttachController&&) = delete;
 
-    /// Starts the reactor thread, connects, and blocks the calling thread
-    /// until the handshake completed and the first session snapshot arrived.
-    /// @param timeout How long to wait before giving up.
-    /// @return Nothing on success; a human-readable reason on failure.
-    [[nodiscard]] std::expected<void, std::string> connectAndWait(std::chrono::milliseconds timeout);
-
-    /// Initiates a detach and joins the reactor thread. Idempotent.
-    void stop();
+    // connectAndWait() and stop() are inherited from MuxControllerBase; this
+    // controller supplies the hooks below.
 
     /// @return How many remote sessions await a local tab.
     [[nodiscard]] std::size_t pendingCount() const;
@@ -211,10 +205,28 @@ class AttachController final: public QObject, public SessionFactory
         muxserver::client::ScreenMirror mirror;
     };
 
+  protected:
     /// The reactor's whole lifetime: connect, serve, notify. Takes the loop
     /// by pointer (coroutine reference parameters can dangle).
-    [[nodiscard]] coro::Task<void> runClient(net::EventLoop* loop);
+    [[nodiscard]] coro::Task<void> runClient(net::EventLoop* loop) override;
 
+    // MuxControllerBase hooks: the attach-specific half of the shared connect lifecycle.
+    void detachOnReactor() override
+    {
+        if (_client != nullptr)
+            _client->detach();
+    }
+    void closeReactorBindings() override { closeAllBindings(); }
+    [[nodiscard]] std::string connectTimeoutMessage() const override
+    {
+        return "timed out waiting for the daemon's snapshot";
+    }
+    [[nodiscard]] std::string connectClosedMessage() const override
+    {
+        return "connection closed during attach";
+    }
+
+  private:
     /// Reactor-side: applies @p delta through the session's mirror (if bound).
     void onUpdate(muxserver::client::RemoteScreen const& screen, muxserver::proto::Delta const& delta);
 
@@ -235,14 +247,9 @@ class AttachController final: public QObject, public SessionFactory
     /// Closes every bound pty (EOF to its session) — the disconnect path.
     void closeAllBindings();
 
+    // The reactor and the connect state machine (_reactor, _mutex, _connected, _state, _failure,
+    // _stopped) live in MuxControllerBase; the registry below is attach-specific.
     muxserver::AttachEndpoint _endpoint;
-    MuxLoopThread _reactor;
-
-    mutable std::mutex _mutex;
-    std::condition_variable _connected;
-    using State = MuxConnectPhase;
-    State _state = State::Connecting;
-    std::string _failure;
     std::deque<PendingSession> _pending; ///< Discovered remote sessions without a local tab.
     std::unordered_map<uint64_t, Binding> _bindings;
     /// The daemon's latest tab/pane tree per window id (B2/B4). Ordered so windowIds()
@@ -262,7 +269,6 @@ class AttachController final: public QObject, public SessionFactory
     /// a single id against. A reattach is a fresh controller with an empty set.
     std::unordered_set<uint64_t> _closedSessions;
     muxserver::client::AttachClient* _client = nullptr; ///< Reactor-owned; valid while serving.
-    bool _stopped = false;
 };
 
 } // namespace contour
