@@ -318,9 +318,21 @@ overriding the corresponding `Terminal::Events` methods it currently drops; stat
       NewTerminalWindow action to `requestRemoteWindow`. **F8 resize policy decided (v1): shared grid,
       last-proposal-wins** (the current behavior) — per-client server-side viewports deferred (only
       matters when 2+ clients attach the *same* session at once; a larger server-render change).
-- [ ] **B5. (parallel, lower priority) tmux-path polish.** F3 ratio/anchor fidelity + GUI→tmux
-      `split-window`/`kill-pane`; wire `%window-renamed`→tab title; fix Contour's own `capture-pane`
-      to preserve SGR and support `-S -` scrollback; F6 client-side `%pause` reaction. Interop-only.
+- [x] **B5. (parallel, lower priority) tmux-path polish.** All five items done (interop-only). **F3
+      ratio/anchor fidelity:** `TmuxController` realizes a window first seen with a multi-pane layout as
+      its WHOLE `BinaryLayout` tree via a pure `tmuxLayoutToWindowLayout` converter (the tmux analogue of
+      `wireToLayout`) + `applyLayoutToWindow` with a `setNextBindPane` per-leaf binding seam;
+      `splitActivePane` gained a `ratio` parameter. **GUI→tmux `split-window`/`kill-pane`:**
+      `requestRemoteSplit` → `split-window [-h] -t %N` (a `_realizing` guard keeps the reconciler's own
+      splits local); `unbindPane` → `kill-pane -t %N` on user close (guarded by `_stopped` + a
+      `_remotelyClosed` set). **`%window-renamed`→tab title:** `windowRenamed` + a queued
+      `tabTitleChanged` signal + `applyPendingRenames` → `TerminalSessionManager::setTabTitleForSession`.
+      **`capture-pane` SGR + `-S -`:** a pure `vtbackend::SgrWriter` + `Line::toUtf8WithSgr` +
+      `Grid::renderRange`; the server's `commandCapturePane` parses `-e`/`-S`/`-E`/`-p`/`-q`/`-J`
+      (bundled `-peqJ` honoured). **F6 `%pause` reaction:** `panePaused` auto-sends
+      `refresh-client -A %N:continue`. Pure command/serializer helpers are headlessly unit-tested; the
+      live tmux behaviour stays covered by the POSIX oracle mirror test (Linux CI). Post-attach
+      incremental growth of an already-realized window is single-anchor (now ratio-bearing).
 
 ### WS-C — TCP + TLS + token transport (opt-in, loopback default)
 
@@ -384,8 +396,9 @@ NTFS ACLs, not POSIX bits; macOS resolves the socket dir under `$TMPDIR` (no `$X
 | | Linux | macOS | Windows |
 |---|---|---|---|
 | WS-A parity (GUI + thin) | ☐ | ☐ | ☑ (muxserver+contour_gui suites green) |
-| WS-B layout | ☐ | ☐ | ☑ B1/B3 wire + B2 GUI apply + B4 multi-window (per-window reconcile e2e over TCP); B5 pending |
+| WS-B layout | ☐ | ☐ | ☑ B1/B3 wire + B2 GUI apply + B4 multi-window (per-window reconcile e2e over TCP) |
 | WS-C TCP+TLS (daemon + client) | ☐ | ☐ | ☑ (net+muxserver+contour e2e incl. two-reactor TLS) |
+| B5 tmux interop (all 5 items) | ☐ oracle | ☐ oracle | ☑ headless (pure converter/serializer/command tests); live path is Linux-oracle-only |
 
 Windows verification is **CI-gated** (no Windows dev box): compile under `-Werror`, run the
 runtime-gated net tests, watch the Windows job after each push.
@@ -619,19 +632,33 @@ here; the Qt-side pieces (`contour/mux/AttachController`, `TerminalSessionManage
   no tmux process), plus the existing POSIX oracle path. contour_gui 9897/9897. **Remaining B5: (4)
   capture-pane SGR + `-S -` scrollback (server-side, in progress), (1, F3) split ratio/anchor
   fidelity.**
+- 2026-07-23 · Windows/clangcl-release · **B5 COMPLETE — the whole daemon-mode plan is now implemented.**
+  (4) capture-pane SGR + scrollback: `vtbackend::SgrWriter` (pure `makeSgrSequence`, reset-first,
+  self-contained) + `Line::toUtf8WithSgr` + `Grid::renderRange`; `commandCapturePane` parses
+  `-e`/`-S`/`-E`/`-p`/`-q`/`-J` with a bundled-short-flag parser (`-peqJ`). (1, F3) whole-tree realize:
+  `tmuxLayoutToWindowLayout` (mirrors `wireToLayout`) + `applyLayoutToWindow` + `setNextBindPane`;
+  `paneAdded` snapshots the window tree under the lock; `adoptPendingPanes` whole-tree-realizes an
+  unrealized multi-pane window (faithful ratio + shape) and falls back to the incremental (now
+  ratio-bearing) path otherwise; `splitActivePane` gained a `ratio` param. Pure converter/serializer
+  tests headless; live tmux path Linux-oracle-only. Final suites: muxserver 140/2781, vtbackend
+  1214/113972, contour_gui 654 cases / 9922 assertions, net 36/165 — all green, `-Werror` clean,
+  `contour.exe` links. **Nothing remains: WS-A, WS-B (B1–B4), WS-C, and B5 (all 5 items) are done.**
 
-## Remaining work — turnkey implementation plan (B5)
+## Remaining work — turnkey implementation plan
+
+**The plan is fully implemented.** All of WS-A (VT feature parity), WS-B (B1 LayoutState wire, B2 GUI
+reconstruction, B3 lifecycle authoring, B4 multi-window), WS-C (TCP + TLS + token), and B5 (all five
+tmux-interop items) are done, tested, and committed on `feature/mux-daemon`. Windows verification is
+green across every suite; the tmux **live** paths (real `tmux` binary) and cross-OS (Linux/macOS)
+runs remain **CI-gated** as designed — their pure decision cores are unit-tested headlessly here.
+Historical staged plan retained below for provenance.
 
 **Done & verified (Windows, real two-reactor TLS attach):** all of WS-A, WS-C, B1, **B2 (full layout
 reconstruction)**, **B3 (server verbs + GUI authoring of tabs, splits, closes with full incremental
-reconciliation)**, and **B4 (multi-window onto one daemon — daemon `NewWindow`, per-window client
-tracking, GUI window mapping; F8 = shared grid, last-proposal-wins)**. The `AttachController_test`
-fixture is a loopback-TCP+TLS daemon, so B5 is Windows-verifiable too — no AF_UNIX/POSIX gate. What
-remains:
-
-- **B5 (interop-only, lower priority).** tmux-path polish: F3 ratio/anchor fidelity, GUI→tmux
-  `split-window`/`kill-pane`, `%window-renamed`→tab title, `capture-pane` SGR + `-S -` scrollback,
-  F6 `%pause` reaction.
+reconciliation)**, **B4 (multi-window onto one daemon — daemon `NewWindow`, per-window client
+tracking, GUI window mapping; F8 = shared grid, last-proposal-wins)**, and **B5 (all five tmux-interop
+items)**. The `AttachController_test` fixture is a loopback-TCP+TLS daemon, so the native paths are
+Windows-verifiable — no AF_UNIX/POSIX gate. Nothing remains; the plan is complete.
 
 ## Open decisions / risks
 
