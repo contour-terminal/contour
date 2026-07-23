@@ -300,7 +300,9 @@ class TerminalSessionManager: public QObject, public vtmux::ModelEvents
     /// @param vertical Split orientation.
     /// @param acting The session that received the keybinding; its hosting tab is the target.
     ///        Null or unknown to the model is a no-op.
-    void splitActivePane(bool vertical, TerminalSession* acting);
+    /// @param ratio The new split's first-child space share, in (0, 1). Defaults to an even split; the
+    ///        tmux mirror passes the remote split's ratio so a mirrored split reproduces its proportions.
+    void splitActivePane(bool vertical, TerminalSession* acting, double ratio = 0.5);
     /// Closes the active pane of the acting session's tab (closing the tab if it was the last pane).
     /// @param acting The session that received the keybinding; its hosting tab is the target.
     void closeActivePane(TerminalSession* acting);

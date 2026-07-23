@@ -1297,7 +1297,7 @@ QVariantList TerminalSessionManager::tabColorPalette() const
 // }}}
 
 // {{{ Split-pane operations
-void TerminalSessionManager::splitActivePane(bool vertical, TerminalSession* acting)
+void TerminalSessionManager::splitActivePane(bool vertical, TerminalSession* acting, double ratio)
 {
     // Attach mode: author the split on the daemon (B3-Qt); its layout re-push
     // reconciles the new pane in. A reconciliation-driven split (during realization)
@@ -1351,7 +1351,7 @@ void TerminalSessionManager::splitActivePane(bool vertical, TerminalSession* act
         return; // no backing session, no split
 
     auto const direction = vertical ? vtmux::SplitState::Vertical : vtmux::SplitState::Horizontal;
-    auto* newLeaf = _model->splitActivePane(tab->id(), direction);
+    auto* newLeaf = _model->splitActivePane(tab->id(), direction, ratio);
     _pendingSessionId.reset(); // consumed by the allocator; clear any leftover
     if (newLeaf == nullptr)
     {

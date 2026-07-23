@@ -8,6 +8,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <format>
+
+#include <muxserver/tmux/LayoutString.h>
 #include <vtmux/Pane.h>
 #include <vtmux/SessionModel.h>
 #include <vtmux/Tab.h>
@@ -89,6 +92,84 @@ TEST_CASE("a GUI split in tmux mode is authored on the tmux server (B5)", "[atta
     auto foreign =
         vtpty::MockPty { vtbackend::PageSize { vtbackend::LineCount(24), vtbackend::ColumnCount(80) } };
     CHECK_FALSE(ctrl->requestRemoteSplit(&foreign, /*vertical=*/true));
+
+    ctrl->stop();
+}
+
+// F3: the pure converter turns a tmux BinaryLayout into a realizable vtmux::Layout that preserves the
+// split orientation, the first-child ratio, and each leaf's tmux pane id.
+TEST_CASE("tmux binary layout converts to a ratio-bearing vtmux layout (F3)", "[attach][tmux]")
+{
+    auto const wireOf = [](std::string const& body) {
+        return std::format("{:04x},{}", muxserver::tmux::layoutChecksum(body), body);
+    };
+
+    // A 2-pane side-by-side window split 70 | 29 (+1 divider) — an asymmetric split.
+    auto const parsed2 = muxserver::tmux::parseLayout(wireOf("100x50,0,0{70x50,0,0,1,29x50,71,0,2}"));
+    REQUIRE(parsed2.has_value());
+    auto const tree2 = muxserver::tmux::collapseToBinary(*parsed2);
+    REQUIRE(tree2.leafCount() == 2);
+
+    auto const conv2 = contour::tmuxLayoutToWindowLayout(tree2);
+    REQUIRE(conv2.layout.tabs.size() == 1);
+    auto const& root2 = conv2.layout.tabs.front().root;
+    REQUIRE_FALSE(root2.isLeaf());
+    CHECK(root2.orientation == vtmux::SplitState::Vertical); // side-by-side
+    REQUIRE(root2.children.size() == 2);
+    REQUIRE(root2.children[0].ratio.has_value());
+    CHECK(*root2.children[0].ratio == tree2.ratio); // the exact tmux ratio, copied faithfully
+    CHECK(*root2.children[0].ratio > 0.6);          // and it is the real asymmetric one (~0.71), not 0.5
+    CHECK(conv2.leafPane.at(&root2.children[0]) == 1);
+    CHECK(conv2.leafPane.at(&root2.children[1]) == 2);
+
+    // A 3-pane right-leaning chain: head leaf + a nested tail split.
+    auto const parsed3 =
+        muxserver::tmux::parseLayout(wireOf("160x50,0,0{53x50,0,0,1,52x50,54,0,2,53x50,107,0,3}"));
+    REQUIRE(parsed3.has_value());
+    auto const tree3 = muxserver::tmux::collapseToBinary(*parsed3);
+    auto const conv3 = contour::tmuxLayoutToWindowLayout(tree3);
+    auto const& root3 = conv3.layout.tabs.front().root;
+    REQUIRE(root3.children.size() == 2);
+    CHECK(conv3.leafPane.at(&root3.children[0]) == 1); // head leaf
+    REQUIRE_FALSE(root3.children[1].isLeaf());         // right-leaning tail is itself a split
+    REQUIRE(root3.children[1].children.size() == 2);
+    CHECK(conv3.leafPane.at(&root3.children[1].children[0]) == 2);
+    CHECK(conv3.leafPane.at(&root3.children[1].children[1]) == 3);
+}
+
+// F3: realizing a whole tmux window tree reproduces the split's orientation AND its non-even ratio in
+// the GUI's own pane model — driving exactly the converter + setNextBindPane + applyLayoutToWindow path
+// that realizeWindowLayout uses.
+TEST_CASE("tmux whole-tree realize reproduces the split ratio and shape (F3)", "[attach][tmux]")
+{
+    auto ctrlOwned = std::make_unique<contour::TmuxController>(std::string {});
+    auto* ctrl = ctrlOwned.get();
+    contour::test::TestApp app { std::move(ctrlOwned) };
+    contour::test::ScopedController const win { app.manager() };
+
+    auto const body = std::string { "100x50,0,0{70x50,0,0,1,29x50,71,0,2}" };
+    auto const parsed =
+        muxserver::tmux::parseLayout(std::format("{:04x},{}", muxserver::tmux::layoutChecksum(body), body));
+    REQUIRE(parsed.has_value());
+    auto const tree = muxserver::tmux::collapseToBinary(*parsed);
+    auto const converted = contour::tmuxLayoutToWindowLayout(tree);
+
+    // Both leaf panes discovered, so createPty can size them.
+    ctrl->paneAdded(/*window=*/1, /*pane=*/1, 70, 50);
+    ctrl->paneAdded(/*window=*/1, /*pane=*/2, 29, 50);
+
+    // Realize the whole tree, binding each leaf to its tmux pane (via the public setNextBindPane seam).
+    app.manager().applyLayoutToWindow(win.id, converted.layout, std::nullopt, [&](auto const& leaf) {
+        if (auto const it = converted.leafPane.find(&leaf); it != converted.leafPane.end())
+            ctrl->setNextBindPane(it->second);
+    });
+
+    auto* tab = app.manager().model().window(win.id)->tabAt(0);
+    REQUIRE(tab != nullptr);
+    CHECK(tab->paneCount() == 2); // both panes realized as one split tab
+    REQUIRE_FALSE(tab->rootPane()->isLeaf());
+    CHECK(tab->rootPane()->splitState() == vtmux::SplitState::Vertical); // faithful orientation
+    CHECK(tab->rootPane()->ratio() > 0.6);                               // faithful ~0.71 ratio, not 0.5
 
     ctrl->stop();
 }

@@ -3,7 +3,10 @@
 #include <contour/TerminalSessionManager.h>
 #include <contour/mux/TmuxController.h>
 
+#include <algorithm>
 #include <format>
+#include <optional>
+#include <ranges>
 #include <utility>
 #include <vector>
 
@@ -14,23 +17,99 @@ namespace contour
 
 namespace
 {
+    using muxserver::tmux::BinaryLayout;
+
     auto const tmuxLog = logstore::category("gui.tmux", "GUI tmux -CC mirroring controller.");
 
-    /// Finds the orientation of the split joining @p pane into @p node's tree.
-    [[nodiscard]] std::optional<vtmux::SplitState> parentOrientationOf(
-        muxserver::tmux::BinaryLayout const& node, uint64_t pane)
+    /// @return True when @p node is a split (has both children) rather than a leaf.
+    [[nodiscard]] bool isSplit(BinaryLayout const& node) noexcept
     {
-        if (node.first == nullptr || node.second == nullptr)
+        return node.first != nullptr && node.second != nullptr;
+    }
+
+    /// Finds the split (orientation + first-child ratio) that joins @p pane into @p node's tree — the
+    /// proportions the pane's incremental split should reproduce.
+    [[nodiscard]] std::optional<std::pair<vtmux::SplitState, double>> parentSplitOf(BinaryLayout const& node,
+                                                                                    uint64_t pane)
+    {
+        if (!isSplit(node))
             return std::nullopt;
         for (auto const* child: { node.first.get(), node.second.get() })
             if (child->paneId == pane)
-                return node.orientation;
+                return std::pair { node.orientation, node.ratio };
         for (auto const* child: { node.first.get(), node.second.get() })
-            if (auto const found = parentOrientationOf(*child, pane))
+            if (auto const found = parentSplitOf(*child, pane))
                 return found;
         return std::nullopt;
     }
+
+    /// Collects every leaf pane id of @p node into @p out (DFS order).
+    void collectLeafPanes(BinaryLayout const& node, std::vector<uint64_t>& out)
+    {
+        if (!isSplit(node))
+        {
+            if (node.paneId)
+                out.push_back(*node.paneId);
+            return;
+        }
+        collectLeafPanes(*node.first, out);
+        collectLeafPanes(*node.second, out);
+    }
+
+    /// Deep-copies a tmux layout tree (its children are unique_ptrs, so it is move-only otherwise).
+    /// Used to snapshot a window's tree on the reactor thread for the GUI thread to realize.
+    [[nodiscard]] BinaryLayout cloneBinaryLayout(BinaryLayout const& node)
+    {
+        auto out =
+            BinaryLayout { .paneId = node.paneId, .orientation = node.orientation, .ratio = node.ratio };
+        if (node.first)
+            out.first = std::make_unique<BinaryLayout>(cloneBinaryLayout(*node.first));
+        if (node.second)
+            out.second = std::make_unique<BinaryLayout>(cloneBinaryLayout(*node.second));
+        return out;
+    }
+
+    /// Converts a tmux layout node into a vtmux::LayoutPane subtree: a leaf becomes an empty pane; a
+    /// split records its orientation with the first child carrying the node's ratio (the second is left
+    /// unset, so ratioForFirst gives it the rest). Mirrors muxserver::client::wireToLayoutPane.
+    [[nodiscard]] vtmux::LayoutPane binaryToLayoutPane(BinaryLayout const& node)
+    {
+        auto out = vtmux::LayoutPane {};
+        if (!isSplit(node))
+            return out; // a leaf: a mirror session backs it
+        out.orientation = node.orientation;
+        auto first = binaryToLayoutPane(*node.first);
+        first.ratio = node.ratio;
+        out.children.push_back(std::move(first));
+        out.children.push_back(binaryToLayoutPane(*node.second));
+        return out;
+    }
+
+    /// Lockstep-walks the converted pane tree and the tmux tree, recording each converted leaf's tmux
+    /// pane id by the leaf's (now stable) address. Mirrors muxserver::client's mapLeaves.
+    void mapBinaryLeaves(vtmux::LayoutPane const& pane,
+                         BinaryLayout const& node,
+                         std::unordered_map<vtmux::LayoutPane const*, uint64_t>& out)
+    {
+        if (pane.isLeaf())
+        {
+            out.emplace(&pane, node.paneId.value_or(0));
+            return;
+        }
+        mapBinaryLeaves(pane.children[0], *node.first, out);
+        mapBinaryLeaves(pane.children[1], *node.second, out);
+    }
 } // namespace
+
+TmuxWindowLayout tmuxLayoutToWindowLayout(muxserver::tmux::BinaryLayout const& tree)
+{
+    auto result = TmuxWindowLayout {};
+    result.layout.tabs.push_back(vtmux::LayoutTab { .root = binaryToLayoutPane(tree) });
+    // Build the leaf → pane map only now that the tree is in place: the pane addresses are stable and
+    // a move of the result preserves them (the vectors' buffers move intact).
+    mapBinaryLeaves(result.layout.tabs.front().root, tree, result.leafPane);
+    return result;
+}
 
 std::string tmuxResumePaneCommand(uint64_t pane)
 {
@@ -191,14 +270,25 @@ coro::Task<void> TmuxController::runClient(net::EventLoop* loop)
 
 void TmuxController::paneAdded(uint64_t window, uint64_t pane, int columns, int lines)
 {
+    // On the reactor thread, where the model is safe to read: capture the pane's split proportions and
+    // a snapshot of the window's whole tree, so the GUI thread can realize it without racing the model.
     auto record = PendingPane { .window = window, .pane = pane, .columns = columns, .lines = lines };
+    auto tree = std::optional<BinaryLayout> {};
     if (auto const it = _model.windows().find(window); it != _model.windows().end() && it->second.tree)
-        if (auto const orientation = parentOrientationOf(*it->second.tree, pane))
-            record.vertical = *orientation == vtmux::SplitState::Vertical;
+    {
+        if (auto const split = parentSplitOf(*it->second.tree, pane))
+        {
+            record.vertical = split->first == vtmux::SplitState::Vertical;
+            record.ratio = split->second;
+        }
+        tree = cloneBinaryLayout(*it->second.tree);
+    }
 
     {
         auto const lock = std::lock_guard { _mutex };
         _pending.push_back(record);
+        if (tree)
+            _pendingTrees.insert_or_assign(window, std::move(*tree)); // latest layout wins
         if (_state == State::Connecting)
             _state = State::Ready;
     }
@@ -306,7 +396,15 @@ void TmuxController::closeAllPanes()
 bool TmuxController::canCreateSession() const noexcept
 {
     auto const lock = std::lock_guard { _mutex };
-    return !_pending.empty();
+    // During a whole-tree realization panes are bound by setNextBindPane (a leaf may have no pending
+    // record yet), so allow creation even with nothing pending.
+    return _nextBindPane.has_value() || !_pending.empty();
+}
+
+void TmuxController::setNextBindPane(uint64_t pane)
+{
+    auto const lock = std::lock_guard { _mutex };
+    _nextBindPane = pane;
 }
 
 bool TmuxController::requestRemoteSplit(vtpty::Pty const* actingPty, bool vertical)
@@ -335,14 +433,36 @@ std::unique_ptr<vtpty::Pty> TmuxController::createPty(std::optional<std::string>
                                                       std::optional<std::string> /*profileName*/)
 {
     auto lock = std::unique_lock { _mutex };
-    if (_pending.empty())
+    // A whole-tree realization names the exact tmux pane to bind (setNextBindPane); otherwise pop the
+    // FIFO of discovered panes. A named pane may not have a pending record yet — then it is born at the
+    // window size and the mirror's first replay repaints it.
+    auto record = PendingPane {};
+    if (_nextBindPane.has_value())
+    {
+        record.pane = *_nextBindPane;
+        _nextBindPane.reset();
+        auto const it = std::ranges::find(_pending, record.pane, &PendingPane::pane);
+        if (it != _pending.end())
+        {
+            record = *it;
+            _pending.erase(it);
+        }
+        else if (auto const size = pageSize.value_or(vtbackend::PageSize {}); size.columns.value != 0)
+        {
+            record.columns = unbox<int>(size.columns);
+            record.lines = unbox<int>(size.lines);
+        }
+    }
+    else if (!_pending.empty())
+    {
+        record = _pending.front();
+        _pending.pop_front();
+    }
+    else
     {
         tmuxLog()("No pending tmux pane; handing out an unbound pty.");
         return makeUnboundFallbackPty(pageSize);
     }
-
-    auto const record = _pending.front();
-    _pending.pop_front();
 
     auto pty = std::make_unique<SelfUnbindingChannelPty>(
         vtpty::PageSize { vtpty::LineCount(record.lines), vtpty::ColumnCount(record.columns) },
@@ -380,47 +500,55 @@ std::unique_ptr<vtpty::Pty> TmuxController::createPty(std::optional<std::string>
     return pty;
 }
 
-void TmuxController::adoptPendingPanes(TerminalSessionManager& manager, vtmux::WindowId window)
+void TmuxController::adoptPendingPanes(TerminalSessionManager& manager, vtmux::WindowId guiWindow)
 {
-    // Each subsequent pane is realized by manager.splitActivePane, which consults requestRemoteSplit;
-    // while realizing an EXISTING tmux pane the split must build locally, not author a new one back to
-    // tmux. (Mirrors AttachController::isRealizingLayout.)
+    // Splits performed here (whole-tree realize, or an incremental split of an existing tmux pane)
+    // must build the mirror pane locally, not author a new split back to tmux. (Mirrors
+    // AttachController::isRealizingLayout.)
     {
         auto const lock = std::lock_guard { _mutex };
         _realizing = true;
     }
     while (true)
     {
-        auto record = PendingPane {};
+        // The next window with pending panes, plus a snapshot of what we need to decide how to realize
+        // it — all read under the lock, so the GUI thread never touches the reactor-owned model.
+        auto window = uint64_t {};
+        auto tree = std::optional<BinaryLayout> {};
+        auto wholeTree = false;
         {
             auto const lock = std::lock_guard { _mutex };
             if (_pending.empty())
                 break;
-            record = _pending.front(); // consumed by createPty inside the calls below
+            window = _pending.front().window;
+
+            if (auto const it = _pendingTrees.find(window); it != _pendingTrees.end())
+            {
+                auto leaves = std::vector<uint64_t> {};
+                collectLeafPanes(it->second, leaves);
+                auto const realized =
+                    std::ranges::any_of(leaves, [&](uint64_t p) { return _ptys.contains(p); });
+                auto const allPending = std::ranges::all_of(leaves, [&](uint64_t p) {
+                    return std::ranges::find(_pending, p, &PendingPane::pane) != _pending.end();
+                });
+                // A window first seen with its whole multi-pane layout (every leaf still pending) is
+                // realized as one faithful tree; anything else falls through to incremental.
+                if (!realized && allPending && leaves.size() > 1)
+                {
+                    tree = cloneBinaryLayout(it->second);
+                    wholeTree = true;
+                }
+            }
         }
 
-        auto* acting = [&]() -> TerminalSession* {
-            auto const lock = std::lock_guard { _mutex };
-            auto const it = _actingByWindow.find(record.window);
-            return it != _actingByWindow.end() ? it->second : nullptr;
-        }();
-
-        auto* created = static_cast<TerminalSession*>(nullptr);
-        if (acting == nullptr)
-            created = manager.createSessionInBackground(window);
-        else
+        if (wholeTree)
         {
-            manager.splitActivePane(record.vertical, acting);
-            created = acting; // the anchor stays valid for further splits
+            realizeWindowLayout(manager, guiWindow, window, *tree);
+            auto const lock = std::lock_guard { _mutex };
+            _pendingTrees.erase(window); // realized; a later change re-snapshots on the next paneAdded
         }
-
-        auto const lock = std::lock_guard { _mutex };
-        // The manager consumes the pending pane through createPty; if it did
-        // not (creation refused or failed), stop instead of spinning.
-        if (!_pending.empty() && _pending.front().pane == record.pane)
-            break;
-        if (created != nullptr)
-            _actingByWindow[record.window] = created;
+        else if (!realizeOnePane(manager, guiWindow))
+            break; // creation stalled — stop instead of spinning
     }
     {
         auto const lock = std::lock_guard { _mutex };
@@ -428,6 +556,69 @@ void TmuxController::adoptPendingPanes(TerminalSessionManager& manager, vtmux::W
     }
     // A window renamed before its first pane was realized now has a tab — title it.
     applyPendingRenames(manager);
+}
+
+void TmuxController::realizeWindowLayout(TerminalSessionManager& manager,
+                                         vtmux::WindowId guiWindow,
+                                         uint64_t tmuxWindow,
+                                         muxserver::tmux::BinaryLayout const& tree)
+{
+    auto const converted = tmuxLayoutToWindowLayout(tree);
+    manager.applyLayoutToWindow(
+        guiWindow, converted.layout, std::nullopt, [&](config::LayoutPane const& leaf) {
+            if (auto const it = converted.leafPane.find(&leaf); it != converted.leafPane.end())
+                setNextBindPane(it->second);
+        });
+
+    // Seed the split anchor so a later incremental split of this window has a session to split beside.
+    if (auto* win = manager.model().window(guiWindow); win != nullptr && win->tabCount() > 0)
+        if (auto* tab = win->tabAt(win->tabCount() - 1); tab != nullptr)
+            if (auto* session = manager.sessionForId(tab->activePane()->session()); session != nullptr)
+            {
+                auto const lock = std::lock_guard { _mutex };
+                _actingByWindow.insert_or_assign(tmuxWindow, session);
+            }
+}
+
+bool TmuxController::realizeOnePane(TerminalSessionManager& manager, vtmux::WindowId guiWindow)
+{
+    auto record = PendingPane {};
+    {
+        auto const lock = std::lock_guard { _mutex };
+        if (_pending.empty())
+            return false;
+        record = _pending.front();
+        // A pane already bound (e.g. by a prior whole-tree realize) is just dropped from the queue.
+        if (_ptys.contains(record.pane))
+        {
+            _pending.pop_front();
+            return true;
+        }
+    }
+
+    auto* acting = [&]() -> TerminalSession* {
+        auto const lock = std::lock_guard { _mutex };
+        auto const it = _actingByWindow.find(record.window);
+        return it != _actingByWindow.end() ? it->second : nullptr;
+    }();
+
+    auto* created = static_cast<TerminalSession*>(nullptr);
+    if (acting == nullptr)
+        created = manager.createSessionInBackground(guiWindow);
+    else
+    {
+        manager.splitActivePane(record.vertical, acting, record.ratio);
+        created = acting; // the anchor stays valid for further splits
+    }
+
+    auto const lock = std::lock_guard { _mutex };
+    // The manager consumes the pending pane through createPty; if it did not (creation refused or
+    // failed), report no progress so the caller stops instead of spinning.
+    if (!_pending.empty() && _pending.front().pane == record.pane)
+        return false;
+    if (created != nullptr)
+        _actingByWindow[record.window] = created;
+    return true;
 }
 
 } // namespace contour
