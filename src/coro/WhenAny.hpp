@@ -180,8 +180,8 @@ namespace detail
             // awaiting flow cancels every child.
             if constexpr (requires { awaiting.promise().stopToken(); })
             {
-                _parentReg.emplace(awaiting.promise().stopToken(),
-                                   [state = &_state] { state->childStop.request_stop(); });
+                _parentToken = awaiting.promise().stopToken();
+                _parentReg.emplace(_parentToken, [state = &_state] { state->childStop.request_stop(); });
             }
 
             _runners.reserve(_tasks.size());
@@ -209,6 +209,13 @@ namespace detail
         ///         awaiting flow itself was cancelled before any child won.
         [[nodiscard]] std::size_t await_resume() const
         {
+            // A cancelled awaiting flow sees NO winner: the child that latched
+            // `decided` did so while unwinding through its own (swallowed)
+            // OperationCancelled, so returning its index would report a cancelled
+            // loser as a successful result and let the flow continue on its
+            // success path. Cancellation dominates even a latched winner.
+            if (_parentToken.stop_requested())
+                throw OperationCancelled {};
             if (_state.exception)
                 std::rethrow_exception(_state.exception);
             return _state.winner;
@@ -218,6 +225,7 @@ namespace detail
         std::vector<Task<void>> _tasks;      ///< Moved into runners on suspend.
         std::vector<WhenAnyRunner> _runners; ///< Kept alive until the race completes.
         WhenAnyState _state {};              ///< Shared with the runners.
+        StopToken _parentToken;              ///< The awaiting flow's own token (empty when it has none).
         std::optional<StopCallback<std::function<void()>>> _parentReg; ///< Parent→child cancel bridge.
     };
 

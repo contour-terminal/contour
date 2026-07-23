@@ -197,4 +197,38 @@ TEST_CASE("whenAny surfaces the winning child's exception", "[whenAny]")
     REQUIRE(root.done());
     REQUIRE(threw);
 }
+
+TEST_CASE("whenAny throws OperationCancelled when the awaiting flow is cancelled", "[whenAny]")
+{
+    auto waiters = std::vector<std::coroutine_handle<>> {};
+    auto aDone = false;
+    auto aCancelled = false;
+    auto bDone = false;
+    auto bCancelled = false;
+    auto winner = coro::detail::WhenAnyNoWinner;
+
+    auto root = raceTwo(&waiters, &aDone, &aCancelled, &bDone, &bCancelled, &winner);
+    auto source = coro::StopSource {};
+    root.handle().promise().setStopToken(source.get_token());
+    root.handle().resume();
+
+    // Both children parked on their ManualEvent.
+    REQUIRE(waiters.size() == 2);
+    REQUIRE_FALSE(root.done());
+
+    // Cancel the AWAITING flow (not a sibling winner): the parent→child bridge
+    // requests the shared child stop, which both parked children observe on their
+    // next resume. The first to unwind must NOT latch itself as the winner.
+    source.request_stop();
+    waiters[0].resume();
+    waiters[1].resume();
+
+    REQUIRE(aCancelled);
+    REQUIRE(bCancelled);
+    REQUIRE(root.done());
+    // No child won, so await_resume throws OperationCancelled (surfaced through
+    // the root task) instead of returning a cancelled loser's index.
+    REQUIRE(winner == coro::detail::WhenAnyNoWinner);
+    REQUIRE_THROWS_AS(root.result(), OperationCancelled);
+}
 #endif
