@@ -386,14 +386,14 @@ namespace
     /// all live notifiers without allocation or locking inside the signal handler.
     constexpr auto MaxWinchNotifiers = size_t { 8 };
     // std::atomic<int> is not copyable, so init via the (int) constructor.
-    std::array<std::atomic<int>, MaxWinchNotifiers> gWinchWriteFds = { -1, -1, -1, -1, -1, -1, -1, -1 };
+    std::array<std::atomic<int>, MaxWinchNotifiers> winchWriteFds = { -1, -1, -1, -1, -1, -1, -1, -1 };
 
     /// Async-signal-safe SIGWINCH handler: writes one byte to every registered
     /// self-pipe so all live notifiers wake and re-propose the TTY size. A full
     /// pipe (EAGAIN) already carries a pending wakeup, so short writes are ignored.
     void winchSignalHandler(int /*sig*/)
     {
-        for (auto const& entry: gWinchWriteFds)
+        for (auto const& entry: winchWriteFds)
         {
             auto const fd = entry.load(std::memory_order_relaxed);
             if (fd >= 0)
@@ -502,10 +502,10 @@ SigwinchNotifier::SigwinchNotifier()
     // Find a free slot in the shared registry and publish the write end before
     // arming the handler, so a signal that arrives the instant the handler is
     // installed already sees a valid fd.
-    for (auto i = size_t { 0 }; i < gWinchWriteFds.size(); ++i)
+    for (auto i = size_t { 0 }; i < winchWriteFds.size(); ++i)
     {
         auto expected = -1;
-        if (gWinchWriteFds[i].compare_exchange_strong(expected, _writeFd, std::memory_order_relaxed))
+        if (winchWriteFds[i].compare_exchange_strong(expected, _writeFd, std::memory_order_relaxed))
         {
             _slotIndex = static_cast<int>(i);
             break;
@@ -529,7 +529,7 @@ SigwinchNotifier::SigwinchNotifier()
     {
         // Handler install failed: undo the pipe so readFd() reports InvalidHandle and
         // trackTtySize takes its idle path instead of parking on a dead pipe.
-        gWinchWriteFds[static_cast<size_t>(_slotIndex)].store(-1, std::memory_order_relaxed);
+        winchWriteFds[static_cast<size_t>(_slotIndex)].store(-1, std::memory_order_relaxed);
         _slotIndex = -1;
         net::platformClose(_writeFd);
         net::platformClose(_readFd);
@@ -547,11 +547,11 @@ SigwinchNotifier::~SigwinchNotifier()
     // this pipe. Restore the previous disposition only if the handler is still
     // the one we installed (another notifier may have replaced it — the registry
     // covers that case transparently).
-    gWinchWriteFds[static_cast<size_t>(_slotIndex)].store(-1, std::memory_order_relaxed);
+    winchWriteFds[static_cast<size_t>(_slotIndex)].store(-1, std::memory_order_relaxed);
 
     // Check whether we were the last active notifier; only then restore the
     // previous disposition to avoid stealing the handler from a still-live one.
-    if (!crispy::any_of(gWinchWriteFds, [](std::atomic<int> const& entry) noexcept {
+    if (!crispy::any_of(winchWriteFds, [](std::atomic<int> const& entry) noexcept {
             return entry.load(std::memory_order_relaxed) >= 0;
         }))
         std::ignore = ::sigaction(SIGWINCH, &_previous, nullptr);
@@ -606,13 +606,13 @@ namespace
     /// a plain C function invoked on an arbitrary thread with no user data
     /// pointer, so the running daemon registers its (thread-safe) shutdown
     /// poster in this one process-wide slot.
-    std::atomic<std::function<void()>*> gConsoleShutdown = nullptr;
+    std::atomic<std::function<void()>*> consoleShutdown = nullptr;
 
     BOOL WINAPI consoleCtrlHandler(DWORD type)
     {
         if (type != CTRL_C_EVENT && type != CTRL_BREAK_EVENT && type != CTRL_CLOSE_EVENT)
             return FALSE;
-        if (auto* shutdown = gConsoleShutdown.load())
+        if (auto* shutdown = consoleShutdown.load())
             (*shutdown)();
         return TRUE;
     }
@@ -669,7 +669,7 @@ int runDaemon(DaemonConfig const& config)
             loop.requestStop();
         });
     } };
-    gConsoleShutdown = &shutdown;
+    consoleShutdown = &shutdown;
     ::SetConsoleCtrlHandler(consoleCtrlHandler, TRUE);
 
     std::println(
@@ -677,7 +677,7 @@ int runDaemon(DaemonConfig const& config)
     loop.blockOn(serveAll(servers));
 
     ::SetConsoleCtrlHandler(consoleCtrlHandler, FALSE);
-    gConsoleShutdown = nullptr;
+    consoleShutdown = nullptr;
 
     std::println(stderr, "contour daemon: shut down");
     return EXIT_SUCCESS;

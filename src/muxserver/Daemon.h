@@ -163,7 +163,7 @@ class SigwinchNotifier
   private:
     net::NativeHandle _readFd = net::InvalidHandle;
     net::NativeHandle _writeFd = net::InvalidHandle;
-    int _slotIndex = -1; ///< Index in the shared gWinchWriteFds registry, or -1 if invalid.
+    int _slotIndex = -1; ///< Index in the shared winchWriteFds registry, or -1 if invalid.
     struct sigaction _previous {};
 };
 
