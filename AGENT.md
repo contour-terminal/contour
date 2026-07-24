@@ -39,6 +39,59 @@ touches I/O, time, randomness, the filesystem, the network, or any other
 ambient/global resource is reached through an interface — never through a
 concrete type, a singleton, or a free function with hidden state.
 
+### Configuration at construction time
+**A constructed object is a usable object.** Everything a class needs to do its job —
+collaborators, policy, tuning knobs, limits — is supplied to its constructor and is fixed
+thereafter. No `init()`/`setup()` second phase, no default constructor followed by a run of
+setters, no static knob poked from elsewhere at startup.
+
+This is the **Complete Constructor** pattern, realized through **constructor injection** and
+**immutability**; in C++ it is **RAII** generalized from resources to configuration. What it
+forbids is **two-phase initialization** and the **temporal coupling** it creates — a hidden call
+order the caller must know, and a not-yet-configured state every method must tolerate.
+
+**Configuration is not state.** This governs how an object is *set up*, not what it does
+afterwards. A setter that mutates the domain state the object exists to manage is fine:
+`CellProxy::setForegroundColor()` is the cell's data; `InputGenerator::setCursorKeysMode()` is VT
+state driven by DECCKM at runtime. `BoxDrawingRenderer::setBrailleStyle()` — a *static*
+rendering-policy knob written once from `Config.cpp` — is the thing to avoid. Ask: *would two
+differently-configured instances be two different objects, or one object in two states?*
+Different objects → constructor.
+
+- Omit the default constructor when there is nothing sensible to default to.
+- Configuration members are private and have no setter. Prefer this encapsulated immutability
+  over `const` members: a `const` member deletes copy- and move-assignment, quietly breaking
+  types held in containers or reassigned. `const`/reference members are permitted
+  (`cppcoreguidelines-avoid-const-or-ref-data-members` is off) — use them for value types that
+  genuinely never need assignment.
+- A long constructor is a fact about the *data*, not a reason to add setters: group related
+  parameters into a config struct (which data-driven design wants anyway). A builder is for
+  genuinely optional, order-independent parameters only.
+- Never wire with a global. A `static` setter is post-construction configuration plus unbounded
+  scope, no thread-safety, and state leaking between tests.
+- Fallible setup belongs in a static factory returning `std::expected<T, E>` — not in a
+  constructor that leaves the object half-built.
+
+**When you cannot.** Each of these must be documented at the declaration, with the reason:
+
+- **Live reconfiguration is the feature** — `Renderer::setFonts()` on config reload. Note the
+  price `Renderer` pays for it: `_reconfigMutex`, staged-vs-published state,
+  `applyPendingReconfig()`. Pay it only where a user-visible requirement demands it.
+- **Externally-driven geometry** — `Renderer::setPageSize()`/`applyResize()`; the window manager
+  decides, not us.
+- **Framework-mandated** — QML default-constructs types and assigns `Q_PROPERTY`s.
+- **Documented rebinding seams** — `TerminalDisplay::setSession()` exists so a session can move
+  between displays; the seam is the design.
+- **Cyclic wiring** — when A and B must know each other, one `attach`-style call after
+  construction is acceptable; a *sequence* of them is not.
+
+**Enforcement.** The mechanical half is automated: `cppcoreguidelines-pro-type-member-init` and
+`cppcoreguidelines-prefer-member-initializer` are enabled, so every member is initialized, in the
+member-initializer list. The design half is a review question — *how many calls must a caller
+make before this object is usable?* The answer must be zero. This is also why it pays off for
+testing: a fully-constructed object is built with test doubles in one expression, with no setup
+ritual and no half-configured state to reason about.
+
 ### Data-driven design
 **Behaviour is described by data; code interprets that data.** This is
 equally load-bearing and goes well beyond "no magic numbers". The aim is
