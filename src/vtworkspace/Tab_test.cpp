@@ -54,14 +54,14 @@ TEST_CASE("Tab: title precedence is runtime > MultiplePanes > active-leaf", "[vt
 
     SECTION("a split with no runtime title yields the MultiplePanes label")
     {
-        tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+        (void) tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
         CHECK(tab.hasMultiplePanes());
         CHECK(tab.title(resolver) == std::string { Tab::MultiplePanesLabel });
     }
 
     SECTION("a runtime title overrides everything")
     {
-        tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+        (void) tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
         tab.setRuntimeTitle("my tab");
         CHECK(tab.title(resolver) == "my tab");
 
@@ -138,7 +138,7 @@ TEST_CASE("Tab: isLastPane is true only for a single-pane tab", "[vtworkspace][t
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
     CHECK(tab.isLastPane(tab.activePane()));
 
-    tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    (void) tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
     CHECK_FALSE(tab.isLastPane(tab.activePane()));
 }
 
@@ -228,8 +228,8 @@ TEST_CASE("Tab: closing the active leaf of a 3-pane tab reselects the most-recen
     // and `third` is active. Collect the three actual LEAVES by walking the tree (splitActivePane's return
     // is the new leaf; the intermediate `second` pane became an internal split node after split #2, so we do
     // NOT hold onto it as a leaf).
-    tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
-    tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    (void) tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    (void) tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
     REQUIRE(tab.paneCount() == 3);
 
     std::vector<Pane*> leaves;
@@ -252,7 +252,7 @@ TEST_CASE("Tab: closing the active leaf of a 3-pane tab reselects the most-recen
 
     // Close the active leaf `last`. Reselection walks the MRU for the next surviving leaf -> `mid` (more
     // recently used than orig), NOT the firstLeaf fallback (which would pick orig).
-    tab.closePane(last);
+    (void) tab.closePane(last);
     CHECK(tab.paneCount() == 2);
     CHECK(tab.activePane()->id() == midId);
 
@@ -267,19 +267,20 @@ TEST_CASE("Tab: closing the active leaf of a 3-pane tab reselects the most-recen
             nonActive = &p;
     });
     REQUIRE(nonActive != nullptr);
-    tab.closePane(nonActive);
+    (void) tab.closePane(nonActive);
     CHECK(tab.paneCount() == 1);
     CHECK(tab.activePane()->session() == activeSessionBefore);
 }
 
-TEST_CASE("Tab: focusDirection has no wrap-around and returns nullptr at every edge", "[vtworkspace][tab][focus]")
+TEST_CASE("Tab: focusDirection has no wrap-around and returns nullptr at every edge",
+          "[vtworkspace][tab][focus]")
 {
     // Per-edge null and non-wrap are the boundary cases users hit constantly; only Left-null was covered.
     // Build root Vertical [ left | right ], then split the active `right` Horizontally -> [ rtTop / rtBottom
     // ].
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
-    tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    (void) tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
     auto* rtBottom = tab.splitActivePane(SplitState::Horizontal, ids.pane(), ids.pane(), ids.session());
     REQUIRE(tab.activePane() == rtBottom);
 
@@ -315,11 +316,12 @@ TEST_CASE("Tab: focusDirection has no wrap-around and returns nullptr at every e
     CHECK(tab.focusDirection(FocusDirection::Down) == nullptr);
 }
 
-TEST_CASE("Tab: splitting an already-split tab adds a third leaf and activates it", "[vtworkspace][tab][split]")
+TEST_CASE("Tab: splitting an already-split tab adds a third leaf and activates it",
+          "[vtworkspace][tab][split]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
-    tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    (void) tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
     REQUIRE(tab.paneCount() == 2);
     // Split the active pane again.
     auto* third = tab.splitActivePane(SplitState::Horizontal, ids.pane(), ids.pane(), ids.session());
@@ -328,7 +330,8 @@ TEST_CASE("Tab: splitting an already-split tab adds a third leaf and activates i
     CHECK(tab.activePane() == third); // the new leaf is active
 }
 
-TEST_CASE("Tab: toggleActivePaneOrientation flips the active pane's parent split", "[vtworkspace][tab][split]")
+TEST_CASE("Tab: toggleActivePaneOrientation flips the active pane's parent split",
+          "[vtworkspace][tab][split]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
@@ -340,7 +343,7 @@ TEST_CASE("Tab: toggleActivePaneOrientation flips the active pane's parent split
 
     SECTION("split tab flips its parent split")
     {
-        tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+        (void) tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
         auto* flipped = tab.toggleActivePaneOrientation();
         REQUIRE(flipped == tab.rootPane());
         CHECK(flipped->splitState() == SplitState::Horizontal);
@@ -523,12 +526,12 @@ TEST_CASE("Tab: splitting while zoomed unzooms", "[vtworkspace][tab][zoom]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
-    tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    (void) tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
     REQUIRE(tab.toggleZoom());
     REQUIRE(tab.isZoomed());
 
     // The pane a split creates has to be visible, or the user just watched a keypress do nothing.
-    tab.splitActivePane(SplitState::Horizontal, ids.pane(), ids.pane(), ids.session());
+    (void) tab.splitActivePane(SplitState::Horizontal, ids.pane(), ids.pane(), ids.session());
     CHECK_FALSE(tab.isZoomed());
     CHECK(tab.layoutRoot() == tab.rootPane());
     CHECK(tab.paneCount() == 3);
@@ -543,7 +546,7 @@ TEST_CASE("Tab: closing a pane while zoomed unzooms without dangling", "[vtworks
 
     // closePane() absorbs the sibling into the parent, DESTROYING Pane objects. Zoom is a bool tied
     // to the active leaf precisely so there is no pane pointer/id of its own left dangling here.
-    tab.closePane(right);
+    (void) tab.closePane(right);
 
     CHECK_FALSE(tab.isZoomed());
     CHECK(tab.paneCount() == 1);
@@ -554,8 +557,8 @@ TEST_CASE("Tab: closing a pane while zoomed unzooms without dangling", "[vtworks
 TEST_CASE("Tab: restructuring the tree while zoomed unzooms", "[vtworkspace][tab][zoom]")
 {
     auto const zoomedThreePaneTab = [](Ids& ids, Tab& tab) {
-        tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
-        tab.splitActivePane(SplitState::Horizontal, ids.pane(), ids.pane(), ids.session());
+        (void) tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+        (void) tab.splitActivePane(SplitState::Horizontal, ids.pane(), ids.pane(), ids.session());
         REQUIRE(tab.toggleZoom());
         REQUIRE(tab.isZoomed());
     };
@@ -616,7 +619,7 @@ TEST_CASE("Tab: a zoomed tab is titled after the pane on screen", "[vtworkspace]
     auto const resolver = makeResolver();
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
     auto const rightSession = ids.session();
-    tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), rightSession);
+    (void) tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), rightSession);
 
     // Tiled, the tab cannot name one pane, so it says so.
     CHECK(tab.title(resolver) == std::string { Tab::MultiplePanesLabel });
@@ -631,11 +634,12 @@ TEST_CASE("Tab: a zoomed tab is titled after the pane on screen", "[vtworkspace]
 }
 // }}}
 
-TEST_CASE("Tab: resizing while zoomed unzooms rather than moving an invisible divider", "[vtworkspace][tab][zoom]")
+TEST_CASE("Tab: resizing while zoomed unzooms rather than moving an invisible divider",
+          "[vtworkspace][tab][zoom]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
-    tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    (void) tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
     REQUIRE(tab.toggleZoom());
     auto const ratioBefore = tab.rootPane()->ratio();
 
@@ -649,12 +653,13 @@ TEST_CASE("Tab: resizing while zoomed unzooms rather than moving an invisible di
     CHECK(split->ratio() < ratioBefore); // ...and the resize itself still happened, now visibly
 }
 
-TEST_CASE("Tab: resizing with no ancestor split on the axis leaves the zoom alone", "[vtworkspace][tab][zoom]")
+TEST_CASE("Tab: resizing with no ancestor split on the axis leaves the zoom alone",
+          "[vtworkspace][tab][zoom]")
 {
     Ids ids;
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
     // A single Vertical split: there is no Horizontal ancestor, so an Up/Down resize finds nothing.
-    tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    (void) tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
     REQUIRE(tab.toggleZoom());
 
     CHECK(tab.resizeActivePane(FocusDirection::Up, 0.05) == nullptr);
@@ -668,7 +673,7 @@ TEST_CASE("Tab: usesMultiplePanesLabel is the one rule behind every consumer's t
     Tab tab { TabId { 1 }, ids.pane(), ids.session() };
     CHECK_FALSE(tab.usesMultiplePanesLabel()); // one pane: named after its session
 
-    tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
+    (void) tab.splitActivePane(SplitState::Vertical, ids.pane(), ids.pane(), ids.session());
     CHECK(tab.usesMultiplePanesLabel()); // tiled and multi-pane: no single pane to name it after
 
     // Zoomed, exactly one pane is on screen, so the tab is named after THAT pane. Both title() and the

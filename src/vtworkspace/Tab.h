@@ -123,7 +123,7 @@ class Tab
     /// No-op on a single-pane tab: there are no siblings to hide, so zooming would be a state change
     /// with no observable effect (and would leave the tab claiming a zoom the user cannot undo by eye).
     /// @return true if the zoom state changed.
-    bool toggleZoom() noexcept;
+    [[nodiscard]] bool toggleZoom() noexcept;
 
     // }}}
 
@@ -135,7 +135,7 @@ class Tab
     /// @param newSession   Session for the new leaf.
     /// @param ratio        First child's space share.
     /// @return The new leaf (which also becomes the active pane).
-    Pane* splitActivePane(
+    [[nodiscard]] Pane* splitActivePane(
         SplitState direction, PaneId splitNodeId, PaneId newLeafId, SessionId newSession, double ratio = 0.5);
 
     /// Closes @p leaf, absorbing its sibling. The active pane and MRU are updated. Returns the
@@ -143,20 +143,20 @@ class Tab
     ///
     /// @pre @p leaf is not the root (closing the last pane is the owning model's job — it closes the
     ///      whole tab). Use isLastPane() to check.
-    SessionId closePane(Pane* leaf);
+    [[nodiscard]] SessionId closePane(Pane* leaf);
 
     /// Whether @p leaf is the only pane in the tab (so closing it means closing the tab).
     [[nodiscard]] bool isLastPane(Pane const* leaf) const noexcept { return leaf == _root.get(); }
 
     /// Moves focus from the active pane in @p direction, if there is a neighbor. Returns the new
     /// active leaf, or nullptr if focus did not move.
-    Pane* focusDirection(FocusDirection direction);
+    [[nodiscard]] Pane* focusDirection(FocusDirection direction);
 
     /// Flips the orientation of the active pane's parent split (Horizontal<->Vertical).
     ///
     /// @return The split node whose orientation flipped, or nullptr if the active pane is the tab's
     ///         only pane (no parent split to flip).
-    Pane* toggleActivePaneOrientation();
+    [[nodiscard]] Pane* toggleActivePaneOrientation();
 
     /// Grows or shrinks the active pane along @p direction by nudging the ratio of the nearest ancestor
     /// split on the matching axis.
@@ -169,7 +169,7 @@ class Tab
     /// @param fraction  The ratio delta magnitude in (0, 1); the sign is derived from @p direction.
     /// @return The split node whose ratio changed, or nullptr if the active pane has no ancestor split
     ///         on that axis (a single pane, or only cross-axis splits above it).
-    Pane* resizeActivePane(FocusDirection direction, double fraction);
+    [[nodiscard]] Pane* resizeActivePane(FocusDirection direction, double fraction);
 
     /// Swaps the active pane with its neighbor in @p direction (the two terminals trade slots),
     /// keeping the active session focused in its new slot.
@@ -180,7 +180,7 @@ class Tab
     /// @param direction The direction of the neighbor to swap with.
     /// @return A pair {a, b} of the two leaves whose sessions were swapped (a is the previously
     ///         active leaf), or {nullptr, nullptr} if there is no neighbor.
-    std::pair<Pane*, Pane*> swapActivePane(FocusDirection direction);
+    [[nodiscard]] std::pair<Pane*, Pane*> swapActivePane(FocusDirection direction);
 
     /// Moves the active pane across its neighbor in @p direction, re-parenting it in the tree.
     ///
@@ -194,7 +194,7 @@ class Tab
     /// @param newSplitId  The id the neighbor node adopts when it promotes into a split (only used
     ///                    when a genuine re-parent happens; ignored on the swap-degenerate path).
     /// @return true if the pane moved (topology or session changed), false if there was no neighbor.
-    bool moveActivePane(FocusDirection direction, PaneId newSplitId);
+    [[nodiscard]] bool moveActivePane(FocusDirection direction, PaneId newSplitId);
 
     // {{{ Title
 

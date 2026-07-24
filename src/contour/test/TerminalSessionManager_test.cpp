@@ -98,16 +98,16 @@ TEST_CASE("SessionModel: the last-window decision tracks the live window set", "
 TEST_CASE("SessionModel: removing a window with tabs closes only that window's tabs",
           "[contour][manager][window]")
 {
-    // The manager terminates a closing window's sessions and removes its vtworkspace::Window; a sibling window's
-    // tabs/sessions must be untouched. This is the model half of the per-window teardown invariant.
+    // The manager terminates a closing window's sessions and removes its vtworkspace::Window; a sibling
+    // window's tabs/sessions must be untouched. This is the model half of the per-window teardown invariant.
     SilentEvents events;
     uint64_t nextSession = 1;
     SessionModel model { events, [&] { return SessionId { nextSession++ }; } };
 
     auto* a = model.createWindow();
     auto* b = model.createWindow();
-    model.createTab(a->id());
-    model.createTab(a->id());
+    (void) model.createTab(a->id());
+    (void) model.createTab(a->id());
     auto* bTab = model.createTab(b->id());
 
     REQUIRE(a->tabCount() == 2);

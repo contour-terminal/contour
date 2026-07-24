@@ -98,7 +98,7 @@ class SessionModel
     // {{{ Windows
 
     /// Creates a new, empty window and returns it.
-    Window* createWindow();
+    [[nodiscard]] Window* createWindow();
 
     /// Removes a window and everything in it. Each contained session is reported closed.
     void removeWindow(WindowId window);
@@ -121,7 +121,7 @@ class SessionModel
     // {{{ Tabs
 
     /// Appends a new tab (with a single fresh-session pane) to @p window and makes it active.
-    Tab* createTab(WindowId window);
+    [[nodiscard]] Tab* createTab(WindowId window);
 
     /// Closes the tab @p tab in @p window, reporting each of its sessions closed. If it was the
     /// last tab, the window becomes empty (the host decides whether to close the OS window).
@@ -214,10 +214,17 @@ class SessionModel
     /// @param source The source whose color to clear.
     void resetTabColor(TabId tab, TabColorSource source);
 
-    /// The session-title resolver the host installs so tabs can derive their title from the active
-    /// pane's program title.
+    /// Installs the session-title resolver — a cross-layer bridge the host supplies so tabs can
+    /// derive their title from the active pane's program title.
+    ///
+    /// This is a post-construction setter (a documented rebinding seam) because the resolver reaches
+    /// into the host's terminal-session registry, which is built from SessionIds the model itself
+    /// allocates. The resolver cannot exist before the model, and the model cannot resolve titles
+    /// without it — the two are wired once both are live.
     void setSessionTitleResolver(Tab::SessionTitleResolver resolver) { _titleResolver = std::move(resolver); }
 
+    /// Returns the currently installed session-title resolver.
+    /// @see setSessionTitleResolver
     [[nodiscard]] Tab::SessionTitleResolver const& sessionTitleResolver() const noexcept
     {
         return _titleResolver;

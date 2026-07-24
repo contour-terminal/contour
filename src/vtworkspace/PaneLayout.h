@@ -58,10 +58,10 @@ inline constexpr int DefaultSplitHandleThickness = 6;
 /// @pre @p layoutRoot must be an ancestor of @p leaf, or @p leaf itself — otherwise the leaf is not on
 ///      screen at all and there is no content size to solve for.
 /// @return The required content-area extent; equals @p requiredLeafSize when @p leaf is the layout root.
-[[nodiscard]] inline LayoutSize contentSizeForLeaf(Pane const& leaf,
-                                                   LayoutSize requiredLeafSize,
-                                                   int handleThickness,
-                                                   Pane const& layoutRoot) noexcept
+[[nodiscard]] [[nodiscard]] inline LayoutSize contentSizeForLeaf(Pane const& leaf,
+                                                                 LayoutSize requiredLeafSize,
+                                                                 int handleThickness,
+                                                                 Pane const& layoutRoot) noexcept
 {
     assert(layoutRoot.contains(&leaf) && "the leaf must lie inside the layout root it is solved against");
 
@@ -109,7 +109,7 @@ struct PaneCellRect
 /// @param axisExtent The parent's extent along the split axis, in cells.
 /// @param ratio The first child's share in (0, 1).
 /// @return {first, second} extents in cells.
-[[nodiscard]] inline std::pair<int, int> splitCellExtents(int axisExtent, double ratio) noexcept
+[[nodiscard]] [[nodiscard]] inline std::pair<int, int> splitCellExtents(int axisExtent, double ratio) noexcept
 {
     auto const divisible = axisExtent - 1;
     auto const first =
@@ -136,7 +136,8 @@ struct PaneCellRect
 /// @param root The pane tree (or subtree) occupying the whole area.
 /// @param area The content grid to project into.
 /// @return One rectangle per leaf, in tree order (first child before second child).
-[[nodiscard]] inline std::vector<PaneCellRect> layoutInCells(Pane const& root, vtpty::PageSize area)
+[[nodiscard]] [[nodiscard]] inline std::vector<PaneCellRect> layoutInCells(Pane const& root,
+                                                                           vtpty::PageSize area)
 {
     auto out = std::vector<PaneCellRect> {};
     out.reserve(static_cast<size_t>(root.leafCount()));

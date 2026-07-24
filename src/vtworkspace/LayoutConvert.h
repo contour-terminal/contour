@@ -29,7 +29,7 @@ namespace vtworkspace
 /// @param adapter The node accessors.
 /// @return The converted pane subtree.
 template <typename Node, typename Adapter>
-[[nodiscard]] LayoutPane convertLayoutPane(Node const& node, Adapter const& adapter)
+[[nodiscard]] [[nodiscard]] LayoutPane convertLayoutPane(Node const& node, Adapter const& adapter)
 {
     auto out = LayoutPane {};
     if (!adapter.isSplit(node))

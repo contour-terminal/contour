@@ -365,8 +365,8 @@ TEST_CASE("SessionModel: moveTab on an empty or unknown tab is a safe no-op", "[
 
     SECTION("unknown tab id in a non-empty window is a no-op")
     {
-        f.model.createTab(win->id());
-        f.model.createTab(win->id());
+        (void) f.model.createTab(win->id());
+        (void) f.model.createTab(win->id());
         f.events.log.clear();
 
         f.model.moveTab(win->id(), TabId { 9999 }, 0); // no such tab
@@ -415,7 +415,8 @@ TEST_CASE("SessionModel: moveTab reorders tabs the way the manager's MoveTab* ac
     }
 }
 
-TEST_CASE("SessionModel: moveTab reorders tabs regardless of per-tab pane counts", "[vtworkspace][model][tab]")
+TEST_CASE("SessionModel: moveTab reorders tabs regardless of per-tab pane counts",
+          "[vtworkspace][model][tab]")
 {
     // The QML drag path (TerminalSessionManager::moveTab) used to reorder a pane-space _sessions
     // vector by tab-row indices, which scrambled once a tab had multiple panes. Reordering through
@@ -458,7 +459,8 @@ TEST_CASE("SessionModel: moveTab preserves the active tab across reorder", "[vtw
     CHECK(win->tabAt(1) == c);
 }
 
-TEST_CASE("SessionModel: moveTab fires activeTabChanged when the active index shifts", "[vtworkspace][model][tab]")
+TEST_CASE("SessionModel: moveTab fires activeTabChanged when the active index shifts",
+          "[vtworkspace][model][tab]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -571,7 +573,8 @@ struct SplitTimingEvents: RecordingEvents
 };
 } // namespace
 
-TEST_CASE("SessionModel: a split assigns the new leaf's session before notifying", "[vtworkspace][model][split]")
+TEST_CASE("SessionModel: a split assigns the new leaf's session before notifying",
+          "[vtworkspace][model][split]")
 {
     // The manager registers the backing session for the new leaf's id BEFORE calling
     // splitActivePane, because the model fires activePaneChanged synchronously and the GUI binds the
@@ -628,7 +631,8 @@ TEST_CASE("SessionModel: closing a non-last pane keeps the tab and absorbs", "[v
     CHECK(f.events.sawPrefix(std::format("paneClosed:{}", tab->id().value)));
 }
 
-TEST_CASE("SessionModel: closing every leaf of a multi-pane tab closes the tab", "[vtworkspace][model][close]")
+TEST_CASE("SessionModel: closing every leaf of a multi-pane tab closes the tab",
+          "[vtworkspace][model][close]")
 {
     // This is the whole-tab close path the manager's CloseTab action now uses (close each of a
     // tab's pane sessions): the model must keep the tab alive while panes survive and tear it down
@@ -760,7 +764,8 @@ TEST_CASE("SessionModel: a tab color is tracked per source, and both changes are
     CHECK_FALSE(tab->color().has_value());
 }
 
-TEST_CASE("SessionModel: an empty or blank tab title resets to the default template", "[vtworkspace][model][title]")
+TEST_CASE("SessionModel: an empty or blank tab title resets to the default template",
+          "[vtworkspace][model][title]")
 {
     // The GUI's inline rename editor opens pre-filled with the RAW override — empty for a
     // never-renamed tab — and commits verbatim on click-away. Without normalization that stored ""
@@ -1161,7 +1166,7 @@ TEST_CASE("SessionModel: tabs and panes added to one window do not appear in ano
 
     // Two tabs into A, one into B.
     auto* a1 = f.model.createTab(a->id());
-    f.model.createTab(a->id());
+    (void) f.model.createTab(a->id());
     auto* b1 = f.model.createTab(b->id());
     REQUIRE(a1 != nullptr);
     REQUIRE(b1 != nullptr);
@@ -1194,7 +1199,7 @@ TEST_CASE("SessionModel: active-tab state is tracked per window", "[vtworkspace]
     auto* b = f.model.createWindow();
 
     auto* a1 = f.model.createTab(a->id());
-    f.model.createTab(a->id()); // a2 becomes A's active
+    (void) f.model.createTab(a->id()); // a2 becomes A's active
     auto* b1 = f.model.createTab(b->id());
 
     // Newest tab is active in each window, independently.
@@ -1216,8 +1221,8 @@ TEST_CASE("SessionModel: removeWindow tears down only that window and leaves oth
     auto* a = f.model.createWindow();
     auto* b = f.model.createWindow();
 
-    f.model.createTab(a->id());
-    f.model.createTab(a->id());
+    (void) f.model.createTab(a->id());
+    (void) f.model.createTab(a->id());
     auto* b1 = f.model.createTab(b->id());
     auto const bId = b->id();
     auto const aId = a->id();
@@ -1248,7 +1253,8 @@ TEST_CASE("SessionModel: removeWindow tears down only that window and leaves oth
 // Replaces DisplayState::previousSession as the source for switchToPreviousTab. Lives on vtworkspace::Window
 // so it is per-window, Qt-free, and unit-testable. Must never dangle at a wrong slot after a close/move.
 
-TEST_CASE("SessionModel: previousActiveTab follows the last activation and toggles", "[vtworkspace][model][tab]")
+TEST_CASE("SessionModel: previousActiveTab follows the last activation and toggles",
+          "[vtworkspace][model][tab]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -1259,7 +1265,7 @@ TEST_CASE("SessionModel: previousActiveTab follows the last activation and toggl
     CHECK(win->activeTab() == t1);
     CHECK(win->previousActiveTab() == t0);
 
-    f.model.createTab(win->id()); // active=2, prev=1
+    (void) f.model.createTab(win->id()); // active=2, prev=1
     CHECK(win->previousActiveTabIndex() == 1);
 
     // An explicit activation records the outgoing tab as previous.
@@ -1272,7 +1278,8 @@ TEST_CASE("SessionModel: previousActiveTab follows the last activation and toggl
     CHECK(win->previousActiveTabIndex() == 2);
 }
 
-TEST_CASE("SessionModel: closing the previous tab invalidates the previous-tab memory", "[vtworkspace][model][tab]")
+TEST_CASE("SessionModel: closing the previous tab invalidates the previous-tab memory",
+          "[vtworkspace][model][tab]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -1307,7 +1314,8 @@ TEST_CASE("SessionModel: closing a lower-indexed tab shifts the previous-tab slo
     CHECK(win->previousActiveTabIndex() == 0); // t1 is now slot 0
 }
 
-TEST_CASE("SessionModel: moving a tab keeps the previous-tab pointer on the same tab", "[vtworkspace][model][tab]")
+TEST_CASE("SessionModel: moving a tab keeps the previous-tab pointer on the same tab",
+          "[vtworkspace][model][tab]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -1719,7 +1727,8 @@ TEST_CASE("SessionModel: a focus move while zoomed re-announces the new leaf", "
     CHECK(f.events.countPrefix("title:") == 1);
 }
 
-TEST_CASE("SessionModel: a focus move on an unzoomed tab announces no zoom change", "[vtworkspace][model][zoom]")
+TEST_CASE("SessionModel: a focus move on an unzoomed tab announces no zoom change",
+          "[vtworkspace][model][zoom]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -1805,7 +1814,8 @@ TEST_CASE("SessionModel: restructuring a zoomed tab announces the zoom clearing 
     }
 }
 
-TEST_CASE("SessionModel: an unzoomed restructure does not retitle a multi-pane tab", "[vtworkspace][model][zoom]")
+TEST_CASE("SessionModel: an unzoomed restructure does not retitle a multi-pane tab",
+          "[vtworkspace][model][zoom]")
 {
     // The mirror of the sections above: with no zoom to clear, orientation/swap/move leave the resolved
     // title ("Multiple panes") untouched, so they must stay silent. This keeps announceZoomChange()'s
@@ -1825,7 +1835,8 @@ TEST_CASE("SessionModel: an unzoomed restructure does not retitle a multi-pane t
     CHECK(f.events.countPrefix("title:") == 0);
 }
 
-TEST_CASE("SessionModel: mutating an unzoomed tab announces no zoom change at all", "[vtworkspace][model][zoom]")
+TEST_CASE("SessionModel: mutating an unzoomed tab announces no zoom change at all",
+          "[vtworkspace][model][zoom]")
 {
     Fixture f;
     auto* win = f.model.createWindow();
@@ -1938,7 +1949,8 @@ TEST_CASE("SessionModel: splitting or closing a zoomed tab retitles it exactly o
     }
 }
 
-TEST_CASE("SessionModel: zoom is per-tab state that survives switching away and back", "[vtworkspace][model][zoom]")
+TEST_CASE("SessionModel: zoom is per-tab state that survives switching away and back",
+          "[vtworkspace][model][zoom]")
 {
     Fixture f;
     auto* win = f.model.createWindow();

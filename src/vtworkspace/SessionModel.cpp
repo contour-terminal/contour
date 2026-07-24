@@ -430,7 +430,7 @@ void SessionModel::closePane(WindowId windowId, TabId tabId, PaneId leafId)
     // Safe to announce zoom below: the last-pane branch above already returned, so the tab survives
     // closePane() and can still be asked for its zoom state afterwards.
     auto const zoomBefore = tab->zoomedLeafId();
-    tab->closePane(leaf);
+    (void) tab->closePane(leaf);
 
     _events.paneClosed(tabId, leafId, survivorId);
     _events.activePaneChanged(tabId, tab->activePane()->id());
@@ -554,7 +554,7 @@ void SessionModel::toggleActivePaneZoom(TabId tabId)
         return;
 
     auto const zoomBefore = tab->zoomedLeafId();
-    tab->toggleZoom();
+    (void) tab->toggleZoom();
     announceZoomChange(*tab, zoomBefore);
 }
 
