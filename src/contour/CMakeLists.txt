@@ -62,6 +62,15 @@ else()
 endif()
 # }}}
 
+# The imported-target name differs between a vendored yaml-cpp and a system one, so
+# resolve it once here -- before add_subdirectory(display), which needs it too
+# (ContourTerminalDisplay includes contour/Config.h, hence yaml-cpp's headers).
+if (TARGET yaml-cpp::yaml-cpp)
+    set(YAML_CPP_LIBRARIES yaml-cpp::yaml-cpp)
+else()
+    set(YAML_CPP_LIBRARIES yaml-cpp)
+endif()
+
 add_subdirectory(display)
 
 if(APPLE)
@@ -286,12 +295,6 @@ endif()
 if(FREEBSD)
     # FreeBSD does not find yaml-cpp in /usr/local but weirdly everything else.
     target_link_directories(contour_core PUBLIC "/usr/local/lib")
-endif()
-
-if (TARGET yaml-cpp::yaml-cpp)
-    set(YAML_CPP_LIBRARIES yaml-cpp::yaml-cpp)
-else()
-    set(YAML_CPP_LIBRARIES yaml-cpp)
 endif()
 
 # Link dependencies go on contour_core as PUBLIC so they propagate to the `contour` executable and
