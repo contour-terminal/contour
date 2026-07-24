@@ -25,11 +25,11 @@
 #include <vector>
 
 #include <coro/Task.hpp>
-#include <vthost/SessionHost.h>
-#include <vthost/proto/Pdu.h>
 #include <net/EventLoop.h>
 #include <net/ISocket.h>
 #include <net/WriteQueue.h>
+#include <vthost/SessionHost.h>
+#include <vthost/proto/Pdu.h>
 
 namespace vthost
 {
@@ -69,7 +69,9 @@ class NativeSession final: public SessionStreamEvents
     void sessionClosed(vtworkspace::SessionId session) override;
 
     void sessionBell(vtworkspace::SessionId session) override;
-    void sessionNotify(vtworkspace::SessionId session, std::string const& title, std::string const& body) override;
+    void sessionNotify(vtworkspace::SessionId session,
+                       std::string const& title,
+                       std::string const& body) override;
     void sessionCopyToClipboard(vtworkspace::SessionId session, std::string const& data) override;
 
     /// Adapts the host's model-change fan-out into a single "layout changed"
@@ -82,7 +84,8 @@ class NativeSession final: public SessionStreamEvents
         void tabAdded(vtworkspace::WindowId, vtworkspace::TabId, int) override { onChange(); }
         void tabClosed(vtworkspace::WindowId, vtworkspace::TabId, int) override { onChange(); }
         void tabMoved(vtworkspace::WindowId, vtworkspace::TabId, int, int) override { onChange(); }
-        void tabMovedToWindow(vtworkspace::WindowId, vtworkspace::TabId, int, vtworkspace::WindowId, int) override
+        void tabMovedToWindow(
+            vtworkspace::WindowId, vtworkspace::TabId, int, vtworkspace::WindowId, int) override
         {
             onChange();
         }
@@ -91,8 +94,14 @@ class NativeSession final: public SessionStreamEvents
         void paneClosed(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override { onChange(); }
         void activePaneChanged(vtworkspace::TabId, vtworkspace::PaneId) override { onChange(); }
         void paneRatioChanged(vtworkspace::TabId, vtworkspace::PaneId, double) override { onChange(); }
-        void paneOrientationChanged(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::SplitState) override { onChange(); }
-        void paneSwapped(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override { onChange(); }
+        void paneOrientationChanged(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::SplitState) override
+        {
+            onChange();
+        }
+        void paneSwapped(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override
+        {
+            onChange();
+        }
         void paneZoomChanged(vtworkspace::TabId, std::optional<vtworkspace::PaneId>) override { onChange(); }
         void paneTreeRestructured(vtworkspace::TabId) override { onChange(); }
         void tabTitleChanged(vtworkspace::TabId) override { onChange(); }

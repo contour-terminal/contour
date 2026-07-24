@@ -37,7 +37,10 @@ class PaneProxy: public QObject
     QML_UNCREATABLE("Created by the session manager")
 
   public:
-    PaneProxy(TerminalSessionManager& manager, vtworkspace::PaneId id) noexcept: _manager { manager }, _id { id } {}
+    PaneProxy(TerminalSessionManager& manager, vtworkspace::PaneId id) noexcept:
+        _manager { manager }, _id { id }
+    {
+    }
 
     [[nodiscard]] int paneId() const noexcept { return static_cast<int>(_id.value); }
 

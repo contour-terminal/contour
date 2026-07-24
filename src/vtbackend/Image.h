@@ -368,6 +368,8 @@ class ImagePool
     /// @param id The image id as referenced by grid cells.
     /// @return The image, or nullptr when it was never created or its last reference is
     ///         gone (the daemon answers a FetchImage request with ImageGone then).
+    /// @pre The caller must ensure the ImagePool outlives this call; the pool reference
+    ///      is not internally guarded — a dangling pool pointer is use-after-free.
     [[nodiscard]] std::shared_ptr<Image const> findImageById(ImageId id) const;
 
     void inspect(std::ostream& os) const;

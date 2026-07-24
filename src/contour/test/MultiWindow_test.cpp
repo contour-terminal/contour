@@ -931,7 +931,8 @@ TEST_CASE("TerminalSessionManager swap/move/toggle/resize route through the acti
 
     // Resize the active pane in each direction: no throw, pane count preserved (ratio nudge only).
     CHECK_NOTHROW(manager.resizeActivePane(vtworkspace::FocusDirection::Left, 0.05, window->activeSession()));
-    CHECK_NOTHROW(manager.resizeActivePane(vtworkspace::FocusDirection::Right, 0.05, window->activeSession()));
+    CHECK_NOTHROW(
+        manager.resizeActivePane(vtworkspace::FocusDirection::Right, 0.05, window->activeSession()));
     CHECK(tab->paneCount() == 3);
 
     // Swap the active pane with its left neighbor: pane count preserved (sessions trade slots).

@@ -959,6 +959,13 @@ class Grid
     // Batch stamping (see finalizeRevisions()).
     uint64_t _seqno = 0;                   ///< The single monotonic source revisions draw from.
     int64_t _stableBaseAtLastFinalize = 0; ///< Bounds the finalize scan to scrolled-out rows.
+                                           ///< Bootstrap: starts at 0 matching _stableBase,
+                                           ///< so before the first finalize, no scrolled-out
+                                           ///< prefix is scanned. New lines are born dirty,
+                                           ///< so they ARE stamped on the first pass — the
+                                           ///< missing prefix scan is harmless by construction.
+                                           ///< Any code that advances _stableBase outside of
+                                           ///< rotateBuffersLeft/Right must update this.
 };
 
 std::ostream& dumpGrid(std::ostream& os, Grid const& grid);

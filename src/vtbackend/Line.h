@@ -564,6 +564,10 @@ class Line
     ColumnOffset _commandEndOffset {};
     ColumnOffset _promptEndOffset {};
     uint64_t _revision = 0; ///< Batch seqno of the last change (see revision()).
+                            ///< Compared against Grid::_seqno via operator> in
+                            ///< forEachLineChangedSince. Both are uint64_t — at
+                            ///< one batch per ~20ms a wrap takes ~11.7 billion
+                            ///< years, so wrap is not handled in the comparison.
     bool _dirty = true;     ///< Fresh lines are pending: bootstrap self-heals.
 };
 

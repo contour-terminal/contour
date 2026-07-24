@@ -10,9 +10,9 @@
 #include <vector>
 
 #include <coro/Task.hpp>
-#include <vthost/proto/Pdu.h>
 #include <net/ISocket.h>
 #include <net/Sockets.h>
+#include <vthost/proto/Pdu.h>
 
 namespace vthost
 {

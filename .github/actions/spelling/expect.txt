@@ -574,6 +574,7 @@ srb
 srgb
 srm
 SRTM
+STARTUPINFOA
 srv
 stdlib
 Stp

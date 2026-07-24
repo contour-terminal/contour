@@ -101,7 +101,8 @@ TEST_CASE("PaneLayout: nested splits compose per traversed level", "[vtworkspace
           == LayoutSize { .width = 412, .height = 209 });
 }
 
-TEST_CASE("PaneLayout: solved content never allocates the leaf below its requirement", "[vtworkspace][layout]")
+TEST_CASE("PaneLayout: solved content never allocates the leaf below its requirement",
+          "[vtworkspace][layout]")
 {
     // Adversarial ratios at the clamp extremes, three levels deep.
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
@@ -172,7 +173,8 @@ TEST_CASE("layoutInCells: a single leaf fills the whole area", "[vtworkspace][la
     CHECK(rects[0] == PaneCellRect { .pane = PaneId { 1 }, .x = 0, .y = 0, .width = 80, .height = 24 });
 }
 
-TEST_CASE("layoutInCells: a side-by-side split spends one column on the divider", "[vtworkspace][layout][cells]")
+TEST_CASE("layoutInCells: a side-by-side split spends one column on the divider",
+          "[vtworkspace][layout][cells]")
 {
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
     auto const [first, second] =
@@ -216,7 +218,8 @@ TEST_CASE("layoutInCells: an asymmetric ratio rounds and the remainder goes to t
     CHECK(rects[0].width + 1 + rects[1].width == 100);
 }
 
-TEST_CASE("layoutInCells: nested splits keep the cell arithmetic exact per level", "[vtworkspace][layout][cells]")
+TEST_CASE("layoutInCells: nested splits keep the cell arithmetic exact per level",
+          "[vtworkspace][layout][cells]")
 {
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
     auto const [left, right] =
@@ -237,7 +240,8 @@ TEST_CASE("layoutInCells: nested splits keep the cell arithmetic exact per level
     CHECK(rects[1].height + 1 + rects[2].height == 50);
 }
 
-TEST_CASE("layoutInCells: an extreme ratio still leaves the small child one cell", "[vtworkspace][layout][cells]")
+TEST_CASE("layoutInCells: an extreme ratio still leaves the small child one cell",
+          "[vtworkspace][layout][cells]")
 {
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
     // Pane::setRatio itself clamps into [0.05, 0.95], so 0.999 arrives as 0.95. In a 4-column area
@@ -252,7 +256,8 @@ TEST_CASE("layoutInCells: an extreme ratio still leaves the small child one cell
     CHECK(rects[0].width + 1 + rects[1].width == 4);
 }
 
-TEST_CASE("layoutInCells: an area too small for a split degrades without crashing", "[vtworkspace][layout][cells]")
+TEST_CASE("layoutInCells: an area too small for a split degrades without crashing",
+          "[vtworkspace][layout][cells]")
 {
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
     root.split(SplitState::Vertical, PaneId { 2 }, PaneId { 3 }, SessionId { 2 }, 0.5);

@@ -27,7 +27,9 @@ struct NoopEvents: vtworkspace::ModelEvents
     void tabAdded(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
     void tabClosed(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
     void tabMoved(vtworkspace::WindowId, vtworkspace::TabId, int, int) override {}
-    void tabMovedToWindow(vtworkspace::WindowId, vtworkspace::TabId, int, vtworkspace::WindowId, int) override {}
+    void tabMovedToWindow(vtworkspace::WindowId, vtworkspace::TabId, int, vtworkspace::WindowId, int) override
+    {
+    }
     void activeTabChanged(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
     void paneSplit(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override {}
     void paneClosed(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override {}
@@ -84,7 +86,8 @@ std::unique_ptr<Rebuilt> realize(WireLayout const& wl)
 {
     auto rebuilt = std::make_unique<Rebuilt>();
     auto pending = vtworkspace::SessionId {};
-    rebuilt->model = std::make_unique<vtworkspace::SessionModel>(rebuilt->events, [&pending] { return pending; });
+    rebuilt->model =
+        std::make_unique<vtworkspace::SessionModel>(rebuilt->events, [&pending] { return pending; });
     auto const window = rebuilt->model->createWindow()->id();
 
     // The seeder stages each leaf's remote session so the model allocator hands it
@@ -168,8 +171,7 @@ TEST_CASE("wireToLayout yields no tabs for an empty layout", "[vthost][layout]")
     CHECK(wireToLayout(proto::LayoutState {}).layout.tabs.empty());
 }
 
-TEST_CASE("wireToLayout tolerates a malformed split node without reading out of bounds",
-          "[vthost][layout]")
+TEST_CASE("wireToLayout tolerates a malformed split node without reading out of bounds", "[vthost][layout]")
 {
     // The wire decoder rejects a split with the wrong child count (see Pdu_test), but
     // the converter must be robust on its own too: a split node missing a child

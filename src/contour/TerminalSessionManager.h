@@ -106,7 +106,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Creates and activates a new tab in @p window.
     /// @param window      The target window.
     /// @param profileName Profile to launch the tab with, or std::nullopt for the app default.
-    void createNewTab(vtworkspace::WindowId window, std::optional<std::string> const& profileName = std::nullopt)
+    void createNewTab(vtworkspace::WindowId window,
+                      std::optional<std::string> const& profileName = std::nullopt)
     {
         // Attach mode: author the tab on the daemon (B3-Qt); its layout re-push
         // reconciles it into a local tab. A local factory returns false and the
@@ -328,7 +329,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param fraction The ratio delta magnitude in (0, 1).
     /// @param acting The session that received the keybinding; its hosting tab is the target.
     void resizeActivePane(vtworkspace::FocusDirection direction, double fraction, TerminalSession* acting);
-    /// Toggles zoom on the acting session's active pane (see vtworkspace::SessionModel::toggleActivePaneZoom).
+    /// Toggles zoom on the acting session's active pane (see
+    /// vtworkspace::SessionModel::toggleActivePaneZoom).
     /// @param acting The session that received the keybinding; its hosting tab is the target.
     void toggleActivePaneZoom(TerminalSession* acting);
     // }}}
@@ -364,7 +366,10 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// VT focus only ever moves within this window, so a model event raised in a background window (a
     /// layout applying its tabs, a tab dropped in by a drag) cannot steal the focused terminal.
     /// @return The focus-owning window, or std::nullopt when no window of this process owns focus.
-    [[nodiscard]] std::optional<vtworkspace::WindowId> focusedWindow() const noexcept { return _focusedWindow; }
+    [[nodiscard]] std::optional<vtworkspace::WindowId> focusedWindow() const noexcept
+    {
+        return _focusedWindow;
+    }
 
     /// Records @p window as the focus-owning OS window AND re-points terminal focus at its active leaf.
     /// Idempotent. Ownership is also recorded — without re-pointing, since there is no session to point
@@ -406,8 +411,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
     /// Assigns @p color to the tab hosting @p session (DECAC item 2 "window frame"), routing through
     /// the authoritative SessionModel so the existing tab-color pipeline repaints the tab strip. The
-    /// color is recorded under vtworkspace::TabColorSource::Application, so it stays hidden behind a color the
-    /// user picked themselves and surfaces once the user clears theirs. No-op if no tab hosts
+    /// color is recorded under vtworkspace::TabColorSource::Application, so it stays hidden behind a color
+    /// the user picked themselves and surfaces once the user clears theirs. No-op if no tab hosts
     /// @p session. MUST be called on the GUI thread (it mutates the GUI-facing model).
     /// @param session The session (by model id) whose hosting tab should be colored.
     /// @param color The color to assign.
@@ -529,11 +534,18 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
                                    int fromIndex,
                                    vtworkspace::WindowId to,
                                    int toIndex) override;
-    void tabMovedToWindow(
-        vtworkspace::WindowId from, vtworkspace::TabId tab, int fromIndex, vtworkspace::WindowId to, int toIndex) override;
+    void tabMovedToWindow(vtworkspace::WindowId from,
+                          vtworkspace::TabId tab,
+                          int fromIndex,
+                          vtworkspace::WindowId to,
+                          int toIndex) override;
     void activeTabChanged(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
-    void paneSplit(vtworkspace::TabId tab, vtworkspace::PaneId splitNode, vtworkspace::PaneId newLeaf) override;
-    void paneClosed(vtworkspace::TabId tab, vtworkspace::PaneId closed, vtworkspace::PaneId survivor) override;
+    void paneSplit(vtworkspace::TabId tab,
+                   vtworkspace::PaneId splitNode,
+                   vtworkspace::PaneId newLeaf) override;
+    void paneClosed(vtworkspace::TabId tab,
+                    vtworkspace::PaneId closed,
+                    vtworkspace::PaneId survivor) override;
     void activePaneChanged(vtworkspace::TabId tab, vtworkspace::PaneId leaf) override;
     void paneRatioChanged(vtworkspace::TabId tab, vtworkspace::PaneId splitNode, double ratio) override;
     void paneOrientationChanged(vtworkspace::TabId tab,

@@ -19,11 +19,11 @@
 #include <vector>
 
 #include <coro/Task.hpp>
-#include <vthost/SessionHost.h>
-#include <vthost/TappingPty.h>
 #include <net/EventLoop.h>
 #include <net/PollEventSource.h>
 #include <net/testing/ScriptedEventSource.h>
+#include <vthost/SessionHost.h>
+#include <vthost/TappingPty.h>
 #include <vtworkspace/Pane.h>
 #include <vtworkspace/Tab.h>
 
@@ -54,9 +54,18 @@ struct RecordingEvents final: vtworkspace::ModelEvents
     {
         log.push_back(std::format("activeTabChanged:{}", index));
     }
-    void paneSplit(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override { log.emplace_back("paneSplit"); }
-    void paneClosed(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override { log.emplace_back("paneClosed"); }
-    void activePaneChanged(vtworkspace::TabId, vtworkspace::PaneId) override { log.emplace_back("activePaneChanged"); }
+    void paneSplit(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override
+    {
+        log.emplace_back("paneSplit");
+    }
+    void paneClosed(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override
+    {
+        log.emplace_back("paneClosed");
+    }
+    void activePaneChanged(vtworkspace::TabId, vtworkspace::PaneId) override
+    {
+        log.emplace_back("activePaneChanged");
+    }
     void paneRatioChanged(vtworkspace::TabId, vtworkspace::PaneId, double) override
     {
         log.emplace_back("paneRatioChanged");
@@ -194,8 +203,7 @@ TEST_CASE("applyClientSize reprojects the leaves onto the new client area", "[vt
     CHECK(terminal->totalPageSize().columns.value == 100);
 }
 
-TEST_CASE("applyClientSize is race-free against a concurrent terminal writer",
-          "[vthost][host][concurrency]")
+TEST_CASE("applyClientSize is race-free against a concurrent terminal writer", "[vthost][host][concurrency]")
 {
     auto h = HostHarness {};
     auto* tab = h.host.createTab();

@@ -289,6 +289,12 @@ void NativeController::unbind(uint64_t session)
 
 void NativeController::closeAllBindings()
 {
+    // This acquires _mutex then calls pty->close() for each binding, which
+    // wakes the parser thread. The parser thread processes EOF, tears down
+    // the TerminalSession, and the SelfUnbindingChannelPty destructor calls
+    // unbind(session) — which also tries to acquire _mutex. This is cross-
+    // thread contention, not a deadlock: the parser thread blocks until
+    // closeAllBindings() returns, delaying cleanup but never wedging.
     auto const lock = std::lock_guard { _mutex };
     for (auto& [session, binding]: _bindings)
         binding.pty->close();

@@ -687,10 +687,14 @@ coro::Task<void> NativeSession::run()
     });
 
     _closed = true;
-    // serveNativeClient destroys this session the moment run() returns, but a
-    // debounce flush spawned before the disconnect may still be parked in its
-    // 20ms delay with `this` in its frame. Wait for it to resume (it observes
-    // _closed and backs out) before letting the frame die.
+    // Lifetime constraint: serveNativeClient destroys this session the moment
+    // run() returns (the unique_ptr goes out of scope immediately after the
+    // co_await). A debounce flush spawned before the disconnect may still be
+    // parked in its 20ms delay with `this` captured in its coroutine frame.
+    // pollUntil drains that pending flush — *this must still be alive for the
+    // entire poll, so this poll MUST remain the last thing run() does before
+    // returning. Any refactoring that moves logic after this point opens a
+    // use-after-free window on _flushScheduled.
     co_await net::pollUntil(&_loop, [this] { return !_flushScheduled; });
     co_await _writer.flushThenClose();
     _connection->close();

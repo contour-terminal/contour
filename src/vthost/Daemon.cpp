@@ -15,7 +15,6 @@
 #include <crispy/algorithm.h>
 #include <crispy/utils.h>
 
-#include <array>
 #include <atomic>
 #include <charconv>
 #include <chrono>
@@ -315,6 +314,8 @@ int runDaemon(DaemonConfig const& config)
     return EXIT_SUCCESS;
 }
 
+#endif // _WIN32
+
 int ensureDaemon(AttachEndpoint const& endpoint, std::string_view daemonBinary, std::chrono::seconds timeout)
 {
     // TCP endpoints: no auto-spawn (can't spawn a remote daemon).
@@ -326,48 +327,44 @@ int ensureDaemon(AttachEndpoint const& endpoint, std::string_view daemonBinary, 
     auto const nativePath = nativeSocketPath(unixEp.socketPath);
 
     // Quick probe: try a non-blocking connect. If it succeeds, the daemon is alive.
-    auto probeSock = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    auto probeSock = ::socket(AF_UNIX, SOCK_STREAM, 0);
     if (probeSock < 0)
         return EXIT_FAILURE;
+#ifndef _WIN32
+    ::fcntl(probeSock, F_SETFD, FD_CLOEXEC);
+#endif
     auto addr = sockaddr_un {};
     addr.sun_family = AF_UNIX;
     auto const pathLen = nativePath.string().copy(addr.sun_path, sizeof(addr.sun_path) - 1);
     addr.sun_path[pathLen] = '\0';
     if (::connect(probeSock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0)
     {
+#ifdef _WIN32
+        ::closesocket(probeSock);
+#else
         ::close(probeSock);
+#endif
         return EXIT_SUCCESS; // daemon is already running
     }
+#ifdef _WIN32
+    ::closesocket(probeSock);
+#else
     ::close(probeSock);
+#endif
 
     // Daemon not running — spawn it in the background.
     auto const deadline = std::chrono::steady_clock::now() + timeout;
-    #ifndef _WIN32
+#ifndef _WIN32
     auto const pid = ::fork();
     if (pid == 0)
     {
         // Child: exec contour daemon with the same socket path.
         auto const socketArg = std::format("--socket={}", unixEp.socketPath.string());
-        // (Preserve the label if one was specified via the endpoint path).
-        ::execl(daemonBinary.data(), daemonBinary.data(), "daemon", socketArg.c_str(), nullptr);
+        auto const daemonBinaryStr = std::string(daemonBinary);
+        ::execl(daemonBinaryStr.c_str(), daemonBinaryStr.c_str(), "daemon", socketArg.c_str(), nullptr);
         ::_exit(EXIT_FAILURE);
     }
-    // Parent: poll until the socket accepts connections or timeout.
-    while (std::chrono::steady_clock::now() < deadline)
-    {
-        auto pollSock = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-        if (pollSock >= 0)
-        {
-            if (::connect(pollSock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0)
-            {
-                ::close(pollSock);
-                return EXIT_SUCCESS;
-            }
-            ::close(pollSock);
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-    #else
+#else
     // Windows: CreateProcess with DETACHED_PROCESS, then poll.
     auto const cmdLine = std::format("{} daemon --socket=\"{}\"", daemonBinary, unixEp.socketPath.string());
     auto si = STARTUPINFOA {};
@@ -386,16 +383,37 @@ int ensureDaemon(AttachEndpoint const& endpoint, std::string_view daemonBinary, 
         return EXIT_FAILURE;
     ::CloseHandle(pi.hThread);
     ::CloseHandle(pi.hProcess);
+#endif
+    // Parent: poll until the socket accepts connections or timeout.
     while (std::chrono::steady_clock::now() < deadline)
     {
-        // TODO: Windows named-pipe probe — connect via CreateFile.
+        auto pollSock = ::socket(AF_UNIX, SOCK_STREAM, 0);
+        if (pollSock >= 0)
+        {
+#ifndef _WIN32
+            ::fcntl(pollSock, F_SETFD, FD_CLOEXEC);
+#endif
+            if (::connect(pollSock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0)
+            {
+#ifdef _WIN32
+                ::closesocket(pollSock);
+#else
+                ::close(pollSock);
+#endif
+                return EXIT_SUCCESS;
+            }
+#ifdef _WIN32
+            ::closesocket(pollSock);
+#else
+            ::close(pollSock);
+#endif
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-    #endif
     return EXIT_FAILURE; // timeout
 }
 
-#else // _WIN32
+#ifdef _WIN32
 
 namespace
 {

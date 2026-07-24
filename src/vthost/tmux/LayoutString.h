@@ -77,11 +77,11 @@ struct ParsedLayout
 /// each split's ratio derived from the children's cell extents.
 struct BinaryLayout
 {
-    std::optional<std::uint64_t> paneId;                     ///< Set for leaves.
+    std::optional<std::uint64_t> paneId;                                 ///< Set for leaves.
     vtworkspace::SplitState orientation = vtworkspace::SplitState::None; ///< None for leaves.
-    double ratio = 0.5;                                      ///< First child's share (splits only).
-    std::unique_ptr<BinaryLayout> first {};                  ///< Splits only.
-    std::unique_ptr<BinaryLayout> second {};                 ///< Splits only.
+    double ratio = 0.5;                      ///< First child's share (splits only).
+    std::unique_ptr<BinaryLayout> first {};  ///< Splits only.
+    std::unique_ptr<BinaryLayout> second {}; ///< Splits only.
 
     /// @return The number of leaves in this subtree.
     [[nodiscard]] int leafCount() const noexcept;

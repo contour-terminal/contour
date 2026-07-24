@@ -113,8 +113,7 @@ TEST_CASE("frames round-trip and resume across byte-at-a-time feeds", "[vthost][
     CHECK(!(*frame)->fd.valid());
 }
 
-TEST_CASE("a stream fragmented mid-frame decodes every frame without unbounded buffering",
-          "[vthost][imsg]")
+TEST_CASE("a stream fragmented mid-frame decodes every frame without unbounded buffering", "[vthost][imsg]")
 {
     // Every chunk deliberately ends mid-frame, so the decoder always holds a partial trailing frame.
     // The old compaction (only when the buffer drained EXACTLY) never fired here, letting the consumed

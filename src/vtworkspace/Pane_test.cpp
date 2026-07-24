@@ -35,7 +35,8 @@ TEST_CASE("Pane: a fresh pane is a leaf carrying its session", "[vtworkspace][pa
     CHECK(pane.leafCount() == 1);
 }
 
-TEST_CASE("Pane: split promotes the leaf and moves its session into the first child", "[vtworkspace][pane][split]")
+TEST_CASE("Pane: split promotes the leaf and moves its session into the first child",
+          "[vtworkspace][pane][split]")
 {
     Ids ids;
     auto const originalId = ids.pane();
@@ -167,7 +168,8 @@ TEST_CASE("Pane: findPane and findLeaf locate nodes by id and session", "[vtwork
     CHECK(root.findLeaf(SessionId { 99999 }) == nullptr);
 }
 
-TEST_CASE("Pane: neighbor finds adjacent leaves across the matching split axis", "[vtworkspace][pane][neighbor]")
+TEST_CASE("Pane: neighbor finds adjacent leaves across the matching split axis",
+          "[vtworkspace][pane][neighbor]")
 {
     Ids ids;
     Pane root { ids.pane(), ids.session() };
@@ -347,7 +349,8 @@ TEST_CASE("Pane: firstLeaf returns the depth-first first leaf of a subtree", "[v
     CHECK(leftBottom->firstLeaf() == leftBottom);
 }
 
-TEST_CASE("Pane: neighbor descends a same-axis nested split to the nearest column", "[vtworkspace][pane][neighbor]")
+TEST_CASE("Pane: neighbor descends a same-axis nested split to the nearest column",
+          "[vtworkspace][pane][neighbor]")
 {
     // descendToEdge's same-axis branch: when the subtree being entered is split along the SAME axis
     // that is being crossed, the walk must keep descending toward the edge nearest the origin —
@@ -424,7 +427,8 @@ TEST_CASE("Pane: neighbor walks up through mismatched-axis ancestors and is null
     CHECK(root.neighbor(left, FocusDirection::Down) == nullptr);
 }
 
-TEST_CASE("Pane: toggleOrientation flips a split node's axis, leaving children and ratio", "[vtworkspace][pane]")
+TEST_CASE("Pane: toggleOrientation flips a split node's axis, leaving children and ratio",
+          "[vtworkspace][pane]")
 {
     Ids ids;
     Pane root { ids.pane(), ids.session() };
@@ -503,7 +507,8 @@ TEST_CASE("Pane: ancestorSplitOnAxis finds the nearest split on the given axis",
     CHECK(Pane::ancestorSplitOnAxis(left, SplitState::Horizontal) == nullptr);
 }
 
-TEST_CASE("Pane: contains() reports subtree membership, counting a node as its own ancestor", "[vtworkspace][pane]")
+TEST_CASE("Pane: contains() reports subtree membership, counting a node as its own ancestor",
+          "[vtworkspace][pane]")
 {
     Ids ids;
     auto root = Pane { ids.pane(), ids.session() };

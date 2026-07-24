@@ -61,7 +61,8 @@ WireLayout wireToLayout(proto::LayoutState const& state)
     // pane addresses are stable (further pushes would have reallocated the children vectors), and
     // NRVO / a move of the result preserves them.
     for (auto const i: std::views::iota(std::size_t { 0 }, state.tabs.size()))
-        vtworkspace::mapLayoutLeaves(result.layout.tabs[i].root, state.tabs[i].root, adapter, result.leafSession);
+        vtworkspace::mapLayoutLeaves(
+            result.layout.tabs[i].root, state.tabs[i].root, adapter, result.leafSession);
     return result;
 }
 

@@ -20,10 +20,10 @@
 #include <vector>
 
 #include <coro/Task.hpp>
-#include <vthost/tmux/ControlModeParser.h>
 #include <net/EventLoop.h>
 #include <net/ISocket.h>
 #include <net/WriteQueue.h>
+#include <vthost/tmux/ControlModeParser.h>
 
 namespace vthost::tmux
 {

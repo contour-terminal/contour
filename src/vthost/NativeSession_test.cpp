@@ -15,13 +15,13 @@
 #include <vector>
 
 #include <coro/WhenAll.hpp>
-#include <vthost/NativeSession.h>
-#include <vthost/SessionHost.h>
-#include <vthost/TappingPty.h>
 #include <net/EventLoop.h>
 #include <net/PollEventSource.h>
 #include <net/testing/CoroTestSupport.h>
 #include <net/testing/InMemoryTransport.h>
+#include <vthost/NativeSession.h>
+#include <vthost/SessionHost.h>
+#include <vthost/TappingPty.h>
 #include <vtworkspace/Pane.h>
 #include <vtworkspace/Tab.h>
 

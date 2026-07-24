@@ -13,14 +13,14 @@
 #include <vector>
 
 #include <coro/WhenAll.hpp>
+#include <net/EventLoop.h>
+#include <net/PollEventSource.h>
+#include <net/testing/InMemoryTransport.h>
 #include <vthost/SessionHost.h>
 #include <vthost/TappingPty.h>
 #include <vthost/tmux/ControlSession.h>
 #include <vthost/tmux/LayoutString.h>
 #include <vthost/tmux/TmuxGateway.h>
-#include <net/EventLoop.h>
-#include <net/PollEventSource.h>
-#include <net/testing/InMemoryTransport.h>
 #include <vtworkspace/Pane.h>
 #include <vtworkspace/Tab.h>
 

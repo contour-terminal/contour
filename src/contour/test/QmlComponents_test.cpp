@@ -430,9 +430,9 @@ class MockPaneProxy: public QObject
         _active = a;
         emit changed();
     }
-    /// Turn this leaf into a split node with two leaf children (as vtworkspace Pane::split does), then notify.
-    /// The split axis defaults to Vertical (2, matching vtworkspace::SplitState); use setOrientation() to change
-    /// it.
+    /// Turn this leaf into a split node with two leaf children (as vtworkspace Pane::split does), then
+    /// notify. The split axis defaults to Vertical (2, matching vtworkspace::SplitState); use
+    /// setOrientation() to change it.
     void becomeSplit(MockPaneProxy* a, MockPaneProxy* b)
     {
         _leaf = false;
@@ -2265,7 +2265,8 @@ TEST_CASE("PaneNode: SplitView orientation follows node.orientation for both axe
         CHECK(splitView->property("orientation").toInt() == expectedQtOrientation);
     };
 
-    // node.orientation 2 (vtworkspace Vertical, side-by-side) -> Qt.Horizontal(1); anything else -> Qt.Vertical(2).
+    // node.orientation 2 (vtworkspace Vertical, side-by-side) -> Qt.Horizontal(1); anything else ->
+    // Qt.Vertical(2).
     run(/*node*/ 2, /*qt*/ 1);
     run(/*node*/ 1, /*qt*/ 2);
 }
@@ -2273,7 +2274,8 @@ TEST_CASE("PaneNode: SplitView orientation follows node.orientation for both axe
 // (No GUI test asserts the SplitView's laid-out child PIXEL widths for a given ratio: SplitView defers its
 // layout under the offscreen platform, so a firstChild.width ≈ ratio*width assertion is flaky. The ratio
 // contract is covered where it is deterministic: the divider-drag clamp in "PaneNode.clampRatio bounds a
-// divider drag..." above, and the model-layer clamp+emit in vtworkspace SessionModel_test's setPaneRatio test.)
+// divider drag..." above, and the model-layer clamp+emit in vtworkspace SessionModel_test's setPaneRatio
+// test.)
 
 TEST_CASE("TerminalPane: active-pane focus border width follows node.active (offscreen)",
           "[contour][gui][qml][split][behavior][focus]")

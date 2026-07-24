@@ -13,12 +13,12 @@
     #include <unistd.h>
 
     #include <coro/WhenAll.hpp>
+    #include <net/Sockets.h>
+    #include <net/SplitSocket.h>
     #include <vthost/imsg/CommandArgv.h>
     #include <vthost/imsg/Identify.h>
     #include <vthost/imsg/ImsgCodec.h>
     #include <vthost/tmux/ControlSession.h>
-    #include <net/Sockets.h>
-    #include <net/SplitSocket.h>
 
 namespace vthost::tmux
 {

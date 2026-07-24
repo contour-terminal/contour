@@ -19,13 +19,13 @@ using vthost::tmux::encodeLayout;
 using vthost::tmux::layoutChecksum;
 using vthost::tmux::ParsedLayout;
 using vthost::tmux::parseLayout;
+using vtpty::ColumnCount;
+using vtpty::LineCount;
+using vtpty::PageSize;
 using vtworkspace::Pane;
 using vtworkspace::PaneId;
 using vtworkspace::SessionId;
 using vtworkspace::SplitState;
-using vtpty::ColumnCount;
-using vtpty::LineCount;
-using vtpty::PageSize;
 
 namespace
 {

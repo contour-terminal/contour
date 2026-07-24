@@ -2631,7 +2631,8 @@ namespace
     /// Translates an action-layer Direction (transport-agnostic) into the model's FocusDirection.
     /// @param direction The direction the user requested.
     /// @return The corresponding vtworkspace::FocusDirection.
-    [[nodiscard]] constexpr vtworkspace::FocusDirection toFocusDirection(actions::Direction direction) noexcept
+    [[nodiscard]] constexpr vtworkspace::FocusDirection toFocusDirection(
+        actions::Direction direction) noexcept
     {
         switch (direction)
         {

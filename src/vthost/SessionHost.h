@@ -265,13 +265,19 @@ class SessionHost final: public vtworkspace::ModelEvents
     void tabClosed(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
     void tabMoved(vtworkspace::WindowId window, vtworkspace::TabId tab, int fromIndex, int toIndex) override;
     void activeTabChanged(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
-    void paneSplit(vtworkspace::TabId tab, vtworkspace::PaneId splitNode, vtworkspace::PaneId newLeaf) override;
-    void paneClosed(vtworkspace::TabId tab, vtworkspace::PaneId closed, vtworkspace::PaneId survivor) override;
+    void paneSplit(vtworkspace::TabId tab,
+                   vtworkspace::PaneId splitNode,
+                   vtworkspace::PaneId newLeaf) override;
+    void paneClosed(vtworkspace::TabId tab,
+                    vtworkspace::PaneId closed,
+                    vtworkspace::PaneId survivor) override;
     void activePaneChanged(vtworkspace::TabId tab, vtworkspace::PaneId leaf) override;
     void paneRatioChanged(vtworkspace::TabId tab, vtworkspace::PaneId splitNode, double ratio) override;
     void tabTitleChanged(vtworkspace::TabId tab) override;
     void tabColorChanged(vtworkspace::TabId tab) override;
-    void paneOrientationChanged(vtworkspace::TabId tab, vtworkspace::PaneId splitNode, vtworkspace::SplitState state) override;
+    void paneOrientationChanged(vtworkspace::TabId tab,
+                                vtworkspace::PaneId splitNode,
+                                vtworkspace::SplitState state) override;
     void paneSwapped(vtworkspace::TabId tab, vtworkspace::PaneId a, vtworkspace::PaneId b) override;
     void paneZoomChanged(vtworkspace::TabId tab, std::optional<vtworkspace::PaneId> zoomedLeaf) override;
     void paneTreeRestructured(vtworkspace::TabId tab) override;
@@ -377,7 +383,8 @@ inline ScopedStreamSubscription makeScopedStreamSubscription(SessionHost& host, 
 }
 
 /// Factory for model-event subscriptions.
-inline ScopedModelSubscription makeScopedModelSubscription(SessionHost& host, vtworkspace::ModelEvents& observer)
+inline ScopedModelSubscription makeScopedModelSubscription(SessionHost& host,
+                                                           vtworkspace::ModelEvents& observer)
 {
     return ScopedModelSubscription { host, observer, &SessionHost::subscribe, &SessionHost::unsubscribe };
 }

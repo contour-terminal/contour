@@ -18,13 +18,13 @@
 #include <vector>
 
 #include <coro/WhenAll.hpp>
-#include <vthost/SessionHost.h>
-#include <vthost/TappingPty.h>
-#include <vthost/tmux/ControlSession.h>
 #include <net/AsyncBufferedReader.h>
 #include <net/EventLoop.h>
 #include <net/PollEventSource.h>
 #include <net/testing/InMemoryTransport.h>
+#include <vthost/SessionHost.h>
+#include <vthost/TappingPty.h>
+#include <vthost/tmux/ControlSession.h>
 #include <vtworkspace/Pane.h>
 #include <vtworkspace/Tab.h>
 
@@ -427,8 +427,8 @@ TEST_CASE("refresh-client flags and subscriptions are accepted", "[vthost][contr
 
 TEST_CASE("pauseAfterFromSeconds clamps overflowing values to a positive duration", "[vthost][control]")
 {
-    using vthost::tmux::pauseAfterFromSeconds;
     using std::chrono::milliseconds;
+    using vthost::tmux::pauseAfterFromSeconds;
 
     CHECK(pauseAfterFromSeconds(0) == milliseconds { 0 });
     CHECK(pauseAfterFromSeconds(5) == milliseconds { 5000 });
