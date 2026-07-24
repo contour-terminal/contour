@@ -9,6 +9,11 @@ native cells+deltas protocol (wezterm's model). One session, two taps: raw PTY b
 control mode; per-line cell deltas feed the native protocol. GUI and daemon share
 `vtworkspace::SessionModel`.
 
+## Personally added To-Do items (to be done before the merge)
+- [ ] fully code review and evaluate the daemon mode and thin client feature for completeness, correctness, and security
+- [ ] README.md update (daemon mode, thin client mode, tmux compatibility, native protocol)
+- [ ] end-user documentation in docs/
+
 ## Phase 0 — foundations
 
 - [x] 0a. `vtworkspace::LayoutTree`: move `LayoutPane`/`LayoutTab`/`Layout` + serialize/realize
