@@ -20,7 +20,7 @@ struct SgrFlagCode
 };
 
 /// The renditions a plain terminal can reproduce, in SGR order — the SINGLE source of truth shared by
-/// makeSgrSequence (capture-pane) and the native-attach mirror's TtyRenderer, so the two can never
+/// makeSgrSequence (capture-pane) and the native-attach mirror's ScreenMirror, so the two can never
 /// drift out of step (an added attribute renders on both paths or neither). The underline variants
 /// (curly/dotted/dashed) collapse onto plain underline (4); rapid blink onto 6.
 inline constexpr auto SgrFlagCodes = std::array {

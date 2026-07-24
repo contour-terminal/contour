@@ -29,6 +29,7 @@
 #include <QtCore/QProcess>
 #include <QtQml/qqmlextensionplugin.h>
 
+#include <vthost/Daemon.h>
 #include <vthost/SocketPath.h>
 #if !defined(__APPLE__) && !defined(_WIN32)
     #include <QtDBus/QDBusConnection>
@@ -91,26 +92,37 @@ ContourGuiApp::ContourGuiApp(std::unique_ptr<SessionFactory> sessionFactory,
     link("contour.terminal", bind(&ContourGuiApp::terminalGuiAction, this));
     link("contour.font-locator", bind(&ContourGuiApp::fontConfigAction, this));
     link("contour.info.config", bind(&ContourGuiApp::checkConfig, this));
-    link("contour.attach", bind(&ContourGuiApp::attachAction, this));
+    link("contour.client", bind(&ContourGuiApp::clientAction, this));
 }
 
 ContourGuiApp::~ContourGuiApp() = default;
 
-int ContourGuiApp::attachAction()
+int ContourGuiApp::clientAction()
 {
-    auto const wantsTmux = parameters().get<bool>("contour.attach.tmux");
-    if (!wantsTmux && !parameters().get<bool>("contour.attach.gui"))
-        return ContourApp::attachAction();
+    auto const wantsTmux = parameters().get<bool>("contour.client.tmux");
 
-    // Resolve every attach-verb parameter BEFORE the re-parse below drops them.
-    auto const socketOption = parameters().get<string>("contour.attach.socket");
-    auto const label = parameters().get<string>("contour.attach.label");
-    auto const attachProfile = parameters().get<string>("contour.attach.profile");
-    auto const attachConfig = parameters().get<string>("contour.attach.config");
-    auto const tmuxSocket = parameters().get<string>("contour.attach.tmux-socket");
-    auto const connectTcp = parameters().get<string>("contour.attach.connect-tcp");
-    auto const tcpToken = parameters().get<string>("contour.attach.token");
-    auto const tlsCaPath = parameters().get<string>("contour.attach.tls-ca");
+    // Resolve every client-verb parameter BEFORE the re-parse below drops them.
+    auto const socketOption = parameters().get<string>("contour.client.socket");
+    auto const label = parameters().get<string>("contour.client.label");
+    auto const attachProfile = parameters().get<string>("contour.client.profile");
+    auto const attachConfig = parameters().get<string>("contour.client.config");
+    auto const tmuxSocket = parameters().get<string>("contour.client.tmux-socket");
+    auto const connectTcp = parameters().get<string>("contour.client.connect-tcp");
+    auto const tcpToken = parameters().get<string>("contour.client.token");
+    auto const tlsCaPath = parameters().get<string>("contour.client.tls-ca");
+
+    // Auto-spawn the daemon if it is not already running (Unix sockets only;
+    // TCP endpoints pass through — you cannot spawn a remote daemon).
+    if (!wantsTmux && connectTcp.empty())
+    {
+        auto const controlPath = vthost::muxSocketPath(label, socketOption);
+        auto const endpoint = vthost::AttachEndpoint { vthost::UnixEndpoint { .socketPath = controlPath } };
+        if (vthost::ensureDaemon(endpoint, programPath()) != EXIT_SUCCESS)
+        {
+            cerr << std::format("contour client: daemon did not start within 5 seconds.\n");
+            return EXIT_FAILURE;
+        }
+    }
 
     auto adopt = std::function<void()> {};
     if (wantsTmux)
@@ -268,6 +280,50 @@ crispy::cli::command ContourGuiApp::parameterDefinition() const
     auto command = ContourApp::parameterDefinition();
 
     // NOLINTBEGIN
+    command.children.insert(
+        command.children.begin(),
+        CLI::command {
+            "client",
+            "Connects to a terminal multiplexer daemon in a GUI window (auto-spawns the daemon if "
+            "needed).",
+            CLI::option_list {
+                CLI::option { "socket",
+                              CLI::value { ""s },
+                              "Path of the daemon's control socket file. Defaults to "
+                              "$XDG_RUNTIME_DIR/contour/LABEL (respecting $CONTOUR_MUX).",
+                              "PATH" },
+                CLI::option { "label",
+                              CLI::value { "default"s },
+                              "Socket label distinguishing daemon instances.",
+                              "NAME" },
+                CLI::option { "tmux",
+                              CLI::value { false },
+                              "Attaches to a real tmux server (spawns `tmux -C attach-session`): "
+                              "tmux windows become tabs, panes become splits." },
+                CLI::option {
+                    "tmux-socket", CLI::value { ""s }, "tmux server socket path (-S) for --tmux.", "PATH" },
+                CLI::option { "profile",
+                              CLI::value { ""s },
+                              "Config profile the GUI renders remote sessions with.",
+                              "NAME" },
+                CLI::option {
+                    "config", CLI::value { ""s }, "Path to configuration file the GUI loads.", "FILE" },
+                CLI::option { "connect-tcp",
+                              CLI::value { ""s },
+                              "Connect to a TCP daemon at HOST:PORT (TLS-encrypted, "
+                              "token-authenticated) instead of the local socket.",
+                              "HOST:PORT" },
+                CLI::option {
+                    "token", CLI::value { ""s }, "Preshared token sent to a --connect-tcp daemon.", "TOKEN" },
+                CLI::option { "tls-ca",
+                              CLI::value { ""s },
+                              "PEM trust anchor pinning the daemon's TLS certificate "
+                              "for --connect-tcp. Omitted = TOFU (encrypt, don't verify; "
+                              "the token authenticates).",
+                              "FILE" },
+            },
+        });
+
     command.children.insert(
         command.children.begin(),
         CLI::command {

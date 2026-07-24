@@ -6,9 +6,9 @@
 namespace contour
 {
 
-/// Contour TUI application.
+/// Contour CLI application base.
 ///
-/// TODO: provide special installable targets in debian packageS (cmake and PPA)
+/// TODO: provide special installable targets in debian packages (cmake and PPA)
 class ContourApp: public crispy::app
 {
   public:
@@ -33,11 +33,6 @@ class ContourApp: public crispy::app
     int catAction();
     /// Runs the headless terminal multiplexer daemon.
     int daemonAction();
-
-  protected:
-    /// Attaches to a running multiplexer daemon as a thin TTY client (the
-    /// GUI app overrides the verb and falls back here without --gui).
-    int attachAction();
 };
 
 } // namespace contour

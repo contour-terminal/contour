@@ -24,13 +24,6 @@
 #include <coro/Cancellation.hpp>
 #include <coro/WhenAll.hpp>
 #include <coro/WhenAny.hpp>
-#include <vthost/Daemon.h>
-#include <vthost/MuxServer.h>
-#include <vthost/NativeSession.h>
-#include <vthost/PduPump.h>
-#include <vthost/SessionHost.h>
-#include <vthost/TappingPty.h>
-#include <vthost/client/AttachClient.h>
 #include <net/EventLoop.h>
 #include <net/ISocket.h>
 #include <net/PollEventSource.h>
@@ -39,6 +32,13 @@
 #include <net/WriteQueue.h>
 #include <net/testing/CoroTestSupport.h>
 #include <net/testing/InMemoryTransport.h>
+#include <vthost/Daemon.h>
+#include <vthost/MuxServer.h>
+#include <vthost/NativeSession.h>
+#include <vthost/PduPump.h>
+#include <vthost/SessionHost.h>
+#include <vthost/TappingPty.h>
+#include <vthost/client/AttachClient.h>
 #include <vtworkspace/Pane.h>
 #include <vtworkspace/Tab.h>
 
@@ -651,7 +651,7 @@ TEST_CASE("attach receives the daemon's tab and pane layout", "[vthost][attach]"
     REQUIRE(layout->tabs.size() == 1);
     auto const& root = layout->tabs.front().root;
     CHECK(root.split == std::to_underlying(vtworkspace::SplitState::Vertical)); // an internal split node
-    CHECK(root.ratio == 6000);                                            // 0.6 x 10000
+    CHECK(root.ratio == 6000);                                                  // 0.6 x 10000
     REQUIRE(root.children.size() == 2);
     // Both children are leaves carrying distinct sessions.
     CHECK(root.children[0].split == 0);
@@ -718,124 +718,3 @@ TEST_CASE("a client authors a new window, honored by the daemon (B4)", "[vthost]
     CHECK(windows.size() == 2);             // the client saw two distinct windows' layouts
     CHECK(host.model().windowCount() == 2); // the daemon really created a second window
 }
-
-// The attach-flow composition (Daemon.cpp) hard-codes STDIN/STDOUT and a real
-// socket connect, so it is not headless-constructible. These tests drive the same
-// building blocks it composes — whenAny(run(), parked-input, trackTtySize) and the
-// real SigwinchNotifier — against the in-memory server/client pair.
-#ifndef _WIN32
-namespace
-{
-
-using vthost::SigwinchNotifier;
-using vthost::trackTtySize;
-
-/// Stands in for the parked stdin pump: awaits readability on an fd that never
-/// becomes readable, recording that it unwound via cancellation (as pumpStdin does).
-Task<void> parkOnFd(net::EventLoop* loop, net::NativeHandle fd, bool* cancelled)
-{
-    try
-    {
-        co_await loop->waitReadable(fd);
-    }
-    catch (coro::OperationCancelled const&)
-    {
-        *cancelled = true;
-        throw; // let the whenAny runner swallow it, exactly like the real input pump
-    }
-}
-
-/// Mirrors attachFlow's select-semantics: run() raced against a parked input pump.
-Task<void> raceRunAgainstPark(EndToEndHarness* h,
-                              net::NativeHandle parkFd,
-                              bool* parkCancelled,
-                              bool* raceReturned)
-{
-    std::ignore = co_await coro::whenAny(h->client->run(), parkOnFd(&h->loop, parkFd, parkCancelled));
-    *raceReturned = true;
-}
-
-/// Once the handshake lands, drops the daemon's socket — the client then sees EOF,
-/// exactly as it would when a real daemon exits.
-Task<void> closeDaemonWhenReady(EndToEndHarness* h)
-{
-    co_await net::testing::waitUntil(&h->loop, [&] { return h->client->connected(); });
-    h->serverConn->close();
-}
-
-/// Mirrors attachFlow's resize seam: run() raced against the SIGWINCH size tracker.
-Task<void> raceRunAgainstTracker(EndToEndHarness* h, net::NativeHandle winchFd, std::function<void()> propose)
-{
-    std::ignore =
-        co_await coro::whenAny(h->client->run(), trackTtySize(&h->loop, winchFd, std::move(propose)));
-}
-
-/// Waits for the initial proposal, fires a real SIGWINCH after bumping the reported
-/// width, waits for the re-proposal to reach the daemon, then detaches.
-Task<void> driveWinchController(EndToEndHarness* h, std::uint32_t* reportedCols, bool* winchRaised)
-{
-    co_await net::testing::waitUntil(&h->loop, [&] {
-        return h->host.pageSize() == vtpty::PageSize { vtpty::LineCount(30), vtpty::ColumnCount(90) };
-    });
-
-    *reportedCols = 120;
-    *winchRaised = ::raise(SIGWINCH) == 0;
-
-    co_await net::testing::waitUntil(&h->loop, [&] {
-        return h->host.pageSize() == vtpty::PageSize { vtpty::LineCount(30), vtpty::ColumnCount(120) };
-    });
-    h->client->detach();
-}
-
-} // namespace
-
-TEST_CASE("attach flow completes on daemon close with input still parked", "[vthost][attach]")
-{
-    auto h = EndToEndHarness {};
-    h.host.createTab();
-
-    // A pipe read end standing in for local stdin that NEVER receives input.
-    auto stdinFds = std::array<int, 2> {};
-    REQUIRE(::pipe(stdinFds.data()) == 0);
-
-    auto parkCancelled = false;
-    auto raceReturned = false;
-    h.loop.blockOn(net::testing::allOf(h.server->run(),
-                                       raceRunAgainstPark(&h, stdinFds[0], &parkCancelled, &raceReturned),
-                                       closeDaemonWhenReady(&h)));
-
-    // whenAll only returns once the race resolved: run() completed on the daemon's
-    // close and the parked "stdin" sibling was cancelled rather than left hanging.
-    CHECK(raceReturned);
-    CHECK(parkCancelled);
-
-    ::close(stdinFds[0]);
-    ::close(stdinFds[1]);
-}
-
-TEST_CASE("SIGWINCH re-proposes the local size to the daemon", "[vthost][attach]")
-{
-    auto h = EndToEndHarness {};
-    h.host.createTab();
-
-    auto notifier = SigwinchNotifier {};
-    REQUIRE(notifier.valid());
-
-    // The proposal reports an injectable width so the winch-driven re-proposal is
-    // distinguishable from the initial one (90 -> 120).
-    auto reportedCols = std::uint32_t { 90 };
-    auto propose = [&] {
-        h.client->requestResize(reportedCols, 30);
-    };
-
-    auto winchRaised = false;
-    h.loop.blockOn(net::testing::allOf(h.server->run(),
-                                       raceRunAgainstTracker(&h, notifier.readFd(), propose),
-                                       driveWinchController(&h, &reportedCols, &winchRaised)));
-
-    CHECK(winchRaised);
-    // 120x30 is a geometry only the SIGWINCH-driven re-proposal could produce; the
-    // initial proposal reported 90. So the signal reached the daemon end to end.
-    CHECK(h.host.pageSize() == vtpty::PageSize { vtpty::LineCount(30), vtpty::ColumnCount(120) });
-}
-#endif // !_WIN32

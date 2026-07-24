@@ -2,12 +2,15 @@
 #include <vthost/client/ScreenMirror.h>
 
 #include <vtbackend/CellFlags.h>
+#include <vtbackend/Color.h>
+#include <vtbackend/SgrWriter.h>
 #include <vtbackend/TextScale.h>
 #include <vtbackend/TextSizing.h>
 
 #include <crispy/base64.h>
 
 #include <algorithm>
+#include <bit>
 #include <format>
 #include <iterator>
 #include <optional>
@@ -16,10 +19,56 @@
 #include <unordered_map>
 
 #include <vthost/MirroredModes.h>
-#include <vthost/client/TtyRenderer.h>
 
 namespace vthost::client
 {
+
+namespace
+{
+    /// Appends the SGR parameters selecting @p raw as fore-, back- or
+    /// underline color (SGR base 38, 48 or 58).
+    void appendColor(std::string& out, uint32_t raw, int base)
+    {
+        auto const color = std::bit_cast<vtbackend::Color>(raw);
+        switch (color.type())
+        {
+            case vtbackend::ColorType::Indexed: out += std::format(";{};5;{}", base, color.index()); break;
+            case vtbackend::ColorType::Bright: out += std::format(";{};5;{}", base, color.index() + 8); break;
+            case vtbackend::ColorType::RGB: {
+                auto const rgb = color.rgb();
+                out += std::format(";{};2;{};{};{}", base, rgb.red, rgb.green, rgb.blue);
+                break;
+            }
+            case vtbackend::ColorType::Default:
+            case vtbackend::ColorType::Undefined: break; // the leading reset already selected it
+        }
+    }
+} // namespace
+
+std::string sgrFor(proto::WireCell const& cell)
+{
+    auto out = std::string { "\033[0" };
+    // The single shared flag→SGR table (vtbackend::SgrWriter) keeps this mirror renderer and
+    // capture-pane's makeSgrSequence in lockstep, so curly/dotted/dashed underlines and rapid blink
+    // reproduce identically on both paths.
+    for (auto const& [flag, sgr]: vtbackend::SgrFlagCodes)
+        if ((cell.flags & static_cast<uint32_t>(flag)) != 0)
+            out += std::format(";{}", sgr);
+    appendColor(out, cell.foreground, 38);
+    appendColor(out, cell.background, 48);
+    appendColor(out, cell.underlineColor, 58);
+    out += 'm';
+    return out;
+}
+
+std::string sgrForFill(proto::WireLine const& line)
+{
+    auto out = std::string { "\033[0" };
+    appendColor(out, line.fillForeground, 38);
+    appendColor(out, line.fillBackground, 48);
+    out += 'm';
+    return out;
+}
 
 namespace
 {

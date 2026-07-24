@@ -22,8 +22,6 @@ add_library(vthost STATIC
     imsg/ImsgCodec.h
     client/ScreenMirror.cpp
     client/ScreenMirror.h
-    client/TtyRenderer.cpp
-    client/TtyRenderer.h
     proto/Pdu.cpp
     proto/Pdu.h
     proto/Wire.cpp
@@ -71,7 +69,6 @@ if(VTHOST_TESTING)
         client/LayoutReconstruction_test.cpp
         client/ScreenMirror_test.cpp
         imsg/ImsgCodec_test.cpp
-        client/TtyRenderer_test.cpp
         proto/Pdu_test.cpp
         proto/Wire_test.cpp
         tmux/ControlModeParser_test.cpp

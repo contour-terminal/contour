@@ -191,10 +191,9 @@ class ContourGuiApp: public QObject, public ContourApp
     int fontConfigAction();
     int checkConfig();
 
-    /// The GUI-aware `contour attach` verb: with --gui, boots the QML
-    /// machinery attached to a daemon; otherwise falls back to the base's
-    /// thin TTY client.
-    int attachAction();
+    /// The `contour client` verb: boots the QML machinery connected to a
+    /// daemon or tmux server.
+    int clientAction();
 
     /// Native attach: brings the local OS windows in line with the daemon's windows (B4). Maps the
     /// primary daemon window onto the boot window and, for each additional daemon window, spawns an OS

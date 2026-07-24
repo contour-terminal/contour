@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <string>
+#include <tuple>
 #include <unordered_set>
 #include <vector>
 
@@ -26,6 +27,27 @@
 
 namespace vthost::client
 {
+
+/// The attribute word tuple deciding whether a cell needs a fresh SGR emission.
+/// Cheap to compare, so runs of equal cells never re-format the sequence.
+using SgrKey = std::tuple<uint32_t, uint32_t, uint32_t, uint32_t>;
+
+/// @return @p cell's SGR key (flags, fore-, back- and underline color).
+[[nodiscard]] constexpr SgrKey sgrKeyOf(proto::WireCell const& cell) noexcept
+{
+    return SgrKey { cell.flags, cell.foreground, cell.background, cell.underlineColor };
+}
+
+/// The SGR sequence selecting @p cell's rendition (starting from a reset).
+/// @param cell The cell whose attributes to select.
+/// @return The `ESC [ ... m` byte sequence.
+[[nodiscard]] std::string sgrFor(proto::WireCell const& cell);
+
+/// The SGR sequence selecting @p line's fill attributes (starting from a
+/// reset) — what a blank region of that row is colored with.
+/// @param line The row whose fill colors to select.
+/// @return The `ESC [ ... m` byte sequence.
+[[nodiscard]] std::string sgrForFill(proto::WireLine const& line);
 
 /// Stateful per-session reserializer. Feed every Delta (after the owning
 /// RemoteScreen applied it) and write the returned bytes into the mirror

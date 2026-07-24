@@ -177,7 +177,6 @@ ContourApp::ContourApp(): app("contour", "Contour Terminal Emulator", CONTOUR_VE
     link("contour.documentation.configuration.profile", bind(&ContourApp::documentationProfileConfig, this));
     link("contour.cat", bind(&ContourApp::catAction, this));
     link("contour.daemon", bind(&ContourApp::daemonAction, this));
-    link("contour.attach", bind(&ContourApp::attachAction, this));
 }
 
 template <typename Callback>
@@ -560,7 +559,7 @@ int ContourApp::daemonAction()
 {
     auto config = vthost::DaemonConfig {};
     config.socketPath = vthost::muxSocketPath(parameters().get<string>("contour.daemon.label"),
-                                                 parameters().get<string>("contour.daemon.socket"));
+                                              parameters().get<string>("contour.daemon.socket"));
 
     auto const shellCommand = vtpty::Process::loginShell(/*escapeSandbox=*/false);
     config.shell.program = shellCommand.front();
@@ -591,40 +590,6 @@ int ContourApp::daemonAction()
     }
 
     return vthost::runDaemon(config);
-}
-
-int ContourApp::attachAction()
-{
-    // Default endpoint: the local control socket. --connect-tcp switches to a
-    // TLS-encrypted, token-authenticated TCP connection.
-    if (auto const connect = parameters().get<string>("contour.attach.connect-tcp"); !connect.empty())
-    {
-        auto const hostPort = vthost::parseHostPort(connect);
-        if (!hostPort)
-        {
-            cerr << std::format("contour attach: invalid --connect-tcp '{}' (expected HOST:PORT)\n", connect);
-            return EXIT_FAILURE;
-        }
-        auto tcp = vthost::TcpEndpoint { .host = hostPort->first,
-                                            .port = hostPort->second,
-                                            .token = parameters().get<string>("contour.attach.token"),
-                                            .caPem = {} };
-        if (auto const caPath = parameters().get<string>("contour.attach.tls-ca"); !caPath.empty())
-        {
-            auto const ca = readFile(std::filesystem::path(caPath));
-            if (ca.empty())
-            {
-                cerr << std::format("contour attach: cannot read --tls-ca file '{}'\n", caPath);
-                return EXIT_FAILURE;
-            }
-            tcp.caPem.assign(ca.begin(), ca.end());
-        }
-        return vthost::runAttach(vthost::AttachEndpoint { std::move(tcp) });
-    }
-
-    return vthost::runAttach(vthost::AttachEndpoint { vthost::UnixEndpoint {
-        .socketPath = vthost::muxSocketPath(parameters().get<string>("contour.attach.label"),
-                                               parameters().get<string>("contour.attach.socket")) } });
 }
 
 int ContourApp::catAction()
@@ -827,56 +792,6 @@ crispy::cli::command ContourApp::parameterDefinition() const
                     CLI::option {
                         "tls-key", CLI::value { ""s }, "PEM private key matching --tls-cert.", "FILE" },
                 } },
-            CLI::command { "attach",
-                           "Attaches to a running multiplexer daemon (thin TTY client, or the "
-                           "GUI with --gui).",
-                           CLI::option_list {
-                               CLI::option { "socket",
-                                             CLI::value { ""s },
-                                             "Path of the daemon's control socket file. Defaults to "
-                                             "$XDG_RUNTIME_DIR/contour/LABEL (respecting $CONTOUR_MUX).",
-                                             "PATH" },
-                               CLI::option { "label",
-                                             CLI::value { "default"s },
-                                             "Socket label distinguishing daemon instances.",
-                                             "NAME" },
-                               CLI::option { "gui",
-                                             CLI::value { false },
-                                             "Attaches the full GUI instead of the thin TTY client: "
-                                             "every remote session becomes a local tab." },
-                               CLI::option { "tmux",
-                                             CLI::value { false },
-                                             "Attaches the GUI to a real tmux server (spawns "
-                                             "`tmux -C attach-session`): tmux windows become tabs, "
-                                             "panes become splits. Implies --gui." },
-                               CLI::option { "tmux-socket",
-                                             CLI::value { ""s },
-                                             "tmux server socket path (-S) for --tmux.",
-                                             "PATH" },
-                               CLI::option { "profile",
-                                             CLI::value { ""s },
-                                             "Config profile the GUI renders remote sessions with.",
-                                             "NAME" },
-                               CLI::option { "config",
-                                             CLI::value { ""s },
-                                             "Path to configuration file the GUI loads.",
-                                             "FILE" },
-                               CLI::option { "connect-tcp",
-                                             CLI::value { ""s },
-                                             "Connect to a TCP daemon at HOST:PORT (TLS-encrypted, "
-                                             "token-authenticated) instead of the local socket.",
-                                             "HOST:PORT" },
-                               CLI::option { "token",
-                                             CLI::value { ""s },
-                                             "Preshared token sent to a --connect-tcp daemon.",
-                                             "TOKEN" },
-                               CLI::option { "tls-ca",
-                                             CLI::value { ""s },
-                                             "PEM trust anchor pinning the daemon's TLS certificate "
-                                             "for --connect-tcp. Omitted ⇒ TOFU (encrypt, don't verify; "
-                                             "the token authenticates).",
-                                             "FILE" },
-                           } },
             CLI::command {
                 "capture",
                 "Captures the screen buffer of the currently running terminal.",
