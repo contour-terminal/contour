@@ -181,16 +181,16 @@ class TmuxController::PaneFeed final: public vthost::tmux::PaneSink
     std::string _buffered;
 };
 
-TmuxController::TmuxController(std::string tmuxSocket): _tmuxSocket(std::move(tmuxSocket))
-{
-    _model.setPaneSinkFactory([this](uint64_t pane, int /*columns*/, int /*lines*/) {
+TmuxController::TmuxController(std::string tmuxSocket):
+    _tmuxSocket(std::move(tmuxSocket)), _model([this](uint64_t pane, int /*columns*/, int /*lines*/) {
         auto feed = std::make_unique<PaneFeed>(*this, pane);
         {
             auto const lock = std::lock_guard { _mutex };
             _feeds[pane] = feed.get();
         }
         return feed;
-    });
+    })
+{
     _model.subscribe(this);
 }
 

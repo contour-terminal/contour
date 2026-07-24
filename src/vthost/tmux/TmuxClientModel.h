@@ -93,13 +93,15 @@ class TmuxModelEvents
 class TmuxClientModel final: public GatewayEvents
 {
   public:
-    /// Binds the gateway used for history replay and window enumeration.
-    /// (Constructed first, since the gateway's constructor takes the events.)
-    void bind(TmuxGateway& gateway) noexcept { _gateway = &gateway; }
+    /// @param sinkFactory Creates the backing PaneSink for each newly discovered
+    ///        pane. Unset, panes default to replay PaneViews.
+    explicit TmuxClientModel(PaneSinkFactory sinkFactory = {}): _sinkFactory(std::move(sinkFactory)) {}
 
-    /// Installs @p factory as the backing-sink source for NEW panes; existing
-    /// panes keep their sink. Unset, panes are backed by replay PaneViews.
-    void setPaneSinkFactory(PaneSinkFactory factory) { _sinkFactory = std::move(factory); }
+    /// Cyclic wiring: the model implements GatewayEvents so must exist before the
+    /// gateway, but the gateway reference is needed for history replay. Single
+    /// attach call — the object is unusable without it but the dependency cycle
+    /// leaves no alternative.
+    void bind(TmuxGateway& gateway) noexcept { _gateway = &gateway; }
 
     /// Registers @p observer for structural changes. Not owned.
     void subscribe(TmuxModelEvents* observer) { _observers.push_back(observer); }

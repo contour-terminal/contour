@@ -11,12 +11,12 @@
 #include <vector>
 
 #include <coro/WhenAll.hpp>
-#include <vthost/SessionHost.h>
-#include <vthost/tmux/ControlSession.h>
-#include <vthost/tmux/TmuxClientModel.h>
 #include <net/EventLoop.h>
 #include <net/PollEventSource.h>
 #include <net/testing/InMemoryTransport.h>
+#include <vthost/SessionHost.h>
+#include <vthost/tmux/ControlSession.h>
+#include <vthost/tmux/TmuxClientModel.h>
 #include <vtworkspace/Pane.h>
 #include <vtworkspace/Tab.h>
 
@@ -190,15 +190,14 @@ struct RecordingModelEvents final: vthost::tmux::TmuxModelEvents
 
 TEST_CASE("injected sinks and observers see the mirrored structure", "[vthost][tmuxclient]")
 {
-    auto model = TmuxClientModel {};
     auto* lastSink = static_cast<RecordingSink*>(nullptr);
-    model.setPaneSinkFactory([&](uint64_t /*pane*/, int columns, int lines) {
+    auto model = TmuxClientModel { [&](uint64_t /*pane*/, int columns, int lines) {
         auto sink = std::make_unique<RecordingSink>();
         sink->columns = columns;
         sink->lines = lines;
         lastSink = sink.get();
         return sink;
-    });
+    } };
     auto events = RecordingModelEvents {};
     model.subscribe(&events);
 
