@@ -356,7 +356,7 @@ bool TerminalSessionManager::applyLayoutToWindow(
         auto seeder = [&](config::LayoutPane const& leaf) -> bool {
             // Attach mode binds the pane about to be born to a specific remote
             // session here, before its backing session (and thus its ChannelPty) is
-            // created — see AttachController.
+            // created — see NativeController.
             if (beforeLeafSeed)
                 beforeLeafSeed(leaf);
             auto const sessionId = vtworkspace::SessionId { _nextSessionId++ };
@@ -1018,7 +1018,9 @@ void TerminalSessionManager::paneRatioChanged(vtworkspace::TabId tab, vtworkspac
         c->notifyRatioChanged(splitNode);
 }
 
-void TerminalSessionManager::paneOrientationChanged(vtworkspace::TabId tab, vtworkspace::PaneId, vtworkspace::SplitState)
+void TerminalSessionManager::paneOrientationChanged(vtworkspace::TabId tab,
+                                                    vtworkspace::PaneId,
+                                                    vtworkspace::SplitState)
 {
     // Rebuild the tab's proxy tree: the coarse refresh re-emits every proxy's `changed` (which carries
     // `orientation`), so PaneNode.qml re-reads the flipped axis and re-lays out its SplitView. Same
@@ -1176,7 +1178,9 @@ void TerminalSessionManager::moveTabToWindow(vtworkspace::WindowId from,
     closeWindowIfEmpty(from);
 }
 
-void TerminalSessionManager::tearOffTabToNewWindow(vtworkspace::WindowId from, int fromIndex, QScreen* targetScreen)
+void TerminalSessionManager::tearOffTabToNewWindow(vtworkspace::WindowId from,
+                                                   int fromIndex,
+                                                   QScreen* targetScreen)
 {
     auto* tab = tabAtRow(from, fromIndex);
     if (tab == nullptr)
@@ -1270,8 +1274,8 @@ void TerminalSessionManager::closeOtherTabs(vtworkspace::WindowId window, int in
     if (keep == nullptr || win == nullptr)
         return;
 
-    auto const doomed =
-        gatherSessionsOfTabsWhere(*win, [keep](int, vtworkspace::Tab* tab) { return tab->id() != keep->id(); });
+    auto const doomed = gatherSessionsOfTabsWhere(
+        *win, [keep](int, vtworkspace::Tab* tab) { return tab->id() != keep->id(); });
     _model->closeOtherTabs(window, keep->id());
     terminateSessions(doomed);
 }

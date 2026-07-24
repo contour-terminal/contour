@@ -104,7 +104,7 @@ using AttachEndpoint = std::variant<UnixEndpoint, TcpEndpoint>;
 /// native socket resolved beside it), or a TLS-encrypted TCP connection whose
 /// peer trust follows the endpoint's @c caPem (empty ⇒ TOFU). This establishes —
 /// and for TCP encrypts — the transport; the caller's NativeClient sends the
-/// token. Shared by the GUI AttachController.
+/// token. Shared by the GUI NativeController.
 /// @param loop The event loop whose reactor drives the connect (not owned).
 /// @param endpoint The daemon endpoint.
 /// @return The ready transport, or a human-readable error string.

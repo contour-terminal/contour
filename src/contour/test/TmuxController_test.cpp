@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/mux/TmuxController.h>
+#include <contour/remote/TmuxController.h>
 #include <contour/test/GuiTestFixtures.h>
 
 #include <vtpty/ChannelPty.h>
@@ -186,7 +186,7 @@ TEST_CASE("tmux whole-tree realize reproduces the split ratio and shape (F3)", "
     CHECK(tab->paneCount() == 2); // both panes realized as one split tab
     REQUIRE_FALSE(tab->rootPane()->isLeaf());
     CHECK(tab->rootPane()->splitState() == vtworkspace::SplitState::Vertical); // faithful orientation
-    CHECK(tab->rootPane()->ratio() > 0.6);                               // faithful ~0.71 ratio, not 0.5
+    CHECK(tab->rootPane()->ratio() > 0.6); // faithful ~0.71 ratio, not 0.5
 
     ctrl->stop();
 }

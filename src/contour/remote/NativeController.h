@@ -2,11 +2,11 @@
 #pragma once
 
 /// @file
-/// `AttachController` — the GUI's native-protocol attach engine.
+/// `NativeController` — the GUI's native-protocol attach engine.
 ///
 /// One controller = one connection to a `contour daemon`. It runs the
 /// Qt-free `vthost::client::NativeClient` on its own reactor thread
-/// (MuxLoopThread) and doubles as the app's `SessionFactory` while attached:
+/// (ReactorThread) and doubles as the app's `SessionFactory` while attached:
 /// every locally created tab is backed by a `vtpty::ChannelPty` bound to one
 /// remote session. Remote deltas re-serialize through a per-session
 /// `ScreenMirror` and feed that pty — the session's ordinary parser thread
@@ -14,8 +14,8 @@
 /// Input and resize flow back through the pty's sinks onto the reactor.
 
 #include <contour/SessionFactory.h>
-#include <contour/mux/MuxController.h>
-#include <contour/mux/MuxLoopThread.h>
+#include <contour/remote/ReactorThread.h>
+#include <contour/remote/RemoteController.h>
 
 #include <vtpty/ChannelPty.h>
 
@@ -47,24 +47,24 @@ namespace contour
 class TerminalSessionManager;
 
 /// The attach-mode session factory and remote-session registry.
-class AttachController final: public QObject, public SessionFactory, public MuxControllerBase
+class NativeController final: public QObject, public SessionFactory, public RemoteController
 {
     Q_OBJECT
 
   public:
     /// @param endpoint How to reach the daemon: the local unix control socket, or
     ///        a TLS-encrypted, token-authenticated TCP endpoint.
-    explicit AttachController(vthost::AttachEndpoint endpoint);
+    explicit NativeController(vthost::AttachEndpoint endpoint);
 
     /// Stops the reactor (detaching if still connected) and joins.
-    ~AttachController() override;
+    ~NativeController() override;
 
-    AttachController(AttachController const&) = delete;
-    AttachController& operator=(AttachController const&) = delete;
-    AttachController(AttachController&&) = delete;
-    AttachController& operator=(AttachController&&) = delete;
+    NativeController(NativeController const&) = delete;
+    NativeController& operator=(NativeController const&) = delete;
+    NativeController(NativeController&&) = delete;
+    NativeController& operator=(NativeController&&) = delete;
 
-    // connectAndWait() and stop() are inherited from MuxControllerBase; this
+    // connectAndWait() and stop() are inherited from RemoteController; this
     // controller supplies the hooks below.
 
     /// @return How many remote sessions await a local tab.
@@ -216,7 +216,7 @@ class AttachController final: public QObject, public SessionFactory, public MuxC
     /// by pointer (coroutine reference parameters can dangle).
     [[nodiscard]] coro::Task<void> runClient(net::EventLoop* loop) override;
 
-    // MuxControllerBase hooks: the attach-specific half of the shared connect lifecycle.
+    // RemoteController hooks: the attach-specific half of the shared connect lifecycle.
     void detachOnReactor() override
     {
         if (_client != nullptr)
@@ -254,7 +254,7 @@ class AttachController final: public QObject, public SessionFactory, public MuxC
     void closeAllBindings();
 
     // The reactor and the connect state machine (_reactor, _mutex, _connected, _state, _failure,
-    // _stopped) live in MuxControllerBase; the registry below is attach-specific.
+    // _stopped) live in RemoteController; the registry below is attach-specific.
     vthost::AttachEndpoint _endpoint;
     std::deque<PendingSession> _pending; ///< Discovered remote sessions without a local tab.
     std::unordered_map<uint64_t, Binding> _bindings;

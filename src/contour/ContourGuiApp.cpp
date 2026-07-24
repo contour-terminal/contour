@@ -12,10 +12,10 @@
 #include <contour/display/ContentScale.h>
 #include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
-#include <contour/mux/AttachController.h>
-#include <contour/mux/RemoteLayout.h>
-#include <contour/mux/RoutingSessionFactory.h>
-#include <contour/mux/TmuxController.h>
+#include <contour/remote/NativeController.h>
+#include <contour/remote/RemoteLayout.h>
+#include <contour/remote/RoutingSessionFactory.h>
+#include <contour/remote/TmuxController.h>
 
 #include <vtpty/Process.h>
 
@@ -200,14 +200,14 @@ int ContourGuiApp::clientAction()
             endpoint = vthost::UnixEndpoint { .socketPath = controlPath };
         }
 
-        _attachController = std::make_unique<AttachController>(std::move(endpoint));
-        if (auto connected = _attachController->connectAndWait(std::chrono::seconds(5)); !connected)
+        _nativeController = std::make_unique<NativeController>(std::move(endpoint));
+        if (auto connected = _nativeController->connectAndWait(std::chrono::seconds(5)); !connected)
         {
             cerr << std::format("contour attach: {} ({})\n", connected.error(), endpointLabel);
-            _attachController.reset();
+            _nativeController.reset();
             return EXIT_FAILURE;
         }
-        _routingFactory->setDelegate(_attachController.get());
+        _routingFactory->setDelegate(_nativeController.get());
         // A window spawned to host a daemon window binds itself here (from its
         // main.qml, via consumeAttachWindow) instead of creating a fresh first tab.
         _sessionManager.setAttachWindowBinder(
@@ -222,12 +222,12 @@ int ContourGuiApp::clientAction()
         adopt = [this] {
             reconcileAttachWindows();
         };
-        connect(_attachController.get(), &AttachController::layoutChanged, this, adopt, Qt::QueuedConnection);
+        connect(_nativeController.get(), &NativeController::layoutChanged, this, adopt, Qt::QueuedConnection);
         connect(
-            _attachController.get(),
-            &AttachController::connectionClosed,
+            _nativeController.get(),
+            &NativeController::connectionClosed,
             this,
-            [this] { _attachController->stop(); },
+            [this] { _nativeController->stop(); },
             Qt::QueuedConnection);
     }
 
@@ -246,8 +246,8 @@ int ContourGuiApp::clientAction()
         argv.push_back(attachConfig.c_str());
     }
     auto const stopControllers = [this] {
-        if (_attachController)
-            _attachController->stop();
+        if (_nativeController)
+            _nativeController->stop();
         if (_tmuxController)
             _tmuxController->stop();
     };
@@ -1005,17 +1005,17 @@ bool ContourGuiApp::requestRemoteWindow()
 
 void ContourGuiApp::reconcileAttachWindows()
 {
-    if (!_attachController)
+    if (!_nativeController)
         return;
 
     // Daemon window ids come ascending, so the primary (lowest-id) window is handled
     // first — it maps to the boot window; the rest each get their own OS window.
-    for (auto const daemonWindow: _attachController->windowIds())
+    for (auto const daemonWindow: _nativeController->windowIds())
     {
         if (auto const mapped = _attachWindowMap.find(daemonWindow); mapped != _attachWindowMap.end())
         {
             // Already shown: bring its tree up to date.
-            contour::applyRemoteLayout(_sessionManager, mapped->second, *_attachController, daemonWindow);
+            contour::applyRemoteLayout(_sessionManager, mapped->second, *_nativeController, daemonWindow);
             continue;
         }
         if (_pendingAttachWindow == daemonWindow)
@@ -1050,7 +1050,7 @@ std::optional<std::uint64_t> primaryDaemonWindowToAdopt(bool anyWindowMapped,
 
 bool ContourGuiApp::bindPendingAttachWindow(WindowController* controller)
 {
-    if (!_attachController || controller == nullptr)
+    if (!_nativeController || controller == nullptr)
         return false;
 
     // A reconcile-spawned secondary OS window claims the daemon window staged for it.
@@ -1069,7 +1069,7 @@ bool ContourGuiApp::bindPendingAttachWindow(WindowController* controller)
     // window (return true) and let reconcileAttachWindows bind it once the first layout arrives.
     if (_attachWindowMap.empty())
     {
-        if (auto const adopt = primaryDaemonWindowToAdopt(false, _attachController->windowIds()))
+        if (auto const adopt = primaryDaemonWindowToAdopt(false, _nativeController->windowIds()))
             bindDaemonWindow(*adopt, controller->windowId());
         return true;
     }
@@ -1080,7 +1080,7 @@ bool ContourGuiApp::bindPendingAttachWindow(WindowController* controller)
 void ContourGuiApp::bindDaemonWindow(std::uint64_t daemonWindow, vtworkspace::WindowId osWindow)
 {
     _attachWindowMap.emplace(daemonWindow, osWindow);
-    contour::applyRemoteLayout(_sessionManager, osWindow, *_attachController, daemonWindow);
+    contour::applyRemoteLayout(_sessionManager, osWindow, *_nativeController, daemonWindow);
 }
 
 display::ForcedFontDpiProvider* ContourGuiApp::forcedFontDpiProvider()

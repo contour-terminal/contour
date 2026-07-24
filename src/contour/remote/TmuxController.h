@@ -5,7 +5,7 @@
 /// `TmuxController` — the GUI's tmux -CC mirroring engine.
 ///
 /// One controller = one spawned `tmux -C attach-session` client. The Qt-free
-/// gateway and client model run on a MuxLoopThread reactor; every remote
+/// gateway and client model run on a ReactorThread reactor; every remote
 /// PANE becomes a local tab or split whose TerminalSession sits on a
 /// `vtpty::ChannelPty` fed the pane's raw %output bytes (the session's own
 /// parser emulates — tmux forwards bytes, the client emulates). Input flows
@@ -15,8 +15,8 @@
 /// shape); panes added later split the tab incrementally.
 
 #include <contour/SessionFactory.h>
-#include <contour/mux/MuxController.h>
-#include <contour/mux/MuxLoopThread.h>
+#include <contour/remote/ReactorThread.h>
+#include <contour/remote/RemoteController.h>
 
 #include <vtpty/ChannelPty.h>
 
@@ -79,7 +79,7 @@ class TerminalSession;
 /// `layout`) to the tmux pane id that backs it. Mirrors `vthost::client::WireLayout`.
 struct TmuxWindowLayout
 {
-    vtworkspace::Layout layout;                                            ///< A single tab: the window's tree.
+    vtworkspace::Layout layout; ///< A single tab: the window's tree.
     std::unordered_map<vtworkspace::LayoutPane const*, uint64_t> leafPane; ///< Converted leaf → tmux pane id.
 };
 
@@ -97,7 +97,7 @@ class TmuxController final:
     public QObject,
     public SessionFactory,
     public vthost::tmux::TmuxModelEvents,
-    public MuxControllerBase
+    public RemoteController
 {
     Q_OBJECT
 
@@ -114,7 +114,7 @@ class TmuxController final:
     TmuxController(TmuxController&&) = delete;
     TmuxController& operator=(TmuxController&&) = delete;
 
-    // connectAndWait() and stop() are inherited from MuxControllerBase; this
+    // connectAndWait() and stop() are inherited from RemoteController; this
     // controller supplies the hooks below.
 
     /// Realizes discovered-but-unrealized panes into @p window. A tmux window first seen with a
@@ -201,7 +201,7 @@ class TmuxController final:
   protected:
     [[nodiscard]] coro::Task<void> runClient(net::EventLoop* loop) override;
 
-    // MuxControllerBase hooks: the tmux-specific half of the shared connect lifecycle.
+    // RemoteController hooks: the tmux-specific half of the shared connect lifecycle.
     void detachOnReactor() override
     {
         if (_gateway != nullptr)
@@ -228,7 +228,7 @@ class TmuxController final:
     void closeAllPanes();
 
     // The reactor and the connect state machine (_reactor, _mutex, _connected, _state, _failure,
-    // _stopped) live in MuxControllerBase; the registry below is tmux-specific.
+    // _stopped) live in RemoteController; the registry below is tmux-specific.
     std::string _tmuxSocket;
     std::deque<PendingPane> _pending;
     std::unordered_map<uint64_t, PaneFeed*> _feeds;         ///< Model-owned sinks, by pane.
@@ -252,7 +252,7 @@ class TmuxController final:
 
     /// LAST member, destroyed FIRST: its pane sinks (PaneFeed) unregister from _feeds and the
     /// (base-owned) _mutex in their destructors, which must still be alive — _feeds is destroyed
-    /// after _model, and _mutex lives in MuxControllerBase (destroyed last of all). The destructor
+    /// after _model, and _mutex lives in RemoteController (destroyed last of all). The destructor
     /// body's stop() has already joined the reactor by then.
     vthost::tmux::TmuxClientModel _model;
 };

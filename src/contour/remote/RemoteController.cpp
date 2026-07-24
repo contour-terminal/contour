@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/mux/MuxController.h>
-#include <contour/mux/MuxLoopThread.h>
+#include <contour/remote/ReactorThread.h>
+#include <contour/remote/RemoteController.h>
 
 #include <vtpty/ChannelPty.h>
 
@@ -28,7 +28,7 @@ std::unique_ptr<vtpty::Pty> makeUnboundFallbackPty(std::optional<vtbackend::Page
     return std::make_unique<vtpty::ChannelPty>(fallback);
 }
 
-bool stopMuxReactor(std::mutex& mutex, bool& stopped, MuxLoopThread& reactor, std::function<void()> detach)
+bool stopMuxReactor(std::mutex& mutex, bool& stopped, ReactorThread& reactor, std::function<void()> detach)
 {
     {
         auto const lock = std::lock_guard { mutex };
@@ -42,7 +42,7 @@ bool stopMuxReactor(std::mutex& mutex, bool& stopped, MuxLoopThread& reactor, st
     return true;
 }
 
-std::expected<void, std::string> MuxControllerBase::connectAndWait(std::chrono::milliseconds timeout)
+std::expected<void, std::string> RemoteController::connectAndWait(std::chrono::milliseconds timeout)
 {
     _reactor.start([this](net::EventLoop* loop) { return runClient(loop); });
 
@@ -57,7 +57,7 @@ std::expected<void, std::string> MuxControllerBase::connectAndWait(std::chrono::
     return {};
 }
 
-void MuxControllerBase::stop()
+void RemoteController::stop()
 {
     if (stopMuxReactor(_mutex, _stopped, _reactor, [this] { detachOnReactor(); }))
         closeReactorBindings();

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/TerminalSession.h>
 #include <contour/TerminalSessionManager.h>
-#include <contour/mux/TmuxController.h>
+#include <contour/remote/TmuxController.h>
 
 #include <algorithm>
 #include <format>
@@ -30,8 +30,8 @@ namespace
 
     /// Finds the split (orientation + first-child ratio) that joins @p pane into @p node's tree — the
     /// proportions the pane's incremental split should reproduce.
-    [[nodiscard]] std::optional<std::pair<vtworkspace::SplitState, double>> parentSplitOf(BinaryLayout const& node,
-                                                                                    uint64_t pane)
+    [[nodiscard]] std::optional<std::pair<vtworkspace::SplitState, double>> parentSplitOf(
+        BinaryLayout const& node, uint64_t pane)
     {
         if (!isSplit(node))
             return std::nullopt;
@@ -102,7 +102,8 @@ TmuxWindowLayout tmuxLayoutToWindowLayout(vthost::tmux::BinaryLayout const& tree
 {
     auto result = TmuxWindowLayout {};
     auto const adapter = BinaryLayoutAdapter {};
-    result.layout.tabs.push_back(vtworkspace::LayoutTab { .root = vtworkspace::convertLayoutPane(tree, adapter) });
+    result.layout.tabs.push_back(
+        vtworkspace::LayoutTab { .root = vtworkspace::convertLayoutPane(tree, adapter) });
     // Build the leaf → pane map only now that the tree is in place: the pane addresses are stable and
     // a move of the result preserves them (the vectors' buffers move intact).
     vtworkspace::mapLayoutLeaves(result.layout.tabs.front().root, tree, adapter, result.leafPane);
@@ -198,7 +199,7 @@ TmuxController::~TmuxController()
     stop();
 }
 
-// connectAndWait() and stop() are provided by MuxControllerBase; this controller supplies runClient()
+// connectAndWait() and stop() are provided by RemoteController; this controller supplies runClient()
 // and the detach / binding-teardown / message hooks (see TmuxController.h).
 
 coro::Task<void> TmuxController::runClient(net::EventLoop* loop)
@@ -501,7 +502,7 @@ void TmuxController::adoptPendingPanes(TerminalSessionManager& manager, vtworksp
 {
     // Splits performed here (whole-tree realize, or an incremental split of an existing tmux pane)
     // must build the mirror pane locally, not author a new split back to tmux. (Mirrors
-    // AttachController::isRealizingLayout.)
+    // NativeController::isRealizingLayout.)
     {
         auto const lock = std::lock_guard { _mutex };
         _realizing = true;

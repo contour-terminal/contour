@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/TerminalSessionManager.h>
-#include <contour/mux/AttachController.h>
+#include <contour/remote/NativeController.h>
 
 #include <algorithm>
 #include <ranges>
@@ -19,19 +19,19 @@ namespace
     auto const attachLog = logstore::category("gui.attach", "GUI native-attach controller.");
 } // namespace
 
-AttachController::AttachController(vthost::AttachEndpoint endpoint): _endpoint(std::move(endpoint))
+NativeController::NativeController(vthost::AttachEndpoint endpoint): _endpoint(std::move(endpoint))
 {
 }
 
-AttachController::~AttachController()
+NativeController::~NativeController()
 {
     stop();
 }
 
-// connectAndWait() and stop() are provided by MuxControllerBase; this controller supplies runClient()
-// and the detach / binding-teardown / message hooks (see AttachController.h).
+// connectAndWait() and stop() are provided by RemoteController; this controller supplies runClient()
+// and the detach / binding-teardown / message hooks (see NativeController.h).
 
-coro::Task<void> AttachController::runClient(net::EventLoop* loop)
+coro::Task<void> NativeController::runClient(net::EventLoop* loop)
 {
     auto const token = vthost::endpointToken(_endpoint);
     auto socket = co_await vthost::connectAttach(loop, _endpoint);
@@ -85,7 +85,7 @@ coro::Task<void> AttachController::runClient(net::EventLoop* loop)
     emit connectionClosed();
 }
 
-void AttachController::onUpdate(RemoteScreen const& screen, vthost::proto::Delta const& delta)
+void NativeController::onUpdate(RemoteScreen const& screen, vthost::proto::Delta const& delta)
 {
     auto lock = std::unique_lock { _mutex };
 
@@ -121,7 +121,7 @@ void AttachController::onUpdate(RemoteScreen const& screen, vthost::proto::Delta
     emit remoteSessionDiscovered();
 }
 
-void AttachController::onLayout(vthost::proto::LayoutState const& layout)
+void NativeController::onLayout(vthost::proto::LayoutState const& layout)
 {
     {
         auto const lock = std::lock_guard { _mutex };
@@ -134,21 +134,21 @@ void AttachController::onLayout(vthost::proto::LayoutState const& layout)
     emit layoutChanged();
 }
 
-std::vector<uint64_t> AttachController::windowIds() const
+std::vector<uint64_t> NativeController::windowIds() const
 {
     auto const lock = std::lock_guard { _mutex };
     // std::map keeps the keys ascending, so the primary (lowest-id) window comes first.
     return std::ranges::to<std::vector>(_layouts | std::views::keys);
 }
 
-std::optional<vthost::proto::LayoutState> AttachController::layout(uint64_t daemonWindow) const
+std::optional<vthost::proto::LayoutState> NativeController::layout(uint64_t daemonWindow) const
 {
     auto const lock = std::lock_guard { _mutex };
     auto const it = _layouts.find(daemonWindow);
     return it != _layouts.end() ? std::optional { it->second } : std::nullopt;
 }
 
-std::optional<vthost::proto::LayoutState> AttachController::layout() const
+std::optional<vthost::proto::LayoutState> NativeController::layout() const
 {
     auto const lock = std::lock_guard { _mutex };
     if (_layouts.empty())
@@ -156,44 +156,44 @@ std::optional<vthost::proto::LayoutState> AttachController::layout() const
     return _layouts.begin()->second; // the primary (lowest-id) window
 }
 
-vthost::client::WireLayout AttachController::wireLayout() const
+vthost::client::WireLayout NativeController::wireLayout() const
 {
     auto const lock = std::lock_guard { _mutex };
     return _layouts.empty() ? vthost::client::WireLayout {}
                             : vthost::client::wireToLayout(_layouts.begin()->second);
 }
 
-void AttachController::setNextBindSession(uint64_t session)
+void NativeController::setNextBindSession(uint64_t session)
 {
     auto const lock = std::lock_guard { _mutex };
     _nextBindSession = session;
 }
 
-void AttachController::setRealizingLayout(bool realizing)
+void NativeController::setRealizingLayout(bool realizing)
 {
     auto const lock = std::lock_guard { _mutex };
     _realizingLayout = realizing;
 }
 
-bool AttachController::isRealizingLayout() const
+bool NativeController::isRealizingLayout() const
 {
     auto const lock = std::lock_guard { _mutex };
     return _realizingLayout;
 }
 
-bool AttachController::isBound(uint64_t session) const
+bool NativeController::isBound(uint64_t session) const
 {
     auto const lock = std::lock_guard { _mutex };
     return _bindings.contains(session);
 }
 
-bool AttachController::isClaimed(uint64_t session) const
+bool NativeController::isClaimed(uint64_t session) const
 {
     auto const lock = std::lock_guard { _mutex };
     return _bindings.contains(session) || _closedSessions.contains(session);
 }
 
-std::optional<uint64_t> AttachController::sessionForPty(vtpty::Pty const* pty) const
+std::optional<uint64_t> NativeController::sessionForPty(vtpty::Pty const* pty) const
 {
     auto const lock = std::lock_guard { _mutex };
     for (auto const& [session, binding]: _bindings)
@@ -202,7 +202,7 @@ std::optional<uint64_t> AttachController::sessionForPty(vtpty::Pty const* pty) c
     return std::nullopt;
 }
 
-void AttachController::requestCreateTab()
+void NativeController::requestCreateTab()
 {
     // The client's send verbs must run on the reactor thread that owns it.
     _reactor.post([this] {
@@ -211,7 +211,7 @@ void AttachController::requestCreateTab()
     });
 }
 
-void AttachController::requestCreateWindow()
+void NativeController::requestCreateWindow()
 {
     _reactor.post([this] {
         if (_client != nullptr)
@@ -219,7 +219,7 @@ void AttachController::requestCreateWindow()
     });
 }
 
-void AttachController::requestSplitPane(vtpty::Pty const* actingPty, bool vertical)
+void NativeController::requestSplitPane(vtpty::Pty const* actingPty, bool vertical)
 {
     auto const session = sessionForPty(actingPty);
     if (!session)
@@ -234,7 +234,7 @@ void AttachController::requestSplitPane(vtpty::Pty const* actingPty, bool vertic
     });
 }
 
-void AttachController::requestClosePane(uint64_t session)
+void NativeController::requestClosePane(uint64_t session)
 {
     _reactor.post([this, session] {
         if (_client != nullptr)
@@ -242,7 +242,7 @@ void AttachController::requestClosePane(uint64_t session)
     });
 }
 
-void AttachController::primeBinding(uint64_t session)
+void NativeController::primeBinding(uint64_t session)
 {
     if (_client == nullptr)
         return;
@@ -257,7 +257,7 @@ void AttachController::primeBinding(uint64_t session)
     binding->second.pty->feed(binding->second.mirror.fullReplay(screen->second));
 }
 
-void AttachController::unbind(uint64_t session)
+void NativeController::unbind(uint64_t session)
 {
     auto userClosed = false;
     {
@@ -280,20 +280,20 @@ void AttachController::unbind(uint64_t session)
         requestClosePane(session);
 }
 
-void AttachController::closeAllBindings()
+void NativeController::closeAllBindings()
 {
     auto const lock = std::lock_guard { _mutex };
     for (auto& [session, binding]: _bindings)
         binding.pty->close();
 }
 
-std::size_t AttachController::pendingCount() const
+std::size_t NativeController::pendingCount() const
 {
     auto const lock = std::lock_guard { _mutex };
     return _pending.size();
 }
 
-bool AttachController::canCreateSession() const noexcept
+bool NativeController::canCreateSession() const noexcept
 {
     auto const lock = std::lock_guard { _mutex };
     // During a layout realization the panes are bound by setNextBindSession (not
@@ -301,7 +301,7 @@ bool AttachController::canCreateSession() const noexcept
     return _realizingLayout || !_pending.empty();
 }
 
-std::unique_ptr<vtpty::Pty> AttachController::createPty(std::optional<std::string> /*cwd*/,
+std::unique_ptr<vtpty::Pty> NativeController::createPty(std::optional<std::string> /*cwd*/,
                                                         std::optional<vtbackend::PageSize> pageSize,
                                                         std::optional<vtpty::Process::ExecInfo> /*command*/,
                                                         std::optional<std::string> /*profileName*/)

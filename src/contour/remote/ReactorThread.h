@@ -2,9 +2,9 @@
 #pragma once
 
 /// @file
-/// `MuxLoopThread` — a net::EventLoop running on its own thread, beside Qt's.
+/// `ReactorThread` — a net::EventLoop running on its own thread, beside Qt's.
 ///
-/// The GUI's mux controllers (native attach, tmux mirroring) do all their
+/// The GUI's remote controllers (native protocol, tmux mirroring) do all their
 /// socket and protocol work on this reactor; the ONLY thread-safe entry into
 /// it is post(). Data flowing the other way needs no Qt marshaling either:
 /// it lands in a thread-safe vtpty::ChannelPty::feed, and the session's own
@@ -23,19 +23,19 @@ namespace contour
 {
 
 /// Owns the reactor and the thread that pumps it.
-class MuxLoopThread
+class ReactorThread
 {
   public:
-    MuxLoopThread() = default;
+    ReactorThread() = default;
 
     /// Joins; the owner must have made the root task finish first (post a
     /// shutdown into the loop), or this blocks forever by design.
-    ~MuxLoopThread() { join(); }
+    ~ReactorThread() { join(); }
 
-    MuxLoopThread(MuxLoopThread const&) = delete;
-    MuxLoopThread& operator=(MuxLoopThread const&) = delete;
-    MuxLoopThread(MuxLoopThread&&) = delete;
-    MuxLoopThread& operator=(MuxLoopThread&&) = delete;
+    ReactorThread(ReactorThread const&) = delete;
+    ReactorThread& operator=(ReactorThread const&) = delete;
+    ReactorThread(ReactorThread&&) = delete;
+    ReactorThread& operator=(ReactorThread&&) = delete;
 
     /// Starts the thread, running @p rootTask to completion on the loop.
     /// A cancellation unwind (requestStop) ends the task silently.

@@ -39,7 +39,7 @@ namespace display
     class ForcedFontDpiProvider;
 }
 
-class AttachController;
+class NativeController;
 class RoutingSessionFactory;
 class TerminalSession;
 class TmuxController;
@@ -218,7 +218,7 @@ class ContourGuiApp: public QObject, public ContourApp
 
     /// The attach engines, declared FIRST so they are destroyed LAST: remote-
     /// backed sessions hold ptys that unregister from them on destruction.
-    std::unique_ptr<AttachController> _attachController;
+    std::unique_ptr<NativeController> _nativeController;
     std::unique_ptr<TmuxController> _tmuxController;
 
     /// Invoked by terminalGuiAction right after the first window booted —

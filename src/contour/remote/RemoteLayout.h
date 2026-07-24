@@ -4,7 +4,7 @@
 /// @file
 /// The attach-mode layout executor (B2): realizes the daemon's captured tab/pane
 /// tree into the GUI's own `TerminalSessionManager`, binding each realized pane to
-/// its remote session. It composes the tested primitives — `AttachController::
+/// its remote session. It composes the tested primitives — `NativeController::
 /// wireLayout()` (the daemon layout converted for the shared `realizeLayoutTab`)
 /// and `TerminalSessionManager::applyLayoutToWindow(..., beforeLeafSeed)` (which
 /// hands each leaf to the seeder just before its backing session is born) — so the
@@ -21,7 +21,7 @@
 namespace contour
 {
 
-class AttachController;
+class NativeController;
 class TerminalSessionManager;
 
 /// Reconciles one daemon window's tab/pane tree into @p window of @p manager,
@@ -38,7 +38,7 @@ class TerminalSessionManager;
 ///        window size), or nullopt for the profile default.
 void applyRemoteLayout(TerminalSessionManager& manager,
                        vtworkspace::WindowId window,
-                       AttachController& controller,
+                       NativeController& controller,
                        std::optional<uint64_t> daemonWindow = std::nullopt,
                        std::optional<vtbackend::PageSize> pageSize = std::nullopt);
 

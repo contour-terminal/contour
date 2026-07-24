@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/TerminalSession.h>
 #include <contour/TerminalSessionManager.h>
-#include <contour/mux/AttachController.h>
-#include <contour/mux/RemoteLayout.h>
+#include <contour/remote/NativeController.h>
+#include <contour/remote/RemoteLayout.h>
 
 #include <algorithm>
 #include <optional>
@@ -46,8 +46,7 @@ namespace
     /// @return True if any leaf of @p pane carries a remote session already claimed
     ///         locally — bound to a pane, or tombstoned by a user close the daemon
     ///         has not acknowledged yet (a stale layout push must not resurrect it).
-    [[nodiscard]] bool anyLeafClaimed(vthost::proto::WirePane const& pane,
-                                      AttachController const& controller)
+    [[nodiscard]] bool anyLeafClaimed(vthost::proto::WirePane const& pane, NativeController const& controller)
     {
         if (pane.split == 0)
             return controller.isClaimed(pane.session);
@@ -83,7 +82,7 @@ namespace
     /// the second). Recurses through already-claimed subtrees to find nested new
     /// splits.
     [[nodiscard]] std::optional<SplitOp> findNewSplit(vthost::proto::WirePane const& node,
-                                                      AttachController const& controller)
+                                                      NativeController const& controller)
     {
         if (node.split == 0 || node.children.size() < 2)
             return std::nullopt;
@@ -107,7 +106,7 @@ namespace
     /// pty against the controller's bindings. Rebuilt after each split so a
     /// just-created pane is available to seed the next.
     [[nodiscard]] std::unordered_map<uint64_t, TerminalSession*> remoteToLocal(
-        TerminalSessionManager& manager, vtworkspace::WindowId window, AttachController const& controller)
+        TerminalSessionManager& manager, vtworkspace::WindowId window, NativeController const& controller)
     {
         auto out = std::unordered_map<uint64_t, TerminalSession*> {};
         auto* win = manager.model().window(window);
@@ -123,7 +122,7 @@ namespace
     /// Realizes ONE whole daemon tab (no leaf yet bound) via the shared realizer.
     void realizeWholeTab(TerminalSessionManager& manager,
                          vtworkspace::WindowId window,
-                         AttachController& controller,
+                         NativeController& controller,
                          vthost::proto::WireTab const& wireTab,
                          std::optional<vtbackend::PageSize> pageSize)
     {
@@ -140,7 +139,7 @@ namespace
 
 void applyRemoteLayout(TerminalSessionManager& manager,
                        vtworkspace::WindowId window,
-                       AttachController& controller,
+                       NativeController& controller,
                        std::optional<uint64_t> daemonWindow,
                        std::optional<vtbackend::PageSize> pageSize)
 {

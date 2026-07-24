@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/mux/AttachController.h>
-#include <contour/mux/RoutingSessionFactory.h>
+#include <contour/remote/NativeController.h>
+#include <contour/remote/RoutingSessionFactory.h>
 #include <contour/test/GuiTestFixtures.h>
 
 #include <vtpty/MockPty.h>
@@ -27,7 +27,7 @@
     #include <unistd.h>
 #endif
 
-#include <contour/mux/RemoteLayout.h>
+#include <contour/remote/RemoteLayout.h>
 
 #include <cstdint>
 
@@ -178,7 +178,7 @@ TEST_CASE("attach controller mirrors a remote session over a real socket", "[att
     auto daemon = DaemonFixture {};
     auto const session = daemon.seedSession("hello attach");
 
-    auto controller = contour::AttachController { daemon.endpoint() };
+    auto controller = contour::NativeController { daemon.endpoint() };
     auto const connected = controller.connectAndWait(10s);
     REQUIRE(connected.has_value());
     REQUIRE(controller.pendingCount() == 1);
@@ -244,7 +244,7 @@ TEST_CASE("attach controller captures the daemon's tab and pane layout", "[attac
         return 0;
     });
 
-    auto controller = contour::AttachController { daemon.endpoint() };
+    auto controller = contour::NativeController { daemon.endpoint() };
     auto const connected = controller.connectAndWait(10s);
     REQUIRE(connected.has_value());
 
@@ -280,8 +280,8 @@ TEST_CASE("attach realizes a split daemon layout as a 2-pane tab", "[attach][con
         return 0;
     });
 
-    // The AttachController is the manager's session factory (attach mode).
-    auto acOwned = std::make_unique<contour::AttachController>(daemon.endpoint());
+    // The NativeController is the manager's session factory (attach mode).
+    auto acOwned = std::make_unique<contour::NativeController>(daemon.endpoint());
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -321,7 +321,7 @@ TEST_CASE("attach reconciles a split authored on the daemon after attach", "[att
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("only");
 
-    auto acOwned = std::make_unique<contour::AttachController>(daemon.endpoint());
+    auto acOwned = std::make_unique<contour::NativeController>(daemon.endpoint());
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -363,7 +363,7 @@ TEST_CASE("attach reconciles an uneven daemon split with matching proportions", 
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("only");
 
-    auto acOwned = std::make_unique<contour::AttachController>(daemon.endpoint());
+    auto acOwned = std::make_unique<contour::NativeController>(daemon.endpoint());
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -411,7 +411,7 @@ TEST_CASE("attach reconciles a pane closed on the daemon by removing it locally"
         return tab->activePane()->session(); // the new (active) pane's session
     });
 
-    auto acOwned = std::make_unique<contour::AttachController>(daemon.endpoint());
+    auto acOwned = std::make_unique<contour::NativeController>(daemon.endpoint());
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -460,7 +460,7 @@ TEST_CASE("attach authors a split on the daemon and reconciles it locally", "[at
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("only");
 
-    auto acOwned = std::make_unique<contour::AttachController>(daemon.endpoint());
+    auto acOwned = std::make_unique<contour::NativeController>(daemon.endpoint());
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -498,7 +498,7 @@ TEST_CASE("attach authors a tab on the daemon and reconciles it locally", "[atta
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("first");
 
-    auto acOwned = std::make_unique<contour::AttachController>(daemon.endpoint());
+    auto acOwned = std::make_unique<contour::NativeController>(daemon.endpoint());
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -536,7 +536,7 @@ TEST_CASE("attach maps each daemon window onto its own GUI window", "[attach][co
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("win one"); // the primary daemon window
 
-    auto acOwned = std::make_unique<contour::AttachController>(daemon.endpoint());
+    auto acOwned = std::make_unique<contour::NativeController>(daemon.endpoint());
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win1 { app.manager() };
@@ -592,7 +592,7 @@ TEST_CASE("a closed mirrored tab does not resurrect on later remote output", "[a
     auto daemon = DaemonFixture {};
     auto const session = daemon.seedSession("first line");
 
-    auto controller = contour::AttachController { daemon.endpoint() };
+    auto controller = contour::NativeController { daemon.endpoint() };
     REQUIRE(controller.connectAndWait(10s).has_value());
     REQUIRE(controller.pendingCount() == 1);
 
@@ -631,7 +631,7 @@ TEST_CASE("a closed mirrored tab does not resurrect on later remote output", "[a
 TEST_CASE("attach controller reports an unreachable daemon", "[attach][controller]")
 {
     // Port 1 on loopback has nothing listening: connect is refused before any TLS.
-    auto controller = contour::AttachController { vthost::TcpEndpoint {
+    auto controller = contour::NativeController { vthost::TcpEndpoint {
         .host = "127.0.0.1", .port = 1, .token = {}, .caPem = {} } };
     auto const connected = controller.connectAndWait(2s);
     REQUIRE(!connected.has_value());

@@ -70,7 +70,7 @@ struct RealizeHarness
     {
         return [this](LayoutPane const& leaf) -> bool {
             // Model a factory that can back only seedLimit sessions: once exhausted, refuse
-            // (without staging a pending id), exactly like AttachController's drained pool.
+            // (without staging a pending id), exactly like NativeController's drained pool.
             if (seedLimit && seedCount >= *seedLimit)
                 return false;
             ++seedCount;

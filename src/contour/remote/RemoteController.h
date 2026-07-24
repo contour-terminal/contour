@@ -3,14 +3,14 @@
 
 /// @file
 /// Shared scaffolding for the GUI's mux controllers — the native-attach engine
-/// (`AttachController`) and the tmux -CC mirror (`TmuxController`). Both run a
-/// Qt-free client on a `MuxLoopThread` reactor and expose the same connection
+/// (`NativeController`) and the tmux -CC mirror (`TmuxController`). Both run a
+/// Qt-free client on a `ReactorThread` reactor and expose the same connection
 /// handshake to the GUI thread. This header single-sources the parts that must
 /// stay identical between them: the connection phase, the blocking
 /// connect-and-wait, and the fallback pty handed out when a session must be born
 /// with nothing pending.
 
-#include <contour/mux/MuxLoopThread.h>
+#include <contour/remote/ReactorThread.h>
 
 #include <vtbackend/primitives.h>
 
@@ -123,7 +123,7 @@ struct MuxConnectOutcome
 ///         stopped — so the caller closes its own bindings only on the first stop.
 [[nodiscard]] bool stopMuxReactor(std::mutex& mutex,
                                   bool& stopped,
-                                  MuxLoopThread& reactor,
+                                  ReactorThread& reactor,
                                   std::function<void()> detach);
 
 /// The connect state machine both GUI mux controllers share: the reactor thread plus the
@@ -137,13 +137,13 @@ struct MuxConnectOutcome
 /// SAME names the controllers already use. A derived controller MUST call `stop()` from its own
 /// destructor (both do) so the reactor is joined while the derived vtable and members are still
 /// alive — the hooks run on the reactor thread up to that join.
-class MuxControllerBase
+class RemoteController
 {
   public:
-    MuxControllerBase(MuxControllerBase const&) = delete;
-    MuxControllerBase& operator=(MuxControllerBase const&) = delete;
-    MuxControllerBase(MuxControllerBase&&) = delete;
-    MuxControllerBase& operator=(MuxControllerBase&&) = delete;
+    RemoteController(RemoteController const&) = delete;
+    RemoteController& operator=(RemoteController const&) = delete;
+    RemoteController(RemoteController&&) = delete;
+    RemoteController& operator=(RemoteController&&) = delete;
 
     /// Starts the reactor on `runClient()`, then blocks the calling (GUI) thread until the handshake
     /// completes, fails, or times out. On timeout it stops and returns `connectTimeoutMessage()`; a
@@ -157,8 +157,8 @@ class MuxControllerBase
     void stop();
 
   protected:
-    MuxControllerBase() = default;
-    ~MuxControllerBase() = default;
+    RemoteController() = default;
+    ~RemoteController() = default;
 
     /// The reactor's whole lifetime (connect, serve, notify); runs on the reactor thread.
     [[nodiscard]] virtual coro::Task<void> runClient(net::EventLoop* loop) = 0;
@@ -172,7 +172,7 @@ class MuxControllerBase
     [[nodiscard]] virtual std::string connectClosedMessage() const = 0;
 
     using State = MuxConnectPhase;
-    MuxLoopThread _reactor;
+    ReactorThread _reactor;
     mutable std::mutex _mutex;          ///< Guards the phase/failure AND each controller's registry.
     std::condition_variable _connected; ///< Notified by the reactor on every phase transition.
     State _state = State::Connecting;

@@ -149,12 +149,12 @@ list(APPEND _header_files
     TerminalSession.h
     TerminalSessionManager.h
     helper.h
-    mux/AttachController.h
-    mux/MuxController.h
-    mux/MuxLoopThread.h
-    mux/RemoteLayout.h
-    mux/RoutingSessionFactory.h
-    mux/TmuxController.h
+    remote/NativeController.h
+    remote/RemoteController.h
+    remote/ReactorThread.h
+    remote/RemoteLayout.h
+    remote/RoutingSessionFactory.h
+    remote/TmuxController.h
 )
 list(APPEND _core_source_files
     Audio.cpp
@@ -173,10 +173,10 @@ list(APPEND _core_source_files
     TerminalSessionManager.cpp
     WindowController.cpp
     helper.cpp
-    mux/AttachController.cpp
-    mux/MuxController.cpp
-    mux/RemoteLayout.cpp
-    mux/TmuxController.cpp
+    remote/NativeController.cpp
+    remote/RemoteController.cpp
+    remote/RemoteLayout.cpp
+    remote/TmuxController.cpp
 )
 
 if(WIN32)
@@ -358,8 +358,8 @@ if(OPENBSD)
         add_executable(contour_gui_test
             test/test_main.cpp
             test/Actions_test.cpp
-            test/AttachController_test.cpp
-            test/MuxController_test.cpp
+            test/NativeController_test.cpp
+            test/RemoteController_test.cpp
             test/TmuxController_test.cpp
             test/AudioNote_test.cpp
             test/BenignQtMessages_test.cpp

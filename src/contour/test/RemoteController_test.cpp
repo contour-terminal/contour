@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/mux/MuxController.h>
-#include <contour/mux/MuxLoopThread.h>
+#include <contour/remote/ReactorThread.h>
+#include <contour/remote/RemoteController.h>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -112,7 +112,7 @@ TEST_CASE("stopMuxReactor tears the reactor down once and ignores a second stop"
 {
     auto mutex = std::mutex {};
     auto stopped = false;
-    auto reactor = contour::MuxLoopThread {};
+    auto reactor = contour::ReactorThread {};
 
     // A root task that parks forever, so only requestStop can end it.
     reactor.start([](net::EventLoop* loop) -> coro::Task<void> {
