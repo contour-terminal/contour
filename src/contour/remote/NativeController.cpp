@@ -47,10 +47,17 @@ coro::Task<void> NativeController::runClient(net::EventLoop* loop)
         co_return;
     }
 
-    auto client = NativeClient { *loop, std::move(*socket), token };
-    client.setUpdateHandler(
-        [this](RemoteScreen const& screen, vthost::proto::Delta const& delta) { onUpdate(screen, delta); });
-    client.setLayoutHandler([this](vthost::proto::LayoutState const& layout) { onLayout(layout); });
+    auto client = NativeClient {
+        *loop,
+        std::move(*socket),
+        token,
+        NativeClient::UpdateHandler { [this](RemoteScreen const& screen, vthost::proto::Delta const& delta) {
+            onUpdate(screen, delta);
+        } },
+        NativeClient::ImageHandler {},
+        NativeClient::SessionEventHandler {},
+        NativeClient::LayoutHandler { [this](vthost::proto::LayoutState const& layout) { onLayout(layout); } }
+    };
     {
         auto const lock = std::lock_guard { _mutex };
         _client = &client;

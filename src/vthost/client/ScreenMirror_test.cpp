@@ -82,7 +82,7 @@ struct MirrorHarness
     net::testing::SocketPair pair = *net::testing::makeSocketPair(loop);
     std::unique_ptr<NativeSession> server =
         std::make_unique<NativeSession>(loop, host, std::move(pair.first));
-    std::unique_ptr<NativeClient> client = std::make_unique<NativeClient>(loop, std::move(pair.second));
+    std::unique_ptr<NativeClient> client;
 
     RecordingEvents mirrorEvents;
     std::unique_ptr<vtbackend::Terminal> mirror;
@@ -95,18 +95,26 @@ struct MirrorHarness
                                                        std::make_unique<vtpty::MockPty>(settings.pageSize),
                                                        std::move(settings),
                                                        std::chrono::steady_clock::now());
-        client->setUpdateHandler(
-            [this](vthost::client::RemoteScreen const& screen, proto::Delta const& delta) {
-                mirror->writeToScreen(reserializer.apply(screen, delta));
-            });
-        client->setImageHandler([this](vthost::client::RemoteScreen const& screen, uint32_t imageId) {
-            mirror->writeToScreen(reserializer.applyImage(screen, imageId));
-        });
-        client->setSessionEventHandler(
-            [this](vthost::client::RemoteScreen const& screen, proto::SessionEvent const& event) {
-                std::ignore = screen;
-                mirror->writeToScreen(ScreenMirror::applyEvent(event));
-            });
+        // Construct client after mirror — the handler lambdas capture `this` and
+        // access `mirror`, so mirror must be ready first.
+        client = std::make_unique<NativeClient>(
+            loop,
+            std::move(pair.second),
+            std::string {},
+            NativeClient::UpdateHandler {
+                [this](vthost::client::RemoteScreen const& screen, proto::Delta const& delta) {
+                    mirror->writeToScreen(reserializer.apply(screen, delta));
+                } },
+            NativeClient::ImageHandler {
+                [this](vthost::client::RemoteScreen const& screen, uint32_t imageId) {
+                    mirror->writeToScreen(reserializer.applyImage(screen, imageId));
+                } },
+            NativeClient::SessionEventHandler {
+                [this](vthost::client::RemoteScreen const& screen, proto::SessionEvent const& event) {
+                    std::ignore = screen;
+                    mirror->writeToScreen(ScreenMirror::applyEvent(event));
+                } },
+            NativeClient::LayoutHandler {});
         // Deliver the host's stream fan-out (bell / notify / clipboard, and screen
         // updates) to the session, exactly as the daemon's serveNativeClient does —
         // so the transient-event path (Terminal::Events -> host -> NativeSession) is

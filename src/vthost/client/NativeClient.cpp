@@ -165,10 +165,20 @@ std::string RemoteScreen::viewportText() const
 // ---------------------------------------------------------------------------
 // NativeClient
 
-NativeClient::NativeClient(net::EventLoop& loop, std::unique_ptr<net::ISocket> connection, std::string token):
+NativeClient::NativeClient(net::EventLoop& loop,
+                           std::unique_ptr<net::ISocket> connection,
+                           std::string token,
+                           UpdateHandler onUpdate,
+                           ImageHandler onImage,
+                           SessionEventHandler onSessionEvent,
+                           LayoutHandler onLayout):
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024),
-    _token(std::move(token))
+    _token(std::move(token)),
+    _onUpdate(std::move(onUpdate)),
+    _onImage(std::move(onImage)),
+    _onSessionEvent(std::move(onSessionEvent)),
+    _onLayout(std::move(onLayout))
 {
 }
 

@@ -112,45 +112,51 @@ struct RemoteScreen
 class NativeClient final
 {
   public:
+    /// Handler invoked after every applied Delta with the updated screen.
+    using UpdateHandler = std::function<void(RemoteScreen const&, proto::Delta const&)>;
+    /// Handler invoked when an image's pixels arrive (ImageData) or the image is
+    /// dropped (ImageGone).
+    using ImageHandler = std::function<void(RemoteScreen const&, uint32_t imageId)>;
+    /// Handler invoked when a transient session event (bell / desktop notification /
+    /// OSC 52 clipboard write) arrives.
+    using SessionEventHandler = std::function<void(RemoteScreen const&, proto::SessionEvent const&)>;
+    /// Handler invoked when the daemon's tab/pane layout arrives.
+    using LayoutHandler = std::function<void(proto::LayoutState const&)>;
+
     /// @param loop The event loop everything runs on.
     /// @param connection The server transport (owned).
     /// @param token The preshared auth token sent in the ClientHello (empty over
     ///        AF_UNIX, where the socket permissions are the gate).
-    NativeClient(net::EventLoop& loop, std::unique_ptr<net::ISocket> connection, std::string token = {});
+    /// @param onUpdate Invoked after every applied Delta with the updated screen.
+    /// @param onImage Invoked when an image's pixels arrive (ImageData) or the
+    ///        image is dropped (ImageGone).
+    /// @param onSessionEvent Invoked when a transient session event (bell /
+    ///        desktop notification / OSC 52 clipboard write) arrives.
+    /// @param onLayout Invoked when the daemon's tab/pane layout arrives.
+    NativeClient(net::EventLoop& loop,
+                 std::unique_ptr<net::ISocket> connection,
+                 std::string token,
+                 UpdateHandler onUpdate,
+                 ImageHandler onImage,
+                 SessionEventHandler onSessionEvent,
+                 LayoutHandler onLayout);
 
     /// The connection flow: sends ClientHello, mirrors server pushes until the
     /// server disconnects or detach() is called.
     [[nodiscard]] coro::Task<void> run();
 
-    /// Invoked after every applied Delta with the updated screen.
-    void setUpdateHandler(std::function<void(RemoteScreen const&, proto::Delta const&)> handler)
-    {
-        _onUpdate = std::move(handler);
-    }
+    /// Replaces the update handler at runtime. The constructor is the primary
+    /// configuration path; use this only when a handler must be swapped mid-life.
+    void setUpdateHandler(UpdateHandler handler) { _onUpdate = std::move(handler); }
 
-    /// Invoked when an image's pixels arrive (ImageData) or the image is dropped
-    /// (ImageGone) for @p imageId in @p screen — so the frontend can repaint the
-    /// cells referencing it. After a drop, `screen.imageData(imageId)` is null.
-    void setImageHandler(std::function<void(RemoteScreen const&, uint32_t imageId)> handler)
-    {
-        _onImage = std::move(handler);
-    }
+    /// Replaces the image handler at runtime.
+    void setImageHandler(ImageHandler handler) { _onImage = std::move(handler); }
 
-    /// Invoked when a transient session event (bell / desktop notification /
-    /// OSC 52 clipboard write) arrives for @p screen's session — the frontend
-    /// re-emits the matching VT into its mirror terminal or acts on it directly.
-    void setSessionEventHandler(std::function<void(RemoteScreen const&, proto::SessionEvent const&)> handler)
-    {
-        _onSessionEvent = std::move(handler);
-    }
+    /// Replaces the session-event handler at runtime.
+    void setSessionEventHandler(SessionEventHandler handler) { _onSessionEvent = std::move(handler); }
 
-    /// Invoked when the daemon's tab/pane layout arrives — a GUI frontend
-    /// reconstructs its tabs and split trees from it. Pushed on attach and on
-    /// every model change. (A thin single-session client may ignore it.)
-    void setLayoutHandler(std::function<void(proto::LayoutState const&)> handler)
-    {
-        _onLayout = std::move(handler);
-    }
+    /// Replaces the layout handler at runtime.
+    void setLayoutHandler(LayoutHandler handler) { _onLayout = std::move(handler); }
 
     /// Sends keyboard/paste bytes to @p session's PTY.
     void sendInput(uint64_t session, std::string_view bytes);
@@ -192,10 +198,10 @@ class NativeClient final
     std::unique_ptr<net::ISocket> _connection;
     net::WriteQueue _writer;
     std::string _token; ///< Sent in the ClientHello to authenticate on TCP.
-    std::function<void(RemoteScreen const&, proto::Delta const&)> _onUpdate;
-    std::function<void(RemoteScreen const&, uint32_t)> _onImage;
-    std::function<void(RemoteScreen const&, proto::SessionEvent const&)> _onSessionEvent;
-    std::function<void(proto::LayoutState const&)> _onLayout;
+    UpdateHandler _onUpdate;
+    ImageHandler _onImage;
+    SessionEventHandler _onSessionEvent;
+    LayoutHandler _onLayout;
     std::map<uint64_t, RemoteScreen> _screens;
     /// Outstanding image fetches: request serial → (session, imageId). The reply
     /// carries no session, so the serial is what routes it to the right screen.
