@@ -371,19 +371,19 @@ std::unique_ptr<vtpty::Pty> NativeController::createPty(std::optional<std::strin
 
     auto pty = std::make_unique<SelfUnbindingChannelPty>(
         vtpty::PageSize { vtpty::LineCount(lines), vtpty::ColumnCount(columns) },
+        [this, session](std::string_view bytes) {
+            _reactor.post([this, session, copy = std::string { bytes }] {
+                if (_client != nullptr)
+                    _client->sendInput(session, copy);
+            });
+        },
+        [this](vtpty::PageSize cells, std::optional<vtpty::ImageSize> /*pixels*/) {
+            _reactor.post([this, cells] {
+                if (_client != nullptr)
+                    _client->requestResize(unbox<uint32_t>(cells.columns), unbox<uint32_t>(cells.lines));
+            });
+        },
         [this, session] { unbind(session); });
-    pty->setWriteSink([this, session](std::string_view bytes) {
-        _reactor.post([this, session, copy = std::string { bytes }] {
-            if (_client != nullptr)
-                _client->sendInput(session, copy);
-        });
-    });
-    pty->setResizeSink([this](vtpty::PageSize cells, std::optional<vtpty::ImageSize> /*pixels*/) {
-        _reactor.post([this, cells] {
-            if (_client != nullptr)
-                _client->requestResize(unbox<uint32_t>(cells.columns), unbox<uint32_t>(cells.lines));
-        });
-    });
     _bindings[session].pty = pty.get();
     lock.unlock();
 

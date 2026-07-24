@@ -46,10 +46,18 @@ class SelfUnbindingChannelPty final: public vtpty::ChannelPty
 {
   public:
     /// @param size The initial page size.
+    /// @param writeSink Receives every chunk the terminal writes (input), or
+    ///        empty to buffer writes.
+    /// @param resizeSink Receives resize requests, or empty.
     /// @param onDestroy Invoked once from the destructor (e.g. controller.unbind(id)).
-    SelfUnbindingChannelPty(vtpty::PageSize size, std::function<void()> onDestroy):
+    SelfUnbindingChannelPty(vtpty::PageSize size,
+                            vtpty::ChannelPty::WriteSink writeSink,
+                            vtpty::ChannelPty::ResizeSink resizeSink,
+                            std::function<void()> onDestroy):
         vtpty::ChannelPty(size), _onDestroy(std::move(onDestroy))
     {
+        setWriteSink(std::move(writeSink));
+        setResizeSink(std::move(resizeSink));
     }
 
     ~SelfUnbindingChannelPty() override

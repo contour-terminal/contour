@@ -99,9 +99,11 @@ TEST_CASE("SelfUnbindingChannelPty runs its on-destroy callback exactly once", "
 {
     auto unbinds = 0;
     {
-        auto pty = contour::SelfUnbindingChannelPty {
-            vtpty::PageSize { vtpty::LineCount(12), vtpty::ColumnCount(40) }, [&unbinds] { ++unbinds; }
-        };
+        auto pty = contour::SelfUnbindingChannelPty { vtpty::PageSize { vtpty::LineCount(12),
+                                                                        vtpty::ColumnCount(40) },
+                                                      {}, // write sink — unused by this test
+                                                      {}, // resize sink — unused by this test
+                                                      [&unbinds] { ++unbinds; } };
         CHECK(pty.pageSize() == vtpty::PageSize { vtpty::LineCount(12), vtpty::ColumnCount(40) });
         CHECK(unbinds == 0); // not until the terminal destroys it
     }

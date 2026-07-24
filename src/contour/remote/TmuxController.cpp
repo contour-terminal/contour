@@ -464,14 +464,12 @@ std::unique_ptr<vtpty::Pty> TmuxController::createPty(std::optional<std::string>
 
     auto pty = std::make_unique<SelfUnbindingChannelPty>(
         vtpty::PageSize { vtpty::LineCount(record.lines), vtpty::ColumnCount(record.columns) },
-        [this, pane = record.pane] { unbindPane(pane); });
-    pty->setWriteSink([this, pane = record.pane](std::string_view bytes) {
-        _reactor.post([this, pane, copy = std::string { bytes }] {
-            if (_gateway != nullptr)
-                _gateway->sendRawInput(pane, copy);
-        });
-    });
-    pty->setResizeSink(
+        [this, pane = record.pane](std::string_view bytes) {
+            _reactor.post([this, pane, copy = std::string { bytes }] {
+                if (_gateway != nullptr)
+                    _gateway->sendRawInput(pane, copy);
+            });
+        },
         [this, pane = record.pane](vtpty::PageSize cells, std::optional<vtpty::ImageSize> /*pixels*/) {
             _reactor.post([this, pane, cells] {
                 if (_gateway == nullptr)
@@ -484,7 +482,8 @@ std::unique_ptr<vtpty::Pty> TmuxController::createPty(std::optional<std::string>
                         _gateway->sendCommand(
                             std::format("refresh-client -C {}x{}", unbox(cells.columns), unbox(cells.lines)));
             });
-        });
+        },
+        [this, pane = record.pane] { unbindPane(pane); });
     _ptys[record.pane] = pty.get();
     auto* feed = [&]() -> PaneFeed* {
         auto const it = _feeds.find(record.pane);
