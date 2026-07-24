@@ -51,6 +51,13 @@ class SessionFactory
   public:
     virtual ~SessionFactory() = default;
 
+    /// Whether this factory can back a new session right now. Local factories
+    /// always can; an attach-mode factory can only hand out PTYs for remote
+    /// sessions that exist but have no local tab yet — the manager's creation
+    /// entry points (new tab, split, layout) no-op while this is false, so a
+    /// "+" click inside a mirror window cannot spawn a stray local shell.
+    [[nodiscard]] virtual bool canCreateSession() const noexcept { return true; }
+
     /// Creates a PTY for a new session, optionally inheriting @p cwd as its working directory and
     /// @p pageSize as its initial grid size.
     ///
@@ -67,6 +74,35 @@ class SessionFactory
         std::optional<vtbackend::PageSize> pageSize = std::nullopt,
         std::optional<vtpty::Process::ExecInfo> commandOverride = std::nullopt,
         std::optional<std::string> profileName = std::nullopt) = 0;
+
+    /// Attach mode: authors a new tab on the DAEMON rather than creating one
+    /// locally — the daemon honors it and re-pushes its layout, which reconciles
+    /// into a local tab (B3-Qt). A local factory does nothing and returns false, so
+    /// the manager creates the tab itself.
+    /// @return true if the request was routed to the daemon (the manager must NOT
+    ///         also create a local tab); false for a local factory.
+    [[nodiscard]] virtual bool requestRemoteTab() { return false; }
+
+    /// Attach mode: authors a split of the pane backed by @p actingPty on the
+    /// DAEMON (@p vertical orientation) rather than splitting locally — the daemon's
+    /// layout re-push reconciles the new pane in (B3-Qt). A local factory returns
+    /// false so the manager performs the split itself.
+    /// @param actingPty The pty of the pane to split.
+    /// @param vertical  The split orientation.
+    /// @return true if routed to the daemon; false for a local factory.
+    [[nodiscard]] virtual bool requestRemoteSplit(vtpty::Pty const* actingPty, bool vertical)
+    {
+        (void) actingPty;
+        (void) vertical;
+        return false;
+    }
+
+    /// Attach mode: authors a new window on the DAEMON rather than opening a purely
+    /// local one — the daemon honors it and pushes the new window's layout, which the
+    /// GUI maps onto a fresh OS window (B4). A local factory returns false so the app
+    /// opens an ordinary window.
+    /// @return true if routed to the daemon; false for a local factory.
+    [[nodiscard]] virtual bool requestRemoteWindow() { return false; }
 };
 
 /// The production SessionFactory: consults the app's active profile and produces either a local

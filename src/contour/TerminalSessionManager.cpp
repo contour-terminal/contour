@@ -46,20 +46,20 @@ TerminalSessionManager::TerminalSessionManager(ContourGuiApp& app,
     _earlyExitThreshold {}
 {
 
-    // The model allocates a fresh vtmux session id whenever it needs one (a new tab or a new split
+    // The model allocates a fresh vtworkspace session id whenever it needs one (a new tab or a new split
     // pane). For tabs we pre-mint the id in createSessionInBackground() and hand it back here; for
     // splits (Phase 2) there is no pre-minted id, so we mint a fresh one. Either way the manager
     // then maps the id to a backing TerminalSession.
-    _model = std::make_unique<vtmux::SessionModel>(*this, [this]() -> vtmux::SessionId {
+    _model = std::make_unique<vtworkspace::SessionModel>(*this, [this]() -> vtworkspace::SessionId {
         if (_pendingSessionId.has_value())
         {
             auto const id = *_pendingSessionId;
             _pendingSessionId.reset();
             return id;
         }
-        return vtmux::SessionId { _nextSessionId++ };
+        return vtworkspace::SessionId { _nextSessionId++ };
     });
-    _model->setSessionTitleResolver([this](vtmux::SessionId id) -> std::string {
+    _model->setSessionTitleResolver([this](vtworkspace::SessionId id) -> std::string {
         if (auto* session = sessionForId(id))
             if (auto name = session->name())
                 return *name;
@@ -67,13 +67,13 @@ TerminalSessionManager::TerminalSessionManager(ContourGuiApp& app,
     });
 }
 
-TerminalSession* TerminalSessionManager::sessionForId(vtmux::SessionId id) const noexcept
+TerminalSession* TerminalSessionManager::sessionForId(vtworkspace::SessionId id) const noexcept
 {
     auto const it = _sessionsById.find(id.value);
     return it != _sessionsById.end() ? it->second : nullptr;
 }
 
-int TerminalSessionManager::rowOfTab(vtmux::TabId tab) const noexcept
+int TerminalSessionManager::rowOfTab(vtworkspace::TabId tab) const noexcept
 {
     // Window-agnostic: resolve the tab's OWNING window through the model, so the row is correct for
     // any tab of any OS window.
@@ -83,7 +83,7 @@ int TerminalSessionManager::rowOfTab(vtmux::TabId tab) const noexcept
 
 WindowController* TerminalSessionManager::createWindowController()
 {
-    // Every OS window gets its own vtmux::Window; the controller adapts exactly that window (all its
+    // Every OS window gets its own vtworkspace::Window; the controller adapts exactly that window (all its
     // reads and writes are keyed by the WindowId).
     auto* window = _model->createWindow();
     auto* controller = new WindowController(*this, window->id());
@@ -96,7 +96,7 @@ WindowController* TerminalSessionManager::createWindowController()
     return controller;
 }
 
-WindowController* TerminalSessionManager::controllerFor(vtmux::WindowId window) const noexcept
+WindowController* TerminalSessionManager::controllerFor(vtworkspace::WindowId window) const noexcept
 {
     auto const it = _controllersByWindow.find(window.value);
     return it != _controllersByWindow.end() ? it->second : nullptr;
@@ -120,10 +120,16 @@ WindowController* TerminalSessionManager::controllerForDisplay(
 }
 
 TerminalSession* TerminalSessionManager::createSessionInBackground(
-    vtmux::WindowId window, std::optional<std::string> const& profileName)
+    vtworkspace::WindowId window, std::optional<std::string> const& profileName)
 {
     // TODO: Remove dependency on app-knowledge and pass shell / terminal-size instead.
     // The GuiApp *or* (Global)Config could be made a global to be accessible from within QML.
+
+    if (!_sessionFactory.canCreateSession())
+    {
+        managerLog()("Refusing to create a session: the session factory cannot back one right now.");
+        return nullptr;
+    }
 
     if (!_focusedWindow)
     {
@@ -156,10 +162,10 @@ TerminalSession* TerminalSessionManager::createSessionInBackground(
 
     // Pre-mint the session id so the model's allocator (see ctor) hands it back, keeping the model
     // tab/pane and the Qt session on one id.
-    auto const sessionId = vtmux::SessionId { _nextSessionId++ };
+    auto const sessionId = vtworkspace::SessionId { _nextSessionId++ };
     auto* session = createBackingSession(sessionId, ptyPath, pageSize, std::nullopt, profileName);
 
-    // Mirror this new session into the vtmux model as a new single-pane tab.
+    // Mirror this new session into the vtworkspace model as a new single-pane tab.
     if (auto* tab = _model->createTab(window))
         _tabBySession[sessionId.value] = tab->id();
 
@@ -167,12 +173,23 @@ TerminalSession* TerminalSessionManager::createSessionInBackground(
 }
 
 TerminalSession* TerminalSessionManager::createBackingSession(
-    vtmux::SessionId sessionId,
+    vtworkspace::SessionId sessionId,
     std::optional<std::string> cwd,
     std::optional<vtbackend::PageSize> pageSize,
     std::optional<vtpty::Process::ExecInfo> const& commandOverride,
     std::optional<std::string> const& profileName)
 {
+    // The chokepoint guard: every creation path funnels through here, so a
+    // future entry point that forgets its own fail-fast check still cannot
+    // mint a backing pty the factory refuses (e.g. a local shell inside an
+    // attach-mode mirror window). The entry points keep their earlier checks
+    // for whole-operation fail-fast semantics.
+    if (!_sessionFactory.canCreateSession())
+    {
+        managerLog()("Refusing to create a backing session: the factory cannot back one right now.");
+        return nullptr;
+    }
+
     // The command this session ACTUALLY runs: an explicit override wins; otherwise, a session on
     // the app-default profile inherits the CLI-verbatim command (`contour terminal PROGRAM ...`),
     // which mutated that profile's shell for the whole process — so SaveLayout can capture it.
@@ -266,7 +283,7 @@ void TerminalSessionManager::clearFocusIfCurrent(TerminalSession* session)
         setFocusedSession(nullptr);
 }
 
-void TerminalSessionManager::setFocusedWindow(vtmux::WindowId window)
+void TerminalSessionManager::setFocusedWindow(vtworkspace::WindowId window)
 {
     // Taking ownership satisfies syncFocusForWindow's gate by construction, so the re-pointing half is
     // that one implementation rather than a second copy of it.
@@ -274,7 +291,7 @@ void TerminalSessionManager::setFocusedWindow(vtmux::WindowId window)
     syncFocusForWindow(controllerFor(window));
 }
 
-void TerminalSessionManager::clearFocusedWindow(vtmux::WindowId window)
+void TerminalSessionManager::clearFocusedWindow(vtworkspace::WindowId window)
 {
     if (_focusedWindow != window) // guarded like clearFocusIfCurrent
         return;
@@ -293,7 +310,7 @@ void TerminalSessionManager::syncFocusForWindow(WindowController* controller)
         setFocusedSession(controller->activeSession());
 }
 
-TerminalSession* TerminalSessionManager::createSession(vtmux::WindowId window,
+TerminalSession* TerminalSessionManager::createSession(vtworkspace::WindowId window,
                                                        std::optional<std::string> const& profileName)
 {
     // Just create the backing session + its model tab. The model's activeTabChanged fires the owning
@@ -316,21 +333,33 @@ void TerminalSessionManager::closeAllTabs(TerminalSession* acting)
         controller->closeWindow();
 }
 
-bool TerminalSessionManager::applyLayoutToWindow(vtmux::WindowId window,
-                                                 config::Layout const& layout,
-                                                 std::optional<vtbackend::PageSize> pageSize)
+bool TerminalSessionManager::applyLayoutToWindow(
+    vtworkspace::WindowId window,
+    config::Layout const& layout,
+    std::optional<vtbackend::PageSize> pageSize,
+    std::function<void(config::LayoutPane const&)> const& beforeLeafSeed)
 {
     if (layout.tabs.empty())
     {
         managerLog()("Layout has no tabs; nothing to apply.");
         return false;
     }
+    if (!_sessionFactory.canCreateSession())
+    {
+        managerLog()("Refusing to apply a layout: the session factory cannot back new sessions right now.");
+        return false;
+    }
     for (auto const& tabSpec: layout.tabs)
     {
         // The seeder stages a backing session for each pane right before the model allocates it,
         // exactly like createBackingSession's use in splitActivePane/createSessionInBackground.
-        auto seeder = [&](config::LayoutPane const& leaf) {
-            auto const sessionId = vtmux::SessionId { _nextSessionId++ };
+        auto seeder = [&](config::LayoutPane const& leaf) -> bool {
+            // Attach mode binds the pane about to be born to a specific remote
+            // session here, before its backing session (and thus its ChannelPty) is
+            // created — see NativeController.
+            if (beforeLeafSeed)
+                beforeLeafSeed(leaf);
+            auto const sessionId = vtworkspace::SessionId { _nextSessionId++ };
             // A command override ONLY when the pane actually names a program to run. A pane that
             // just picks a directory still runs the profile's shell — it travels through `cwd`,
             // the same channel every other new tab/split uses. Engaging an override with an empty
@@ -349,9 +378,15 @@ bool TerminalSessionManager::applyLayoutToWindow(vtmux::WindowId window,
                 managerLog()("Layout references unknown profile '{}'; using window profile.", *profileName);
                 profileName.reset();
             }
-            std::optional<std::string> const cwd =
-                leaf.directory ? std::optional { leaf.directory->string() } : std::nullopt;
-            createBackingSession(sessionId, cwd, pageSize, command, profileName);
+            // Narrow the layout directory to the cwd string HERE (apply-time), not at config parse:
+            // on Windows path::string() throws for a path outside the active code page, and doing it
+            // at parse would fail the whole config rather than just this pane's launch.
+            auto cwd =
+                leaf.directory ? std::optional { leaf.directory->string() } : std::optional<std::string> {};
+            // Report whether the backing session was actually created: a nullptr (the factory
+            // refused, e.g. an attach-mode pool that ran dry) stops the realizer before it
+            // allocates a pane with no session behind it — the same guard the split path uses.
+            return createBackingSession(sessionId, std::move(cwd), pageSize, command, profileName) != nullptr;
         };
 
         auto* modelTab = realizeLayoutTab(*_model, window, tabSpec, seeder);
@@ -359,7 +394,7 @@ bool TerminalSessionManager::applyLayoutToWindow(vtmux::WindowId window,
         if (modelTab != nullptr)
         {
             // Map every leaf session in the new tab to this tab id (mirrors createSessionInBackground).
-            modelTab->rootPane()->walkTree([&](vtmux::Pane& p) {
+            modelTab->rootPane()->walkTree([&](vtworkspace::Pane& p) {
                 if (p.isLeaf())
                     _tabBySession[p.session().value] = modelTab->id();
             });
@@ -551,7 +586,7 @@ void TerminalSessionManager::recordCommand(std::string const& id)
     }
 }
 
-std::expected<void, LayoutSaveError> TerminalSessionManager::saveWindowLayout(vtmux::WindowId windowId,
+std::expected<void, LayoutSaveError> TerminalSessionManager::saveWindowLayout(vtworkspace::WindowId windowId,
                                                                               std::string const& name)
 {
     if (name.empty())
@@ -561,7 +596,7 @@ std::expected<void, LayoutSaveError> TerminalSessionManager::saveWindowLayout(vt
     if (window == nullptr)
         return std::unexpected(LayoutSaveError::UnknownWindow);
 
-    auto const resolve = [this](vtmux::SessionId id) {
+    auto const resolve = [this](vtworkspace::SessionId id) {
         PaneLeafData data;
         if (auto* session = sessionForId(id))
         {
@@ -705,11 +740,11 @@ void TerminalSessionManager::switchToTab(int position, TerminalSession* acting)
         activateModelTabByRow(win->id(), position - 1);
 }
 
-void TerminalSessionManager::removeWindowController(vtmux::WindowId windowId)
+void TerminalSessionManager::removeWindowController(vtworkspace::WindowId windowId)
 {
     // Drop the controller for a closed OS window. Real per-window identity: "last window" is
     // _controllersByWindow.size() == 1 (the manager's authoritative window registry), NOT a scan of
-    // display keys. The controller has already removed its vtmux::Window, pruned its proxy tree and
+    // display keys. The controller has already removed its vtworkspace::Window, pruned its proxy tree and
     // terminated its own sessions (WindowController::closeWindow); here we just unregister + delete it,
     // and — if this was the last window — clear any residual shared session registries so no stale entry
     // outlives the process's last window.
@@ -758,7 +793,7 @@ void TerminalSessionManager::closeTab(TerminalSession* acting)
     terminateSessions(sessionsInTab(tab));
 }
 
-void TerminalSessionManager::moveTabByTab(vtmux::Tab* tab, int targetRow)
+void TerminalSessionManager::moveTabByTab(vtworkspace::Tab* tab, int targetRow)
 {
     // The single move mechanism: reorder the tab through the authoritative model — within the tab's
     // OWNING window — so the tab strip and status line (both model-driven) actually move, then
@@ -827,7 +862,7 @@ void TerminalSessionManager::removeSession(TerminalSession& thatSession)
     if (_focusedSession == &thatSession)
         _focusedSession = nullptr;
 
-    // Mirror the removal into the vtmux model FIRST, while the registry still resolves this session
+    // Mirror the removal into the vtworkspace model FIRST, while the registry still resolves this session
     // to its tab/leaf, then erase the local bookkeeping. A session is one *pane*; closing it must
     // close only that pane. closePane() absorbs the surviving sibling when the tab still has other
     // panes and only tears down the whole tab (firing tabClosed -> beginRemoveRows) when this was
@@ -850,13 +885,13 @@ void TerminalSessionManager::updateColorPreference(vtbackend::ColorPreference co
         session->updateColorPreference(preference);
 }
 
-vtmux::Tab* TerminalSessionManager::tabAtRow(vtmux::WindowId window, int index) const noexcept
+vtworkspace::Tab* TerminalSessionManager::tabAtRow(vtworkspace::WindowId window, int index) const noexcept
 {
     auto* win = _model->window(window);
     return win != nullptr ? win->tabAt(index) : nullptr;
 }
 
-vtmux::Tab* TerminalSessionManager::findTabHostingSession(vtmux::SessionId session) const noexcept
+vtworkspace::Tab* TerminalSessionManager::findTabHostingSession(vtworkspace::SessionId session) const noexcept
 {
     // O(1) via the SessionId -> TabId index.
     if (auto const it = _tabBySession.find(session.value); it != _tabBySession.end())
@@ -864,7 +899,7 @@ vtmux::Tab* TerminalSessionManager::findTabHostingSession(vtmux::SessionId sessi
     return nullptr;
 }
 
-// {{{ vtmux::ModelEvents
+// {{{ vtworkspace::ModelEvents
 //
 // Stage 3 of the per-window refactor: the manager hosts the SessionModel and implements ModelEvents, but
 // the QML tab strip / pane tree bind to the per-window WindowController. So each handler is now a pure
@@ -873,45 +908,45 @@ vtmux::Tab* TerminalSessionManager::findTabHostingSession(vtmux::SessionId sessi
 // its own. The manager's own QAbstractListModel emissions and proxy tree — which Stage 2 kept as a harmless
 // unobserved superset — are gone; the status-line fan-out (updateStatusLine) still lives here until Stage 4
 // moves it onto the controllers.
-void TerminalSessionManager::tabAboutToBeAdded(vtmux::WindowId window, int index)
+void TerminalSessionManager::tabAboutToBeAdded(vtworkspace::WindowId window, int index)
 {
     if (auto* c = controllerFor(window))
         c->onTabAboutToBeAdded(index);
 }
 
-void TerminalSessionManager::tabAdded(vtmux::WindowId window, vtmux::TabId, int index)
+void TerminalSessionManager::tabAdded(vtworkspace::WindowId window, vtworkspace::TabId, int index)
 {
     if (auto* c = controllerFor(window))
         c->onTabAdded(index);
 }
 
-void TerminalSessionManager::tabAboutToBeRemoved(vtmux::WindowId window, int index)
+void TerminalSessionManager::tabAboutToBeRemoved(vtworkspace::WindowId window, int index)
 {
     if (auto* c = controllerFor(window))
         c->onTabAboutToBeRemoved(index);
 }
 
-void TerminalSessionManager::tabClosed(vtmux::WindowId window, vtmux::TabId, int)
+void TerminalSessionManager::tabClosed(vtworkspace::WindowId window, vtworkspace::TabId, int)
 {
     if (auto* c = controllerFor(window))
         c->onTabClosed();
 }
 
-void TerminalSessionManager::tabAboutToBeMoved(vtmux::WindowId window, int fromIndex, int toIndex)
+void TerminalSessionManager::tabAboutToBeMoved(vtworkspace::WindowId window, int fromIndex, int toIndex)
 {
     if (auto* c = controllerFor(window))
         c->onTabAboutToBeMoved(fromIndex, toIndex);
 }
 
-void TerminalSessionManager::tabMoved(vtmux::WindowId window, vtmux::TabId, int, int)
+void TerminalSessionManager::tabMoved(vtworkspace::WindowId window, vtworkspace::TabId, int, int)
 {
     if (auto* c = controllerFor(window))
         c->onTabMoved();
 }
 
-void TerminalSessionManager::tabAboutToBeMovedToWindow(vtmux::WindowId from,
+void TerminalSessionManager::tabAboutToBeMovedToWindow(vtworkspace::WindowId from,
                                                        int fromIndex,
-                                                       vtmux::WindowId to,
+                                                       vtworkspace::WindowId to,
                                                        int toIndex)
 {
     // Qt has no cross-model "move rows"; a transplant is a remove on the source and an insert on the
@@ -923,7 +958,7 @@ void TerminalSessionManager::tabAboutToBeMovedToWindow(vtmux::WindowId from,
 }
 
 void TerminalSessionManager::tabMovedToWindow(
-    vtmux::WindowId from, vtmux::TabId, int, vtmux::WindowId to, int toIndex)
+    vtworkspace::WindowId from, vtworkspace::TabId, int, vtworkspace::WindowId to, int toIndex)
 {
     // Close-half on the source completes its beginRemoveRows; add-half on the destination completes its
     // beginInsertRows (bracketed in tabAboutToBeMovedToWindow with the SAME toIndex). onTabAdded ignores
@@ -934,7 +969,7 @@ void TerminalSessionManager::tabMovedToWindow(
         dst->onTabAdded(toIndex);
 }
 
-void TerminalSessionManager::activeTabChanged(vtmux::WindowId window, vtmux::TabId, int)
+void TerminalSessionManager::activeTabChanged(vtworkspace::WindowId window, vtworkspace::TabId, int)
 {
     if (auto* c = controllerFor(window))
     {
@@ -945,7 +980,7 @@ void TerminalSessionManager::activeTabChanged(vtmux::WindowId window, vtmux::Tab
     }
 }
 
-void TerminalSessionManager::paneSplit(vtmux::TabId tab, vtmux::PaneId, vtmux::PaneId)
+void TerminalSessionManager::paneSplit(vtworkspace::TabId tab, vtworkspace::PaneId, vtworkspace::PaneId)
 {
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
     {
@@ -955,7 +990,7 @@ void TerminalSessionManager::paneSplit(vtmux::TabId tab, vtmux::PaneId, vtmux::P
     }
 }
 
-void TerminalSessionManager::paneClosed(vtmux::TabId tab, vtmux::PaneId, vtmux::PaneId)
+void TerminalSessionManager::paneClosed(vtworkspace::TabId tab, vtworkspace::PaneId, vtworkspace::PaneId)
 {
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
     {
@@ -965,7 +1000,7 @@ void TerminalSessionManager::paneClosed(vtmux::TabId tab, vtmux::PaneId, vtmux::
     }
 }
 
-void TerminalSessionManager::activePaneChanged(vtmux::TabId tab, vtmux::PaneId)
+void TerminalSessionManager::activePaneChanged(vtworkspace::TabId tab, vtworkspace::PaneId)
 {
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
     {
@@ -977,13 +1012,15 @@ void TerminalSessionManager::activePaneChanged(vtmux::TabId tab, vtmux::PaneId)
     }
 }
 
-void TerminalSessionManager::paneRatioChanged(vtmux::TabId tab, vtmux::PaneId splitNode, double)
+void TerminalSessionManager::paneRatioChanged(vtworkspace::TabId tab, vtworkspace::PaneId splitNode, double)
 {
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
         c->notifyRatioChanged(splitNode);
 }
 
-void TerminalSessionManager::paneOrientationChanged(vtmux::TabId tab, vtmux::PaneId, vtmux::SplitState)
+void TerminalSessionManager::paneOrientationChanged(vtworkspace::TabId tab,
+                                                    vtworkspace::PaneId,
+                                                    vtworkspace::SplitState)
 {
     // Rebuild the tab's proxy tree: the coarse refresh re-emits every proxy's `changed` (which carries
     // `orientation`), so PaneNode.qml re-reads the flipped axis and re-lays out its SplitView. Same
@@ -992,7 +1029,7 @@ void TerminalSessionManager::paneOrientationChanged(vtmux::TabId tab, vtmux::Pan
         c->rebuildActiveTabPaneProxies();
 }
 
-void TerminalSessionManager::paneSwapped(vtmux::TabId tab, vtmux::PaneId, vtmux::PaneId)
+void TerminalSessionManager::paneSwapped(vtworkspace::TabId tab, vtworkspace::PaneId, vtworkspace::PaneId)
 {
     // A swap moves sessions between two leaves (ids unchanged). The rebuild re-binds each proxy's
     // `session`, so the two affected panes render their new terminals.
@@ -1000,7 +1037,7 @@ void TerminalSessionManager::paneSwapped(vtmux::TabId tab, vtmux::PaneId, vtmux:
         c->rebuildActiveTabPaneProxies();
 }
 
-void TerminalSessionManager::paneZoomChanged(vtmux::TabId tab, std::optional<vtmux::PaneId>)
+void TerminalSessionManager::paneZoomChanged(vtworkspace::TabId tab, std::optional<vtworkspace::PaneId>)
 {
     // Zoom moves the tab's layout ROOT without reshaping its TREE, so this re-points the rendered root
     // rather than rebuilding the proxy tree: the panes (and their terminals) are all still there, just
@@ -1016,7 +1053,7 @@ void TerminalSessionManager::paneZoomChanged(vtmux::TabId tab, std::optional<vtm
     }
 }
 
-void TerminalSessionManager::paneTreeRestructured(vtmux::TabId tab)
+void TerminalSessionManager::paneTreeRestructured(vtworkspace::TabId tab)
 {
     // A move re-parents nodes and re-homes ids unpredictably, so re-read the whole tab's tree.
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
@@ -1027,7 +1064,7 @@ void TerminalSessionManager::paneTreeRestructured(vtmux::TabId tab)
     }
 }
 
-void TerminalSessionManager::tabTitleChanged(vtmux::TabId tab)
+void TerminalSessionManager::tabTitleChanged(vtworkspace::TabId tab)
 {
     // The indicator status line's {Tabs} entry is built from the tab titles, so republish it here
     // (Stage 4 moves this fan-out onto the controllers); otherwise a renamed tab keeps its old name in
@@ -1038,7 +1075,7 @@ void TerminalSessionManager::tabTitleChanged(vtmux::TabId tab)
                                { WindowController::Roles::TitleRole, WindowController::Roles::RawTitleRole });
 }
 
-void TerminalSessionManager::tabColorChanged(vtmux::TabId tab)
+void TerminalSessionManager::tabColorChanged(vtworkspace::TabId tab)
 {
     updateStatusLine();
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
@@ -1053,7 +1090,7 @@ void TerminalSessionManager::refreshAllTabTitles()
         controller->refreshAllTabTitles();
 }
 
-void TerminalSessionManager::refreshTabForSession(vtmux::SessionId session)
+void TerminalSessionManager::refreshTabForSession(vtworkspace::SessionId session)
 {
     // Route to the OWNING window's controller — that list-model is what the visible tab strip
     // renders from. (Emitting on the manager reached nothing: no QML binds the manager's rows.)
@@ -1062,24 +1099,30 @@ void TerminalSessionManager::refreshTabForSession(vtmux::SessionId session)
             c->notifyTabRowChanged(tab->id(), { WindowController::Roles::TitleRole });
 }
 
-void TerminalSessionManager::setTabColorForSession(vtmux::SessionId session, vtbackend::RGBColor color)
+void TerminalSessionManager::setTabTitleForSession(vtworkspace::SessionId session, std::string title)
+{
+    if (auto* tab = findTabHostingSession(session))
+        _model->setTabTitle(tab->id(), std::move(title));
+}
+
+void TerminalSessionManager::setTabColorForSession(vtworkspace::SessionId session, vtbackend::RGBColor color)
 {
     // Reuse the authoritative tab-color path: SessionModel::setTabColor fires tabColorChanged, which
     // this manager routes to the owning WindowController's ColorRole, repainting the tab strip. The
     // Application source keeps this write off the user's own color slot, which outranks it.
     if (auto* tab = findTabHostingSession(session))
-        _model->setTabColor(tab->id(), vtmux::TabColorSource::Application, color);
+        _model->setTabColor(tab->id(), vtworkspace::TabColorSource::Application, color);
 }
 
-void TerminalSessionManager::resetTabColorForSession(vtmux::SessionId session)
+void TerminalSessionManager::resetTabColorForSession(vtworkspace::SessionId session)
 {
     if (auto* tab = findTabHostingSession(session))
-        _model->resetTabColor(tab->id(), vtmux::TabColorSource::Application);
+        _model->resetTabColor(tab->id(), vtworkspace::TabColorSource::Application);
 }
 // }}}
 
 // {{{ Tab-strip operations (window-routed)
-void TerminalSessionManager::activateModelTabByRow(vtmux::WindowId window, int row)
+void TerminalSessionManager::activateModelTabByRow(vtworkspace::WindowId window, int row)
 {
     auto* tab = tabAtRow(window, row);
     if (tab == nullptr)
@@ -1091,12 +1134,12 @@ void TerminalSessionManager::activateModelTabByRow(vtmux::WindowId window, int r
     _model->activateTab(window, tab->id());
 }
 
-void TerminalSessionManager::activateTab(vtmux::WindowId window, int index)
+void TerminalSessionManager::activateTab(vtworkspace::WindowId window, int index)
 {
     activateModelTabByRow(window, index);
 }
 
-void TerminalSessionManager::moveTab(vtmux::WindowId window, int fromIndex, int toIndex)
+void TerminalSessionManager::moveTab(vtworkspace::WindowId window, int fromIndex, int toIndex)
 {
     // fromIndex/toIndex are tab-strip rows (tab-space) of @p window. The tab order is owned by the
     // model, so reorder purely there and bounds-check against that window's tab count.
@@ -1109,7 +1152,7 @@ void TerminalSessionManager::moveTab(vtmux::WindowId window, int fromIndex, int 
     moveTabByTab(tabAtRow(window, fromIndex), toIndex);
 }
 
-void TerminalSessionManager::closeWindowIfEmpty(vtmux::WindowId window)
+void TerminalSessionManager::closeWindowIfEmpty(vtworkspace::WindowId window)
 {
     // An empty window (no tabs) is not a valid state: after a cross-window move that took a window's
     // last tab, close it. Runs AFTER the transplant, so the moved tab's sessions are already gone from
@@ -1119,9 +1162,9 @@ void TerminalSessionManager::closeWindowIfEmpty(vtmux::WindowId window)
             controller->closeWindow();
 }
 
-void TerminalSessionManager::moveTabToWindow(vtmux::WindowId from,
+void TerminalSessionManager::moveTabToWindow(vtworkspace::WindowId from,
                                              int fromIndex,
-                                             vtmux::WindowId to,
+                                             vtworkspace::WindowId to,
                                              int toIndex)
 {
     // Resolve the tab in tab-space of the source window, then hand the model TabIds — the model owns
@@ -1135,7 +1178,9 @@ void TerminalSessionManager::moveTabToWindow(vtmux::WindowId from,
     closeWindowIfEmpty(from);
 }
 
-void TerminalSessionManager::tearOffTabToNewWindow(vtmux::WindowId from, int fromIndex, QScreen* targetScreen)
+void TerminalSessionManager::tearOffTabToNewWindow(vtworkspace::WindowId from,
+                                                   int fromIndex,
+                                                   QScreen* targetScreen)
 {
     auto* tab = tabAtRow(from, fromIndex);
     if (tab == nullptr)
@@ -1171,7 +1216,7 @@ bool TerminalSessionManager::consumePendingTransplant(WindowController* newContr
     return true;
 }
 
-void TerminalSessionManager::closeTabAtIndex(vtmux::WindowId window, int index)
+void TerminalSessionManager::closeTabAtIndex(vtworkspace::WindowId window, int index)
 {
     // index is a tab row (rows are tabs). Close the whole tab by terminating each of its panes'
     // sessions; the model collapses to the survivor on each close and tears the tab down with the
@@ -1179,12 +1224,12 @@ void TerminalSessionManager::closeTabAtIndex(vtmux::WindowId window, int index)
     terminateSessions(sessionsInTab(tabAtRow(window, index)));
 }
 
-std::vector<TerminalSession*> TerminalSessionManager::sessionsInTab(vtmux::Tab* tab) const
+std::vector<TerminalSession*> TerminalSessionManager::sessionsInTab(vtworkspace::Tab* tab) const
 {
     std::vector<TerminalSession*> sessions;
     if (tab == nullptr)
         return sessions;
-    tab->rootPane()->walkTree([&](vtmux::Pane& pane) {
+    tab->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
         if (pane.isLeaf())
             if (auto* session = sessionForId(pane.session()))
                 sessions.push_back(session);
@@ -1205,7 +1250,7 @@ void TerminalSessionManager::terminateSessions(std::span<TerminalSession* const>
 }
 
 std::vector<TerminalSession*> TerminalSessionManager::gatherSessionsOfTabsWhere(
-    vtmux::Window& window, std::function<bool(int row, vtmux::Tab*)> const& predicate) const
+    vtworkspace::Window& window, std::function<bool(int row, vtworkspace::Tab*)> const& predicate) const
 {
     // Collect the backing sessions of every tab of @p window matching @p predicate. Used by the
     // bulk-close operations, which must gather the doomed sessions BEFORE the model mutates (so the
@@ -1222,20 +1267,20 @@ std::vector<TerminalSession*> TerminalSessionManager::gatherSessionsOfTabsWhere(
     return doomed;
 }
 
-void TerminalSessionManager::closeOtherTabs(vtmux::WindowId window, int index)
+void TerminalSessionManager::closeOtherTabs(vtworkspace::WindowId window, int index)
 {
     auto* win = _model->window(window);
     auto* keep = tabAtRow(window, index);
     if (keep == nullptr || win == nullptr)
         return;
 
-    auto const doomed =
-        gatherSessionsOfTabsWhere(*win, [keep](int, vtmux::Tab* tab) { return tab->id() != keep->id(); });
+    auto const doomed = gatherSessionsOfTabsWhere(
+        *win, [keep](int, vtworkspace::Tab* tab) { return tab->id() != keep->id(); });
     _model->closeOtherTabs(window, keep->id());
     terminateSessions(doomed);
 }
 
-void TerminalSessionManager::closeTabsToRight(vtmux::WindowId window, int index)
+void TerminalSessionManager::closeTabsToRight(vtworkspace::WindowId window, int index)
 {
     auto* win = _model->window(window);
     auto* anchor = tabAtRow(window, index);
@@ -1245,7 +1290,7 @@ void TerminalSessionManager::closeTabsToRight(vtmux::WindowId window, int index)
     // Tabs strictly to the right of @p index. The gather scan is already row-ordered and hands us the row,
     // so compare it directly instead of re-deriving it with a linear rowOfTab() scan per candidate.
     auto const doomed =
-        gatherSessionsOfTabsWhere(*win, [index](int row, vtmux::Tab*) { return row > index; });
+        gatherSessionsOfTabsWhere(*win, [index](int row, vtworkspace::Tab*) { return row > index; });
     _model->closeTabsToRight(window, anchor->id());
     terminateSessions(doomed);
 }
@@ -1261,8 +1306,20 @@ QVariantList TerminalSessionManager::tabColorPalette() const
 // }}}
 
 // {{{ Split-pane operations
-void TerminalSessionManager::splitActivePane(bool vertical, TerminalSession* acting)
+void TerminalSessionManager::splitActivePane(bool vertical, TerminalSession* acting, double ratio)
 {
+    // Attach mode: author the split on the daemon (B3-Qt); its layout re-push
+    // reconciles the new pane in. A reconciliation-driven split (during realization)
+    // returns false and builds locally below, as does a local factory.
+    if (acting != nullptr && _sessionFactory.requestRemoteSplit(&acting->terminal().device(), vertical))
+        return;
+
+    if (!_sessionFactory.canCreateSession())
+    {
+        managerLog()("Refusing to split: the session factory cannot back a new session right now.");
+        return;
+    }
+
     auto* tab = paneActionTargetTab(acting);
     if (tab == nullptr)
         return;
@@ -1298,11 +1355,12 @@ void TerminalSessionManager::splitActivePane(bool vertical, TerminalSession* act
     // nothing re-notifying the proxy. createBackingSession registers the id and stages it as the
     // _pendingSessionId, so the model allocator (invoked inside splitActivePane) hands back exactly
     // this id — same backing-session-first order as createSessionInBackground/createTab.
-    auto const newSessionId = vtmux::SessionId { _nextSessionId++ };
-    createBackingSession(newSessionId, std::move(cwd), pageSize);
+    auto const newSessionId = vtworkspace::SessionId { _nextSessionId++ };
+    if (createBackingSession(newSessionId, std::move(cwd), pageSize) == nullptr)
+        return; // no backing session, no split
 
-    auto const direction = vertical ? vtmux::SplitState::Vertical : vtmux::SplitState::Horizontal;
-    auto* newLeaf = _model->splitActivePane(tab->id(), direction);
+    auto const direction = vertical ? vtworkspace::SplitState::Vertical : vtworkspace::SplitState::Horizontal;
+    auto* newLeaf = _model->splitActivePane(tab->id(), direction, ratio);
     _pendingSessionId.reset(); // consumed by the allocator; clear any leftover
     if (newLeaf == nullptr)
     {
@@ -1335,19 +1393,19 @@ void TerminalSessionManager::closeActivePane(TerminalSession* acting)
         session->terminate();
 }
 
-void TerminalSessionManager::focusPane(vtmux::FocusDirection direction, TerminalSession* acting)
+void TerminalSessionManager::focusPane(vtworkspace::FocusDirection direction, TerminalSession* acting)
 {
     if (auto* tab = paneActionTargetTab(acting))
         _model->focusDirection(tab->id(), direction);
 }
 
-void TerminalSessionManager::swapPane(vtmux::FocusDirection direction, TerminalSession* acting)
+void TerminalSessionManager::swapPane(vtworkspace::FocusDirection direction, TerminalSession* acting)
 {
     if (auto* tab = paneActionTargetTab(acting))
         _model->swapActivePane(tab->id(), direction);
 }
 
-void TerminalSessionManager::movePane(vtmux::FocusDirection direction, TerminalSession* acting)
+void TerminalSessionManager::movePane(vtworkspace::FocusDirection direction, TerminalSession* acting)
 {
     if (auto* tab = paneActionTargetTab(acting))
         _model->moveActivePane(tab->id(), direction);
@@ -1359,7 +1417,7 @@ void TerminalSessionManager::toggleActivePaneOrientation(TerminalSession* acting
         _model->toggleActivePaneOrientation(tab->id());
 }
 
-void TerminalSessionManager::resizeActivePane(vtmux::FocusDirection direction,
+void TerminalSessionManager::resizeActivePane(vtworkspace::FocusDirection direction,
                                               double fraction,
                                               TerminalSession* acting)
 {
@@ -1375,7 +1433,7 @@ void TerminalSessionManager::toggleActivePaneZoom(TerminalSession* acting)
 // }}}
 
 // {{{ PaneProxy support
-bool TerminalSessionManager::isActivePane(vtmux::TabId tab, vtmux::PaneId id) const noexcept
+bool TerminalSessionManager::isActivePane(vtworkspace::TabId tab, vtworkspace::PaneId id) const noexcept
 {
     // Keyed by the proxy's OWN tab (not "the active tab"), so a proxy of any window's tab answers
     // correctly — a divider drag or pane click in a second OS window must not consult the first
@@ -1385,13 +1443,13 @@ bool TerminalSessionManager::isActivePane(vtmux::TabId tab, vtmux::PaneId id) co
     return false;
 }
 
-void TerminalSessionManager::setPaneRatio(vtmux::TabId tab, vtmux::PaneId id, double ratio)
+void TerminalSessionManager::setPaneRatio(vtworkspace::TabId tab, vtworkspace::PaneId id, double ratio)
 {
     if (_model->findTab(tab) != nullptr)
         _model->setPaneRatio(tab, id, ratio);
 }
 
-void TerminalSessionManager::activatePane(vtmux::TabId tab, vtmux::PaneId id)
+void TerminalSessionManager::activatePane(vtworkspace::TabId tab, vtworkspace::PaneId id)
 {
     if (_model->findTab(tab) != nullptr)
         _model->setActivePane(tab, id);

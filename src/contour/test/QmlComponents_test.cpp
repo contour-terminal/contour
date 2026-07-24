@@ -49,7 +49,7 @@
 
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
-#include <vtmux/PaneLayout.h>
+#include <vtworkspace/PaneLayout.h>
 
 namespace
 {
@@ -75,7 +75,7 @@ class MockTabController: public QAbstractListModel
 
     [[nodiscard]] constexpr int splitHandleThickness() const noexcept
     {
-        return vtmux::DefaultSplitHandleThickness;
+        return vtworkspace::DefaultSplitHandleThickness;
     }
 
     [[nodiscard]] bool titleBarVisible() const noexcept { return _titleBarVisible; }
@@ -188,7 +188,7 @@ class MockTabController: public QAbstractListModel
     Q_INVOKABLE void closeTabAtIndex(int) {}
     Q_INVOKABLE void closeOtherTabs(int) {}
     Q_INVOKABLE void closeTabsToRight(int) {}
-    /// Sixteen distinct colors, matching the SHAPE of the real palette (vtmux SessionModel's
+    /// Sixteen distinct colors, matching the SHAPE of the real palette (vtworkspace SessionModel's
     /// DefaultPalette): two full rows of the flyout's 8-column grid. The count is what makes vertical
     /// keyboard navigation testable at all — a shorter palette has no second row to move down into.
     /// Built once, like the real TerminalSessionManager's cached list, since QML re-reads it per binding.
@@ -430,9 +430,9 @@ class MockPaneProxy: public QObject
         _active = a;
         emit changed();
     }
-    /// Turn this leaf into a split node with two leaf children (as vtmux Pane::split does), then notify.
-    /// The split axis defaults to Vertical (2, matching vtmux::SplitState); use setOrientation() to change
-    /// it.
+    /// Turn this leaf into a split node with two leaf children (as vtworkspace Pane::split does), then
+    /// notify. The split axis defaults to Vertical (2, matching vtworkspace::SplitState); use
+    /// setOrientation() to change it.
     void becomeSplit(MockPaneProxy* a, MockPaneProxy* b)
     {
         _leaf = false;
@@ -467,7 +467,7 @@ class MockPaneProxy: public QObject
     MockPaneProxy* _second;
     QObject* _session = nullptr;
     bool _active = false;
-    int _orientation = 2; // vtmux::SplitState::Vertical for a split node; ignored for a leaf
+    int _orientation = 2; // vtworkspace::SplitState::Vertical for a split node; ignored for a leaf
     double _ratio = 0.5;
 };
 
@@ -1789,7 +1789,7 @@ TEST_CASE("PaneNode.clampRatio bounds a divider drag instead of discarding it (o
 
 // (No offscreen "grabs keyboard focus" test: hasActiveFocus() does not resolve reliably under the offscreen
 // platform, so such an assertion is a FALSE guard — it passes with OR without the forceActiveFocus() fix.
-// Focus-follows-active is covered deterministically at the vtmux model layer; the "renders active pane
+// Focus-follows-active is covered deterministically at the vtworkspace model layer; the "renders active pane
 // without error" GUI case is covered by the split behavioral test. The global QML-message gate in
 // test_main.cpp additionally fails the run on ANY QML error, so a stray ReferenceError cannot pass silently.)
 
@@ -2048,7 +2048,7 @@ TEST_CASE("split: a pane created already-active renders without error (offscreen
 {
     // A split makes the NEW pane active from construction. Assert a from-birth-active leaf instantiates and
     // renders with no QML error. Whether it holds keyboard focus is NOT asserted (unreliable offscreen);
-    // focus-follows-active is tested at the vtmux model layer.
+    // focus-follows-active is tested at the vtworkspace model layer.
     QQmlEngine engine;
     qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
     MockTabController controller;
@@ -2212,7 +2212,7 @@ TEST_CASE("split: TerminalPane opacity follows the session opacity (offscreen)",
 // ============================================================================================
 // GUI-layer pane-operation tests: assert observable RENDERED properties (orientation, geometry, border
 // width, activate routing) — the parts of split/resize/focus-highlight that DO resolve reliably offscreen
-// (unlike Qt keyboard focus). These complement the vtmux model tests.
+// (unlike Qt keyboard focus). These complement the vtworkspace model tests.
 // ============================================================================================
 
 namespace
@@ -2265,7 +2265,8 @@ TEST_CASE("PaneNode: SplitView orientation follows node.orientation for both axe
         CHECK(splitView->property("orientation").toInt() == expectedQtOrientation);
     };
 
-    // node.orientation 2 (vtmux Vertical, side-by-side) -> Qt.Horizontal(1); anything else -> Qt.Vertical(2).
+    // node.orientation 2 (vtworkspace Vertical, side-by-side) -> Qt.Horizontal(1); anything else ->
+    // Qt.Vertical(2).
     run(/*node*/ 2, /*qt*/ 1);
     run(/*node*/ 1, /*qt*/ 2);
 }
@@ -2273,7 +2274,8 @@ TEST_CASE("PaneNode: SplitView orientation follows node.orientation for both axe
 // (No GUI test asserts the SplitView's laid-out child PIXEL widths for a given ratio: SplitView defers its
 // layout under the offscreen platform, so a firstChild.width ≈ ratio*width assertion is flaky. The ratio
 // contract is covered where it is deterministic: the divider-drag clamp in "PaneNode.clampRatio bounds a
-// divider drag..." above, and the model-layer clamp+emit in vtmux SessionModel_test's setPaneRatio test.)
+// divider drag..." above, and the model-layer clamp+emit in vtworkspace SessionModel_test's setPaneRatio
+// test.)
 
 TEST_CASE("TerminalPane: active-pane focus border width follows node.active (offscreen)",
           "[contour][gui][qml][split][behavior][focus]")

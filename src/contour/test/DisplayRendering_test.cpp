@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Display-gated end-to-end rendering tests: a REAL TerminalDisplay bound to a REAL TerminalSession
-// (BlockingMockPty-backed, live read loop) inside a real QQuickWindow, with frames forced through
+// (vtpty::ChannelPty-backed, live read loop) inside a real QQuickWindow, with frames forced through
 // QQuickWindow::grabWindow(). This exercises the render stack no offscreen test can reach — the
 // scene graph cannot stand up a render loop under the "offscreen" QPA platform (see ROADMAP.md) —
 // so every case SKIPs unless CONTOUR_TEST_DISPLAY=1 opts into the session's real windowing system
@@ -22,6 +22,8 @@
 #include <contour/test/GuiTestFixtures.h>
 
 #include <vtbackend/primitives.h>
+
+#include <vtpty/ChannelPty.h>
 
 #include <QtCore/QBuffer>
 #include <QtCore/QDir>
@@ -46,9 +48,9 @@
 #include <unordered_map>
 
 #include <QtTest/QTest>
-#include <vtmux/Pane.h>
-#include <vtmux/SessionModel.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/SessionModel.h>
+#include <vtworkspace/Tab.h>
 
 using namespace std::string_view_literals;
 using namespace std::chrono_literals;
@@ -71,7 +73,7 @@ namespace
         }                                                                                  \
     } while (0)
 
-/// One live rendering session: app + session (BlockingMockPty) + display item in a shown window.
+/// One live rendering session: app + session (vtpty::ChannelPty) + display item in a shown window.
 ///
 /// Construction wires everything the production QML path would (setSession attaches the display,
 /// starts the session's read loop, and creates the renderer on the first sync); pump() forces real
@@ -81,7 +83,7 @@ namespace
 struct DisplayHarness
 {
     contour::test::TestApp testApp;
-    contour::test::BlockingMockPty* pty = nullptr; // owned by the session's terminal
+    vtpty::ChannelPty* pty = nullptr; // owned by the session's terminal
     std::unique_ptr<contour::TerminalSession> session;
     std::unique_ptr<QQuickWindow> window;
     contour::display::TerminalDisplay* display = nullptr; // manually deleted in teardown
@@ -89,7 +91,7 @@ struct DisplayHarness
 
     DisplayHarness(): display(new contour::display::TerminalDisplay())
     {
-        auto ptyOwned = std::make_unique<contour::test::BlockingMockPty>(
+        auto ptyOwned = std::make_unique<vtpty::ChannelPty>(
             vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) });
         pty = ptyOwned.get();
         session = std::make_unique<contour::TerminalSession>(
@@ -750,7 +752,7 @@ TEST_CASE("display: a font-size change on one session does not leak to another o
     auto const fontA = h.display->fontSize().pt;
 
     // Session B is a "second tab": a distinct session bound onto the SAME display.
-    auto secondPty = std::make_unique<contour::test::BlockingMockPty>(
+    auto secondPty = std::make_unique<vtpty::ChannelPty>(
         vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) });
     auto sessionB = std::make_unique<contour::TerminalSession>(
         &h.testApp.app().sessionsManager(), std::move(secondPty), h.testApp.app());
@@ -1265,7 +1267,7 @@ TEST_CASE("display: content-driven resize refuses, then resizes once the session
 {
     // The content-driven-resize choke point (applyContentDrivenResize) solves the pane tree against the
     // model: it resizes only if the requesting display's session is the active tab's leaf. The harness
-    // builds a live session+display but does NOT register it in the controller's vtmux window, so the
+    // builds a live session+display but does NOT register it in the controller's vtworkspace window, so the
     // resize is refused until we mint a model tab whose leaf carries this session's id. This exercises
     // BOTH the refusal branch and the real happy path (contentSizeForLeaf -> osWindow->resize()), which
     // need a live renderer (cellSize) and so are only reachable through this display-gated harness.
@@ -1354,7 +1356,7 @@ TEST_CASE("display: a session re-bound onto a resized display adopts the live gr
     // A "background tab" session born at the small profile default (25x80), as createBackingSession would
     // produce for a brand-new window — deliberately NOT pre-sized to the resized display.
     auto const birthSize = vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) };
-    auto secondPty = std::make_unique<contour::test::BlockingMockPty>(birthSize);
+    auto secondPty = std::make_unique<vtpty::ChannelPty>(birthSize);
     auto second = std::make_unique<contour::TerminalSession>(
         &h.testApp.app().sessionsManager(), std::move(secondPty), h.testApp.app());
     REQUIRE(second->terminal().totalPageSize() == birthSize);

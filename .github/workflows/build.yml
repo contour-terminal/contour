@@ -794,6 +794,9 @@ jobs:
       - name: "build"
         run: cmake --build --preset gcc-debug -- -j3
       - name: "tests"
+        # A hung test (e.g. a dead-loop) must fail the matrix fast, not stall for hours: the whole
+        # suite runs in seconds, so 5 minutes is a generous ceiling for the offscreen ctest run.
+        timeout-minutes: 5
         run: cmake --build --preset gcc-debug --target test
       - name: "install weston (headless compositor for display-gated GUI tests)"
         # Non-gating until proven on a GitHub runner: the local run is green (headless weston,

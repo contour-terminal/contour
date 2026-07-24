@@ -14,7 +14,7 @@ bool PaneProxy::isLeaf() const noexcept
 int PaneProxy::orientation() const noexcept
 {
     auto* p = pane();
-    return static_cast<int>(p != nullptr ? p->splitState() : vtmux::SplitState::None);
+    return static_cast<int>(p != nullptr ? p->splitState() : vtworkspace::SplitState::None);
 }
 
 double PaneProxy::ratio() const noexcept

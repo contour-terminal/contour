@@ -19,9 +19,12 @@
 #include <QtGui/QScreen>
 #include <QtQml/QQmlApplicationEngine>
 
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <unordered_map>
+#include <vector>
 
 namespace contour
 {
@@ -36,7 +39,22 @@ namespace display
     class ForcedFontDpiProvider;
 }
 
+class NativeController;
+class RoutingSessionFactory;
 class TerminalSession;
+class TmuxController;
+class WindowController;
+
+/// The daemon window the boot (first) OS window should adopt when attaching, rather than authoring
+/// a fresh tab. In attach mode the boot window mirrors the daemon's primary (lowest-id) window; a
+/// later OS window is not a boot window (@p anyWindowMapped is then true). Pure so the boot-adoption
+/// rule is unit-testable without the QML boot flow.
+/// @param anyWindowMapped True if at least one OS window is already bound to a daemon window.
+/// @param daemonWindowIds The daemon's known window ids, ascending (windowIds() ordering).
+/// @return The daemon window to adopt, or nullopt if this is not the boot window, or the daemon has
+///         not reported a window yet.
+[[nodiscard]] std::optional<std::uint64_t> primaryDaemonWindowToAdopt(
+    bool anyWindowMapped, std::vector<std::uint64_t> const& daemonWindowIds);
 
 /// Extends ContourApp with terminal GUI capability.
 class ContourGuiApp: public QObject, public ContourApp
@@ -63,6 +81,7 @@ class ContourGuiApp: public QObject, public ContourApp
                            std::unique_ptr<ExternalLauncher> externalLauncher = nullptr,
                            std::unique_ptr<LayoutStore> layoutStore = nullptr,
                            std::unique_ptr<CommandHistoryStore> commandHistoryStore = nullptr);
+    ~ContourGuiApp() override;
 
     static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(ContourApp::instance()); }
 
@@ -78,6 +97,13 @@ class ContourGuiApp: public QObject, public ContourApp
     /// Consumes the pending spawn target screen staged by newWindow().
     /// @return The staged screen, or nullptr (already consumed / never staged / screen unplugged).
     [[nodiscard]] QScreen* takePendingSpawnScreen() noexcept;
+
+    /// Attach mode: authors a new window on the daemon (routed through the session factory's
+    /// requestRemoteWindow) instead of opening a purely local one. The daemon's new-window layout push
+    /// then spawns and binds the matching OS window (B4). Called by the NewTerminalWindow action.
+    /// @return true if the request was routed to the daemon (do NOT open a local window); false for a
+    ///         local factory.
+    [[nodiscard]] bool requestRemoteWindow();
 
     /// The app-wide forced-font-DPI provider (single instance; see display/ContentScale.h), created
     /// lazily on first use (requires a constructed QGuiApplication for platform detection).
@@ -165,9 +191,55 @@ class ContourGuiApp: public QObject, public ContourApp
     int fontConfigAction();
     int checkConfig();
 
+    /// The `contour client` verb: boots the QML machinery connected to a
+    /// daemon or tmux server.
+    int clientAction();
+
+    /// Native attach: brings the local OS windows in line with the daemon's windows (B4). Maps the
+    /// primary daemon window onto the boot window and, for each additional daemon window, spawns an OS
+    /// window (which binds itself via bindPendingAttachWindow) then reconciles each window's tab/pane
+    /// tree. Idempotent — re-run on every layoutChanged. No-op when not attached.
+    void reconcileAttachWindows();
+
+    /// Attach-window binder installed on the manager: called from a freshly-spawned window's main.qml
+    /// (via consumeAttachWindow). If a daemon window is staged for it, records the daemon→OS-window
+    /// mapping, reconciles that window's layout into it, and returns true so the window does NOT create
+    /// its own first tab.
+    /// @param controller The freshly-created controller of the just-spawned OS window.
+    /// @return true if @p controller's window was bound to a pending daemon window.
+    bool bindPendingAttachWindow(WindowController* controller);
+
+    /// Records the daemon-window → OS-window mapping and immediately reconciles that daemon window's
+    /// tab/pane tree into @p osWindow — the one place the "a mapping always implies a reconcile"
+    /// invariant lives (shared by the primary-window and spawned-window paths).
+    /// @param daemonWindow The daemon window id.
+    /// @param osWindow The OS window that mirrors it.
+    void bindDaemonWindow(std::uint64_t daemonWindow, vtworkspace::WindowId osWindow);
+
+    /// The attach engines, declared FIRST so they are destroyed LAST: remote-
+    /// backed sessions hold ptys that unregister from them on destruction.
+    std::unique_ptr<NativeController> _nativeController;
+    std::unique_ptr<TmuxController> _tmuxController;
+
+    /// Invoked by terminalGuiAction right after the first window booted —
+    /// attach mode adopts the remaining remote sessions as tabs here.
+    std::function<void()> _onGuiBooted;
+
+    /// Native attach (B4): each daemon window id mapped to the OS window that mirrors it. The primary
+    /// daemon window maps to the boot window; additional ones map to spawned windows.
+    std::unordered_map<uint64_t, vtworkspace::WindowId> _attachWindowMap;
+    /// The daemon window whose OS window is being spawned right now: reconcileAttachWindows stages it
+    /// just before newWindow(), and that window's main.qml claims it via bindPendingAttachWindow.
+    /// Single-slot (like _pendingTransplant / _pendingSpawnScreen): the QML load is synchronous, so a
+    /// stage is always consumed before the next is made.
+    std::optional<uint64_t> _pendingAttachWindow;
+
     config::Config _config;
     // Declared before _sessionManager: the manager holds a reference to the factory.
+    // Always a RoutingSessionFactory wrapping the injected/default factory,
+    // so attach mode can switch the route without touching the manager.
     std::unique_ptr<SessionFactory> _sessionFactory;
+    RoutingSessionFactory* _routingFactory = nullptr; ///< The concrete view of _sessionFactory.
     // The external-resource launcher (URL open / process spawn), reached by sessions via _app.
     std::unique_ptr<ExternalLauncher> _externalLauncher;
     // Declared before _sessionManager: the manager holds a reference to the store.

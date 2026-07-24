@@ -62,9 +62,16 @@ else()
 endif()
 # }}}
 
-if(CONTOUR_FRONTEND_GUI)
-    add_subdirectory(display)
+# The imported-target name differs between a vendored yaml-cpp and a system one, so
+# resolve it once here -- before add_subdirectory(display), which needs it too
+# (ContourTerminalDisplay includes contour/Config.h, hence yaml-cpp's headers).
+if (TARGET yaml-cpp::yaml-cpp)
+    set(YAML_CPP_LIBRARIES yaml-cpp::yaml-cpp)
+else()
+    set(YAML_CPP_LIBRARIES yaml-cpp)
 endif()
+
+add_subdirectory(display)
 
 if(APPLE)
     #set(CMAKE_INSTALL_RPATH "@executable_path")
@@ -132,46 +139,54 @@ set(_main_source_files
     main.cpp
 )
 
-if(CONTOUR_FRONTEND_GUI)
-    list(APPEND _header_files
-        Audio.h
-        AudioNote.h
-        BlurBehind.h
-        CatImageArgs.h
-        CommandPaletteModel.h
-        ContourGuiApp.h
-        ExitCode.h
-        ExternalLauncher.h
-        FreeDesktopNotifier.h
-        LayoutStore.h
-        NotificationRouter.h
-        PaneProxy.h
-        QtExternalLauncher.h
-        SessionFactory.h
-        SettingsController.h
-        TerminalSession.h
-        TerminalSessionManager.h
-        helper.h
-    )
-    list(APPEND _core_source_files
-        Audio.cpp
-        BlurBehind.cpp
-        CommandPaletteModel.cpp
-        ContourGuiApp.cpp
-        FreeDesktopNotifier.cpp
-        PaneProxy.cpp
-        QtExternalLauncher.cpp
-        LayoutBuilder.cpp
-        LayoutStore.cpp
-        SessionFactory.cpp
-        SettingsController.cpp
-        TerminalSession.cpp
-        display/TerminalAccessible.cpp
-        TerminalSessionManager.cpp
-        WindowController.cpp
-        helper.cpp
-    )
-endif()
+list(APPEND _header_files
+    Audio.h
+    AudioNote.h
+    BlurBehind.h
+    CatImageArgs.h
+    CommandPaletteModel.h
+    ContourGuiApp.h
+    ExitCode.h
+    ExternalLauncher.h
+    FreeDesktopNotifier.h
+    LayoutStore.h
+    NotificationRouter.h
+    PaneProxy.h
+    QtExternalLauncher.h
+    SessionFactory.h
+    SettingsController.h
+    TerminalSession.h
+    TerminalSessionManager.h
+    helper.h
+    remote/NativeController.h
+    remote/RemoteController.h
+    remote/ReactorThread.h
+    remote/RemoteLayout.h
+    remote/RoutingSessionFactory.h
+    remote/TmuxController.h
+)
+list(APPEND _core_source_files
+    Audio.cpp
+    BlurBehind.cpp
+    CommandPaletteModel.cpp
+    ContourGuiApp.cpp
+    FreeDesktopNotifier.cpp
+    PaneProxy.cpp
+    QtExternalLauncher.cpp
+    LayoutBuilder.cpp
+    LayoutStore.cpp
+    SessionFactory.cpp
+    SettingsController.cpp
+    TerminalSession.cpp
+    display/TerminalAccessible.cpp
+    TerminalSessionManager.cpp
+    WindowController.cpp
+    helper.cpp
+    remote/NativeController.cpp
+    remote/RemoteController.cpp
+    remote/RemoteLayout.cpp
+    remote/TmuxController.cpp
+)
 
 if(WIN32)
     list(APPEND _main_source_files contour.rc)
@@ -242,10 +257,6 @@ if(CONTOUR_WITH_TTS)
     target_link_libraries(contour_core PUBLIC Qt6::TextToSpeech)
 endif()
 
-if(CONTOUR_FRONTEND_GUI)
-    target_compile_definitions(contour_core PUBLIC CONTOUR_FRONTEND_GUI)
-endif()
-
 if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     target_compile_definitions(contour_core PUBLIC CONTOUR_GUI_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
@@ -286,26 +297,21 @@ if(FREEBSD)
     target_link_directories(contour_core PUBLIC "/usr/local/lib")
 endif()
 
-if (TARGET yaml-cpp::yaml-cpp)
-    set(YAML_CPP_LIBRARIES yaml-cpp::yaml-cpp)
-else()
-    set(YAML_CPP_LIBRARIES yaml-cpp)
-endif()
-
 # Link dependencies go on contour_core as PUBLIC so they propagate to the `contour` executable and
 # the `contour_gui_test` target through the object library's usage requirements.
 target_link_libraries(contour_core
     PUBLIC
     crispy::core
     vtbackend
-    vtmux
+    vtworkspace
     Qt6::Core
     ${YAML_CPP_LIBRARIES}
+    PRIVATE
+    vthost
 )
 
 # {{{ GUI: Declare Qt build dependencies
-if(CONTOUR_FRONTEND_GUI)
-    if(OPENBSD)
+if(OPENBSD)
         find_package(X11 REQUIRED)
     endif()
     target_link_libraries(contour_core
@@ -355,6 +361,9 @@ if(CONTOUR_FRONTEND_GUI)
         add_executable(contour_gui_test
             test/test_main.cpp
             test/Actions_test.cpp
+            test/NativeController_test.cpp
+            test/RemoteController_test.cpp
+            test/TmuxController_test.cpp
             test/AudioNote_test.cpp
             test/BenignQtMessages_test.cpp
             test/CaptureScreen_test.cpp
@@ -480,7 +489,6 @@ if(CONTOUR_FRONTEND_GUI)
         # }}}
     endif()
     # }}}
-endif()
 # }}}
 
 # {{{ Build terminfo file

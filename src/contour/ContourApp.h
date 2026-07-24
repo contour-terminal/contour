@@ -6,9 +6,9 @@
 namespace contour
 {
 
-/// Contour TUI application.
+/// Contour CLI application base.
 ///
-/// TODO: provide special installable targets in debian packageS (cmake and PPA)
+/// TODO: provide special installable targets in debian packages (cmake and PPA)
 class ContourApp: public crispy::app
 {
   public:
@@ -31,6 +31,8 @@ class ContourApp: public crispy::app
     int documentationProfileConfig();
     /// Displays an image in the terminal via GIP oneshot sequence.
     int catAction();
+    /// Runs the headless terminal multiplexer daemon.
+    int daemonAction();
 };
 
 } // namespace contour

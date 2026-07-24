@@ -5,12 +5,7 @@
 #include <contour/AsciiText.h>
 #include <contour/ConfigDocumentation.h>
 #include <contour/TabBarMode.h>
-
-#include <vtrasterizer/GlyphScaling.h>
-
-#ifdef CONTOUR_FRONTEND_GUI
-    #include <contour/display/ShaderConfig.h>
-#endif
+#include <contour/display/ShaderConfig.h>
 
 #include <vtbackend/Color.h>
 #include <vtbackend/ColorPalette.h>
@@ -30,6 +25,7 @@
 #include <vtrasterizer/BoxDrawingRenderer.h>
 #include <vtrasterizer/Decorator.h>
 #include <vtrasterizer/FontDescriptions.h>
+#include <vtrasterizer/GlyphScaling.h>
 
 #include <text_shaper/font.h>
 #include <text_shaper/mock_font_locator.h>
@@ -70,7 +66,7 @@
 #include <variant>
 
 #include <reflection-cpp/reflection.hpp>
-#include <vtmux/Primitives.h> // vtmux::SplitState for layout panes
+#include <vtworkspace/LayoutTree.h> // layout tree structs (LayoutPane, LayoutTab, Layout)
 
 namespace contour::config
 {
@@ -572,50 +568,11 @@ inline auto defaultFamilyName = "monospace";
     return value;
 }
 
-/// A node in a layout tab's pane tree. It is EITHER a leaf (a terminal to open) OR a split (an
-/// orientation plus two or more children): an empty @c children means leaf.
-struct LayoutPane
-{
-    /// Program to run in this pane, replacing the profile's shell. Unset runs that shell.
-    std::optional<std::string> command;
-    /// Arguments passed to @c command.
-    std::vector<std::string> arguments;
-    /// Working directory the pane's shell starts in. Unset uses the profile's.
-    std::optional<std::filesystem::path> directory;
-    /// Per-pane profile override (terminal-level settings only — not window ones).
-    std::optional<std::string> profile;
-    /// Fraction (0, 1] of the parent split this pane occupies. Unset means "share whatever the
-    /// explicitly-sized siblings leave over, equally" (see contour::ratioForFirst).
-    std::optional<double> ratio;
-
-    /// How this pane's children are arranged (splits only).
-    vtmux::SplitState orientation = vtmux::SplitState::Vertical;
-    /// The child panes of a split, in layout order. Empty for a leaf.
-    std::vector<LayoutPane> children;
-
-    /// @return true when this node is a terminal pane rather than a split.
-    [[nodiscard]] bool isLeaf() const noexcept { return children.empty(); }
-};
-
-/// One tab of a layout: its name and color, plus the pane tree it opens with.
-struct LayoutTab
-{
-    /// Seeds the tab's name.
-    std::optional<std::string> title;
-    /// Sets the tab's User color.
-    std::optional<vtbackend::RGBColor> color;
-    /// Default profile for this tab's panes; a pane's own @c profile still wins.
-    std::optional<std::string> profile;
-    /// The tab's pane tree: a leaf for a plain single-pane tab, a split node otherwise.
-    LayoutPane root;
-};
-
-/// A named layout: the ordered tabs that LaunchLayout opens together.
-struct Layout
-{
-    /// The tabs to open, in order.
-    std::vector<LayoutTab> tabs;
-};
+/// The layout tree model (structs + realize/serialize helpers) lives in vtworkspace::LayoutTree so the
+/// Qt-free daemon shares it; these aliases keep the config-side spellings working.
+using LayoutPane = vtworkspace::LayoutPane;
+using LayoutTab = vtworkspace::LayoutTab;
+using Layout = vtworkspace::Layout;
 
 struct TerminalProfile
 {

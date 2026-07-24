@@ -2604,25 +2604,25 @@ bool TerminalSession::operator()(actions::ClosePane)
 
 bool TerminalSession::operator()(actions::FocusPaneLeft)
 {
-    _manager->focusPane(vtmux::FocusDirection::Left, /*acting*/ this);
+    _manager->focusPane(vtworkspace::FocusDirection::Left, /*acting*/ this);
     return true;
 }
 
 bool TerminalSession::operator()(actions::FocusPaneRight)
 {
-    _manager->focusPane(vtmux::FocusDirection::Right, /*acting*/ this);
+    _manager->focusPane(vtworkspace::FocusDirection::Right, /*acting*/ this);
     return true;
 }
 
 bool TerminalSession::operator()(actions::FocusPaneUp)
 {
-    _manager->focusPane(vtmux::FocusDirection::Up, /*acting*/ this);
+    _manager->focusPane(vtworkspace::FocusDirection::Up, /*acting*/ this);
     return true;
 }
 
 bool TerminalSession::operator()(actions::FocusPaneDown)
 {
-    _manager->focusPane(vtmux::FocusDirection::Down, /*acting*/ this);
+    _manager->focusPane(vtworkspace::FocusDirection::Down, /*acting*/ this);
     return true;
 }
 
@@ -2630,65 +2630,66 @@ namespace
 {
     /// Translates an action-layer Direction (transport-agnostic) into the model's FocusDirection.
     /// @param direction The direction the user requested.
-    /// @return The corresponding vtmux::FocusDirection.
-    [[nodiscard]] constexpr vtmux::FocusDirection toFocusDirection(actions::Direction direction) noexcept
+    /// @return The corresponding vtworkspace::FocusDirection.
+    [[nodiscard]] constexpr vtworkspace::FocusDirection toFocusDirection(
+        actions::Direction direction) noexcept
     {
         switch (direction)
         {
-            case actions::Direction::Left: return vtmux::FocusDirection::Left;
-            case actions::Direction::Right: return vtmux::FocusDirection::Right;
-            case actions::Direction::Up: return vtmux::FocusDirection::Up;
-            case actions::Direction::Down: return vtmux::FocusDirection::Down;
+            case actions::Direction::Left: return vtworkspace::FocusDirection::Left;
+            case actions::Direction::Right: return vtworkspace::FocusDirection::Right;
+            case actions::Direction::Up: return vtworkspace::FocusDirection::Up;
+            case actions::Direction::Down: return vtworkspace::FocusDirection::Down;
         }
-        return vtmux::FocusDirection::Left;
+        return vtworkspace::FocusDirection::Left;
     }
 } // namespace
 
 bool TerminalSession::operator()(actions::SwapPaneLeft)
 {
-    _manager->swapPane(vtmux::FocusDirection::Left, /*acting*/ this);
+    _manager->swapPane(vtworkspace::FocusDirection::Left, /*acting*/ this);
     return true;
 }
 
 bool TerminalSession::operator()(actions::SwapPaneRight)
 {
-    _manager->swapPane(vtmux::FocusDirection::Right, /*acting*/ this);
+    _manager->swapPane(vtworkspace::FocusDirection::Right, /*acting*/ this);
     return true;
 }
 
 bool TerminalSession::operator()(actions::SwapPaneUp)
 {
-    _manager->swapPane(vtmux::FocusDirection::Up, /*acting*/ this);
+    _manager->swapPane(vtworkspace::FocusDirection::Up, /*acting*/ this);
     return true;
 }
 
 bool TerminalSession::operator()(actions::SwapPaneDown)
 {
-    _manager->swapPane(vtmux::FocusDirection::Down, /*acting*/ this);
+    _manager->swapPane(vtworkspace::FocusDirection::Down, /*acting*/ this);
     return true;
 }
 
 bool TerminalSession::operator()(actions::MovePaneLeft)
 {
-    _manager->movePane(vtmux::FocusDirection::Left, /*acting*/ this);
+    _manager->movePane(vtworkspace::FocusDirection::Left, /*acting*/ this);
     return true;
 }
 
 bool TerminalSession::operator()(actions::MovePaneRight)
 {
-    _manager->movePane(vtmux::FocusDirection::Right, /*acting*/ this);
+    _manager->movePane(vtworkspace::FocusDirection::Right, /*acting*/ this);
     return true;
 }
 
 bool TerminalSession::operator()(actions::MovePaneUp)
 {
-    _manager->movePane(vtmux::FocusDirection::Up, /*acting*/ this);
+    _manager->movePane(vtworkspace::FocusDirection::Up, /*acting*/ this);
     return true;
 }
 
 bool TerminalSession::operator()(actions::MovePaneDown)
 {
-    _manager->movePane(vtmux::FocusDirection::Down, /*acting*/ this);
+    _manager->movePane(vtworkspace::FocusDirection::Down, /*acting*/ this);
     return true;
 }
 
@@ -2880,6 +2881,10 @@ void TerminalSession::spawnNewTerminal(string const& profileName)
     }
     else
     {
+        // Attach mode: author the window on the daemon (B4); its new-window layout push spawns and
+        // binds the matching OS window. A local factory returns false and we open an ordinary window.
+        if (_app.requestRemoteWindow())
+            return;
         sessionLog()("spawning new in-process window");
         _app.config().profile(_profileName)->shell.value().workingDirectory = fs::path(wd);
         // The new window mints its own WindowController + first tab in main.qml's Component.onCompleted,

@@ -33,7 +33,7 @@
 
 #include <qcolor.h>
 
-#include <vtmux/Primitives.h>
+#include <vtworkspace/Primitives.h>
 
 namespace contour
 {
@@ -345,10 +345,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return _profileOverride;
     }
 
-    /// The id by which the vtmux layout model refers to this session. Set when the manager mirrors
+    /// The id by which the vtworkspace layout model refers to this session. Set when the manager mirrors
     /// the session into the model. Identifies the leaf pane that hosts this session.
-    [[nodiscard]] vtmux::SessionId modelSessionId() const noexcept { return _modelSessionId; }
-    void setModelSessionId(vtmux::SessionId id) noexcept { _modelSessionId = id; }
+    [[nodiscard]] vtworkspace::SessionId modelSessionId() const noexcept { return _modelSessionId; }
+    void setModelSessionId(vtworkspace::SessionId id) noexcept { _modelSessionId = id; }
 
     std::optional<std::string> name() const
     {
@@ -768,7 +768,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     //
     TerminalSessionManager* _manager;
     int _id;
-    vtmux::SessionId _modelSessionId {};
+    vtworkspace::SessionId _modelSessionId {};
     std::chrono::steady_clock::time_point _startTime;
     config::Config _config;
     std::string _profileName;

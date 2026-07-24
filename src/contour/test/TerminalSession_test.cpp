@@ -2,7 +2,7 @@
 //
 // Integration tests for TerminalSession that exercise the *real* class (not a Qt-free surrogate).
 //
-// Unlike the model-layer tests (TabListModel_test / vtmux SessionModel_test), these construct an
+// Unlike the model-layer tests (TabListModel_test / vtworkspace SessionModel_test), these construct an
 // actual TerminalSession around a MockPty and a test-configured ContourGuiApp. That is only possible
 // because the contour frontend is built as the `contour_core` object library the test links against,
 // and because crispy::app exposes parseParametersForTesting() to populate parameters() without
@@ -502,7 +502,7 @@ TEST_CASE("TerminalSession: tab actions from an unregistered session are guarded
           "[contour][session][actions]")
 {
     // Tab actions route through the manager keyed by the acting session\'s model id. A session that
-    // was never registered in the vtmux model (this fixture) must resolve to no target tab and be a
+    // was never registered in the vtworkspace model (this fixture) must resolve to no target tab and be a
     // safe no-op — the guard every keybinding rides when a pane acts during teardown.
     TestApp testApp;
     auto session = makeDisplaylessSession(testApp.app());

@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/Line.h>
 
+#include <vtbackend/SgrWriter.h>
+
 #include <libunicode/grapheme_segmenter.h>
 #include <libunicode/utf8.h>
 #include <libunicode/width.h>
+
+#include <ranges>
 
 namespace vtbackend
 {
@@ -92,7 +96,7 @@ std::string Line::toUtf8(ColumnOffset begin, ColumnOffset end) const
     str.reserve(last - first); // exact for ASCII, a sound floor for anything wider
 
     int skipCount = 0;
-    for (auto i = first; i < last; ++i)
+    for (auto const i: std::views::iota(first, last))
     {
         if (skipCount > 0)
         {
@@ -109,6 +113,52 @@ std::string Line::toUtf8(ColumnOffset begin, ColumnOffset end) const
             skipCount = _storage.widths[i] - 1;
         }
     }
+    return str;
+}
+
+std::string Line::toUtf8WithSgr(ColumnOffset begin, ColumnOffset end) const
+{
+    auto const cols = unbox<size_t>(_columns);
+    auto const first = std::min(static_cast<size_t>(std::max(*begin, 0)), cols);
+    auto const last = std::min(static_cast<size_t>(std::max(*end, 0)), cols);
+    if (first >= last)
+        return {};
+
+    auto str = std::string {};
+
+    // A blank line is uniformly the default rendition — no escapes, just spaces.
+    if (isBlank())
+    {
+        str.append(static_cast<size_t>(last - first), ' ');
+        return str;
+    }
+
+    auto current = GraphicsAttributes {}; // the default rendition is "in effect" at line start
+    auto skipCount = 0;
+    for (auto const i: std::views::iota(first, last))
+    {
+        if (skipCount > 0)
+        {
+            --skipCount; // a wide char's trailing cells share the lead cell's rendition
+            continue;
+        }
+        if (auto const& attrs = _storage.sgr[i]; attrs != current)
+        {
+            str += makeSgrSequence(attrs);
+            current = attrs;
+        }
+        if (_storage.clusterSize[i] == 0)
+            str += ' ';
+        else
+        {
+            forEachCodepoint(_storage, i, [&](char32_t cp) {
+                unicode::convert_to<char>(std::u32string_view(&cp, 1), std::back_inserter(str));
+            });
+            skipCount = _storage.widths[i] - 1;
+        }
+    }
+    if (current != GraphicsAttributes {})
+        str += "\033[m"; // close the last open rendition so it cannot bleed onto the next line
     return str;
 }
 

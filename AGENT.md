@@ -106,10 +106,10 @@ the design is not data-driven enough yet.
 
 ### Testability of every code area
 **Every code area must be testable, and new code lands with tests.** Each module ships a
-Catch2 `*_test` target (`vtbackend_test`, `vtparser_test`, `vtpty_test`, `vtmux_test`,
+Catch2 `*_test` target (`vtbackend_test`, `vtparser_test`, `vtpty_test`, `vtworkspace_test`,
 `crispy_test`, …). Code that is not headless-constructible (the GUI/RHI stack in
 `src/contour/`) is made testable by *extracting pure decisions into dependency-free headers*
-and driving the rest offscreen — the `contour_gui_test` / `vtmux_test` harnesses (GUI uses
+and driving the rest offscreen — the `contour_gui_test` / `vtworkspace_test` harnesses (GUI uses
 `Qt6::Test`). If something is hard to test, that is a design smell: inject the dependency and
 extract the decision, don't skip the test. Aim always to increase coverage.
 
@@ -134,11 +134,11 @@ First-party modules under `src/`, roughly bottom-up (later depends on earlier):
 - `src/vtpty` — pseudo-terminal (PTY) abstraction
 - `src/vtbackend` — terminal engine (grid, screen, VT semantics)
 - `src/vtrasterizer` — turns terminal cells into renderable geometry/atlases
-- `src/vtmux` — Qt-free tab/split-pane tree model
+- `src/vtworkspace` — Qt-free tab/split-pane tree model
 - `src/contour` — the Qt/QML GUI frontend (windows, display, RHI renderer)
 
 Respect these boundaries: lower layers must not depend on higher ones, and the GUI must not
-reach around `vtbackend`/`vtmux` into rendering internals.
+reach around `vtbackend`/`vtworkspace` into rendering internals.
 
 # VT reference sources
 

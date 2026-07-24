@@ -258,13 +258,38 @@ layouts:
     REQUIRE(t0.root.arguments.size() == 1);
     CHECK(t0.root.arguments[0] == ".");
     REQUIRE(t0.root.directory.has_value());
-    CHECK(t0.root.directory->generic_string() == "/tmp");
+    CHECK(*t0.root.directory == "/tmp");
 
     auto const& t1 = work.tabs[1];
     CHECK(t1.title == "claude");
     CHECK(t1.root.isLeaf());
     CHECK(*t1.root.command == "claude");
     CHECK_FALSE(t1.root.directory.has_value());
+}
+
+TEST_CASE("Config: a layout directory with non-ASCII characters loads losslessly", "[config][layout]")
+{
+    // Regression: the layout directory is stored as a lossless std::filesystem::path, not narrowed to
+    // a std::string at parse time. On Windows the old .string() narrowing threw std::system_error for a
+    // path outside the active code page (e.g. a Unicode profile directory), failing the ENTIRE config
+    // load; now such a path is preserved and only its own pane's launch would be affected.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    work:
+        tabs:
+            - title: "editor"
+              directory: "/tmp/naïve project"
+              command: "nvim"
+)"sv);
+
+    // The config loaded (no parse-time throw) and the directory was preserved intact.
+    auto const& layouts = config.layouts.value();
+    REQUIRE(layouts.contains("work"));
+    auto const& work = layouts.at("work");
+    REQUIRE(work.tabs.size() == 1);
+    REQUIRE(work.tabs[0].root.directory.has_value());
+    CHECK(*work.tabs[0].root.directory == std::filesystem::path { "/tmp/naïve project" });
 }
 
 TEST_CASE("Config: shellSplit tokenizes a command line respecting quotes", "[config][layout]")
@@ -335,7 +360,7 @@ layouts:
     auto const& tab = config.layouts.value().at("dev").tabs.at(0);
     auto const& root = tab.root;
     REQUIRE_FALSE(root.isLeaf());
-    CHECK(root.orientation == vtmux::SplitState::Vertical);
+    CHECK(root.orientation == vtworkspace::SplitState::Vertical);
     REQUIRE(root.children.size() == 2);
 
     CHECK(root.children[0].isLeaf());
@@ -351,7 +376,7 @@ layouts:
 
     auto const& nested = root.children[1];
     REQUIRE_FALSE(nested.isLeaf());
-    CHECK(nested.orientation == vtmux::SplitState::Horizontal);
+    CHECK(nested.orientation == vtworkspace::SplitState::Horizontal);
     REQUIRE(nested.children.size() == 2);
     CHECK(*nested.children[0].command == "htop");
     CHECK(nested.children[0].arguments.empty());
@@ -549,9 +574,9 @@ layouts:
     auto const& tabs = config.layouts.value().at("work").tabs;
     REQUIRE(tabs.size() == 2);
     // Natural capitalization must work like every other enum-ish config value.
-    CHECK(tabs.at(0).root.orientation == vtmux::SplitState::Horizontal);
+    CHECK(tabs.at(0).root.orientation == vtworkspace::SplitState::Horizontal);
     // An unknown value falls back to the vertical default (with a log line, not silently).
-    CHECK(tabs.at(1).root.orientation == vtmux::SplitState::Vertical);
+    CHECK(tabs.at(1).root.orientation == vtworkspace::SplitState::Vertical);
 }
 
 TEST_CASE("Config: an invalid tab color is ignored instead of turning black", "[config][layout]")

@@ -416,7 +416,44 @@ shared_ptr<Image const> ImagePool::create(ImageFormat format, ImageSize size, Im
     // TODO: This operation should be idempotent, i.e. if that image has been created already, return a
     // reference to that.
     auto const id = _nextImageId++;
-    return make_shared<Image>(id, format, std::move(data), size, _onImageRemove);
+    // The remover prunes the id index before the user's callback runs. It captures the
+    // index by shared_ptr, never the pool: an image's last reference may outlive the
+    // pool member order-wise, and it may drop on any thread.
+    auto image = make_shared<Image>(
+        id, format, std::move(data), size, [index = _idIndex, remover = _onImageRemove](Image const* image) {
+            {
+                auto const _ = std::lock_guard { index->mutex };
+                // Prune only if this dying image still owns its slot. After the uint32
+                // id counter wraps, a live image may have re-taken this id via
+                // insert_or_assign (see create() below); its weak_ptr is unexpired, so
+                // erasing by id unconditionally would drop the LIVE entry. Our own slot's
+                // weak_ptr is already expired once the destructor's remover runs, so
+                // expired() precisely selects the entry to remove.
+                if (auto const it = index->images.find(image->id().value);
+                    it != index->images.end() && it->second.expired())
+                    index->images.erase(it);
+            }
+            if (remover)
+                remover(image);
+        });
+    {
+        auto const _ = std::lock_guard { _idIndex->mutex };
+        // insert_or_assign, not emplace: after the uint32 id counter wraps, the
+        // reused id may still carry a stale index entry (an expired weak_ptr whose
+        // remover has not yet pruned it). emplace would no-op on the existing key,
+        // leaving the new live image unindexed — findImageById would then miss it
+        // and callers would wrongly treat a present image as gone.
+        _idIndex->images.insert_or_assign(id.value, image);
+    }
+    return image;
+}
+
+shared_ptr<Image const> ImagePool::findImageById(ImageId id) const
+{
+    auto const _ = std::lock_guard { _idIndex->mutex };
+    if (auto const it = _idIndex->images.find(id.value); it != _idIndex->images.end())
+        return it->second.lock();
+    return {};
 }
 
 shared_ptr<RasterizedImage> rasterize(shared_ptr<Image const> image,
@@ -452,6 +489,10 @@ void ImagePool::unlink(string const& name)
 void ImagePool::clear()
 {
     _imageNameToImageCache.clear();
+    {
+        auto const _ = std::lock_guard { _idIndex->mutex };
+        _idIndex->images.clear();
+    }
 }
 
 void ImagePool::inspect(ostream& os) const

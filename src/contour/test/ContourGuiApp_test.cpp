@@ -52,6 +52,23 @@ TEST_CASE("ContourGuiApp::resolveResource falls back to the qrc scheme for an un
     CHECK(url.toString().contains("contour"));
 }
 
+TEST_CASE("the attach boot window adopts the primary daemon window", "[contour][app][attach]")
+{
+    using contour::primaryDaemonWindowToAdopt;
+
+    // The boot window (no OS window mapped yet) adopts the primary — lowest-id — daemon window,
+    // so main.qml adopts it instead of authoring a spurious fresh tab on the daemon.
+    CHECK(primaryDaemonWindowToAdopt(/*anyWindowMapped=*/false, { 7, 12, 30 }) == 7);
+
+    // A later OS window (one already mapped) is NOT the boot window — it adopts nothing here (it is
+    // handled by the staged _pendingAttachWindow path instead).
+    CHECK_FALSE(primaryDaemonWindowToAdopt(/*anyWindowMapped=*/true, { 7, 12 }).has_value());
+
+    // No daemon window reported yet: nothing to bind now — the caller still claims the boot window
+    // and reconcileAttachWindows binds it once the first layout arrives.
+    CHECK_FALSE(primaryDaemonWindowToAdopt(/*anyWindowMapped=*/false, {}).has_value());
+}
+
 TEST_CASE("onExit records no exit status for a non-process session", "[contour][app]")
 {
     // A MockPty-backed session is neither a local vtpty::Process nor an SSH session: onExit must

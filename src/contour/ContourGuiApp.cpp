@@ -12,6 +12,10 @@
 #include <contour/display/ContentScale.h>
 #include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
+#include <contour/remote/NativeController.h>
+#include <contour/remote/RemoteLayout.h>
+#include <contour/remote/RoutingSessionFactory.h>
+#include <contour/remote/TmuxController.h>
 
 #include <vtpty/Process.h>
 
@@ -24,6 +28,9 @@
 #include <QtCore/QEventLoop>
 #include <QtCore/QProcess>
 #include <QtQml/qqmlextensionplugin.h>
+
+#include <vthost/Daemon.h>
+#include <vthost/SocketPath.h>
 #if !defined(__APPLE__) && !defined(_WIN32)
     #include <QtDBus/QDBusConnection>
 #endif
@@ -72,7 +79,9 @@ ContourGuiApp::ContourGuiApp(std::unique_ptr<SessionFactory> sessionFactory,
                              std::unique_ptr<ExternalLauncher> externalLauncher,
                              std::unique_ptr<LayoutStore> layoutStore,
                              std::unique_ptr<CommandHistoryStore> commandHistoryStore):
-    _sessionFactory(sessionFactory ? std::move(sessionFactory) : std::make_unique<AppSessionFactory>(*this)),
+    _sessionFactory(std::make_unique<RoutingSessionFactory>(
+        sessionFactory ? std::move(sessionFactory) : std::make_unique<AppSessionFactory>(*this))),
+    _routingFactory(static_cast<RoutingSessionFactory*>(_sessionFactory.get())),
     _externalLauncher(externalLauncher ? std::move(externalLauncher)
                                        : std::make_unique<QtExternalLauncher>()),
     _layoutStore(layoutStore ? std::move(layoutStore) : std::make_unique<FileLayoutStore>()),
@@ -83,6 +92,179 @@ ContourGuiApp::ContourGuiApp(std::unique_ptr<SessionFactory> sessionFactory,
     link("contour.terminal", bind(&ContourGuiApp::terminalGuiAction, this));
     link("contour.font-locator", bind(&ContourGuiApp::fontConfigAction, this));
     link("contour.info.config", bind(&ContourGuiApp::checkConfig, this));
+    link("contour.client", bind(&ContourGuiApp::clientAction, this));
+}
+
+ContourGuiApp::~ContourGuiApp() = default;
+
+int ContourGuiApp::clientAction()
+{
+    auto const wantsTmux = parameters().get<bool>("contour.client.tmux");
+
+    // Resolve every client-verb parameter BEFORE the re-parse below drops them.
+    auto const socketOption = parameters().get<string>("contour.client.socket");
+    auto const label = parameters().get<string>("contour.client.label");
+    auto const attachProfile = parameters().get<string>("contour.client.profile");
+    auto const attachConfig = parameters().get<string>("contour.client.config");
+    auto const tmuxSocket = parameters().get<string>("contour.client.tmux-socket");
+    auto const connectTcp = parameters().get<string>("contour.client.connect-tcp");
+    auto const tcpToken = parameters().get<string>("contour.client.token");
+    auto const tlsCaPath = parameters().get<string>("contour.client.tls-ca");
+
+    // Auto-spawn the daemon if it is not already running (Unix sockets only;
+    // TCP endpoints pass through — you cannot spawn a remote daemon).
+    if (!wantsTmux && connectTcp.empty())
+    {
+        auto const controlPath = vthost::muxSocketPath(label, socketOption);
+        auto const endpoint = vthost::AttachEndpoint { vthost::UnixEndpoint { .socketPath = controlPath } };
+        if (vthost::ensureDaemon(endpoint, programPath()) != EXIT_SUCCESS)
+        {
+            cerr << std::format("contour client: daemon did not start within 5 seconds.\n");
+            return EXIT_FAILURE;
+        }
+    }
+
+    auto adopt = std::function<void()> {};
+    if (wantsTmux)
+    {
+        _tmuxController = std::make_unique<TmuxController>(tmuxSocket);
+        if (auto connected = _tmuxController->connectAndWait(std::chrono::seconds(10)); !connected)
+        {
+            cerr << std::format("contour attach --tmux: {}\n", connected.error());
+            _tmuxController.reset();
+            return EXIT_FAILURE;
+        }
+        _routingFactory->setDelegate(_tmuxController.get());
+        adopt = [this] {
+            if (auto const window = _sessionManager.focusedWindow())
+                _tmuxController->adoptPendingPanes(_sessionManager, *window);
+        };
+        connect(
+            _tmuxController.get(), &TmuxController::remotePaneDiscovered, this, adopt, Qt::QueuedConnection);
+        // A %window-renamed reflects onto the owning tab's title (a tmux window is a tab).
+        connect(
+            _tmuxController.get(),
+            &TmuxController::tabTitleChanged,
+            this,
+            [this] { _tmuxController->applyPendingRenames(_sessionManager); },
+            Qt::QueuedConnection);
+        connect(
+            _tmuxController.get(),
+            &TmuxController::connectionClosed,
+            this,
+            [this] { _tmuxController->stop(); },
+            Qt::QueuedConnection);
+    }
+    else
+    {
+        // Build the daemon endpoint: a TLS-encrypted TCP connection when
+        // --connect-tcp is given, otherwise the local control socket (connectAttach
+        // resolves the native socket beside it).
+        auto endpoint = vthost::AttachEndpoint {};
+        auto endpointLabel = std::string {};
+        if (!connectTcp.empty())
+        {
+            auto const hostPort = vthost::parseHostPort(connectTcp);
+            if (!hostPort)
+            {
+                cerr << std::format("contour attach: invalid --connect-tcp '{}' (expected HOST:PORT)\n",
+                                    connectTcp);
+                return EXIT_FAILURE;
+            }
+            auto tcp = vthost::TcpEndpoint {
+                .host = hostPort->first, .port = hostPort->second, .token = tcpToken, .caPem = {}
+            };
+            if (!tlsCaPath.empty())
+            {
+                auto const path = std::filesystem::path(tlsCaPath);
+                // An empty CA read must hard-fail exactly like the thin client:
+                // makeTlsClientContext treats "" as the TOFU/no-verify posture, so
+                // accepting it would silently strip the pinning the user asked for.
+                auto caPem = std::string {};
+                if (std::filesystem::is_regular_file(path))
+                    caPem = crispy::readFileAsString(path);
+                if (caPem.empty())
+                {
+                    cerr << std::format("contour attach: cannot read --tls-ca file '{}'\n", tlsCaPath);
+                    return EXIT_FAILURE;
+                }
+                tcp.caPem = std::move(caPem);
+            }
+            endpointLabel = std::format("{}:{}", tcp.host, tcp.port);
+            endpoint = std::move(tcp);
+        }
+        else
+        {
+            auto const controlPath = vthost::muxSocketPath(label, socketOption);
+            endpointLabel = controlPath.string();
+            endpoint = vthost::UnixEndpoint { .socketPath = controlPath };
+        }
+
+        _nativeController = std::make_unique<NativeController>(std::move(endpoint));
+        if (auto connected = _nativeController->connectAndWait(std::chrono::seconds(5)); !connected)
+        {
+            cerr << std::format("contour attach: {} ({})\n", connected.error(), endpointLabel);
+            _nativeController.reset();
+            return EXIT_FAILURE;
+        }
+        _routingFactory->setDelegate(_nativeController.get());
+        // A window spawned to host a daemon window binds itself here (from its
+        // main.qml, via consumeAttachWindow) instead of creating a fresh first tab.
+        _sessionManager.setAttachWindowBinder(
+            [this](WindowController* controller) { return bindPendingAttachWindow(controller); });
+        // Reconcile the GUI against the daemon's authoritative window→tab→split tree
+        // (B2/B4): whenever a layout arrives or changes (GUI boot, or a window/tab/
+        // split authored on the daemon, here or by another client), map each daemon
+        // window onto an OS window and realize any tab not yet shown, each pane bound
+        // to its remote session. Incremental — what is already shown is left untouched.
+        // A dying connection ends every mirror session (stop() closes the ptys),
+        // closing the tabs through the shell-exit teardown.
+        adopt = [this] {
+            reconcileAttachWindows();
+        };
+        connect(_nativeController.get(), &NativeController::layoutChanged, this, adopt, Qt::QueuedConnection);
+        connect(
+            _nativeController.get(),
+            &NativeController::connectionClosed,
+            this,
+            [this] { _nativeController->stop(); },
+            Qt::QueuedConnection);
+    }
+
+    // Boot the GUI under the terminal verb's parameter surface: re-parse a
+    // synthetic argv so every contour.terminal.* key resolves, carrying the
+    // attach-specific profile/config choices over.
+    auto argv = std::vector<char const*> { "contour", "terminal" };
+    if (!attachProfile.empty())
+    {
+        argv.push_back("profile");
+        argv.push_back(attachProfile.c_str());
+    }
+    if (!attachConfig.empty())
+    {
+        argv.push_back("config");
+        argv.push_back(attachConfig.c_str());
+    }
+    auto const stopControllers = [this] {
+        if (_nativeController)
+            _nativeController->stop();
+        if (_tmuxController)
+            _tmuxController->stop();
+    };
+    if (!reparseParameters(static_cast<int>(argv.size()), argv.data()))
+    {
+        _routingFactory->setDelegate(nullptr);
+        stopControllers();
+        return EXIT_FAILURE;
+    }
+
+    _onGuiBooted = adopt;
+    auto const rv = terminalGuiAction();
+
+    _onGuiBooted = nullptr;
+    _routingFactory->setDelegate(nullptr);
+    stopControllers();
+    return rv;
 }
 
 int ContourGuiApp::run(int argc, char const* argv[])
@@ -98,6 +280,50 @@ crispy::cli::command ContourGuiApp::parameterDefinition() const
     auto command = ContourApp::parameterDefinition();
 
     // NOLINTBEGIN
+    command.children.insert(
+        command.children.begin(),
+        CLI::command {
+            "client",
+            "Connects to a terminal multiplexer daemon in a GUI window (auto-spawns the daemon if "
+            "needed).",
+            CLI::option_list {
+                CLI::option { "socket",
+                              CLI::value { ""s },
+                              "Path of the daemon's control socket file. Defaults to "
+                              "$XDG_RUNTIME_DIR/contour/LABEL (respecting $CONTOUR_MUX).",
+                              "PATH" },
+                CLI::option { "label",
+                              CLI::value { "default"s },
+                              "Socket label distinguishing daemon instances.",
+                              "NAME" },
+                CLI::option { "tmux",
+                              CLI::value { false },
+                              "Attaches to a real tmux server (spawns `tmux -C attach-session`): "
+                              "tmux windows become tabs, panes become splits." },
+                CLI::option {
+                    "tmux-socket", CLI::value { ""s }, "tmux server socket path (-S) for --tmux.", "PATH" },
+                CLI::option { "profile",
+                              CLI::value { ""s },
+                              "Config profile the GUI renders remote sessions with.",
+                              "NAME" },
+                CLI::option {
+                    "config", CLI::value { ""s }, "Path to configuration file the GUI loads.", "FILE" },
+                CLI::option { "connect-tcp",
+                              CLI::value { ""s },
+                              "Connect to a TCP daemon at HOST:PORT (TLS-encrypted, "
+                              "token-authenticated) instead of the local socket.",
+                              "HOST:PORT" },
+                CLI::option {
+                    "token", CLI::value { ""s }, "Preshared token sent to a --connect-tcp daemon.", "TOKEN" },
+                CLI::option { "tls-ca",
+                              CLI::value { ""s },
+                              "PEM trust anchor pinning the daemon's TLS certificate "
+                              "for --connect-tcp. Omitted = TOFU (encrypt, don't verify; "
+                              "the token authenticates).",
+                              "FILE" },
+            },
+        });
+
     command.children.insert(
         command.children.begin(),
         CLI::command {
@@ -667,6 +893,11 @@ int ContourGuiApp::terminalGuiAction()
         newWindow();
     }
 
+    // Attach mode adopts the remaining remote sessions as tabs now that a
+    // window exists to put them in.
+    if (_onGuiBooted)
+        _onGuiBooted();
+
     // Run the event loop FIRST (it populates _exitStatus via onExit during the run), THEN map that
     // status to the process exit code. The mapping is the pure exitCodeFor() (ExitCode.h), extracted
     // so it is unit-testable without the event loop. NB: sequenced explicitly — passing exec() as an
@@ -765,6 +996,94 @@ QScreen* ContourGuiApp::takePendingSpawnScreen() noexcept
     auto* screen = _pendingSpawnScreen.data();
     _pendingSpawnScreen.clear();
     return screen;
+}
+
+bool ContourGuiApp::requestRemoteWindow()
+{
+    return _routingFactory != nullptr && _routingFactory->requestRemoteWindow();
+}
+
+void ContourGuiApp::reconcileAttachWindows()
+{
+    if (!_nativeController)
+        return;
+
+    // Daemon window ids come ascending, so the primary (lowest-id) window is handled
+    // first — it maps to the boot window; the rest each get their own OS window.
+    for (auto const daemonWindow: _nativeController->windowIds())
+    {
+        if (auto const mapped = _attachWindowMap.find(daemonWindow); mapped != _attachWindowMap.end())
+        {
+            // Already shown: bring its tree up to date.
+            contour::applyRemoteLayout(_sessionManager, mapped->second, *_nativeController, daemonWindow);
+            continue;
+        }
+        if (_pendingAttachWindow == daemonWindow)
+            continue; // an OS window is already spawning for this daemon window
+
+        if (_attachWindowMap.empty())
+        {
+            // The primary daemon window adopts the boot window (already created before
+            // the first layout arrived). A missing focused window (mid-boot) stages
+            // the daemon window so bindPendingAttachWindow can bind it once the boot
+            // window becomes ready, instead of hoping for another layout push.
+            if (auto const boot = _sessionManager.focusedWindow())
+                bindDaemonWindow(daemonWindow, *boot);
+            else if (!_pendingAttachWindow)
+                _pendingAttachWindow = daemonWindow;
+            continue;
+        }
+
+        // A new daemon window: spawn an OS window to host it. Its main.qml claims the
+        // staged id (consumeAttachWindow → bindPendingAttachWindow), records the mapping
+        // and reconciles — so it never creates a stray fresh tab. The QML load is
+        // synchronous, so the stage is consumed before this returns.
+        _pendingAttachWindow = daemonWindow;
+        newWindow();
+    }
+}
+
+std::optional<std::uint64_t> primaryDaemonWindowToAdopt(bool anyWindowMapped,
+                                                        std::vector<std::uint64_t> const& daemonWindowIds)
+{
+    if (anyWindowMapped || daemonWindowIds.empty())
+        return std::nullopt;
+    return daemonWindowIds.front(); // windowIds() is ascending, so front() is the primary window
+}
+
+bool ContourGuiApp::bindPendingAttachWindow(WindowController* controller)
+{
+    if (!_nativeController || controller == nullptr)
+        return false;
+
+    // A reconcile-spawned secondary OS window claims the daemon window staged for it.
+    if (_pendingAttachWindow)
+    {
+        auto const daemonWindow = *_pendingAttachWindow;
+        _pendingAttachWindow.reset();
+        bindDaemonWindow(daemonWindow, controller->windowId());
+        return true;
+    }
+
+    // The boot (first) OS window in attach mode ADOPTS the daemon's primary window instead of
+    // authoring a fresh tab. Claiming it here makes main.qml skip win.createNewTab(), which in
+    // attach mode would author a spurious extra tab on the daemon (and create no local first tab).
+    // Bind the primary window now if the daemon already reported one; otherwise still claim the boot
+    // window (return true) and let reconcileAttachWindows bind it once the first layout arrives.
+    if (_attachWindowMap.empty())
+    {
+        if (auto const adopt = primaryDaemonWindowToAdopt(false, _nativeController->windowIds()))
+            bindDaemonWindow(*adopt, controller->windowId());
+        return true;
+    }
+
+    return false;
+}
+
+void ContourGuiApp::bindDaemonWindow(std::uint64_t daemonWindow, vtworkspace::WindowId osWindow)
+{
+    _attachWindowMap.emplace(daemonWindow, osWindow);
+    contour::applyRemoteLayout(_sessionManager, osWindow, *_nativeController, daemonWindow);
 }
 
 display::ForcedFontDpiProvider* ContourGuiApp::forcedFontDpiProvider()

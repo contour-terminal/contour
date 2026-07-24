@@ -2,7 +2,7 @@
 //
 // Contract tests for the tab strip's QAbstractListModel projection.
 //
-// WindowController projects a Qt-free vtmux::SessionModel into a QAbstractListModel whose rows are
+// WindowController projects a Qt-free vtworkspace::SessionModel into a QAbstractListModel whose rows are
 // its window's TABS (a tab with several split panes is still one row). Driving the production
 // controller here would need a full ContourGuiApp session stack, so these tests drive a thin
 // TabListModel that performs the EXACT SAME projection and the EXACT SAME
@@ -29,16 +29,16 @@
 
 #include <QtTest/QAbstractItemModelTester>
 #include <QtTest/QSignalSpy>
-#include <vtmux/ModelEvents.h>
-#include <vtmux/SessionModel.h>
+#include <vtworkspace/ModelEvents.h>
+#include <vtworkspace/SessionModel.h>
 
-using namespace vtmux;
+using namespace vtworkspace;
 
 namespace
 {
 
 /// A faithful stand-in for WindowController's QAbstractListModel surface: rows are the window's
-/// tabs, and the vtmux ModelEvents are mapped to begin/end* exactly as the controller does.
+/// tabs, and the vtworkspace ModelEvents are mapped to begin/end* exactly as the controller does.
 /// It deliberately does NOT back rows with a per-pane session vector, so a split adds no row.
 class TabListModel: public QAbstractListModel, public ModelEvents
 {
@@ -142,7 +142,7 @@ class TabListModel: public QAbstractListModel, public ModelEvents
     }
     // }}}
 
-    // {{{ vtmux::ModelEvents — identical begin/end* bracketing to WindowController's on* hooks
+    // {{{ vtworkspace::ModelEvents — identical begin/end* bracketing to WindowController's on* hooks
     void tabAboutToBeAdded(WindowId, int index) override { beginInsertRows(QModelIndex(), index, index); }
     void tabAdded(WindowId, TabId, int) override
     {
@@ -331,7 +331,7 @@ TEST_CASE("TabListModel: closing a tab removes exactly one row via the remove co
 
     auto* a = m.model().createTab(m.window().id());
     auto* b = m.model().createTab(m.window().id());
-    m.model().createTab(m.window().id());
+    (void) m.model().createTab(m.window().id());
     CHECK(m.rowCount() == 3);
 
     // Closing the middle tab drops the row count by exactly one; the tester verifies rowCount was 3
@@ -411,8 +411,8 @@ TEST_CASE("TabListModel: switching the active tab repaints the old and new rows'
     TabListModel m;
     QAbstractItemModelTester const tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
 
-    m.model().createTab(m.window().id());           // row 0
-    m.model().createTab(m.window().id());           // row 1
+    (void) m.model().createTab(m.window().id());    // row 0
+    (void) m.model().createTab(m.window().id());    // row 1
     auto* c = m.model().createTab(m.window().id()); // row 2, active (newest)
     REQUIRE(m.window().activeTab() == c);
     REQUIRE(m.window().activeTabIndex() == 2);
@@ -561,7 +561,7 @@ TEST_CASE("TabListModel: out-of-range and parented indices yield empty data", "[
 {
     TabListModel m;
     QAbstractItemModelTester const tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
-    m.model().createTab(m.window().id());
+    (void) m.model().createTab(m.window().id());
 
     CHECK_FALSE(roleAt(m, 5, TabListModel::Roles::TitleRole).isValid());
     CHECK(m.rowCount(m.index(0)) == 0); // list model: rows only under the root
@@ -851,7 +851,7 @@ TEST_CASE("TabListModel: a tab rename republishes the indicator status line",
     SECTION("a color change refreshes the status line (the established contract this mirrors)")
     {
         auto const before = m.statusLineUpdateCount;
-        m.model().setTabColor(a->id(), vtmux::TabColorSource::User, vtbackend::RGBColor { 10, 20, 30 });
+        m.model().setTabColor(a->id(), vtworkspace::TabColorSource::User, vtbackend::RGBColor { 10, 20, 30 });
         CHECK(m.statusLineUpdateCount == before + 1);
     }
 

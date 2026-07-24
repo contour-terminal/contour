@@ -3,7 +3,7 @@
 //
 // A leaf node renders a single terminal pane (a ContourTerminal bound to the leaf's session); a
 // split node renders a SplitView containing two child panes laid out along the node's orientation.
-// The structure follows the vtmux::Pane tree, surfaced to QML as PaneProxy objects.
+// The structure follows the vtworkspace::Pane tree, surfaced to QML as PaneProxy objects.
 //
 // A QML component cannot instantiate itself by name (Qt rejects that as "instantiated
 // recursively"), so the split children are loaded by URL via Loader.setSource("PaneNode.qml", ...).
@@ -74,10 +74,10 @@ FocusScope {
             // Loader deactivates). Guard every root.node access here the same way the outer Loaders
             // do, so teardown does not raise "Cannot read property of null" TypeErrors.
 
-            // orientation: vtmux::SplitState::Vertical (2) => side-by-side (Qt.Horizontal).
+            // orientation: vtworkspace::SplitState::Vertical (2) => side-by-side (Qt.Horizontal).
             orientation: (root.node && root.node.orientation === 2) ? Qt.Horizontal : Qt.Vertical
 
-            // Explicit handle so the thickness has ONE source (vtmux::DefaultSplitHandleThickness,
+            // Explicit handle so the thickness has ONE source (vtworkspace::DefaultSplitHandleThickness,
             // surfaced as terminalSessions.splitHandleThickness) shared with the window-size solver.
             // Visuals reproduce the Qt Quick "Basic" style default delegate this replaces.
             handle: Rectangle {

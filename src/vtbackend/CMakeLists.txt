@@ -47,6 +47,7 @@ set(vtbackend_HEADERS
     Selector.h
     Sequence.h
     SequenceBuilder.h
+    SgrWriter.h
     SixelParser.h
     regis/ReGISTables.h
     regis/ReGISColor.h

@@ -39,9 +39,9 @@ enum class CopyFormat : uint8_t
 
 /// A cardinal direction for directional pane actions (resize).
 ///
-/// Kept local to the action layer (rather than reusing vtmux::FocusDirection) so this layer stays
+/// Kept local to the action layer (rather than reusing vtworkspace::FocusDirection) so this layer stays
 /// transport-agnostic — it describes *what the user asked for*, and the dispatch handler translates it
-/// to the model's vtmux::FocusDirection. Mirrors how CopyFormat is a local enum.
+/// to the model's vtworkspace::FocusDirection. Mirrors how CopyFormat is a local enum.
 enum class Direction : uint8_t
 {
     Left,
