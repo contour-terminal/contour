@@ -16,9 +16,9 @@
 #include <utility>
 #include <vector>
 
+#include <net/Sockets.h>
 #include <vthost/MirroredModes.h>
 #include <vthost/PduPump.h>
-#include <net/Sockets.h>
 #include <vtworkspace/Pane.h>
 #include <vtworkspace/Tab.h>
 
@@ -119,7 +119,7 @@ namespace
 
         auto const columns = unbox<std::size_t>(line.size());
         wire.cells.reserve(columns);
-        for (std::size_t column = 0; column < columns; ++column)
+        for (auto const column: std::views::iota(std::size_t { 0 }, columns))
         {
             auto cell = proto::WireCell {};
             cell.codepoint = soa.codepoints[column];
