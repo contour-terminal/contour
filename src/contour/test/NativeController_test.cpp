@@ -157,6 +157,17 @@ std::string drainUntil(vtpty::Pty& pty, std::string_view needle)
     return collected;
 }
 
+/// Connects @p controller to the fixture's daemon, failing the test with the
+/// controller's own reason (a timeout, a closed connection, a TLS error) rather
+/// than a bare `false` -- the difference between a diagnosable CI failure and a
+/// guess.
+void requireConnected(contour::RemoteController& controller, std::chrono::milliseconds timeout = 10s)
+{
+    auto const connected = controller.connectAndWait(timeout);
+    INFO("connectAndWait: " << (connected ? std::string { "ok" } : connected.error()));
+    REQUIRE(connected.has_value());
+}
+
 /// A factory that can never back a session (the attach guard's stand-in).
 struct RefusingFactory final: contour::SessionFactory
 {
@@ -286,7 +297,7 @@ TEST_CASE("attach realizes a split daemon layout as a 2-pane tab", "[attach][con
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
 
-    REQUIRE(ac->connectAndWait(10s).has_value());
+    requireConnected(*ac);
     // The layout leads the snapshot; poll until the split tree has arrived.
     for (auto i = 0; i < 200; ++i)
     {
@@ -326,7 +337,7 @@ TEST_CASE("attach reconciles a split authored on the daemon after attach", "[att
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
 
-    REQUIRE(ac->connectAndWait(10s).has_value());
+    requireConnected(*ac);
     for (auto i = 0; i < 200 && !ac->layout().has_value(); ++i)
         std::this_thread::sleep_for(5ms);
     contour::applyRemoteLayout(app.manager(), win.id, *ac);
@@ -368,7 +379,7 @@ TEST_CASE("attach reconciles an uneven daemon split with matching proportions", 
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
 
-    REQUIRE(ac->connectAndWait(10s).has_value());
+    requireConnected(*ac);
     for (auto i = 0; i < 200 && !ac->layout().has_value(); ++i)
         std::this_thread::sleep_for(5ms);
     contour::applyRemoteLayout(app.manager(), win.id, *ac);
@@ -415,7 +426,7 @@ TEST_CASE("attach reconciles a pane closed on the daemon by removing it locally"
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
-    REQUIRE(ac->connectAndWait(10s).has_value());
+    requireConnected(*ac);
     for (auto i = 0; i < 200 && !ac->layout().has_value(); ++i)
         std::this_thread::sleep_for(5ms);
     contour::applyRemoteLayout(app.manager(), win.id, *ac);
@@ -465,7 +476,7 @@ TEST_CASE("attach authors a split on the daemon and reconciles it locally", "[at
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
 
-    REQUIRE(ac->connectAndWait(10s).has_value());
+    requireConnected(*ac);
     for (auto i = 0; i < 200 && !ac->layout().has_value(); ++i)
         std::this_thread::sleep_for(5ms);
     contour::applyRemoteLayout(app.manager(), win.id, *ac);
@@ -503,7 +514,7 @@ TEST_CASE("attach authors a tab on the daemon and reconciles it locally", "[atta
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
 
-    REQUIRE(ac->connectAndWait(10s).has_value());
+    requireConnected(*ac);
     for (auto i = 0; i < 200 && !ac->layout().has_value(); ++i)
         std::this_thread::sleep_for(5ms);
     contour::applyRemoteLayout(app.manager(), win.id, *ac);
@@ -541,7 +552,7 @@ TEST_CASE("attach maps each daemon window onto its own GUI window", "[attach][co
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win1 { app.manager() };
 
-    REQUIRE(ac->connectAndWait(10s).has_value());
+    requireConnected(*ac);
     for (auto i = 0; i < 200 && ac->windowIds().empty(); ++i)
         std::this_thread::sleep_for(5ms);
     REQUIRE(ac->windowIds().size() == 1);
@@ -593,7 +604,7 @@ TEST_CASE("a closed mirrored tab does not resurrect on later remote output", "[a
     auto const session = daemon.seedSession("first line");
 
     auto controller = contour::NativeController { daemon.endpoint() };
-    REQUIRE(controller.connectAndWait(10s).has_value());
+    requireConnected(controller);
     REQUIRE(controller.pendingCount() == 1);
 
     // Bind the pending remote session to a local tab, then close that tab.

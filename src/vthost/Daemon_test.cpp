@@ -21,15 +21,20 @@ namespace
 
 namespace fs = std::filesystem;
 
-/// A unique, empty directory under the system temp dir, removed on destruction.
+/// A unique directory path under the system temp dir, removed on destruction.
 /// Each test gets its own so concurrent runs cannot collide on a socket file.
+///
+/// The directory is deliberately NOT created here: listenUnix creates it with
+/// owner-only permissions, and refuses to bind under a world-accessible parent.
+/// Pre-creating it would hand it the default 0755 and fail that check.
+///
 /// Both components are kept terse on purpose: an AF_UNIX path must fit
 /// sun_path's 108 bytes, and the system temp dir already eats much of that.
 struct TempDir
 {
     fs::path path = fs::temp_directory_path() / std::format("contour-d-{}", std::random_device {}());
 
-    TempDir() { fs::create_directories(path); }
+    TempDir() = default;
 
     ~TempDir()
     {
@@ -70,6 +75,9 @@ TEST_CASE("ensureDaemon: a listening daemon is detected, nothing is spawned", "[
     auto listener = net::listenUnix(loop, vthost::nativeSocketPath(controlSocket).string());
     if (!listener.has_value())
     {
+        // Unsupported is the one acceptable failure (no AF_UNIX at all); anything
+        // else is a real bind regression, so report what it actually said.
+        INFO("listenUnix failed: " << listener.error().toString());
         REQUIRE(listener.error().code == net::NetErrorCode::Unsupported);
         SKIP("AF_UNIX not supported on this platform");
     }
