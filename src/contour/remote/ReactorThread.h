@@ -22,7 +22,15 @@
 namespace contour
 {
 
-/// Owns the reactor and the thread that pumps it.
+/// @brief Owns a net::EventLoop running on a dedicated thread.
+///
+/// Two-phase initialization (default-construct then start()) is necessary because
+/// the root coroutine task is supplied by the owning RemoteController at connect
+/// time, not at construction time — the reactor is allocated before the concrete
+/// controller knows its connection type.
+///
+/// @note The owner must ensure the root task finishes (or requestStop() is posted
+///       into the loop) before destruction, or the destructor blocks forever.
 class ReactorThread
 {
   public:
@@ -39,6 +47,9 @@ class ReactorThread
 
     /// Starts the thread, running @p rootTask to completion on the loop.
     /// A cancellation unwind (requestStop) ends the task silently.
+    /// @param rootTask The coroutine factory that produces the root task to run
+    ///        on the loop (e.g. NativeClient::runClient or
+    ///        TmuxClientModel::runControlMode).
     void start(std::function<coro::Task<void>(net::EventLoop*)> rootTask)
     {
         _thread = std::thread { [this, rootTask = std::move(rootTask)]() mutable {
@@ -59,6 +70,7 @@ class ReactorThread
     [[nodiscard]] bool wasCancelled() const noexcept { return _cancelled.load(std::memory_order_acquire); }
 
     /// Marshals @p fn onto the loop thread. Thread-safe.
+    /// @param fn The work to marshal onto the reactor thread.
     void post(std::function<void()> fn) { _loop.post(std::move(fn)); }
 
     /// Cancels every flow on the loop (marshaled onto it), so a task parked

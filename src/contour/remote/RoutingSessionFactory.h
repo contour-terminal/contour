@@ -28,6 +28,10 @@ class RoutingSessionFactory final: public SessionFactory
 
     /// Routes createPty/canCreateSession to @p delegate (not owned; nullptr
     /// restores the default factory).
+    /// @note This setter exists as a documented rebinding seam: the session
+    ///       factory reference is held for the app's lifetime, and attach mode
+    ///       swaps in a delegate at runtime rather than replacing the factory
+    ///       pointer.
     void setDelegate(SessionFactory* delegate) noexcept { _delegate = delegate; }
 
     [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(
