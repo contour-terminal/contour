@@ -16,9 +16,9 @@
 #include <memory>
 
 #include <coro/Task.hpp>
-#include <vthost/SessionHost.h>
 #include <net/EventLoop.h>
 #include <net/ISocket.h>
+#include <vthost/SessionHost.h>
 
 namespace vthost::tmux
 {
@@ -26,7 +26,7 @@ namespace vthost::tmux
 /// The daemon's connection-handler factory for imsg (binary tmux) clients.
 /// @param loop The event loop.
 /// @param host The session host (not owned; must outlive the daemon's serving).
-/// @return A handler suitable for MuxServer's constructor.
+/// @return A handler suitable for ConnectionAcceptor's constructor.
 [[nodiscard]] std::function<coro::Task<void>(std::unique_ptr<net::ISocket>)> makeTmuxImsgHandler(
     net::EventLoop& loop, SessionHost& host);
 

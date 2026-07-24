@@ -153,7 +153,7 @@ namespace
       private:
         /// Suspends a caller until the in-flight handshake, driven by another
         /// coroutine, completes. OpenSSL is not reentrant, so concurrent read() and
-        /// write() (as AttachClient does) must NOT both call SSL_do_handshake — the
+        /// write() (as NativeClient does) must NOT both call SSL_do_handshake — the
         /// single-loop path serialized them by timing; a real two-reactor connection
         /// interleaves them and corrupts the handshake without this gate.
         struct HandshakeGate

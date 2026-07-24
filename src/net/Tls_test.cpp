@@ -152,7 +152,7 @@ TEST_CASE("TLS completes a two-reactor handshake under concurrent client I/O", "
 {
     // The remote topology: server and client on INDEPENDENT reactors (separate
     // threads), a real loopback TCP socket between them. The client drives the
-    // handshake from CONCURRENT write and read coroutines — the shape AttachClient
+    // handshake from CONCURRENT write and read coroutines — the shape NativeClient
     // uses (WriteQueue + read pump) — which deadlocked before handshake() was
     // serialized (two coroutines calling non-reentrant SSL_do_handshake at once).
     auto serverSource = net::PollEventSource {};

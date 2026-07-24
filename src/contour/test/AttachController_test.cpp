@@ -32,17 +32,17 @@
 #include <cstdint>
 
 #include <coro/Cancellation.hpp>
-#include <vthost/MuxServer.h>
-#include <vthost/NativeSession.h>
-#include <vthost/SessionHost.h>
-#include <vthost/SocketPath.h>
-#include <vthost/TappingPty.h>
-#include <vthost/client/LayoutReconstruction.h>
 #include <net/EventLoop.h>
 #include <net/ISocket.h>
 #include <net/PollEventSource.h>
 #include <net/Sockets.h>
 #include <net/Tls.h>
+#include <vthost/ConnectionAcceptor.h>
+#include <vthost/NativeSession.h>
+#include <vthost/SessionHost.h>
+#include <vthost/SocketPath.h>
+#include <vthost/TappingPty.h>
+#include <vthost/client/LayoutReconstruction.h>
 #include <vtworkspace/Pane.h>
 #include <vtworkspace/SessionModel.h>
 #include <vtworkspace/Tab.h>
@@ -61,7 +61,7 @@ struct DaemonFixture
     net::PollEventSource source;
     net::EventLoop loop { source };
     std::unique_ptr<vthost::SessionHost> host;
-    std::unique_ptr<vthost::MuxServer> server;
+    std::unique_ptr<vthost::ConnectionAcceptor> server;
     std::uint16_t port = 0; ///< The OS-assigned loopback port the daemon listens on.
     std::thread thread;
     bool cancelled = false; ///< Whether teardown unwound the accept loop.
@@ -79,7 +79,7 @@ struct DaemonFixture
         // Encrypt each accepted socket (server-side TLS, self-signed) before the
         // native protocol runs over it — the daemon's real TCP path. This exercises
         // the two-reactor TLS handshake (client + daemon on independent reactors),
-        // which AttachClient's concurrent read+write drives.
+        // which NativeClient's concurrent read+write drives.
         auto tls = net::makeSelfSignedServerContext();
         REQUIRE(tls.has_value());
         auto native = vthost::makeNativeHandler(loop, *host);
@@ -87,7 +87,7 @@ struct DaemonFixture
         auto handler = [context, native](std::unique_ptr<net::ISocket> socket) {
             return native(context->wrap(std::move(socket)));
         };
-        server = std::make_unique<vthost::MuxServer>(loop, std::move(*listener), handler);
+        server = std::make_unique<vthost::ConnectionAcceptor>(loop, std::move(*listener), handler);
         thread = std::thread { [this] {
             try
             {

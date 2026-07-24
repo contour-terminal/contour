@@ -32,20 +32,20 @@
 #include <net/WriteQueue.h>
 #include <net/testing/CoroTestSupport.h>
 #include <net/testing/InMemoryTransport.h>
+#include <vthost/ConnectionAcceptor.h>
 #include <vthost/Daemon.h>
-#include <vthost/MuxServer.h>
 #include <vthost/NativeSession.h>
 #include <vthost/PduPump.h>
 #include <vthost/SessionHost.h>
 #include <vthost/TappingPty.h>
-#include <vthost/client/AttachClient.h>
+#include <vthost/client/NativeClient.h>
 #include <vtworkspace/Pane.h>
 #include <vtworkspace/Tab.h>
 
 using coro::Task;
 using vthost::NativeSession;
 using vthost::SessionHost;
-using vthost::client::AttachClient;
+using vthost::client::NativeClient;
 using vthost::client::RemoteScreen;
 namespace proto = vthost::proto;
 using namespace std::chrono_literals;
@@ -54,7 +54,7 @@ namespace
 {
 
 /// The full server<->client pair over one in-memory socket: the REAL
-/// NativeSession serves what the REAL AttachClient mirrors.
+/// NativeSession serves what the REAL NativeClient mirrors.
 struct EndToEndHarness
 {
     net::PollEventSource source;
@@ -67,7 +67,7 @@ struct EndToEndHarness
     net::ISocket* serverConn = pair.first.get(); ///< Captured before the move, to simulate a daemon exit.
     std::unique_ptr<NativeSession> server =
         std::make_unique<NativeSession>(loop, host, std::move(pair.first));
-    std::unique_ptr<AttachClient> client = std::make_unique<AttachClient>(loop, std::move(pair.second));
+    std::unique_ptr<NativeClient> client = std::make_unique<NativeClient>(loop, std::move(pair.second));
 };
 
 Task<void> scenario(EndToEndHarness* h, vtworkspace::SessionId sessionId)
@@ -320,7 +320,7 @@ Task<void> fakeImageServer(net::EventLoop* loop, net::ISocket* socket, proto::Im
 }
 
 /// Waits for image 7's pixels to reach the client's cache, then detaches.
-Task<void> awaitImageThenDetach(net::EventLoop* loop, AttachClient* client, bool* seen)
+Task<void> awaitImageThenDetach(net::EventLoop* loop, NativeClient* client, bool* seen)
 {
     co_await net::testing::waitUntil(loop, [&] {
         auto const it = client->screens().find(1);
@@ -345,7 +345,7 @@ TEST_CASE("attach fetches image pixels on demand and caches them", "[vthost][att
     auto loop = net::EventLoop { source };
     auto pair = *net::testing::makeSocketPair(loop);
     auto* serverSock = pair.first.get();
-    auto client = AttachClient { loop, std::move(pair.second) };
+    auto client = NativeClient { loop, std::move(pair.second) };
 
     auto imageEvent = false;
     client.setImageHandler([&](RemoteScreen const&, uint32_t id) {
@@ -384,9 +384,9 @@ void tokenAttach(std::string serverToken, std::string clientToken, bool* gotSnap
     auto server = NativeSession {
         loop, host, std::move(pair.first), NativeSession::DefaultWriteQueueBytes, std::move(serverToken)
     };
-    auto client = AttachClient { loop, std::move(pair.second), std::move(clientToken) };
+    auto client = NativeClient { loop, std::move(pair.second), std::move(clientToken) };
 
-    auto scenario = [](net::EventLoop* loop, AttachClient* client, bool* got) -> Task<void> {
+    auto scenario = [](net::EventLoop* loop, NativeClient* client, bool* got) -> Task<void> {
         // On accept a snapshot arrives quickly; on reject the server drops us and
         // no snapshot ever comes. Bounded poll either way.
         for (auto i = 0; i < 300 && client->screens().empty(); ++i)
@@ -449,13 +449,16 @@ namespace
 
 /// Connects over TCP, mirrors the snapshot, detaches, then closes the server so
 /// its accept loop unwinds. Records whether a snapshot arrived.
-Task<void> tcpAttachDriver(net::EventLoop* loop, vthost::MuxServer* server, std::uint16_t port, bool* saw)
+Task<void> tcpAttachDriver(net::EventLoop* loop,
+                           vthost::ConnectionAcceptor* server,
+                           std::uint16_t port,
+                           bool* saw)
 {
     auto connected = co_await net::connect(loop, "127.0.0.1", port);
     if (connected)
     {
-        auto client = AttachClient { *loop, std::move(*connected), "tok" };
-        auto scenario = [](net::EventLoop* loop, AttachClient* client, bool* saw) -> Task<void> {
+        auto client = NativeClient { *loop, std::move(*connected), "tok" };
+        auto scenario = [](net::EventLoop* loop, NativeClient* client, bool* saw) -> Task<void> {
             for (auto i = 0; i < 300 && client->screens().empty(); ++i)
                 co_await loop->delay(1ms);
             *saw = !client->screens().empty();
@@ -482,8 +485,9 @@ TEST_CASE("attach mirrors over a real TCP transport with token auth", "[vthost][
     auto listener = net::listen(loop, "127.0.0.1", 0);
     REQUIRE(listener.has_value());
     auto const port = (*listener)->localPort();
-    auto server =
-        vthost::MuxServer { loop, std::move(*listener), vthost::makeNativeHandler(loop, host, "tok") };
+    auto server = vthost::ConnectionAcceptor { loop,
+                                               std::move(*listener),
+                                               vthost::makeNativeHandler(loop, host, "tok") };
 
     auto saw = false;
     loop.blockOn(net::testing::allOf(server.serve(), tcpAttachDriver(&loop, &server, port, &saw)));
@@ -496,7 +500,7 @@ namespace
 /// Connects over TCP, wraps the connection in TLS (client role), mirrors the
 /// snapshot, detaches, then closes the server. Records whether a snapshot came.
 Task<void> tlsTcpAttachDriver(net::EventLoop* loop,
-                              vthost::MuxServer* server,
+                              vthost::ConnectionAcceptor* server,
                               std::shared_ptr<net::ITlsContext> clientTls,
                               std::uint16_t port,
                               bool* saw)
@@ -504,8 +508,8 @@ Task<void> tlsTcpAttachDriver(net::EventLoop* loop,
     auto connected = co_await net::connect(loop, "127.0.0.1", port);
     if (connected)
     {
-        auto client = AttachClient { *loop, clientTls->wrap(std::move(*connected)), "tok" };
-        auto scenario = [](net::EventLoop* loop, AttachClient* client, bool* saw) -> Task<void> {
+        auto client = NativeClient { *loop, clientTls->wrap(std::move(*connected)), "tok" };
+        auto scenario = [](net::EventLoop* loop, NativeClient* client, bool* saw) -> Task<void> {
             for (auto i = 0; i < 500 && client->screens().empty(); ++i)
                 co_await loop->delay(1ms);
             *saw = !client->screens().empty();
@@ -544,7 +548,7 @@ TEST_CASE("attach mirrors over TLS-encrypted TCP with token auth", "[vthost][att
     auto handler = [tlsContext, nativeHandler](std::unique_ptr<net::ISocket> socket) {
         return nativeHandler(tlsContext->wrap(std::move(socket)));
     };
-    auto server = vthost::MuxServer { loop, std::move(*listener), handler };
+    auto server = vthost::ConnectionAcceptor { loop, std::move(*listener), handler };
 
     auto saw = false;
     loop.blockOn(
@@ -586,7 +590,7 @@ TEST_CASE("attach mirrors over TLS with a generated self-signed dev certificate"
     auto handler = [tlsContext, nativeHandler](std::unique_ptr<net::ISocket> socket) {
         return nativeHandler(tlsContext->wrap(std::move(socket)));
     };
-    auto server = vthost::MuxServer { loop, std::move(*listener), handler };
+    auto server = vthost::ConnectionAcceptor { loop, std::move(*listener), handler };
 
     auto saw = false;
     loop.blockOn(
@@ -598,7 +602,7 @@ namespace
 {
 
 /// Waits for the daemon's layout to arrive on the client, then detaches.
-Task<void> awaitLayout(net::EventLoop* loop, AttachClient* client, std::optional<proto::LayoutState>* layout)
+Task<void> awaitLayout(net::EventLoop* loop, NativeClient* client, std::optional<proto::LayoutState>* layout)
 {
     co_await net::testing::waitUntil(loop, [layout] { return layout->has_value(); });
     client->detach();
@@ -606,7 +610,7 @@ Task<void> awaitLayout(net::EventLoop* loop, AttachClient* client, std::optional
 
 /// Awaits the initial one-tab layout, authors a second tab, and waits for the
 /// daemon to honor it and re-push a two-tab layout before detaching.
-Task<void> driveCreateTab(net::EventLoop* loop, AttachClient* client, int const* mirroredTabs)
+Task<void> driveCreateTab(net::EventLoop* loop, NativeClient* client, int const* mirroredTabs)
 {
     co_await net::testing::waitUntil(loop, [mirroredTabs] { return *mirroredTabs == 1; });
     client->createTab();
@@ -616,7 +620,7 @@ Task<void> driveCreateTab(net::EventLoop* loop, AttachClient* client, int const*
 
 /// Awaits the initial single-window layout, authors a new window, and waits for
 /// the daemon to push a layout for the SECOND window before detaching.
-Task<void> driveCreateWindow(net::EventLoop* loop, AttachClient* client, std::set<uint64_t>* windows)
+Task<void> driveCreateWindow(net::EventLoop* loop, NativeClient* client, std::set<uint64_t>* windows)
 {
     co_await net::testing::waitUntil(loop, [windows] { return windows->size() == 1; });
     client->createWindow();
@@ -640,7 +644,7 @@ TEST_CASE("attach receives the daemon's tab and pane layout", "[vthost][attach]"
 
     auto pair = *net::testing::makeSocketPair(loop);
     auto server = NativeSession { loop, host, std::move(pair.first) };
-    auto client = AttachClient { loop, std::move(pair.second) };
+    auto client = NativeClient { loop, std::move(pair.second) };
 
     auto layout = std::optional<proto::LayoutState> {};
     client.setLayoutHandler([&layout](proto::LayoutState const& received) { layout = received; });
@@ -673,7 +677,7 @@ TEST_CASE("a client authors a tab, honored by the daemon and mirrored back", "[v
 
     auto pair = *net::testing::makeSocketPair(loop);
     auto server = NativeSession { loop, host, std::move(pair.first) };
-    auto client = AttachClient { loop, std::move(pair.second) };
+    auto client = NativeClient { loop, std::move(pair.second) };
 
     // Subscribe the session's layout observer so the tab the client authors below
     // fans back out as a fresh LayoutState — production wires this in
@@ -704,7 +708,7 @@ TEST_CASE("a client authors a new window, honored by the daemon (B4)", "[vthost]
 
     auto pair = *net::testing::makeSocketPair(loop);
     auto server = NativeSession { loop, host, std::move(pair.first) };
-    auto client = AttachClient { loop, std::move(pair.second) };
+    auto client = NativeClient { loop, std::move(pair.second) };
     auto subscription = vthost::makeScopedModelSubscription(host, server.layoutObserver());
 
     // Every LayoutState the client receives names its window; collect the ids.

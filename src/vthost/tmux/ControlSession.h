@@ -25,12 +25,12 @@
 #include <vector>
 
 #include <coro/Task.hpp>
-#include <vthost/SessionHost.h>
-#include <vthost/tmux/ControlOutput.h>
 #include <net/AsyncBufferedReader.h>
 #include <net/EventLoop.h>
 #include <net/ISocket.h>
 #include <net/WriteQueue.h>
+#include <vthost/SessionHost.h>
+#include <vthost/tmux/ControlOutput.h>
 #include <vtworkspace/ModelEvents.h>
 
 namespace vthost::tmux
@@ -109,8 +109,12 @@ class ControlSession final: public vtworkspace::ModelEvents, public SessionStrea
     void tabClosed(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
     void tabMoved(vtworkspace::WindowId window, vtworkspace::TabId tab, int fromIndex, int toIndex) override;
     void activeTabChanged(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
-    void paneSplit(vtworkspace::TabId tab, vtworkspace::PaneId splitNode, vtworkspace::PaneId newLeaf) override;
-    void paneClosed(vtworkspace::TabId tab, vtworkspace::PaneId closed, vtworkspace::PaneId survivor) override;
+    void paneSplit(vtworkspace::TabId tab,
+                   vtworkspace::PaneId splitNode,
+                   vtworkspace::PaneId newLeaf) override;
+    void paneClosed(vtworkspace::TabId tab,
+                    vtworkspace::PaneId closed,
+                    vtworkspace::PaneId survivor) override;
     void activePaneChanged(vtworkspace::TabId tab, vtworkspace::PaneId leaf) override;
     void paneRatioChanged(vtworkspace::TabId tab, vtworkspace::PaneId splitNode, double ratio) override;
     void tabTitleChanged(vtworkspace::TabId tab) override;
@@ -212,7 +216,7 @@ class ControlSession final: public vtworkspace::ModelEvents, public SessionStrea
 /// The daemon's connection-handler factory for control-mode clients.
 /// @param loop The event loop.
 /// @param host The session host (not owned; must outlive the daemon's serving).
-/// @return A handler suitable for MuxServer's constructor.
+/// @return A handler suitable for ConnectionAcceptor's constructor.
 [[nodiscard]] std::function<coro::Task<void>(std::unique_ptr<net::ISocket>)> makeControlModeHandler(
     net::EventLoop& loop, SessionHost& host);
 

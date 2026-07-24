@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/MuxServer.h>
+#include <vthost/ConnectionAcceptor.h>
 
 #include <chrono>
 #include <utility>
@@ -11,14 +11,14 @@ namespace vthost
 
 using namespace std::chrono_literals;
 
-MuxServer::MuxServer(net::EventLoop& loop,
-                     std::unique_ptr<net::IListener> listener,
-                     ConnectionHandler handler):
+ConnectionAcceptor::ConnectionAcceptor(net::EventLoop& loop,
+                                       std::unique_ptr<net::IListener> listener,
+                                       ConnectionHandler handler):
     _loop(loop), _listener(std::move(listener)), _handler(std::move(handler))
 {
 }
 
-coro::Task<void> MuxServer::serve()
+coro::Task<void> ConnectionAcceptor::serve()
 {
     while (true)
     {

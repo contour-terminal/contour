@@ -1,8 +1,8 @@
 add_library(vthost STATIC
     Daemon.cpp
     Daemon.h
-    MuxServer.cpp
-    MuxServer.h
+    ConnectionAcceptor.cpp
+    ConnectionAcceptor.h
     NativeSession.cpp
     NativeSession.h
     PduPump.h
@@ -10,8 +10,8 @@ add_library(vthost STATIC
     SessionHost.h
     SocketPath.h
     TappingPty.h
-    client/AttachClient.cpp
-    client/AttachClient.h
+    client/NativeClient.cpp
+    client/NativeClient.h
     client/LayoutReconstruction.cpp
     client/LayoutReconstruction.h
     imsg/CommandArgv.cpp
@@ -62,10 +62,10 @@ if(VTHOST_TESTING)
     add_executable(vthost_test
         test_main.cpp
         SessionHost_test.cpp
-        MuxServer_test.cpp
+        ConnectionAcceptor_test.cpp
         NativeSession_test.cpp
         SocketPath_test.cpp
-        client/AttachClient_test.cpp
+        client/NativeClient_test.cpp
         client/LayoutReconstruction_test.cpp
         client/ScreenMirror_test.cpp
         imsg/ImsgCodec_test.cpp

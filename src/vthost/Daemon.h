@@ -103,7 +103,7 @@ using AttachEndpoint = std::variant<UnixEndpoint, TcpEndpoint>;
 /// Connects to the daemon per @p endpoint: the local unix control socket (its
 /// native socket resolved beside it), or a TLS-encrypted TCP connection whose
 /// peer trust follows the endpoint's @c caPem (empty ⇒ TOFU). This establishes —
-/// and for TCP encrypts — the transport; the caller's AttachClient sends the
+/// and for TCP encrypts — the transport; the caller's NativeClient sends the
 /// token. Shared by the GUI AttachController.
 /// @param loop The event loop whose reactor drives the connect (not owned).
 /// @param endpoint The daemon endpoint.

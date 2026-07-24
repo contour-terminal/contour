@@ -22,7 +22,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include <vthost/client/AttachClient.h>
+#include <vthost/client/NativeClient.h>
 #include <vthost/proto/Pdu.h>
 
 namespace vthost::client

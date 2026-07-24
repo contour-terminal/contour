@@ -19,20 +19,20 @@
 #include <vector>
 
 #include <coro/WhenAll.hpp>
-#include <vthost/NativeSession.h>
-#include <vthost/SessionHost.h>
-#include <vthost/client/AttachClient.h>
-#include <vthost/client/ScreenMirror.h>
 #include <net/EventLoop.h>
 #include <net/PollEventSource.h>
 #include <net/testing/InMemoryTransport.h>
+#include <vthost/NativeSession.h>
+#include <vthost/SessionHost.h>
+#include <vthost/client/NativeClient.h>
+#include <vthost/client/ScreenMirror.h>
 #include <vtworkspace/Pane.h>
 #include <vtworkspace/Tab.h>
 
 using coro::Task;
 using vthost::NativeSession;
 using vthost::SessionHost;
-using vthost::client::AttachClient;
+using vthost::client::NativeClient;
 using vthost::client::ScreenMirror;
 namespace proto = vthost::proto;
 using namespace std::chrono_literals;
@@ -82,7 +82,7 @@ struct MirrorHarness
     net::testing::SocketPair pair = *net::testing::makeSocketPair(loop);
     std::unique_ptr<NativeSession> server =
         std::make_unique<NativeSession>(loop, host, std::move(pair.first));
-    std::unique_ptr<AttachClient> client = std::make_unique<AttachClient>(loop, std::move(pair.second));
+    std::unique_ptr<NativeClient> client = std::make_unique<NativeClient>(loop, std::move(pair.second));
 
     RecordingEvents mirrorEvents;
     std::unique_ptr<vtbackend::Terminal> mirror;

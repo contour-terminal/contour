@@ -18,17 +18,17 @@
 
     #include <coro/Task.hpp>
     #include <coro/WhenAll.hpp>
-    #include <vthost/MuxServer.h>
     #include <net/AsyncBufferedReader.h>
     #include <net/EventLoop.h>
     #include <net/IListener.h>
     #include <net/PollEventSource.h>
     #include <net/Sockets.h>
     #include <net/testing/CoroTestSupport.h>
+    #include <vthost/ConnectionAcceptor.h>
 
 using coro::Task;
-using vthost::MuxServer;
 using net::EventLoop;
+using vthost::ConnectionAcceptor;
 
 namespace
 {
@@ -114,7 +114,7 @@ Task<void> clientRoundTrip(EventLoop* loop, std::string socketPath, std::string 
 
 } // namespace
 
-TEST_CASE("MuxServer serves concurrent connections through the injected handler", "[vthost][server]")
+TEST_CASE("ConnectionAcceptor serves concurrent connections through the injected handler", "[vthost][server]")
 {
     auto const tmp = TempDir {};
     auto const socketPath = (tmp.path / "sockets" / "default").string();
@@ -126,9 +126,10 @@ TEST_CASE("MuxServer serves concurrent connections through the injected handler"
     REQUIRE(listener.has_value());
 
     auto seen = std::vector<std::string> {};
-    auto server = MuxServer { loop, std::move(*listener), [&seen](std::unique_ptr<net::ISocket> conn) {
-                                 return echoLineHandler(std::move(conn), &seen);
-                             } };
+    auto server =
+        ConnectionAcceptor { loop, std::move(*listener), [&seen](std::unique_ptr<net::ISocket> conn) {
+                                return echoLineHandler(std::move(conn), &seen);
+                            } };
     loop.spawn(server.serve());
 
     // TWO clients in flight at once: with the ported-from server's sequential
@@ -159,7 +160,7 @@ TEST_CASE("persistent accept failures back off instead of starving the loop", "[
 
     auto attempts = 0;
     auto server =
-        MuxServer { loop, std::make_unique<ExhaustedListener>(&attempts), vthost::drainConnection };
+        ConnectionAcceptor { loop, std::make_unique<ExhaustedListener>(&attempts), vthost::drainConnection };
     loop.spawn(server.serve());
 
     // Every accept fails without suspending; serve() must yield between attempts
@@ -180,7 +181,7 @@ TEST_CASE("closing the server ends the accept loop", "[vthost][server]")
     auto listener = net::listenUnix(loop, socketPath);
     REQUIRE(listener.has_value());
 
-    auto server = MuxServer { loop, std::move(*listener), vthost::drainConnection };
+    auto server = ConnectionAcceptor { loop, std::move(*listener), vthost::drainConnection };
 
     // Close before serving: the first accept resolves cancelled and serve returns.
     server.close();

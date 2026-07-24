@@ -5,7 +5,7 @@
 /// `AttachController` — the GUI's native-protocol attach engine.
 ///
 /// One controller = one connection to a `contour daemon`. It runs the
-/// Qt-free `vthost::client::AttachClient` on its own reactor thread
+/// Qt-free `vthost::client::NativeClient` on its own reactor thread
 /// (MuxLoopThread) and doubles as the app's `SessionFactory` while attached:
 /// every locally created tab is backed by a `vtpty::ChannelPty` bound to one
 /// remote session. Remote deltas re-serialize through a per-session
@@ -36,8 +36,8 @@
 #include <vector>
 
 #include <vthost/Daemon.h>
-#include <vthost/client/AttachClient.h>
 #include <vthost/client/LayoutReconstruction.h>
+#include <vthost/client/NativeClient.h>
 #include <vthost/client/ScreenMirror.h>
 #include <vtworkspace/Primitives.h>
 
@@ -274,7 +274,7 @@ class AttachController final: public QObject, public SessionFactory, public MuxC
     /// session-removed notification from the daemon — there is nothing to clear
     /// a single id against. A reattach is a fresh controller with an empty set.
     std::unordered_set<uint64_t> _closedSessions;
-    vthost::client::AttachClient* _client = nullptr; ///< Reactor-owned; valid while serving.
+    vthost::client::NativeClient* _client = nullptr; ///< Reactor-owned; valid while serving.
 };
 
 } // namespace contour

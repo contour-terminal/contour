@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/client/AttachClient.h>
+#include <vthost/client/NativeClient.h>
 
 #include <libunicode/convert.h>
 
@@ -10,8 +10,8 @@
 #include <variant>
 #include <vector>
 
-#include <vthost/PduPump.h>
 #include <net/Sockets.h>
+#include <vthost/PduPump.h>
 
 namespace vthost::client
 {
@@ -163,16 +163,16 @@ std::string RemoteScreen::viewportText() const
 }
 
 // ---------------------------------------------------------------------------
-// AttachClient
+// NativeClient
 
-AttachClient::AttachClient(net::EventLoop& loop, std::unique_ptr<net::ISocket> connection, std::string token):
+NativeClient::NativeClient(net::EventLoop& loop, std::unique_ptr<net::ISocket> connection, std::string token):
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024),
     _token(std::move(token))
 {
 }
 
-uint64_t AttachClient::send(proto::DecodedPdu const& pdu)
+uint64_t NativeClient::send(proto::DecodedPdu const& pdu)
 {
     auto const serial = _nextSerial++;
     auto sink = proto::Writer {};
@@ -188,7 +188,7 @@ uint64_t AttachClient::send(proto::DecodedPdu const& pdu)
     return serial;
 }
 
-void AttachClient::sendInput(uint64_t session, std::string_view bytes)
+void NativeClient::sendInput(uint64_t session, std::string_view bytes)
 {
     auto input = proto::Input { .session = session, .data = {} };
     auto const* src = reinterpret_cast<std::byte const*>(bytes.data());
@@ -196,12 +196,12 @@ void AttachClient::sendInput(uint64_t session, std::string_view bytes)
     send(proto::DecodedPdu { input });
 }
 
-void AttachClient::requestResize(uint32_t columns, uint32_t lines)
+void NativeClient::requestResize(uint32_t columns, uint32_t lines)
 {
     send(proto::DecodedPdu { proto::ResizeRequest { .columns = columns, .lines = lines } });
 }
 
-void AttachClient::fetchImage(uint64_t session, uint32_t imageId)
+void NativeClient::fetchImage(uint64_t session, uint32_t imageId)
 {
     auto const serial =
         send(proto::DecodedPdu { proto::FetchImage { .session = session, .imageId = imageId } });
@@ -210,35 +210,35 @@ void AttachClient::fetchImage(uint64_t session, uint32_t imageId)
     _pendingImages.insert_or_assign(serial, std::pair { session, imageId });
 }
 
-void AttachClient::createTab()
+void NativeClient::createTab()
 {
     send(proto::DecodedPdu { proto::CreateTab {} });
 }
 
-void AttachClient::createWindow()
+void NativeClient::createWindow()
 {
     send(proto::DecodedPdu { proto::NewWindow {} });
 }
 
-void AttachClient::splitPane(uint64_t session, uint8_t orientation, uint16_t ratio)
+void NativeClient::splitPane(uint64_t session, uint8_t orientation, uint16_t ratio)
 {
     send(proto::DecodedPdu {
         proto::SplitPane { .session = session, .orientation = orientation, .ratio = ratio } });
 }
 
-void AttachClient::closePane(uint64_t session)
+void NativeClient::closePane(uint64_t session)
 {
     send(proto::DecodedPdu { proto::ClosePane { .session = session } });
 }
 
-void AttachClient::detach()
+void NativeClient::detach()
 {
     _detached = true;
     _writer.close();
     _connection->close();
 }
 
-void AttachClient::handlePdu(proto::DecodedFrame const& frame)
+void NativeClient::handlePdu(proto::DecodedFrame const& frame)
 {
     auto const& pdu = frame.pdu;
     if (auto const* hello = std::get_if<proto::ServerHello>(&pdu))
@@ -314,7 +314,7 @@ void AttachClient::handlePdu(proto::DecodedFrame const& frame)
     // Unknown PDUs are ignored for forward compatibility.
 }
 
-coro::Task<void> AttachClient::run()
+coro::Task<void> NativeClient::run()
 {
     send(proto::DecodedPdu { proto::ClientHello { .codecVersion = proto::CodecVersion, .token = _token } });
 

@@ -2,7 +2,7 @@
 #pragma once
 
 /// @file
-/// `AttachClient` — the native-protocol client engine (Qt-free).
+/// `NativeClient` — the native-protocol client engine (Qt-free).
 ///
 /// The client runs NO parser: it mirrors each remote session's screen from the
 /// server's stable-id-addressed Delta stream into a `RemoteScreen` — a plain
@@ -21,10 +21,10 @@
 #include <vector>
 
 #include <coro/Task.hpp>
-#include <vthost/proto/Pdu.h>
 #include <net/EventLoop.h>
 #include <net/ISocket.h>
 #include <net/WriteQueue.h>
+#include <vthost/proto/Pdu.h>
 
 namespace vthost::client
 {
@@ -109,14 +109,14 @@ struct RemoteScreen
 };
 
 /// One attached native-protocol connection.
-class AttachClient final
+class NativeClient final
 {
   public:
     /// @param loop The event loop everything runs on.
     /// @param connection The server transport (owned).
     /// @param token The preshared auth token sent in the ClientHello (empty over
     ///        AF_UNIX, where the socket permissions are the gate).
-    AttachClient(net::EventLoop& loop, std::unique_ptr<net::ISocket> connection, std::string token = {});
+    NativeClient(net::EventLoop& loop, std::unique_ptr<net::ISocket> connection, std::string token = {});
 
     /// The connection flow: sends ClientHello, mirrors server pushes until the
     /// server disconnects or detach() is called.

@@ -2,11 +2,11 @@
 #pragma once
 
 /// @file
-/// `MuxServer` — the daemon's accept loop.
+/// `ConnectionAcceptor` — the daemon's accept loop.
 ///
 /// Deliberately protocol-agnostic: every accepted connection is handed to an
 /// injected handler coroutine, so the tmux control-mode protocol (and later the
-/// native cells+deltas protocol) plug in without touching the server. Unlike
+/// native cells+deltas protocol) plug in without touching the acceptor. Unlike
 /// the strict request/response server this design was ported from, connections
 /// are handled CONCURRENTLY: each one runs as its own spawned flow, with the
 /// socket's ownership moved into that flow's frame.
@@ -31,19 +31,21 @@ using ConnectionHandler = std::function<coro::Task<void>(std::unique_ptr<net::IS
 
 /// Accepts connections on an injected listener and spawns one handler flow per
 /// connection.
-class MuxServer
+class ConnectionAcceptor
 {
   public:
     /// @param loop The loop the accept flow and every connection flow run on.
     /// @param listener The bound endpoint to accept from (owned).
     /// @param handler Invoked once per accepted connection to produce its flow.
-    MuxServer(net::EventLoop& loop, std::unique_ptr<net::IListener> listener, ConnectionHandler handler);
+    ConnectionAcceptor(net::EventLoop& loop,
+                       std::unique_ptr<net::IListener> listener,
+                       ConnectionHandler handler);
 
-    MuxServer(MuxServer const&) = delete;
-    MuxServer& operator=(MuxServer const&) = delete;
-    MuxServer(MuxServer&&) = delete;
-    MuxServer& operator=(MuxServer&&) = delete;
-    ~MuxServer() = default;
+    ConnectionAcceptor(ConnectionAcceptor const&) = delete;
+    ConnectionAcceptor& operator=(ConnectionAcceptor const&) = delete;
+    ConnectionAcceptor(ConnectionAcceptor&&) = delete;
+    ConnectionAcceptor& operator=(ConnectionAcceptor&&) = delete;
+    ~ConnectionAcceptor() = default;
 
     /// The accept loop: runs until the listener is closed or the loop stops.
     /// blockOn this (or spawn it) to serve.

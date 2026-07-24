@@ -22,14 +22,14 @@
 
     #include <coro/Task.hpp>
     #include <coro/WhenAll.hpp>
+    #include <net/EventLoop.h>
+    #include <net/PollEventSource.h>
+    #include <net/Sockets.h>
     #include <vthost/SessionHost.h>
     #include <vthost/imsg/CommandArgv.h>
     #include <vthost/imsg/Identify.h>
     #include <vthost/imsg/ImsgCodec.h>
     #include <vthost/tmux/ImsgServer.h>
-    #include <net/EventLoop.h>
-    #include <net/PollEventSource.h>
-    #include <net/Sockets.h>
 
 using coro::Task;
 using namespace std::chrono_literals;
@@ -183,11 +183,11 @@ struct ImsgHarness
     net::PollEventSource source;
     net::EventLoop loop { source };
     vthost::SessionHost host { loop,
-                                  [](vtbackend::PageSize size) {
-                                      return std::make_unique<vtpty::MockPty>(size);
-                                  },
-                                  vtbackend::Settings {},
-                                  /*startPumps=*/false };
+                               [](vtbackend::PageSize size) {
+                                   return std::make_unique<vtpty::MockPty>(size);
+                               },
+                               vtbackend::Settings {},
+                               /*startPumps=*/false };
     FakeTmuxClient client;
     std::unique_ptr<net::ISocket> serverEnd;
 
@@ -323,7 +323,7 @@ TEST_CASE("a version mismatch answers MSG_VERSION and drops", "[vthost][imsgserv
         #include <pty.h>
     #endif
 
-    #include <vthost/MuxServer.h>
+    #include <vthost/ConnectionAcceptor.h>
 
 namespace
 {
@@ -343,7 +343,7 @@ std::string runShellCapture(std::string const& command)
 }
 
 /// The oracle's client side: drives the tmux binary's pty and reaps it.
-Task<void> oracleScenario(net::EventLoop* loop, int master, pid_t child, vthost::MuxServer* server)
+Task<void> oracleScenario(net::EventLoop* loop, int master, pid_t child, vthost::ConnectionAcceptor* server)
 {
     makeNonBlocking(master);
 
@@ -406,8 +406,9 @@ TEST_CASE("a real tmux binary attaches over imsg", "[vthost][imsgserver][oracle]
 
     auto listener = net::listenUnix(loop, socketPath);
     REQUIRE(listener.has_value());
-    auto server =
-        vthost::MuxServer { loop, std::move(*listener), vthost::tmux::makeTmuxImsgHandler(loop, host) };
+    auto server = vthost::ConnectionAcceptor { loop,
+                                               std::move(*listener),
+                                               vthost::tmux::makeTmuxImsgHandler(loop, host) };
 
     // The REAL tmux client on its own pty, pointed at OUR socket.
     auto master = -1;
@@ -419,7 +420,7 @@ TEST_CASE("a real tmux binary attaches over imsg", "[vthost][imsgserver][oracle]
         ::_exit(127);
     }
 
-    auto drive = [](vthost::MuxServer* srv, Task<void> scenario) -> Task<void> {
+    auto drive = [](vthost::ConnectionAcceptor* srv, Task<void> scenario) -> Task<void> {
         co_await coro::whenAll(srv->serve(), std::move(scenario));
     };
     loop.blockOn(drive(&server, oracleScenario(&loop, master, child, &server)));

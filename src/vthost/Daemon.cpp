@@ -36,7 +36,7 @@
 #include <net/PollEventSource.h>
 #include <net/Sockets.h>
 #include <net/Tls.h>
-#include <vthost/MuxServer.h>
+#include <vthost/ConnectionAcceptor.h>
 #include <vthost/NativeSession.h>
 #include <vthost/SessionHost.h>
 #include <vthost/SocketPath.h>
@@ -59,7 +59,7 @@ namespace vthost
 namespace
 {
     /// Drives every protocol server's accept loop on the one reactor.
-    coro::Task<void> serveAll(std::vector<MuxServer*> servers)
+    coro::Task<void> serveAll(std::vector<ConnectionAcceptor*> servers)
     {
         auto accepts = std::vector<coro::Task<void>> {};
         accepts.reserve(servers.size());
@@ -214,14 +214,15 @@ int runDaemon(DaemonConfig const& config)
     auto listener = bindDaemonEndpoint(loop, config.socketPath.string());
     if (!listener)
         return listener.error();
-    auto server = MuxServer { loop, std::move(*listener), tmux::makeControlModeHandler(loop, host) };
+    auto server = ConnectionAcceptor { loop, std::move(*listener), tmux::makeControlModeHandler(loop, host) };
 
     // The native cells+deltas protocol listens beside the control-mode socket.
     auto const nativePath = nativeSocketPath(config.socketPath).string();
     auto nativeListener = bindDaemonEndpoint(loop, nativePath);
     if (!nativeListener)
         return nativeListener.error();
-    auto nativeServer = MuxServer { loop, std::move(*nativeListener), makeNativeHandler(loop, host) };
+    auto nativeServer =
+        ConnectionAcceptor { loop, std::move(*nativeListener), makeNativeHandler(loop, host) };
 
     // The imsg endpoint serves the REAL tmux client binary
     // (`tmux -S <socket>-tmux -C attach-session`).
@@ -229,15 +230,16 @@ int runDaemon(DaemonConfig const& config)
     auto imsgListener = bindDaemonEndpoint(loop, imsgPath);
     if (!imsgListener)
         return imsgListener.error();
-    auto imsgServer = MuxServer { loop, std::move(*imsgListener), tmux::makeTmuxImsgHandler(loop, host) };
+    auto imsgServer =
+        ConnectionAcceptor { loop, std::move(*imsgListener), tmux::makeTmuxImsgHandler(loop, host) };
 
-    auto servers = std::vector<MuxServer*> { &server, &nativeServer, &imsgServer };
+    auto servers = std::vector<ConnectionAcceptor*> { &server, &nativeServer, &imsgServer };
 
     // Opt-in: ALSO bind tmux's own discovery path, so a plain
     // `tmux -L <label> -C attach-session` finds this daemon. Opt-in only —
     // with the daemon down, a `new-session` on that path silently forks a
     // REAL tmux server onto it.
-    auto compatServer = std::optional<MuxServer> {};
+    auto compatServer = std::optional<ConnectionAcceptor> {};
     if (config.tmuxCompatLabel)
     {
         auto const compatPath = std::format("/tmp/tmux-{}/{}", ::getuid(), *config.tmuxCompatLabel);
@@ -252,7 +254,7 @@ int runDaemon(DaemonConfig const& config)
     // Opt-in: ALSO serve the native protocol over TCP (loopback by default). The
     // transport is protocol-agnostic, so the same native handler serves it — with
     // the preshared token as the authentication the filesystem gate can't provide.
-    auto nativeTcpServer = std::optional<MuxServer> {};
+    auto nativeTcpServer = std::optional<ConnectionAcceptor> {};
     if (config.nativeTcp)
     {
         auto tcpListener = net::listen(loop, config.nativeTcp->host, config.nativeTcp->port);
@@ -423,19 +425,20 @@ int runDaemon(DaemonConfig const& config)
     auto listener = bindDaemonEndpoint(loop, config.socketPath.string());
     if (!listener)
         return listener.error();
-    auto server = MuxServer { loop, std::move(*listener), tmux::makeControlModeHandler(loop, host) };
+    auto server = ConnectionAcceptor { loop, std::move(*listener), tmux::makeControlModeHandler(loop, host) };
 
     auto const nativePath = nativeSocketPath(config.socketPath).string();
     auto nativeListener = bindDaemonEndpoint(loop, nativePath);
     if (!nativeListener)
         return nativeListener.error();
-    auto nativeServer = MuxServer { loop, std::move(*nativeListener), makeNativeHandler(loop, host) };
+    auto nativeServer =
+        ConnectionAcceptor { loop, std::move(*nativeListener), makeNativeHandler(loop, host) };
     // No imsg endpoint on Windows: SCM_RIGHTS fd passing does not exist here.
 
-    auto servers = std::vector<MuxServer*> { &server, &nativeServer };
+    auto servers = std::vector<ConnectionAcceptor*> { &server, &nativeServer };
 
     // Opt-in native TCP listener (loopback by default), same as the POSIX path.
-    auto nativeTcpServer = std::optional<MuxServer> {};
+    auto nativeTcpServer = std::optional<ConnectionAcceptor> {};
     if (config.nativeTcp)
     {
         auto tcpListener = net::listen(loop, config.nativeTcp->host, config.nativeTcp->port);

@@ -11,7 +11,7 @@
 namespace contour
 {
 
-using vthost::client::AttachClient;
+using vthost::client::NativeClient;
 using vthost::client::RemoteScreen;
 
 namespace
@@ -47,10 +47,9 @@ coro::Task<void> AttachController::runClient(net::EventLoop* loop)
         co_return;
     }
 
-    auto client = AttachClient { *loop, std::move(*socket), token };
-    client.setUpdateHandler([this](RemoteScreen const& screen, vthost::proto::Delta const& delta) {
-        onUpdate(screen, delta);
-    });
+    auto client = NativeClient { *loop, std::move(*socket), token };
+    client.setUpdateHandler(
+        [this](RemoteScreen const& screen, vthost::proto::Delta const& delta) { onUpdate(screen, delta); });
     client.setLayoutHandler([this](vthost::proto::LayoutState const& layout) { onLayout(layout); });
     {
         auto const lock = std::lock_guard { _mutex };
@@ -225,8 +224,8 @@ void AttachController::requestSplitPane(vtpty::Pty const* actingPty, bool vertic
     auto const session = sessionForPty(actingPty);
     if (!session)
         return;
-    auto const orientation = static_cast<uint8_t>(
-        std::to_underlying(vertical ? vtworkspace::SplitState::Vertical : vtworkspace::SplitState::Horizontal));
+    auto const orientation = static_cast<uint8_t>(std::to_underlying(
+        vertical ? vtworkspace::SplitState::Vertical : vtworkspace::SplitState::Horizontal));
     // 5000 = 0.5 × 10000, the wire encoding for an even split (see proto/Pdu.h).
     constexpr uint16_t EvenSplitRatio = 5000;
     _reactor.post([this, session = *session, orientation] {
