@@ -34,7 +34,10 @@ struct Margin
 
         [[nodiscard]] constexpr ColumnCount length() const noexcept
         {
-            return unbox<ColumnCount>(to - from) + ColumnCount(1);
+            // unsigned arithmetic avoids signed-overflow UB in the +1 when
+            // the difference is INT_MAX (the practical range makes this
+            // impossible, but the compiler may still exploit the UB).
+            return ColumnCount::cast_from(static_cast<unsigned>(unbox<int>(to - from)) + 1u);
         }
         [[nodiscard]] constexpr bool contains(ColumnOffset value) const noexcept
         {
@@ -60,7 +63,7 @@ struct Margin
 
         [[nodiscard]] constexpr LineCount length() const noexcept
         {
-            return unbox<LineCount>(to - from) + LineCount(1);
+            return LineCount::cast_from(static_cast<unsigned>(unbox<int>(to - from)) + 1u);
         }
         [[nodiscard]] constexpr bool contains(LineOffset value) const noexcept
         {
@@ -87,8 +90,10 @@ struct Margin
 
 constexpr bool operator==(Margin const& a, PageSize b) noexcept
 {
-    return a.horizontal.from.value == 0 && a.horizontal.to.value + 1 == b.columns.value
-           && a.vertical.from.value == 0 && a.vertical.to.value + 1 == b.lines.value;
+    // Avoid signed-overflow UB from `to.value + 1` when to.value is INT_MAX:
+    // rewrite as `to == other - 1` (page sizes are always >= 1).
+    return a.horizontal.from.value == 0 && a.horizontal.to.value == b.columns.value - 1
+           && a.vertical.from.value == 0 && a.vertical.to.value == b.lines.value - 1;
 }
 
 constexpr bool operator!=(Margin const& a, PageSize b) noexcept

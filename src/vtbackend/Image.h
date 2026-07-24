@@ -67,8 +67,18 @@ enum class ImageFormat : uint8_t
         return false; // must be resolved to a concrete format before it can be checked
     if (*size.width <= 0 || *size.height <= 0)
         return false;
-    auto const expected =
-        static_cast<size_t>(*size.width) * static_cast<size_t>(*size.height) * bytesPerPixel(format);
+    // Checked multiply: width * height * bpp can overflow size_t for extreme
+    // (e.g. 65537² RGBA) images, wrapping to a value that spuriously matches
+    // dataSize and letting an undersized pixmap through validation.
+    auto const w = static_cast<size_t>(*size.width);
+    auto const h = static_cast<size_t>(*size.height);
+    auto const bpp = static_cast<size_t>(bytesPerPixel(format));
+    auto const pixels = w * h;
+    if (w != 0 && pixels / w != h) // overflow in w * h
+        return false;
+    auto const expected = pixels * bpp;
+    if (pixels != 0 && expected / pixels != bpp) // overflow in pixels * bpp
+        return false;
     return dataSize == expected;
 }
 

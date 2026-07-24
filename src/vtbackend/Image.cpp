@@ -489,6 +489,10 @@ void ImagePool::unlink(string const& name)
 void ImagePool::clear()
 {
     _imageNameToImageCache.clear();
+    {
+        auto const _ = std::lock_guard { _idIndex->mutex };
+        _idIndex->images.clear();
+    }
 }
 
 void ImagePool::inspect(ostream& os) const
