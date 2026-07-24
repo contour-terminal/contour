@@ -811,13 +811,11 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("profiles", c.profiles, c.defaultProfileName.value());
         loadFromEntry("layouts", c.layouts);
         loadFromEntry("git_drawings", c.gitDrawings);
-#ifdef CONTOUR_FRONTEND_GUI
         vtrasterizer::BoxDrawingRenderer::setGitDrawingsStyle(c.gitDrawings.value());
         loadFromEntry("box_arc_style", c.boxArcStyle);
         vtrasterizer::BoxDrawingRenderer::setArcStyle(c.boxArcStyle.value());
         loadFromEntry("braille_style", c.brailleStyle);
         vtrasterizer::BoxDrawingRenderer::setBrailleStyle(c.brailleStyle.value());
-#endif
 
         // loadFromEntry("color_schemes", c.colorschemes); // NB: This is always loaded lazily
         loadFromEntry("input_mapping", c.inputMappings);

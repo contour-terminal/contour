@@ -86,7 +86,6 @@ endif()
 
 option(CONTOUR_TESTING "Enables building of unittests for libterminal [default: ${MAINTAINER_MODE}]" ${MAINTAINER_MODE})
 option(CONTOUR_VERIFY_STATE "Enables expensive internal terminal-state invariant checks (Grid/Terminal verifyState) [default: ${MAINTAINER_MODE}]" ${MAINTAINER_MODE})
-option(CONTOUR_FRONTEND_GUI "Enables GUI frontend." ON)
 option(CONTOUR_COVERAGE "Builds with codecov [default: OFF]" OFF)
 option(CONTOUR_SANITIZE "Builds with Address sanitizer enabled [default: OFF]" "OFF")
 option(CONTOUR_STACKTRACE_ADDR2LINE "Uses addr2line to pretty-print SEGV stacktrace." ${ADDR2LINE_DEFAULT})
@@ -172,9 +171,7 @@ if(CONTOUR_USE_CPM)
 endif()
 
 
-if(CONTOUR_FRONTEND_GUI)
-    include(FindQt)
-endif()
+include(FindQt)
 
 # The vendored third-party code (fetched via CPM/FetchContent) must NOT be run through clang-tidy: it
 # has no .clang-tidy config (clang-tidy then aborts with "no checks enabled") and is not ours to lint.
@@ -202,9 +199,7 @@ else()
     set(USING_TIDY_STRING "ON (${CMAKE_CXX_CLANG_TIDY})")
 endif()
 
-if(CONTOUR_FRONTEND_GUI)
-    find_package(Qt6 COMPONENTS Core QUIET)
-endif()
+find_package(Qt6 COMPONENTS Core QUIET)
 
 add_custom_target(package-verbose
     COMMAND ${CMAKE_CPACK_COMMAND} --config CPackConfig.cmake --verbose
@@ -225,7 +220,7 @@ macro(ContourConfigurationSummary)
     message(STATUS "Build unit tests:                                   ${CONTOUR_TESTING}")
     message(STATUS "Verify terminal state invariants:                   ${CONTOUR_VERIFY_STATE}")
     message(STATUS "Enable with code coverage:                          ${CONTOUR_CODE_COVERAGE_ENABLED}")
-    message(STATUS "Build contour frontend GUI:                         ${CONTOUR_FRONTEND_GUI}")
+    message(STATUS "Build contour frontend GUI:                         ON")
     message(STATUS "Build contour using mimalloc:                       ${CONTOUR_BUILD_WITH_MIMALLOC}")
     message(STATUS "Clang Tidy:                                         ${USING_TIDY_STRING}")
     message(STATUS "|> Enable performance metrics:                      ${CONTOUR_PERF_STATS}")

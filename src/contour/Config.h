@@ -5,12 +5,7 @@
 #include <contour/AsciiText.h>
 #include <contour/ConfigDocumentation.h>
 #include <contour/TabBarMode.h>
-
-#include <vtrasterizer/GlyphScaling.h>
-
-#ifdef CONTOUR_FRONTEND_GUI
-    #include <contour/display/ShaderConfig.h>
-#endif
+#include <contour/display/ShaderConfig.h>
 
 #include <vtbackend/Color.h>
 #include <vtbackend/ColorPalette.h>
@@ -30,6 +25,7 @@
 #include <vtrasterizer/BoxDrawingRenderer.h>
 #include <vtrasterizer/Decorator.h>
 #include <vtrasterizer/FontDescriptions.h>
+#include <vtrasterizer/GlyphScaling.h>
 
 #include <text_shaper/font.h>
 #include <text_shaper/mock_font_locator.h>

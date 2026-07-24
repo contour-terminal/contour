@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#ifdef CONTOUR_FRONTEND_GUI
-    #include <contour/ContourGuiApp.h>
-#else
-    #include <contour/ContourApp.h>
-#endif
-
 #include <contour/BenignQtMessages.h>
+#include <contour/ContourGuiApp.h>
 
 #include <crispy/SuppressWindowsDialogs.hpp>
 
@@ -158,11 +153,7 @@ int main(int argc, char const* argv[])
 
     qInstallMessageHandler(qtCustomMessageOutput);
 
-#ifdef CONTOUR_FRONTEND_GUI
     contour::ContourGuiApp app;
-#else
-    contour::ContourApp app;
-#endif
 
     return app.run(argc, argv);
 }

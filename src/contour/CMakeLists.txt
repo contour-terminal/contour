@@ -62,9 +62,7 @@ else()
 endif()
 # }}}
 
-if(CONTOUR_FRONTEND_GUI)
-    add_subdirectory(display)
-endif()
+add_subdirectory(display)
 
 if(APPLE)
     #set(CMAKE_INSTALL_RPATH "@executable_path")
@@ -132,56 +130,54 @@ set(_main_source_files
     main.cpp
 )
 
-if(CONTOUR_FRONTEND_GUI)
-    list(APPEND _header_files
-        Audio.h
-        AudioNote.h
-        BlurBehind.h
-        CatImageArgs.h
-        CommandPaletteModel.h
-        ContourGuiApp.h
-        ExitCode.h
-        ExternalLauncher.h
-        FreeDesktopNotifier.h
-        LayoutStore.h
-        NotificationRouter.h
-        PaneProxy.h
-        QtExternalLauncher.h
-        SessionFactory.h
-        SettingsController.h
-        TerminalSession.h
-        TerminalSessionManager.h
-        helper.h
-        mux/AttachController.h
-        mux/MuxController.h
-        mux/MuxLoopThread.h
-        mux/RemoteLayout.h
-        mux/RoutingSessionFactory.h
-        mux/TmuxController.h
-    )
-    list(APPEND _core_source_files
-        Audio.cpp
-        BlurBehind.cpp
-        CommandPaletteModel.cpp
-        ContourGuiApp.cpp
-        FreeDesktopNotifier.cpp
-        PaneProxy.cpp
-        QtExternalLauncher.cpp
-        LayoutBuilder.cpp
-        LayoutStore.cpp
-        SessionFactory.cpp
-        SettingsController.cpp
-        TerminalSession.cpp
-        display/TerminalAccessible.cpp
-        TerminalSessionManager.cpp
-        WindowController.cpp
-        helper.cpp
-        mux/AttachController.cpp
-        mux/MuxController.cpp
-        mux/RemoteLayout.cpp
-        mux/TmuxController.cpp
-    )
-endif()
+list(APPEND _header_files
+    Audio.h
+    AudioNote.h
+    BlurBehind.h
+    CatImageArgs.h
+    CommandPaletteModel.h
+    ContourGuiApp.h
+    ExitCode.h
+    ExternalLauncher.h
+    FreeDesktopNotifier.h
+    LayoutStore.h
+    NotificationRouter.h
+    PaneProxy.h
+    QtExternalLauncher.h
+    SessionFactory.h
+    SettingsController.h
+    TerminalSession.h
+    TerminalSessionManager.h
+    helper.h
+    mux/AttachController.h
+    mux/MuxController.h
+    mux/MuxLoopThread.h
+    mux/RemoteLayout.h
+    mux/RoutingSessionFactory.h
+    mux/TmuxController.h
+)
+list(APPEND _core_source_files
+    Audio.cpp
+    BlurBehind.cpp
+    CommandPaletteModel.cpp
+    ContourGuiApp.cpp
+    FreeDesktopNotifier.cpp
+    PaneProxy.cpp
+    QtExternalLauncher.cpp
+    LayoutBuilder.cpp
+    LayoutStore.cpp
+    SessionFactory.cpp
+    SettingsController.cpp
+    TerminalSession.cpp
+    display/TerminalAccessible.cpp
+    TerminalSessionManager.cpp
+    WindowController.cpp
+    helper.cpp
+    mux/AttachController.cpp
+    mux/MuxController.cpp
+    mux/RemoteLayout.cpp
+    mux/TmuxController.cpp
+)
 
 if(WIN32)
     list(APPEND _main_source_files contour.rc)
@@ -252,10 +248,6 @@ if(CONTOUR_WITH_TTS)
     target_link_libraries(contour_core PUBLIC Qt6::TextToSpeech)
 endif()
 
-if(CONTOUR_FRONTEND_GUI)
-    target_compile_definitions(contour_core PUBLIC CONTOUR_FRONTEND_GUI)
-endif()
-
 if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     target_compile_definitions(contour_core PUBLIC CONTOUR_GUI_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
@@ -316,8 +308,7 @@ target_link_libraries(contour_core
 )
 
 # {{{ GUI: Declare Qt build dependencies
-if(CONTOUR_FRONTEND_GUI)
-    if(OPENBSD)
+if(OPENBSD)
         find_package(X11 REQUIRED)
     endif()
     target_link_libraries(contour_core
@@ -495,7 +486,6 @@ if(CONTOUR_FRONTEND_GUI)
         # }}}
     endif()
     # }}}
-endif()
 # }}}
 
 # {{{ Build terminfo file
