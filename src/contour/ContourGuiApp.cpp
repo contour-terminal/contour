@@ -1024,10 +1024,13 @@ void ContourGuiApp::reconcileAttachWindows()
         if (_attachWindowMap.empty())
         {
             // The primary daemon window adopts the boot window (already created before
-            // the first layout arrived). A missing focused window (mid-boot) just retries
-            // on the next layout push.
+            // the first layout arrived). A missing focused window (mid-boot) stages
+            // the daemon window so bindPendingAttachWindow can bind it once the boot
+            // window becomes ready, instead of hoping for another layout push.
             if (auto const boot = _sessionManager.focusedWindow())
                 bindDaemonWindow(daemonWindow, *boot);
+            else if (!_pendingAttachWindow)
+                _pendingAttachWindow = daemonWindow;
             continue;
         }
 
