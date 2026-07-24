@@ -33,6 +33,9 @@ void WriteQueue::close() noexcept
     _state->closed = true;
     _state->queue.clear();
     _state->queuedBytes = 0;
+    // Abort any in-flight write so the drain coroutine stops promptly instead
+    // of finishing a write to a peer the caller is already tearing down.
+    _state->socket->close();
 }
 
 coro::Task<void> WriteQueue::flushThenClose()

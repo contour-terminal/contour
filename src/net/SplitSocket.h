@@ -58,6 +58,10 @@ class SplitSocket final: public ISocket
         return _readHalf->isClosed() || _writeHalf->isClosed();
     }
 
+    /// Forwards to the read half so tmux sessions attached via combineHalves()
+    /// report the real peer address instead of the ISocket default (empty).
+    [[nodiscard]] std::string peerAddress() const override { return _readHalf->peerAddress(); }
+
   private:
     std::unique_ptr<ISocket> _readHalf;
     std::unique_ptr<ISocket> _writeHalf;

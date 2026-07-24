@@ -82,8 +82,13 @@ coro::Task<IoResult> WindowsSocket::read(std::span<std::byte> buffer)
         if (auto const closed = closedError("read on closed socket"))
             co_return std::unexpected(*closed);
 
-        auto const n =
-            ::recv(_socket, reinterpret_cast<char*>(buffer.data()), static_cast<int>(buffer.size()), 0);
+        // Clamp to INT_MAX: ::recv's length parameter is int; a larger buffer
+        // would have its size truncated (possibly to a negative value), causing
+        // WSAEFAULT and a spurious connection drop.
+        auto const n = ::recv(_socket,
+                              reinterpret_cast<char*>(buffer.data()),
+                              static_cast<int>(std::min(buffer.size(), static_cast<size_t>(INT_MAX))),
+                              0);
         if (n > 0)
             co_return static_cast<std::size_t>(n);
         if (n == 0)
@@ -108,8 +113,13 @@ coro::Task<IoResult> WindowsSocket::write(std::span<std::byte const> buffer)
             co_return std::unexpected(*closed);
 
         auto const remaining = buffer.subspan(total);
-        auto const n = ::send(
-            _socket, reinterpret_cast<char const*>(remaining.data()), static_cast<int>(remaining.size()), 0);
+        // Clamp to INT_MAX: ::send's length parameter is int; the write loop
+        // handles the remainder on the next iteration, so a truncated length
+        // is a safe partial-send rather than a silent failure.
+        auto const n = ::send(_socket,
+                              reinterpret_cast<char const*>(remaining.data()),
+                              static_cast<int>(std::min(remaining.size(), static_cast<size_t>(INT_MAX))),
+                              0);
         if (n > 0)
         {
             total += static_cast<std::size_t>(n);

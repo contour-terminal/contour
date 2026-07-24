@@ -41,6 +41,14 @@
 namespace net
 {
 
+/// Thrown by WaitFdAwaiter::await_resume when the fd could not be registered
+/// with the event source (e.g. fd table exhausted). Distinct from
+/// OperationCancelled so the caller can tell a plumbing failure from a
+/// deliberate cancellation.
+struct FdRegistrationFailed
+{
+};
+
 class DelayAwaiter;
 class WaitFdAwaiter;
 
@@ -334,14 +342,18 @@ class WaitFdAwaiter
     }
 
     /// Detaches the fd and, if the flow was cancelled while parked or the attach
-    /// failed, reports cancellation.
-    /// @throws OperationCancelled if cancelled while parked or the fd could not be attached.
+    /// failed, reports the failure.
+    /// @throws FdRegistrationFailed if the fd could not be registered with the
+    ///         event source (resource exhaustion — distinct from cancellation).
+    /// @throws OperationCancelled if cancelled while parked or the fd was invalid.
     void await_resume()
     {
         _cancelReg.reset();
         if (_registration)
             _loop.unregisterFdWaiter(_registration);
-        if (_token.stop_requested() || !_registration)
+        else if (_fd != InvalidHandle && !_token.stop_requested())
+            throw FdRegistrationFailed {};
+        if (_token.stop_requested() || _fd == InvalidHandle)
             throw coro::OperationCancelled {};
     }
 

@@ -13,13 +13,13 @@ EventLoop::EventLoop(EventSource& source, IClock& clock): _source(source), _cloc
 {
     // The post() self-pipe: its read end is an ordinary Read registration, so a
     // cross-thread post breaks an in-flight _source.wait() like any fd readiness.
-    // If creation fails (fd exhaustion), post() still queues work — it is then
-    // only picked up when the loop next wakes for another reason.
-    if (auto pipe = createSystemPipe())
-    {
-        _postPipe = std::move(*pipe);
-        _postToken = _source.attach(_postPipe->waitHandle(), FdInterest::Read);
-    }
+    // The daemon depends on this for shutdown — a null pipe silently losing
+    // cross-thread wakeups would deadlock. Fail fast instead.
+    auto pipe = createSystemPipe();
+    if (!pipe)
+        throw std::runtime_error("EventLoop: cannot create post self-pipe (fd exhaustion?)");
+    _postPipe = std::move(*pipe);
+    _postToken = _source.attach(_postPipe->waitHandle(), FdInterest::Read);
 }
 
 EventLoop::~EventLoop()
@@ -244,12 +244,17 @@ void EventLoop::pumpOnce()
 
     // Nothing is parked on a source: a well-formed root flow either completed
     // (the caller's loop will observe `done()`) or is awaiting a child task that
-    // will itself park. Returning avoids a wait with no one to wake. (Posted
-    // callbacks arriving cross-thread are still picked up: blockOn re-enters the
-    // pump, whose top runs them.)
+    // will itself park. A cross-thread post() may have enqueued callbacks between
+    // the top-of-pump drain and this check — drain them once more before
+    // returning so the blockOn loop, which exits when done(), does not strand
+    // them.
     auto const hasParked = !_timers.empty() || !_fdWaiters.empty();
     if (!hasParked)
+    {
+        runPostedCallbacks();
+        drainReadyQueue();
         return;
+    }
 
     auto const outcome = _source.wait(computeTimeoutMs());
 
