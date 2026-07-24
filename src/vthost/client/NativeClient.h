@@ -149,13 +149,16 @@ class NativeClient final
     /// configuration path; use this only when a handler must be swapped mid-life.
     void setUpdateHandler(UpdateHandler handler) { _onUpdate = std::move(handler); }
 
-    /// Replaces the image handler at runtime.
+    /// Replaces the image handler at runtime. The constructor is the primary
+    /// configuration path; use this only when a handler must be swapped mid-life.
     void setImageHandler(ImageHandler handler) { _onImage = std::move(handler); }
 
-    /// Replaces the session-event handler at runtime.
+    /// Replaces the session-event handler at runtime. The constructor is the primary
+    /// configuration path; use this only when a handler must be swapped mid-life.
     void setSessionEventHandler(SessionEventHandler handler) { _onSessionEvent = std::move(handler); }
 
-    /// Replaces the layout handler at runtime.
+    /// Replaces the layout handler at runtime. The constructor is the primary
+    /// configuration path; use this only when a handler must be swapped mid-life.
     void setLayoutHandler(LayoutHandler handler) { _onLayout = std::move(handler); }
 
     /// Sends keyboard/paste bytes to @p session's PTY.
