@@ -112,6 +112,20 @@ Task<void> clientRoundTrip(EventLoop* loop, std::string socketPath, std::string 
     *echoed = echo.has_value() && *echo == line;
 }
 
+/// Test-only connection handler: drains lines until the peer disconnects.
+/// Used by the persistent-failure and close-before-serve tests which need a
+/// real handler but don't care about the data.
+coro::Task<void> drainConnection(std::unique_ptr<net::ISocket> connection)
+{
+    auto reader = net::AsyncBufferedReader { connection.get() };
+    while (true)
+    {
+        auto const line = co_await reader.readLine();
+        if (!line.has_value())
+            co_return;
+    }
+}
+
 } // namespace
 
 TEST_CASE("ConnectionAcceptor serves concurrent connections through the injected handler", "[vthost][server]")
@@ -160,7 +174,7 @@ TEST_CASE("persistent accept failures back off instead of starving the loop", "[
 
     auto attempts = 0;
     auto server =
-        ConnectionAcceptor { loop, std::make_unique<ExhaustedListener>(&attempts), vthost::drainConnection };
+        ConnectionAcceptor { loop, std::make_unique<ExhaustedListener>(&attempts), drainConnection };
     loop.spawn(server.serve());
 
     // Every accept fails without suspending; serve() must yield between attempts
@@ -181,7 +195,7 @@ TEST_CASE("closing the server ends the accept loop", "[vthost][server]")
     auto listener = net::listenUnix(loop, socketPath);
     REQUIRE(listener.has_value());
 
-    auto server = ConnectionAcceptor { loop, std::move(*listener), vthost::drainConnection };
+    auto server = ConnectionAcceptor { loop, std::move(*listener), drainConnection };
 
     // Close before serving: the first accept resolves cancelled and serve returns.
     server.close();

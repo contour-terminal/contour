@@ -24,15 +24,19 @@ TmuxGateway::TmuxGateway(net::EventLoop& loop,
 
 void TmuxGateway::sendCommand(std::string command, CommandCallback callback)
 {
-    _pending.push_back(std::move(callback));
     command += '\n';
     if (!_writer.enqueue(std::move(command)))
     {
-        // The queue's overflow contract: a dropped command whose callback is
-        // already queued in _pending desyncs every later reply — sever instead.
+        // The queue's overflow contract: a dropped command means its callback
+        // (not yet queued) must be failed so the caller can clean up, rather
+        // than left dangling in _pending to desync every later reply.
+        if (callback)
+            callback(false, {});
         _writer.close();
         _connection->close();
+        return;
     }
+    _pending.push_back(std::move(callback));
 }
 
 void TmuxGateway::sendKeys(uint64_t pane, std::string_view text)
@@ -82,9 +86,15 @@ void TmuxGateway::detach()
 {
     _detached = true;
     // An empty line detaches (control.c:547); if it cannot even be queued,
-    // fall back to severing the transport — teardown is wanted either way.
+    // fail every pending callback so nothing leaks, then sever the transport.
     if (!_writer.enqueue("\n"))
     {
+        for (auto& cb: _pending)
+        {
+            if (cb)
+                cb(false, {});
+        }
+        _pending.clear();
         _writer.close();
         _connection->close();
     }
@@ -205,6 +215,14 @@ coro::Task<void> TmuxGateway::run()
         if (reader.buffered() == 0)
             _events.notificationsDrained();
     }
+
+    // Disconnect or exit: fail every orphaned callback so nothing leaks.
+    for (auto& cb: _pending)
+    {
+        if (cb)
+            cb(false, {});
+    }
+    _pending.clear();
 
     co_await _writer.flushThenClose();
     _connection->close();

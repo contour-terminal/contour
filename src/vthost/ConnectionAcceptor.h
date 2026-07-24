@@ -63,10 +63,4 @@ class ConnectionAcceptor
     ConnectionHandler _handler;
     std::size_t _acceptedCount = 0;
 };
-
-/// The Phase-1 placeholder connection handler: drains lines until the peer
-/// disconnects. Replaced by the tmux control-mode protocol in the next phase.
-/// @param connection The accepted client connection (owned by the flow).
-[[nodiscard]] coro::Task<void> drainConnection(std::unique_ptr<net::ISocket> connection);
-
 } // namespace vthost

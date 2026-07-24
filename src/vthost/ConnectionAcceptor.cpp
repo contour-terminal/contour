@@ -4,8 +4,6 @@
 #include <chrono>
 #include <utility>
 
-#include <net/AsyncBufferedReader.h>
-
 namespace vthost
 {
 
@@ -38,17 +36,6 @@ coro::Task<void> ConnectionAcceptor::serve()
         // One flow per connection, socket ownership moved into its frame; the
         // loop reaps the frame when the connection flow finishes.
         _loop.spawn(_handler(std::move(*accepted)));
-    }
-}
-
-coro::Task<void> drainConnection(std::unique_ptr<net::ISocket> connection)
-{
-    auto reader = net::AsyncBufferedReader { connection.get() };
-    while (true)
-    {
-        auto const line = co_await reader.readLine();
-        if (!line.has_value())
-            co_return; // EOF or error: the connection is done
     }
 }
 

@@ -363,8 +363,12 @@ int runDaemon(DaemonConfig const& config)
 
     // Unblock the watcher if shutdown came from elsewhere; if it already
     // consumed a signal, the raised one stays blocked and dies with the process.
+    // raise(3) targets the calling thread (pthread_kill(pthread_self(), …)) —
+    // the watcher thread's sigwait dequeues from its own queue and never sees a
+    // thread-directed signal. kill(getpid(), …) sends a process-directed signal
+    // that sigwait in any thread can consume.
     if (!signalSeen)
-        std::ignore = ::raise(SIGTERM);
+        std::ignore = ::kill(getpid(), SIGTERM);
     watcher.join();
 
     std::println(stderr, "contour daemon: shut down");
@@ -395,12 +399,21 @@ int ensureDaemon(AttachEndpoint const& endpoint, std::string_view daemonBinary, 
         return EXIT_FAILURE;
 
     // Poll until the socket accepts connections or the timeout elapses.
+    // Back off gradually: a freshly spawned daemon needs a moment to bind,
+    // but polling at a fixed 100ms wastes ~50 connect/close cycles over the
+    // default 5s timeout. Doubling the sleep each iteration caps at 1s.
     auto const deadline = std::chrono::steady_clock::now() + timeout;
+    auto sleepMs = std::chrono::milliseconds { 50 };
     while (std::chrono::steady_clock::now() < deadline)
     {
         if (daemonAccepts(loop, nativePath))
             return EXIT_SUCCESS;
-        std::this_thread::sleep_for(std::chrono::milliseconds { 100 });
+        auto const remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now());
+        if (remaining < sleepMs)
+            sleepMs = remaining;
+        std::this_thread::sleep_for(sleepMs);
+        sleepMs = std::min(sleepMs * 2, std::chrono::milliseconds { 1000 });
     }
     return EXIT_FAILURE; // timeout
 }
