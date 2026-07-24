@@ -64,18 +64,18 @@ struct Layout
 };
 
 /// Descends first-children to the leftmost leaf of @p node (returns @p node itself if it is a leaf).
-[[nodiscard]] [[nodiscard]] LayoutPane const& leftmostLeaf(LayoutPane const& node);
+[[nodiscard]] LayoutPane const& leftmostLeaf(LayoutPane const& node);
 
 /// The share of space in (0, 1) that @p children.front() receives when @p children are laid out
 /// side by side in one split. A child's `ratio` is its fraction of the whole split; children
 /// without one share what the explicitly-sized ones leave over, equally.
 /// @param children The children of one split (or the not-yet-placed tail of one).
 /// @return The first child's share, or 0.5 for an empty range.
-[[nodiscard]] [[nodiscard]] double ratioForFirst(std::span<LayoutPane const> children);
+[[nodiscard]] double ratioForFirst(std::span<LayoutPane const> children);
 
 /// The share given to @p splitNode's first child versus its remaining children.
 /// @param splitNode A split node (a leaf yields 0.5: it has no children to weigh).
-[[nodiscard]] [[nodiscard]] double ratioForFirst(LayoutPane const& splitNode);
+[[nodiscard]] double ratioForFirst(LayoutPane const& splitNode);
 
 /// Invoked immediately before each model allocation to stage the backing session for that leaf's
 /// command/profile/dir. It must arrange for the model's SessionAllocator to return the id it created.
@@ -110,9 +110,9 @@ using LeafResolver = std::function<PaneLeafData(SessionId)>;
 /// Serializes @p pane (leaf or split) into a LayoutPane, resolving each leaf's runtime data
 /// via @p resolve. A split's orientation and ratio are preserved so the tree can be realized again
 /// unchanged via realizeLayoutTab.
-[[nodiscard]] [[nodiscard]] LayoutPane serializePane(Pane const& pane, LeafResolver const& resolve);
+[[nodiscard]] LayoutPane serializePane(Pane const& pane, LeafResolver const& resolve);
 
 /// Serializes @p tab (title/color/pane tree) into a LayoutTab, for save-layout use.
-[[nodiscard]] [[nodiscard]] LayoutTab serializeTab(Tab const& tab, LeafResolver const& resolve);
+[[nodiscard]] LayoutTab serializeTab(Tab const& tab, LeafResolver const& resolve);
 
 } // namespace vtworkspace
