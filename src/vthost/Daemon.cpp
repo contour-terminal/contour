@@ -20,6 +20,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <expected>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -43,12 +44,8 @@
 #include <vthost/tmux/ImsgServer.h>
 
 #ifndef _WIN32
-    #include <sys/socket.h>
-    #include <sys/un.h>
-
     #include <csignal>
 
-    #include <fcntl.h>
     #include <unistd.h>
 #endif
 
@@ -145,6 +142,66 @@ namespace
             return std::unexpected(EXIT_FAILURE);
         }
         return std::move(*listener);
+    }
+
+    /// Probes whether a daemon is accepting connections on the native socket at
+    /// @p path. Only reachability is asked: the established transport is dropped
+    /// again as soon as the connect returns.
+    ///
+    /// AF_UNIX is a Windows citizen too (10 1803+ / afunix.h), so this needs no
+    /// platform split — net::connectUnix owns the per-OS detail (winsock
+    /// initialization, the SOCKET/int handle split, the path-length check).
+    /// @param loop The reactor driving the connect (not owned).
+    /// @param path The native socket file to probe.
+    /// @return True if a daemon accepted the connection.
+    [[nodiscard]] bool daemonAccepts(net::EventLoop& loop, std::string const& path)
+    {
+        return loop.blockOn(net::connectUnix(&loop, path)).has_value();
+    }
+
+    /// Starts `<daemonBinary> daemon --socket=<socketPath>` detached from this
+    /// process, so the client may exit without taking the daemon down with it.
+    /// @param daemonBinary Path to the `contour` binary.
+    /// @param socketPath The control socket the spawned daemon should bind.
+    /// @return False if the process could not be started.
+    [[nodiscard]] bool spawnDetachedDaemon(std::string_view daemonBinary,
+                                           std::filesystem::path const& socketPath)
+    {
+#ifndef _WIN32
+        auto const pid = ::fork();
+        if (pid < 0)
+            return false;
+        if (pid == 0)
+        {
+            auto const socketArg = std::format("--socket={}", socketPath.string());
+            auto const daemonBinaryStr = std::string { daemonBinary };
+            ::execl(daemonBinaryStr.c_str(), daemonBinaryStr.c_str(), "daemon", socketArg.c_str(), nullptr);
+            ::_exit(EXIT_FAILURE);
+        }
+        return true;
+#else
+        // CreateProcess parses its command line in place and may write to it, so the
+        // buffer must be mutable. Both paths are quoted: either can hold spaces
+        // (`C:\Program Files\…`), which an unquoted command line would split.
+        auto commandLine = std::format(R"("{}" daemon --socket="{}")", daemonBinary, socketPath.string());
+        auto startupInfo = STARTUPINFOA {};
+        startupInfo.cb = sizeof(startupInfo);
+        auto processInfo = PROCESS_INFORMATION {};
+        if (!::CreateProcessA(nullptr,
+                              commandLine.data(),
+                              nullptr,
+                              nullptr,
+                              FALSE,
+                              DETACHED_PROCESS | CREATE_NO_WINDOW,
+                              nullptr,
+                              nullptr,
+                              &startupInfo,
+                              &processInfo))
+            return false;
+        ::CloseHandle(processInfo.hThread);
+        ::CloseHandle(processInfo.hProcess);
+        return true;
+#endif
     }
 } // namespace
 
@@ -322,93 +379,28 @@ int ensureDaemon(AttachEndpoint const& endpoint, std::string_view daemonBinary, 
     if (std::holds_alternative<TcpEndpoint>(endpoint))
         return EXIT_SUCCESS;
 
-    // Unix socket: probe the native socket beside the control socket.
+    // Unix socket: probe the native socket beside the control socket. One reactor
+    // serves the initial probe and every poll that follows.
     auto const& unixEp = std::get<UnixEndpoint>(endpoint);
-    auto const nativePath = nativeSocketPath(unixEp.socketPath);
+    auto const nativePath = nativeSocketPath(unixEp.socketPath).string();
 
-    // Quick probe: try a non-blocking connect. If it succeeds, the daemon is alive.
-    auto probeSock = ::socket(AF_UNIX, SOCK_STREAM, 0);
-    if (probeSock < 0)
-        return EXIT_FAILURE;
-#ifndef _WIN32
-    ::fcntl(probeSock, F_SETFD, FD_CLOEXEC);
-#endif
-    auto addr = sockaddr_un {};
-    addr.sun_family = AF_UNIX;
-    auto const pathLen = nativePath.string().copy(addr.sun_path, sizeof(addr.sun_path) - 1);
-    addr.sun_path[pathLen] = '\0';
-    if (::connect(probeSock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0)
-    {
-#ifdef _WIN32
-        ::closesocket(probeSock);
-#else
-        ::close(probeSock);
-#endif
+    auto source = net::PollEventSource {};
+    auto loop = net::EventLoop { source };
+
+    if (daemonAccepts(loop, nativePath))
         return EXIT_SUCCESS; // daemon is already running
-    }
-#ifdef _WIN32
-    ::closesocket(probeSock);
-#else
-    ::close(probeSock);
-#endif
 
     // Daemon not running — spawn it in the background.
-    auto const deadline = std::chrono::steady_clock::now() + timeout;
-#ifndef _WIN32
-    auto const pid = ::fork();
-    if (pid == 0)
-    {
-        // Child: exec contour daemon with the same socket path.
-        auto const socketArg = std::format("--socket={}", unixEp.socketPath.string());
-        auto const daemonBinaryStr = std::string(daemonBinary);
-        ::execl(daemonBinaryStr.c_str(), daemonBinaryStr.c_str(), "daemon", socketArg.c_str(), nullptr);
-        ::_exit(EXIT_FAILURE);
-    }
-#else
-    // Windows: CreateProcess with DETACHED_PROCESS, then poll.
-    auto const cmdLine = std::format("{} daemon --socket=\"{}\"", daemonBinary, unixEp.socketPath.string());
-    auto si = STARTUPINFOA {};
-    si.cb = sizeof(si);
-    auto pi = PROCESS_INFORMATION {};
-    if (!::CreateProcessA(nullptr,
-                          cmdLine.data(),
-                          nullptr,
-                          nullptr,
-                          FALSE,
-                          DETACHED_PROCESS | CREATE_NO_WINDOW,
-                          nullptr,
-                          nullptr,
-                          &si,
-                          &pi))
+    if (!spawnDetachedDaemon(daemonBinary, unixEp.socketPath))
         return EXIT_FAILURE;
-    ::CloseHandle(pi.hThread);
-    ::CloseHandle(pi.hProcess);
-#endif
-    // Parent: poll until the socket accepts connections or timeout.
+
+    // Poll until the socket accepts connections or the timeout elapses.
+    auto const deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline)
     {
-        auto pollSock = ::socket(AF_UNIX, SOCK_STREAM, 0);
-        if (pollSock >= 0)
-        {
-#ifndef _WIN32
-            ::fcntl(pollSock, F_SETFD, FD_CLOEXEC);
-#endif
-            if (::connect(pollSock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0)
-            {
-#ifdef _WIN32
-                ::closesocket(pollSock);
-#else
-                ::close(pollSock);
-#endif
-                return EXIT_SUCCESS;
-            }
-#ifdef _WIN32
-            ::closesocket(pollSock);
-#else
-            ::close(pollSock);
-#endif
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (daemonAccepts(loop, nativePath))
+            return EXIT_SUCCESS;
+        std::this_thread::sleep_for(std::chrono::milliseconds { 100 });
     }
     return EXIT_FAILURE; // timeout
 }

@@ -63,6 +63,7 @@ if(VTHOST_TESTING)
         test_main.cpp
         SessionHost_test.cpp
         ConnectionAcceptor_test.cpp
+        Daemon_test.cpp
         NativeSession_test.cpp
         SocketPath_test.cpp
         client/NativeClient_test.cpp
