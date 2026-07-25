@@ -1054,6 +1054,43 @@ TEST_CASE("display: the accessibility interface reports the caret", "[display][a
     CHECK_NOTHROW(h.display->resetAccessibleCaret());
 }
 
+TEST_CASE("display: the prompt interface leaves Qt's accessibility cache with its display", "[display][a11y]")
+{
+    // Issue #2015, end to end: a real session whose OSC 133 marks make the prompt genuinely appear, so
+    // the interface is registered by the production path rather than by the test. ~TerminalAccessible
+    // explains the ownership rule this asserts; TerminalAccessible_test.cpp gates it in CI.
+    //
+    // Asserting on the id rather than on the interface keeps the check itself safe: it compares
+    // pointers and never dereferences a freed one.
+    REQUIRE_DISPLAY_OR_SKIP();
+    auto harness = std::make_unique<DisplayHarness>();
+
+    contour::display::TerminalAccessible::installFactory();
+    harness->display->forceActiveFocus();
+
+    // OSC 133 A/B: the prompt-start / prompt-end pair that gives livePromptSpan() something to report,
+    // and thus the only thing that brings the prompt child interface into existence.
+    harness->feedAndSettle("\033]133;A\033\\$ \033]133;B\033\\"sv);
+
+    auto* accessible = dynamic_cast<contour::display::TerminalAccessible*>(
+        QAccessible::queryAccessibleInterface(harness->display));
+    REQUIRE(accessible != nullptr);
+
+    // Driven directly: reportAccessibleCaret() gates on an attached assistive client, and neither the
+    // test environment nor CI has one.
+    accessible->reportCaret();
+    REQUIRE(accessible->childCount() == 1); // the prompt branch really ran
+
+    auto* prompt = accessible->child(0);
+    REQUIRE(prompt != nullptr);
+    auto const promptId = QAccessible::uniqueId(prompt);
+    REQUIRE(QAccessible::accessibleInterface(promptId) == prompt);
+
+    harness.reset(); // deletes the display, and with it the terminal's accessible interface
+
+    CHECK(QAccessible::accessibleInterface(promptId) == nullptr);
+}
+
 TEST_CASE("display: mouse press/move drive selection and the cursor shape on the live display",
           "[display][mouse]")
 {

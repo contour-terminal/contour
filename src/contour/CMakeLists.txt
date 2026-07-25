@@ -378,6 +378,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/ExitCode_test.cpp
             test/CaretGeometry_test.cpp
             test/CaretReportGate_test.cpp
+            test/TerminalAccessible_test.cpp
             test/Helper_test.cpp
             test/HyperlinkTooltip_test.cpp
             test/HorizontalWheelGesture_test.cpp
