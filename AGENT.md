@@ -13,9 +13,10 @@
   /// @param name Description.
   /// @return Description.
   ```
-- Naming conventions and static-analysis rules live in **per-module `.clang-tidy` files**
-  (`src/.clang-tidy` is the base; `src/crispy/`, `src/text_shaper/`, and `examples/` override
-  it). These files are the authoritative source and win over any prose here.
+- Naming conventions and static-analysis rules live in **`.clang-tidy` files** (`./.clang-tidy` at
+  the repository root is the base, so every first-party tree resolves to it by clang-tidy's normal
+  parent-directory search; `src/crispy/` and `src/text_shaper/` override it for their snake_case
+  naming). These files are the authoritative source and win over any prose here.
 - C++ code formatting rules are defined in `.clang-format`; run `clang-format` after changes.
 - Use smart pointers for ownership; do not use raw owning pointers
 - Do not introduce new third-party dependencies without strong justification
