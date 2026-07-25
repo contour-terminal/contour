@@ -34,6 +34,97 @@ front. Chain monadically with `and_then`, `or_else`, `transform`, `transform_err
 than nested `if`s. Reserve exceptions for programmer errors (precondition violation, contract
 misuse), not for expected, recoverable failures.
 
+### `enum class` over `bool`
+**A `bool` in an API is an anonymous enum whose two values are named after their representation
+instead of their meaning.** A `bool` parameter, return type, or data member is a finding unless one
+of the exceptions below applies; the replacement is a purpose-named `enum class`. The tree already
+has dozens of these and they are the model to copy: `WrapPending`, `HighlightSearchMatches`,
+`JumpOver`, `StatusLineStyling`, `PixelReporting`, `ClusterWidthPolicy`, `GlyphWidthPolicy`.
+
+The parameter case carries all three costs at once:
+
+- **The call site loses the meaning.** `Line::toUtf8Trimmed(true, false)` tells a reader nothing,
+  and no amount of careful naming *inside* the function repairs the code that calls it.
+- **The compiler stops helping.** `bool` accepts pointers, integers and characters through implicit
+  conversion, so an overload taking `bool` can quietly swallow an argument meant for another one,
+  and two adjacent `bool` parameters can be exchanged without a diagnostic. An `enum class`
+  converts from nothing.
+- **A third case rewrites every signature.** When yes/no becomes yes/no/inherit, a `bool` forces a
+  signature change and an edit at every call site; an `enum class` gains an enumerator and `switch`
+  exhaustiveness names the places that must now handle it — the same argument data-driven design
+  makes.
+
+`TerminalSession`'s guarded-role API is the case to learn from: `applyPendingFontChange`,
+`applyPendingPaste`, `executePendingBufferCapture` and `executeShowHostWritableStatusLine` all take
+`(bool allow, bool remember)`, as does `executeRole(GuardedRole, bool, bool)`. The two arguments
+are adjacent, identically typed and silently exchangeable, and together they gate a *permission*
+decision — swap them at one call site and you grant what should have been remembered. Also
+`Terminal::programUDK(bool clearAll, bool locked, …)`, `tabVisualStateFor(bool active,
+bool hovered, bool windowActive)`, and `Terminal::refreshRenderBuffer(bool locked = false)`, which
+manages to be both a defaulted `bool` parameter and a `bool` return.
+
+**The shape of the fix.**
+
+- **Name the enum after the decision, not after the type.** Domain words beat `Yes`/`No`
+  (`ClusterWidthPolicy::FirstCodepoint`); reserve `Yes`/`No` for a type whose own name already
+  reads as the question, as `JumpOver::Yes` and `HighlightSearchMatches::No` do.
+- **Give it an explicit underlying type** — `: uint8_t`, as nearly every enum in `src/` already
+  does. Order the enumerators so the off/absent/default case is zero. We are inconsistent here
+  (`WrapPending` is `{Yes, No}`, `HighlightSearchMatches` is `{No, Yes}`); new enums use zero for
+  the negative case so a zero-initialized value still means what the `false` meant.
+- **Flags that genuinely combine are a bitmask, not a pile of enums.** Where several booleans are
+  truly orthogonal and every combination is legal, the answer is one bitmask type — this is why
+  `cppcoreguidelines-use-enum-class` is off for `vtbackend::Modifier`, `LockKey` and
+  `MatchModes::Flag`, whose values are protocol-defined bit positions.
+- **A strong typedef is the other acceptable shape** where a value must stay boolean in behaviour
+  but distinct in type — `using Handled = boxed::boxed<bool, HandledTag>;` on `InputHandler`. Reach
+  for it when the type name supplies the meaning and the two states have no better names.
+
+**Per position.**
+
+- **Parameters.** A defaulted `bool` is the worst form — it shows neither the name nor the value at
+  the call site, so prefer two named functions. Two adjacent `bool` parameters are the next worst,
+  being silently exchangeable; fix those signatures first.
+- **Returns.** A `bool` return is right when the function name *asks the question*: `empty()`,
+  `contains()`, `isLineWrapped()`, `hasLineAt()`, the comparison operators. It is a finding when it
+  reports success or failure — `captureScreen()`, `loadConfig()`, `tryAddKey()`, `openUrl()`,
+  `runDetached()` are all really `std::expected<void, E>`, which carries the *reason* instead of
+  discarding it — or when it selects between two named outcomes, which is an `enum class`.
+- **Members.** The same test as parameters, plus one more: two or more `bool` members in a type are
+  usually a state machine hiding in flags. Where some combinations cannot legally occur, the states
+  are one `enum class`, not a set of independent switches.
+- **A surviving `bool` reads as a predicate** — `_isVisible`, not `_visible` — so the use site
+  still reads as a question.
+
+**When you cannot.** Each of these must be documented at the declaration, with the reason:
+
+- **The parameter is the property** — a setter that exists only to assign a `bool` member which
+  itself passed the test above. The narrow carve-out, not a general licence: if the member should
+  have been an `enum class`, so should the setter.
+- **A signature you do not own** — a Qt virtual or slot, a standard concept (`std::predicate`,
+  comparators), a C callback typedef.
+- **Serialization and wire boundaries** — `Config` fields parsed from YAML, protocol flags. Convert
+  at the boundary and keep the `enum class` inside it. `Config`'s public `bool` fields are the
+  documented exception; do not open a sweep of the config schema on their account.
+- **Generic code with no domain meaning** — a `bool` template argument threaded to `if constexpr`,
+  as in `Parser.h`'s `TraceStateChanges`.
+- **QML-facing `Q_INVOKABLE`/`Q_PROPERTY`** — an enum reaches QML only once registered with the
+  meta-object system (`Q_ENUM`), and the QML side must then name the enumerators. Worth doing, but
+  find the QML callers before promising it.
+
+**Enforcement.** Mostly a review question — *at the call site, can you tell what `true` means
+without opening the header?* — because the two checks that would help are off:
+`bugprone-easily-swappable-parameters` (adjacent parameters of convertible type) and
+`readability-implicit-bool-conversion` (the conversions that let a `bool` overload swallow a
+pointer). A clean build therefore says nothing about signatures; enabling either on one module is a
+reasonable first move, and what it reports is the finding, not noise. Where a `bool` is
+deliberately kept, `bugprone-argument-comment` is enabled via `bugprone-*`, and its
+`CommentBoolLiterals` option (off by default) would make `/*asciiHint=*/true` a *checked* comment
+rather than a hopeful one — a mitigation, not a substitute for the type. The practice barely exists
+today: 27 such comments in `src/`, all but one of them in tests, against ~165 bare literal
+arguments in non-test code. Tellingly, `/*allow=*/` and `/*remember=*/` are among the 27 — the
+guarded-role call sites already felt the need to annotate what the type should have said.
+
 ### Dependency injection
 **This is a load-bearing principle, not a nice-to-have.** Anything that
 touches I/O, time, randomness, the filesystem, the network, or any other
