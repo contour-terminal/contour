@@ -7,8 +7,6 @@
 #include <QtGui/QAccessibleInterface>
 #include <QtGui/QAccessibleObject>
 
-#include <memory>
-
 namespace contour::display
 {
 
@@ -24,8 +22,11 @@ class TerminalAccessible;
 /// rectangle on the terminal itself would be read by nothing.
 ///
 /// Has no QObject behind it: it is a region of the terminal, not a widget. Qt 6 allows a QObject-less
-/// interface to be the subject of a QAccessibleEvent, which is all this needs. Owned by its parent
-/// @ref TerminalAccessible and destroyed with it.
+/// interface to be the subject of a QAccessibleEvent, which is all this needs.
+///
+/// Owned by Qt's accessibility cache, like every other QAccessibleInterface -- which is why
+/// ~QAccessibleInterface is protected. Its parent @ref TerminalAccessible registers it and hands it
+/// back on destruction; nobody else may delete it. @see TerminalAccessible::promptInterface.
 class PromptAccessible final: public QAccessibleInterface
 {
   public:
@@ -122,6 +123,10 @@ class TerminalAccessible final: public QAccessibleObject, public QAccessibleText
     /// The display this interface adapts, or nullptr once it has been destroyed.
     [[nodiscard]] TerminalDisplay* display() const;
 
+    /// The prompt child interface. Never null, and never to be deleted by a caller: it belongs to
+    /// Qt's accessibility cache, which this object hands it back to when it goes away.
+    [[nodiscard]] PromptAccessible* promptInterface() const noexcept;
+
     /// Recomputes the caret state and, if it changed in a way worth announcing, tells the OS.
     ///
     /// Runs on the GUI THREAD only. Reads the BLINK-FREE visibility predicate deliberately: the render
@@ -133,14 +138,11 @@ class TerminalAccessible final: public QAccessibleObject, public QAccessibleText
     void resetCaretGate();
 
   private:
-    /// The prompt child, created on demand while a live prompt exists.
-    [[nodiscard]] PromptAccessible* promptInterface() const;
-
     CaretReportGate _gate;
-    /// Mirrors whether a prompt child currently exists, so show/hide are announced once each.
+    /// Mirrors whether a prompt child is currently exposed, so show/hide are announced once each.
     bool _promptShown = false;
-    /// Created on first use, including from const query methods; owned here and destroyed with this.
-    mutable std::unique_ptr<PromptAccessible> _prompt;
+    /// Non-owning: Qt's accessibility cache owns it, and the destructor hands it back.
+    PromptAccessible* _prompt;
 };
 
 } // namespace contour::display

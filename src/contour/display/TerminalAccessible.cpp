@@ -65,11 +65,30 @@ namespace
 
 // {{{ TerminalAccessible
 
-TerminalAccessible::TerminalAccessible(TerminalDisplay* display): QAccessibleObject { display }
+TerminalAccessible::TerminalAccessible(TerminalDisplay* display):
+    QAccessibleObject { display }, _prompt { new PromptAccessible(this) }
 {
+    // Registered up front rather than on first use, so the two views of the prompt's ownership can
+    // never disagree: an interface reaches the cache the instant it becomes the subject of a
+    // QAccessibleEvent anyway, because that constructor calls QAccessible::uniqueId() on it.
+    // NB: PromptAccessible only stores the pointer, so passing a half-constructed `this` is safe.
+    QAccessible::registerAccessibleInterface(_prompt);
 }
 
-TerminalAccessible::~TerminalAccessible() = default;
+TerminalAccessible::~TerminalAccessible()
+{
+    // Hand the prompt back to Qt's accessibility cache, which is what deletes it -- ~QAccessibleInterface
+    // is protected precisely to say that the cache owns every interface it has handed an id to.
+    //
+    // It learns that one has gone away through QObject::destroyed alone, a hook QAccessibleCache::insert
+    // installs only for interfaces that HAVE an object. The prompt has none, so nothing would ever drop
+    // its entry: deleting it here instead left the cache holding a dangling pointer, which it then
+    // dereferenced and freed a second time from ~QAccessibleCache at application exit -- issue #2015.
+    //
+    // The id is looked up rather than remembered because the cache RECYCLES ids: a stored one could
+    // name someone else's interface by the time it is used.
+    QAccessible::deleteAccessibleInterface(QAccessible::uniqueId(_prompt));
+}
 
 void TerminalAccessible::installFactory()
 {
@@ -159,11 +178,9 @@ QAccessibleInterface* TerminalAccessible::parent() const
     return QAccessible::queryAccessibleInterface(item->window());
 }
 
-PromptAccessible* TerminalAccessible::promptInterface() const
+PromptAccessible* TerminalAccessible::promptInterface() const noexcept
 {
-    if (!_prompt)
-        _prompt = std::make_unique<PromptAccessible>(const_cast<TerminalAccessible*>(this));
-    return _prompt.get();
+    return _prompt;
 }
 
 int TerminalAccessible::childCount() const
@@ -180,7 +197,7 @@ QAccessibleInterface* TerminalAccessible::child(int index) const
 
 int TerminalAccessible::indexOfChild(QAccessibleInterface const* child) const
 {
-    if (_promptShown && child == _prompt.get())
+    if (_promptShown && child == _prompt)
         return 0;
     return -1;
 }
