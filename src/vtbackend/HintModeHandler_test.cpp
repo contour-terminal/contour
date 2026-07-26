@@ -4,8 +4,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <ranges>
+#include <set>
 
 using namespace vtbackend;
 
@@ -79,6 +81,39 @@ auto filepathOnlyPatterns() -> std::vector<HintPattern>
     return result;
 }
 
+/// @p lines as unwrapped rows starting at grid line 0, every one of them labelable.
+auto scanArea(std::vector<std::string> const& lines) -> HintScanArea
+{
+    auto area = HintScanArea {
+        .rows = {},
+        .labelableRows = HintRowRange { .first = LineOffset(0),
+                                        .last = LineOffset::cast_from(lines.size()) - LineOffset(1) },
+    };
+    for (auto const i: std::views::iota(size_t { 0 }, lines.size()))
+        area.rows.push_back(HintScanRow {
+            .text = lines[i], .line = LineOffset::cast_from(i), .continuation = LineContinuation::No });
+    return area;
+}
+
+/// @p lines as one wrapped logical line: the first row heads it, every later row continues it.
+/// Starts at grid line @p firstLine, and every row is labelable.
+auto wrappedScanArea(std::vector<std::string> const& lines, LineOffset firstLine = LineOffset(0))
+    -> HintScanArea
+{
+    auto area = HintScanArea {
+        .rows = {},
+        .labelableRows =
+            HintRowRange { .first = firstLine,
+                           .last = firstLine + LineOffset::cast_from(lines.size()) - LineOffset(1) },
+    };
+    for (auto const i: std::views::iota(size_t { 0 }, lines.size()))
+        area.rows.push_back(
+            HintScanRow { .text = lines[i],
+                          .line = firstLine + LineOffset::cast_from(i),
+                          .continuation = i == 0 ? LineContinuation::No : LineContinuation::Yes });
+    return area;
+}
+
 } // namespace
 
 TEST_CASE("HintModeHandler.LabelAssignment.SingleChar", "[hintmode]")
@@ -91,7 +126,7 @@ TEST_CASE("HintModeHandler.LabelAssignment.SingleChar", "[hintmode]")
         "also https://test.org and https://other.net",
     };
 
-    handler.activate(lines, PageSize { LineCount(2), ColumnCount(50) }, urlOnlyPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), urlOnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     auto const& matches = handler.matches();
@@ -132,10 +167,7 @@ TEST_CASE("HintModeHandler.LabelAssignment.TwoChar", "[hintmode]")
     if (!line.empty())
         lines.push_back(line);
 
-    handler.activate(lines,
-                     PageSize { LineCount(static_cast<int>(lines.size())), ColumnCount(200) },
-                     urlOnlyPatterns(),
-                     HintAction::Copy);
+    handler.activate(scanArea(lines), urlOnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     REQUIRE(handler.matches().size() == 27);
@@ -156,7 +188,7 @@ TEST_CASE("HintModeHandler.ProgressiveFiltering", "[hintmode]")
         "https://alpha.com https://beta.com https://gamma.com",
     };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(60) }, urlOnlyPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), urlOnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.matches().size() == 3);
     CHECK(handler.matches()[0].label == "a");
@@ -183,7 +215,7 @@ TEST_CASE("HintModeHandler.EscapeCancels", "[hintmode]")
 
     auto lines = std::vector<std::string> { "https://example.com" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(30) }, urlOnlyPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), urlOnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
 
@@ -201,7 +233,7 @@ TEST_CASE("HintModeHandler.NoMatches", "[hintmode]")
 
     auto lines = std::vector<std::string> { "no urls or hashes here" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(30) }, urlOnlyPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), urlOnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     CHECK(handler.matches().empty());
@@ -214,7 +246,7 @@ TEST_CASE("HintModeHandler.FilePathPattern", "[hintmode]")
 
     auto lines = std::vector<std::string> { "edit /home/user/file.txt and ./local/path" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(50) }, allPatterns(), HintAction::Open);
+    handler.activate(scanArea(lines), allPatterns(), HintAction::Open);
 
     REQUIRE(handler.isActive());
     // Should find file paths.
@@ -238,7 +270,7 @@ TEST_CASE("HintModeHandler.GitHashPattern", "[hintmode]")
 
     auto lines = std::vector<std::string> { "commit a1b2c3d some message" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(40) }, allPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), allPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     auto foundHash = false;
@@ -261,7 +293,7 @@ TEST_CASE("HintModeHandler.BackspaceRemovesFilter", "[hintmode]")
 
     auto const patterns = urlOnlyPatterns();
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(60) }, patterns, HintAction::Copy);
+    handler.activate(scanArea(lines), patterns, HintAction::Copy);
 
     REQUIRE(handler.matches().size() == 3);
 
@@ -270,7 +302,7 @@ TEST_CASE("HintModeHandler.BackspaceRemovesFilter", "[hintmode]")
     CHECK(!handler.isActive()); // 'a' is unique label -> auto-selected.
 
     // Reactivate for backspace test.
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(60) }, patterns, HintAction::Copy);
+    handler.activate(scanArea(lines), patterns, HintAction::Copy);
 
     // Test backspace on empty filter is a no-op.
     handler.processInput(U'\x08'); // Backspace on empty filter.
@@ -285,7 +317,7 @@ TEST_CASE("HintModeHandler.CaseInsensitive", "[hintmode]")
 
     auto lines = std::vector<std::string> { "https://example.com" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(30) }, urlOnlyPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), urlOnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.matches().size() == 1);
     CHECK(handler.matches()[0].label == "a");
@@ -303,7 +335,7 @@ TEST_CASE("HintModeHandler.ActionDispatch", "[hintmode]")
 
     auto lines = std::vector<std::string> { "https://example.com" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(30) }, urlOnlyPatterns(), HintAction::Open);
+    handler.activate(scanArea(lines), urlOnlyPatterns(), HintAction::Open);
 
     handler.processInput(U'a');
 
@@ -320,7 +352,7 @@ TEST_CASE("HintModeHandler.OverlappingPatterns", "[hintmode]")
     // The overlap removal should keep only the longer URL match.
     auto lines = std::vector<std::string> { "visit https://example.com/path for info" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(50) }, allPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), allPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
 
@@ -355,8 +387,7 @@ TEST_CASE("HintModeHandler.BareRelativeFilePath", "[hintmode]")
         "error in lib/utils/helpers.h:42",
     };
 
-    handler.activate(
-        lines, PageSize { LineCount(2), ColumnCount(50) }, filepathOnlyPatterns(), HintAction::Open);
+    handler.activate(scanArea(lines), filepathOnlyPatterns(), HintAction::Open);
 
     REQUIRE(handler.isActive());
 
@@ -381,8 +412,7 @@ TEST_CASE("HintModeHandler.BareRelativeDoesNotMatchPlainWords", "[hintmode]")
     // Plain words without slashes must NOT match the filepath pattern.
     auto lines = std::vector<std::string> { "hello world foo bar" };
 
-    handler.activate(
-        lines, PageSize { LineCount(1), ColumnCount(30) }, filepathOnlyPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), filepathOnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     CHECK(handler.matches().empty());
@@ -404,7 +434,7 @@ TEST_CASE("HintModeHandler.ValidatorFiltersMatches", "[hintmode]")
         };
     }
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(50) }, patterns, HintAction::Open);
+    handler.activate(scanArea(lines), patterns, HintAction::Open);
 
     REQUIRE(handler.isActive());
     REQUIRE(handler.matches().size() == 1);
@@ -419,8 +449,7 @@ TEST_CASE("HintModeHandler.NoValidatorPassesAll", "[hintmode]")
     auto lines = std::vector<std::string> { "see /foo/bar and /baz/qux" };
 
     // No validator set — both paths should pass through.
-    handler.activate(
-        lines, PageSize { LineCount(1), ColumnCount(40) }, filepathOnlyPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), filepathOnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
 
@@ -461,7 +490,7 @@ TEST_CASE("HintModeHandler.BareFilenameWithValidatedPattern", "[hintmode]")
         },
     };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(60) }, patterns, HintAction::Open);
+    handler.activate(scanArea(lines), patterns, HintAction::Open);
 
     REQUIRE(handler.isActive());
     REQUIRE(handler.matches().size() == 4);
@@ -493,7 +522,7 @@ TEST_CASE("HintModeHandler.BareFilenameFilteredByValidator", "[hintmode]")
         },
     };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(60) }, patterns, HintAction::Copy);
+    handler.activate(scanArea(lines), patterns, HintAction::Copy);
 
     REQUIRE(handler.isActive());
     REQUIRE(handler.matches().size() == 1);
@@ -518,7 +547,7 @@ TEST_CASE("HintModeHandler.SingleCharTokensNotMatched", "[hintmode]")
         },
     };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(30) }, patterns, HintAction::Copy);
+    handler.activate(scanArea(lines), patterns, HintAction::Copy);
 
     REQUIRE(handler.isActive());
     CHECK(handler.matches().empty());
@@ -533,8 +562,7 @@ TEST_CASE("HintModeHandler.BuiltinRegexDoesNotMatchBareFilenames", "[hintmode]")
     // bare filenames must NOT be matched — they need a path separator.
     auto lines = std::vector<std::string> { "edit main.cpp and README.md" };
 
-    handler.activate(
-        lines, PageSize { LineCount(1), ColumnCount(40) }, filepathOnlyPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), filepathOnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     // No filepath matches because there are no slashes.
@@ -658,7 +686,7 @@ TEST_CASE("HintModeHandler.CwdRelativeFilesystemValidation", "[hintmode]")
         },
     };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(100) }, patterns, HintAction::Open);
+    handler.activate(scanArea(lines), patterns, HintAction::Open);
 
     REQUIRE(handler.isActive());
 
@@ -706,7 +734,7 @@ TEST_CASE("HintModeHandler.HiddenFilesWithValidatedPattern", "[hintmode]")
         },
     };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(60) }, patterns, HintAction::Open);
+    handler.activate(scanArea(lines), patterns, HintAction::Open);
 
     REQUIRE(handler.isActive());
 
@@ -741,7 +769,7 @@ TEST_CASE("HintModeHandler.DotPrefixedRelativePath", "[hintmode]")
         },
     };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(50) }, patterns, HintAction::Open);
+    handler.activate(scanArea(lines), patterns, HintAction::Open);
 
     REQUIRE(handler.isActive());
 
@@ -769,7 +797,7 @@ TEST_CASE("HintModeHandler.TransformerRewritesMatchedText", "[hintmode]")
         },
     };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(40) }, patterns, HintAction::Copy);
+    handler.activate(scanArea(lines), patterns, HintAction::Copy);
 
     REQUIRE(handler.isActive());
     REQUIRE(handler.matches().size() == 1);
@@ -790,7 +818,7 @@ TEST_CASE("HintModeHandler.IPv6FullAddress", "[hintmode]")
 
     auto lines = std::vector<std::string> { "address 2001:0db8:85a3:0000:0000:8a2e:0370:7334 here" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(60) }, ipv6OnlyPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), ipv6OnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     REQUIRE(handler.matches().size() == 1);
@@ -804,7 +832,7 @@ TEST_CASE("HintModeHandler.IPv6CompressedMiddle", "[hintmode]")
 
     auto lines = std::vector<std::string> { "link-local fe80::4117:f059:6f05:b06 on eth0" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(60) }, ipv6OnlyPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), ipv6OnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     REQUIRE(handler.matches().size() == 1);
@@ -818,7 +846,7 @@ TEST_CASE("HintModeHandler.IPv6CompressedStart", "[hintmode]")
 
     auto lines = std::vector<std::string> { "loopback ::1 and ::ffff:abcd more" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(50) }, ipv6OnlyPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), ipv6OnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     REQUIRE(handler.matches().size() == 2);
@@ -833,7 +861,7 @@ TEST_CASE("HintModeHandler.IPv6CompressedEnd", "[hintmode]")
 
     auto lines = std::vector<std::string> { "prefix fe80:: in use" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(30) }, ipv6OnlyPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), ipv6OnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     REQUIRE(handler.matches().size() == 1);
@@ -847,7 +875,7 @@ TEST_CASE("HintModeHandler.IPv6ShortCompressed", "[hintmode]")
 
     auto lines = std::vector<std::string> { "dns 2001:db8::1 server" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(30) }, ipv6OnlyPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), ipv6OnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     REQUIRE(handler.matches().size() == 1);
@@ -861,7 +889,7 @@ TEST_CASE("HintModeHandler.IPv6DoesNotMatchCppScope", "[hintmode]")
 
     auto lines = std::vector<std::string> { "std::vector and boost::asio and Foo::Bar" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(50) }, ipv6OnlyPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), ipv6OnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     CHECK(handler.matches().empty());
@@ -874,7 +902,7 @@ TEST_CASE("HintModeHandler.IPv6DoesNotMatchPlainHex", "[hintmode]")
 
     auto lines = std::vector<std::string> { "hash abcdef0123 and word deadbeef" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(40) }, ipv6OnlyPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), ipv6OnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     CHECK(handler.matches().empty());
@@ -893,7 +921,7 @@ TEST_CASE("HintModeHandler.UnicodeOffsetInPrompt", "[hintmode]")
     // Without the fix, startCol would incorrectly be 4 instead of 2.
     auto lines = std::vector<std::string> { "\xe2\x9d\xaf https://example.com" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(40) }, urlOnlyPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), urlOnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     REQUIRE(handler.matches().size() == 1);
@@ -910,7 +938,7 @@ TEST_CASE("HintModeHandler.AsciiPositionsUnchanged", "[hintmode]")
     // Pure ASCII: byte offset == column offset. Regression guard.
     auto lines = std::vector<std::string> { "visit https://example.com for more" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(40) }, urlOnlyPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), urlOnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     REQUIRE(handler.matches().size() == 1);
@@ -932,7 +960,7 @@ TEST_CASE("HintModeHandler.WideCharacterOffset", "[hintmode]")
     //   col 4: ' ' (separator), col 5..20: URL.
     auto lines = std::vector<std::string> { "\xe4\xb8\xad \xe4\xb8\xad  https://test.org" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(40) }, urlOnlyPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), urlOnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     REQUIRE(handler.matches().size() == 1);
@@ -952,7 +980,7 @@ TEST_CASE("HintModeHandler.MultipleUnicodeSegments", "[hintmode]")
     //          ' ' = 15, ★ = 16, ' ' = 17, URL2 starts at 18 (len 14, ends at 30)
     auto lines = std::vector<std::string> { "\xe2\x86\x92 https://a.com \xe2\x98\x85 https://b.com" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(50) }, urlOnlyPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), urlOnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     REQUIRE(handler.matches().size() == 2);
@@ -973,7 +1001,7 @@ TEST_CASE("HintModeHandler.MatchAtLineStartWithUnicode", "[hintmode]")
     // "https://start.org ❯" — URL at columns 0..17, then space at 18, ❯ at 19.
     auto lines = std::vector<std::string> { "https://start.org \xe2\x9d\xaf" };
 
-    handler.activate(lines, PageSize { LineCount(1), ColumnCount(30) }, urlOnlyPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), urlOnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     REQUIRE(handler.matches().size() == 1);
@@ -981,3 +1009,419 @@ TEST_CASE("HintModeHandler.MatchAtLineStartWithUnicode", "[hintmode]")
     CHECK(handler.matches()[0].start.column == ColumnOffset(0));
     CHECK(handler.matches()[0].end.column == ColumnOffset(16));
 }
+
+// {{{ Logical-line grouping and offset mapping
+
+TEST_CASE("buildLogicalLines.UnwrappedRowsStayApart", "[hintmode]")
+{
+    auto const rows = std::vector<HintScanRow> {
+        HintScanRow { .text = "one", .line = LineOffset(0), .continuation = LineContinuation::No },
+        HintScanRow { .text = "two", .line = LineOffset(1), .continuation = LineContinuation::No },
+    };
+
+    auto const logical = buildLogicalLines(rows);
+
+    REQUIRE(logical.size() == 2);
+    CHECK(logical[0].text == "one");
+    CHECK(logical[0].firstLine == LineOffset(0));
+    CHECK(logical[1].text == "two");
+    CHECK(logical[1].firstLine == LineOffset(1));
+}
+
+TEST_CASE("buildLogicalLines.ContinuationsJoinTheHead", "[hintmode]")
+{
+    auto const rows = std::vector<HintScanRow> {
+        HintScanRow { .text = "head", .line = LineOffset(3), .continuation = LineContinuation::No },
+        HintScanRow { .text = "-mid", .line = LineOffset(4), .continuation = LineContinuation::Yes },
+        HintScanRow { .text = "-end", .line = LineOffset(5), .continuation = LineContinuation::Yes },
+        HintScanRow { .text = "next", .line = LineOffset(6), .continuation = LineContinuation::No },
+    };
+
+    auto const logical = buildLogicalLines(rows);
+
+    REQUIRE(logical.size() == 2);
+    CHECK(logical[0].text == "head-mid-end");
+    CHECK(logical[0].firstLine == LineOffset(3));
+    CHECK(logical[0].rowCodepointEnds == std::vector<size_t> { 4, 8, 12 });
+    CHECK(logical[1].text == "next");
+    CHECK(logical[1].firstLine == LineOffset(6));
+}
+
+TEST_CASE("buildLogicalLines.LeadingContinuationHeadsItsOwnLine", "[hintmode]")
+{
+    // The head scrolled out of the scanned range: the continuation is all we can see of it, and
+    // must not be dropped.
+    auto const rows = std::vector<HintScanRow> {
+        HintScanRow { .text = "tail", .line = LineOffset(0), .continuation = LineContinuation::Yes },
+        HintScanRow { .text = "-end", .line = LineOffset(1), .continuation = LineContinuation::Yes },
+    };
+
+    auto const logical = buildLogicalLines(rows);
+
+    REQUIRE(logical.size() == 1);
+    CHECK(logical[0].text == "tail-end");
+    CHECK(logical[0].firstLine == LineOffset(0));
+}
+
+TEST_CASE("buildLogicalLines.NonConsecutiveRowsBreakTheRun", "[hintmode]")
+{
+    // A gap in the offsets would break gridPositionOf()'s firstLine + rowIndex arithmetic.
+    auto const rows = std::vector<HintScanRow> {
+        HintScanRow { .text = "aaa", .line = LineOffset(0), .continuation = LineContinuation::No },
+        HintScanRow { .text = "bbb", .line = LineOffset(7), .continuation = LineContinuation::Yes },
+    };
+
+    auto const logical = buildLogicalLines(rows);
+
+    REQUIRE(logical.size() == 2);
+    CHECK(logical[1].firstLine == LineOffset(7));
+}
+
+TEST_CASE("gridPositionOf.MapsAcrossRowBoundaries", "[hintmode]")
+{
+    auto const logical = HintLogicalLine {
+        .text = "abcdefghi",
+        .firstLine = LineOffset(-2),
+        .rowCodepointEnds = { 3, 6, 9 },
+    };
+
+    // First row.
+    CHECK(gridPositionOf(logical, 0) == CellLocation { .line = LineOffset(-2), .column = ColumnOffset(0) });
+    CHECK(gridPositionOf(logical, 2) == CellLocation { .line = LineOffset(-2), .column = ColumnOffset(2) });
+    // Second row starts exactly at the boundary.
+    CHECK(gridPositionOf(logical, 3) == CellLocation { .line = LineOffset(-1), .column = ColumnOffset(0) });
+    CHECK(gridPositionOf(logical, 5) == CellLocation { .line = LineOffset(-1), .column = ColumnOffset(2) });
+    // Third row.
+    CHECK(gridPositionOf(logical, 6) == CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
+    CHECK(gridPositionOf(logical, 8) == CellLocation { .line = LineOffset(0), .column = ColumnOffset(2) });
+    // Past the end clamps to the last existing cell.
+    CHECK(gridPositionOf(logical, 9) == CellLocation { .line = LineOffset(0), .column = ColumnOffset(2) });
+    CHECK(gridPositionOf(logical, 99) == CellLocation { .line = LineOffset(0), .column = ColumnOffset(2) });
+}
+
+TEST_CASE("gridPositionOf.EmptyLogicalLineClampsToItsFirstCell", "[hintmode]")
+{
+    auto const logical =
+        HintLogicalLine { .text = "", .firstLine = LineOffset(4), .rowCodepointEnds = { 0 } };
+
+    CHECK(gridPositionOf(logical, 0) == CellLocation { .line = LineOffset(4), .column = ColumnOffset(0) });
+}
+
+// }}}
+
+// {{{ Wrapped-line matching
+
+TEST_CASE("HintModeHandler.UrlWrappedAcrossTwoRows", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    // "https://example.com/some/very/long/path" broken after column 20.
+    auto const lines = std::vector<std::string> { "https://example.com/", "some/very/long/path" };
+
+    handler.activate(wrappedScanArea(lines), urlOnlyPatterns(), HintAction::Copy);
+
+    REQUIRE(handler.matches().size() == 1);
+    auto const& match = handler.matches()[0];
+    CHECK(match.matchedText == "https://example.com/some/very/long/path");
+    CHECK(match.start == CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
+    CHECK(match.end == CellLocation { .line = LineOffset(1), .column = ColumnOffset(18) });
+}
+
+TEST_CASE("HintModeHandler.UrlWrappedAcrossThreeRows", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    auto const lines = std::vector<std::string> { "https://example.com/a/", "middle/part/", "tail" };
+
+    handler.activate(wrappedScanArea(lines), urlOnlyPatterns(), HintAction::Copy);
+
+    REQUIRE(handler.matches().size() == 1);
+    auto const& match = handler.matches()[0];
+    CHECK(match.matchedText == "https://example.com/a/middle/part/tail");
+    CHECK(match.start == CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
+    CHECK(match.end == CellLocation { .line = LineOffset(2), .column = ColumnOffset(3) });
+}
+
+TEST_CASE("HintModeHandler.UnwrappedRowsDoNotBleedIntoEachOther", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    // Same text as the two-row wrap case, but the rows are separate logical lines: the second row
+    // is not a URL at all, so only the first must match.
+    auto const lines = std::vector<std::string> { "https://example.com/", "some/very/long/path" };
+
+    handler.activate(scanArea(lines), urlOnlyPatterns(), HintAction::Copy);
+
+    REQUIRE(handler.matches().size() == 1);
+    CHECK(handler.matches()[0].matchedText == "https://example.com/");
+    CHECK(handler.matches()[0].end.line == LineOffset(0));
+}
+
+TEST_CASE("HintModeHandler.SelectionForwardsAWrappedRange", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    auto const lines = std::vector<std::string> { "https://example.com/", "wrapped" };
+
+    handler.activate(wrappedScanArea(lines), urlOnlyPatterns(), HintAction::Select);
+    REQUIRE(handler.matches().size() == 1);
+
+    handler.processInput(U'a');
+
+    CHECK(executor.hintSelectedCount == 1);
+    CHECK(executor.lastAction == HintAction::Select);
+    CHECK(executor.lastSelectedText == "https://example.com/wrapped");
+    CHECK(executor.lastStart == CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
+    CHECK(executor.lastEnd == CellLocation { .line = LineOffset(1), .column = ColumnOffset(6) });
+}
+
+TEST_CASE("HintModeHandler.OverlapIsRejectedAcrossARowBoundary", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    // The URL wraps, and its tail rows also look like file paths. Only the longest match at each
+    // position survives, and the nested path matches inside the URL must not reappear as hints.
+    auto const lines = std::vector<std::string> { "https://example.com/", "src/vtbackend/x.h" };
+
+    handler.activate(wrappedScanArea(lines), allPatterns(), HintAction::Copy);
+
+    REQUIRE(handler.matches().size() == 1);
+    CHECK(handler.matches()[0].matchedText == "https://example.com/src/vtbackend/x.h");
+}
+
+// }}}
+
+// {{{ Labelable range
+
+TEST_CASE("HintModeHandler.MatchStartingOutsideTheLabelableRangeIsNotOffered", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    // Row 0 is scanned for its text but cannot carry a label, so the URL that starts there — and
+    // wraps into the labelable row 1 — is not offered at all.
+    auto area = wrappedScanArea(std::vector<std::string> { "https://example.com/", "wrapped" });
+    area.labelableRows = HintRowRange { .first = LineOffset(1), .last = LineOffset(1) };
+
+    handler.activate(area, urlOnlyPatterns(), HintAction::Copy);
+
+    CHECK(handler.matches().empty());
+}
+
+TEST_CASE("HintModeHandler.MatchEndingOutsideTheLabelableRangeIsOfferedInFull", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    // The mirror case: the label lands on the visible row 0, and row 1 is scanned only to complete
+    // the text. The hint is offered, and the text it yields is whole.
+    auto area = wrappedScanArea(std::vector<std::string> { "https://example.com/", "wrapped" });
+    area.labelableRows = HintRowRange { .first = LineOffset(0), .last = LineOffset(0) };
+
+    handler.activate(area, urlOnlyPatterns(), HintAction::Copy);
+
+    REQUIRE(handler.matches().size() == 1);
+    CHECK(handler.matches()[0].matchedText == "https://example.com/wrapped");
+    CHECK(handler.matches()[0].end.line == LineOffset(1));
+}
+
+TEST_CASE("HintModeHandler.HistoryRowOffsetsRoundTrip", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    // Grid rows above the page carry negative offsets; they must survive scanning unchanged.
+    auto const area =
+        wrappedScanArea(std::vector<std::string> { "see https://example.com/", "tail" }, LineOffset(-4));
+
+    handler.activate(area, urlOnlyPatterns(), HintAction::Copy);
+
+    REQUIRE(handler.matches().size() == 1);
+    CHECK(handler.matches()[0].start == CellLocation { .line = LineOffset(-4), .column = ColumnOffset(4) });
+    CHECK(handler.matches()[0].end == CellLocation { .line = LineOffset(-3), .column = ColumnOffset(3) });
+}
+
+// }}}
+
+// {{{ Label widths
+
+namespace
+{
+/// One URL per match, spread over @p count single-row logical lines.
+auto linesWithUrls(size_t count) -> std::vector<std::string>
+{
+    auto lines = std::vector<std::string>();
+    lines.reserve(count);
+    for (auto const i: std::views::iota(size_t { 0 }, count))
+        lines.push_back(std::format("https://site{}.example", i));
+    return lines;
+}
+} // namespace
+
+TEST_CASE("HintModeHandler.LabelWidthGrowsWithTheMatchCount", "[hintmode]")
+{
+    struct TestCase
+    {
+        size_t matchCount;
+        size_t expectedWidth;
+    };
+
+    // 26 labels per character: 26 fit in one, 676 in two, and beyond that three are needed. Before
+    // the base-26 generalization, index 676 produced 'a' + 26 == '{' — a label no keystroke could
+    // ever select.
+    auto const cases = std::vector<TestCase> {
+        TestCase { .matchCount = 1, .expectedWidth = 1 },
+        TestCase { .matchCount = 26, .expectedWidth = 1 },
+        TestCase { .matchCount = 27, .expectedWidth = 2 },
+        TestCase { .matchCount = 676, .expectedWidth = 2 },
+        TestCase { .matchCount = 677, .expectedWidth = 3 },
+    };
+
+    for (auto const& testCase: cases)
+    {
+        INFO(std::format("{} matches", testCase.matchCount));
+        auto executor = MockExecutor {};
+        auto handler = HintModeHandler { executor };
+
+        handler.activate(scanArea(linesWithUrls(testCase.matchCount)), urlOnlyPatterns(), HintAction::Copy);
+
+        auto const& matches = handler.matches();
+        REQUIRE(matches.size() == testCase.matchCount);
+
+        auto seen = std::set<std::string> {};
+        for (auto const& match: matches)
+        {
+            CHECK(match.label.size() == testCase.expectedWidth);
+            // Every character must be one hint mode accepts, and every label must be unique.
+            for (auto const ch: match.label)
+                CHECK((ch >= 'a' && ch <= 'z'));
+            CHECK(seen.insert(match.label).second);
+        }
+    }
+}
+
+TEST_CASE("HintModeHandler.ThreeCharLabelIsSelectable", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    handler.activate(scanArea(linesWithUrls(677)), urlOnlyPatterns(), HintAction::Copy);
+    REQUIRE(handler.matches().size() == 677);
+
+    // The last match gets the highest label; typing it must select that match and nothing else.
+    auto const label = handler.matches().back().label;
+    auto const expectedText = handler.matches().back().matchedText;
+    REQUIRE(label.size() == 3);
+
+    for (auto const ch: label)
+        handler.processInput(static_cast<char32_t>(ch));
+
+    CHECK(executor.hintSelectedCount == 1);
+    CHECK(executor.lastSelectedText == expectedText);
+    CHECK(!handler.isActive());
+}
+
+// }}}
+
+// {{{ Input handling paths a single-character label set cannot reach
+
+TEST_CASE("HintModeHandler.BackspaceRemovesATypedCharacter", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    // More than 26 matches, so labels are two characters and one keystroke cannot auto-select --
+    // which is the only way a non-empty filter can still be there when Backspace arrives.
+    handler.activate(scanArea(linesWithUrls(30)), urlOnlyPatterns(), HintAction::Copy);
+    REQUIRE(handler.matches().size() == 30);
+
+    handler.processInput(U'a');
+    REQUIRE(handler.isActive());
+    REQUIRE(handler.currentFilter() == "a");
+    auto const narrowed = handler.matches().size();
+    CHECK(narrowed < 30); // 'a' filtered to the "a?" labels only.
+
+    handler.processInput(U'\x08');
+
+    CHECK(handler.isActive());
+    CHECK(handler.currentFilter().empty());
+    CHECK(handler.matches().size() == 30); // every candidate is back
+}
+
+TEST_CASE("HintModeHandler.NonAlphabeticInputIsIgnored", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    handler.activate(scanArea(linesWithUrls(3)), urlOnlyPatterns(), HintAction::Copy);
+    REQUIRE(handler.matches().size() == 3);
+
+    // Consumed so it cannot leak to the running application, but it changes nothing.
+    CHECK(handler.processInput(U'1'));
+    CHECK(handler.processInput(U'-'));
+
+    CHECK(handler.isActive());
+    CHECK(handler.currentFilter().empty());
+    CHECK(executor.hintSelectedCount == 0);
+}
+
+TEST_CASE("HintModeHandler.AKeyMatchingNoLabelExitsHintMode", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    handler.activate(scanArea(linesWithUrls(3)), urlOnlyPatterns(), HintAction::Copy);
+    REQUIRE(handler.matches().size() == 3); // labels a, b, c
+
+    handler.processInput(U'z');
+
+    CHECK(!handler.isActive());
+    CHECK(executor.hintSelectedCount == 0);
+    CHECK(executor.hintExitedCount == 1);
+}
+
+TEST_CASE("HintModeHandler.InputAndDeactivationAreNoOpsWhenInactive", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    // Never activated: input is not consumed, so the caller passes it on.
+    CHECK_FALSE(handler.processInput(U'a'));
+
+    handler.activate(scanArea(linesWithUrls(1)), urlOnlyPatterns(), HintAction::Copy);
+    handler.deactivate();
+    REQUIRE(executor.hintExitedCount == 1);
+
+    // Deactivating twice must not fire the exit callback again -- the Escape key and an
+    // auto-selection can both arrive at deactivate().
+    handler.deactivate();
+    CHECK(executor.hintExitedCount == 1);
+}
+
+TEST_CASE("HintModeHandler.LongestMatchWinsAtTheSameStart", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    // Two patterns that match at the very same position with different lengths. The sort's
+    // tie-break puts the longer one first, and the overlap pass then drops the shorter -- the rule
+    // the wrapped-line overlap comparison relies on.
+    auto patterns = std::vector<HintPattern> {
+        HintPattern {
+            .name = "short", .regex = std::regex(R"([0-9a-f]{7})"), .validator = {}, .transformer = {} },
+        HintPattern {
+            .name = "long", .regex = std::regex(R"([0-9a-f]{10})"), .validator = {}, .transformer = {} },
+    };
+
+    handler.activate(scanArea(std::vector<std::string> { "abcdef0123" }), patterns, HintAction::Copy);
+
+    REQUIRE(handler.matches().size() == 1);
+    CHECK(handler.matches()[0].matchedText == "abcdef0123");
+}
+
+// }}}

@@ -4035,8 +4035,9 @@ TEST_CASE("Terminal.hint_mode_accepts_labels_while_lock_keys_are_latched", "[ter
         auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) } };
         mock.writeToScreen("visit https://example.com now");
 
-        mock.terminal.activateHintMode(vtbackend::HintModeHandler::builtinPatterns(),
-                                       vtbackend::HintAction::Copy);
+        mock.terminal.activateHintMode(
+            vtbackend::HintModeRequest { .patterns = vtbackend::HintModeHandler::builtinPatterns(),
+                                         .action = vtbackend::HintAction::Copy });
         REQUIRE(mock.terminal.isHintModeActive());
         REQUIRE(mock.terminal.hintMatches().size() == 1);
 
@@ -4561,4 +4562,353 @@ TEST_CASE("Terminal.IME queries answered under the state lock survive concurrent
     REQUIRE(addressable(cursor));
     CHECK(terminal.currentScreen().cellWidthAt(cursor) <= 2);
     CHECK(terminal.currentScreen().lineTextAt(cursor.line).size() <= 4uz * 80);
+}
+
+// {{{ #1864: hint mode across wrapped lines, and the scrollback scope
+
+TEST_CASE("Terminal.hint_mode_matches_a_url_wrapped_across_rows", "[terminal][hintmode]")
+{
+    // 20 columns forces "https://example.com/wrapped" to wrap after column 20. Scanning per
+    // physical row would find at most the truncated head; the logical line yields the whole URL.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(10) };
+    mock.writeToScreen("https://example.com/wrapped");
+    mock.terminal.flushInput();
+
+    REQUIRE(mock.terminal.currentScreen().isLineWrapped(LineOffset(1)));
+
+    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
+        .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Copy });
+
+    REQUIRE(mock.terminal.hintMatches().size() == 1);
+    auto const& match = mock.terminal.hintMatches().at(0);
+    CHECK(match.matchedText == "https://example.com/wrapped");
+    CHECK(match.start == CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
+    CHECK(match.end == CellLocation { .line = LineOffset(1), .column = ColumnOffset(6) });
+}
+
+TEST_CASE("Terminal.hint_mode_visible_scope_ignores_scrollback", "[terminal][hintmode]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, LineCount(20) };
+    mock.writeToScreen("https://scrolled-away.example\r\n\r\n\r\n\r\n\r\n");
+    mock.terminal.flushInput();
+
+    // The URL is now above the page: it must not be offered under the default scope.
+    REQUIRE(mock.terminal.currentScreen().historyLineCount() > LineCount(0));
+
+    mock.terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = vtbackend::HintModeHandler::builtinPatterns(),
+                                     .action = vtbackend::HintAction::Copy,
+                                     .scope = vtbackend::HintScope::Visible });
+
+    CHECK(mock.terminal.hintMatches().empty());
+}
+
+TEST_CASE("Terminal.hint_mode_scrollback_scope_finds_history", "[terminal][hintmode]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, LineCount(20) };
+    mock.writeToScreen("https://scrolled-away.example\r\n\r\n\r\n\r\n\r\n");
+    mock.terminal.flushInput();
+
+    mock.terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = vtbackend::HintModeHandler::builtinPatterns(),
+                                     .action = vtbackend::HintAction::Copy,
+                                     .scope = vtbackend::HintScope::Scrollback,
+                                     .scrollbackLimit = LineCount(1000) });
+
+    REQUIRE(mock.terminal.hintMatches().size() == 1);
+    auto const& match = mock.terminal.hintMatches().at(0);
+    CHECK(match.matchedText == "https://scrolled-away.example");
+    // A history row: a negative, scroll-invariant line offset.
+    CHECK(match.start.line < LineOffset(0));
+}
+
+TEST_CASE("Terminal.hint_mode_scrollback_labels_survive_scrolling", "[terminal][hintmode]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, LineCount(20) };
+    // The escape and the URL are written separately: check-spelling splits identifiers on case
+    // boundaries, so "\r\nhttps" would arrive as the nonsense token `nhttps`.
+    mock.writeToScreen("https://one.example\r\n");
+    mock.writeToScreen("https://two.example\r\n\r\n\r\n\r\n\r\n");
+    mock.terminal.flushInput();
+
+    mock.terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = vtbackend::HintModeHandler::builtinPatterns(),
+                                     .action = vtbackend::HintAction::Copy,
+                                     .scope = vtbackend::HintScope::Scrollback,
+                                     .scrollbackLimit = LineCount(1000) });
+
+    auto const before = mock.terminal.hintMatches();
+    REQUIRE(before.size() == 2);
+
+    // Scrolling reveals other rows' labels; it must not rename the ones already on screen, or a
+    // label the user has read becomes wrong under their fingers.
+    mock.terminal.viewport().scrollUp(LineCount(2));
+
+    auto const after = mock.terminal.hintMatches();
+    REQUIRE(after.size() == before.size());
+    for (auto const i: std::views::iota(size_t { 0 }, after.size()))
+    {
+        CHECK(after[i].label == before[i].label);
+        CHECK(after[i].start == before[i].start);
+        CHECK(after[i].matchedText == before[i].matchedText);
+    }
+}
+
+TEST_CASE("Terminal.hint_mode_visible_scope_rescans_on_scroll", "[terminal][hintmode]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, LineCount(20) };
+    mock.writeToScreen("https://scrolled-away.example\r\n\r\n\r\n\r\n\r\n");
+    mock.terminal.flushInput();
+
+    mock.terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = vtbackend::HintModeHandler::builtinPatterns(),
+                                     .action = vtbackend::HintAction::Copy,
+                                     .scope = vtbackend::HintScope::Visible });
+    REQUIRE(mock.terminal.hintMatches().empty());
+
+    // The visible scope's scan region *is* the viewport, so scrolling the URL back into view must
+    // surface it. Scroll to the very top rather than by a hardcoded count: the URL is on the oldest
+    // history row, wherever the scroll accounting puts it.
+    REQUIRE(mock.terminal.viewport().scrollToTop());
+
+    REQUIRE(mock.terminal.hintMatches().size() == 1);
+    CHECK(mock.terminal.hintMatches().at(0).matchedText == "https://scrolled-away.example");
+}
+
+// }}}
+
+TEST_CASE("Terminal.hint_mode_overlay_draws_labels_into_the_render_buffer", "[terminal][hintmode]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, LineCount(10) };
+    mock.writeToScreen("visit https://example.com now");
+    mock.terminal.flushInput();
+
+    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
+        .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Copy });
+    REQUIRE(mock.terminal.hintMatches().size() == 1);
+    auto const& match = mock.terminal.hintMatches().at(0);
+    REQUIRE(match.label == "a");
+
+    mock.terminal.refreshRenderBuffer();
+    auto const buf = mock.terminal.renderBuffer();
+
+    // The label replaces the match's first cell.
+    auto const labelCell =
+        std::ranges::find_if(buf.get().cells, [&](auto const& cell) { return cell.position == match.start; });
+    REQUIRE(labelCell != buf.get().cells.end());
+    CHECK(labelCell->codepoints == U"a");
+}
+
+TEST_CASE("Terminal.hint_mode_overlay_reaches_a_line_without_the_cursor", "[terminal][hintmode]")
+{
+    // A plain, uniformly-coloured line with no cursor and no selection is rendered through the
+    // trivial-line fast path, which emits one RenderLine instead of per-cell RenderCells. The hint
+    // overlay only rewrites cells, so the label must not be lost to that path.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, LineCount(10) };
+    mock.writeToScreen("visit https://example.com now\r\n");
+    mock.writeToScreen("second line holds the cursor");
+    mock.terminal.flushInput();
+
+    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
+        .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Copy });
+    REQUIRE(mock.terminal.hintMatches().size() == 1);
+    auto const& match = mock.terminal.hintMatches().at(0);
+    REQUIRE(match.start.line == LineOffset(0));
+
+    mock.terminal.refreshRenderBuffer();
+    auto const buf = mock.terminal.renderBuffer();
+
+    auto const labelCell =
+        std::ranges::find_if(buf.get().cells, [&](auto const& cell) { return cell.position == match.start; });
+    REQUIRE(labelCell != buf.get().cells.end());
+    CHECK(labelCell->codepoints == U"a");
+}
+
+TEST_CASE("Terminal.hint_mode_overlay_highlights_a_wrapped_match_on_both_rows", "[terminal][hintmode]")
+{
+    // The overlay's match body is a run of text, not a rectangle: a wrapped match must be
+    // highlighted on its continuation row too, and only up to the column it actually ends on.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) }, LineCount(10) };
+    mock.writeToScreen("https://example.com/wrapped");
+    mock.terminal.flushInput();
+
+    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
+        .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Copy });
+    REQUIRE(mock.terminal.hintMatches().size() == 1);
+    auto const& match = mock.terminal.hintMatches().at(0);
+    REQUIRE(match.start.line == LineOffset(0));
+    REQUIRE(match.end.line == LineOffset(1));
+
+    mock.terminal.refreshRenderBuffer();
+    auto const buf = mock.terminal.renderBuffer();
+
+    auto const backgroundAt = [&](CellLocation pos) -> std::optional<vtbackend::RGBColor> {
+        auto const it =
+            std::ranges::find_if(buf.get().cells, [&](auto const& cell) { return cell.position == pos; });
+        if (it == buf.get().cells.end())
+            return std::nullopt;
+        return it->attributes.backgroundColor;
+    };
+
+    // Compared within the continuation row, so cursorline colouring (the Vi cursor sits on the
+    // last written row) cannot confound it: the cells the match covers are highlighted, and the
+    // first cell past its end is not.
+    auto const firstInside = backgroundAt(CellLocation { .line = match.end.line, .column = ColumnOffset(0) });
+    auto const lastInside = backgroundAt(CellLocation { .line = match.end.line, .column = match.end.column });
+    auto const firstOutside =
+        backgroundAt(CellLocation { .line = match.end.line, .column = match.end.column + ColumnOffset(1) });
+
+    REQUIRE(firstInside.has_value());
+    REQUIRE(lastInside.has_value());
+    REQUIRE(firstOutside.has_value());
+    CHECK(*firstInside == *lastInside);   // the whole run on this row is highlighted
+    CHECK(*firstOutside != *firstInside); // and the highlight stops where the match does
+}
+
+TEST_CASE("Terminal.hint_mode_dispatches_each_action", "[terminal][hintmode]")
+{
+    // Every HintAction routed through HintModeExecutor::onHintSelected, so a new one cannot be
+    // added without a home here.
+    auto const activate = [](auto& mock, vtbackend::HintAction action) {
+        mock.terminal.activateHintMode(vtbackend::HintModeRequest {
+            .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = action });
+        REQUIRE(mock.terminal.hintMatches().size() == 1);
+        mock.sendCharEvent(U'a');
+    };
+
+    SECTION("Copy")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+        mock.writeToScreen("go https://example.com now");
+        mock.terminal.flushInput();
+        activate(mock, vtbackend::HintAction::Copy);
+        CHECK(mock.clipboardData == "https://example.com");
+    }
+
+    SECTION("Open")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+        mock.writeToScreen("go https://example.com now");
+        mock.terminal.flushInput();
+        activate(mock, vtbackend::HintAction::Open);
+        CHECK(mock.openedDocument == "https://example.com");
+    }
+
+    SECTION("Paste")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+        mock.writeToScreen("go https://example.com now");
+        mock.terminal.flushInput();
+        mock.resetReplyData();
+        activate(mock, vtbackend::HintAction::Paste);
+        CHECK(mock.replyData() == "https://example.com");
+    }
+
+    SECTION("CopyAndPaste")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+        mock.writeToScreen("go https://example.com now");
+        mock.terminal.flushInput();
+        mock.resetReplyData();
+        activate(mock, vtbackend::HintAction::CopyAndPaste);
+        CHECK(mock.clipboardData == "https://example.com");
+        CHECK(mock.replyData() == "https://example.com");
+    }
+
+    SECTION("Select")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+        mock.writeToScreen("go https://example.com now");
+        mock.terminal.flushInput();
+        activate(mock, vtbackend::HintAction::Select);
+
+        // Visual mode with the match pre-selected, ready for manual adjustment before yanking.
+        CHECK(mock.terminal.inputHandler().mode() == vtbackend::ViMode::Visual);
+        REQUIRE(mock.terminal.selector() != nullptr);
+        CHECK(mock.terminal.selector()->from()
+              == CellLocation { .line = LineOffset(0), .column = ColumnOffset(3) });
+    }
+}
+
+TEST_CASE("Terminal.hint_mode_validates_and_resolves_paths_against_the_working_directory",
+          "[terminal][hintmode]")
+{
+    // With a working directory known (OSC 7), the filepath pattern broadens to bare names and a
+    // filesystem-existence validator keeps only the ones that are really there; the match is then
+    // transformed to an absolute path so Copy and Open get something usable. The validator is
+    // memoized per activation, so a name repeated across rows is stat()ed once.
+    namespace fs = std::filesystem;
+
+    auto const tmpRoot =
+        fs::temp_directory_path()
+        / std::format("contour-hint-cwd-{}", std::chrono::steady_clock::now().time_since_epoch().count());
+    fs::create_directories(tmpRoot);
+    {
+        auto file = std::ofstream(tmpRoot / "Makefile");
+        file << "all:\n";
+    }
+    auto const cleanup = crispy::finally { [&]() { fs::remove_all(tmpRoot); } };
+
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(60) }, LineCount(10) };
+    mock.terminal.setCurrentWorkingDirectory("file://" + tmpRoot.generic_string());
+
+    // "Makefile" exists and must be offered; "Nonexistent" does not and must be filtered out. The
+    // repeat is what the memo cache collapses.
+    mock.writeToScreen("edit Makefile please\r\n");
+    mock.writeToScreen("also Makefile again\r\n");
+    mock.writeToScreen("but Nonexistent is absent");
+    mock.terminal.flushInput();
+
+    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
+        .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Copy });
+
+    auto const& matches = mock.terminal.hintMatches();
+    auto const expected = (tmpRoot / "Makefile").generic_string();
+    REQUIRE(matches.size() == 2); // the two Makefile mentions, not the missing name
+    CHECK(matches[0].matchedText == expected);
+    CHECK(matches[1].matchedText == expected);
+    CHECK(std::ranges::none_of(matches, [](auto const& m) { return m.matchedText.contains("Nonexistent"); }));
+}
+
+TEST_CASE("Terminal.hint_mode_extends_the_scan_past_the_viewport_to_finish_a_wrapped_line",
+          "[terminal][hintmode]")
+{
+    // A one-row viewport so a two-row wrapped match can only ever straddle its edge.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) }, LineCount(10) };
+    mock.writeToScreen("https://example.com/wrapped");
+    mock.writeToScreen("\r\n\r\n\r\n");
+    mock.terminal.flushInput();
+
+    auto const history = unbox<int>(mock.terminal.currentScreen().historyLineCount());
+    REQUIRE(history >= 3);
+
+    // Grid rows: the URL head, then its continuation, then the blank rows the line feeds added.
+    auto const head = LineOffset(-history);
+    REQUIRE_FALSE(mock.terminal.currentScreen().isLineWrapped(head));
+    REQUIRE(mock.terminal.currentScreen().isLineWrapped(head + LineOffset(1)));
+
+    auto const activateAt = [&](int scrollOffset) {
+        mock.terminal.viewport().scrollTo(vtbackend::ScrollOffset(scrollOffset));
+        mock.terminal.activateHintMode(
+            vtbackend::HintModeRequest { .patterns = vtbackend::HintModeHandler::builtinPatterns(),
+                                         .action = vtbackend::HintAction::Copy });
+    };
+
+    SECTION("the head is visible: the scan reaches down for the tail and yields the whole URL")
+    {
+        activateAt(history);
+
+        REQUIRE(mock.terminal.hintMatches().size() == 1);
+        auto const& match = mock.terminal.hintMatches().at(0);
+        CHECK(match.matchedText == "https://example.com/wrapped");
+        CHECK(match.start.line == head);
+        CHECK(match.end.line == head + LineOffset(1)); // the tail is off screen, but it is matched
+    }
+
+    SECTION("only the tail is visible: the hint is not offered, because its label cannot be drawn")
+    {
+        activateAt(history - 1);
+
+        CHECK(mock.terminal.hintMatches().empty());
+    }
 }

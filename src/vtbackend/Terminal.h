@@ -1573,8 +1573,8 @@ class Terminal
     [[nodiscard]] Search const& search() const noexcept { return _search; }
 
     // {{{ hint mode
-    /// Activates hint mode by scanning visible lines for regex matches.
-    void activateHintMode(std::vector<HintPattern> const& patterns, HintAction action);
+    /// Activates hint mode, scanning the region @p request asks for.
+    void activateHintMode(HintModeRequest request);
 
     /// Returns true if hint mode is currently active.
     [[nodiscard]] bool isHintModeActive() const noexcept { return _hintModeHandler.isActive(); }
@@ -1596,6 +1596,7 @@ class Terminal
     [[nodiscard]] HintModeHandler& hintModeHandler() noexcept { return _hintModeHandler; }
 
     /// Re-scans hints for the current viewport (called on scroll while hint mode is active).
+    /// A no-op under HintScope::Scrollback, whose labels are assigned once and must not move.
     void refreshHints();
     // }}} hint mode
 
@@ -2384,6 +2385,13 @@ class Terminal
     };
     HintModeExecutor _hintModeExecutor { *this };
     HintModeHandler _hintModeHandler { _hintModeExecutor };
+
+    /// The scope the active hint session was activated with; decides whether a scroll re-scans.
+    HintScope _hintScope = HintScope::Visible;
+
+    /// Gathers the rows hint mode scans under @p scope, extended past the labelable range to whole
+    /// logical lines so a pattern wrapped across the boundary is still matched in full.
+    [[nodiscard]] HintScanArea collectHintScanArea(HintScope scope, LineCount scrollbackLimit) const;
 
     std::unique_ptr<ShellIntegration> _shellIntegration;
     SemanticBlockTracker _semanticBlockTracker;

@@ -1998,7 +1998,10 @@ bool TerminalSession::operator()(actions::FollowHyperlink const& action)
 
 bool TerminalSession::operator()(actions::HintMode const& action)
 {
-    sessionLog()("Activating hint mode with patterns: '{}', action: {}", action.patterns, action.hintAction);
+    sessionLog()("Activating hint mode with patterns: '{}', action: {}, scope: {}",
+                 action.patterns,
+                 action.hintAction,
+                 action.scope);
 
     // Start with builtin patterns.
     auto patterns = vtbackend::HintModeHandler::builtinPatterns();
@@ -2050,8 +2053,13 @@ bool TerminalSession::operator()(actions::HintMode const& action)
         }
     }
 
-    auto const hintAction = action.hintAction;
-    crispy::locked(terminal(), [&]() { terminal().activateHintMode(patterns, hintAction); });
+    auto request = vtbackend::HintModeRequest {
+        .patterns = std::move(patterns),
+        .action = action.hintAction,
+        .scope = action.scope,
+        .scrollbackLimit = profile().hintScrollbackLines.value(),
+    };
+    crispy::locked(terminal(), [&]() { terminal().activateHintMode(std::move(request)); });
     return true;
 }
 

@@ -2551,29 +2551,61 @@ std::optional<std::string> Terminal::localPathAtMousePosition() const
 
 // {{{ Hint mode
 
-void Terminal::refreshHints()
+HintScanArea Terminal::collectHintScanArea(HintScope scope, LineCount scrollbackLimit) const
 {
-    auto const lines = unbox<int>(pageSize().lines);
-    auto const scrollOff = unbox<int>(_viewport.scrollOffset());
-    auto visibleLines = std::vector<std::string>();
-    visibleLines.reserve(static_cast<size_t>(lines));
-    for (auto const i: std::views::iota(0, lines))
-        visibleLines.push_back(currentScreen().lineTextAt(LineOffset(i - scrollOff), false, false));
+    auto const& screen = currentScreen();
+    auto const gridBottom = pageSize().lines.as<LineOffset>() - LineOffset(1);
+    auto const historyTop = -screen.historyLineCount().as<LineOffset>();
 
-    _hintModeHandler.refresh(visibleLines, pageSize());
+    // A label can only be typed once it has been drawn. Under Visible that is the viewport; under
+    // Scrollback the labels are fixed for the session, so every scanned row can carry one and the
+    // user scrolls to reach it.
+    auto const labelableRows = [&] {
+        if (scope == HintScope::Scrollback)
+            return HintRowRange { .first = std::max(historyTop, -scrollbackLimit.as<LineOffset>()),
+                                  .last = gridBottom };
+        auto const viewportTop = -_viewport.scrollOffset().as<LineOffset>();
+        return HintRowRange { .first = viewportTop, .last = viewportTop + gridBottom };
+    }();
+
+    // Extend the scan to whole logical lines: a pattern that wraps across the boundary is then
+    // matched in full, and only its tail goes unrendered.
+    auto first = labelableRows.first;
+    while (first > historyTop && screen.isLineWrapped(first))
+        --first;
+    auto last = labelableRows.last;
+    while (last < gridBottom && screen.isLineWrapped(last + LineOffset(1)))
+        ++last;
+
+    auto area = HintScanArea { .rows = {}, .labelableRows = labelableRows };
+    area.rows.reserve(static_cast<size_t>(unbox(last - first) + 1));
+    for (auto line = first; line <= last; ++line)
+        area.rows.push_back(HintScanRow {
+            // Untrimmed on purpose: one codepoint per cell is what makes a codepoint index a column.
+            .text = screen.lineTextAt(line, false, false),
+            .line = line,
+            .continuation = screen.isLineWrapped(line) ? LineContinuation::Yes : LineContinuation::No,
+        });
+    return area;
 }
 
-void Terminal::activateHintMode(std::vector<HintPattern> const& patterns, HintAction action)
+void Terminal::refreshHints()
 {
-    auto const lines = unbox<int>(pageSize().lines);
-    auto const scrollOff = unbox<int>(_viewport.scrollOffset());
-    auto visibleLines = std::vector<std::string>();
-    visibleLines.reserve(static_cast<size_t>(lines));
-    for (auto const i: std::views::iota(0, lines))
-        visibleLines.push_back(currentScreen().lineTextAt(LineOffset(i - scrollOff), false, false));
+    // Scrollback-scope labels are assigned once and must not move: scrolling reveals other rows'
+    // labels rather than renaming them, so a label the user already read stays valid. Only the
+    // visible scope, whose scan region *is* the viewport, re-scans.
+    if (_hintScope == HintScope::Scrollback)
+        return;
 
-    // Make a mutable copy so we can attach validators.
-    auto mutablePatterns = patterns;
+    _hintModeHandler.refresh(collectHintScanArea(HintScope::Visible, LineCount(0)));
+}
+
+void Terminal::activateHintMode(HintModeRequest request)
+{
+    _hintScope = request.scope;
+    auto const area = collectHintScanArea(request.scope, request.scrollbackLimit);
+
+    auto mutablePatterns = std::move(request.patterns);
 
     // When CWD is available, attach a filesystem-existence validator to filepath patterns.
     auto const cwdUrl = currentWorkingDirectory();
@@ -2606,12 +2638,21 @@ void Terminal::activateHintMode(std::vector<HintPattern> const& patterns, HintAc
                 return resolved;
             };
 
-            pattern.validator = [resolvePath, home](std::string const& matchStr) -> bool {
+            // Memoized per activation: the broadened regex matches every bare word, and a
+            // scrollback-scope scan of a thousand rows would otherwise stat() each repeated one
+            // again — brutal on a network filesystem. Repetition is the norm in terminal output
+            // (a file named once per compiler diagnostic), so the cache earns its keep.
+            pattern.validator = [resolvePath, home, cache = std::make_shared<std::map<std::string, bool>>()](
+                                    std::string const& matchStr) -> bool {
                 // Cannot resolve ~/ paths when HOME is unset — let them through unvalidated.
                 if (matchStr.starts_with("~/") && home.empty())
                     return true;
+                if (auto const cached = cache->find(matchStr); cached != cache->end())
+                    return cached->second;
                 auto ec = std::error_code {};
-                return std::filesystem::exists(resolvePath(matchStr), ec);
+                auto const exists = std::filesystem::exists(resolvePath(matchStr), ec);
+                cache->emplace(matchStr, exists);
+                return exists;
             };
 
             // Transform matched text to absolute path so Copy/Open actions work correctly.
@@ -2619,7 +2660,7 @@ void Terminal::activateHintMode(std::vector<HintPattern> const& patterns, HintAc
         }
     }
 
-    _hintModeHandler.activate(visibleLines, pageSize(), mutablePatterns, action);
+    _hintModeHandler.activate(area, mutablePatterns, request.action);
     _inputHandler.setMode(ViMode::Hint);
 }
 
@@ -2629,6 +2670,9 @@ void Terminal::applyHintOverlay(RenderBuffer& output, LineOffset baseLine) const
         return;
 
     auto const& matches = _hintModeHandler.matches();
+    if (matches.empty())
+        return;
+
     auto const& filter = _hintModeHandler.currentFilter();
 
     // Resolve palette colors for hint rendering.
@@ -2652,75 +2696,85 @@ void Terminal::applyHintOverlay(RenderBuffer& output, LineOffset baseLine) const
     auto const matchBg = resolveColor(hintMatch.background);
     auto const matchBgAlpha = hintMatch.backgroundAlpha;
 
+    // A match projected from scroll-invariant grid rows into render-buffer rows.
+    struct ProjectedMatch
+    {
+        CellLocationRange body;  ///< The whole match: a run of text that may cross rows.
+        CellLocation labelStart; ///< Where the label's first character is drawn.
+        std::string_view label;
+    };
+
+    // Bucket the matches by the main-screen row they touch, so the sweep below consults only the
+    // matches on the row it is on rather than all of them. A wrapped match lands in every row it
+    // covers. Under HintScope::Scrollback the match count is unbounded by the page size, which is
+    // what makes this necessary rather than merely tidy.
+    auto const scrollOffset = _viewport.scrollOffset().as<LineOffset>();
+    auto const pageLines = pageSize().lines.as<LineOffset>();
+    auto rowBuckets = std::vector<std::vector<ProjectedMatch>>(unbox<size_t>(pageLines));
+
     for (auto const& match: matches)
     {
-        auto const labelLen = static_cast<int>(match.label.size());
-        auto const matchLine = baseLine + match.start.line;
+        auto const first = match.start + scrollOffset;
+        auto const last = match.end + scrollOffset;
+        auto const projected = ProjectedMatch {
+            .body = CellLocationRange { .first = first + baseLine, .second = last + baseLine },
+            .labelStart = first + baseLine,
+            .label = match.label,
+        };
+        auto const from = std::max(first.line, LineOffset(0));
+        auto const to = std::min(last.line, pageLines - LineOffset(1));
+        for (auto row = from; row <= to; ++row)
+            rowBuckets[unbox<size_t>(row)].push_back(projected);
+    }
 
-        // Apply overlay for each cell in the RenderBuffer.
-        for (auto& cell: output.cells)
+    for (auto& cell: output.cells)
+    {
+        // Rows outside the main screen — the status line — carry no hints, so they only ever dim,
+        // exactly as before.
+        auto const row = cell.position.line - baseLine;
+        auto const bucket = row >= LineOffset(0) && row < pageLines
+                                ? std::span<ProjectedMatch const> { rowBuckets[unbox<size_t>(row)] }
+                                : std::span<ProjectedMatch const> {};
+
+        auto onMatch = false;
+        for (auto const& match: bucket)
         {
-            auto const line = cell.position.line;
-            auto const col = cell.position.column;
-
-            // Check if this cell is in the label region.
-            if (line == matchLine && col >= match.start.column
-                && col < match.start.column + ColumnOffset(labelLen))
+            // The label is drawn over the first label.size() cells of the match's first row even
+            // where it overruns a match shorter than its own label: a half-drawn label cannot be
+            // typed.
+            auto const labelEnd = match.labelStart.column + ColumnOffset::cast_from(match.label.size());
+            if (cell.position.line == match.labelStart.line && cell.position.column >= match.labelStart.column
+                && cell.position.column < labelEnd)
             {
-                auto const labelIdx = static_cast<size_t>(unbox(col) - unbox(match.start.column));
-                if (labelIdx < match.label.size())
-                {
-                    // Replace codepoints with label character.
-                    cell.codepoints = std::u32string(1, static_cast<char32_t>(match.label[labelIdx]));
-                    cell.width = 1;
+                auto const labelIdx = unbox<size_t>(cell.position.column - match.labelStart.column);
 
-                    // Distinguish typed-so-far from remaining label characters.
-                    if (labelIdx < filter.size())
-                    {
-                        // Already-typed portion: dimmed label styling.
-                        cell.attributes.foregroundColor = typedLabelFg;
-                        cell.attributes.backgroundColor = typedLabelBg;
-                    }
-                    else
-                    {
-                        // Remaining label: bright label styling from palette.
-                        cell.attributes.foregroundColor = labelFg;
-                        cell.attributes.backgroundColor = labelBg;
-                    }
-                    cell.attributes.flags |= CellFlag::Bold;
-                }
+                // Replace codepoints with label character.
+                cell.codepoints = std::u32string(1, static_cast<char32_t>(match.label[labelIdx]));
+                cell.width = 1;
+
+                // Distinguish the already-typed prefix from the characters still to type.
+                auto const typed = labelIdx < filter.size();
+                cell.attributes.foregroundColor = typed ? typedLabelFg : labelFg;
+                cell.attributes.backgroundColor = typed ? typedLabelBg : labelBg;
+                cell.attributes.flags |= CellFlag::Bold;
+
+                onMatch = true;
+                break;
             }
-            // Check if this cell is in the match body region (after the label).
-            else if (line == matchLine && col > match.start.column + ColumnOffset(labelLen - 1)
-                     && col <= match.end.column)
+
+            if (match.body.contains(cell.position))
             {
                 // Highlight match body with palette-configured background blend.
                 cell.attributes.backgroundColor =
                     mixColor(cell.attributes.backgroundColor, matchBg, matchBgAlpha);
+                onMatch = true;
+                break;
             }
         }
-    }
 
-    // Dim all cells that don't belong to any match when hints are active.
-    // This helps the labels stand out.
-    if (!matches.empty())
-    {
-        for (auto& cell: output.cells)
-        {
-            auto const line = cell.position.line;
-            auto const col = cell.position.column;
-
-            auto const belongsToMatch = std::ranges::any_of(matches, [&](auto const& m) {
-                auto const mLine = baseLine + m.start.line;
-                return line == mLine && col >= m.start.column && col <= m.end.column;
-            });
-
-            if (!belongsToMatch)
-            {
-                // Fade non-match cells toward the terminal's default background.
-                blendAttributesTo(cell.attributes, _colorPalette.defaultBackground, 0.5f);
-            }
-        }
+        // Fade cells that belong to no match toward the default background, so labels stand out.
+        if (!onMatch)
+            blendAttributesTo(cell.attributes, _colorPalette.defaultBackground, 0.5f);
     }
 }
 
@@ -2739,19 +2793,15 @@ void Terminal::HintModeExecutor::onHintSelected(std::string const& matchedText,
             terminal.sendRawInput(matchedText);
             break;
         case HintAction::Select: {
-            // Convert viewport-relative coordinates to grid-relative coordinates.
-            auto const scrollOff = LineOffset::cast_from(terminal._viewport.scrollOffset());
-            auto const gridStart = CellLocation { .line = start.line - scrollOff, .column = start.column };
-            auto const gridEnd = CellLocation { .line = end.line - scrollOff, .column = end.column };
-
             // Clear any existing selection so that entering Visual mode uses our
             // cursor position as the anchor, not a stale selection start.
             terminal.clearSelection();
 
-            // Enter vi visual mode with the match range pre-selected.
-            terminal._viCommands.cursorPosition = gridStart;
+            // Enter vi visual mode with the match range pre-selected. The positions are already
+            // grid-absolute, which is what the Vi cursor speaks.
+            terminal._viCommands.cursorPosition = start;
             terminal._inputHandler.setMode(ViMode::Visual);
-            terminal._viCommands.moveCursorTo(gridEnd);
+            terminal._viCommands.moveCursorTo(end);
             break;
         }
     }

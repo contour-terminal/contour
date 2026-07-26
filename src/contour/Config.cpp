@@ -932,6 +932,7 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child, TerminalProfile&
 
         loadFromEntry(child, "hyperlink_decoration", where.hyperlinkDecoration);
         loadFromEntry(child, "hint_patterns", where.hintPatterns);
+        loadFromEntry(child, "hint_scrollback_lines", where.hintScrollbackLines);
     }
 }
 
@@ -3081,11 +3082,35 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
                 }
             }
 
+            auto scope = vtbackend::HintScope::Visible;
+            if (auto nodeScope = node["scope"]; nodeScope && nodeScope.IsScalar())
+            {
+                auto const scopeStr = crispy::toUpper(nodeScope.as<std::string>());
+                static auto constexpr HintScopeMappings =
+                    std::array<std::pair<std::string_view, vtbackend::HintScope>, 2> { {
+                        { "VISIBLE", vtbackend::HintScope::Visible },
+                        { "SCROLLBACK", vtbackend::HintScope::Scrollback },
+                    } };
+                if (auto const p = std::ranges::find_if(HintScopeMappings,
+                                                        [&](auto const& t) { return t.first == scopeStr; });
+                    p != HintScopeMappings.end())
+                {
+                    scope = p->second;
+                }
+                else
+                {
+                    logger()("Invalid scope '{}' in HintMode action. Defaulting to 'Visible'.",
+                             nodeScope.as<std::string>());
+                }
+            }
+
             auto patterns = std::string {};
             if (auto nodePatterns = node["patterns"]; nodePatterns && nodePatterns.IsScalar())
                 patterns = nodePatterns.as<std::string>();
 
-            return actions::HintMode { .patterns = std::move(patterns), .hintAction = hintAction };
+            return actions::HintMode { .patterns = std::move(patterns),
+                                       .hintAction = hintAction,
+                                       .scope = scope };
         }
 
         return action;

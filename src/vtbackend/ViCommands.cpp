@@ -320,8 +320,14 @@ void ViCommands::searchCurrentWord()
 
 void ViCommands::enterHintMode(HintAction action)
 {
-    auto const patterns = HintModeHandler::builtinPatterns();
-    _terminal->activateHintMode(patterns, action);
+    // `gh`/`gH` scan the visible page with the built-in patterns; the scrollback scope is reachable
+    // only through an input_mapping, which can name the limit.
+    _terminal->activateHintMode(HintModeRequest {
+        .patterns = HintModeHandler::builtinPatterns(),
+        .action = action,
+        .scope = HintScope::Visible,
+        .scrollbackLimit = LineCount(0),
+    });
 }
 
 void ViCommands::executeYank(ViMotion motion, unsigned count)

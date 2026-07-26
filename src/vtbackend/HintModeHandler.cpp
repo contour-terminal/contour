@@ -10,41 +10,123 @@ using namespace std;
 namespace vtbackend
 {
 
+namespace
+{
+    /// The characters labels are built from — the same set @ref HintModeHandler::processInput accepts.
+    constexpr auto Alphabet = string_view { "abcdefghijklmnopqrstuvwxyz" };
+} // namespace
+
+auto Utf8CodepointCursor::codepointIndexAt(size_t byteOffset) noexcept -> size_t
+{
+    auto const limit = min(byteOffset, _text.size());
+    // Count bytes that are NOT continuation bytes (10xxxxxx), resuming where the last call stopped.
+    for (; _byteOffset < limit; ++_byteOffset)
+        if ((static_cast<char8_t>(_text[_byteOffset]) & 0xC0) != 0x80)
+            ++_codepointIndex;
+    return _codepointIndex;
+}
+
 auto utf8ByteOffsetToCodepointIndex(string_view text, size_t byteOffset) noexcept -> size_t
 {
-    auto const limit = min(byteOffset, text.size());
-    // Count bytes that are NOT continuation bytes (10xxxxxx).
-    return static_cast<size_t>(ranges::count_if(views::iota(size_t { 0 }, limit), [&](auto i) {
-        return (static_cast<char8_t>(text[i]) & 0xC0) != 0x80;
-    }));
+    return Utf8CodepointCursor { text }.codepointIndexAt(byteOffset);
+}
+
+auto buildLogicalLines(vector<HintScanRow> const& rows) -> vector<HintLogicalLine>
+{
+    auto result = vector<HintLogicalLine>();
+
+    for (auto const& row: rows)
+    {
+        auto const codepoints = utf8ByteOffsetToCodepointIndex(row.text, row.text.size());
+
+        // A continuation row extends the logical line above it. Two cases start a new one anyway:
+        // there is no row above (the head scrolled out of the scanned range, so this row is all we
+        // can see of its logical line), and a gap in the row offsets (which would break the
+        // firstLine + rowIndex arithmetic gridPositionOf() relies on).
+        auto const continuesPrevious =
+            row.continuation == LineContinuation::Yes && !result.empty()
+            && row.line
+                   == result.back().firstLine + LineOffset::cast_from(result.back().rowCodepointEnds.size());
+
+        if (continuesPrevious)
+        {
+            auto& logical = result.back();
+            logical.text += row.text;
+            logical.rowCodepointEnds.push_back(logical.rowCodepointEnds.back() + codepoints);
+            continue;
+        }
+
+        result.push_back(HintLogicalLine {
+            .text = row.text,
+            .firstLine = row.line,
+            .rowCodepointEnds = { codepoints },
+        });
+    }
+
+    return result;
+}
+
+auto gridPositionOf(HintLogicalLine const& logical, size_t codepointIndex) noexcept -> CellLocation
+{
+    auto const& ends = logical.rowCodepointEnds;
+
+    // The first row whose exclusive end is past the index is the row the index falls on.
+    auto const it = ranges::upper_bound(ends, codepointIndex);
+    if (it != ends.end())
+    {
+        auto const rowIndex = static_cast<size_t>(std::distance(ends.begin(), it));
+        auto const rowStart = rowIndex == 0 ? size_t { 0 } : ends[rowIndex - 1];
+        return CellLocation { .line = logical.firstLine + LineOffset::cast_from(rowIndex),
+                              .column = ColumnOffset::cast_from(codepointIndex - rowStart) };
+    }
+
+    // Past the end: clamp to the last cell that exists. Asking for the final codepoint takes the
+    // branch above, so this recurses exactly once.
+    if (ends.empty() || ends.back() == 0)
+        return CellLocation { .line = logical.firstLine, .column = ColumnOffset(0) };
+    return gridPositionOf(logical, ends.back() - 1);
 }
 
 HintModeHandler::HintModeHandler(Executor& executor): _executor { executor }
 {
 }
 
-void HintModeHandler::rescanLines(vector<string> const& visibleLines, PageSize pageSize)
+void HintModeHandler::rescanLines(HintScanArea const& area)
 {
     _filter.clear();
     _allMatches.clear();
     _filteredMatches.clear();
 
-    // Scan each visible line for regex matches.
-    auto const lineCount = std::min(visibleLines.size(), static_cast<size_t>(unbox<int>(pageSize.lines)));
-    for (auto const lineIdx: std::views::iota(size_t { 0 }, lineCount))
+    // Match against logical lines, not physical rows: a URL broken across a wrap is one match.
+    //
+    // A row that wrapped mid-wide-character left a pad space in its last cell, and joining the rows
+    // therefore inserts that space inside such a match. Every terminal that pads this way has the
+    // same limitation; the alternative is to guess which trailing blanks are padding.
+    for (auto const& logical: buildLogicalLines(area.rows))
     {
-        auto const& lineText = visibleLines[lineIdx];
-        auto const lineOffset = LineOffset(static_cast<int>(lineIdx));
-
         for (auto const& pattern: _patterns)
         {
-            auto matchIter = sregex_iterator(lineText.begin(), lineText.end(), pattern.regex);
+            auto matchIter = sregex_iterator(logical.text.begin(), logical.text.end(), pattern.regex);
             auto const matchEnd = sregex_iterator();
+
+            // One forward pass per pattern: sregex_iterator yields non-overlapping matches in
+            // increasing position order, so every offset this converts is non-decreasing.
+            auto codepointIndexOf = Utf8CodepointCursor { logical.text };
 
             for (; matchIter != matchEnd; ++matchIter)
             {
                 auto const& match = *matchIter;
                 if (match.empty())
+                    continue;
+
+                auto const startIndex =
+                    codepointIndexOf.codepointIndexAt(static_cast<size_t>(match.position()));
+                auto const start = gridPositionOf(logical, startIndex);
+
+                // The label is drawn at the match start, so a match starting on a row that cannot
+                // carry one could never be selected: do not offer it. Tested before the validator,
+                // which may go to the filesystem.
+                if (!area.labelableRows.contains(start.line))
                     continue;
 
                 auto const matchStr = match.str();
@@ -53,31 +135,25 @@ void HintModeHandler::rescanLines(vector<string> const& visibleLines, PageSize p
                 if (pattern.validator && !pattern.validator(matchStr))
                     continue;
 
-                auto const startCol =
-                    ColumnOffset::cast_from(utf8ByteOffsetToCodepointIndex(lineText, match.position()));
-                auto const endCodepointIndex =
-                    utf8ByteOffsetToCodepointIndex(lineText, match.position() + match.length());
-                auto const endCol = ColumnOffset::cast_from(endCodepointIndex - 1);
-
-                auto const actionText = pattern.transformer ? pattern.transformer(matchStr) : matchStr;
+                auto const endIndex =
+                    codepointIndexOf.codepointIndexAt(static_cast<size_t>(match.position() + match.length()));
 
                 _allMatches.push_back(HintMatch {
                     .label = {},
-                    .matchedText = actionText,
-                    .start = CellLocation { .line = lineOffset, .column = startCol },
-                    .end = CellLocation { .line = lineOffset, .column = endCol },
+                    .matchedText = pattern.transformer ? pattern.transformer(matchStr) : matchStr,
+                    .start = start,
+                    .end = gridPositionOf(logical, endIndex - 1),
                 });
             }
         }
     }
 
-    // Sort matches top-to-bottom, left-to-right, longer matches first at same start.
+    // Sort matches in reading order, longer matches first at the same start. CellLocation's
+    // defaulted operator<=> compares line before column, so it already is reading order.
     ranges::sort(_allMatches, [](auto const& a, auto const& b) {
-        if (a.start.line != b.start.line)
-            return a.start.line < b.start.line;
-        if (a.start.column != b.start.column)
-            return a.start.column < b.start.column;
-        return a.end.column > b.end.column; // Longer match first at same start position.
+        if (a.start != b.start)
+            return a.start < b.start;
+        return b.end < a.end; // Longer match first at the same start position.
     });
 
     // Remove duplicate matches (same text at same position).
@@ -85,14 +161,15 @@ void HintModeHandler::rescanLines(vector<string> const& visibleLines, PageSize p
         _allMatches, [](auto const& a, auto const& b) { return a.start == b.start && a.end == b.end; });
     _allMatches.erase(eraseBegin, eraseEnd);
 
-    // Remove overlapping matches — keep the longer (earlier) match at each position.
+    // Remove overlapping matches — keep the longer (earlier) match at each position. The list is
+    // sorted, so only the last kept match can overlap, and comparing whole positions rather than
+    // columns makes this hold across a wrap boundary too.
     {
         auto kept = vector<HintMatch>();
         kept.reserve(_allMatches.size());
         for (auto& match: _allMatches)
         {
-            if (!kept.empty() && kept.back().start.line == match.start.line
-                && match.start.column <= kept.back().end.column)
+            if (!kept.empty() && match.start <= kept.back().end)
                 continue; // Overlap detected — skip the shorter/later match.
             kept.push_back(std::move(match));
         }
@@ -103,23 +180,22 @@ void HintModeHandler::rescanLines(vector<string> const& visibleLines, PageSize p
     _filteredMatches = _allMatches;
 }
 
-void HintModeHandler::activate(vector<string> const& visibleLines,
-                               PageSize pageSize,
+void HintModeHandler::activate(HintScanArea const& area,
                                vector<HintPattern> const& patterns,
                                HintAction action)
 {
     _action = action;
     _patterns = patterns;
-    rescanLines(visibleLines, pageSize);
+    rescanLines(area);
 
     _active = true;
     _executor.onHintModeEntered();
     _executor.requestRedraw();
 }
 
-void HintModeHandler::refresh(vector<string> const& visibleLines, PageSize pageSize)
+void HintModeHandler::refresh(HintScanArea const& area)
 {
-    rescanLines(visibleLines, pageSize);
+    rescanLines(area);
     _executor.requestRedraw();
 }
 
@@ -197,20 +273,25 @@ void HintModeHandler::assignLabels()
     if (matchCount == 0)
         return;
 
-    auto const useTwoChar = matchCount > 26;
+    auto const radix = Alphabet.size();
+
+    // The narrowest width that can name every match, 26 labels per character. Every label gets the
+    // same width so none is a prefix of another, which is what lets progressive filtering
+    // auto-select the moment the typed prefix is unique.
+    auto labelWidth = size_t { 1 };
+    for (auto capacity = radix; capacity < matchCount; capacity *= radix)
+        ++labelWidth;
 
     for (auto const i: std::views::iota(size_t { 0 }, matchCount))
     {
-        if (useTwoChar)
+        auto label = string(labelWidth, Alphabet.front());
+        auto rest = i;
+        for (auto digit = labelWidth; digit > 0; --digit)
         {
-            auto const first = static_cast<char>('a' + static_cast<int>(i / 26));
-            auto const second = static_cast<char>('a' + static_cast<int>(i % 26));
-            _allMatches[i].label = string { first, second };
+            label[digit - 1] = Alphabet[rest % radix];
+            rest /= radix;
         }
-        else
-        {
-            _allMatches[i].label = string { static_cast<char>('a' + static_cast<int>(i)) };
-        }
+        _allMatches[i].label = std::move(label);
     }
 }
 
