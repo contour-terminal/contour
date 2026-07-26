@@ -1,0 +1,39 @@
+# Spell check.
+#
+# This lives in its own workflow rather than in build.yml on purpose: build.yml carries a
+# `paths-ignore` for `docs/**`, `*.md` and `*.sh`, so a documentation-only change never ran the
+# spell gate at all -- the one kind of change most likely to introduce a typo. The check now costs
+# about a second, so it is cheap to run on everything.
+#
+# The job runs `scripts/check-spelling.sh`, the very same script `ctest -L lint` runs, at the same
+# pinned typos version. That is what keeps a local pre-flight and this gate from disagreeing.
+
+name: Spelling
+
+on:
+  merge_group:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+concurrency:
+  group: spelling-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check_spelling:
+    name: Check spelling
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: "Checking spelling"
+        # Turn the script's offline skip into a hard failure: a gate that silently passes because
+        # it could not download its tool is worse than no gate.
+        env:
+          CHECK_SPELLING_REQUIRE_TOOL: 1
+        run: ./scripts/check-spelling.sh

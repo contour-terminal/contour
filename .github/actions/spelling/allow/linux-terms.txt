@@ -1,9 +1,0 @@
-NSS
-VDPAU
-armhf
-libwayland
-qplatformwindow
-qwayland
-qwaylandwindow
-heaptrack
-wlroots

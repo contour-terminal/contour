@@ -1,4 +1,0 @@
-HKLM
-PRODUCTFEATURE
-XFragment
-XPatch

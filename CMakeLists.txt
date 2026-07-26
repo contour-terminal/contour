@@ -156,6 +156,15 @@ if(CONTOUR_TESTING)
                  COMMAND ${CMAKE_COMMAND} -E env bash
                          "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-workflows.sh")
         set_tests_properties(check_workflows PROPERTIES LABELS "lint" TIMEOUT 120)
+
+        # Spell-check the tree. CI runs this very script, so a local `ctest` run and the CI gate
+        # cannot disagree — that is what stops a spelling failure from costing an extra push. Skips
+        # gracefully if typos cannot be obtained (see the script); CI sets
+        # CHECK_SPELLING_REQUIRE_TOOL so the skip cannot turn into a false green there.
+        add_test(NAME check_spelling
+                 COMMAND ${CMAKE_COMMAND} -E env bash
+                         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-spelling.sh")
+        set_tests_properties(check_spelling PROPERTIES LABELS "lint" TIMEOUT 120)
     endif()
 endif()
 # ----------------------------------------------------------------------------

@@ -1,0 +1,98 @@
+# Spell-check configuration. Run it with `scripts/check-spelling.sh`, or via `ctest -L lint`.
+# CI runs that same script, so this one file governs both -- see docs/internals/spell-checking.md.
+#
+# typos is CORPUS-based: it flags known *misspellings*, not unknown words. A new domain term
+# (DECATC, UPSS, ptyx, XTMODKEYS) therefore needs NO entry here. Do not add one preemptively.
+#
+# Before adding an entry, work down this list and stop at the first branch that fits:
+#
+#   1. The word is misspelled            -> fix the text. This is the usual answer.
+#   2. The word is in an identifier      -> rename the identifier.
+#   3. The file is not prose at all      -> exclude it under [files], as narrowly as possible.
+#   4. None of the above                 -> add an entry, WITH a comment saying why.
+#
+# An entry without a justification comment is a defect. Prefer a scoped [type.*] section over
+# [default] so an exception covers only the files where it is legitimate: a tree-wide entry for
+# `ue` would silently accept that typo everywhere, while the terminfo section below accepts it
+# only in the capability table where it is a real capability name.
+#
+# This list is deliberately small. If it grows past ~30 entries, that is a sign branch 1 is
+# being skipped -- not that this codebase has unusual vocabulary.
+
+[files]
+extend-exclude = [
+    # Desktop entries carry translations in many languages.
+    "*.desktop",
+    # Recorded sixel image data, not text.
+    "test/images/*.sixel",
+    # Recorded conformance data, not prose. The goldens are screen dumps -- a VT test suite's
+    # output, cell by cell, which is where runs of `eeeeeeee` and `aaaaaaaaaa` come from -- and
+    # the command files are vttest's own transcripts, byte-encoded. Neither is written by anyone;
+    # both are re-recorded by `--bless` / `--bless-command-files` whenever behaviour changes
+    # deliberately, so spell-checking them would mean maintaining a dictionary of a terminal's
+    # test patterns.
+    "src/vtconformance/test/golden/*.dump",
+    "src/vtconformance/test/cmd/*.cmd",
+]
+
+[default]
+extend-ignore-re = [
+    # NOLINT comments name clang-tidy checks, not English -- e.g. the check
+    # `clang-analyzer-optin.performance.Padding` contains "optin". Ignoring the whole comment
+    # keeps a newly-suppressed check from becoming a spelling failure.
+    'NOLINT[A-Z]*\([^)]*\)',
+    # Unicode codepoint notation. A terminal emulator cites these constantly, and the hex digits
+    # spell words by accident -- U+E0BA and U+25BA both read as "BA".
+    'U\+[0-9A-Fa-f]{4,6}',
+]
+
+[default.extend-identifiers]
+Q_INVOKABLE = "Q_INVOKABLE" # Qt's macro for exposing a method to QML/the meta-object system.
+invokable = "invokable"     # Qt jargon: prose calls a Q_INVOKABLE method "an invokable".
+countr_zero = "countr_zero" # std::countr_zero, C++20 <bit>.
+tio = "tio"                 # The POSIX idiom for a local `struct termios`.
+iy = "iy"                   # Item-space y coordinate, paired with `ix`.
+
+[default.extend-words]
+# Domain vocabulary that is genuinely tree-wide in a terminal emulator.
+Pn = "Pn"         # DEC's notation for a numeric parameter, quoted from the manuals (Pn, Ps, Pt).
+Ptd = "Ptd"       # DECCRA's target-destination parameter, same notation.
+DECID = "DECID"   # VT sequence mnemonic: Identify Terminal.
+viw = "viw"       # Vi command: visually select the inner word.
+LAMDA = "LAMDA"   # Unicode's own spelling of U+039B GREEK CAPITAL LETTER LAMDA.
+WRONLY = "WRONLY" # POSIX O_WRONLY.
+mis = "mis"       # English prefix: mis-sized, mis-set, mis-targeted, mis-navigate, mis-tabled.
+
+# Terminfo capability names: protocol-defined two- to five-character tokens, several of which
+# collide with English words. Scoped to the capability table so they are not accepted elsewhere.
+[type.terminfo]
+extend-glob = ["Capabilities.cpp"]
+
+[type.terminfo.extend-words]
+HOM = "HOM"   # kHOM and friends: shifted Home.
+kend = "kend" # End key.
+ue = "ue"     # Exit underline mode.
+nd = "nd"     # Move the cursor right one column.
+rin = "rin"   # Scroll back n lines.
+Fo = "Fo"     # Function key 15.
+FO = "FO"     # Function key 41.
+
+# The spell-checking documentation has to quote misspellings to explain itself -- it cites the
+# words the old allow-list had absorbed. Its code spans are therefore exempt; its prose is not.
+[type.spelling-docs]
+extend-glob = ["spell-checking.md"]
+extend-ignore-re = ['`[^`]*`']
+
+# Fixture strings in unit tests: expected grid contents and generated labels, not vocabulary.
+[type.cpp-test]
+extend-glob = ["*_test.cpp"]
+
+[type.cpp-test.extend-words]
+ba = "ba"   # A generated two-letter hint-mode label.
+ABD = "ABD" # Expected grid contents after a delete-character test.
+caf = "caf" # "caf\xC3\xA9" -- café written as explicit UTF-8 bytes.
+# ViCommands_test annotates each motion with the word the cursor lands in, bracketing the part it
+# skips: `l[ine.]`, `a[nd]`, `T[hree]`. The bracket leaves the tail as a bare token.
+ine = "ine"   # From `l[ine.]` in the vi.motion `b` test.
+nd = "nd"     # From `a[nd]` in the vi.motion `b` test.
+hree = "hree" # From `T[hree]` in the vi.motion `b` test.
