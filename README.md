@@ -102,7 +102,7 @@ from source by following the instructions below.
 ```
 
 This script *might* ask you for the administrator password if a package dependency
-can be insalled via the system package manager.
+can be installed via the system package manager.
 
 #### Compile
 

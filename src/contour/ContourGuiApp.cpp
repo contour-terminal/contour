@@ -112,7 +112,7 @@ crispy::cli::command ContourGuiApp::parameterDefinition() const
                     "profile", CLI::value { ""s }, "Terminal Profile to load (overriding config).", "NAME" },
                 CLI::option { "debug",
                               CLI::value { ""s },
-                              "Enables debug logging, using a comma (,) seperated list of tags.",
+                              "Enables debug logging, using a comma (,) separated list of tags.",
                               "TAGS" },
             },
         });
@@ -131,7 +131,7 @@ crispy::cli::command ContourGuiApp::parameterDefinition() const
                     "profile", CLI::value { ""s }, "Terminal Profile to load (overriding config).", "NAME" },
                 CLI::option { "debug",
                               CLI::value { ""s },
-                              "Enables debug logging, using a comma (,) seperated list of tags.",
+                              "Enables debug logging, using a comma (,) separated list of tags.",
                               "TAGS" },
                 CLI::option { "live-config", CLI::value { false }, "Enables live config reloading." },
                 CLI::option {

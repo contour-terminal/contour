@@ -313,7 +313,7 @@ namespace
         {
             crispy::ignore_unused(this);
 
-            // TODO: Find a more convinient way; The following is printing the time in UTC,
+            // TODO: Find a more convenient way; The following is printing the time in UTC,
             //       but we need it in local time.
             // return std::format("{:%H:%M}", std::chrono::system_clock::now());
 

@@ -303,7 +303,7 @@ optional<Process::ExitStatus> Process::Private::checkStatus(bool waitForExit) co
 
     if (waitForExit)
         if (WaitForSingleObject(processInfo.hThread, INFINITE /*10 * 1000*/) != S_OK)
-            printf("WaitForSingleObject(thr): %s\n", getLastErrorAsString().c_str());
+            printf("WaitForSingleObject(hThread): %s\n", getLastErrorAsString().c_str());
 
     DWORD exitCode;
     if (!GetExitCodeProcess(processInfo.hProcess, &exitCode))

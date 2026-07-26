@@ -1393,7 +1393,7 @@ void SshSession::authenticateWithPrivateKey()
 
     if (rc != LIBSSH2_ERROR_NONE)
     {
-        // Only log error if we havee tried to authenticate with password,
+        // Only log error if we have tried to authenticate with password,
         // as the first attempt is always with an empty password.
         if (_walkIndex != 0)
             logError("Private key based authentication failed. {}", libssl2ErrorString(rc));

@@ -19,6 +19,6 @@ or go to our Github Issues page at https://github.com/contour-terminal/contour/
 and create a ticket with the necessary details.
 
 We are aware that this project is by far not perfect. Reporting bugs as well as
-vunerabilities helps us creating a great product for all of us.
+vulnerabilities helps us creating a great product for all of us.
 
 Many thanks for taking part in the community.

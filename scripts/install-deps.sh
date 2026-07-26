@@ -292,7 +292,7 @@ install_deps_ubuntu() {
             packages="$packages"
         fi
         if [ "$RELEASE" = "23.04" ]; then
-            packages="$packages qml6-moduile-qtquick3d-spatialaudio"
+            packages="$packages qml6-module-qtquick3d-spatialaudio"
         fi
         # qt6-wayland-dev-tools (the qtwaylandscanner tool) is a separate package up to Ubuntu 24.04;
         # from 25.04/26.04 it is folded into qt6-wayland-dev and the standalone package no longer has
@@ -546,7 +546,7 @@ install_deps_darwin() {
 
 main() {
     if test x$OS_OVERRIDE != x; then
-        # In CI, we need to be able to fetch embedd-setups for different OSes.
+        # In CI, we need to be able to fetch embedded setups for different OSes.
         ID=$OS_OVERRIDE
     elif test -f /etc/os-release; then
         ID=$(grep ^ID= /etc/os-release | cut -d= -f2)

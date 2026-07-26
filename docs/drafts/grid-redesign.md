@@ -15,7 +15,7 @@
   happens as early as possible in the `Sequencer`.
 - `Line::Wrapped`-flag can be removed.
 - writing an overlong line does not need to care about auto-wrapping
-  - because `lineLength / pageWidth == numberOfLinesWriten`
+  - because `lineLength / pageWidth == numberOfLinesWritten`
   - the new cursor position can be computed analogous to the above
 - because of the meaning of the scroll-offset, reflow can be O(1) implemented
   with a `Line()` being arbitrary long(!) and the top screen line being

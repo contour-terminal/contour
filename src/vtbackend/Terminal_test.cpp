@@ -43,10 +43,10 @@ using vtbackend::SmoothScrollResult;
 
 using namespace vtbackend::test;
 
-// TODO: Test case posibilities:
+// TODO: Test case possibilities:
 //
 // - [x] Synchronized output (?2026)
-// - [x] Blinking cursor visiblity over time and on input events
+// - [x] Blinking cursor visibility over time and on input events
 // - [ ] double click word selection
 // - [ ] triple click line selection
 // - [ ] rectangular block selection

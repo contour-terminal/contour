@@ -17,7 +17,7 @@ NumberToHex(${PROJECT_VERSION_PATCH} HEX_PATCH)
 
 # {{{ Setup QT_COMPONENTS
 # QT_COMPONENTS is the list of Qt libraries Contour requires for building.
-# NB: Widgets is rquired for SystemTrayIcon's fallback implementation
+# NB: Widgets is required for SystemTrayIcon's fallback implementation
 # NB: GuiPrivate provides rhi/qrhi.h (RHI resource model) used by the display lib and the screenshot
 #     readback test. It must be requested here explicitly: relying on a sibling subdirectory's
 #     find_package to have populated the Qt6::GuiPrivate target is order-dependent and fails on some

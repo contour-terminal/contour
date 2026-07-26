@@ -3430,7 +3430,8 @@ TEST_CASE("A resize-border press over a tab does not start a tab drag (offscreen
     QSignalSpy const activations(handler, SIGNAL(activeChanged()));
 
     // Every section presses a point that lies over BOTH a resize handle and the tab -- the overlap the
-    // bug lived in. The two REQUIREs are what stop a missed press from passing the CHECK vacuously.
+    // bug lived in. The two REQUIRE checks are what stop a missed press from passing the CHECK
+    // vacuously.
     auto const drag = [&](QPoint const& from, QPoint const& to) {
         REQUIRE(isOverResizeBorder(*host, from));
         REQUIRE(sceneRectOf(*tab).contains(from));

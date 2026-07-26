@@ -60,7 +60,7 @@ enum class GuardedRole : uint8_t
 
 /**
  * Trivial cache to remember the interactive choice when the user has to be asked
- * and the user decided to permenently decide for the current session.
+ * and the user decided to permanently decide for the current session.
  */
 using PermissionCache = std::map<GuardedRole, bool>;
 

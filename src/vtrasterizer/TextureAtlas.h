@@ -105,7 +105,7 @@ struct AtlasProperties
 
     // Number of hashtable slots to map to the texture tiles.
     // Larger values may increase performance, but too large may also decrease.
-    // This value is rounted up to a value equal to the power of two.
+    // This value is rounded up to a value equal to the power of two.
     crispy::strong_hashtable_size hashCount {};
 
     // Number of tiles the texture atlas must be able to store at least.
@@ -218,7 +218,7 @@ struct TileAttributes
  * Atlas items are LRU-cached and the possibly passed metadata is
  * going to be destroyed at the time of cache eviction.
  *
- * The total number of of cachable tiles should be at least as large
+ * The total number of of cacheable tiles should be at least as large
  * as the terminal's cell count per page.
  * More tiles will most likely improve render performance.
  *
@@ -438,7 +438,7 @@ constexpr auto sliced(vtbackend::Width tileWidth, uint32_t offsetX, vtbackend::I
         {
             return iterator { .tileWidth = tileWidth,
                               .value = TileSliceIndex {
-                                  .sliceIndex = 0,           // index (irrelevant, undefind)
+                                  .sliceIndex = 0,           // index (irrelevant, undefined)
                                   .beginX = offsetForEndX(), // begin
                                   .endX = offsetForEndX()    // end
                               } };
@@ -494,7 +494,7 @@ TextureAtlas<Metadata>::TextureAtlas(AtlasBackend& backend, AtlasProperties atla
     }() },
     _tileCache { TileCache::create(
         atlasProperties.hashCount,
-        crispy::lru_capacity { // The LRU entry capacity is the number of total tiles availabe,
+        crispy::lru_capacity { // The LRU entry capacity is the number of total tiles available,
                                // minus the number of reserved tiles for direct-mapping, and
                                // minus one for the LRU-sentinel entry (which is why entryIndex
                                // is between 1 and capacity inclusive)

@@ -74,7 +74,7 @@ namespace detail::tags // {{{
 
 // {{{ Column types
 
-/// ColumnPosition represents the absolute column on the visibile screen area
+/// ColumnPosition represents the absolute column on the visible screen area
 /// (usually the main page unless scrolled upwards).
 ///
 /// A column position starts at 1.
@@ -86,7 +86,7 @@ using ColumnOffset = boxed::boxed<int, detail::tags::ColumnOffset>;
 // {{{ Line types
 
 // clang-format off
-/// Special structure for inifinite history of Grid
+/// Special structure for infinite history of Grid
 struct Infinite {};
 // clang-format on
 /// MaxHistoryLineCount represents type that are used to store number

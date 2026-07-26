@@ -1318,7 +1318,7 @@ void Terminal::sendMouseMoveEvent(Modifiers modifiers,
     // - grid text selection is extended
     verifyState();
 
-    // avoid applying event for sctatus line or inidcator status line
+    // avoid applying event for sctatus line or indicator status line
     if (!(isPrimaryScreen() || isAlternateScreen()))
         return;
 
@@ -4684,7 +4684,7 @@ void Terminal::pushColorPalette(size_t slot)
         _savedColorPalettes.resize(index + 1);
 
     // That's a totally weird idea.
-    // Looking at the xterm's source code, and simply mimmicking their semantics without questioning,
+    // Looking at the xterm's source code, and simply mimicking their semantics without questioning,
     // simply to stay compatible (sadface).
     if (slot != MagicStackTopId && _lastSavedColorPalette < _savedColorPalettes.size())
         _lastSavedColorPalette = _savedColorPalettes.size();

@@ -511,7 +511,7 @@
           <li>Fixes VT sequence DECALN to properly reset margins when statusline is shown</li>
           <li>Fixes VT sequence ED (CSI J) when statusline is shown.</li>
           <li>Fixes VT sequence SM ?1003 (Any Event mouse tracking) not reporting mouse move events.</li>
-          <li>Fixes VT sequence XTWINOPS (`CSI 22 t` and `CSI 23 t`) to not assert and terminate the terminal but default to missing paramter `0` instead (#1369).</li>
+          <li>Fixes VT sequence XTWINOPS (`CSI 22 t` and `CSI 23 t`) to not assert and terminate the terminal but default to missing parameter `0` instead (#1369).</li>
           <li>Fixes VT sequences CUU/CUD/CUF/CUB to better respect margins (#1201)</li>
           <li>Fixes printing over 2nd cell of a wide character should delete wide character (#1268)</li>
           <li>Fixes URI re-encoding of local files in `OSC 8` (#1199)</li>
@@ -535,7 +535,7 @@
           <li>Adds VT sequence `SM ?2031` and `RM ?2031` to enable/disable unsolicited DSR for color scheme updates by the user or OS.</li>
           <li>Adds support the extended `CSIu` keyboard protocol to better report key modifiers.</li>
           <li>Adds extended keyboard protocol support (CSI u) to better report key modifiers.</li>
-          <li>Adds support vor horizontal mouse scrolling event reporting sequences.</li>
+          <li>Adds support for horizontal mouse scrolling event reporting sequences.</li>
           <li>Adds percentage value to Indicator Statusline to indicate scroll offset in scrollback buffer.</li>
           <li>Adds inheritance of profiles in configuration file based on default profile (#1063).</li>
           <li>Adds config option `profiles.*.bell` to adjust BEL behavior (#1348) and fixes (#1162) and (#1163).</li>
@@ -590,16 +590,16 @@
           <li>Fixes mouse selection to only be initiated if actually meant to, i.e. in alt screen mode only if bypass-modifier was pressed (#1017).</li>
           <li>Fixes mouse selection within scrolloff setting to not cause the viewport to jump anymore (#1019).</li>
           <li>Fixes rendering sixel image when status line is active (#1050).</li>
-          <li>Adds normal mode motion `[[`, `]]`, `[]`, `][` mimmicking exactly what vim does.</li>
+          <li>Adds normal mode motion `[[`, `]]`, `[]`, `][` mimicking exactly what vim does.</li>
           <li>Adds normal mode motion `[m` and `]m` to jump line marks up/down.</li>
           <li>Adds normal mode motion `mm` to toggle the line mark at the current active cursor position.</li>
           <li>Adds normal mode motion `t{char}`, `T{char}`, `f{char}`, `F{char}`, `;`, `,` to move cursor in line till before/after or to given `{char}`.</li>
           <li>Adds config entry `vi_mode_highlight` to color palette to highlight current cursor's line when not in insert mode (aka. in Vi-mode).</li>
           <li>Adds shell integration for fish shell.</li>
           <li>Adds shell integration for tcsh shell.</li>
-          <li>Improve performance of parsing UTF-8 text on ARM64 platfroms through the use SIMD instructions.</li>
+          <li>Improve performance of parsing UTF-8 text on ARM64 platforms through the use SIMD instructions.</li>
           <li>Contour can now run on platforms not supporting hardware crypto extension for ARM64 nor AES-NI for x86-64. Hardware acceleration support can be configured to be included at compile time.</li>
-          <li>Fixes scroll up when infinte history limit is set</li>
+          <li>Fixes scroll up when infinite history limit is set</li>
         </ul>
       </description>
     </release>
@@ -663,7 +663,7 @@
           <li>Fixes sometimes rendering two cursors when statusline is shown.</li>
           <li>Fixes normal mode's page top (S-H)/ page bottom (S-L) cursor movements to respect scroll offset.</li>
           <li>Fixes VT sequences `RIS` and action `ClearHistoryAndReset` when statusline is shown.</li>
-          <li>Fixes cursor going beyond the terminal screnn in vim mode, move right motion (#917).</li>
+          <li>Fixes cursor going beyond the terminal screen in vim mode, move right motion (#917).</li>
           <li>Fixes selection while statusline is shown. (#910)</li>
           <li>Improves hard-reset (`RIS`) to restore initial statusline state.</li>
           <li>Improves `$` motion in vi-like normal mode to point to the last non-empty grid cell in the current line instead of the right page margin.</li>
@@ -732,7 +732,7 @@
           <li>Fixes dim/faint coloring to not affect background and default text coloring when feint SGR attribute is set (#786).</li>
           <li>Fixes SGR 9 (crossed out) and 53 (overline) to both look like underline.</li>
           <li>Fixes size of drawn sixel image if no size is given beforehand (#809).</li>
-          <li>Fixes glyph rendering for some unexpectly oversized glyphs (#423).</li>
+          <li>Fixes glyph rendering for some unexpectedly oversized glyphs (#423).</li>
           <li>Adds `line#24` to terminfo file for backwards compatibility.</li>
           <li>Adds configuration key `live_config` to determine whether or not to reload running terminal instances on every config file change.</li>
           <li>Adds DEC-mode 2027 for enabling/discovering Unicode support as per draft specification (Terminal Unicode Core).</li>
@@ -771,7 +771,7 @@
           <li>[Flatpak] Also pass stdout-fastpipe (`3`) to shell.</li>
           <li>[Flatpak] Do not set controlling terminal in order to allow TTY abilities like Ctrl+C. This seems to be a known bug in flatpak.</li>
           <li>[Flatpak] Exposes TERMINFO environment variable pointing to a valid path containing the contour terminfo file.</li>
-          <li>Changes behavior of PTY (and shell process) creation until only when a PTY is required by the terminal emulator during instanciation, possibly avoiding problems with xdotool running too early.</li>
+          <li>Changes behavior of PTY (and shell process) creation until only when a PTY is required by the terminal emulator during instantiation, possibly avoiding problems with xdotool running too early.</li>
           <li>Internal: Y-axis inverted to match GUI coordinate systems where (0, 0) is top left rather than bottom left.</li>
         </ul>
       </description>
@@ -837,7 +837,7 @@
           <li>Fixes wrong-spacing rendering bug on some lines.</li>
           <li>Fixes assertion on font resize when a (Sixel) image is currently being rendered (#642).</li>
           <li>Fixes assertion on too quick shell terminations (#647).</li>
-          <li>Fixes fallback shell execution on UNIX-like systems when the reuqested shell cannot be spawned (#647).</li>
+          <li>Fixes fallback shell execution on UNIX-like systems when the requested shell cannot be spawned (#647).</li>
           <li>Fixes selection being wrongly rendered when viewport is scrolled (#641).</li>
           <li>Fixes full-line selection not properly injecting linefeeds between the lines.</li>
           <li>Changes behavior of full-line selection to include a trailing linefeed for the last line (#641).</li>
@@ -970,7 +970,7 @@
           <li>Fixes off-by-one bug in builtin box drawing (#424).</li>
           <li>Fixes assertion in text renderer with regards to colored glyphs.</li>
           <li>Fixes Sixel background select to support transparency (#450).</li>
-          <li>Fixes session resuming on KDE desktop envionment which is respawing all Contour instances upon re-login but failed due to invalid command line parameters (#461).</li>
+          <li>Fixes session resuming on KDE desktop environment which is respawing all Contour instances upon re-login but failed due to invalid command line parameters (#461).</li>
           <li>Fixes Meta+Key keyboard inputs being ignored.</li>
           <li>Changes DECSDM such that it works like a real VT340; also xterm, as of version 369, changed that recently (#287).</li>
           <li>Adds context menu support for KDE.</li>
@@ -1003,7 +1003,7 @@
           <li>Removes `tab_width` configuration. Tab width cannot be configured anymore but remaints by default at 8.</li>
           <li>Adds basic automatically created archive for Arch Linux to the CI build artifacts page and release page.</li>
           <li>Adds support for bypassing the mouse protocol via Shift-click (configurable via `bypass_mouse_protocol_modifier`)</li>
-          <li>Adds improved debug logging. via CLI flag `-d` (`--enable-debug`) to accept a comma seperated list of tags to enable logging for. Appending a `*` at the end of a debug tag will enable all debug tags that match prefix its prefix.  The list of available debuglog tags can be found via CLI flag `-D` (`--list-debug-tags`).</li>
+          <li>Adds improved debug logging. via CLI flag `-d` (`--enable-debug`) to accept a comma separated list of tags to enable logging for. Appending a `*` at the end of a debug tag will enable all debug tags that match prefix its prefix.  The list of available debuglog tags can be found via CLI flag `-D` (`--list-debug-tags`).</li>
           <li>Adds support for different font render modes: `lcd`, `light`, `gray`, `monochrome` in `profiles.NAME.font.render_mode` (default: `lcd`).</li>
           <li>Adds support for different text render engines: `OpenShaper`, `DirectWrite` and `CoreText` for upcoming native platform support on Windows (and later macOS).</li>
           <li>Adds support for different font location engines: `fontconfig` (others will follow).</li>
@@ -1025,7 +1025,7 @@
           <li>Adds VT sequence for enabling/disabling debug logging. `CSI ? 46 h` and `CSI ? 46 l` and CLI option `-d`.</li>
           <li>Adds VT sequence for querying/setting current font `OSC 50 ; ? ST` and `OSC 50 ; Font ST` (and `OSC 60 Ps Ps Ps Ps Ps ST` for a more fine grained font query/setting control).</li>
           <li>Adds VT sequence `CSI 18 t` and `CSI 19 t` for getting screen character size. Responds with `CSI 8 ; $columns ; $rows t` and  `CSI 9 ; $columns ; $rows t` respectively.</li>
-          <li>Adds VT sequence to capture the current screen buffer `CSI > LineMode ; StartLine ; LineCount t` giving the respone back on stdin via `OSC 314 ; $screen_buffer ST`, and feature detection via `DA1` number `314`.</li>
+          <li>Adds VT sequence to capture the current screen buffer `CSI > LineMode ; StartLine ; LineCount t` giving the response back on stdin via `OSC 314 ; $screen_buffer ST`, and feature detection via `DA1` number `314`.</li>
           <li>Adds VT sequence `DECSNLS` for setting number of lines to display.</li>
           <li>Adds VT sequence `CSI Ps b` (`REP`) for repeating the last graphical character `Ps` times.</li>
           <li>Adds VT sequence `OSC 4 ; INDEX ; COLOR ST` for setting or querying color palette (if COLOR is `?` instead of a color spec).</li>
@@ -1039,7 +1039,7 @@
           <li>Adds new CLI command: `contour set profile to NAME` to change the profile on the fly.</li>
           <li>Adds new CLI command: `contour generate terminfo output OUTPUT_FILE` to create a Contour terminfo file.</li>
           <li>Adds new CLI command: `contour generate config output OUTPUT_FILE` to create a new default config.</li>
-          <li>Adds new CLI command: `contour generate integration shell SHELL output OUTPUT_FILE` to create the shell integreation file for the given shell (only zsh supported for now). Also adds a pre-generated shell integration file for Linux (and macOS) to `/usr/share/contour/shell-integration.zsh`.</li>
+          <li>Adds new CLI command: `contour generate integration shell SHELL output OUTPUT_FILE` to create the shell integration file for the given shell (only zsh supported for now). Also adds a pre-generated shell integration file for Linux (and macOS) to `/usr/share/contour/shell-integration.zsh`.</li>
           <li>Unicode data updated to version 14.0 beta.</li>
           <li>Adds support for building with Qt 6 (disabled by default).</li>
           <li>Adds support for building with mimalloc (experimental, disabled by default).</li>

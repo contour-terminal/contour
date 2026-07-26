@@ -390,7 +390,7 @@ class Line
 
     // Tests if the given text can be matched in this line at the exact given start column, in sensitive
     // or insensitive mode.
-    [[nodiscard]] bool matchTextAtWithSensetivityMode(std::u32string_view text,
+    [[nodiscard]] bool matchTextAtWithSensitivityMode(std::u32string_view text,
                                                       ColumnOffset startColumn,
                                                       bool isCaseSensitive) const noexcept
     {
@@ -425,7 +425,7 @@ class Line
             return std::nullopt;
 
         auto matchTextAt = [&](auto text, auto baseColumn) {
-            return matchTextAtWithSensetivityMode(text, baseColumn, isCaseSensitive);
+            return matchTextAtWithSensitivityMode(text, baseColumn, isCaseSensitive);
         };
 
         auto baseColumn = startColumn;
@@ -457,7 +457,7 @@ class Line
             return std::nullopt;
 
         auto matchTextAt = [&](auto text, auto baseColumn) {
-            return matchTextAtWithSensetivityMode(text, baseColumn, isCaseSensitive);
+            return matchTextAtWithSensitivityMode(text, baseColumn, isCaseSensitive);
         };
 
         auto baseColumn = std::min(startColumn, ColumnOffset::cast_from(cols - text.size()));

@@ -38,7 +38,7 @@ class RenderBufferBuilder
                         bool includeSelection);
 
     /// Renders a single grid cell.
-    /// This call is guaranteed to be invoked sequencially, from top line
+    /// This call is guaranteed to be invoked sequentially, from top line
     /// to the bottom line and from left page margin to the right page margin,
     /// for every non-trivial line.
     /// A trivial line is rendered using renderTrivialLine().
@@ -50,7 +50,7 @@ class RenderBufferBuilder
 
     /// Renders a trivial line.
     ///
-    /// This call is guaranteed to be invoked sequencially from page top
+    /// This call is guaranteed to be invoked sequentially from page top
     /// to page bottom for every trivial line in order.
     /// As this function is only invoked for trivial lines, all other lines
     /// with their grid cells are to be rendered using renderCell().

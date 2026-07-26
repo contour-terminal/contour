@@ -337,7 +337,7 @@ struct Function
         auto const maskLeader = !leader ? 0 : (static_cast<id_type>(leader) - 0x3C) << LeaderShift;
 
         // 0x20..0x2F: (intermediates, usually just one, or 0x00 if none)
-        auto const maskInterm =
+        auto const maskIntermediate =
             !intermediate ? 0 : (static_cast<id_type>(intermediate) - 0x20 + 1) << IntermediateShift;
 
         // 0x40..0x7E: final character
@@ -345,7 +345,7 @@ struct Function
         auto const maskMinPar = static_cast<id_type>(minimumParameters) << MinParamShift;
         auto const maskMaxPar = static_cast<id_type>(maximumParameters) << MaxParamShift;
 
-        return maskCat | maskLeader | maskInterm | maskFinalS | maskMinPar | maskMaxPar;
+        return maskCat | maskLeader | maskIntermediate | maskFinalS | maskMinPar | maskMaxPar;
     }
 
     constexpr operator id_type() const noexcept { return id(); }

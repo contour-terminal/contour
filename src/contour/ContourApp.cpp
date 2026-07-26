@@ -322,7 +322,7 @@ images:
 
 ```
 
-The default profile is automatically the top (first) defined profile in the configuration file, but can be explicitly set to an order-independant name using `default_profile` configuration key.
+The default profile is automatically the top (first) defined profile in the configuration file, but can be explicitly set to an order-independent name using `default_profile` configuration key.
 
 
 ## Profiles
@@ -346,7 +346,7 @@ For the full list of options see generated configuration file on your system or 
 In contour you can specify different colors inside terminal, for example text background and foreground, cursor properties, selection colors and plenty others.
 You can configure your color profiles, whereas a color can be expressed in standard web format, with a leading # followed by red/green/blue values, 7 characters in total. You may alternatively use 0x as prefix instead of #. For example 0x102030 is equal to '#102030'.
 
-Syntax for color shemes repeat the one of profiles. First color scheme inside configuration file must be named `default`, each other color schemes inherit values from `default` color scheme. Example of configuration for `color_schemes`
+Syntax for color schemes repeat the one of profiles. First color scheme inside configuration file must be named `default`, each other color schemes inherit values from `default` color scheme. Example of configuration for `color_schemes`
 ```
 color_schemes:
     default:
@@ -620,7 +620,7 @@ crispy::cli::command ContourApp::parameterDefinition() const
                     CLI::command { "keys", "List of configurable actions for key binding" },
                     CLI::command {
                         "configuration",
-                        "Create documentaion for configuration file",
+                        "Create documentation for configuration file",
                         CLI::option_list {},
                         CLI::command_list {
                             CLI::command { "global",

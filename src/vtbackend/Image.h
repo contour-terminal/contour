@@ -274,7 +274,7 @@ std::shared_ptr<RasterizedImage> rasterize(std::shared_ptr<Image const> image,
                                            ImageSize cellSize,
                                            ImageLayer layer = ImageLayer::Replace);
 
-/// An ImageFragment holds a graphical image that ocupies one full grid cell.
+/// An ImageFragment holds a graphical image that occupies one full grid cell.
 class ImageFragment
 {
   public:

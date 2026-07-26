@@ -499,8 +499,8 @@ point TextRenderer::applyGlyphPositionToPen(point pen,
  *
  * @param _pos          offset relative to the glyph run's base position
  * @param _color        text color
- * @param _glyphMetrics bitmap size and glyph bearing (cachable)
- * @param _glyphPos     glyph positioning relative to the pen's baseline pos (cachable)
+ * @param _glyphMetrics bitmap size and glyph bearing (cacheable)
+ * @param _glyphPos     glyph positioning relative to the pen's baseline pos (cacheable)
  *
  */
 void TextRenderer::renderRasterizedGlyph(crispy::point pen,

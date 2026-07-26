@@ -228,7 +228,7 @@ class Renderer
      * @param terminal       The terminal to render
      * @param pressureHint   Indicates whether or not this render will most likely be
      *                       updated right after again, allowing a few optimizations
-     *                       to performa that reduce visual features as they are
+     *                       to perform that reduce visual features as they are
      *                       CPU intensive but allow to render fast.
      *                       The user shall not notice that, because this frame
      *                       is known already to be updated right after again.

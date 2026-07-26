@@ -13,7 +13,7 @@ fi
 if [[ "${count}" == "0" ]]; then
     exit 0
 fi
-echo "This PR still contains PR-related TODO itmes that must be resolved."
+echo "This PR still contains PR-related TODO items that must be resolved."
 echo
 echo "${FOUND} ${FOUND2}"
 exit 1

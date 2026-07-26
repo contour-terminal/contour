@@ -4498,7 +4498,7 @@ TEST_CASE("CursorBackwardTab.fixedTabWidth", "[screen]")
         CHECK("X       b       c   " == screen.grid().lineText(LineOffset(0)));
     }
 
-    SECTION("oveflow")
+    SECTION("overflow")
     {
         screen.cursorBackwardTab(TabStopCount(4));
         CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
@@ -4531,7 +4531,7 @@ TEST_CASE("CursorBackwardTab.manualTabs", "[screen]")
     REQUIRE(screen.logicalCursorPosition().column.value == 9);
     REQUIRE("a   b   c " == screen.grid().lineText(LineOffset(0)));
 
-    SECTION("oveflow")
+    SECTION("overflow")
     {
         screen.cursorBackwardTab(TabStopCount(4));
         CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
@@ -4691,7 +4691,7 @@ TEST_CASE("findMarkerDownwards", "[screen]")
         mark = screen.findMarkerDownwards(LineOffset(1));
         REQUIRE_FALSE(mark.has_value());
 
-        // underflow: one below scroll buttom
+        // underflow: one below scroll bottom
         mark = screen.findMarkerDownwards(LineOffset(0));
         REQUIRE_FALSE(mark.has_value());
     }
@@ -4705,7 +4705,7 @@ TEST_CASE("findMarkerDownwards", "[screen]")
         screen.setMark();
         mock.writeToScreen("3ghi\r\n"); // 2 (-1)
 
-        // visibile screen
+        // visible screen
         screen.setMark(); // 3 (0)
         mock.writeToScreen("4jkl\r\n");
         mock.writeToScreen("5mno\r\n"); // 4 (1)
@@ -4792,7 +4792,7 @@ TEST_CASE("findMarkerUpwards", "[screen]")
         screen.setMark();
         mock.writeToScreen("3ghi\r\n"); // 2 (-1)
 
-        // visibile screen
+        // visible screen
         screen.setMark(); // 3 (0)
         mock.writeToScreen("4jkl\r\n");
         mock.writeToScreen("5mno\r\n"); // 4 (1)
@@ -5289,10 +5289,10 @@ TEST_CASE("DECCRA.DownLeft.intersecting", "[screen]")
     auto constexpr SLeft = 3;
 
     auto constexpr SBottom = 5;
-    auto constexpr SRightt = 6;
+    auto constexpr SRight = 6;
 
     auto constexpr TTop = 3;
-    auto constexpr TLeftt = 2;
+    auto constexpr TLeft = 2;
 
     auto const* const expectedText = "ABCDEF\n"
                                      "abcdef\n" // .3456.
@@ -5303,8 +5303,8 @@ TEST_CASE("DECCRA.DownLeft.intersecting", "[screen]")
     // copy up by one line (4 to 3), 2 lines
     // copy left by one column (3 to 2), 2 columns
 
-    auto const deccraSeq = std::format(
-        "\033[{};{};{};{};{};{};{};{}$v", STop, SLeft, SBottom, SRightt, Page, TTop, TLeftt, Page);
+    auto const deccraSeq =
+        std::format("\033[{};{};{};{};{};{};{};{}$v", STop, SLeft, SBottom, SRight, Page, TTop, TLeft, Page);
     mock.writeToScreen(deccraSeq);
 
     auto const resultText = screen.renderMainPageText();
