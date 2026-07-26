@@ -1233,6 +1233,13 @@ constexpr StringLiteral HintPatternsConfig {
     "'\\b[0-9a-fA-F]{{8}}-[0-9a-fA-F]{{4}}-[0-9a-fA-F]{{4}}-[0-9a-fA-F]{{4}}-[0-9a-fA-F]{{12}}\\b'\n"
 };
 
+constexpr StringLiteral HintScrollbackLinesConfig {
+    "\n"
+    "{comment} How many scrollback rows a HintMode action with `scope: Scrollback` scans at most.\n"
+    "{comment} Only that scope reads this; `scope: Visible` (the default) never leaves the viewport.\n"
+    "hint_scrollback_lines: {}\n"
+};
+
 constexpr StringLiteral IndicatorStatusLineConfig {
     "\n"
     "{comment} Defines the colors to be used for the Indicator status line.\n"
@@ -2380,6 +2387,7 @@ using WordHighlight = DocumentationEntry<WordHighlightConfig, Dummy>;
 using HintLabel = DocumentationEntry<HintLabelConfig, Dummy>;
 using HintMatch = DocumentationEntry<HintMatchConfig, Dummy>;
 using HintPatterns = DocumentationEntry<HintPatternsConfig, Dummy>;
+using HintScrollbackLines = DocumentationEntry<HintScrollbackLinesConfig, Dummy>;
 using IndicatorStatusLine = DocumentationEntry<IndicatorStatusLineConfig, Dummy>;
 using InputMethodEditor = DocumentationEntry<InputMethodEditorConfig, Dummy>;
 using InputMethodEditorSupport = DocumentationEntry<InputMethodEditorSupportConfig, Dummy>;

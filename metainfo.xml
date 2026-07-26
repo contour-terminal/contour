@@ -226,6 +226,8 @@
           <li>Fixes profile settings that only took effect after a restart: changing background_image, its blur or opacity, the background color, or the scrollbar position now applies as soon as the config is reloaded or the profile is switched</li>
           <li>Fixes searching for text outside Latin-1: a needle such as "Привет" or an emoji drove the case handling through functions that are undefined for those codepoints, which could silently mismatch or abort the terminal. Case is now folded per the Unicode character database, so "smart case" and case-insensitive search work for non-Latin scripts as well</li>
           <li>Fixes passive mouse tracking (DEC mode 2029) surviving a terminal reset: after RIS the mode read as off while mouse reports still carried its extra parameter, which applications cannot parse, and wheel scrolling on the alternate screen emitted nothing</li>
+          <li>Fixes hint mode missing any URL or path that the terminal broke across two rows because the window was too narrow: patterns are now matched against the whole logical line, so such a match is one hint whose highlight follows it across the line break and which yields the complete text rather than the fragment on one row</li>
+          <li>Adds a scope parameter to the HintMode action: scope: Scrollback scans the scrollback history as well as the visible page, capped by the new hint_scrollback_lines profile option (default 1000). Its labels are assigned once and stay put, so you can activate hint mode, scroll to older output, and then type the label you see; scope: Visible remains the default</li>
         </ul>
       </description>
     </release>

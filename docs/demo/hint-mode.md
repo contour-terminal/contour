@@ -113,6 +113,51 @@ The `patterns` parameter accepts:
 - Multiple pattern names separated by `|`: `filepath|githash`
 - `all` or empty: scan for all builtin patterns at once
 
+### Scope: Reaching Into Scrollback
+
+By default hint mode scans only what is on screen. The `scope` parameter widens
+that to the scrollback history:
+
+```yaml
+input_mapping:
+    # Scan the visible page (the default — may be omitted)
+    - { mods: [Control, Shift], key: U, action: HintMode, patterns: url, hint_action: Open, scope: Visible }
+
+    # Scan the visible page *and* scrollback history
+    - { mods: [Control, Shift], key: Y, action: HintMode, patterns: url, hint_action: Open, scope: Scrollback }
+```
+
+Under `scope: Scrollback`, labels are assigned once when hint mode is activated and
+then **stay put**: scrolling reveals the labels on other rows rather than renaming
+the ones you have already read. So the workflow is: activate, scroll to the output
+you want, then type its label. A label acts on its match even while it is off screen.
+
+`scope: Visible` behaves the other way round, because its scan region *is* the
+viewport: scrolling re-scans and re-labels.
+
+How much history a `Scrollback` activation reads is capped per profile, so a very
+large scrollback does not turn one keystroke into a long scan:
+
+```yaml
+profiles:
+  main:
+    # Maximum scrollback rows a `scope: Scrollback` activation scans (default: 1000).
+    hint_scrollback_lines: 1000
+```
+
+### Wrapped Lines
+
+A pattern is matched against the *logical* line, so a URL that the terminal broke
+across two or more rows because the window was too narrow is still found as a
+single hint, and selecting it yields the whole URL rather than the fragment on one
+row. The label sits at the start of the match, and the highlight follows the match
+across the line break.
+
+A hint is only offered where its label can be drawn. A match that begins above the
+scanned region — so that its label would be invisible — is not offered, since a
+label you cannot see is a label you cannot type. A match that begins inside the
+region and runs past its end *is* offered, and still yields its complete text.
+
 ### Colors
 
 Hint mode label and match colors are configured in the color scheme section of

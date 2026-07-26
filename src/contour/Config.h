@@ -700,6 +700,9 @@ struct TerminalProfile
     ConfigEntry<ColorConfig, documentation::Colors> colors { SimpleColorConfig {} };
     ConfigEntry<HyperlinkDecorationConfig, documentation::HyperlinkDecoration> hyperlinkDecoration {};
     ConfigEntry<std::vector<HintPatternConfig>, documentation::HintPatterns> hintPatterns {};
+    ConfigEntry<vtbackend::LineCount, documentation::HintScrollbackLines> hintScrollbackLines {
+        vtbackend::LineCount { 1000 }
+    };
 
     ConfigEntry<std::string, documentation::WMClass> wmClass { CONTOUR_APP_ID };
     ConfigEntry<std::string, documentation::TabLabel> tabLabel { "{WindowTitle}" };

@@ -25,6 +25,18 @@
 namespace vtbackend
 {
 
+/// How @ref Line::toUtf8 renders the continuation cell(s) of a wide (double-width) character.
+enum class ContinuationCell : uint8_t
+{
+    /// Emit nothing: a wide character contributes a single codepoint, so the result is the text as
+    /// written. This is what copy/yank and selection want.
+    Collapse = 0,
+    /// Emit one space per continuation cell, so every grid cell contributes exactly one codepoint and
+    /// a codepoint index into the result equals a column offset. This is what the hint scanner needs
+    /// to map a regex match position back to a grid column.
+    Pad = 1,
+};
+
 // clang-format off
 template <typename, bool> struct OptionalProperty;
 template <typename T> struct OptionalProperty<T, false> {};
@@ -315,7 +327,16 @@ class Line
     /// The text of the columns [@p begin, @p end) of this line, blank cells rendered as spaces.
     /// @param begin First column to render; clamped to the line.
     /// @param end One past the last column to render; clamped to the line.
-    [[nodiscard]] std::string toUtf8(ColumnOffset begin, ColumnOffset end) const;
+    /// @param continuation Whether a wide character's continuation cell(s) collapse away or emit a
+    ///                     padding space; see @ref ContinuationCell.
+    [[nodiscard]] std::string toUtf8(ColumnOffset begin,
+                                     ColumnOffset end,
+                                     ContinuationCell continuation = ContinuationCell::Collapse) const;
+
+    /// The full text of this line with exactly one codepoint per grid column: a wide character's
+    /// continuation cell becomes a space, so a codepoint index into the result equals a column
+    /// offset. Used by the hint scanner, which maps regex match positions back to grid columns.
+    [[nodiscard]] std::string toUtf8ColumnAligned() const;
 
     [[nodiscard]] std::string toUtf8Trimmed() const;
     [[nodiscard]] std::string toUtf8Trimmed(bool stripLeadingSpaces, bool stripTrailingSpaces) const;

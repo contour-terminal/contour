@@ -72,7 +72,12 @@ std::string Line::toUtf8() const
     return toUtf8(ColumnOffset(0), ColumnOffset::cast_from(_columns));
 }
 
-std::string Line::toUtf8(ColumnOffset begin, ColumnOffset end) const
+std::string Line::toUtf8ColumnAligned() const
+{
+    return toUtf8(ColumnOffset(0), ColumnOffset::cast_from(_columns), ContinuationCell::Pad);
+}
+
+std::string Line::toUtf8(ColumnOffset begin, ColumnOffset end, ContinuationCell continuation) const
 {
     auto const cols = unbox<size_t>(_columns);
     auto const first = std::min(static_cast<size_t>(std::max(*begin, 0)), cols);
@@ -97,6 +102,10 @@ std::string Line::toUtf8(ColumnOffset begin, ColumnOffset end) const
         if (skipCount > 0)
         {
             --skipCount;
+            // A wide character's continuation cell: emit a padding space when the caller wants one
+            // codepoint per grid column, otherwise let the leading cell stand for the whole glyph.
+            if (continuation == ContinuationCell::Pad)
+                str += ' ';
             continue;
         }
         if (_storage.clusterSize[i] == 0)

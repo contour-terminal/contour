@@ -1204,6 +1204,7 @@ profiles:
         hint_patterns:
             - { name: 'url', regex: 'https?://\S+' }
             - { name: '', regex: 'incomplete' }
+        hint_scrollback_lines: 250
         mouse:
             hide_while_typing: false
 )"sv);
@@ -1221,6 +1222,7 @@ profiles:
     // Hint patterns: the complete entry loads, the nameless one is skipped with a warning.
     REQUIRE(profile->hintPatterns.value().size() == 1);
     CHECK(profile->hintPatterns.value().at(0).name == "url");
+    CHECK(profile->hintScrollbackLines.value() == vtbackend::LineCount(250));
 
     CHECK(profile->mouse.value().hideWhileTyping == false);
 }
@@ -1929,6 +1931,38 @@ input_mapping:
     CHECK(resizes[0].percent == 8);
     CHECK(resizes[1].direction == contour::actions::Direction::Right);
     CHECK(resizes[1].percent == 5); // default when omitted
+}
+
+// No comma in the name: Catch2 splits its command-line test filter on commas, so a comma here
+// would leave no way to run the case on its own.
+TEST_CASE("Config: HintMode parses its scope and rejects an unknown one", "[config][input-mapping]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control], key: 'h', action: HintMode, patterns: url, scope: Scrollback }
+    - { mods: [Control], key: 'j', action: HintMode, patterns: url, scope: visible }
+    - { mods: [Control], key: 'k', action: HintMode, patterns: url, scope: sideways }
+    - { mods: [Control], key: 'l', action: HintMode, patterns: url }
+)"sv);
+
+    // A binding on a literal character lands in charMappings, not keyMappings — the latter holds
+    // only the named keys (LeftArrow, Insert, F6, …).
+    std::vector<contour::actions::HintMode> hints;
+    for (auto const& cm: config.inputMappings.value().charMappings)
+        for (auto const& action: cm.binding)
+            if (auto const* h = std::get_if<contour::actions::HintMode>(&action))
+                hints.push_back(*h);
+
+    REQUIRE(hints.size() == 4);
+    CHECK(hints[0].scope == vtbackend::HintScope::Scrollback);
+    CHECK(hints[1].scope == vtbackend::HintScope::Visible); // case-insensitive
+    CHECK(hints[2].scope == vtbackend::HintScope::Visible); // unknown value falls back
+    CHECK(hints[3].scope == vtbackend::HintScope::Visible); // omitted: the default
 }
 
 TEST_CASE("Config: color scheme with 0x colors and sequence color maps parses", "[config]")

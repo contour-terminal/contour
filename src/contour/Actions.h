@@ -63,7 +63,7 @@ struct DecreaseOpacity{};
 struct FocusNextSearchMatch{};
 struct FocusPreviousSearchMatch{};
 struct FollowHyperlink{ std::string uri; }; // empty uri => whatever lies under the mouse cursor right now
-struct HintMode{ std::string patterns; vtbackend::HintAction hintAction = vtbackend::HintAction::Copy; };
+struct HintMode{ std::string patterns; vtbackend::HintAction hintAction = vtbackend::HintAction::Copy; vtbackend::HintScope scope = vtbackend::HintScope::Visible; };
 struct IncreaseFontSize{};
 struct IncreaseOpacity{};
 struct NewTerminal{ std::optional<std::string> profileName; };
@@ -385,10 +385,13 @@ namespace documentation
         "Follows the hyperlink that is exposed via OSC 8 under the current cursor position."
     };
     constexpr inline std::string_view HintMode {
-        "Activates hint mode: scans the visible terminal for regex-matched patterns (URLs, file paths, "
+        "Activates hint mode: scans the terminal for regex-matched patterns (URLs, file paths, "
         "git hashes, etc.), renders short alphabetic labels on each match, and lets the user type a label "
         "to act on that match (copy, open, paste). Parameter `patterns` selects which pattern set to use, "
-        "and `hint_action` specifies the action (Copy, Open, Paste, CopyAndPaste, Select)."
+        "`hint_action` specifies the action (Copy, Open, Paste, CopyAndPaste, Select), and `scope` selects "
+        "how much to scan: Visible (the default, the current viewport) or Scrollback (the viewport plus up "
+        "to `hint_scrollback_lines` rows of history, whose labels stay put while you scroll to reach them). "
+        "A pattern that wraps across a line break is matched as one hint."
     };
     constexpr inline std::string_view IncreaseFontSize { "Increases the font size by 1 pixel." };
     constexpr inline std::string_view IncreaseOpacity { "Increases the default-background opacity by 5%." };
@@ -919,6 +922,21 @@ struct std::formatter<vtbackend::HintAction>: std::formatter<std::string_view>
             case vtbackend::HintAction::Paste: output = "Paste"; break;
             case vtbackend::HintAction::CopyAndPaste: output = "CopyAndPaste"; break;
             case vtbackend::HintAction::Select: output = "Select"; break;
+        }
+        return formatter<string_view>::format(output, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtbackend::HintScope>: std::formatter<std::string_view>
+{
+    auto format(vtbackend::HintScope value, auto& ctx) const
+    {
+        string_view output;
+        switch (value)
+        {
+            case vtbackend::HintScope::Visible: output = "Visible"; break;
+            case vtbackend::HintScope::Scrollback: output = "Scrollback"; break;
         }
         return formatter<string_view>::format(output, ctx);
     }

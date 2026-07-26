@@ -73,8 +73,9 @@ CommandArguments commandArguments(actions::Action const& action)
                 return { .id = a.delimiters, .title = std::format(": {}", a.delimiters) };
             },
             [](HintMode const& a) -> CommandArguments {
-                return { .id = std::format("{}:{}", a.patterns, a.hintAction),
-                         .title = std::format(": {} ({})", a.patterns, a.hintAction) };
+                // The scope belongs in the id: two mappings that differ only by it are two commands.
+                return { .id = std::format("{}:{}:{}", a.patterns, a.hintAction, a.scope),
+                         .title = std::format(": {} ({}, {})", a.patterns, a.hintAction, a.scope) };
             },
             [](SendChars const& a) -> CommandArguments {
                 return { .id = a.chars, .title = std::format(": {}", crispy::escape(a.chars)) };

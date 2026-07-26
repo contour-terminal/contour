@@ -238,6 +238,7 @@ istreambuf
 journalctl
 keychain
 keysym
+labelable
 letterbox
 letterboxes
 libcuda

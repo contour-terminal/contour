@@ -123,6 +123,29 @@ TEST_CASE("Line.toUtf8", "[Line]")
     CHECK(trimmed == "Hi");
 }
 
+TEST_CASE("Line.toUtf8ColumnAligned", "[Line]")
+{
+    auto constexpr DisplayWidth = ColumnCount(5);
+
+    auto line = Line(DisplayWidth, LineFlag::None, GraphicsAttributes {});
+
+    // A double-width character (CJK U+4E2D) in columns 0-1, then an ASCII 'X' in column 2.
+    line.useCellAt(ColumnOffset(0)).write(GraphicsAttributes {}, U'\x4e2d', 2);
+    line.useCellAt(ColumnOffset(2)).write(GraphicsAttributes {}, U'X', 1);
+
+    // toUtf8 collapses the wide character to its single codepoint (what copy/yank and selection
+    // want): the continuation cell contributes nothing.
+    CHECK(line.toUtf8()
+          == "\xe4\xb8\xad"
+             "X  ");
+
+    // toUtf8ColumnAligned emits exactly one codepoint per grid column: the continuation cell becomes
+    // a space, so 'X' sits at codepoint index 2 (its column) rather than index 1.
+    CHECK(line.toUtf8ColumnAligned()
+          == "\xe4\xb8\xad"
+             " X  ");
+}
+
 // ---------------------------------------------------------------------------
 // Lazy-blank Line behavior
 // ---------------------------------------------------------------------------

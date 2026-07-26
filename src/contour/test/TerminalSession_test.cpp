@@ -1339,6 +1339,9 @@ TEST_CASE("TerminalSession: HintMode merges user patterns, skips invalid regex, 
     CHECK((*session)(actions::HintMode { .patterns = "ticket|url" }));
     CHECK((*session)(actions::HintMode { .patterns = "no-such-pattern" }));
     CHECK((*session)(actions::HintMode { .patterns = "" }));
+
+    // The scrollback scope reads the profile's hint_scrollback_lines and scans history as well.
+    CHECK((*session)(actions::HintMode { .patterns = "all", .scope = vtbackend::HintScope::Scrollback }));
 }
 
 TEST_CASE("TerminalSession: search-match focus actions move the vi cursor onto a found match",

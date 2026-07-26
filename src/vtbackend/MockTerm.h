@@ -170,6 +170,7 @@ class MockTerm: public Terminal::NullEvents
     Terminal terminal;
 
     std::string clipboardData;
+    std::string openedDocument;
 
     /// The most recent window-frame (tab) color assigned via DECAC item 2, or std::nullopt if the
     /// frame color was reset (or never set). @see setWindowFrameColor, resetWindowFrameColor.
@@ -194,6 +195,10 @@ class MockTerm: public Terminal::NullEvents
     void copyToClipboard(std::string_view data) override { clipboardData = data; }
 
     std::string getClipboard() override { return clipboardData; }
+
+    /// Records what the terminal asked the desktop to open, so a test can assert on it instead of
+    /// only on the absence of a crash.
+    void openDocument(std::string_view fileOrUrl) override { openedDocument = fileOrUrl; }
 
     void setWindowFrameColor(RGBColor color) override
     {
