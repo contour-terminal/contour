@@ -48,6 +48,26 @@ FreeDesktopNotifier::FreeDesktopNotifier(QObject* parent): QObject(parent)
                 SLOT(onActionInvoked(uint, QString)));
 }
 
+FreeDesktopNotifier::~FreeDesktopNotifier()
+{
+    // Mirror image of the two bus.connect() calls above; the arguments must match exactly or the
+    // match rule is not removed. @see the declaration for why this cannot be defaulted.
+    auto bus = QDBusConnection::sessionBus();
+    bus.disconnect("org.freedesktop.Notifications",
+                   "/org/freedesktop/Notifications",
+                   "org.freedesktop.Notifications",
+                   "NotificationClosed",
+                   this,
+                   SLOT(onNotificationClosed(uint, uint)));
+
+    bus.disconnect("org.freedesktop.Notifications",
+                   "/org/freedesktop/Notifications",
+                   "org.freedesktop.Notifications",
+                   "ActionInvoked",
+                   this,
+                   SLOT(onActionInvoked(uint, QString)));
+}
+
 void FreeDesktopNotifier::notify(vtbackend::DesktopNotification const& notification)
 {
     if (!_interface || !_interface->isValid())
