@@ -85,8 +85,17 @@ Item {
                 }
             }
             DragHandler {
+                objectName: "titleBarDragHandler" // findChild() handle for the GUI test
                 target: null
                 acceptedButtons: Qt.LeftButton
+                // The default grabPermissions minus CanTakeOverFromItems, for the same reason as the tab
+                // drag handler in TabItem (issue #1997): the resize border's top edge zone covers the top
+                // six pixels of this region, and taking its grab asked for a window MOVE on top of the
+                // resize already under way. See TabItem.qml for why the rule belongs on the handler.
+                grabPermissions: PointerHandler.CanTakeOverFromHandlersOfDifferentType
+                                 | PointerHandler.ApprovesTakeOverByHandlersOfDifferentType
+                                 | PointerHandler.ApprovesTakeOverByItems
+                                 | PointerHandler.ApprovesCancellation
                 onActiveChanged: if (active) root.window.startSystemMove()
             }
         }
