@@ -151,6 +151,40 @@ class SettingsController: public QObject
     /// Sets the default profile (persisted to settings.yml, overriding contour.yml). @return success.
     Q_INVOKABLE bool setDefaultProfile(QString const& name);
 
+    /// Parses an indicator status line template into the item list the visual editor edits.
+    ///
+    /// Each returned map holds: `type` (the template's placeholder name), `label` and `sample` from
+    /// vtbackend::StatusLineDefinitions::ItemTraits, `displayName` (the label, or the item's own text
+    /// where it has some), `hasColor`/`color` and `hasBgColor`/`bgColor`, `textLeft`/`textRight`, and
+    /// `flags` -- a map from each template flag name to whether it is set. Items carrying more than
+    /// styles add their own keys: `text`, `command`, or Tabs' `hasActiveColor`/`activeColor`,
+    /// `hasActiveBackground`/`activeBackground` and `separator`.
+    ///
+    /// Everything the template can express is present, so @ref serializeIndicatorSegment can put all of
+    /// it back: a segment that goes through this pair unedited comes out unchanged.
+    [[nodiscard]] Q_INVOKABLE QVariantList parseIndicatorSegment(QString const& templateStr) const;
+
+    /// Serializes an item list (as returned by @ref parseIndicatorSegment) back to a template string.
+    /// An item whose `type` names no known placeholder is skipped rather than guessed at.
+    [[nodiscard]] Q_INVOKABLE QString serializeIndicatorSegment(QVariantList const& items) const;
+
+    /// Every placeholder the indicator editor can offer, as `{ type, label, sample }`.
+    /// Read from vtbackend, so the picker cannot offer a placeholder the parser rejects -- nor omit one
+    /// it accepts.
+    [[nodiscard]] Q_INVOKABLE QVariantList indicatorPlaceholders() const;
+
+    /// Every cell flag an indicator item can carry, as `{ key, label }`. `key` indexes the `flags` map
+    /// of @ref parseIndicatorSegment.
+    [[nodiscard]] Q_INVOKABLE QVariantList indicatorFlags() const;
+
+    /// The indicator template for segment @p segmentIndex (0=left, 1=middle, 2=right) of the current
+    /// profile draft; empty when there is no draft or the index is out of range.
+    [[nodiscard]] Q_INVOKABLE QString indicatorSegment(int segmentIndex) const;
+
+    /// Sets the indicator template for segment @p segmentIndex on the current profile draft.
+    /// A no-op when there is no draft, the profile is read-only, or the index is out of range.
+    Q_INVOKABLE void setIndicatorSegment(int segmentIndex, QString const& value);
+
     /// Overrides a global setting (persisted to settings.yml over contour.yml). @return success.
     Q_INVOKABLE bool setGlobalField(QString const& key, QVariant const& value);
     /// Clears a global override, so the setting falls back to contour.yml/default. @return success.
