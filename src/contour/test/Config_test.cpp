@@ -1934,7 +1934,7 @@ input_mapping:
 }
 
 // No comma in the name: Catch2 splits its command-line test filter on commas, so a comma here
-// would make the case unrunnable on its own.
+// would leave no way to run the case on its own.
 TEST_CASE("Config: HintMode parses its scope and rejects an unknown one", "[config][input-mapping]")
 {
     QTemporaryDir dir;

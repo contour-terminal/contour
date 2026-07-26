@@ -1160,7 +1160,7 @@ TEST_CASE("HintModeHandler.UnwrappedRowsDoNotBleedIntoEachOther", "[hintmode]")
     CHECK(handler.matches()[0].end.line == LineOffset(0));
 }
 
-TEST_CASE("HintModeHandler.SelectionForwardsAWrappedRange", "[hintmode]")
+TEST_CASE("HintModeHandler.SelectionForwardsWrappedRange", "[hintmode]")
 {
     auto executor = MockExecutor {};
     auto handler = HintModeHandler { executor };
@@ -1330,7 +1330,7 @@ TEST_CASE("HintModeHandler.ThreeCharLabelIsSelectable", "[hintmode]")
 
 // {{{ Input handling paths a single-character label set cannot reach
 
-TEST_CASE("HintModeHandler.BackspaceRemovesATypedCharacter", "[hintmode]")
+TEST_CASE("HintModeHandler.BackspaceRemovesOneTypedCharacter", "[hintmode]")
 {
     auto executor = MockExecutor {};
     auto handler = HintModeHandler { executor };

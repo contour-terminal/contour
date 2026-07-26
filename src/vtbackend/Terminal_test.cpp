@@ -4625,8 +4625,9 @@ TEST_CASE("Terminal.hint_mode_scrollback_scope_finds_history", "[terminal][hintm
 TEST_CASE("Terminal.hint_mode_scrollback_labels_survive_scrolling", "[terminal][hintmode]")
 {
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, LineCount(20) };
-    // The escape and the URL are written separately: check-spelling splits identifiers on case
-    // boundaries, so "\r\nhttps" would arrive as the nonsense token `nhttps`.
+    // The two URLs go in separate calls so that each line-break escape ends a literal rather than
+    // sitting in front of a word: check-spelling splits identifiers on case boundaries, so an escape
+    // glued ahead of a word forms a nonsense token and fails the spell gate.
     mock.writeToScreen("https://one.example\r\n");
     mock.writeToScreen("https://two.example\r\n\r\n\r\n\r\n\r\n");
     mock.terminal.flushInput();
@@ -4654,7 +4655,7 @@ TEST_CASE("Terminal.hint_mode_scrollback_labels_survive_scrolling", "[terminal][
     }
 }
 
-TEST_CASE("Terminal.hint_mode_visible_scope_rescans_on_scroll", "[terminal][hintmode]")
+TEST_CASE("Terminal.hint_mode_visible_scope_scans_again_on_scroll", "[terminal][hintmode]")
 {
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, LineCount(20) };
     mock.writeToScreen("https://scrolled-away.example\r\n\r\n\r\n\r\n\r\n");

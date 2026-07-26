@@ -3,9 +3,7 @@ aaaaaaaaaa
 aaaabbbbcccc
 aabbcc
 ababab
-abcdefghi
 abcdefghijklmnopqrstuvwxy
-abcdefghijklmnopqrstuvwxyz
 ABCDEFGHIX
 ABCDEFGHXJKLMNOPQRST
 ABCXDEFGHI

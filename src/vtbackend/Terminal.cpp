@@ -2578,7 +2578,7 @@ HintScanArea Terminal::collectHintScanArea(HintScope scope, LineCount scrollback
         ++last;
 
     auto area = HintScanArea { .rows = {}, .labelableRows = labelableRows };
-    area.rows.reserve(static_cast<size_t>(unbox(last - first) + 1));
+    area.rows.reserve(unbox<size_t>(last - first) + 1);
     for (auto line = first; line <= last; ++line)
         area.rows.push_back(HintScanRow {
             // Untrimmed on purpose: one codepoint per cell is what makes a codepoint index a column.
