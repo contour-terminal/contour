@@ -1,4 +1,4 @@
-# Spell-check configuration. Run it with `scripts/check-spelling.sh`, or via `ctest -L lint`.
+# Spell-check configuration. Run it with `scripts/check-spelling.py`, or via `ctest -L lint`.
 # CI runs that same script, so this one file governs both -- see docs/internals/spell-checking.md.
 #
 # typos is CORPUS-based: it flags known *misspellings*, not unknown words. A new domain term

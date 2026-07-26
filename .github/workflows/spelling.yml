@@ -5,8 +5,14 @@
 # spell gate at all -- the one kind of change most likely to introduce a typo. The check now costs
 # about a second, so it is cheap to run on everything.
 #
-# The job runs `scripts/check-spelling.sh`, the very same script `ctest -L lint` runs, at the same
+# The job runs `scripts/check-spelling.py`, the very same script `ctest -L lint` runs, at the same
 # pinned typos version. That is what keeps a local pre-flight and this gate from disagreeing.
+#
+# One Linux job is enough here: the gate reads the same files whatever host it runs on, so running
+# it per-platform in CI would only cost minutes. The point of the script being Python rather than
+# shell is that `ctest -L lint` can run it on Windows and macOS too — for a developer on either,
+# and in the Windows CI job, which is the only one that invokes `ctest`. (The macOS CI job runs its
+# test binaries directly, so it does not pick the gate up.)
 
 name: Spelling
 
@@ -36,4 +42,4 @@ jobs:
         # it could not download its tool is worse than no gate.
         env:
           CHECK_SPELLING_REQUIRE_TOOL: 1
-        run: ./scripts/check-spelling.sh
+        run: python3 scripts/check-spelling.py

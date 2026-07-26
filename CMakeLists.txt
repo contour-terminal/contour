@@ -147,24 +147,50 @@ endif()
 if(CONTOUR_TESTING)
     enable_testing()
 
-    # Lint the GitHub Actions workflows locally so a workflow-file error (which silently breaks CI
-    # dispatch on GitHub — a check-suite with zero jobs failing at 0s) is caught by `ctest` before
-    # it is pushed. Skips gracefully if actionlint cannot be obtained (see the script). Not gated on
-    # a build target, so it runs even in a fresh tree.
-    if(NOT WIN32)
-        add_test(NAME check_workflows
-                 COMMAND ${CMAKE_COMMAND} -E env bash
-                         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-workflows.sh")
-        set_tests_properties(check_workflows PROPERTIES LABELS "lint" TIMEOUT 120)
+    # A lint gate registered here is Python, not shell, so that it runs on every platform this
+    # project supports. These two used to be bash, guarded by `if(NOT WIN32)`, which left Windows
+    # developers — and the Windows CI job, the one job that invokes `ctest` directly — with no spell
+    # check and no workflow check at all. The other scripts/check-*.sh remain bash because CI is
+    # their only caller; the rule is that anything ctest runs has to be portable. Both gates fetch
+    # their tool on demand and skip gracefully when it cannot be obtained, so neither is gated on a
+    # build target and both run in a fresh tree.
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        # One line per gate. The label and timeout are applied to whatever this registers, so a new
+        # gate cannot land outside `ctest -L lint` by someone forgetting a second edit — which is
+        # the same silently-skipped-check problem these gates exist to catch.
+        set(CONTOUR_LINT_GATES "")
+        macro(contour_add_lint_gate name script)
+            add_test(NAME ${name}
+                     COMMAND ${Python3_EXECUTABLE}
+                             "${CMAKE_CURRENT_SOURCE_DIR}/scripts/${script}" ${ARGN})
+            list(APPEND CONTOUR_LINT_GATES ${name})
+        endmacro()
+
+        # Lint the GitHub Actions workflows locally so a workflow-file error (which silently breaks
+        # CI dispatch on GitHub — a check-suite with zero jobs failing at 0s) is caught before it is
+        # pushed.
+        contour_add_lint_gate(check_workflows check-workflows.py)
 
         # Spell-check the tree. CI runs this very script, so a local `ctest` run and the CI gate
-        # cannot disagree — that is what stops a spelling failure from costing an extra push. Skips
-        # gracefully if typos cannot be obtained (see the script); CI sets
-        # CHECK_SPELLING_REQUIRE_TOOL so the skip cannot turn into a false green there.
-        add_test(NAME check_spelling
-                 COMMAND ${CMAKE_COMMAND} -E env bash
-                         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-spelling.sh")
-        set_tests_properties(check_spelling PROPERTIES LABELS "lint" TIMEOUT 120)
+        # cannot disagree — that is what stops a spelling failure from costing an extra push. CI
+        # sets CHECK_SPELLING_REQUIRE_TOOL so the skip cannot turn into a false green there.
+        contour_add_lint_gate(check_spelling check-spelling.py)
+
+        # The justification rule in `_typos.toml` is the only thing keeping the exception list from
+        # growing back into the 2,237-entry allow-list it replaced, and its parser has been wrong
+        # before. This case needs no network, so it stays meaningful on an offline clone where the
+        # gate above skips.
+        contour_add_lint_gate(check_spelling_selftest check-spelling.py --self-test)
+
+        # 300s, not the 120s these had as shell scripts: a cold cache now downloads the tool on
+        # Windows too, and a CI runner's first run pays for both.
+        set_tests_properties(${CONTOUR_LINT_GATES} PROPERTIES LABELS "lint" TIMEOUT 300)
+    else()
+        # A warning, not a status line: losing both lint gates is exactly the silent gap this
+        # change set out to close, and it must not scroll past in a wall of configure output.
+        message(WARNING "Python 3 not found: the lint gates (check_spelling, check_workflows) "
+                        "are not registered.")
     endif()
 endif()
 # ----------------------------------------------------------------------------

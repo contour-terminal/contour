@@ -51,6 +51,11 @@ sandbox/**
 # Python virtual environment
 .venv
 
+# Python bytecode cache. The lint gates in scripts/ import scripts/lib, so running `ctest -L lint`
+# leaves these behind next to the sources.
+__pycache__/
+*.pyc
+
 # flatpak-builder: build cache and ccache compiler shims
 .flatpak-builder
 .flatpak-builder/**
