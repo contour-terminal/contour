@@ -29,6 +29,13 @@ compile_commands.json
 /Testing/
 CMakeUserPresets.json
 
+# The Unicode Character Database, downloaded into the source root by libunicode's tablegen when
+# it is built as a dependency. libunicode ignores it in its own tree for the same reason; it must
+# be ignored here too, both so a multi-megabyte download cannot be committed and because the
+# spell gate walks the working tree honouring .gitignore -- and the UCD is Unicode's data, not
+# our prose ("WOMENS SYMBOL", "Santa Claus", and hex ranges that spell words: 1F9BA reads as BA).
+/_ucd/
+
 # This is a workspace-local sandbox directory with test files not to be included in Git.
 sandbox
 sandbox/**
