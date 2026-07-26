@@ -38,7 +38,14 @@ void TextClusterGrouper::renderLine(std::u32string_view text,
     _initialPenPosition = vtbackend::CellLocation { .line = lineOffset, .column = columnOffset };
 
     // Iterate char32_t codepoints directly — no UTF-8 decode needed.
-    // For trivial lines, each codepoint is a single-codepoint grapheme cluster.
+    //
+    // Each codepoint here is a grapheme cluster of its own: a cell holding more than one takes its
+    // line off the batched path before it ever gets here (@see vtbackend::appendCodepointToCluster).
+    // Its WIDTH is still a question — a wide character normally leaves the path too, through the
+    // continuation cell it writes, but Screen::clearAndAdvance skips that fill when only one column
+    // remains, so a full-width character on the last writable column does arrive. Hence the measure
+    // and the filler loop below, which RenderBufferBuilder::renderGridText mirrors exactly: the two
+    // draw the same line whenever a selection switches between them.
     for (auto const cp: text)
     {
         auto const gridPosition = vtbackend::CellLocation { .line = lineOffset, .column = columnOffset };

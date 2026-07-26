@@ -348,6 +348,21 @@ class Line
 
     /// Build a TrivialLineBuffer for the render fast path.
     /// Only valid when isTrivialBuffer() returns true.
+    ///
+    /// @c textOut carries exactly ONE codepoint per column, which is what makes this cheap and what
+    /// bounds when it may be used: a cell holding a grapheme cluster cannot be represented here,
+    /// because the flat text has no cell boundaries for the renderer to recover the extra codepoints
+    /// from. Such a line therefore never reaches this function -- appending a continuation codepoint
+    /// clears the trivial flag (@see appendCodepointToCluster), as writing a wide cell's
+    /// continuation and an image fragment already do. Without that, everything after each cluster's
+    /// base codepoint is silently dropped from the rendered text.
+    ///
+    /// One codepoint per column is NOT the same as one COLUMN per cell, and the difference is
+    /// reachable: a wide character leaves the batched path only through the continuation cell it
+    /// writes, and @c Screen::clearAndAdvance skips that fill when a single column is left, so a
+    /// full-width character on the last writable column stays here as a two-column cell. Consumers
+    /// must therefore measure each codepoint rather than assume it is one column wide.
+    ///
     /// @param textOut receives the codepoints directly from SoA (no UTF-8 encoding).
     [[nodiscard]] TrivialLineBuffer trivialBuffer(std::u32string& textOut) const
     {

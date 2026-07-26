@@ -269,6 +269,45 @@ TEST_CASE("LineSoA.graphemeCluster.multiCodepoint", "[LineSoA]")
     CHECK(collected[1] == U'\u0301');
 }
 
+TEST_CASE("LineSoA.graphemeCluster.appendLeavesTheTrivialPath", "[LineSoA]")
+{
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(10));
+    REQUIRE(line.trivial);
+
+    line.codepoints[0] = U'e';
+    line.clusterSize[0] = 1;
+    CHECK(line.trivial); // a single-codepoint cell is still expressible
+
+    // The batched RenderLine path stores one codepoint per column (@see Line::trivialBuffer), so a
+    // cell holding a cluster cannot be represented there and its line must leave that path -- the
+    // same reason a wide cell's continuation and an image fragment already clear the flag. Note the
+    // cluster stays ONE column wide here: it is the extra codepoint, not any width change, that the
+    // batched representation cannot carry.
+    auto const widthChange = appendCodepointToCluster(line, 0, U'\u0301');
+    CHECK(widthChange == 0);
+    CHECK(line.widths[0] == 1);
+    CHECK_FALSE(line.trivial);
+}
+
+TEST_CASE("LineSoA.graphemeCluster.appendLeavesTheTrivialPathUnderFirstCodepoint", "[LineSoA]")
+{
+    // Under ClusterWidthPolicy::FirstCodepoint (DEC mode 2027 reset) the cluster keeps its width,
+    // and appendCodepointToCluster returns early -- but the codepoint still joined the cluster, so
+    // the line is just as inexpressible as above.
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(10));
+
+    line.codepoints[0] = U'\U0001F441'; // EYE
+    line.clusterSize[0] = 1;
+    line.widths[0] = 1;
+
+    auto const widthChange = appendCodepointToCluster(line, 0, U'\uFE0F', ClusterWidthPolicy::FirstCodepoint);
+    CHECK(widthChange == 0);
+    CHECK(line.widths[0] == 1); // VS16 may not widen it under this policy
+    CHECK_FALSE(line.trivial);
+}
+
 TEST_CASE("LineSoA.graphemeCluster.clearExtras", "[LineSoA]")
 {
     LineSoA line;
@@ -396,13 +435,13 @@ TEST_CASE("LineSoA.appendCodepointToCluster.width_never_reaches_zero", "[LineSoA
     initializeLineSoA(line, ColumnCount(10));
 
     auto cell = CellProxy(line, 0);
-    cell.write(GraphicsAttributes {}, U'́', 1); // a combining mark as the cluster BASE
+    cell.write(GraphicsAttributes {}, U'\u0301', 1); // a combining mark as the cluster BASE
     auto const delta = cell.appendCharacter(U'̂');
 
     CHECK(line.widths[0] >= 1);
     CHECK(delta >= 0);
     CHECK(cell.codepointCount() == 2);
-    CHECK(cell.codepoint(0) == U'́');
+    CHECK(cell.codepoint(0) == U'\u0301');
 }
 
 TEST_CASE("LineSoA.appendCodepointToCluster.pool_survives_more_appends_than_the_index_can_address",
@@ -421,7 +460,7 @@ TEST_CASE("LineSoA.appendCodepointToCluster.pool_survives_more_appends_than_the_
     {
         auto cell = CellProxy(line, 0);
         cell.write(GraphicsAttributes {}, U'e', 1);
-        (void) cell.appendCharacter(U'́');
+        (void) cell.appendCharacter(U'\u0301');
         (void) cell.appendCharacter(U'̂');
     }
 
@@ -430,12 +469,12 @@ TEST_CASE("LineSoA.appendCodepointToCluster.pool_survives_more_appends_than_the_
     // into the abandoned garbage -- which the repetitive filler above would otherwise match by luck.
     auto cell = CellProxy(line, 0);
     cell.write(GraphicsAttributes {}, U'e', 1);
-    (void) cell.appendCharacter(U'́');
+    (void) cell.appendCharacter(U'\u0301');
     (void) cell.appendCharacter(U'⃣');
 
     REQUIRE(cell.codepointCount() == 3);
     CHECK(cell.codepoint(0) == U'e');
-    CHECK(cell.codepoint(1) == U'́');
+    CHECK(cell.codepoint(1) == U'\u0301');
     CHECK(cell.codepoint(2) == U'⃣');
 }
 

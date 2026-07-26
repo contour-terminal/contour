@@ -13,10 +13,12 @@
 #include <crispy/utils.h>
 
 #include <libunicode/convert.h>
+#include <libunicode/width.h>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <filesystem>
@@ -26,6 +28,7 @@
 #include <ranges>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using namespace std;
@@ -3858,6 +3861,278 @@ TEST_CASE("Terminal.YankHighlight.trivialLineIsHighlighted", "[terminal][vi]")
 }
 // }}}
 
+// {{{ Grapheme cluster rendering (GitHub #1752)
+//
+// #1752: selecting text made a VS16 emoji grow padding, pushing the bracket behind it to the
+// right. A selection takes a uniform-SGR line off the batched RenderLine path and onto the
+// per-cell one, and the two measured differently -- the batched one per codepoint, the per-cell one
+// per grapheme cluster. Whatever else changes, the two must agree, so these tests compare the
+// LAYOUT the two states produce and assert which path each of them took.
+namespace
+{
+
+/// Which representation a line reached the render buffer through.
+enum class RenderPath : uint8_t
+{
+    /// Per-cell RenderCells. Taken by a line the batched form cannot express, and by any line
+    /// carrying a selection, a cursor or a highlight.
+    PerCell,
+    /// One batched RenderLine covering the whole line.
+    Batched,
+};
+
+/// One entry per drawn glyph on screen line @p line: the column it lands on, its text, and how many
+/// columns it covers.
+///
+/// Derived from whichever representation the render buffer used, so a batched line and a per-cell
+/// line are directly comparable -- which is the whole point, since a selection is what switches
+/// between them. Continuation and blank cells are skipped: they carry no glyph of their own.
+struct DrawnGlyph
+{
+    int column;
+    std::u32string codepoints;
+    int width;
+
+    bool operator==(DrawnGlyph const&) const = default;
+};
+
+std::vector<DrawnGlyph> renderedLayout(vtbackend::RenderBufferRef const& buf, vtbackend::LineOffset line)
+{
+    auto result = std::vector<DrawnGlyph> {};
+
+    for (auto const& cell: buf.get().cells)
+        if (cell.position.line == line && !cell.codepoints.empty() && cell.codepoints != U" ")
+            result.emplace_back(cell.position.column.value, cell.codepoints, int { cell.width });
+
+    if (!result.empty())
+        return result;
+
+    // Batched path: the rasterizer walks the flat text one codepoint per column, advancing by that
+    // codepoint's own width. @see vtrasterizer::TextClusterGrouper::renderLine.
+    for (auto const& renderLine: buf.get().lines)
+    {
+        if (renderLine.lineOffset != line)
+            continue;
+        auto column = 0;
+        for (auto const codepoint: renderLine.text)
+        {
+            auto const width = static_cast<int>(std::max(1u, unicode::width(codepoint)));
+            if (codepoint != U' ')
+                result.emplace_back(column, std::u32string(1, codepoint), width);
+            column += width;
+        }
+    }
+
+    return result;
+}
+
+/// A layout as `col:U+XXXX+U+YYYY(wN) ...`. Catch2 prints a u32string as `{?}`, which says nothing
+/// about a mismatch that is entirely about which codepoints landed where, and how wide.
+std::string describeLayout(std::vector<DrawnGlyph> const& layout)
+{
+    auto result = std::string {};
+    for (auto const& glyph: layout)
+    {
+        result += std::format("{}{}:", result.empty() ? "" : " ", glyph.column);
+        for (auto const [index, codepoint]: crispy::views::enumerate(glyph.codepoints))
+            result += std::format("{}U+{:04X}", index ? "+" : "", static_cast<uint32_t>(codepoint));
+        result += std::format("(w{})", glyph.width);
+    }
+    return result;
+}
+
+/// The layout of screen line @p line as rendered right now, plus which path produced it.
+/// Snapshotted so the render buffer's lock is released before the caller changes the terminal.
+std::pair<std::string, RenderPath> renderLineOf(vtbackend::Terminal& terminal, LineOffset line)
+{
+    terminal.refreshRenderBuffer();
+    auto const buf = terminal.renderBuffer();
+    auto const batched = std::ranges::any_of(
+        buf.get().lines, [&](auto const& renderLine) { return renderLine.lineOffset == line; });
+    return { describeLayout(renderedLayout(buf, line)), batched ? RenderPath::Batched : RenderPath::PerCell };
+}
+
+/// Selects columns [@p firstColumn, @p lastColumn] of screen line @p line, as a mouse drag would.
+void selectColumns(vtbackend::Terminal& terminal,
+                   LineOffset line,
+                   ColumnOffset firstColumn,
+                   ColumnOffset lastColumn)
+{
+    terminal.setSelector(std::make_unique<vtbackend::LinearSelection>(
+        terminal.selectionHelper(), CellLocation { .line = line, .column = firstColumn }, []() {}));
+    (void) terminal.selector()->extend(CellLocation { .line = line, .column = lastColumn });
+    terminal.selector()->complete();
+}
+
+} // namespace
+
+TEST_CASE("Terminal.GraphemeCluster.selectionDoesNotShiftLayout", "[terminal][unicode]")
+{
+    // Each case names the layout it must produce, unselected AND selected, and which path the
+    // unselected state must have taken. Naming the layout rather than comparing the two states
+    // against each other matters: both derive from the same line, so two equally wrong layouts
+    // would satisfy a self-consistency check without drawing the right thing. Naming the path
+    // matters just as much -- a case that never reaches the batched form is not testing the
+    // batched-vs-per-cell agreement it appears to be testing.
+    struct TestCase
+    {
+        std::string_view name;
+        std::string_view text;
+        std::string_view layout;
+        RenderPath unselectedPath;
+    };
+
+    // The first three are #1752's reproduction lines. The two that broke are the two whose BASE
+    // codepoint is one column wide and which only reach two columns through VS16 -- 1F441 EYE and
+    // 1F3F3 WAVING WHITE FLAG; 1F44D THUMBS UP is wide already, which is why the reporter saw it
+    // survive. In all three the closing bracket belongs at column 3. They widen through a
+    // continuation cell, which is what takes them off the batched path in BOTH states.
+    auto constexpr Cases = std::array {
+        TestCase { .name = "thumbs up + skin tone modifier",
+                   .text = "[\U0001F44D\U0001F3FB]"sv,
+                   .layout = "0:U+005B(w1) 1:U+1F44D+U+1F3FB(w2) 3:U+005D(w1)"sv,
+                   .unselectedPath = RenderPath::PerCell },
+        TestCase { .name = "rainbow flag: VS16, ZWJ, rainbow",
+                   .text = "[\U0001F3F3\uFE0F\u200D\U0001F308]"sv,
+                   .layout = "0:U+005B(w1) 1:U+1F3F3+U+FE0F+U+200D+U+1F308(w2) 3:U+005D(w1)"sv,
+                   .unselectedPath = RenderPath::PerCell },
+        TestCase { .name = "eye + VS16",
+                   .text = "[\U0001F441\uFE0F]"sv,
+                   .layout = "0:U+005B(w1) 1:U+1F441+U+FE0F(w2) 3:U+005D(w1)"sv,
+                   .unselectedPath = RenderPath::PerCell },
+        // Plain text stays on the batched path, so this is the case that actually compares the two
+        // representations against each other -- the comparison #1752 is about.
+        TestCase { .name = "plain text",
+                   .text = "abc"sv,
+                   .layout = "0:U+0061(w1) 1:U+0062(w1) 2:U+0063(w1)"sv,
+                   .unselectedPath = RenderPath::Batched },
+        // A cluster that stays ONE column wide writes no continuation cell, so only the cluster rule
+        // itself takes its line off the batched path -- and that path stores one codepoint per
+        // column (@see Line::trivialBuffer), silently discarding everything after the base. A
+        // decomposed alpha + COMBINING ACUTE therefore reached the renderer as a bare alpha.
+        TestCase { .name = "alpha + combining acute",
+                   .text = "\u03B1\u0301x"sv,
+                   .layout = "0:U+03B1+U+0301(w1) 1:U+0078(w1)"sv,
+                   .unselectedPath = RenderPath::PerCell },
+    };
+
+    for (auto const& testCase: Cases)
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) }, LineCount(0) };
+        // Park the cursor on the NEXT line. Left on line 0, gridLineContainsCursor() forces the
+        // per-cell path even unselected, and the batched half of every comparison below silently
+        // stops happening.
+        mock.writeToScreen(testCase.text);
+        mock.writeToScreen("\r\n"sv);
+
+        auto const [unselected, unselectedPath] = renderLineOf(mock.terminal, LineOffset(0));
+        selectColumns(mock.terminal, LineOffset(0), ColumnOffset(0), ColumnOffset(19));
+        auto const [selected, selectedPath] = renderLineOf(mock.terminal, LineOffset(0));
+
+        INFO(testCase.name);
+        CHECK(unselectedPath == testCase.unselectedPath);
+        CHECK(selectedPath == RenderPath::PerCell); // a selection always forces per-cell
+        CHECK(unselected == testCase.layout);
+        CHECK(selected == testCase.layout);
+    }
+}
+
+TEST_CASE("Terminal.GraphemeCluster.aWideCellOnTheLastColumnKeepsItsWidth", "[terminal][unicode]")
+{
+    // A wide character leaves the batched path only through the continuation cell it writes, and
+    // Screen::clearAndAdvance skips that fill when a single column is left -- so a full-width
+    // character on the last writable column stays on a line the batched path still claims, as a
+    // TWO-column cell. The selection fallback must measure it the same way the batched path does;
+    // reporting one column shrinks the selection background and any underline behind the glyph.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) }, LineCount(0) };
+    mock.writeToScreen("\033[1;5H\u4E16"sv); // last column of a 5-column page
+    mock.writeToScreen("\033[2;1H"sv);       // cursor off the line under test
+
+    REQUIRE(mock.terminal.primaryScreen().grid().lineAt(LineOffset(0)).isTrivialBuffer());
+    REQUIRE(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(4)).width() == 2);
+
+    auto const [unselected, unselectedPath] = renderLineOf(mock.terminal, LineOffset(0));
+    selectColumns(mock.terminal, LineOffset(0), ColumnOffset(0), ColumnOffset(4));
+    auto const [selected, selectedPath] = renderLineOf(mock.terminal, LineOffset(0));
+
+    CHECK(unselectedPath == RenderPath::Batched);
+    CHECK(selectedPath == RenderPath::PerCell);
+    CHECK(unselected == "4:U+4E16(w2)");
+    CHECK(selected == unselected);
+}
+
+TEST_CASE("Terminal.GraphemeCluster.batchedFallbackDoesNotInheritTheCursor", "[terminal][unicode]")
+{
+    // makeColorsForCell extends a block cursor over the second column of a wide glyph by consulting
+    // _prevWidth/_prevHasCursor, which every emitter must reset per cell. startLine() resets them
+    // for a per-cell line, but renderTrivialLine has no such entry point -- so if its fallback
+    // resets only once, a line following one that ENDS in a wide glyph under the cursor is painted
+    // entirely in cursor colours.
+    //
+    // Asserted against a control that differs only in the previous line's last cell, so no palette
+    // value is hard-coded.
+    auto const colorsOfSecondLine = [](std::string_view lastCellOfFirstLine) {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) }, LineCount(0) };
+        auto constexpr ClockBase = chrono::steady_clock::time_point();
+        mock.terminal.tick(ClockBase);
+        // The block-cursor inversion this test is about is suppressed while a cursor MOTION
+        // animation is in flight (makeColorsForCell requires animationProgress >= 1). Writing text
+        // is exactly what starts one, so switch the animation off rather than race it.
+        mock.terminal.settings().cursorMotionAnimationDuration = chrono::milliseconds(0);
+
+        mock.writeToScreen("\033[2;1H"sv);
+        mock.writeToScreen("xyz"sv);                       // line 1: uniform text
+        mock.writeToScreen("\033[1;1H\033[31mab\033[m"sv); // line 0: mixed SGR -> per-cell path
+        mock.writeToScreen(std::format("\033[1;5H{}", lastCellOfFirstLine));
+
+        // The cursor must end ON line 0's last cell, so renderCell leaves _prevHasCursor set.
+        REQUIRE(mock.terminal.primaryScreen().cursor().position
+                == CellLocation { .line = LineOffset(0), .column = ColumnOffset(4) });
+        // Line 1 is selected in part, which sends it to renderTrivialLine's fallback; columns 0..2
+        // are outside the selection, so nothing may recolor them.
+        selectColumns(mock.terminal, LineOffset(1), ColumnOffset(3), ColumnOffset(4));
+
+        mock.terminal.tick(ClockBase + chrono::seconds(1));
+        mock.terminal.refreshRenderBuffer();
+        auto const buf = mock.terminal.renderBuffer();
+        auto result = std::vector<vtbackend::RGBColor> {};
+        for (auto const& cell: buf.get().cells)
+            if (cell.position.line == LineOffset(1) && cell.position.column < ColumnOffset(3))
+                result.push_back(cell.attributes.backgroundColor);
+        return result;
+    };
+
+    auto const afterWideGlyph = colorsOfSecondLine("\u4E16"sv); // two columns, cursor on it
+    auto const afterNarrowGlyph = colorsOfSecondLine("Z"sv);    // one column, cursor on it
+
+    REQUIRE(afterNarrowGlyph.size() == 3);
+    CHECK(afterWideGlyph == afterNarrowGlyph);
+}
+
+TEST_CASE("Terminal.GraphemeCluster.aClusterLeavesTheBatchedPath", "[terminal][unicode]")
+{
+    // Why the layouts above can agree at all: a line the batched RenderLine path cannot express
+    // must not take it. That path stores one codepoint per column, so a cell holding more than one
+    // -- whether or not the cluster also grew wider -- has to leave it, exactly as a wide cell and
+    // an image fragment already do. Stated on its own so a change that re-admits such a line fails
+    // HERE, naming the cause, rather than as a layout mismatch above or only in the GUI.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) }, LineCount(0) };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("[\U0001F441\uFE0F]"sv);
+    CHECK_FALSE(screen.grid().lineAt(LineOffset(0)).isTrivialBuffer());
+    // The eye is two columns: its own, plus the one VS16 claimed for it.
+    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).width() == 2);
+
+    // The same must hold when the cluster stays one column wide, which is the case that has no
+    // continuation cell to break SGR uniformity on its behalf.
+    mock.writeToScreen("\r\n\u03B1\u0301x"sv);
+    CHECK(screen.at(LineOffset(1), ColumnOffset(0)).codepointCount() == 2);
+    CHECK_FALSE(screen.grid().lineAt(LineOffset(1)).isTrivialBuffer());
+    CHECK(screen.at(LineOffset(1), ColumnOffset(0)).width() == 1);
+}
+// }}}
+
 // {{{ mouse wheel alternate-scroll (GitHub #1951)
 
 TEST_CASE("Terminal.Wheel.AltScreen.NoProtocol.emits_cursor_keys", "[terminal]")
@@ -4540,7 +4815,7 @@ TEST_CASE("Terminal.IME queries answered under the state lock survive concurrent
                                           PageSize { LineCount(24), ColumnCount(80) } };
     for (auto const round: std::views::iota(0, 200))
     {
-        mc.writeToScreen("wide 世界 and combining ᬦᬸ é\r\n");
+        mc.writeToScreen("wide \u4E16界 and combining ᬦᬸ e\u0301\r\n");
         if (round % 25 == 24)
         {
             auto const usable = usableSizes[static_cast<size_t>((round / 25) % 2)];
