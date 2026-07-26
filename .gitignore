@@ -3,6 +3,13 @@
 .vscode/**
 _deps
 _deps/**
+# The Unicode Character Database libunicode's table generator reads, downloaded into the source
+# tree by the build (LIBUNICODE_UCD_BASE_DIR). Same class of thing as _deps above: a fetched build
+# input, not source. Leaving it untracked also kept it in the spell checker's search, where a few
+# thousand character names ("LATIN CAPITAL LETTER VOLAPUK UE", "ARABIC LIGATURE TEH WITH JEEM")
+# read as misspellings.
+_ucd
+_ucd/**
 [bB]uild
 [bB]uild/**
 [rR]elease
