@@ -2192,7 +2192,10 @@ class Terminal
     // {{{ Render buffer state
     /// Boolean, indicating whether the terminal's screen buffer contains updates to be rendered.
     mutable std::atomic<uint64_t> _changes { 0 };
-    bool _screenDirty = false; // TODO: just inc _changes and delete this instead.
+    // Atomic because both threads touch it without a common lock: the parser thread sets it from
+    // screenUpdated(), which runs OUTSIDE _stateMutex on purpose (it calls back into the GUI), while
+    // the GUI/render thread reads and clears it in readFromPty()/fillRenderBuffer().
+    std::atomic<bool> _screenDirty = false; // TODO: just inc _changes and delete this instead.
     RefreshInterval _refreshInterval;
     RenderDoubleBuffer _renderBuffer {};
     std::atomic<uint64_t> _lastFrameID = 0;
