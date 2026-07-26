@@ -20,6 +20,7 @@
 #include <crispy/assert.h>
 #include <crispy/utils.h>
 
+#include <QtCore/QDeadlineTimer>
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
 #include <QtCore/QMetaObject>
@@ -308,9 +309,28 @@ TerminalSession::~TerminalSession()
 {
     sessionLog()("Destroying terminal session.");
     _terminating = true;
+
+    // Close the device first: that is what makes ExitWatcherThread's waitForClosed() return, so the
+    // watcher ends by itself. terminate() alone could not do this job. It only REQUESTS termination and
+    // does not wait, so the QThread was destroyed while its thread was still running -- Qt says as much
+    // ("QThread: Destroyed while thread is still running") and the live thread then reads a freed
+    // QThread. It is also unsafe on its own terms: it cuts the thread at an arbitrary instruction, and
+    // every waitForClosed() that blocks on a condition variable (SshSession's, the test mocks') holds
+    // that device's mutex while it waits, which would then never be unlocked.
+    if (!_terminal.device().isClosed())
+        _terminal.device().close();
     _terminal.device().wakeupReader();
-    if (_exitWatcherThread->isRunning())
+
+    // Bounded, because ConPty::waitForClosed() only notices the close on its next one-second poll.
+    // terminate() stays as the last resort, and is now followed by the wait() it always needed.
+    // wait() on a thread that was never started returns immediately, so the never-started case (a
+    // session whose device failed to start) costs nothing.
+    if (!_exitWatcherThread->wait(QDeadlineTimer { std::chrono::seconds { 3 } }))
+    {
         _exitWatcherThread->terminate();
+        _exitWatcherThread->wait();
+    }
+
     if (_screenUpdateThread)
         _screenUpdateThread->join();
 }
