@@ -2446,6 +2446,17 @@ bool TerminalSession::operator()(actions::TraceStep)
 
 bool TerminalSession::operator()(actions::ViNormalMode)
 {
+    // Locked for the same reason ToggleStatusLine above is: switching Vi mode is not a local state
+    // flip. ViCommands::modeChanged() pushes (resp. pops) the indicator status display, and that
+    // resizes the page -- Terminal::setStatusDisplay -> resizeScreen -> applyPageSizeToMainDisplay ->
+    // Grid::resize, which reallocates and reflows the grid the parser thread is writing into under
+    // this very lock. Unlocked, a keystroke landing mid-parse pulls the grid out from under a live
+    // write; the result is a torn grid or a dangling line iterator, i.e. a segmentation fault or a
+    // verifyState() abort -- and Require() is not compiled out in release builds. That is #1495,
+    // which needed a remote tmux only because it keeps the parser thread busy enough to hit the
+    // window nearly every time.
+    auto const l = scoped_lock { _terminal };
+
     if (terminal().inputHandler().mode() == ViMode::Insert)
         terminal().inputHandler().setMode(ViMode::Normal);
     else if (terminal().inputHandler().mode() == ViMode::Normal)
