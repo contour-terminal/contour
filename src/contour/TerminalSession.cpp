@@ -44,6 +44,7 @@
 #include <limits>
 #include <ranges>
 #include <regex>
+#include <span>
 
 #ifdef __OpenBSD__
     #include <pthread_np.h>
@@ -409,13 +410,76 @@ void TerminalSession::scheduleRedraw()
 void TerminalSession::start()
 {
     // ensure that we start only once
-    if (!_screenUpdateThread)
+    if (_screenUpdateThread)
+        return;
+
+    sessionLog()("Starting terminal session.");
+
+    // A device that will not start is an expected, recoverable outcome, and vtpty reports it as one.
+    // The catch is the backstop for what a signature cannot cover — std::bad_alloc, a throw from
+    // inside a platform call — because start() is reached from a Qt event handler (see
+    // display::TerminalDisplay::setSession), and an exception escaping it abandons a half-constructed
+    // display mid-mutation. That was the crash of issue #1711; nothing may leave this function.
+    auto const started = [this]() -> vtpty::StartResult {
+        try
+        {
+            return _terminal.device().start();
+        }
+        catch (std::exception const& e)
+        {
+            return std::unexpected(
+                vtpty::StartFailure { .error = vtpty::StartError::SpawnFailed, .detail = e.what() });
+        }
+    }();
+
+    if (!started)
     {
-        sessionLog()("Starting terminal session.");
-        _terminal.device().start();
-        _screenUpdateThread = make_unique<std::thread>(bind(&TerminalSession::mainLoop, this));
-        _exitWatcherThread->start(QThread::LowPriority);
+        reportDeviceStartFailure(started.error());
+        return; // No device, so no read loop and no exit watcher to start.
     }
+
+    // The device came up, but not necessarily as asked: the spawn may have had to drop the inherited
+    // working directory or fall back to the login shell. Say so before the child's own output arrives.
+    if (!started->diagnostic.empty())
+    {
+        sessionLog()("Device started with a diagnostic: {}", started->diagnostic);
+        writeNotice(std::array { started->diagnostic });
+    }
+
+    _screenUpdateThread = make_unique<std::thread>(bind(&TerminalSession::mainLoop, this));
+    _exitWatcherThread->start(QThread::LowPriority);
+}
+
+void TerminalSession::writeNotice(std::span<std::string const> lines)
+{
+    // Same highlighting as onClosed()'s early-exit notice, so every message this terminal speaks in
+    // its own voice — rather than relaying the child's — looks the same to the user.
+    auto constexpr SGR = "\033[1;38:2::255:255:255m\033[48:2::255:0:0m"sv;
+    auto constexpr EL = "\033[K"sv;
+    for (auto const& text: lines)
+        _terminal.writeToScreen(std::format("\r\n{}{}{}", SGR, EL, text));
+    _terminal.writeToScreen("\r\n");
+}
+
+void TerminalSession::reportDeviceStartFailure(vtpty::StartFailure const& failure)
+{
+    sessionLog()("Failed to start terminal device: {}", failure);
+
+    // Where the user is looking, and carrying the platform's own reason rather than a bare "it
+    // failed" — this is the parent-side equivalent of the diagnostic the POSIX child writes onto the
+    // pty before it exits (see Process_unix.cpp).
+    writeNotice(std::array {
+        std::format("{}", failure), "The terminal could not be started."s, "Press any key to close."s });
+
+    // Close the device so the session is coherently dead rather than idling on a device that never
+    // came up, and arm the early-exit notice so the pane is dismissed by the paths that already
+    // handle a shell that died right after starting: the acknowledging key press in sendKeyEvent(),
+    // or terminate()'s already-closed branch when the user closes the tab instead. Without this the
+    // pane would be a zombie — nothing to prune it, since the exit watcher never started.
+    if (!_terminal.device().isClosed())
+        _terminal.device().close();
+    auto const _ = std::scoped_lock { _onClosedMutex };
+    _terminatedAndWaitingForKeyPress = true;
 }
 
 void TerminalSession::mainLoop()
@@ -981,13 +1045,8 @@ void TerminalSession::onClosed()
         // model and tear down its QML item, destroying the very screen the message below is shown on
         // (and leaving an empty window behind that nothing can close). The pane stays fully alive until
         // the acknowledging key press (see sendKeyEvent/sendCharEvent), which prunes and closes then.
-        auto constexpr SGR = "\033[1;38:2::255:255:255m\033[48:2::255:0:0m"sv;
-        auto constexpr EL = "\033[K"sv;
-        auto constexpr TextLines = array<string_view, 2> { "Shell terminated too quickly.",
-                                                           "The window will not be closed automatically." };
-        for (auto const text: TextLines)
-            _terminal.writeToScreen(std::format("\r\n{}{}{}", SGR, EL, text));
-        _terminal.writeToScreen("\r\n");
+        writeNotice(
+            array { "Shell terminated too quickly."s, "The window will not be closed automatically."s });
         _terminatedAndWaitingForKeyPress = true;
         return;
     }

@@ -51,16 +51,23 @@ namespace
 
 using contour::test::TestApp;
 
-/// Creates a TerminalSession backed by a MockPty, with NO display attached (the default state).
+constexpr auto TestPageSize = vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) };
+
+/// Creates a TerminalSession backed by @p pty, with NO display attached (the default state).
 /// The session owns the PTY; the caller owns the session.
-[[nodiscard]] std::unique_ptr<contour::TerminalSession> makeDisplaylessSession(contour::ContourGuiApp& app)
+[[nodiscard]] std::unique_ptr<contour::TerminalSession> makeSessionWith(contour::ContourGuiApp& app,
+                                                                        std::unique_ptr<vtpty::Pty> pty)
 {
-    auto pty =
-        std::make_unique<vtpty::MockPty>(vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) });
     // Pass the app's real session manager so the sessionClosed->removeSession wiring matches
     // production; we never pump the Qt event loop here, so that slot does not actually fire and the
     // test stays deterministic.
     return std::make_unique<contour::TerminalSession>(&app.sessionsManager(), std::move(pty), app);
+}
+
+/// The common case: a session over a plain MockPty.
+[[nodiscard]] std::unique_ptr<contour::TerminalSession> makeDisplaylessSession(contour::ContourGuiApp& app)
+{
+    return makeSessionWith(app, std::make_unique<vtpty::MockPty>(TestPageSize));
 }
 
 } // namespace
@@ -168,6 +175,102 @@ TEST_CASE("TerminalSession::workingDirectory rejects a cwd that does not exist o
     // the local path was resolved, or the platform-uniform "." fallback was taken — never a
     // nonexistent path.
     CHECK((resolved == "." || std::filesystem::exists(resolved)));
+}
+
+TEST_CASE("TerminalSession::start reports a device that fails to start instead of propagating",
+          "[contour][session][start]")
+{
+    // Regression for #1711 ("Crash on Windows"). On Windows there is no fork(), so a CreateProcess()
+    // failure — a working directory the shell cannot be started in, a shell that is not on PATH — is
+    // discovered in the PARENT, and vtpty's only way to report it was to throw. TerminalSession::start()
+    // let that exception through, so it unwound out of TerminalDisplay::setSession() halfway: past the
+    // image decoder, past the font/grid re-seed, and past `emit sessionChanged(newSession)`. The session
+    // was by then registered with the manager and owned a tab in the vtmux model, but its update thread
+    // and exit watcher had never started, so no onClosed() could ever prune it — a half-bound display
+    // and a zombie pane.
+    //
+    // A shell that will not start is an expected, recoverable failure. It must be REPORTED — in the
+    // pane, the way the POSIX child already reports its own chdir/exec failures — never propagated.
+    TestApp testApp;
+    auto session =
+        makeSessionWith(testApp.app(),
+                        std::make_unique<contour::test::ConfigurableStartPty>(
+                            TestPageSize, contour::test::ConfigurableStartPty::StartBehavior::Throw));
+
+    // The headline: whatever the device does, start() must not take the process down with it.
+    CHECK_NOTHROW(session->start());
+
+    // Reported where the user is looking, carrying the reason rather than a bare "it failed".
+    auto const screen = session->terminal().primaryScreen().renderMainPageText();
+    CHECK(screen.contains(contour::test::ConfigurableStartPty::FailureText));
+
+    // The device never came up, so it is left closed — which is what makes the pane dismissible
+    // through the paths that already exist (terminate()'s already-closed branch, and the
+    // acknowledging key press below).
+    CHECK(session->terminal().device().isClosed());
+
+    // The pane is not a zombie: the next key press prunes it, exactly as the early-exit notice does
+    // for a shell that dies right after starting.
+    auto closed = 0;
+    QObject::connect(session.get(), &contour::TerminalSession::sessionClosed, [&](contour::TerminalSession&) {
+        ++closed;
+    });
+    session->sendKeyEvent(vtbackend::Key::Enter,
+                          vtbackend::Modifiers {},
+                          vtbackend::KeyboardEventType::Press,
+                          std::chrono::steady_clock::now());
+    CHECK(closed == 1);
+}
+
+TEST_CASE("TerminalSession::start surfaces a reported start failure", "[contour][session][start]")
+{
+    // The same contract as above, reached the way vtpty now actually reports it: as a StartFailure
+    // value rather than an exception. This is the shape Process_win32's CreateProcess() ladder returns
+    // when every rung failed.
+    TestApp testApp;
+    auto session =
+        makeSessionWith(testApp.app(),
+                        std::make_unique<contour::test::ConfigurableStartPty>(
+                            TestPageSize, contour::test::ConfigurableStartPty::StartBehavior::Fail));
+
+    CHECK_NOTHROW(session->start());
+
+    // The platform's own reason reaches the user — a bare "could not start" would leave them with no
+    // idea that it was the directory, which is exactly what they need to fix.
+    auto const screen = session->terminal().primaryScreen().renderMainPageText();
+    CHECK(screen.contains(contour::test::ConfigurableStartPty::FailureText));
+    CHECK(session->terminal().device().isClosed());
+}
+
+TEST_CASE("TerminalSession::start runs a session that started with a diagnostic", "[contour][session][start]")
+{
+    // A spawn-ladder rung below the first one: the child IS running, but not the way it was asked for
+    // (here the inherited working directory had to be dropped). That is a notice, not a failure — the
+    // session must come up completely, or the recovery would be worse than the crash it replaced.
+    TestApp testApp;
+    auto session =
+        makeSessionWith(testApp.app(),
+                        std::make_unique<contour::test::ConfigurableStartPty>(
+                            TestPageSize, contour::test::ConfigurableStartPty::StartBehavior::Diagnose));
+
+    CHECK_NOTHROW(session->start());
+
+    auto const screen = session->terminal().primaryScreen().renderMainPageText();
+    CHECK(screen.contains(contour::test::ConfigurableStartPty::DiagnosticText));
+
+    // Unlike the failure cases, the device stays OPEN and the read loop is running.
+    CHECK_FALSE(session->terminal().device().isClosed());
+
+    // Not armed for dismissal: a key press is input for the shell, not an acknowledgement.
+    auto closed = 0;
+    QObject::connect(session.get(), &contour::TerminalSession::sessionClosed, [&](contour::TerminalSession&) {
+        ++closed;
+    });
+    session->sendKeyEvent(vtbackend::Key::Enter,
+                          vtbackend::Modifiers {},
+                          vtbackend::KeyboardEventType::Press,
+                          std::chrono::steady_clock::now());
+    CHECK(closed == 0);
 }
 
 // ============================================================================================

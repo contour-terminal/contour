@@ -17,6 +17,8 @@
 
 #include <vtbackend/Terminal.h>
 
+#include <vtpty/Pty.h>
+
 #include <vtrasterizer/Renderer.h>
 
 #include <crispy/point.h>
@@ -29,6 +31,8 @@
 #include <atomic>
 #include <cstdint>
 #include <format>
+#include <span>
+#include <string>
 #include <thread>
 
 #include <qcolor.h>
@@ -367,7 +371,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return The raw window title (empty if none has been set).
     [[nodiscard]] std::string resolvedWindowTitle() const { return terminal().resolvedWindowTitle(); }
 
-    /// Starts the VT background thread.
+    /// Starts the PTY device and, if it came up, the VT background threads.
+    ///
+    /// Total: a device that cannot be started is REPORTED into this session's screen, never
+    /// propagated. Callers reach start() from inside Qt event handlers (see
+    /// display::TerminalDisplay::setSession), where an escaping exception would abandon a
+    /// half-constructed display — the crash of issue #1711.
     void start();
 
     /// Initiates termination of this session, regardless of the underlying terminal state.
@@ -707,6 +716,15 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool reloadConfig(config::Config newConfig, std::string const& profileName);
     int executeAllActions(std::vector<actions::Action> const& actions);
     void spawnNewTerminal(std::string const& profileName);
+
+    /// Writes @p lines into this session's own screen, highlighted the way onClosed()'s early-exit
+    /// notice is, so the user reads them where the shell's output would have been.
+    void writeNotice(std::span<std::string const> lines);
+
+    /// Reports a PTY device that failed to start, and leaves the pane in the state the early-exit
+    /// notice already defines: the reason on screen, the device closed, and the pane pruned by the
+    /// next key press (see sendKeyEvent) or by closing the tab (see terminate).
+    void reportDeviceStartFailure(vtpty::StartFailure const& failure);
 
     /// Re-announces every Q_PROPERTY whose value is derived from the profile, so the QML bindings that
     /// read them re-evaluate against the profile that was just swapped in. Call after every assignment
