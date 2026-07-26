@@ -12,6 +12,7 @@
 
 #include <vtbackend/Color.h>
 
+#include <QtCore/QStringList>
 #include <QtCore/QTemporaryDir>
 
 #include <catch2/catch_approx.hpp>
@@ -60,6 +61,15 @@ struct Fixture
                                                           });
     }
 };
+
+/// Finds the field row whose "key" is @p key in @p rows, or an empty map if absent.
+[[nodiscard]] QVariantMap rowWithKey(QVariantList const& rows, QString const& key)
+{
+    for (auto const& row: rows)
+        if (row.toMap().value("key").toString() == key)
+            return row.toMap();
+    return {};
+}
 
 /// Finds the profile row named @p name in @p rows, or an empty map if absent.
 [[nodiscard]] QVariantMap rowNamed(QVariantList const& rows, QString const& name)
@@ -452,3 +462,272 @@ TEST_CASE("SettingsController: gui_config_locked makes the page read-only", "[se
     CHECK(fx.controller->saveProfileAs("work") == false);
     CHECK(fx.controller->setDefaultProfile("main") == false);
 }
+
+// {{{ Profile field descriptors
+
+TEST_CASE("SettingsController: every enum field's value is one of its own options", "[settings]")
+{
+    // An enum row hands QML both a combo-box model (`options`) and the currently selected value. If the
+    // value is spelled differently from the options -- which is what happens the moment those two are
+    // derived separately -- the combo box silently shows nothing selected, and the first interaction
+    // writes a value the user never chose. Checking every enum row at once catches that for all of them,
+    // including ones added later.
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+
+    auto enumRows = 0;
+    for (auto const& raw: fx.controller->profileFields())
+    {
+        auto const row = raw.toMap();
+        if (row.value("type").toString() != "enum")
+            continue;
+        ++enumRows;
+
+        auto const key = row.value("key").toString();
+        auto const options = row.value("options").toStringList();
+        auto const value = row.value("value").toString();
+
+        INFO("enum field: " << key.toStdString() << " = '" << value.toStdString() << "'");
+        CHECK(!options.isEmpty());
+        CHECK(options.contains(value));
+    }
+    CHECK(enumRows > 0); // the loop above is worthless if it never runs
+}
+
+TEST_CASE("SettingsController: enum fields round-trip through their options", "[settings]")
+{
+    // Setting a row to each of its own options must stick. This is the other half of the drift check
+    // above: the getter and the setter have to agree on the spelling, not merely each be self-consistent.
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+
+    for (auto const& raw: fx.controller->profileFields())
+    {
+        auto const row = raw.toMap();
+        if (row.value("type").toString() != "enum")
+            continue;
+
+        auto const key = row.value("key").toString();
+        for (auto const& option: row.value("options").toStringList())
+        {
+            fx.controller->setProfileField(key, option);
+            auto const after = rowWithKey(fx.controller->profileFields(), key);
+            INFO("enum field: " << key.toStdString() << " set to '" << option.toStdString() << "'");
+            CHECK(after.value("value").toString() == option);
+        }
+    }
+}
+
+TEST_CASE("SettingsController: unlimited scrollback survives a round-trip", "[settings]")
+{
+    // -1 is how the config file spells unlimited history, so it is what the page must show and accept.
+    // Reporting Infinite as 0 and reading 0 back as LineCount(0) turned unlimited scrollback into no
+    // scrollback the first time anything touched the field.
+    auto fx = Fixture(std::string_view { R"(
+default_profile: main
+profiles:
+    main:
+        history:
+            limit: -1
+)" });
+    fx.controller->newProfile("main");
+
+    auto const row = rowWithKey(fx.controller->profileFields(), "history_max_lines");
+    REQUIRE(!row.isEmpty());
+    CHECK(row.value("value").toInt() == -1);
+
+    SECTION("and writing -1 back keeps it unlimited")
+    {
+        fx.controller->setProfileField("history_max_lines", -1);
+        CHECK(rowWithKey(fx.controller->profileFields(), "history_max_lines").value("value").toInt() == -1);
+    }
+
+    SECTION("while a finite limit is still a finite limit")
+    {
+        fx.controller->setProfileField("history_max_lines", 4200);
+        CHECK(rowWithKey(fx.controller->profileFields(), "history_max_lines").value("value").toInt() == 4200);
+    }
+}
+
+TEST_CASE("SettingsController: profile fields are grouped for the settings page", "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+
+    auto groups = QStringList {};
+    for (auto const& raw: fx.controller->profileFields())
+    {
+        auto const row = raw.toMap();
+        auto const group = row.value("group").toString();
+        INFO("field: " << row.value("key").toString().toStdString());
+        CHECK(!group.isEmpty()); // every field belongs to a section
+        CHECK(!row.value("groupGlyph").toString().isEmpty());
+        if (!groups.contains(group))
+            groups.push_back(group);
+    }
+    CHECK(groups.size() > 1); // and they are not all in one bucket
+
+    // The three raw indicator template fields are gone: the visual editor owns them now, so the page no
+    // longer has to hide them by matching on a key prefix.
+    auto keys = QStringList {};
+    for (auto const& raw: fx.controller->profileFields())
+        keys.push_back(raw.toMap().value("key").toString());
+    CHECK(!keys.contains("status_line_indicator_left"));
+    CHECK(!keys.contains("status_line_indicator_middle"));
+    CHECK(!keys.contains("status_line_indicator_right"));
+}
+
+// }}}
+// {{{ Indicator status line bridge
+
+TEST_CASE("SettingsController: the indicator bridge round-trips a segment unchanged", "[settings]")
+{
+    // The whole point of the bridge: opening the settings page parses each segment into items, and saving
+    // serializes them back. A segment nobody edited must come back byte-identical, or merely visiting the
+    // page rewrites the user's profile.
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+
+    for (auto const segmentIndex: { 0, 1, 2 })
+    {
+        auto const original = fx.controller->indicatorSegment(segmentIndex);
+        auto const items = fx.controller->parseIndicatorSegment(original);
+        INFO("segment " << segmentIndex << ": " << original.toStdString());
+        REQUIRE(!items.isEmpty());
+
+        // Canonical form is a fixed point, so repeated opens and saves cannot drift the template.
+        auto const once = fx.controller->serializeIndicatorSegment(items);
+        CHECK(fx.controller->serializeIndicatorSegment(fx.controller->parseIndicatorSegment(once)) == once);
+
+        // And every item kept its type rather than degrading into literal text.
+        auto typesOf = [](QVariantList const& rows) {
+            auto out = QStringList {};
+            for (auto const& row: rows)
+                out.push_back(row.toMap().value("type").toString());
+            return out;
+        };
+        CHECK(typesOf(fx.controller->parseIndicatorSegment(once)) == typesOf(items));
+    }
+}
+
+TEST_CASE("SettingsController: the indicator bridge preserves the default left segment's detail",
+          "[settings]")
+{
+    // The shipped default's {Tabs:ActiveColor=#FFFF00,...} is the case that used to be destroyed: the
+    // bridge rebuilt Tabs with its three extra fields defaulted, so opening the page dropped the colour.
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+
+    auto const items = fx.controller->parseIndicatorSegment(fx.controller->indicatorSegment(0));
+    auto tabs = QVariantMap {};
+    for (auto const& raw: items)
+        if (raw.toMap().value("type").toString() == "Tabs")
+            tabs = raw.toMap();
+
+    REQUIRE(!tabs.isEmpty());
+    CHECK(tabs.value("hasActiveColor").toBool());
+    CHECK(tabs.value("activeColor").toString() == "#FFFF00");
+
+    // ... and it is still there after a save.
+    auto const readBack =
+        fx.controller->parseIndicatorSegment(fx.controller->serializeIndicatorSegment(items));
+    auto tabsAgain = QVariantMap {};
+    for (auto const& raw: readBack)
+        if (raw.toMap().value("type").toString() == "Tabs")
+            tabsAgain = raw.toMap();
+    CHECK(tabsAgain.value("activeColor").toString() == "#FFFF00");
+}
+
+TEST_CASE("SettingsController: the indicator bridge exposes every flag the template supports", "[settings]")
+{
+    // Four of the thirteen used to be exposed, so a profile using Underline or Inverse lost it on save.
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+
+    auto const flagCatalog = fx.controller->indicatorFlags();
+    REQUIRE(flagCatalog.size() >= 13);
+
+    auto const items = fx.controller->parseIndicatorSegment("{InputMode:Underline,Inverse,CrossedOut}");
+    REQUIRE(items.size() == 1);
+    auto const flags = items.first().toMap().value("flags").toMap();
+
+    // Each catalog entry is a key of the per-item flag map, so QML can drive one from the other.
+    for (auto const& raw: flagCatalog)
+    {
+        auto const key = raw.toMap().value("key").toString();
+        INFO("flag: " << key.toStdString());
+        CHECK(!raw.toMap().value("label").toString().isEmpty());
+        CHECK(flags.contains(key));
+    }
+
+    CHECK(flags.value("Underline").toBool());
+    CHECK(flags.value("Inverse").toBool());
+    CHECK(flags.value("CrossedOut").toBool());
+    CHECK(!flags.value("Bold").toBool());
+
+    // And they survive the trip back out.
+    auto const readBack =
+        fx.controller->parseIndicatorSegment(fx.controller->serializeIndicatorSegment(items));
+    REQUIRE(readBack.size() == 1);
+    auto const after = readBack.first().toMap().value("flags").toMap();
+    CHECK(after.value("Underline").toBool());
+    CHECK(after.value("Inverse").toBool());
+    CHECK(after.value("CrossedOut").toBool());
+}
+
+TEST_CASE("SettingsController: the indicator placeholder catalog matches what parsing produces", "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+    auto const catalog = fx.controller->indicatorPlaceholders();
+    REQUIRE(!catalog.isEmpty());
+
+    for (auto const& raw: catalog)
+    {
+        auto const entry = raw.toMap();
+        auto const type = entry.value("type").toString();
+        INFO("placeholder: " << type.toStdString());
+        CHECK(!entry.value("label").toString().isEmpty());
+        CHECK(!entry.value("sample").toString().isEmpty());
+
+        // Text and Command need their payload attribute to be recognized at all; the rest stand alone.
+        auto const templateText = [&type] {
+            if (type == "Text")
+                return QString("{Text:text=x}");
+            if (type == "Command")
+                return QString("{Command:Program=true}");
+            return QString("{%1}").arg(type);
+        }();
+        auto const items = fx.controller->parseIndicatorSegment(templateText);
+        REQUIRE(items.size() == 1);
+        CHECK(items.first().toMap().value("type").toString() == type);
+    }
+}
+
+TEST_CASE("SettingsController: setIndicatorSegment refuses a read-only profile", "[settings]")
+{
+    // The chips in the editor are gated in QML too, but the controller is the boundary that has to hold:
+    // a contour.yml profile is shown read-only and must not be editable through this path.
+    auto fx = Fixture(BasicConfig);
+    fx.controller->editProfile("main"); // a contour.yml profile: read-only in the GUI
+    REQUIRE(fx.controller->editingReadOnly());
+
+    auto const before = fx.controller->indicatorSegment(0);
+    fx.controller->setIndicatorSegment(0, "{Clock}");
+    CHECK(fx.controller->indicatorSegment(0) == before);
+}
+
+TEST_CASE("SettingsController: indicator segment indices are bounds-checked", "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+
+    CHECK(fx.controller->indicatorSegment(-1).isEmpty());
+    CHECK(fx.controller->indicatorSegment(3).isEmpty());
+
+    // An out-of-range write is dropped rather than landing on a neighbouring segment.
+    auto const middle = fx.controller->indicatorSegment(1);
+    fx.controller->setIndicatorSegment(7, "{Clock}");
+    CHECK(fx.controller->indicatorSegment(1) == middle);
+}
+
+// }}}

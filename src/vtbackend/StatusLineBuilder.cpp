@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/StatusLineBuilder.h>
 
+#include <vtbackend/CellFlags.h>
 #include <vtbackend/Color.h>
 #include <vtbackend/Terminal.h>
 
@@ -10,12 +11,14 @@
 #include <libunicode/convert.h>
 
 #include <chrono>
+#include <concepts>
 #include <cstdio>
 #include <ctime>
 #include <format>
 #include <optional>
 #include <ranges>
 #include <system_error>
+#include <type_traits>
 
 using namespace std::string_view_literals;
 
@@ -53,119 +56,79 @@ static std::optional<RGBColor> tryParseColorAttribute(crispy::string_interpolati
     return std::nullopt;
 }
 
-static std::optional<StatusLineDefinitions::Item> makeStatusLineItem(
-    crispy::interpolated_string_fragment const& fragment)
+/// The value of attribute @p key, or nullopt when the interpolation does not carry it.
+static std::optional<std::string> tryParseStringAttribute(crispy::string_interpolation const& interpolation,
+                                                          std::string_view key)
 {
-    if (std::holds_alternative<std::string_view>(fragment))
-        return StatusLineDefinitions::Text { StatusLineDefinitions::Styles {},
-                                             std::string(std::get<std::string_view>(fragment)) };
+    if (auto const i = interpolation.attributes.find(key); i != interpolation.attributes.end())
+        return std::string(i->second);
 
-    auto const& interpolation = std::get<crispy::string_interpolation>(fragment);
+    return std::nullopt;
+}
 
+/// Builds the item of type @p T that @p interpolation describes, given its already-parsed @p styles.
+///
+/// The three alternatives carrying payload beyond `Styles` are the only ones that need saying here;
+/// every other placeholder is exactly its styles. Returns nullopt when a required attribute is
+/// missing, which makes the placeholder unrecognized and so echoed verbatim by the caller.
+template <typename T>
+static std::optional<StatusLineDefinitions::Item> makeItemOfType(
+    StatusLineDefinitions::Styles const& styles, crispy::string_interpolation const& interpolation)
+{
+    if constexpr (std::same_as<T, StatusLineDefinitions::Command>)
+    {
+        // Without a program there is nothing to run, so this is not a usable {Command}.
+        if (auto program = tryParseStringAttribute(interpolation, "Program"))
+            return StatusLineDefinitions::Command { styles, std::move(*program) };
+        return std::nullopt;
+    }
+    else if constexpr (std::same_as<T, StatusLineDefinitions::Text>)
+    {
+        // A missing `text=` yields empty text rather than throwing: this parses user-authored config,
+        // and a bare "{Text}" is a plausible typo that must not take the process down.
+        return StatusLineDefinitions::Text {
+            styles, tryParseStringAttribute(interpolation, "text").value_or(std::string {})
+        };
+    }
+    else if constexpr (std::same_as<T, StatusLineDefinitions::Tabs>)
+    {
+        return StatusLineDefinitions::Tabs {
+            styles,
+            tryParseColorAttribute(interpolation, "ActiveColor"),
+            tryParseColorAttribute(interpolation, "ActiveBackground"),
+            tryParseStringAttribute(interpolation, "Separator"),
+        };
+    }
+    else
+        return T { styles };
+}
+
+/// The item @p interpolation describes, or nullopt when it names no known placeholder (or names one but
+/// omits an attribute it cannot do without), in which case the caller echoes it verbatim.
+static std::optional<StatusLineDefinitions::Item> makeStatusLineItem(
+    crispy::string_interpolation const& interpolation)
+{
     auto styles = StatusLineDefinitions::Styles {};
 
-    auto constexpr FlagMappings = std::array {
-        std::pair { "Bold", CellFlag::Bold },
-        std::pair { "Faint", CellFlag::Faint },
-        std::pair { "Italic", CellFlag::Italic },
-        std::pair { "Underline", CellFlag::Underline },
-        std::pair { "Blinking", CellFlag::Blinking },
-        std::pair { "Inverse", CellFlag::Inverse },
-        std::pair { "CrossedOut", CellFlag::CrossedOut },
-        std::pair { "DoubleUnderline", CellFlag::DoublyUnderlined },
-        std::pair { "CurlyUnderline", CellFlag::CurlyUnderlined },
-        std::pair { "DottedUnderline", CellFlag::DottedUnderline },
-        std::pair { "DashedUnderline", CellFlag::DashedUnderline },
-        std::pair { "RapidBlinking", CellFlag::RapidBlinking },
-        std::pair { "Overline", CellFlag::Overline },
-    };
-
-    for (auto&& [text, flag]: FlagMappings)
-        if (interpolation.flags.contains(text))
+    for (auto const& [name, _, flag]: StatusLineDefinitions::CellFlagNames)
+        if (interpolation.flags.contains(name))
             styles.flags.enable(flag);
 
     styles.foregroundColor = tryParseColorAttribute(interpolation, "Color");
     styles.backgroundColor = tryParseColorAttribute(interpolation, "BackgroundColor");
+    styles.textLeft = tryParseStringAttribute(interpolation, "Left").value_or(std::string {});
+    styles.textRight = tryParseStringAttribute(interpolation, "Right").value_or(std::string {});
 
-    if (auto const i = interpolation.attributes.find("Left"); i != interpolation.attributes.end())
-        styles.textLeft = i->second;
-
-    if (auto const i = interpolation.attributes.find("Right"); i != interpolation.attributes.end())
-        styles.textRight = i->second;
-
-    if (interpolation.name == "CellSGR")
-        return StatusLineDefinitions::CellSGR { styles };
-
-    if (interpolation.name == "CellTextUTF8")
-        return StatusLineDefinitions::CellTextUtf8 { styles };
-
-    if (interpolation.name == "CellTextUTF32")
-        return StatusLineDefinitions::CellTextUtf32 { styles };
-
-    if (interpolation.name == "Clock")
-        return StatusLineDefinitions::Clock { styles };
-
-    if (interpolation.name == "Command")
-    {
-        if (interpolation.attributes.contains("Program"))
-        {
-            return StatusLineDefinitions::Command {
-                styles,
-                std::string(interpolation.attributes.at("Program")),
-            };
-        }
-        else
-            return std::nullopt;
-    }
-
-    if (interpolation.name == "HistoryLineCount")
-        return StatusLineDefinitions::HistoryLineCount { styles };
-
-    if (interpolation.name == "Hyperlink")
-        return StatusLineDefinitions::Hyperlink { styles };
-
-    if (interpolation.name == "InputMode")
-        return StatusLineDefinitions::InputMode { styles };
-
-    if (interpolation.name == "TraceMode")
-        return StatusLineDefinitions::TraceMode { styles };
-
-    if (interpolation.name == "ProtectedMode")
-        return StatusLineDefinitions::ProtectedMode { styles };
-
-    if (interpolation.name == "SearchMode")
-        return StatusLineDefinitions::SearchMode { styles };
-
-    if (interpolation.name == "SearchPrompt")
-        return StatusLineDefinitions::SearchPrompt { styles };
-
-    if (interpolation.name == "Title")
-        return StatusLineDefinitions::Title { styles };
-
-    if (interpolation.name == "Text")
-        return StatusLineDefinitions::Text {
-            styles,
-            std::string(interpolation.attributes.at("text")),
-        };
-
-    if (interpolation.name == "VTType")
-        return StatusLineDefinitions::VTType { styles };
-
-    if (interpolation.name == "Tabs")
-    {
-        std::optional<RGBColor> const activeColor = tryParseColorAttribute(interpolation, "ActiveColor");
-        std::optional<RGBColor> const activeBackground =
-            tryParseColorAttribute(interpolation, "ActiveBackground");
-
-        return StatusLineDefinitions::Tabs {
-            styles,
-            activeColor,
-            activeBackground,
-            std::nullopt, // separator
-        };
-    }
-
-    return std::nullopt;
+    // Dispatch on the placeholder name via StatusLineDefinitions::ItemTraits, so the set of names
+    // understood here is the same set the serializer writes and the settings page offers.
+    auto result = std::optional<StatusLineDefinitions::Item> {};
+    StatusLineDefinitions::forEachItemType([&](auto tag) {
+        using T = decltype(tag)::type;
+        if (result || interpolation.name != StatusLineDefinitions::ItemTraits<T>::Name)
+            return;
+        result = makeItemOfType<T>(styles, interpolation);
+    });
+    return result;
 }
 
 StatusLineSegment parseStatusLineSegment(std::string_view text)
@@ -187,10 +150,9 @@ StatusLineSegment parseStatusLineSegment(std::string_view text)
     {
         if (std::holds_alternative<std::string_view>(fragment))
             segment.emplace_back(literalText(std::get<std::string_view>(fragment)));
-        // Pass the fragment variant straight through (no copy): makeStatusLineItem takes it by const ref,
-        // so binding the string_interpolation into a temporary variant here would deep-copy its flag set
-        // and attribute map.
-        else if (auto const item = makeStatusLineItem(fragment))
+        // Reached by const reference out of the variant (no copy): binding the string_interpolation by
+        // value here would deep-copy its flag set and attribute map.
+        else if (auto const item = makeStatusLineItem(std::get<crispy::string_interpolation>(fragment)))
             segment.emplace_back(*item);
         else
             // An unrecognized placeholder is echoed verbatim (its exact original `{...}` slice) rather than
@@ -517,6 +479,132 @@ std::string serializeToVT(Terminal const& vt, StatusLineSegment const& segment, 
     for (auto const& item: segment)
         serializer(item);
     return serializer.result;
+}
+
+namespace
+{
+    /// Writes a placeholder's attribute list, emitting the ':' that separates the placeholder name
+    /// from its first attribute and the ',' before each subsequent one.
+    ///
+    /// crispy::parse_interpolation splits a placeholder at its *first* colon -- everything before it
+    /// is the name -- then splits what follows on commas. Emitting a comma where the colon belongs
+    /// therefore folds the entire attribute list into the name, which matches no placeholder and is
+    /// echoed back as literal text: the item and every style on it are destroyed by one round trip.
+    /// Owning the separator in one place is what stops that from being writable by accident.
+    struct AttributeWriter
+    {
+        std::string& out;
+        bool first = true;
+
+        /// Appends a bare flag, e.g. "Bold".
+        void add(std::string_view entry)
+        {
+            out += first ? ':' : ',';
+            first = false;
+            out += entry;
+        }
+
+        /// Appends a "key=value" attribute.
+        void add(std::string_view key, std::string_view value)
+        {
+            add(key);
+            out += '=';
+            out += value;
+        }
+
+        /// Appends "key=#RRGGBB" when @p color holds a value; a no-op otherwise.
+        void addColor(std::string_view key, std::optional<RGBColor> color)
+        {
+            // formatColor() is documented as the exact inverse of parseColor(), which is what
+            // tryParseColorAttribute() reads these back with -- so the two ends of the round trip are
+            // one function apart rather than two spellings that have to be kept agreeing.
+            if (color)
+                add(key, formatColor(*color));
+        }
+    };
+
+    /// Whether @p text survives a round trip as a placeholder attribute value.
+    ///
+    /// A template has no escaping, so a ',' reads back as an attribute separator and a brace as a
+    /// placeholder boundary. See the note on @ref serializeStatusLineSegment.
+    [[nodiscard]] bool isAttributeSafe(std::string_view text) noexcept
+    {
+        return text.find_first_of(",{}") == std::string_view::npos;
+    }
+
+    /// Appends the attributes every item shares: its flags, colors and side adornments.
+    void appendStyles(AttributeWriter& attributes, StatusLineDefinitions::Styles const& styles)
+    {
+        for (auto const& [name, _, flag]: StatusLineDefinitions::CellFlagNames)
+            if (styles.flags.test(flag))
+                attributes.add(name);
+
+        attributes.addColor("Color", styles.foregroundColor);
+        attributes.addColor("BackgroundColor", styles.backgroundColor);
+
+        if (!styles.textLeft.empty())
+            attributes.add("Left", styles.textLeft);
+
+        if (!styles.textRight.empty())
+            attributes.add("Right", styles.textRight);
+    }
+} // namespace
+
+std::string serializeStatusLineSegment(StatusLineSegment const& segment)
+{
+    auto result = std::string {};
+
+    for (auto const& item: segment)
+    {
+        std::visit(
+            [&](auto const& v) {
+                using T = std::decay_t<decltype(v)>;
+
+                if constexpr (std::same_as<T, StatusLineDefinitions::Text>)
+                {
+                    auto const unstyled = !v.foregroundColor && !v.backgroundColor && !v.flags.any()
+                                          && v.textLeft.empty() && v.textRight.empty();
+                    // A bare literal is the form parseStatusLineSegment produces for the plain text
+                    // between placeholders, and the only form that can hold a comma or a brace at
+                    // all -- so text that cannot be an attribute is emitted this way even when that
+                    // costs its styling, because the styled form would come back corrupted instead.
+                    if (unstyled || !isAttributeSafe(v.text))
+                    {
+                        // Verbatim, with no brace escaping: a template has none, so a doubled brace
+                        // would not read back as one -- it would gain a brace on every save.
+                        // Verbatim round-trips exactly, because "a{b" reads back as the literal "a"
+                        // followed by the unterminated "{b" echoed verbatim, and the two concatenate
+                        // to the text we started with.
+                        result += v.text;
+                        return;
+                    }
+                }
+
+                result += '{';
+                result += StatusLineDefinitions::ItemTraits<T>::Name;
+                auto attributes = AttributeWriter { .out = result };
+
+                if constexpr (std::same_as<T, StatusLineDefinitions::Text>)
+                    attributes.add("text", v.text);
+                else if constexpr (std::same_as<T, StatusLineDefinitions::Command>)
+                    attributes.add("Program", v.command);
+
+                appendStyles(attributes, v);
+
+                if constexpr (std::same_as<T, StatusLineDefinitions::Tabs>)
+                {
+                    attributes.addColor("ActiveColor", v.activeColor);
+                    attributes.addColor("ActiveBackground", v.activeBackground);
+                    if (v.separator)
+                        attributes.add("Separator", *v.separator);
+                }
+
+                result += '}';
+            },
+            item);
+    }
+
+    return result;
 }
 
 } // namespace vtbackend

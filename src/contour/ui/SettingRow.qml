@@ -1,12 +1,16 @@
 // vim:syntax=qml
-// One editable setting, rendered as a Windows-Terminal-style "settings card": a rounded, subtly
-// elevated surface (SystemPalette.base over the page's window colour) with the label + help text on
-// the left and a type-driven editor on the right, plus a faint accent wash on hover.
+// One editable setting: the label + help text on the left and a type-driven editor on the right, with a
+// faint accent wash on hover.
 //
 // It is the reusable building block of the settings page (mirroring Windows Terminal's SettingContainer):
 // a page is a column of these, each bound to one row of SettingsController.profileFields
 // ({ key, label, help, type, value }). The `type` string selects the editor widget, so a new field
 // type is a new case in the Loader below — not a change to every page.
+//
+// Two looks, chosen by `flat`. Standalone it draws its own rounded, subtly elevated card
+// (SystemPalette.base over the page's window colour). Inside a SettingsSection it draws no card at all,
+// because the section already is one: nesting a card per row inside a card per group reads as clutter
+// and doubles every border the eye has to cross to find a field.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -22,10 +26,16 @@ Item {
     property var options: []
     property bool editable: true
 
+    /// Drop the card and draw a hover wash only; for rows inside a SettingsSection.
+    property bool flat: false
+    /// Draw a hairline above the row. Set on every row of a section but its first, to separate the rows
+    /// the dropped card used to separate.
+    property bool showSeparator: false
+
     // Emitted when the user commits a change; the page forwards it to SettingsController.setProfileField.
     signal edited(string key, var value)
 
-    implicitHeight: rowLayout.implicitHeight + 24
+    implicitHeight: rowLayout.implicitHeight + (root.flat ? 16 : 24)
     implicitWidth: rowLayout.implicitWidth + 32
 
     SystemPalette {
@@ -36,9 +46,9 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        radius: 8
-        color: sys.base
-        border.width: 1
+        radius: root.flat ? 6 : 8
+        color: root.flat ? "transparent" : sys.base
+        border.width: root.flat ? 0 : 1
         border.color: Qt.rgba(sys.windowText.r, sys.windowText.g, sys.windowText.b, 0.12)
         Rectangle {
             anchors.fill: parent
@@ -50,13 +60,22 @@ Item {
         HoverHandler { id: cardHover }
     }
 
+    Rectangle {
+        anchors { left: parent.left; right: parent.right; top: parent.top }
+        anchors.leftMargin: 4
+        anchors.rightMargin: 4
+        height: 1
+        visible: root.showSeparator
+        color: Qt.rgba(sys.windowText.r, sys.windowText.g, sys.windowText.b, 0.08)
+    }
+
     RowLayout {
         id: rowLayout
         anchors.fill: parent
-        anchors.leftMargin: 16
-        anchors.rightMargin: 16
-        anchors.topMargin: 12
-        anchors.bottomMargin: 12
+        anchors.leftMargin: root.flat ? 10 : 16
+        anchors.rightMargin: root.flat ? 10 : 16
+        anchors.topMargin: root.flat ? 8 : 12
+        anchors.bottomMargin: root.flat ? 8 : 12
         spacing: 16
 
         ColumnLayout {
@@ -118,9 +137,15 @@ Item {
         }
     }
 
+    // The two numeric editors restore their displayed value instead of committing a non-number. A
+    // validator rejects keystrokes that cannot *lead* to a valid number, but it does not make the field
+    // non-empty: clear it and `editingFinished` still fires, parse still yields NaN, and QVariant turns
+    // NaN into 0 — so clearing the field would silently persist zero. Restoring reads as "that was not a
+    // number" and leaves the setting alone.
     Component {
         id: doubleEditor
         TextField {
+            id: doubleField
             Accessible.name: root.label
             Accessible.description: root.help
             Layout.fillWidth: true
@@ -128,23 +153,43 @@ Item {
             enabled: root.editable
             selectByMouse: true
             validator: DoubleValidator {}
-            onEditingFinished: root.edited(root.fieldKey, parseFloat(text))
+            onEditingFinished: {
+                var parsed = parseFloat(doubleField.text)
+                if (isNaN(parsed)) {
+                    doubleField.text = root.value !== null && root.value !== undefined ? String(root.value) : ""
+                    return
+                }
+                root.edited(root.fieldKey, parsed)
+            }
         }
     }
 
     Component {
         id: intEditor
-        SpinBox {
+        TextField {
+            id: intField
             Accessible.name: root.label
             Accessible.description: root.help
+            Layout.fillWidth: true
+            text: root.value !== null && root.value !== undefined ? String(root.value) : "0"
             enabled: root.editable
+            selectByMouse: true
             // Full 32-bit signed range: the config fields this drives are plain ints (e.g.
-            // read_buffer_size, which can legitimately exceed a megabyte), and a narrower cap would
-            // silently clamp such a value on display and then persist the clamped number on the next edit.
-            from: -2147483647
-            to: 2147483647
-            value: root.value !== null && root.value !== undefined ? root.value : 0
-            onValueModified: root.edited(root.fieldKey, value)
+            // read_buffer_size, which can legitimately exceed a megabyte, and history_max_lines, whose
+            // -1 means unlimited), and a narrower cap would silently clamp such a value on display and
+            // then persist the clamped number on the next edit.
+            validator: IntValidator {
+                bottom: -2147483647
+                top: 2147483647
+            }
+            onEditingFinished: {
+                var parsed = parseInt(intField.text, 10)
+                if (isNaN(parsed)) {
+                    intField.text = root.value !== null && root.value !== undefined ? String(root.value) : "0"
+                    return
+                }
+                root.edited(root.fieldKey, parsed)
+            }
         }
     }
 

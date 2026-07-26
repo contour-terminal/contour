@@ -76,6 +76,105 @@ Rectangle {
         return ""
     }
 
+    // {{{ Field grouping and live filter
+    //
+    // The field panes are long — a profile has around ninety settings — so they are shown as collapsible
+    // groups with a search box over them. The grouping is not decided here: each row of
+    // SettingsController.profileFields carries the `group` and `groupGlyph` it belongs under, so which
+    // fields belong together is a fact about the fields, stated next to them in C++.
+
+    /// Live filter over the field panes. Matches a field's label, help text or key.
+    property string filterText: ""
+    readonly property bool filtering: root.filterText.trim().length > 0
+
+    /// Per-group open state, keyed by group title. Absent means open.
+    ///
+    /// Held here rather than inside each SettingsSection because a keystroke in the search box changes
+    /// the group model, which rebuilds every delegate — state living in a delegate would reset on every
+    /// character typed.
+    property var expandedGroups: ({})
+
+    /// Whether the group titled @p title is currently open.
+    function groupExpanded(title) {
+        // A search opens whatever it matched: having to expand a group to see a hit you already searched
+        // for defeats the search.
+        if (root.filtering)
+            return true
+        return root.expandedGroups[title] !== false
+    }
+
+    /// Flips the open state of the group titled @p title.
+    function toggleGroup(title) {
+        // Reassigned as a fresh object, because mutating the existing one in place does not notify the
+        // bindings that read it.
+        var next = {}
+        for (var key in root.expandedGroups)
+            next[key] = root.expandedGroups[key]
+        next[title] = (root.expandedGroups[title] === false)
+        root.expandedGroups = next
+    }
+
+    /// Whether @p field passes the current filter.
+    function fieldMatches(field) {
+        var needle = root.filterText.trim().toLowerCase()
+        if (needle.length === 0)
+            return true
+        // The key is searched too, so a user who knows the YAML name of a setting can type that.
+        return String(field.label).toLowerCase().indexOf(needle) >= 0
+            || String(field.help).toLowerCase().indexOf(needle) >= 0
+            || String(field.key).toLowerCase().indexOf(needle) >= 0
+    }
+
+    /// Whether @p text passes the current filter. For the sections that are not lists of scalar fields
+    /// (the colour scheme, the status line indicator) and so have only their title to match on.
+    function textMatches(text) {
+        var needle = root.filterText.trim().toLowerCase()
+        return needle.length === 0 || String(text).toLowerCase().indexOf(needle) >= 0
+    }
+
+    /// Buckets @p rows into [{ title, glyph, fields }], keeping the order C++ listed them in and
+    /// dropping groups the filter emptied.
+    function groupFields(rows) {
+        var out = []
+        var byTitle = ({})
+        for (var i = 0; i < rows.length; ++i) {
+            var field = rows[i]
+            if (!root.fieldMatches(field))
+                continue
+            var title = field.group !== undefined ? field.group : ""
+            if (byTitle[title] === undefined) {
+                byTitle[title] = {
+                    "title": title,
+                    "glyph": field.groupGlyph !== undefined ? field.groupGlyph : "",
+                    "fields": []
+                }
+                out.push(byTitle[title])
+            }
+            byTitle[title].fields.push(field)
+        }
+        return out
+    }
+
+    readonly property var profileGroups: root.controller ? root.groupFields(root.controller.profileFields) : []
+    readonly property var globalFieldsFiltered: {
+        var out = []
+        if (!root.controller)
+            return out
+        var rows = root.controller.globalFields
+        for (var i = 0; i < rows.length; ++i)
+            if (root.fieldMatches(rows[i]))
+                out.push(rows[i])
+        return out
+    }
+    /// How many fields the filter is currently hiding, for the "no matches" hint.
+    readonly property int visibleFieldCount: {
+        var total = 0
+        for (var i = 0; i < root.profileGroups.length; ++i)
+            total += root.profileGroups[i].fields.length
+        return total
+    }
+    // }}}
+
     // Delete is confirmed through a modal dialog; the row that asked stashes its target here first.
     property string pendingDeleteKind: "" // "profile" | "scheme"
     property string pendingDeleteName: ""
@@ -343,6 +442,55 @@ Rectangle {
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
+
+                    // Search over the fields of whichever field pane is open. Only those two panes have
+                    // fields to filter; the colour-scheme and keybinding panes have their own shapes.
+                    Rectangle {
+                        objectName: "fieldFilterBox"
+                        visible: root.editorMode === "profile" || root.editorMode === "globals"
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        Layout.preferredHeight: 34
+                        radius: 8
+                        color: sys.base
+                        border.width: 1
+                        border.color: filterField.activeFocus
+                                      ? Qt.rgba(sys.highlight.r, sys.highlight.g, sys.highlight.b, 0.55)
+                                      : root.hairline
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 6
+                            spacing: 6
+
+                            Label {
+                                text: "🔍"
+                                color: root.subtleText
+                                font.pointSize: 9
+                            }
+                            TextField {
+                                id: filterField
+                                objectName: "fieldFilterField"
+                                Layout.fillWidth: true
+                                placeholderText: qsTr("Search settings…")
+                                selectByMouse: true
+                                background: null // the surrounding Rectangle is the field's frame
+                                Accessible.name: qsTr("Search settings")
+                                // Bound live rather than on commit, so the list narrows as you type.
+                                onTextChanged: root.filterText = text
+                                Keys.onEscapePressed: clear()
+                            }
+                            ToolButton {
+                                objectName: "fieldFilterClearButton"
+                                visible: filterField.text.length > 0
+                                text: "✕"
+                                flat: true
+                                Accessible.name: qsTr("Clear the search")
+                                onClicked: filterField.clear()
+                            }
+                        }
+                    }
                 }
 
                 // The editors: mutually exclusive, visible-toggled, each anchored to fill this pane.
@@ -390,42 +538,69 @@ Rectangle {
                                 width: profileScroll.availableWidth
                                 spacing: 10
 
+                                // One collapsible card per field group. Which fields share a card is
+                                // decided in C++ (profileFieldGroups), not matched on here.
                                 Repeater {
-                                    model: root.controller ? root.controller.profileFields : []
-                                    delegate: SettingRow {
+                                    model: root.profileGroups
+                                    delegate: SettingsSection {
                                         required property var modelData
                                         Layout.fillWidth: true
-                                        fieldKey: modelData.key
-                                        label: modelData.label
-                                        help: modelData.help
-                                        type: modelData.type
-                                        value: modelData.value
-                                        options: modelData.options
-                                        editable: root.controller && !root.controller.editingReadOnly
-                                        onEdited: (key, value) => root.controller.setProfileField(key, value)
+                                        title: modelData.title
+                                        glyph: modelData.glyph
+                                        badgeCount: modelData.fields.length
+                                        expanded: root.groupExpanded(modelData.title)
+                                        onToggleRequested: root.toggleGroup(modelData.title)
+
+                                        Repeater {
+                                            model: modelData.fields
+                                            delegate: SettingRow {
+                                                required property var modelData
+                                                required property int index
+                                                Layout.fillWidth: true
+                                                flat: true
+                                                showSeparator: index > 0
+                                                fieldKey: modelData.key
+                                                label: modelData.label
+                                                help: modelData.help
+                                                type: modelData.type
+                                                value: modelData.value
+                                                options: modelData.options
+                                                editable: root.controller && !root.controller.editingReadOnly
+                                                onEdited: (key, value) => root.controller.setProfileField(key, value)
+                                            }
+                                        }
                                     }
                                 }
 
-                                // Color-scheme selection group (with dark/light distinction).
-                                Rectangle {
+                                // Says so when a search matched nothing, rather than showing an empty pane.
+                                Label {
+                                    objectName: "noFieldMatchesLabel"
+                                    visible: root.filtering && root.visibleFieldCount === 0
                                     Layout.fillWidth: true
-                                    Layout.preferredHeight: schemeGroup.implicitHeight + 28
-                                    radius: 8
-                                    color: sys.base
-                                    border.width: 1
-                                    border.color: root.hairline
+                                    Layout.topMargin: 12
+                                    horizontalAlignment: Text.AlignHCenter
+                                    wrapMode: Text.WordWrap
+                                    color: root.subtleText
+                                    text: qsTr("No setting matches “%1”.").arg(root.filterText.trim())
+                                }
+
+                                // Color-scheme selection group (with dark/light distinction). A section
+                                // like the field groups, so the pane reads as one list of groups; its
+                                // body is hand-built because a scheme choice is not a scalar field.
+                                SettingsSection {
+                                    id: schemeSection
+                                    Layout.fillWidth: true
+                                    title: qsTr("Color scheme")
+                                    glyph: "◐"
+                                    visible: !root.filtering || root.textMatches(title)
+                                    expanded: root.groupExpanded(title)
+                                    onToggleRequested: root.toggleGroup(title)
 
                                     ColumnLayout {
                                         id: schemeGroup
-                                        anchors.fill: parent
-                                        anchors.margins: 14
+                                        Layout.fillWidth: true
                                         spacing: 8
 
-                                        Label {
-                                            text: qsTr("Color scheme")
-                                            font.weight: Font.DemiBold
-                                            color: sys.windowText
-                                        }
                                         RowLayout {
                                             Layout.fillWidth: true
                                             spacing: 8
@@ -481,6 +656,26 @@ Rectangle {
                                         }
                                     }
                                 }
+
+                                // Status line indicator editor: a visual builder that replaces the three
+                                // raw template fields the descriptor list used to expose.
+                                SettingsSection {
+                                    id: indicatorSection
+                                    Layout.fillWidth: true
+                                    title: qsTr("Status line indicator")
+                                    glyph: "▤"
+                                    visible: !root.filtering || root.textMatches(title)
+                                    expanded: root.groupExpanded(title)
+                                    onToggleRequested: root.toggleGroup(title)
+
+                                    StatusLineIndicatorEditor {
+                                        Layout.fillWidth: true
+                                        controller: root.controller
+                                        editable: root.controller && !root.controller.editingReadOnly
+                                    }
+                                }
+
+                                Item { Layout.preferredHeight: 4 } // breathing room above the action bar
                             }
                         }
 
@@ -552,30 +747,58 @@ Rectangle {
                         ColumnLayout {
                             width: globalsScroll.availableWidth
                             spacing: 10
-                            Repeater {
-                                model: root.controller ? root.controller.globalFields : []
-                                delegate: RowLayout {
-                                    required property var modelData
-                                    Layout.fillWidth: true
-                                    spacing: 8
-                                    SettingRow {
+
+                            // A single section: there are only a handful of application-wide settings, so
+                            // splitting them further would be more chrome than content. Presented as a
+                            // section anyway, so both field panes look like the same kind of page.
+                            SettingsSection {
+                                id: globalsSection
+                                Layout.fillWidth: true
+                                title: qsTr("Application")
+                                glyph: "⚙"
+                                badgeCount: root.globalFieldsFiltered.length
+                                expanded: root.groupExpanded(title)
+                                onToggleRequested: root.toggleGroup(title)
+
+                                Repeater {
+                                    model: root.globalFieldsFiltered
+                                    delegate: RowLayout {
+                                        required property var modelData
+                                        required property int index
                                         Layout.fillWidth: true
-                                        fieldKey: modelData.key
-                                        label: modelData.label
-                                        help: modelData.help
-                                        type: modelData.type
-                                        value: modelData.value
-                                        options: modelData.options
-                                        editable: root.controller && !root.controller.locked
-                                        onEdited: (key, value) => root.controller.setGlobalField(key, value)
-                                    }
-                                    Button {
-                                        text: qsTr("Reset")
-                                        visible: modelData.overridden
-                                        enabled: root.controller && !root.controller.locked
-                                        onClicked: root.controller.resetGlobalField(modelData.key)
+                                        spacing: 8
+                                        SettingRow {
+                                            Layout.fillWidth: true
+                                            flat: true
+                                            showSeparator: index > 0
+                                            fieldKey: modelData.key
+                                            label: modelData.label
+                                            help: modelData.help
+                                            type: modelData.type
+                                            value: modelData.value
+                                            options: modelData.options
+                                            editable: root.controller && !root.controller.locked
+                                            onEdited: (key, value) => root.controller.setGlobalField(key, value)
+                                        }
+                                        Button {
+                                            text: qsTr("Reset")
+                                            visible: modelData.overridden
+                                            enabled: root.controller && !root.controller.locked
+                                            onClicked: root.controller.resetGlobalField(modelData.key)
+                                        }
                                     }
                                 }
+                            }
+
+                            Label {
+                                objectName: "noGlobalMatchesLabel"
+                                visible: root.filtering && root.globalFieldsFiltered.length === 0
+                                Layout.fillWidth: true
+                                Layout.topMargin: 12
+                                horizontalAlignment: Text.AlignHCenter
+                                wrapMode: Text.WordWrap
+                                color: root.subtleText
+                                text: qsTr("No setting matches “%1”.").arg(root.filterText.trim())
                             }
                         }
                     }
