@@ -10,6 +10,7 @@
 
 #include <libunicode/convert.h>
 #include <libunicode/utf8_grapheme_segmenter.h>
+#include <libunicode/width.h>
 
 using namespace std;
 
@@ -402,6 +403,15 @@ void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
     _useCursorlineColoring = isCursorLine(lineOffset);
     _currentLineFlags = flags;
 
+    // Same reason, and the same job startLine() does for a per-cell line: makeColorsForCell reads
+    // this pair to extend a block cursor across the second column of a wide glyph, so it describes
+    // the cell BEFORE the one being coloured. A new line has no such cell. Left carrying the
+    // previous line's values -- which is what happened while only startLine() cleared them -- a line
+    // whose predecessor ended in a wide glyph under the cursor gets its first cell, and with it the
+    // whole batched RenderLine or the whole fill run, painted in cursor colours.
+    _prevWidth = 0;
+    _prevHasCursor = false;
+
     auto const frontIndex = _output->cells.size();
 
     // Visual selection can alter colors for some columns in this line.
@@ -442,14 +452,15 @@ void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
                                 ColumnOffset::cast_from(lineBuffer.usedColumns));
     auto const pageColumnsEnd = boxed_cast<ColumnOffset>(_terminal->pageSize().columns);
 
-    // render text — fallback path for selection/cursor, convert u32 to UTF-8
+    // Render the text cell by cell, because a selection or a cursor gives some column a colour of
+    // its own. The text comes from the grid, which has already decided where each cell begins, so
+    // it goes to the emitter that respects that -- re-deriving the boundaries here is what let the
+    // renderer and the grid disagree in GitHub #1752. An empty line has no text and only wants the
+    // fill loop below.
     _searchPatternOffset = 0;
-    auto const utf8Text =
-        textOverride.empty() ? std::string(lineBuffer.text.view()) : unicode::convert_to<char>(textOverride);
-    renderUtf8Text(CellLocation { .line = lineOffset, .column = ColumnOffset(0) },
+    renderGridText(CellLocation { .line = lineOffset, .column = ColumnOffset(0) },
                    lineBuffer.textAttributes,
-                   utf8Text,
-                   true);
+                   textOverride);
 
     // {{{ fill the remaining empty cells
     for (auto columnOffset = textMargin; columnOffset < pageColumnsEnd; ++columnOffset)
@@ -457,7 +468,6 @@ void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
         auto const pos = CellLocation { .line = lineOffset, .column = columnOffset };
         auto const gridPosition = _terminal->viewport().translateScreenToGridCoordinate(pos);
         auto renderAttributes = createRenderAttributes(gridPosition, lineBuffer.fillAttributes);
-        auto const scale = _currentLineFlags.test(LineFlag::DoubleWidth) ? 2 : 1;
 
         _output->cells.emplace_back(makeRenderCellExplicit(_terminal->colorPalette(),
                                                            char32_t { 0 },
@@ -467,7 +477,7 @@ void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
                                                            renderAttributes.backgroundColor,
                                                            lineBuffer.fillAttributes.underlineColor,
                                                            _baseLine + lineOffset,
-                                                           columnOffset * scale));
+                                                           displayColumn(columnOffset)));
     }
     // }}}
 
@@ -582,10 +592,74 @@ void RenderBufferBuilder::endLine() noexcept
     }
 }
 
+void RenderBufferBuilder::renderGridText(CellLocation screenPosition,
+                                         GraphicsAttributes textAttributes,
+                                         std::u32string_view text)
+{
+    // @p text holds one codepoint per column, as Line::trivialBuffer produces it, and each codepoint
+    // is measured on its own -- exactly as TextClusterGrouper::renderLine measures the very same
+    // string when the line is drawn batched instead. That agreement is the point: a selection is
+    // what switches a line between the two, so any difference in how they measure shows up as text
+    // moving when it is selected, which is what GitHub #1752 reported.
+    //
+    // What must NOT happen here is re-segmenting the text into grapheme clusters, as renderUtf8Text
+    // does. The cell boundaries are already decided; re-deriving them can fuse two cells' codepoints
+    // into one cluster the grid never formed and pull the rest of the line leftwards.
+    for (auto column = screenPosition.column; auto const codepoint: text)
+    {
+        auto const gridPosition = _terminal->viewport().translateScreenToGridCoordinate(
+            CellLocation { .line = screenPosition.line, .column = column });
+        auto const [fg, bg] = makeColorsForCell(gridPosition,
+                                                textAttributes.flags,
+                                                textAttributes.foregroundColor,
+                                                textAttributes.backgroundColor);
+
+        // A cell always covers at least one column, and covers two when its codepoint is wide. The
+        // trivial path is not supposed to carry a wide cell -- writing one fills a continuation cell
+        // whose flags break the line's SGR uniformity -- but Screen::clearAndAdvance skips that fill
+        // when only one column is left, so a full-width character on the last writable column does
+        // reach here. Measuring it the same way the batched path does keeps the two in step.
+        auto const width = ColumnCount::cast_from(std::max(1u, unicode::width(codepoint)));
+
+        _output->cells.emplace_back(makeRenderCellExplicit(_terminal->colorPalette(),
+                                                           std::u32string(1, codepoint),
+                                                           width,
+                                                           textAttributes.flags,
+                                                           _currentLineFlags,
+                                                           fg,
+                                                           bg,
+                                                           textAttributes.underlineColor,
+                                                           _baseLine + screenPosition.line,
+                                                           displayColumn(column)));
+
+        // Spacer cells behind a wide glyph, so its background is painted across both columns.
+        for (auto i = ColumnCount(1); i < width; ++i)
+            _output->cells.emplace_back(makeRenderCellExplicit(_terminal->colorPalette(),
+                                                               U" ",
+                                                               ColumnCount(1),
+                                                               textAttributes.flags,
+                                                               _currentLineFlags,
+                                                               fg,
+                                                               bg,
+                                                               textAttributes.underlineColor,
+                                                               _baseLine + screenPosition.line,
+                                                               displayColumn(column + i.as<ColumnOffset>())));
+
+        column += width.as<ColumnOffset>();
+    }
+
+    _lineNr = screenPosition.line;
+
+    // _prevWidth/_prevHasCursor are NOT maintained here. renderTrivialLine clears them for the whole
+    // line, and nothing in the loop above sets them, so every cell is coloured against a cleared
+    // pair -- which is what the batched path this must agree with does too, having no per-cell state
+    // at all. The visible consequence, shared with master's renderUtf8Text: a block cursor sitting
+    // on a wide glyph is not extended across that glyph's second column on this path.
+}
+
 ColumnCount RenderBufferBuilder::renderUtf8Text(CellLocation screenPosition,
                                                 GraphicsAttributes textAttributes,
-                                                std::string_view text,
-                                                bool allowMatchSearchPattern)
+                                                std::string_view text)
 {
     auto columnCountRendered = ColumnCount(0);
 
@@ -605,8 +679,6 @@ ColumnCount RenderBufferBuilder::renderUtf8Text(CellLocation screenPosition,
         //            unicode::convert_to<char>(u32string_view(graphemeCluster)).size(),
         //            unicode::convert_to<char>(u32string_view(graphemeCluster)));
 
-        auto const scale = _currentLineFlags.test(LineFlag::DoubleWidth) ? 2 : 1;
-
         _output->cells.emplace_back(makeRenderCellExplicit(
             _terminal->colorPalette(),
             graphemeCluster,
@@ -617,7 +689,7 @@ ColumnCount RenderBufferBuilder::renderUtf8Text(CellLocation screenPosition,
             bg,
             textAttributes.underlineColor,
             _baseLine + screenPosition.line,
-            (screenPosition.column + ColumnOffset::cast_from(columnCountRendered)) * scale));
+            displayColumn(screenPosition.column + ColumnOffset::cast_from(columnCountRendered))));
 
         // Span filling cells for preceding wide glyphs to get the background color properly painted.
         for (auto i = ColumnCount(1); i < width; ++i)
@@ -632,16 +704,13 @@ ColumnCount RenderBufferBuilder::renderUtf8Text(CellLocation screenPosition,
                 bg,
                 textAttributes.underlineColor,
                 _baseLine + screenPosition.line,
-                (screenPosition.column + ColumnOffset::cast_from(columnCountRendered + i)) * scale));
+                displayColumn(screenPosition.column + ColumnOffset::cast_from(columnCountRendered + i))));
         }
 
         columnCountRendered += ColumnCount::cast_from(width);
         _lineNr = screenPosition.line;
         _prevWidth = 0;
         _prevHasCursor = false;
-
-        if (allowMatchSearchPattern)
-            matchSearchPattern(u32string_view(graphemeCluster));
     }
     return columnCountRendered;
 }
@@ -661,7 +730,7 @@ bool RenderBufferBuilder::tryRenderInputMethodEditor(CellLocation screenPosition
             _output->cells.back().groupEnd = true;
 
         _inputMethodSkipColumns =
-            renderUtf8Text(screenPosition, textAttributes, _inputMethodData.preeditString, false);
+            renderUtf8Text(screenPosition, textAttributes, _inputMethodData.preeditString);
         if (_inputMethodSkipColumns > ColumnCount(0))
         {
             if (_output->cursor.has_value())
@@ -694,8 +763,6 @@ void RenderBufferBuilder::renderCell(ConstCellProxy screenCell, LineOffset line,
     _prevWidth = screenCell.width();
     _prevHasCursor = _cursorPosition && gridPosition == *_cursorPosition;
 
-    auto const displayColumn = _currentLineFlags.test(LineFlag::DoubleWidth) ? column * 2 : column;
-
     _output->cells.emplace_back(makeRenderCell(_terminal->colorPalette(),
                                                _terminal->hyperlinks(),
                                                screenCell,
@@ -703,7 +770,7 @@ void RenderBufferBuilder::renderCell(ConstCellProxy screenCell, LineOffset line,
                                                fg,
                                                bg,
                                                _baseLine + line,
-                                               displayColumn));
+                                               displayColumn(column)));
 
     // A row that a tall block reaches down into carries no text of its own, so nothing would be drawn
     // there and the block would exist only as long as its HEAD row was on screen -- scroll the head

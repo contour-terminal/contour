@@ -117,10 +117,37 @@ class RenderBufferBuilder
 
     [[nodiscard]] bool tryRenderInputMethodEditor(CellLocation screenPosition, CellLocation gridPosition);
 
+    /// Emits one render cell per column for text taken from the grid.
+    ///
+    /// The grid has already decided where each cell begins and how wide it is, so this only counts
+    /// the columns off. Its counterpart @c renderUtf8Text is for text whose cell boundaries nobody
+    /// has determined yet, and measures them; using that one on grid text is what let the renderer
+    /// and the grid disagree about a cluster's width (GitHub #1752).
+    ///
+    /// @param screenPosition Where the first cell goes.
+    /// @param textAttributes The line's uniform SGR.
+    /// @param text One codepoint per column, as @c Line::trivialBuffer produces it.
+    void renderGridText(CellLocation screenPosition,
+                        GraphicsAttributes textAttributes,
+                        std::u32string_view text);
+
+    /// Emits render cells for text whose cell boundaries are not yet known -- the IME preedit
+    /// string -- segmenting it into grapheme clusters and measuring each.
+    /// @see renderGridText for text that comes from the grid.
+    /// @return How many columns were covered.
     ColumnCount renderUtf8Text(CellLocation screenPosition,
                                GraphicsAttributes attributes,
-                               std::string_view text,
-                               bool allowMatchSearchPattern);
+                               std::string_view text);
+
+    /// The display column a grid column draws at.
+    ///
+    /// DECDWL (@c LineFlag::DoubleWidth) doubles every cell's width, so cell N of such a line draws
+    /// at display column 2N. Lives here because every emitter needs it and four copies of the
+    /// expression is four places to miss when the mapping grows a case.
+    [[nodiscard]] ColumnOffset displayColumn(ColumnOffset column) const noexcept
+    {
+        return _currentLineFlags.test(LineFlag::DoubleWidth) ? column * 2 : column;
+    }
 
     template <typename T>
     void matchSearchPattern(T const& cellText);
