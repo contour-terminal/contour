@@ -165,7 +165,32 @@ Item {
 
     DragHandler {
         id: dragHandler
+        objectName: "tabDragHandler"   // findChild() handle for the GUI test
         target: dragProxy
+        // Says what a pointer handler already defaults to, as the window-move handler in TitleBar does and
+        // for the same reason: a tab is dragged with the left button, the right one belongs to the context
+        // menu, and a default is a thing a future edit can change without anyone noticing.
+        acceptedButtons: Qt.LeftButton
+        // The default grabPermissions MINUS CanTakeOverFromItems, so this handler can never take a
+        // gesture away from an item that already accepted the press.
+        //
+        // The window's resize handles are MouseAreas stacked above this strip (ResizeBorder, z:1000), and
+        // the top-left corner one sits exactly on the first tab. A DragHandler takes a PASSIVE grab on
+        // press, so it sees the moves regardless of who is on top; with CanTakeOverFromItems it then stole
+        // the exclusive grab from the handle that had just asked the window manager to resize, and the one
+        // press both resized the window and dragged this tab, whose QDrag ghost followed the cursor for
+        // the whole gesture (issue #1997).
+        //
+        // The rule lives HERE rather than only on the resize handles because this is the half we can
+        // guarantee: an item's keepMouseGrab (ResizeBorder's preventStealing) is a request Qt honours
+        // differently across versions -- it holds on Qt 6.4 and 6.11 but not on 6.10 -- whereas
+        // approveGrabTransition() refuses a handler without CanTakeOverFromItems outright. Nothing in the
+        // strip holds the grab on press (the wheel MouseArea takes Qt.NoButton, the ListView is
+        // interactive: false), so a genuine drag off a tab is unaffected.
+        grabPermissions: PointerHandler.CanTakeOverFromHandlersOfDifferentType
+                         | PointerHandler.ApprovesTakeOverByHandlersOfDifferentType
+                         | PointerHandler.ApprovesTakeOverByItems
+                         | PointerHandler.ApprovesCancellation
         // A small threshold so a click/tap still activates or renames; only a real drag begins a move.
         // Activating this handler arms dragProxy.Drag.active, which starts the automatic QDrag; the
         // move/tear-off decision is made by the DropArea and dragProxy.Drag.onDragFinished, not here.

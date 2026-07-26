@@ -19,7 +19,21 @@ Item {
     // Helper to create one resize zone.
     component ResizeZone: MouseArea {
         required property int edges
+        objectName: "resizeZone" // findChildren() handle for the GUI test; all eight share it
         acceptedButtons: Qt.LeftButton
+        // States that this gesture is not up for grabs: it belongs to the window manager from the
+        // startSystemResize() below onwards. These zones lie OVER the window chrome — the top-left corner
+        // one sits exactly on the first tab, and the top edge covers the top of every tab and of the title
+        // bar's window-move region — and a DragHandler down there takes a PASSIVE grab on press, so it sees
+        // the moves whoever is on top. Taking the grab from here turned one press into a resize AND a tab
+        // drag, or a resize AND a startSystemMove() (issue #1997).
+        //
+        // This is the INTENT, not the guarantee: preventStealing sets keepMouseGrab, which
+        // QQuickPointerHandler::approveGrabTransition consults, but Qt honours it inconsistently — it holds
+        // on Qt 6.4 and 6.11 and does NOT on 6.10. The enforcement therefore lives on the handlers we own,
+        // which drop CanTakeOverFromItems from their grabPermissions; see TabItem.qml. Keep both: a handler
+        // added beneath these zones later will not necessarily remember that rule.
+        preventStealing: true
         onPressed: root.window.startSystemResize(edges)
     }
 

@@ -30,6 +30,7 @@
 #include <QtCore/QTextStream>
 #include <QtGui/QColor>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QMouseEvent>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
@@ -770,6 +771,47 @@ enum class TabStripAt : std::uint8_t
     Bottom //!< `tab_bar_position: Bottom`: the tab's bottom edge IS the window's bottom edge.
 };
 
+/// Builds @p source as a QML component and instantiates it, failing the test on any QML error.
+///
+/// Every host in this file is the same three steps — hand the engine the source, wait out the load (which
+/// is synchronous for a source string, so the loop turns over at most once), create — so they share them
+/// here rather than repeating them once per host.
+///
+/// @param engine The engine to build in.
+/// @param source The QML source of the host, whose root must be a Window.
+/// @param name   A file name used for the component URL and in the failure message; it need not exist.
+/// @return The instantiated root object.
+[[nodiscard]] std::unique_ptr<QObject> buildQmlHost(QQmlEngine& engine,
+                                                    QString const& source,
+                                                    QString const& name)
+{
+    QQmlComponent component(&engine);
+    component.setData(source.toUtf8(), QUrl(QStringLiteral("qrc:/contour/ui/%1").arg(name)));
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+
+    INFO(name.toStdString() << " errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+
+    std::unique_ptr<QObject> host(component.create());
+    REQUIRE(host != nullptr);
+    QCoreApplication::processEvents();
+    return host;
+}
+
+/// The TabItem property assignments every host that carries one needs, so two hosts cannot drift into
+/// binding the same tab differently. Contains no `%n` placeholder, so it is safe to embed in a source
+/// string that is then .arg()-substituted.
+constexpr auto TabItemBindings = "    controller: terminalSessions\n"
+                                 "    window: host\n"
+                                 "    tabIndex: 0\n"
+                                 "    tabTitle: \"shell\"\n"
+                                 "    tabRawTitle: \"\"\n"
+                                 "    tabColor: \"transparent\"\n"
+                                 "    tabActive: true\n"
+                                 "    tabPaneCount: 1\n"
+                                 "    tabZoomed: false\n";
+
 /// Hosts TabItem.qml inside a real Window, which is what its TabColorFlyout Popup needs: a Popup opens
 /// into its window's overlay, and a TabItem created bare (as the tests above do) has no window at all —
 /// open() would then leave the flyout invisible and prove nothing.
@@ -805,32 +847,14 @@ enum class TabStripAt : std::uint8_t
                                        "    id: item\n"
                                        "    x: %2 ? host.width - width : 0\n"
                                        "    y: %2 ? host.height - height : 0\n"
-                                       "    controller: terminalSessions\n"
-                                       "    window: host\n"
-                                       "    tabIndex: 0\n"
-                                       "    tabTitle: \"shell\"\n"
-                                       "    tabRawTitle: \"\"\n"
-                                       "    tabColor: \"transparent\"\n"
-                                       "    tabActive: true\n"
-                                       "    tabPaneCount: 1\n"
-                                       "    tabZoomed: false\n"
+                                       "%3"
                                        "  }\n"
                                        "}\n")
                             .arg(windowWidth)
-                            .arg(bottom ? QStringLiteral("true") : QStringLiteral("false"));
+                            .arg(bottom ? QStringLiteral("true") : QStringLiteral("false"))
+                            .arg(QLatin1StringView(TabItemBindings));
 
-    QQmlComponent component(&engine);
-    component.setData(source.toUtf8(), QUrl(QStringLiteral("qrc:/contour/ui/TabItemTestHost.qml")));
-    while (component.status() == QQmlComponent::Loading)
-        QCoreApplication::processEvents();
-
-    INFO("TabItemTestHost errors: " << component.errorString().toStdString());
-    REQUIRE(component.isReady());
-
-    std::unique_ptr<QObject> host(component.create());
-    REQUIRE(host != nullptr);
-    QCoreApplication::processEvents();
-    return host;
+    return buildQmlHost(engine, source, QStringLiteral("TabItemTestHost.qml"));
 }
 
 /// The rectangle the flyout actually occupies in its window — which is NOT what its `y` property says.
@@ -3241,6 +3265,260 @@ TEST_CASE("SessionChrome shows the hyperlink tooltip only while there is a link 
         QCoreApplication::processEvents();
         CHECK(tip->property("tipText").toString().isEmpty());
     }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+namespace
+{
+/// How a posted gesture finishes.
+enum class GestureEnd : std::uint8_t
+{
+    ButtonStillDown, //!< Stop after the last move, leaving the gesture in flight.
+    Released,        //!< Release the button, completing the gesture.
+};
+
+/// Drags the pointer across @p window with every event QUEUED first, then delivered in one go.
+///
+/// The queueing is not incidental. An automatic QDrag (TabItem's dragProxy) runs QDrag::exec() — a NESTED
+/// event loop — from inside the very move event that activates its DragHandler. A test that sent the moves
+/// synchronously (QTest::mouseMove) and only afterwards the release would therefore block forever: it
+/// cannot send the release that the nested loop is waiting to receive. Posting everything up front leaves
+/// the release already in the queue, so even a build that wrongly starts a drag completes the gesture
+/// instead of hanging the suite. For that reason every assertion below drives a RELEASED gesture and reads
+/// what happened from signal spies, rather than inspecting a gesture still in flight.
+///
+/// @param window The window to deliver to.
+/// @param button The button held down for the drag.
+/// @param from   Press position, in window coordinates.
+/// @param to     Final move position, in window coordinates; one intermediate move is interpolated.
+/// @param end    Whether to release the button at @p to.
+void postGesture(
+    QQuickWindow& window, Qt::MouseButton button, QPoint const& from, QPoint const& to, GestureEnd end)
+{
+    auto const post =
+        [&](QEvent::Type type, QPoint const& pos, Qt::MouseButton eventButton, Qt::MouseButtons held) {
+            QCoreApplication::postEvent(
+                &window,
+                new QMouseEvent(type, pos, window.mapToGlobal(pos), eventButton, held, Qt::NoModifier));
+        };
+    post(QEvent::MouseButtonPress, from, button, button);
+    post(QEvent::MouseMove, (from + to) / 2, Qt::NoButton, button);
+    post(QEvent::MouseMove, to, Qt::NoButton, button);
+    if (end == GestureEnd::Released)
+        post(QEvent::MouseButtonRelease, to, button, Qt::NoButton);
+    QCoreApplication::processEvents();
+}
+
+/// The scene-coordinate rectangle @p item occupies.
+[[nodiscard]] QRectF sceneRectOf(QQuickItem const& item)
+{
+    return { item.mapToScene(QPointF(0, 0)), QSizeF(item.width(), item.height()) };
+}
+
+/// Whether @p scenePoint lies inside one of the resize border's eight hit zones.
+///
+/// This is the NON-VACUITY check every assertion below needs: "no drag started" is equally true of a
+/// gesture that missed the resize border altogether, which would prove nothing at all. Asserting the
+/// GEOMETRY rather than the delivery on purpose — whether a MouseArea reports `pressed` around a
+/// startSystemResize() call made from its own onPressed is a Qt implementation detail that differs
+/// between 6.10 and 6.11, while the overlap this fix is about is a plain fact about the scene.
+///
+/// @param host       The host window to search.
+/// @param scenePoint A point in window coordinates.
+/// @return Whether a zone covers it.
+[[nodiscard]] bool isOverResizeBorder(QObject& host, QPoint const& scenePoint)
+{
+    auto const zones = host.findChildren<QQuickItem*>(QStringLiteral("resizeZone"));
+    REQUIRE(zones.size() == 8); // four edges, four corners
+    return std::ranges::any_of(
+        zones, [&](QQuickItem const* zone) { return sceneRectOf(*zone).contains(scenePoint); });
+}
+
+/// Hosts a REAL TabItem under the REAL ResizeBorder, at the window origin — which is where the tab strip
+/// puts the first tab, and therefore where the top-left corner handle lands on it.
+///
+/// The tab is placed directly rather than through a TabStrip: a ListView realizes its delegates lazily
+/// against a viewport, which offscreen leaves the tab absent and every assertion vacuous. What is under
+/// test is two items' hit zones overlapping, and a delegate adds nothing to it.
+///
+/// @param engine     The engine to build in.
+/// @param controller The mock the tab binds to.
+/// @return The host Window; the tab is reachable as its `tabItem` property.
+[[nodiscard]] std::unique_ptr<QObject> makeTabItemUnderResizeBorderHost(QQmlEngine& engine,
+                                                                        MockTabController& controller)
+{
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    auto const source = QStringLiteral("import QtQuick\n"
+                                       "import QtQuick.Window\n"
+                                       "import \"qrc:/contour/ui\"\n"
+                                       "Window {\n"
+                                       "  id: host\n"
+                                       "  width: 400; height: 300; visible: true\n"
+                                       "  property alias tabItem: item\n"
+                                       "  TabItem {\n"
+                                       "    id: item\n"
+                                       "    x: 0; y: 0\n"
+                                       "%1"
+                                       "  }\n"
+                                       "  ResizeBorder { window: host }\n"
+                                       "}\n")
+                            .arg(QLatin1StringView(TabItemBindings));
+
+    return buildQmlHost(engine, source, QStringLiteral("TabItemBorderTestHost.qml"));
+}
+
+/// Hosts the REAL TitleBar under the REAL ResizeBorder, in main.qml's stacking order (bar at z:1, border
+/// filling the window at z:1000) — so the bar's window-move region really does sit beneath the border's top
+/// edge zone, as it does in the running application.
+///
+/// @param engine     The engine to build in.
+/// @param controller The mock the bar binds to.
+/// @return The host Window; the bar is reachable via findChild("titleBar").
+[[nodiscard]] std::unique_ptr<QObject> makeTitleBarUnderResizeBorderHost(QQmlEngine& engine,
+                                                                         MockTabController& controller)
+{
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    auto const source = QStringLiteral("import QtQuick\n"
+                                       "import QtQuick.Window\n"
+                                       "import \"qrc:/contour/ui\"\n"
+                                       "Window {\n"
+                                       "  id: host\n"
+                                       "  width: 800; height: 400; visible: true\n"
+                                       "  TitleBar {\n"
+                                       "    objectName: \"titleBar\"\n"
+                                       "    anchors.left: parent.left\n"
+                                       "    anchors.right: parent.right\n"
+                                       "    y: 0\n"
+                                       "    height: implicitHeight\n"
+                                       "    z: 1\n"
+                                       "    controller: terminalSessions\n"
+                                       "    window: host\n"
+                                       "    useCustomWindowControls: true\n"
+                                       "  }\n"
+                                       "  ResizeBorder { window: host }\n"
+                                       "}\n");
+
+    return buildQmlHost(engine, source, QStringLiteral("TitleBarBorderTestHost.qml"));
+}
+} // namespace
+
+TEST_CASE("A resize-border press over a tab does not start a tab drag (offscreen)",
+          "[contour][gui][qml][resize]")
+{
+    // Issue #1997. ResizeBorder fills the window at z:1000, so its 6px handles lie over the chrome a
+    // frameless window draws for itself, and the top-left corner one lands exactly on the first tab. A
+    // DragHandler takes a PASSIVE grab on press, so it sees the moves whoever is on top; while it could
+    // also take over from an item it then stole the exclusive grab from the handle that had just asked the
+    // window manager to resize, and TabItem's automatic QDrag rendered the tab under the cursor for the
+    // length of the gesture. Releasing away from a strip would have gone on to call tearOffTab().
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+
+    auto const host = makeTabItemUnderResizeBorderHost(engine, controller);
+    auto* window = qobject_cast<QQuickWindow*>(host.get());
+    REQUIRE(window != nullptr);
+    auto* tab = host->property("tabItem").value<QQuickItem*>();
+    REQUIRE(tab != nullptr);
+    auto* handler = tab->findChild<QObject*>(QStringLiteral("tabDragHandler"));
+    REQUIRE(handler != nullptr);
+    // Activation is transient (`active` goes false again on release), so the question is "did it ever
+    // activate", not "is it active now".
+    QSignalSpy const activations(handler, SIGNAL(activeChanged()));
+
+    // Every section presses a point that lies over BOTH a resize handle and the tab -- the overlap the
+    // bug lived in. The two REQUIREs are what stop a missed press from passing the CHECK vacuously.
+    auto const drag = [&](QPoint const& from, QPoint const& to) {
+        REQUIRE(isOverResizeBorder(*host, from));
+        REQUIRE(sceneRectOf(*tab).contains(from));
+        postGesture(*window, Qt::LeftButton, from, to, GestureEnd::Released);
+    };
+
+    SECTION("the top-left corner handle, which lands on the first tab")
+    {
+        drag(QPoint(3, 3), QPoint(200, 120));
+        CHECK(activations.isEmpty());
+    }
+
+    SECTION("the top edge handle, which covers the top of every tab")
+    {
+        drag(QPoint(60, 3), QPoint(240, 120));
+        CHECK(activations.isEmpty());
+    }
+
+    SECTION("the left edge handle, which covers the left of the first tab")
+    {
+        drag(QPoint(3, 20), QPoint(200, 140));
+        CHECK(activations.isEmpty());
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("A resize-border press over the title bar does not start a window move (offscreen)",
+          "[contour][gui][qml][resize]")
+{
+    // The bar's empty stretch drags the window (startSystemMove), and it too lies under the border's top
+    // edge zone — so the same press that began a resize went on to ask for a move as well. Same cause as
+    // the tab-drag half of #1997, different victim.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+
+    auto const host = makeTitleBarUnderResizeBorderHost(engine, controller);
+    auto* window = qobject_cast<QQuickWindow*>(host.get());
+    REQUIRE(window != nullptr);
+
+    auto* moveHandler = host->findChild<QObject*>(QStringLiteral("titleBarDragHandler"));
+    REQUIRE(moveHandler != nullptr);
+    // Read the region's real geometry rather than guessing an x: it starts after however wide the tab strip
+    // and the new-tab button happen to be, and ends before the window controls.
+    auto* dragRegion = host->findChild<QQuickItem*>(QStringLiteral("dragRegion"));
+    REQUIRE(dragRegion != nullptr);
+    REQUIRE(dragRegion->width() > 0);
+    auto const regionCentreX =
+        static_cast<int>(dragRegion->mapToScene(QPointF(0, 0)).x() + (dragRegion->width() / 2));
+
+    QSignalSpy const activations(moveHandler, SIGNAL(activeChanged()));
+
+    // Over both a resize handle and the bar's draggable stretch, which is the overlap under test.
+    auto const press = QPoint(regionCentreX, 3);
+    REQUIRE(isOverResizeBorder(*host, press));
+    REQUIRE(sceneRectOf(*dragRegion).contains(press));
+
+    postGesture(*window, Qt::LeftButton, press, QPoint(regionCentreX + 120, 120), GestureEnd::Released);
+    CHECK(activations.isEmpty());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("A right-button drag over a tab does not start a tab drag (offscreen)",
+          "[contour][gui][qml][resize]")
+{
+    // A tab is dragged with the left button; the right one belongs to its context menu. That is already a
+    // pointer handler's default, so this pins it rather than fixing anything — TitleBar's own drag handler
+    // states the same thing explicitly, and TabItem simply never got the same treatment.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+
+    auto const host = makeTabItemHost(engine, controller);
+    auto* window = qobject_cast<QQuickWindow*>(host.get());
+    REQUIRE(window != nullptr);
+    auto* tab = host->property("tabItem").value<QQuickItem*>();
+    REQUIRE(tab != nullptr);
+    auto* handler = tab->findChild<QObject*>(QStringLiteral("tabDragHandler"));
+    REQUIRE(handler != nullptr);
+
+    QSignalSpy const activations(handler, SIGNAL(activeChanged()));
+
+    // Well inside the tab (it is at the window origin, at least 120x32), dragged clear of it. There is no
+    // ResizeBorder in this host, so nothing but acceptedButtons can hold the drag back.
+    postGesture(*window, Qt::RightButton, QPoint(30, 16), QPoint(200, 90), GestureEnd::Released);
+    CHECK(activations.isEmpty());
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
