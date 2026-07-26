@@ -848,7 +848,7 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child, TerminalProfile&
             // load shell config if ssh is not provided
             loadFromEntry(child, "shell", where.shell);
         }
-        // inforce some default shell setup
+        // enforce some default shell setup
         defaultSettings(where.shell.value());
 
         loadFromEntry(child, "escape_sandbox", where.escapeSandbox);
@@ -1264,7 +1264,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, vtbackend::ColorPal
             }
         }
     }
-    logger()("*** loading pallete");
+    logger()("*** loading palette");
     loadFromEntry(child, "", where.palette);
 }
 
@@ -3371,7 +3371,7 @@ static void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile co
             doc.append(writer.process(writer.whichDoc(v), name, v.value()));
         };
 
-    // Something is wrong for vtpty::Process::ExecInfo formating for static build
+    // Something is wrong for vtpty::Process::ExecInfo formatting for static build
     // we add this lambda to handle it in overload set for now
     auto const processConfigEntryWithExecInfo =
         [&]<documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(

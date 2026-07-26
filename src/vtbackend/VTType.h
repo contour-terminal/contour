@@ -100,7 +100,7 @@ constexpr int conformanceLevelOf(VTType vt) noexcept
 /// Based on the DEC VSRM registered extensions table.
 DeviceAttributes filterRequiredExtensions(DeviceAttributes attrs, VTType operatingLevel) noexcept;
 
-//! Generates human readable string of comma seperated list of attribute names.
+//! Generates human readable string of comma separated list of attribute names.
 std::string to_string(DeviceAttributes v);
 
 //! Generates a parameter list that can be used to generate the CSI response.

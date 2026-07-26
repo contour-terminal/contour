@@ -21,7 +21,7 @@
 
 // TODO tests:
 //
-// - [ ] variations of option names and value attachements
+// - [ ] variations of option names and value attachments
 //       all of: NAME [VALUE] | --NAME [VALUE] | -NAME [VALUE] | --NAME[=VALUE]
 // - [ ] help output printing (colored, non-colored)
 // - [ ] help output auto-detecting screen width, via: VT seq, ioctl(TIOCGWINSZ), manual

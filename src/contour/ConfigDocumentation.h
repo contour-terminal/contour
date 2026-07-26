@@ -139,7 +139,7 @@ constexpr StringLiteral MouseConfig { "mouse:\n"
                                       "    hide_while_typing: {}\n"
                                       "\n" };
 
-constexpr StringLiteral SeachModeSwitchConfig {
+constexpr StringLiteral SearchModeSwitchConfig {
     "{comment} Whether or not to switch from search mode into insert on exit. If this value is set to true,\n"
     "{comment} it will go back to insert mode, otherwise it will go back to normal mode.\n"
     "search_mode_switch: {}\n"
@@ -1311,7 +1311,7 @@ constexpr StringLiteral BrailleStyleConfig {
     "\n"
     "{comment} Controls how Unicode Braille characters are rendered.\n "
     "{comment} May be one of `font`, `solid`, `circle`, `circle_empty`, "
-    "`square`, `square_empty, `aa_square`, `aa_square_emtpy`.\n"
+    "`square`, `square_empty`, `aa_square`, `aa_square_empty`.\n"
     "{comment} The default value is `circle`.\n"
     "{comment} `font` disables special rendering and uses font characters.\n"
     "{comment} `solid` splits character box into 8 rectangles without space between them."
@@ -1384,7 +1384,7 @@ constexpr StringLiteral DefaultProfilesWeb {
 };
 
 constexpr StringLiteral EarlyExitThresholdWeb {
-    "option determines the early threshold time. If contour atempts to close earlier than specified "
+    "option determines the early threshold time. If contour attempts to close earlier than specified "
     "threshold, additional message will be printed that contour terminated too early and additional key "
     "press is required to close contour."
 };
@@ -1534,7 +1534,7 @@ constexpr StringLiteral SshHostConfigWeb {
     "required. OpenSSL for example does not require it.\n"
     ":octicons-horizontal-rule-16: ==ssh.known_hosts== Path to `known_hosts` file. This defaults to and "
     "usually is located in `~/.ssh/known_hosts`.\n"
-    ":octicons-horizontal-rule-16: ==ssh.forward_agent== Boolean, indicating wether or not the local SSH "
+    ":octicons-horizontal-rule-16: ==ssh.forward_agent== Boolean, indicating whether or not the local SSH "
     "auth agent should be requested to be forwarded. Note: this is currently not working due to an issue "
     "related to the underlying library being used, but is hopefully resolved soon.\n"
     "\n"
@@ -1557,7 +1557,7 @@ constexpr StringLiteral MaximizedWeb {
 
 constexpr StringLiteral MarginsWeb {
     "Enforces a horizontal and vertical margin to respect on both sides of the terminal.\n"
-    "This is particularily useful on operating systems (like MacOS) that draw the border frame into the main "
+    "This is particularly useful on operating systems (like MacOS) that draw the border frame into the main "
     "widgets space,\n"
     "or simply to create some artificial space to improve the user's focus.\n"
     "\n"
@@ -2116,7 +2116,7 @@ constexpr StringLiteral ShowIndicatorOnResizeWeb {
     "\n"
 };
 
-constexpr StringLiteral SeachModeSwitchWeb {
+constexpr StringLiteral SearchModeSwitchWeb {
     "The configuration option determines whether the editor should automatically switch from search mode "
     "back to insert mode upon exiting a search. If enabled, the terminal will return to insert mode, "
     "allowing for immediate text input. If disabled, the terminal will remain in normal mode.\n"
@@ -2203,7 +2203,7 @@ using ShowTitleBar = DocumentationEntry<ShowTitleBarConfig, ShowTitleBarWeb>;
 using DimUnfocused = DocumentationEntry<DimUnfocusedConfig, DimUnfocusedWeb>;
 using ShowIndicatorOnResize = DocumentationEntry<ShowIndicatorOnResizeConfig, ShowIndicatorOnResizeWeb>;
 using Mouse = DocumentationEntry<MouseConfig, MouseWeb>;
-using SeachModeSwitch = DocumentationEntry<SeachModeSwitchConfig, SeachModeSwitchWeb>;
+using SearchModeSwitch = DocumentationEntry<SearchModeSwitchConfig, SearchModeSwitchWeb>;
 using InsertAfterYank = DocumentationEntry<InsertAfterYankConfig, InsertAfterYankWeb>;
 using CopyLastMarkRangeOffset = DocumentationEntry<CopyLastMarkRangeOffsetConfig, CopyLastMarkRangeOffsetWeb>;
 using WMClass = DocumentationEntry<WMClassConfig, WMClassWeb>;

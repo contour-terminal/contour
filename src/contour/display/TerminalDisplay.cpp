@@ -107,7 +107,7 @@ namespace
 } // namespace
 // }}}
 
-// {{{ Display creation and QQuickItem overides
+// {{{ Display creation and QQuickItem overrides
 TerminalDisplay::TerminalDisplay(QQuickItem* parent):
     QQuickItem(parent),
     _startTime { steady_clock::time_point::min() },
@@ -289,7 +289,7 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
         notifyCellGeometryChanged();
     }
 
-    _session->attachDisplay(*this); // NB: Requires Renderer to be instanciated to retrieve grid metrics.
+    _session->attachDisplay(*this); // NB: Requires Renderer to be instantiated to retrieve grid metrics.
 
     // Render ReGIS text through the real font engine: (re)build a text_shaper-backed rasterizer from
     // the now-bound session's profile font and inject it. Rebuilding when the font or DPI differs keeps
@@ -473,7 +473,7 @@ void TerminalDisplay::releaseResources()
     // thread with the context current — so defer it via a render job. The renderer may already be gone
     // (the scene-graph node's releaseResources() destroys it on the render thread), in which case there
     // is nothing to schedule.
-    // window() can already be null if the item was unparented from the scene before releaseResources() runs;
+    // window() can already be null if the item was detached from the scene before releaseResources() runs;
     // scheduling a render job then would dereference null. The CleanupJob takes ownership of _renderTarget
     // and deletes it on the render thread, so only null the pointer once the job has taken it. Without a
     // window we must NOT null _renderTarget here — otherwise the deferred destroyRenderer() (via the

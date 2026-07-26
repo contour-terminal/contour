@@ -1518,7 +1518,7 @@ void Screen::sendTerminalId()
     auto constexpr Pv =
         (((LIBTERMINAL_VERSION_MAJOR * 100) + LIBTERMINAL_VERSION_MINOR) * 100) + LIBTERMINAL_VERSION_PATCH;
 
-    // ROM cardridge registration number (always 0)
+    // ROM cartridge registration number (always 0)
     auto constexpr Pc = 0;
 
     reply("\033[>{};{};{}c", pp, Pv, Pc);
@@ -4006,7 +4006,7 @@ namespace impl
         /// `OSC 4` / `OSC 5` -- sets or queries palette colors, as index/specification pairs.
         ///
         /// As in xterm, the first pair that cannot be read ends the sequence: a bad index or an
-        /// unparseable specification stops the walk rather than skipping to the next pair.
+        /// unparsable specification stops the walk rather than skipping to the next pair.
         ///
         /// @see xterm's ChangeAnsiColorRequest() in misc.c.
         ApplyResult setOrRequestColorPalette(Sequence const& seq,
@@ -4129,7 +4129,7 @@ namespace impl
             {
                 auto const fonts = terminal.getFontDef();
                 terminal.reply("\033]60;{};{};{};{};{};{}\033\\",
-                               int(fonts.size * 100), // precission-shift
+                               int(fonts.size * 100), // precision-shift
                                fonts.regular,
                                fonts.bold,
                                fonts.italic,
@@ -7495,7 +7495,7 @@ optional<CellLocation> Screen::search(std::u32string_view searchText, CellLocati
 
     // First try match at start location.
     if (_grid.lineAt(startPosition.line)
-            .matchTextAtWithSensetivityMode(searchText, startPosition.column, isCaseSensitive))
+            .matchTextAtWithSensitivityMode(searchText, startPosition.column, isCaseSensitive))
         return startPosition;
 
     // Search reverse until found or exhausted.
@@ -7520,7 +7520,7 @@ optional<CellLocation> Screen::searchReverse(std::u32string_view searchText, Cel
 
     // First try match at start location.
     if (_grid.lineAt(startPosition.line)
-            .matchTextAtWithSensetivityMode(searchText, startPosition.column, isCaseSensitive))
+            .matchTextAtWithSensitivityMode(searchText, startPosition.column, isCaseSensitive))
         return startPosition;
 
     // Search reverse until found or exhausted.

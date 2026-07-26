@@ -371,7 +371,7 @@ constexpr ParserTable ParserTable::get() // {{{
         // t.transition(anywhere, State::APC_String, 0x9F_b);    // C1: APC
     }
 
-    // TODO: verify the above is correct (programatically as much as possible)
+    // TODO: verify the above is correct (programmatically as much as possible)
     // TODO: see if we can reduce the pressure on L2 caches (is this even an issue?)
 
     return t;

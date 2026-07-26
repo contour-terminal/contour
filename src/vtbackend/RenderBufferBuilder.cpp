@@ -619,7 +619,7 @@ ColumnCount RenderBufferBuilder::renderUtf8Text(CellLocation screenPosition,
             _baseLine + screenPosition.line,
             (screenPosition.column + ColumnOffset::cast_from(columnCountRendered)) * scale));
 
-        // Span filling cells for preciding wide glyphs to get the background color properly painted.
+        // Span filling cells for preceding wide glyphs to get the background color properly painted.
         for (auto i = ColumnCount(1); i < width; ++i)
         {
             _output->cells.emplace_back(makeRenderCellExplicit(

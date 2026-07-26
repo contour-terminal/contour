@@ -27,7 +27,7 @@ using URI = std::string;
 
 struct HyperlinkInfo
 {                       // TODO: rename to Hyperlink
-    std::string userId; //!< application provied ID
+    std::string userId; //!< application provided ID
     URI uri;
     mutable HyperlinkState state = HyperlinkState::Inactive;
 

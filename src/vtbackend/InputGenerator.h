@@ -22,7 +22,7 @@
 namespace vtbackend
 {
 
-/// Mutualy exclusive mouse protocls.
+/// Mutually exclusive mouse protocols.
 enum class MouseProtocol : uint16_t
 {
     /// Old X10 mouse protocol
@@ -379,7 +379,7 @@ enum class MouseTransport : uint8_t
     // `CSI Cb Cx Cy M` and `CSI Cb Cx Cy m` (button release)
     SGR,
     // SGR-Pixels (1016), an xterm extension as of Patch #359 - 2020/08/17
-    // This is just like SGR but reports pixels isntead of ANSI cursor positions.
+    // This is just like SGR but reports pixels instead of ANSI cursor positions.
     SGRPixels,
     // `CSI < Cb Cx Cy M` with Cb += 0x20
     URXVT,

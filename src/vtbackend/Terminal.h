@@ -79,7 +79,7 @@ enum class ScrollPhase : uint8_t
     Momentum, ///< OS-generated momentum phase (we implement our own).
 };
 
-/// Helping information to visualize IME text that has not been comitted yet.
+/// Helping information to visualize IME text that has not been committed yet.
 struct InputMethodData
 {
     // If this string is non-empty, the IME is active and the given data
@@ -1412,7 +1412,7 @@ class Terminal
         return _hoveringHyperlinkId.load().value != 0;
     }
 
-    /// Retrieves the HyperlinkInfo that is currently behing hovered by the mouse, if so,
+    /// Retrieves the HyperlinkInfo that is currently being hovered by the mouse, if so,
     /// or a nothing otherwise.
     [[nodiscard]] std::shared_ptr<HyperlinkInfo const> tryGetHoveringHyperlink() const noexcept
     {
@@ -1853,7 +1853,7 @@ class Terminal
         // session name via resolvedTabName() — but it takes and RELEASES _stateMutex there, then acquires
         // _guiTabInfoMutex separately in setGuiTabInfoForStatusLine(); it never holds _stateMutex while
         // acquiring _guiTabInfoMutex. Because the writer never nests the two the other way round, there is
-        // no AB-BA inversion. Do NOT move the name resolution inside setGuiTabInfoForStatusLine() (i.e.
+        // no ABBA inversion. Do NOT move the name resolution inside setGuiTabInfoForStatusLine() (i.e.
         // under _guiTabInfoMutex): that WOULD nest _stateMutex inside _guiTabInfoMutex and deadlock against
         // this reader.
         auto const l = std::lock_guard { _guiTabInfoMutex };
@@ -1917,7 +1917,7 @@ class Terminal
     bool shouldExtendSelectionByMouse(CellLocation newPosition, PixelCoordinate pixelPosition) const noexcept;
 
     // Tests if the App mouse protocol is explicitly being bypassed by the user,
-    // by pressing a special bypass modifier (usualy Shift).
+    // by pressing a special bypass modifier (usually Shift).
     bool allowBypassAppMouseGrabViaModifier(Modifiers modifiers) const noexcept
     {
         return _settings.mouseProtocolBypassModifiers != Modifier::None

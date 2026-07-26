@@ -784,14 +784,14 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
         }
         else
         {
-            Lines shrinkedLines;
+            Lines shrunkLines;
             LineSoA wrappedColumns;
             initializeLineSoA(wrappedColumns, ColumnCount(0));
             size_t wrappedUsed = 0;
             LineFlags previousFlags = _lines.front().inheritableFlags();
 
             auto const totalLineCount = unbox<size_t>(_pageSize.lines + maxHistoryLineCount());
-            shrinkedLines.reserve(totalLineCount);
+            shrunkLines.reserve(totalLineCount);
             Require(totalLineCount == unbox<size_t>(this->totalLineCount()));
 
             auto numLinesWritten = LineCount(0);
@@ -823,7 +823,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                     {
                         // Every chunk here is the OVERFLOW of a head that was already emitted, so it is a
                         // continuation: no semantic marks, and therefore no command-end offset either.
-                        auto const numLinesInserted = detail::addNewWrappedLines(shrinkedLines,
+                        auto const numLinesInserted = detail::addNewWrappedLines(shrunkLines,
                                                                                  newColumnCount,
                                                                                  wrappedColumns,
                                                                                  wrappedUsed,
@@ -851,13 +851,13 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                     wrappedUsed = trimBlankRight(wrappedColumns, overflowCols);
                 }
 
-                shrinkedLines.emplace_back(std::move(line));
+                shrunkLines.emplace_back(std::move(line));
                 numLinesWritten++;
-                Ensures(shrinkedLines.back().size() >= newColumnCount);
+                Ensures(shrunkLines.back().size() >= newColumnCount);
             }
             if (wrappedUsed > 0)
             {
-                numLinesWritten += detail::addNewWrappedLines(shrinkedLines,
+                numLinesWritten += detail::addNewWrappedLines(shrunkLines,
                                                               newColumnCount,
                                                               wrappedColumns,
                                                               wrappedUsed,
@@ -866,16 +866,16 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                                                               ColumnOffset(0),
                                                               false);
             }
-            Require(unbox<size_t>(numLinesWritten) == shrinkedLines.size());
+            Require(unbox<size_t>(numLinesWritten) == shrunkLines.size());
             Require(numLinesWritten >= _pageSize.lines);
 
-            while (shrinkedLines.size() < totalLineCount)
-                shrinkedLines.emplace_back(newColumnCount, LineFlag::None, GraphicsAttributes {});
+            while (shrunkLines.size() < totalLineCount)
+                shrunkLines.emplace_back(newColumnCount, LineFlag::None, GraphicsAttributes {});
 
-            shrinkedLines.rotate_left(unbox<size_t>(numLinesWritten - _pageSize.lines));
+            shrunkLines.rotate_left(unbox<size_t>(numLinesWritten - _pageSize.lines));
             _linesUsed = LineCount::cast_from(numLinesWritten);
 
-            _lines = std::move(shrinkedLines);
+            _lines = std::move(shrunkLines);
             _pageSize.columns = newColumnCount;
 
             verifyState();

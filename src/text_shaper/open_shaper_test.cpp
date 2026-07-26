@@ -633,7 +633,7 @@ TEST_CASE("open_shaper.coverage.cache_does_not_outlive_the_keys_it_stores", "[op
 {
     // The coverage cache answers with a font_key, and those keys are owned by the maps clear_cache()
     // empties. Surviving that call it would hand back a key nothing can resolve -- and the shaping
-    // path REQUIREs the lookup to succeed, so the next frame drawing that codepoint aborted. Any
+    // path requires the lookup to succeed, so the next frame drawing that codepoint aborted. Any
     // non-DPI font change reaches this: applyFontDescriptions() calls clear_cache().
     auto coverageFont = bdf_font { "coverage", Monospaced, { { Snowman, 8 } } };
 

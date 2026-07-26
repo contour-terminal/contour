@@ -657,13 +657,13 @@ namespace // {{{ helpers
                       option_style optionStyle,
                       option_name const& name,
                       string_view placeholder,
-                      presence presense)
+                      presence presence)
     {
         auto const colorize = colorizer(colors);
 
         stringstream os;
 
-        if (presense == presence::Optional)
+        if (presence == presence::Optional)
             os << colorize("[", help_element::Braces);
         switch (optionStyle)
         {
@@ -691,7 +691,7 @@ namespace // {{{ helpers
                        << colorize(placeholder, help_element::OptionValue);
                 break;
         }
-        if (presense == presence::Optional)
+        if (presence == presence::Optional)
             os << colorize("]", help_element::Braces);
 
         return os.str();
@@ -865,7 +865,7 @@ namespace // {{{ helpers
                              unsigned margin,
                              [[maybe_unused]] vector<command const*>& parents)
     {
-        // NOTE: We asume that cursor position is at first column!
+        // NOTE: We assume that cursor position is at first column!
         auto const stylize = stylizer(style);
         bool const isLeafCommand = com.children.empty();
 

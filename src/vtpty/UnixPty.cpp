@@ -160,7 +160,7 @@ bool UnixPty::Slave::login()
         return false;
 
     // This is doing what login_tty() is doing, too.
-    // But doing it ourselfs allows for a little more flexibility.
+    // But doing it ourselves allows for a little more flexibility.
     // return login_tty(_slaveFd) == 0;
 
     sigset_t signals;

@@ -44,7 +44,7 @@ RGBColor paintOnePixelWith(std::string_view colorDefinition)
 //
 // The table is constexpr, so these cost nothing at runtime and fail the build rather than a test
 // run. vtparser's equivalent table carries a standing "TODO: verify the above is correct
-// (programatically as much as possible)" and never got these; the point of writing them here is that
+// (programmatically as much as possible)" and never got these; the point of writing them here is that
 // a mis-tabled cell is otherwise silent.
 
 using Table = SixelParser::Table;

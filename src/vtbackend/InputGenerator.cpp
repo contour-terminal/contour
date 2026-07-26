@@ -1063,7 +1063,7 @@ bool InputGenerator::generate(char32_t characterEvent,
 }
 
 /// Strips the modifier corresponding to a modifier-only key from the modifier set.
-/// On key release, Windows KEY_EVENT_RECORDs reflect the post-release state
+/// On key release, Windows KEY_EVENT_RECORD values reflect the post-release state
 /// (e.g., releasing Alt clears LEFT_ALT_PRESSED from dwControlKeyState).
 /// Qt may still report the pre-release modifier, so we strip it explicitly.
 static constexpr Modifiers stripSelfModifier(Key key, Modifiers modifiers) noexcept

@@ -95,9 +95,9 @@ Write-Host "a) arg0: $option"
 
 function Run {
     $ProjectRoot = "${PSScriptRoot}/.."
-    $ThirsPartiesDir = "${ProjectRoot}/_deps"
-    $DistfilesDir = "${ThirsPartiesDir}/distfiles"
-    $SourcesDir = "${ThirsPartiesDir}/sources"
+    $ThirdPartiesDir = "${ProjectRoot}/_deps"
+    $DistfilesDir = "${ThirdPartiesDir}/distfiles"
+    $SourcesDir = "${ThirdPartiesDir}/sources"
     $CMakeListsFile = "${SourcesDir}/CMakeLists.txt"
 
     if (! [System.IO.Directory]::Exists($DistfilesDir)) {
@@ -118,7 +118,7 @@ function Run {
             -Archive $TP.Archive `
             -URI $TP.URI `
             -Macro $TP.Macro `
-            -Target $ThirsPartiesDir `
+            -Target $ThirdPartiesDir `
             -CMakeListsFile $CMakeListsFile
     }
 

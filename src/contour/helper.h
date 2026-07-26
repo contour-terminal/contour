@@ -254,7 +254,7 @@ enum class RenderState : uint8_t
 
 /// Defines the current screen-dirtiness-vs-rendering state.
 ///
-/// This is primarily updated by two independant threads, the rendering thread and the I/O
+/// This is primarily updated by two independent threads, the rendering thread and the I/O
 /// thread.
 /// The rendering thread constantly marks the rendering state CleanPainting whenever it is about
 /// to render and, depending on whether new screen changes happened, in the frameSwapped()

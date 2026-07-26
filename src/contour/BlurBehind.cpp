@@ -218,7 +218,7 @@ void setEnabled(QWindow* window, bool enable, QRegion const& region)
 #endif
 
 #if defined(_WIN32) // {{{
-    // Awesome hack with the noteworty links:
+    // Awesome hack with the noteworthy links:
     // * https://gist.github.com/ethanhs/0e157e4003812e99bf5bc7cb6f73459f (used as code template)
     // * https://github.com/riverar/sample-win32-acrylicblur/blob/master/MainWindow.xaml.cs
     // * https://stackoverflow.com/questions/44000217/mimicking-acrylic-in-a-win32-app

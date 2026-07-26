@@ -18,7 +18,7 @@ struct Metrics
 
     void operator()(Sequence const& seq) { sequences[seq.text()]++; }
 
-    /// @returns an ordered list of collected metrics, with highest frequencey first.
+    /// @returns an ordered list of collected metrics, with highest frequency first.
     [[nodiscard]] std::vector<std::pair<std::string, uint64_t>> ordered() const
     {
         std::vector<std::pair<std::string, uint64_t>> vec;

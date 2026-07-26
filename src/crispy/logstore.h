@@ -24,7 +24,7 @@
 #endif
 
 // NB: Don't do that now. It seems to only cause problems, such as
-// __has_include reports presense and in can in fact be included, but it's
+// __has_include reports presence and in can in fact be included, but it's
 // not giving us the expected std::...source_location, wow.
 //
 // #if __has_include(<source_location>) && !defined(_WIN32)

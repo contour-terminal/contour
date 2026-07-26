@@ -26,7 +26,7 @@ renderer:
 
 Defines the number of hashtable slots to map to the texture tiles.
 Larger values may increase performance, but too large may also decrease.
-This value is rounted up to a value equal to the power of two.
+This value is rounded up to a value equal to the power of two.
 
 Default: `4096`
 

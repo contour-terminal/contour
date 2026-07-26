@@ -644,7 +644,7 @@ struct TerminalProfile
     ConfigEntry<bool, documentation::ShowIndicatorOnResize> sizeIndicatorOnResize { true };
     ConfigEntry<bool, documentation::Fullscreen> fullscreen { false };
     ConfigEntry<bool, documentation::Maximized> maximized { false };
-    ConfigEntry<bool, documentation::SeachModeSwitch> searchModeSwitch { true };
+    ConfigEntry<bool, documentation::SearchModeSwitch> searchModeSwitch { true };
     ConfigEntry<bool, documentation::InsertAfterYank> insertAfterYank { false };
     ConfigEntry<Bell, documentation::Bell> bell { { .sound = "default", .alert = true, .volume = 1.0f } };
     ConfigEntry<vtbackend::VTType, documentation::TerminalId> terminalId { vtbackend::VTType::VT525 };

@@ -157,7 +157,7 @@ struct LogicalLine
                 auto remainingText = searchText;
                 remainingText.remove_prefix(result->partialMatchLength);
                 if (line + 1 != lines.end()
-                    && (line + 1)->get().matchTextAtWithSensetivityMode(
+                    && (line + 1)->get().matchTextAtWithSensitivityMode(
                         remainingText, ColumnOffset(0), isCaseSensitive))
                     return CellLocation { .line = i,
                                           .column = ColumnOffset::cast_from(
@@ -226,7 +226,7 @@ struct LogicalLine
                 auto remainingText = searchText;
                 remainingText.remove_suffix(result->partialMatchLength);
                 if (line + 1 != lines.rend()
-                    && (line + 1)->get().matchTextAtWithSensetivityMode(
+                    && (line + 1)->get().matchTextAtWithSensitivityMode(
                         remainingText, lastColumn - static_cast<int>(remainingText.size()), isCaseSensitive))
                     return CellLocation { .line = i - 1,
                                           .column = lastColumn - static_cast<int>(remainingText.size()) };
@@ -246,7 +246,7 @@ struct LogicalLine
         auto const lineLength = unbox<size_t>(line.size());
         while (!searchText.empty())
         {
-            if (line.matchTextAtWithSensetivityMode(
+            if (line.matchTextAtWithSensitivityMode(
                     searchText,
                     ColumnOffset(static_cast<int>(lineLength - searchText.size())),
                     isCaseSensitive))
@@ -263,7 +263,7 @@ struct LogicalLine
     {
         while (!searchText.empty())
         {
-            if (line.matchTextAtWithSensetivityMode(searchText, ColumnOffset(0), isCaseSensitive))
+            if (line.matchTextAtWithSensitivityMode(searchText, ColumnOffset(0), isCaseSensitive))
                 return searchText.size();
             searchText.remove_prefix(1);
         }
@@ -302,7 +302,7 @@ struct LogicalLine
         auto segments = segmentSearchText(searchText, startCol);
         for (auto segment: segments)
         {
-            if (!startLine->get().matchTextAtWithSensetivityMode(segment, startCol, isCaseSensitive))
+            if (!startLine->get().matchTextAtWithSensitivityMode(segment, startCol, isCaseSensitive))
                 return false;
             ++startLine;
         }
@@ -319,7 +319,7 @@ struct LogicalLine
         auto segments = segmentSearchText(searchText, startCol);
         for (auto i: segments)
         {
-            if (!startLine->get().matchTextAtWithSensetivityMode(i, startCol, isCaseSensitive))
+            if (!startLine->get().matchTextAtWithSensitivityMode(i, startCol, isCaseSensitive))
                 return false;
             startCol = ColumnOffset::cast_from(0);
             --startLine;
