@@ -1248,6 +1248,56 @@ TEST_CASE("HintModeHandler.HistoryRowOffsetsRoundTrip", "[hintmode]")
 
 // }}}
 
+// {{{ Content-scroll tracking
+
+TEST_CASE("HintModeHandler.ApplyScrollTracksContentScroll", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    auto lines = std::vector<std::string> {
+        "https://alpha.com",
+        "https://beta.com",
+    };
+    handler.activate(scanArea(lines), urlOnlyPatterns(), HintAction::Copy);
+    REQUIRE(handler.matches().size() == 2);
+    auto const before = handler.matches();
+
+    // Two rows of new output scroll the grid up by two: every match keeps its label and text but
+    // moves up two rows so a label the user has already read stays on the same text.
+    handler.applyScroll(LineOffset(2), LineCount(100));
+
+    auto const& after = handler.matches();
+    REQUIRE(after.size() == 2);
+    for (auto const i: std::views::iota(size_t { 0 }, after.size()))
+    {
+        CHECK(after[i].label == before[i].label);
+        CHECK(after[i].matchedText == before[i].matchedText);
+        CHECK(after[i].start.line == before[i].start.line - LineOffset(2));
+        CHECK(after[i].end.line == before[i].end.line - LineOffset(2));
+    }
+}
+
+TEST_CASE("HintModeHandler.ApplyScrollDropsMatchesScrolledOutOfHistory", "[hintmode]")
+{
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+
+    auto lines = std::vector<std::string> { "https://gone.example" };
+    handler.activate(scanArea(lines), urlOnlyPatterns(), HintAction::Copy);
+    REQUIRE(handler.matches().size() == 1);
+
+    // Scrolling far past a shallow history buffer carries the only match out of the buffer, so the
+    // session has nothing left to offer and ends.
+    handler.applyScroll(LineOffset(5), LineCount(2));
+
+    CHECK(handler.matches().empty());
+    CHECK(!handler.isActive());
+    CHECK(executor.hintExitedCount == 1);
+}
+
+// }}}
+
 // {{{ Label widths
 
 namespace

@@ -175,13 +175,23 @@ class HintModeHandler
     /// pattern may span several rows.
     ///
     /// @param area     The rows to scan and which of them may carry a label.
-    /// @param patterns The regex patterns to scan for.
+    /// @param patterns The regex patterns to scan for; taken by value and moved into the handler,
+    ///                 so a caller with a throwaway vector should std::move it in.
     /// @param action   The action to perform on selection.
-    void activate(HintScanArea const& area, std::vector<HintPattern> const& patterns, HintAction action);
+    void activate(HintScanArea const& area, std::vector<HintPattern> patterns, HintAction action);
 
     /// Re-scans @p area using the patterns and action stored by @ref activate.
     /// Called on viewport scroll to update visible-scope hints without re-entering hint mode.
     void refresh(HintScanArea const& area);
+
+    /// Tracks grid content scrolling into history while a hint session is open, so a label keeps
+    /// pointing at the same text instead of at whatever text scrolled into its old grid-absolute
+    /// position. Every match moves up by @p lines; a match whose start has scrolled out of the
+    /// @p historyLineCount-deep buffer is dropped, and the session deactivates if none remain.
+    ///
+    /// @param lines            Rows scrolled into history (positive), as reported by the buffer.
+    /// @param historyLineCount The scrollback depth after the scroll.
+    void applyScroll(LineOffset lines, LineCount historyLineCount);
 
     /// Deactivates hint mode.
     void deactivate();
@@ -249,9 +259,9 @@ class HintModeHandler
 
 /// Converts a UTF-8 byte offset within @p text to the corresponding codepoint index.
 ///
-/// In the UTF-8 strings produced by Line::toUtf8(), each grid cell emits exactly one
-/// codepoint (wide-character continuation cells emit a space). Therefore the codepoint
-/// index equals the column index for these strings.
+/// In the column-aligned UTF-8 strings the hint scanner uses (see @ref Line::toUtf8ColumnAligned),
+/// each grid cell emits exactly one codepoint (a wide character's continuation cell emits a space).
+/// Therefore the codepoint index equals the column index for these strings.
 [[nodiscard]] auto utf8ByteOffsetToCodepointIndex(std::string_view text, size_t byteOffset) noexcept
     -> size_t;
 

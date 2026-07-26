@@ -580,8 +580,16 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
 
     auto const hoveringHyperlinkGuard = ScopedHyperlinkHover { *this, *_currentScreen };
     auto const mainDisplayReverseVideo = isModeEnabled(vtbackend::DECMode::ReverseVideo);
-    auto const highlightSearchMatches =
-        _search.pattern.empty() ? HighlightSearchMatches::No : HighlightSearchMatches::Yes;
+
+    // A non-empty search pattern forces every visible line onto the per-cell render path (the
+    // uniform-line fast path emits one RenderLine and no per-cell data). Hint mode needs the same:
+    // its overlay dims unmatched cells and stamps label glyphs by rewriting per-cell data, so while
+    // a hint session is active every line must take the per-cell path, or a label on a plain line —
+    // the common case — would never be drawn. Grid::render reuses its search-highlight flag as that
+    // per-cell switch.
+    auto const renderLinesPerCell = (!_search.pattern.empty() || isHintModeActive())
+                                        ? HighlightSearchMatches::Yes
+                                        : HighlightSearchMatches::No;
 
     auto const theCursorPosition = [&]() -> std::optional<CellLocation> {
         if (inputHandler().mode() == ViMode::Insert)
@@ -615,7 +623,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                                             effectiveCursorPosition,
                                                                             includeSelection },
                                                       _viewport.scrollOffset(),
-                                                      highlightSearchMatches,
+                                                      renderLinesPerCell,
                                                       smoothScrollExtra);
     else
         _lastRenderPassHints = displayedScreen.render(RenderBufferBuilder { *this,
@@ -629,7 +637,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                                             effectiveCursorPosition,
                                                                             includeSelection },
                                                       _viewport.scrollOffset(),
-                                                      highlightSearchMatches);
+                                                      renderLinesPerCell);
 
     // Save the baseLine used for the main screen before the bottom status line shifts it.
     auto const mainScreenLine = baseLine;
@@ -2557,6 +2565,10 @@ HintScanArea Terminal::collectHintScanArea(HintScope scope, LineCount scrollback
     auto const gridBottom = pageSize().lines.as<LineOffset>() - LineOffset(1);
     auto const historyTop = -screen.historyLineCount().as<LineOffset>();
 
+    // A scrollback limit is a row count; a negative value (an out-of-range config) would push
+    // labelableRows.first past last and underflow the reserve() below, so clamp it to zero.
+    scrollbackLimit = std::max(scrollbackLimit, LineCount(0));
+
     // A label can only be typed once it has been drawn. Under Visible that is the viewport; under
     // Scrollback the labels are fixed for the session, so every scanned row can carry one and the
     // user scrolls to reach it.
@@ -2581,8 +2593,9 @@ HintScanArea Terminal::collectHintScanArea(HintScope scope, LineCount scrollback
     area.rows.reserve(unbox<size_t>(last - first) + 1);
     for (auto line = first; line <= last; ++line)
         area.rows.push_back(HintScanRow {
-            // Untrimmed on purpose: one codepoint per cell is what makes a codepoint index a column.
-            .text = screen.lineTextAt(line, false, false),
+            // Column-aligned on purpose: one codepoint per grid cell (a wide character's
+            // continuation cell becomes a space) is what makes a codepoint index a column.
+            .text = screen.lineTextColumnAlignedAt(line),
             .line = line,
             .continuation = screen.isLineWrapped(line) ? LineContinuation::Yes : LineContinuation::No,
         });
@@ -2660,7 +2673,7 @@ void Terminal::activateHintMode(HintModeRequest request)
         }
     }
 
-    _hintModeHandler.activate(area, mutablePatterns, request.action);
+    _hintModeHandler.activate(area, std::move(mutablePatterns), request.action);
     _inputHandler.setMode(ViMode::Hint);
 }
 
@@ -2710,6 +2723,7 @@ void Terminal::applyHintOverlay(RenderBuffer& output, LineOffset baseLine) const
     // what makes this necessary rather than merely tidy.
     auto const scrollOffset = _viewport.scrollOffset().as<LineOffset>();
     auto const pageLines = pageSize().lines.as<LineOffset>();
+    auto const pageColumns = unbox<int>(pageSize().columns);
     auto rowBuckets = std::vector<std::vector<ProjectedMatch>>(unbox<size_t>(pageLines));
 
     for (auto const& match: matches)
@@ -2721,11 +2735,29 @@ void Terminal::applyHintOverlay(RenderBuffer& output, LineOffset baseLine) const
             .labelStart = first + baseLine,
             .label = match.label,
         };
+        // The label may overrun the row's right edge and wrap onto the next row(s), so it can touch
+        // a row the body does not; bucket every row either of them covers.
+        auto const labelEndColumn = unbox<int>(first.column) + static_cast<int>(match.label.size()) - 1;
+        auto const labelEndLine = first.line + LineOffset(labelEndColumn / pageColumns);
         auto const from = std::max(first.line, LineOffset(0));
-        auto const to = std::min(last.line, pageLines - LineOffset(1));
+        auto const to = std::min(std::max(last.line, labelEndLine), pageLines - LineOffset(1));
         for (auto row = from; row <= to; ++row)
             rowBuckets[unbox<size_t>(row)].push_back(projected);
     }
+
+    // The label occupies label.size() consecutive grid cells starting at labelStart, flowing left to
+    // right and wrapping onto the next row at the page's right edge (exactly as the wrapped match's
+    // body does). Returns which label character, if any, falls on @p pos.
+    auto const labelIndexAt = [&](CellLocation pos, ProjectedMatch const& match) -> std::optional<size_t> {
+        auto const rowDelta = unbox<int>(pos.line - match.labelStart.line);
+        if (rowDelta < 0)
+            return std::nullopt;
+        auto const index =
+            (rowDelta * pageColumns) + unbox<int>(pos.column) - unbox<int>(match.labelStart.column);
+        if (index < 0 || static_cast<size_t>(index) >= match.label.size())
+            return std::nullopt;
+        return static_cast<size_t>(index);
+    };
 
     for (auto& cell: output.cells)
     {
@@ -2739,21 +2771,17 @@ void Terminal::applyHintOverlay(RenderBuffer& output, LineOffset baseLine) const
         auto onMatch = false;
         for (auto const& match: bucket)
         {
-            // The label is drawn over the first label.size() cells of the match's first row even
-            // where it overruns a match shorter than its own label: a half-drawn label cannot be
-            // typed.
-            auto const labelEnd = match.labelStart.column + ColumnOffset::cast_from(match.label.size());
-            if (cell.position.line == match.labelStart.line && cell.position.column >= match.labelStart.column
-                && cell.position.column < labelEnd)
+            // The label is drawn over the match's first label.size() cells — wrapping onto the next
+            // row rather than being clipped at the right edge, and drawn in full even where it
+            // overruns a match shorter than its own label: a half-drawn label cannot be typed.
+            if (auto const labelIdx = labelIndexAt(cell.position, match))
             {
-                auto const labelIdx = unbox<size_t>(cell.position.column - match.labelStart.column);
-
                 // Replace codepoints with label character.
-                cell.codepoints = std::u32string(1, static_cast<char32_t>(match.label[labelIdx]));
+                cell.codepoints = std::u32string(1, static_cast<char32_t>(match.label[*labelIdx]));
                 cell.width = 1;
 
                 // Distinguish the already-typed prefix from the characters still to type.
-                auto const typed = labelIdx < filter.size();
+                auto const typed = *labelIdx < filter.size();
                 cell.attributes.foregroundColor = typed ? typedLabelFg : labelFg;
                 cell.attributes.backgroundColor = typed ? typedLabelBg : labelBg;
                 cell.attributes.flags |= CellFlag::Bold;
@@ -3884,8 +3912,23 @@ void Terminal::onBufferScrolled(LineCount n) noexcept
     _viCommands.cursorPosition.line -= n;
 
     // Adjust viewport accordingly to make it fixed at the scroll-offset as if nothing has happened.
+    // A viewport that actually moved has already run onViewportChanged() (and, in hint mode, the
+    // refreshHints() there); remember that so the visible-scope branch below does not re-scan twice.
+    auto viewportFollowedContent = false;
     if (viewport().scrolled() || _viewport.pixelOffset() > 0.0f || _inputHandler.mode() == ViMode::Normal)
-        viewport().scrollUp(n);
+        viewportFollowedContent = viewport().scrollUp(n);
+
+    // Keep an open hint session consistent with content that just scrolled. Scrollback labels are
+    // fixed for the session, so shift each match up to stay on its own text. The visible scope
+    // re-scans its (now-changed) viewport instead — but only when the viewport did not already move,
+    // since onViewportChanged() re-scans for us when it does.
+    if (_hintModeHandler.isActive())
+    {
+        if (_hintScope == HintScope::Scrollback)
+            _hintModeHandler.applyScroll(boxed_cast<LineOffset>(n), primaryScreen().historyLineCount());
+        else if (!viewportFollowedContent)
+            refreshHints();
+    }
 
     if (!_selection)
         return;

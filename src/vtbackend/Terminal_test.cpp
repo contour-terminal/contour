@@ -4913,3 +4913,124 @@ TEST_CASE("Terminal.hint_mode_extends_the_scan_past_the_viewport_to_finish_a_wra
         CHECK(mock.terminal.hintMatches().empty());
     }
 }
+
+TEST_CASE("Terminal.hint_mode_maps_columns_past_a_wide_character", "[terminal][hintmode]")
+{
+    // A double-width glyph before the URL must not shift the label/highlight left: the scan text is
+    // column-aligned (the wide character's continuation cell becomes a space), so the URL's grid
+    // column accounts for the two cells the glyph occupies.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, LineCount(10) };
+    mock.writeToScreen("\xe4\xb8\xad https://example.com"); // 中 (2 columns) + space + URL
+    mock.terminal.flushInput();
+
+    // 中 really is double-width here, otherwise the column arithmetic below would not be exercised.
+    REQUIRE(mock.terminal.currentScreen().cellWidthAt(
+                CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) })
+            == 2);
+
+    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
+        .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Copy });
+
+    REQUIRE(mock.terminal.hintMatches().size() == 1);
+    auto const& match = mock.terminal.hintMatches().at(0);
+    CHECK(match.matchedText == "https://example.com");
+    // 中 occupies columns 0-1 and the space column 2, so the URL starts at column 3 — not column 2,
+    // which is where a codepoint-counted (wide-character-collapsing) mapping would wrongly place it.
+    CHECK(match.start == CellLocation { .line = LineOffset(0), .column = ColumnOffset(3) });
+}
+
+TEST_CASE("Terminal.hint_mode_survives_a_negative_scrollback_limit", "[terminal][hintmode]")
+{
+    // A negative hint_scrollback_lines (an out-of-range config value) must not push the labelable
+    // range past the grid and underflow the row reservation, which would terminate the terminal.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, LineCount(20) };
+    mock.writeToScreen("https://one.example\r\n\r\n\r\n\r\n\r\n");
+    mock.terminal.flushInput();
+
+    mock.terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = vtbackend::HintModeHandler::builtinPatterns(),
+                                     .action = vtbackend::HintAction::Copy,
+                                     .scope = vtbackend::HintScope::Scrollback,
+                                     .scrollbackLimit = vtbackend::LineCount(-100) });
+
+    // It did not crash; the negative limit clamped to "no history", so the scrolled-away URL is out
+    // of range and nothing is offered.
+    CHECK(mock.terminal.isHintModeActive());
+    CHECK(mock.terminal.hintMatches().empty());
+}
+
+TEST_CASE("Terminal.hint_mode_matches_track_content_scrolling", "[terminal][hintmode]")
+{
+    // A hint session's positions are grid-absolute. When new output scrolls the grid while the
+    // session is open, each match must move up with its own text rather than staying at a now-stale
+    // row that other text has scrolled into.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, LineCount(50) };
+    mock.writeToScreen("https://tracked.example\r\n");
+    mock.terminal.flushInput();
+
+    mock.terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = vtbackend::HintModeHandler::builtinPatterns(),
+                                     .action = vtbackend::HintAction::Copy,
+                                     .scope = vtbackend::HintScope::Scrollback,
+                                     .scrollbackLimit = vtbackend::LineCount(1000) });
+    REQUIRE(mock.terminal.hintMatches().size() == 1);
+    auto const before = mock.terminal.hintMatches().at(0);
+
+    // Three more lines scroll the grid up by two; the match keeps its label and text but moves up.
+    // Each line goes in its own write so a line-break escape ends its literal rather than gluing to
+    // the next word (which check-spelling would read as a nonsense token).
+    mock.writeToScreen("more\r\n");
+    mock.writeToScreen("lines\r\n");
+    mock.writeToScreen("here\r\n");
+    mock.terminal.flushInput();
+
+    REQUIRE(mock.terminal.hintMatches().size() == 1);
+    auto const after = mock.terminal.hintMatches().at(0);
+    CHECK(after.matchedText == before.matchedText);
+    CHECK(after.label == before.label);
+    CHECK(after.start.line < before.start.line); // followed its text up into history
+}
+
+TEST_CASE("Terminal.hint_mode_overlay_wraps_a_label_past_the_row_edge", "[terminal][hintmode]")
+{
+    // 27 matches force two-character labels. One URL starts at the very last column, so its label
+    // cannot fit on that row: the second character must appear on the wrapped continuation row
+    // rather than being silently dropped.
+    auto urlPatterns = std::vector<vtbackend::HintPattern>();
+    for (auto& pattern: vtbackend::HintModeHandler::builtinPatterns())
+        if (pattern.name == "url")
+            urlPatterns.push_back(std::move(pattern));
+
+    auto mock = MockTerm { PageSize { LineCount(30), ColumnCount(20) }, LineCount(50) };
+    for (auto const i: std::views::iota(0, 26))
+        mock.writeToScreen(std::format("https://s{}.io\r\n", i));
+    // 19 blank filler columns then the URL, so its match starts at column 19 (the last column).
+    mock.writeToScreen(std::string(19, ' ') + "https://edge.example");
+    mock.terminal.flushInput();
+
+    mock.terminal.activateHintMode(vtbackend::HintModeRequest { .patterns = std::move(urlPatterns),
+                                                                .action = vtbackend::HintAction::Copy });
+
+    auto const& matches = mock.terminal.hintMatches();
+    REQUIRE(matches.size() == 27);
+    auto const edge =
+        std::ranges::find_if(matches, [](auto const& m) { return m.matchedText == "https://edge.example"; });
+    REQUIRE(edge != matches.end());
+    REQUIRE(edge->label.size() == 2);
+    REQUIRE(edge->start.column == ColumnOffset(19)); // the last column of a 20-wide page
+
+    mock.terminal.refreshRenderBuffer();
+    auto const buf = mock.terminal.renderBuffer();
+    auto const codepointsAt = [&](CellLocation pos) -> std::optional<std::u32string> {
+        auto const it =
+            std::ranges::find_if(buf.get().cells, [&](auto const& cell) { return cell.position == pos; });
+        if (it == buf.get().cells.end())
+            return std::nullopt;
+        return it->codepoints;
+    };
+
+    // First label character on the start cell, second wrapped onto the next row's first column.
+    auto const wrapped = CellLocation { .line = edge->start.line + LineOffset(1), .column = ColumnOffset(0) };
+    CHECK(codepointsAt(edge->start) == std::u32string(1, static_cast<char32_t>(edge->label[0])));
+    CHECK(codepointsAt(wrapped) == std::u32string(1, static_cast<char32_t>(edge->label[1])));
+}

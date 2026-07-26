@@ -180,12 +180,10 @@ void HintModeHandler::rescanLines(HintScanArea const& area)
     _filteredMatches = _allMatches;
 }
 
-void HintModeHandler::activate(HintScanArea const& area,
-                               vector<HintPattern> const& patterns,
-                               HintAction action)
+void HintModeHandler::activate(HintScanArea const& area, vector<HintPattern> patterns, HintAction action)
 {
     _action = action;
-    _patterns = patterns;
+    _patterns = std::move(patterns);
     rescanLines(area);
 
     _active = true;
@@ -196,6 +194,37 @@ void HintModeHandler::activate(HintScanArea const& area,
 void HintModeHandler::refresh(HintScanArea const& area)
 {
     rescanLines(area);
+    _executor.requestRedraw();
+}
+
+void HintModeHandler::applyScroll(LineOffset lines, LineCount historyLineCount)
+{
+    if (!_active)
+        return;
+
+    // The oldest row still in the buffer; anything above it has scrolled out for good.
+    auto const top = -historyLineCount.as<LineOffset>();
+
+    // Scrolling changes only positions, never labels, so the label-prefix filter membership is
+    // unchanged: shift both lists in place rather than re-filtering _allMatches into _filteredMatches
+    // (which would deep-copy every surviving match's strings on each scrolled line).
+    auto const shiftAndPrune = [top, lines](std::vector<HintMatch>& matches) {
+        for (auto& match: matches)
+        {
+            match.start.line -= lines;
+            match.end.line -= lines;
+        }
+        std::erase_if(matches, [top](auto const& match) { return match.start.line < top; });
+    };
+    shiftAndPrune(_allMatches);
+    shiftAndPrune(_filteredMatches);
+
+    if (_allMatches.empty())
+    {
+        deactivate();
+        return;
+    }
+
     _executor.requestRedraw();
 }
 

@@ -818,6 +818,14 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
         return _grid.lineAt(line).toUtf8Trimmed(stripLeadingSpaces, stripTrailingSpaces);
     }
 
+    /// The full text of @p line with exactly one codepoint per grid column — a wide character's
+    /// continuation cell becomes a space — so a codepoint index into the result is a column offset.
+    /// Used by the hint scanner; see @ref Line::toUtf8ColumnAligned.
+    [[nodiscard]] std::string lineTextColumnAlignedAt(LineOffset line) const noexcept
+    {
+        return _grid.lineAt(line).toUtf8ColumnAligned();
+    }
+
     [[nodiscard]] bool isLineEmpty(LineOffset line) const noexcept { return _grid.lineAt(line).empty(); }
 
     [[nodiscard]] uint8_t cellWidthAt(CellLocation position) const noexcept
