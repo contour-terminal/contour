@@ -484,9 +484,14 @@ SshSession::SshSession(SshHostConfig config, SshHostkeyVerificationRequestCallba
     _ptySlave { std::make_unique<SshPtySlave>() },
     _p { new Private(), [](Private* p) { delete p; } }
 {
-    libssh2_init(0); // TODO: call only once?
-
-    std::atexit([]() { libssh2_exit(); });
+    // Once per process, not once per session. libssh2_init() is not itself thread-safe, and two tabs
+    // opening an SSH session at the same time called it concurrently; it also registered a fresh
+    // atexit() handler each time, against an implementation only required to accept 32 of them.
+    static auto libssh2InitOnce = std::once_flag {};
+    std::call_once(libssh2InitOnce, []() {
+        libssh2_init(0);
+        std::atexit([]() { libssh2_exit(); });
+    });
 
     // The session stays BLOCKING for the whole handshake: every step of processState() is written
     // assuming a call either succeeds or fails, and teaching all of them to resume from EAGAIN is the
@@ -531,7 +536,7 @@ void SshSession::setState(State nextState)
     if (_state == nextState)
         return;
 
-    sshLog()("({}) State transition from {} to {}.\n", crispy::threadName(), _state, nextState);
+    sshLog()("({}) State transition from {} to {}.\n", crispy::threadName(), _state.load(), nextState);
 
     _state = nextState;
 
@@ -627,7 +632,7 @@ void SshSession::processState()
     waitForSocket();
     while (true)
     {
-        switch (_state)
+        switch (_state.load())
         {
             case State::Initial:
                 //.
@@ -1035,7 +1040,7 @@ int SshSession::write(std::string_view buf)
     }
     else if (_state != State::Operational)
     {
-        sshLog()("Ignoring write() call in state: {}", _state);
+        sshLog()("Ignoring write() call in state: {}", _state.load());
         return static_cast<int>(buf.size()); // Make the caller believe that we have written all bytes.
     }
 
@@ -1125,7 +1130,7 @@ void SshSession::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
 bool SshSession::isOperational() const noexcept
 {
     // clang-format off
-    switch (_state)
+    switch (_state.load())
     {
         case State::Operational:
             return true;

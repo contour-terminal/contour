@@ -8,6 +8,7 @@
 #include <crispy/overloaded.h>
 #include <crispy/result.h>
 
+#include <atomic>
 #include <condition_variable>
 #include <functional>
 #include <map>
@@ -257,7 +258,13 @@ class SshSession final: public Pty
     struct Private;
     std::unique_ptr<Private, void (*)(Private*)> _p;
 
-    State _state = State::Initial;
+    /// Atomic because it is read without _mutex: isClosed() is called from the PTY reader thread and
+    /// from TerminalSession teardown, and read()'s condition-variable predicate examines it under
+    /// _injectMutex instead. setState() writes it under _mutex, so those reads would otherwise race.
+    ///
+    /// _walkIndex needs no such treatment: every access sits inside processState() or the auth helpers
+    /// it calls, all of which run under _mutex.
+    std::atomic<State> _state = State::Initial;
     int _walkIndex = 0;
 
     std::string _injectedWrite;
