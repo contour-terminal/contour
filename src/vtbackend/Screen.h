@@ -639,11 +639,16 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     }
 
     // Tests if given coordinate is within the visible screen area.
+    //
+    // Both bounds are exclusive at the top: the last addressable column is columns-1, exactly as the
+    // last addressable line is lines-1. The column test used to be `<=`, which accepted a coordinate
+    // one cell past the right edge -- the value verifyState() aborts on and any caller using this to
+    // guard an index would have read out of bounds with.
     [[nodiscard]] bool contains(CellLocation coord) const noexcept
     {
         return LineOffset(0) <= coord.line && coord.line < boxed_cast<LineOffset>(pageSize().lines)
                && ColumnOffset(0) <= coord.column
-               && coord.column <= boxed_cast<ColumnOffset>(pageSize().columns);
+               && coord.column < boxed_cast<ColumnOffset>(pageSize().columns);
     }
 
     [[nodiscard]] std::optional<CellLocation> search(std::u32string_view searchText,

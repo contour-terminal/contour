@@ -714,11 +714,12 @@ class Terminal
     }
 
     // Tests if given coordinate is within the visible screen area.
+    // Exclusive on both axes; see Screen::contains() for why the column bound is not `<=`.
     [[nodiscard]] constexpr bool contains(CellLocation coord) const noexcept
     {
         return LineOffset(0) <= coord.line && coord.line < boxed_cast<LineOffset>(_settings.pageSize.lines)
                && ColumnOffset(0) <= coord.column
-               && coord.column <= boxed_cast<ColumnOffset>(_settings.pageSize.columns);
+               && coord.column < boxed_cast<ColumnOffset>(_settings.pageSize.columns);
     }
 
     [[nodiscard]] bool isCursorInViewport() const noexcept
