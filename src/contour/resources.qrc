@@ -29,7 +29,14 @@
         <file>ui/SettingsListItem.qml</file>
         <file>ui/ConfirmDialog.qml</file>
         <file>ui/SettingRow.qml</file>
+        <file>ui/SettingsSection.qml</file>
         <file>ui/ColorSchemeEditor.qml</file>
+        <file>ui/StatusLineIndicatorEditor.qml</file>
+        <file>ui/StatusLineSegmentRow.qml</file>
+        <file>ui/StatusLineChip.qml</file>
+        <file>ui/StatusLineItemDialog.qml</file>
+        <file>ui/StatusLinePreviewItem.qml</file>
+        <file>ui/ColorSlotField.qml</file>
         <file>ui/main.qml</file>
     </qresource>
 </RCC>

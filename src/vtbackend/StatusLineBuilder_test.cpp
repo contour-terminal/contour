@@ -109,9 +109,9 @@ TEST_CASE("serializeStatusLineSegment.firstAttributeIsColonSeparated", "[statusl
     CHECK(text == "{InputMode:Bold,Color=#FFFF00}");
 
     // ... and it must still be an InputMode after a round trip, not literal text.
-    auto const reparsed = parseStatusLineSegment(text);
-    REQUIRE(reparsed.size() == 1);
-    CHECK(std::holds_alternative<StatusLineDefinitions::InputMode>(reparsed[0]));
+    auto const readBack = parseStatusLineSegment(text);
+    REQUIRE(readBack.size() == 1);
+    CHECK(std::holds_alternative<StatusLineDefinitions::InputMode>(readBack[0]));
 }
 
 TEST_CASE("serializeStatusLineSegment.roundTripsShippedDefaults", "[statusline]")
@@ -151,11 +151,11 @@ TEST_CASE("serializeStatusLineSegment.preservesEveryCellFlag", "[statusline]")
         styles.flags.enable(flag);
 
         auto const text = serializeStatusLineSegment({ StatusLineDefinitions::InputMode { styles } });
-        auto const reparsed = parseStatusLineSegment(text);
+        auto const readBack = parseStatusLineSegment(text);
 
-        REQUIRE(reparsed.size() == 1);
-        REQUIRE(std::holds_alternative<StatusLineDefinitions::InputMode>(reparsed[0]));
-        CHECK(std::get<StatusLineDefinitions::InputMode>(reparsed[0]).flags.test(flag));
+        REQUIRE(readBack.size() == 1);
+        REQUIRE(std::holds_alternative<StatusLineDefinitions::InputMode>(readBack[0]));
+        CHECK(std::get<StatusLineDefinitions::InputMode>(readBack[0]).flags.test(flag));
     }
 
     SECTION("all of them at once")
@@ -164,11 +164,11 @@ TEST_CASE("serializeStatusLineSegment.preservesEveryCellFlag", "[statusline]")
         for (auto const& [name, label, flag]: StatusLineDefinitions::CellFlagNames)
             styles.flags.enable(flag);
 
-        auto const reparsed =
+        auto const readBack =
             parseStatusLineSegment(serializeStatusLineSegment({ StatusLineDefinitions::Clock { styles } }));
-        REQUIRE(reparsed.size() == 1);
-        REQUIRE(std::holds_alternative<StatusLineDefinitions::Clock>(reparsed[0]));
-        CHECK(std::get<StatusLineDefinitions::Clock>(reparsed[0]).flags == styles.flags);
+        REQUIRE(readBack.size() == 1);
+        REQUIRE(std::holds_alternative<StatusLineDefinitions::Clock>(readBack[0]));
+        CHECK(std::get<StatusLineDefinitions::Clock>(readBack[0]).flags == styles.flags);
     }
 }
 
@@ -184,11 +184,11 @@ TEST_CASE("serializeStatusLineSegment.preservesTabsAttributes", "[statusline]")
         std::string { " | " },
     };
 
-    auto const reparsed = parseStatusLineSegment(serializeStatusLineSegment({ tabs }));
-    REQUIRE(reparsed.size() == 1);
-    REQUIRE(std::holds_alternative<StatusLineDefinitions::Tabs>(reparsed[0]));
+    auto const readBack = parseStatusLineSegment(serializeStatusLineSegment({ tabs }));
+    REQUIRE(readBack.size() == 1);
+    REQUIRE(std::holds_alternative<StatusLineDefinitions::Tabs>(readBack[0]));
 
-    auto const& got = std::get<StatusLineDefinitions::Tabs>(reparsed[0]);
+    auto const& got = std::get<StatusLineDefinitions::Tabs>(readBack[0]);
     CHECK(got.activeColor == tabs.activeColor);
     CHECK(got.activeBackground == tabs.activeBackground);
     CHECK(got.separator == tabs.separator);
@@ -236,10 +236,10 @@ TEST_CASE("serializeStatusLineSegment.textKeepsBracesAndCommasVerbatim", "[statu
         auto const text = serializeStatusLineSegment({ StatusLineDefinitions::Text { styles, "a,b" } });
         CHECK(text == "a,b");
 
-        auto const reparsed = parseStatusLineSegment(text);
-        REQUIRE(reparsed.size() == 1);
-        REQUIRE(std::holds_alternative<StatusLineDefinitions::Text>(reparsed[0]));
-        CHECK(std::get<StatusLineDefinitions::Text>(reparsed[0]).text == "a,b");
+        auto const readBack = parseStatusLineSegment(text);
+        REQUIRE(readBack.size() == 1);
+        REQUIRE(std::holds_alternative<StatusLineDefinitions::Text>(readBack[0]));
+        CHECK(std::get<StatusLineDefinitions::Text>(readBack[0]).text == "a,b");
     }
 
     SECTION("styled text without a comma or brace keeps its styling")
@@ -247,12 +247,12 @@ TEST_CASE("serializeStatusLineSegment.textKeepsBracesAndCommasVerbatim", "[statu
         auto styles = StatusLineDefinitions::Styles {};
         styles.flags.enable(CellFlag::Bold);
 
-        auto const reparsed = parseStatusLineSegment(
+        auto const readBack = parseStatusLineSegment(
             serializeStatusLineSegment({ StatusLineDefinitions::Text { styles, "plain" } }));
-        REQUIRE(reparsed.size() == 1);
-        REQUIRE(std::holds_alternative<StatusLineDefinitions::Text>(reparsed[0]));
+        REQUIRE(readBack.size() == 1);
+        REQUIRE(std::holds_alternative<StatusLineDefinitions::Text>(readBack[0]));
 
-        auto const& got = std::get<StatusLineDefinitions::Text>(reparsed[0]);
+        auto const& got = std::get<StatusLineDefinitions::Text>(readBack[0]);
         CHECK(got.text == "plain");
         CHECK(got.flags.test(CellFlag::Bold));
     }
@@ -267,19 +267,26 @@ TEST_CASE("serializeStatusLineSegment.everyPlaceholderNameRoundTrips", "[statusl
         auto const name = std::string(StatusLineDefinitions::ItemTraits<T>::Name);
 
         // Text and Command need their payload attribute to be recognized at all.
-        auto const template_ = std::same_as<T, StatusLineDefinitions::Text>      ? "{Text:text=x}"
-                               : std::same_as<T, StatusLineDefinitions::Command> ? "{Command:Program=true}"
-                                                                                 : "{" + name + "}";
+        // Capture-default rather than naming `name`: the branch that uses it is discarded for Text and
+        // Command, which would make an explicit capture unused for those instantiations.
+        auto const templateText = [&] -> std::string {
+            if constexpr (std::same_as<T, StatusLineDefinitions::Text>)
+                return "{Text:text=x}";
+            else if constexpr (std::same_as<T, StatusLineDefinitions::Command>)
+                return "{Command:Program=true}";
+            else
+                return "{" + name + "}";
+        }();
 
-        auto const segment = parseStatusLineSegment(template_);
+        auto const segment = parseStatusLineSegment(templateText);
         INFO("placeholder: " << name);
         REQUIRE(segment.size() == 1);
         REQUIRE(std::holds_alternative<T>(segment[0]));
 
         // And its serialized form parses back to the same type.
-        auto const reparsed = parseStatusLineSegment(serializeStatusLineSegment(segment));
-        REQUIRE(reparsed.size() == 1);
-        CHECK(std::holds_alternative<T>(reparsed[0]));
+        auto const readBack = parseStatusLineSegment(serializeStatusLineSegment(segment));
+        REQUIRE(readBack.size() == 1);
+        CHECK(std::holds_alternative<T>(readBack[0]));
     });
 }
 
@@ -291,12 +298,12 @@ TEST_CASE("serializeStatusLineSegment.preservesBothSideAdornments", "[statusline
     styles.textLeft = " | ";
     styles.textRight = " > ";
 
-    auto const reparsed =
+    auto const readBack =
         parseStatusLineSegment(serializeStatusLineSegment({ StatusLineDefinitions::Clock { styles } }));
-    REQUIRE(reparsed.size() == 1);
-    REQUIRE(std::holds_alternative<StatusLineDefinitions::Clock>(reparsed[0]));
+    REQUIRE(readBack.size() == 1);
+    REQUIRE(std::holds_alternative<StatusLineDefinitions::Clock>(readBack[0]));
 
-    auto const& got = std::get<StatusLineDefinitions::Clock>(reparsed[0]);
+    auto const& got = std::get<StatusLineDefinitions::Clock>(readBack[0]);
     CHECK(got.textLeft == " | ");
     CHECK(got.textRight == " > ");
 }

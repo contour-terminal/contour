@@ -629,10 +629,10 @@ TEST_CASE("SettingsController: the indicator bridge preserves the default left s
     CHECK(tabs.value("activeColor").toString() == "#FFFF00");
 
     // ... and it is still there after a save.
-    auto const reparsed =
+    auto const readBack =
         fx.controller->parseIndicatorSegment(fx.controller->serializeIndicatorSegment(items));
     auto tabsAgain = QVariantMap {};
-    for (auto const& raw: reparsed)
+    for (auto const& raw: readBack)
         if (raw.toMap().value("type").toString() == "Tabs")
             tabsAgain = raw.toMap();
     CHECK(tabsAgain.value("activeColor").toString() == "#FFFF00");
@@ -666,10 +666,10 @@ TEST_CASE("SettingsController: the indicator bridge exposes every flag the templ
     CHECK(!flags.value("Bold").toBool());
 
     // And they survive the trip back out.
-    auto const reparsed =
+    auto const readBack =
         fx.controller->parseIndicatorSegment(fx.controller->serializeIndicatorSegment(items));
-    REQUIRE(reparsed.size() == 1);
-    auto const after = reparsed.first().toMap().value("flags").toMap();
+    REQUIRE(readBack.size() == 1);
+    auto const after = readBack.first().toMap().value("flags").toMap();
     CHECK(after.value("Underline").toBool());
     CHECK(after.value("Inverse").toBool());
     CHECK(after.value("CrossedOut").toBool());
@@ -690,10 +690,14 @@ TEST_CASE("SettingsController: the indicator placeholder catalog matches what pa
         CHECK(!entry.value("sample").toString().isEmpty());
 
         // Text and Command need their payload attribute to be recognized at all; the rest stand alone.
-        auto const template_ = type == "Text"      ? QString("{Text:text=x}")
-                               : type == "Command" ? QString("{Command:Program=true}")
-                                                   : QString("{%1}").arg(type);
-        auto const items = fx.controller->parseIndicatorSegment(template_);
+        auto const templateText = [&type] {
+            if (type == "Text")
+                return QString("{Text:text=x}");
+            if (type == "Command")
+                return QString("{Command:Program=true}");
+            return QString("{%1}").arg(type);
+        }();
+        auto const items = fx.controller->parseIndicatorSegment(templateText);
         REQUIRE(items.size() == 1);
         CHECK(items.first().toMap().value("type").toString() == type);
     }

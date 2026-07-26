@@ -572,7 +572,7 @@ std::string serializeStatusLineSegment(StatusLineSegment const& segment)
                     {
                         // Verbatim, with no brace escaping: a template has none, so a doubled brace
                         // would not read back as one -- it would gain a brace on every save.
-                        // Verbatim round-trips exactly, because "a{b" reparses as the literal "a"
+                        // Verbatim round-trips exactly, because "a{b" reads back as the literal "a"
                         // followed by the unterminated "{b" echoed verbatim, and the two concatenate
                         // to the text we started with.
                         result += v.text;
