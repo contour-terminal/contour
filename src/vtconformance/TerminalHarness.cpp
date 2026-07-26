@@ -2,10 +2,12 @@
 #include <vtconformance/TerminalHarness.h>
 
 #include <chrono>
+#include <format>
 #include <memory>
 #include <optional>
 #include <ranges>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -49,7 +51,12 @@ TerminalHarness::~TerminalHarness()
 
 void TerminalHarness::start(Pumping pumping)
 {
-    _engine->device().start();
+    // A harness that cannot start its device has nothing to conform against, so a failure here is a
+    // setup error rather than a recoverable one — unlike in the GUI, where it is reported into the
+    // pane (see contour::TerminalSession::start).
+    if (auto const started = _engine->device().start(); !started)
+        throw std::runtime_error(std::format("Failed to start the terminal device. {}", started.error()));
+
     if (pumping == Pumping::Internally)
         _pumpThread = std::make_unique<std::thread>([this] { pump(); });
 }

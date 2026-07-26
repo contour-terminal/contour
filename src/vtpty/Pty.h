@@ -8,7 +8,11 @@
 #include <crispy/logstore.h>
 
 #include <chrono>
+#include <cstdint>
+#include <expected>
+#include <format>
 #include <optional>
+#include <string>
 #include <string_view>
 
 #include <boxed-cpp/boxed.hpp>
@@ -49,6 +53,39 @@ class PtySlaveDummy: public PtySlave
     int write(std::string_view) noexcept override { return 0; }
 };
 
+/// Why a PTY, or the child process attached to it, failed to start.
+enum class StartError : std::uint8_t
+{
+    PtyAllocationFailed, ///< The pseudo terminal itself could not be created.
+    SpawnFailed,         ///< The child process could not be created.
+};
+
+/// A start() failure: the machine-readable reason plus the platform's own diagnostic text.
+///
+/// Failing to start a shell is an expected, recoverable outcome — a working directory that has since
+/// been removed, a `shell:` that is not on PATH — not a programmer error, so it is reported rather
+/// than thrown. It used to be thrown, and on Windows (where a CreateProcess() failure surfaces in the
+/// parent, there being no fork()) that exception unwound out of a Qt event handler and left a
+/// half-constructed display behind. See issue #1711.
+struct StartFailure
+{
+    StartError error {};
+    std::string detail; ///< The platform's own message, for the user to read.
+};
+
+/// What a successful start() has to report.
+///
+/// @c diagnostic is empty unless the start had to deviate from what was asked for — a working
+/// directory that could not be used and was dropped, a fallback shell — in which case the caller
+/// shows it to the user. It is not an error: the child IS running.
+struct StartOutcome
+{
+    std::string diagnostic;
+};
+
+/// The result of starting a PTY and whatever is attached to it.
+using StartResult = std::expected<StartOutcome, StartFailure>;
+
 class Pty
 {
   public:
@@ -61,7 +98,9 @@ class Pty
     virtual ~Pty() = default;
 
     /// Starts the PTY instance.
-    virtual void start() = 0;
+    ///
+    /// @return a possibly-empty diagnostic on success, or why the start failed.
+    [[nodiscard]] virtual StartResult start() = 0;
 
     virtual PtySlave& slave() noexcept = 0;
 
@@ -119,3 +158,34 @@ auto inline const ptyInLog = logstore::category("pty.input", "Logs PTY raw input
 auto inline const ptyOutLog = logstore::category("pty.output", "Logs PTY raw output.");
 
 } // namespace vtpty
+
+template <>
+struct std::formatter<vtpty::StartError>: std::formatter<std::string_view>
+{
+    auto format(vtpty::StartError value, auto& ctx) const
+    {
+        // A switch rather than a table: switch exhaustiveness names this spot when an enumerator
+        // is added, which a lookup table would silently mis-answer.
+        auto const text = [value]() -> std::string_view {
+            switch (value)
+            {
+                case vtpty::StartError::PtyAllocationFailed: return "PTY allocation failed";
+                case vtpty::StartError::SpawnFailed: return "process creation failed";
+            }
+            return "unknown error";
+        }();
+        return std::formatter<std::string_view>::format(text, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtpty::StartFailure>: std::formatter<std::string>
+{
+    auto format(vtpty::StartFailure const& value, auto& ctx) const
+    {
+        return std::formatter<std::string>::format(value.detail.empty()
+                                                       ? std::format("{}", value.error)
+                                                       : std::format("{}: {}", value.error, value.detail),
+                                                   ctx);
+    }
+};

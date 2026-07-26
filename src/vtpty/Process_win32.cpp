@@ -2,6 +2,7 @@
 #include <vtpty/ConPty.h>
 #include <vtpty/Process.h>
 #include <vtpty/Pty.h>
+#include <vtpty/SpawnLadder.h>
 
 #include <crispy/assert.h>
 #include <crispy/overloaded.h>
@@ -19,6 +20,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 #include <Windows.h>
 #include <direct.h>
@@ -184,11 +186,12 @@ bool Process::isFlatpak()
     return false;
 }
 
-void Process::start()
+StartResult Process::start()
 {
     Require(static_cast<ConPty const*>(_d->pty.get()));
 
-    _d->pty->start();
+    if (auto started = _d->pty->start(); !started)
+        return started;
 
     initializeStartupInfoAttachedToPTY(_d->startupInfo, static_cast<ConPty&>(*_d->pty));
 
@@ -216,46 +219,59 @@ void Process::start()
     }
     auto const envScope = InheritingEnvBlock { env };
 
-    auto const cwd = _d->cwd.generic_string();
-    auto const cwdPtr = !cwd.empty() ? cwd.c_str() : nullptr;
+    // POSIX walks its fallback ladder in the child, after fork(); with no fork to hide behind, we walk
+    // ours here. Each rung gives up strictly more than the one before -- first the working directory,
+    // then the command itself -- so a directory the shell cannot be started in (the ERROR_DIRECTORY of
+    // issue #1711) costs the user their inherited cwd rather than their new tab.
+    auto const loginShellArgs = loginShell(false);
+    auto ladder = buildSpawnLadder(
+        cmd, _d->cwd.generic_string(), loginShellArgs.empty() ? std::string {} : loginShellArgs.front());
 
-    ptyLog()("Creating process for command line: {}", cmd);
+    // Captured at each failure site: FormatMessageA/LocalFree (inside getLastErrorAsString) and the
+    // logging below both overwrite the thread's last-error, so reading it once after the loop would
+    // report something other than why the spawn failed -- and that reason is what the user reads.
+    auto lastError = "No spawn attempt was made."s;
 
-    BOOL success = CreateProcess(nullptr,                        // No module name - use Command Line
-                                 const_cast<LPSTR>(cmd.c_str()), // Command Line
-                                 nullptr,                        // Process handle not inheritable
-                                 nullptr,                        // Thread handle not inheritable
-                                 FALSE,                          // Inherit handles
-                                 EXTENDED_STARTUPINFO_PRESENT,   // Creation flags
-                                 nullptr,                        // Use parent's environment block
-                                 const_cast<LPSTR>(cwdPtr),      // Use parent's starting directory
-                                 &_d->startupInfo.StartupInfo,   // Pointer to STARTUPINFO
-                                 &_d->processInfo);              // Pointer to PROCESS_INFORMATION
-
-    if (!success)
+    for (auto& attempt: ladder)
     {
-        success = CreateProcess(nullptr, // No module name - use Command Line
-                                const_cast<LPSTR>((this->loginShell(false)[0]).c_str()), // Command Line
-                                nullptr,                      // Process handle not inheritable
-                                nullptr,                      // Thread handle not inheritable
-                                FALSE,                        // Inherit handles
-                                EXTENDED_STARTUPINFO_PRESENT, // Creation flags
-                                nullptr,                      // Use parent's environment block
-                                const_cast<LPSTR>(cwdPtr),    // Use parent's starting directory
-                                &_d->startupInfo.StartupInfo, // Pointer to STARTUPINFO
-                                &_d->processInfo);            // Pointer to PROCESS_INFORMATION
+        ptyLog()("Creating process for command line: {}", attempt.commandLine);
+
+        // CreateProcessA may write to lpCommandLine in place, so it is handed the string's own
+        // writable storage rather than a const_cast of c_str().
+        auto const succeeded =
+            CreateProcess(nullptr,                         // No module name - use Command Line
+                          attempt.commandLine.data(),      // Command Line
+                          nullptr,                         // Process handle not inheritable
+                          nullptr,                         // Thread handle not inheritable
+                          FALSE,                           // Inherit handles
+                          EXTENDED_STARTUPINFO_PRESENT,    // Creation flags
+                          nullptr,                         // Use parent's environment block
+                          attempt.workingDirectory.empty() // Empty: use parent's starting directory
+                              ? nullptr
+                              : attempt.workingDirectory.data(),
+                          &_d->startupInfo.StartupInfo, // Pointer to STARTUPINFO
+                          &_d->processInfo);            // Pointer to PROCESS_INFORMATION
+
+        if (!succeeded)
+        {
+            lastError = getLastErrorAsString();
+            ptyLog()("Failed to create process: {}", lastError);
+            continue;
+        }
+
+        _d->exitWatcher = std::thread([this]() {
+            (void) wait();
+            ptyLog()("Process terminated with exit code {}.", checkStatus().value());
+            _d->pty->close();
+        });
+
+        // The child is running; the only thing left to say is what this rung had to give up to get
+        // there, which is empty for the rung that ran exactly what was asked for.
+        return StartOutcome { .diagnostic = std::move(attempt.diagnostic) };
     }
 
-    if (!success)
-    {
-        throw runtime_error { "Could not create process. "s + getLastErrorAsString() };
-    }
-
-    _d->exitWatcher = std::thread([this]() {
-        (void) wait();
-        ptyLog()("Process terminated with exit code {}.", checkStatus().value());
-        _d->pty->close();
-    });
+    return std::unexpected(StartFailure { .error = StartError::SpawnFailed,
+                                          .detail = "Could not create process. "s + std::move(lastError) });
 }
 
 void Process::waitForClosed()

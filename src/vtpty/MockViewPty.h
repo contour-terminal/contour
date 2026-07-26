@@ -25,7 +25,7 @@ class MockViewPty: public Pty
     [[nodiscard]] PageSize pageSize() const noexcept override;
     void resizeScreen(PageSize cells, std::optional<ImageSize> pixels = std::nullopt) override;
 
-    void start() override;
+    [[nodiscard]] StartResult start() override;
     void close() override;
     void waitForClosed() override;
     [[nodiscard]] bool isClosed() const noexcept override;

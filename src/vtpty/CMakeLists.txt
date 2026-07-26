@@ -20,6 +20,7 @@ set(vtpty_SOURCES
     MockViewPty.cpp
     Process${PLATFORM_SUFFIX}.cpp
     Pty.cpp
+    SpawnLadder.cpp
 )
 
 set(vtpty_HEADERS
@@ -29,6 +30,7 @@ set(vtpty_HEADERS
     PageSize.h
     Process.h
     Pty.h
+    SpawnLadder.h
 )
 
 set(_include_SshSession_module FALSE)
@@ -99,6 +101,7 @@ if(VTPTY_TESTING)
     add_executable(vtpty_test
         test_main.cpp
         ImageSize_test.cpp
+        SpawnLadder_test.cpp
     )
     target_link_libraries(vtpty_test vtpty crispy::core Catch2::Catch2)
     add_test(NAME vtpty_test COMMAND $<TARGET_FILE:vtpty_test>)
