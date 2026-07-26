@@ -5303,8 +5303,8 @@ TEST_CASE("DECCRA.DownLeft.intersecting", "[screen]")
     // copy up by one line (4 to 3), 2 lines
     // copy left by one column (3 to 2), 2 columns
 
-    auto const deccraSeq = std::format(
-        "\033[{};{};{};{};{};{};{};{}$v", STop, SLeft, SBottom, SRight, Page, TTop, TLeft, Page);
+    auto const deccraSeq =
+        std::format("\033[{};{};{};{};{};{};{};{}$v", STop, SLeft, SBottom, SRight, Page, TTop, TLeft, Page);
     mock.writeToScreen(deccraSeq);
 
     auto const resultText = screen.renderMainPageText();
