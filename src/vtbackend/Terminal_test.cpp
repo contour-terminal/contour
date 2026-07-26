@@ -4769,6 +4769,44 @@ TEST_CASE("Terminal.focus.events_reach_the_pty_only_under_DECMode_1004", "[termi
     }
 }
 
+TEST_CASE("Terminal.flushInput drops pending input on a fatal PTY write error", "[terminal][pty]")
+{
+    // The frontend retries flushInput() for as long as hasInput() reports bytes are still pending
+    // (TerminalSession::flushInput posts itself again). That is right for backpressure and wrong for a
+    // dead device: bytes that can never be delivered would keep hasInput() true forever, turning the
+    // retry into an unbounded loop that logs one error per iteration -- the "Failed to write to SSH
+    // channel" flood seen on a corrupted SSH session (#1495).
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto& pty = static_cast<vtpty::MockPty&>(mock.terminal.device());
+
+    SECTION("EAGAIN is backpressure: the bytes stay pending for the next attempt")
+    {
+        pty.setWriteBehavior(vtpty::PtyWriteBehavior::FailAgain);
+        mock.terminal.sendRawInput("hello"sv);
+
+        CHECK(mock.terminal.hasInput());
+
+        // Once the device accepts again, the very same bytes go out.
+        pty.setWriteBehavior(vtpty::PtyWriteBehavior::Accept);
+        mock.terminal.flushInput();
+        CHECK_FALSE(mock.terminal.hasInput());
+        CHECK(pty.stdinBuffer() == "hello");
+    }
+
+    SECTION("a fatal error drops them, so the caller's retry terminates")
+    {
+        pty.setWriteBehavior(vtpty::PtyWriteBehavior::FailFatally);
+        mock.terminal.sendRawInput("hello"sv);
+
+        CHECK_FALSE(mock.terminal.hasInput());
+
+        // A second flush has nothing left to send, so no further error is produced.
+        mock.terminal.flushInput();
+        CHECK_FALSE(mock.terminal.hasInput());
+        CHECK(pty.stdinBuffer().empty());
+    }
+}
+
 TEST_CASE("Terminal.IME queries answered under the state lock survive concurrent output and resize",
           "[terminal][ime]")
 {

@@ -5,10 +5,20 @@
 
 #include <crispy/BufferObject.h>
 
+#include <cstdint>
 #include <string>
 
 namespace vtpty
 {
+
+/// How MockPty::write() responds, so a test can drive the failure paths a real PTY only reaches when
+/// the far end breaks.
+enum class PtyWriteBehavior : uint8_t
+{
+    Accept = 0,  ///< Stores the bytes and reports all of them written.
+    FailAgain,   ///< Reports -1/EAGAIN: transient backpressure, the caller should retry.
+    FailFatally, ///< Reports -1/EIO: the device is gone, the bytes can never be delivered.
+};
 
 /// Mock-PTY, to be used in unit tests.
 class MockPty: public Pty
@@ -30,6 +40,11 @@ class MockPty: public Pty
     void close() override;
     void waitForClosed() override;
     [[nodiscard]] bool isClosed() const noexcept override;
+
+    /// Selects how the next write() responds. Runtime state rather than construction-time
+    /// configuration: a test flips it mid-run to make a write start failing, which is precisely the
+    /// transition under test.
+    void setWriteBehavior(PtyWriteBehavior behavior) noexcept { _writeBehavior = behavior; }
 
     [[nodiscard]] std::string& stdinBuffer() noexcept { return _inputBuffer; }
     [[nodiscard]] std::string const& stdinBuffer() const noexcept { return _inputBuffer; }
@@ -59,6 +74,7 @@ class MockPty: public Pty
     std::string _outputBuffer;
     std::size_t _outputReadOffset = 0;
     bool _closed = false;
+    PtyWriteBehavior _writeBehavior = PtyWriteBehavior::Accept;
     PtySlaveDummy _slave;
 };
 

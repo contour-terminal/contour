@@ -1509,7 +1509,16 @@ void Terminal::flushInput()
     // XXX Should be the only location that does write to the PTY's stdin to avoid race conditions.
     auto const rv = _pty->write(input);
     if (rv <= 0)
+    {
+        // EAGAIN/EINTR is backpressure: keep the bytes pending so the caller's deferred retry sends
+        // them. Any other error is fatal for this device -- these bytes will never be delivered, and
+        // leaving them pending keeps hasInput() true, which turns TerminalSession::flushInput()'s
+        // self-repost into an unbounded loop that logs one error per iteration. That is the
+        // "Failed to write to SSH channel" flood a broken SSH session used to produce.
+        if (rv < 0 && errno != EAGAIN && errno != EINTR)
+            _inputGenerator.consume(static_cast<int>(input.size()));
         return;
+    }
 
     _inputGenerator.consume(rv);
 
