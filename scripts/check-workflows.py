@@ -7,11 +7,12 @@ of error that silently breaks CI dispatch -- e.g. an invalid `${{ env.X }}` cont
 without this check.
 
 actionlint is fetched on demand into the build tree if not already on PATH, so this needs no system
-install. If it cannot be obtained (offline), the check SKIPS rather than fails. Set
-CHECK_WORKFLOWS_REQUIRE_TOOL=1 to turn that skip into a hard failure. No CI job sets it today: the
-only jobs that run this gate are the build matrix ones, and a transient failure to reach the GitHub
-release CDN should not redden a build. Its sibling `check-spelling.py` has a dedicated, always-on
-workflow that can afford to be strict; this one does not yet.
+install. If it cannot be obtained (offline), the check SKIPS rather than fails, so a fresh offline
+clone still gets a green `ctest`. `.github/workflows/build.yml` sets CHECK_WORKFLOWS_REQUIRE_TOOL=1
+at workflow level to turn that skip into a hard failure, so a failed download can never show up as
+a green gate in CI.
+
+It is Python rather than a shell script so that it runs on Windows too, alongside the spell gate.
 """
 
 from __future__ import annotations

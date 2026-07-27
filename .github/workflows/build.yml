@@ -31,6 +31,12 @@ concurrency:
 
 env:
   CTEST_OUTPUT_ON_FAILURE: 1
+  # Turn the workflow lint's offline skip into a hard failure. `check-workflows.py` skips when it
+  # cannot obtain actionlint, so that a fresh offline clone still gets a green `ctest`; in CI that
+  # would mean a gate quietly passing because its download failed, which is worse than no gate.
+  # Set at workflow level so it covers every job here that runs `ctest` -- the Linux matrix and
+  # packaging jobs via `--target test`, and the Windows job directly.
+  CHECK_WORKFLOWS_REQUIRE_TOOL: 1
   # Single source of truth for the LLVM/Clang toolchain version used across this workflow
   # (clang-format, clang-tidy and the Clang build matrix). Bump this one value to upgrade.
   LLVM_VERSION: "22"
