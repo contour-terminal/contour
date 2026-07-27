@@ -34,11 +34,15 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <ranges>
+#include <thread>
 
 using namespace std::string_literals;
 
@@ -830,13 +834,94 @@ TEST_CASE("TerminalSession: display-guarded toggle actions are safe no-ops witho
     CHECK((*session)(actions::ToggleInputMethodHandling {}));
     CHECK((*session)(actions::ToggleTitleBar {}));
 
-    // Vi-mode toggle round-trips Insert -> Normal -> Insert (pure input-handler state).
+    // Vi-mode toggle round-trips Insert -> Normal -> Insert. Note this is NOT merely input-handler
+    // state: entering Normal mode pushes the indicator status line, which resizes the page and
+    // reflows the grid -- see the lock-contract case below.
     using vtbackend::ViMode;
     CHECK(session->terminal().inputHandler().mode() == ViMode::Insert);
     (*session)(actions::ViNormalMode {});
     CHECK(session->terminal().inputHandler().mode() == ViMode::Normal);
     (*session)(actions::ViNormalMode {});
     CHECK(session->terminal().inputHandler().mode() == ViMode::Insert);
+}
+
+TEST_CASE("TerminalSession: ViNormalMode holds the terminal lock while switching mode",
+          "[contour][session][actions][threading]")
+{
+    // Regression guard for #1495 ("Normal mode crashes ... WSL -> ssh -> tmux").
+    //
+    // The action runs on the GUI thread, and entering Normal mode is not a local state flip:
+    // ViCommands::modeChanged() pushes the indicator status display, which resizes the page and
+    // reflows the grid (Terminal::setStatusDisplay -> resizeScreen -> Screen::applyPageSizeToMainDisplay
+    // -> Grid::resize). The parser thread writes cells into that very grid while holding the terminal
+    // lock, so doing this unlocked reallocates the grid underneath a live write -- a torn grid or a
+    // dangling line iterator, surfacing as a segmentation fault or a verifyState() abort (Require() is NOT
+    // compiled out in release builds).
+    //
+    // Rather than race the real threads, assert the contract directly: hold the lock exactly as the
+    // parser thread does, and require the action to block until it is released.
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    namespace actions = contour::actions;
+
+    auto parserHold = std::unique_lock { session->terminal() };
+
+    auto started = std::atomic<bool> { false };
+    auto completed = std::atomic<bool> { false };
+    auto worker = std::thread { [&]() {
+        started.store(true, std::memory_order_release);
+        (*session)(actions::ViNormalMode {});
+        completed.store(true, std::memory_order_release);
+    } };
+
+    // Wait until the worker is actually running, so the check below cannot pass merely because the
+    // thread had not been scheduled yet.
+    while (!started.load(std::memory_order_acquire))
+        std::this_thread::yield();
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    CHECK_FALSE(completed.load(std::memory_order_acquire));
+
+    parserHold.unlock();
+    worker.join();
+
+    CHECK(completed.load(std::memory_order_acquire));
+    CHECK(session->terminal().inputHandler().mode() == vtbackend::ViMode::Normal);
+}
+
+TEST_CASE("TerminalSession: Vi-mode toggling does not race concurrent screen writes",
+          "[contour][session][actions][threading]")
+{
+    // The production shape of #1495: the parser thread writes cells while the GUI thread toggles Vi
+    // mode, whose status-line push reflows the grid. This is the case that must be run under
+    // ThreadSanitizer (`ctest --preset=clang-tsan`) -- without the lock in ViNormalMode, TSan reports
+    // a write-write race on the grid between Screen::writeText and Grid::resize. Under ASan it stands
+    // as a plain no-deadlock / no-corruption smoke test.
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    namespace actions = contour::actions;
+
+    auto stop = std::atomic<bool> { false };
+    auto writer = std::thread { [&]() {
+        // Stands in for Terminal::processInputOnce(): writeToScreen() takes the terminal lock around
+        // the parse exactly as the real parser thread does.
+        while (!stop.load(std::memory_order_acquire))
+        {
+            session->terminal().writeToScreen("hello \033[1mworld\033[m\r\n");
+            std::this_thread::yield();
+        }
+    } };
+
+    auto constexpr ToggleCount = 100;
+    for ([[maybe_unused]] auto const i: std::views::iota(0, ToggleCount))
+        (*session)(actions::ViNormalMode {});
+
+    stop.store(true, std::memory_order_release);
+    writer.join();
+
+    // An even number of toggles lands back in Insert mode, and the terminal is still consistent.
+    CHECK(session->terminal().inputHandler().mode() == vtbackend::ViMode::Insert);
+    CHECK(session->terminal().totalPageSize().lines > vtbackend::LineCount(0));
 }
 
 TEST_CASE("TerminalSession: ScreenshotVT writes the screen capture to a file", "[contour][session][actions]")

@@ -2,6 +2,8 @@
 
 #include <crispy/BufferObject.h>
 
+#include <cerrno>
+
 using namespace std::chrono;
 using std::optional;
 using std::string_view;
@@ -36,6 +38,13 @@ void MockPty::wakeupReader()
 
 int MockPty::write(std::string_view data)
 {
+    switch (_writeBehavior)
+    {
+        case PtyWriteBehavior::FailAgain: errno = EAGAIN; return -1;
+        case PtyWriteBehavior::FailFatally: errno = EIO; return -1;
+        case PtyWriteBehavior::Accept: break;
+    }
+
     // Writing into stdin.
     _inputBuffer += std::string_view(data.data(), data.size());
     return static_cast<int>(data.size());

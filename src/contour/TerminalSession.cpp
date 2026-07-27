@@ -1715,6 +1715,10 @@ void TerminalSession::cursorPositionChanged()
 // {{{ Actions
 bool TerminalSession::operator()(actions::CancelSelection)
 {
+    // Locked: the selection is torn down by the parser thread too (a buffer scroll re-extends or drops
+    // it). See ViNormalMode for the rationale.
+    auto const l = scoped_lock { _terminal };
+
     if (!_terminal.selectionAvailable())
         return false;
     _terminal.clearSelection();
@@ -1912,12 +1916,17 @@ bool TerminalSession::operator()(actions::CopySelection copySelection)
 
 bool TerminalSession::operator()(actions::CreateDebugDump)
 {
+    // Deliberately NOT locked: Terminal::inspect() only forwards to the display, which queues a flag
+    // for the render thread to service on its next frame. No terminal state is read synchronously.
     _terminal.inspect();
     return true;
 }
 
 bool TerminalSession::operator()(actions::CreateSelection const& customSelector)
 {
+    // Locked: word-wise selection scans grid cells and installs a selector. See ViNormalMode.
+    auto const l = scoped_lock { _terminal };
+
     _terminal.triggerWordWiseSelectionWithCustomDelimiters(customSelector.delimiters);
     return true;
 }
@@ -1952,6 +1961,9 @@ bool TerminalSession::operator()(actions::DecreaseOpacity)
 
 bool TerminalSession::operator()(actions::FocusNextSearchMatch)
 {
+    // Locked: searchNextMatch() walks the grid and the Vi cursor moves with it. See ViNormalMode.
+    auto const l = scoped_lock { _terminal };
+
     auto const nextPosition = _terminal.searchNextMatch(_terminal.normalModeCursorPosition());
     if (!nextPosition)
         return false;
@@ -1963,6 +1975,9 @@ bool TerminalSession::operator()(actions::FocusNextSearchMatch)
 
 bool TerminalSession::operator()(actions::FocusPreviousSearchMatch)
 {
+    // Locked for the same reason as FocusNextSearchMatch above.
+    auto const l = scoped_lock { _terminal };
+
     auto const nextPosition = _terminal.searchPrevMatch(_terminal.normalModeCursorPosition());
     if (!nextPosition)
         return false;
@@ -2098,6 +2113,9 @@ bool TerminalSession::operator()(actions::NewTerminal const& action)
 
 bool TerminalSession::operator()(actions::NoSearchHighlight)
 {
+    // Locked: clears the search term and the match set the parser thread re-derives on new output.
+    auto const l = scoped_lock { _terminal };
+
     _terminal.clearSearch();
     return true;
 }
@@ -2169,6 +2187,11 @@ bool TerminalSession::operator()(actions::PasteSelection paste)
     if (QClipboard const* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
     {
         string const text = normalize_crlf(clipboard->text(QClipboard::Selection));
+
+        // Locked around the terminal calls only -- the clipboard read above is Qt's and must not run
+        // with the terminal lock held. See ViNormalMode for the rationale.
+        auto const l = scoped_lock { _terminal };
+
         if (paste.evaluateInShell)
             terminal().sendRawInput(string_view { text + "\n" });
         else
@@ -2181,6 +2204,9 @@ bool TerminalSession::operator()(actions::PasteSelection paste)
 bool TerminalSession::operator()(actions::Quit)
 {
     // TODO: later warn here when more then one terminal view is open
+    // Deliberately NOT locked: closing the device is precisely the mechanism that breaks the parser
+    // thread out of its blocking read. Serializing it behind that thread's own lock is what we are
+    // trying to avoid.
     terminal().device().close();
     // Unwind the event loop rather than calling exit(): the PTY reader thread may still be
     // running, and exit() would run static destructors underneath it.
@@ -2250,6 +2276,12 @@ bool TerminalSession::operator()(actions::CopyScreenshot)
 
 void TerminalSession::smoothScrollUp(vtbackend::LineCount lineCount)
 {
+    // Locked here rather than in each of the six scroll actions that funnel through this helper: the
+    // viewport offset and the smooth-scroll state are read and advanced by the parser thread too (a
+    // buffer scroll shifts the viewport), so a GUI-thread scroll must not interleave with it. See
+    // ViNormalMode for the full GUI-vs-parser-thread rationale.
+    auto const l = scoped_lock { _terminal };
+
     if (terminal().settings().smoothScrolling)
     {
         auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
@@ -2262,6 +2294,9 @@ void TerminalSession::smoothScrollUp(vtbackend::LineCount lineCount)
 
 void TerminalSession::smoothScrollDown(vtbackend::LineCount lineCount)
 {
+    // Locked for the same reason as smoothScrollUp() above.
+    auto const l = scoped_lock { _terminal };
+
     if (terminal().settings().smoothScrolling)
     {
         auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
@@ -2280,12 +2315,18 @@ bool TerminalSession::operator()(actions::ScrollDown)
 
 bool TerminalSession::operator()(actions::ScrollMarkDown)
 {
+    // Locked: scans the grid for marks and moves the viewport. See ViNormalMode.
+    auto const l = scoped_lock { _terminal };
+
     terminal().viewport().scrollMarkDown();
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollMarkUp)
 {
+    // Locked for the same reason as ScrollMarkDown above.
+    auto const l = scoped_lock { _terminal };
+
     terminal().viewport().scrollMarkUp();
     return true;
 }
@@ -2318,6 +2359,9 @@ bool TerminalSession::operator()(actions::ScrollPageUp)
 
 bool TerminalSession::operator()(actions::ScrollToBottom)
 {
+    // Locked: mutates the smooth-scroll state and the viewport. See ViNormalMode.
+    auto const l = scoped_lock { _terminal };
+
     // Snap immediately for ScrollToTop/Bottom (animating large distances is impractical).
     terminal().resetSmoothScroll();
     terminal().viewport().scrollToBottom();
@@ -2326,6 +2370,9 @@ bool TerminalSession::operator()(actions::ScrollToBottom)
 
 bool TerminalSession::operator()(actions::ScrollToTop)
 {
+    // Locked for the same reason as ScrollToBottom above.
+    auto const l = scoped_lock { _terminal };
+
     // Snap immediately for ScrollToTop/Bottom (animating large distances is impractical).
     terminal().resetSmoothScroll();
     terminal().viewport().scrollToTop();
@@ -2340,6 +2387,10 @@ bool TerminalSession::operator()(actions::ScrollUp)
 
 bool TerminalSession::operator()(actions::SearchReverse)
 {
+    // Locked: starting a search switches Vi mode, which pushes the indicator status line and so
+    // resizes the page -- the same hazard ViNormalMode documents.
+    auto const l = scoped_lock { _terminal };
+
     terminal().inputHandler().startSearchExternally();
 
     return true;
@@ -2347,6 +2398,10 @@ bool TerminalSession::operator()(actions::SearchReverse)
 
 bool TerminalSession::operator()(actions::SendChars const& event)
 {
+    // Locked: sendRawInput() appends to the input generator and flushes it, and the parser thread
+    // appends to that same generator whenever a sequence replies. See ViNormalMode.
+    auto const l = scoped_lock { _terminal };
+
     // auto const now = steady_clock::now();
     // for (auto const ch: event.chars)
     //     terminal().sendCharPressEvent(static_cast<char32_t>(ch), vtbackend::Modifiers::None, now);
@@ -2358,6 +2413,9 @@ bool TerminalSession::operator()(actions::ToggleAllKeyMaps)
 {
     _allowKeyMappings = !_allowKeyMappings;
     inputLog()("{} key mappings.", _allowKeyMappings ? "Enabling" : "Disabling");
+
+    // Locked: setStatusDisplay() resizes the page and reflows the grid, exactly as ViNormalMode does.
+    auto const l = scoped_lock { _terminal };
 
     if (!_allowKeyMappings)
     {
@@ -2386,10 +2444,17 @@ bool TerminalSession::operator()(actions::ToggleInputMethodHandling)
 
 bool TerminalSession::operator()(actions::ToggleInputProtection)
 {
-    terminal().setAllowInput(!terminal().allowInput());
+    // Locked around the terminal calls only; announce() below is Qt accessibility and must not run
+    // with the terminal lock held. See ViNormalMode for the rationale.
+    auto const allowInput = [&]() {
+        auto const l = scoped_lock { _terminal };
+        terminal().setAllowInput(!terminal().allowInput());
+        return terminal().allowInput();
+    }();
+
     // Assertive: this changes what typing does, so a client mid-sentence should be interrupted rather
     // than tell the user about it after they have already typed into a terminal that ignored them.
-    announce(terminal().allowInput() ? QObject::tr("Editable") : QObject::tr("Read-only"),
+    announce(allowInput ? QObject::tr("Editable") : QObject::tr("Read-only"),
              QAccessible::AnnouncementPoliteness::Assertive);
     return true;
 }
@@ -2419,6 +2484,9 @@ bool TerminalSession::operator()(actions::ToggleTitleBar)
 }
 
 // {{{ Trace debug mode
+// The four Trace* actions below are deliberately NOT locked: Terminal::setExecutionMode() carries its
+// own _breakMutex and condition variable precisely so the GUI thread can steer the parser thread's
+// loop from outside. Taking _stateMutex here would add nothing and only widen the critical section.
 bool TerminalSession::operator()(actions::TraceBreakAtEmptyQueue)
 {
     _terminal.setExecutionMode(ExecutionMode::BreakAtEmptyQueue);
@@ -2446,6 +2514,17 @@ bool TerminalSession::operator()(actions::TraceStep)
 
 bool TerminalSession::operator()(actions::ViNormalMode)
 {
+    // Locked for the same reason ToggleStatusLine above is: switching Vi mode is not a local state
+    // flip. ViCommands::modeChanged() pushes (resp. pops) the indicator status display, and that
+    // resizes the page -- Terminal::setStatusDisplay -> resizeScreen -> applyPageSizeToMainDisplay ->
+    // Grid::resize, which reallocates and reflows the grid the parser thread is writing into under
+    // this very lock. Unlocked, a keystroke landing mid-parse pulls the grid out from under a live
+    // write; the result is a torn grid or a dangling line iterator, i.e. a segmentation fault or a
+    // verifyState() abort -- and Require() is not compiled out in release builds. That is #1495,
+    // which needed a remote tmux only because it keeps the parser thread busy enough to hit the
+    // window nearly every time.
+    auto const l = scoped_lock { _terminal };
+
     if (terminal().inputHandler().mode() == ViMode::Insert)
         terminal().inputHandler().setMode(ViMode::Normal);
     else if (terminal().inputHandler().mode() == ViMode::Normal)
@@ -2455,6 +2534,8 @@ bool TerminalSession::operator()(actions::ViNormalMode)
 
 bool TerminalSession::operator()(actions::WriteScreen const& event)
 {
+    // Deliberately NOT locked here: Terminal::writeToScreen() takes the terminal lock itself, and
+    // _stateMutex is non-recursive -- wrapping this would self-deadlock.
     terminal().writeToScreen(event.chars);
     return true;
 }
@@ -2474,7 +2555,12 @@ bool TerminalSession::operator()(actions::SpeakSelection)
     if (!_speech->available())
         return false;
 
-    auto const text = speakableText(terminal().extractSelectionText(), MaxSpokenChars);
+    // Locked around the extraction only: it reads the selection and the grid cells behind it, both of
+    // which the parser thread mutates. _speech->say() below is Qt and must not hold the lock.
+    auto const text = [&]() {
+        auto const l = scoped_lock { _terminal };
+        return speakableText(terminal().extractSelectionText(), MaxSpokenChars);
+    }();
     if (text.empty())
         return false;
 

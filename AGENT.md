@@ -269,6 +269,9 @@ variable is unset, clone the trees first (they are not vendored into this repo).
 - Linux debug (default): `cmake --build --preset clang-asan` — Clang, Debug, with
   Address + UndefinedBehavior sanitizers. On Windows use `clang-debug`.
 - Release / performance: `cmake --build --preset clang-release`.
+- Data races: `cmake --preset clang-tsan` then `cmake --build --preset clang-tsan` — Clang, Debug,
+  `CONTOUR_SANITIZE=thread`. ASan and TSan are mutually exclusive, hence the separate tree
+  (`out/clang-tsan/`). Use it for anything touching the GUI-thread/parser-thread boundary.
 - Coverage: `cmake --preset clang-coverage` then `cmake --build --preset clang-coverage`
   (Clang, Debug, `CONTOUR_COVERAGE=ON` → `-g --coverage`; builds into `out/clang-coverage/`).
 
@@ -278,6 +281,8 @@ variable is unset, clone the trees first (they are not vendored into this repo).
 - Framework is **Catch2** for the libraries; the GUI tests use `Qt6::Test`.
 - Run a single test: `<module>_test "TestName"` with an optional `-c "section name"`
   (e.g. `out/clang-asan/src/vtbackend/vtbackend_test "TestName" -c "section"`).
+- Data races: `ctest --preset=clang-tsan`. Tests that drive terminal state from a second thread
+  carry the `[threading]` tag, so `<module>_test "[threading]"` runs just those.
 - Code coverage: configure/build with the `clang-coverage` preset (above), then run the suite
   with `ctest --preset=clang-coverage`. This exercises the unit tests plus the offscreen,
   `e2e`-labeled app runs — including the coverage-oriented config at

@@ -29,7 +29,15 @@ class FreeDesktopNotifier: public QObject
 
   public:
     explicit FreeDesktopNotifier(QObject* parent = nullptr);
-    ~FreeDesktopNotifier() override = default;
+
+    /// Removes the two session-bus signal subscriptions the constructor installed.
+    ///
+    /// Not defaulted: QDBusConnection::connect() registers a match rule on the process-wide session
+    /// bus, and there is one notifier per terminal session. Without the matching disconnect the rules
+    /// accumulate for the life of the process, and the bus keeps delivering those signals towards an
+    /// object that is being destroyed -- the bus runs its own thread, so that is a teardown race and
+    /// not merely a leak.
+    ~FreeDesktopNotifier() override;
 
     /// Sends a desktop notification via D-Bus.
     ///

@@ -714,11 +714,12 @@ class Terminal
     }
 
     // Tests if given coordinate is within the visible screen area.
+    // Exclusive on both axes; see Screen::contains() for why the column bound is not `<=`.
     [[nodiscard]] constexpr bool contains(CellLocation coord) const noexcept
     {
         return LineOffset(0) <= coord.line && coord.line < boxed_cast<LineOffset>(_settings.pageSize.lines)
                && ColumnOffset(0) <= coord.column
-               && coord.column <= boxed_cast<ColumnOffset>(_settings.pageSize.columns);
+               && coord.column < boxed_cast<ColumnOffset>(_settings.pageSize.columns);
     }
 
     [[nodiscard]] bool isCursorInViewport() const noexcept
@@ -2192,7 +2193,10 @@ class Terminal
     // {{{ Render buffer state
     /// Boolean, indicating whether the terminal's screen buffer contains updates to be rendered.
     mutable std::atomic<uint64_t> _changes { 0 };
-    bool _screenDirty = false; // TODO: just inc _changes and delete this instead.
+    // Atomic because both threads touch it without a common lock: the parser thread sets it from
+    // screenUpdated(), which runs OUTSIDE _stateMutex on purpose (it calls back into the GUI), while
+    // the GUI/render thread reads and clears it in readFromPty()/fillRenderBuffer().
+    std::atomic<bool> _screenDirty = false; // TODO: just inc _changes and delete this instead.
     RefreshInterval _refreshInterval;
     RenderDoubleBuffer _renderBuffer {};
     std::atomic<uint64_t> _lastFrameID = 0;

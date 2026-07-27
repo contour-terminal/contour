@@ -85,6 +85,14 @@
             }
         },
         {
+            "name": "clang-tsan",
+            "displayName": "Clang Debug + TSan",
+            "inherits": "clang-debug",
+            "cacheVariables": {
+                "CONTOUR_SANITIZE": "thread"
+            }
+        },
+        {
             "name": "clang-coverage",
             "displayName": "Clang Debug + Coverage",
             "inherits": "clang-debug",
@@ -120,6 +128,11 @@
             "configurePreset": "clang-asan"
         },
         {
+            "name": "clang-tsan",
+            "displayName": "Clang - Debug + TSan",
+            "configurePreset": "clang-tsan"
+        },
+        {
             "name": "clang-coverage",
             "displayName": "Clang - Debug + Coverage",
             "configurePreset": "clang-coverage"
@@ -140,6 +153,17 @@
         {
             "name": "clang-asan",
             "configurePreset": "clang-asan",
+            "output": {
+                "outputOnFailure": true
+            },
+            "execution": {
+                "noTestsAction": "error",
+                "stopOnFailure": true
+            }
+        },
+        {
+            "name": "clang-tsan",
+            "configurePreset": "clang-tsan",
             "output": {
                 "outputOnFailure": true
             },

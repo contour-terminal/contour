@@ -8,6 +8,7 @@
 #include <crispy/overloaded.h>
 #include <crispy/result.h>
 
+#include <atomic>
 #include <condition_variable>
 #include <functional>
 #include <map>
@@ -237,12 +238,33 @@ class SshSession final: public Pty
     PageSize _pageSize { .lines = LineCount(24), .columns = ColumnCount(80) };
     std::optional<ImageSize> _pixels = std::nullopt;
     std::unique_ptr<PtySlave> _ptySlave;
-    std::mutex _mutex;
+
+    /// Serializes every libssh2 call, and with them the state machine that issues them.
+    ///
+    /// A single LIBSSH2_SESSION must not be used from two threads at once: libssh2 keeps the
+    /// transport's cipher and MAC state per session, so an overlapping call corrupts it and the
+    /// connection dies with LIBSSH2_ERROR_DECRYPT / LIBSSH2_ERROR_OUT_OF_BOUNDARY. That is exactly
+    /// what happens here without it -- the PTY reader thread sits in read() while the GUI thread
+    /// enters write() on a keystroke or resizeScreen() on a window resize.
+    ///
+    /// Lock ordering: _mutex may be taken before _injectMutex (processState() does, on the way to
+    /// State::Operational), never after. read() therefore releases _injectMutex before it touches
+    /// libssh2 at all -- which it must anyway, since holding it across a blocking read would stall
+    /// every GUI-thread injectRead() until the remote sends a byte.
+    ///
+    /// Mutable so the const exitStatus() can hold it.
+    std::mutex mutable _mutex;
 
     struct Private;
     std::unique_ptr<Private, void (*)(Private*)> _p;
 
-    State _state = State::Initial;
+    /// Atomic because it is read without _mutex: isClosed() is called from the PTY reader thread and
+    /// from TerminalSession teardown, and read()'s condition-variable predicate examines it under
+    /// _injectMutex instead. setState() writes it under _mutex, so those reads would otherwise race.
+    ///
+    /// _walkIndex needs no such treatment: every access sits inside processState() or the auth helpers
+    /// it calls, all of which run under _mutex.
+    std::atomic<State> _state = State::Initial;
     int _walkIndex = 0;
 
     std::string _injectedWrite;

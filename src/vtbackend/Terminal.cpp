@@ -389,6 +389,7 @@ bool Terminal::processInputOnce()
         return false;
     }
 
+    auto batchedRendering = false;
     {
         auto const _ = std::lock_guard { *this };
         // Use the buffer that readFromPty() actually read into, not _currentPtyBuffer
@@ -407,9 +408,14 @@ bool Terminal::processInputOnce()
 
         // Process any local echo (SRM) that a reply deferred during the parse.
         processPendingLocalEcho();
+
+        // Sampled inside the lock: _modes is written by the GUI thread too (a Vi-mode toggle sets
+        // DECMode::VisibleCursor under this lock), and screenUpdated() below must stay OUTSIDE it
+        // because it calls back into the GUI.
+        batchedRendering = _modes.enabled(DECMode::BatchedRendering);
     }
 
-    if (!_modes.enabled(DECMode::BatchedRendering))
+    if (!batchedRendering)
         screenUpdated();
 
 #ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
@@ -1503,7 +1509,16 @@ void Terminal::flushInput()
     // XXX Should be the only location that does write to the PTY's stdin to avoid race conditions.
     auto const rv = _pty->write(input);
     if (rv <= 0)
+    {
+        // EAGAIN/EINTR is backpressure: keep the bytes pending so the caller's deferred retry sends
+        // them. Any other error is fatal for this device -- these bytes will never be delivered, and
+        // leaving them pending keeps hasInput() true, which turns TerminalSession::flushInput()'s
+        // self-repost into an unbounded loop that logs one error per iteration. That is the
+        // "Failed to write to SSH channel" flood a broken SSH session used to produce.
+        if (rv < 0 && errno != EAGAIN && errno != EINTR)
+            _inputGenerator.consume(static_cast<int>(input.size()));
         return;
+    }
 
     _inputGenerator.consume(rv);
 
@@ -1568,15 +1583,19 @@ void Terminal::parseFragmentChunked(string_view vtStream)
 
 void Terminal::writeToScreen(string_view vtStream)
 {
+    auto batchedRendering = false;
     {
         auto const l = std::lock_guard { *this };
         parseFragmentChunked(vtStream);
 
         // Any local echo the parse deferred (a sequence that replied) is safe to parse now.
         processPendingLocalEcho();
+
+        // Sampled inside the lock, for the reason processInputOnce() gives at the same test.
+        batchedRendering = _modes.enabled(DECMode::BatchedRendering);
     }
 
-    if (!_modes.enabled(DECMode::BatchedRendering))
+    if (!batchedRendering)
     {
         screenUpdated();
     }
@@ -3755,7 +3774,7 @@ void Terminal::setPage(PageIndex target, bool moveCursorHome)
             finalizeScreenTransition();
 
         auto const savedChanges = _changes.load();
-        auto const savedScreenDirty = _screenDirty;
+        bool const savedScreenDirty = _screenDirty;
         auto const savedFrameID = _lastFrameID.load();
 
         RenderBuffer snapshotBuffer;

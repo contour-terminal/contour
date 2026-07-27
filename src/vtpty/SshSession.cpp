@@ -23,8 +23,11 @@
 #include <crispy/escape.h>
 #include <crispy/utils.h>
 
+#include <chrono>
 #include <expected>
 #include <fstream>
+#include <mutex>
+#include <ranges>
 
 #include <libssh2.h>
 #include <libssh2_publickey.h>
@@ -471,7 +474,6 @@ struct SshSession::Private
     LIBSSH2_SESSION* sshSession = nullptr;
     LIBSSH2_CHANNEL* sshChannel = nullptr;
     LIBSSH2_AGENT* sshAgent = nullptr;
-    bool wantsWaitForSocket = false;
 
     socket_handle sshSocket;
 };
@@ -482,14 +484,20 @@ SshSession::SshSession(SshHostConfig config, SshHostkeyVerificationRequestCallba
     _ptySlave { std::make_unique<SshPtySlave>() },
     _p { new Private(), [](Private* p) { delete p; } }
 {
-    libssh2_init(0); // TODO: call only once?
+    // Once per process, not once per session. libssh2_init() is not itself thread-safe, and two tabs
+    // opening an SSH session at the same time called it concurrently; it also registered a fresh
+    // atexit() handler each time, against an implementation only required to accept 32 of them.
+    static auto libssh2InitOnce = std::once_flag {};
+    std::call_once(libssh2InitOnce, []() {
+        libssh2_init(0);
+        std::atexit([]() { libssh2_exit(); });
+    });
 
-#ifdef SSH_SESSION_NB_IO
-    libssh2_session_set_blocking(_p->sshSession, 0);
-#endif
-
-    std::atexit([]() { libssh2_exit(); });
-
+    // The session stays BLOCKING for the whole handshake: every step of processState() is written
+    // assuming a call either succeeds or fails, and teaching all of them to resume from EAGAIN is the
+    // rewrite this file's author abandoned. It is switched to non-blocking on reaching
+    // State::Operational, where the only two callers -- read() and write() -- do handle EAGAIN, and
+    // where blocking inside libssh2 while holding _mutex would stall the other thread.
     _p->sshSession = libssh2_session_init();
 }
 
@@ -528,7 +536,7 @@ void SshSession::setState(State nextState)
     if (_state == nextState)
         return;
 
-    sshLog()("({}) State transition from {} to {}.\n", crispy::threadName(), _state, nextState);
+    sshLog()("({}) State transition from {} to {}.\n", crispy::threadName(), _state.load(), nextState);
 
     _state = nextState;
 
@@ -555,7 +563,6 @@ bool SshSession::requestPty()
                                                    _pixels.has_value() ? _pixels->height.as<int>() : 0);
     if (rc == LIBSSH2_ERROR_EAGAIN)
     {
-        _p->wantsWaitForSocket = true;
         return false;
     }
     if (rc != LIBSSH2_ERROR_NONE)
@@ -588,8 +595,7 @@ bool SshSession::setEnv()
             libssh2_channel_setenv_ex(_p->sshChannel, name.data(), name.size(), value.data(), value.size());
         if (rc == LIBSSH2_ERROR_EAGAIN)
         {
-            _walkIndex = i;                // remember where we left off
-            _p->wantsWaitForSocket = true; // and wait for socket to become writable
+            _walkIndex = i; // remember where we left off
             return false;
         }
         if (rc != LIBSSH2_ERROR_NONE)
@@ -611,7 +617,6 @@ void SshSession::resizeScreen()
                                             _pixels.has_value() ? unbox<int>(_pixels->height) : 0);
     if (rc == LIBSSH2_ERROR_EAGAIN)
     {
-        _p->wantsWaitForSocket = true;
         return;
     }
     if (rc != LIBSSH2_ERROR_NONE)
@@ -627,7 +632,7 @@ void SshSession::processState()
     waitForSocket();
     while (true)
     {
-        switch (_state)
+        switch (_state.load())
         {
             case State::Initial:
                 //.
@@ -645,7 +650,6 @@ void SshSession::processState()
                 int const rc = LIBSSH2_HANDSHAKE_FUNCTION(_p->sshSession, _p->sshSocket);
                 if (rc == LIBSSH2_ERROR_EAGAIN)
                 {
-                    _p->wantsWaitForSocket = true;
                     return;
                 }
                 if (rc != LIBSSH2_ERROR_NONE)
@@ -736,7 +740,6 @@ void SshSession::processState()
                 auto const rc = libssh2_session_last_errno(_p->sshSession);
                 if (rc == LIBSSH2_ERROR_EAGAIN)
                 {
-                    _p->wantsWaitForSocket = true;
                     errno = EAGAIN;
                     return;
                 }
@@ -759,7 +762,6 @@ void SshSession::processState()
                     int const rc = libssh2_channel_request_auth_agent(_p->sshChannel);
                     if (rc == LIBSSH2_ERROR_EAGAIN)
                     {
-                        _p->wantsWaitForSocket = true;
                         return;
                     }
 
@@ -793,6 +795,11 @@ void SshSession::processState()
                     setState(State::Failure);
                     return;
                 }
+                // Handshake done, so the blocking mode that carried it is no longer wanted: from here
+                // read() and write() run concurrently on two threads and both handle EAGAIN by
+                // waiting on the socket with _mutex released. @see the constructor and _mutex.
+                libssh2_session_set_blocking(_p->sshSession, 0);
+
                 auto const _ = std::lock_guard { _injectMutex };
                 setState(State::Operational);
                 _injectCV.notify_all();
@@ -822,7 +829,8 @@ void SshSession::start()
             "Starting SSH session to host: {}@{}:{}", _config.username, _config.hostname, _config.port);
 
     assert(_state == State::Initial);
-    // auto const _ = std::lock_guard { _mutex };
+    // Runs on the GUI thread while the PTY reader thread may already be in read(). @see _mutex.
+    auto const _ = std::lock_guard { _mutex };
     setState(State::Started);
     processState();
 
@@ -869,6 +877,10 @@ PtySlave& SshSession::slave() noexcept
 
 void SshSession::close()
 {
+    // Reached from the reader thread on a read error and from the GUI thread on session teardown, so
+    // the channel shutdown below needs the same serialization as every other libssh2 call. @see _mutex.
+    auto const _ = std::lock_guard { _mutex };
+
     setState(State::Closed);
 
     if (_p->sshChannel)
@@ -897,42 +909,56 @@ std::optional<SshSession::ReadResult> SshSession::read(crispy::buffer_object<cha
                                                        std::optional<std::chrono::milliseconds> timeout,
                                                        size_t size)
 {
-    auto injectLock = std::unique_lock { _injectMutex };
-    _injectCV.wait(injectLock, [this]() { return _state == State::Operational || !_injectedRead.empty(); });
-
-    if (!_injectedRead.empty())
     {
-        auto const nread = std::min(size, _injectedRead.size());
-        std::copy_n(_injectedRead.begin(), nread, storage.hotEnd());
-        _injectedRead.erase(0, nread);
-        return ReadResult { .data = std::string_view { storage.hotEnd(), nread },
-                            .fromStdoutFastPipe = false };
-    }
+        auto injectLock = std::unique_lock { _injectMutex };
+        _injectCV.wait(injectLock,
+                       [this]() { return _state == State::Operational || !_injectedRead.empty(); });
 
-    if (_state == State::AuthenticatePasswordWaitForInput)
-    {
-        errno = EAGAIN;
-        return std::nullopt;
+        if (!_injectedRead.empty())
+        {
+            auto const nread = std::min(size, _injectedRead.size());
+            std::copy_n(_injectedRead.begin(), nread, storage.hotEnd());
+            _injectedRead.erase(0, nread);
+            return ReadResult { .data = std::string_view { storage.hotEnd(), nread },
+                                .fromStdoutFastPipe = false };
+        }
+
+        if (_state == State::AuthenticatePasswordWaitForInput)
+        {
+            errno = EAGAIN;
+            return std::nullopt;
+        }
     }
+    // _injectMutex is released here, before any libssh2 work: holding it across the read below would
+    // block every GUI-thread injectRead() until the remote sends a byte, and it would also invert the
+    // _mutex -> _injectMutex order that processState() establishes. @see _mutex.
 
     // Below is for state: Operational
-    processState();
-
-    if (_state != State::Operational && !isClosed())
     {
-        errno = EAGAIN;
-        _p->wantsWaitForSocket = true;
-        return std::nullopt;
+        auto const _ = std::lock_guard { _mutex };
+        processState();
+
+        if (_state != State::Operational && !isClosed())
+        {
+            errno = EAGAIN;
+            return std::nullopt;
+        }
     }
 
-    waitForSocket(timeout);
-    // auto _ = std::unique_lock { _mutex };
-    auto const rc =
-        libssh2_channel_read(_p->sshChannel, storage.hotEnd(), std::min(storage.bytesAvailable(), size));
+    // The lock covers the libssh2 call and nothing else. The session is non-blocking by now, so this
+    // returns at once either way and the idle wait happens below, unlocked.
+    auto const rc = [&]() {
+        auto const _ = std::lock_guard { _mutex };
+        return libssh2_channel_read(
+            _p->sshChannel, storage.hotEnd(), std::min(storage.bytesAvailable(), size));
+    }();
 
     if (rc == LIBSSH2_ERROR_EAGAIN)
     {
-        _p->wantsWaitForSocket = true;
+        // Park on the socket rather than returning EAGAIN straight away -- the caller treats EAGAIN
+        // as "try again", so returning immediately would spin a core. waitForSocket() releases
+        // _mutex for the duration, which is what keeps a keystroke from waiting on the remote.
+        waitForSocket(timeout);
         errno = EAGAIN;
         return std::nullopt;
     }
@@ -986,7 +1012,11 @@ void SshSession::handlePreAuthenticationPasswordInput(std::string_view buf, Stat
 
 int SshSession::write(std::string_view buf)
 {
-    // auto const _ = std::lock_guard { _mutex };
+    // Held for the whole call: the pre-authentication branches below drive the state machine through
+    // processState(), and the operational branch talks to libssh2 directly. It is a unique_lock
+    // because the retry loop at the end must release it while waiting on the socket. @see _mutex.
+    auto lock = std::unique_lock { _mutex };
+
     if (isClosed())
     {
         errno = EPIPE;
@@ -1010,23 +1040,43 @@ int SshSession::write(std::string_view buf)
     }
     else if (_state != State::Operational)
     {
-        sshLog()("Ignoring write() call in state: {}", _state);
+        sshLog()("Ignoring write() call in state: {}", _state.load());
         return static_cast<int>(buf.size()); // Make the caller believe that we have written all bytes.
     }
 
-    waitForSocket();
-    auto const rv = libssh2_channel_write(_p->sshChannel, buf.data(), buf.size());
+    // A non-blocking write can report EAGAIN with the socket merely momentarily full. Absorb the
+    // common transient here -- bounded, and with _mutex released while waiting, because this runs on
+    // the GUI thread and must not stall it. Anything longer is handed back as EAGAIN so the caller's
+    // deferred retry deals with it instead of us blocking the UI.
+    auto constexpr MaxWriteAttempts = 3;
+    auto constexpr WriteRetryTimeout = std::chrono::milliseconds { 20 };
+
+    auto rv = ssize_t { LIBSSH2_ERROR_EAGAIN };
+    for ([[maybe_unused]] auto const attempt: std::views::iota(0, MaxWriteAttempts))
+    {
+        rv = libssh2_channel_write(_p->sshChannel, buf.data(), buf.size());
+        if (rv != LIBSSH2_ERROR_EAGAIN)
+            break;
+
+        lock.unlock();
+        waitForSocket(WriteRetryTimeout);
+        lock.lock();
+    }
 
     if (rv == LIBSSH2_ERROR_EAGAIN)
     {
-        _p->wantsWaitForSocket = true;
         errno = EAGAIN;
         return -1;
     }
 
     if (rv < 0)
     {
+        // Fatal, so the session is done. Without this the transport stayed "usable" and every
+        // subsequent write re-entered a corrupted session, which is how a single failure turned into
+        // hundreds of identical log lines. Failure makes isClosed() true, so the next write
+        // short-circuits with EPIPE and the reader tears the session down.
         logError("Failed to write to SSH channel. {}", libssl2ErrorString(rv));
+        setState(State::Failure);
         errno = EIO;
         return -1;
     }
@@ -1061,7 +1111,9 @@ PageSize SshSession::pageSize() const noexcept
 
 void SshSession::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
 {
-    // auto const _ = std::lock_guard { _mutex };
+    // A window resize runs on the GUI thread and issues libssh2_channel_request_pty_size_ex() while
+    // the reader thread may be inside libssh2_channel_read(). @see _mutex.
+    auto const _ = std::lock_guard { _mutex };
 
     _pageSize = cells;
     _pixels = pixels;
@@ -1078,7 +1130,7 @@ void SshSession::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
 bool SshSession::isOperational() const noexcept
 {
     // clang-format off
-    switch (_state)
+    switch (_state.load())
     {
         case State::Operational:
             return true;
@@ -1090,6 +1142,9 @@ bool SshSession::isOperational() const noexcept
 
 std::optional<SshSession::ExitStatus> SshSession::exitStatus() const
 {
+    // Queried from the session/GUI thread while the reader may still be in read(). @see _mutex.
+    auto const _ = std::lock_guard { _mutex };
+
     auto exitcode = libssh2_channel_get_exit_status(_p->sshChannel);
 
     char* exitSignalStr = nullptr;
@@ -1317,58 +1372,34 @@ void SshSession::logErrorWithDetails(int libssl2ErrorCode, std::string_view mess
 
 int SshSession::waitForSocket(std::optional<std::chrono::milliseconds> timeout)
 {
-    if (!_p->wantsWaitForSocket)
-        return 0;
+    // Called only after a libssh2 call returned EAGAIN, and deliberately WITHOUT _mutex held: this is
+    // where the reader thread spends its idle time, and blocking here under the lock would make every
+    // keystroke wait for the remote to speak. Only the direction query needs the lock. @see _mutex.
+    auto const dir = [&]() {
+        auto const _ = std::lock_guard { _mutex };
+        assert(_p->sshSession);
+        return libssh2_session_block_directions(_p->sshSession);
+    }();
 
-    _p->wantsWaitForSocket = false;
+    auto fd = fd_set {};
+    FD_ZERO(&fd);
+    FD_SET(_p->sshSocket, &fd);
 
-#ifdef SSH_SESSION_NB_IO
-    fd_set fd;
-    fd_set* writefd = nullptr;
-    fd_set* readfd = nullptr;
+    // libssh2 tells us which way it is blocked; waiting on the other one would just spin.
+    auto* readfd = (dir & LIBSSH2_SESSION_BLOCK_INBOUND) != 0 ? &fd : nullptr;
+    auto* writefd = (dir & LIBSSH2_SESSION_BLOCK_OUTBOUND) != 0 ? &fd : nullptr;
+    if (readfd == nullptr && writefd == nullptr)
+        readfd = &fd; // libssh2 reported neither; inbound is the sane default for a shell session.
 
     auto tv = timeval {};
     if (timeout)
     {
-        tv.tv_sec = timeout->count() / 1000;
-        tv.tv_usec = (timeout->count() % 1000) * 1000;
+        tv.tv_sec = static_cast<decltype(tv.tv_sec)>(timeout->count() / 1000);
+        tv.tv_usec = static_cast<decltype(tv.tv_usec)>((timeout->count() % 1000) * 1000);
     }
 
     // TODO: also watch for break signal, so we can abort waiting for socket
-
-    FD_ZERO(&fd);
-    FD_SET(_p->sshSocket, &fd);
-
-    assert(_p->sshSession);
-
-    auto const dir =
-        libssh2_session_block_directions(_p->sshSession); // now make sure we wait in the correct direction
-
-    if (dir & LIBSSH2_SESSION_BLOCK_INBOUND)
-    {
-        readfd = &fd;
-        std::cout << std::format("({}) SshSession: waiting for socket to become readable\n",
-                                 crispy::threadName());
-    }
-
-    if (dir & LIBSSH2_SESSION_BLOCK_OUTBOUND)
-    {
-        writefd = &fd;
-        std::cout << std::format("({}) SshSession: waiting for socket to become readable\n",
-                                 crispy::threadName());
-    }
-
-    auto const rc = ::select((int) (_p->sshSocket + 1), readfd, writefd, nullptr, timeout ? &tv : nullptr);
-    std::cout << std::format("({}) SshSession: select() returned {}{}{}\n",
-                             crispy::threadName(),
-                             rc,
-                             readfd && FD_ISSET(_p->sshSocket, readfd) ? " [readable]" : "",
-                             writefd && FD_ISSET(_p->sshSocket, writefd) ? " [writable]" : "");
-    return rc;
-#else
-    crispy::ignore_unused(timeout);
-    return 0;
-#endif
+    return ::select(static_cast<int>(_p->sshSocket + 1), readfd, writefd, nullptr, timeout ? &tv : nullptr);
 }
 
 void SshSession::authenticateWithPrivateKey()
@@ -1384,7 +1415,6 @@ void SshSession::authenticateWithPrivateKey()
 
     if (rc == LIBSSH2_ERROR_EAGAIN)
     {
-        _p->wantsWaitForSocket = true;
         return;
     }
 
@@ -1429,7 +1459,6 @@ void SshSession::authenticateWithPassword()
 
     if (rc == LIBSSH2_ERROR_EAGAIN)
     {
-        _p->wantsWaitForSocket = true;
         return;
     }
 
@@ -1497,7 +1526,6 @@ bool SshSession::authenticateWithAgent()
         rc = libssh2_agent_userauth(_p->sshAgent, _config.username.data(), identity);
         if (rc == LIBSSH2_ERROR_EAGAIN)
         {
-            _p->wantsWaitForSocket = true;
             _walkIndex = i;
             return false;
         }
