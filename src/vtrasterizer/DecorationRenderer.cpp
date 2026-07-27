@@ -3,6 +3,7 @@
 
 #include <vtrasterizer/GridMetrics.h>
 #include <vtrasterizer/Pixmap.h>
+#include <vtrasterizer/UnderlineGeometry.h>
 #include <vtrasterizer/shared_defines.h>
 
 #include <crispy/times.h>
@@ -11,7 +12,9 @@
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <numbers>
 #include <optional>
+#include <ranges>
 #include <utility>
 
 using crispy::each_element;
@@ -151,8 +154,16 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             });
         }
         case Decorator::DoubleUnderline: {
-            auto const thickness = max(1u, unsigned(ceil(double(underlineThickness()) * 2.0) / 3.0));
-            auto const y1 = max(0u, underlinePosition() + thickness);
+            // Two thirds of the underline's thickness per stroke. The parentheses used to close
+            // after ceil(), so this truncated instead of rounding up and an even thickness lost a
+            // pixel: at thickness 2 it yielded 1.
+            auto const thickness = max(1u, unsigned(ceil(double(underlineThickness()) * 2.0 / 3.0)));
+            // The upper stroke's top is the underline position, as it is for every other
+            // decoration. It used to be `position + thickness`, which placed the stroke's top two
+            // thicknesses higher -- above the baseline, and so inside the glyphs.
+            // Clamped before the cast to unsigned, never after: an unsigned subtraction wraps to a
+            // huge positive, which max() then happily keeps.
+            auto const y1 = static_cast<unsigned>(max(0, underlinePosition() - static_cast<int>(thickness)));
             // y1 - 3 thickness can be negative
             auto const y0 = max(0, static_cast<int>(y1) - (3 * static_cast<int>(thickness)));
             auto const height = vtbackend::Height(y1 + thickness);
@@ -171,48 +182,56 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             });
         }
         case Decorator::CurlyUnderline: {
-            auto const height = vtbackend::Height::cast_from(_gridMetrics.baseline);
-            auto const h2 = max(unbox<int>(height) / 2, 1);
-            auto const yScalar = h2 - 1;
-            auto const xScalar = 2 * M_PI / *width;
-            auto const yBase = h2;
+            // The wave is sized from the underline position rather than from the baseline: the
+            // latter is `lineHeight - ascender` and so folds in the font's whole line gap, which
+            // grew the curl to the height of a lowercase letter on a font with leading (#1754).
+            auto const geometry = curlyUnderlineGeometry(
+                underlinePosition(), underlineThickness(), unbox<int>(_gridMetrics.cellSize.height));
+            auto const height = vtbackend::Height::cast_from(geometry.tileHeight);
+            // One full cycle per cell, so adjacent cells join crest to crest.
+            auto const xScalar = 2 * std::numbers::pi / unbox<double>(width);
             auto const imageSize = ImageSize { width, height };
             auto block = blockElement(imageSize);
             return create(block.downsampledSize, [&]() -> atlas::Buffer {
-                auto const thicknessHalf = max(1, int(ceil(underlineThickness() / 2.0)));
                 for (auto x: crispy::times(unbox(width)))
                 {
                     // Using Wu's antialiasing algorithm to paint the curved line.
                     // See: https://dl.acm.org/doi/pdf/10.1145/127719.122734
-                    auto const y = yScalar * cos(xScalar * x);
+                    auto const y = geometry.amplitude * cos(xScalar * static_cast<double>(x));
                     auto const y1 = static_cast<int>(floor(y));
                     auto const y2 = static_cast<int>(ceil(y));
                     auto const intensity = static_cast<uint8_t>(255 * fabs(y - y1));
-                    // block.paintOver(x, yBase + y1, 255 - intensity);
-                    // block.paintOver(x, yBase + y2, intensity);
+                    // The stroke thickens along y, not x: a near-horizontal cosine widened
+                    // sideways gains no weight and leaves holes where the curve is steepest.
+                    block.paintOverThick(static_cast<int>(x),
+                                         geometry.centerY + y1,
+                                         uint8_t(255 - intensity),
+                                         0,
+                                         geometry.strokeRadius);
                     block.paintOverThick(
-                        static_cast<int>(x), yBase + y1, uint8_t(255 - intensity), thicknessHalf, 0);
-                    block.paintOverThick(static_cast<int>(x), yBase + y2, intensity, thicknessHalf, 0);
+                        static_cast<int>(x), geometry.centerY + y2, intensity, 0, geometry.strokeRadius);
                 }
                 return block.take();
             });
         }
         case Decorator::DottedUnderline: {
-            auto const dotHeight = (unsigned) _gridMetrics.underline.thickness;
-            auto const dotWidth = dotHeight;
-            auto const height =
-                vtbackend::Height::cast_from((unsigned) _gridMetrics.underline.position + dotHeight);
-            auto const y0 = (unsigned) _gridMetrics.underline.position - dotHeight;
-            auto const x0 = 0u;
-            auto const x1 = unbox(width) / 2;
+            // Signed throughout, and the dot shrinks to the room it has: computing the origin as
+            // `(unsigned) position - thickness` wrapped whenever a font put its underline within
+            // one thickness of the cell bottom, and Pixmap::paint then clipped every dot away --
+            // the decoration vanished silently rather than merely looking cramped.
+            auto const dotSize = std::clamp(underlineThickness(), 1, max(1, underlinePosition()));
+            auto const y0 = max(0, underlinePosition() - dotSize);
+            auto const height = vtbackend::Height::cast_from(y0 + dotSize);
+            // Two dots per cell: one flush with the left edge, one at the half-way mark.
+            auto const x1 = unbox<int>(width) / 2;
             auto block = blockElement(ImageSize { width, height });
             return create(block.downsampledSize, [&]() -> atlas::Buffer {
-                for (auto y: crispy::times(dotHeight))
+                for (auto const y: std::views::iota(0, dotSize))
                 {
-                    for (auto x: crispy::times(dotWidth))
+                    for (auto const x: std::views::iota(0, dotSize))
                     {
-                        block.paint(int(x + x0), int(y + y0));
-                        block.paint(int(x + x1), int(y + y0));
+                        block.paint(x, y + y0);
+                        block.paint(x + x1, y + y0);
                     }
                 }
                 return block.take();
@@ -222,8 +241,11 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             // Divides a grid cell's underline in three sub-ranges and only renders first and third one,
             // whereas the middle one is being skipped.
             auto const thicknessHalf = max(1u, unsigned(ceil(underlineThickness() / 2.0)));
-            auto const thickness = max(1u, thicknessHalf * 2);
-            auto const y0 = max(0, underlinePosition() - static_cast<int>(thicknessHalf));
+            auto const thickness = thicknessHalf * 2; // at least 2, thicknessHalf being at least 1
+            // Subtracting the whole thickness, not half of it: the dashes' top is the underline
+            // position, as it is for every other decoration. Half left them one row higher, on the
+            // baseline itself.
+            auto const y0 = max(0, underlinePosition() - static_cast<int>(thickness));
             auto const height = vtbackend::Height(y0 + thickness);
             auto const imageSize = ImageSize { width, height };
             return create(imageSize, [&]() -> atlas::Buffer {

@@ -234,6 +234,8 @@
           <li>Adds a scope parameter to the HintMode action: scope: Scrollback scans the scrollback history as well as the visible page, capped by the new hint_scrollback_lines profile option (default 1000). Its labels are assigned once and stay put, so you can activate hint mode, scroll to older output, and then type the label you see; scope: Visible remains the default</li>
           <li>Fixes selecting text changing how wide a glyph is drawn, so that emoji and other multi-codepoint characters no longer gain padding and push the rest of the line to the right when highlighted (#1752)</li>
           <li>Fixes combining marks vanishing from uniformly styled lines: a character written in decomposed form, such as a Greek or Cyrillic letter followed by a combining accent, was drawn as its base letter alone, because the batched rendering path those lines take can only carry one codepoint per column</li>
+          <li>Fixes curly underlines being drawn almost as tall as a lowercase letter and running into the text above them on fonts that declare line spacing, such as the default "monospace" on many Linux systems. The wave was sized from the whole space below the baseline, which includes that spacing; it is now sized from where the font puts its underline, and never reaches higher than a straight underline would (#1754)</li>
+          <li>Fixes the other underline styles sitting one row too high, on the baseline itself: the upper stroke of a double underline could be drawn inside the letters, a dotted underline came out as dashes or vanished entirely where the font's underline sits close to the cell bottom, and a double underline's strokes were a pixel too thin at even thicknesses</li>
         </ul>
       </description>
     </release>

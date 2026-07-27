@@ -15,6 +15,7 @@ set(_header_files
     TextClusterGrouper.h
     TextRenderer.h
     TextureAtlas.h
+    UnderlineGeometry.h
     utils.h
 )
 
@@ -36,12 +37,14 @@ set(_source_files
 set(_test_files
     TextClusterGrouper_test.cpp
     BoxDrawingRenderer_test.cpp
+    DecorationRenderer_test.cpp
     GlyphAdvance_test.cpp
     GlyphScaling_test.cpp
     GlyphSlicing_test.cpp
     ImageRenderer_test.cpp
     ReGISFontRasterizer_test.cpp
     TextRenderer_test.cpp
+    UnderlineGeometry_test.cpp
 )
 
 source_group(Sources FILES ${_source_files})
