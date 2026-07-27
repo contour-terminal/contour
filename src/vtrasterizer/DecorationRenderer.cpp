@@ -3,6 +3,7 @@
 
 #include <vtrasterizer/GridMetrics.h>
 #include <vtrasterizer/Pixmap.h>
+#include <vtrasterizer/UnderlineGeometry.h>
 #include <vtrasterizer/shared_defines.h>
 
 #include <crispy/times.h>
@@ -11,6 +12,7 @@
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <numbers>
 #include <optional>
 #include <utility>
 
@@ -171,28 +173,34 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             });
         }
         case Decorator::CurlyUnderline: {
-            auto const height = vtbackend::Height::cast_from(_gridMetrics.baseline);
-            auto const h2 = max(unbox<int>(height) / 2, 1);
-            auto const yScalar = h2 - 1;
-            auto const xScalar = 2 * M_PI / *width;
-            auto const yBase = h2;
+            // The wave is sized from the underline position rather than from the baseline: the
+            // latter is `lineHeight - ascender` and so folds in the font's whole line gap, which
+            // grew the curl to the height of a lowercase letter on a font with leading (#1754).
+            auto const geometry = curlyUnderlineGeometry(
+                underlinePosition(), underlineThickness(), unbox<int>(_gridMetrics.cellSize.height));
+            auto const height = vtbackend::Height::cast_from(geometry.tileHeight);
+            // One full cycle per cell, so adjacent cells join crest to crest.
+            auto const xScalar = 2 * std::numbers::pi / unbox<double>(width);
             auto const imageSize = ImageSize { width, height };
             auto block = blockElement(imageSize);
             return create(block.downsampledSize, [&]() -> atlas::Buffer {
-                auto const thicknessHalf = max(1, int(ceil(underlineThickness() / 2.0)));
                 for (auto x: crispy::times(unbox(width)))
                 {
                     // Using Wu's antialiasing algorithm to paint the curved line.
                     // See: https://dl.acm.org/doi/pdf/10.1145/127719.122734
-                    auto const y = yScalar * cos(xScalar * x);
+                    auto const y = geometry.amplitude * cos(xScalar * static_cast<double>(x));
                     auto const y1 = static_cast<int>(floor(y));
                     auto const y2 = static_cast<int>(ceil(y));
                     auto const intensity = static_cast<uint8_t>(255 * fabs(y - y1));
-                    // block.paintOver(x, yBase + y1, 255 - intensity);
-                    // block.paintOver(x, yBase + y2, intensity);
+                    // The stroke thickens along y, not x: a near-horizontal cosine widened
+                    // sideways gains no weight and leaves holes where the curve is steepest.
+                    block.paintOverThick(static_cast<int>(x),
+                                         geometry.centerY + y1,
+                                         uint8_t(255 - intensity),
+                                         0,
+                                         geometry.strokeRadius);
                     block.paintOverThick(
-                        static_cast<int>(x), yBase + y1, uint8_t(255 - intensity), thicknessHalf, 0);
-                    block.paintOverThick(static_cast<int>(x), yBase + y2, intensity, thicknessHalf, 0);
+                        static_cast<int>(x), geometry.centerY + y2, intensity, 0, geometry.strokeRadius);
                 }
                 return block.take();
             });
