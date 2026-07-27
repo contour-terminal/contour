@@ -103,6 +103,10 @@ if(VTPTY_TESTING)
         ImageSize_test.cpp
         SpawnLadder_test.cpp
     )
+    if(WIN32)
+        # ConPty is the Windows-only PTY backend.
+        target_sources(vtpty_test PRIVATE ConPty_test.cpp)
+    endif()
     target_link_libraries(vtpty_test vtpty crispy::core Catch2::Catch2)
     add_test(NAME vtpty_test COMMAND $<TARGET_FILE:vtpty_test>)
 
