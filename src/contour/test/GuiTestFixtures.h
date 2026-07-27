@@ -237,6 +237,26 @@ class RecordingExternalLauncher final: public contour::ExternalLauncher
     bool openUrlResult = true;
 };
 
+/// A SpeechSynthesizer that records what it was asked to say instead of saying it.
+///
+/// The read-aloud path cannot otherwise be driven headlessly: the real synthesizer answers
+/// available() only by connecting to the machine's speech service and enumerating its voices, so a
+/// test would depend on the developer's installed voices and would speak out loud when they have one.
+class RecordingSpeechSynthesizer final: public contour::SpeechSynthesizer
+{
+  public:
+    [[nodiscard]] bool available() const override { return isAvailable; }
+    void say(std::string_view text) override { spoken.emplace_back(text); }
+    void stop() override { ++stopCount; }
+
+    /// Everything say() was handed, in order — already passed through speakableText().
+    std::vector<std::string> spoken;
+    /// How many times stop() was asked for.
+    size_t stopCount = 0;
+    /// What available() reports (flip to false for the "no voice on this machine" path).
+    bool isAvailable = true;
+};
+
 /// In-memory PTY with REAL blocking-read semantics, for a test that runs a LIVE session read loop
 /// (the render harness, where TerminalDisplay::setSession starts the session's threads).
 ///
@@ -449,13 +469,19 @@ class TestApp
     /// @param commandHistoryStore Optional command-history override; pass an
     ///                InMemoryCommandHistoryStore (keep a raw observation pointer first) to drive the
     ///                command palette's MRU persistence without touching the disk.
+    ///
+    /// @param speech Optional speech override; pass a RecordingSpeechSynthesizer (keep a raw
+    ///                observation pointer first) to drive the read-aloud path. @see defaultSpeech()
+    ///                for what a test app gets without one.
     explicit TestApp(std::unique_ptr<contour::SessionFactory> factory = nullptr,
                      std::unique_ptr<contour::LayoutStore> layoutStore = nullptr,
-                     std::unique_ptr<contour::CommandHistoryStore> commandHistoryStore = nullptr):
+                     std::unique_ptr<contour::CommandHistoryStore> commandHistoryStore = nullptr,
+                     std::unique_ptr<contour::SpeechSynthesizer> speech = nullptr):
         _app(std::move(factory),
              makeRecordingLauncher(),
              std::move(layoutStore),
-             std::move(commandHistoryStore))
+             std::move(commandHistoryStore),
+             speech ? std::move(speech) : defaultSpeech())
     {
         char const* argv[] = { "contour", "terminal" };
         // Parse the "terminal" subcommand so parameters() carries every contour.terminal.* default
@@ -468,7 +494,7 @@ class TestApp
     /// @param args The command tokens after the program name (e.g. {"font-locator"}).
     explicit TestApp(std::initializer_list<char const*> args,
                      std::unique_ptr<contour::SessionFactory> factory = nullptr):
-        _app(std::move(factory), makeRecordingLauncher())
+        _app(std::move(factory), makeRecordingLauncher(), nullptr, nullptr, defaultSpeech())
     {
         std::vector<char const*> argv;
         argv.reserve(args.size() + 1);
@@ -484,6 +510,18 @@ class TestApp
     [[nodiscard]] RecordingExternalLauncher& launcher() noexcept { return *_launcher; }
 
   private:
+    /// The synthesizer a test app gets when the test does not name one.
+    ///
+    /// The NULL one, never the production synthesizer -- and this is the single place that decides
+    /// so, because it is an invariant of the suite rather than a default anyone should vary. A real
+    /// synthesizer connects to the machine's speech service (speech-dispatcher on Linux) as soon as
+    /// a session is asked for its context-menu state: surprising for a headless suite, audible if
+    /// the machine has a voice, and a leak inside libspeechd on every connection.
+    [[nodiscard]] static std::unique_ptr<contour::SpeechSynthesizer> defaultSpeech()
+    {
+        return std::make_unique<contour::NullSpeechSynthesizer>();
+    }
+
     /// Builds the recording launcher, stashing a raw observation pointer before handing ownership to
     /// the app. Runs in the member-initializer list, so _launcher is set before _app is constructed.
     std::unique_ptr<contour::ExternalLauncher> makeRecordingLauncher()

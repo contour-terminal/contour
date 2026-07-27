@@ -8,7 +8,6 @@
 #include <contour/ContextMenu.h>
 #include <contour/HorizontalWheelGesture.h>
 #include <contour/HyperlinkTooltip.h>
-#include <contour/SpeechSynthesizer.h>
 #include <contour/display/Announcer.h>
 #ifdef __linux__
     #include <contour/FreeDesktopNotifier.h>
@@ -805,9 +804,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Never null: a NullAnnouncer stands in wherever there is nothing to announce through, so the call
     /// sites never have to ask whether announcing is possible.
     std::unique_ptr<display::Announcer> _announcer = std::make_unique<display::NullAnnouncer>();
-    /// Built once per session rather than per invocation: a QTextToSpeech probes the platform's engines
-    /// on construction, which is far too much work to redo on every keypress.
-    std::unique_ptr<SpeechSynthesizer> _speech = makeSpeechSynthesizer();
     QString _hyperlinkTooltipText;
     QRectF _hyperlinkTooltipAnchor;
 

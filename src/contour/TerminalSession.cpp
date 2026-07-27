@@ -2,6 +2,7 @@
 #include <contour/Actions.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/ExternalLauncher.h>
+#include <contour/SpeechSynthesizer.h>
 #include <contour/TerminalSession.h>
 #include <contour/display/CaretGeometry.h>
 #include <contour/display/TerminalDisplay.h>
@@ -1893,7 +1894,7 @@ ContextMenuState TerminalSession::contextMenuState()
             .inputProtected = !terminal().allowInput(),
             // A property of the build and the machine, asked once here so the menu itself stays a pure
             // function of this snapshot.
-            .canSpeak = _speech->available(),
+            .canSpeak = _app.speechSynthesizer().available(),
             // Taken now, while the pointer is still on the cell the user clicked. The rows built from this
             // carry the URI with them, because by the time one is picked the pointer has moved to the menu.
             .hyperlinkUnderCursor = hyperlink ? hyperlink->uri : std::string {},
@@ -2631,11 +2632,11 @@ bool TerminalSession::operator()(actions::SpeakSelection)
     // way to skip ahead.
     auto constexpr MaxSpokenChars = size_t { 4000 };
 
-    if (!_speech->available())
+    if (!_app.speechSynthesizer().available())
         return false;
 
     // Locked around the extraction only: it reads the selection and the grid cells behind it, both of
-    // which the parser thread mutates. _speech->say() below is Qt and must not hold the lock.
+    // which the parser thread mutates. The say() below is Qt and must not hold the lock.
     auto const text = [&]() {
         auto const l = scoped_lock { _terminal };
         return speakableText(terminal().extractSelectionText(), MaxSpokenChars);
@@ -2643,13 +2644,13 @@ bool TerminalSession::operator()(actions::SpeakSelection)
     if (text.empty())
         return false;
 
-    _speech->say(text);
+    _app.speechSynthesizer().say(text);
     return true;
 }
 
 bool TerminalSession::operator()(actions::StopSpeaking)
 {
-    _speech->stop();
+    _app.speechSynthesizer().stop();
     return true;
 }
 

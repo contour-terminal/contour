@@ -529,6 +529,59 @@ TEST_CASE("TerminalSession: the context-menu actions and the state they are gate
     }
 }
 
+TEST_CASE("TerminalSession: the selection is read aloud through the app's one voice",
+          "[contour][session][actions][speech]")
+{
+    auto speech = std::make_unique<contour::test::RecordingSpeechSynthesizer>();
+    auto* const voice = speech.get();
+    TestApp testApp(nullptr, nullptr, nullptr, std::move(speech));
+    auto session = makeDisplaylessSession(testApp.app());
+
+    SECTION("what is spoken is the prepared text, not the grid")
+    {
+        for (auto i = 0; i < 3; ++i)
+            session->terminal().writeToScreen(std::format("line {}\r\n", i));
+        REQUIRE((*session)(contour::actions::SelectAll {}));
+
+        CHECK((*session)(contour::actions::SpeakSelection {}));
+        REQUIRE(voice->spoken.size() == 1);
+        // Passed through speakableText: the padding every terminal line carries out to the right
+        // margin is silence, and the blank rows below the text are not read as pauses.
+        CHECK(voice->spoken.front() == "line 0\nline 1\nline 2");
+    }
+
+    SECTION("with nothing selected there is nothing to say")
+    {
+        CHECK_FALSE((*session)(contour::actions::SpeakSelection {}));
+        CHECK(voice->spoken.empty());
+    }
+
+    SECTION("a machine with no voice neither offers the row nor speaks")
+    {
+        voice->isAvailable = false;
+        session->terminal().writeToScreen("hello\r\n");
+        REQUIRE((*session)(contour::actions::SelectAll {}));
+
+        CHECK_FALSE(session->contextMenuState().canSpeak);
+        CHECK_FALSE((*session)(contour::actions::SpeakSelection {}));
+        CHECK(voice->spoken.empty());
+    }
+
+    SECTION("a second session speaks and stops through the same voice")
+    {
+        // A machine has one voice, so the synthesizer belongs to the app rather than the session.
+        // With one engine per session, StopSpeaking in this tab could not stop what another started.
+        auto other = makeDisplaylessSession(testApp.app());
+        session->terminal().writeToScreen("hello\r\n");
+        REQUIRE((*session)(contour::actions::SelectAll {}));
+        REQUIRE((*session)(contour::actions::SpeakSelection {}));
+
+        CHECK((*other)(contour::actions::StopSpeaking {}));
+        CHECK(voice->stopCount == 1);
+        CHECK(voice->spoken.size() == 1);
+    }
+}
+
 TEST_CASE("TerminalSession: scrollback actions move the viewport over seeded history",
           "[contour][session][actions][scroll]")
 {
