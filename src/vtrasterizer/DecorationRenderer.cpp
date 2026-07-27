@@ -240,7 +240,10 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             // whereas the middle one is being skipped.
             auto const thicknessHalf = max(1u, unsigned(ceil(underlineThickness() / 2.0)));
             auto const thickness = max(1u, thicknessHalf * 2);
-            auto const y0 = max(0, underlinePosition() - static_cast<int>(thicknessHalf));
+            // Subtracting the whole thickness, not half of it: the dashes' top is the underline
+            // position, as it is for every other decoration. Half left them one row higher, on the
+            // baseline itself.
+            auto const y0 = max(0, underlinePosition() - static_cast<int>(thickness));
             auto const height = vtbackend::Height(y0 + thickness);
             auto const imageSize = ImageSize { width, height };
             return create(imageSize, [&]() -> atlas::Buffer {
