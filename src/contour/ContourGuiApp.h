@@ -7,6 +7,7 @@
 #include <contour/ExitCode.h>
 #include <contour/ExternalLauncher.h>
 #include <contour/LayoutStore.h>
+#include <contour/SpeechSynthesizer.h>
 #include <contour/TerminalSessionManager.h>
 #include <contour/helper.h>
 
@@ -59,10 +60,15 @@ class ContourGuiApp: public QObject, public ContourApp
     ///                       (the default) wires the production FileCommandHistoryStore (an atomically-
     ///                       replaced `command-history.yml`); tests pass an in-memory store to drive the
     ///                       record -> persist -> reload cycle without touching the disk.
+    /// @param speechSynthesizer The voice every session in this app reads selections through. Null
+    ///                       (the default) wires the production one; tests pass a
+    ///                       NullSpeechSynthesizer, which keeps the suite off the platform's speech
+    ///                       service (on Linux that is a speech-dispatcher connection per use).
     explicit ContourGuiApp(std::unique_ptr<SessionFactory> sessionFactory = nullptr,
                            std::unique_ptr<ExternalLauncher> externalLauncher = nullptr,
                            std::unique_ptr<LayoutStore> layoutStore = nullptr,
-                           std::unique_ptr<CommandHistoryStore> commandHistoryStore = nullptr);
+                           std::unique_ptr<CommandHistoryStore> commandHistoryStore = nullptr,
+                           std::unique_ptr<SpeechSynthesizer> speechSynthesizer = nullptr);
 
     static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(ContourApp::instance()); }
 
@@ -138,6 +144,13 @@ class ContourGuiApp: public QObject, public ContourApp
     /// The external-resource launcher (URL opening, child-process spawning) for this app's sessions.
     [[nodiscard]] ExternalLauncher& externalLauncher() noexcept { return *_externalLauncher; }
 
+    /// The voice this app's sessions read selections through.
+    ///
+    /// One per app rather than one per session, because a machine has one voice: two sessions
+    /// speaking at once is not a thing the platform can do, and with an engine each, "Stop Speaking"
+    /// in one tab could not stop what another tab had started.
+    [[nodiscard]] SpeechSynthesizer& speechSynthesizer() noexcept { return *_speechSynthesizer; }
+
     [[nodiscard]] static QUrl resolveResource(std::string_view path);
 
     [[nodiscard]] vtbackend::ColorPreference colorPreference() const noexcept { return _colorPreference; }
@@ -174,6 +187,8 @@ class ContourGuiApp: public QObject, public ContourApp
     std::unique_ptr<LayoutStore> _layoutStore;
     // Likewise: the manager holds a reference to the command-history store.
     std::unique_ptr<CommandHistoryStore> _commandHistoryStore;
+    // Shared by every session, reached via _app; @see speechSynthesizer().
+    std::unique_ptr<SpeechSynthesizer> _speechSynthesizer;
     TerminalSessionManager _sessionManager;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
     // Spawn context: the screen the next window should open on (QPointer: screens can be unplugged

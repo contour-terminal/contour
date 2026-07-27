@@ -71,13 +71,15 @@ namespace contour
 ContourGuiApp::ContourGuiApp(std::unique_ptr<SessionFactory> sessionFactory,
                              std::unique_ptr<ExternalLauncher> externalLauncher,
                              std::unique_ptr<LayoutStore> layoutStore,
-                             std::unique_ptr<CommandHistoryStore> commandHistoryStore):
+                             std::unique_ptr<CommandHistoryStore> commandHistoryStore,
+                             std::unique_ptr<SpeechSynthesizer> speechSynthesizer):
     _sessionFactory(sessionFactory ? std::move(sessionFactory) : std::make_unique<AppSessionFactory>(*this)),
     _externalLauncher(externalLauncher ? std::move(externalLauncher)
                                        : std::make_unique<QtExternalLauncher>()),
     _layoutStore(layoutStore ? std::move(layoutStore) : std::make_unique<FileLayoutStore>()),
     _commandHistoryStore(commandHistoryStore ? std::move(commandHistoryStore)
                                              : std::make_unique<FileCommandHistoryStore>()),
+    _speechSynthesizer(speechSynthesizer ? std::move(speechSynthesizer) : makeSpeechSynthesizer()),
     _sessionManager(*this, *_sessionFactory, *_layoutStore, *_commandHistoryStore)
 {
     link("contour.terminal", bind(&ContourGuiApp::terminalGuiAction, this));

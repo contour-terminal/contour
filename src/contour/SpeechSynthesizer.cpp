@@ -69,6 +69,13 @@ std::string speakableText(std::string_view text, size_t maxChars)
 namespace
 {
     /// Speaks through Qt's TextToSpeech module.
+    ///
+    /// The engine is built on first use rather than with this object. Constructing a QTextToSpeech
+    /// loads the platform's speech plugin and opens a connection to its service — speech-dispatcher on
+    /// Linux — to enumerate the installed voices, and that connection leaks its voice-list reply
+    /// inside libspeechd. A contour nobody ever asks to read anything aloud should pay none of that,
+    /// so holding this object stays free and the engine appears only when something is actually said
+    /// or asked about.
     class QtSpeechSynthesizer final: public SpeechSynthesizer
     {
       public:
@@ -77,21 +84,42 @@ namespace
             // Built in, but a platform with no engine or no installed voice still cannot speak; on Linux
             // that is a machine without speech-dispatcher or flite. Asked rather than assumed, so the
             // menu row does not offer silence.
-            return _speech.state() != QTextToSpeech::Error && !_speech.availableVoices().isEmpty();
+            auto const& speech = engine();
+            return speech.state() != QTextToSpeech::Error && !speech.availableVoices().isEmpty();
         }
 
         void say(std::string_view text) override
         {
             // say() already replaces what is being spoken; stopping first makes that explicit and is
             // what makes a second invocation feel like "read THIS" rather than "queue this up".
-            _speech.stop();
-            _speech.say(QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size())));
+            auto& speech = engine();
+            speech.stop();
+            speech.say(QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size())));
         }
 
-        void stop() override { _speech.stop(); }
+        void stop() override
+        {
+            // Deliberately does NOT build the engine: nothing has been spoken through one that does not
+            // exist, so there is nothing to stop, and constructing it here to stop it immediately would
+            // undo the deferral this class exists for.
+            if (_speech)
+                _speech->stop();
+        }
 
       private:
-        QTextToSpeech _speech;
+        /// The engine, constructed on the first call. @see the class description for why it waits.
+        /// @return The engine, which from here on outlives every use of it.
+        [[nodiscard]] QTextToSpeech& engine() const
+        {
+            if (!_speech)
+                _speech = std::make_unique<QTextToSpeech>();
+            return *_speech;
+        }
+
+        /// Mutable because asking whether speech is possible is a const question whose answer only the
+        /// engine knows. Deferring construction is an implementation detail; it must not force the call
+        /// sites into a non-const path, nor into sequencing a setup call of their own.
+        mutable std::unique_ptr<QTextToSpeech> _speech;
     };
 } // namespace
 
