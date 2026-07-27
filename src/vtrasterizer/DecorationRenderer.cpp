@@ -161,7 +161,9 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             // The upper stroke's top is the underline position, as it is for every other
             // decoration. It used to be `position + thickness`, which placed the stroke's top two
             // thicknesses higher -- above the baseline, and so inside the glyphs.
-            auto const y1 = static_cast<unsigned>(max(0, underlinePosition() - int(thickness)));
+            // Clamped before the cast to unsigned, never after: an unsigned subtraction wraps to a
+            // huge positive, which max() then happily keeps.
+            auto const y1 = static_cast<unsigned>(max(0, underlinePosition() - static_cast<int>(thickness)));
             // y1 - 3 thickness can be negative
             auto const y0 = max(0, static_cast<int>(y1) - (3 * static_cast<int>(thickness)));
             auto const height = vtbackend::Height(y1 + thickness);
@@ -220,7 +222,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             auto const dotSize = std::clamp(underlineThickness(), 1, max(1, underlinePosition()));
             auto const y0 = max(0, underlinePosition() - dotSize);
             auto const height = vtbackend::Height::cast_from(y0 + dotSize);
-            auto const x0 = 0;
+            // Two dots per cell: one flush with the left edge, one at the half-way mark.
             auto const x1 = unbox<int>(width) / 2;
             auto block = blockElement(ImageSize { width, height });
             return create(block.downsampledSize, [&]() -> atlas::Buffer {
@@ -228,7 +230,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
                 {
                     for (auto const x: std::views::iota(0, dotSize))
                     {
-                        block.paint(x + x0, y + y0);
+                        block.paint(x, y + y0);
                         block.paint(x + x1, y + y0);
                     }
                 }
@@ -239,7 +241,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             // Divides a grid cell's underline in three sub-ranges and only renders first and third one,
             // whereas the middle one is being skipped.
             auto const thicknessHalf = max(1u, unsigned(ceil(underlineThickness() / 2.0)));
-            auto const thickness = max(1u, thicknessHalf * 2);
+            auto const thickness = thicknessHalf * 2; // at least 2, thicknessHalf being at least 1
             // Subtracting the whole thickness, not half of it: the dashes' top is the underline
             // position, as it is for every other decoration. Half left them one row higher, on the
             // baseline itself.

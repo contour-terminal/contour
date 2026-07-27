@@ -84,24 +84,11 @@ class DecorationProbe
     std::unique_ptr<Renderable::TextureAtlas> _atlas;
 };
 
-/// Row @p row of @p tile as '#' (ink) and '.' (clear), top-origin, the way the bitmap is stored.
-[[nodiscard]] std::string rowOf(atlas::UploadTile const& tile, int row)
-{
-    auto const width = unbox<size_t>(tile.bitmapSize.width);
-    auto text = std::string {};
-    for (auto const x: std::views::iota(0uz, width))
-        text += tile.bitmap[(static_cast<size_t>(row) * width) + x] > 0 ? '#' : '.';
-    return text;
-}
-
-/// Every row of @p tile, so a failing CHECK prints the decoration instead of a number.
-[[nodiscard]] std::vector<std::string> renderedRows(atlas::UploadTile const& tile)
-{
-    auto rows = std::vector<std::string> {};
-    for (auto const y: std::views::iota(0, unbox<int>(tile.bitmapSize.height)))
-        rows.emplace_back(rowOf(tile, y));
-    return rows;
-}
+/// A decoration as rendered: one '#'/'.' string per row, top-origin.
+///
+/// Every measurement below reads these rows rather than the bitmap, so the tile is walked once and
+/// a failing CHECK can print the decoration instead of a number. @see bitmapRows.
+using Rendered = std::vector<std::string>;
 
 /// Cell-bottom offset of the highest inked row, or 0 when the tile is blank.
 ///
@@ -109,50 +96,50 @@ class DecorationProbe
 /// draws it at `cellBottom - bitmapHeight`), so top-origin row `r` of a tile `H` tall sits at
 /// cell-bottom offset `H - r`. That identity is the whole reason these tests can talk about the
 /// baseline at all.
-[[nodiscard]] int topmostInkOffset(atlas::UploadTile const& tile)
+[[nodiscard]] int topmostInkOffset(Rendered const& rows)
 {
-    auto const height = unbox<int>(tile.bitmapSize.height);
+    auto const height = static_cast<int>(rows.size());
     for (auto const y: std::views::iota(0, height))
-        if (rowOf(tile, y).contains('#'))
+        if (rows[static_cast<size_t>(y)].contains('#'))
             return height - y;
     return 0;
 }
 
 /// Cell-bottom offset of the lowest inked row, or 0 when the tile is blank.
-[[nodiscard]] int bottommostInkOffset(atlas::UploadTile const& tile)
+[[nodiscard]] int bottommostInkOffset(Rendered const& rows)
 {
-    auto const height = unbox<int>(tile.bitmapSize.height);
+    auto const height = static_cast<int>(rows.size());
     for (auto const y: std::views::iota(0, height) | std::views::reverse)
-        if (rowOf(tile, y).contains('#'))
+        if (rows[static_cast<size_t>(y)].contains('#'))
             return height - y;
     return 0;
 }
 
-/// How many rows of @p tile carry any ink.
-[[nodiscard]] int inkedRows(atlas::UploadTile const& tile)
+/// How many rows carry any ink.
+[[nodiscard]] int inkedRows(Rendered const& rows)
 {
+    return static_cast<int>(std::ranges::count_if(rows, [](auto const& row) { return row.contains('#'); }));
+}
+
+/// How many columns of the LEFT half carry any ink -- the width of a dotted underline's first dot,
+/// the second one starting at the half-way mark.
+[[nodiscard]] int inkedColumnsInFirstHalf(Rendered const& rows)
+{
+    if (rows.empty())
+        return 0;
     auto count = 0;
-    for (auto const y: std::views::iota(0, unbox<int>(tile.bitmapSize.height)))
-        if (rowOf(tile, y).contains('#'))
+    for (auto const x: std::views::iota(0uz, rows.front().size() / 2))
+        if (std::ranges::any_of(rows, [x](auto const& row) { return row[x] == '#'; }))
             ++count;
     return count;
 }
 
-/// How many columns of @p tile's LEFT half carry any ink -- the width of a dotted underline's first
-/// dot, the second one starting at the half-way mark.
-[[nodiscard]] int inkedColumnsInFirstHalf(atlas::UploadTile const& tile)
+[[nodiscard]] int litPixels(Rendered const& rows)
 {
-    auto const rows = std::views::iota(0, unbox<int>(tile.bitmapSize.height));
     auto count = 0;
-    for (auto const x: std::views::iota(0, unbox<int>(tile.bitmapSize.width) / 2))
-        if (std::ranges::any_of(rows, [&](int y) { return rowOf(tile, y)[static_cast<size_t>(x)] == '#'; }))
-            ++count;
+    for (auto const& row: rows)
+        count += static_cast<int>(std::ranges::count(row, '#'));
     return count;
-}
-
-[[nodiscard]] size_t litPixels(atlas::UploadTile const& tile)
-{
-    return static_cast<size_t>(std::ranges::count_if(tile.bitmap, [](uint8_t v) { return v > 0; }));
 }
 
 /// The decorations that are supposed to live below the baseline, in the cell's descender region.
@@ -176,17 +163,18 @@ TEST_CASE("DecorationRenderer.underlineFamilyStaysBelowTheBaseline", "[decoratio
     for (auto const decoration: UnderlineFamily)
     {
         auto const& tile = probe.upload(decoration);
+        auto const rows = bitmapRows(tile);
         INFO(std::format("{} tile {} in cell {}, baseline {}, underline position {}",
                          decoration,
                          tile.bitmapSize,
                          gridMetrics.cellSize,
                          gridMetrics.baseline,
                          gridMetrics.underline.position));
-        for (auto const& row: renderedRows(tile))
+        for (auto const& row: rows)
             UNSCOPED_INFO(row);
 
-        CHECK(litPixels(tile) > 0);
-        CHECK(topmostInkOffset(tile) <= gridMetrics.underline.position);
+        CHECK(litPixels(rows) > 0);
+        CHECK(topmostInkOffset(rows) <= gridMetrics.underline.position);
         CHECK(unbox<int>(tile.bitmapSize.height) <= unbox<int>(gridMetrics.cellSize.height));
     }
 }
@@ -200,13 +188,13 @@ TEST_CASE("DecorationRenderer.curlyUnderlineIsNotAsTallAsTheDescender", "[decora
     auto const gridMetrics =
         gridMetricsFor(NimbusCellSize, NimbusBaseline, NimbusUnderlinePosition, /*thickness*/ 1);
     auto probe = DecorationProbe { gridMetrics };
-    auto const& tile = probe.upload(Decorator::CurlyUnderline);
+    auto const rows = bitmapRows(probe.upload(Decorator::CurlyUnderline));
 
-    for (auto const& row: renderedRows(tile))
+    for (auto const& row: rows)
         UNSCOPED_INFO(row);
 
-    auto const top = topmostInkOffset(tile);
-    auto const bottom = bottommostInkOffset(tile);
+    auto const top = topmostInkOffset(rows);
+    auto const bottom = bottommostInkOffset(rows);
     auto const bandHeight = top - bottom + 1;
 
     INFO(std::format("wave occupies cell-bottom offsets {}..{} ({} rows); baseline is at {}",
@@ -234,15 +222,15 @@ TEST_CASE("DecorationRenderer.curlyUnderlineIsActuallyCurly", "[decoration]")
     auto const gridMetrics =
         gridMetricsFor(NimbusCellSize, NimbusBaseline, NimbusUnderlinePosition, /*thickness*/ 1);
     auto probe = DecorationProbe { gridMetrics };
-    auto const& tile = probe.upload(Decorator::CurlyUnderline);
+    auto const rows = bitmapRows(probe.upload(Decorator::CurlyUnderline));
 
-    for (auto const& row: renderedRows(tile))
+    for (auto const& row: rows)
         UNSCOPED_INFO(row);
 
-    auto const height = unbox<int>(tile.bitmapSize.height);
-    auto const width = unbox<int>(tile.bitmapSize.width);
-    auto const crestRow = rowOf(tile, height - topmostInkOffset(tile));
-    auto const troughRow = rowOf(tile, height - bottommostInkOffset(tile));
+    auto const height = static_cast<int>(rows.size());
+    auto const width = static_cast<int>(rows.front().size());
+    auto const& crestRow = rows[static_cast<size_t>(height - topmostInkOffset(rows))];
+    auto const& troughRow = rows[static_cast<size_t>(height - bottommostInkOffset(rows))];
 
     INFO(std::format("crest '{}' trough '{}'", crestRow, troughRow));
 
@@ -259,8 +247,8 @@ TEST_CASE("DecorationRenderer.curlyUnderlineHonorsUnderlineThickness", "[decorat
     auto thin = DecorationProbe { gridMetricsFor(NimbusCellSize, NimbusBaseline, 9, 1) };
     auto thick = DecorationProbe { gridMetricsFor(NimbusCellSize, NimbusBaseline, 9, 5) };
 
-    CHECK(litPixels(thick.upload(Decorator::CurlyUnderline))
-          > litPixels(thin.upload(Decorator::CurlyUnderline)));
+    CHECK(litPixels(bitmapRows(thick.upload(Decorator::CurlyUnderline)))
+          > litPixels(bitmapRows(thin.upload(Decorator::CurlyUnderline))));
 }
 
 TEST_CASE("DecorationRenderer.dottedUnderlineSurvivesAShallowUnderlinePosition", "[decoration]")
@@ -278,15 +266,15 @@ TEST_CASE("DecorationRenderer.dottedUnderlineSurvivesAShallowUnderlinePosition",
         auto const gridMetrics = gridMetricsFor(
             ImageSize { Width(10), Height(16) }, /*baseline*/ 2, /*position*/ 1, /*thickness*/ 3);
         auto probe = DecorationProbe { gridMetrics };
-        auto const& tile = probe.upload(Decorator::DottedUnderline);
+        auto const rows = bitmapRows(probe.upload(Decorator::DottedUnderline));
 
-        for (auto const& row: renderedRows(tile))
+        for (auto const& row: rows)
             UNSCOPED_INFO(row);
 
-        CHECK(litPixels(tile) > 0);
-        CHECK(inkedRows(tile) == inkedColumnsInFirstHalf(tile)); // the dot is square
+        CHECK(litPixels(rows) > 0);
+        CHECK(inkedRows(rows) == inkedColumnsInFirstHalf(rows)); // the dot is square
         // The dot shrinks to the room it has rather than overhanging it, so the anchor still holds.
-        CHECK(topmostInkOffset(tile) == gridMetrics.underline.position);
+        CHECK(topmostInkOffset(rows) == gridMetrics.underline.position);
     }
 
     SECTION("underline flush with the cell bottom")
@@ -294,12 +282,12 @@ TEST_CASE("DecorationRenderer.dottedUnderlineSurvivesAShallowUnderlinePosition",
         auto const gridMetrics = gridMetricsFor(
             ImageSize { Width(10), Height(16) }, /*baseline*/ 1, /*position*/ 0, /*thickness*/ 1);
         auto probe = DecorationProbe { gridMetrics };
-        auto const& tile = probe.upload(Decorator::DottedUnderline);
+        auto const rows = bitmapRows(probe.upload(Decorator::DottedUnderline));
 
-        for (auto const& row: renderedRows(tile))
+        for (auto const& row: rows)
             UNSCOPED_INFO(row);
 
-        CHECK(litPixels(tile) > 0); // drew nothing whatsoever before the fix
+        CHECK(litPixels(rows) > 0); // drew nothing whatsoever before the fix
     }
 }
 
@@ -311,13 +299,11 @@ TEST_CASE("DecorationRenderer.doubleUnderlineIsTwoSeparatedStrokes", "[decoratio
     auto const gridMetrics =
         gridMetricsFor(NimbusCellSize, NimbusBaseline, NimbusUnderlinePosition, /*thickness*/ 1);
     auto probe = DecorationProbe { gridMetrics };
-    auto const& tile = probe.upload(Decorator::DoubleUnderline);
-
-    auto const rows = renderedRows(tile);
+    auto const rows = bitmapRows(probe.upload(Decorator::DoubleUnderline));
     for (auto const& row: rows)
         UNSCOPED_INFO(row);
 
-    CHECK(topmostInkOffset(tile) <= gridMetrics.underline.position);
+    CHECK(topmostInkOffset(rows) <= gridMetrics.underline.position);
 
     // Two runs of inked rows, separated by at least one clear row.
     auto inkedRuns = 0;
@@ -339,12 +325,10 @@ TEST_CASE("DecorationRenderer.doubleUnderlineThicknessFollowsTwoThirds", "[decor
     auto const gridMetrics = gridMetricsFor(
         ImageSize { Width(10), Height(40) }, /*baseline*/ 18, /*position*/ 16, /*thickness*/ 2);
     auto probe = DecorationProbe { gridMetrics };
-    auto const& tile = probe.upload(Decorator::DoubleUnderline);
+    auto const rows = bitmapRows(probe.upload(Decorator::DoubleUnderline));
 
-    auto const rows = renderedRows(tile);
     for (auto const& row: rows)
         UNSCOPED_INFO(row);
 
-    auto const inkedRows = std::ranges::count_if(rows, [](auto const& row) { return row.contains('#'); });
-    CHECK(inkedRows == 4); // two strokes of ceil(2 * 2/3) == 2 rows each
+    CHECK(inkedRows(rows) == 4); // two strokes of ceil(2 * 2/3) == 2 rows each
 }

@@ -152,6 +152,31 @@ class MockRenderTarget: public vtrasterizer::RenderTarget
     MockImageTextureBackend _imageScheduler;
 };
 
+/// Renders @p tileData as one '#' (ink) / '.' (clear) string per row, top-origin, the way the bitmap
+/// is stored.
+///
+/// Shared so that a test which ASSERTS a shape (verifyBitmap) and one which MEASURES a shape read
+/// the same pixels the same way -- and so a failing check can print the decoration rather than a
+/// number.
+template <typename TileCreateData>
+[[nodiscard]] std::vector<std::string> bitmapRows(TileCreateData const& tileData)
+{
+    auto const width = tileData.bitmapSize.width.template as<size_t>();
+    auto const height = tileData.bitmapSize.height.template as<size_t>();
+    auto const componentCount = atlas::element_count(tileData.bitmapFormat);
+
+    auto rows = std::vector<std::string> {};
+    rows.reserve(height);
+    for (auto const y: std::views::iota(0zu, height))
+    {
+        auto& row = rows.emplace_back();
+        row.reserve(width);
+        for (auto const x: std::views::iota(0zu, width))
+            row += tileData.bitmap[((y * width) + x) * componentCount] > 0 ? '#' : '.';
+    }
+    return rows;
+}
+
 template <typename TileCreateData>
 void verifyBitmap(TileCreateData const& tileData, std::vector<std::string> const& pattern)
 {
@@ -160,27 +185,14 @@ void verifyBitmap(TileCreateData const& tileData, std::vector<std::string> const
     if (!pattern.empty())
         REQUIRE(tileData.bitmapSize.width.template as<int>() == static_cast<int>(pattern[0].size()));
 
-    auto const width = tileData.bitmapSize.width.template as<size_t>();
-    auto const height = tileData.bitmapSize.height.template as<size_t>();
-    auto const componentCount = atlas::element_count(tileData.bitmapFormat);
-
     // Assuming AlphaMask (Red) format from BDF / BoxDrawing
     REQUIRE(tileData.bitmapFormat == atlas::Format::Red);
 
-    for (auto const y: std::views::iota(0zu, height))
+    auto const rows = bitmapRows(tileData);
+    for (auto const y: std::views::iota(0zu, rows.size()))
     {
-        std::string actualRow;
-        actualRow.reserve(width);
-
-        for (auto const x: std::views::iota(0zu, width))
-        {
-            auto const pixelIndex = ((y * width) + x) * componentCount;
-            auto const pixelValue = tileData.bitmap[pixelIndex];
-            actualRow += (pixelValue > 0 ? '#' : '.');
-        }
-
         INFO("Row: " << y);
-        CHECK(actualRow == pattern[y]);
+        CHECK(rows[y] == pattern[y]);
     }
 }
 
