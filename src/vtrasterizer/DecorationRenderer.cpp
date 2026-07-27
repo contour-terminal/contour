@@ -14,6 +14,7 @@
 #include <iostream>
 #include <numbers>
 #include <optional>
+#include <ranges>
 #include <utility>
 
 using crispy::each_element;
@@ -206,21 +207,23 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             });
         }
         case Decorator::DottedUnderline: {
-            auto const dotHeight = (unsigned) _gridMetrics.underline.thickness;
-            auto const dotWidth = dotHeight;
-            auto const height =
-                vtbackend::Height::cast_from((unsigned) _gridMetrics.underline.position + dotHeight);
-            auto const y0 = (unsigned) _gridMetrics.underline.position - dotHeight;
-            auto const x0 = 0u;
-            auto const x1 = unbox(width) / 2;
+            // Signed throughout, and the dot shrinks to the room it has: computing the origin as
+            // `(unsigned) position - thickness` wrapped whenever a font put its underline within
+            // one thickness of the cell bottom, and Pixmap::paint then clipped every dot away --
+            // the decoration vanished silently rather than merely looking cramped.
+            auto const dotSize = std::clamp(underlineThickness(), 1, max(1, underlinePosition()));
+            auto const y0 = max(0, underlinePosition() - dotSize);
+            auto const height = vtbackend::Height::cast_from(y0 + dotSize);
+            auto const x0 = 0;
+            auto const x1 = unbox<int>(width) / 2;
             auto block = blockElement(ImageSize { width, height });
             return create(block.downsampledSize, [&]() -> atlas::Buffer {
-                for (auto y: crispy::times(dotHeight))
+                for (auto const y: std::views::iota(0, dotSize))
                 {
-                    for (auto x: crispy::times(dotWidth))
+                    for (auto const x: std::views::iota(0, dotSize))
                     {
-                        block.paint(int(x + x0), int(y + y0));
-                        block.paint(int(x + x1), int(y + y0));
+                        block.paint(x + x0, y + y0);
+                        block.paint(x + x1, y + y0);
                     }
                 }
                 return block.take();
