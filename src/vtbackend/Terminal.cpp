@@ -1602,6 +1602,13 @@ size_t Terminal::maxBulkTextSequenceWidth() const noexcept
     // This matches the baseline behavior (isTrivialBuffer check) and avoids
     // a timing-sensitive race in screenUpdated() where TrySwapBuffers state
     // causes _screenDirty to not be set, leaving the display stale.
+    //
+    // NOTE: isTrivialBuffer() answers a RENDER question -- "can this line be emitted as one batched
+    // RenderLine" -- which is stricter than the uniform-SGR question asked here. A wide character,
+    // an image fragment or a grapheme cluster anywhere in the line therefore also costs the rest of
+    // that line its bulk write, even though none of them makes an ASCII bulk write unsafe.
+    // Measured worst case: about 45% on a line whose first cell holds a combining mark and whose
+    // remaining 480 columns are ASCII. @see LineSoA::trivial for what else clears it.
     if (!primaryScreen().currentLine().isTrivialBuffer())
         return 0;
 

@@ -314,6 +314,35 @@ int appendCodepointToCluster(LineSoA& line, size_t col, char32_t codepoint, Clus
 
             line.clusterPool.push_back(codepoint);
             line.clusterSize[col] = currentSize + 1;
+
+            // The batched RenderLine path stores ONE codepoint per column (@see
+            // Line::trivialBuffer), so a cell holding a cluster cannot be expressed there at all:
+            // everything after the base is silently dropped, and a decomposed "e" + U+0301 draws
+            // without its accent. Leave the fast path, exactly as a wide cell's continuation
+            // (@see fillWideCharContinuation) and an image fragment (@see CellProxy::setImageFragment)
+            // already do.
+            //
+            // Independent of @p policy and of any width change: under FirstCodepoint the cluster
+            // keeps its width, but the codepoint still joins it -- and it is the codepoint, not the
+            // width, that the batched representation cannot carry.
+            //
+            // Only when a cluster is actually FORMED. Appending to a cell with no base codepoint
+            // (currentSize == 0) leaves the pool entry unreferenced -- clusterPoolIndex is set only
+            // on the transition from 1 -- so the cell still reads back as its single (empty) base
+            // and stays perfectly expressible. Clearing the flag there would cost the line its fast
+            // path for a codepoint nothing can read.
+            //
+            // The flag also gates the PARSER's bulk-write path (@see
+            // Terminal::maxBulkTextSequenceWidth), so a cluster costs its line that too, for the
+            // rest of the line. Measured (clang-release, 1.46 MB): text carrying combining marks
+            // throughout is unaffected (8.0 vs 8.3 ms) because such a line already takes the
+            // per-codepoint write path; the worst case -- ONE mark followed by 480 ASCII columns --
+            // costs about 45% on that line, 21 ms to 31 ms. That is the price of not dropping the
+            // codepoints, and it is paid only by lines that carry a cluster. Separating "may the
+            // parser bulk-write here" from "can the renderer batch this line" would recover it, but
+            // they are one flag today and splitting them is not this change.
+            if (currentSize >= 1)
+                line.trivial = false;
         }
     }
 

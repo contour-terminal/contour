@@ -115,9 +115,20 @@ struct LineSoA
     /// Number of columns populated with content (for efficient trim operations).
     ColumnCount usedColumns {};
 
-    /// Cached: true when all written cells share uniform SGR attributes.
-    /// Set to true on line init/reset, set to false when a cell is written
-    /// with different SGR than the first cell. Read as O(1) by the render path.
+    /// Cached: true while this line can be rendered as ONE batched RenderLine.
+    ///
+    /// That representation is a flat string of one codepoint per column with uniform attributes, so
+    /// the flag answers "is the line still expressible that way", not merely "is its SGR uniform".
+    /// Set to true on line init/reset, and cleared when a cell becomes inexpressible:
+    ///
+    /// - its SGR or hyperlink differs from the first cell's (@see writeCellToSoA)
+    /// - it is a wide cell's continuation (@see fillWideCharContinuation)
+    /// - it carries an image fragment (@see BasicCellProxy::setImageFragment)
+    /// - it holds a grapheme cluster, i.e. more than one codepoint (@see appendCodepointToCluster)
+    ///
+    /// Anything that makes a cell fail that test must clear this, or @c Line::trivialBuffer will
+    /// silently drop what it cannot represent. Read as O(1) by the render path -- and by
+    /// @c Terminal::maxBulkTextSequenceWidth, which gates the parser's bulk-write path on it.
     bool trivial = true;
 
     /// The GraphicsAttributes used in the most recent full-line reset/clear.
@@ -244,6 +255,11 @@ enum class ClusterWidthPolicy : uint8_t
 };
 
 /// Appends @p codepoint to the grapheme cluster at @p col.
+///
+/// Also clears @c LineSoA::trivial, because a cell holding more than one codepoint cannot be
+/// represented on the batched render path (@see Line::trivialBuffer, which keeps one codepoint per
+/// column). Any future path that grows a cluster without going through here owes the same clear;
+/// without it the extra codepoints are dropped from the rendered text with no diagnostic.
 ///
 /// @return by how many columns the cluster's width changed, which is always 0 under
 ///         ClusterWidthPolicy::FirstCodepoint.
