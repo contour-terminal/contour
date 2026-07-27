@@ -373,6 +373,12 @@ void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
     // cursorPositionChanged() early-return, freezing IME rectangle tracking and the a11y caret.
     _cursorMovedPostPending.clear(std::memory_order_release);
 
+    // A closed session has nothing to resize: its PTY is gone. Closing a pane makes QML re-run the
+    // Loader binding for the surviving panes, which re-enters setSession() -> attachDisplay() while
+    // onClosed() is still unwinding, so this path really is reached after the PTY has been closed.
+    // Skipping the resize keeps a dead session from pushing a geometry change down to it; ConPty
+    // additionally refuses the resize on its own side, since attachDisplay() is not the only caller.
+    if (!isClosed())
     {
         // NB: Inform connected TTY and local Screen instance about initial cell pixel size.
         auto const l = scoped_lock { _terminal };

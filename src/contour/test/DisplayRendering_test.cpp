@@ -1412,6 +1412,50 @@ TEST_CASE("display: a session re-bound onto a resized display adopts the live gr
     second.reset();
 }
 
+TEST_CASE("display: attaching a display to an already-closed session does not resize its dead PTY",
+          "[display][session][close]")
+{
+    // Regression pin for the ConPTY teardown crash: closing a pane makes QML re-run the Loader
+    // binding for the surviving panes, which re-enters TerminalDisplay::setSession() ->
+    // TerminalSession::attachDisplay() while onClosed() is still unwinding. attachDisplay()
+    // unconditionally called Terminal::resizeScreen(), so the resize reached a PTY that had already
+    // been closed. On Windows that is fatal rather than merely pointless: ConPty::close()
+    // invalidates the HPCON but leaves the slave alive, so the resize passed INVALID_HANDLE_VALUE
+    // to ResizePseudoConsole, which dereferences it (access violation reading 0xffffffffffffffff).
+    //
+    // The unit-level half of this lives in vtpty's ConPty_test; here the whole GUI path is driven:
+    // a real display re-attached to a real closed session must push no resize down to the device.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+    h.pump();
+
+    // Close the session the way the shell exiting does: terminate() closes the PTY device and drives
+    // the session to its closed state.
+    h.session->terminate();
+    for (int i = 0; i < 50 && !h.session->isClosed(); ++i)
+    {
+        QTest::qWait(10);
+        QCoreApplication::processEvents();
+    }
+    REQUIRE(h.pty->isClosed());
+    REQUIRE(h.session->isClosed());
+
+    // Whatever the close path itself did is not what this test is about; only what the *re-attach*
+    // does after it.
+    auto const resizesBeforeReattach = h.pty->resizesAfterClose();
+
+    // The re-attach QML performs on the surviving panes. Detach first so setSession() takes the
+    // full attachDisplay() path rather than an early-out on an unchanged session pointer.
+    h.display->setSession(nullptr);
+    h.pump();
+    h.display->setSession(h.session.get());
+    h.pump();
+
+    // Attached, and no geometry was pushed into the closed device.
+    CHECK(h.session->display() == h.display);
+    CHECK(h.pty->resizesAfterClose() == resizesBeforeReattach);
+}
+
 TEST_CASE("display: IME cursor-position and surrounding-text queries read the live grid", "[display][ime]")
 {
     REQUIRE_DISPLAY_OR_SKIP();
