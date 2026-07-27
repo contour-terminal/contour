@@ -117,7 +117,7 @@ class SshSession final: public Pty
     explicit SshSession(SshHostConfig config, SshHostkeyVerificationRequestCallback hostkeyRequestCallback);
     ~SshSession() override;
 
-    void start() override;
+    [[nodiscard]] StartResult start() override;
     PtySlave& slave() noexcept override;
     void close() override;
     void waitForClosed() override;

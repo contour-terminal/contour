@@ -219,14 +219,16 @@ UnixPty::UnixPty(PageSize pageSize, optional<ImageSize> pixels): _pageSize { pag
 {
 }
 
-void UnixPty::start()
+StartResult UnixPty::start()
 {
     auto const handles = createUnixPty(_pageSize, _pixels);
     _masterFd = crispy::file_descriptor::from_native(unbox<int>(handles.master));
     _slave = make_unique<Slave>(handles.slave);
 
     if (!util::setFileFlags(_masterFd, O_CLOEXEC | O_NONBLOCK))
-        throw runtime_error { "Failed to configure PTY. "s + std::generic_category().message(errno) };
+        return std::unexpected(
+            StartFailure { .error = StartError::PtyAllocationFailed,
+                           .detail = "Failed to configure PTY. "s + std::generic_category().message(errno) });
 
     util::setFileFlags(_stdoutFastPipe.reader(), O_NONBLOCK);
     ptyLog()("stdout fastpipe: reader {}, writer {}", _stdoutFastPipe.reader(), _stdoutFastPipe.writer());
@@ -237,6 +239,8 @@ void UnixPty::start()
 #if defined(__linux__) && defined(UTEMPTER)
     utempter_add_record(_masterFd, hostnameForUtmp());
 #endif
+
+    return {};
 }
 
 UnixPty::~UnixPty()

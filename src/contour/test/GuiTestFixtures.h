@@ -30,6 +30,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -245,7 +246,9 @@ class RecordingExternalLauncher final: public contour::ExternalLauncher
 /// buffer BLOCKS the reader (honoring the read timeout) until data arrives, a wakeupReader(), or
 /// close(); EOF (empty read) is reported only once closed. wakeupReader() genuinely unblocks the
 /// reader (as UnixPty's break-pipe does), so ~TerminalSession's thread join completes.
-class BlockingMockPty final: public vtpty::Pty
+/// Not final: ConfigurableStartPty derives from it to vary start() alone, the blocking read being
+/// exactly what a session that must survive its own start() needs.
+class BlockingMockPty: public vtpty::Pty
 {
   public:
     explicit BlockingMockPty(vtbackend::PageSize windowSize): _pageSize { windowSize } {}
@@ -309,7 +312,7 @@ class BlockingMockPty final: public vtpty::Pty
         _pixelSize = pixels;
     }
 
-    void start() override {}
+    vtpty::StartResult start() override { return {}; }
     void close() override
     {
         {
@@ -370,6 +373,65 @@ class BlockingMockPty final: public vtpty::Pty
     bool _closed = false;
     bool _woken = false; ///< One-shot wakeupReader() flag (teardown wake), cleared on read.
     vtpty::PtySlaveDummy _slave;
+};
+
+/// PTY whose start() produces a caller-chosen outcome, so every way a device can come up — or fail
+/// to — is drivable from one fixture rather than a family of near-identical ones.
+///
+/// The Throw case is the shape of the #1711 crash: on Windows a CreateProcess() failure is
+/// discovered in the PARENT (there is no fork), and the only channel Process::start() had was an
+/// exception. Thrown from TerminalSession::start(), it unwound out of TerminalDisplay::setSession()
+/// mid-mutation — past emit sessionChanged() — leaving a half-bound display and a session that,
+/// never having started its exit watcher, no onClosed() could ever prune. It is kept as a case
+/// because no device may take the process down that way, whatever it throws.
+///
+/// Built on BlockingMockPty rather than vtpty::MockPty because the Diagnose case must leave a session
+/// that is genuinely UP: MockPty answers an empty buffer with a zero-length read, which
+/// Terminal::processInputOnce() reads as EOF — so the read loop this start() has just launched would
+/// close the device from under the test within microseconds of returning. That is a race a debug build
+/// happens to win and a release build loses.
+class ConfigurableStartPty final: public BlockingMockPty
+{
+  public:
+    /// What start() does.
+    enum class StartBehavior : uint8_t
+    {
+        Diagnose, ///< Starts, reporting what it had to give up (a spawn-ladder rung below the first).
+        Fail,     ///< Reports a failure as a value, the way vtpty does.
+        Throw,    ///< Throws, the way the Windows spawn used to. See issue #1711.
+    };
+
+    /// The message the Windows reporters in #1711 actually saw.
+    static constexpr auto FailureText = std::string_view { "The directory name is invalid." };
+
+    /// A non-fatal notice, as the spawn ladder's directory-dropping rung produces.
+    static constexpr auto DiagnosticText =
+        std::string_view { "Failed to start in \"/gone\". Using the current directory instead." };
+
+    ConfigurableStartPty(vtbackend::PageSize pageSize, StartBehavior behavior):
+        BlockingMockPty { pageSize }, _behavior { behavior }
+    {
+    }
+
+    vtpty::StartResult start() override
+    {
+        switch (_behavior)
+        {
+            case StartBehavior::Throw: throw std::runtime_error(std::string { FailureText });
+            case StartBehavior::Fail:
+                return std::unexpected(vtpty::StartFailure { .error = vtpty::StartError::SpawnFailed,
+                                                             .detail = std::string { FailureText } });
+            case StartBehavior::Diagnose:
+                return BlockingMockPty::start().transform([](vtpty::StartOutcome outcome) {
+                    outcome.diagnostic = std::string { DiagnosticText };
+                    return outcome;
+                });
+        }
+        return {};
+    }
+
+  private:
+    StartBehavior _behavior;
 };
 
 /// Builds a ContourGuiApp whose parameters() are populated with defaults (so profileName() resolves

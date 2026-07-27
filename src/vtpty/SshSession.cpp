@@ -820,7 +820,7 @@ void SshSession::processState()
     }
 }
 
-void SshSession::start()
+StartResult SshSession::start()
 {
     if (_config.port == 22)
         logInfoWithInject("Starting SSH session to host: {}@{}", _config.username, _config.hostname);
@@ -832,6 +832,9 @@ void SshSession::start()
     // Runs on the GUI thread while the PTY reader thread may already be in read(). @see _mutex.
     auto const _ = std::lock_guard { _mutex };
     setState(State::Started);
+    // Connecting is asynchronous and its failures are reported through the state machine (State::Closed
+    // plus a logged message), so there is nothing for start() itself to fail with: reaching Started IS
+    // the success this returns.
     processState();
 
     /*
@@ -868,6 +871,8 @@ void SshSession::start()
 
         // _p->sshClient.setBlocking(false);
     */
+
+    return {};
 }
 
 PtySlave& SshSession::slave() noexcept

@@ -88,7 +88,7 @@ class [[nodiscard]] Process: public Pty
 
     // Pty overrides
     // clang-format off
-    void start() override;
+    [[nodiscard]] StartResult start() override;
     [[nodiscard]] PtySlave& slave() noexcept override { return pty().slave(); }
     void close() override { pty().close(); }
     void waitForClosed() override;

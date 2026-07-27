@@ -165,10 +165,15 @@ bool ConPty::isClosed() const noexcept
     return _master == INVALID_HANDLE_VALUE;
 }
 
-void ConPty::start()
+StartResult ConPty::start()
 {
     ptyLog()("Starting ConPTY");
     assert(!_slave);
+
+    auto const failed = [](std::string detail) {
+        return std::unexpected(
+            StartFailure { .error = StartError::PtyAllocationFailed, .detail = std::move(detail) });
+    };
 
     _slave = make_unique<ConPtySlave>(_output);
 
@@ -177,12 +182,12 @@ void ConPty::start()
 
     // Create the pipes to which the ConPty will connect to
     if (!CreatePipe(&hPipePTYIn, &_output, NULL, 0))
-        throw runtime_error { GetLastErrorAsString() };
+        return failed(GetLastErrorAsString());
 
     if (!CreatePipe(&_input, &hPipePTYOut, NULL, 0))
     {
         CloseHandle(hPipePTYIn);
-        throw runtime_error { GetLastErrorAsString() };
+        return failed(GetLastErrorAsString());
     }
 
     // Create the Pseudo Console of the required size, attached to the PTY-end of the pipes
@@ -196,7 +201,9 @@ void ConPty::start()
         CloseHandle(hPipePTYOut);
 
     if (hr != S_OK)
-        throw runtime_error { GetLastErrorAsString() };
+        return failed(GetLastErrorAsString());
+
+    return {};
 }
 
 void ConPty::waitForClosed()

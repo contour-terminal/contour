@@ -220,9 +220,10 @@ bool Process::isFlatpak()
     return check;
 }
 
-void Process::start()
+StartResult Process::start()
 {
-    _d->pty->start();
+    if (auto started = _d->pty->start(); !started)
+        return started;
 
     UnixPipe* stdoutFastPipe = [this]() -> UnixPipe* {
         if (auto* p = dynamic_cast<UnixPty*>(_d->pty.get()))
@@ -332,7 +333,8 @@ void Process::start()
                 stdoutFastPipe->closeWriter();
             break;
         case -1: // fork error
-            throw runtime_error { getLastErrorAsString() };
+            return std::unexpected(
+                StartFailure { .error = StartError::SpawnFailed, .detail = getLastErrorAsString() });
         case 0: // in child
         {
             (void) _d->pty->slave().login();
@@ -388,6 +390,11 @@ void Process::start()
             break;
         }
     }
+
+    // Nothing to report: on POSIX a working directory that cannot be entered, or a program that
+    // cannot be executed, is discovered in the CHILD, which writes its own diagnostic onto the pty
+    // (see the fallback ladder above) and exits. The parent only fails when fork() itself does.
+    return {};
 }
 
 Process::~Process()
