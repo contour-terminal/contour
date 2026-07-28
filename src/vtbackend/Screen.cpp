@@ -5,6 +5,7 @@
 #include <vtbackend/DesktopNotification.h>
 #include <vtbackend/InputGenerator.h>
 #include <vtbackend/MessageParser.h>
+#include <vtbackend/ModifyKeys.h>
 #include <vtbackend/RectangularAreaChecksum.h>
 #include <vtbackend/SixelParser.h>
 #include <vtbackend/SoAClusterWriter.h>
@@ -2986,6 +2987,26 @@ namespace
         if (holds_alternative<CellBackgroundColor>(color))
             return palette.defaultBackground;
         return get<RGBColor>(color);
+    }
+
+    /// Applies a decoded XTMODKEYS/XTRMMODKEYS request to @p terminal.
+    /// @param terminal The terminal whose input encoding the request configures.
+    /// @param request What the request decoded to (@see modifyKeysRequest).
+    /// @return Ok for a resource xterm defines, Unsupported for a number it does not.
+    [[nodiscard]] ApplyResult applyModifyKeys(Terminal& terminal, ModifyKeysRequest const& request)
+    {
+        switch (request.action)
+        {
+            case ModifyKeysAction::SetOtherKeys:
+                terminal.setModifyOtherKeys(request.otherKeysValue);
+                return ApplyResult::Ok;
+            case ModifyKeysAction::Ignore: return ApplyResult::Ok;
+            // Unsupported rather than Invalid: the sequence parsed fine, the resource
+            // it names is simply not one this terminal knows -- and xterm may define
+            // another tomorrow.
+            case ModifyKeysAction::Unknown: return ApplyResult::Unsupported;
+        }
+        crispy::unreachable();
     }
 } // namespace
 
@@ -6989,11 +7010,32 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             break;
 
         case DECPS: _terminal->playSound(seq.parameters()); break;
-        case MODIFYOTHERKEYS: {
-            auto const mode = seq.param_or(0, 0);
-            _terminal->setModifyOtherKeys(mode);
-            return ApplyResult::Ok;
+        case XTMODKEYS: {
+            // `CSI > Pp ; Pv m` assigns; `CSI > Pp m` resets that one resource (param_or
+            // supplies the initial value for the absent Pv); bare `CSI > m` resets ALL of
+            // them, which here means modifyOtherKeys -- the only one carrying state.
+            // Read Pp as an int, NOT as a uint8_t: a CSI parameter is a uint16_t, and narrowing it
+            // here would wrap `CSI > 260 ; 2 m` onto resource 4 (OtherKeys) and silently enable
+            // modifyOtherKeys. modifyKeysRequest() range-checks with std::cmp_equal precisely so an
+            // out-of-range selector falls through to Unknown, as xterm ignores what it does not define.
+            auto const resource = seq.parameterCount() == 0
+                                      ? int { toModifyKeysResourceNum(ModifyKeysResource::OtherKeys) }
+                                      : seq.param_or<int>(0, 0);
+            return applyModifyKeys(*_terminal,
+                                   modifyKeysRequest(resource, seq.param_or(1, InitialModifyOtherKeys)));
         }
+        case XTRMMODKEYS:
+            // The resource value -1 that XTMODKEYS cannot express. An omitted Ps names
+            // modifyFunctionKeys, which Contour does not track -- so the common
+            // `CSI > 4 n` is what actually changes anything here.
+            //
+            // Read as an int for the reason XTMODKEYS above does: the default value's own type must
+            // not decide the parameter's width, or `CSI > 260 n` truncates onto a real resource.
+            return applyModifyKeys(
+                *_terminal,
+                modifyKeysRequest(
+                    seq.param_or<int>(0, toModifyKeysResourceNum(ModifyKeysResource::FunctionKeys)),
+                    InitialModifyOtherKeys));
         case CSIUENTER: {
             auto const flags = KeyboardEventFlags::from_value(seq.param_or(0, 1));
             _terminal->keyboardProtocol().enter(flags);
