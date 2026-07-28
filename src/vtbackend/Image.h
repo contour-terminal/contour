@@ -11,6 +11,8 @@
 #include <format>
 #include <functional>
 #include <memory>
+#include <mutex>
+#include <unordered_map>
 #include <vector>
 
 namespace vtbackend
@@ -65,8 +67,18 @@ enum class ImageFormat : uint8_t
         return false; // must be resolved to a concrete format before it can be checked
     if (*size.width <= 0 || *size.height <= 0)
         return false;
-    auto const expected =
-        static_cast<size_t>(*size.width) * static_cast<size_t>(*size.height) * bytesPerPixel(format);
+    // Checked multiply: width * height * bpp can overflow size_t for extreme
+    // (e.g. 65537² RGBA) images, wrapping to a value that spuriously matches
+    // dataSize and letting an undersized pixmap through validation.
+    auto const w = static_cast<size_t>(*size.width);
+    auto const h = static_cast<size_t>(*size.height);
+    auto const bpp = static_cast<size_t>(bytesPerPixel(format));
+    auto const pixels = w * h;
+    if (w != 0 && pixels / w != h) // overflow in w * h
+        return false;
+    auto const expected = pixels * bpp;
+    if (pixels != 0 && expected / pixels != bpp) // overflow in pixels * bpp
+        return false;
     return dataSize == expected;
 }
 
@@ -362,20 +374,43 @@ class ImagePool
     [[nodiscard]] std::shared_ptr<Image const> findImageByName(std::string const& name) const noexcept;
     void unlink(std::string const& name);
 
+    /// Finds a live image by its stable id.
+    /// @param id The image id as referenced by grid cells.
+    /// @return The image, or nullptr when it was never created or its last reference is
+    ///         gone (the daemon answers a FetchImage request with ImageGone then).
+    /// @pre The caller must ensure the ImagePool outlives this call; the pool reference
+    ///      is not internally guarded — a dangling pool pointer is use-after-free.
+    [[nodiscard]] std::shared_ptr<Image const> findImageById(ImageId id) const;
+
     void inspect(std::ostream& os) const;
 
     void clear();
 
   private:
+    /// Test-only seam: rewinds _nextImageId to reproduce the uint32 id-counter wrap
+    /// (a reused id colliding with a still-live image) without four billion allocations.
+    friend struct ImagePoolIdWrapTester;
+
     void removeRasterizedImage(RasterizedImage* image); //!< Removes a rasterized image from pool.
 
     using NameToImageIdCache = crispy::strong_lru_cache<std::string, std::shared_ptr<Image const>>;
+
+    /// The id index behind findImageById(): weak_ptrs so the index never extends image
+    /// lifetime (eviction stays refcount-driven), shared with each image's remover so
+    /// pruning is safe regardless of destruction order, and mutex-guarded because the
+    /// last reference can drop on any thread (e.g. the GUI's render thread).
+    struct IdIndex
+    {
+        std::mutex mutex;
+        std::unordered_map<uint32_t, std::weak_ptr<Image const>> images;
+    };
 
     // data members
     //
     ImageId _nextImageId;                      //!< ID for next image to be put into the pool
     NameToImageIdCache _imageNameToImageCache; //!< keeps mapping from name to raw image
     OnImageRemove _onImageRemove;              //!< Callback to be invoked when image gets removed from pool.
+    std::shared_ptr<IdIndex> _idIndex = std::make_shared<IdIndex>(); //!< id -> live image index
 };
 
 } // namespace vtbackend

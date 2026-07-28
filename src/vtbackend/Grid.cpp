@@ -10,6 +10,7 @@
 #include <format>
 #include <iostream>
 #include <ranges>
+#include <utility>
 
 using std::max;
 using std::min;
@@ -132,12 +133,57 @@ void Grid::setMaxHistoryLineCount(MaxHistoryLineCount maxHistoryLineCount)
     _lines.resize(unbox<size_t>(_pageSize.lines + this->maxHistoryLineCount()),
                   Line(_pageSize.columns, defaultLineFlags(), GraphicsAttributes {}));
     _linesUsed = min(_linesUsed, _pageSize.lines + this->maxHistoryLineCount());
+    bumpGeneration();
     verifyState();
+}
+
+void Grid::finalizeRevisions() noexcept
+{
+    // Scan the page, the prefix that scrolled out since the last finalize, and any history row
+    // handed out for writing since then — all clamped to the valid history. The first covers rows
+    // written and then scrolled away within one batch (stamped at their new negative offset); the
+    // second covers rows dirtied in place with nothing scrolling at all (@see _dirtyHistoryFloor).
+    auto const scrolledFloor = _stableBase - scrolledOutDepthSince(_stableBaseAtLastFinalize);
+    auto const next = _seqno + 1;
+    auto stamped = false;
+    auto stampedHistoryFloor = NoHistoryFloor;
+    for (auto offset = scanTopFor(std::min(scrolledFloor, _dirtyHistoryFloor));
+         offset < boxed_cast<LineOffset>(_pageSize.lines);
+         ++offset)
+    {
+        // rowAt, not lineAt: the mutable overload would re-arm the very floor this pass clears.
+        if (!rowAt(offset).stampRevision(next))
+            continue;
+        stamped = true;
+        if (offset < LineOffset(0))
+            stampedHistoryFloor = std::min(stampedHistoryFloor, stableLineIdOf(offset));
+    }
+    if (stamped)
+        _seqno = next;
+    // Remember how deep a history change reached and when, so a consumer that has not caught up to
+    // this batch still scans down to it (@see forEachLineChangedSince).
+    //
+    // Derived from the rows actually STAMPED, deliberately not from _dirtyHistoryFloor: that floor
+    // is armed by handing a row out mutably, which a read-only caller sitting in a non-const
+    // function does too (Screen::captureBuffer walks the whole scrollback). Keying the sticky
+    // watermark on it would let one buffer capture pin every later delta scan at the top of the
+    // history for the rest of the generation. The per-row branch below costs one predictable
+    // compare and is paid only for rows that were genuinely dirty.
+    if (stampedHistoryFloor != NoHistoryFloor)
+    {
+        _changedHistoryFloor = std::min(_changedHistoryFloor, stampedHistoryFloor);
+        _changedHistorySeqno = next;
+    }
+    _dirtyHistoryFloor = NoHistoryFloor;
+    _stableBaseAtLastFinalize = _stableBase;
 }
 
 void Grid::clearHistory()
 {
     _linesUsed = _pageSize.lines;
+    // The floor jumps to the base: every history id is evicted, no resend needed —
+    // deliberately NOT a generation bump (page row identity is untouched).
+    syncStableFloor();
     verifyState();
 }
 
@@ -147,6 +193,11 @@ void Grid::verifyState() const noexcept
     Require(LineCount::cast_from(_lines.size()) >= totalLineCount());
     Require(LineCount::cast_from(_lines.size()) >= _linesUsed);
     Require(_linesUsed >= _pageSize.lines);
+    // A floor below base - history would re-validate evicted stable ids.
+    Require(_stableFloor >= _stableBase - unbox<int64_t>(historyLineCount()));
+    // A floor above the base would deny live page rows their identity (and hand
+    // std::clamp an inverted range); rotateBuffersRight re-keys before that.
+    Require(_stableFloor <= _stableBase);
 #endif
 }
 
@@ -177,14 +228,43 @@ std::string Grid::renderMainPageText() const
     return text;
 }
 
+std::vector<std::string> Grid::renderRange(LineOffset start,
+                                           LineOffset end,
+                                           CaptureRendition rendition,
+                                           CaptureTrailingSpaces trailing) const
+{
+    // The same top forEachValidLine walks from, and for the same reason: at capacity, scrollDown
+    // wraps destroyed page rows into the oldest history slots without resetting them, so the rows
+    // between -historyLineCount() and the stable floor hold garbage a capture must not return.
+    auto const top = addressableTop();
+    auto const bottom = unbox<LineOffset>(_pageSize.lines) - LineOffset(1);
+    auto const from = std::clamp(start, top, bottom);
+    auto const to = std::clamp(end, top, bottom);
+
+    auto lines = std::vector<std::string> {};
+    if (from > to)
+        return lines;
+    lines.reserve(unbox<size_t>(to - from) + 1);
+    for (auto y = from; y <= to; ++y)
+    {
+        auto const& line = lineAt(y);
+        auto const columns = trailing == CaptureTrailingSpaces::Keep
+                                 ? unbox<ColumnOffset>(_pageSize.columns)
+                                 : unbox<ColumnOffset>(line.trimmedColumns());
+        lines.push_back(rendition == CaptureRendition::WithSgr ? line.toUtf8WithSgr(ColumnOffset(0), columns)
+                                                               : line.toUtf8(ColumnOffset(0), columns));
+    }
+    return lines;
+}
+
 Line& Grid::lineAt(LineOffset line) noexcept
 {
-    return _lines[unbox<long>(line)];
+    return rowAt(line);
 }
 
 Line const& Grid::lineAt(LineOffset line) const noexcept
 {
-    return const_cast<Grid&>(*this).lineAt(line);
+    return const_cast<Grid&>(*this).rowAt(line);
 }
 
 CellProxy Grid::at(LineOffset line, ColumnOffset column) noexcept
@@ -317,6 +397,7 @@ LineCount Grid::scrollUp(LineCount linesCountToScrollUp, GraphicsAttributes defa
         if (*linesAppendCount != 0)
         {
             _linesUsed += linesAppendCount;
+            syncStableFloor();
             Require(unbox<size_t>(_linesUsed) <= _lines.size());
             fill_n(next(_lines.begin(), *_pageSize.lines),
                    unbox<size_t>(linesAppendCount),
@@ -416,8 +497,12 @@ LineCount Grid::scrollUp(LineCount n, GraphicsAttributes defaultAttributes, Marg
             // copy would actually change the destination. Two blank lines with the same
             // fillAttrs collapse to a no-op; differing fillAttrs require materialization
             // so the source's attrs propagate into the target's [fromCol, fromCol+count).
+            // Through std::as_const: the mutable storage() overload dirties pessimistically, and
+            // this branch reads the target purely to decide that it needs no write at all. Taking
+            // the mutable overload here stamps a provably unchanged row into the next delta batch,
+            // once per skipped row per scroll.
             if (sourceLine.isBlank() && targetLine.isBlank()
-                && sourceLine.storage().fillAttrs == targetLine.storage().fillAttrs)
+                && sourceLine.storage().fillAttrs == std::as_const(targetLine).storage().fillAttrs)
                 continue;
             copyColumns(
                 sourceLine.storage(), fromCol, targetLine.materializedStorage(), fromCol, columnsToMove);
@@ -488,8 +573,10 @@ void Grid::scrollDown(LineCount vN, GraphicsAttributes const& defaultAttributes,
                 auto const fromCol = unbox<size_t>(margin.horizontal.from);
                 // Only skip when both lines are blank AND share fillAttrs; differing
                 // attrs must propagate into the copied range (requires materialization).
+                // std::as_const for the same reason as in scrollUp: the read that decides "no write
+                // needed" must not go through the dirtying overload.
                 if (srcLine.isBlank() && dstLine.isBlank()
-                    && srcLine.storage().fillAttrs == dstLine.storage().fillAttrs)
+                    && srcLine.storage().fillAttrs == std::as_const(dstLine).storage().fillAttrs)
                     continue;
                 copyColumns(srcLine.storage(),
                             fromCol,
@@ -523,6 +610,7 @@ void Grid::unscroll(LineCount n, GraphicsAttributes const& defaultAttributes)
     {
         rotateBuffersRight(pullable);
         _linesUsed -= pullable;
+        syncStableFloor();
     }
 
     auto const remaining = clampedN - pullable;
@@ -562,6 +650,7 @@ void Grid::reset()
     _lines.rotate_right(_lines.zero_index());
     for (int i = 0; i < unbox(_pageSize.lines); ++i)
         _lines[i].reset(defaultLineFlags(), GraphicsAttributes {});
+    bumpGeneration();
     verifyState();
 }
 
@@ -594,6 +683,7 @@ CellLocation Grid::growLines(LineCount newHeight, CellLocation cursor)
 
     _pageSize.lines += totalLinesToExtend;
     _linesUsed = min(_linesUsed + totalLinesToExtend, LineCount::cast_from(_lines.size()));
+    syncStableFloor(); // the min() clamp can shrink the history at ring capacity
 
     Ensures(_pageSize.lines == newHeight);
     Ensures(_lines.size() >= unbox<size_t>(maxHistoryLineCount() + _pageSize.lines));
@@ -636,6 +726,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
         {
             _pageSize.lines -= cutoffCount;
             _linesUsed -= cutoffCount;
+            syncStableFloor();
             Ensures(*cursor.line < *_pageSize.lines);
             verifyState();
         }
@@ -872,11 +963,19 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
             while (shrunkLines.size() < totalLineCount)
                 shrunkLines.emplace_back(newColumnCount, LineFlag::None, GraphicsAttributes {});
 
-            shrunkLines.rotate_left(unbox<size_t>(numLinesWritten - _pageSize.lines));
             _linesUsed = LineCount::cast_from(numLinesWritten);
-
             _lines = std::move(shrunkLines);
             _pageSize.columns = newColumnCount;
+
+            // The rotation goes through the ring primitive rather than being applied to the local
+            // vector, because rotateBuffersLeft is where the stable-id accounting lives. Rotating
+            // `shrunkLines` instead left `_stableBase` exactly where it was while the history GREW
+            // underneath it — and syncStableFloor()'s max() can only RAISE the floor, never lower
+            // one — so every history row the reflow had just created sat below `_stableFloor` and
+            // forEachValidLine() began its walk above them: a client attaching after a narrowing
+            // resize got a grid with no scrollback at all, though the daemon still held the rows.
+            // growColumns has always gone through this primitive; the two paths now agree.
+            rotateBuffersLeft(historyLineCount());
 
             verifyState();
             return cursor; // TODO
@@ -902,6 +1001,9 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
     }
 
     Ensures(_pageSize == newSize);
+    // Any page-size change destroys physical row identity (a non-reflow column resize
+    // mutates history in place; reflow rebuilds the whole ring): one bump, clients resync.
+    bumpGeneration();
     verifyState();
 
     return cursor;
@@ -910,29 +1012,6 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
 void Grid::clampHistory()
 {
     // TODO: needed?
-}
-
-void Grid::appendNewLines(LineCount count, GraphicsAttributes attr)
-{
-    auto const wrappableFlag = _lines.back().wrappableFlag();
-
-    if (historyLineCount() == maxHistoryLineCount())
-    {
-        for (int i = 0; i < unbox(count); ++i)
-        {
-            auto line = std::move(_lines.front());
-            _lines.pop_front();
-            line.reset(defaultLineFlags(), attr);
-            _lines.emplace_back(std::move(line));
-        }
-        return;
-    }
-
-    if (auto const n = std::min(count, _pageSize.lines); *n > 0)
-    {
-        generate_n(back_inserter(_lines), *n, [&]() { return Line(_pageSize.columns, wrappableFlag, attr); });
-        clampHistory();
-    }
 }
 // }}}
 // {{{ dumpGrid impl

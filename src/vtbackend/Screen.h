@@ -785,7 +785,10 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     void enableLineFlags(LineOffset lineOffset, LineFlags flags, bool enable) noexcept
     {
-        _grid.lineAt(lineOffset).setFlag(flags, enable);
+        // changingLineAt, because a logical line's head follows wrapped rows into the SCROLLBACK:
+        // marking one changes a row nothing scrolled, which the delta scan would otherwise never
+        // revisit. @see Grid::changingLineAt.
+        _grid.changingLineAt(lineOffset).setFlag(flags, enable);
     }
 
     /// Sets or clears the semantic marks @p flags on the LOGICAL line that @p line belongs to.

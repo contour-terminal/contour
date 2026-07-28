@@ -3858,6 +3858,17 @@ TEST_CASE("DECRQSS reports the current SGR", "[screen]")
         mock.writeToScreen("\033P$qm\033\\"); // DECRQSS "m"
         CHECK("\033P1$r0;1;3m\033\\" == mock.terminal.peekInput());
     }
+
+    SECTION("colours, including an INDEXED underline colour")
+    {
+        // The report and `capture-pane -e` now share one encoder (vtbackend/SgrWriter.h). They used
+        // to hold a copy each, and both copies were wrong in a different place: the capture's knew
+        // nothing about SGR 58 at all, and this one only ever spelled an RGB underline colour — so
+        // `\e[58:5:1m`, which this terminal happily parses, was reported back as no colour at all.
+        mock.writeToScreen("\033[31;44;4:3;58:5:1m"); // red fg, blue bg, curly underline in red
+        mock.writeToScreen("\033P$qm\033\\");         // DECRQSS "m"
+        CHECK("\033P1$r0;4:3;31;44;58;5;1m\033\\" == mock.terminal.peekInput());
+    }
 }
 
 TEST_CASE("DECRQSS reports the attribute change extent (DECSACE)", "[screen]")
@@ -9569,3 +9580,112 @@ TEST_CASE("Reverse wraparound carries the cursor to the line above", "[screen]")
 }
 
 // }}} Backspace
+
+// {{{ Delta change tracking: advanced-feature write-path coverage
+namespace
+{
+/// Drains the grid's pending changes so a test observes only its own writes.
+GridDeltaCursor drainedDeltaCursor(Grid& grid)
+{
+    auto cursor = GridDeltaCursor {};
+    std::ignore = grid.forEachLineChangedSince(cursor, [](LineOffset, Line const&) {});
+    return cursor;
+}
+
+std::vector<int> changedLineOffsets(Grid& grid, GridDeltaCursor& cursor)
+{
+    auto out = std::vector<int> {};
+    std::ignore = grid.forEachLineChangedSince(
+        cursor, [&](LineOffset offset, Line const&) { out.push_back(unbox<int>(offset)); });
+    return out;
+}
+} // namespace
+
+TEST_CASE("Delta.imagePlacementBumpsExactlyTheCoveredLines", "[screen][delta]")
+{
+    auto const pageSize = PageSize { LineCount(11), ColumnCount(11) };
+    auto mock = MockTerm { pageSize, LineCount(11) };
+    mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(10) });
+
+    auto& grid = mock.terminal.primaryScreen().grid();
+    auto cursor = drainedDeltaCursor(grid);
+
+    mock.writeToScreen(ChessBoard); // a 10x10-cell sixel image over rows 0..9
+
+    auto const changed = changedLineOffsets(grid, cursor);
+    CHECK(changed == std::vector { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 });
+}
+
+TEST_CASE("Delta.sizedTextBumpsHeadAndContinuationRows", "[screen][delta]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
+    auto& grid = mock.terminal.primaryScreen().grid();
+    auto cursor = drainedDeltaCursor(grid);
+
+    // OSC 66 with s=2: the head lands on row 0, the continuation cells on row 1.
+    mock.writeToScreen("\033]66;s=2:w=2;W\a"sv);
+
+    CHECK(changedLineOffsets(grid, cursor) == std::vector { 0, 1 });
+}
+
+TEST_CASE("Delta.decdwlBumpsTheLine", "[screen][delta]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
+    auto& grid = mock.terminal.primaryScreen().grid();
+    auto cursor = drainedDeltaCursor(grid);
+
+    mock.writeToScreen("\033#6"sv); // DECDWL mutates the line via non-const flags()
+
+    CHECK(changedLineOffsets(grid, cursor) == std::vector { 0 });
+}
+
+TEST_CASE("Delta.hyperlinkedTextCarriesItsIdThroughADeltaCycle", "[screen][delta]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
+    auto& grid = mock.terminal.primaryScreen().grid();
+    auto cursor = drainedDeltaCursor(grid);
+
+    mock.writeToScreen("\033]8;;https://example.com\033\\ab\033]8;;\033\\"sv);
+
+    auto linkedColumns = 0;
+    std::ignore = grid.forEachLineChangedSince(cursor, [&](LineOffset offset, Line const& line) {
+        REQUIRE(offset == LineOffset(0));
+        for (auto const& id: line.storage().hyperlinks)
+            if (id != HyperlinkId {})
+                ++linkedColumns;
+    });
+    CHECK(linkedColumns == 2); // "ab" carries the hyperlink id through the delta
+}
+// }}} Delta change tracking
+
+TEST_CASE("a prompt mark on a scrolled-out logical line reaches the change stream", "[screen][delta]")
+{
+    // The end-to-end shape of Grid.delta.aHistoryRowDirtiedInPlaceIsReported: OSC 133;B stamps the
+    // mark on the LOGICAL line's head, and logicalLineHead() walks up wrapped rows into the
+    // scrollback. Nothing scrolls at that moment, so the row lies outside the prefix the delta scan
+    // covers — and a daemon-hosted session's clients would keep the previous PromptEnd offset for
+    // that logical line forever, making every feature built on it (copy last command output,
+    // prompt-aware selection) select the wrong range client-side while working on the daemon.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(4) }, LineCount(10) };
+    auto& terminal = mock.terminal;
+    auto& grid = terminal.primaryScreen().grid();
+
+    // A wrapped logical line whose head then scrolls above the page.
+    mock.writeToScreen("abcdefgh\r\n");
+    mock.writeToScreen("\r\n");
+    REQUIRE(unbox<int>(grid.historyLineCount()) >= 2);
+
+    auto cursor = GridDeltaCursor {};
+    std::ignore = grid.forEachLineChangedSince(cursor, [](LineOffset, Line const&) {});
+
+    // The shell marks the prompt on the line the cursor sits on; its logical head is in history.
+    mock.writeToScreen("\033]133;B\033\\");
+
+    auto reported = std::vector<int> {};
+    std::ignore = grid.forEachLineChangedSince(
+        cursor, [&](LineOffset offset, Line const&) { reported.push_back(unbox<int>(offset)); });
+
+    // Whichever row the head resolved to, the change reached the stream — before the fix an
+    // above-the-page head reported nothing at all.
+    CHECK_FALSE(reported.empty());
+}

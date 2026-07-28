@@ -1136,6 +1136,15 @@ class Terminal
     /// Returns the zero-based page index of the displayed page.
     [[nodiscard]] PageIndex displayedPageIndex() const noexcept { return _displayedPage; }
 
+    /// The page the viewer is actually looking at — the alternate screen while a full-screen
+    /// application is running, and whatever DECPCCM last displayed.
+    ///
+    /// Named here rather than spelled `pageAt(displayedPageIndex())` at each consumer, because
+    /// every one of those is a chance to reach for `primaryScreen()` instead and silently answer
+    /// about the buffer the editor replaced — which is exactly what `capture-pane` used to do.
+    [[nodiscard]] Screen& displayedPage() noexcept { return pageAt(_displayedPage); }
+    [[nodiscard]] Screen const& displayedPage() const noexcept { return pageAt(_displayedPage); }
+
     /// Returns the 1-based page number where the cursor is active (for VT replies).
     [[nodiscard]] int cursorPageNumber() const noexcept { return _cursorPage.value + 1; }
 
@@ -1212,6 +1221,7 @@ class Terminal
             page->setReGISTextRasterizer(rasterizer);
     }
     [[nodiscard]] Screen const& hostWritableStatusLineDisplay() const noexcept { return _hostWritableStatusLineScreen; }
+    [[nodiscard]] Screen& hostWritableStatusLineDisplay() noexcept { return _hostWritableStatusLineScreen; }
     [[nodiscard]] Screen const& indicatorStatusLineDisplay() const noexcept { return _indicatorStatusScreen; }
     // clang-format on
 
@@ -1536,7 +1546,28 @@ class Terminal
     void setGenerateFocusEvents(bool enabled);
     void setMouseProtocol(MouseProtocol protocol, bool enabled);
     void setMouseTransport(MouseTransport transport);
+    /// Applies one of the four coordinate-encoding DEC modes (1005/1006/1015/1016), which select a
+    /// single mutually-exclusive setting between them: a set selects @p mode's encoding, a reset
+    /// clears it only when it is the one currently in effect.
+    /// @param mode One of the coordinate-encoding modes; anything else is a precondition violation.
+    /// @param enable Whether the mode is being set or reset.
+    void setMouseCoordinateMode(DECMode mode, bool enable);
     void setMouseWheelMode(InputGenerator::MouseWheelMode mode);
+
+    /// The RESOLVED mouse-reporting state, as the input generator will actually encode it. This is
+    /// not derivable from the DEC mode register: nine mouse modes write these three values, several
+    /// of them to the same one, so a set of mode bits cannot say which spelling won.
+    /// @{
+    [[nodiscard]] std::optional<MouseProtocol> mouseProtocol() const noexcept
+    {
+        return _inputGenerator.mouseProtocol();
+    }
+    [[nodiscard]] MouseTransport mouseTransport() const noexcept { return _inputGenerator.mouseTransport(); }
+    [[nodiscard]] InputGenerator::MouseWheelMode mouseWheelMode() const noexcept
+    {
+        return _inputGenerator.mouseWheelMode();
+    }
+    /// @}
     /// Sets alternate-scroll lines per wheel notch, syncing @ref Settings and the input generator.
     /// @param lines Lines per notch (values below 1 are clamped to 1 at emit time).
     void setMouseWheelScrollMultiplier(LineCount lines);
@@ -2231,8 +2262,16 @@ class Terminal
     /// there is one source of truth) and thereafter written only by sendFocus{In,Out}Event.
     bool _focused;
 
-    VTType _terminalId = VTType::VT525;
-    VTType _operatingLevel = VTType::VT525;
+    /// The terminal identity DA1/DA2 report, and the conformance level in force. Both seeded from
+    /// Settings::terminalId (NOT defaulted here, so there is one source of truth) and thereafter
+    /// written only by setTerminalId / setOperatingLevel — DECSCL for the level, a config reload for
+    /// the identity.
+    ///
+    /// Seeding matters beyond tidiness: a terminal nobody reconfigures after construction used to
+    /// report VT525 whatever its settings said, so every daemon-hosted session ignored its profile's
+    /// `terminal_id` outright. The GUI was immune only because configureTerminal() assigns it.
+    VTType _terminalId;
+    VTType _operatingLevel;
     ControlTransmissionMode _c1TransmissionMode = ControlTransmissionMode::S7C1T;
 
     /// xterm title-mode features (XTSMTITLE / XTRMTITLE), one bit per TitleModeFeature. Default is all

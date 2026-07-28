@@ -27,11 +27,13 @@
 #include <sys/types.h>
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
+#include <optional>
 #include <ranges>
 #include <regex>
 #include <string>
@@ -197,6 +199,8 @@ Terminal::Terminal(Events& eventListener,
     _defaultColorPalette { _settings.colorPalette },
     _colorPalette { _settings.colorPalette },
     _focused { _settings.focused },
+    _terminalId { _settings.terminalId },
+    _operatingLevel { _settings.terminalId },
     _pageMargins {},
     _hostWritableScreenMargin { .vertical = Margin::Vertical { .from = {}, .to = LineOffset(0) },
                                 .horizontal =
@@ -214,6 +218,13 @@ Terminal::Terminal(Events& eventListener,
     _inputHandler { _viCommands, ViMode::Insert },
     _shellIntegration { std::make_unique<NullShellIntegration>() }
 {
+    // Through setTerminalId, so the three pieces of state derived from the identity are derived in
+    // ONE place. Seeding _terminalId/_operatingLevel in the member list and stopping there left the
+    // conformance GATE and the sequence TABLE disagreeing for any terminal nobody reconfigures
+    // afterwards — a daemon-hosted VT220 session refused the VT420 modes and answered DA1 as a
+    // VT220, yet still executed DECFRA/DECCRA off the full VT525 table.
+    setTerminalId(_settings.terminalId);
+
     // Initialize all page margins to defaults.
     _pageMargins.fill(makeDefaultMargin(_settings.pageSize));
 
@@ -3039,6 +3050,48 @@ void Terminal::setMouseTransport(MouseTransport transport)
     _inputGenerator.setMouseTransport(transport);
 }
 
+namespace
+{
+    /// The DEC modes that choose how a mouse report spells its coordinates. They are four spellings
+    /// of ONE setting rather than four independent flags -- xterm keeps a single
+    /// `screen->extend_coords` and says so outright: "Rather than choose an arbitrary precedence
+    /// among the coordinate modes, they are mutually exclusive. For consistency, a reset is only
+    /// effective against the matching mode." (xterm charproc.c, `srm_EXT_MODE_MOUSE` et al.)
+    ///
+    /// A fifth spelling is a row here; the switch labels in setMode only route to it.
+    constexpr auto MouseCoordinateModes = std::to_array<std::pair<DECMode, MouseTransport>>({
+        { DECMode::MouseExtended, MouseTransport::Extended },   // 1005
+        { DECMode::MouseSGR, MouseTransport::SGR },             // 1006
+        { DECMode::MouseURXVT, MouseTransport::URXVT },         // 1015
+        { DECMode::MouseSGRPixels, MouseTransport::SGRPixels }, // 1016
+    });
+
+    /// @param mode The DEC mode to classify.
+    /// @return The coordinate encoding @p mode selects, or nullopt if it selects none.
+    [[nodiscard]] constexpr optional<MouseTransport> mouseCoordinateModeOf(DECMode mode) noexcept
+    {
+        for (auto const& [decMode, transport]: MouseCoordinateModes)
+            if (decMode == mode)
+                return transport;
+        return nullopt;
+    }
+} // namespace
+
+void Terminal::setMouseCoordinateMode(DECMode mode, bool enable)
+{
+    auto const transport = mouseCoordinateModeOf(mode);
+    Require(transport.has_value()); // only the coordinate modes route here
+
+    // xterm's rule, and the reason this cannot be four independent cases: a SET selects this
+    // encoding, but a RESET only clears it when it is the one in effect. Clearing unconditionally
+    // means a peer that replays a whole mode set -- naming the three it does not want alongside the
+    // one it does -- destroys the encoding the application chose, because the resets land after it.
+    if (enable)
+        setMouseTransport(*transport);
+    else if (_inputGenerator.mouseTransport() == *transport)
+        setMouseTransport(MouseTransport::Default);
+}
+
 void Terminal::setMouseWheelMode(InputGenerator::MouseWheelMode mode)
 {
     _inputGenerator.setMouseWheelMode(mode);
@@ -3342,24 +3395,18 @@ void Terminal::setMode(DECMode mode, bool enable)
             }
             break;
         case DECMode::BracketedPaste: setBracketedPaste(enable); break;
-        case DECMode::MouseSGR:
-            if (enable)
-                setMouseTransport(MouseTransport::SGR);
-            else
-                setMouseTransport(MouseTransport::Default);
+        // The four coordinate encodings are one mutually-exclusive setting; @see
+        // MouseCoordinateModes for the rule and its source.
+        case DECMode::MouseExtended:  // 1005
+        case DECMode::MouseSGR:       // 1006
+        case DECMode::MouseURXVT:     // 1015
+        case DECMode::MouseSGRPixels: // 1016
+            setMouseCoordinateMode(mode, enable);
             break;
-        case DECMode::MouseExtended: setMouseTransport(MouseTransport::Extended); break;
-        case DECMode::MouseURXVT: setMouseTransport(MouseTransport::URXVT); break;
         case DECMode::MousePassiveTracking:
             _inputGenerator.setPassiveMouseTracking(enable);
             setMode(DECMode::MouseSGR, enable);                    // SGR is required.
             setMode(DECMode::MouseProtocolButtonTracking, enable); // ButtonTracking is default
-            break;
-        case DECMode::MouseSGRPixels:
-            if (enable)
-                setMouseTransport(MouseTransport::SGRPixels);
-            else
-                setMouseTransport(MouseTransport::Default);
             break;
         case DECMode::MouseAlternateScroll:
             if (enable)
