@@ -1,4 +1,4 @@
-add_library(vtmux STATIC
+add_library(vtworkspace STATIC
     Pane.cpp
     Pane.h
     PaneLayout.h
@@ -9,30 +9,30 @@ add_library(vtmux STATIC
     ModelEvents.h
     Primitives.h
 )
-target_link_libraries(vtmux PUBLIC
+target_link_libraries(vtworkspace PUBLIC
     vtbackend
     crispy::core
 )
-target_include_directories(vtmux PUBLIC
+target_include_directories(vtworkspace PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
 )
 
-option(VTMUX_TESTING "Enables building of unittests for vtmux [default: ON]" ${CONTOUR_TESTING})
-if(VTMUX_TESTING)
+option(VTWORKSPACE_TESTING "Enables building of unittests for vtworkspace [default: ON]" ${CONTOUR_TESTING})
+if(VTWORKSPACE_TESTING)
     enable_testing()
-    add_executable(vtmux_test
+    add_executable(vtworkspace_test
         test_main.cpp
         Pane_test.cpp
         PaneLayout_test.cpp
         Tab_test.cpp
         SessionModel_test.cpp
     )
-    target_link_libraries(vtmux_test vtmux crispy::core Catch2::Catch2)
-    add_test(NAME vtmux_test COMMAND $<TARGET_FILE:vtmux_test>)
+    target_link_libraries(vtworkspace_test vtworkspace crispy::core Catch2::Catch2)
+    add_test(NAME vtworkspace_test COMMAND $<TARGET_FILE:vtworkspace_test>)
 
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
-        target_compile_options(vtmux_test PRIVATE -Wno-c2y-extensions)
+        target_compile_options(vtworkspace_test PRIVATE -Wno-c2y-extensions)
     endif()
 endif()

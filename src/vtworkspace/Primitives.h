@@ -5,7 +5,7 @@
 
 #include <boxed-cpp/boxed.hpp>
 
-namespace vtmux
+namespace vtworkspace
 {
 
 namespace detail::tags
@@ -76,4 +76,4 @@ enum class FocusDirection : uint8_t
     return direction == FocusDirection::Right || direction == FocusDirection::Down;
 }
 
-} // namespace vtmux
+} // namespace vtworkspace

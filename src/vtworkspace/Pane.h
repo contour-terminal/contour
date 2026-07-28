@@ -7,9 +7,9 @@
 #include <optional>
 #include <utility>
 
-#include <vtmux/Primitives.h>
+#include <vtworkspace/Primitives.h>
 
-namespace vtmux
+namespace vtworkspace
 {
 
 /// A node in a tab's binary split tree.
@@ -208,4 +208,4 @@ class Pane
     Pane* _parent = nullptr;
 };
 
-} // namespace vtmux
+} // namespace vtworkspace

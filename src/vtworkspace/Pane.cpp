@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtmux/Pane.h>
+#include <vtworkspace/Pane.h>
 
 #include <cassert>
 
-namespace vtmux
+namespace vtworkspace
 {
 
 std::pair<Pane*, Pane*> Pane::split(
@@ -171,4 +171,4 @@ Pane* Pane::neighbor(Pane const* fromLeaf, FocusDirection direction)
     return nullptr;
 }
 
-} // namespace vtmux
+} // namespace vtworkspace

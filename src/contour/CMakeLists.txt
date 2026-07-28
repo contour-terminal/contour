@@ -298,7 +298,7 @@ target_link_libraries(contour_core
     PUBLIC
     crispy::core
     vtbackend
-    vtmux
+    vtworkspace
     Qt6::Core
     ${YAML_CPP_LIBRARIES}
 )

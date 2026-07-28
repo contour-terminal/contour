@@ -10,8 +10,8 @@
 #include <numeric>
 #include <ranges>
 
-#include <vtmux/Pane.h>
-#include <vtmux/Tab.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/Tab.h>
 
 namespace contour
 {
@@ -61,8 +61,8 @@ double ratioForFirst(config::LayoutPane const& splitNode)
 
 namespace
 {
-    void realizePane(vtmux::SessionModel& model,
-                     vtmux::TabId tab,
+    void realizePane(vtworkspace::SessionModel& model,
+                     vtworkspace::TabId tab,
                      config::LayoutPane const& node,
                      PaneSeeder const& seed);
 
@@ -71,9 +71,9 @@ namespace
     /// tail is the rest of the SAME children vector, so no subtree is ever copied.
     /// Precondition: the model's active leaf is a freshly created leaf seeded with
     /// leftmostLeaf(children.front()).
-    void realizeSiblings(vtmux::SessionModel& model,
-                         vtmux::TabId tab,
-                         vtmux::SplitState orientation,
+    void realizeSiblings(vtworkspace::SessionModel& model,
+                         vtworkspace::TabId tab,
+                         vtworkspace::SplitState orientation,
                          std::span<config::LayoutPane const> children,
                          PaneSeeder const& seed)
     {
@@ -101,8 +101,8 @@ namespace
     }
 
     // Precondition: model's active leaf is a freshly created leaf seeded with leftmostLeaf(node).
-    void realizePane(vtmux::SessionModel& model,
-                     vtmux::TabId tab,
+    void realizePane(vtworkspace::SessionModel& model,
+                     vtworkspace::TabId tab,
                      config::LayoutPane const& node,
                      PaneSeeder const& seed)
     {
@@ -113,8 +113,8 @@ namespace
     }
 } // namespace
 
-vtmux::Tab* realizeLayoutTab(vtmux::SessionModel& model,
-                             vtmux::WindowId window,
+vtworkspace::Tab* realizeLayoutTab(vtworkspace::SessionModel& model,
+                             vtworkspace::WindowId window,
                              config::LayoutTab const& tab,
                              PaneSeeder const& seed)
 {
@@ -133,7 +133,7 @@ vtmux::Tab* realizeLayoutTab(vtmux::SessionModel& model,
     if (tab.title)
         model.setTabTitle(modelTab->id(), *tab.title);
     if (tab.color)
-        model.setTabColor(modelTab->id(), vtmux::TabColorSource::User, *tab.color);
+        model.setTabColor(modelTab->id(), vtworkspace::TabColorSource::User, *tab.color);
 
     realizePane(model, modelTab->id(), tab.root, seed);
     return modelTab;
@@ -206,7 +206,7 @@ namespace
 
         out << YAML::Key << "split" << YAML::Value << YAML::BeginMap;
         out << YAML::Key << "orientation" << YAML::Value
-            << (pane.orientation == vtmux::SplitState::Horizontal ? "horizontal" : "vertical");
+            << (pane.orientation == vtworkspace::SplitState::Horizontal ? "horizontal" : "vertical");
         out << YAML::Key << "panes" << YAML::Value << YAML::BeginSeq;
         for (auto const& child: pane.children)
             emitPane(out, child, /* emitRatio */ true);
@@ -238,7 +238,7 @@ namespace
     }
 } // namespace
 
-config::LayoutPane serializePane(vtmux::Pane const& pane, LeafResolver const& resolve)
+config::LayoutPane serializePane(vtworkspace::Pane const& pane, LeafResolver const& resolve)
 {
     config::LayoutPane out;
     if (pane.isLeaf())
@@ -260,12 +260,12 @@ config::LayoutPane serializePane(vtmux::Pane const& pane, LeafResolver const& re
     return out;
 }
 
-config::LayoutTab serializeTab(vtmux::Tab const& tab, LeafResolver const& resolve)
+config::LayoutTab serializeTab(vtworkspace::Tab const& tab, LeafResolver const& resolve)
 {
     config::LayoutTab out;
     if (tab.runtimeTitle())
         out.title = *tab.runtimeTitle();
-    if (auto const color = tab.color(vtmux::TabColorSource::User))
+    if (auto const color = tab.color(vtworkspace::TabColorSource::User))
         out.color = *color;
     out.root = serializePane(*tab.rootPane(), resolve);
     return out;

@@ -9,9 +9,9 @@
 #include <ranges>
 #include <vector>
 
-#include <vtmux/PaneLayout.h>
+#include <vtworkspace/PaneLayout.h>
 
-using namespace vtmux;
+using namespace vtworkspace;
 
 namespace
 {
@@ -47,14 +47,14 @@ LayoutSize simulateAllocation(Pane& root, Pane const& leaf, LayoutSize content)
 
 } // namespace
 
-TEST_CASE("PaneLayout: unsplit leaf passes the requirement through", "[vtmux][layout]")
+TEST_CASE("PaneLayout: unsplit leaf passes the requirement through", "[vtworkspace][layout]")
 {
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
     CHECK(contentSizeForLeaf(root, { .width = 640, .height = 480 }, Handle, root)
           == LayoutSize { .width = 640, .height = 480 });
 }
 
-TEST_CASE("PaneLayout: side-by-side split solves the width axis only", "[vtmux][layout]")
+TEST_CASE("PaneLayout: side-by-side split solves the width axis only", "[vtworkspace][layout]")
 {
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
     auto const [first, second] =
@@ -69,7 +69,7 @@ TEST_CASE("PaneLayout: side-by-side split solves the width axis only", "[vtmux][
           == LayoutSize { .width = 812, .height = 300 });
 }
 
-TEST_CASE("PaneLayout: stacked split solves the height axis only", "[vtmux][layout]")
+TEST_CASE("PaneLayout: stacked split solves the height axis only", "[vtworkspace][layout]")
 {
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
     auto const [first, second] =
@@ -83,7 +83,7 @@ TEST_CASE("PaneLayout: stacked split solves the height axis only", "[vtmux][layo
           == LayoutSize { .width = 640, .height = 142 });
 }
 
-TEST_CASE("PaneLayout: nested splits compose per traversed level", "[vtmux][layout]")
+TEST_CASE("PaneLayout: nested splits compose per traversed level", "[vtworkspace][layout]")
 {
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
     auto const [left, right] =
@@ -99,7 +99,7 @@ TEST_CASE("PaneLayout: nested splits compose per traversed level", "[vtmux][layo
           == LayoutSize { .width = 412, .height = 209 });
 }
 
-TEST_CASE("PaneLayout: solved content never allocates the leaf below its requirement", "[vtmux][layout]")
+TEST_CASE("PaneLayout: solved content never allocates the leaf below its requirement", "[vtworkspace][layout]")
 {
     // Adversarial ratios at the clamp extremes, three levels deep.
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
@@ -123,7 +123,7 @@ TEST_CASE("PaneLayout: solved content never allocates the leaf below its require
     }
 }
 
-TEST_CASE("PaneLayout: the layout root bounds the ratio walk", "[vtmux][layout][zoom]")
+TEST_CASE("PaneLayout: the layout root bounds the ratio walk", "[vtworkspace][layout][zoom]")
 {
     // A three-leaf tree: root splits side-by-side, its second child splits top/bottom.
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };

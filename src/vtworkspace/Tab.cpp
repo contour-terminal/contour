@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtmux/Tab.h>
+#include <vtworkspace/Tab.h>
 
 #include <cassert>
 
-namespace vtmux
+namespace vtworkspace
 {
 
 void Tab::touchMru(PaneId id)
@@ -227,4 +227,4 @@ std::string Tab::title(SessionTitleResolver const& resolver) const
     return resolver(_activeLeaf->session());
 }
 
-} // namespace vtmux
+} // namespace vtworkspace

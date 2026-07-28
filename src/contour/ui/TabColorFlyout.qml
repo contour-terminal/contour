@@ -1,6 +1,6 @@
 // vim:syntax=qml
 // A popup with a grid of predefined color swatches for trivially colorizing a tab (Windows-Terminal
-// style). The palette comes from the authoritative vtmux model via the controller, so the GUI and
+// style). The palette comes from the authoritative vtworkspace model via the controller, so the GUI and
 // any future network client offer the same choices. One click on a swatch sets the tab color; a hex
 // field below the swatches lets the user enter an arbitrary RGB color.
 //

@@ -19,13 +19,13 @@
 #include <unordered_map>
 #include <vector>
 
-#include <vtmux/Primitives.h>
+#include <vtworkspace/Primitives.h>
 
-namespace vtmux
+namespace vtworkspace
 {
 class Tab;
 class Window;
-} // namespace vtmux
+} // namespace vtworkspace
 
 namespace contour
 {
@@ -35,9 +35,9 @@ class TerminalSession;
 class PaneProxy;
 class SettingsController;
 
-/// Per-OS-window Qt/QML adapter over one vtmux::Window.
+/// Per-OS-window Qt/QML adapter over one vtworkspace::Window.
 ///
-/// Clean-architecture role: this is the ADAPTER between the pure, Qt-free domain core (vtmux::Window /
+/// Clean-architecture role: this is the ADAPTER between the pure, Qt-free domain core (vtworkspace::Window /
 /// SessionModel) and the QML window (ApplicationWindow / main.qml). One instance exists per OS window.
 /// It owns everything window-scoped and Qt-shaped:
 ///   - the tab-strip QAbstractListModel (rows = this window's tabs) + the tab invokables the strip calls;
@@ -51,11 +51,11 @@ class SettingsController;
 /// It holds NO session lifetime and NO authority over the model tree. Structural mutations
 /// (create/close/move tab, split/close/focus pane, terminate) are delegated to the
 /// TerminalSessionManager SERVICE, tagged with this controller's WindowId, so the model stays the single
-/// source of truth and session ownership stays in one place. The manager also routes each vtmux
+/// source of truth and session ownership stays in one place. The manager also routes each vtworkspace
 /// ModelEvent to the owning window's controller (the on*() hooks below).
 ///
 /// Created only by TerminalSessionManager::createWindowController() (which mints the backing
-/// vtmux::Window) and owned via QQmlEngine CppOwnership; destroyed when its ApplicationWindow closes.
+/// vtworkspace::Window) and owned via QQmlEngine CppOwnership; destroyed when its ApplicationWindow closes.
 class WindowController: public QAbstractListModel, public TabTitleProvider
 {
     Q_OBJECT
@@ -97,12 +97,12 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
         PaneCountRole = Qt::UserRole + 4, //!< Number of panes in this tab.
         SessionIdRole = Qt::UserRole + 5, //!< The session id of the tab's active leaf.
         RawTitleRole = Qt::UserRole + 6,  //!< Un-expanded runtime rename template (empty if never renamed).
-        ZoomedRole = Qt::UserRole + 7,    //!< Whether this tab's active pane is zoomed (see vtmux::Tab).
+        ZoomedRole = Qt::UserRole + 7,    //!< Whether this tab's active pane is zoomed (see vtworkspace::Tab).
     };
 
     /// @param manager  The session-lifetime service + model host (must outlive this controller).
-    /// @param windowId The backing vtmux::Window this controller adapts.
-    WindowController(TerminalSessionManager& manager, vtmux::WindowId windowId);
+    /// @param windowId The backing vtworkspace::Window this controller adapts.
+    WindowController(TerminalSessionManager& manager, vtworkspace::WindowId windowId);
     ~WindowController() override;
 
     WindowController(WindowController const&) = delete;
@@ -110,7 +110,7 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     WindowController(WindowController&&) = delete;
     WindowController& operator=(WindowController&&) = delete;
 
-    [[nodiscard]] vtmux::WindowId windowId() const noexcept { return _windowId; }
+    [[nodiscard]] vtworkspace::WindowId windowId() const noexcept { return _windowId; }
 
     // {{{ QAbstractListModel (tab strip)
     [[nodiscard]] QVariant data(QModelIndex const& index, int role = Qt::DisplayRole) const override;
@@ -476,7 +476,7 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// THE grid->window choke point: every programmatic window resize (DECSLPP / CSI 8 t, font zoom's
     /// grid restore, profile switch, DPR settlement) lands here; nothing else may resize the window.
     /// Computes the window size so that @p requester's pane receives @p totalPageSize — for a split
-    /// window by solving the pane-tree ratios (vtmux::contentSizeForLeaf), identity for a single pane —
+    /// window by solving the pane-tree ratios (vtworkspace::contentSizeForLeaf), identity for a single pane —
     /// plus the declared chrome, and issues ONE resize. The resulting WM resize event drives the grid
     /// through the normal window->grid path; the WM is free to refuse (the reflowed grid then stands).
     /// Refused (logged) when fullscreen/maximized or the requester has no window/session/pane.
@@ -512,7 +512,7 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
 
     /// Get-or-create a PaneProxy for @p id (reused across rebuilds so QML items survive). Public so the
     /// PaneProxy can be constructed against the manager. (Used only by rebuildActiveTabPaneProxies.)
-    [[nodiscard]] PaneProxy* getProxy(vtmux::PaneId id);
+    [[nodiscard]] PaneProxy* getProxy(vtworkspace::PaneId id);
 
     // {{{ Called by the manager's ModelEvents router (dispatched here by WindowId)
     void onTabAboutToBeAdded(int index);
@@ -522,17 +522,17 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     void onTabAboutToBeMoved(int fromIndex, int toIndex);
     void onTabMoved();
     void onActiveTabChanged();
-    void notifyTabRowChanged(vtmux::TabId tab, QList<Roles> const& roles);
+    void notifyTabRowChanged(vtworkspace::TabId tab, QList<Roles> const& roles);
     void refreshAllTabTitles();
     void refreshActiveTabHighlight();
     void rebuildActiveTabPaneProxies();
-    /// Re-points activeTabRootPane at the active tab's layout root (vtmux::Tab::layoutRoot), which zoom
+    /// Re-points activeTabRootPane at the active tab's layout root (vtworkspace::Tab::layoutRoot), which zoom
     /// moves without reshaping the tree. O(1): the proxies stay valid, so no walk or rebuild is needed.
     void refreshActiveTabLayoutRoot();
     /// Notifies every proxy's active state changed (active-pane focus moved, no tree rebuild).
     void notifyActivePaneChanged();
     /// Notifies the split node proxy @p splitNode that its ratio changed.
-    void notifyRatioChanged(vtmux::PaneId splitNode);
+    void notifyRatioChanged(vtworkspace::PaneId splitNode);
     /// Emits activeSessionChanged (the focused pane's session may have changed).
     void emitActiveSessionChanged() { emit activeSessionChanged(); }
     /// Rebuilds and republishes this window's status line (tab list + per-pane marker).
@@ -580,16 +580,16 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// @param active The new settings-page visibility.
     void setSettingsActive(bool active);
 
-    /// The backing vtmux::Window, or nullptr if it has been removed.
-    [[nodiscard]] vtmux::Window* window() const noexcept;
-    /// The active tab of this window's vtmux::Window, or nullptr.
-    [[nodiscard]] vtmux::Tab* activeModelTab() const noexcept;
+    /// The backing vtworkspace::Window, or nullptr if it has been removed.
+    [[nodiscard]] vtworkspace::Window* window() const noexcept;
+    /// The active tab of this window's vtworkspace::Window, or nullptr.
+    [[nodiscard]] vtworkspace::Tab* activeModelTab() const noexcept;
     /// The model tab backing list-model row @p index, or nullptr.
-    [[nodiscard]] vtmux::Tab* tabAtRow(int index) const noexcept;
+    [[nodiscard]] vtworkspace::Tab* tabAtRow(int index) const noexcept;
     /// The row index of @p tab in this window, or -1.
-    [[nodiscard]] int rowOfTab(vtmux::TabId tab) const noexcept;
+    [[nodiscard]] int rowOfTab(vtworkspace::TabId tab) const noexcept;
     /// Resolves the label shown on @p row's tab.
-    [[nodiscard]] QString resolvedTabLabel(vtmux::Tab* tab, TerminalSession* session, int row) const;
+    [[nodiscard]] QString resolvedTabLabel(vtworkspace::Tab* tab, TerminalSession* session, int row) const;
 
     /// Resolves the OS window to operate on for a geometry request from @p requester, adopting the
     /// requester's QQuickWindow as _osWindow when none is recorded yet (same rule as focusDisplay).
@@ -619,7 +619,7 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     void onOSWindowActiveChanged();
 
     TerminalSessionManager& _manager;
-    vtmux::WindowId _windowId;
+    vtworkspace::WindowId _windowId;
 
     // Wheel state for the tab strip. Separate from the grid's (which lives on TerminalSession) so a
     // gesture over the strip is judged on its own, and so the accumulator does not jump when the

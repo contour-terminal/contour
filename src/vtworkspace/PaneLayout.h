@@ -5,9 +5,9 @@
 #include <cassert>
 #include <cmath>
 
-#include <vtmux/Pane.h>
+#include <vtworkspace/Pane.h>
 
-namespace vtmux
+namespace vtworkspace
 {
 
 /// A 2D extent in the host's pixel unit. The solver is unit-agnostic; hosts pass logical pixels.
@@ -81,4 +81,4 @@ inline constexpr int DefaultSplitHandleThickness = 6;
     return { .width = static_cast<int>(width), .height = static_cast<int>(height) };
 }
 
-} // namespace vtmux
+} // namespace vtworkspace

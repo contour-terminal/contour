@@ -70,7 +70,7 @@
 #include <variant>
 
 #include <reflection-cpp/reflection.hpp>
-#include <vtmux/Primitives.h> // vtmux::SplitState for layout panes
+#include <vtworkspace/Primitives.h> // vtworkspace::SplitState for layout panes
 
 namespace contour::config
 {
@@ -589,7 +589,7 @@ struct LayoutPane
     std::optional<double> ratio;
 
     /// How this pane's children are arranged (splits only).
-    vtmux::SplitState orientation = vtmux::SplitState::Vertical;
+    vtworkspace::SplitState orientation = vtworkspace::SplitState::Vertical;
     /// The child panes of a split, in layout order. Empty for a leaf.
     std::vector<LayoutPane> children;
 

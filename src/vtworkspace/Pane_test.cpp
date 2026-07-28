@@ -4,10 +4,10 @@
 
 #include <vector>
 
-#include <vtmux/Pane.h>
-#include <vtmux/Primitives.h>
+#include <vtworkspace/Pane.h>
+#include <vtworkspace/Primitives.h>
 
-using namespace vtmux;
+using namespace vtworkspace;
 
 namespace
 {
@@ -21,7 +21,7 @@ struct Ids
 };
 } // namespace
 
-TEST_CASE("Pane: a fresh pane is a leaf carrying its session", "[vtmux][pane]")
+TEST_CASE("Pane: a fresh pane is a leaf carrying its session", "[vtworkspace][pane]")
 {
     Ids ids;
     auto const sid = ids.session();
@@ -35,7 +35,7 @@ TEST_CASE("Pane: a fresh pane is a leaf carrying its session", "[vtmux][pane]")
     CHECK(pane.leafCount() == 1);
 }
 
-TEST_CASE("Pane: split promotes the leaf and moves its session into the first child", "[vtmux][pane][split]")
+TEST_CASE("Pane: split promotes the leaf and moves its session into the first child", "[vtworkspace][pane][split]")
 {
     Ids ids;
     auto const originalId = ids.pane();
@@ -75,7 +75,7 @@ TEST_CASE("Pane: split promotes the leaf and moves its session into the first ch
     }
 }
 
-TEST_CASE("Pane: closeChild lets the parent absorb the surviving sibling", "[vtmux][pane][close]")
+TEST_CASE("Pane: closeChild lets the parent absorb the surviving sibling", "[vtworkspace][pane][close]")
 {
     Ids ids;
     auto const originalId = ids.pane();
@@ -111,7 +111,7 @@ TEST_CASE("Pane: closeChild lets the parent absorb the surviving sibling", "[vtm
     }
 }
 
-TEST_CASE("Pane: nested split then collapse keeps the tree minimal", "[vtmux][pane][close]")
+TEST_CASE("Pane: nested split then collapse keeps the tree minimal", "[vtworkspace][pane][close]")
 {
     Ids ids;
     Pane root { ids.pane(), ids.session() };
@@ -134,7 +134,7 @@ TEST_CASE("Pane: nested split then collapse keeps the tree minimal", "[vtmux][pa
     CHECK_FALSE(root.isLeaf());
 }
 
-TEST_CASE("Pane: walkTree visits depth-first pre-order", "[vtmux][pane][walk]")
+TEST_CASE("Pane: walkTree visits depth-first pre-order", "[vtworkspace][pane][walk]")
 {
     Ids ids;
     Pane root { ids.pane(), ids.session() };
@@ -153,7 +153,7 @@ TEST_CASE("Pane: walkTree visits depth-first pre-order", "[vtmux][pane][walk]")
     CHECK(visited[4] == root.second()->id());
 }
 
-TEST_CASE("Pane: findPane and findLeaf locate nodes by id and session", "[vtmux][pane][find]")
+TEST_CASE("Pane: findPane and findLeaf locate nodes by id and session", "[vtworkspace][pane][find]")
 {
     Ids ids;
     Pane root { ids.pane(), ids.session() };
@@ -167,7 +167,7 @@ TEST_CASE("Pane: findPane and findLeaf locate nodes by id and session", "[vtmux]
     CHECK(root.findLeaf(SessionId { 99999 }) == nullptr);
 }
 
-TEST_CASE("Pane: neighbor finds adjacent leaves across the matching split axis", "[vtmux][pane][neighbor]")
+TEST_CASE("Pane: neighbor finds adjacent leaves across the matching split axis", "[vtworkspace][pane][neighbor]")
 {
     Ids ids;
     Pane root { ids.pane(), ids.session() };
@@ -181,7 +181,7 @@ TEST_CASE("Pane: neighbor finds adjacent leaves across the matching split axis",
     CHECK(root.neighbor(right, FocusDirection::Down) == nullptr);
 }
 
-TEST_CASE("Pane: neighbor descends into nested splits to the boundary leaf", "[vtmux][pane][neighbor]")
+TEST_CASE("Pane: neighbor descends into nested splits to the boundary leaf", "[vtworkspace][pane][neighbor]")
 {
     Ids ids;
     Pane root { ids.pane(), ids.session() };
@@ -198,7 +198,7 @@ TEST_CASE("Pane: neighbor descends into nested splits to the boundary leaf", "[v
     CHECK(target != rightBottom);
 }
 
-TEST_CASE("Pane: setRatio clamps into the open interval (0, 1)", "[vtmux][pane][ratio]")
+TEST_CASE("Pane: setRatio clamps into the open interval (0, 1)", "[vtworkspace][pane][ratio]")
 {
     Ids ids;
     Pane root { ids.pane(), ids.session() };
@@ -247,7 +247,7 @@ TEST_CASE("Pane: setRatio clamps into the open interval (0, 1)", "[vtmux][pane][
 }
 
 TEST_CASE("Pane: closeChild absorbs a split-node survivor and re-parents its grandchildren",
-          "[vtmux][pane][close]")
+          "[vtworkspace][pane][close]")
 {
     // The survivor-is-a-split re-parenting branch is otherwise never exercised (the existing nested test only
     // collapses to a LEAF survivor). A wrong/dangling _parent here breaks every later neighbor()/closePane
@@ -288,7 +288,7 @@ TEST_CASE("Pane: closeChild absorbs a split-node survivor and re-parents its gra
 }
 
 TEST_CASE("Pane: split ratio persists across a subsequent child split and is inherited on collapse",
-          "[vtmux][pane][resize]")
+          "[vtworkspace][pane][resize]")
 {
     // Ratio PERSISTENCE has no coverage: no test reads ratio() after a split-of-child or a collapse. A
     // layout/restore regression that reset or failed to inherit ratios would pass every other test.
@@ -327,7 +327,7 @@ TEST_CASE("Pane: split ratio persists across a subsequent child split and is inh
     }
 }
 
-TEST_CASE("Pane: firstLeaf returns the depth-first first leaf of a subtree", "[vtmux][pane][find]")
+TEST_CASE("Pane: firstLeaf returns the depth-first first leaf of a subtree", "[vtworkspace][pane][find]")
 {
     Ids ids;
     Pane root { ids.pane(), ids.session() };
@@ -347,7 +347,7 @@ TEST_CASE("Pane: firstLeaf returns the depth-first first leaf of a subtree", "[v
     CHECK(leftBottom->firstLeaf() == leftBottom);
 }
 
-TEST_CASE("Pane: neighbor descends a same-axis nested split to the nearest column", "[vtmux][pane][neighbor]")
+TEST_CASE("Pane: neighbor descends a same-axis nested split to the nearest column", "[vtworkspace][pane][neighbor]")
 {
     // descendToEdge's same-axis branch: when the subtree being entered is split along the SAME axis
     // that is being crossed, the walk must keep descending toward the edge nearest the origin —
@@ -371,7 +371,7 @@ TEST_CASE("Pane: neighbor descends a same-axis nested split to the nearest colum
 }
 
 TEST_CASE("Primitives: crossingSplitFor and pointsTowardSecondChild map directions to axes",
-          "[vtmux][primitives]")
+          "[vtworkspace][primitives]")
 {
     // Left/Right cross a Vertical divider (children side by side); Up/Down cross a Horizontal one.
     CHECK(crossingSplitFor(FocusDirection::Left) == SplitState::Vertical);
@@ -386,7 +386,7 @@ TEST_CASE("Primitives: crossingSplitFor and pointsTowardSecondChild map directio
 }
 
 TEST_CASE("Pane: neighbor walks up through mismatched-axis ancestors and is null at a deep tree edge",
-          "[vtmux][pane][focus]")
+          "[vtworkspace][pane][focus]")
 {
     // neighbor() is the core of directional focus. Build a tree where the nearest matching-axis ancestor is
     // several levels up through an opposite-axis split, so the ancestor-walk (skip same-axis ancestor when
@@ -424,7 +424,7 @@ TEST_CASE("Pane: neighbor walks up through mismatched-axis ancestors and is null
     CHECK(root.neighbor(left, FocusDirection::Down) == nullptr);
 }
 
-TEST_CASE("Pane: toggleOrientation flips a split node's axis, leaving children and ratio", "[vtmux][pane]")
+TEST_CASE("Pane: toggleOrientation flips a split node's axis, leaving children and ratio", "[vtworkspace][pane]")
 {
     Ids ids;
     Pane root { ids.pane(), ids.session() };
@@ -442,7 +442,7 @@ TEST_CASE("Pane: toggleOrientation flips a split node's axis, leaving children a
     CHECK(root.splitState() == SplitState::Vertical); // flips back
 }
 
-TEST_CASE("Pane: swapLeafPayload trades sessions but keeps both PaneIds", "[vtmux][pane]")
+TEST_CASE("Pane: swapLeafPayload trades sessions but keeps both PaneIds", "[vtworkspace][pane]")
 {
     Ids ids;
     auto const idA = ids.pane();
@@ -460,7 +460,7 @@ TEST_CASE("Pane: swapLeafPayload trades sessions but keeps both PaneIds", "[vtmu
     CHECK(b.id() == idB);
 }
 
-TEST_CASE("Pane: swapChildren flips the two subtrees wholesale", "[vtmux][pane]")
+TEST_CASE("Pane: swapChildren flips the two subtrees wholesale", "[vtworkspace][pane]")
 {
     Ids ids;
     Pane root { ids.pane(), ids.session() };
@@ -481,7 +481,7 @@ TEST_CASE("Pane: swapChildren flips the two subtrees wholesale", "[vtmux][pane]"
     CHECK(root.second()->parent() == &root);
 }
 
-TEST_CASE("Pane: ancestorSplitOnAxis finds the nearest split on the given axis", "[vtmux][pane]")
+TEST_CASE("Pane: ancestorSplitOnAxis finds the nearest split on the given axis", "[vtworkspace][pane]")
 {
     Ids ids;
     // root (Vertical) -> [left leaf | right (Horizontal) -> [top | bottom]]
@@ -503,7 +503,7 @@ TEST_CASE("Pane: ancestorSplitOnAxis finds the nearest split on the given axis",
     CHECK(Pane::ancestorSplitOnAxis(left, SplitState::Horizontal) == nullptr);
 }
 
-TEST_CASE("Pane: contains() reports subtree membership, counting a node as its own ancestor", "[vtmux][pane]")
+TEST_CASE("Pane: contains() reports subtree membership, counting a node as its own ancestor", "[vtworkspace][pane]")
 {
     Ids ids;
     auto root = Pane { ids.pane(), ids.session() };

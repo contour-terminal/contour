@@ -10,7 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <vtmux/SessionModel.h>
+#include <vtworkspace/SessionModel.h>
 
 namespace contour
 {
@@ -36,8 +36,8 @@ using PaneSeeder = std::function<void(config::LayoutPane const& leaf)>;
 /// Creates a tab in @p window from @p tab: seeds+creates the first pane, applies title/color, then
 /// builds the pane tree. @p seed is invoked immediately before each model allocation to stage that
 /// pane's backing session (it must make the model's allocator return the id it created).
-vtmux::Tab* realizeLayoutTab(vtmux::SessionModel& model,
-                             vtmux::WindowId window,
+vtworkspace::Tab* realizeLayoutTab(vtworkspace::SessionModel& model,
+                             vtworkspace::WindowId window,
                              config::LayoutTab const& tab,
                              PaneSeeder const& seed);
 
@@ -61,14 +61,14 @@ struct PaneLeafData
 
 /// Resolves a leaf pane's backing session id to its runtime command/arguments/directory, for
 /// serializing a live pane tree back into a config::LayoutPane (the inverse of PaneSeeder).
-using LeafResolver = std::function<PaneLeafData(vtmux::SessionId)>;
+using LeafResolver = std::function<PaneLeafData(vtworkspace::SessionId)>;
 
 /// Serializes @p pane (leaf or split) into a config::LayoutPane, resolving each leaf's runtime data
 /// via @p resolve. A split's orientation and ratio are preserved so the tree can be realized again
 /// unchanged via realizeLayoutTab.
-[[nodiscard]] config::LayoutPane serializePane(vtmux::Pane const& pane, LeafResolver const& resolve);
+[[nodiscard]] config::LayoutPane serializePane(vtworkspace::Pane const& pane, LeafResolver const& resolve);
 
 /// Serializes @p tab (title/color/pane tree) into a config::LayoutTab, for SaveLayout.
-[[nodiscard]] config::LayoutTab serializeTab(vtmux::Tab const& tab, LeafResolver const& resolve);
+[[nodiscard]] config::LayoutTab serializeTab(vtworkspace::Tab const& tab, LeafResolver const& resolve);
 
 } // namespace contour

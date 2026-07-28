@@ -33,7 +33,7 @@
 #include <cstdint>
 #include <memory>
 
-#include <vtmux/PaneLayout.h>
+#include <vtworkspace/PaneLayout.h>
 
 namespace
 {
@@ -134,7 +134,7 @@ class MockMainController: public QAbstractListModel
     }
     [[nodiscard]] constexpr int splitHandleThickness() const noexcept
     {
-        return vtmux::DefaultSplitHandleThickness;
+        return vtworkspace::DefaultSplitHandleThickness;
     }
     [[nodiscard]] int chromeHeight() const noexcept { return _chromeHeight; }
     void setChromeHeight(int height)
