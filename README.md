@@ -19,6 +19,7 @@ for everyday use. It is aiming for power users with a modern feature mindset.
 - ✅ Unicode: Emoji support (-: 🌈 💝 😛 👪 - including ZWJ, VS15, VS16 emoji :-)
 - ✅ Unicode: Grapheme cluster support
 - ✅ Terminal tabs
+- ✅ [Persistent sessions](https://contour-terminal.org/persistent-sessions/) that survive the window (daemon mode) — reattach locally or over the network, and interoperate with tmux in both directions
 - ✅ Bold and italic fonts
 - ✅ High-DPI support.
 - ✅ Vertical Line Markers (quickly jump to markers in your history!)
@@ -87,6 +88,27 @@ In order to configure Contour, it is necessary to modify the configuration file
 `contour.yml`, which is initially generated in the `$HOME/.config/contour`
 directory. Some features also require shell integration. These can be generated
 via the CLI (see below), these currently exist for zsh, fish and tcsh.
+
+## Persistent sessions (daemon mode)
+
+> **Experimental.** Daemon mode is new in 0.7.0 and still settling. It is built into every Contour
+> and covered by the test suite, but its command-line flags and its wire protocol may change
+> between releases.
+
+Contour already gives you tabs and split panes inside one window. Daemon mode goes further: it
+moves your sessions into a background process, so they survive the window that shows them. A long
+build keeps going after you close the window, work done over SSH survives the link dropping, and
+the same sessions can be reattached from another machine over an encrypted connection.
+
+```sh
+contour client   # attaches to the daemon, starting one if none is running
+```
+
+Contour also speaks tmux's control-mode protocol in both directions: tmux-aware tooling — and the
+stock `tmux` binary itself — can attach to a Contour daemon, and `contour client --tmux` mirrors a
+running tmux server into a Contour window, windows as tabs and panes as splits.
+
+See [Persistent sessions](https://contour-terminal.org/persistent-sessions/) for the full guide.
 
 ## Installing from source
 
@@ -183,6 +205,12 @@ cmake --build build/ --target install
     contour license
     contour parser-table
     contour list-debug-tags
+    contour daemon [socket PATH] [label NAME] [exit-with-last-session] [tmux-compat-socket LABEL]
+                   [listen-tcp HOST:PORT] [token TOKEN] [token-file FILE]
+                   [tls-cert FILE] [tls-key FILE] [log TAGS] [log-file FILE]
+    contour client [socket PATH] [label NAME] [tmux] [tmux-socket PATH] [profile NAME] [config FILE]
+                   [connect-tcp HOST:PORT] [token TOKEN] [token-file FILE] [tls-ca FILE]
+                   [log TAGS] [log-file FILE]
     contour generate terminfo to FILE
     contour generate config to FILE
     contour generate integration shell SHELL to FILE
