@@ -6,6 +6,8 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include <vtworkspace/ModelEvents.h>
@@ -96,18 +98,30 @@ class SessionModel
     // {{{ Windows
 
     /// Creates a new, empty window and returns it.
-    Window* createWindow();
+    [[nodiscard]] Window* createWindow();
 
     /// Removes a window and everything in it. Each contained session is reported closed.
     void removeWindow(WindowId window);
 
     [[nodiscard]] Window* window(WindowId id) const noexcept;
 
+    /// @return How many windows the model holds.
+    [[nodiscard]] int windowCount() const noexcept { return static_cast<int>(_windows.size()); }
+
+    /// @return The window at @p index (0-based), or nullptr if out of range. For
+    ///         enumerating every window (e.g. the daemon serializing all of them).
+    [[nodiscard]] Window* windowAt(int index) const noexcept
+    {
+        return index >= 0 && std::cmp_less(index, _windows.size())
+                   ? _windows[static_cast<std::size_t>(index)].get()
+                   : nullptr;
+    }
+
     // }}}
     // {{{ Tabs
 
     /// Appends a new tab (with a single fresh-session pane) to @p window and makes it active.
-    Tab* createTab(WindowId window);
+    [[nodiscard]] Tab* createTab(WindowId window);
 
     /// Closes the tab @p tab in @p window, reporting each of its sessions closed. If it was the
     /// last tab, the window becomes empty (the host decides whether to close the OS window).
@@ -145,8 +159,9 @@ class SessionModel
     /// Returns the new (now active) leaf.
     Pane* splitActivePane(TabId tab, SplitState direction, double ratio = 0.5);
 
-    /// Closes pane @p leaf in @p tab. If it was the tab's last pane, the tab (and possibly the
-    /// window) is closed instead. Reports the closed session(s).
+    /// Closes pane @p leaf in @p tab. If it was the tab's last pane, the whole tab is closed
+    /// instead; a window left with no tabs stays in the model (empty), for the host to close or
+    /// keep — see closeTab. Reports the closed session(s).
     void closePane(WindowId window, TabId tab, PaneId leaf);
 
     /// Sets the active pane of @p tab.
@@ -200,10 +215,17 @@ class SessionModel
     /// @param source The source whose color to clear.
     void resetTabColor(TabId tab, TabColorSource source);
 
-    /// The session-title resolver the host installs so tabs can derive their title from the active
-    /// pane's program title.
+    /// Installs the session-title resolver — a cross-layer bridge the host supplies so tabs can
+    /// derive their title from the active pane's program title.
+    ///
+    /// This is a post-construction setter (a documented rebinding seam) because the resolver reaches
+    /// into the host's terminal-session registry, which is built from SessionIds the model itself
+    /// allocates. The resolver cannot exist before the model, and the model cannot resolve titles
+    /// without it — the two are wired once both are live.
     void setSessionTitleResolver(Tab::SessionTitleResolver resolver) { _titleResolver = std::move(resolver); }
 
+    /// Returns the currently installed session-title resolver.
+    /// @see setSessionTitleResolver
     [[nodiscard]] Tab::SessionTitleResolver const& sessionTitleResolver() const noexcept
     {
         return _titleResolver;
@@ -217,6 +239,46 @@ class SessionModel
     /// The id of the window owning @p tab, or a default WindowId{} (value 0) if @p tab is unknown. Lets
     /// the Qt host route a pane event (which carries only a TabId) to the owning window's controller.
     [[nodiscard]] WindowId windowOfTab(TabId tab) const noexcept;
+
+    /// Locates the leaf pane hosting @p session, searching every window. For hosts that resolve a
+    /// session to its pane without knowing which window owns it (the daemon's session-exit pruning,
+    /// per-session output mapping, and client-authored split verbs).
+    /// @param session The session to locate.
+    /// @return The {window, tab, pane} triple; all nullptr when @p session is unknown.
+    [[nodiscard]] std::tuple<Window*, Tab*, Pane*> findSessionLeaf(SessionId session) const;
+
+    /// Locates the LEAF pane with id @p pane, searching every window (pane ids are minted
+    /// model-globally). For hosts resolving a wire pane reference without knowing which window owns
+    /// it (the tmux control session's %N targets — tmux names leaf panes only, so internal split
+    /// nodes deliberately do not match).
+    /// @param pane The leaf pane id to locate.
+    /// @return The leaf pane, or nullptr when @p pane is unknown.
+    [[nodiscard]] Pane* findLeafPane(PaneId pane) const;
+
+    /// Locates any pane — leaf or split node — of @p tab.
+    ///
+    /// The pane mutators all begin by resolving a (tab, pane) pair, and so does a host answering a
+    /// pane event, which carries exactly that pair and nothing else. Whether the node must be a leaf
+    /// differs per caller, so that stays the caller's guard; only the lookup is shared.
+    /// @param tab  The tab owning the pane.
+    /// @param pane The pane id to locate.
+    /// @return The pane, or nullptr when either id is unknown.
+    [[nodiscard]] Pane* findPane(TabId tab, PaneId pane) const;
+
+    /// Invokes @p f(Window&, Tab&) for every tab of every window, in window order. Single-sources
+    /// the windows×tabs traversal for hosts that project the whole model (the daemon's resize
+    /// reprojection and attach snapshots).
+    /// @param f The per-tab visitor.
+    template <typename F>
+    void forEachTab(F&& f) const
+    {
+        // @p f is invoked once per tab, so it is forwarded once into a reference binding and
+        // called through that (the same idiom Pane::walkTree documents).
+        auto&& visit = std::forward<F>(f);
+        for (auto const& win: _windows)
+            for (auto const& tab: win->_tabs)
+                visit(*win, *tab);
+    }
 
     /// The predefined tab-color palette offered to the user (a grid of swatches, WT-style). Both the
     /// GUI and a future daemon expose the same set so all clients see identical choices. Backed by a

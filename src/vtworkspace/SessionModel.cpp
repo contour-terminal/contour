@@ -366,6 +366,32 @@ WindowId SessionModel::windowOfTab(TabId tabId) const noexcept
     return win != nullptr ? win->id() : WindowId {};
 }
 
+std::tuple<Window*, Tab*, Pane*> SessionModel::findSessionLeaf(SessionId session) const
+{
+    for (auto const& win: _windows)
+        for (auto const& tab: win->_tabs)
+            if (auto* leaf = tab->rootPane()->findLeaf(session); leaf != nullptr)
+                return { win.get(), tab.get(), leaf };
+    return { nullptr, nullptr, nullptr };
+}
+
+Pane* SessionModel::findLeafPane(PaneId pane) const
+{
+    for (auto const& win: _windows)
+        for (auto const& tab: win->_tabs)
+            if (auto* leaf = tab->rootPane()->walkTree(
+                    [pane](Pane& node) { return node.isLeaf() && node.id() == pane; });
+                leaf != nullptr)
+                return leaf;
+    return nullptr;
+}
+
+Pane* SessionModel::findPane(TabId tabId, PaneId paneId) const
+{
+    auto* tab = findTab(tabId);
+    return tab != nullptr ? tab->rootPane()->findPane(paneId) : nullptr;
+}
+
 Pane* SessionModel::splitActivePane(TabId tabId, SplitState direction, double ratio)
 {
     auto* tab = findTab(tabId);
@@ -410,7 +436,7 @@ void SessionModel::closePane(WindowId windowId, TabId tabId, PaneId leafId)
     // Safe to announce zoom below: the last-pane branch above already returned, so the tab survives
     // closePane() and can still be asked for its zoom state afterwards.
     auto const zoomBefore = tab->zoomedLeafId();
-    tab->closePane(leaf);
+    (void) tab->closePane(leaf);
 
     _events.paneClosed(tabId, leafId, survivorId);
     _events.activePaneChanged(tabId, tab->activePane()->id());
@@ -454,10 +480,7 @@ void SessionModel::focusDirection(TabId tabId, FocusDirection direction)
 
 void SessionModel::setPaneRatio(TabId tabId, PaneId splitNodeId, double ratio)
 {
-    auto* tab = findTab(tabId);
-    if (tab == nullptr)
-        return;
-    auto* node = tab->rootPane()->findPane(splitNodeId);
+    auto* node = findPane(tabId, splitNodeId);
     if (node == nullptr || node->isLeaf())
         return;
     node->setRatio(ratio);
@@ -534,7 +557,7 @@ void SessionModel::toggleActivePaneZoom(TabId tabId)
         return;
 
     auto const zoomBefore = tab->zoomedLeafId();
-    tab->toggleZoom();
+    (void) tab->toggleZoom();
     announceZoomChange(*tab, zoomBefore);
 }
 

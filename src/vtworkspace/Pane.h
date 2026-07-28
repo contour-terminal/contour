@@ -194,6 +194,19 @@ class Pane
     /// @return The nearest matching ancestor split node, or nullptr if there is none.
     [[nodiscard]] static Pane* ancestorSplitOnAxis(Pane* fromLeaf, SplitState axis) noexcept;
 
+    /// Returns the lowest node having both @p a and @p b in its subtree, or nullptr if they are the
+    /// same node or belong to different trees.
+    ///
+    /// For two DISTINCT leaves the answer is always the split node that separates them — the divider
+    /// between the two. That is how a peer names a split without knowing our pane ids: it sends ANY
+    /// leaf from each side (the daemon protocol's ResizeSplit does exactly this), and mirrored trees
+    /// resolve the same node. Which leaf each side contributes does not matter, so neither end has to
+    /// agree with the other on how to pick one.
+    /// @param a One node to start the upward walk from.
+    /// @param b The node the ancestor must also contain.
+    /// @return Their lowest common ancestor, or nullptr.
+    [[nodiscard]] static Pane* lowestCommonAncestor(Pane* a, Pane const* b) noexcept;
+
   private:
     /// Descends into @p subtree to find the boundary leaf nearest the edge we arrived from when
     /// moving along @p direction (e.g. when moving Right, pick the left-most leaf of the subtree).

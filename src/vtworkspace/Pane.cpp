@@ -92,6 +92,18 @@ Pane* Pane::ancestorSplitOnAxis(Pane* fromLeaf, SplitState axis) noexcept
     return nullptr;
 }
 
+Pane* Pane::lowestCommonAncestor(Pane* a, Pane const* b) noexcept
+{
+    // Same node: there is no ancestor SEPARATING them, and answering with their parent would name a
+    // split the caller never meant. Different trees: the walk runs off the root and reports nothing.
+    if (a == nullptr || b == nullptr || a == b)
+        return nullptr;
+    for (Pane* ancestor = a; ancestor != nullptr; ancestor = ancestor->parent())
+        if (ancestor->contains(b))
+            return ancestor;
+    return nullptr;
+}
+
 bool Pane::contains(Pane const* node) const noexcept
 {
     for (auto const* p = node; p != nullptr; p = p->parent())

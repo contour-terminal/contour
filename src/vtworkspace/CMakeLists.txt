@@ -1,4 +1,7 @@
 add_library(vtworkspace STATIC
+    LayoutConvert.h
+    LayoutTree.cpp
+    LayoutTree.h
     Pane.cpp
     Pane.h
     PaneLayout.h
@@ -23,6 +26,7 @@ if(VTWORKSPACE_TESTING)
     enable_testing()
     add_executable(vtworkspace_test
         test_main.cpp
+        LayoutTree_test.cpp
         Pane_test.cpp
         PaneLayout_test.cpp
         Tab_test.cpp
@@ -30,6 +34,7 @@ if(VTWORKSPACE_TESTING)
     )
     target_link_libraries(vtworkspace_test vtworkspace crispy::core Catch2::Catch2)
     add_test(NAME vtworkspace_test COMMAND $<TARGET_FILE:vtworkspace_test>)
+    set_tests_properties(vtworkspace_test PROPERTIES LABELS daemon)
 
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
