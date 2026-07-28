@@ -16,6 +16,7 @@
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #ifdef CRISPY_CONCEPTS_SUPPORTED
@@ -197,30 +198,47 @@ constexpr unsigned long strntoul(char const* data, size_t count, char const** ep
     return result;
 }
 
-template <typename T>
-std::string joinHumanReadable(std::vector<T> const& list, std::string_view sep = ", ")
+/// Joins a range's elements into one human-readable, separator-delimited string.
+///
+/// Takes a range rather than a `std::vector` so a caller can pass a view straight over a table it
+/// already holds, instead of materializing one only to name it once. libstdc++ 14 — the oldest
+/// standard library this project builds against — is also missing the `std::from_range` container
+/// constructors that the materializing spelling reaches for first.
+///
+/// @param list The elements to join, in order.
+/// @param sep Placed between consecutive elements.
+/// @return The joined text; empty when the range is.
+template <std::ranges::input_range Range>
+[[nodiscard]] std::string joinHumanReadable(Range&& list, std::string_view sep = ", ")
 {
-    std::stringstream result;
-    for (size_t i = 0; i < list.size(); ++i)
+    auto result = std::string {};
+    auto isFirst = true;
+    for (auto const& element: std::forward<Range>(list))
     {
-        if (i != 0)
-            result << sep;
-        result << std::format("{}", T(list[i]));
+        if (!std::exchange(isFirst, false))
+            result += sep;
+        result += std::format("{}", element);
     }
-    return result.str();
+    return result;
 }
 
-template <typename T, typename U>
-std::string joinHumanReadableQuoted(std::vector<T> const& list, U sep = ", ")
+/// Joins a range's elements into one separator-delimited string, each element quoted and escaped.
+///
+/// @param list The elements to join, in order.
+/// @param sep Placed between consecutive elements.
+/// @return The joined text; empty when the range is.
+template <std::ranges::input_range Range, typename Separator>
+[[nodiscard]] std::string joinHumanReadableQuoted(Range&& list, Separator sep = ", ")
 {
-    std::stringstream result;
-    for (size_t i = 0; i < list.size(); ++i)
+    auto result = std::string {};
+    auto isFirst = true;
+    for (auto const& element: std::forward<Range>(list))
     {
-        if (i != 0)
-            result << sep;
-        result << '"' << crispy::escape(std::format("{}", list[i])) << '"';
+        if (!std::exchange(isFirst, false))
+            result += std::format("{}", sep);
+        result += std::format("\"{}\"", crispy::escape(std::format("{}", element)));
     }
-    return result.str();
+    return result;
 }
 
 template <typename T, typename Callback>
