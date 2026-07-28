@@ -12,9 +12,9 @@ namespace vtworkspace
 ///
 /// This mirrors the spirit of vtbackend::Terminal::Events: the model never knows what its host is,
 /// it only calls out through this interface when something changes. The Qt GUI implements it and
-/// translates each callback into a Qt signal / model-reset; a future daemon implements it and fans
-/// each callback out to subscribed network clients (see docs/drafts/daemon-mode.md). The model
-/// itself stays free of Qt and of any transport.
+/// translates each callback into a Qt signal / model-reset; the daemon implements it and fans each
+/// callback out to subscribed network clients (see docs/internals/vthost.md). The model itself
+/// stays free of Qt and of any transport.
 ///
 /// All callbacks are invoked on the thread that performed the mutation. The host is responsible for
 /// any cross-thread marshalling it needs (e.g. the Qt GUI posts to its GUI thread).
