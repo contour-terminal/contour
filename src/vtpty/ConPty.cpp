@@ -288,15 +288,21 @@ void ConPty::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
 {
     (void) pixels; // TODO Can we pass that information, too?
 
-    if (!_slave)
+    // No live pseudoconsole to resize: remember the size rather than drop it, so a subsequent
+    // start() creates the pseudoconsole at it. attachDisplay() is what first tells a PTY its size,
+    // and it now runs before start() -- dropping the size here left the child born at whatever the
+    // constructor was handed (the profile's configured terminal size), so the shell's first prompt,
+    // and any program launched before the first window-geometry change, wrapped at the wrong column.
+    // UnixPty stashes the same way; only the pixel half is ConPTY's to ignore.
+    //
+    // This must test the master handle, not _slave: close() invalidates _master but leaves _slave
+    // alive, so a _slave-based guard let a post-close resize through and handed
+    // INVALID_HANDLE_VALUE to ResizePseudoConsole, which dereferences it. That is a real crash on
+    // the session-teardown path -- closing a pane makes QML re-run the Loader binding, which calls
+    // setSession() -> attachDisplay() -> Terminal::resizeScreen() on the already-closed PTY.
+    if (isClosed())
     {
-        // Not started yet: remember the size rather than drop it, so start() creates the
-        // pseudoconsole at it. attachDisplay() is what first tells a PTY its size, and it now runs
-        // before start() -- dropping the size here left the child born at whatever the constructor
-        // was handed (the profile's configured terminal size), so the shell's first prompt, and any
-        // program launched before the first window-geometry change, wrapped at the wrong column.
-        // UnixPty stashes the same way; only the pixel half is ConPTY's to ignore.
-        ptyLog()("Recording pre-start terminal size: {}x{}", cells.columns, cells.lines);
+        ptyLog()("Recording terminal size while no pseudoconsole is live: {}x{}", cells.columns, cells.lines);
         _size = cells;
         return;
     }

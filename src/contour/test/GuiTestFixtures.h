@@ -328,8 +328,19 @@ class BlockingMockPty: public vtpty::Pty
     void resizeScreen(vtbackend::PageSize cells, std::optional<vtpty::ImageSize> pixels) override
     {
         auto const lock = std::lock_guard { _mutex };
+        if (_closed)
+            ++_resizesAfterClose;
         _pageSize = cells;
         _pixelSize = pixels;
+    }
+
+    /// How many resizes arrived after close(). A real PTY has no device left to resize by then --
+    /// ConPty crashed outright on one (it handed the invalidated HPCON to ResizePseudoConsole) --
+    /// so this must stay zero.
+    [[nodiscard]] int resizesAfterClose() const noexcept
+    {
+        auto const lock = std::lock_guard { _mutex };
+        return _resizesAfterClose;
     }
 
     vtpty::StartResult start() override { return {}; }
@@ -390,6 +401,7 @@ class BlockingMockPty: public vtpty::Pty
     std::string _inputBuffer;
     std::string _outputBuffer;
     std::size_t _outputReadOffset = 0;
+    int _resizesAfterClose = 0; ///< Resizes that arrived once _closed; see resizesAfterClose().
     bool _closed = false;
     bool _woken = false; ///< One-shot wakeupReader() flag (teardown wake), cleared on read.
     vtpty::PtySlaveDummy _slave;
