@@ -6,6 +6,7 @@ include(PedanticCompiler)
 
 add_subdirectory(crispy)
 add_subdirectory(coro)
+add_subdirectory(net)
 add_subdirectory(text_shaper)
 add_subdirectory(vtpty)
 add_subdirectory(vtparser)
