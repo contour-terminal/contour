@@ -197,6 +197,13 @@ constexpr StringLiteral AccessibilityAnnouncementsConfig {
     "\n"
 };
 
+constexpr StringLiteral AccessibilityCaretReportingConfig {
+    "{comment} Whether the cursor position is reported to assistive technology, so that screen\n"
+    "{comment} magnifiers can follow the caret. Costs nothing while no assistive client is attached.\n"
+    "accessibility_caret_reporting: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral HyperlinkHoverTooltipConfig {
     "{comment} Whether hovering an OSC 8 hyperlink shows a tooltip with its target.\n"
     "hyperlink_hover_tooltip: {}\n"
@@ -1683,6 +1690,15 @@ constexpr StringLiteral AccessibilityAnnouncementsWeb {
     "\n"
 };
 
+constexpr StringLiteral AccessibilityCaretReportingWeb {
+    "\n"
+    "Whether the terminal reports where the caret is to assistive technology, which is how a screen "
+    "magnifier follows what you are typing. Costs nothing while no assistive client is attached. Turn "
+    "it off to rule the caret reports out when diagnosing input latency. See "
+    "[Accessibility](../../accessibility.md).\n"
+    "\n"
+};
+
 constexpr StringLiteral HyperlinkHoverTooltipWeb {
     "\n"
     "Whether hovering an [OSC 8 hyperlink](../vt-extensions/index.md) shows a tooltip naming its "
@@ -2282,6 +2298,8 @@ using TabLabel = DocumentationEntry<TabLabelConfig, TabLabelWeb>;
 using PixelReporting = DocumentationEntry<PixelReportingConfig, PixelReportingWeb>;
 using AccessibilityAnnouncements =
     DocumentationEntry<AccessibilityAnnouncementsConfig, AccessibilityAnnouncementsWeb>;
+using AccessibilityCaretReporting =
+    DocumentationEntry<AccessibilityCaretReportingConfig, AccessibilityCaretReportingWeb>;
 using HyperlinkHoverTooltip = DocumentationEntry<HyperlinkHoverTooltipConfig, HyperlinkHoverTooltipWeb>;
 using TabBarPosition = DocumentationEntry<TabBarPositionConfig, TabBarPositionWeb>;
 using TabBarVisibility = DocumentationEntry<TabBarVisibilityConfig, TabBarVisibilityWeb>;

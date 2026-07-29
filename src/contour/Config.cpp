@@ -634,6 +634,7 @@ static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
             overrides.loadFromEntry("reflow_on_resize", config.reflowOnResize);
             overrides.loadFromEntry("tab_switch_on_horizontal_wheel", config.tabSwitchOnHorizontalWheel);
             overrides.loadFromEntry("accessibility_announcements", config.accessibilityAnnouncements);
+            overrides.loadFromEntry("accessibility_caret_reporting", config.accessibilityCaretReporting);
             overrides.loadFromEntry("hyperlink_hover_tooltip", config.hyperlinkHoverTooltip);
             overrides.loadFromEntry("tab_bar_position", config.tabBarPosition);
             overrides.loadFromEntry("tab_bar_visibility", config.tabBarVisibility);
@@ -839,6 +840,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("reflow_on_resize", c.reflowOnResize);
         loadFromEntry("tab_switch_on_horizontal_wheel", c.tabSwitchOnHorizontalWheel);
         loadFromEntry("accessibility_announcements", c.accessibilityAnnouncements);
+        loadFromEntry("accessibility_caret_reporting", c.accessibilityCaretReporting);
         loadFromEntry("hyperlink_hover_tooltip", c.hyperlinkHoverTooltip);
         loadFromEntry("tab_bar_position", c.tabBarPosition);
         loadFromEntry("tab_bar_visibility", c.tabBarVisibility);

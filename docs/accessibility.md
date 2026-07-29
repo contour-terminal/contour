@@ -7,6 +7,10 @@ reader know where it should be reading.
 There is nothing to switch on. Reporting is always available and costs effectively nothing while no
 assistive client is attached; the platform activates it when one appears.
 
+Should you ever need to rule the caret reports out — when diagnosing input latency, say — set
+`accessibility_caret_reporting: false` in `contour.yml`. That silences the caret reports only; the
+announcements below have their own setting.
+
 ## What is reported
 
 | Reported | Meaning |

@@ -52,6 +52,21 @@ class CaretReportGate
         return changed;
     }
 
+    /// Whether scanning for the live prompt would be wasted work for a caret at @p visible / @p position.
+    ///
+    /// The prompt span is much the most expensive part of a CaretState to build, and this answers —
+    /// without it — whether it could change the verdict. True means it cannot: the rest of the state
+    /// matches what was last seen AND no prompt was seen then either, so a state carrying no prompt is
+    /// exactly the last one and @ref shouldReport would decline it.
+    ///
+    /// @param visible  Whether there is a caret to report.
+    /// @param position Where it is.
+    /// @return true when the caller may leave CaretState::prompt unset.
+    [[nodiscard]] bool promptScanRedundant(bool visible, vtbackend::CellLocation position) const noexcept
+    {
+        return _last.visible == visible && _last.position == position && !_last.prompt.has_value();
+    }
+
     /// Forgets what was last reported, so the next visible state is reported afresh.
     ///
     /// Call whenever something other than the caret invalidated the client's picture: focus moving to

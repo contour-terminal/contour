@@ -20,6 +20,37 @@
 using contour::display::TerminalAccessible;
 using contour::display::TerminalDisplay;
 
+namespace
+{
+
+/// Counts the events Qt is handed, and how many carry the child index that means "discard me".
+///
+/// Static state in a free function because QAccessible::installUpdateHandler takes a plain function
+/// pointer, so there is nowhere to put a capture.
+struct EventProbe
+{
+    static inline int emitted = 0;
+    static inline int strayChild = 0;
+
+    static void reset() noexcept
+    {
+        emitted = 0;
+        strayChild = 0;
+    }
+
+    static void handle(QAccessibleEvent* event)
+    {
+        ++emitted;
+        // An event that names a QObject must leave the union's other member alone: -1 is "no child",
+        // and anything else sends Qt looking for a child that does not exist. An event with no QObject
+        // is the interface-subject form, where the union legitimately holds a unique id.
+        if (event->object() != nullptr && event->child() != -1)
+            ++strayChild;
+    }
+};
+
+} // namespace
+
 TEST_CASE("a11y: the terminal's interfaces leave Qt's accessibility cache with their display",
           "[contour][a11y]")
 {
@@ -41,4 +72,29 @@ TEST_CASE("a11y: the terminal's interfaces leave Qt's accessibility cache with t
 
     CHECK(QAccessible::accessibleInterface(terminalId) == nullptr);
     CHECK(QAccessible::accessibleInterface(promptId) == nullptr);
+}
+
+TEST_CASE("a11y: every emitted event names a subject Qt can resolve", "[contour][a11y]")
+{
+    // QAccessibleEvent keeps m_child and m_uniqueId in a UNION, and its QAccessibleInterface overload
+    // writes the id into that union while ALSO setting m_object. So for an interface that HAS a QObject
+    // -- which TerminalAccessible does -- Qt takes its QObject branch and reads the id back as a child
+    // index. Ids are allocated from 0x80000000 up, so the lookup gets a large negative number, fails,
+    // and Qt DISCARDS the event: the caret report simply never reaches the OS, with nothing but
+    // "Invalid child in QAccessibleEvent" on stderr to say so. See notifySubject() in
+    // TerminalAccessible.cpp, which picks the overload by whether there is a QObject to name.
+    TerminalAccessible::installFactory();
+
+    auto display = std::make_unique<TerminalDisplay>();
+    auto* accessible =
+        dynamic_cast<TerminalAccessible*>(QAccessible::queryAccessibleInterface(display.get()));
+    REQUIRE(accessible != nullptr);
+
+    EventProbe::reset();
+    auto* const previous = QAccessible::installUpdateHandler(&EventProbe::handle);
+    accessible->reportLocation();
+    QAccessible::installUpdateHandler(previous);
+
+    CHECK(EventProbe::emitted > 0); // the probe really saw the emission
+    CHECK(EventProbe::strayChild == 0);
 }

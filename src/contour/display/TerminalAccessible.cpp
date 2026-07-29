@@ -9,8 +9,10 @@
 
 #include <QtQuick/QQuickWindow>
 
+#include <algorithm>
 #include <atomic>
 #include <mutex>
+#include <utility>
 
 namespace
 {
@@ -27,6 +29,37 @@ void notifyAccessibility(Args&&... args)
 {
     auto event = Event(std::forward<Args>(args)...);
     QAccessible::updateAccessibility(&event);
+}
+
+/// Emits an @p Event about @p iface, naming the subject the way Qt's own layout requires.
+///
+/// QAccessibleEvent stores `m_child` and `m_uniqueId` in a UNION, and EVERY event class's
+/// QAccessibleInterface overload writes the unique id into it *and* sets `m_object = iface->object()`.
+/// So for an interface that HAS a QObject, Qt takes its QObject branch and reads that id back as a
+/// child index; ids are allocated from 0x80000000 up, so the lookup gets a large negative number,
+/// fails, and Qt DISCARDS the event -- leaving nothing but "Invalid child in QAccessibleEvent" on
+/// stderr to say the report never reached the OS.
+///
+/// Resolving the subject HERE is what makes that unreachable. Every event class carries both
+/// overloads over the same union, so a construction written out at the call site is correct only by
+/// the author's discipline, and the failure is silent when it is not.
+///
+/// @tparam Event The QAccessibleEvent subclass to construct.
+/// @param iface  The interface the event is about. Must not be null.
+/// @param args   The event's remaining constructor arguments.
+template <typename Event, typename... Args>
+void notifyAbout(QAccessibleInterface* iface, Args&&... args)
+{
+    if (auto* object = iface->object())
+        notifyAccessibility<Event>(object, std::forward<Args>(args)...);
+    else
+        notifyAccessibility<Event>(iface, std::forward<Args>(args)...);
+}
+
+/// @ref notifyAbout for a plain QAccessibleEvent, whose only other argument is the event type.
+void notifySubject(QAccessibleInterface* iface, QAccessible::Event type)
+{
+    notifyAbout<QAccessibleEvent>(iface, type);
 }
 
 } // namespace
@@ -185,26 +218,26 @@ PromptAccessible* TerminalAccessible::promptInterface() const noexcept
 
 int TerminalAccessible::childCount() const
 {
-    return _promptShown ? 1 : 0;
+    return _shownPrompt.has_value() ? 1 : 0;
 }
 
 QAccessibleInterface* TerminalAccessible::child(int index) const
 {
-    if (index != 0 || !_promptShown)
+    if (index != 0 || !_shownPrompt.has_value())
         return nullptr;
     return promptInterface();
 }
 
 int TerminalAccessible::indexOfChild(QAccessibleInterface const* child) const
 {
-    if (_promptShown && child == _prompt)
+    if (_shownPrompt.has_value() && child == _prompt)
         return 0;
     return -1;
 }
 
 QAccessibleInterface* TerminalAccessible::childAt(int x, int y) const
 {
-    if (!_promptShown)
+    if (!_shownPrompt.has_value())
         return nullptr;
 
     auto* prompt = promptInterface();
@@ -272,31 +305,48 @@ QRect TerminalAccessible::characterRect(int offset) const
 QString TerminalAccessible::text(int startOffset, int endOffset) const
 {
     auto* item = display();
-    if (item == nullptr || !item->hasSession() || startOffset >= endOffset)
+    if (item == nullptr || !item->hasSession()) // terminal() asserts a session; check before touching it
         return {};
 
     auto const lock = std::lock_guard { item->terminal() };
     auto const& terminal = item->terminal();
-    auto const columns = terminal.pageSize().columns;
-    auto const clampedEnd = std::min(endOffset, flatTextLength(terminal.pageSize()));
+    auto const pageSize = terminal.pageSize();
+    auto const columns = pageSize.columns;
+
+    // Subsumes startOffset >= endOffset, since begin >= startOffset and end <= endOffset.
+    auto const begin = std::max(0, startOffset);
+    auto const end = std::min(endOffset, flatTextLength(pageSize));
+    if (begin >= end)
+        return {};
 
     // Rebuilt from the grid rather than cached: an assistive client asks for a range at a time, and a
     // cache would have to be invalidated on every screen update.
-    auto result = QString {};
+    //
+    // Read one LINE at a time, by COLUMN RANGE, into one buffer. Each of those matters on a path a
+    // platform bridge walks after every caret move -- macOS turns AXValue into text(0, characterCount())
+    // -- on the GUI thread, holding this lock. Asking the grid once per character instead made a
+    // full-viewport read quadratic in the line length, because every call rebuilt the whole line.
+    auto utf8 = std::string {};
+    utf8.reserve(static_cast<size_t>(end - begin));
+
     auto const& screen = terminal.currentScreen();
-    for (auto offset = std::max(0, startOffset); offset < clampedEnd; ++offset)
+    auto const lastColumn = boxed_cast<vtbackend::ColumnOffset>(columns);
+    auto const stride = unbox<int>(columns) + 1;
+    auto const lastLine = cellAtFlatOffset(end - 1, columns).line;
+
+    for (auto line = cellAtFlatOffset(begin, columns).line; line <= lastLine; ++line)
     {
-        auto const cell = cellAtFlatOffset(offset, columns);
-        if (cell.column == boxed_cast<vtbackend::ColumnOffset>(columns))
-        {
-            result += QLatin1Char('\n');
-            continue;
-        }
-        if (cell.line >= boxed_cast<vtbackend::LineOffset>(terminal.pageSize().lines))
-            break;
-        result += QString::fromStdString(screen.lineTextAt(cell.line)).mid(unbox<int>(cell.column), 1);
+        auto const lineBegin = flatOffsetOf({ .line = line, .column = vtbackend::ColumnOffset(0) }, columns);
+        auto const from = vtbackend::ColumnOffset(std::max(begin, lineBegin) - lineBegin);
+        auto const to = vtbackend::ColumnOffset(std::min(end, lineBegin + stride) - lineBegin);
+
+        if (from < lastColumn)
+            utf8 += screen.lineTextColumnAlignedAt(line, from, std::min(to, lastColumn));
+
+        if (to > lastColumn) // the newline that ends this row falls inside the range
+            utf8 += '\n';
     }
-    return result;
+    return QString::fromStdString(utf8);
 }
 
 int TerminalAccessible::offsetAtPoint(QPoint const& point) const
@@ -387,7 +437,9 @@ void TerminalAccessible::reportCaret()
     if (!item->hasActiveFocus())
         return;
 
-    auto const current = [&] {
+    // ONE pass under the lock, yielding the state the gate judges and the caret's flat offset. Asking
+    // cursorPosition() for the latter afterwards would take the lock a second time for a value in hand.
+    auto const [current, caretOffset] = [&] {
         auto const lock = std::lock_guard { item->terminal() };
         auto const& terminal = item->terminal();
 
@@ -400,39 +452,54 @@ void TerminalAccessible::reportCaret()
                                   .position = terminal.currentScreen().cursor().position,
                                   .prompt = std::nullopt };
 
-        if (visible)
+        // The prompt scan is the EXPENSIVE half: findLivePromptRegion climbs up to MaxPromptScanLines
+        // logical lines, and without shell integration it cannot conclude "no prompt" until it has
+        // spent that whole budget. This runs at frame rate on the GUI thread holding the terminal lock,
+        // so skip it whenever it cannot change the verdict -- which the gate can answer without it.
+        //
+        // A prompt appearing while the caret stands perfectly still is the one case this defers, and it
+        // does not occur in practice: the shell writes the prompt, which moves the cursor.
+        if (visible && !_gate.promptScanRedundant(visible, state.position))
             if (auto const span = terminal.livePromptSpan(); span.has_value())
                 state.prompt = *span;
 
-        return state;
+        return std::pair { state, flatOffsetOf(state.position, terminal.pageSize().columns) };
     }();
 
     if (!_gate.shouldReport(current))
         return;
 
-    auto const hadPrompt = std::exchange(_promptShown, current.prompt.has_value());
+    // ONE history: what was last ANNOUNCED. The gate's own memory records even when it declines, so it
+    // answers a different question and the two must not be mixed. This one also backs childCount()/
+    // child()/indexOfChild(), which must agree with the ObjectShow/ObjectHide pair.
+    auto const previous = std::exchange(_shownPrompt, current.prompt);
 
-    if (current.prompt.has_value() && !hadPrompt)
+    if (current.prompt.has_value() && !previous.has_value())
     {
         auto* prompt = promptInterface();
-        notifyAccessibility<QAccessibleEvent>(prompt, QAccessible::ObjectShow);
-        notifyAccessibility<QAccessibleEvent>(prompt, QAccessible::Focus);
+        notifySubject(prompt, QAccessible::ObjectShow);
+        notifySubject(prompt, QAccessible::Focus);
     }
-    else if (!current.prompt.has_value() && hadPrompt)
+    else if (!current.prompt.has_value() && previous.has_value())
     {
-        notifyAccessibility<QAccessibleEvent>(promptInterface(), QAccessible::ObjectHide);
-        notifyAccessibility<QAccessibleEvent>(this, QAccessible::Focus);
+        notifySubject(promptInterface(), QAccessible::ObjectHide);
+        notifySubject(this, QAccessible::Focus);
     }
-    else if (current.prompt.has_value())
+    else if (current.prompt.has_value() && current.prompt != previous)
     {
-        // Same prompt region, moved: the viewport scrolled or the shell repainted it.
-        notifyAccessibility<QAccessibleEvent>(promptInterface(), QAccessible::LocationChanged);
+        // Same prompt region, MOVED: the viewport scrolled or the shell repainted it. Only when it
+        // actually moved -- the caret walking along an unchanged prompt does not relocate the region.
+        notifySubject(promptInterface(), QAccessible::LocationChanged);
     }
 
-    // Emitted alongside, never instead of: TextCaretMoved says the OFFSET changed, which does not tell a
-    // magnifier that the same offset now sits at different pixels after a scroll.
-    notifyAccessibility<QAccessibleTextCursorEvent>(object(), cursorPosition());
-    notifyAccessibility<QAccessibleEvent>(this, QAccessible::LocationChanged);
+    notifyAbout<QAccessibleTextCursorEvent>(this, caretOffset);
+}
+
+void TerminalAccessible::reportLocation()
+{
+    notifySubject(this, QAccessible::LocationChanged);
+    if (_shownPrompt.has_value())
+        notifySubject(promptInterface(), QAccessible::LocationChanged);
 }
 
 // }}}
@@ -461,17 +528,14 @@ QRect PromptAccessible::rect() const
 
     auto const metrics = item->gridMetrics();
 
-    auto const span = [&] {
+    // One lock for both reads: taking it twice gave the grid a window to be resized between the span
+    // and the width it is measured against.
+    auto const [span, columns] = [&] {
         auto const lock = std::lock_guard { item->terminal() };
-        return item->terminal().livePromptSpan();
+        return std::pair { item->terminal().livePromptSpan(), item->terminal().pageSize().columns };
     }();
     if (!span.has_value())
         return {};
-
-    auto const columns = [&] {
-        auto const lock = std::lock_guard { item->terminal() };
-        return item->terminal().pageSize().columns;
-    }();
 
     auto const local = rowBandRectangle(
         metrics.pageMargin, metrics.cellSize, span->firstLine, span->lastLine, columns, item->contentScale());

@@ -7,6 +7,8 @@
 #include <QtGui/QAccessibleInterface>
 #include <QtGui/QAccessibleObject>
 
+#include <optional>
+
 namespace contour::display
 {
 
@@ -137,10 +139,19 @@ class TerminalAccessible final: public QAccessibleObject, public QAccessibleText
     /// Forgets what was last announced, so the next state is announced afresh. @see CaretReportGate::reset.
     void resetCaretGate();
 
+    /// Tells the OS that this terminal's screen rectangle moved or resized.
+    ///
+    /// Runs on the GUI THREAD only. Deliberately NOT part of reportCaret(): QAccessible::LocationChanged
+    /// describes THIS OBJECT's geometry, which a caret move does not alter — emitting it per caret move
+    /// made every keystroke invite the platform to re-read our geometry.
+    void reportLocation();
+
   private:
     CaretReportGate _gate;
-    /// Mirrors whether a prompt child is currently exposed, so show/hide are announced once each.
-    bool _promptShown = false;
+    /// The prompt span last ANNOUNCED, which is also what the child interface currently exposes — so
+    /// show/hide are said once each and childCount()/child() agree with them. Distinct from the gate's
+    /// own memory, which records what was last SEEN whether or not it was worth announcing.
+    std::optional<vtbackend::LivePromptSpan> _shownPrompt;
     /// Non-owning: Qt's accessibility cache owns it, and the destructor hands it back.
     PromptAccessible* _prompt;
 };

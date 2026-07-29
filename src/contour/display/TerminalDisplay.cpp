@@ -416,6 +416,11 @@ void TerminalDisplay::geometryChange(QRectF const& newGeometry, QRectF const& ol
     // One reflow per committed geometry change (position-only moves are irrelevant to the grid).
     if (newGeometry.size() != oldGeometry.size())
         applyDisplaySizeToGrid();
+
+    // A position-only move DOES matter here, though: a magnifier tracks the caret by screen rectangle,
+    // and every rectangle we hand out is mapped through this item's origin.
+    if (newGeometry != oldGeometry)
+        reportAccessibleLocation();
 }
 
 void TerminalDisplay::handleWindowChanged(QQuickWindow* newWindow)
@@ -1449,6 +1454,11 @@ void TerminalDisplay::notifyCellGeometryChanged()
     // controller (offscreen tests) simply have no WM hints to maintain.
     if (auto* controller = windowController())
         controller->updateSizeHintsFor(*this);
+
+    // Every cell rectangle we hand out is derived from the cell size, the margins and the content scale,
+    // so all three of this seam's callers (font size, DPI/content scale, profile margins) move the caret
+    // on screen without moving this item -- geometryChange() stays silent for them.
+    reportAccessibleLocation();
 }
 // }}}
 
@@ -1540,6 +1550,27 @@ namespace
             return nullptr;
         return dynamic_cast<TerminalAccessible*>(QAccessible::queryAccessibleInterface(display));
     }
+
+    /// As @ref accessibleOf, but also honours the session's accessibility_caret_reporting setting.
+    ///
+    /// Gated here rather than in the factory: the interface is handed out per display by a static factory
+    /// that has no session in reach, while the setting belongs to the session's config. Withholding the
+    /// REPORTS is the part that matters -- they are what prompts a platform bridge to read the viewport
+    /// back out of us. Deliberately NOT applied to the gate RESET, which only clears our own memory of
+    /// what was last said and must stay consistent across a live config reload.
+    ///
+    /// accessibleOf() first: its isActive() check is one relaxed atomic load and is false for everyone
+    /// with no assistive client attached, which is almost everyone -- the config read behind it walks a
+    /// session pointer into a large Config.
+    TerminalAccessible* reportingAccessibleOf(TerminalDisplay* display)
+    {
+        auto* accessible = accessibleOf(display);
+        if (accessible == nullptr)
+            return nullptr;
+        if (!display->hasSession() || !display->session().config().accessibilityCaretReporting.value())
+            return nullptr;
+        return accessible;
+    }
 } // namespace
 
 void TerminalDisplay::reportCursorMoved()
@@ -1555,8 +1586,25 @@ void TerminalDisplay::reportCursorMoved()
 
 void TerminalDisplay::reportAccessibleCaret()
 {
-    if (auto* accessible = accessibleOf(this))
+    if (auto* accessible = reportingAccessibleOf(this))
         accessible->reportCaret();
+}
+
+void TerminalDisplay::reportAccessibleLocation()
+{
+    // Coalesced the way cursorPositionChanged() is, and for the same reason: an interactive resize or a
+    // split-divider drag commits a geometry change per input event, and every LocationChanged is an
+    // invitation for the platform to read our geometry -- on macOS, the whole viewport -- straight back
+    // out. A magnifier only needs the settled rectangle, so one report per delivered frame is plenty.
+    if (_locationReportPending)
+        return;
+    _locationReportPending = true;
+
+    post([this]() {
+        _locationReportPending = false;
+        if (auto* accessible = reportingAccessibleOf(this))
+            accessible->reportLocation();
+    });
 }
 
 void TerminalDisplay::resetAccessibleCaret()
