@@ -451,6 +451,45 @@ Config loadConfigFromFile(fs::path const& fileName)
     return config;
 }
 
+vtbackend::Settings emulationSettings(Config const& config, TerminalProfile const& profile)
+{
+    auto settings = vtbackend::Settings {};
+    settings.pageSize = profile.terminalSize.value();
+    settings.maxHistoryLineCount = profile.history.value().maxHistoryLineCount;
+    settings.terminalId = profile.terminalId.value();
+    settings.frozenModes = profile.frozenModes.value();
+    settings.maxImageRegisterCount = config.images.value().maxImageColorRegisters;
+    settings.goodImageProtocol = config.images.value().goodImageProtocol;
+    settings.primaryScreen.allowReflowOnResize = config.reflowOnResize.value();
+    settings.graphemeClustering = config.graphemeClustering.value();
+    settings.wordDelimiters = unicode::from_utf8(config.wordDelimiters.value());
+    return settings;
+}
+
+std::expected<vtbackend::Settings, std::string> resolveEmulationSettings(std::string const& configPath,
+                                                                         std::string const& profileName)
+{
+    auto loaded = Config {};
+    try
+    {
+        // The same two-overload split every other verb uses: empty means the default location,
+        // which loadConfig() resolves (and creates, if absent).
+        loaded = configPath.empty() ? loadConfig() : loadConfigFromFile(configPath);
+    }
+    catch (std::exception const& e)
+    {
+        return std::unexpected { std::format("cannot load config: {}", e.what()) };
+    }
+
+    auto const& name = profileName.empty() ? loaded.defaultProfileName.value() : profileName;
+    auto const* const profile = loaded.findProfile(name);
+    if (profile == nullptr)
+        return std::unexpected { std::format(
+            "unknown profile '{}' in '{}'", name, loaded.configFile.string()) };
+
+    return emulationSettings(loaded, *profile);
+}
+
 void compareEntries(Config& config, auto const& output)
 {
     // compare entries in config and default config and log differences
@@ -811,13 +850,11 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("profiles", c.profiles, c.defaultProfileName.value());
         loadFromEntry("layouts", c.layouts);
         loadFromEntry("git_drawings", c.gitDrawings);
-#ifdef CONTOUR_FRONTEND_GUI
         vtrasterizer::BoxDrawingRenderer::setGitDrawingsStyle(c.gitDrawings.value());
         loadFromEntry("box_arc_style", c.boxArcStyle);
         vtrasterizer::BoxDrawingRenderer::setArcStyle(c.boxArcStyle.value());
         loadFromEntry("braille_style", c.brailleStyle);
         vtrasterizer::BoxDrawingRenderer::setBrailleStyle(c.brailleStyle.value());
-#endif
 
         // loadFromEntry("color_schemes", c.colorschemes); // NB: This is always loaded lazily
         loadFromEntry("input_mapping", c.inputMappings);
@@ -1039,9 +1076,9 @@ void YAMLConfigReader::parseLayoutPane(YAML::Node const& node, config::LayoutPan
         {
             auto const value = crispy::toLower(orientation.as<std::string>());
             if (value == "horizontal")
-                where.orientation = vtmux::SplitState::Horizontal;
+                where.orientation = vtworkspace::SplitState::Horizontal;
             else if (value == "vertical")
-                where.orientation = vtmux::SplitState::Vertical;
+                where.orientation = vtworkspace::SplitState::Vertical;
             else
                 logger()("Unknown split orientation '{}' (expected 'horizontal' or 'vertical'); "
                          "using vertical.",
@@ -1086,7 +1123,10 @@ void YAMLConfigReader::parseLayoutPane(YAML::Node const& node, config::LayoutPan
         }
     if (auto const directory = node["directory"]; directory && directory.IsScalar())
         // resolvedPath (not bare homeResolvedPath): a layout's directory expands ${VAR} as well as
-        // ~, exactly like every other path in the configuration.
+        // ~, exactly like every other path in the configuration. Store the resolved path losslessly
+        // (no .string() here): narrowing is deferred to apply-time so a path outside the active code
+        // page fails only this pane's launch, not the whole config load (Windows path::string()
+        // throws for such a path).
         where.directory = resolvedPath(directory.as<std::string>());
     if (auto const profile = node["profile"]; profile && profile.IsScalar())
         where.profile = profile.as<std::string>();

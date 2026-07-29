@@ -259,7 +259,8 @@ constexpr inline auto DECRQCRA = FunctionDocumentation { .mnemonic = "DECRQCRA",
 constexpr inline auto XTCHECKSUM = FunctionDocumentation { .mnemonic = "XTCHECKSUM", .comment = "Select checksum extension", .parameters = "Ps", .description = "Selects how DECRQCRA computes its checksum. Ps is a bit mask; a zero (the default) is DEC-compatible, and each bit switches one aspect off:\n\n* 1: do not negate the result.\n* 2: do not fold the video attributes in.\n* 4: count blank cells rather than omitting them.\n* 8: count cells never written to (as blanks) rather than skipping them.\n* 16: report the codepoint as-is rather than mapping it into the DEC charset.\n\nThe selection survives a soft reset (DECSTR) and a hard reset (RIS), both of which restore it to the value the terminal was configured with.", .examples = "CSI 10 # y" };
 constexpr inline auto SL = FunctionDocumentation { .mnemonic = "SL", .comment = "Scroll Left" };
 constexpr inline auto SR = FunctionDocumentation { .mnemonic = "SR", .comment = "Scroll Right" };
-constexpr inline auto MODIFYOTHERKEYS = FunctionDocumentation { .mnemonic = "MODIFYOTHERKEYS", .comment = "Modify Other Keys mode" };
+constexpr inline auto XTMODKEYS = FunctionDocumentation { .mnemonic = "XTMODKEYS", .comment = "Set/reset key modifier options", .parameters = "Pp;Pv", .description = "Selects how much modifier information the terminal folds into the escape sequence it sends for a key. Pp names the RESOURCE, Pv the value assigned to it:\n\n* 0: modifyKeyboard\n* 1: modifyCursorKeys\n* 2: modifyFunctionKeys\n* 3: modifyKeypadKeys\n* 4: modifyOtherKeys\n* 6: modifyModifierKeys\n* 7: modifySpecialKeys\n\nOmitting Pv resets that one resource to its initial value; omitting both resets every resource. Contour implements modifyOtherKeys (Pp = 4), whose value 1 encodes control- and shift-modified keys as `CSI 27 ; modifier ; codepoint ~` and value 2 extends that to every modifier; the remaining resources are accepted and ignored. The Kitty keyboard protocol supersedes this whenever its flag stack is non-empty.", .examples = "CSI > 4 ; 2 m" };
+constexpr inline auto XTRMMODKEYS = FunctionDocumentation { .mnemonic = "XTRMMODKEYS", .comment = "Disable key modifier options", .parameters = "Ps", .description = "Disables the key-modifier resource Ps names (the same numbering XTMODKEYS uses), which is the resource value -1 that XTMODKEYS itself cannot express. An omitted Ps disables modifyFunctionKeys. For modifyOtherKeys (Ps = 4) this returns Contour to the legacy encoding.", .examples = "CSI > 4 n" };
 constexpr inline auto SBQUERY = FunctionDocumentation { .mnemonic = "SBQUERY", .comment = "Query semantic command blocks." };
 
 } // namespace documentation
@@ -814,7 +815,11 @@ constexpr inline auto XTSHIFTESCAPE=detail::CSI('>', 0, 1, std::nullopt, 's', VT
 constexpr inline auto XTCHECKSUM  = detail::CSI(std::nullopt, 0, 1, '#', 'y', VTExtension::XTerm, documentation::XTCHECKSUM);
 constexpr inline auto XTSMGRAPHICS= detail::CSI('?', 2, 4, std::nullopt, 'S', VTExtension::XTerm, documentation::XTSMGRAPHICS);
 constexpr inline auto XTVERSION   = detail::CSI('>', 0, 1, std::nullopt, 'q', VTExtension::XTerm, documentation::XTVERSION);
-constexpr inline auto MODIFYOTHERKEYS = detail::CSI('>', 0, 1, std::nullopt, 'm', VTExtension::XTerm, documentation::MODIFYOTHERKEYS);
+// `CSI > Pp ; Pv m` — Pp is the RESOURCE selector, Pv its value; `CSI > Pp m` resets one
+// resource and bare `CSI > m` resets all, so minArgs stays 0 and maxArgs 2.
+// @see ctlseqs.txt "Set/reset key modifier options (XTMODKEYS)".
+constexpr inline auto XTMODKEYS   = detail::CSI('>', 0, 2, std::nullopt, 'm', VTExtension::XTerm, documentation::XTMODKEYS);
+constexpr inline auto XTRMMODKEYS = detail::CSI('>', 0, 1, std::nullopt, 'n', VTExtension::XTerm, documentation::XTRMMODKEYS);
 constexpr inline auto SBQUERY         = detail::CSI('>', 0, 6, std::nullopt, 'b', VTExtension::Contour, documentation::SBQUERY);
 
 // DEC Multi-Page Navigation (VT420)
@@ -1080,7 +1085,8 @@ constexpr static auto allFunctionsArray() noexcept
         XTSHIFTESCAPE,
         XTSMGRAPHICS,
         XTVERSION,
-        MODIFYOTHERKEYS,
+        XTMODKEYS,
+        XTRMMODKEYS,
         SBQUERY,
         NP,
         PP,

@@ -2,14 +2,12 @@
 #include <crispy/App.h>
 
 #include <crispy/environment.h>
+#include <crispy/logsink.h>
 #include <crispy/logstore.h>
 #include <crispy/user_info.h>
 #include <crispy/utils.h>
 
 #include <algorithm>
-#include <array>
-#include <chrono>
-#include <ctime>
 #include <filesystem>
 #include <format>
 #include <iomanip>
@@ -31,11 +29,9 @@ using std::optional;
 using std::setw;
 using std::string;
 using std::string_view;
-using std::chrono::duration_cast;
 
 using namespace std::string_view_literals;
 
-namespace chrono = std::chrono;
 namespace fs = std::filesystem;
 
 namespace CLI = crispy::cli;
@@ -201,8 +197,7 @@ int app::versionAction()
     return EXIT_SUCCESS;
 }
 
-// customize debuglog transform to shorten the file_name output a bit
-bool app::parseParametersForTesting(int argc, char const* argv[])
+bool app::reparseParameters(int argc, char const* argv[])
 {
     _syntax = parameterDefinition();
     optional<CLI::flag_store> flagsOpt = CLI::parse(_syntax.value(), argc, argv);
@@ -212,11 +207,20 @@ bool app::parseParametersForTesting(int argc, char const* argv[])
     return true;
 }
 
+bool app::parseParametersForTesting(int argc, char const* argv[])
+{
+    return reparseParameters(argc, argv);
+}
+
 int app::run(int argc, char const* argv[])
 {
     try
     {
         customizeLogStoreOutput();
+
+        // Kept before parsing consumes it: a verb that must relaunch this binary with this
+        // configuration replays these tokens verbatim (see commandLine()).
+        _commandLine.assign(argv, argv + argc);
 
         _syntax = parameterDefinition();
 
@@ -246,108 +250,48 @@ int app::run(int argc, char const* argv[])
     }
 }
 
+std::expected<void, std::string> app::installLogging(std::string const& optionPrefix, bool showProcessId)
+{
+    auto const filter = parameters().get<std::string>(optionPrefix + ".log");
+    auto output = logstore::scoped_output::create({
+        .filter = filter,
+        .file = logstore::parseLogFileSpec(parameters().get<std::string>(optionPrefix + ".log-file")),
+        .showProcessId = showProcessId,
+    });
+    if (!output)
+        return std::unexpected(output.error());
+
+    // A pattern matching nothing is nearly always a typo, and its symptom — no output — looks
+    // exactly like "the thing you asked about never happened".
+    for (auto const& unmatched: logstore::unmatchedFilters(filter))
+        std::cerr << std::format("{}: --log '{}' matches no known tag (see `{} list-debug-tags`).\n",
+                                 _appName,
+                                 unmatched,
+                                 _appName);
+
+    _logOutput = std::move(*output);
+    return {};
+}
+
 void app::customizeLogStoreOutput()
 {
     logstore::sink::console().set_enabled(true);
 
-    // A curated list of colors.
+    // console() writes to std::cout, so STDOUT is the right stream to ask about here.
+    // (A destination that writes elsewhere must gate on ITS stream — see logstore::scoped_output.)
     static bool const colorized =
 #ifndef _WIN32
         isatty(STDOUT_FILENO) != 0;
 #else
         true;
 #endif
-    static constexpr auto Colors = std::array<int, 23> {
-        2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 150, 155, 159, 165, 170, 175, 180, 185, 190, 195, 200,
-    };
-    logstore::set_formatter([](logstore::message_builder const& msg) -> std::string {
-        auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string> {
-            if (!colorized)
-                return { "", "", "" };
-            auto const* const tagStart = "\033[1m";
-            auto const colorIndex =
-                Colors.at(std::hash<string_view> {}(msg.get_category().name()) % Colors.size());
-            auto const msgStart = std::format("\033[38;5;{}m", colorIndex);
-            auto const resetSGR = std::format("\033[m");
-            return { tagStart, msgStart, resetSGR };
-        }();
 
-        // // fileName with path to file relative to project root
-        // auto const srcIndex = string_view(msg.location().file_name()).find("src");
-        // auto const fileName = string(srcIndex != string_view::npos
-        //                                  ? string_view(msg.location().file_name()).substr(srcIndex + 4)
-        //                                  : string(msg.location().file_name()));
-
-        auto result = string {};
-
-        auto const lines = crispy::split(msg.text(), '\n');
-        for (auto const [i, line]: crispy::views::enumerate(lines))
-        {
-            if (i != 0)
-                result += "        ";
-            else
-            {
-                // clang-format off
-                auto const now = chrono::system_clock::now();
-                std::time_t const nowTimeT = std::chrono::system_clock::to_time_t(now);
-                auto tm = std::tm {};
-#ifdef _WIN32
-                localtime_s(&tm, &nowTimeT);
-#else
-                localtime_r(&nowTimeT, &tm);
-#endif
-                std::stringstream dateTimeStrStream;
-                dateTimeStrStream << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
-                auto const micros = duration_cast<chrono::microseconds>(now.time_since_epoch()).count() % 1'000'000;
-                result += sgrTag;
-                result += std::format("[{}.{:06}] [{}]",
-                                      dateTimeStrStream.str(),
-                                      micros,
-                                      msg.get_category().name());
-                result += sgrReset;
-                result += ' ';
-                // clang-format on
-            }
-
-            result += sgrMessage;
-            result += line;
-            result += sgrReset;
-            result += '\n';
-        }
-
-        return result;
-    });
-
-    logstore::errorLog.set_formatter([](logstore::message_builder const& msg) -> std::string {
-        auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string> {
-            if (!colorized)
-                return { "", "", "" };
-            auto const* const tagStart = "\033[1;31m";
-            auto const* const msgStart = "\033[31m";
-            auto const* const resetSGR = "\033[m";
-            return { tagStart, msgStart, resetSGR };
-        }();
-
-        auto result = string {};
-        auto const lines = crispy::split(msg.text(), '\n');
-        for (auto const [i, line]: crispy::views::enumerate(lines))
-        {
-            if (i != 0)
-                result += "        ";
-            else
-            {
-                result += sgrTag;
-                result += std::format("[{}] ", "error");
-                result += sgrReset;
-            }
-
-            result += sgrMessage;
-            result += line;
-            result += sgrReset;
-            result += '\n';
-        }
-        return result;
-    });
+    // The historical console shape: timestamped standard lines, and a bare `[error]` tag with
+    // no timestamp for errors. Destinations that want the process id (or a timestamp on error
+    // lines) build their own options; the layout itself is single-sourced in logsink.cpp.
+    logstore::set_formatter(logstore::makeStandardFormatter({ .colorize = colorized }));
+    logstore::errorLog.set_formatter(
+        logstore::makeErrorFormatter({ .colorize = colorized, .showTimestamp = false }));
 }
 
 } // namespace crispy

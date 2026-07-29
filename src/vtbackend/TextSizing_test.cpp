@@ -1244,3 +1244,44 @@ TEST_CASE("TextSizing.a_block_whose_head_scrolled_above_the_viewport_still_draws
     CHECK(std::ranges::find(bands, 0) == bands.end());
     CHECK(std::ranges::find(bands, 1) != bands.end());
 }
+
+TEST_CASE("TextSizing.erasing_a_block_whose_head_scrolled_off_is_reported", "[textsizing][delta]")
+{
+    // A tall block whose HEAD has scrolled into the scrollback while a continuation row is still on
+    // the page: erasing it writes into a NEGATIVE line offset, which multicellBlockAt deliberately
+    // permits (it walks up to the top of the history to find the head).
+    //
+    // Reaching that row through plain lineAt() marks it dirty but arms no history floor, so
+    // finalizeRevisions() never scans down to it and forEachLineChangedSince never reports it — no
+    // later scroll ever brings it back into the scanned prefix either. A daemon-attached client
+    // then kept rendering the destroyed top half of the block in its scrollback for good, while the
+    // local window showed it correctly.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(2), ColumnCount(10) }, LineCount(10) };
+    auto& terminal = mock.terminal;
+    auto& screen = terminal.primaryScreen();
+
+    // A 2x2 block at the origin: head on row 0, continuation on row 1.
+    mock.writeToScreen("\033]66;s=2;A\a"sv);
+    REQUIRE(screen.at(LineOffset(1), ColumnOffset(0)).isFlagEnabled(CellFlag::MulticellContinuation));
+
+    // Scroll the head into history; the continuation row stays on the page.
+    mock.writeToScreen("\033[2;1H\n"sv);
+    REQUIRE(screen.grid().historyLineCount() >= LineCount(1));
+    // Read as TEXT: the cell proxies hand out a mutable view, which would dirty the very row whose
+    // reporting this test is about.
+    REQUIRE(screen.grid().lineText(LineOffset(-1)).starts_with("A"));
+
+    // Drain the delta stream, so anything reported afterwards is caused by the erase alone.
+    auto cursor = GridDeltaCursor {};
+    std::ignore = screen.grid().forEachLineChangedSince(cursor, [](LineOffset, Line const&) {});
+
+    // Overwrite the continuation cell: the whole block is destroyed, head included.
+    mock.writeToScreen("\033[1;1Hz"sv);
+    CHECK_FALSE(screen.grid().lineText(LineOffset(-1)).starts_with("A"));
+
+    // The history row the erase touched must be reported to a delta consumer.
+    auto reported = std::vector<int> {};
+    std::ignore = screen.grid().forEachLineChangedSince(
+        cursor, [&](LineOffset offset, Line const&) { reported.push_back(unbox<int>(offset)); });
+    CHECK(std::ranges::find(reported, -1) != reported.end());
+}

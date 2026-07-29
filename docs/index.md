@@ -21,6 +21,7 @@ Bring your terminal to life with color schemes, profiles, and sixel inline image
 :material-check-bold:{.check-mark}  [Font ligatures](demo/font-ligatures.md) support (very useful for programming and scripting) <br/>
 ![demo](/screenshots/contour-font-ligatures.png){ align=left }
 :material-check-bold:{.check-mark}  Complex Unicode support, including colored Emoji (-: 🌈  💝  😛  👪  - including ZWJ, VS15, VS16 emoji :-) <br/>
+:material-check-bold:{.check-mark}  [Persistent sessions](persistent-sessions.md) that survive the window (daemon mode) — reattach locally or over the network <br/>
 :material-check-bold:{.check-mark}  [Vi-like input modes](input-modes.md) for improved navigation, selection and copy'n'paste experience <br/>
 :material-check-bold:{.check-mark}  [Vertical Line Markers](demo/line-marks.md) (quickly jump to markers in your history!) <br/>
 :material-check-bold:{.check-mark}  Profiles (grouped customization of: color scheme, login shell, and related behaviors) <br/>

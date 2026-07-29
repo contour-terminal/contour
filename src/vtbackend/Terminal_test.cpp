@@ -656,6 +656,68 @@ TEST_CASE("Terminal.RIS.resetsPassiveMouseTracking", "[terminal]")
     CHECK(mc.terminal.isModeEnabled(DECMode::MousePassiveTracking));
 }
 
+TEST_CASE("Terminal.mouse coordinate modes are one mutually-exclusive setting", "[terminal][mouse]")
+{
+    using namespace vtbackend;
+
+    // xterm keeps ONE `screen->extend_coords` for 1005/1006/1015/1016 and documents the
+    // consequence: "they are mutually exclusive. For consistency, a reset is only effective against
+    // the matching mode." Contour treated them as four independent flags, so a reset of any of them
+    // clobbered whichever encoding was in effect -- and 1005/1015 ignored the set/reset bit
+    // entirely, making a RESET turn them ON.
+    auto mc = MockTerm { ColumnCount(20), LineCount(5) };
+    REQUIRE(mc.terminal.mouseTransport() == MouseTransport::Default);
+
+    SECTION("a reset of a mode that is not in effect leaves the active encoding alone")
+    {
+        mc.writeToScreen("\033[?1006h"sv);
+        REQUIRE(mc.terminal.mouseTransport() == MouseTransport::SGR);
+
+        // The three the application did NOT choose. Each used to overwrite the transport.
+        mc.writeToScreen("\033[?1005l"sv);
+        CHECK(mc.terminal.mouseTransport() == MouseTransport::SGR);
+        mc.writeToScreen("\033[?1015l"sv);
+        CHECK(mc.terminal.mouseTransport() == MouseTransport::SGR);
+        mc.writeToScreen("\033[?1016l"sv);
+        CHECK(mc.terminal.mouseTransport() == MouseTransport::SGR);
+    }
+
+    SECTION("a reset of the mode that IS in effect returns to the default encoding")
+    {
+        mc.writeToScreen("\033[?1006h"sv);
+        REQUIRE(mc.terminal.mouseTransport() == MouseTransport::SGR);
+        mc.writeToScreen("\033[?1006l"sv);
+        CHECK(mc.terminal.mouseTransport() == MouseTransport::Default);
+    }
+
+    SECTION("resetting 1005 from the default must not ENABLE it")
+    {
+        mc.writeToScreen("\033[?1005l"sv);
+        CHECK(mc.terminal.mouseTransport() == MouseTransport::Default);
+        mc.writeToScreen("\033[?1015l"sv);
+        CHECK(mc.terminal.mouseTransport() == MouseTransport::Default);
+    }
+
+    SECTION("setting one encoding replaces another")
+    {
+        mc.writeToScreen("\033[?1005h"sv);
+        REQUIRE(mc.terminal.mouseTransport() == MouseTransport::Extended);
+        mc.writeToScreen("\033[?1016h"sv);
+        CHECK(mc.terminal.mouseTransport() == MouseTransport::SGRPixels);
+        mc.writeToScreen("\033[?1015h"sv);
+        CHECK(mc.terminal.mouseTransport() == MouseTransport::URXVT);
+    }
+
+    SECTION("replaying a whole mode set keeps the encoding the application chose")
+    {
+        // What a thin client does on attach: it knows WHICH modes are set and states the rest as
+        // reset. Before the fix the trailing resets landed after the set and left Default, so the
+        // mirror encoded X10 coordinates for an application that had asked for SGR.
+        mc.writeToScreen("\033[?1005l\033[?1006h\033[?1015l\033[?1016l"sv);
+        CHECK(mc.terminal.mouseTransport() == MouseTransport::SGR);
+    }
+}
+
 TEST_CASE("Terminal.forceRedraw keeps the cell size", "[terminal]")
 {
     using namespace vtbackend;
@@ -5371,4 +5433,74 @@ TEST_CASE("Terminal.hint_mode_overlay_wraps_a_label_past_the_row_edge", "[termin
     auto const wrapped = CellLocation { .line = edge->start.line + LineOffset(1), .column = ColumnOffset(0) };
     CHECK(codepointsAt(edge->start) == std::u32string(1, static_cast<char32_t>(edge->label[0])));
     CHECK(codepointsAt(wrapped) == std::u32string(1, static_cast<char32_t>(edge->label[1])));
+}
+
+TEST_CASE("Terminal reports the identity its settings named", "[terminal]")
+{
+    // Settings::terminalId used to reach nothing: _terminalId was default-initialized to VT525 and
+    // written only by setTerminalId(), which the GUI calls from configureTerminal(). Any terminal
+    // nobody reconfigures after construction -- every daemon-hosted session, and vtconformance's --
+    // therefore reported VT525 whatever its profile said, and DA1/DA2/DECSCL answered accordingly.
+    auto events = vtbackend::Terminal::NullEvents {};
+    auto const pageSize = vtbackend::PageSize { vtbackend::LineCount(5), vtbackend::ColumnCount(20) };
+
+    auto settings = vtbackend::Settings {};
+    settings.pageSize = pageSize;
+    settings.terminalId = vtbackend::VTType::VT340;
+
+    auto terminal = vtbackend::Terminal {
+        events, std::make_unique<vtpty::MockPty>(pageSize), settings, std::chrono::steady_clock::now()
+    };
+
+    CHECK(terminal.terminalId() == vtbackend::VTType::VT340);
+    // The operating level follows the identity at birth, as setTerminalId() also makes it do -- a
+    // terminal must not start out claiming conformance above the model it reports.
+    CHECK(terminal.operatingLevel() == vtbackend::VTType::VT340);
+    CHECK(vtbackend::conformanceLevelOf(terminal.operatingLevel()) == 3);
+}
+
+TEST_CASE("a terminal constructed below VT525 narrows its sequence table too", "[terminal][conformance]")
+{
+    // Seeding _operatingLevel from Settings::terminalId without ALSO resetting the dispatch table
+    // leaves the conformance gate and the table disagreeing for any terminal nobody reconfigures
+    // afterwards — which is every daemon-hosted session (vthost::SessionHost builds each Terminal
+    // straight from the profile's settings and never calls setTerminalId, unlike the GUI's
+    // configureTerminal()). Such a session answered DA1 as a VT220 and refused the VT420 DEC modes,
+    // yet still executed VT420-only sequences off the full VT525 table.
+    auto const hasFunction = [](vtbackend::Terminal const& terminal, vtbackend::Function const& wanted) {
+        return std::ranges::any_of(terminal.activeSequences(),
+                                   [&](vtbackend::Function const& fn) { return fn.id() == wanted.id(); });
+    };
+
+    auto events = vtbackend::Terminal::NullEvents {};
+    auto const pageSize = vtbackend::PageSize { vtbackend::LineCount(5), vtbackend::ColumnCount(20) };
+
+    auto makeTerminal = [&](vtbackend::VTType id) {
+        auto settings = vtbackend::Settings {};
+        settings.pageSize = pageSize;
+        settings.terminalId = id;
+        return vtbackend::Terminal { events,
+                                     std::make_unique<vtpty::MockPty>(pageSize),
+                                     settings,
+                                     std::chrono::steady_clock::time_point() };
+    };
+
+    SECTION("a VT220 identity excludes the VT420-only sequences")
+    {
+        auto terminal = makeTerminal(vtbackend::VTType::VT220);
+        CHECK(terminal.operatingLevel() == vtbackend::VTType::VT220);
+        CHECK_FALSE(hasFunction(terminal, vtbackend::DECFRA)); // VT420
+        CHECK(hasFunction(terminal, vtbackend::DECSCL));       // never gated: it SETS the level
+        // The table the constructor produced must be the one setTerminalId would have produced —
+        // that equality is the whole invariant, and what an explicit call used to be needed for.
+        auto const activeCount = terminal.activeSequences().size();
+        terminal.setTerminalId(vtbackend::VTType::VT220);
+        CHECK(terminal.activeSequences().size() == activeCount);
+    }
+
+    SECTION("the default identity keeps the full table")
+    {
+        auto terminal = makeTerminal(vtbackend::Settings {}.terminalId);
+        CHECK(hasFunction(terminal, vtbackend::DECFRA));
+    }
 }

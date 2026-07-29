@@ -8,14 +8,27 @@ cmake/            - CMake helper modules
 scripts/          - general development assisting and CI helper scripts
 src/              - Contour source code
   contour/        - GUI terminal emulator application (business logic)
+  coro/           - C++23 coroutine vocabulary types
   crispy/         - fundamentals library
+  net/            - coroutine reactor, sockets and TLS
   text_shaper/    - font location and text shaping & rasterization library
   vtbackend/      - core terminal library
+  vthost/         - Qt-free session daemon and both protocol engines
   vtparser/       - VT parser library
   vtpty/          - PTY library
   vtrasterizer/   - frontend independent Terminal rendering library
+  vtworkspace/    - Qt-free tab/split-pane tree model
 test/             - Contains a set of test scripts.
 ```
+
+Listed alphabetically above; the dependency order is `crispy` → `coro` → `net`
+→ `text_shaper`/`vtparser` → `vtpty` → `vtbackend` →
+`vtrasterizer`/`vtworkspace` → `vthost` → `contour`. Lower layers must not
+depend on higher ones, and the GUI must not reach around `vtbackend`/
+`vtworkspace` into rendering internals.
+
+The daemon and its protocols are documented separately in
+[Multiplexer & daemon mode](vthost.md).
 
 ### `crispy` library
 

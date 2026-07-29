@@ -59,7 +59,15 @@ class Renderer
      * @p atlasDirectMapping Indicates whether or not direct mapped tiles are allowed.
      * @p atlasTileCount     Number of tiles guaranteed to be available in LRU cache.
      */
+    /// @p pageMargin The grid's origin in device pixels, as the profile configures it.
+    ///
+    /// Supplied here rather than left at zero until the first applyResize(): gridMetrics() is the
+    /// published origin every consumer maps through — including the GUI's mouse hit-test, which
+    /// subtracts it from the pointer position — and an event delivered before the first geometry
+    /// change would otherwise be mapped with no margin at all and report a cell several rows and
+    /// columns away from the one the user clicked.
     Renderer(vtbackend::PageSize pageSize,
+             PageMargin pageMargin,
              FontDescriptions fontDescriptions,
              vtbackend::ColorPalette const& colorPalette,
              crispy::strong_hashtable_size atlasHashtableSlotCount,

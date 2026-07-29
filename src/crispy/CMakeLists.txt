@@ -27,6 +27,7 @@ set(crispy_SOURCES
     file_descriptor.h
     flags.h
     interpolated_string.cpp interpolated_string.h
+    logsink.cpp logsink.h
     logstore.cpp logstore.h
     overloaded.h
     reference.h
@@ -134,6 +135,7 @@ if(CRISPY_TESTING)
         compose_test.cpp
         environment_test.cpp
         interpolated_string_test.cpp
+        logsink_test.cpp
         utils_test.cpp
         result_test.cpp
         ring_test.cpp

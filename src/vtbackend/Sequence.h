@@ -11,10 +11,13 @@
 #include <concepts>
 #include <cstddef>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
+#include <utility>
 
 #include <boxed-cpp/boxed.hpp>
 
@@ -22,6 +25,19 @@ namespace vtbackend
 {
 
 class SequenceParameterBuilder;
+
+namespace detail
+{
+    /// A type `std::in_range` accepts, which is exactly the set that can silently narrow a CSI
+    /// parameter: `bool` and the character types are integral but not *standard* integers, and
+    /// passing either to it is a hard error rather than a false.
+    template <typename T>
+    concept RangeCheckableParameter =
+        std::integral<T> && !std::same_as<std::remove_cv_t<T>, bool>
+        && !std::same_as<std::remove_cv_t<T>, char> && !std::same_as<std::remove_cv_t<T>, wchar_t>
+        && !std::same_as<std::remove_cv_t<T>, char8_t> && !std::same_as<std::remove_cv_t<T>, char16_t>
+        && !std::same_as<std::remove_cv_t<T>, char32_t>;
+} // namespace detail
 
 /**
  * CSI parameter API.
@@ -350,6 +366,17 @@ class Sequence
     template <typename T = unsigned>
     [[nodiscard]] std::optional<T> param_opt(size_t parameterIndex) const noexcept
     {
+        // A parameter is stored as uint16_t (the parser clamps at 0xFFFF), and reading it into a
+        // NARROWER T silently wraps: `CSI > 260 ; 2 m` read as a uint8_t arrived as resource 4 and
+        // switched modifyOtherKeys on. Every such alias is invisible at the call site, so make it a
+        // build break rather than something a review has to catch. Boxed types carry their own
+        // width and clamp in cast_from; `std::in_range` accepts only the standard integers, which
+        // is exactly the set that can narrow here.
+        if constexpr (detail::RangeCheckableParameter<T>)
+            static_assert(std::in_range<T>(std::numeric_limits<Parameter>::max()),
+                          "reading a CSI parameter into a type too narrow for it aliases silently; "
+                          "read it as int and range-check the value instead");
+
         if (parameterIndex >= _parameters.count() || _parameters.isOmitted(parameterIndex))
             return std::nullopt;
 

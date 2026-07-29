@@ -34,7 +34,7 @@
 #include <memory>
 
 #include <QtTest/QTest>
-#include <vtmux/PaneLayout.h>
+#include <vtworkspace/PaneLayout.h>
 
 namespace
 {
@@ -144,7 +144,7 @@ class RoutingMockPane: public QObject
     explicit RoutingMockPane(bool leaf = true): _leaf { leaf } {}
 
     [[nodiscard]] bool isLeaf() const { return _leaf; }
-    [[nodiscard]] int orientation() const { return 2; } // vtmux::SplitState::Vertical (side-by-side)
+    [[nodiscard]] int orientation() const { return 2; } // vtworkspace::SplitState::Vertical (side-by-side)
     [[nodiscard]] double ratio() const { return 0.5; }
     [[nodiscard]] RoutingMockPane* first() const { return _first; }
     [[nodiscard]] RoutingMockPane* second() const { return _second; }
@@ -240,7 +240,7 @@ class RoutingMockController: public QAbstractListModel
     [[nodiscard]] bool tabBarShouldShow() const noexcept { return true; } // shown
     [[nodiscard]] constexpr int splitHandleThickness() const noexcept
     {
-        return vtmux::DefaultSplitHandleThickness;
+        return vtworkspace::DefaultSplitHandleThickness;
     }
     [[nodiscard]] int chromeHeight() const noexcept { return _chromeHeight; }
     void setChromeHeight(int height)
@@ -286,6 +286,7 @@ class RoutingMockController: public QAbstractListModel
     Q_INVOKABLE QObject* createWindowController() { return this; }
     Q_INVOKABLE void bindWindow(QObject*) {}
     Q_INVOKABLE bool consumePendingTransplant(QObject*) { return false; }
+    Q_INVOKABLE bool consumeAttachWindow(QObject*) { return false; }
     Q_INVOKABLE bool consumeDefaultLayout(QObject*) { return false; }
     Q_INVOKABLE void createNewTab() {}
     Q_INVOKABLE void showInitial() {}

@@ -813,6 +813,7 @@ struct ReconfigFixture
 
     ReconfigFixture():
         renderer(vtbackend::PageSize { LineCount(24), ColumnCount(80) },
+                 vtrasterizer::PageMargin {},
                  fontDescriptions,
                  colorPalette,
                  crispy::strong_hashtable_size { 1024 },

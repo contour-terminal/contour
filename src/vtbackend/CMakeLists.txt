@@ -40,6 +40,7 @@ set(vtbackend_HEADERS
     MatchModes.h
     MessageParser.h
     MockTerm.h
+    ModifyKeys.h
     RenderBuffer.h
     RenderBufferBuilder.h
     Screen.h
@@ -47,6 +48,7 @@ set(vtbackend_HEADERS
     Selector.h
     Sequence.h
     SequenceBuilder.h
+    SgrWriter.h
     SixelParser.h
     regis/ReGISTables.h
     regis/ReGISColor.h
@@ -172,6 +174,8 @@ if(LIBTERMINAL_TESTING)
         HintModeHandler_test.cpp
         Line_test.cpp
         MessageParser_test.cpp
+        ModifyKeys_test.cpp
+        VTType_test.cpp
         RectangularAreaChecksum_test.cpp
         KittyClipboard_test.cpp
         PointerShape_test.cpp

@@ -86,6 +86,7 @@ install-stamp
 
 # mkdocs
 docs/vt-sequence/index.md
+/site/
 
 version.txt
 .history

@@ -14,8 +14,12 @@
 #include <libunicode/convert.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace vtbackend
 {
@@ -31,7 +35,10 @@ struct Margin
 
         [[nodiscard]] constexpr ColumnCount length() const noexcept
         {
-            return unbox<ColumnCount>(to - from) + ColumnCount(1);
+            // unsigned arithmetic avoids signed-overflow UB in the +1 when
+            // the difference is INT_MAX (the practical range makes this
+            // impossible, but the compiler may still exploit the UB).
+            return ColumnCount::cast_from(static_cast<unsigned>(unbox<int>(to - from)) + 1u);
         }
         [[nodiscard]] constexpr bool contains(ColumnOffset value) const noexcept
         {
@@ -57,7 +64,7 @@ struct Margin
 
         [[nodiscard]] constexpr LineCount length() const noexcept
         {
-            return unbox<LineCount>(to - from) + LineCount(1);
+            return LineCount::cast_from(static_cast<unsigned>(unbox<int>(to - from)) + 1u);
         }
         [[nodiscard]] constexpr bool contains(LineOffset value) const noexcept
         {
@@ -84,8 +91,10 @@ struct Margin
 
 constexpr bool operator==(Margin const& a, PageSize b) noexcept
 {
-    return a.horizontal.from.value == 0 && a.horizontal.to.value + 1 == b.columns.value
-           && a.vertical.from.value == 0 && a.vertical.to.value + 1 == b.lines.value;
+    // Avoid signed-overflow UB from `to.value + 1` when to.value is INT_MAX:
+    // rewrite as `to == other - 1` (page sizes are always >= 1).
+    return a.horizontal.from.value == 0 && a.horizontal.to.value == b.columns.value - 1
+           && a.vertical.from.value == 0 && a.vertical.to.value == b.lines.value - 1;
 }
 
 constexpr bool operator!=(Margin const& a, PageSize b) noexcept
@@ -525,6 +534,38 @@ struct ReverseLogicalLines
     [[nodiscard]] iterator end() const { return { lines, topMostLine, topMostLine - 1, bottomMostLine }; }
 };
 
+/// A consumer's position in a grid's change stream (one per followed grid per client).
+struct GridDeltaCursor
+{
+    uint64_t generation = 0; ///< The generation this cursor is valid within.
+    uint64_t seqno = 0;      ///< Every batch up to and including this one was seen.
+    int64_t stableBase = 0;  ///< The base at the last query; bounds the history scan depth.
+};
+
+/// What a delta query yielded.
+enum class GridDeltaResult : uint8_t
+{
+    Delta,          ///< Changed lines were reported and the cursor advanced.
+    ResyncRequired, ///< Row identity was rebuilt: snapshot via forEachValidLine().
+};
+
+/// Whether a captured row carries the rendition its cells wear (tmux `capture-pane -e`).
+enum class CaptureRendition : uint8_t
+{
+    PlainText = 0, ///< Text only; colours and style flags are dropped.
+    WithSgr = 1,   ///< SGR sequences interleaved wherever the rendition changes.
+};
+
+/// What a captured row does with the default cells that pad it out to the page width
+/// (tmux `capture-pane -J`/`-N`, either of which asks for @c Keep).
+enum class CaptureTrailingSpaces : uint8_t
+{
+    /// Drop them, which is what tmux does by default (`grid_line_length`). @see Line::trimmedColumns.
+    Trim = 0,
+    /// Keep every column, so each row is exactly the page width.
+    Keep = 1,
+};
+
 /**
  * Manages the screen grid buffer (main screen + scrollback history).
  *
@@ -569,6 +610,26 @@ class Grid
     // {{{ Line API
     [[nodiscard]] Line& lineAt(LineOffset line) noexcept;
     [[nodiscard]] Line const& lineAt(LineOffset line) const noexcept;
+
+    /// The row at @p line, for a caller that is about to CHANGE it below the page top.
+    ///
+    /// Records how deep the change reached, so the batch stamping and the delta scan cover the row
+    /// even though nothing scrolled it into range (@see _dirtyHistoryFloor). Deliberately a named
+    /// operation rather than a side effect of picking the non-const `lineAt` overload: which
+    /// overload a caller lands on follows the constness of the *enclosing function*, so read-only
+    /// walks of the scrollback that happen to sit in a non-const method (Screen::captureBuffer,
+    /// the marker scans) would arm a full-history rescan they have no business arming.
+    ///
+    /// Only needed where the row may lie ABOVE the page — a page row is always scanned, and a row
+    /// that scrolls out is covered by the base delta. In practice that means the semantic marks,
+    /// which are stamped on a logical line's head and so follow wrapped rows into the history.
+    /// @param line The row about to be changed (negative addresses history).
+    /// @return The row.
+    [[nodiscard]] Line& changingLineAt(LineOffset line) noexcept
+    {
+        noteMutableRow(line);
+        return lineAt(line);
+    }
 
     [[nodiscard]] std::string lineText(LineOffset line) const;
     [[nodiscard]] std::string lineTextTrimmed(LineOffset line) const;
@@ -666,6 +727,152 @@ class Grid
 
     [[nodiscard]] std::string renderMainPageText() const;
     [[nodiscard]] std::string renderAllText() const;
+
+    /// Renders the inclusive row range [@p start, @p end] (LineOffsets: 0 = top of the page, negative =
+    /// into scrollback, positive = down the page) as one string per row. The range is clamped to the
+    /// rows that still hold valid data — the same floor `forEachValidLine` uses, NOT
+    /// -historyLineCount(): at-capacity scrollDown wraps destroyed page rows into the oldest history
+    /// slots without resetting them, and capturing from below the floor returns that garbage.
+    /// An empty/inverted range yields no rows. Backs `capture-pane` (including `-e` for SGR,
+    /// `-J`/`-N` for trailing spaces and `-S -`/`-E` for scrollback).
+    /// @param start First row (inclusive).
+    /// @param end Last row (inclusive).
+    /// @param rendition Whether to interleave SGR escape sequences preserving each cell's rendition.
+    /// @param trailing Whether the default cells padding a row out to the page width are kept.
+    /// @return One captured line per row.
+    [[nodiscard]] std::vector<std::string> renderRange(LineOffset start,
+                                                       LineOffset end,
+                                                       CaptureRendition rendition,
+                                                       CaptureTrailingSpaces trailing) const;
+    // }}}
+
+    // {{{ Stable row identity (the daemon's delta addressing)
+    //
+    // A stable id names a PHYSICAL row across ring rotations: scrolling changes a row's
+    // LineOffset but never its id. Ids are only meaningful within one generation; a
+    // generation bump means row identity was destroyed wholesale (resize/reflow, history
+    // limit change, reset) and clients must resync. Plain ints, guarded by the terminal
+    // lock like all grid state.
+
+    /// The wholesale-rebuild counter: a change invalidates every stable id.
+    [[nodiscard]] uint64_t generation() const noexcept { return _generation; }
+
+    /// The stable id of the (existing) row at @p offset.
+    [[nodiscard]] int64_t stableLineIdOf(LineOffset offset) const noexcept
+    {
+        return _stableBase + unbox<int64_t>(offset);
+    }
+
+    /// The offset the stable id @p id currently maps to, or nullopt if the row was
+    /// evicted (below the floor) or does not exist yet.
+    [[nodiscard]] std::optional<LineOffset> lineOffsetOf(int64_t id) const noexcept
+    {
+        if (id < _stableFloor || id >= _stableBase + unbox<int64_t>(_pageSize.lines))
+            return std::nullopt;
+        return LineOffset::cast_from(id - _stableBase);
+    }
+
+    /// The oldest stable id still addressable; monotonic within a generation.
+    /// Deliberately NOT derived from historyLineCount(): at-capacity scrollDown wraps
+    /// destroyed page rows into the oldest history slots without resetting them, and a
+    /// derived floor would re-validate those evicted ids against garbage.
+    [[nodiscard]] int64_t stableRangeFloor() const noexcept { return _stableFloor; }
+
+    /// The batch counter every line revision draws from (advanced by finalizeRevisions).
+    [[nodiscard]] uint64_t seqno() const noexcept { return _seqno; }
+
+    /// Stamps every dirty line with the next batch number in one pass over the page, the
+    /// rows scrolled out since the last finalize (so a row written and then scrolled away
+    /// within one batch still gets stamped), and any history row handed out mutably since
+    /// then (so a row dirtied in place deep in the scrollback gets stamped at all). Bumps
+    /// the seqno only if anything was stamped — an idle grid finalizes for free, and
+    /// nothing runs at all when no consumer queries.
+    void finalizeRevisions() noexcept;
+
+    /// Reports every line changed since @p cursor and advances it.
+    ///
+    /// Self-finalizing. On a generation mismatch the cursor is re-anchored to the
+    /// current state and ResyncRequired is returned WITHOUT reporting lines — the caller
+    /// snapshots via forEachValidLine() instead. (A resync must never be "changes since
+    /// seqno 0": post-rebuild rows legitimately keep revision 0 forever.)
+    /// @param cursor The consumer's stream position (updated).
+    /// @param callback Invoked as callback(LineOffset, Line const&) per changed line.
+    template <typename F>
+    [[nodiscard]] GridDeltaResult forEachLineChangedSince(GridDeltaCursor& cursor, F&& callback)
+    {
+        finalizeRevisions();
+        if (cursor.generation != _generation)
+        {
+            cursor =
+                GridDeltaCursor { .generation = _generation, .seqno = _seqno, .stableBase = _stableBase };
+            return GridDeltaResult::ResyncRequired;
+        }
+
+        // Scan the page plus however far the ring advanced since the consumer last
+        // looked, clamped to the rows that still hold valid data (the floor excludes
+        // at-capacity-wrapped garbage slots).
+        //
+        // Plus, for a consumer that has not passed the seqno a history row was last stamped at, down
+        // to that row: a scrollback line can be dirtied WITHOUT anything scrolling (Screen's OSC 133
+        // handlers mark a logical line's head, which walks up wrapped rows into the history), and no
+        // later scroll ever brings it back into the prefix above — so it would be stamped and then
+        // never reported. A consumer already past that seqno has seen it and scans nothing extra.
+        auto&& report = std::forward<F>(callback);
+        auto const scrolledFloor = _stableBase - scrolledOutDepthSince(cursor.stableBase);
+        auto const floorId = cursor.seqno < _changedHistorySeqno
+                                 ? std::min(scrolledFloor, _changedHistoryFloor)
+                                 : scrolledFloor;
+        for (auto offset = scanTopFor(floorId); offset < boxed_cast<LineOffset>(_pageSize.lines); ++offset)
+        {
+            auto const& line = std::as_const(*this).lineAt(offset);
+            if (line.revision() > cursor.seqno)
+                report(offset, line);
+        }
+
+        cursor.seqno = _seqno;
+        cursor.stableBase = _stableBase;
+        return GridDeltaResult::Delta;
+    }
+
+    /// The topmost offset whose row still holds valid data — the shallower of the history depth and
+    /// the stable floor.
+    ///
+    /// Both bounds are needed, and neither implies the other: at capacity, scrollDown wraps
+    /// destroyed page rows into the oldest history slots without resetting them, so the floor
+    /// excludes rows historyLineCount() still counts; and a floor below the history is simply an id
+    /// range no row exists for. Every walk over "the rows this grid actually has" starts here, so a
+    /// second caller cannot pick a different top (@see forEachValidLine, renderRange).
+    /// @return The offset to start at; 0 or negative.
+    [[nodiscard]] LineOffset addressableTop() const noexcept
+    {
+        return LineOffset::cast_from(
+            std::max(-unbox<int64_t>(historyLineCount()), _stableFloor - _stableBase));
+    }
+
+    /// Walks every valid line — the whole addressable range, no change filter — for the
+    /// attach/resync snapshot.
+    /// @param callback Invoked as callback(LineOffset, Line const&) per line.
+    template <typename F>
+    void forEachValidLine(F&& callback) const
+    {
+        auto&& report = std::forward<F>(callback);
+        for (auto offset = addressableTop(); offset < boxed_cast<LineOffset>(_pageSize.lines); ++offset)
+            report(offset, lineAt(offset));
+    }
+
+    /// Re-anchors @p cursor to the change stream's current head WITHOUT a scan.
+    /// After an attach/resync snapshot (forEachValidLine reported the whole grid),
+    /// the consumer has seen everything up to now, so its cursor jumps straight to
+    /// the head — running forEachLineChangedSince purely to advance it would walk
+    /// the grid a second time. Self-finalizing exactly like forEachLineChangedSince,
+    /// and lands the cursor on the same {generation, seqno, stableBase} either of
+    /// that method's branches would, so a following delta.seqno read stays consistent.
+    /// @param cursor The consumer's stream position (re-anchored to now).
+    void anchorCursorToHead(GridDeltaCursor& cursor) noexcept
+    {
+        finalizeRevisions();
+        cursor = GridDeltaCursor { .generation = _generation, .seqno = _seqno, .stableBase = _stableBase };
+    }
     // }}}
 
     [[nodiscard]] constexpr LineFlags defaultLineFlags() const noexcept;
@@ -712,7 +919,6 @@ class Grid
 
   private:
     CellLocation growLines(LineCount newHeight, CellLocation cursor);
-    void appendNewLines(LineCount count, GraphicsAttributes attr);
     void clampHistory();
 
     // {{{ buffer helpers
@@ -725,11 +931,109 @@ class Grid
 
     void rezeroBuffers() noexcept { _lines.rezero(); }
 
-    void rotateBuffers(int offset) noexcept { _lines.rotate(offset); }
+    // The ONLY ring-rotation entry points: stable-id accounting lives here so every
+    // scroll/unscroll/grow path keeps row identity by construction. (The former
+    // uncentralized rotateBuffers(int)/appendNewLines paths were dead and are gone —
+    // they would have been silent identity-desync holes.)
 
-    void rotateBuffersLeft(LineCount count) noexcept { _lines.rotate_left(unbox<size_t>(count)); }
+    void rotateBuffersLeft(LineCount count) noexcept
+    {
+        _lines.rotate_left(unbox<size_t>(count));
+        _stableBase += unbox<int64_t>(count);
+        syncStableFloor();
+    }
 
-    void rotateBuffersRight(LineCount count) noexcept { _lines.rotate_right(unbox<size_t>(count)); }
+    void rotateBuffersRight(LineCount count) noexcept
+    {
+        _lines.rotate_right(unbox<size_t>(count));
+        _stableBase -= unbox<int64_t>(count);
+        if (_stableBase < _stableFloor)
+        {
+            if (historyLineCount() == LineCount(0))
+            {
+                // A zero-history grid (the alternate screen): there are no history
+                // slots to hold garbage and no ids were ever issued below the base,
+                // so the newly exposed top rows take strictly-fresh ids with no
+                // collision. Drop the floor to the new base and KEEP the generation,
+                // so a full-page reverse scroll stays an incremental delta instead
+                // of forcing a whole-screen resnapshot to every attached mirror.
+                _stableFloor = _stableBase;
+                return;
+            }
+            // Reverse-scrolling past the addressable history sinks the base below the
+            // floor: the newly exposed top page rows would take ids already issued to
+            // evicted rows, and the floor cannot follow them down without re-validating
+            // garbage slots. Row identity cannot survive this — rebuild it wholesale.
+            // Every history row that was still valid provably lands in the caller's
+            // blanked region, so after the bump the page is the entire valid range.
+            _stableFloor = _stableBase;
+            bumpGeneration(); // re-syncs the floor itself
+            return;
+        }
+        syncStableFloor();
+    }
+
+    /// The count of rows that scrolled out of the page top since stable base @p priorBase,
+    /// clamped to the still-valid history depth (the floor excludes at-capacity-wrapped
+    /// garbage slots). This is the negative-offset span a delta or finalize scan must cover
+    /// so a row written and then scrolled away within one batch is still seen at its new
+    /// offset. Single-sources the boundary math shared by finalizeRevisions() and
+    /// forEachLineChangedSince().
+    [[nodiscard]] int64_t scrolledOutDepthSince(int64_t priorBase) const noexcept
+    {
+        return std::clamp<int64_t>(_stableBase - priorBase, std::int64_t { 0 }, _stableBase - _stableFloor);
+    }
+
+    /// The offset a scan bounded below by the stable id @p floorId must start at.
+    ///
+    /// Clamps the id to the oldest one that still holds valid data, then to the page top: a floor at
+    /// or above the base means "the page only". Single-sources the id→offset conversion the finalize
+    /// and delta scans share, so neither can walk off the addressable range.
+    /// @param floorId The lowest stable id the scan wants to cover.
+    /// @return Its offset, never positive.
+    [[nodiscard]] LineOffset scanTopFor(int64_t floorId) const noexcept
+    {
+        return LineOffset::cast_from(std::min<int64_t>(0, std::max(floorId, _stableFloor) - _stableBase));
+    }
+
+    /// Records that the row at @p line was handed out for writing, so the batch stamping covers it
+    /// even though nothing scrolled it into range. Page rows are always scanned and cost nothing here.
+    /// @param line The offset just handed out mutably.
+    void noteMutableRow(LineOffset line) noexcept
+    {
+        if (line < LineOffset(0))
+            _dirtyHistoryFloor = std::min(_dirtyHistoryFloor, stableLineIdOf(line));
+    }
+
+    /// The row at @p line without the mutable-access bookkeeping — the raw ring index every accessor
+    /// above is built from, and what the scans themselves must use so a finalize pass does not
+    /// re-arm the very floor it is clearing.
+    /// @param line The row offset (negative addresses history).
+    /// @return The row.
+    [[nodiscard]] Line& rowAt(LineOffset line) noexcept { return _lines[unbox<long>(line)]; }
+
+    /// Re-establishes the floor invariant `_stableFloor >= _stableBase - history` after
+    /// anything moved the base or shrank the history. max() keeps it monotonic: eviction
+    /// only ever advances it within a generation.
+    void syncStableFloor() noexcept
+    {
+        _stableFloor = std::max(_stableFloor, _stableBase - unbox<int64_t>(historyLineCount()));
+    }
+
+    /// Destroys stable row identity wholesale (resize/reflow, history-limit change,
+    /// reset): clients observe the change and resync.
+    void bumpGeneration() noexcept
+    {
+        ++_generation;
+        syncStableFloor();
+        // Row identity is gone, so an id-keyed history watermark means nothing now. Consumers
+        // resync on the generation mismatch anyway.
+        _dirtyHistoryFloor = NoHistoryFloor;
+        _changedHistoryFloor = NoHistoryFloor;
+        _changedHistorySeqno = 0;
+        // Re-anchor the finalize scan: the pre-rebuild base delta is meaningless now.
+        _stableBaseAtLastFinalize = _stableBase;
+    }
 
     /// Resets the topmost @p count lines of the main page to blank.
     ///
@@ -749,6 +1053,46 @@ class Grid
     MaxHistoryLineCount _historyLimit;
     Lines _lines;
     LineCount _linesUsed;
+
+    // Stable row identity (see the accessors above): maintained exclusively by the
+    // ring-rotation primitives, syncStableFloor() and bumpGeneration().
+    uint64_t _generation = 0;
+    int64_t _stableBase = 0;  ///< Stable id of page row 0; signed — SD/unscroll push it down.
+    int64_t _stableFloor = 0; ///< Oldest addressable id; monotonic within a generation.
+
+    // Batch stamping (see finalizeRevisions()).
+
+    /// The "no history row involved" value of the two floors below: above every real stable id, so
+    /// a std::min against it is a no-op and no clamping special case is needed.
+    static constexpr int64_t NoHistoryFloor = std::numeric_limits<int64_t>::max();
+
+    /// The lowest stable id announced through changingLineAt() since the last finalize, or
+    /// NoHistoryFloor when no history row was. A scrollback row can be dirtied with nothing
+    /// scrolling at all — Screen's OSC 133 handlers stamp semantic marks on a logical line's HEAD,
+    /// and logicalLineHead() walks up wrapped rows into the history — and such a row lies outside
+    /// the scrolled-out prefix, so without this it would never be stamped and the change would
+    /// never reach a client. Cleared by every finalize.
+    int64_t _dirtyHistoryFloor = NoHistoryFloor;
+
+    /// The lowest history stable id a finalize actually STAMPED, and the seqno it stamped at.
+    /// Sticky within a generation (bumpGeneration clears both): a consumer whose cursor predates
+    /// that seqno has not seen the row and no scroll will bring it into range, so
+    /// forEachLineChangedSince extends its scan down to the floor for that consumer alone. The
+    /// floor is clamped to _stableFloor at use, so eviction bounds how deep the extension can go.
+    /// Never derived from _dirtyHistoryFloor: an announced change that turned out not to change
+    /// anything must not widen every later scan for the rest of the generation.
+    int64_t _changedHistoryFloor = NoHistoryFloor;
+    uint64_t _changedHistorySeqno = 0;
+
+    uint64_t _seqno = 0;                   ///< The single monotonic source revisions draw from.
+    int64_t _stableBaseAtLastFinalize = 0; ///< Bounds the finalize scan to scrolled-out rows.
+                                           ///< Bootstrap: starts at 0 matching _stableBase,
+                                           ///< so before the first finalize, no scrolled-out
+                                           ///< prefix is scanned. New lines are born dirty,
+                                           ///< so they ARE stamped on the first pass — the
+                                           ///< missing prefix scan is harmless by construction.
+                                           ///< Any code that advances _stableBase outside of
+                                           ///< rotateBuffersLeft/Right must update this.
 };
 
 std::ostream& dumpGrid(std::ostream& os, Grid const& grid);

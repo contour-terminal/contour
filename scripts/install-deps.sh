@@ -192,6 +192,7 @@ install_deps_popos() {
         libqt5opengl5-dev
         libqt5x11extras5-dev
         libssh2-1-dev
+        libssl-dev
         libutempter-dev
         libx11-xcb-dev
         libyaml-cpp-dev
@@ -232,6 +233,7 @@ install_deps_ubuntu() {
         libfreetype6-dev
         libharfbuzz-dev
         libssh2-1-dev
+        libssl-dev
         libutempter-dev
         libx11-xcb-dev
         libyaml-cpp-dev
@@ -390,6 +392,7 @@ install_deps_arch() {
         libxcb \
         microsoft-gsl \
         ninja \
+        openssl \
         pkg-config \
         libutempter \
         yaml-cpp \
@@ -435,6 +438,7 @@ install_deps_suse() {
         harfbuzz-devel
         utempter-devel
         libxcb-devel
+        libopenssl-devel
         libssh2-devel
         ncurses-devel
         ninja
@@ -488,6 +492,7 @@ install_deps_fedora() {
         libssh2-devel
         libxcb-devel
         ninja-build
+        openssl-devel
         pkgconf
         libutempter-devel
         yaml-cpp-devel
@@ -539,6 +544,7 @@ install_deps_darwin() {
         freetype \
         harfbuzz \
         libssh2 \
+        openssl \
         pkg-config \
         qt$QTVER \
         yaml-cpp

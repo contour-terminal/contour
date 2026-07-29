@@ -24,7 +24,7 @@
 
 #include <mutex>
 
-#include <vtmux/SessionModel.h>
+#include <vtworkspace/SessionModel.h>
 
 namespace
 {

@@ -9,6 +9,8 @@
 #include <cstddef>
 #include <format>
 #include <ranges>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 using namespace vtbackend;
@@ -1243,6 +1245,76 @@ TEST_CASE("Grid.scrollUp.partialHorizontal.blankLinesMatchingFillAttrsStayBlank"
     CHECK(grid.lineAt(LineOffset(1)).isBlank());
 }
 
+TEST_CASE("Grid.renderRange.trimsTrailingSpacesUnlessAsked", "[grid][capture]")
+{
+    // capture-pane's contract: tmux trims each row at its last non-default cell (grid_line_length)
+    // and keeps the padding only for -J/-N. Rendering the full page width unconditionally handed
+    // every client rows tmux would never emit.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(8) }, false, LineCount(0));
+    grid.setLineText(LineOffset(0), "hi");
+
+    auto const trimmed = grid.renderRange(
+        LineOffset(0), LineOffset(0), CaptureRendition::PlainText, CaptureTrailingSpaces::Trim);
+    REQUIRE(trimmed.size() == 1);
+    CHECK(trimmed.front() == "hi");
+
+    auto const kept = grid.renderRange(
+        LineOffset(0), LineOffset(0), CaptureRendition::PlainText, CaptureTrailingSpaces::Keep);
+    REQUIRE(kept.size() == 1);
+    CHECK(kept.front() == "hi      ");
+
+    // A row that is default cells throughout trims away entirely, exactly as tmux reports it.
+    auto const blank = grid.renderRange(
+        LineOffset(1), LineOffset(1), CaptureRendition::PlainText, CaptureTrailingSpaces::Trim);
+    REQUIRE(blank.size() == 1);
+    CHECK(blank.front().empty());
+}
+
+TEST_CASE("Grid.renderRange.aColouredBlankRowSurvivesTheTrim", "[grid][capture]")
+{
+    // The trim drops DEFAULT cells, not spaces: a region cleared under a coloured pen is something
+    // the application drew, and dropping it would silently erase its colour from `capture-pane -e`.
+    auto grid = Grid(PageSize { LineCount(1), ColumnCount(4) }, false, LineCount(0));
+    auto redBg = GraphicsAttributes {};
+    redBg.backgroundColor = RGBColor { 255, 0, 0 };
+    grid.lineAt(LineOffset(0)).reset(LineFlags {}, redBg);
+
+    auto const captured = grid.renderRange(
+        LineOffset(0), LineOffset(0), CaptureRendition::PlainText, CaptureTrailingSpaces::Trim);
+    REQUIRE(captured.size() == 1);
+    CHECK(captured.front() == "    ");
+}
+
+TEST_CASE("Grid.renderRange.staysAboveTheStableFloor", "[grid][capture][stable-id]")
+{
+    // renderRange must address exactly the rows the daemon's own snapshot walk does. At capacity a
+    // reverse scroll wraps destroyed page rows into the oldest history slots WITHOUT resetting
+    // them, which is why stableRangeFloor() exists — and a capture clamped to -historyLineCount()
+    // returned those slots, so `capture-pane -S -` began with phantom rows no mirror ever held.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(2));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    grid.setLineText(LineOffset(1), "BBBBB");
+    grid.scrollUp(LineCount(2));
+    grid.setLineText(LineOffset(0), "CCCCC");
+    grid.setLineText(LineOffset(1), "DDDDD");
+    grid.scrollUp(LineCount(2));
+    REQUIRE(grid.historyLineCount() == LineCount(2)); // the ring is full
+
+    grid.scrollDown(LineCount(1), GraphicsAttributes {}, fullPageMargin(grid.pageSize()));
+
+    // The floor now sits ABOVE base - historyLineCount(): one history slot holds a destroyed row.
+    auto const floorOffset = grid.stableRangeFloor() - grid.stableLineIdOf(LineOffset(0));
+    REQUIRE(floorOffset > -unbox<int64_t>(grid.historyLineCount()));
+
+    auto valid = 0;
+    grid.forEachValidLine([&](LineOffset, Line const&) { ++valid; });
+    auto const captured = grid.renderRange(-boxed_cast<LineOffset>(grid.historyLineCount()),
+                                           unbox<LineOffset>(grid.pageSize().lines) - LineOffset(1),
+                                           CaptureRendition::PlainText,
+                                           CaptureTrailingSpaces::Keep);
+    CHECK(captured.size() == static_cast<std::size_t>(valid));
+}
+
 TEST_CASE("Grid.reflow.semanticMarksStayOnTheHeadLine", "[grid]")
 {
     // A shell's semantic marks (OSC 133, and Contour's own SETMARK) name the line a prompt starts on and
@@ -1314,4 +1386,488 @@ TEST_CASE("Grid.reflow.semanticMarksStayOnTheHeadLine", "[grid]")
 }
 
 // }}}
+
+// {{{ stable row identity
+TEST_CASE("Grid.stableId.roundTripBelowCapacity", "[grid][stable-id]")
+{
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(5));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    grid.setLineText(LineOffset(1), "BBBBB");
+
+    auto const idA = grid.stableLineIdOf(LineOffset(0));
+    grid.scrollUp(LineCount(1)); // A scrolls into history
+
+    // The id names the same PHYSICAL row across the rotation.
+    auto const offset = grid.lineOffsetOf(idA);
+    REQUIRE(offset.has_value());
+    CHECK(*offset == LineOffset(-1));
+    CHECK(grid.lineText(*offset) == "AAAAA");
+    // Page row 0 is a new physical row: the id space advanced with the scroll.
+    CHECK(grid.stableLineIdOf(LineOffset(0)) == idA + 1);
+}
+
+TEST_CASE("Grid.stableId.evictionAdvancesTheFloorMonotonically", "[grid][stable-id]")
+{
+    // Ring capacity: 2 page + 1 history = 3 slots.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(1));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    auto const idA = grid.stableLineIdOf(LineOffset(0));
+    auto const floorBefore = grid.stableRangeFloor();
+
+    grid.scrollUp(LineCount(1)); // A -> history, still addressable
+    REQUIRE(grid.lineOffsetOf(idA).has_value());
+    CHECK(grid.stableRangeFloor() >= floorBefore);
+
+    grid.scrollUp(LineCount(1)); // ring full: A is evicted
+    CHECK(grid.lineOffsetOf(idA) == std::nullopt);
+    CHECK(grid.stableRangeFloor() > floorBefore);
+}
+
+TEST_CASE("Grid.stableId.scrollDownKeepsRowIdentity", "[grid][stable-id]")
+{
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(5) }, false, LineCount(5));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    auto const idA = grid.stableLineIdOf(LineOffset(0));
+
+    // A full-page scrollDown pushes row A downward: same id, new offset.
+    grid.scrollDown(LineCount(1), GraphicsAttributes {}, fullPageMargin(grid.pageSize()));
+
+    auto const offset = grid.lineOffsetOf(idA);
+    REQUIRE(offset.has_value());
+    CHECK(*offset == LineOffset(1));
+    CHECK(grid.lineText(*offset) == "AAAAA");
+}
+
+TEST_CASE("Grid.stableId.reverseScrollOnZeroHistoryKeepsIdentity", "[grid][stable-id]")
+{
+    // Zero history (the alternate screen's shape): a full-page reverse scroll
+    // sinks the base below the floor, but with no history slots there is no
+    // garbage to re-validate and the exposed top row takes a strictly-fresh id
+    // that was never issued. Row identity survives WITHOUT a generation bump, so
+    // an attached mirror gets an incremental delta, not a whole-screen resnapshot.
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(5) }, false, LineCount(0));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    auto const generationBefore = grid.generation();
+    auto const idA = grid.stableLineIdOf(LineOffset(0));
+
+    grid.scrollDown(LineCount(1), GraphicsAttributes {}, fullPageMargin(grid.pageSize()));
+
+    CHECK(grid.generation() == generationBefore); // no wholesale rebuild
+    CHECK(grid.stableRangeFloor() == grid.stableLineIdOf(LineOffset(0)));
+    CHECK(grid.lineOffsetOf(idA) == LineOffset(1)); // A kept its id, moved down
+    CHECK(grid.lineText(LineOffset(1)) == "AAAAA");
+    for (auto const offset: std::views::iota(0, 3))
+        CHECK(grid.lineOffsetOf(grid.stableLineIdOf(LineOffset(offset))) == LineOffset(offset));
+}
+
+TEST_CASE("Grid.stableId.reverseScrollRebuildsOnlyWhenSinkingBelowTheFloor", "[grid][stable-id]")
+{
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(5) }, false, LineCount(5));
+    grid.scrollUp(LineCount(2)); // two history rows: base 2, floor 0
+    auto const generationBefore = grid.generation();
+
+    // Reverse-scrolling down TO the floor keeps row identity...
+    grid.scrollDown(LineCount(2), GraphicsAttributes {}, fullPageMargin(grid.pageSize()));
+    CHECK(grid.generation() == generationBefore);
+
+    // ...but one more line sinks the base below it: identity is rebuilt wholesale.
+    grid.scrollDown(LineCount(1), GraphicsAttributes {}, fullPageMargin(grid.pageSize()));
+    CHECK(grid.generation() == generationBefore + 1);
+    CHECK(grid.stableRangeFloor() == grid.stableLineIdOf(LineOffset(0)));
+}
+
+TEST_CASE("Grid.stableId.unscrollPullsHistoryRowsBackUnderTheirIds", "[grid][stable-id]")
+{
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(5) }, false, LineCount(5));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    grid.scrollUp(LineCount(1)); // A -> history
+    auto const idA = grid.stableLineIdOf(LineOffset(-1));
+    auto const floorBefore = grid.stableRangeFloor();
+
+    grid.unscroll(LineCount(1), GraphicsAttributes {});
+
+    auto const offset = grid.lineOffsetOf(idA);
+    REQUIRE(offset.has_value());
+    CHECK(*offset == LineOffset(0));
+    CHECK(grid.lineText(*offset) == "AAAAA");
+    CHECK(grid.stableRangeFloor() >= floorBefore); // the floor never regresses
+}
+
+TEST_CASE("Grid.stableId.clearHistoryEvictsAllHistoryIds", "[grid][stable-id]")
+{
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(5));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    grid.scrollUp(LineCount(2));
+    REQUIRE(grid.historyLineCount() == LineCount(2));
+
+    auto const idHistory = grid.stableLineIdOf(LineOffset(-1));
+    auto const idPage = grid.stableLineIdOf(LineOffset(0));
+    auto const generationBefore = grid.generation();
+
+    grid.clearHistory();
+
+    // History ids are evicted via the floor jump; page identity is untouched
+    // and NO generation bump happened (clients drop history without a resend).
+    CHECK(grid.lineOffsetOf(idHistory) == std::nullopt);
+    CHECK(grid.lineOffsetOf(idPage) == LineOffset(0));
+    CHECK(grid.stableRangeFloor() == grid.stableLineIdOf(LineOffset(0)));
+    CHECK(grid.generation() == generationBefore);
+}
+
+TEST_CASE("Grid.generation.bumpsOnlyOnWholesaleRebuilds", "[grid][stable-id]")
+{
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(5));
+    auto const g0 = grid.generation();
+
+    grid.scrollUp(LineCount(1));
+    CHECK(grid.generation() == g0); // scrolling never destroys identity
+
+    grid.clearHistory();
+    CHECK(grid.generation() == g0); // the floor jump suffices
+
+    std::ignore = grid.resize(PageSize { LineCount(2), ColumnCount(6) }, CellLocation {}, false);
+    CHECK(grid.generation() == g0 + 1); // reflow rebuilds the whole ring
+
+    grid.setMaxHistoryLineCount(LineCount(9));
+    CHECK(grid.generation() == g0 + 2);
+
+    grid.reset();
+    CHECK(grid.generation() == g0 + 3);
+}
+// }}}
+
+// {{{ delta queries
+namespace
+{
+/// Drains all pending changes so a test starts from a clean cursor.
+GridDeltaCursor drainedCursor(Grid& grid)
+{
+    auto cursor = GridDeltaCursor {};
+    std::ignore = grid.forEachLineChangedSince(cursor, [](LineOffset, Line const&) {});
+    return cursor;
+}
+
+std::vector<int> changedOffsets(Grid& grid, GridDeltaCursor& cursor)
+{
+    auto out = std::vector<int> {};
+    std::ignore = grid.forEachLineChangedSince(
+        cursor, [&](LineOffset offset, Line const&) { out.push_back(unbox<int>(offset)); });
+    return out;
+}
+} // namespace
+
+TEST_CASE("Grid.delta.bootstrapReportsEveryPageLineThenIdles", "[grid][delta]")
+{
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(5));
+
+    auto cursor = GridDeltaCursor {};
+    CHECK(changedOffsets(grid, cursor) == std::vector { 0, 1 }); // fresh lines are pending
+
+    // Idle idempotence: nothing changed, nothing reported, the seqno holds still.
+    auto const seqnoBefore = grid.seqno();
+    CHECK(changedOffsets(grid, cursor).empty());
+    CHECK(grid.seqno() == seqnoBefore);
+}
+
+TEST_CASE("Grid.delta.onlyTheWrittenLineIsReported", "[grid][delta]")
+{
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(5) }, false, LineCount(5));
+    auto cursor = drainedCursor(grid);
+
+    grid.setLineText(LineOffset(1), "hello");
+
+    CHECK(changedOffsets(grid, cursor) == std::vector { 1 });
+}
+
+TEST_CASE("Grid.delta.scrolledOutRowsReportAtTheirNegativeOffset", "[grid][delta]")
+{
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(5));
+    auto cursor = drainedCursor(grid);
+
+    grid.setLineText(LineOffset(0), "AAAAA");
+    grid.scrollUp(LineCount(1));
+
+    // The written row scrolled to -1 within the same batch and must be stamped
+    // there; the new bottom row is fresh; the untouched middle row (now at 0)
+    // moved by pure rotation -- same id, same content, NOT reported.
+    CHECK(changedOffsets(grid, cursor) == std::vector { -1, 1 });
+}
+
+TEST_CASE("Grid.delta.marginScrollMovedRowsAreReported", "[grid][delta]")
+{
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(5) }, false, LineCount(0));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    grid.setLineText(LineOffset(1), "BBBBB");
+    grid.setLineText(LineOffset(2), "CCCCC");
+    auto cursor = drainedCursor(grid);
+
+    // Scroll region rows 1..2: row 2 moves into row 1 (move assignment dirties
+    // the destination), row 2 is blanked. Row 0 is outside the region.
+    auto const margin =
+        Margin { .vertical = Margin::Vertical { .from = LineOffset(1), .to = LineOffset(2) },
+                 .horizontal = Margin::Horizontal { .from = ColumnOffset(0), .to = ColumnOffset(4) } };
+    std::ignore = grid.scrollUp(LineCount(1), GraphicsAttributes {}, margin);
+
+    CHECK(changedOffsets(grid, cursor) == std::vector { 1, 2 });
+    CHECK(grid.lineText(LineOffset(1)) == "CCCCC");
+}
+
+TEST_CASE("Grid.delta.resizeForcesOneResyncThenDeltas", "[grid][delta]")
+{
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(5));
+    auto cursor = drainedCursor(grid);
+
+    std::ignore = grid.resize(PageSize { LineCount(2), ColumnCount(7) }, CellLocation {}, false);
+
+    auto reported = 0;
+    CHECK(grid.forEachLineChangedSince(cursor, [&](LineOffset, Line const&) { ++reported; })
+          == GridDeltaResult::ResyncRequired);
+    CHECK(reported == 0); // a resync never reports lines; snapshot instead:
+
+    auto snapshot = 0;
+    grid.forEachValidLine([&](LineOffset, Line const&) { ++snapshot; });
+    CHECK(snapshot == 2);
+
+    // The re-anchored cursor resumes plain delta service.
+    CHECK(changedOffsets(grid, cursor).empty());
+    grid.setLineText(LineOffset(0), "after");
+    CHECK(changedOffsets(grid, cursor) == std::vector { 0 });
+}
+
+TEST_CASE("Grid.delta.zeroHistoryReverseScrollStaysIncremental", "[grid][delta]")
+{
+    // The attach-daemon scenario: a client follows the alternate screen (zero
+    // history) and the app reverse-scrolls (RI at the top). With no history slots
+    // the exposed top row takes a strictly-fresh id, so this stays an INCREMENTAL
+    // delta -- only the exposed row reports, not a whole-screen resync to every
+    // mirror. (The clamp is also never handed an inverted range.)
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(5) }, false, LineCount(0));
+    grid.setLineText(LineOffset(1), "MID");
+    auto cursor = drainedCursor(grid);
+    auto const generationBefore = grid.generation();
+
+    grid.scrollDown(LineCount(1), GraphicsAttributes {}, fullPageMargin(grid.pageSize()));
+
+    // No resync (generation held); only the freshly exposed top row reports --
+    // rows that merely shifted down kept their ids, content and revision.
+    auto reported = std::vector<int> {};
+    CHECK(grid.forEachLineChangedSince(cursor, [&](LineOffset offset, Line const&) {
+        reported.push_back(unbox<int>(offset));
+    }) == GridDeltaResult::Delta);
+    CHECK(grid.generation() == generationBefore);
+    CHECK(reported == std::vector { 0 });
+
+    // The whole page stays addressable, and plain delta service continues.
+    auto offsets = std::vector<int> {};
+    grid.forEachValidLine([&](LineOffset offset, Line const&) { offsets.push_back(unbox<int>(offset)); });
+    CHECK(offsets == std::vector { 0, 1, 2 });
+    CHECK(changedOffsets(grid, cursor).empty());
+    grid.setLineText(LineOffset(2), "after");
+    CHECK(changedOffsets(grid, cursor) == std::vector { 2 });
+}
+
+TEST_CASE("Grid.delta.clearHistoryNeedsNoResend", "[grid][delta]")
+{
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(5));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    grid.scrollUp(LineCount(2));
+    auto cursor = drainedCursor(grid);
+
+    grid.clearHistory();
+
+    // The floor jump evicted the history ids; nothing was rewritten, so the
+    // delta stream stays silent -- clients just drop their history.
+    CHECK(changedOffsets(grid, cursor).empty());
+}
+// }}}
+
 // NOLINTEND(misc-const-correctness)
+
+TEST_CASE("Grid.delta.aHistoryRowDirtiedInPlaceIsReported", "[grid][delta]")
+{
+    // A scrollback row can be dirtied with NOTHING scrolling: Screen's OSC 133 handlers stamp the
+    // semantic marks on a logical line's HEAD, and logicalLineHead() walks up wrapped rows all the
+    // way into the history. Such a row lies outside the scrolled-out prefix the scans covered, so
+    // it was neither stamped nor reported — the attached client's mirror kept the previous
+    // PromptEnd/CommandEnd flags for that logical line forever, and every feature built on them
+    // (copy-last-command-output, prompt-aware selection) selected the wrong range client-side while
+    // working correctly on the daemon.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(5));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    grid.setLineText(LineOffset(1), "BBBBB");
+    grid.scrollUp(LineCount(2)); // both rows now live at -2 and -1
+    auto cursor = drainedCursor(grid);
+    REQUIRE(changedOffsets(grid, cursor).empty());
+
+    // Mark the deepest history row, exactly as OSC 133;B does on a wrapped prompt's head.
+    grid.changingLineAt(LineOffset(-2)).setFlag(LineFlag::PromptEnd, true);
+
+    CHECK(changedOffsets(grid, cursor) == std::vector { -2 });
+    // ...and it settles again: the extension is not a permanent widening of the scan.
+    CHECK(changedOffsets(grid, cursor).empty());
+}
+
+TEST_CASE("Grid.delta.aHistoryRowChangeReachesALaggingConsumer", "[grid][delta]")
+{
+    // Two consumers (two attached clients) share one grid, and either one's pump finalizes for
+    // both. A consumer that missed the batch the history row was stamped in must still be told —
+    // its own scrolled-out prefix is empty, so nothing else would ever bring the row into range.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(5));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    grid.scrollUp(LineCount(1));
+    auto fast = drainedCursor(grid);
+    auto slow = drainedCursor(grid);
+
+    grid.changingLineAt(LineOffset(-1)).setPromptEndOffset(ColumnOffset(3));
+    CHECK(changedOffsets(grid, fast) == std::vector { -1 });
+
+    // The slow consumer polls only now, a batch later, and must see the same row.
+    grid.setLineText(LineOffset(1), "later");
+    CHECK(changedOffsets(grid, slow) == std::vector { -1, 1 });
+}
+
+TEST_CASE("Grid.delta.readingTheScrollbackDoesNotWidenTheScan", "[grid][delta]")
+{
+    // The extension is armed by changingLineAt and by nothing else — deliberately NOT by picking
+    // the non-const lineAt overload, because which overload a caller lands on follows the constness
+    // of the enclosing FUNCTION: Screen::captureBuffer walks the whole scrollback from a non-const
+    // method, and that read would otherwise pin every later delta scan at the top of the history.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(5));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    grid.setLineText(LineOffset(1), "BBBBB");
+    grid.scrollUp(LineCount(2));
+    auto cursor = drainedCursor(grid);
+
+    CHECK(grid.lineText(LineOffset(-2)) == "AAAAA");
+    std::ignore = grid.lineAt(LineOffset(-2)).isBlank(); // the MUTABLE overload, from a read
+    std::ignore = grid.at(LineOffset(-2), ColumnOffset(0));
+
+    CHECK(changedOffsets(grid, cursor).empty());
+}
+
+TEST_CASE("Grid.delta.aGenerationBumpForgetsTheHistoryWatermark", "[grid][delta]")
+{
+    // The watermark is keyed by stable id, and a generation bump destroys row identity wholesale.
+    // Keeping it would point the scan at ids that no longer mean anything.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(5));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    grid.scrollUp(LineCount(1));
+    auto cursor = drainedCursor(grid);
+    grid.changingLineAt(LineOffset(-1)).setFlag(LineFlag::CommandEnd, true);
+
+    std::ignore = grid.resize(PageSize { LineCount(2), ColumnCount(7) }, CellLocation {}, false);
+    CHECK(grid.forEachLineChangedSince(cursor, [](LineOffset, Line const&) {})
+          == GridDeltaResult::ResyncRequired);
+    // The re-anchored cursor resumes plain, un-widened delta service.
+    CHECK(changedOffsets(grid, cursor).empty());
+}
+
+TEST_CASE("Grid.delta.reflowShrinkKeepsItsNewHistoryAddressable", "[grid][delta]")
+{
+    // The reflow-shrink path rebuilds the whole ring and GROWS the history. Rotating the local
+    // vector instead of going through rotateBuffersLeft left _stableBase where it was, and
+    // syncStableFloor()'s max() can only RAISE the floor, never lower one — so every row reflow had
+    // just created sat below _stableFloor and forEachValidLine() began its walk above them. A client
+    // attaching after a narrowing resize received a grid with no scrollback at all, though the
+    // daemon still held the rows and capture-pane would happily return them.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(6) }, true, LineCount(10));
+    // A fresh grid: base 0, floor 0, no history — precisely the state whose max() cannot recover.
+    REQUIRE(grid.historyLineCount() == LineCount(0));
+    REQUIRE(grid.stableRangeFloor() == grid.stableLineIdOf(LineOffset(0)));
+
+    grid.setLineText(LineOffset(0), "ABCDEF");
+    grid.setLineText(LineOffset(1), "GHIJKL");
+    grid.lineAt(LineOffset(0)).setWrappable(true);
+    grid.lineAt(LineOffset(1)).setWrappable(true);
+
+    // Narrow to three columns: each six-column row reflows into two, so two rows are pushed into
+    // history and the page keeps the last two.
+    std::ignore = grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, false);
+    REQUIRE(grid.historyLineCount() == LineCount(2));
+
+    // The floor must have followed the base down, or the rows below it are unaddressable.
+    CHECK(grid.stableRangeFloor()
+          == grid.stableLineIdOf(LineOffset(0)) - unbox<int64_t>(grid.historyLineCount()));
+
+    // The snapshot every attaching client and every ResyncRequired takes must report them.
+    auto reported = std::vector<int> {};
+    grid.forEachValidLine([&](LineOffset offset, Line const&) { reported.push_back(unbox<int>(offset)); });
+    CHECK(reported == std::vector { -2, -1, 0, 1 });
+
+    // And the rows are the reflowed content, not blanks.
+    CHECK(grid.lineText(LineOffset(-2)) == "ABC");
+    CHECK(grid.lineText(LineOffset(-1)) == "DEF");
+    CHECK(grid.lineText(LineOffset(0)) == "GHI");
+    CHECK(grid.lineText(LineOffset(1)) == "JKL");
+
+    // Every id in the reported range resolves back to the offset it was reported at.
+    for (auto const offset: reported)
+        CHECK(grid.lineOffsetOf(grid.stableLineIdOf(LineOffset::cast_from(offset)))
+              == LineOffset::cast_from(offset));
+}
+
+TEST_CASE("Grid.delta.reflowShrinkOverExistingHistoryStaysAddressable", "[grid][delta]")
+{
+    // The same, starting from a grid that ALREADY has history and a base above zero — the state a
+    // long-lived session is in when the user narrows the window.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(6) }, true, LineCount(10));
+    for (auto const row: std::views::iota(0, 4))
+    {
+        grid.setLineText(LineOffset(1), std::format("{}23456", row));
+        grid.lineAt(LineOffset(1)).setWrappable(true);
+        grid.scrollUp(LineCount(1));
+    }
+    REQUIRE(grid.historyLineCount() > LineCount(0));
+
+    std::ignore = grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, false);
+
+    CHECK(grid.stableRangeFloor()
+          == grid.stableLineIdOf(LineOffset(0)) - unbox<int64_t>(grid.historyLineCount()));
+    auto reported = 0;
+    grid.forEachValidLine([&](LineOffset, Line const&) { ++reported; });
+    CHECK(reported == unbox<int>(grid.historyLineCount()) + unbox<int>(grid.pageSize().lines));
+}
+
+TEST_CASE("Grid.delta.aScrollTheFastPathSkippedReportsNothing", "[grid][delta][blank]")
+{
+    // The partial-horizontal scroll's no-op fast path decides that a row needs no write at all, so
+    // it must not stamp the row it declines to touch. Reading the target through the MUTABLE
+    // Line::storage() overload — which dirties pessimistically — re-shipped a provably unchanged
+    // WireLine to every attached client, once per skipped row per scroll, on the hottest path in
+    // the emulator. std::as_const picks the const overload and costs nothing.
+    auto grid = Grid(PageSize { LineCount(4), ColumnCount(10) }, true, LineCount(0));
+    auto attrs = GraphicsAttributes {};
+    attrs.backgroundColor = RGBColor { 128, 128, 128 };
+    grid.lineAt(LineOffset(1)).reset(LineFlags {}, attrs);
+    grid.lineAt(LineOffset(2)).reset(LineFlags {}, attrs);
+    auto cursor = drainedCursor(grid);
+
+    auto const margin =
+        Margin { .vertical = Margin::Vertical { .from = LineOffset(1), .to = LineOffset(2) },
+                 .horizontal = Margin::Horizontal { .from = ColumnOffset(2), .to = ColumnOffset(7) } };
+    std::ignore = grid.scrollUp(LineCount(1), attrs, margin);
+    CHECK(changedOffsets(grid, cursor).empty());
+
+    grid.scrollDown(LineCount(1), attrs, margin); // the same shape, mirrored
+    CHECK(changedOffsets(grid, cursor).empty());
+}
+
+TEST_CASE("Grid.delta.growColumnsKeepsItsHistoryAddressable", "[grid][delta]")
+{
+    // The symmetric case, which always worked — pinned so the two reflow paths cannot drift apart
+    // again.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(3) }, true, LineCount(10));
+    grid.setLineText(LineOffset(0), "ABC");
+    grid.setLineText(LineOffset(1), "DEF");
+    grid.lineAt(LineOffset(0)).setWrappable(true);
+    grid.lineAt(LineOffset(1)).setWrappable(true);
+    grid.scrollUp(LineCount(1));
+
+    std::ignore = grid.resize(PageSize { LineCount(2), ColumnCount(6) }, CellLocation {}, false);
+
+    CHECK(grid.stableRangeFloor()
+          == grid.stableLineIdOf(LineOffset(0)) - unbox<int64_t>(grid.historyLineCount()));
+    auto reported = 0;
+    grid.forEachValidLine([&](LineOffset, Line const&) { ++reported; });
+    CHECK(reported == unbox<int>(grid.historyLineCount()) + unbox<int>(grid.pageSize().lines));
+}

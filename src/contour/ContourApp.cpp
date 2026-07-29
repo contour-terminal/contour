@@ -13,6 +13,7 @@
 #include <crispy/CLI.h>
 #include <crispy/StackTrace.h>
 #include <crispy/base64.h>
+#include <crispy/logsink.h>
 #include <crispy/utils.h>
 
 #include <QtCore/QFile>
@@ -27,6 +28,11 @@
 #include <iostream>
 #include <memory>
 #include <utility>
+
+#include <vthost/Daemon.h>
+#include <vthost/ServiceControl.h>
+#include <vthost/SocketPath.h>
+#include <vthost/Token.h>
 
 #ifndef _WIN32
     #include <sys/ioctl.h>
@@ -116,6 +122,106 @@ namespace
         abort();
     }
 #endif
+    /// One row per `contour daemon-service` verb: its CLI name, its help text, and what it does.
+    ///
+    /// The table is the definition — the command list, the handler registration and the dispatch all
+    /// read it, so a seventh verb is a row here rather than an edit in three places.
+    struct DaemonServiceVerb
+    {
+        std::string_view name;
+        std::string_view helpText;
+        contour::DaemonServiceAction action;
+    };
+
+    constexpr auto DaemonServiceVerbs = std::array {
+        // Only `install` carries the experimental marker: a parent command with children renders
+        // THEIR help rather than its own, so marking `daemon-service` itself would say it to
+        // nobody -- and install is the verb that opts a machine in, where it is worth saying.
+        DaemonServiceVerb { "install",
+                            "(experimental) Registers the daemon so it starts on its own (see "
+                            "--start).",
+                            contour::DaemonServiceAction::Install },
+        DaemonServiceVerb { "uninstall",
+                            "Stops the daemon and removes its registration.",
+                            contour::DaemonServiceAction::Uninstall },
+        DaemonServiceVerb { "start",
+                            "Starts the registered daemon now, without waiting for its trigger.",
+                            contour::DaemonServiceAction::Start },
+        DaemonServiceVerb {
+            "stop", "Stops the running daemon, leaving it registered.", contour::DaemonServiceAction::Stop },
+        DaemonServiceVerb {
+            "restart", "Stops it and starts it again.", contour::DaemonServiceAction::Restart },
+        DaemonServiceVerb { "status",
+                            "Reports whether it is registered and running, and what it runs.",
+                            contour::DaemonServiceAction::Status },
+    };
+
+    /// The option set each `daemon-service` verb carries.
+    ///
+    /// Mounted on every verb rather than on their shared parent because crispy's parser resolves
+    /// an option against the CURRENT command only — so `daemon-service install --label x` could
+    /// not see a `--label` declared one level up, and the natural argument order would be the one
+    /// that fails. Built once here so the spellings and help texts still have a single home.
+    /// @param full Whether to include the options only `install` needs.
+    /// @return The option list.
+    [[nodiscard]] crispy::cli::option_list daemonServiceOptions(bool full)
+    {
+        namespace CLI = crispy::cli;
+
+        auto options = CLI::option_list {
+            CLI::option { "label", CLI::value { "default"s }, "Socket label the daemon serves.", "NAME" },
+        };
+        if (!full)
+            return options;
+
+        options.emplace_back(CLI::option { "socket",
+                                           CLI::value { ""s },
+                                           "Control socket path. Resolved to an absolute path at "
+                                           "install time, since a registration outlives this shell.",
+                                           "PATH" });
+        options.emplace_back(CLI::option { "start",
+                                           CLI::value { "logon"s },
+                                           "When the daemon starts: `logon` (a Scheduled Task "
+                                           "triggered by your logon, running as you, needing no "
+                                           "elevation and no password — the default), `boot` or "
+                                           "`manual` (an SCM service; not implemented yet, since a "
+                                           "service under a named account needs its password).",
+                                           "MODE" });
+        options.emplace_back(CLI::option { "config",
+                                           CLI::value { ""s },
+                                           "Configuration file the hosted sessions' terminal "
+                                           "settings come from.",
+                                           "FILE" });
+        options.emplace_back(CLI::option {
+            "profile", CLI::value { ""s }, "Config profile those settings come from.", "NAME" });
+        options.emplace_back(CLI::option { "size-policy",
+                                           CLI::value { "latest"s },
+                                           "Which attached client's size the shared grid takes: "
+                                           "`latest`, `smallest` or `largest`.",
+                                           "POLICY" });
+        options.emplace_back(
+            CLI::option { "log", CLI::value { ""s }, "Log tag filter for the installed daemon.", "TAGS" });
+        options.emplace_back(CLI::option { "log-file",
+                                           CLI::value { ""s },
+                                           "Where the installed daemon logs. Defaults to SOCKET.log, "
+                                           "because a detached daemon has no console to write to.",
+                                           "FILE" });
+        return options;
+    }
+
+    /// Builds the `daemon-service` sub-verbs from @ref DaemonServiceVerbs.
+    /// @return One command per verb, each carrying the options it needs.
+    [[nodiscard]] crispy::cli::command_list daemonServiceCommands()
+    {
+        auto commands = crispy::cli::command_list {};
+        for (auto const& verb: DaemonServiceVerbs)
+            commands.emplace_back(crispy::cli::command {
+                .name = verb.name,
+                .helpText = verb.helpText,
+                .options = daemonServiceOptions(verb.action == contour::DaemonServiceAction::Install) });
+        return commands;
+    }
+
 } // namespace
 // }}}
 
@@ -173,6 +279,17 @@ ContourApp::ContourApp(): app("contour", "Contour Terminal Emulator", CONTOUR_VE
     link("contour.documentation.configuration.global", bind(&ContourApp::documentationGlobalConfig, this));
     link("contour.documentation.configuration.profile", bind(&ContourApp::documentationProfileConfig, this));
     link("contour.cat", bind(&ContourApp::catAction, this));
+    link("contour.daemon", bind(&ContourApp::daemonAction, this));
+    // One handler per verb rather than one that switches: crispy::app dispatches on the first
+    // true flag, so the verb IS the dispatch.
+    for (auto const& verb: DaemonServiceVerbs)
+    {
+        // The flag prefix is captured rather than rediscovered: deriving it inside the handler
+        // meant indexing the verb table by the enum's value, which silently breaks the day the
+        // two fall out of order.
+        auto prefix = std::format("contour.daemon-service.{}", verb.name);
+        link(prefix, [this, action = verb.action, prefix] { return daemonServiceAction(action, prefix); });
+    }
 }
 
 template <typename Callback>
@@ -549,7 +666,297 @@ namespace
         cout << ST;
         cout.flush();
     }
+
 } // namespace
+
+int ContourApp::daemonAction()
+{
+    // Logging is installed FIRST, so every diagnostic below — socket binds, TLS setup — is
+    // captured. The app owns it, so it outlives runDaemon (categories hold a reference into its
+    // sink) and every thread runDaemon spawns has been joined by the time it returns.
+    if (auto const installed = installLogging("contour.daemon", /*showProcessId=*/true); !installed)
+    {
+        cerr << std::format("contour daemon: {}\n", installed.error());
+        return EXIT_FAILURE;
+    }
+
+    auto config = vthost::DaemonConfig {};
+    config.socketPath = vthost::muxSocketPath(parameters().get<string>("contour.daemon.label"),
+                                              parameters().get<string>("contour.daemon.socket"));
+
+    // The hosted terminals' emulation settings. The profile's `history.limit` is
+    // load-bearing here rather than cosmetic -- @see vthost::DefaultSessionHistoryLineCount.
+    auto const settings =
+        config::resolveEmulationSettings(parameters().get<string>("contour.daemon.config"),
+                                         parameters().get<string>("contour.daemon.profile"));
+    if (!settings)
+    {
+        cerr << std::format("contour daemon: {}\n", settings.error());
+        return EXIT_FAILURE;
+    }
+    config.settings = *settings;
+
+    auto const shellCommand = vtpty::Process::loginShell(/*escapeSandbox=*/false);
+    config.shell.program = shellCommand.front();
+    config.shell.arguments.assign(std::next(shellCommand.begin()), shellCommand.end());
+    config.shell.workingDirectory = vtpty::Process::homeDirectory();
+
+    if (auto label = parameters().get<string>("contour.daemon.tmux-compat-socket"); !label.empty())
+        config.tmuxCompatLabel = std::move(label);
+
+    if (parameters().get<bool>("contour.daemon.exit-with-last-session"))
+        config.lifecycle = vthost::DaemonLifecycle::ExitWhenEmpty;
+
+    // Rejected rather than defaulted: silently serving `latest` to someone who asked for
+    // `smallest` would look like the feature does not work.
+    auto const sizePolicy = parameters().get<string>("contour.daemon.size-policy");
+    if (auto const policy = vthost::clientSizePolicyFrom(sizePolicy))
+        config.sizePolicy = *policy;
+    else
+    {
+        cerr << std::format("contour daemon: unknown --size-policy '{}' (expected one of: {})\n",
+                            sizePolicy,
+                            crispy::joinHumanReadable(vthost::ClientSizePolicyNames | std::views::keys));
+        return EXIT_FAILURE;
+    }
+
+    // Opt-in TCP listener: absent unless --listen-tcp is given; always TLS-encrypted
+    // (self-signed when no cert/key), token-authenticated, loopback-bound unless the
+    // host part says otherwise.
+    if (auto const listen = parameters().get<string>("contour.daemon.listen-tcp"); !listen.empty())
+    {
+        auto const hostPort = vthost::parseHostPort(listen);
+        if (!hostPort)
+        {
+            cerr << std::format("contour daemon: invalid --listen-tcp '{}' (expected HOST:PORT)\n", listen);
+            return EXIT_FAILURE;
+        }
+
+        auto token = vthost::resolveToken(parameters().get<string>("contour.daemon.token"),
+                                          parameters().get<string>("contour.daemon.token-file"));
+        if (!token)
+        {
+            cerr << std::format("contour daemon: {}\n", token.error());
+            return EXIT_FAILURE;
+        }
+        // A token is REQUIRED here, not merely supported. On the unix socket the filesystem
+        // permissions are the gate; TCP has no such gate, so serving it without a token would
+        // hand a full shell to anyone who can reach the port. Refusing to start is the only safe
+        // reading of `--listen-tcp` with no credential — a warning would be dismissed once and
+        // then run that way forever.
+        if (token->empty())
+        {
+            cerr << "contour daemon: --listen-tcp requires --token or --token-file; the TCP "
+                    "transport has no filesystem permissions to fall back on.\n";
+            return EXIT_FAILURE;
+        }
+
+        config.nativeTcp = vthost::NativeTcpListenerConfig {
+            .host = hostPort->first,
+            .port = hostPort->second,
+            .token = *std::move(token),
+            .tlsCertPath = parameters().get<string>("contour.daemon.tls-cert"),
+            .tlsKeyPath = parameters().get<string>("contour.daemon.tls-key"),
+        };
+    }
+
+    // Everything above has validated the configuration, so a typo is reported by THIS process
+    // rather than killing a child whose stderr nobody is reading. Only now is it safe to hand
+    // the work to a detached copy of ourselves.
+    if (parameters().get<bool>("contour.daemon.background"))
+        return runDaemonInBackground(config.socketPath);
+
+    return vthost::runDaemon(config);
+}
+
+int ContourApp::runDaemonInBackground(std::filesystem::path const& socketPath)
+{
+    // Our own tokens replayed verbatim — rebuilding the child's command line from parsed flags
+    // would silently drop every option someone forgets to add to the rebuilder.
+    auto childArgs = commandLine();
+
+    // The flag that brought us here is OVERRIDDEN rather than filtered out of them, because a token
+    // filter cannot recognize all of its spellings and gets it wrong in both directions.
+    // crispy::cli accepts `--background`, `-background` and the bare `background` (its natural
+    // style), each optionally followed by an explicit value in either the `=VALUE` or the
+    // separate-token form. A surviving token makes the child spawn ANOTHER detached child, which
+    // spawns another — a slow fork bomb, each generation additionally polling for readiness — while
+    // dropping only the flag of `--background true` leaves the orphaned `true` for the parser to
+    // reject, and the user is told the daemon did not start with no cause given. Options are
+    // last-one-wins (@see crispy::cli's setOption, which overwrites), so stating it once more at the
+    // end settles it whatever the user wrote.
+    childArgs.emplace_back("--background=false"); // the child runs in ITS foreground, or nothing binds
+
+    // A detached process has no console, so its standard error goes nowhere: without a log file
+    // the backgrounded daemon becomes the one instance nobody can diagnose. Derived rather than
+    // required, so the common case needs no second flag.
+    auto logFile = parameters().get<string>("contour.daemon.log-file");
+    if (logFile.empty())
+    {
+        logFile = vthost::daemonLogPath(socketPath).string();
+        childArgs.push_back(std::format("--log-file={}", logFile));
+    }
+
+    if (vthost::runDaemonDetached(std::move(childArgs), socketPath) != EXIT_SUCCESS)
+    {
+        cerr << std::format("contour daemon: the background daemon did not start; see {}\n", logFile);
+        return EXIT_FAILURE;
+    }
+
+    cout << std::format("contour daemon: serving on {} (logging to {})\n", socketPath.string(), logFile);
+    return EXIT_SUCCESS;
+}
+
+int ContourApp::daemonServiceAction(DaemonServiceAction action, std::string const& prefix)
+{
+    auto const label = parameters().get<string>(prefix + ".label");
+
+    auto const mode = [&]() -> std::optional<vthost::ServiceStartMode> {
+        // Only `install` chooses a backend; every other verb must address whatever is already
+        // registered, so it asks each backend in turn rather than guessing.
+        if (action != DaemonServiceAction::Install)
+            return std::nullopt;
+        return vthost::serviceStartModeFrom(parameters().get<string>(prefix + ".start"));
+    }();
+
+    if (action == DaemonServiceAction::Install && !mode)
+    {
+        cerr << std::format("contour daemon-service: unknown --start '{}' (expected one of: {})\n",
+                            parameters().get<string>(prefix + ".start"),
+                            crispy::joinHumanReadable(vthost::ServiceStartModeNames | std::views::keys));
+        return EXIT_FAILURE;
+    }
+
+    auto const name = vthost::serviceNameForLabel(label);
+
+    // For a non-install verb the registration decides which backend owns it: `status` on a
+    // logon task must not report "not installed" merely because it asked the SCM.
+    auto backend = std::unique_ptr<vthost::ServiceBackend> {};
+    if (mode)
+        backend = vthost::makeServiceBackend(*mode, name);
+    else
+    {
+        for (auto const& [_, candidate]: vthost::ServiceStartModeNames)
+        {
+            auto probe = vthost::makeServiceBackend(candidate, name);
+            if (auto const found = probe->status();
+                found && found->state != vthost::ServiceRunState::NotInstalled)
+            {
+                backend = std::move(probe);
+                break;
+            }
+        }
+        if (!backend)
+        {
+            cerr << std::format("contour daemon-service: no registration named '{}'; run "
+                                "'contour daemon-service install' first\n",
+                                name);
+            return EXIT_FAILURE;
+        }
+    }
+
+    auto const report = [&](std::expected<void, vthost::ServiceError> const& result, std::string_view verb) {
+        if (result)
+        {
+            cout << std::format("contour daemon-service: {} {}\n", name, verb);
+            return EXIT_SUCCESS;
+        }
+        cerr << std::format(
+            "contour daemon-service: could not {} {}: {}\n", verb, name, result.error().toString());
+        return EXIT_FAILURE;
+    };
+
+    switch (action)
+    {
+        case DaemonServiceAction::Install: {
+            auto commandLineOrError = daemonServiceCommandLine(prefix, label);
+            if (!commandLineOrError)
+            {
+                cerr << std::format("contour daemon-service: {}\n", commandLineOrError.error());
+                return EXIT_FAILURE;
+            }
+            auto request = vthost::ServiceInstallRequest {
+                .commandLine = *std::move(commandLineOrError),
+                .mode = *mode,
+                .displayName = std::format("Contour daemon ({})", label),
+                .description = "Hosts Contour terminal sessions so they outlive any window "
+                               "showing them.",
+            };
+            if (auto const installed = backend->install(request); !installed)
+            {
+                cerr << std::format(
+                    "contour daemon-service: could not install {}: {}\n", name, installed.error().toString());
+                return EXIT_FAILURE;
+            }
+            cout << std::format(
+                "contour daemon-service: {} installed, starting at {}\n", name, vthost::nameOf(*mode));
+            return EXIT_SUCCESS;
+        }
+        case DaemonServiceAction::Uninstall: return report(backend->uninstall(), "uninstalled");
+        case DaemonServiceAction::Start: return report(backend->start(), "started");
+        case DaemonServiceAction::Stop: return report(backend->stop(), "stopped");
+        case DaemonServiceAction::Restart:
+            // A stop that finds nothing running is not a failure here: restart's contract is
+            // "be running afterwards", which a stopped registration already satisfies halfway.
+            std::ignore = backend->stop();
+            return report(backend->start(), "restarted");
+        case DaemonServiceAction::Status: {
+            auto const status = backend->status();
+            if (!status)
+            {
+                cerr << std::format(
+                    "contour daemon-service: could not query {}: {}\n", name, status.error().toString());
+                return EXIT_FAILURE;
+            }
+            cout << std::format(
+                "{}: {} (starts at {})\n", name, vthost::nameOf(status->state), vthost::nameOf(status->mode));
+            if (!status->commandLine.empty())
+                cout << std::format("  runs: {}\n", status->commandLine);
+            return EXIT_SUCCESS;
+        }
+    }
+    return EXIT_FAILURE;
+}
+
+std::expected<std::vector<std::string>, std::string> ContourApp::daemonServiceCommandLine(
+    std::string const& prefix, std::string const& label) const
+{
+    // Absolute, and resolved NOW: a registration outlives the shell that created it, and a
+    // service's %TEMP%/%USERNAME% need not match the interactive user's — so a path left to be
+    // derived at start time would resolve somewhere the user's own client never looks.
+    auto const socketPath = vthost::muxSocketPath(label, parameters().get<string>(prefix + ".socket"));
+
+    auto const sizePolicyText = parameters().get<string>(prefix + ".size-policy");
+    auto const sizePolicy = vthost::clientSizePolicyFrom(sizePolicyText);
+    if (!sizePolicy)
+    {
+        // Caught here rather than by the installed daemon: a rejected value would otherwise kill
+        // a process started by the OS, whose stderr nobody is watching.
+        return std::unexpected(
+            std::format("unknown --size-policy '{}' (expected one of: {})",
+                        sizePolicyText,
+                        crispy::joinHumanReadable(vthost::ClientSizePolicyNames | std::views::keys)));
+    }
+
+    auto logFile = parameters().get<string>(prefix + ".log-file");
+    if (logFile.empty())
+        logFile = vthost::daemonLogPath(socketPath).string();
+
+    // Through daemonSpawnArgs, which is already the ONE spelling of this flag list — the client's
+    // auto-spawn builds its command line the same way, so a daemon option cannot end up forwarded
+    // by one path and silently dropped by the other. Persistent, not ExitWhenEmpty: an installed
+    // daemon exists precisely to still be there for the next client.
+    return vthost::daemonSpawnArgs(std::filesystem::absolute(commandLine().front()).string(),
+                                   socketPath,
+                                   vthost::DaemonSpawnOptions {
+                                       .filter = parameters().get<string>(prefix + ".log"),
+                                       .logFile = std::move(logFile),
+                                       .configPath = parameters().get<string>(prefix + ".config"),
+                                       .profileName = parameters().get<string>(prefix + ".profile"),
+                                       .sizePolicy = *sizePolicy,
+                                   },
+                                   vthost::DaemonLifecycle::Persistent);
+}
 
 int ContourApp::catAction()
 {
@@ -711,6 +1118,107 @@ crispy::cli::command ContourApp::parameterDefinition() const
                 CLI::verbatim {
                     "IMAGE_FILE",
                     "Path to image to be displayed. Image formats supported are at least PNG, JPG." } },
+            CLI::command { "daemon-service",
+                           "Installs, removes and controls an OS-managed Contour daemon that starts on its "
+                           "own. A sibling verb rather than `daemon service` because options bind to the "
+                           "command they follow, and the daemon verb already owns its own set.",
+                           CLI::option_list {},
+                           daemonServiceCommands() },
+            CLI::command {
+                "daemon",
+                "(experimental) Runs the headless terminal multiplexer daemon, serving sessions "
+                "to attaching clients over a control socket. Its options and wire protocol may "
+                "still change between releases.",
+                CLI::option_list {
+                    CLI::option { "socket",
+                                  CLI::value { ""s },
+                                  "Path of the control socket file. Defaults to "
+                                  "$XDG_RUNTIME_DIR/contour/LABEL (respecting $CONTOUR_MUX).",
+                                  "PATH" },
+                    CLI::option { "label",
+                                  CLI::value { "default"s },
+                                  "Socket label distinguishing daemon instances.",
+                                  "NAME" },
+                    CLI::option { "config",
+                                  CLI::value { ""s },
+                                  "Path to the configuration file whose profile supplies the "
+                                  "hosted sessions' terminal settings (history depth, terminal "
+                                  "id, reflow, image limits).",
+                                  "FILE" },
+                    CLI::option { "profile",
+                                  CLI::value { ""s },
+                                  "Config profile the hosted sessions' terminal settings come "
+                                  "from. Defaults to the configuration's default profile.",
+                                  "NAME" },
+                    CLI::option { "background",
+                                  CLI::value { false },
+                                  "Relaunches this command detached and returns once the daemon "
+                                  "is accepting connections, instead of holding the terminal. "
+                                  "Without --log-file the detached daemon logs beside its socket "
+                                  "(SOCKET.log), since a detached process has no console to write "
+                                  "its diagnostics to." },
+                    CLI::option { "exit-with-last-session",
+                                  CLI::value { false },
+                                  "Terminates the daemon once its last hosted session is gone "
+                                  "instead of waiting for further clients (tmux spells this "
+                                  "`exit-empty`). Off by default, so a daemon started by hand "
+                                  "keeps serving with no sessions; `contour client` passes this "
+                                  "to a daemon it auto-spawns, which belongs to that client." },
+                    CLI::option { "size-policy",
+                                  CLI::value { "latest"s },
+                                  "Which attached client's size the shared grid takes when several "
+                                  "clients of different sizes are attached: `latest` (the client "
+                                  "that resized most recently, the default), `smallest` (the "
+                                  "largest grid every client can fully display) or `largest` (the "
+                                  "union, which smaller clients pan). Mirrors tmux's `window-size`.",
+                                  "POLICY" },
+                    CLI::option { "tmux-compat-socket",
+                                  CLI::value { ""s },
+                                  "Additionally binds tmux's own discovery path "
+                                  "/tmp/tmux-<uid>/<LABEL> so a plain `tmux -L LABEL -C "
+                                  "attach-session` finds this daemon.",
+                                  "LABEL" },
+                    CLI::option { "listen-tcp",
+                                  CLI::value { ""s },
+                                  "Also serve the native protocol over TCP at HOST:PORT "
+                                  "(opt-in; loopback e.g. 127.0.0.1:9090 by default). Always "
+                                  "TLS-encrypted and token-authenticated.",
+                                  "HOST:PORT" },
+                    CLI::option { "token",
+                                  CLI::value { ""s },
+                                  "Preshared token every TCP client must present; required with "
+                                  "--listen-tcp, which has no filesystem gate to fall back on. "
+                                  "Note that a token given here is visible to other local users "
+                                  "via the process list; prefer --token-file.",
+                                  "TOKEN" },
+                    CLI::option { "token-file",
+                                  CLI::value { ""s },
+                                  "Reads the preshared token from FILE instead of the command "
+                                  "line, so the secret is protected by that file's permissions "
+                                  "rather than exposed in the process list. Trailing newlines "
+                                  "are ignored.",
+                                  "FILE" },
+                    CLI::option { "tls-cert",
+                                  CLI::value { ""s },
+                                  "PEM certificate for the TCP listener. When omitted (with "
+                                  "--tls-key) the daemon generates an ephemeral self-signed "
+                                  "certificate (TOFU).",
+                                  "FILE" },
+                    CLI::option {
+                        "tls-key", CLI::value { ""s }, "PEM private key matching --tls-cert.", "FILE" },
+                    CLI::option { "log",
+                                  CLI::value { ""s },
+                                  "Enables logging for a comma (,) separated list of tags, or "
+                                  "`all` (see `contour list-debug-tags`). Note the trailing `*` "
+                                  "is a prefix match, so `vthost.*` includes the verbose "
+                                  "`vthost.trace.*` tiers. Overrides $LOG.",
+                                  "TAGS" },
+                    CLI::option { "log-file",
+                                  CLI::value { ""s },
+                                  "Appends log output to FILE instead of standard error. If - "
+                                  "(dash) is given, standard error is used explicitly.",
+                                  "FILE" },
+                } },
             CLI::command {
                 "capture",
                 "Captures the screen buffer of the currently running terminal.",

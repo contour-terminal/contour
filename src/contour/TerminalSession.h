@@ -30,13 +30,15 @@
 #include <atomic>
 #include <cstdint>
 #include <format>
+#include <initializer_list>
 #include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 
 #include <qcolor.h>
 
-#include <vtmux/Primitives.h>
+#include <vtworkspace/Primitives.h>
 
 namespace contour
 {
@@ -348,10 +350,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return _profileOverride;
     }
 
-    /// The id by which the vtmux layout model refers to this session. Set when the manager mirrors
+    /// The id by which the vtworkspace layout model refers to this session. Set when the manager mirrors
     /// the session into the model. Identifies the leaf pane that hosts this session.
-    [[nodiscard]] vtmux::SessionId modelSessionId() const noexcept { return _modelSessionId; }
-    void setModelSessionId(vtmux::SessionId id) noexcept { _modelSessionId = id; }
+    [[nodiscard]] vtworkspace::SessionId modelSessionId() const noexcept { return _modelSessionId; }
+    void setModelSessionId(vtworkspace::SessionId id) noexcept { _modelSessionId = id; }
 
     std::optional<std::string> name() const
     {
@@ -384,6 +386,16 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// onClosed() -> sessionClosed -> TerminalSessionManager::removeSession path still runs (so a
     /// background tab/split-pane session does not leak when closed).
     void terminate();
+
+    /// Records that this session's transport (the daemon connection) died, before the ptys it
+    /// fed are closed.
+    ///
+    /// A daemon-hosted pane's device is a socket-backed pty, so a lost connection arrives at
+    /// onClosed() looking exactly like a shell exiting. Only the caller tearing the connection
+    /// down knows the difference, and it must say so BEFORE closing the device — that close is
+    /// what wakes the exit watcher. Runtime state, not construction-time configuration: a
+    /// session is born connected and may lose that at any point.
+    void noteTransportLost() noexcept { _transportLost = true; }
 
     config::Config const& config() const noexcept { return _config; }
     config::TerminalProfile const& profile() const noexcept { return _profile; }
@@ -474,6 +486,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void discardDesktopNotification(std::string_view identifier) override;
     void focusTerminalWindow() override;
     void onClosed() override;
+
     void pasteFromClipboard(unsigned count, bool strip) override;
     void onSelectionCompleted() override;
     void requestWindowResize(vtbackend::LineCount, vtbackend::ColumnCount) override;
@@ -785,7 +798,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     //
     TerminalSessionManager* _manager;
     int _id;
-    vtmux::SessionId _modelSessionId {};
+    vtworkspace::SessionId _modelSessionId {};
     std::chrono::steady_clock::time_point _startTime;
     config::Config _config;
     std::string _profileName;
@@ -863,6 +876,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// early-exit "shell terminated too quickly" notice, which exists only for shells dying on their
     /// own shortly after startup.
     std::atomic<bool> _terminationRequested = false;
+
+    /// @see noteTransportLost.
+    std::atomic<bool> _transportLost = false;
 
 #ifdef __linux__
     FreeDesktopNotifier _desktopNotifier;

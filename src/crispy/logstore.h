@@ -268,8 +268,41 @@ inline void disable(std::string_view categoryName)
     enable(categoryName, false);
 }
 
+/// Decides whether one filter pattern selects a category.
+///
+/// The single definition of the filter grammar, so `configure()` and any caller that wants to
+/// report unmatched patterns cannot disagree about what a pattern means.
+/// @param pattern One filter element; a trailing `*` makes it a prefix match.
+/// @param categoryName The category's name.
+/// @return Whether @p pattern selects @p categoryName. An empty pattern selects nothing.
+[[nodiscard]] inline bool matchesFilterPattern(std::string_view pattern,
+                                               std::string_view categoryName) noexcept
+{
+    // An empty element ("a,,b") has no back() to inspect, and matches nothing.
+    if (pattern.empty())
+        return false;
+    if (pattern.back() != '*')
+        return categoryName == pattern;
+    // TODO: '*' excludes hidden categories
+    //
+    // starts_with, not the three-iterator std::equal this used to be: that form bounds only the
+    // PATTERN range, so a pattern longer than the category name (e.g. "vthost.*" against
+    // "error") read past the end of the name.
+    return categoryName.starts_with(pattern.substr(0, pattern.size() - 1));
+}
+
+/// Applies a category filter: "all", or a comma-separated list of names each with an optional
+/// trailing `*` prefix wildcard.
+///
+/// This is a SELECTION, not a union — every category the filter does not name is DISABLED.
+/// The `error` category is deliberately exempt: errors are not a debug tier, and asking for
+/// extra detail (`--log vthost.trace.proto`, `LOG=vt.parser`) must never take failure reporting
+/// away. Every caller gets that guarantee, rather than each remembering to restore it.
+///
+/// @param filterString The filter to apply; an empty string disables everything but `error`.
 inline void configure(std::string_view filterString)
 {
+    // Restored at the end, so an explicit "error" in the filter is not the only way to keep it.
     if (filterString == "all")
     {
         for (auto& category: logstore::get())
@@ -280,16 +313,15 @@ inline void configure(std::string_view filterString)
         auto const filters = crispy::split(filterString, ',');
         for (auto& category: logstore::get())
         {
-            category.get().enable(crispy::any_of(filters, [&](std::string_view filterPattern) -> bool {
-                if (filterPattern.back() != '*')
-                    return category.get().name() == filterPattern;
-                // TODO: '*' excludes hidden categories
-                return std::equal(std::begin(filterPattern),
-                                  std::prev(end(filterPattern)),
-                                  std::begin(category.get().name()));
+            category.get().enable(crispy::any_of(filters, [&](std::string_view filterPattern) {
+                return matchesFilterPattern(filterPattern, category.get().name());
             }));
         }
     }
+
+    // By NAME rather than by touching the errorLog object, which is declared further down this
+    // header; the registry lookup needs no declaration order.
+    enable("error");
 }
 
 inline message_builder::message_builder(logstore::category const& cat, source_location location):

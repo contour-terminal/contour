@@ -3,6 +3,7 @@
 :material-check-bold:{.check-mark}  Available on all 4 major platforms, Linux, macOS, FreeBSD, Windows. <br/>
 :material-check-bold:{.check-mark}  GPU-accelerated rendering. <br/>
 :material-check-bold:{.check-mark}  Terminal tabs <br/>
+:material-check-bold:{.check-mark}  [Persistent sessions](persistent-sessions.md) that survive the window (daemon mode) — reattach locally or over the network, and interoperate with tmux in both directions <br/>
 :material-check-bold:{.check-mark}  [Font ligatures](demo/font-ligatures.md) support (very useful for programming and scripting) <br/>
 :material-check-bold:{.check-mark}  Unicode: Emoji support (-: 🌈  💝  😛  👪  - including ZWJ, VS15, VS16 emoji :-) <br/>
 :material-check-bold:{.check-mark}  Unicode: Grapheme cluster support <br/>

@@ -11,8 +11,8 @@
 # One Linux job is enough here: the gate reads the same files whatever host it runs on, so running
 # it per-platform in CI would only cost minutes. The point of the script being Python rather than
 # shell is that `ctest -L lint` can run it on Windows and macOS too — for a developer on either,
-# and in the Windows CI job, which is the only one that invokes `ctest`. (The macOS CI job runs its
-# test binaries directly, so it does not pick the gate up.)
+# and in the Windows, macOS and FreeBSD CI jobs, which all invoke `ctest`. (The FreeBSD job excludes
+# the `lint` label to keep its VM budget, so it is the one that does not pick the gate up.)
 
 name: Spelling
 

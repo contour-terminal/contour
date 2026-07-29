@@ -50,11 +50,22 @@ sudo apt-get install -y build-essential curl libncurses-dev
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "${WORKDIR}"' EXIT
 
-curl -fsSL "https://invisible-mirror.net/archives/vttest/vttest-${VTTEST_VERSION}.tgz" \
-    -o "${WORKDIR}/vttest.tgz"
+# Fetch the pinned vttest source. Thomas Dickey's GitHub snapshot mirror is the primary source:
+# invisible-mirror.net intermittently answers with HTTP 415 (rate-limiting), failing the whole gate on
+# an external hiccup unrelated to the change under test -- it stays as a fallback. --retry-all-errors
+# is needed because 415 is a 4xx curl would not otherwise retry (curl >= 7.71; CI ships 8.x). The
+# exact-version check below guards against either source serving the wrong build.
+fetch() {
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 150 "$1" \
+        -o "${WORKDIR}/vttest.tgz"
+}
+fetch "https://github.com/ThomasDickey/vttest-snapshots/archive/refs/tags/t${VTTEST_VERSION}.tar.gz" \
+    || fetch "https://invisible-mirror.net/archives/vttest/vttest-${VTTEST_VERSION}.tgz"
 tar -xzf "${WORKDIR}/vttest.tgz" -C "${WORKDIR}"
 
-cd "${WORKDIR}/vttest-${VTTEST_VERSION}"
+# Both sources unpack to a single top-level directory (vttest-<ver> from invisible-mirror.net,
+# vttest-snapshots-t<ver> from GitHub); locate it rather than hard-coding the name.
+cd "$(find "${WORKDIR}" -mindepth 1 -maxdepth 1 -type d -name 'vttest*' | head -n1)"
 ./configure --prefix=/usr
 make -j"$(nproc)"
 sudo make install

@@ -3,8 +3,12 @@
 
 #include <crispy/assert.h>
 
+#include <array>
 #include <format>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 
 namespace vtbackend
 {
@@ -29,6 +33,57 @@ enum class VTType : uint8_t
     VT520 = 64,
     VT525 = 65,
 };
+
+/// One row of the @ref VTTypes table: a @ref VTType and its human-readable name.
+///
+/// The wire/DA2 number is not a separate field because for this enum it IS the enumerator's value
+/// (see the note above) — unlike @ref DECModeNumbering, where the two are genuinely independent.
+struct VTTypeInfo
+{
+    VTType type;           ///< The terminal type.
+    std::string_view name; ///< Its canonical spelling, as configuration and logs use it.
+};
+
+/// Every @ref VTType, in ascending numeric order. Read by @ref fromVTTypeNum and
+/// @ref nameOfVTType, so adding a terminal type is one new row.
+constexpr inline auto VTTypes = std::to_array<VTTypeInfo>({
+    { .type = VTType::VT100, .name = "VT100" },
+    { .type = VTType::VT220, .name = "VT220" },
+    { .type = VTType::VT240, .name = "VT240" },
+    { .type = VTType::VT330, .name = "VT330" },
+    { .type = VTType::VT340, .name = "VT340" },
+    { .type = VTType::VT320, .name = "VT320" },
+    { .type = VTType::VT420, .name = "VT420" },
+    { .type = VTType::VT510, .name = "VT510" },
+    { .type = VTType::VT520, .name = "VT520" },
+    { .type = VTType::VT525, .name = "VT525" },
+});
+
+/// The @ref VTType a numeric encoding denotes.
+///
+/// Needed wherever a VTType arrives as a plain number from outside the program — a configuration
+/// file, the native protocol — because the numbering is sparse AND not monotonic in capability
+/// (`VT330 = 18` precedes `VT320 = 24`), so neither a cast nor a range check is correct.
+/// @param typeNum The numeric encoding (matching the terminalID / DA2 response).
+/// @return The type, or std::nullopt when no VTType uses @p typeNum.
+[[nodiscard]] constexpr std::optional<VTType> fromVTTypeNum(unsigned typeNum) noexcept
+{
+    for (auto const& row: VTTypes)
+        if (std::cmp_equal(std::to_underlying(row.type), typeNum))
+            return row.type;
+    return std::nullopt;
+}
+
+/// The canonical name of @p type ("VT525"), as the formatter and logs spell it.
+/// @param type The terminal type.
+/// @return Its name, or an empty view for a value outside the enumeration.
+[[nodiscard]] constexpr std::string_view nameOfVTType(VTType type) noexcept
+{
+    for (auto const& row: VTTypes)
+        if (row.type == type)
+            return row.name;
+    return {};
+}
 
 enum class VTExtension : uint8_t
 {
@@ -114,21 +169,9 @@ struct std::formatter<vtbackend::VTType>: std::formatter<std::string_view>
 {
     auto format(vtbackend::VTType const id, auto& ctx) const
     {
-        string_view name;
-        switch (id)
-        {
-            case vtbackend::VTType::VT100: name = "VT100"; break;
-            case vtbackend::VTType::VT220: name = "VT220"; break;
-            case vtbackend::VTType::VT240: name = "VT240"; break;
-            case vtbackend::VTType::VT320: name = "VT320"; break;
-            case vtbackend::VTType::VT330: name = "VT330"; break;
-            case vtbackend::VTType::VT340: name = "VT340"; break;
-            case vtbackend::VTType::VT420: name = "VT420"; break;
-            case vtbackend::VTType::VT510: name = "VT510"; break;
-            case vtbackend::VTType::VT520: name = "VT520"; break;
-            case vtbackend::VTType::VT525: name = "VT525"; break;
-        }
-        return formatter<string_view>::format(name, ctx);
+        // Reads the same VTTypes table fromVTTypeNum does, so a new terminal type cannot be
+        // rendered by one and unknown to the other.
+        return formatter<string_view>::format(vtbackend::nameOfVTType(id), ctx);
     }
 };
 template <>

@@ -5,7 +5,9 @@
 #include <vtbackend/DesktopNotification.h>
 #include <vtbackend/InputGenerator.h>
 #include <vtbackend/MessageParser.h>
+#include <vtbackend/ModifyKeys.h>
 #include <vtbackend/RectangularAreaChecksum.h>
+#include <vtbackend/SgrWriter.h>
 #include <vtbackend/SixelParser.h>
 #include <vtbackend/SoAClusterWriter.h>
 #include <vtbackend/Terminal.h>
@@ -123,120 +125,6 @@ namespace // {{{ helper
         SAFE_SYS_CALL(::nanosleep(&ts, &ts));
     #endif
 #endif
-    }
-
-    std::string vtSequenceParameterString(GraphicsAttributes const& sgr)
-    {
-        std::string output;
-        // TODO: See if we can use VTWriter here instead (might need a little refactor).
-        // std::stringstream os;
-        // auto vtWriter = VTWriter(os);
-        // vtWriter.setForegroundColor(sgr.foregroundColor);
-        // vtWriter.setBackgroundColor(sgr.backgroundColor);
-
-        auto const sgrSep = [&]() {
-            if (!output.empty())
-                output += ';';
-        };
-        auto const sgrAdd = [&](unsigned value) {
-            sgrSep();
-            output += std::to_string(value);
-        };
-        auto const sgrAddStr = [&](string_view value) {
-            sgrSep();
-            output += value;
-        };
-        auto const sgrAddSub = [&](unsigned value) {
-            sgrSep();
-            output += std::to_string(value);
-        };
-
-        if (isIndexedColor(sgr.foregroundColor))
-        {
-            auto const colorValue = getIndexedColor(sgr.foregroundColor);
-            if (static_cast<unsigned>(colorValue) < 8)
-                sgrAdd(30 + static_cast<unsigned>(colorValue));
-            else
-            {
-                sgrAdd(38);
-                sgrAddSub(5);
-                sgrAddSub(static_cast<unsigned>(colorValue));
-            }
-        }
-        // A default foreground is already implied by the leading `0` (reset) DECRQSS prepends, so it is
-        // not spelled out -- xterm's SGR report lists only the attributes that actually differ.
-        else if (isBrightColor(sgr.foregroundColor))
-            sgrAdd(90 + static_cast<unsigned>(getBrightColor(sgr.foregroundColor)));
-        else if (isRGBColor(sgr.foregroundColor))
-        {
-            auto const rgb = getRGBColor(sgr.foregroundColor);
-            sgrAdd(38);
-            sgrAddSub(2);
-            sgrAddSub(static_cast<unsigned>(rgb.red));
-            sgrAddSub(static_cast<unsigned>(rgb.green));
-            sgrAddSub(static_cast<unsigned>(rgb.blue));
-        }
-
-        if (isIndexedColor(sgr.backgroundColor))
-        {
-            auto const colorValue = getIndexedColor(sgr.backgroundColor);
-            if (static_cast<unsigned>(colorValue) < 8)
-                sgrAdd(40 + static_cast<unsigned>(colorValue));
-            else
-            {
-                sgrAdd(48);
-                sgrAddSub(5);
-                sgrAddSub(static_cast<unsigned>(colorValue));
-            }
-        }
-        // As with the foreground: a default background is implied by the reset and left unspoken.
-        else if (isBrightColor(sgr.backgroundColor))
-            sgrAdd(100 + getBrightColor(sgr.backgroundColor));
-        else if (isRGBColor(sgr.backgroundColor))
-        {
-            auto const& rgb = getRGBColor(sgr.backgroundColor);
-            sgrAdd(48);
-            sgrAddSub(2);
-            sgrAddSub(static_cast<unsigned>(rgb.red));
-            sgrAddSub(static_cast<unsigned>(rgb.green));
-            sgrAddSub(static_cast<unsigned>(rgb.blue));
-        }
-
-        if (isRGBColor(sgr.underlineColor))
-        {
-            auto const& rgb = getRGBColor(sgr.underlineColor);
-            sgrAdd(58);
-            sgrAddSub(2);
-            sgrAddSub(static_cast<unsigned>(rgb.red));
-            sgrAddSub(static_cast<unsigned>(rgb.green));
-            sgrAddSub(static_cast<unsigned>(rgb.blue));
-        }
-
-        // TODO: sgr.styles;
-        auto constexpr Masks = array {
-            pair { CellFlag::Bold, "1"sv },
-            pair { CellFlag::Faint, "2"sv },
-            pair { CellFlag::Italic, "3"sv },
-            pair { CellFlag::Underline, "4"sv },
-            pair { CellFlag::Blinking, "5"sv },
-            pair { CellFlag::RapidBlinking, "6"sv },
-            pair { CellFlag::Inverse, "7"sv },
-            pair { CellFlag::Hidden, "8"sv },
-            pair { CellFlag::CrossedOut, "9"sv },
-            pair { CellFlag::DoublyUnderlined, "4:2"sv },
-            pair { CellFlag::CurlyUnderlined, "4:3"sv },
-            pair { CellFlag::DottedUnderline, "4:4"sv },
-            pair { CellFlag::DashedUnderline, "4:5"sv },
-            pair { CellFlag::Framed, "51"sv },
-            // TODO(impl or completely remove): pair{CellFlag::Encircled, ""sv},
-            pair { CellFlag::Overline, "53"sv },
-        };
-
-        for (auto const& mask: Masks)
-            if (sgr.flags & mask.first)
-                sgrAddStr(mask.second);
-
-        return output;
     }
 
     template <typename T, typename U>
@@ -2987,6 +2875,26 @@ namespace
             return palette.defaultBackground;
         return get<RGBColor>(color);
     }
+
+    /// Applies a decoded XTMODKEYS/XTRMMODKEYS request to @p terminal.
+    /// @param terminal The terminal whose input encoding the request configures.
+    /// @param request What the request decoded to (@see modifyKeysRequest).
+    /// @return Ok for a resource xterm defines, Unsupported for a number it does not.
+    [[nodiscard]] ApplyResult applyModifyKeys(Terminal& terminal, ModifyKeysRequest const& request)
+    {
+        switch (request.action)
+        {
+            case ModifyKeysAction::SetOtherKeys:
+                terminal.setModifyOtherKeys(request.otherKeysValue);
+                return ApplyResult::Ok;
+            case ModifyKeysAction::Ignore: return ApplyResult::Ok;
+            // Unsupported rather than Invalid: the sequence parsed fine, the resource
+            // it names is simply not one this terminal knows -- and xterm may define
+            // another tomorrow.
+            case ModifyKeysAction::Unknown: return ApplyResult::Unsupported;
+        }
+        crispy::unreachable();
+    }
 } // namespace
 
 void Screen::requestDynamicColor(DynamicColorName name)
@@ -3113,8 +3021,17 @@ void Screen::requestStatusString(RequestStatusString value)
                 // EXTENSION: Usually DECSCPP only knows about 80 and 132, but we take any.
                 return std::format("{}|$", pageSize().columns);
             case RequestStatusString::DECSNLS: return std::format("{}*|", pageSize().lines);
-            case RequestStatusString::SGR:
-                return std::format("0;{}m", vtSequenceParameterString(_cursor.graphicsRendition));
+            case RequestStatusString::SGR: {
+                // Through the one shared encoder (vtbackend/SgrWriter.h), which `capture-pane -e`
+                // also renders each cell with. This case used to hold a second copy of it, and the
+                // two had already drifted twice: the private copy alone knew the underline styles
+                // are sub-parameters, while the shared one alone was reachable from a capture — and
+                // an INDEXED underline colour (SGR 58;5;n, which this terminal parses) was dropped
+                // by both. A rendition is now spelled the same way wherever it is reported.
+                auto params = std::string { "0" };
+                appendSgrParameters(params, _cursor.graphicsRendition);
+                return std::format("{}m", params);
+            }
             case RequestStatusString::DECSCA: {
                 auto const isProtected = _cursor.graphicsRendition.flags & CellFlag::CharacterProtected;
                 return std::format("{}\"q", isProtected ? 1 : 2);
@@ -5137,7 +5054,13 @@ void Screen::eraseMulticellBlockAt(CellLocation position)
         auto const lineOffset = block->origin.line + LineOffset::cast_from(row);
         if (lineOffset >= boxed_cast<LineOffset>(pageSize().lines))
             break;
-        auto& target = grid().lineAt(lineOffset);
+        // changingLineAt, because multicellBlockAt() deliberately walks up into the SCROLLBACK to
+        // find a block's head (its top row may have scrolled off while a continuation row is still
+        // on the page). A history row mutated through plain lineAt() marks itself dirty but arms
+        // no history floor, so finalizeRevisions() never reaches it: the erase then never reported
+        // to a daemon-attached client, which kept rendering the destroyed top half of the block in
+        // its scrollback for good, while the local window showed it correctly.
+        auto& target = grid().changingLineAt(lineOffset);
         for (auto const i: std::views::iota(0, block->columns))
         {
             auto const column = block->origin.column + ColumnOffset::cast_from(i);
@@ -6133,7 +6056,7 @@ void Screen::processShellIntegration(Sequence const& seq)
             // area ends, and it cannot be recovered afterwards: once the user types, the two are the same
             // run of cells.
             auto const cursorPosition = cursor().position;
-            auto& head = _grid.lineAt(_grid.logicalLineHead(cursorPosition.line));
+            auto& head = _grid.changingLineAt(_grid.logicalLineHead(cursorPosition.line));
             head.setFlag(LineFlag::PromptEnd, true);
             head.setPromptEndOffset(_grid.logicalColumnOf(cursorPosition));
 
@@ -6167,7 +6090,7 @@ void Screen::processShellIntegration(Sequence const& seq)
             // Remembering the column is what later tells the two apart; without it a copy of the command's
             // output either swallows the next prompt or loses its own last line.
             auto const cursorPosition = cursor().position;
-            auto& head = _grid.lineAt(_grid.logicalLineHead(cursorPosition.line));
+            auto& head = _grid.changingLineAt(_grid.logicalLineHead(cursorPosition.line));
             head.setFlag(LineFlag::CommandEnd, true);
             head.setCommandEndOffset(_grid.logicalColumnOf(cursorPosition));
 
@@ -6989,11 +6912,32 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             break;
 
         case DECPS: _terminal->playSound(seq.parameters()); break;
-        case MODIFYOTHERKEYS: {
-            auto const mode = seq.param_or(0, 0);
-            _terminal->setModifyOtherKeys(mode);
-            return ApplyResult::Ok;
+        case XTMODKEYS: {
+            // `CSI > Pp ; Pv m` assigns; `CSI > Pp m` resets that one resource (param_or
+            // supplies the initial value for the absent Pv); bare `CSI > m` resets ALL of
+            // them, which here means modifyOtherKeys -- the only one carrying state.
+            // Read Pp as an int, NOT as a uint8_t: a CSI parameter is a uint16_t, and narrowing it
+            // here would wrap `CSI > 260 ; 2 m` onto resource 4 (OtherKeys) and silently enable
+            // modifyOtherKeys. modifyKeysRequest() range-checks with std::cmp_equal precisely so an
+            // out-of-range selector falls through to Unknown, as xterm ignores what it does not define.
+            auto const resource = seq.parameterCount() == 0
+                                      ? int { toModifyKeysResourceNum(ModifyKeysResource::OtherKeys) }
+                                      : seq.param_or<int>(0, 0);
+            return applyModifyKeys(*_terminal,
+                                   modifyKeysRequest(resource, seq.param_or(1, InitialModifyOtherKeys)));
         }
+        case XTRMMODKEYS:
+            // The resource value -1 that XTMODKEYS cannot express. An omitted Ps names
+            // modifyFunctionKeys, which Contour does not track -- so the common
+            // `CSI > 4 n` is what actually changes anything here.
+            //
+            // Read as an int for the reason XTMODKEYS above does: the default value's own type must
+            // not decide the parameter's width, or `CSI > 260 n` truncates onto a real resource.
+            return applyModifyKeys(
+                *_terminal,
+                modifyKeysRequest(
+                    seq.param_or<int>(0, toModifyKeysResourceNum(ModifyKeysResource::FunctionKeys)),
+                    InitialModifyOtherKeys));
         case CSIUENTER: {
             auto const flags = KeyboardEventFlags::from_value(seq.param_or(0, 1));
             _terminal->keyboardProtocol().enter(flags);

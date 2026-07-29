@@ -170,7 +170,7 @@ Row {
 
     // The settings "tab": shown in the strip while the settings page is open (settingsActive), reading
     // and behaving like a tab — highlighted as the active view, with a close button that leaves settings.
-    // It is a Qt-layer affordance (vtmux untouched), so it is a pinned item here rather than a model row.
+    // It is a Qt-layer affordance (vtworkspace untouched), so it is a pinned item here rather than a model row.
     Item {
         id: settingsTab
         objectName: "settingsTab"

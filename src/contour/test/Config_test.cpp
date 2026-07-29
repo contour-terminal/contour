@@ -16,6 +16,7 @@
 #include <vtbackend/InputGenerator.h>
 #include <vtbackend/primitives.h>
 
+#include <crispy/logsink.h>
 #include <crispy/logstore.h>
 
 #include <QtCore/QTemporaryDir>
@@ -181,6 +182,62 @@ profiles:
     CHECK_FALSE(env.at("TERM_PROGRAM_VERSION").empty());
 }
 
+TEST_CASE("Config: emulationSettings carries the profile's VT semantics", "[config]")
+{
+    // The half of a profile's terminal settings that decides what the terminal IS, shared by the
+    // GUI session factory and `contour daemon`. It exists so the two cannot disagree: a daemon
+    // hosting sessions with a different scrollback depth than the client rendering them cannot
+    // name the rows that client is trying to mirror, and the user sees blank scrollback.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+reflow_on_resize: false
+grapheme_clustering: false
+images:
+    sixel_register_count: 512
+profiles:
+    main:
+        terminal_id: VT340
+        terminal_size:
+            columns: 132
+            lines: 40
+        history:
+            limit: 4242
+)"sv);
+
+    auto const* const profile = config.findProfile("main");
+    REQUIRE(profile != nullptr);
+    auto const settings = contour::config::emulationSettings(config, *profile);
+
+    REQUIRE(std::holds_alternative<vtbackend::LineCount>(settings.maxHistoryLineCount));
+    CHECK(std::get<vtbackend::LineCount>(settings.maxHistoryLineCount) == vtbackend::LineCount(4242));
+    CHECK(settings.pageSize.columns == vtbackend::ColumnCount(132));
+    CHECK(settings.pageSize.lines == vtbackend::LineCount(40));
+    CHECK(settings.terminalId == vtbackend::VTType::VT340);
+    CHECK(settings.maxImageRegisterCount == 512);
+    CHECK(settings.primaryScreen.allowReflowOnResize == false);
+    CHECK(settings.graphemeClustering == false);
+}
+
+TEST_CASE("Config: emulationSettings carries an unlimited history", "[config]")
+{
+    // maxHistoryLineCount is a variant; the daemon must inherit the Infinite arm too, or an
+    // "unlimited scrollback" profile silently caps its hosted sessions.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        history:
+            limit: -1
+)"sv);
+
+    auto const* const profile = config.findProfile("main");
+    REQUIRE(profile != nullptr);
+    CHECK(std::holds_alternative<vtbackend::Infinite>(
+        contour::config::emulationSettings(config, *profile).maxHistoryLineCount));
+}
+
 TEST_CASE("Config: profile knobs load from YAML", "[config]")
 {
     QTemporaryDir dir;
@@ -258,13 +315,38 @@ layouts:
     REQUIRE(t0.root.arguments.size() == 1);
     CHECK(t0.root.arguments[0] == ".");
     REQUIRE(t0.root.directory.has_value());
-    CHECK(t0.root.directory->generic_string() == "/tmp");
+    CHECK(*t0.root.directory == "/tmp");
 
     auto const& t1 = work.tabs[1];
     CHECK(t1.title == "claude");
     CHECK(t1.root.isLeaf());
     CHECK(*t1.root.command == "claude");
     CHECK_FALSE(t1.root.directory.has_value());
+}
+
+TEST_CASE("Config: a layout directory with non-ASCII characters loads losslessly", "[config][layout]")
+{
+    // Regression: the layout directory is stored as a lossless std::filesystem::path, not narrowed to
+    // a std::string at parse time. On Windows the old .string() narrowing threw std::system_error for a
+    // path outside the active code page (e.g. a Unicode profile directory), failing the ENTIRE config
+    // load; now such a path is preserved and only its own pane's launch would be affected.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+layouts:
+    work:
+        tabs:
+            - title: "editor"
+              directory: "/tmp/naïve project"
+              command: "nvim"
+)"sv);
+
+    // The config loaded (no parse-time throw) and the directory was preserved intact.
+    auto const& layouts = config.layouts.value();
+    REQUIRE(layouts.contains("work"));
+    auto const& work = layouts.at("work");
+    REQUIRE(work.tabs.size() == 1);
+    REQUIRE(work.tabs[0].root.directory.has_value());
+    CHECK(*work.tabs[0].root.directory == std::filesystem::path { "/tmp/naïve project" });
 }
 
 TEST_CASE("Config: shellSplit tokenizes a command line respecting quotes", "[config][layout]")
@@ -335,7 +417,7 @@ layouts:
     auto const& tab = config.layouts.value().at("dev").tabs.at(0);
     auto const& root = tab.root;
     REQUIRE_FALSE(root.isLeaf());
-    CHECK(root.orientation == vtmux::SplitState::Vertical);
+    CHECK(root.orientation == vtworkspace::SplitState::Vertical);
     REQUIRE(root.children.size() == 2);
 
     CHECK(root.children[0].isLeaf());
@@ -351,7 +433,7 @@ layouts:
 
     auto const& nested = root.children[1];
     REQUIRE_FALSE(nested.isLeaf());
-    CHECK(nested.orientation == vtmux::SplitState::Horizontal);
+    CHECK(nested.orientation == vtworkspace::SplitState::Horizontal);
     REQUIRE(nested.children.size() == 2);
     CHECK(*nested.children[0].command == "htop");
     CHECK(nested.children[0].arguments.empty());
@@ -549,9 +631,9 @@ layouts:
     auto const& tabs = config.layouts.value().at("work").tabs;
     REQUIRE(tabs.size() == 2);
     // Natural capitalization must work like every other enum-ish config value.
-    CHECK(tabs.at(0).root.orientation == vtmux::SplitState::Horizontal);
+    CHECK(tabs.at(0).root.orientation == vtworkspace::SplitState::Horizontal);
     // An unknown value falls back to the vertical default (with a log line, not silently).
-    CHECK(tabs.at(1).root.orientation == vtmux::SplitState::Vertical);
+    CHECK(tabs.at(1).root.orientation == vtworkspace::SplitState::Vertical);
 }
 
 TEST_CASE("Config: an invalid tab color is ignored instead of turning black", "[config][layout]")
@@ -3120,44 +3202,6 @@ TEST_CASE("Config: every built-in char binding is stored folded", "[config][inpu
     }
 }
 
-namespace
-{
-
-/// Redirects the `error` log category into a buffer for the lifetime of this object.
-///
-/// The restore runs from the destructor rather than at the end of the test body, because a failing
-/// CHECK unwinds: leaving the category pointing at a destroyed local sink would corrupt every later
-/// test in the binary (category::_sink is a reference_wrapper with no lifetime management).
-class ScopedErrorLogCapture
-{
-  public:
-    ScopedErrorLogCapture():
-        _sink { true, [this](std::string_view const& line) { _captured += line; } },
-        _category { logstore::get("error") }
-    {
-        if (_category)
-            _category->set_sink(_sink);
-    }
-
-    ~ScopedErrorLogCapture()
-    {
-        if (_category)
-            _category->set_sink(logstore::sink::error_console());
-    }
-
-    ScopedErrorLogCapture(ScopedErrorLogCapture const&) = delete;
-    ScopedErrorLogCapture& operator=(ScopedErrorLogCapture const&) = delete;
-
-    [[nodiscard]] std::string const& captured() const noexcept { return _captured; }
-
-  private:
-    std::string _captured;
-    logstore::sink _sink;
-    logstore::category* _category;
-};
-
-} // namespace
-
 TEST_CASE("Config: a dropped input_mapping entry is reported", "[config][input-mapping]")
 {
     auto dir = QTemporaryDir {};
@@ -3166,7 +3210,7 @@ TEST_CASE("Config: a dropped input_mapping entry is reported", "[config][input-m
     // The silence was the whole reason issue #1987 was hard to diagnose: a row vanished and nothing
     // anywhere said so. These assertions stay deliberately weak -- that the offending row and field
     // are NAMED -- rather than pinning the sentence, which would break on any rewording.
-    auto capture = ScopedErrorLogCapture {};
+    auto capture = logstore::scoped_capture { "error" };
 
     auto const config = loadFromYaml(dir, R"(
 default_profile: main
@@ -3182,7 +3226,7 @@ input_mapping:
     // The good row still binds: a bad neighbour must not take the whole section down.
     CHECK(config.inputMappings.value().charMappings.size() == 1);
 
-    auto const& log = capture.captured();
+    auto const& log = capture.text();
     INFO("captured error log:\n" << log);
 
     // The misspelled modifier is named, and so is the row it killed.
@@ -3204,7 +3248,7 @@ TEST_CASE("Config: an input_mapping that is not a list is reported, not silently
     // malformed section leaves the user with nothing bound at all -- the worst version of the silent
     // loss behind issue #1987, and now the most likely one, since the docs tell people the section
     // replaces the defaults.
-    auto capture = ScopedErrorLogCapture {};
+    auto capture = logstore::scoped_capture { "error" };
 
     auto const config = loadFromYaml(dir, R"(
 default_profile: main
@@ -3222,8 +3266,82 @@ input_mapping:
     CHECK(mappings.charMappings.empty());
     CHECK(mappings.mouseMappings.empty());
 
-    INFO("captured error log:\n" << capture.captured());
-    CHECK(capture.captured().contains("input_mapping"));
+    INFO("captured error log:\n" << capture.text());
+    CHECK(capture.text().contains("input_mapping"));
 }
 
 // }}}
+
+TEST_CASE("Config: resolveEmulationSettings resolves a named profile from a file", "[config]")
+{
+    // The one load-resolve-refuse sequence both `contour daemon` and `contour client` go through, so
+    // a warm daemon and the client that attaches to it cannot disagree about what the profile means.
+    QTemporaryDir dir;
+    auto const path = writeConfig(dir, R"(
+default_profile: main
+profiles:
+    main:
+        terminal_id: VT340
+        history:
+            limit: 4242
+    other:
+        terminal_id: VT420
+        history:
+            limit: 100
+)"sv);
+
+    SECTION("a named profile")
+    {
+        auto const settings = contour::config::resolveEmulationSettings(path.string(), "other");
+        REQUIRE(settings.has_value());
+        CHECK(settings->terminalId == vtbackend::VTType::VT420);
+        REQUIRE(std::holds_alternative<vtbackend::LineCount>(settings->maxHistoryLineCount));
+        CHECK(std::get<vtbackend::LineCount>(settings->maxHistoryLineCount) == vtbackend::LineCount(100));
+    }
+
+    SECTION("an empty profile name selects the configuration's default")
+    {
+        auto const settings = contour::config::resolveEmulationSettings(path.string(), "");
+        REQUIRE(settings.has_value());
+        CHECK(settings->terminalId == vtbackend::VTType::VT340);
+    }
+}
+
+TEST_CASE("Config: resolveEmulationSettings refuses an unknown profile", "[config]")
+{
+    // Refusing beats falling back to the default: a daemon hosting sessions under a profile the user
+    // did not name is a misconfiguration they would discover only much later, through the wrong
+    // scrollback depth or the wrong reported terminal. The message has to name both halves of the
+    // mistake for that to be diagnosable at all.
+    QTemporaryDir dir;
+    auto const path = writeConfig(dir, R"(
+default_profile: main
+profiles:
+    main:
+        terminal_id: VT525
+)"sv);
+
+    auto const settings = contour::config::resolveEmulationSettings(path.string(), "nope");
+    REQUIRE_FALSE(settings.has_value());
+    CHECK(settings.error().contains("nope"));
+    CHECK(settings.error().contains(path.string()));
+}
+
+TEST_CASE("Config: resolveEmulationSettings reports a config it cannot parse", "[config]")
+{
+    // The failure mode the try/catch actually exists for. NOT a nonexistent path: loadConfigFromFile
+    // calls createFileIfNotExists, so an absent file is created rather than refused, and whether that
+    // creation fails is a property of the filesystem -- `/nonexistent/...` is refused on Linux and
+    // was happily created on Windows, which is how this test failed there and nowhere else.
+    QTemporaryDir dir;
+    auto const path = writeConfig(dir, R"(
+default_profile: main
+profiles:
+    main:
+  bad_indentation: [unclosed
+)"sv);
+
+    auto const settings = contour::config::resolveEmulationSettings(path.string(), "");
+    REQUIRE_FALSE(settings.has_value());
+    CHECK_FALSE(settings.error().empty());
+}

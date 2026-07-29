@@ -101,6 +101,7 @@ nav:
     #- Rendered (Advanced) : configuration/advanced/rendered.md
   - Features:
     - List of features: features.md
+    - Persistent sessions: persistent-sessions.md
     - Font ligatures: demo/font-ligatures.md
     - Images: demo/images.md
     - ReGIS vector graphics: demo/regis-graphics.md
@@ -131,5 +132,6 @@ nav:
   - Internals:
     - internals/index.md
     - internals/CODING_STYLE.md
+    - internals/vthost.md
     - internals/text-stack.md
     - internals/vt-conformance.md

@@ -293,3 +293,186 @@ TEST_CASE("Line.blank.copyColumnsFromBlankSourceClearsDest", "[Line][blank]")
     CHECK(dst.cellEmptyAt(ColumnOffset(1)));
     CHECK(dst.cellEmptyAt(ColumnOffset(4)));
 }
+
+TEST_CASE("Line.revision.freshLinesArePendingAndStampOnce", "[Line][revision]")
+{
+    auto line = Line(ColumnCount(8), LineFlag::None, GraphicsAttributes {});
+    CHECK(line.isDirty()); // bootstrap self-heals: a fresh line is pending
+    CHECK(line.revision() == 0);
+
+    CHECK(line.stampRevision(7));
+    CHECK(line.revision() == 7);
+    CHECK_FALSE(line.isDirty());
+
+    // A clean line never restamps.
+    CHECK_FALSE(line.stampRevision(8));
+    CHECK(line.revision() == 7);
+}
+
+TEST_CASE("Line.revision.everyMutatorDirties", "[Line][revision]")
+{
+    auto line = Line(ColumnCount(8), LineFlag::None, GraphicsAttributes {});
+
+    auto const dirtiedBy = [&](auto&& mutate) {
+        static_cast<void>(line.stampRevision(1)); // normalize to clean
+        mutate();
+        return line.isDirty();
+    };
+
+    CHECK(dirtiedBy([&] { line.reset(LineFlag::None, GraphicsAttributes {}); }));
+    CHECK(dirtiedBy([&] { line.reset(LineFlag::None, GraphicsAttributes {}, ColumnCount(8)); }));
+    CHECK(dirtiedBy([&] { line.fill(LineFlag::None, GraphicsAttributes {}, U'x', 1); }));
+    CHECK(dirtiedBy([&] { line.fill(ColumnOffset(0), GraphicsAttributes {}, "ab"); }));
+    CHECK(dirtiedBy([&] { line.resize(ColumnCount(10)); }));
+    // useCellAt defers dirtying to the proxy's write methods: a read-only
+    // CellProxy (the return value discarded here) does NOT dirty the line.
+    CHECK_FALSE(dirtiedBy([&] { static_cast<void>(line.useCellAt(ColumnOffset(0))); }));
+    // Writing through the proxy dirties the line.
+    CHECK(dirtiedBy([&] { line.useCellAt(ColumnOffset(0)).write(GraphicsAttributes {}, U'x', 1); }));
+    CHECK(dirtiedBy([&] { static_cast<void>(line.materializedStorage()); }));
+    CHECK(dirtiedBy([&] { static_cast<void>(line.storage()); })); // mutable overload
+    CHECK(dirtiedBy([&] { static_cast<void>(line.flags()); }));   // mutable overload
+    CHECK(dirtiedBy([&] { line.setFlag(LineFlag::Marked, true); }));
+    CHECK(dirtiedBy([&] { line.setCommandEndOffset(ColumnOffset(3)); }));
+    CHECK(dirtiedBy([&] { line.setPromptEndOffset(ColumnOffset(2)); }));
+}
+
+TEST_CASE("Line.revision.constReadsStayClean", "[Line][revision]")
+{
+    auto line = Line(ColumnCount(8), LineFlag::None, GraphicsAttributes {});
+    line.fill(ColumnOffset(0), GraphicsAttributes {}, "hi");
+    static_cast<void>(line.stampRevision(1));
+
+    auto const& constLine = line;
+    static_cast<void>(constLine.flags());
+    static_cast<void>(constLine.storage());
+    static_cast<void>(constLine.toUtf8());
+    static_cast<void>(constLine.isTrivialBuffer());
+    CHECK_FALSE(line.isDirty());
+}
+
+TEST_CASE("Line.revision.assignmentDirtiesTheDestination", "[Line][revision]")
+{
+    auto source = Line(ColumnCount(4), LineFlag::None, GraphicsAttributes {});
+    source.fill(ColumnOffset(0), GraphicsAttributes {}, "abcd");
+    static_cast<void>(source.stampRevision(5));
+
+    auto target = Line(ColumnCount(4), LineFlag::None, GraphicsAttributes {});
+    static_cast<void>(target.stampRevision(1));
+    REQUIRE_FALSE(target.isDirty());
+
+    SECTION("copy assignment")
+    {
+        target = source;
+    }
+    SECTION("move assignment")
+    {
+        target = std::move(source);
+    }
+    CHECK(target.isDirty());
+    CHECK(target.toUtf8() == "abcd");
+}
+
+TEST_CASE("Line.revision.rotateDirtiesEveryMovedRow", "[Line][revision]")
+{
+    // scrollDown at capacity and margin scrolls move Lines between rows via
+    // std::rotate / move assignment (Grid.cpp); the receiving rows must all
+    // come out dirty without any call-site sprinkling.
+    auto lines = std::vector<Line> {};
+    for (auto const text: { "aaaa", "bbbb", "cccc" })
+    {
+        auto line = Line(ColumnCount(4), LineFlag::None, GraphicsAttributes {});
+        line.fill(ColumnOffset(0), GraphicsAttributes {}, text);
+        static_cast<void>(line.stampRevision(1));
+        lines.push_back(std::move(line));
+    }
+
+    std::ranges::rotate(lines, lines.begin() + 1);
+
+    CHECK(lines[0].toUtf8() == "bbbb");
+    for (auto const& line: lines)
+        CHECK(line.isDirty());
+}
+
+// The renditions capture-pane reproduces come from the SgrFlagCodes table (vtbackend/SgrWriter.h),
+// which is shared with the terminal's own DECRQSS report. It used to hold one int per flag, so it
+// could not spell the ECMA-48 SUB-parameter forms and collapsed every underline STYLE onto plain
+// `4` -- while DECRQSS, from its own private copy of the same mapping, answered them correctly. Two
+// copies, one right and one wrong; these pin the survivor.
+TEST_CASE("Line.toUtf8WithSgr.underlineStylesKeepTheirSubParameter", "[Line][sgr]")
+{
+    auto const capture = [](CellFlag flag) {
+        auto line = Line(ColumnCount(2), LineFlag::None, GraphicsAttributes {});
+        line.useCellAt(ColumnOffset(0)).write(GraphicsAttributes { .flags = CellFlags { flag } }, U'x', 1);
+        return line.toUtf8WithSgr(ColumnOffset(0), ColumnOffset(1));
+    };
+
+    CHECK(capture(CellFlag::Underline).contains("\033[0;4m"));
+    CHECK(capture(CellFlag::CurlyUnderlined).contains("\033[0;4:3m"));
+    CHECK(capture(CellFlag::DottedUnderline).contains("\033[0;4:4m"));
+    CHECK(capture(CellFlag::DashedUnderline).contains("\033[0;4:5m"));
+    // `21` is read as "bold off" by a number of terminals; the sub-parameter form is unambiguous.
+    CHECK(capture(CellFlag::DoublyUnderlined).contains("\033[0;4:2m"));
+    // Framed was missing from the table entirely, so it rendered as no rendition at all.
+    CHECK(capture(CellFlag::Framed).contains("\033[0;51m"));
+    CHECK(capture(CellFlag::Overline).contains("\033[0;53m"));
+}
+
+TEST_CASE("Line.toUtf8WithSgr.blankLineKeepsItsFillRendition", "[Line][sgr]")
+{
+    // A blank line is uniformly its FILL rendition, and that is NOT necessarily the default one:
+    // Screen erases with the cursor's pen, so `\e[41m\e[2J` leaves every row blank on red. Rendering
+    // those rows as bare spaces silently dropped the colour of every cleared region from a
+    // `capture-pane -e`, while the rows that happened to hold text kept theirs.
+    auto const fill = GraphicsAttributes { .backgroundColor = IndexedColor::Red };
+    auto const line = Line(ColumnCount(4), LineFlag::None, fill);
+    REQUIRE(line.isBlank());
+
+    auto const captured = line.toUtf8WithSgr(ColumnOffset(0), ColumnOffset(4));
+    CHECK(captured.contains("\033[0;41m"));
+    CHECK(captured.contains("    "));
+    // The rendition is closed so it cannot bleed onto whatever line is replayed next — the same
+    // guarantee the per-cell path gives.
+    CHECK(captured.ends_with("\033[m"));
+}
+
+TEST_CASE("Line.toUtf8WithSgr.blankLineAtTheDefaultPenEmitsNoEscapes", "[Line][sgr]")
+{
+    // The overwhelmingly common case must stay free of escapes: an empty screen captured with -e
+    // should not gain an SGR per row.
+    auto const line = Line(ColumnCount(4), LineFlag::None, GraphicsAttributes {});
+    REQUIRE(line.isBlank());
+    CHECK(line.toUtf8WithSgr(ColumnOffset(0), ColumnOffset(4)) == "    ");
+}
+
+TEST_CASE("Line.toUtf8WithSgr.blankLineFillCarriesStyleFlagsToo", "[Line][sgr]")
+{
+    // `\e[7m\e[K` erases under an INVERSE pen — a rendition the row's colours alone cannot describe.
+    auto const fill = GraphicsAttributes { .flags = CellFlags { CellFlag::Inverse } };
+    auto const line = Line(ColumnCount(3), LineFlag::None, fill);
+    REQUIRE(line.isBlank());
+    CHECK(line.toUtf8WithSgr(ColumnOffset(0), ColumnOffset(3)).contains("\033[0;7m"));
+}
+
+TEST_CASE("Line.toUtf8WithSgr.carriesTheUnderlineColour", "[Line][sgr]")
+{
+    // The other half of the same drift: the FLAG half was consolidated into SgrFlagCodes while the
+    // COLOUR half stayed duplicated, and the capture's copy knew nothing about SGR 58 — so a pane
+    // using coloured underlines lost every one of them through `capture-pane -e`, while DECRQSS
+    // (from the other copy) reported them. SGR 58 has no aixterm short form, so even an indexed
+    // colour goes out in the `58;5;n` form.
+    auto const capture = [](Color underline) {
+        auto line = Line(ColumnCount(2), LineFlag::None, GraphicsAttributes {});
+        line.useCellAt(ColumnOffset(0))
+            .write(GraphicsAttributes { .underlineColor = underline,
+                                        .flags = CellFlags { CellFlag::CurlyUnderlined } },
+                   U'x',
+                   1);
+        return line.toUtf8WithSgr(ColumnOffset(0), ColumnOffset(1));
+    };
+
+    CHECK(capture(RGBColor { 0x11, 0x22, 0x33 }).contains("58;2;17;34;51"));
+    CHECK(capture(Color::Indexed(IndexedColor::Red)).contains("58;5;1"));
+    // The default underline colour is already implied by the leading reset and stays unspoken.
+    CHECK_FALSE(capture(DefaultColor()).contains("58"));
+}
