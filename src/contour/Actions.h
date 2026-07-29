@@ -857,13 +857,13 @@ struct std::formatter<contour::actions::Direction>: std::formatter<std::string_v
                 // A profile-less CreateNewTab opens the default profile, so it has no argument to write.
                 return a.profileName ? std::format(", profile: '{}'", *a.profileName) : std::string {};
             },
-            // Both render the token their TabBarMode.h row carries, so what is written back is by
+            // Both render the token their ConfigEnum.h row carries, so what is written back is by
             // construction what the reader accepts.
             [](SetTabBarVisibility const& a) {
-                return std::format(", mode: {}", contour::config::tabBarModeToken(a.mode));
+                return std::format(", mode: {}", contour::config::configEnumToken(a.mode));
             },
             [](SetTabBarPosition const& a) {
-                return std::format(", position: {}", contour::config::tabBarModeToken(a.position));
+                return std::format(", position: {}", contour::config::configEnumToken(a.position));
             },
             [](SetTabColor const& a) {
                 // A colorless SetTabColor opens the picker, so it has no argument to write. The color

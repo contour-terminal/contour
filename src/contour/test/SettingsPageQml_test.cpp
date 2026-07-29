@@ -9,6 +9,7 @@
 #include <contour/Config.h>
 #include <contour/GuiConfigStore.h>
 #include <contour/SettingsController.h>
+#include <contour/test/QmlChromeStyle.h>
 #include <contour/test/QmlMessageCapture.h>
 
 #include <QtCore/QTemporaryDir>
@@ -58,7 +59,8 @@ TEST_CASE("SettingsPage opens on the global settings pane", "[contour][gui][qml]
     auto controller = SettingsController([&]() -> config::Config const& { return cfg; }, store, [&]() {});
 
     QQmlEngine engine;
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/SettingsPage.qml")));
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsPage.qml")));
     REQUIRE(component.isReady());
 
     auto initial = QVariantMap {};
@@ -111,7 +113,8 @@ TEST_CASE("SettingsPage creates a profile through the QML and it lands on disk (
                                          });
 
     QQmlEngine engine;
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/SettingsPage.qml")));
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsPage.qml")));
     REQUIRE(component.isReady());
 
     auto initial = QVariantMap {};
@@ -203,9 +206,10 @@ struct PageFixture
                                                               config::loadConfigFromFile(cfg, configPath);
                                                           });
 
+        contour::test::installChromeStyle(engine);
         engine.setIncubationController(&incubation);
-        component = std::make_unique<QQmlComponent>(&engine,
-                                                    QUrl(QStringLiteral("qrc:/contour/ui/SettingsPage.qml")));
+        component = std::make_unique<QQmlComponent>(
+            &engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsPage.qml")));
         REQUIRE(component->isReady());
         auto initial = QVariantMap {};
         initial.insert("controller", QVariant::fromValue(controller.get()));

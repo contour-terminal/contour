@@ -9,6 +9,7 @@
 #include <contour/LayoutStore.h>
 #include <contour/SpeechSynthesizer.h>
 #include <contour/TerminalSessionManager.h>
+#include <contour/UiStyleProvider.h>
 #include <contour/helper.h>
 
 #include <vtpty/Process.h>
@@ -57,6 +58,23 @@ class WindowController;
 [[nodiscard]] std::optional<std::uint64_t> primaryDaemonWindowToAdopt(
     bool anyWindowMapped, std::vector<std::uint64_t> const& daemonWindowIds);
 
+/// Whether @p configHome holds QML overrides in the pre-module layout, which nothing loads.
+///
+/// The loader that shipped with the loose qrc files probed `<configHome>/ui/<Name>.qml` file by file.
+/// The QML module that replaced it is overridden the way any module is: the config directory joins
+/// the import path, and a `<configHome>/Contour/Ui` module with its own qmldir shadows the built-in
+/// one. A user who had customized a component before that change therefore sees the customization
+/// simply stop applying, and neither the old location nor the new one is guessable from the other --
+/// so this is what lets the boot path say so out loud. @see ContourGuiApp::terminalGuiAction.
+///
+/// @param configHome The configuration directory, i.e. what becomes the QML import path.
+/// @return @c true when the legacy directory holds at least one .qml file AND no module override
+///         exists, which is exactly the case where the user has lost something without being told.
+[[nodiscard]] bool hasStrandedQmlOverrides(std::filesystem::path const& configHome);
+
+/// The directory a user's own `Contour.Ui` module is loaded from, under @p configHome.
+[[nodiscard]] std::filesystem::path uiModuleOverrideDirectory(std::filesystem::path const& configHome);
+
 /// Extends ContourApp with terminal GUI capability.
 class ContourGuiApp: public QObject, public ContourApp
 {
@@ -94,7 +112,7 @@ class ContourGuiApp: public QObject, public ContourApp
     int run(int argc, char const* argv[]) override;
     [[nodiscard]] crispy::cli::command parameterDefinition() const override;
 
-    /// Opens a new OS window (loads a fresh main.qml root).
+    /// Opens a new OS window (loads a fresh Main.qml root).
     /// @param targetScreen The screen the new window should open on (the spawning window's screen),
     ///                     or nullptr when unknown (first window); consumed by the window's
     ///                     WindowController::bindWindow() via takePendingSpawnScreen().
@@ -177,8 +195,6 @@ class ContourGuiApp: public QObject, public ContourApp
     /// in one tab could not stop what another tab had started.
     [[nodiscard]] SpeechSynthesizer& speechSynthesizer() noexcept { return *_speechSynthesizer; }
 
-    [[nodiscard]] static QUrl resolveResource(std::string_view path);
-
     [[nodiscard]] vtbackend::ColorPreference colorPreference() const noexcept { return _colorPreference; }
 
     /// Applies the configured GUI chrome theme (dark/light/system) to the application's color
@@ -214,7 +230,7 @@ class ContourGuiApp: public QObject, public ContourApp
     /// tree. Idempotent — re-run on every layoutChanged. No-op when not attached.
     void reconcileAttachWindows();
 
-    /// Attach-window binder installed on the manager: called from a freshly-spawned window's main.qml
+    /// Attach-window binder installed on the manager: called from a freshly-spawned window's Main.qml
     /// (via consumeAttachWindow). If a daemon window is staged for it, records the daemon→OS-window
     /// mapping, reconciles that window's layout into it, and returns true so the window does NOT create
     /// its own first tab.
@@ -242,7 +258,7 @@ class ContourGuiApp: public QObject, public ContourApp
     /// daemon window maps to the boot window; additional ones map to spawned windows.
     std::unordered_map<uint64_t, vtworkspace::WindowId> _attachWindowMap;
     /// The daemon window whose OS window is being spawned right now: reconcileAttachWindows stages it
-    /// just before newWindow(), and that window's main.qml claims it via bindPendingAttachWindow.
+    /// just before newWindow(), and that window's Main.qml claims it via bindPendingAttachWindow.
     /// Single-slot (like _pendingTransplant / _pendingSpawnScreen): the QML load is synchronous, so a
     /// stage is always consumed before the next is made.
     std::optional<uint64_t> _pendingAttachWindow;
@@ -284,6 +300,11 @@ class ContourGuiApp: public QObject, public ContourApp
     /// Whether a forced (dark/light) GUI theme currently overrides the OS application palette. Guards
     /// the one-time capture of @c _guiSystemPalette and its restoration when returning to System.
     bool _guiPaletteOverridden = false;
+
+    /// The chrome's design tokens, handed to QML as the `chromeStyle` context property. Declared
+    /// BEFORE the engine so it outlives it: a context property is a borrowed pointer the engine keeps
+    /// dereferencing, and members are destroyed in reverse declaration order.
+    std::unique_ptr<UiStyleProvider> _uiStyleProvider;
 
     std::unique_ptr<QQmlApplicationEngine> _qmlEngine;
 };

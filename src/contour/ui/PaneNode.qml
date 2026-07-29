@@ -15,7 +15,7 @@ import QtQuick
 import QtQuick.Controls
 import Contour.Terminal
 
-// FocusScope, NOT a plain Item: main.qml's restoreTerminalFocus() (fired on every tab create/switch)
+// FocusScope, NOT a plain Item: Main.qml's restoreTerminalFocus() (fired on every tab create/switch)
 // force-focuses this root. A plain Item would itself become the window scope's focus item — REPLACING
 // the active TerminalPane, and since Qt Quick key events do not bubble, every subsequent key was
 // silently swallowed (typing and all keybindings dead after creating a tab). As a FocusScope,
@@ -34,7 +34,7 @@ FocusScope {
     // each child with a null node, so neither inner Loader activated, no TerminalPane was created, and the
     // split pane rendered as the fully transparent window (the desktop showing through). Defaulting to null
     // makes the deferred assignment valid and matches the `root.node !== null` guards used throughout. The
-    // top-level instance in main.qml still sets `node:` declaratively at construction.
+    // top-level instance in Main.qml still sets `node:` declaratively at construction.
     property var node: null
 
     // Smallest first-child share a divider drag may persist; keeps both panes visible/grabbable.

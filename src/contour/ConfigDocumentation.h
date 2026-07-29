@@ -220,6 +220,37 @@ constexpr StringLiteral TabBarVisibilityConfig {
     "\n"
 };
 
+constexpr StringLiteral UiStyleConfig {
+    "{comment} How the application's own chrome -- tab strip, title bar, menus, popups and the\n"
+    "{comment} settings page -- is painted (ignore-case). This selects a shape, not a color: both\n"
+    "{comment} styles follow the OS palette and the `theme` setting above.\n"
+    "{comment}   native   = platform-native GUI chrome (default).\n"
+    "{comment}   terminal = cell-quantized monospace chrome that reads like a TUI.\n"
+    "{comment} Takes effect on the next start.\n"
+    "ui_style: {}\n"
+    "\n"
+};
+
+// Quoted, like every other free-text string key (see WordDelimitersConfig below). Unquoted, the
+// default empty value emits `ui_font_family:` -- a YAML null the reader cannot convert to a string --
+// and a family beginning with a YAML indicator, of which "@MS Gothic" is a real one, would be read as
+// something other than itself. The writer escapes `"` and `\` for exactly this context.
+constexpr StringLiteral UiFontFamilyConfig {
+    "{comment} Font family the terminal-style chrome is drawn with. Empty inherits the running\n"
+    "{comment} profile's regular font, which is what makes the chrome match the terminal grid.\n"
+    "{comment} Ignored while ui_style is native. Takes effect on the next start.\n"
+    "ui_font_family: \"{}\"\n"
+    "\n"
+};
+
+constexpr StringLiteral UiFontSizeConfig {
+    "{comment} Font size, in points, the terminal-style chrome is drawn with. 0 inherits the\n"
+    "{comment} running profile's font size. Ignored while ui_style is native.\n"
+    "{comment} Takes effect on the next start.\n"
+    "ui_font_size: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral MarginsConfig {
     "{comment} Window margins\n"
     "{comment}\n"
@@ -1669,6 +1700,46 @@ constexpr StringLiteral TabBarPositionWeb {
     "\n"
 };
 
+constexpr StringLiteral UiStyleWeb {
+    "\n"
+    "Selects how the application's own chrome is painted: the tab strip and title bar, and the "
+    "controls (buttons, fields, menu entries, combo boxes) inside menus, popups and the settings page. "
+    "This selects a *shape*, not a color: both styles take their colors from the "
+    "operating system palette and follow the [`theme`](#theme) setting. Valid values (ignore-case):\n"
+    "\n"
+    "- `native` — platform-native GUI chrome. This is the default.\n"
+    "- `terminal` — the chrome is quantized to whole character cells of a monospace font and its "
+    "corners are squared off, so the window reads as one continuous TUI rather than as a GUI wrapped "
+    "around a terminal. Tabs keep every GUI affordance (drag to reorder, tear off, rename, close, "
+    "context menu); only their appearance changes.\n"
+    "\n"
+    "This is the recommended way to get the terminal look now that a window can hold split panes: the "
+    "indicator status line's `{{Tabs}}` item still works, but it is drawn per pane, so a split window "
+    "would show one tab list per pane instead of one per window.\n"
+    "\n"
+    "The Qt Quick Controls half of the style is selected once, before the first control is created, so "
+    "a change takes effect on the next start rather than live.\n"
+    "\n"
+};
+
+constexpr StringLiteral UiFontFamilyWeb {
+    "\n"
+    "Font family the terminal-style chrome is drawn with. When empty (the default) the chrome inherits "
+    "the regular font family of the profile the window is running (`-p`/`--profile`, else "
+    "[`default_profile`](#default_profile)), which is what makes it match the terminal grid below it. "
+    "Ignored while [`ui_style`](#ui_style) is `native`, where the chrome uses the platform UI font. "
+    "Takes effect on the next start.\n"
+    "\n"
+};
+
+constexpr StringLiteral UiFontSizeWeb {
+    "\n"
+    "Font size, in points, the terminal-style chrome is drawn with. When 0 (the default) the chrome "
+    "inherits the font size of the profile the window is running. Ignored while "
+    "[`ui_style`](#ui_style) is `native`. Takes effect on the next start.\n"
+    "\n"
+};
+
 constexpr StringLiteral TabBarVisibilityWeb {
     "\n"
     "Selects when the GUI tab strip (tab bar) is shown. Valid values (ignore-case):\n"
@@ -2214,6 +2285,9 @@ using AccessibilityAnnouncements =
 using HyperlinkHoverTooltip = DocumentationEntry<HyperlinkHoverTooltipConfig, HyperlinkHoverTooltipWeb>;
 using TabBarPosition = DocumentationEntry<TabBarPositionConfig, TabBarPositionWeb>;
 using TabBarVisibility = DocumentationEntry<TabBarVisibilityConfig, TabBarVisibilityWeb>;
+using UiStyle = DocumentationEntry<UiStyleConfig, UiStyleWeb>;
+using UiFontFamily = DocumentationEntry<UiFontFamilyConfig, UiFontFamilyWeb>;
+using UiFontSize = DocumentationEntry<UiFontSizeConfig, UiFontSizeWeb>;
 using Margins = DocumentationEntry<MarginsConfig, MarginsWeb>;
 using TerminalSize = DocumentationEntry<TerminalSizeConfig, TerminalSizeWeb>;
 using TerminalId = DocumentationEntry<TerminalIdConfig, TerminalIdWeb>;

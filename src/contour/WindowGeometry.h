@@ -38,7 +38,7 @@ struct Margins
 };
 
 /// Window chrome OUTSIDE the terminal content area (e.g. the QML title/tab bar), in logical pixels,
-/// DECLARED by the UI layer (main.qml knows its layout). Never measured from live window-minus-item
+/// DECLARED by the UI layer (Main.qml knows its layout). Never measured from live window-minus-item
 /// deltas — such measurements are transiently wrong during relayout and structurally wrong in splits.
 struct Chrome
 {

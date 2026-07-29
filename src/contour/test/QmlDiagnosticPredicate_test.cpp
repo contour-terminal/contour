@@ -18,9 +18,9 @@ TEST_CASE("isQmlDiagnostic.matchesQmlDefects", "[contour][qml-gate]")
     // Real message shapes as Qt emits them through the message handler.
     auto const message = GENERATE(
         // Source-located diagnostics (component load errors, warnings with a .qml/qrc origin):
-        QStringLiteral("qrc:/contour/ui/main.qml:42: ReferenceError: terminalSessions is not defined"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/Main.qml:42: ReferenceError: terminalSessions is not defined"),
         QStringLiteral("file:///tmp/Foo.qml:7:5: Unable to assign null to QQuickItem*"),
-        QStringLiteral("qrc:/contour/ui/PaneNode.qml:76:9: QML SplitView: Binding loop detected for "
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/PaneNode.qml:76:9: QML SplitView: Binding loop detected for "
                        "property \"preferredWidth\""),
         // JS error classes without a source suffix in the body:
         QStringLiteral("ReferenceError: win is not defined"),

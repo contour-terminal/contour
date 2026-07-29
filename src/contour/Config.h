@@ -5,6 +5,7 @@
 #include <contour/AsciiText.h>
 #include <contour/ConfigDocumentation.h>
 #include <contour/TabBarMode.h>
+#include <contour/UiStyle.h>
 
 #include <vtbackend/Color.h>
 #include <vtbackend/ColorPalette.h>
@@ -1135,6 +1136,15 @@ struct Config
     };
     ConfigEntry<bool, documentation::GuiConfigLocked> guiConfigLocked { false };
     ConfigEntry<contour::config::GuiTheme, documentation::Theme> theme { contour::config::GuiTheme::System };
+    // Like the tab bar above, the chrome style belongs to the APPLICATION rather than to a profile: a
+    // window paints one tab strip and one set of menus while its panes may each run a different
+    // profile, so asking a profile which style the chrome wears has no answer when they disagree.
+    ConfigEntry<UiStyle, documentation::UiStyle> uiStyle { UiStyle::Native };
+    // Empty / 0 mean "inherit the default profile's regular font", which is what makes the
+    // terminal-style chrome match the grid below it. Resolved in UiStyleProvider, not here, because
+    // the default profile is not known until the whole config has been read.
+    ConfigEntry<std::string, documentation::UiFontFamily> uiFontFamily { "" };
+    ConfigEntry<double, documentation::UiFontSize> uiFontSize { 0.0 };
 
     /// How a glyph is enlarged for scaled text (kitty text sizing protocol, OSC 66).
     /// @see vtrasterizer::GlyphScalingMethod for what each method costs.
@@ -1410,6 +1420,7 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, GuiTheme& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarPosition& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarVisibility& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, UiStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::FontDescriptions& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, text::render_mode& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::TextOutlineConfig& where);
@@ -2282,13 +2293,13 @@ struct std::formatter<contour::config::PixelReporting>: formatter<std::string_vi
 };
 
 // Both tab bar modes render as the configuration token their table row carries, so what is written
-// back is by construction what the reader accepts -- see contour/TabBarMode.h.
+// back is by construction what the reader accepts -- see contour/ConfigEnum.h.
 template <>
 struct std::formatter<contour::config::TabBarPosition>: formatter<std::string_view>
 {
     auto format(contour::config::TabBarPosition value, auto& ctx) const
     {
-        return formatter<std::string_view>::format(contour::config::tabBarModeToken(value), ctx);
+        return formatter<std::string_view>::format(contour::config::configEnumToken(value), ctx);
     }
 };
 
@@ -2297,7 +2308,16 @@ struct std::formatter<contour::config::TabBarVisibility>: formatter<std::string_
 {
     auto format(contour::config::TabBarVisibility value, auto& ctx) const
     {
-        return formatter<std::string_view>::format(contour::config::tabBarModeToken(value), ctx);
+        return formatter<std::string_view>::format(contour::config::configEnumToken(value), ctx);
+    }
+};
+
+template <>
+struct std::formatter<contour::config::UiStyle>: formatter<std::string_view>
+{
+    auto format(contour::config::UiStyle value, auto& ctx) const
+    {
+        return formatter<std::string_view>::format(contour::config::configEnumToken(value), ctx);
     }
 };
 

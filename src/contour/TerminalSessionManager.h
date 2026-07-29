@@ -469,20 +469,20 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// controller is the QML-facing adapter for one ApplicationWindow: it owns that window's tab-strip
     /// list-model, PaneProxy tree and window services, and delegates structural / session-lifetime
     /// operations back to this manager tagged with its WindowId. Owned via QQmlEngine CppOwnership
-    /// (like sessions and proxies). main.qml calls this from Component.onCompleted before creating its
+    /// (like sessions and proxies). Main.qml calls this from Component.onCompleted before creating its
     /// first tab.
     Q_INVOKABLE contour::WindowController* createWindowController();
 
     /// If a tab tear-off is pending (staged by tearOffTabToNewWindow before this window was spawned),
     /// transplants that tab into @p newController's window and returns true; the window must NOT then
     /// create its own first tab. Returns false when there is no pending transplant, in which case
-    /// main.qml creates the usual fresh first tab. Consumes the staged request (fires at most once).
+    /// Main.qml creates the usual fresh first tab. Consumes the staged request (fires at most once).
     /// @param newController The freshly-created controller of the just-spawned window.
     /// @return true if a torn-off tab was adopted; false if the window should create its own first tab.
     Q_INVOKABLE bool consumePendingTransplant(contour::WindowController* newController);
 
     /// Looks up the app's startup layout (ContourGuiApp::layoutName(), from `--layout` or the config's
-    /// `default_layout`) and, if found, applies it to @p controller's window. Called by main.qml right
+    /// `default_layout`) and, if found, applies it to @p controller's window. Called by Main.qml right
     /// after consumePendingTransplant() when no tab was transplanted, so a freshly-spawned window can
     /// open pre-populated instead of falling back to a single blank tab. One-shot: only the FIRST
     /// window of the process consumes the startup layout — every later window (NewTerminalWindow)
@@ -502,7 +502,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
         _attachWindowBinder = std::move(binder);
     }
 
-    /// main.qml calls this in Component.onCompleted (like consumeDefaultLayout): in attach mode a
+    /// Main.qml calls this in Component.onCompleted (like consumeDefaultLayout): in attach mode a
     /// window may have been spawned to host a specific daemon window (B4). If the installed binder
     /// adopts @p controller's window for that daemon window, this returns true and the window must NOT
     /// create its own first tab — its tabs come from reconciling the daemon window's layout instead.
@@ -837,11 +837,11 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
     // A tab tear-off staged by tearOffTabToNewWindow(): the (source window, tab) the next spawned
     // window should adopt as its sole tab instead of creating a fresh one. Consumed exactly once by
-    // consumePendingTransplant() from that window's main.qml. Mirrors ContourGuiApp::_pendingSpawnScreen.
+    // consumePendingTransplant() from that window's Main.qml. Mirrors ContourGuiApp::_pendingSpawnScreen.
     std::optional<std::pair<vtworkspace::WindowId, vtworkspace::TabId>> _pendingTransplant;
 
     // Attach-mode window binder installed by ContourGuiApp (B4): a freshly-spawned window asks it
-    // (via consumeAttachWindow, from main.qml) whether it hosts a pending daemon window. Empty when
+    // (via consumeAttachWindow, from Main.qml) whether it hosts a pending daemon window. Empty when
     // not attached, so consumeAttachWindow is a no-op for ordinary local windows.
     std::function<bool(contour::WindowController*)> _attachWindowBinder;
 

@@ -3,7 +3,7 @@
 //
 // Opened by a nameless SaveLayout action — the row the command palette offers, or a key bound to bare
 // SaveLayout. Both route through the session manager to THIS window's WindowController, whose
-// `saveLayoutRequested` signal main.qml connects to open(). This is the exact mirror of how a colorless
+// `saveLayoutRequested` signal Main.qml connects to open(). This is the exact mirror of how a colorless
 // SetTabColor opens TabColorFlyout: the bare action opens a surface that supplies the argument.
 //
 // The user types a layout name and presses Enter; the dialog hands it to WindowController::saveLayoutAs,

@@ -638,6 +638,9 @@ static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
             overrides.loadFromEntry("tab_bar_position", config.tabBarPosition);
             overrides.loadFromEntry("tab_bar_visibility", config.tabBarVisibility);
             overrides.loadFromEntry("theme", config.theme);
+            overrides.loadFromEntry("ui_style", config.uiStyle);
+            overrides.loadFromEntry("ui_font_family", config.uiFontFamily);
+            overrides.loadFromEntry("ui_font_size", config.uiFontSize);
             overrides.loadFromEntry("early_exit_threshold", config.earlyExitThreshold);
         }
     }
@@ -843,6 +846,9 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("grapheme_clustering", c.graphemeClustering);
         loadFromEntry("gui_config_locked", c.guiConfigLocked);
         loadFromEntry("theme", c.theme);
+        loadFromEntry("ui_style", c.uiStyle);
+        loadFromEntry("ui_font_family", c.uiFontFamily);
+        loadFromEntry("ui_font_size", c.uiFontSize);
         loadFromEntry("experimental", c.experimentalFeatures);
         loadFromEntry("bypass_mouse_protocol_modifier", c.bypassMouseProtocolModifiers);
         loadFromEntry("on_mouse_select", c.onMouseSelection);
@@ -2255,7 +2261,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
 
 namespace
 {
-    /// Reads a tab bar mode spelled as one of the tokens its table carries.
+    /// Reads a configuration enum spelled as one of the tokens its ConfigEnum.h table carries.
     ///
     /// Case-insensitive, and an unrecognized value is reported rather than silently accepted -- a typo
     /// in a visible appearance setting should not pass unnoticed. It still leaves @p where at its
@@ -2264,12 +2270,12 @@ namespace
     ///
     /// @param node   The mapping to read from.
     /// @param entry  The key within @p node.
-    /// @param where  Receives the mode, and is left untouched when the value is not recognized.
+    /// @param where  Receives the value, and is left untouched when it is not recognized.
     /// @param logger The reader's trace category, passed in because it is a member of the reader.
-    template <typename Mode>
-    void loadTabBarMode(YAML::Node const& node,
+    template <typename Enum>
+    void loadConfigEnum(YAML::Node const& node,
                         std::string const& entry,
-                        Mode& where,
+                        Enum& where,
                         logstore::category const& logger)
     {
         auto const child = node[entry];
@@ -2278,8 +2284,8 @@ namespace
 
         auto const rawValue = child.as<std::string>();
         logger()("Loading entry: {}, value {}", entry, rawValue);
-        if (auto const mode = tabBarModeFromToken<Mode>(rawValue))
-            where = *mode;
+        if (auto const value = configEnumFromToken<Enum>(rawValue))
+            where = *value;
         else
             errorLog()("Unknown value for {}: '{}'; keeping {}.", entry, rawValue, where);
     }
@@ -2287,14 +2293,19 @@ namespace
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarPosition& where)
 {
-    loadTabBarMode(node, entry, where, logger);
+    loadConfigEnum(node, entry, where, logger);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
                                      TabBarVisibility& where)
 {
-    loadTabBarMode(node, entry, where, logger);
+    loadConfigEnum(node, entry, where, logger);
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, UiStyle& where)
+{
+    loadConfigEnum(node, entry, where, logger);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
@@ -2903,7 +2914,7 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
         if (holds_alternative<actions::SetTabBarVisibility>(action))
         {
             if (auto mode = node["mode"]; mode && mode.IsScalar())
-                if (auto const parsed = tabBarModeFromToken<TabBarVisibility>(mode.as<std::string>()))
+                if (auto const parsed = configEnumFromToken<TabBarVisibility>(mode.as<std::string>()))
                     return actions::SetTabBarVisibility { *parsed };
             return std::nullopt;
         }
@@ -2911,7 +2922,7 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
         if (holds_alternative<actions::SetTabBarPosition>(action))
         {
             if (auto position = node["position"]; position && position.IsScalar())
-                if (auto const parsed = tabBarModeFromToken<TabBarPosition>(position.as<std::string>()))
+                if (auto const parsed = configEnumFromToken<TabBarPosition>(position.as<std::string>()))
                     return actions::SetTabBarPosition { *parsed };
             return std::nullopt;
         }

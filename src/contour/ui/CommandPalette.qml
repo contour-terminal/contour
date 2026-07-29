@@ -2,7 +2,7 @@
 // The command palette: a searchable popup listing every runnable command.
 //
 // Opened by the OpenCommandPalette action (Ctrl+Shift+P by default), which routes through the session
-// manager to this window's WindowController, whose `commandPaletteRequested` signal main.qml connects
+// manager to this window's WindowController, whose `commandPaletteRequested` signal Main.qml connects
 // to open(). The rows come from the controller's CommandPaletteModel:
 //
 //   - with an empty filter the list is sectioned — RECENTLY USED (persisted across restarts) on top,

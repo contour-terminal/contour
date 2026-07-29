@@ -1327,7 +1327,7 @@ std::tuple<LineOffset, ColumnOffset> TerminalSession::consumeScroll() noexcept
 
 QString TerminalSession::title() const
 {
-    // Bound to main.qml's window `title:`, so Qt re-evaluates this on the GUI thread whenever the title
+    // Bound to Main.qml's window `title:`, so Qt re-evaluates this on the GUI thread whenever the title
     // changes — concurrently with the parser thread's OSC 0/2 writer (setWindowTitle assigns _windowTitle
     // under _stateMutex). Read the locked copy via resolvedWindowTitle() rather than the lock-free
     // windowTitle() reference, which would tear (or use-after-free on a string reallocation) against that
@@ -3086,7 +3086,7 @@ void TerminalSession::spawnNewTerminal(string const& profileName)
             return;
         sessionLog()("spawning new in-process window");
         _app.config().profile(_profileName)->shell.value().workingDirectory = fs::path(wd);
-        // The new window mints its own WindowController + first tab in main.qml's Component.onCompleted,
+        // The new window mints its own WindowController + first tab in Main.qml's Component.onCompleted,
         // so no session-staging handshake is needed.
         // A window spawned from an existing one should open on that window's screen (the best
         // pre-show DPR predictor); the new window's bindWindow() consumes it.

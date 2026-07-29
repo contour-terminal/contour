@@ -10,9 +10,13 @@
 #include <contour/TerminalSession.h>
 #include <contour/test/GuiTestFixtures.h>
 
+#include <QtCore/QTemporaryDir>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 
 using contour::test::TestApp;
@@ -43,13 +47,51 @@ TEST_CASE("ContourGuiApp reports no dump-state path by default", "[contour][app]
     CHECK_FALSE(app.app().dumpStateAtExit().has_value());
 }
 
-TEST_CASE("ContourGuiApp::resolveResource falls back to the qrc scheme for an unknown path", "[contour][app]")
+// The QML override seam moved: the loader used to probe `<configHome>/ui/<Name>.qml` file by file,
+// and the module that replaced it is overridden by a `<configHome>/Contour/Ui` module instead. A user
+// who had customized a component would otherwise watch it silently stop applying, so the boot path
+// detects the stranded layout and says so — which only means anything if it detects it correctly.
+TEST_CASE("hasStrandedQmlOverrides only fires on a customization that has actually been lost",
+          "[contour][app]")
 {
-    // A resource that exists neither under the config home nor the dev source dir resolves to the
-    // bundled qrc: URL (the production fallback for shipped assets).
-    auto const url = contour::ContourGuiApp::resolveResource("definitely/not/a/real/asset.xyz");
-    CHECK(url.scheme() == "qrc");
-    CHECK(url.toString().contains("contour"));
+    QTemporaryDir const home;
+    REQUIRE(home.isValid());
+    auto const configHome = std::filesystem::path(home.path().toStdString());
+
+    SECTION("a config directory with no overrides at all")
+    {
+        CHECK_FALSE(contour::hasStrandedQmlOverrides(configHome));
+    }
+
+    SECTION("an empty legacy directory is not a lost customization")
+    {
+        // Left behind by an uninstall, or created and never used. Warning here would train the user
+        // to ignore the message.
+        std::filesystem::create_directories(configHome / "ui");
+        CHECK_FALSE(contour::hasStrandedQmlOverrides(configHome));
+
+        // A non-QML file there is not one either.
+        std::ofstream(configHome / "ui" / "notes.txt") << "hello";
+        CHECK_FALSE(contour::hasStrandedQmlOverrides(configHome));
+    }
+
+    SECTION("a legacy .qml file with no module override IS the case worth warning about")
+    {
+        std::filesystem::create_directories(configHome / "ui");
+        std::ofstream(configHome / "ui" / "TabItem.qml") << "import QtQuick\nItem {}\n";
+        CHECK(contour::hasStrandedQmlOverrides(configHome));
+    }
+
+    SECTION("a migrated module silences it, whatever is left in the old directory")
+    {
+        std::filesystem::create_directories(configHome / "ui");
+        std::ofstream(configHome / "ui" / "TabItem.qml") << "import QtQuick\nItem {}\n";
+
+        auto const moduleDirectory = contour::uiModuleOverrideDirectory(configHome);
+        std::filesystem::create_directories(moduleDirectory);
+        std::ofstream(moduleDirectory / "qmldir") << "module Contour.Ui\n";
+        CHECK_FALSE(contour::hasStrandedQmlOverrides(configHome));
+    }
 }
 
 TEST_CASE("the attach boot window adopts the primary daemon window", "[contour][app][attach]")
@@ -57,7 +99,7 @@ TEST_CASE("the attach boot window adopts the primary daemon window", "[contour][
     using contour::primaryDaemonWindowToAdopt;
 
     // The boot window (no OS window mapped yet) adopts the primary — lowest-id — daemon window,
-    // so main.qml adopts it instead of authoring a spurious fresh tab on the daemon.
+    // so Main.qml adopts it instead of authoring a spurious fresh tab on the daemon.
     CHECK(primaryDaemonWindowToAdopt(/*anyWindowMapped=*/false, { 7, 12, 30 }) == 7);
 
     // A later OS window (one already mapped) is NOT the boot window — it adopts nothing here (it is

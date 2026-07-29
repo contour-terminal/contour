@@ -206,7 +206,7 @@ Popup {
 
         // Arbitrary-color entry. Deliberately dependency-free (no QtQuick.Dialogs): a hard import of that
         // module is not installed in every runtime, and its absence would cascade up and break the whole
-        // main.qml. Instead the user types a 6-digit hex RGB value; the preview updates live and Enter
+        // Main.qml. Instead the user types a 6-digit hex RGB value; the preview updates live and Enter
         // (or clicking the preview) applies it. The "#rrggbb" string is coerced to a QColor by the same
         // controller.setTabColor() the preset swatches use, so the backend needs no new API.
         RowLayout {

@@ -436,7 +436,7 @@ TEST_CASE("TerminalSessionManager: a directory-only layout pane does not overrid
 TEST_CASE("TerminalSessionManager: consumeDefaultLayout applies the startup layout exactly once",
           "[manager][layout]")
 {
-    // main.qml calls consumeDefaultLayout for EVERY window it loads; only the process's first
+    // Main.qml calls consumeDefaultLayout for EVERY window it loads; only the process's first
     // window may consume the startup layout, or NewTerminalWindow would re-run all its commands.
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     contour::test::TestApp app { std::move(factoryOwned) };

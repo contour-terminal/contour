@@ -4,7 +4,7 @@
 // keybinding, which rides the same key-event path into the focused display) must keep working
 // across tab creation, tab switching, and pane splitting.
 //
-// Regression pinned here: creating a second tab killed ALL keyboard input. main.qml restores
+// Regression pinned here: creating a second tab killed ALL keyboard input. Main.qml restores
 // terminal focus on every activeTabIndexChanged by force-focusing the loaded PaneNode ROOT; while
 // that root was a plain Item (not a FocusScope), focusing it REPLACED the TerminalPane as the
 // window scope's focus item — and Qt Quick key events do not bubble, so every subsequent key
@@ -12,10 +12,11 @@
 // root as a FocusScope, focusing it forwards to the remembered focus child (the active pane).
 //
 // The harness synthesizes REAL key events (QTest::keyClick -> QWindowSystemInterface), loads the
-// REAL main.qml/PaneNode.qml/TerminalPane.qml chain, and records key delivery in a ContourTerminal
+// REAL Main.qml/PaneNode.qml/TerminalPane.qml chain, and records key delivery in a ContourTerminal
 // stand-in that mirrors the real display's focus behavior (ItemIsFocusScope) and its silent-drop
 // failure mode.
 
+#include <contour/test/QmlChromeStyle.h>
 #include <contour/test/QmlMessageCapture.h>
 
 #include <QtCore/QAbstractListModel>
@@ -194,14 +195,14 @@ class RoutingMockPane: public QObject
 /// Manager + WindowController in one mock (the MainWindowQml_test pattern), extended with a
 /// SETTABLE activeTabRootPane/activeTabIndex so a test can replay the production event sequence of
 /// a tab creation or switch: repoint the root proxy, then announce the active-index change (which
-/// is what fires main.qml's restoreTerminalFocus()).
+/// is what fires Main.qml's restoreTerminalFocus()).
 class RoutingMockController: public QAbstractListModel
 {
     Q_OBJECT
     Q_PROPERTY(int activeTabIndex READ activeTabIndex NOTIFY activeTabIndexChanged)
     Q_PROPERTY(bool multimediaReady READ multimediaReady CONSTANT)
     Q_PROPERTY(bool titleBarVisible READ titleBarVisible NOTIFY titleBarVisibleChanged)
-    // Tab-strip placement + visibility main.qml binds; defaults (Top, shown) keep this routing test's
+    // Tab-strip placement + visibility Main.qml binds; defaults (Top, shown) keep this routing test's
     // layout identical to production without needing to vary them.
     Q_PROPERTY(int tabBarPosition READ tabBarPosition NOTIFY tabBarPositionChanged)
     Q_PROPERTY(bool tabBarShouldShow READ tabBarShouldShow NOTIFY tabBarShouldShowChanged)
@@ -209,14 +210,14 @@ class RoutingMockController: public QAbstractListModel
     Q_PROPERTY(int chromeHeight READ chromeHeight WRITE setChromeHeight NOTIFY chromeHeightChanged)
     Q_PROPERTY(QObject* activeTabRootPane READ activeTabRootPane NOTIFY activeTabRootPaneChanged)
     Q_PROPERTY(QObject* activeSession READ activeSession CONSTANT)
-    // Mirrors WindowController's command-palette surface: main.qml instantiates CommandPalette.qml
+    // Mirrors WindowController's command-palette surface: Main.qml instantiates CommandPalette.qml
     // against this controller and Connections-targets its commandPaletteRequested signal, so the mock
     // must carry both or the run-wide QML message gate fails the suite.
     Q_PROPERTY(QObject* commandPalette READ commandPalette CONSTANT)
-    // Ditto for the context-menu surface: main.qml instantiates ActionContextMenu.qml against this
+    // Ditto for the context-menu surface: Main.qml instantiates ActionContextMenu.qml against this
     // controller, binds its `entries` to contextMenuModel and Connections-targets contextMenuRequested.
     Q_PROPERTY(QVariantList contextMenuModel READ contextMenuModel NOTIFY contextMenuModelChanged)
-    // Ditto for the title bar's own menu surface, which main.qml instantiates alongside it.
+    // Ditto for the title bar's own menu surface, which Main.qml instantiates alongside it.
     Q_PROPERTY(QVariantList titleBarContextMenuModel READ titleBarContextMenuModel NOTIFY
                    titleBarContextMenuModelChanged)
 
@@ -254,14 +255,14 @@ class RoutingMockController: public QAbstractListModel
     [[nodiscard]] QObject* activeTabRootPane() const noexcept { return _activeTabRootPane; }
     [[nodiscard]] QObject* activeSession() const noexcept { return nullptr; }
 
-    /// Repoints the active tab's root proxy (the pane tree main.qml renders), as the production
+    /// Repoints the active tab's root proxy (the pane tree Main.qml renders), as the production
     /// controller does on a tab create/switch when it rebuilds its proxies.
     void setActiveTabRootPane(QObject* pane)
     {
         _activeTabRootPane = pane;
         emit activeTabRootPaneChanged();
     }
-    /// Announces the active-tab change — the signal main.qml reacts to with restoreTerminalFocus().
+    /// Announces the active-tab change — the signal Main.qml reacts to with restoreTerminalFocus().
     void setActiveTabIndex(int index)
     {
         _activeTabIndex = index;
@@ -271,7 +272,7 @@ class RoutingMockController: public QAbstractListModel
     [[nodiscard]] QObject* commandPalette() const noexcept { return nullptr; }
     Q_INVOKABLE void runCommand(QString const&) {}
     /// Mirrors WindowController::openCommandPalette(): what the manager calls for the
-    /// OpenCommandPalette action, and what makes main.qml's popup appear.
+    /// OpenCommandPalette action, and what makes Main.qml's popup appear.
     Q_INVOKABLE void openCommandPalette() { emit commandPaletteRequested(); }
 
     [[nodiscard]] QVariantList contextMenuModel() const { return {}; }
@@ -280,7 +281,7 @@ class RoutingMockController: public QAbstractListModel
     Q_INVOKABLE void triggerTitleBarContextMenuAction(int /*actionId*/) {}
     Q_INVOKABLE void triggerContextMenuAction(int) {}
     /// Mirrors WindowController::openContextMenu(): what the manager calls for the OpenContextMenu
-    /// action, and what makes main.qml pop the terminal's right-click menu.
+    /// action, and what makes Main.qml pop the terminal's right-click menu.
     Q_INVOKABLE void openContextMenu() { emit contextMenuRequested(); }
 
     Q_INVOKABLE QObject* createWindowController() { return this; }
@@ -361,7 +362,7 @@ class RoutingMockController: public QAbstractListModel
     void tabTitleEditRequested(int /*index*/);
     // Matches TabItem's Connections handler; a missing signal here is a QML warning, not a silent no-op.
     void tabColorPickRequested(int /*index*/);
-    // Matches main.qml's Connections handler for the save-layout prompt; a missing signal here is a QML
+    // Matches Main.qml's Connections handler for the save-layout prompt; a missing signal here is a QML
     // warning the run-wide gate turns into a suite failure.
     void saveLayoutRequested();
 
@@ -371,17 +372,18 @@ class RoutingMockController: public QAbstractListModel
     QObject* _activeTabRootPane = nullptr;
 };
 
-/// Loads main.qml against @p controller, shows the (offscreen) window and pumps events.
+/// Loads Main.qml against @p controller, shows the (offscreen) window and pumps events.
 [[nodiscard]] std::unique_ptr<QObject> loadMainWindow(QQmlEngine& engine, RoutingMockController& controller)
 {
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/main.qml")));
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/Main.qml")));
     while (component.status() == QQmlComponent::Loading)
         QCoreApplication::processEvents();
     if (!component.isReady())
     {
         for (auto const& error: component.errors())
-            UNSCOPED_INFO("main.qml error: " << error.toString().toStdString());
+            UNSCOPED_INFO("Main.qml error: " << error.toString().toStdString());
         return nullptr;
     }
     std::unique_ptr<QObject> root(component.create());
@@ -434,7 +436,7 @@ TEST_CASE("keyboard routing survives tab creation, tab switching, and splitting 
     RoutingMockController controller;
     QQmlEngine::setObjectOwnership(&controller, QQmlEngine::CppOwnership);
 
-    // Tab 1: a single active leaf, present before main.qml loads (the post-startup state).
+    // Tab 1: a single active leaf, present before Main.qml loads (the post-startup state).
     RoutingMockSession sessionA;
     RoutingMockPane rootA(/*leaf*/ true);
     rootA.setSession(&sessionA);
@@ -466,7 +468,7 @@ TEST_CASE("keyboard routing survives tab creation, tab switching, and splitting 
     SECTION("creating a second tab keeps keys flowing into the new tab's pane")
     {
         // Tab creation, production event order (WindowController::onActiveTabChanged): announce the
-        // active-index change FIRST — which fires main.qml's restoreTerminalFocus() — then rebuild
+        // active-index change FIRST — which fires Main.qml's restoreTerminalFocus() — then rebuild
         // the proxies, repointing the active tab's root proxy (the persistent pane rebinds its
         // session). The regression: restore focused the PaneNode ROOT, which as a plain Item
         // swallowed every subsequent key (typing dead, and with it every tab-switch keybinding,

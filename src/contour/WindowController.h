@@ -38,7 +38,7 @@ class SettingsController;
 /// Per-OS-window Qt/QML adapter over one vtworkspace::Window.
 ///
 /// Clean-architecture role: this is the ADAPTER between the pure, Qt-free domain core (vtworkspace::Window /
-/// SessionModel) and the QML window (ApplicationWindow / main.qml). One instance exists per OS window.
+/// SessionModel) and the QML window (ApplicationWindow / Main.qml). One instance exists per OS window.
 /// It owns everything window-scoped and Qt-shaped:
 ///   - the tab-strip QAbstractListModel (rows = this window's tabs) + the tab invokables the strip calls;
 ///   - the PaneProxy tree for the active tab (the recursive PaneNode.qml renders from activeTabRootPane);
@@ -72,7 +72,7 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     Q_PROPERTY(contour::PaneProxy* activeTabRootPane READ activeTabRootPane NOTIFY activeTabRootPaneChanged)
     Q_PROPERTY(contour::TerminalSession* activeSession READ activeSession NOTIFY activeSessionChanged)
     Q_PROPERTY(bool titleBarVisible READ titleBarVisible NOTIFY titleBarVisibleChanged)
-    // Tab-strip (tab bar) placement + visibility, exposed to main.qml. `tabBarPosition` is an int
+    // Tab-strip (tab bar) placement + visibility, exposed to Main.qml. `tabBarPosition` is an int
     // (0 = Top, 1 = Bottom) matching the config::TabBarPosition enumerator order. `tabBarShouldShow`
     // is the resolved gate (mode + live tab count) the QML binds its `visible` to.
     Q_PROPERTY(int tabBarPosition READ tabBarPosition NOTIFY tabBarPositionChanged)
@@ -232,7 +232,7 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// @return Opaque black for a light background, opaque white for a dark one.
     Q_INVOKABLE [[nodiscard]] QColor tabTextColor(QColor const& tabBackground) const;
 
-    /// Closes this OS window: tears down its tabs/sessions and drops the controller. main.qml onClosing.
+    /// Closes this OS window: tears down its tabs/sessions and drops the controller. Main.qml onClosing.
     Q_INVOKABLE void closeWindow();
     /// Whether this window may close now (its last pane exited). TerminalPane.onTerminated.
     Q_INVOKABLE [[nodiscard]] bool canCloseWindow() const noexcept;
@@ -257,7 +257,7 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
 
     // {{{ Settings page
     /// Whether this window's content area currently shows the in-app settings page instead of the
-    /// active tab's terminal pane tree. The content Loader in main.qml switches on this, so the settings
+    /// active tab's terminal pane tree. The content Loader in Main.qml switches on this, so the settings
     /// page and the terminal are mutually-exclusive views of the same region (Windows-Terminal style).
     [[nodiscard]] bool settingsActive() const noexcept { return _settingsActive; }
 
@@ -335,7 +335,7 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// Sets the window's title-bar visibility: stores the window-scoped state, applies the native
     /// window-frame decoration (Qt::FramelessWindowHint on the adopted OS window — shown => native
     /// frame, hidden => frameless so the custom client-side TitleBar is the only decoration; the C++
-    /// counterpart of main.qml's `flags` binding), and notifies the QML window bindings.
+    /// counterpart of Main.qml's `flags` binding), and notifies the QML window bindings.
     /// @param visible The new visibility.
     void setTitleBarVisible(bool visible);
 
@@ -354,7 +354,7 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     [[nodiscard]] int tabBarVisibility() const noexcept;
 
     /// Whether the tab strip should currently be shown, resolving the visibility mode against the live
-    /// tab count: Always => true, Never => false, Multiple => count() > 1. main.qml binds the tab
+    /// tab count: Always => true, Never => false, Multiple => count() > 1. Main.qml binds the tab
     /// strip's `visible` to this.
     /// @return True if the tab strip should be shown.
     [[nodiscard]] bool tabBarShouldShow() const noexcept;
@@ -401,7 +401,7 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// Adopts the QML window early (before any display focuses in), assigns the spawn target screen
     /// (the pre-show DPR predictor: spawning window's screen, else the cursor's screen on non-Wayland,
     /// else primary) and installs the DPR/screen-change hooks for the scale-settlement handler.
-    /// Called from main.qml's Component.onCompleted, before the first tab exists.
+    /// Called from Main.qml's Component.onCompleted, before the first tab exists.
     /// @param osWindow The ApplicationWindow backing this controller.
     Q_INVOKABLE void bindWindow(QQuickWindow* osWindow);
 
@@ -420,10 +420,10 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     /// the window directly in the profile's state (normal/maximized/fullscreen) — the first map is the
     /// final geometry, eliminating the map-then-correct spawn flicker. Falls back to showing at the
     /// default size (never leaves the user windowless) when no metrics are available.
-    /// Called from main.qml's Component.onCompleted, after the first tab was created.
+    /// Called from Main.qml's Component.onCompleted, after the first tab was created.
     Q_INVOKABLE void showInitial();
 
-    /// Window chrome height in logical pixels OUTSIDE the terminal content area, DECLARED by main.qml
+    /// Window chrome height in logical pixels OUTSIDE the terminal content area, DECLARED by Main.qml
     /// (bound to the title bar's effective height: 0 when hidden). Geometry math must never measure
     /// window-minus-item deltas — those are transient during relayout and structurally wrong in splits.
     [[nodiscard]] int chromeHeight() const noexcept { return _chromeHeight; }
@@ -697,7 +697,7 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     config::TabBarVisibility _tabBarVisibility = config::TabBarVisibility::Always;
     bool _tabBarVisibilitySeeded = false;
 
-    // Declared title-bar chrome height in logical px (written by main.qml's binding).
+    // Declared title-bar chrome height in logical px (written by Main.qml's binding).
     int _chromeHeight = 0;
     // Whether the window was maximized before entering fullscreen (restored on toggle-out).
     bool _maximizedState = false;

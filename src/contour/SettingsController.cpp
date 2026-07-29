@@ -70,12 +70,12 @@ namespace
         return QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size()));
     }
 
-    /// The configuration tokens of every mode of type @p Mode, in table order.
-    template <typename Mode>
-    [[nodiscard]] QStringList tabBarModeTokens()
+    /// The configuration tokens of every value of configuration enum @p Enum, in table order.
+    template <typename Enum>
+    [[nodiscard]] QStringList configEnumTokens()
     {
         auto tokens = QStringList {};
-        for (auto const& info: config::tabBarModes<Mode>())
+        for (auto const& info: config::configEnumValues<Enum>())
             tokens.push_back(toQString(info.token));
         return tokens;
     }
@@ -943,20 +943,55 @@ namespace
               "Where the tab strip sits relative to the terminal content.",
               "enum",
               [](config::Config const& c) {
-                  return QVariant(toQString(config::tabBarModeToken(c.tabBarPosition.value())));
+                  return QVariant(toQString(config::configEnumToken(c.tabBarPosition.value())));
               },
               [](QVariant const& v) { return v.toString().toStdString(); },
-              tabBarModeTokens<config::TabBarPosition>() },
+              configEnumTokens<config::TabBarPosition>() },
             { "tab_bar_visibility",
               "Tab bar visibility",
               "When the tab strip is shown: always, never, or only once a window has more than one "
               "tab.",
               "enum",
               [](config::Config const& c) {
-                  return QVariant(toQString(config::tabBarModeToken(c.tabBarVisibility.value())));
+                  return QVariant(toQString(config::configEnumToken(c.tabBarVisibility.value())));
               },
               [](QVariant const& v) { return v.toString().toStdString(); },
-              tabBarModeTokens<config::TabBarVisibility>() },
+              configEnumTokens<config::TabBarVisibility>() },
+            // Reads its options and its accepted set from contour/UiStyle.h, like the tab bar rows
+            // above. The restart note is part of the help text rather than a separate affordance
+            // because the limitation is Qt's: the Quick Controls style is chosen once, before the
+            // first control exists (see ContourGuiApp), so there is nothing to apply live.
+            { "ui_style",
+              "Interface style",
+              "Native GUI chrome, or cell-quantized terminal (TUI) chrome drawn in a monospace font. "
+              "Takes effect after restart.",
+              "enum",
+              [](config::Config const& c) {
+                  return QVariant(toQString(config::configEnumToken(c.uiStyle.value())));
+              },
+              [](QVariant const& v) { return v.toString().toStdString(); },
+              configEnumTokens<config::UiStyle>() },
+            // Same restart note as ui_style above, and for the same reason: the chrome's design
+            // tokens are resolved from this font once, when the provider is built (ContourGuiApp),
+            // and every property of it is CONSTANT. Saying so here is the whole difference between
+            // "this setting needs a restart" and "this setting is broken".
+            { "ui_font_family",
+              "Interface font",
+              "Font the terminal-style chrome is drawn with. Empty inherits the running profile's "
+              "font, which is what makes the chrome match the terminal grid. Takes effect after "
+              "restart.",
+              "string",
+              [](config::Config const& c) {
+                  return QVariant(QString::fromStdString(c.uiFontFamily.value()));
+              },
+              [](QVariant const& v) { return v.toString().toStdString(); } },
+            { "ui_font_size",
+              "Interface font size",
+              "Size, in points, the terminal-style chrome is drawn with. 0 inherits the running "
+              "profile's font size. Takes effect after restart.",
+              "double",
+              [](config::Config const& c) { return QVariant(c.uiFontSize.value()); },
+              [](QVariant const& v) { return std::format("{}", v.toDouble()); } },
             { "grapheme_clustering",
               "Grapheme clustering",
               "Whether DEC mode 2027 starts out set, letting a codepoint arriving after the first "

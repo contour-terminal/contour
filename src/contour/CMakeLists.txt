@@ -113,8 +113,10 @@ set(_header_files
     SpeechSynthesizer.h
     ModifierNames.h
     Shortcut.h
+    ConfigEnum.h
     TabBarMode.h
     TabLabel.h
+    UiStyle.h
 )
 # Sources are split into a reusable object library (contour_core) and the thin executable entry
 # point (main.cpp). The object library carries every translation unit of the frontend so that both
@@ -170,6 +172,7 @@ if(CONTOUR_FRONTEND_GUI)
         SettingsController.h
         TerminalSession.h
         TerminalSessionManager.h
+        UiStyleProvider.h
         helper.h
         remote/NativeController.h
         remote/RemoteController.h
@@ -193,6 +196,7 @@ if(CONTOUR_FRONTEND_GUI)
         TerminalSession.cpp
         display/TerminalAccessible.cpp
         TerminalSessionManager.cpp
+        UiStyleProvider.cpp
         WindowController.cpp
         helper.cpp
         remote/NativeController.cpp
@@ -206,14 +210,137 @@ if(WIN32)
     list(APPEND _main_source_files contour.rc)
 endif()
 
+# Both QML modules exist only for the GUI frontend, so they are built only for it. Outside that
+# guard a headless CLI-only build still ran qmlcachegen over all 45 QML files and compiled the
+# ~3.6 MB of C++ it generates -- about 110 seconds of a clean build for code such a build can
+# never load.
+if(CONTOUR_FRONTEND_GUI)
+    # {{{ Contour.Ui: the application's own QML, as a proper QML module
+    # A module rather than a pile of files in resources.qrc: it gives the components a URI to be imported
+    # by (so one is referenced by type name rather than by qrc path, and QML tooling can resolve them),
+    # it lets qmlcachegen compile them ahead of time, and a module is the shape a custom Qt Quick
+    # Controls style has to take.
+    #
+    # Its own target rather than contour_core, because qt_add_qml_module needs a real library to back the
+    # module and contour_core is an OBJECT library. STATIC so it still links into both consumers (the
+    # contour executable and contour_gui_test) without a second copy of the QML.
+    #
+    # NB: a QML module's type name is its file's stem, which must therefore start uppercase -- that is why
+    # the window is Main.qml rather than the historical main.qml.
+    set(_qml_files
+        ui/Main.qml
+        ui/BellSound.qml
+        ui/RequestPermission.qml
+        ui/SessionChrome.qml
+        ui/TitleBar.qml
+        ui/TabStrip.qml
+        ui/NewTabMenu.qml
+        ui/TabItem.qml
+        ui/TabContextMenu.qml
+        ui/TabColorFlyout.qml
+        ui/WindowControls.qml
+        ui/ResizeBorder.qml
+        ui/PaneNode.qml
+        ui/TerminalPane.qml
+        ui/ActionContextMenu.qml
+        ui/CommandPalette.qml
+        ui/SaveLayoutDialog.qml
+        ui/SettingsPage.qml
+        ui/SettingsNavItem.qml
+        ui/SettingsListItem.qml
+        ui/ConfirmDialog.qml
+        ui/SettingRow.qml
+        ui/SettingsSection.qml
+        ui/ColorSchemeEditor.qml
+        ui/StatusLineIndicatorEditor.qml
+        ui/StatusLineSegmentRow.qml
+        ui/StatusLineChip.qml
+        ui/StatusLineItemDialog.qml
+        ui/StatusLinePreviewItem.qml
+        ui/ColorSlotField.qml
+    )
+
+    # The files live in ui/ but the module is flat: without an alias each one would land at
+    # :/qt/qml/Contour/Ui/ui/<Name>.qml, leaving a stray directory level in every resource path and in
+    # the qmldir. Aliasing to the bare file name makes the resource layout match the module identity.
+    foreach(_qml_file IN LISTS _qml_files)
+        get_filename_component(_qml_name "${_qml_file}" NAME)
+        set_source_files_properties("${_qml_file}" PROPERTIES QT_RESOURCE_ALIAS "${_qml_name}")
+    endforeach()
+
+    # This module is QML files and nothing else, which is what both NO_ options say. The C++ types the
+    # QML talks to (ContourTerminal, TerminalSession, WindowController, ...) are registered by hand into
+    # the separate Contour.Terminal URI from ContourGuiApp, because their compilation unit is contour_core
+    # -- an OBJECT library, which qt_add_qml_module cannot back.
+    #
+    # NO_GENERATE_QMLTYPES: without it Qt asks this target for metatypes it has no C++ sources to produce,
+    # and configuration fails demanding AUTOMOC.
+    #
+    # NO_PLUGIN: a plugin exists to register a module's C++ types, and there are none here. Left in, the
+    # generated qmldir declares `optional plugin contour_qmlplugin`, which the engine then fails to load
+    # because a STATIC module's plugin has to be linked and registered into every consuming executable --
+    # and every QML component fails with `module "Contour.Ui" plugin ... not found`. Without it the module
+    # resolves from its own qmldir under the default :/qt/qml import path, which is all it needs.
+    # OUTPUT_DIRECTORY mirrors the URI: two QML modules in one CMake directory would otherwise both want
+    # to drop their qmldir straight into the binary dir, which CMake rejects outright.
+    qt_add_qml_module(contour_qml
+        STATIC
+        URI Contour.Ui
+        VERSION 1.0
+        RESOURCE_PREFIX /qt/qml
+        OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/Contour/Ui
+        NO_GENERATE_QMLTYPES
+        NO_PLUGIN
+        QML_FILES ${_qml_files}
+    )
+    # }}}
+
+    # {{{ ContourTui: the Qt Quick Controls style that paints controls as terminal chrome
+    # A Qt Quick Controls style IS a QML module whose URI is the style name, so that QQuickStyle can find
+    # it on the import path -- which is the second reason the QML moved to qt_add_qml_module (see above).
+    # Selecting it is app-wide and once-per-process (ContourGuiApp), which is why `ui_style` takes effect
+    # on the next start.
+    #
+    # The same NO_GENERATE_QMLTYPES / NO_PLUGIN reasoning as Contour.Ui applies: QML files, no C++ types.
+    set(_tui_style_files
+        styles/ContourTui/Button.qml
+        styles/ContourTui/CheckBox.qml
+        styles/ContourTui/ComboBox.qml
+        styles/ContourTui/ItemDelegate.qml
+        styles/ContourTui/Label.qml
+        styles/ContourTui/Menu.qml
+        styles/ContourTui/MenuItem.qml
+        styles/ContourTui/MenuSeparator.qml
+        styles/ContourTui/Popup.qml
+        styles/ContourTui/ScrollBar.qml
+        styles/ContourTui/ScrollView.qml
+        styles/ContourTui/Switch.qml
+        styles/ContourTui/TextField.qml
+        styles/ContourTui/ToolButton.qml
+        styles/ContourTui/ToolTip.qml
+    )
+
+    foreach(_style_file IN LISTS _tui_style_files)
+        get_filename_component(_style_name "${_style_file}" NAME)
+        set_source_files_properties("${_style_file}" PROPERTIES QT_RESOURCE_ALIAS "${_style_name}")
+    endforeach()
+
+    qt_add_qml_module(contour_tui_style
+        STATIC
+        URI ContourTui
+        VERSION 1.0
+        RESOURCE_PREFIX /qt/qml
+        OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/ContourTui
+        NO_GENERATE_QMLTYPES
+        NO_PLUGIN
+        QML_FILES ${_tui_style_files}
+    )
+    # }}}
+
+endif()
+
 set(_qt_resources resources.qrc)
 qt_add_resources(_qt_resources ${_qt_resources})
-
-set(_qml_files
-    ui/BellSound.qml
-    ui/RequestPermission.qml
-    ui/main.qml
-)
 
 source_group(Sources FILES ${_core_source_files} ${_main_source_files})
 source_group(Headers FILES ${_header_files})
@@ -222,7 +349,7 @@ source_group(QML FILES ${_qml_files})
 
 # {{{ contour_core: the reusable object library (everything but main.cpp)
 add_library(contour_core OBJECT)
-target_sources(contour_core PRIVATE ${_core_source_files} ${_header_files} ${_qt_resources} ${_qml_files})
+target_sources(contour_core PRIVATE ${_core_source_files} ${_header_files} ${_qt_resources})
 
 set_target_properties(contour_core PROPERTIES AUTOMOC ON)
 set_target_properties(contour_core PROPERTIES AUTORCC ON)
@@ -332,6 +459,11 @@ target_link_libraries(contour_core
     vthost
 )
 
+# The QML modules are GUI-only (see the guard above), so the dependency on them is too.
+if(CONTOUR_FRONTEND_GUI)
+    target_link_libraries(contour_core PUBLIC contour_qml contour_tui_style)
+endif()
+
 # {{{ GUI: Declare Qt build dependencies
 if(CONTOUR_FRONTEND_GUI)
     if(OPENBSD)
@@ -431,6 +563,9 @@ if(CONTOUR_FRONTEND_GUI)
             test/TerminalSession_test.cpp
             test/QmlComponents_test.cpp
             test/TabColorScheme_test.cpp
+            test/ContourTuiStyle_test.cpp
+            test/UiStyle_test.cpp
+            test/UiStyleProvider_test.cpp
             test/TabListModel_test.cpp
             test/TabLabel_test.cpp
             test/WindowGeometry_test.cpp

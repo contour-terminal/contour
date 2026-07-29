@@ -99,7 +99,7 @@ struct DisplayHarness
 
         window = std::make_unique<QQuickWindow>();
         window->resize(800, 600);
-        // Match production: main.qml makes the ApplicationWindow transparent so the terminal paints
+        // Match production: Main.qml makes the ApplicationWindow transparent so the terminal paints
         // its own (dark) background. A bare QQuickWindow otherwise clears to Qt's default WHITE, which
         // both mismatches the real app and weakens the pixel-change assertions (white margins swamp
         // the grid). Clear to black so grabbed frames reflect what a user actually sees.

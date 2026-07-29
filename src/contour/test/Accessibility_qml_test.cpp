@@ -10,6 +10,7 @@
 // What this canNOT assert is what a bridge would DELIVER; offscreen QPA has no accessibility bridge at
 // all. That remains a manual check — see docs/accessibility.md for the Accerciser recipe.
 
+#include <contour/test/QmlChromeStyle.h>
 #include <contour/test/QmlMessageCapture.h>
 
 #include <QtCore/QCoreApplication>
@@ -64,10 +65,11 @@ namespace
 TEST_CASE("accessibility: the tab strip declares itself a tab list", "[contour][gui][qml][a11y]")
 {
     QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
     contour::test::QmlMessageCapture const warnings;
 
     auto root = loadComponent(engine,
-                              QStringLiteral("qrc:/contour/ui/TabStrip.qml"),
+                              QStringLiteral("qrc:/qt/qml/Contour/Ui/TabStrip.qml"),
                               QVariantMap { { "controller", QVariant::fromValue(nullptr) },
                                             { "window", QVariant::fromValue(nullptr) } });
 
@@ -88,6 +90,7 @@ TEST_CASE("accessibility: every settings editor carries the row's label", "[cont
     // and that was true of every field on the settings page at once. Asserted for every editor TYPE,
     // so a new field type added to the Loader cannot quietly reintroduce it.
     QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
     contour::test::QmlMessageCapture const warnings;
 
     struct Case
@@ -108,7 +111,7 @@ TEST_CASE("accessibility: every settings editor carries the row's label", "[cont
         INFO("editor type: " << testCase.type);
         auto root = loadComponent(
             engine,
-            QStringLiteral("qrc:/contour/ui/SettingRow.qml"),
+            QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingRow.qml"),
             QVariantMap {
                 { "label", QStringLiteral("Tab bar visibility") },
                 { "help", QStringLiteral("When the tab strip is shown.") },
