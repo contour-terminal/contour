@@ -18,6 +18,7 @@
 #include <QtGui/QWheelEvent>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -117,6 +118,22 @@ namespace
     return std::make_unique<contour::TerminalSession>(&app.sessionsManager(), std::move(pty), app);
 }
 
+/// The layout for every test that is not about layouts: passthrough leaves the native key
+/// identifier alone, which for the events built here (nativeVirtualKey 0) means "unknown".
+[[nodiscard]] contour::KeyboardLayout const& passthroughLayout()
+{
+    static auto const layout = contour::makePassthroughKeyboardLayout();
+    return *layout;
+}
+
+/// Reads native key identifiers as macOS does — as positional Carbon key codes — so the macOS
+/// regression can be driven through the real key path on any platform.
+[[nodiscard]] contour::KeyboardLayout const& macUsAnsiLayout()
+{
+    static auto const layout = contour::makeMacUsAnsiKeyboardLayout();
+    return *layout;
+}
+
 using contour::test::mockPtyOf;
 } // namespace
 
@@ -130,7 +147,7 @@ TEST_CASE("sendKeyEvent maps Qt key events onto the terminal's PTY encoding", "[
     {
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_X, Qt::NoModifier, QStringLiteral("x"));
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session);
+        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         CHECK(pty.stdinBuffer() == "x");
     }
 
@@ -138,7 +155,7 @@ TEST_CASE("sendKeyEvent maps Qt key events onto the terminal's PTY encoding", "[
     {
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session);
+        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         CHECK(pty.stdinBuffer() == "\r");
     }
 
@@ -146,7 +163,7 @@ TEST_CASE("sendKeyEvent maps Qt key events onto the terminal's PTY encoding", "[
     {
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier);
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session);
+        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         CHECK(pty.stdinBuffer().contains('\033'));
     }
 
@@ -154,9 +171,91 @@ TEST_CASE("sendKeyEvent maps Qt key events onto the terminal's PTY encoding", "[
     {
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier, QStringLiteral("\x03"));
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session);
+        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         CHECK(pty.stdinBuffer().contains('\x03'));
     }
+}
+
+TEST_CASE("the macOS layout reads Carbon key codes as positions, not codepoints", "[helper][input]")
+{
+    auto const& layout = macUsAnsiLayout();
+
+    // The keys the old code got wrong: every kVK_ANSI_* code >= 32, which a codepoint-shaped read
+    // of the key code turned into the punctuation character of the same value.
+    CHECK(layout.unshiftedKeyOf(0x20) == U'u');  // was read as ' '
+    CHECK(layout.unshiftedKeyOf(0x21) == U'[');  // was read as '!'
+    CHECK(layout.unshiftedKeyOf(0x22) == U'i');  // was read as '"'
+    CHECK(layout.unshiftedKeyOf(0x23) == U'p');  // was read as '#'
+    CHECK(layout.unshiftedKeyOf(0x25) == U'l');  // was read as '%'
+    CHECK(layout.unshiftedKeyOf(0x26) == U'j');  // was read as '&'
+    CHECK(layout.unshiftedKeyOf(0x28) == U'k');  // was read as '('
+    CHECK(layout.unshiftedKeyOf(0x29) == U';');  // was read as ')'
+    CHECK(layout.unshiftedKeyOf(0x2A) == U'\\'); // was read as '*'
+    CHECK(layout.unshiftedKeyOf(0x2B) == U',');  // was read as '+'
+    CHECK(layout.unshiftedKeyOf(0x2C) == U'/');  // was read as ','
+    CHECK(layout.unshiftedKeyOf(0x2D) == U'n');  // was read as '-'
+    CHECK(layout.unshiftedKeyOf(0x2E) == U'm');  // was read as '.'
+    CHECK(layout.unshiftedKeyOf(0x2F) == U'.');  // was read as '/'
+    CHECK(layout.unshiftedKeyOf(0x32) == U'`');  // was read as '2'
+
+    // The codes below 32 never reached the broken branch, and must still map.
+    CHECK(layout.unshiftedKeyOf(0x00) == U'a');
+    CHECK(layout.unshiftedKeyOf(0x08) == U'c');
+    CHECK(layout.unshiftedKeyOf(0x0D) == U'w');
+    CHECK(layout.unshiftedKeyOf(0x12) == U'1');
+
+    // Keys that carry no character are absent, and 0 means "ask the character instead".
+    CHECK(layout.unshiftedKeyOf(0x38) == 0); // kVK_Shift
+    CHECK(layout.unshiftedKeyOf(0x3B) == 0); // kVK_Control
+    CHECK(layout.unshiftedKeyOf(0x7A) == 0); // kVK_F1
+
+    // No VK code off Windows, so none can reach win32-input-mode disguised as one.
+    CHECK(layout.win32VirtualKeyOf(0x20) == 0);
+}
+
+TEST_CASE("the passthrough layout decodes the X11 Unicode keysym form", "[helper][input]")
+{
+    auto const& layout = passthroughLayout();
+
+    // Latin-1 keysyms and Win32 VK codes are already codepoints for the keys that reach this path.
+    CHECK(layout.unshiftedKeyOf(0x75) == U'u');
+
+    // Anything outside Latin-1 arrives as `0x01000000 | codepoint`, which is not one.
+    CHECK(layout.unshiftedKeyOf(0x0100'0446) == U'ц');
+
+    // A key we cannot name — a function or media keysym — reports unknown rather than a wrong key.
+    CHECK(layout.unshiftedKeyOf(0x1008'FF11) == 0); // XF86AudioLowerVolume
+}
+
+TEST_CASE("Ctrl+U reaches the application as Ctrl+U under the Kitty keyboard protocol", "[helper][input]")
+{
+    // The reported bug, end to end: a Qt event carrying a macOS key code, through the real key path,
+    // out to the PTY. fish enables the Kitty protocol, which transmits the key IDENTITY rather than
+    // a control byte, and kVK_ANSI_U is 0x20 — so reading the key code as a codepoint sent
+    // Ctrl+Space, which fish does not bind, and it inserted a space instead of killing the line.
+    //
+    // The breadth of affected keys is pinned by the two layout tests above; this is about the wiring.
+    contour::test::TestApp app;
+    auto session = makeSession(app.app());
+    auto& pty = mockPtyOf(*session);
+
+    // What fish sends on startup: CSI > 1 u, "disambiguate escape codes".
+    session->terminal().writeToScreen("\033[>1u");
+
+    // nativeScanCode/nativeVirtualKey/nativeModifiers, as Qt's Cocoa plugin fills them in.
+    auto constexpr MacKeyCodeU = quint32 { 0x20 };
+    auto ev = QKeyEvent(QEvent::KeyPress,
+                        Qt::Key_U,
+                        Qt::ControlModifier,
+                        MacKeyCodeU,
+                        MacKeyCodeU,
+                        0,
+                        QString {},
+                        /*autorep=*/false,
+                        /*count=*/1);
+    pty.stdinBuffer().clear();
+    contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, macUsAnsiLayout());
+    CHECK(pty.stdinBuffer() == "\033[117;5u");
 }
 
 TEST_CASE("the browser tab-switch chords are claimed before the terminal encodes them", "[helper][input]")
@@ -185,7 +284,7 @@ TEST_CASE("the browser tab-switch chords are claimed before the terminal encodes
     auto const reachedThePty = [&](Qt::Key key, Qt::KeyboardModifiers modifiers) {
         QKeyEvent ev(QEvent::KeyPress, key, modifiers);
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session);
+        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         return !pty.stdinBuffer().empty();
     };
 
@@ -222,7 +321,7 @@ TEST_CASE("sendKeyEvent covers the whole special-key mapping table", "[helper][i
     {
         QKeyEvent ev(QEvent::KeyPress, key, Qt::NoModifier);
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session);
+        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         INFO("key = " << static_cast<int>(key));
         CHECK_FALSE(pty.stdinBuffer().empty());
     }
@@ -231,7 +330,7 @@ TEST_CASE("sendKeyEvent covers the whole special-key mapping table", "[helper][i
     {
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_Backtab, Qt::ShiftModifier);
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session);
+        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         CHECK_FALSE(pty.stdinBuffer().empty());
     }
     for (auto const key: { Qt::Key_0,
@@ -246,7 +345,7 @@ TEST_CASE("sendKeyEvent covers the whole special-key mapping table", "[helper][i
     {
         QKeyEvent ev(QEvent::KeyPress, key, Qt::KeypadModifier);
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session);
+        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         INFO("keypad key = " << static_cast<int>(key));
         CHECK_FALSE(pty.stdinBuffer().empty());
     }
@@ -255,7 +354,7 @@ TEST_CASE("sendKeyEvent covers the whole special-key mapping table", "[helper][i
     {
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_CapsLock, Qt::NoModifier);
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session);
+        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         CHECK(pty.stdinBuffer().empty());
     }
 }
@@ -433,7 +532,7 @@ input_mapping:
     {
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_P, ctrlShift, QStringLiteral("\x10"));
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session);
+        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         CHECK(pty.stdinBuffer().empty());
     }
 
@@ -442,7 +541,7 @@ input_mapping:
         // Empty text, so sendKeyEvent falls back to its Qt::Key -> character table.
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_P, ctrlShift, QString());
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session);
+        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         CHECK(pty.stdinBuffer().empty());
     }
 
@@ -468,7 +567,7 @@ input_mapping:
 #endif
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_P, Qt::AltModifier, QStringLiteral("p"));
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session);
+        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         CHECK(pty.stdinBuffer().empty());
     }
 
@@ -478,7 +577,7 @@ input_mapping:
         // simply made the session swallow all input.
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_Y, ctrlShift, QStringLiteral("y"));
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session);
+        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         CHECK_FALSE(pty.stdinBuffer().empty());
     }
 }

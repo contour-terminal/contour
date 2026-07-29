@@ -831,7 +831,7 @@ class Terminal
     using Timestamp = std::chrono::steady_clock::time_point;
     Handled sendKeyEvent(Key key, KeyboardModifiers modifiers, KeyboardEventType eventType, Timestamp now);
     Handled sendCharEvent(char32_t ch,
-                          uint32_t physicalKey,
+                          KeyIdentity keyIdentity,
                           KeyboardModifiers modifiers,
                           KeyboardEventType eventType,
                           Timestamp now);

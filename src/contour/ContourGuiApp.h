@@ -134,6 +134,12 @@ class ContourGuiApp: public QObject, public ContourApp
     /// @return The provider; never nullptr once a Qt application exists.
     [[nodiscard]] display::ForcedFontDpiProvider* forcedFontDpiProvider();
 
+    /// The app-wide keyboard layout (single instance; see KeyboardLayout.h). The active layout is
+    /// process-global ambient state, and the macOS implementation registers an observer for changes
+    /// to it, so one instance is shared rather than one per pane.
+    /// @return The layout; never nullptr.
+    [[nodiscard]] KeyboardLayout const& keyboardLayout() const noexcept { return *_keyboardLayout; }
+
     [[nodiscard]] std::string profileName() const;
 
     /// The layout to open at startup: `--layout NAME` if given, else config's `default_layout`.
@@ -279,6 +285,9 @@ class ContourGuiApp: public QObject, public ContourApp
     std::unique_ptr<SpeechSynthesizer> _speechSynthesizer;
     TerminalSessionManager _sessionManager;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
+    // Shared by every display, reached via the session; @see keyboardLayout(). Unlike the DPI
+    // provider this needs no Qt application, so it is built eagerly with the app.
+    std::unique_ptr<KeyboardLayout> _keyboardLayout = makePlatformKeyboardLayout();
     // Spawn context: the screen the next window should open on (QPointer: screens can be unplugged
     // between staging and consumption).
     QPointer<QScreen> _pendingSpawnScreen;

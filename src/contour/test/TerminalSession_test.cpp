@@ -318,14 +318,16 @@ TEST_CASE("TerminalSession: key and char events write their encoding into the PT
     auto session = makeDisplaylessSession(testApp.app());
     auto const now = std::chrono::steady_clock::now();
 
-    session->sendCharEvent(U'a', 0, Modifiers {}, KeyboardEventType::Press, now);
+    session->sendCharEvent(
+        U'a', vtbackend::KeyIdentity { .unshiftedKey = U'a' }, Modifiers {}, KeyboardEventType::Press, now);
     CHECK(mockPtyOf(*session).stdinBuffer() == "a");
 
     session->sendKeyEvent(vtbackend::Key::Enter, Modifiers {}, KeyboardEventType::Press, now);
     CHECK(mockPtyOf(*session).stdinBuffer() == "a\r");
 
     // A release in the default keyboard protocol encodes nothing.
-    session->sendCharEvent(U'a', 0, Modifiers {}, KeyboardEventType::Release, now);
+    session->sendCharEvent(
+        U'a', vtbackend::KeyIdentity { .unshiftedKey = U'a' }, Modifiers {}, KeyboardEventType::Release, now);
     CHECK(mockPtyOf(*session).stdinBuffer() == "a\r");
 }
 
@@ -933,8 +935,11 @@ TEST_CASE("TerminalSession: a modifier-bound char dispatches its action instead 
     auto& pty = mockPtyOf(*session);
     pty.stdinBuffer().clear();
 
-    session->sendCharEvent(
-        U'0', 0, Modifiers { vtbackend::Modifier::Control }, KeyboardEventType::Press, now);
+    session->sendCharEvent(U'0',
+                           vtbackend::KeyIdentity { .unshiftedKey = U'0' },
+                           Modifiers { vtbackend::Modifier::Control },
+                           KeyboardEventType::Press,
+                           now);
     // The bound action consumed the char: PTY stays empty (an unbound char would echo a byte).
     CHECK(pty.stdinBuffer().empty());
 }
@@ -1118,8 +1123,11 @@ TEST_CASE("TerminalSession: key and char events encode modifiers into the PTY", 
 
     // A control character: Ctrl+C encodes as 0x03.
     pty.stdinBuffer().clear();
-    session->sendCharEvent(
-        U'c', 0, Modifiers { Modifier::Control }, KeyboardEventType::Press, std::chrono::steady_clock::now());
+    session->sendCharEvent(U'c',
+                           vtbackend::KeyIdentity { .unshiftedKey = U'c' },
+                           Modifiers { Modifier::Control },
+                           KeyboardEventType::Press,
+                           std::chrono::steady_clock::now());
     CHECK(pty.stdinBuffer().contains('\x03'));
 
     // A function/navigation key produces its escape sequence (CSI-prefixed).
@@ -1341,7 +1349,7 @@ TEST_CASE("TerminalSession: a spontaneous early exit shows the notice and a key 
 
     // The acknowledging key press prunes the pane: sessionClosed fires now.
     session->sendCharEvent(U'x',
-                           static_cast<uint32_t>('x'),
+                           vtbackend::KeyIdentity { .unshiftedKey = U'x' },
                            vtbackend::Modifiers {},
                            vtbackend::KeyboardEventType::Press,
                            std::chrono::steady_clock::now());
@@ -1969,13 +1977,15 @@ TEST_CASE("TerminalSession: Ctrl+Shift+P opens the palette instead of reaching t
 
     // Ctrl+printable arrives as a CHARACTER (Qt::Key_P is not in helper.cpp's KeyMappings table), which
     // is why the default binding is a CharInputMapping on 'P' rather than a KeyInputMapping.
-    session->sendCharEvent(U'P', 0, ctrlShift, KeyboardEventType::Press, now);
+    session->sendCharEvent(
+        U'P', vtbackend::KeyIdentity { .unshiftedKey = U'P' }, ctrlShift, KeyboardEventType::Press, now);
     CHECK(mockPtyOf(*session).stdinBuffer().empty());
 
     // The session is not registered with a window here, so the palette has nowhere to open — the point
     // is that the action still consumed the key rather than letting it through. A chord with no binding,
     // by contrast, is encoded and written to the PTY.
-    session->sendCharEvent(U'Y', 0, ctrlShift, KeyboardEventType::Press, now);
+    session->sendCharEvent(
+        U'Y', vtbackend::KeyIdentity { .unshiftedKey = U'Y' }, ctrlShift, KeyboardEventType::Press, now);
     CHECK_FALSE(mockPtyOf(*session).stdinBuffer().empty());
 }
 
@@ -1990,12 +2000,17 @@ TEST_CASE("TerminalSession: Ctrl+Shift+, fires despite Qt delivering the shifted
     auto const now = std::chrono::steady_clock::now();
     auto const ctrlShift = Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift };
 
-    session->sendCharEvent(U'<', 0, ctrlShift, KeyboardEventType::Press, now);
+    session->sendCharEvent(
+        U'<', vtbackend::KeyIdentity { .unshiftedKey = U'<' }, ctrlShift, KeyboardEventType::Press, now);
     CHECK(mockPtyOf(*session).stdinBuffer().empty()); // consumed by the ',' binding via its base char
 
     // A shifted symbol whose base key has no binding still reaches the terminal (retry misses, falls
     // through) — the normalization only rescues chords that are actually bound.
-    session->sendCharEvent(U'~', 0, ctrlShift, KeyboardEventType::Press, now); // base '`', unbound
+    session->sendCharEvent(U'~',
+                           vtbackend::KeyIdentity { .unshiftedKey = U'~' },
+                           ctrlShift,
+                           KeyboardEventType::Press,
+                           now); // base '`', unbound
     CHECK_FALSE(mockPtyOf(*session).stdinBuffer().empty());
 }
 
@@ -2050,7 +2065,8 @@ input_mapping:
     mockPtyOf(*session).stdinBuffer().clear();
     auto const chord =
         Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Alt, vtbackend::Modifier::Shift };
-    session->sendCharEvent(U'Q', 0, chord, KeyboardEventType::Press, now);
+    session->sendCharEvent(
+        U'Q', vtbackend::KeyIdentity { .unshiftedKey = U'Q' }, chord, KeyboardEventType::Press, now);
 
     CHECK(mockPtyOf(*session).stdinBuffer().empty()); // consumed by the binding
     CHECK(session->terminal().primaryScreen().historyLineCount() == vtbackend::LineCount(0));
@@ -2058,8 +2074,11 @@ input_mapping:
     // A subset of the chord must NOT match: config::apply compares modifiers with ==, and this is the
     // property that keeps Ctrl+Q from firing a binding written for Ctrl+Alt+Shift+Q.
     mockPtyOf(*session).stdinBuffer().clear();
-    session->sendCharEvent(
-        U'Q', 0, Modifiers { vtbackend::Modifier::Control }, KeyboardEventType::Press, now);
+    session->sendCharEvent(U'Q',
+                           vtbackend::KeyIdentity { .unshiftedKey = U'Q' },
+                           Modifiers { vtbackend::Modifier::Control },
+                           KeyboardEventType::Press,
+                           now);
     CHECK_FALSE(mockPtyOf(*session).stdinBuffer().empty());
 }
 
@@ -2088,16 +2107,19 @@ input_mapping:
 
     // Both cases must fire: which one arrives depends on the route the Qt event took, not the user.
     mockPtyOf(*session).stdinBuffer().clear();
-    session->sendCharEvent(U'P', 0, ctrlShift, KeyboardEventType::Press, now);
+    session->sendCharEvent(
+        U'P', vtbackend::KeyIdentity { .unshiftedKey = U'P' }, ctrlShift, KeyboardEventType::Press, now);
     CHECK(mockPtyOf(*session).stdinBuffer().empty());
 
     mockPtyOf(*session).stdinBuffer().clear();
-    session->sendCharEvent(U'p', 0, ctrlShift, KeyboardEventType::Press, now);
+    session->sendCharEvent(
+        U'p', vtbackend::KeyIdentity { .unshiftedKey = U'p' }, ctrlShift, KeyboardEventType::Press, now);
     CHECK(mockPtyOf(*session).stdinBuffer().empty());
 
     // An unbound letter still reaches the shell — the fold must not swallow everything.
     mockPtyOf(*session).stdinBuffer().clear();
-    session->sendCharEvent(U'y', 0, ctrlShift, KeyboardEventType::Press, now);
+    session->sendCharEvent(
+        U'y', vtbackend::KeyIdentity { .unshiftedKey = U'y' }, ctrlShift, KeyboardEventType::Press, now);
     CHECK_FALSE(mockPtyOf(*session).stdinBuffer().empty());
 }
 

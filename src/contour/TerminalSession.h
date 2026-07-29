@@ -460,6 +460,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return The provider, or nullptr when no Qt application exists (tests).
     [[nodiscard]] display::ForcedFontDpiProvider* forcedFontDpiProvider() noexcept;
 
+    /// The app-wide keyboard layout (see KeyboardLayout.h), for the display's key path. Routed
+    /// through the session for the same reason as the DPI provider above.
+    /// @return The layout; never nullptr.
+    [[nodiscard]] KeyboardLayout const& keyboardLayout() const noexcept;
+
     Q_INVOKABLE void applyPendingFontChange(bool allow, bool remember);
     Q_INVOKABLE void applyPendingPaste(bool allow, bool remember);
     Q_INVOKABLE void executePendingBufferCapture(bool allow, bool remember);
@@ -512,7 +517,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
                       vtbackend::KeyboardEventType eventType,
                       Timestamp now);
     void sendCharEvent(char32_t value,
-                       uint32_t physicalKey,
+                       vtbackend::KeyIdentity keyIdentity,
                        vtbackend::KeyboardModifiers modifiers,
                        vtbackend::KeyboardEventType eventType,
                        Timestamp now);

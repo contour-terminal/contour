@@ -73,6 +73,31 @@ namespace
         }                                                                                  \
     } while (0)
 
+/// Counts the accessibility events Qt is handed, and how many it would discard.
+///
+/// Static state in a free function because QAccessible::installUpdateHandler takes a plain function
+/// pointer. @see the union hazard documented at notifyAbout() in TerminalAccessible.cpp.
+struct AccessibleEventProbe
+{
+    static inline int Emitted = 0;
+    static inline int Undeliverable = 0;
+
+    static void reset() noexcept
+    {
+        Emitted = 0;
+        Undeliverable = 0;
+    }
+
+    static void handle(QAccessibleEvent* event)
+    {
+        ++Emitted;
+        // Both halves of "Qt will actually deliver this": a QObject-subject event must carry no child
+        // index, and the interface it resolves to must exist.
+        if ((event->object() != nullptr && event->child() != -1) || event->accessibleInterface() == nullptr)
+            ++Undeliverable;
+    }
+};
+
 /// One live rendering session: app + session (vtpty::ChannelPty) + display item in a shown window.
 ///
 /// Construction wires everything the production QML path would (setSession attaches the display,
@@ -1054,6 +1079,111 @@ TEST_CASE("display: the accessibility interface reports the caret", "[display][a
     CHECK_NOTHROW(accessible->rect());
     CHECK_NOTHROW(h.display->reportAccessibleCaret());
     CHECK_NOTHROW(h.display->resetAccessibleCaret());
+}
+
+TEST_CASE("display: the accessibility text interface reads the viewport column-aligned", "[display][a11y]")
+{
+    // This is the read a platform bridge issues after every caret move -- macOS turns AXValue into
+    // text(0, characterCount()) -- so it runs on the GUI thread, holding the terminal lock, once per
+    // keystroke. It used to call lineTextAt() once per CHARACTER, which rebuilds the whole line each
+    // time: quadratic in the line length, and wrong besides, because lineTextAt() TRIMS leading
+    // whitespace, so a column offset indexed into a shifted string.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+
+    contour::display::TerminalAccessible::installFactory();
+    auto* accessible = QAccessible::queryAccessibleInterface(h.display);
+    REQUIRE(accessible != nullptr);
+    auto* text =
+        static_cast<QAccessibleTextInterface*>(accessible->interface_cast(QAccessible::TextInterface));
+    REQUIRE(text != nullptr);
+
+    // Read the grid width rather than assuming it: the harness reflows its page to the display's pixel
+    // size, so the flat layout's stride is whatever that reflow settled on. A row is its cells, then
+    // the newline that ends it.
+    auto const columns = [&] {
+        auto const lock = std::lock_guard { h.session->terminal() };
+        return unbox<int>(h.session->terminal().pageSize().columns);
+    }();
+    auto const stride = columns + 1;
+
+    // Catch2 cannot print a QString, so every comparison goes through std::string.
+    auto const readAt = [&](int from, int to) {
+        return text->text(from, to).toStdString();
+    };
+
+    // Two LEADING spaces on purpose -- that is the half the trimming bug destroyed.
+    h.feedAndSettle("\033[2J\033[1;1H  indented\033[2;1Hsecond"sv);
+
+    CHECK(readAt(0, 10) == "  indented");
+    CHECK(readAt(0, 2) == "  ");
+
+    // A row boundary yields the newline, and only it.
+    CHECK(readAt(columns, columns + 1) == "\n");
+    CHECK(readAt(columns - 1, columns + 2) == " \ns");
+
+    // The next row starts one stride along.
+    CHECK(readAt(stride, stride + 6) == "second");
+
+    // The whole viewport is exactly as long as the offset space it is addressed by.
+    auto const whole = text->text(0, text->characterCount());
+    CHECK(whole.size() == text->characterCount());
+    CHECK(whole.toStdString().starts_with("  indented"));
+
+    SECTION("a wide character's continuation cell reads as one padding space")
+    {
+        // U+4F60 U+597D, two columns each, then an ASCII column: five columns, five codepoints.
+        h.feedAndSettle("\033[2J\033[1;1H\xe4\xbd\xa0\xe5\xa5\xbdX"sv);
+        CHECK(readAt(0, 5) == "\xe4\xbd\xa0 \xe5\xa5\xbd X");
+    }
+
+    SECTION("a non-BMP character survives as a whole surrogate pair")
+    {
+        // U+1F600, two columns wide and TWO UTF-16 code units, so a column is no longer a QChar index.
+        // The old mid(column, 1) sliced the pair and handed the OS a lone high surrogate.
+        h.feedAndSettle("\033[2J\033[1;1H\xf0\x9f\x98\x80"sv);
+        CHECK(readAt(0, 1) == "\xf0\x9f\x98\x80");
+        CHECK(text->text(0, 1).size() == 2); // both halves, not one
+    }
+}
+
+TEST_CASE("display: every event a caret report emits is one Qt will deliver", "[display][a11y]")
+{
+    // The union hazard (see notifyAbout() in TerminalAccessible.cpp) makes a mis-subjected event fail
+    // SILENTLY -- Qt drops it and prints "Invalid child in QAccessibleEvent". So assert on the whole
+    // prompt lifecycle, which is what exercises every emission site: appear, move, vanish.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+
+    contour::display::TerminalAccessible::installFactory();
+    h.display->forceActiveFocus();
+
+    auto* accessible =
+        dynamic_cast<contour::display::TerminalAccessible*>(QAccessible::queryAccessibleInterface(h.display));
+    REQUIRE(accessible != nullptr);
+
+    AccessibleEventProbe::reset();
+    auto* const previous = QAccessible::installUpdateHandler(&AccessibleEventProbe::handle);
+
+    // Driven directly: the production entry point gates on an attached assistive client, and neither
+    // this environment nor CI has one.
+    h.feedAndSettle("\033]133;A\033\\$ \033]133;B\033\\"sv); // prompt appears
+    accessible->reportCaret();
+    auto const afterAppear = AccessibleEventProbe::Emitted;
+
+    h.feedAndSettle("x"sv); // caret walks the prompt
+    accessible->reportCaret();
+
+    h.feedAndSettle("\r\n"sv); // prompt scrolls / the command runs
+    accessible->reportCaret();
+
+    accessible->reportLocation();
+
+    QAccessible::installUpdateHandler(previous);
+
+    CHECK(afterAppear > 0); // the prompt branch really ran
+    CHECK(AccessibleEventProbe::Emitted > afterAppear);
+    CHECK(AccessibleEventProbe::Undeliverable == 0);
 }
 
 TEST_CASE("display: the prompt interface leaves Qt's accessibility cache with its display", "[display][a11y]")

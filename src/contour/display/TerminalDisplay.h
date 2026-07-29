@@ -195,6 +195,22 @@ class TerminalDisplay: public QQuickItem
     /// stay silent while the client still points at the pane it left.
     void resetAccessibleCaret();
 
+    /// Tells assistive technology that the cell-to-screen mapping moved, so the rectangles it last read
+    /// are stale.
+    ///
+    /// Separate from @ref reportAccessibleCaret on purpose: QAccessible::LocationChanged describes THIS
+    /// OBJECT's geometry, which a moving caret does not alter. Emitting it per caret move asked the
+    /// platform to re-read our geometry on every keystroke, and told it nothing it did not know.
+    ///
+    /// Called from the seams where that mapping actually changes: @ref geometryChange (this item resized
+    /// or repositioned within its parent) and @ref notifyCellGeometryChanged (cell size, margins or
+    /// content scale). NOT covered: a window MOVE, which changes global coordinates while leaving this
+    /// item's parent-relative geometry alone — QQuickItem has no hook for it, and it would need
+    /// QWindow::x/yChanged wired up in configureScreenHooks().
+    ///
+    /// Coalesced, so calling it liberally is cheap. GUI THREAD ONLY.
+    void reportAccessibleLocation();
+
     // Attributes
     [[nodiscard]] vtbackend::RefreshRate refreshRate() const;
     text::DPI fontDPI() const noexcept;
@@ -501,6 +517,9 @@ class TerminalDisplay: public QQuickItem
     // }}}
 
     RenderStateManager _state;
+    /// Guards against piling up accessible-location posts while a resize or divider drag commits one
+    /// geometry change per input event. GUI thread only, hence a plain bool.
+    bool _locationReportPending = false;
     bool _doDumpState = false;
     std::optional<std::variant<std::filesystem::path, std::monostate>> _saveScreenshot { std::nullopt };
 

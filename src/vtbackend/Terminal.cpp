@@ -1021,7 +1021,7 @@ Handled Terminal::sendKeyEvent(Key key,
 }
 
 Handled Terminal::sendCharEvent(char32_t ch,
-                                uint32_t physicalKey,
+                                KeyIdentity keyIdentity,
                                 KeyboardModifiers modifiers,
                                 KeyboardEventType eventType,
                                 Timestamp now)
@@ -1053,7 +1053,7 @@ Handled Terminal::sendCharEvent(char32_t ch,
     if (_inputHandler.sendCharPressEvent(ch, chord, eventType))
         return Handled { true };
 
-    auto const success = _inputGenerator.generate(ch, physicalKey, modifiers, eventType);
+    auto const success = _inputGenerator.generate(ch, keyIdentity, modifiers, eventType);
     if (success)
     {
         flushInput();

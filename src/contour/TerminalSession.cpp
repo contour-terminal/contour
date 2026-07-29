@@ -346,6 +346,11 @@ display::ForcedFontDpiProvider* TerminalSession::forcedFontDpiProvider() noexcep
     return _app.forcedFontDpiProvider();
 }
 
+KeyboardLayout const& TerminalSession::keyboardLayout() const noexcept
+{
+    return _app.keyboardLayout();
+}
+
 void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
 {
     sessionLog()("Attaching session to display {}x{}.", newDisplay.width(), newDisplay.height());
@@ -1513,7 +1518,7 @@ void TerminalSession::sendKeyEvent(Key key,
 }
 
 void TerminalSession::sendCharEvent(char32_t value,
-                                    uint32_t physicalKey,
+                                    KeyIdentity keyIdentity,
                                     KeyboardModifiers modifiers,
                                     KeyboardEventType eventType,
                                     Timestamp now)
@@ -1575,7 +1580,7 @@ void TerminalSession::sendCharEvent(char32_t value,
                 return;
         }
     }
-    terminal().sendCharEvent(value, physicalKey, modifiers, eventType, now);
+    terminal().sendCharEvent(value, keyIdentity, modifiers, eventType, now);
 }
 
 void TerminalSession::sendMousePressEvent(Modifiers modifiers,

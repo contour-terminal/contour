@@ -8,10 +8,12 @@
 #include <libunicode/convert.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <array>
 #include <format>
 #include <string>
+#include <string_view>
 #include <type_traits>
 
 using namespace std;
@@ -427,8 +429,32 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Ctrl+L", "[terminal,input]")
 {
     auto input = ExtendedKeyboardInputGenerator {};
     input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
-    input.generateChar('L', 'L', Modifier::Control, KeyboardEventType::Press);
+    input.generateChar(
+        'L', KeyIdentity { .unshiftedKey = U'L' }, Modifier::Control, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("\033[108;5u"sv));
+}
+
+TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Ctrl+letter.unshiftedKeyDecidesTheKeyCode", "[terminal,input]")
+{
+    // The key code must come from KeyIdentity::unshiftedKey and from nothing else. A platform key
+    // identifier that merely happens to be numerically plausible used to be accepted here, which is
+    // how macOS's positional key codes reached applications as entirely different keys.
+    auto input = ExtendedKeyboardInputGenerator {};
+    input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+    input.generateChar(
+        U'U', KeyIdentity { .unshiftedKey = U'u' }, Modifier::Control, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[117;5u"sv));
+}
+
+TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.unknownUnshiftedKeyFallsBackToTheCharacter",
+          "[terminal,input]")
+{
+    // A platform that cannot name the key reports zero, and the letter rule takes over. Reporting the
+    // character beats reporting a key the user did not press.
+    auto input = ExtendedKeyboardInputGenerator {};
+    input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
+    input.generateChar('U', KeyIdentity {}, Modifier::Control, KeyboardEventType::Press);
+    REQUIRE(escape(input.take()) == escape("\033[117;5u"sv));
 }
 
 TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Escape", "[terminal,input]")
@@ -524,7 +550,8 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.CapsLock", "[terminal,input]")
     // modifier is CapsLock (64), encoded = 1 + 64 = 65
     // (CapsLock alone with only DisambiguateEscapeCodes would go to legacy,
     //  because lock modifiers don't trigger CSI u on their own)
-    input.generateChar('A', 'a', LockKey::CapsLock, KeyboardEventType::Press);
+    input.generateChar(
+        'A', KeyIdentity { .unshiftedKey = U'a' }, LockKey::CapsLock, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("\033[97;65u"sv));
 }
 
@@ -535,7 +562,7 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.NumLock", "[terminal,input]")
     input.flags().enable(KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
 
     // '5' with NumLock (128) + ReportAllKeys, encoded = 1 + 128 = 129
-    input.generateChar('5', '5', LockKey::NumLock, KeyboardEventType::Press);
+    input.generateChar('5', KeyIdentity { .unshiftedKey = U'5' }, LockKey::NumLock, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("\033[53;129u"sv));
 }
 
@@ -548,12 +575,14 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.CapsLock.ReportEventTypes", "[ter
     // 'A' with CapsLock, Press event
     // CapsLock is a lock modifier — Press event doesn't need action encoding,
     // so this goes to legacy (no real mods, no action, no report-all-keys)
-    input.generateChar('A', 'a', LockKey::CapsLock, KeyboardEventType::Press);
+    input.generateChar(
+        'A', KeyIdentity { .unshiftedKey = U'a' }, LockKey::CapsLock, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("A"sv));
 
     // 'A' with CapsLock, Release event — needs action encoding, so CSI u kicks in
     // modifier = CapsLock (64), encoded = 1 + 64 = 65, event type = 3 (Release)
-    input.generateChar('A', 'a', LockKey::CapsLock, KeyboardEventType::Release);
+    input.generateChar(
+        'A', KeyIdentity { .unshiftedKey = U'a' }, LockKey::CapsLock, KeyboardEventType::Release);
     REQUIRE(escape(input.take()) == escape("\033[97;65:3u"sv));
 }
 
@@ -592,7 +621,7 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Shift+3", "[terminal,input]")
     input.flags().enable(KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
 
     // Shift+3 → '#': primary key must be '3' (51), not '#' (35)
-    input.generateChar('#', '3', Modifier::Shift, KeyboardEventType::Press);
+    input.generateChar('#', KeyIdentity { .unshiftedKey = U'3' }, Modifier::Shift, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("\033[51;2u"sv));
 }
 
@@ -604,7 +633,7 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Shift+3.AlternateKeys", "[termina
     input.flags().enable(KeyboardEventFlag::ReportAlternateKeys);
 
     // With alternate keys: CSI 51:35;2u (key='3', shifted_key='#', Shift)
-    input.generateChar('#', '3', Modifier::Shift, KeyboardEventType::Press);
+    input.generateChar('#', KeyIdentity { .unshiftedKey = U'3' }, Modifier::Shift, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("\033[51:35;2u"sv));
 }
 
@@ -615,7 +644,7 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Shift+semicolon", "[terminal,inpu
     input.flags().enable(KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
 
     // Shift+; → ':' — primary key must be ';' (59), not ':' (58)
-    input.generateChar(':', ';', Modifier::Shift, KeyboardEventType::Press);
+    input.generateChar(':', KeyIdentity { .unshiftedKey = U';' }, Modifier::Shift, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("\033[59;2u"sv));
 }
 
@@ -625,9 +654,9 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.plain_hash_german", "[terminal,in
     input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
     input.flags().enable(KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
 
-    // Direct '#' key (German layout): physicalKey='#', no shift
+    // Direct '#' key (German layout): the key itself is unshifted '#'
     // No semicolon when modifiers encode to empty string
-    input.generateChar('#', '#', Modifier::None, KeyboardEventType::Press);
+    input.generateChar('#', KeyIdentity { .unshiftedKey = U'#' }, Modifier::None, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("\033[35u"sv));
 }
 
@@ -688,15 +717,15 @@ TEST_CASE("ExtendedKeyboardInputGenerator.ReportEventTypes_alone", "[terminal,in
     input.enter(KeyboardEventFlag::ReportEventTypes);
 
     // 'a' Press: legacy (no mods, no action encoding for Press)
-    input.generateChar('a', 'a', Modifier::None, KeyboardEventType::Press);
+    input.generateChar('a', KeyIdentity { .unshiftedKey = U'a' }, Modifier::None, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("a"sv));
 
     // 'a' Repeat: CSI 97;1:2 u (needs CSI u for action encoding)
-    input.generateChar('a', 'a', Modifier::None, KeyboardEventType::Repeat);
+    input.generateChar('a', KeyIdentity { .unshiftedKey = U'a' }, Modifier::None, KeyboardEventType::Repeat);
     REQUIRE(escape(input.take()) == escape("\033[97;1:2u"sv));
 
     // 'a' Release: CSI 97;1:3 u
-    input.generateChar('a', 'a', Modifier::None, KeyboardEventType::Release);
+    input.generateChar('a', KeyIdentity { .unshiftedKey = U'a' }, Modifier::None, KeyboardEventType::Release);
     REQUIRE(escape(input.take()) == escape("\033[97;1:3u"sv));
 }
 
@@ -707,7 +736,7 @@ TEST_CASE("ExtendedKeyboardInputGenerator.ReportAllKeys_alone", "[terminal,input
     input.enter(KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
 
     // 'a' Press: CSI 97 u
-    input.generateChar('a', 'a', Modifier::None, KeyboardEventType::Press);
+    input.generateChar('a', KeyIdentity { .unshiftedKey = U'a' }, Modifier::None, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("\033[97u"sv));
 
     // Enter Press: CSI 13 u
@@ -729,7 +758,7 @@ TEST_CASE("ExtendedKeyboardInputGenerator.legacy.Shift_only_with_disambiguate", 
     input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
 
     // Shift+'a' with disambiguate only: legacy 'A' (Shift+printable is unambiguous)
-    input.generateChar('A', 'a', Modifier::Shift, KeyboardEventType::Press);
+    input.generateChar('A', KeyIdentity { .unshiftedKey = U'a' }, Modifier::Shift, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("A"sv));
 }
 
@@ -739,7 +768,7 @@ TEST_CASE("ExtendedKeyboardInputGenerator.legacy.colon_with_disambiguate_only", 
     input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
 
     // Shift+';' -> ':' with DisambiguateEscapeCodes only: must send ':' (not CSI u)
-    input.generateChar(':', ';', Modifier::Shift, KeyboardEventType::Press);
+    input.generateChar(':', KeyIdentity { .unshiftedKey = U';' }, Modifier::Shift, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape(":"sv));
 }
 
@@ -793,15 +822,18 @@ TEST_CASE("ExtendedKeyboardInputGenerator.EventType_encoding", "[terminal,input]
     input.flags().enable(KeyboardEventFlag::ReportEventTypes);
 
     // Press with mods: no :1 suffix (Press is default, omitted per spec)
-    input.generateChar('a', 'a', Modifier::Control, KeyboardEventType::Press);
+    input.generateChar(
+        'a', KeyIdentity { .unshiftedKey = U'a' }, Modifier::Control, KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("\033[97;5u"sv));
 
     // Repeat with mods: :2 suffix
-    input.generateChar('a', 'a', Modifier::Control, KeyboardEventType::Repeat);
+    input.generateChar(
+        'a', KeyIdentity { .unshiftedKey = U'a' }, Modifier::Control, KeyboardEventType::Repeat);
     REQUIRE(escape(input.take()) == escape("\033[97;5:2u"sv));
 
     // Release with mods: :3 suffix
-    input.generateChar('a', 'a', Modifier::Control, KeyboardEventType::Release);
+    input.generateChar(
+        'a', KeyIdentity { .unshiftedKey = U'a' }, Modifier::Control, KeyboardEventType::Release);
     REQUIRE(escape(input.take()) == escape("\033[97;5:3u"sv));
 }
 
@@ -871,7 +903,10 @@ TEST_CASE("ExtendedKeyboardInputGenerator.CSIu.Ctrl_Shift_letter", "[terminal,in
     auto input = ExtendedKeyboardInputGenerator {};
     input.enter(KeyboardEventFlag::DisambiguateEscapeCodes);
     // Ctrl+Shift+'i' is unrepresentable in legacy → CSI u fallback: ESC[105;6u
-    input.generateChar('I', 'i', Modifiers { Modifier::Control } | Modifier::Shift, KeyboardEventType::Press);
+    input.generateChar('I',
+                       KeyIdentity { .unshiftedKey = U'i' },
+                       Modifiers { Modifier::Control } | Modifier::Shift,
+                       KeyboardEventType::Press);
     REQUIRE(escape(input.take()) == escape("\x1b[105;6u"sv));
 }
 
@@ -1042,9 +1077,12 @@ TEST_CASE("InputGenerator.Win32InputMode.character", "[terminal,input]")
     auto input = InputGenerator {};
     input.setWin32InputMode(true);
 
-    // Typing 'a' (VK=0x41 on Windows, passed as physicalKey) with no modifiers
+    // Typing 'a' (VK_A = 0x41 on Windows) with no modifiers
     // Expected: CSI 65;0;97;1;0;1_
-    input.generate(U'a', 0x41, Modifier::None, KeyboardEventType::Press);
+    input.generate(U'a',
+                   KeyIdentity { .unshiftedKey = U'a', .nativeVirtualKey = 0x41 },
+                   Modifier::None,
+                   KeyboardEventType::Press);
     auto const seq = input.peek();
     CHECK(seq == "\033[65;0;97;1;0;1_");
     input.consume(static_cast<int>(seq.size()));
@@ -1056,7 +1094,10 @@ TEST_CASE("InputGenerator.Win32InputMode.character_with_shift", "[terminal,input
     input.setWin32InputMode(true);
 
     // Typing 'A' (Shift+a), VK=0x41, unicode='A'=65, Shift pressed -> CS=0x0010
-    input.generate(U'A', 0x41, Modifier::Shift, KeyboardEventType::Press);
+    input.generate(U'A',
+                   KeyIdentity { .unshiftedKey = U'A', .nativeVirtualKey = 0x41 },
+                   Modifier::Shift,
+                   KeyboardEventType::Press);
     auto const seq = input.peek();
     CHECK(seq == "\033[65;0;65;1;16;1_");
     input.consume(static_cast<int>(seq.size()));
@@ -1068,7 +1109,10 @@ TEST_CASE("InputGenerator.Win32InputMode.character_with_ctrl", "[terminal,input]
     input.setWin32InputMode(true);
 
     // Ctrl+L: VK=0x4C, unicode char is Ctrl-mapped: 'l' -> 0x0C (12), Ctrl pressed -> CS=0x0008
-    input.generate(U'l', 0x4C, Modifier::Control, KeyboardEventType::Press);
+    input.generate(U'l',
+                   KeyIdentity { .unshiftedKey = U'l', .nativeVirtualKey = 0x4C },
+                   Modifier::Control,
+                   KeyboardEventType::Press);
     auto const seq = input.peek();
     CHECK(seq == "\033[76;0;12;1;8;1_"); // UC=12 (0x0C), not 108 ('l')
     input.consume(static_cast<int>(seq.size()));
@@ -1104,7 +1148,10 @@ TEST_CASE("InputGenerator.Win32InputMode.key_release", "[terminal,input]")
     input.setWin32InputMode(true);
 
     // Key release should set Kd=0
-    input.generate(U'a', 0x41, Modifier::None, KeyboardEventType::Release);
+    input.generate(U'a',
+                   KeyIdentity { .unshiftedKey = U'a', .nativeVirtualKey = 0x41 },
+                   Modifier::None,
+                   KeyboardEventType::Release);
     auto const seq = input.peek();
     CHECK(seq == "\033[65;0;97;0;0;1_"); // Kd=0 for release
     input.consume(static_cast<int>(seq.size()));
@@ -1134,7 +1181,10 @@ TEST_CASE("InputGenerator.Win32InputMode.supersedes_csiu", "[terminal,input]")
     input.setWin32InputMode(true);
 
     // Typing 'a' should produce Win32 format, not CSI u format
-    input.generate(U'a', 0x41, Modifier::None, KeyboardEventType::Press);
+    input.generate(U'a',
+                   KeyIdentity { .unshiftedKey = U'a', .nativeVirtualKey = 0x41 },
+                   Modifier::None,
+                   KeyboardEventType::Press);
     auto const seq = input.peek();
     CHECK(seq == "\033[65;0;97;1;0;1_"); // Win32 format, NOT "\033[97u"
     input.consume(static_cast<int>(seq.size()));
@@ -1150,7 +1200,10 @@ TEST_CASE("InputGenerator.Win32InputMode.reset_clears_mode", "[terminal,input]")
     CHECK(input.win32InputMode() == false);
 
     // After reset, should generate legacy format, not Win32
-    input.generate(U'a', 0x41, Modifier::None, KeyboardEventType::Press);
+    input.generate(U'a',
+                   KeyIdentity { .unshiftedKey = U'a', .nativeVirtualKey = 0x41 },
+                   Modifier::None,
+                   KeyboardEventType::Press);
     auto const seq = input.peek();
     CHECK(seq == "a"); // Legacy: plain character
     input.consume(static_cast<int>(seq.size()));
@@ -1443,7 +1496,10 @@ TEST_CASE("InputGenerator.Win32InputMode.capslock_in_cs", "[terminal,input]")
     input.setWin32InputMode(true);
 
     // Typing 'a' with CapsLock on: CS=CAPSLOCK_ON(0x0080)=128
-    input.generate(U'a', 0x41, LockKey::CapsLock, KeyboardEventType::Press);
+    input.generate(U'a',
+                   KeyIdentity { .unshiftedKey = U'a', .nativeVirtualKey = 0x41 },
+                   LockKey::CapsLock,
+                   KeyboardEventType::Press);
     auto const seq = input.peek();
     CHECK(seq == "\033[65;0;97;1;128;1_");
     input.consume(static_cast<int>(seq.size()));
@@ -1455,7 +1511,10 @@ TEST_CASE("InputGenerator.Win32InputMode.numlock_in_cs", "[terminal,input]")
     input.setWin32InputMode(true);
 
     // Typing 'a' with NumLock on: CS=NUMLOCK_ON(0x0020)=32
-    input.generate(U'a', 0x41, LockKey::NumLock, KeyboardEventType::Press);
+    input.generate(U'a',
+                   KeyIdentity { .unshiftedKey = U'a', .nativeVirtualKey = 0x41 },
+                   LockKey::NumLock,
+                   KeyboardEventType::Press);
     auto const seq = input.peek();
     CHECK(seq == "\033[65;0;97;1;32;1_");
     input.consume(static_cast<int>(seq.size()));
@@ -1468,7 +1527,10 @@ TEST_CASE("InputGenerator.Win32InputMode.capslock_and_numlock_in_cs", "[terminal
 
     // Both locks: CS=CAPSLOCK_ON|NUMLOCK_ON = 0x0080|0x0020 = 0x00A0 = 160
     auto const locks = LockKeys { LockKey::CapsLock } | LockKey::NumLock;
-    input.generate(U'a', 0x41, locks, KeyboardEventType::Press);
+    input.generate(U'a',
+                   KeyIdentity { .unshiftedKey = U'a', .nativeVirtualKey = 0x41 },
+                   locks,
+                   KeyboardEventType::Press);
     auto const seq = input.peek();
     CHECK(seq == "\033[65;0;97;1;160;1_");
     input.consume(static_cast<int>(seq.size()));
@@ -1511,7 +1573,8 @@ TEST_CASE("InputGenerator.Win32InputMode.shift_alt_character", "[terminal,input]
 
     // Shift+Alt+'a': CS = ShiftPressed(0x0010) | LeftAltPressed(0x0002) = 0x0012 = 18
     auto const mods = Modifiers { Modifier::Shift } | Modifiers { Modifier::Alt };
-    input.generate(U'a', 0x41, mods, KeyboardEventType::Press);
+    input.generate(
+        U'a', KeyIdentity { .unshiftedKey = U'a', .nativeVirtualKey = 0x41 }, mods, KeyboardEventType::Press);
     auto const seq = input.peek();
     CHECK(seq == "\033[65;0;97;1;18;1_");
     input.consume(static_cast<int>(seq.size()));
@@ -1525,7 +1588,8 @@ TEST_CASE("InputGenerator.Win32InputMode.ctrl_shift_character", "[terminal,input
     // Ctrl+Shift+'a': CS = LeftCtrlPressed(0x0008) | ShiftPressed(0x0010) = 0x0018 = 24
     // UC = Ctrl-mapped 'a' -> 0x01 = 1
     auto const mods = Modifiers { Modifier::Control } | Modifiers { Modifier::Shift };
-    input.generate(U'a', 0x41, mods, KeyboardEventType::Press);
+    input.generate(
+        U'a', KeyIdentity { .unshiftedKey = U'a', .nativeVirtualKey = 0x41 }, mods, KeyboardEventType::Press);
     auto const seq = input.peek();
     CHECK(seq == "\033[65;0;1;1;24;1_");
     input.consume(static_cast<int>(seq.size()));
@@ -1540,7 +1604,8 @@ TEST_CASE("InputGenerator.Win32InputMode.ctrl_shift_alt_character", "[terminal,i
     // UC = Ctrl-mapped 'a' -> 0x01 = 1
     auto const mods =
         Modifiers { Modifier::Control } | Modifiers { Modifier::Shift } | Modifiers { Modifier::Alt };
-    input.generate(U'a', 0x41, mods, KeyboardEventType::Press);
+    input.generate(
+        U'a', KeyIdentity { .unshiftedKey = U'a', .nativeVirtualKey = 0x41 }, mods, KeyboardEventType::Press);
     auto const seq = input.peek();
     CHECK(seq == "\033[65;0;1;1;26;1_");
     input.consume(static_cast<int>(seq.size()));
@@ -1568,7 +1633,10 @@ TEST_CASE("InputGenerator.Win32InputMode.repeat_event", "[terminal,input]")
     input.setWin32InputMode(true);
 
     // Repeat event should produce Kd=1 (same as Press, since any non-Release is key-down)
-    input.generate(U'a', 0x41, Modifier::None, KeyboardEventType::Repeat);
+    input.generate(U'a',
+                   KeyIdentity { .unshiftedKey = U'a', .nativeVirtualKey = 0x41 },
+                   Modifier::None,
+                   KeyboardEventType::Repeat);
     auto const seq = input.peek();
     CHECK(seq == "\033[65;0;97;1;0;1_"); // Kd=1
     input.consume(static_cast<int>(seq.size()));
@@ -1610,7 +1678,10 @@ TEST_CASE("InputGenerator.Win32InputMode.space_character", "[terminal,input]")
     input.setWin32InputMode(true);
 
     // Space: VK_SPACE=0x20=32, UC=' '=32
-    input.generate(U' ', 0x20, Modifier::None, KeyboardEventType::Press);
+    input.generate(U' ',
+                   KeyIdentity { .unshiftedKey = U' ', .nativeVirtualKey = 0x20 },
+                   Modifier::None,
+                   KeyboardEventType::Press);
     auto const seq = input.peek();
     CHECK(seq == "\033[32;0;32;1;0;1_");
     input.consume(static_cast<int>(seq.size()));
@@ -1622,7 +1693,10 @@ TEST_CASE("InputGenerator.Win32InputMode.digit_character", "[terminal,input]")
     input.setWin32InputMode(true);
 
     // Digit '1': VK='1'=0x31=49, UC='1'=49
-    input.generate(U'1', 0x31, Modifier::None, KeyboardEventType::Press);
+    input.generate(U'1',
+                   KeyIdentity { .unshiftedKey = U'1', .nativeVirtualKey = 0x31 },
+                   Modifier::None,
+                   KeyboardEventType::Press);
     auto const seq = input.peek();
     CHECK(seq == "\033[49;0;49;1;0;1_");
     input.consume(static_cast<int>(seq.size()));
@@ -1634,7 +1708,10 @@ TEST_CASE("InputGenerator.Win32InputMode.ctrl_c", "[terminal,input]")
     input.setWin32InputMode(true);
 
     // Ctrl+C: VK=0x43=67, UC = Ctrl-mapped 'c' -> 0x03 = 3, CS=LeftCtrl(0x0008)=8
-    input.generate(U'c', 0x43, Modifier::Control, KeyboardEventType::Press);
+    input.generate(U'c',
+                   KeyIdentity { .unshiftedKey = U'c', .nativeVirtualKey = 0x43 },
+                   Modifier::Control,
+                   KeyboardEventType::Press);
     auto const seq = input.peek();
     CHECK(seq == "\033[67;0;3;1;8;1_");
     input.consume(static_cast<int>(seq.size()));

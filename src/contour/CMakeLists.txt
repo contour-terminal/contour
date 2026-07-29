@@ -164,6 +164,7 @@ if(CONTOUR_FRONTEND_GUI)
         ExitCode.h
         ExternalLauncher.h
         FreeDesktopNotifier.h
+        KeyboardLayout.h
         LayoutStore.h
         NotificationRouter.h
         PaneProxy.h
@@ -187,6 +188,7 @@ if(CONTOUR_FRONTEND_GUI)
         CommandPaletteModel.cpp
         ContourGuiApp.cpp
         FreeDesktopNotifier.cpp
+        KeyboardLayout.cpp
         PaneProxy.cpp
         QtExternalLauncher.cpp
         LayoutBuilder.cpp
@@ -484,6 +486,14 @@ if(CONTOUR_FRONTEND_GUI)
         target_link_libraries(contour_core PUBLIC X11::xcb X11::xcb_cursor)
     elseif(NOT(WIN32) AND NOT(APPLE))
         target_link_libraries(contour_core PUBLIC xcb)
+    endif()
+
+    if(APPLE)
+        # KeyboardLayout.cpp asks the Text Input Sources API what the active layout makes of a key
+        # code, because [NSEvent keyCode] -- which is what Qt hands us -- is positional and says
+        # nothing about the character. TIS* and UCKeyTranslate both live in Carbon/HIToolbox.
+        find_library(CARBON_LIBRARY Carbon REQUIRED)
+        target_link_libraries(contour_core PUBLIC ${CARBON_LIBRARY})
     endif()
     if(CONTOUR_BUILD_STATIC)
         qt_import_qml_plugins(contour)

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/Config.h>
+#include <contour/KeyboardLayout.h>
 #include <contour/WindowGeometry.h>
 
 #include <vtbackend/InputGenerator.h>
@@ -186,7 +187,21 @@ constexpr vtbackend::MouseButton makeMouseButton(Qt::MouseButton button)
 [[nodiscard]] vtbackend::ScrollPhase mapScrollPhase(Qt::ScrollPhase phase) noexcept;
 
 class TerminalSession;
-bool sendKeyEvent(QKeyEvent* keyEvent, vtbackend::KeyboardEventType eventType, TerminalSession& session);
+
+/// Translates a Qt key event into terminal input and hands it to @p session.
+///
+/// @param keyEvent The Qt event.
+/// @param eventType Whether this is a press, a repeat or a release.
+/// @param session The session to send the resulting input to.
+/// @param keyboardLayout Resolves the event's native key identifier to the codepoint the key
+///                       carries unmodified. Passed in rather than queried, because it reads the
+///                       user's active input source -- an ambient resource tests must be able to
+///                       substitute.
+/// @return Whether the event was translated into input; false leaves it for Qt to route on.
+bool sendKeyEvent(QKeyEvent* keyEvent,
+                  vtbackend::KeyboardEventType eventType,
+                  TerminalSession& session,
+                  KeyboardLayout const& keyboardLayout);
 void sendWheelEvent(QWheelEvent* event, TerminalSession& session);
 void sendMousePressEvent(QMouseEvent* event, TerminalSession& session);
 void sendMouseMoveEvent(QMouseEvent* event, TerminalSession& session);

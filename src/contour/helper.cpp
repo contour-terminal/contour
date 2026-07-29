@@ -395,7 +395,10 @@ char32_t unshiftedCodepoint(char32_t ch) noexcept
     }
 }
 
-bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, TerminalSession& session)
+bool sendKeyEvent(QKeyEvent* event,
+                  vtbackend::KeyboardEventType eventType,
+                  TerminalSession& session,
+                  KeyboardLayout const& keyboardLayout)
 {
     using vtbackend::Key;
     using vtbackend::Modifier;
@@ -617,7 +620,16 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         return true;
     }
 
-    auto const physicalKey = event->nativeVirtualKey();
+    // What the platform natively calls this key, translated into the two vocabularies the keyboard
+    // protocols speak. Both go through the layout rather than being copied across raw: only it knows
+    // how to read nativeVirtualKey(), which is a positional Carbon key code on macOS, a keysym on
+    // X11 and a VK code on Win32.
+    auto const nativeVirtualKey = event->nativeVirtualKey();
+    auto const keyIdentity = vtbackend::KeyIdentity {
+        .unshiftedKey = keyboardLayout.unshiftedKeyOf(nativeVirtualKey),
+        .nativeVirtualKey = keyboardLayout.win32VirtualKeyOf(nativeVirtualKey),
+    };
+
     if (event->text().isEmpty())
     {
         // NOLINTNEXTLINE(readability-qualified-auto)
@@ -625,7 +637,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
                                                 [event](auto const& x) { return x.first == event->key(); });
             i != end(CharMappings))
         {
-            session.sendCharEvent(static_cast<char32_t>(i->second), physicalKey, modifiers, eventType, now);
+            session.sendCharEvent(static_cast<char32_t>(i->second), keyIdentity, modifiers, eventType, now);
             event->accept();
             return true;
         }
@@ -647,7 +659,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         bool const shiftPressed =
             modifiers.chord.test(Modifier::Shift) ^ modifiers.locks.test(vtbackend::LockKey::CapsLock);
         auto const ch = static_cast<char32_t>(shiftPressed ? std::toupper(key) : std::tolower(key));
-        session.sendCharEvent(ch, physicalKey, modifiers, eventType, now);
+        session.sendCharEvent(ch, keyIdentity, modifiers, eventType, now);
         event->accept();
         return true;
     }
@@ -655,7 +667,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
 
     if (0x20 <= key && key < 0x80 && modifiers.chord.test(Modifier::Control))
     {
-        session.sendCharEvent(static_cast<char32_t>(key), physicalKey, modifiers, eventType, now);
+        session.sendCharEvent(static_cast<char32_t>(key), keyIdentity, modifiers, eventType, now);
         event->accept();
         return true;
     }
@@ -668,10 +680,10 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
         // On macOS the Alt-modifier does not seem to be passed to the terminal apps
         // but rather remapped to whatever macOS is mapping them to.
         for (char32_t const ch: codepoints)
-            session.sendCharEvent(ch, physicalKey, modifiers.without(Modifier::Alt), eventType, now);
+            session.sendCharEvent(ch, keyIdentity, modifiers.without(Modifier::Alt), eventType, now);
 #else
         for (char32_t const ch: codepoints)
-            session.sendCharEvent(ch, physicalKey, modifiers, eventType, now);
+            session.sendCharEvent(ch, keyIdentity, modifiers, eventType, now);
 #endif
         event->accept();
         return true;
