@@ -834,6 +834,23 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
         return _grid.lineAt(line).toUtf8ColumnAligned();
     }
 
+    /// As above, but only columns [@p begin, @p end) — still one codepoint per column.
+    ///
+    /// Indexing by COLUMN is the point: the whole-line overload forces a caller that wants a range to
+    /// slice the result afterwards, and by then the columns have been encoded into a string and a wide
+    /// or non-BMP character no longer occupies one unit. @ref Line::toUtf8 clamps both bounds.
+    ///
+    /// @param line  The line to read.
+    /// @param begin First column to include.
+    /// @param end   One past the last column to include.
+    /// @return That column range's text.
+    [[nodiscard]] std::string lineTextColumnAlignedAt(LineOffset line,
+                                                      ColumnOffset begin,
+                                                      ColumnOffset end) const noexcept
+    {
+        return _grid.lineAt(line).toUtf8(begin, end, ContinuationCell::Pad);
+    }
+
     [[nodiscard]] bool isLineEmpty(LineOffset line) const noexcept { return _grid.lineAt(line).empty(); }
 
     [[nodiscard]] uint8_t cellWidthAt(CellLocation position) const noexcept
