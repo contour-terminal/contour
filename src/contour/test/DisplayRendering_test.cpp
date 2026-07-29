@@ -79,22 +79,22 @@ namespace
 /// pointer. @see the union hazard documented at notifyAbout() in TerminalAccessible.cpp.
 struct AccessibleEventProbe
 {
-    static inline int emitted = 0;
-    static inline int undeliverable = 0;
+    static inline int Emitted = 0;
+    static inline int Undeliverable = 0;
 
     static void reset() noexcept
     {
-        emitted = 0;
-        undeliverable = 0;
+        Emitted = 0;
+        Undeliverable = 0;
     }
 
     static void handle(QAccessibleEvent* event)
     {
-        ++emitted;
+        ++Emitted;
         // Both halves of "Qt will actually deliver this": a QObject-subject event must carry no child
         // index, and the interface it resolves to must exist.
         if ((event->object() != nullptr && event->child() != -1) || event->accessibleInterface() == nullptr)
-            ++undeliverable;
+            ++Undeliverable;
     }
 };
 
@@ -1169,7 +1169,7 @@ TEST_CASE("display: every event a caret report emits is one Qt will deliver", "[
     // this environment nor CI has one.
     h.feedAndSettle("\033]133;A\033\\$ \033]133;B\033\\"sv); // prompt appears
     accessible->reportCaret();
-    auto const afterAppear = AccessibleEventProbe::emitted;
+    auto const afterAppear = AccessibleEventProbe::Emitted;
 
     h.feedAndSettle("x"sv); // caret walks the prompt
     accessible->reportCaret();
@@ -1182,8 +1182,8 @@ TEST_CASE("display: every event a caret report emits is one Qt will deliver", "[
     QAccessible::installUpdateHandler(previous);
 
     CHECK(afterAppear > 0); // the prompt branch really ran
-    CHECK(AccessibleEventProbe::emitted > afterAppear);
-    CHECK(AccessibleEventProbe::undeliverable == 0);
+    CHECK(AccessibleEventProbe::Emitted > afterAppear);
+    CHECK(AccessibleEventProbe::Undeliverable == 0);
 }
 
 TEST_CASE("display: the prompt interface leaves Qt's accessibility cache with its display", "[display][a11y]")

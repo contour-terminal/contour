@@ -29,23 +29,23 @@ namespace
 /// pointer, so there is nowhere to put a capture.
 struct EventProbe
 {
-    static inline int emitted = 0;
-    static inline int strayChild = 0;
+    static inline int Emitted = 0;
+    static inline int StrayChild = 0;
 
     static void reset() noexcept
     {
-        emitted = 0;
-        strayChild = 0;
+        Emitted = 0;
+        StrayChild = 0;
     }
 
     static void handle(QAccessibleEvent* event)
     {
-        ++emitted;
+        ++Emitted;
         // An event that names a QObject must leave the union's other member alone: -1 is "no child",
         // and anything else sends Qt looking for a child that does not exist. An event with no QObject
         // is the interface-subject form, where the union legitimately holds a unique id.
         if (event->object() != nullptr && event->child() != -1)
-            ++strayChild;
+            ++StrayChild;
     }
 };
 
@@ -95,6 +95,6 @@ TEST_CASE("a11y: every emitted event names a subject Qt can resolve", "[contour]
     accessible->reportLocation();
     QAccessible::installUpdateHandler(previous);
 
-    CHECK(EventProbe::emitted > 0); // the probe really saw the emission
-    CHECK(EventProbe::strayChild == 0);
+    CHECK(EventProbe::Emitted > 0); // the probe really saw the emission
+    CHECK(EventProbe::StrayChild == 0);
 }
