@@ -377,8 +377,11 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
         terminal.viewport().scrollUp(LineCount(2));
         REQUIRE(terminal.viewport().scrolled());
 
-        terminal.sendCharEvent(
-            U'a', 0, anyModifiers, vtbackend::KeyboardEventType::Press, std::chrono::steady_clock::now());
+        terminal.sendCharEvent(U'a',
+                               vtbackend::KeyIdentity { .unshiftedKey = U'a' },
+                               anyModifiers,
+                               vtbackend::KeyboardEventType::Press,
+                               std::chrono::steady_clock::now());
 
         CHECK(!terminal.viewport().scrolled());
     }
@@ -389,8 +392,11 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
         terminal.viewport().scrollUp(LineCount(2));
         REQUIRE(terminal.viewport().scrolled());
 
-        terminal.sendCharEvent(
-            U'a', 0, anyModifiers, vtbackend::KeyboardEventType::Press, std::chrono::steady_clock::now());
+        terminal.sendCharEvent(U'a',
+                               vtbackend::KeyIdentity { .unshiftedKey = U'a' },
+                               anyModifiers,
+                               vtbackend::KeyboardEventType::Press,
+                               std::chrono::steady_clock::now());
 
         CHECK(!terminal.viewport().scrolled());
     }
@@ -438,8 +444,11 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
         REQUIRE(terminal.viewport().scrolled());
         auto const offsetBefore = terminal.viewport().scrollOffset();
 
-        terminal.sendCharEvent(
-            U'a', 0, anyModifiers, vtbackend::KeyboardEventType::Release, std::chrono::steady_clock::now());
+        terminal.sendCharEvent(U'a',
+                               vtbackend::KeyIdentity { .unshiftedKey = U'a' },
+                               anyModifiers,
+                               vtbackend::KeyboardEventType::Release,
+                               std::chrono::steady_clock::now());
 
         CHECK(terminal.viewport().scrolled());
         CHECK(terminal.viewport().scrollOffset() == offsetBefore);
@@ -3655,12 +3664,19 @@ TEST_CASE("Terminal.KittyKeyRelease.sendCharEvent", "[terminal]")
     auto constexpr Now = std::chrono::steady_clock::time_point {};
 
     mc.resetReplyData();
-    terminal.sendCharEvent('a', 'a', vtbackend::Modifier::Control, vtbackend::KeyboardEventType::Press, Now);
+    terminal.sendCharEvent('a',
+                           vtbackend::KeyIdentity { .unshiftedKey = 'a' },
+                           vtbackend::Modifier::Control,
+                           vtbackend::KeyboardEventType::Press,
+                           Now);
     CHECK(e(mc.replyData()) == e("\033[97;5u"s));
 
     mc.resetReplyData();
-    terminal.sendCharEvent(
-        'a', 'a', vtbackend::Modifier::Control, vtbackend::KeyboardEventType::Release, Now);
+    terminal.sendCharEvent('a',
+                           vtbackend::KeyIdentity { .unshiftedKey = 'a' },
+                           vtbackend::Modifier::Control,
+                           vtbackend::KeyboardEventType::Release,
+                           Now);
     CHECK(!mc.replyData().empty());
     CHECK(e(mc.replyData()) == e("\033[97;5:3u"s));
 }
@@ -3675,12 +3691,19 @@ TEST_CASE("Terminal.KittyKeyRelease.NoOutputWithoutFlag", "[terminal]")
     auto constexpr Now = std::chrono::steady_clock::time_point {};
 
     mc.resetReplyData();
-    terminal.sendCharEvent('a', 'a', vtbackend::Modifier::Control, vtbackend::KeyboardEventType::Press, Now);
+    terminal.sendCharEvent('a',
+                           vtbackend::KeyIdentity { .unshiftedKey = 'a' },
+                           vtbackend::Modifier::Control,
+                           vtbackend::KeyboardEventType::Press,
+                           Now);
     CHECK(!mc.replyData().empty());
 
     mc.resetReplyData();
-    terminal.sendCharEvent(
-        'a', 'a', vtbackend::Modifier::Control, vtbackend::KeyboardEventType::Release, Now);
+    terminal.sendCharEvent('a',
+                           vtbackend::KeyIdentity { .unshiftedKey = 'a' },
+                           vtbackend::Modifier::Control,
+                           vtbackend::KeyboardEventType::Release,
+                           Now);
     CHECK(mc.replyData().empty());
 }
 
@@ -4514,8 +4537,11 @@ TEST_CASE("Terminal.kitty_keyboard_protocol_reports_lock_modifiers", "[terminal]
     mock.resetReplyData();
 
     // Key code 97 (lowercase a), modifier 65 == 1 + LockKey::CapsLock.
-    mock.terminal.sendCharEvent(
-        U'a', U'a', CapsLockOnly, vtbackend::KeyboardEventType::Press, std::chrono::steady_clock::now());
+    mock.terminal.sendCharEvent(U'a',
+                                vtbackend::KeyIdentity { .unshiftedKey = U'a' },
+                                CapsLockOnly,
+                                vtbackend::KeyboardEventType::Press,
+                                std::chrono::steady_clock::now());
 
     CHECK(e(mock.replyData()) == e("\033[97;65u"));
 }

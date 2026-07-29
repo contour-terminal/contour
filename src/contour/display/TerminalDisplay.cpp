@@ -1198,14 +1198,15 @@ void TerminalDisplay::keyPressEvent(QKeyEvent* keyEvent)
     sendKeyEvent(keyEvent,
                  keyEvent->isAutoRepeat() ? vtbackend::KeyboardEventType::Repeat
                                           : vtbackend::KeyboardEventType::Press,
-                 *_session);
+                 *_session,
+                 _session->keyboardLayout());
 }
 
 void TerminalDisplay::keyReleaseEvent(QKeyEvent* keyEvent)
 {
     if (!_session || keyEvent->isAutoRepeat())
         return;
-    sendKeyEvent(keyEvent, vtbackend::KeyboardEventType::Release, *_session);
+    sendKeyEvent(keyEvent, vtbackend::KeyboardEventType::Release, *_session, _session->keyboardLayout());
 }
 
 void TerminalDisplay::wheelEvent(QWheelEvent* event)

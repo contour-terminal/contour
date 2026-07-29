@@ -41,12 +41,13 @@ class MockTerm: public Terminal::NullEvents
                        KeyboardModifiers modifiers = KeyboardModifiers {},
                        Terminal::Timestamp now = std::chrono::steady_clock::now())
     {
-        // Simulate physical key here, as we don't have a real keyboard.
-        auto const physicalKey = static_cast<uint32_t>(ch);
+        // Synthesize the key identity here, as we don't have a real keyboard to ask.
+        auto const keyIdentity =
+            KeyIdentity { .unshiftedKey = ch, .nativeVirtualKey = static_cast<uint32_t>(ch) };
 
-        if (!terminal.sendCharEvent(ch, physicalKey, modifiers, KeyboardEventType::Press, now))
+        if (!terminal.sendCharEvent(ch, keyIdentity, modifiers, KeyboardEventType::Press, now))
             return false;
-        terminal.sendCharEvent(ch, physicalKey, modifiers, KeyboardEventType::Release, now);
+        terminal.sendCharEvent(ch, keyIdentity, modifiers, KeyboardEventType::Release, now);
         return true;
     }
 

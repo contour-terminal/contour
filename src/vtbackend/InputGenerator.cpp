@@ -70,11 +70,12 @@ static constexpr std::optional<char> ctrlMappedKey(char32_t ch) noexcept
 
 // {{{ StandardKeyboardInputGenerator
 bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
-                                                  uint32_t physicalKey,
+                                                  KeyIdentity keyIdentity,
                                                   KeyboardModifiers keyboardModifiers,
                                                   KeyboardEventType eventType)
 {
-    crispy::ignore_unused(physicalKey);
+    // Legacy encoding transmits bytes, not key identities: there is nowhere in it to put one.
+    crispy::ignore_unused(keyIdentity);
 
     if (eventType == KeyboardEventType::Release)
         return false;
@@ -334,7 +335,7 @@ bool StandardKeyboardInputGenerator::generateKey(Key key,
 // {{{ ExtendedKeyboardInputGenerator
 
 bool ExtendedKeyboardInputGenerator::generateChar(char32_t characterEvent,
-                                                  uint32_t physicalKey,
+                                                  KeyIdentity keyIdentity,
                                                   KeyboardModifiers modifiers,
                                                   KeyboardEventType eventType)
 {
@@ -343,7 +344,7 @@ bool ExtendedKeyboardInputGenerator::generateChar(char32_t characterEvent,
 
     if (!isNonLegacyMode())
         return StandardKeyboardInputGenerator::generateChar(
-            characterEvent, physicalKey, modifiers, eventType);
+            characterEvent, keyIdentity, modifiers, eventType);
 
     auto const hasRealMods = modifiers.chord.any();
     auto const needsAction =
@@ -354,7 +355,7 @@ bool ExtendedKeyboardInputGenerator::generateChar(char32_t characterEvent,
     // No real mods, no action encoding needed, not report-all-keys: legacy UTF-8
     if (!hasRealMods && !needsAction && !reportAllKeys)
         return StandardKeyboardInputGenerator::generateChar(
-            characterEvent, physicalKey, modifiers, eventType);
+            characterEvent, keyIdentity, modifiers, eventType);
 
     // Printable chars with only Shift modifier are unambiguous: stay in legacy mode.
     // CSI u is only needed when mods other than Shift are present (or reportAllKeys is set).
@@ -362,12 +363,12 @@ bool ExtendedKeyboardInputGenerator::generateChar(char32_t characterEvent,
     auto const canUseLegacyEncoding = hasOnlyShift || !disambiguate;
     if (!needsAction && !reportAllKeys && canUseLegacyEncoding)
         return StandardKeyboardInputGenerator::generateChar(
-            characterEvent, physicalKey, modifiers, eventType);
+            characterEvent, keyIdentity, modifiers, eventType);
 
     // CSI u encoding (conditionally include semicolon only when modifiers non-empty)
     auto const encodedMods = encodeModifiers(modifiers, eventType);
     auto const modsPart = encodedMods.empty() ? std::string {} : std::format(";{}", encodedMods);
-    append("\033[{}{}u", encodeCharacter(characterEvent, physicalKey, modifiers.chord), modsPart);
+    append("\033[{}{}u", encodeCharacter(characterEvent, keyIdentity, modifiers.chord), modsPart);
     return true;
 }
 
@@ -395,45 +396,37 @@ std::string ExtendedKeyboardInputGenerator::encodeModifiers(KeyboardModifiers mo
 }
 
 std::string ExtendedKeyboardInputGenerator::encodeCharacter(char32_t ch,
-                                                            uint32_t physicalKey,
+                                                            KeyIdentity keyIdentity,
                                                             Modifiers chord) const
 {
-    // Per Kitty spec: unicode-key-code is always the un-shifted base key.
-    // For letters, simple_lowercase normalizes both ch and physicalKey (A→a).
-    // For non-letter shifted symbols (Shift+3→#), simple_lowercase('#')='#'
-    // which is WRONG — the base key '3' (from physicalKey) must be used instead.
-    // We apply simple_lowercase to physicalKey to normalize letter keys that may
-    // arrive as uppercase from the platform (e.g., physicalKey='L' for the L key).
-    auto const baseKey =
-        (physicalKey >= 32 && physicalKey < 0x110000)
-            ? static_cast<uint32_t>(unicode::simple_lowercase(static_cast<char32_t>(physicalKey)))
-            : static_cast<uint32_t>(unicode::simple_lowercase(ch));
+    // Per Kitty spec: unicode-key-code is always the un-shifted key, which is precisely what
+    // KeyIdentity::unshiftedKey carries. Deriving it from `ch` instead only works for letters:
+    // simple_lowercase('A') is 'a', but simple_lowercase('#') is '#' where the answer is '3'.
+    //
+    // Zero means the platform could not tell us, so fall back to the letter rule. The test must be
+    // against zero and nothing wider -- a range test here cannot tell a codepoint from a key
+    // identifier that merely looks like one (@see contour::KeyboardLayout).
+    auto const unshiftedKey = keyIdentity.unshiftedKey;
+    auto const baseKey = unshiftedKey != 0 ? static_cast<uint32_t>(unicode::simple_lowercase(unshiftedKey))
+                                           : static_cast<uint32_t>(unicode::simple_lowercase(ch));
     auto result = std::to_string(baseKey);
 
     if (enabled(KeyboardEventFlag::ReportAlternateKeys))
     {
         // Shifted key = the character actually produced when Shift is active.
         // For Shift+3→'#': shiftedKey=35. For Shift+A→'A': shiftedKey=65.
-        uint32_t shiftedKey = 0;
+        //
+        // The spec's third field, the key's position in the standard PC-101 layout, is deliberately
+        // not emitted: no windowing system we support hands out a PC-101 key code, and the only
+        // value we could put there is the un-shifted key we already reported.
         if (chord.contains(Modifier::Shift))
         {
             auto const producedKey = static_cast<uint32_t>(ch);
             if (producedKey != baseKey)
-                shiftedKey = producedKey;
-        }
-
-        bool const showPhysicalKey = physicalKey && physicalKey != baseKey && physicalKey != shiftedKey;
-
-        if (shiftedKey || showPhysicalKey)
-            result += ':';
-        if (shiftedKey)
-            result += std::to_string(shiftedKey);
-
-        // The base layout key is the key corresponding to the physical key in the standard PC-101 key layout
-        if (showPhysicalKey)
-        {
-            result += ':';
-            result += std::to_string(physicalKey);
+            {
+                result += ':';
+                result += std::to_string(producedKey);
+            }
         }
     }
 
@@ -1021,7 +1014,7 @@ void InputGenerator::setAutomaticNewLineMode(bool enable)
 }
 
 bool InputGenerator::generate(char32_t characterEvent,
-                              uint32_t physicalKey,
+                              KeyIdentity keyIdentity,
                               KeyboardModifiers modifiers,
                               KeyboardEventType eventType)
 {
@@ -1029,7 +1022,7 @@ bool InputGenerator::generate(char32_t characterEvent,
     // It is the native ConPTY input format and carries richer key information
     // (VK codes, scan codes) than CSI u in the Windows environment.
     if (_win32InputMode)
-        return generateWin32KeyInput(physicalKey, characterEvent, modifiers, eventType);
+        return generateWin32KeyInput(keyIdentity.nativeVirtualKey, characterEvent, modifiers, eventType);
 
     // modifyOtherKeys mode 2: emit CSI 27 ; modifier ; codepoint ~ for modified keys.
     // This takes precedence over the CSI u keyboard protocol but only when no CSI u flags are active.
@@ -1048,7 +1041,7 @@ bool InputGenerator::generate(char32_t characterEvent,
     }
 
     bool const success =
-        _keyboardInputGenerator.generateChar(characterEvent, physicalKey, modifiers, eventType);
+        _keyboardInputGenerator.generateChar(characterEvent, keyIdentity, modifiers, eventType);
 
     if (success)
     {

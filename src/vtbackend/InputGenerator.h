@@ -393,13 +393,36 @@ enum class KeyboardEventType : uint8_t
     Release = 3,
 };
 
+/// Identifies the key behind a character event, beyond the character it produced.
+///
+/// The two members answer different questions for different keyboard protocols and are deliberately
+/// not interchangeable. Both are optional -- zero means the platform did not tell us, and the
+/// encoders then derive what they need from the character itself.
+///
+/// Filling these is the windowing-system boundary's job, because it is the only layer that knows
+/// what its native key identifiers mean; a raw one must never be stored here. What a platform calls
+/// a key is not necessarily a codepoint, nor a VK code (@see contour::KeyboardLayout).
+struct KeyIdentity
+{
+    /// The codepoint this key produces with no modifiers applied, in the *current* keyboard
+    /// layout -- the Kitty keyboard protocol's `unicode-key-code`. For Shift+3 on a US layout
+    /// this is '3', not '#'.
+    char32_t unshiftedKey = 0;
+
+    /// The Win32 virtual-key code (`VK_*`) for this key, as ConPTY's win32-input-mode reports it.
+    /// Zero off Windows: no other platform has a VK code to give, and win32-input-mode is reachable
+    /// everywhere (DECSET 9001 carries no platform guard), so a native value smuggled in here would
+    /// be transmitted as a VK code that it is not.
+    uint32_t nativeVirtualKey = 0;
+};
+
 class KeyboardInputGenerator
 {
   public:
     virtual ~KeyboardInputGenerator() = default;
 
     virtual bool generateChar(char32_t characterEvent,
-                              uint32_t physicalKey,
+                              KeyIdentity keyIdentity,
                               KeyboardModifiers modifiers,
                               KeyboardEventType eventType) = 0;
     virtual bool generateKey(Key key, KeyboardModifiers modifiers, KeyboardEventType eventType) = 0;
@@ -409,7 +432,7 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
 {
   public:
     bool generateChar(char32_t characterEvent,
-                      uint32_t physicalKey,
+                      KeyIdentity keyIdentity,
                       KeyboardModifiers modifiers,
                       KeyboardEventType eventType) override;
     bool generateKey(Key key, KeyboardModifiers modifiers, KeyboardEventType eventType) override;
@@ -560,7 +583,7 @@ class ExtendedKeyboardInputGenerator final: public StandardKeyboardInputGenerato
     // {{{ Overrides from StandardKeyboardInputGenerator
 
     bool generateChar(char32_t characterEvent,
-                      uint32_t physicalKey,
+                      KeyIdentity keyIdentity,
                       KeyboardModifiers modifiers,
                       KeyboardEventType eventType) override;
     bool generateKey(Key key, KeyboardModifiers modifiers, KeyboardEventType eventType) override;
@@ -568,7 +591,7 @@ class ExtendedKeyboardInputGenerator final: public StandardKeyboardInputGenerato
     // }}}
 
   private:
-    [[nodiscard]] std::string encodeCharacter(char32_t ch, uint32_t physicalKey, Modifiers chord) const;
+    [[nodiscard]] std::string encodeCharacter(char32_t ch, KeyIdentity keyIdentity, Modifiers chord) const;
     [[nodiscard]] std::string encodeModifiers(KeyboardModifiers modifiers, KeyboardEventType eventType) const;
 
     std::array<KeyboardEventFlags, MaxStackDepth> _flags = { KeyboardEventFlag::None };
@@ -663,14 +686,20 @@ class InputGenerator
     [[nodiscard]] int modifyOtherKeys() const noexcept { return _modifyOtherKeys; }
 
     bool generate(char32_t characterEvent,
-                  uint32_t physicalKey,
+                  KeyIdentity keyIdentity,
                   KeyboardModifiers modifiers,
                   KeyboardEventType eventType);
+
+    /// Convenience overload for callers that have no windowing system to ask -- tests, and the
+    /// synthetic input paths. It synthesizes the key identity from the character, which is exact
+    /// for an unmodified US-layout ASCII key and close enough for the rest.
     bool generate(char32_t characterEvent, KeyboardModifiers modifiers, KeyboardEventType eventType)
     {
-        // Simulate physical key here.
-        auto const physicalKey = static_cast<uint32_t>(characterEvent);
-        return generate(characterEvent, physicalKey, modifiers, eventType);
+        return generate(characterEvent,
+                        KeyIdentity { .unshiftedKey = characterEvent,
+                                      .nativeVirtualKey = static_cast<uint32_t>(characterEvent) },
+                        modifiers,
+                        eventType);
     }
     bool generate(Key key, KeyboardModifiers modifiers, KeyboardEventType eventType);
     void generatePaste(std::string_view const& text);
