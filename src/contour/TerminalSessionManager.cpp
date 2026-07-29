@@ -73,6 +73,31 @@ TerminalSession* TerminalSessionManager::sessionForId(vtworkspace::SessionId id)
     return it != _sessionsById.end() ? it->second : nullptr;
 }
 
+vtpty::Pty const* TerminalSessionManager::actingPtyOfWindow(vtworkspace::WindowId window) const
+{
+    auto* win = _model->window(window);
+    if (win == nullptr)
+        return nullptr;
+    // The active tab's active pane first — that is the pane the user is looking at, so it is the
+    // most faithful "this window" the remote side can be given. Any live leaf of the window would
+    // resolve to the same window on the daemon, so the scan below is a fallback for a window whose
+    // active pane happens to have no live session (a tab mid-teardown), not a different answer.
+    auto const ptyOf = [this](vtworkspace::SessionId id) -> vtpty::Pty const* {
+        auto* session = sessionForId(id);
+        return session != nullptr ? &session->terminal().device() : nullptr;
+    };
+    if (auto* tab = win->activeTab(); tab != nullptr)
+        if (auto* leaf = tab->activePane(); leaf != nullptr)
+            if (auto const* pty = ptyOf(leaf->session()); pty != nullptr)
+                return pty;
+    for (auto const row: std::views::iota(0, win->tabCount()))
+        if (auto* tab = win->tabAt(row); tab != nullptr)
+            for (auto* session: sessionsInTab(tab))
+                if (session != nullptr)
+                    return &session->terminal().device();
+    return nullptr;
+}
+
 int TerminalSessionManager::rowOfTab(vtworkspace::TabId tab) const noexcept
 {
     // Window-agnostic: resolve the tab's OWNING window through the model, so the row is correct for
@@ -125,6 +150,12 @@ TerminalSession* TerminalSessionManager::createSessionInBackground(
     // TODO: Remove dependency on app-knowledge and pass shell / terminal-size instead.
     // The GuiApp *or* (Global)Config could be made a global to be accessible from within QML.
 
+    if (!_sessionFactory.canCreateSession())
+    {
+        managerLog()("Refusing to create a session: the session factory cannot back one right now.");
+        return nullptr;
+    }
+
     if (!_focusedWindow)
     {
         managerLog()("No focused window found. something went wrong.");
@@ -173,6 +204,17 @@ TerminalSession* TerminalSessionManager::createBackingSession(
     std::optional<vtpty::Process::ExecInfo> const& commandOverride,
     std::optional<std::string> const& profileName)
 {
+    // The chokepoint guard: every creation path funnels through here, so a
+    // future entry point that forgets its own fail-fast check still cannot
+    // mint a backing pty the factory refuses (e.g. a local shell inside an
+    // attach-mode mirror window). The entry points keep their earlier checks
+    // for whole-operation fail-fast semantics.
+    if (!_sessionFactory.canCreateSession())
+    {
+        managerLog()("Refusing to create a backing session: the factory cannot back one right now.");
+        return nullptr;
+    }
+
     // The command this session ACTUALLY runs: an explicit override wins; otherwise, a session on
     // the app-default profile inherits the CLI-verbatim command (`contour terminal PROGRAM ...`),
     // which mutated that profile's shell for the whole process — so SaveLayout can capture it.
@@ -195,6 +237,9 @@ TerminalSession* TerminalSessionManager::createBackingSession(
                  session->id(),
                  (void*) session,
                  _sessionsById.size());
+    // Close the cycle the constructor could not: the factory handed out a pty, and a
+    // daemon-backed one needs the terminal built around it to populate its grid.
+    _sessionFactory.bindTerminal(&session->terminal().device(), session->terminal());
 
     _pendingSessionId = sessionId;
     _sessionsById[sessionId.value] = session;
@@ -316,20 +361,32 @@ void TerminalSessionManager::closeAllTabs(TerminalSession* acting)
         controller->closeWindow();
 }
 
-bool TerminalSessionManager::applyLayoutToWindow(vtworkspace::WindowId window,
-                                                 config::Layout const& layout,
-                                                 std::optional<vtbackend::PageSize> pageSize)
+bool TerminalSessionManager::applyLayoutToWindow(
+    vtworkspace::WindowId window,
+    config::Layout const& layout,
+    std::optional<vtbackend::PageSize> pageSize,
+    std::function<void(config::LayoutPane const&)> const& beforeLeafSeed)
 {
     if (layout.tabs.empty())
     {
         managerLog()("Layout has no tabs; nothing to apply.");
         return false;
     }
+    if (!_sessionFactory.canCreateSession())
+    {
+        managerLog()("Refusing to apply a layout: the session factory cannot back new sessions right now.");
+        return false;
+    }
     for (auto const& tabSpec: layout.tabs)
     {
         // The seeder stages a backing session for each pane right before the model allocates it,
         // exactly like createBackingSession's use in splitActivePane/createSessionInBackground.
-        auto seeder = [&](config::LayoutPane const& leaf) {
+        auto seeder = [&](config::LayoutPane const& leaf) -> bool {
+            // Attach mode binds the pane about to be born to a specific remote
+            // session here, before its backing session (and thus its ChannelPty) is
+            // created — see NativeController.
+            if (beforeLeafSeed)
+                beforeLeafSeed(leaf);
             auto const sessionId = vtworkspace::SessionId { _nextSessionId++ };
             // A command override ONLY when the pane actually names a program to run. A pane that
             // just picks a directory still runs the profile's shell — it travels through `cwd`,
@@ -349,9 +406,15 @@ bool TerminalSessionManager::applyLayoutToWindow(vtworkspace::WindowId window,
                 managerLog()("Layout references unknown profile '{}'; using window profile.", *profileName);
                 profileName.reset();
             }
-            std::optional<std::string> const cwd =
-                leaf.directory ? std::optional { leaf.directory->string() } : std::nullopt;
-            createBackingSession(sessionId, cwd, pageSize, command, profileName);
+            // Narrow the layout directory to the cwd string HERE (apply-time), not at config parse:
+            // on Windows path::string() throws for a path outside the active code page, and doing it
+            // at parse would fail the whole config rather than just this pane's launch.
+            auto cwd =
+                leaf.directory ? std::optional { leaf.directory->string() } : std::optional<std::string> {};
+            // Report whether the backing session was actually created: a nullptr (the factory
+            // refused, e.g. an attach-mode pool that ran dry) stops the realizer before it
+            // allocates a pane with no session behind it — the same guard the split path uses.
+            return createBackingSession(sessionId, std::move(cwd), pageSize, command, profileName) != nullptr;
         };
 
         auto* modelTab = realizeLayoutTab(*_model, window, tabSpec, seeder);
@@ -755,7 +818,7 @@ void TerminalSessionManager::closeTab(TerminalSession* acting)
         return;
     }
     managerLog()("Close tab: acting session ID {}, tab row {}", acting->id(), rowOfTab(tab->id()));
-    terminateSessions(sessionsInTab(tab));
+    terminateSessions(sessionsInTab(tab), SessionEnd::Destroy);
 }
 
 void TerminalSessionManager::moveTabByTab(vtworkspace::Tab* tab, int targetRow)
@@ -977,13 +1040,40 @@ void TerminalSessionManager::activePaneChanged(vtworkspace::TabId tab, vtworkspa
     }
 }
 
-void TerminalSessionManager::paneRatioChanged(vtworkspace::TabId tab, vtworkspace::PaneId splitNode, double)
+void TerminalSessionManager::paneRatioChanged(vtworkspace::TabId tab,
+                                              vtworkspace::PaneId splitNode,
+                                              double ratio)
 {
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
         c->notifyRatioChanged(splitNode);
+    reportSplitRatio(tab, splitNode, ratio);
 }
 
-void TerminalSessionManager::paneOrientationChanged(vtworkspace::TabId tab, vtworkspace::PaneId, vtworkspace::SplitState)
+void TerminalSessionManager::reportSplitRatio(vtworkspace::TabId tab,
+                                              vtworkspace::PaneId splitNode,
+                                              double ratio)
+{
+    auto* split = _model->findPane(tab, splitNode);
+    if (split == nullptr || split->isLeaf())
+        return;
+
+    // Name the split by ANY leaf from each side — the daemon resolves their lowest common ancestor,
+    // which is this node whichever leaves the two sides contribute. firstLeaf() is simply the cheapest
+    // one to reach; nothing downstream depends on the choice.
+    auto const ptyOfLeafUnder = [this](vtworkspace::Pane* child) -> vtpty::Pty const* {
+        auto* session = sessionForId(child->firstLeaf()->session());
+        return session != nullptr ? &session->terminal().device() : nullptr;
+    };
+
+    auto const* first = ptyOfLeafUnder(split->first());
+    auto const* second = ptyOfLeafUnder(split->second());
+    if (first != nullptr && second != nullptr)
+        _sessionFactory.reportSplitRatio(first, second, ratio);
+}
+
+void TerminalSessionManager::paneOrientationChanged(vtworkspace::TabId tab,
+                                                    vtworkspace::PaneId,
+                                                    vtworkspace::SplitState)
 {
     // Rebuild the tab's proxy tree: the coarse refresh re-emits every proxy's `changed` (which carries
     // `orientation`), so PaneNode.qml re-reads the flipped axis and re-lays out its SplitView. Same
@@ -1062,6 +1152,12 @@ void TerminalSessionManager::refreshTabForSession(vtworkspace::SessionId session
             c->notifyTabRowChanged(tab->id(), { WindowController::Roles::TitleRole });
 }
 
+void TerminalSessionManager::setTabTitleForSession(vtworkspace::SessionId session, std::string title)
+{
+    if (auto* tab = findTabHostingSession(session))
+        _model->setTabTitle(tab->id(), std::move(title));
+}
+
 void TerminalSessionManager::setTabColorForSession(vtworkspace::SessionId session, vtbackend::RGBColor color)
 {
     // Reuse the authoritative tab-color path: SessionModel::setTabColor fires tabColorChanged, which
@@ -1135,7 +1231,9 @@ void TerminalSessionManager::moveTabToWindow(vtworkspace::WindowId from,
     closeWindowIfEmpty(from);
 }
 
-void TerminalSessionManager::tearOffTabToNewWindow(vtworkspace::WindowId from, int fromIndex, QScreen* targetScreen)
+void TerminalSessionManager::tearOffTabToNewWindow(vtworkspace::WindowId from,
+                                                   int fromIndex,
+                                                   QScreen* targetScreen)
 {
     auto* tab = tabAtRow(from, fromIndex);
     if (tab == nullptr)
@@ -1176,7 +1274,7 @@ void TerminalSessionManager::closeTabAtIndex(vtworkspace::WindowId window, int i
     // index is a tab row (rows are tabs). Close the whole tab by terminating each of its panes'
     // sessions; the model collapses to the survivor on each close and tears the tab down with the
     // last pane.
-    terminateSessions(sessionsInTab(tabAtRow(window, index)));
+    terminateSessions(sessionsInTab(tabAtRow(window, index)), SessionEnd::Destroy);
 }
 
 std::vector<TerminalSession*> TerminalSessionManager::sessionsInTab(vtworkspace::Tab* tab) const
@@ -1192,7 +1290,13 @@ std::vector<TerminalSession*> TerminalSessionManager::sessionsInTab(vtworkspace:
     return sessions;
 }
 
-void TerminalSessionManager::terminateSessions(std::span<TerminalSession* const> sessions)
+void TerminalSessionManager::authorRemoteEnd(TerminalSession* session)
+{
+    if (session != nullptr)
+        _sessionFactory.requestRemoteClose(&session->terminal().device());
+}
+
+void TerminalSessionManager::terminateSessions(std::span<TerminalSession* const> sessions, SessionEnd end)
 {
     // The single whole-tab close primitive shared by every close entry point. The caller has already
     // gathered the doomed sessions into a stable vector, so terminate() -> removeSession is free to
@@ -1200,8 +1304,17 @@ void TerminalSessionManager::terminateSessions(std::span<TerminalSession* const>
     // invalidating what we iterate. terminate() now closes the PTY even for a display-less background
     // pane, so panes of a non-active tab are torn down too (previously a silent no-op that leaked the
     // session and its shell process).
+    //
+    // A Destroy also has to be authored UPSTREAM for a session this process does not own: a
+    // daemon-hosted one outlives its pty, so closing the local view is not closing the session.
+    // Done before the terminate() below, while each session still holds the pty the remote factory
+    // identifies it by.
     for (auto* session: sessions)
+    {
+        if (end == SessionEnd::Destroy)
+            authorRemoteEnd(session);
         session->terminate();
+    }
 }
 
 std::vector<TerminalSession*> TerminalSessionManager::gatherSessionsOfTabsWhere(
@@ -1229,10 +1342,10 @@ void TerminalSessionManager::closeOtherTabs(vtworkspace::WindowId window, int in
     if (keep == nullptr || win == nullptr)
         return;
 
-    auto const doomed =
-        gatherSessionsOfTabsWhere(*win, [keep](int, vtworkspace::Tab* tab) { return tab->id() != keep->id(); });
+    auto const doomed = gatherSessionsOfTabsWhere(
+        *win, [keep](int, vtworkspace::Tab* tab) { return tab->id() != keep->id(); });
     _model->closeOtherTabs(window, keep->id());
-    terminateSessions(doomed);
+    terminateSessions(doomed, SessionEnd::Destroy);
 }
 
 void TerminalSessionManager::closeTabsToRight(vtworkspace::WindowId window, int index)
@@ -1247,7 +1360,7 @@ void TerminalSessionManager::closeTabsToRight(vtworkspace::WindowId window, int 
     auto const doomed =
         gatherSessionsOfTabsWhere(*win, [index](int row, vtworkspace::Tab*) { return row > index; });
     _model->closeTabsToRight(window, anchor->id());
-    terminateSessions(doomed);
+    terminateSessions(doomed, SessionEnd::Destroy);
 }
 
 QVariantList TerminalSessionManager::tabColorPalette() const
@@ -1261,8 +1374,20 @@ QVariantList TerminalSessionManager::tabColorPalette() const
 // }}}
 
 // {{{ Split-pane operations
-void TerminalSessionManager::splitActivePane(bool vertical, TerminalSession* acting)
+void TerminalSessionManager::splitActivePane(bool vertical, TerminalSession* acting, double ratio)
 {
+    // Attach mode: author the split on the daemon (B3-Qt); its layout re-push
+    // reconciles the new pane in. A reconciliation-driven split (during realization)
+    // returns false and builds locally below, as does a local factory.
+    if (acting != nullptr && _sessionFactory.requestRemoteSplit(&acting->terminal().device(), vertical))
+        return;
+
+    if (!_sessionFactory.canCreateSession())
+    {
+        managerLog()("Refusing to split: the session factory cannot back a new session right now.");
+        return;
+    }
+
     auto* tab = paneActionTargetTab(acting);
     if (tab == nullptr)
         return;
@@ -1299,17 +1424,22 @@ void TerminalSessionManager::splitActivePane(bool vertical, TerminalSession* act
     // _pendingSessionId, so the model allocator (invoked inside splitActivePane) hands back exactly
     // this id — same backing-session-first order as createSessionInBackground/createTab.
     auto const newSessionId = vtworkspace::SessionId { _nextSessionId++ };
-    createBackingSession(newSessionId, std::move(cwd), pageSize);
+    if (createBackingSession(newSessionId, std::move(cwd), pageSize) == nullptr)
+        return; // no backing session, no split
 
     auto const direction = vertical ? vtworkspace::SplitState::Vertical : vtworkspace::SplitState::Horizontal;
-    auto* newLeaf = _model->splitActivePane(tab->id(), direction);
+    auto* newLeaf = _model->splitActivePane(tab->id(), direction, ratio);
     _pendingSessionId.reset(); // consumed by the allocator; clear any leftover
     if (newLeaf == nullptr)
     {
         // The split did not happen; the backing session we created has no model pane, so terminate
-        // it to drop the orphaned session/registry entries rather than leak them.
+        // it to drop the orphaned session/registry entries rather than leak them. In attach mode it
+        // is a real daemon session too, so end it upstream — nothing will ever show it.
         if (auto* orphan = sessionForId(newSessionId))
+        {
+            authorRemoteEnd(orphan);
             orphan->terminate();
+        }
         return;
     }
 
@@ -1317,7 +1447,7 @@ void TerminalSessionManager::splitActivePane(bool vertical, TerminalSession* act
     _tabBySession[newSessionId.value] = tab->id();
 }
 
-void TerminalSessionManager::closeActivePane(TerminalSession* acting)
+void TerminalSessionManager::closeActivePane(TerminalSession* acting, SessionEnd end)
 {
     auto* tab = paneActionTargetTab(acting);
     if (tab == nullptr)
@@ -1332,7 +1462,13 @@ void TerminalSessionManager::closeActivePane(TerminalSession* acting)
     // only drops the local bookkeeping.
     _model->closePane(_model->windowOfTab(tab->id()), tab->id(), active->id());
     if (auto* session = sessionForId(sessionId))
+    {
+        // On Destroy, a daemon-hosted session must be closed upstream too, or it lingers there with
+        // no view. Authored while the pty still exists, since that is what identifies it.
+        if (end == SessionEnd::Destroy)
+            authorRemoteEnd(session);
         session->terminate();
+    }
 }
 
 void TerminalSessionManager::focusPane(vtworkspace::FocusDirection direction, TerminalSession* acting)

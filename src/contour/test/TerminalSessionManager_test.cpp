@@ -19,12 +19,19 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <sstream>
+#include <vector>
 
+#include <vthost/client/LayoutReconstruction.h>
+#include <vthost/proto/Pdu.h>
 #include <vtworkspace/ModelEvents.h>
+#include <vtworkspace/Pane.h>
 #include <vtworkspace/SessionModel.h>
 #include <vtworkspace/Tab.h>
 
@@ -91,16 +98,16 @@ TEST_CASE("SessionModel: the last-window decision tracks the live window set", "
 TEST_CASE("SessionModel: removing a window with tabs closes only that window's tabs",
           "[contour][manager][window]")
 {
-    // The manager terminates a closing window's sessions and removes its vtworkspace::Window; a sibling window's
-    // tabs/sessions must be untouched. This is the model half of the per-window teardown invariant.
+    // The manager terminates a closing window's sessions and removes its vtworkspace::Window; a sibling
+    // window's tabs/sessions must be untouched. This is the model half of the per-window teardown invariant.
     SilentEvents events;
     uint64_t nextSession = 1;
     SessionModel model { events, [&] { return SessionId { nextSession++ }; } };
 
     auto* a = model.createWindow();
     auto* b = model.createWindow();
-    model.createTab(a->id());
-    model.createTab(a->id());
+    (void) model.createTab(a->id());
+    (void) model.createTab(a->id());
     auto* bTab = model.createTab(b->id());
 
     REQUIRE(a->tabCount() == 2);
@@ -166,6 +173,59 @@ TEST_CASE("TerminalSessionManager: applyLayoutToWindow builds tabs with colors",
     CHECK(factory->requestedCommandOverrides[3]->program == "echo right");
 }
 
+// B2: a daemon LayoutState, once converted by vthost::client::wireToLayout,
+// realizes through the SAME applyLayoutToWindow path the config-layout feature
+// uses — proving the daemon's tab/split tree rebuilds in the GUI's model. (The
+// remote-session binding of each realized pane is the AF_UNIX-fixture layer; here
+// the MockPty factory backs the panes so the STRUCTURE is verified on Windows.)
+TEST_CASE("TerminalSessionManager: applyLayoutToWindow realizes a daemon wire layout", "[manager][layout]")
+{
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    contour::test::TestApp app { std::move(factoryOwned) };
+    contour::test::ScopedController const win { app.manager() };
+
+    // Tab 0: a single pane. Tab 1: a vertical split (60/40) of two panes.
+    auto state = vthost::proto::LayoutState {};
+    state.tabs.push_back(
+        vthost::proto::WireTab { .root = vthost::proto::WirePane { .split = 0, .session = 1 } });
+    state.tabs.push_back(vthost::proto::WireTab {
+        .root = vthost::proto::WirePane {
+            .split = 2,
+            .ratio = 6000,
+            .children = { vthost::proto::WirePane { .split = 0, .session = 2 },
+                          vthost::proto::WirePane { .split = 0, .session = 3 } } } });
+
+    auto const wl = vthost::client::wireToLayout(state);
+
+    // The beforeLeafSeed hook fires once per leaf, right before its backing session
+    // is created — resolving each leaf to its remote session exactly as the attach
+    // binding will (leafSession keyed by the realized leaf's address).
+    auto boundSessions = std::vector<uint64_t> {};
+    auto const seedHook = [&](contour::config::LayoutPane const& leaf) {
+        boundSessions.push_back(wl.leafSession.at(&leaf));
+    };
+    REQUIRE(app.manager().applyLayoutToWindow(win.id, wl.layout, std::nullopt, seedHook));
+
+    // Every leaf (across both tabs) was bound to its remote session.
+    std::ranges::sort(boundSessions);
+    CHECK(boundSessions == std::vector<uint64_t> { 1, 2, 3 });
+
+    auto* window = app.manager().model().window(win.id);
+    REQUIRE(window != nullptr);
+    CHECK(window->tabCount() == 2);
+
+    auto* single = window->tabAt(0);
+    REQUIRE(single != nullptr);
+    CHECK(single->paneCount() == 1);
+
+    auto* splitTab = window->tabAt(1);
+    REQUIRE(splitTab != nullptr);
+    CHECK(splitTab->paneCount() == 2);
+    REQUIRE_FALSE(splitTab->rootPane()->isLeaf());
+    CHECK(splitTab->rootPane()->splitState() == vtworkspace::SplitState::Vertical);
+    CHECK(std::lround(splitTab->rootPane()->ratio() * 10000.0) == 6000); // first child's 60% share
+}
+
 // Manager-level coverage for saveWindowLayout: builds a real, PTY-backed 2-tab window via
 // applyLayoutToWindow (so each leaf session has a genuine launchedCommand()), saves it under a name,
 // and asserts BOTH that layouts.yml was written next to the loaded config file AND that re-parsing
@@ -223,7 +283,7 @@ TEST_CASE("TerminalSessionManager: saveWindowLayout writes layouts.yml", "[manag
     auto const& savedLayout = parsed.layouts.value().at("saved");
     REQUIRE(savedLayout.tabs.size() == 2);
     // Commands come from TerminalSession::launchedCommand(), which the mock PTY factory does set;
-    // workingDirectory() may be empty for a BlockingMockPty-less MockPty session, so we don't assert
+    // workingDirectory() may be empty for a plain MockPty session, so we don't assert
     // on directory here.
     REQUIRE(savedLayout.tabs[0].root.command.has_value());
     CHECK(*savedLayout.tabs[0].root.command == "echo a");
@@ -359,7 +419,10 @@ TEST_CASE("TerminalSessionManager: a directory-only layout pane does not overrid
 
     contour::config::Layout layout;
     contour::config::LayoutTab tab;
-    tab.root.directory = std::filesystem::path { "/tmp" };
+    // Plain string, not std::filesystem::path: LayoutPane::directory is an
+    // optional<string>, and path only converts to string on POSIX (Windows
+    // paths are wide).
+    tab.root.directory = "/tmp";
     layout.tabs = { tab };
     REQUIRE(app.manager().applyLayoutToWindow(win.id, layout));
 

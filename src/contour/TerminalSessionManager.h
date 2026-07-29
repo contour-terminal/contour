@@ -39,6 +39,21 @@ namespace contour
 class PaneProxy;
 class WindowController;
 
+/// Why a set of sessions is being torn down — the caller's intent, which nothing downstream can
+/// recover: a PTY is destroyed on a pane close, a tab close, a window close and an app quit alike.
+/// It only matters for a session the local process does not own (a daemon-hosted one in attach
+/// mode), where the two answers are opposites, so every teardown entry point must state which it is.
+enum class SessionEnd : uint8_t
+{
+    /// The user ended these sessions for good (a pane or tab close). A daemon-hosted session is
+    /// closed upstream too, via SessionFactory::requestRemoteClose, so it does not linger headless.
+    Destroy,
+    /// Only the local view goes away (a window close, an app quit, a lost connection). A
+    /// daemon-hosted session keeps running and returns on the next attach — that is the whole point
+    /// of daemon mode, so nothing is authored upstream here.
+    Detach,
+};
+
 /**
  * Session-lifetime service, SessionModel host, and per-window ModelEvents router.
  *
@@ -106,8 +121,20 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Creates and activates a new tab in @p window.
     /// @param window      The target window.
     /// @param profileName Profile to launch the tab with, or std::nullopt for the app default.
-    void createNewTab(vtworkspace::WindowId window, std::optional<std::string> const& profileName = std::nullopt)
+    void createNewTab(vtworkspace::WindowId window,
+                      std::optional<std::string> const& profileName = std::nullopt)
     {
+        // Attach mode: author the tab on the daemon (B3-Qt); its layout re-push
+        // reconciles it into a local tab. A local factory returns false and the
+        // tab is created here as usual.
+        //
+        // @p window travels along as one of its ptys: a remote model mints its own window ids, so
+        // a session it already hosts is the only name both ends share. Dropping it entirely — as
+        // this did — sent every window's "+" to the daemon's FIRST window, so a tab opened in a
+        // second attach-mode window appeared in the wrong one and the window clicked in gained
+        // nothing.
+        if (_sessionFactory.requestRemoteTab(actingPtyOfWindow(window)))
+            return;
         createSession(window, profileName);
     }
 
@@ -223,10 +250,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///                 window's running size (LaunchLayout into an existing window) so commands that
     ///                 read the terminal size at startup see the real one; @c std::nullopt (a
     ///                 brand-new window at startup) uses the profile's configured terminalSize.
+    /// @param beforeLeafSeed Invoked (when set) with each leaf pane immediately before its backing
+    ///                 session is created — the hook attach mode uses to bind the pane about to be born
+    ///                 to a specific remote session (via vthost::client::WireLayout::leafSession).
     /// @return false if @p layout has no tabs (nothing to apply); true otherwise.
     bool applyLayoutToWindow(vtworkspace::WindowId window,
                              config::Layout const& layout,
-                             std::optional<vtbackend::PageSize> pageSize = std::nullopt);
+                             std::optional<vtbackend::PageSize> pageSize = std::nullopt,
+                             std::function<void(config::LayoutPane const&)> const& beforeLeafSeed = {});
 
     // Keyboard tab navigation/reordering. Every entry point takes the ACTING session (the one that
     // received the keybinding) and targets that session's hosting window, so a keybinding in any
@@ -291,10 +322,15 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param vertical Split orientation.
     /// @param acting The session that received the keybinding; its hosting tab is the target.
     ///        Null or unknown to the model is a no-op.
-    void splitActivePane(bool vertical, TerminalSession* acting);
+    /// @param ratio The new split's first-child space share, in (0, 1). Defaults to an even split; the
+    ///        tmux mirror passes the remote split's ratio so a mirrored split reproduces its proportions.
+    void splitActivePane(bool vertical, TerminalSession* acting, double ratio = 0.5);
     /// Closes the active pane of the acting session's tab (closing the tab if it was the last pane).
     /// @param acting The session that received the keybinding; its hosting tab is the target.
-    void closeActivePane(TerminalSession* acting);
+    /// @param end Whether the user is ending this pane's session (the ClosePane action) or the pane
+    ///        is only being dropped locally because it is already gone upstream (the attach
+    ///        reconciler's subtractive pass). Mandatory: the two are indistinguishable afterwards.
+    void closeActivePane(TerminalSession* acting, SessionEnd end);
     /// Moves pane focus within the acting session's tab in the given direction.
     /// @param direction The direction to move pane focus.
     /// @param acting The session that received the keybinding; its hosting tab is the target.
@@ -317,7 +353,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param fraction The ratio delta magnitude in (0, 1).
     /// @param acting The session that received the keybinding; its hosting tab is the target.
     void resizeActivePane(vtworkspace::FocusDirection direction, double fraction, TerminalSession* acting);
-    /// Toggles zoom on the acting session's active pane (see vtworkspace::SessionModel::toggleActivePaneZoom).
+    /// Toggles zoom on the acting session's active pane (see
+    /// vtworkspace::SessionModel::toggleActivePaneZoom).
     /// @param acting The session that received the keybinding; its hosting tab is the target.
     void toggleActivePaneZoom(TerminalSession* acting);
     // }}}
@@ -325,6 +362,15 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     // {{{ Model service used by PaneProxy + WindowController
     /// The TerminalSession backing @p id, or nullptr. (Public for PaneProxy.)
     [[nodiscard]] TerminalSession* sessionForId(vtworkspace::SessionId id) const noexcept;
+
+    /// The pty backing @p window's active pane, or nullptr when the window has no live pane.
+    ///
+    /// How a WINDOW is named to a remote session factory: window ids are minted per model, so the
+    /// only handle both ends share is a session the window hosts, which the factory keys by its
+    /// pty (@see SessionFactory::requestRemoteTab, requestRemoteSplit).
+    /// @param window The window to name.
+    /// @return A pty of that window, or nullptr.
+    [[nodiscard]] vtpty::Pty const* actingPtyOfWindow(vtworkspace::WindowId window) const;
     /// Whether @p id is the active leaf of tab @p tab.
     [[nodiscard]] bool isActivePane(vtworkspace::TabId tab, vtworkspace::PaneId id) const noexcept;
     /// Sets the split ratio of node @p id in tab @p tab.
@@ -353,7 +399,10 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// VT focus only ever moves within this window, so a model event raised in a background window (a
     /// layout applying its tabs, a tab dropped in by a drag) cannot steal the focused terminal.
     /// @return The focus-owning window, or std::nullopt when no window of this process owns focus.
-    [[nodiscard]] std::optional<vtworkspace::WindowId> focusedWindow() const noexcept { return _focusedWindow; }
+    [[nodiscard]] std::optional<vtworkspace::WindowId> focusedWindow() const noexcept
+    {
+        return _focusedWindow;
+    }
 
     /// Records @p window as the focus-owning OS window AND re-points terminal focus at its active leaf.
     /// Idempotent. Ownership is also recorded — without re-pointing, since there is no session to point
@@ -385,10 +434,18 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param session The session whose hosting tab should refresh its label.
     void refreshTabForSession(vtworkspace::SessionId session);
 
+    /// Sets an explicit @p title on the tab hosting @p session, through the authoritative SessionModel
+    /// (which repaints the owning window's tab strip). Used by the tmux mirror to reflect a
+    /// `%window-renamed` onto the tab (a tmux window maps to a tab). No-op if no tab hosts @p session.
+    /// MUST be called on the GUI thread (it mutates the GUI-facing model).
+    /// @param session The session (by model id) whose hosting tab to title.
+    /// @param title The new tab title.
+    void setTabTitleForSession(vtworkspace::SessionId session, std::string title);
+
     /// Assigns @p color to the tab hosting @p session (DECAC item 2 "window frame"), routing through
     /// the authoritative SessionModel so the existing tab-color pipeline repaints the tab strip. The
-    /// color is recorded under vtworkspace::TabColorSource::Application, so it stays hidden behind a color the
-    /// user picked themselves and surfaces once the user clears theirs. No-op if no tab hosts
+    /// color is recorded under vtworkspace::TabColorSource::Application, so it stays hidden behind a color
+    /// the user picked themselves and surfaces once the user clears theirs. No-op if no tab hosts
     /// @p session. MUST be called on the GUI thread (it mutates the GUI-facing model).
     /// @param session The session (by model id) whose hosting tab should be colored.
     /// @param color The color to assign.
@@ -436,6 +493,26 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///         the window should create its usual first tab.
     Q_INVOKABLE bool consumeDefaultLayout(contour::WindowController* controller);
 
+    /// Installs the attach-mode window binder (ContourGuiApp installs it once attached). It decides
+    /// whether a freshly-spawned OS window should adopt a pending daemon window's layout instead of
+    /// creating the usual fresh first tab. Cleared (nullptr) when detaching. @see consumeAttachWindow.
+    /// @param binder Invoked with each spawned window's controller; returns true if it adopted it.
+    void setAttachWindowBinder(std::function<bool(contour::WindowController*)> binder)
+    {
+        _attachWindowBinder = std::move(binder);
+    }
+
+    /// main.qml calls this in Component.onCompleted (like consumeDefaultLayout): in attach mode a
+    /// window may have been spawned to host a specific daemon window (B4). If the installed binder
+    /// adopts @p controller's window for that daemon window, this returns true and the window must NOT
+    /// create its own first tab — its tabs come from reconciling the daemon window's layout instead.
+    /// @param controller The freshly-created controller of the just-spawned window.
+    /// @return true if the window was bound to a pending daemon window; false otherwise.
+    Q_INVOKABLE bool consumeAttachWindow(contour::WindowController* controller)
+    {
+        return _attachWindowBinder && controller != nullptr ? _attachWindowBinder(controller) : false;
+    }
+
     /// The controller adapting @p window, or nullptr. Used by the ModelEvents router to forward each Qt
     /// row/signal emission to the owning window's controller.
     [[nodiscard]] WindowController* controllerFor(vtworkspace::WindowId window) const noexcept;
@@ -463,8 +540,24 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
         return sessionsInTab(tab);
     }
     /// Terminates each of @p sessions (public whole-tab close primitive for WindowController).
-    void terminate(std::span<TerminalSession* const> sessions) { terminateSessions(sessions); }
+    /// @param sessions The backing sessions to tear down.
+    /// @param end Whether the user ended them or only their local view is going away.
+    void terminate(std::span<TerminalSession* const> sessions, SessionEnd end)
+    {
+        terminateSessions(sessions, end);
+    }
     // }}}
+
+    /// Tells every live session that the daemon connection died, before its ptys are closed.
+    ///
+    /// Every session in an attached GUI is fed by that one connection, so losing it ends all of
+    /// them at once. @see TerminalSession::noteTransportLost
+    void noteTransportLost() noexcept
+    {
+        for (auto* session: _sessionsById | std::views::values)
+            if (session != nullptr)
+                session->noteTransportLost();
+    }
 
     /// Returns whether the Qt multimedia backend has been initialized.
     [[nodiscard]] bool isMultimediaReady() const noexcept { return _multimediaReady; }
@@ -490,11 +583,18 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
                                    int fromIndex,
                                    vtworkspace::WindowId to,
                                    int toIndex) override;
-    void tabMovedToWindow(
-        vtworkspace::WindowId from, vtworkspace::TabId tab, int fromIndex, vtworkspace::WindowId to, int toIndex) override;
+    void tabMovedToWindow(vtworkspace::WindowId from,
+                          vtworkspace::TabId tab,
+                          int fromIndex,
+                          vtworkspace::WindowId to,
+                          int toIndex) override;
     void activeTabChanged(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
-    void paneSplit(vtworkspace::TabId tab, vtworkspace::PaneId splitNode, vtworkspace::PaneId newLeaf) override;
-    void paneClosed(vtworkspace::TabId tab, vtworkspace::PaneId closed, vtworkspace::PaneId survivor) override;
+    void paneSplit(vtworkspace::TabId tab,
+                   vtworkspace::PaneId splitNode,
+                   vtworkspace::PaneId newLeaf) override;
+    void paneClosed(vtworkspace::TabId tab,
+                    vtworkspace::PaneId closed,
+                    vtworkspace::PaneId survivor) override;
     void activePaneChanged(vtworkspace::TabId tab, vtworkspace::PaneId leaf) override;
     void paneRatioChanged(vtworkspace::TabId tab, vtworkspace::PaneId splitNode, double ratio) override;
     void paneOrientationChanged(vtworkspace::TabId tab,
@@ -523,6 +623,16 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// closeWindow) never tears down the moved tab's now-relocated sessions.
     /// @param window The source window a tab was just moved out of.
     void closeWindowIfEmpty(vtworkspace::WindowId window);
+
+    /// Tells the session factory that @p splitNode's ratio is now @p ratio, naming the split by the
+    /// pty of one leaf from each of its children (@see SessionFactory::reportSplitRatio).
+    ///
+    /// Both ratio mutators — a divider drag and the ResizePane keybinding — land on paneRatioChanged,
+    /// so routing from there is what keeps this a single touchpoint rather than one per action.
+    /// @param tab       The tab owning the split.
+    /// @param splitNode The split node whose ratio changed.
+    /// @param ratio     Its new first-child share.
+    void reportSplitRatio(vtworkspace::TabId tab, vtworkspace::PaneId splitNode, double ratio);
 
     /// Re-syncs terminal focus after an active-tab/-pane change in @p controller: if it owns the
     /// focused display, moves focus to its new active-leaf session (symmetric out/in). A background
@@ -587,8 +697,21 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// each pane close and tears the tab down with its last pane. The caller passes a stable snapshot
     /// (e.g. from sessionsInTab) so the model mutations terminate() triggers do not invalidate the
     /// iteration. Keeping this in one place ensures the close entry points stay consistent.
+    ///
+    /// @p end is mandatory rather than defaulted so a new close path cannot silently inherit the
+    /// wrong answer: getting it wrong either kills a daemon session the user only detached from, or
+    /// leaves one running that they closed.
     /// @param sessions The backing sessions to terminate.
-    void terminateSessions(std::span<TerminalSession* const> sessions);
+    /// @param end Whether the user ended these sessions or only their local view is going away.
+    void terminateSessions(std::span<TerminalSession* const> sessions, SessionEnd end);
+
+    /// Authors the end of @p session upstream when it is not locally owned (attach mode), so a
+    /// daemon-hosted session the user closed does not linger there. A no-op for a local session.
+    ///
+    /// Must run while @p session still holds its pty: the remote factory identifies the session BY
+    /// its pty, and the teardown that follows destroys it.
+    /// @param session The session being ended for good.
+    void authorRemoteEnd(TerminalSession* session);
 
     /// Resolves the model tab that hosts @p session (any of its split panes), or nullptr if @p
     /// session is unknown to the registries or has no model tab.
@@ -716,6 +839,11 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     // window should adopt as its sole tab instead of creating a fresh one. Consumed exactly once by
     // consumePendingTransplant() from that window's main.qml. Mirrors ContourGuiApp::_pendingSpawnScreen.
     std::optional<std::pair<vtworkspace::WindowId, vtworkspace::TabId>> _pendingTransplant;
+
+    // Attach-mode window binder installed by ContourGuiApp (B4): a freshly-spawned window asks it
+    // (via consumeAttachWindow, from main.qml) whether it hosts a pending daemon window. Empty when
+    // not attached, so consumeAttachWindow is a no-op for ordinary local windows.
+    std::function<bool(contour::WindowController*)> _attachWindowBinder;
 
     // Cached QVariantList of the (immutable) tab-color palette, built lazily on first request.
     mutable QVariantList _tabColorPaletteCache;

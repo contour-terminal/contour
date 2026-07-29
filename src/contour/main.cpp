@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#include <contour/BenignQtMessages.h>
+
 #ifdef CONTOUR_FRONTEND_GUI
     #include <contour/ContourGuiApp.h>
 #else
     #include <contour/ContourApp.h>
 #endif
-
-#include <contour/BenignQtMessages.h>
 
 #include <crispy/SuppressWindowsDialogs.hpp>
 
@@ -161,6 +161,8 @@ int main(int argc, char const* argv[])
 #ifdef CONTOUR_FRONTEND_GUI
     contour::ContourGuiApp app;
 #else
+    // Without the GUI frontend there is no window to open, so `contour client` is gone with it;
+    // what remains is `contour daemon` and the CLI verbs, which need nothing beyond Qt Core.
     contour::ContourApp app;
 #endif
 

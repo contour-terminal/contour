@@ -157,8 +157,18 @@ namespace
         auto const cellSize = session.display()->cellSize();
         auto const dpr = session.display()->contentScale();
 
-        auto const marginTop = static_cast<int>(unbox(session.profile().margins.value().vertical) * dpr);
-        auto const marginLeft = static_cast<int>(unbox(session.profile().margins.value().horizontal) * dpr);
+        // The renderer's own origin, not the profile margin re-derived: they are equal while the
+        // grid starts at the top-left, and they must STAY equal when it does not. A daemon-hosted
+        // grid can be larger than this client's viewport, and the pan that shows a window into it
+        // rides this margin (@see contour::geometry::viewportOrigin) -- so a hit-test computing the
+        // origin for itself would report the cell the user clicked minus the pan.
+        //
+        // Correct from the FIRST event, not merely after one: the renderer is constructed with the
+        // profile's scaled margin (@see its constructor), so an event that arrives before the first
+        // applyResize() is no longer mapped through a zero origin.
+        auto const pageMargin = session.display()->gridMetrics().pageMargin;
+        auto const marginTop = pageMargin.top;
+        auto const marginLeft = pageMargin.left;
 
         auto const sx = int(double(x) * dpr);
         auto sy = int(double(y) * dpr);
@@ -176,37 +186,49 @@ namespace
         return { .line = row, .column = col };
     }
 
+    /// @param event The Qt event to take the position from.
+    /// @param pageMargin The renderer's grid origin in device pixels (@see makeMouseCellLocation
+    ///        for why this is read rather than re-derived).
+    /// @param dpr Device pixels per logical pixel.
     PixelCoordinate makeMousePixelPosition(QHoverEvent* event,
-                                           config::WindowMargins margins,
+                                           vtrasterizer::PageMargin pageMargin,
                                            double dpr) noexcept
     {
         auto const position = event->position();
-        auto const marginLeft = static_cast<int>(unbox(margins.horizontal) * dpr);
-        auto const marginTop = static_cast<int>(unbox(margins.vertical) * dpr);
-        return PixelCoordinate { .x = PixelCoordinate::X { int(double(position.x()) * dpr) - marginLeft },
-                                 .y = PixelCoordinate::Y { int(double(position.y()) * dpr) - marginTop } };
+        return PixelCoordinate {
+            .x = PixelCoordinate::X { int(double(position.x()) * dpr) - pageMargin.left },
+            .y = PixelCoordinate::Y { int(double(position.y()) * dpr) - pageMargin.top }
+        };
     }
 
+    /// @param event The Qt event to take the position from.
+    /// @param pageMargin The renderer's grid origin in device pixels (@see makeMouseCellLocation
+    ///        for why this is read rather than re-derived).
+    /// @param dpr Device pixels per logical pixel.
     PixelCoordinate makeMousePixelPosition(QMouseEvent* event,
-                                           config::WindowMargins margins,
+                                           vtrasterizer::PageMargin pageMargin,
                                            double dpr) noexcept
     {
         auto const position = event->position();
-        auto const marginLeft = static_cast<int>(unbox(margins.horizontal) * dpr);
-        auto const marginTop = static_cast<int>(unbox(margins.vertical) * dpr);
-        return PixelCoordinate { .x = PixelCoordinate::X { int(double(position.x()) * dpr) - marginLeft },
-                                 .y = PixelCoordinate::Y { int(double(position.y()) * dpr) - marginTop } };
+        return PixelCoordinate {
+            .x = PixelCoordinate::X { int(double(position.x()) * dpr) - pageMargin.left },
+            .y = PixelCoordinate::Y { int(double(position.y()) * dpr) - pageMargin.top }
+        };
     }
 
+    /// @param event The Qt event to take the position from.
+    /// @param pageMargin The renderer's grid origin in device pixels (@see makeMouseCellLocation
+    ///        for why this is read rather than re-derived).
+    /// @param dpr Device pixels per logical pixel.
     PixelCoordinate makeMousePixelPosition(QWheelEvent* event,
-                                           config::WindowMargins margins,
+                                           vtrasterizer::PageMargin pageMargin,
                                            double dpr) noexcept
     {
         auto const position = event->position();
-        auto const marginLeft = static_cast<int>(unbox(margins.horizontal) * dpr);
-        auto const marginTop = static_cast<int>(unbox(margins.vertical) * dpr);
-        return PixelCoordinate { .x = PixelCoordinate::X { int(double(position.x()) * dpr) - marginLeft },
-                                 .y = PixelCoordinate::Y { int(double(position.y()) * dpr) - marginTop } };
+        return PixelCoordinate {
+            .x = PixelCoordinate::X { int(double(position.x()) * dpr) - pageMargin.left },
+            .y = PixelCoordinate::Y { int(double(position.y()) * dpr) - pageMargin.top }
+        };
     }
 
     QPoint transposed(QPoint p) noexcept
@@ -678,8 +700,8 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
     // which Qt only populates for key events. Take the chord and be explicit about it.
     auto const modifiers = makeModifiers(event->modifiers()).chord;
 
-    auto const pixelPosition =
-        makeMousePixelPosition(event, session.profile().margins.value(), session.display()->contentScale());
+    auto const pixelPosition = makeMousePixelPosition(
+        event, session.display()->gridMetrics().pageMargin, session.display()->contentScale());
 
     // NOTE: Qt is playing some weird games with the mouse wheel events, i.e. if Alt is pressed
     //       it will send horizontal wheel events instead of vertical ones. We need to compensate
@@ -720,10 +742,11 @@ void sendMousePressEvent(QMouseEvent* event, TerminalSession& session)
     // display-dependent event paths' guards.
     if (session.display() == nullptr)
         return;
-    session.sendMousePressEvent(
-        makeModifiers(event->modifiers()).chord,
-        makeMouseButton(event->button()),
-        makeMousePixelPosition(event, session.profile().margins.value(), session.display()->contentScale()));
+    session.sendMousePressEvent(makeModifiers(event->modifiers()).chord,
+                                makeMouseButton(event->button()),
+                                makeMousePixelPosition(event,
+                                                       session.display()->gridMetrics().pageMargin,
+                                                       session.display()->contentScale()));
     event->accept();
 }
 
@@ -734,10 +757,11 @@ void sendMouseReleaseEvent(QMouseEvent* event, TerminalSession& session)
     // display-dependent event paths' guards.
     if (session.display() == nullptr)
         return;
-    session.sendMouseReleaseEvent(
-        makeModifiers(event->modifiers()).chord,
-        makeMouseButton(event->button()),
-        makeMousePixelPosition(event, session.profile().margins.value(), session.display()->contentScale()));
+    session.sendMouseReleaseEvent(makeModifiers(event->modifiers()).chord,
+                                  makeMouseButton(event->button()),
+                                  makeMousePixelPosition(event,
+                                                         session.display()->gridMetrics().pageMargin,
+                                                         session.display()->contentScale()));
     event->accept();
 }
 
@@ -748,10 +772,11 @@ void sendMouseMoveEvent(QMouseEvent* event, TerminalSession& session)
     // display-dependent event paths' guards.
     if (session.display() == nullptr)
         return;
-    session.sendMouseMoveEvent(
-        makeModifiers(event->modifiers()).chord,
-        makeMouseCellLocation(event->pos().x(), event->pos().y(), session),
-        makeMousePixelPosition(event, session.profile().margins.value(), session.display()->contentScale()));
+    session.sendMouseMoveEvent(makeModifiers(event->modifiers()).chord,
+                               makeMouseCellLocation(event->pos().x(), event->pos().y(), session),
+                               makeMousePixelPosition(event,
+                                                      session.display()->gridMetrics().pageMargin,
+                                                      session.display()->contentScale()));
     event->accept();
 }
 
@@ -763,10 +788,11 @@ void sendMouseMoveEvent(QHoverEvent* event, TerminalSession& session)
     if (session.display() == nullptr)
         return;
     auto const position = event->position().toPoint();
-    session.sendMouseMoveEvent(
-        makeModifiers(event->modifiers()).chord,
-        makeMouseCellLocation(position.x(), position.y(), session),
-        makeMousePixelPosition(event, session.profile().margins.value(), session.display()->contentScale()));
+    session.sendMouseMoveEvent(makeModifiers(event->modifiers()).chord,
+                               makeMouseCellLocation(position.x(), position.y(), session),
+                               makeMousePixelPosition(event,
+                                                      session.display()->gridMetrics().pageMargin,
+                                                      session.display()->contentScale()));
     event->accept();
 }
 

@@ -562,6 +562,41 @@ TEST_CASE("setTabColorForSession routes a DECAC frame color to the session's tab
         window->closeTabAtIndex(row);
 }
 
+TEST_CASE("setTabTitleForSession routes a tmux %window-renamed to the session's tab",
+          "[contour][multiwindow][model]")
+{
+    // The tmux mirror's %window-renamed path calls TerminalSessionManager::setTabTitleForSession(
+    // sessionId, name) (posted from TmuxController::applyPendingRenames). This is the direct unit test
+    // of that routing: a session's model id resolves to its hosting tab and lands the runtime title.
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    TestApp app(std::move(factoryOwned));
+    auto& manager = app.manager();
+    ScopedController window { manager };
+
+    window->createNewTab();
+    REQUIRE(window->count() == 1);
+
+    auto* tab = manager.model().window(window.id)->tabAt(0);
+    REQUIRE(tab != nullptr);
+    auto const sessionId = tab->activePane()->session();
+    REQUIRE_FALSE(tab->runtimeTitle().has_value());
+
+    manager.setTabTitleForSession(sessionId, "build");
+    REQUIRE(tab->runtimeTitle().has_value());
+    CHECK(*tab->runtimeTitle() == "build");
+
+    // A later rename overwrites it.
+    manager.setTabTitleForSession(sessionId, "deploy");
+    CHECK(*tab->runtimeTitle() == "deploy");
+
+    // An unknown session id is a harmless no-op (the null-tab guard).
+    CHECK_NOTHROW(manager.setTabTitleForSession(vtworkspace::SessionId { 999999 }, "ghost"));
+    CHECK(*tab->runtimeTitle() == "deploy");
+
+    for (int row = window->count() - 1; row >= 0; --row)
+        window->closeTabAtIndex(row);
+}
+
 TEST_CASE("the SetTabColor / ResetTabColor actions color the acting session's tab",
           "[contour][multiwindow][model]")
 {
@@ -865,7 +900,7 @@ TEST_CASE("TerminalSessionManager splits, focuses and closes panes through the a
     CHECK_NOTHROW(manager.focusPane(vtworkspace::FocusDirection::Right, acting));
 
     // Closing the active pane collapses the split back to a single leaf.
-    manager.closeActivePane(window->activeSession());
+    manager.closeActivePane(window->activeSession(), contour::SessionEnd::Destroy);
     CHECK(tab->rootPane()->isLeaf());
 
     window->closeTabAtIndex(0);
@@ -896,7 +931,8 @@ TEST_CASE("TerminalSessionManager swap/move/toggle/resize route through the acti
 
     // Resize the active pane in each direction: no throw, pane count preserved (ratio nudge only).
     CHECK_NOTHROW(manager.resizeActivePane(vtworkspace::FocusDirection::Left, 0.05, window->activeSession()));
-    CHECK_NOTHROW(manager.resizeActivePane(vtworkspace::FocusDirection::Right, 0.05, window->activeSession()));
+    CHECK_NOTHROW(
+        manager.resizeActivePane(vtworkspace::FocusDirection::Right, 0.05, window->activeSession()));
     CHECK(tab->paneCount() == 3);
 
     // Swap the active pane with its left neighbor: pane count preserved (sessions trade slots).
@@ -1184,7 +1220,7 @@ TEST_CASE("manager tab switching and moving route for the acting session", "[con
     manager.moveTabToRight(nullptr);
     manager.closeTab(nullptr);
     manager.splitActivePane(true, nullptr);
-    manager.closeActivePane(nullptr);
+    manager.closeActivePane(nullptr, contour::SessionEnd::Destroy);
     manager.focusPane(vtworkspace::FocusDirection::Left, nullptr);
     CHECK(window->activeTabIndex() == before);
 
@@ -1239,7 +1275,7 @@ TEST_CASE("manager pane split/close/focus operate on the acting session's tab", 
     QCoreApplication::processEvents();
 
     // Close the active pane; the tab collapses back to a single pane.
-    manager.closeActivePane(window->activeSession());
+    manager.closeActivePane(window->activeSession(), contour::SessionEnd::Destroy);
     QCoreApplication::processEvents();
     CHECK_FALSE(tab->hasMultiplePanes());
 
@@ -1267,5 +1303,5 @@ TEST_CASE("manager guards unknown windows and null acting sessions", "[contour][
     CHECK_NOTHROW(manager.moveTabToRight(nullptr));
     CHECK_NOTHROW(manager.splitActivePane(/*vertical*/ true, nullptr));
     CHECK_NOTHROW(manager.focusPane(vtworkspace::FocusDirection::Left, nullptr));
-    CHECK_NOTHROW(manager.closeActivePane(nullptr));
+    CHECK_NOTHROW(manager.closeActivePane(nullptr, contour::SessionEnd::Destroy));
 }

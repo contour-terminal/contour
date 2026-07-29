@@ -41,6 +41,10 @@ trap 'rm -rf "$OUT"' EXIT
 # runner), so they are NOT held to the non-empty contract below — only that they do not crash.
 "$CONTOUR" info config > /dev/null 2>&1 || true
 "$CONTOUR" font-locator > /dev/null 2>&1 || true
+# `daemon-service status` is headless and instant, but its exit code is environment-dependent in
+# exactly the way the two above are: it reports failure when nothing is registered, and there is no
+# service backend on this platform at all. Swept for the code path, not held to an outcome.
+"$CONTOUR" daemon-service status > /dev/null 2>&1 || true
 "$CONTOUR" documentation vt > "$OUT/doc-vt.txt"
 "$CONTOUR" documentation keys > "$OUT/doc-keys.txt"
 "$CONTOUR" documentation configuration global > "$OUT/doc-config-global.txt"

@@ -140,12 +140,17 @@ namespace
                                                  ColorPreference colorPreference,
                                                  std::optional<vtbackend::PageSize> initialPageSize)
     {
-        auto settings = vtbackend::Settings {};
+        // The emulation half comes from the shared table, so a GUI-hosted session and a
+        // daemon-hosted one can never disagree on what the terminal IS; only the
+        // presentation fields below are the GUI's own.
+        auto settings = config::emulationSettings(config, profile);
 
-        // A new tab/split inherits the live window's running grid; only a brand-new window falls back to
-        // the profile's configured terminalSize. Applied here so the terminal is BORN at the right size,
-        // not just corrected once a display attaches (which never happens for a background tab).
-        settings.pageSize = initialPageSize.value_or(profile.terminalSize.value());
+        // A new tab/split inherits the live window's running grid; a brand-new window keeps the
+        // profile's configured terminalSize, which the shared table already applied. Overridden here
+        // so the terminal is BORN at the right size, not just corrected once a display attaches
+        // (which never happens for a background tab).
+        if (initialPageSize)
+            settings.pageSize = *initialPageSize;
 
         // Focus is granted, never assumed: TerminalSessionManager::setFocusedSession is the sole
         // authority, and it only focus-OUTs the session that previously held focus. A session born
@@ -155,7 +160,6 @@ namespace
         settings.focused = false;
         settings.ptyBufferObjectSize = config.ptyBufferObjectSize.value();
         settings.ptyReadBufferSize = config.ptyReadBufferSize.value();
-        settings.maxHistoryLineCount = profile.history.value().maxHistoryLineCount;
         settings.mouseWheelScrollMultiplier = profile.history.value().historyScrollMultiplier;
         settings.autoScrollOnUpdate = profile.history.value().autoScrollOnUpdate;
         settings.copyLastMarkRangeOffset = profile.copyLastMarkRangeOffset.value();
@@ -169,10 +173,7 @@ namespace
         settings.smoothLineScrolling = profile.smoothLineScrolling.value();
         settings.smoothScrolling = profile.smoothScrolling.value();
         settings.momentumScrolling = profile.momentumScrolling.value();
-        settings.wordDelimiters = unicode::from_utf8(config.wordDelimiters.value());
         settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers.value();
-        settings.maxImageRegisterCount = config.images.value().maxImageColorRegisters;
-        settings.goodImageProtocol = config.images.value().goodImageProtocol;
         settings.statusDisplayType = profile.statusLine.value().initialType;
         settings.statusDisplayPosition = profile.statusLine.value().position;
         settings.indicatorStatusLine.left = profile.statusLine.value().indicator.left;
@@ -219,11 +220,8 @@ namespace
             profile.statusLine.value().syncWindowTitleWithHostWritableStatusDisplay;
         if (auto const* p = preferredColorPalette(profile.colors.value(), colorPreference))
             settings.colorPalette = *p;
-        settings.primaryScreen.allowReflowOnResize = config.reflowOnResize.value();
         settings.highlightDoubleClickedWord = profile.highlightDoubleClickedWord.value();
         settings.highlightTimeout = profile.highlightTimeout.value();
-        settings.frozenModes = profile.frozenModes.value();
-        settings.graphemeClustering = config.graphemeClustering.value();
 
         return settings;
     }
@@ -1065,6 +1063,25 @@ void TerminalSession::onClosed()
 #endif
     else
         sessionLog()("Process terminated after {} seconds.", diff.count());
+
+    // A lost daemon connection reaches us as a closed device, exactly like a shell exiting —
+    // and for a pane whose session lives in the daemon, "the shell terminated" is simply false:
+    // the shell is still running, on the other side of a socket that went away. Reported as an
+    // early exit it also sends whoever reads it hunting through shell startup, which is where
+    // this notice came from. Age is irrelevant here: a connection lost after hours is still
+    // worth saying out loud, so this is checked before the early-exit window.
+    if (_transportLost && !_terminationRequested)
+    {
+        sessionLog()("Daemon connection lost after {} seconds; the hosted shell is unaffected.",
+                     diff.count());
+        // Like the early-exit notice below, this deliberately does not emit sessionClosed: pruning
+        // the pane would destroy the very screen the message is shown on. The pane stays alive until
+        // the acknowledging key press.
+        writeNotice(array { "Disconnected from the Contour daemon."s,
+                            "Your sessions are still running — reattach with: contour client"s });
+        _terminatedAndWaitingForKeyPress = true;
+        return;
+    }
 
     if (diff < _app.earlyExitThreshold() && !_terminationRequested)
     {
@@ -2778,7 +2795,9 @@ bool TerminalSession::operator()(actions::SplitHorizontal)
 
 bool TerminalSession::operator()(actions::ClosePane)
 {
-    _manager->closeActivePane(/*acting*/ this);
+    // The user's explicit "end this" affordance: Destroy, so a daemon-hosted session is closed on
+    // the daemon too rather than left running with no view.
+    _manager->closeActivePane(/*acting*/ this, SessionEnd::Destroy);
     return true;
 }
 
@@ -2811,7 +2830,8 @@ namespace
     /// Translates an action-layer Direction (transport-agnostic) into the model's FocusDirection.
     /// @param direction The direction the user requested.
     /// @return The corresponding vtworkspace::FocusDirection.
-    [[nodiscard]] constexpr vtworkspace::FocusDirection toFocusDirection(actions::Direction direction) noexcept
+    [[nodiscard]] constexpr vtworkspace::FocusDirection toFocusDirection(
+        actions::Direction direction) noexcept
     {
         switch (direction)
         {
@@ -3060,6 +3080,10 @@ void TerminalSession::spawnNewTerminal(string const& profileName)
     }
     else
     {
+        // Attach mode: author the window on the daemon (B4); its new-window layout push spawns and
+        // binds the matching OS window. A local factory returns false and we open an ordinary window.
+        if (_app.requestRemoteWindow())
+            return;
         sessionLog()("spawning new in-process window");
         _app.config().profile(_profileName)->shell.value().workingDirectory = fs::path(wd);
         // The new window mints its own WindowController + first tab in main.qml's Component.onCompleted,

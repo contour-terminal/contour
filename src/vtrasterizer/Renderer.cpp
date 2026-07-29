@@ -53,7 +53,10 @@ namespace
         rendererLog()("Loading grid metrics {}", gm);
     }
 
-    GridMetrics loadGridMetrics(text::font_key font, vtbackend::PageSize pageSize, text::shaper& textShaper)
+    GridMetrics loadGridMetrics(text::font_key font,
+                                vtbackend::PageSize pageSize,
+                                PageMargin pageMargin,
+                                text::shaper& textShaper)
     {
         auto gm = GridMetrics {};
 
@@ -61,7 +64,9 @@ namespace
         gm.cellMargin = {
             .top = 0, .left = 0, .bottom = 0, .right = 0
         }; // TODO (pass as args, and make use of them)
-        gm.pageMargin = { .left = 0, .top = 0, .bottom = 0 }; // TODO (fill early)
+        // The configured origin, not zero: applyResize() refines it against the real surface, but
+        // until it runs this is what every consumer of gridMetrics() maps through.
+        gm.pageMargin = pageMargin;
 
         loadGridMetricsFromFont(font, gm, textShaper);
 
@@ -124,6 +129,7 @@ namespace
 } // namespace
 
 Renderer::Renderer(vtbackend::PageSize pageSize,
+                   PageMargin pageMargin,
                    FontDescriptions fontDescriptions,
                    vtbackend::ColorPalette const& colorPalette,
                    crispy::strong_hashtable_size atlasHashtableSlotCount,
@@ -148,7 +154,7 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
         return shaper;
     }() },
     _fonts { loadFontKeys(_fontDescriptions, *_textShaper) },
-    _gridMetrics { loadGridMetrics(_fonts.regular, pageSize, *_textShaper) },
+    _gridMetrics { loadGridMetrics(_fonts.regular, pageSize, pageMargin, *_textShaper) },
     _publishedMetrics { _gridMetrics },
     _publishedFontDescriptions { _fontDescriptions },
     _publishedCellSize { _gridMetrics.cellSize },

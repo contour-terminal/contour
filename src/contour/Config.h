@@ -6,12 +6,6 @@
 #include <contour/ConfigDocumentation.h>
 #include <contour/TabBarMode.h>
 
-#include <vtrasterizer/GlyphScaling.h>
-
-#ifdef CONTOUR_FRONTEND_GUI
-    #include <contour/display/ShaderConfig.h>
-#endif
-
 #include <vtbackend/Color.h>
 #include <vtbackend/ColorPalette.h>
 #include <vtbackend/ControlCode.h>
@@ -30,6 +24,7 @@
 #include <vtrasterizer/BoxDrawingRenderer.h>
 #include <vtrasterizer/Decorator.h>
 #include <vtrasterizer/FontDescriptions.h>
+#include <vtrasterizer/GlyphScaling.h>
 
 #include <text_shaper/font.h>
 #include <text_shaper/mock_font_locator.h>
@@ -70,7 +65,7 @@
 #include <variant>
 
 #include <reflection-cpp/reflection.hpp>
-#include <vtworkspace/Primitives.h> // vtworkspace::SplitState for layout panes
+#include <vtworkspace/LayoutTree.h> // layout tree structs (LayoutPane, LayoutTab, Layout)
 
 namespace contour::config
 {
@@ -572,50 +567,11 @@ inline auto defaultFamilyName = "monospace";
     return value;
 }
 
-/// A node in a layout tab's pane tree. It is EITHER a leaf (a terminal to open) OR a split (an
-/// orientation plus two or more children): an empty @c children means leaf.
-struct LayoutPane
-{
-    /// Program to run in this pane, replacing the profile's shell. Unset runs that shell.
-    std::optional<std::string> command;
-    /// Arguments passed to @c command.
-    std::vector<std::string> arguments;
-    /// Working directory the pane's shell starts in. Unset uses the profile's.
-    std::optional<std::filesystem::path> directory;
-    /// Per-pane profile override (terminal-level settings only — not window ones).
-    std::optional<std::string> profile;
-    /// Fraction (0, 1] of the parent split this pane occupies. Unset means "share whatever the
-    /// explicitly-sized siblings leave over, equally" (see contour::ratioForFirst).
-    std::optional<double> ratio;
-
-    /// How this pane's children are arranged (splits only).
-    vtworkspace::SplitState orientation = vtworkspace::SplitState::Vertical;
-    /// The child panes of a split, in layout order. Empty for a leaf.
-    std::vector<LayoutPane> children;
-
-    /// @return true when this node is a terminal pane rather than a split.
-    [[nodiscard]] bool isLeaf() const noexcept { return children.empty(); }
-};
-
-/// One tab of a layout: its name and color, plus the pane tree it opens with.
-struct LayoutTab
-{
-    /// Seeds the tab's name.
-    std::optional<std::string> title;
-    /// Sets the tab's User color.
-    std::optional<vtbackend::RGBColor> color;
-    /// Default profile for this tab's panes; a pane's own @c profile still wins.
-    std::optional<std::string> profile;
-    /// The tab's pane tree: a leaf for a plain single-pane tab, a split node otherwise.
-    LayoutPane root;
-};
-
-/// A named layout: the ordered tabs that LaunchLayout opens together.
-struct Layout
-{
-    /// The tabs to open, in order.
-    std::vector<LayoutTab> tabs;
-};
+/// The layout tree model (structs + realize/serialize helpers) lives in vtworkspace::LayoutTree so the
+/// Qt-free daemon shares it; these aliases keep the config-side spellings working.
+using LayoutPane = vtworkspace::LayoutPane;
+using LayoutTab = vtworkspace::LayoutTab;
+using Layout = vtworkspace::Layout;
 
 struct TerminalProfile
 {
@@ -2078,6 +2034,39 @@ void loadConfigFromFile(Config& config, std::filesystem::path const& fileName);
 Config loadConfigFromFile(std::filesystem::path const& fileName);
 Config loadConfig();
 void compareEntries(Config& config, auto const& output);
+
+/// The VT-EMULATION half of a profile's terminal settings — everything that decides what
+/// the terminal *is* (history depth, initial page size, reported identity, reflow,
+/// grapheme clustering, image limits, word delimiters, frozen modes) as opposed to how it
+/// is *presented* (cursor blink, transitions, status-line layout, colors).
+///
+/// Split out because two very different callers need exactly this much and no more: the
+/// GUI's session factory, which layers its presentation fields on top, and
+/// `contour daemon`, which owns terminals nobody presents locally. One table for the
+/// shared half is what stops the two from emulating differently — see
+/// `vthost::DefaultSessionHistoryLineCount` for what that costs when they do.
+///
+/// @param config The loaded configuration (global entries).
+/// @param profile The resolved profile.
+/// @return Settings with the emulation fields applied over the vtbackend defaults.
+[[nodiscard]] vtbackend::Settings emulationSettings(Config const& config, TerminalProfile const& profile);
+
+/// Loads a configuration and resolves one profile's @ref emulationSettings from it.
+///
+/// The whole load-resolve-refuse sequence, in one place, because two verbs need exactly it and
+/// nothing else: `contour daemon`, which hosts terminals no display ever presents, and
+/// `contour client`, which states the same settings in its handshake so a WARM daemon emulates the
+/// sessions it creates the way this client's configuration says. Spelling it twice is how the two
+/// would come to disagree.
+///
+/// @param configPath Configuration file to read; empty selects the default location.
+/// @param profileName Profile to resolve; empty selects the configuration's default.
+/// @return The settings, or a human-readable reason they could not be resolved. An unknown profile
+///         is a failure rather than a fall back to the default one: hosting sessions under a
+///         profile the user did not name is a misconfiguration they would discover only much later,
+///         through the wrong scrollback depth or the wrong reported terminal.
+[[nodiscard]] std::expected<vtbackend::Settings, std::string> resolveEmulationSettings(
+    std::string const& configPath, std::string const& profileName);
 
 /// Loads ONLY the `layouts:` map contained in the single file at @p path (no sibling-merge, no
 /// inline-config layouts). A missing file yields an empty map (nothing saved yet is not an

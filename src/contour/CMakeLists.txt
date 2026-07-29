@@ -22,7 +22,14 @@ NumberToHex(${PROJECT_VERSION_PATCH} HEX_PATCH)
 #     readback test. It must be requested here explicitly: relying on a sibling subdirectory's
 #     find_package to have populated the Qt6::GuiPrivate target is order-dependent and fails on some
 #     Qt packagings (e.g. Homebrew Qt on macOS), where contour_gui_test then cannot link it.
-set(QT_COMPONENTS Core Gui GuiPrivate Qml Quick QuickControls2 Network Multimedia Widgets DBus)
+# NB: without the GUI frontend none of that is reachable -- what is left is `contour daemon` and
+#     the CLI verbs, which need Core alone. Asking for the rest anyway would make a headless build
+#     require a Qt that renders, which is the whole point of not building the frontend.
+if(CONTOUR_FRONTEND_GUI)
+    set(QT_COMPONENTS Core Gui GuiPrivate Qml Quick QuickControls2 Network Multimedia Widgets DBus)
+else()
+    set(QT_COMPONENTS Core)
+endif()
 # }}}
 
 message(STATUS "Qt components: ${QT_COMPONENTS}")
@@ -62,6 +69,15 @@ else()
 endif()
 # }}}
 
+# The imported-target name differs between a vendored yaml-cpp and a system one, so
+# resolve it once here -- before add_subdirectory(display), which needs it too
+# (ContourTerminalDisplay includes contour/Config.h, hence yaml-cpp's headers).
+if (TARGET yaml-cpp::yaml-cpp)
+    set(YAML_CPP_LIBRARIES yaml-cpp::yaml-cpp)
+else()
+    set(YAML_CPP_LIBRARIES yaml-cpp)
+endif()
+
 if(CONTOUR_FRONTEND_GUI)
     add_subdirectory(display)
 endif()
@@ -80,6 +96,7 @@ set(_header_files
     AsciiText.h
     AtomicFileWrite.h
     CaptureScreen.h
+    CatImageArgs.h
     Command.h
     CommandCatalog.h
     CommandHistory.h
@@ -132,12 +149,14 @@ set(_main_source_files
     main.cpp
 )
 
+# Everything below opens a window, drives one, or talks to a daemon on behalf of one. Without
+# CONTOUR_FRONTEND_GUI the `contour` binary keeps its CLI verbs -- `contour daemon` among them,
+# which is why a GUI-less build is worth having at all.
 if(CONTOUR_FRONTEND_GUI)
     list(APPEND _header_files
         Audio.h
         AudioNote.h
         BlurBehind.h
-        CatImageArgs.h
         CommandPaletteModel.h
         ContourGuiApp.h
         ExitCode.h
@@ -152,6 +171,12 @@ if(CONTOUR_FRONTEND_GUI)
         TerminalSession.h
         TerminalSessionManager.h
         helper.h
+        remote/NativeController.h
+        remote/RemoteController.h
+        remote/ReactorThread.h
+        remote/RemoteLayout.h
+        remote/RoutingSessionFactory.h
+        remote/TmuxController.h
     )
     list(APPEND _core_source_files
         Audio.cpp
@@ -170,6 +195,10 @@ if(CONTOUR_FRONTEND_GUI)
         TerminalSessionManager.cpp
         WindowController.cpp
         helper.cpp
+        remote/NativeController.cpp
+        remote/RemoteController.cpp
+        remote/RemoteLayout.cpp
+        remote/TmuxController.cpp
     )
 endif()
 
@@ -286,21 +315,21 @@ if(FREEBSD)
     target_link_directories(contour_core PUBLIC "/usr/local/lib")
 endif()
 
-if (TARGET yaml-cpp::yaml-cpp)
-    set(YAML_CPP_LIBRARIES yaml-cpp::yaml-cpp)
-else()
-    set(YAML_CPP_LIBRARIES yaml-cpp)
-endif()
-
 # Link dependencies go on contour_core as PUBLIC so they propagate to the `contour` executable and
 # the `contour_gui_test` target through the object library's usage requirements.
+# vtrasterizer is Qt-free and Config.h includes its headers unconditionally (BoxDrawingRenderer,
+# Decorator, FontDescriptions, GlyphScaling), so it belongs here rather than with the GUI's Qt
+# dependencies -- which is what lets Config.cpp configure the box-drawing styles in either build.
 target_link_libraries(contour_core
     PUBLIC
     crispy::core
     vtbackend
+    vtrasterizer
     vtworkspace
     Qt6::Core
     ${YAML_CPP_LIBRARIES}
+    PRIVATE
+    vthost
 )
 
 # {{{ GUI: Declare Qt build dependencies
@@ -310,7 +339,6 @@ if(CONTOUR_FRONTEND_GUI)
     endif()
     target_link_libraries(contour_core
         PUBLIC
-        vtrasterizer
         ContourTerminalDisplay
         Qt6::DBus
         Qt6::Multimedia
@@ -355,6 +383,9 @@ if(CONTOUR_FRONTEND_GUI)
         add_executable(contour_gui_test
             test/test_main.cpp
             test/Actions_test.cpp
+            test/NativeController_test.cpp
+            test/RemoteController_test.cpp
+            test/TmuxController_test.cpp
             test/AudioNote_test.cpp
             test/BenignQtMessages_test.cpp
             test/CaptureScreen_test.cpp
@@ -460,6 +491,13 @@ if(CONTOUR_FRONTEND_GUI)
             # return 0, which would make the test pass vacuously).
             add_test(NAME contour_e2e_cli
                 COMMAND setsid -w sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/cli-surface.sh $<TARGET_FILE:contour>)
+            # The only test that starts a real daemon. vthost_test drives runDaemon's internals
+            # through injected sockets, which cannot reach the wiring between the CLI verb and the
+            # daemon: argument validation, socket path derivation, SIGTERM handling, unlink-on-close.
+            # `setsid -w` for the same reason as the sweep above -- a daemon must not inherit the
+            # developer's controlling terminal.
+            add_test(NAME contour_e2e_daemon
+                COMMAND setsid -w sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/daemon-lifecycle.sh $<TARGET_FILE:contour>)
 
             # LeakSanitizer is disabled for the e2e app runs (LSAN_OPTIONS=detect_leaks=0). Booting the
             # real binary probes the audio/GPU driver stack (QMediaDevices::audioOutputs() ->
@@ -471,16 +509,49 @@ if(CONTOUR_FRONTEND_GUI)
             # stays fully enabled here; the unit-test suites keep full leak checking.
             set_tests_properties(
                 contour_e2e_lifecycle contour_e2e_vt_stream
-                contour_e2e_custom_config contour_e2e_cli
+                contour_e2e_custom_config contour_e2e_cli contour_e2e_daemon
                 PROPERTIES
                     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1;LSAN_OPTIONS=detect_leaks=0"
                     TIMEOUT 120
                     RUN_SERIAL TRUE
                     LABELS e2e)
+            # Also selectable with the daemon suites: `ctest -L daemon` must cover the feature
+            # end to end, not just its unit layers.
+            set_property(TEST contour_e2e_daemon APPEND PROPERTY LABELS daemon)
         endif()
         # }}}
     endif()
     # }}}
+endif()
+# }}}
+
+# {{{ e2e: the CLI verb surface, in BOTH frontend configurations
+# Deliberately outside the CONTOUR_FRONTEND_GUI block above: what this asserts is which verbs each
+# configuration exposes, so it has to run in the configuration that has no GUI too -- that is the
+# one where a missing guard shows up.
+#
+# A CMake script rather than a shell script (as the other e2e tests are), because it must also run
+# on Windows, where `sh` is not available and where the daemon gets the least coverage otherwise.
+if(CONTOUR_TESTING)
+    if(CONTOUR_FRONTEND_GUI)
+        set(_frontend_kind "gui")
+    else()
+        set(_frontend_kind "headless")
+    endif()
+    add_test(NAME contour_e2e_cli_verbs
+        COMMAND ${CMAKE_COMMAND}
+                -D "CONTOUR_BINARY=$<TARGET_FILE:contour>"
+                -D "FRONTEND=${_frontend_kind}"
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/CliVerbs.cmake)
+    # The verdict is the marker, not the exit code: `cmake -P` returns 0 even after
+    # message(FATAL_ERROR) before CMake 3.31, so a failing assertion would otherwise pass silently.
+    # QT_QPA_PLATFORM=offscreen for the same reason the sibling e2e tests set it: in a GUI build
+    # this runs the Qt-linked binary, and a CI runner has no display for it to fall back on.
+    set_tests_properties(contour_e2e_cli_verbs PROPERTIES
+        TIMEOUT 60
+        LABELS e2e
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        PASS_REGULAR_EXPRESSION "cli-verbs: OK")
 endif()
 # }}}
 

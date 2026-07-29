@@ -126,6 +126,7 @@ ApplicationWindow
         // synchronously instantiates the pane tree -> TerminalDisplay -> renderer (headless cell
         // metrics), so showInitial() below can size the window from REAL metrics before the first map.
         if (!terminalSessions.consumePendingTransplant(win)
+            && !terminalSessions.consumeAttachWindow(win)
             && !terminalSessions.consumeDefaultLayout(win))
             win.createNewTab()
         win.showInitial()

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/Terminal.h>
 #include <vtbackend/primitives.h>
 
 #include <vtpty/Process.h>
@@ -51,6 +52,13 @@ class SessionFactory
   public:
     virtual ~SessionFactory() = default;
 
+    /// Whether this factory can back a new session right now. Local factories
+    /// always can; an attach-mode factory can only hand out PTYs for remote
+    /// sessions that exist but have no local tab yet — the manager's creation
+    /// entry points (new tab, split, layout) no-op while this is false, so a
+    /// "+" click inside a mirror window cannot spawn a stray local shell.
+    [[nodiscard]] virtual bool canCreateSession() const noexcept { return true; }
+
     /// Creates a PTY for a new session, optionally inheriting @p cwd as its working directory and
     /// @p pageSize as its initial grid size.
     ///
@@ -67,6 +75,85 @@ class SessionFactory
         std::optional<vtbackend::PageSize> pageSize = std::nullopt,
         std::optional<vtpty::Process::ExecInfo> commandOverride = std::nullopt,
         std::optional<std::string> profileName = std::nullopt) = 0;
+
+    /// Attach mode: authors a new tab on the DAEMON rather than creating one
+    /// locally — the daemon honors it and re-pushes its layout, which reconciles
+    /// into a local tab (B3-Qt). A local factory does nothing and returns false, so
+    /// the manager creates the tab itself.
+    ///
+    /// The target WINDOW travels as one of its ptys, matching `requestRemoteSplit` and the
+    /// session-keyed verbs underneath: a remote model mints its own window ids, so the only thing
+    /// both ends can name a window by is a session it hosts. Taking no window at all is what made
+    /// a "+" clicked in a second attach-mode window open its tab in the first.
+    /// @param actingPty A pty backing any pane of the target window; null means no preference.
+    /// @return true if the request was routed to the daemon (the manager must NOT
+    ///         also create a local tab); false for a local factory.
+    [[nodiscard]] virtual bool requestRemoteTab(vtpty::Pty const* /*actingPty*/) { return false; }
+
+    /// Attach mode: authors a split of the pane backed by @p actingPty on the
+    /// DAEMON (@p vertical orientation) rather than splitting locally — the daemon's
+    /// layout re-push reconciles the new pane in (B3-Qt). A local factory returns
+    /// false so the manager performs the split itself.
+    /// @param actingPty The pty of the pane to split.
+    /// @param vertical  The split orientation.
+    /// @return true if routed to the daemon; false for a local factory.
+    [[nodiscard]] virtual bool requestRemoteSplit(vtpty::Pty const* actingPty, bool vertical)
+    {
+        (void) actingPty;
+        (void) vertical;
+        return false;
+    }
+
+    /// Attach mode: reports that the user moved the divider of the split separating the panes backed
+    /// by @p firstPty and @p secondPty, so the DAEMON's model records the new ratio.
+    ///
+    /// Unlike the request* verbs this does not ROUTE the operation — the local tree has already been
+    /// changed, and the daemon is being told. It has to be told: a re-attaching client rebuilds every
+    /// tab from the daemon's layout, so a ratio only it knows about is a ratio the user loses.
+    ///
+    /// The split is named by one pty from each side rather than by a pane id, because pane ids are
+    /// minted per model and the two ends have their own (@see vtworkspace::Pane::lowestCommonAncestor).
+    /// A local factory does nothing — its model is the only one there is.
+    /// @param firstPty  A pty backing a leaf of the split's FIRST child.
+    /// @param secondPty A pty backing a leaf of the split's SECOND child.
+    /// @param ratio     The first child's new space share.
+    virtual void reportSplitRatio(vtpty::Pty const* /*firstPty*/,
+                                  vtpty::Pty const* /*secondPty*/,
+                                  double /*ratio*/)
+    {
+    }
+
+    /// Attach mode: authors a new window on the DAEMON rather than opening a purely
+    /// local one — the daemon honors it and pushes the new window's layout, which the
+    /// GUI maps onto a fresh OS window (B4). A local factory returns false so the app
+    /// opens an ordinary window.
+    /// @return true if routed to the daemon; false for a local factory.
+    [[nodiscard]] virtual bool requestRemoteWindow() { return false; }
+
+    /// Attach mode: authors the CLOSE of the pane backed by @p pty on the DAEMON, so a session the
+    /// user really ended does not linger there headless.
+    ///
+    /// Called ONLY from the paths that mean "end this session" — a pane close, a tab close, or an
+    /// orphaned session with no pane — and never from a window close, an app quit or a lost
+    /// connection, where the local view goes away but a daemon-hosted session must keep running.
+    /// That distinction cannot be recovered downstream: a PTY is destroyed on all of those paths
+    /// alike, so the intent has to be stated where it is known (@see TerminalSessionManager::
+    /// SessionEnd). A local factory does nothing — destroying the pty ends its process.
+    /// @param pty The pty backing the session to end.
+    virtual void requestRemoteClose(vtpty::Pty const* /*pty*/) {}
+
+    /// Announces the terminal that was built around a pty this factory handed out.
+    ///
+    /// One post-construction call, because the dependency genuinely is cyclic: a `Terminal` cannot
+    /// be constructed without its pty, and attach mode needs the `Terminal` in order to populate its
+    /// grid from the daemon's deltas. @see the "cyclic wiring" exception in AGENT.md — it is a single
+    /// `attach`-style call, not a sequence of them, and the object is fully usable before it.
+    ///
+    /// A local factory ignores it: a local session's output arrives through its own pty and the
+    /// parser puts it on the screen, so nothing outside needs a handle on the grid.
+    /// @param pty The pty this factory produced.
+    /// @param terminal The terminal now driving it.
+    virtual void bindTerminal(vtpty::Pty const* /*pty*/, vtbackend::Terminal& /*terminal*/) {}
 };
 
 /// The production SessionFactory: consults the app's active profile and produces either a local

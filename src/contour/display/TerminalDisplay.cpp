@@ -273,8 +273,18 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     if (!_renderer)
     {
         auto const timer = ScopedTimer(startupLog, "Renderer construction");
+        // The profile's own margin, scaled to device pixels, exactly as applyResize() derives it
+        // (@see geometry::fitPageToPixels, which takes left/top straight from these). Seeded here so
+        // the published grid origin is right from the very first event rather than from the first
+        // geometry change: the mouse hit-test maps through it, and a zero origin under a configured
+        // margin reports the cell the user clicked minus that margin.
+        auto const marginsDevicePx =
+            geometry::scaled(toGeometryMargins(profile().margins.value()), contentScale());
         _renderer = make_unique<vtrasterizer::Renderer>(
             _session->profile().terminalSize.value(),
+            vtrasterizer::PageMargin { .left = marginsDevicePx.horizontal,
+                                       .top = marginsDevicePx.vertical,
+                                       .bottom = marginsDevicePx.vertical },
             sanitizeFontDescription(profile().fonts.value(), fontDPI()),
             _session->terminal().colorPalette(),
             _session->config().renderer.value().textureAtlasHashtableSlots,

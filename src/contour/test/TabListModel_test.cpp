@@ -331,7 +331,7 @@ TEST_CASE("TabListModel: closing a tab removes exactly one row via the remove co
 
     auto* a = m.model().createTab(m.window().id());
     auto* b = m.model().createTab(m.window().id());
-    m.model().createTab(m.window().id());
+    (void) m.model().createTab(m.window().id());
     CHECK(m.rowCount() == 3);
 
     // Closing the middle tab drops the row count by exactly one; the tester verifies rowCount was 3
@@ -411,8 +411,8 @@ TEST_CASE("TabListModel: switching the active tab repaints the old and new rows'
     TabListModel m;
     QAbstractItemModelTester const tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
 
-    m.model().createTab(m.window().id());           // row 0
-    m.model().createTab(m.window().id());           // row 1
+    (void) m.model().createTab(m.window().id());    // row 0
+    (void) m.model().createTab(m.window().id());    // row 1
     auto* c = m.model().createTab(m.window().id()); // row 2, active (newest)
     REQUIRE(m.window().activeTab() == c);
     REQUIRE(m.window().activeTabIndex() == 2);
@@ -561,7 +561,7 @@ TEST_CASE("TabListModel: out-of-range and parented indices yield empty data", "[
 {
     TabListModel m;
     QAbstractItemModelTester const tester(&m, QAbstractItemModelTester::FailureReportingMode::Fatal);
-    m.model().createTab(m.window().id());
+    (void) m.model().createTab(m.window().id());
 
     CHECK_FALSE(roleAt(m, 5, TabListModel::Roles::TitleRole).isValid());
     CHECK(m.rowCount(m.index(0)) == 0); // list model: rows only under the root

@@ -611,7 +611,11 @@ void WindowController::closeWindow()
         emit activeTabRootPaneChanged();
     }
 
-    _manager.terminate(doomed);
+    // SessionEnd::Detach: closing a WINDOW is not ending its sessions. That only differs for a
+    // session this process does not own — in attach mode the daemon keeps them running and the next
+    // `contour client` shows them again, which is the whole point of daemon mode. Ending one is the
+    // ClosePane/CloseTab action, not this.
+    _manager.terminate(doomed, SessionEnd::Detach);
 
     // Close the OS window itself. When the user clicked the close button, the QQuickWindow is already
     // closing and this is a harmless no-op; when we got here programmatically (an emptied window after a

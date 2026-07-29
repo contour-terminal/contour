@@ -10,6 +10,7 @@
 #include <contour/TerminalSessionManager.h>
 #include <contour/WindowController.h>
 
+#include <vtpty/ChannelPty.h>
 #include <vtpty/MockPty.h>
 #include <vtpty/Process.h>
 #include <vtpty/Pty.h>
@@ -20,15 +21,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <algorithm>
-#include <chrono>
-#include <condition_variable>
 #include <expected>
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -257,155 +254,9 @@ class RecordingSpeechSynthesizer final: public contour::SpeechSynthesizer
     bool isAvailable = true;
 };
 
-/// In-memory PTY with REAL blocking-read semantics, for a test that runs a LIVE session read loop
-/// (the render harness, where TerminalDisplay::setSession starts the session's threads).
-///
-/// vtpty::MockPty returns a zero-length chunk on an empty buffer, which the terminal loop treats as
-/// EOF (processInputOnce closes the PTY) — correct for synchronous parse-what-you-seeded tests, fatal
-/// for a session that must stay alive between feeds. This mock mirrors UnixPty instead: an empty
-/// buffer BLOCKS the reader (honoring the read timeout) until data arrives, a wakeupReader(), or
-/// close(); EOF (empty read) is reported only once closed. wakeupReader() genuinely unblocks the
-/// reader (as UnixPty's break-pipe does), so ~TerminalSession's thread join completes.
-/// Not final: ConfigurableStartPty derives from it to vary start() alone, the blocking read being
-/// exactly what a session that must survive its own start() needs.
-class BlockingMockPty: public vtpty::Pty
-{
-  public:
-    explicit BlockingMockPty(vtbackend::PageSize windowSize): _pageSize { windowSize } {}
-
-    vtpty::PtySlave& slave() noexcept override { return _slave; }
-
-    [[nodiscard]] std::optional<ReadResult> read(crispy::buffer_object<char>& storage,
-                                                 std::optional<std::chrono::milliseconds> timeout,
-                                                 size_t size) override
-    {
-        auto lock = std::unique_lock { _mutex };
-        auto const wake = [this]() {
-            return _closed || _woken || _outputReadOffset < _outputBuffer.size();
-        };
-        if (timeout.has_value())
-            _wakeup.wait_for(lock, *timeout, wake);
-        else
-            _wakeup.wait(lock, wake);
-
-        if (_outputReadOffset == _outputBuffer.size())
-        {
-            if (_closed)
-                // Drained and closed: report EOF (empty read), as a real PTY does.
-                return ReadResult { .data = std::string_view {}, .fromStdoutFastPipe = false };
-            // A bare wakeupReader() (teardown wake, no data) or a genuine timeout: return EAGAIN so
-            // the caller re-checks its _terminating flag, exactly as UnixPty's break-pipe wake does.
-            _woken = false;
-            errno = EAGAIN;
-            return std::nullopt;
-        }
-
-        auto const n = std::min({ size, _outputBuffer.size() - _outputReadOffset, storage.bytesAvailable() });
-        auto const chunk = std::string_view { _outputBuffer.data() + _outputReadOffset, n };
-        _outputReadOffset += n;
-        auto const pooled = storage.writeAtEnd(chunk);
-        return ReadResult { .data = std::string_view(pooled.data(), pooled.size()),
-                            .fromStdoutFastPipe = false };
-    }
-
-    void wakeupReader() override
-    {
-        {
-            auto const lock = std::lock_guard { _mutex };
-            _woken = true;
-        }
-        _wakeup.notify_all();
-    }
-
-    int write(std::string_view data) override
-    {
-        auto const lock = std::lock_guard { _mutex };
-        _inputBuffer.append(data);
-        return static_cast<int>(data.size());
-    }
-
-    [[nodiscard]] vtbackend::PageSize pageSize() const noexcept override { return _pageSize; }
-    void resizeScreen(vtbackend::PageSize cells, std::optional<vtpty::ImageSize> pixels) override
-    {
-        auto const lock = std::lock_guard { _mutex };
-        if (_closed)
-            ++_resizesAfterClose;
-        _pageSize = cells;
-        _pixelSize = pixels;
-    }
-
-    /// How many resizes arrived after close(). A real PTY has no device left to resize by then --
-    /// ConPty crashed outright on one (it handed the invalidated HPCON to ResizePseudoConsole) --
-    /// so this must stay zero.
-    [[nodiscard]] int resizesAfterClose() const noexcept
-    {
-        auto const lock = std::lock_guard { _mutex };
-        return _resizesAfterClose;
-    }
-
-    vtpty::StartResult start() override { return {}; }
-    void close() override
-    {
-        {
-            auto const lock = std::lock_guard { _mutex };
-            _closed = true;
-        }
-        _wakeup.notify_all();
-    }
-    void waitForClosed() override
-    {
-        auto lock = std::unique_lock { _mutex };
-        _wakeup.wait(lock, [this]() { return _closed; });
-    }
-    [[nodiscard]] bool isClosed() const noexcept override
-    {
-        auto const lock = std::lock_guard { _mutex };
-        return _closed;
-    }
-
-    /// Feeds VT output to the (possibly blocked) session read loop.
-    void feed(std::string_view data)
-    {
-        {
-            auto const lock = std::lock_guard { _mutex };
-            if (_outputReadOffset == _outputBuffer.size())
-            {
-                _outputReadOffset = 0;
-                _outputBuffer.assign(data);
-            }
-            else
-                _outputBuffer.append(data);
-        }
-        _wakeup.notify_all();
-    }
-
-    /// Snapshot of everything the terminal wrote into the PTY (keyboard/mouse encodings, replies).
-    [[nodiscard]] std::string stdinSnapshot() const
-    {
-        auto const lock = std::lock_guard { _mutex };
-        return _inputBuffer;
-    }
-
-    /// Whether fed output is still waiting to be consumed by the session's read loop.
-    [[nodiscard]] bool isStdoutPending() const
-    {
-        auto const lock = std::lock_guard { _mutex };
-        return _outputReadOffset < _outputBuffer.size();
-    }
-
-  private:
-    mutable std::mutex _mutex;
-    std::condition_variable _wakeup;
-    vtbackend::PageSize _pageSize;
-    std::optional<vtpty::ImageSize> _pixelSize;
-    std::string _inputBuffer;
-    std::string _outputBuffer;
-    std::size_t _outputReadOffset = 0;
-    int _resizesAfterClose = 0; ///< Resizes that arrived once _closed; see resizesAfterClose().
-    bool _closed = false;
-    bool _woken = false; ///< One-shot wakeupReader() flag (teardown wake), cleared on read.
-    vtpty::PtySlaveDummy _slave;
-};
+// The former fixture-local BlockingMockPty (an in-memory PTY with real blocking-read semantics
+// for tests running a LIVE session read loop) now ships as vtpty::ChannelPty, so production
+// remote sessions run on the identical Pty.
 
 /// PTY whose start() produces a caller-chosen outcome, so every way a device can come up — or fail
 /// to — is drivable from one fixture rather than a family of near-identical ones.
@@ -417,12 +268,13 @@ class BlockingMockPty: public vtpty::Pty
 /// never having started its exit watcher, no onClosed() could ever prune. It is kept as a case
 /// because no device may take the process down that way, whatever it throws.
 ///
-/// Built on BlockingMockPty rather than vtpty::MockPty because the Diagnose case must leave a session
-/// that is genuinely UP: MockPty answers an empty buffer with a zero-length read, which
+/// Built on vtpty::ChannelPty rather than vtpty::MockPty because the Diagnose case must leave a
+/// session that is genuinely UP: MockPty answers an empty buffer with a zero-length read, which
 /// Terminal::processInputOnce() reads as EOF — so the read loop this start() has just launched would
 /// close the device from under the test within microseconds of returning. That is a race a debug build
-/// happens to win and a release build loses.
-class ConfigurableStartPty final: public BlockingMockPty
+/// happens to win and a release build loses. ChannelPty blocks instead, which is why production
+/// remote sessions run on it too.
+class ConfigurableStartPty final: public vtpty::ChannelPty
 {
   public:
     /// What start() does.
@@ -441,7 +293,7 @@ class ConfigurableStartPty final: public BlockingMockPty
         std::string_view { "Failed to start in \"/gone\". Using the current directory instead." };
 
     ConfigurableStartPty(vtbackend::PageSize pageSize, StartBehavior behavior):
-        BlockingMockPty { pageSize }, _behavior { behavior }
+        vtpty::ChannelPty { pageSize }, _behavior { behavior }
     {
     }
 
@@ -454,7 +306,7 @@ class ConfigurableStartPty final: public BlockingMockPty
                 return std::unexpected(vtpty::StartFailure { .error = vtpty::StartError::SpawnFailed,
                                                              .detail = std::string { FailureText } });
             case StartBehavior::Diagnose:
-                return BlockingMockPty::start().transform([](vtpty::StartOutcome outcome) {
+                return vtpty::ChannelPty::start().transform([](vtpty::StartOutcome outcome) {
                     outcome.diagnostic = std::string { DiagnosticText };
                     return outcome;
                 });

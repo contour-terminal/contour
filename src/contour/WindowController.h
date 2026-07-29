@@ -97,7 +97,7 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
         PaneCountRole = Qt::UserRole + 4, //!< Number of panes in this tab.
         SessionIdRole = Qt::UserRole + 5, //!< The session id of the tab's active leaf.
         RawTitleRole = Qt::UserRole + 6,  //!< Un-expanded runtime rename template (empty if never renamed).
-        ZoomedRole = Qt::UserRole + 7,    //!< Whether this tab's active pane is zoomed (see vtworkspace::Tab).
+        ZoomedRole = Qt::UserRole + 7, //!< Whether this tab's active pane is zoomed (see vtworkspace::Tab).
     };
 
     /// @param manager  The session-lifetime service + model host (must outlive this controller).
