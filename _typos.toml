@@ -47,11 +47,12 @@ extend-ignore-re = [
 ]
 
 [default.extend-identifiers]
-Q_INVOKABLE = "Q_INVOKABLE" # Qt's macro for exposing a method to QML/the meta-object system.
-invokable = "invokable"     # Qt jargon: prose calls a Q_INVOKABLE method "an invokable".
-countr_zero = "countr_zero" # std::countr_zero, C++20 <bit>.
-tio = "tio"                 # The POSIX idiom for a local `struct termios`.
-iy = "iy"                   # Item-space y coordinate, paired with `ix`.
+Q_INVOKABLE = "Q_INVOKABLE"       # Qt's macro for exposing a method to QML/the meta-object system.
+invokable = "invokable"           # Qt jargon: prose calls a Q_INVOKABLE method "an invokable".
+countr_zero = "countr_zero"       # std::countr_zero, C++20 <bit>.
+tio = "tio"                       # The POSIX idiom for a local `struct termios`.
+iy = "iy"                         # Item-space y coordinate, paired with `ix`.
+msg_controllen = "msg_controllen" # The control-buffer length field of POSIX `struct msghdr`.
 
 [default.extend-words]
 # Domain vocabulary that is genuinely tree-wide in a terminal emulator.

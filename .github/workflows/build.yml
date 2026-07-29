@@ -133,6 +133,52 @@ jobs:
     - name: "build"
       run: cmake --build build
 
+  # Builds the GUI-less configuration, whose product is `contour daemon` -- a session host for a
+  # server or a container. Being unbuilt is exactly how this configuration rotted before; one job
+  # is what keeps a new GUI source from landing outside its CONTOUR_FRONTEND_GUI guard.
+  #
+  # Deliberately NOT installing a modern Qt over the distro one: relying on Ubuntu's Qt 6.4.2
+  # proves the headless build needs nothing beyond Qt6::Core -- no Qt6::GuiPrivate, no Qt Quick.
+  # Clang only, since this gates a build configuration and not a toolchain.
+  build_headless:
+    name: "Ubuntu Linux (no GUI frontend)"
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: "ccache-ubuntu2404-headless"
+        max-size: 256M
+    - name: "update APT database"
+      run: sudo ./scripts/apt-update.sh
+    - name: "install dependencies"
+      run: sudo env QTVER=6 ./scripts/install-deps.sh
+    - name: "Post-fix embedded dependency permissions."
+      run: sudo find _deps/sources -exec chown $UID {} \;
+    - name: Install clang
+      run: |
+        wget https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh ${LLVM_VERSION}
+    - name: "cmake"
+      run: |
+        cmake \
+              --preset clang-debug \
+              -B build \
+              -G Ninja \
+              -D CONTOUR_WAYLAND=OFF \
+              -D CONTOUR_FRONTEND_GUI=OFF \
+              -D CONTOUR_TESTING=ON \
+              -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}"
+    - name: "build"
+      run: cmake --build build --target contour
+    # contour_e2e_cli_verbs asserts the verb surface this configuration is supposed to expose --
+    # `daemon` present, `client` gone. It is a ctest test rather than a step of this job, so it
+    # also runs in the ordinary GUI builds, where it asserts the other half.
+    - name: "tests"
+      run: ctest --test-dir build -R contour_e2e_cli_verbs --output-on-failure
+
   check_links:
     name: "Check links"
     runs-on: ubuntu-24.04
@@ -324,10 +370,18 @@ jobs:
             SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
             cmake -S . -B build -DCONTOUR_TESTING=ON -DLIBUNICODE_USE_STD_SIMD=OFF
             cmake --build build/ -j2
-            ./build/src/crispy/crispy_test
-            ./build/src/vtparser/vtparser_test
-            ./build/src/vtbackend/vtbackend_test
-            ./build/src/vtrasterizer/vtrasterizer_test
+            # ctest, not a hand-written list: that list predated src/coro, src/net, src/vthost and
+            # src/vtworkspace, so those suites were built in this VM and thrown away -- and a BSD
+            # is exactly where the daemon's socket code would diverge. The label exclusions keep
+            # the VM's budget: `e2e` boots the real app repeatedly, and `lint` re-runs gates the
+            # Linux jobs already own.
+            #
+            # contour_gui_test is excluded BY NAME, not because it cannot work here -- it selects
+            # the offscreen QPA itself when there is no DISPLAY -- but because it has never once
+            # run on this VM, and this job gates master rather than a PR. Widening coverage to the
+            # daemon suites should not also stake master on an untried Qt run. Drop the exclusion
+            # once someone has watched it pass here.
+            ctest --test-dir build/ --output-on-failure -LE "e2e|lint" -E "contour_gui_test"
             rm -rf _deps build
   # }}}
   # {{{ OpenBSD
@@ -426,6 +480,12 @@ jobs:
           brew uninstall aws-sam-cli azure-cli
 
           ./scripts/install-deps.sh
+      - name: "install tmux (oracle for the tmux-interop tests)"
+        # A CI-only tool, so it is here rather than in install-deps.sh, which lists what Contour
+        # needs to BUILD. Without it the four tmux oracles self-skip, and switching this job to
+        # ctest (below) would otherwise have reached them only to watch them do nothing -- macOS
+        # is where the BSD socket and Apple-libc++ differences in that code path would show up.
+        run: brew install tmux && tmux -V
       - name: "Create build directory"
         run: mkdir build
       - name: "Generate build files"
@@ -440,14 +500,31 @@ jobs:
                 -B build/
       - name: "Build"
         run: cmake --build build/
-      - name: "test: crispy"
-        run: ./build/src/crispy/crispy_test
-      - name: "test: vtparser"
-        run: ./build/src/vtparser/vtparser_test
-      - name: "test: vtbackend"
-        run: ./build/src/vtbackend/vtbackend_test
-      - name: "test: vtrasterizer"
-        run: ./build/src/vtrasterizer/vtrasterizer_test
+      - name: "tests"
+        # ctest, not a hand-written list of binaries: the previous four-line list predated
+        # src/coro, src/net, src/vthost and src/vtworkspace, so those suites were built here and
+        # never run — macOS is exactly where the Apple-libc++ and BSD-socket differences bite.
+        # Registering a new test target must not require editing this file.
+        #
+        # 15 rather than 10: with tmux installed the four oracles now actually run instead of
+        # skipping, and each drives a real tmux server over a pty.
+        timeout-minutes: 15
+        run: ctest --test-dir build/ --output-on-failure
+      - name: "verify the tmux oracles actually ran"
+        # @see the identical assertion on the Linux matrix for why a green suite is not enough:
+        # a Catch2 SKIP exits 0, so "no tmux, nothing ran" is indistinguishable from success.
+        # imsgserver stays excluded here for parity with Linux -- brew's tmux is new enough to run
+        # it, but making one platform's coverage depend on a formula's version is how this becomes
+        # a mystery failure the day the formula moves.
+        run: |
+          set -o pipefail
+          binary=build/src/vthost/vthost_test
+          output=$("$binary" '[oracle]~[imsgserver]' 2>&1) || { printf '%s\n' "$output"; exit 1; }
+          printf '%s\n' "$output"
+          if printf '%s' "$output" | grep -q 'skipped'; then
+            echo "::error::$binary reported SKIPPED; the tmux interop tests are not being exercised on macOS"
+            exit 1
+          fi
       - name: "Create Package(s)"
         run: |
           set -ex
@@ -595,6 +672,35 @@ jobs:
         shell: pwsh
         run: |
           ctest --preset ${{ env.CMAKE_PRESET }} --build-config RelWithDebInfo
+      - name: "verify the AF_UNIX tests actually ran"
+        # Windows is the ONLY validation the daemon's Windows transport gets -- nobody develops it
+        # on a Windows box. The AF_UNIX cases self-skip where the platform has no AF_UNIX, and a
+        # Catch2 SKIP exits 0, so a green suite cannot distinguish "the transport works" from "it
+        # was never exercised". `windows-latest` is far past the 10 1803 that introduced AF_UNIX,
+        # so a skip here is a regression, not a platform fact. Same assertion the Linux matrix
+        # makes about the tmux oracles.
+        #
+        # On WIN32 the top-level CMakeLists redirects CMAKE_RUNTIME_OUTPUT_DIRECTORY to
+        # <binaryDir>/bin, so the executables do NOT sit beside their source directory the way they
+        # do on Linux. The preset's generator is Ninja (single-config), so there is no
+        # per-configuration subdirectory under it either.
+        shell: bash
+        run: |
+          set -o pipefail
+          for binary in \
+              "out/build/${CMAKE_PRESET}/bin/net_test.exe" \
+              "out/build/${CMAKE_PRESET}/bin/vthost_test.exe"; do
+            # A missing binary must not read as "nothing skipped": that is the very failure mode
+            # this step exists to catch, one directory layout further out.
+            [ -x "$binary" ] || { echo "::error::$binary not found; the assertion below would pass vacuously"; exit 1; }
+            echo "--- $binary [afunix]"
+            output=$("$binary" '[afunix]' 2>&1) || { printf '%s\n' "$output"; exit 1; }
+            printf '%s\n' "$output"
+            if printf '%s' "$output" | grep -q 'skipped'; then
+              echo "::error::$binary [afunix] reported SKIPPED; the daemon's AF_UNIX transport is not being exercised on Windows"
+              exit 1
+            fi
+          done
       - name: "Install Wix Toolset"
         run: |
           # Use this to list all available versions
@@ -683,6 +789,16 @@ jobs:
           fi
       - name: "install dependencies"
         run: sudo env QTVER="${{ matrix.qt_version }}" SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
+      - name: "install tmux (oracle for the tmux-interop tests)"
+        # Without a tmux binary the tmux-compatibility tests self-skip, which is how they went
+        # their entire existence without once running: LayoutString's two select-layout oracles,
+        # TmuxGateway's real `tmux -C` drive, and TmuxController's GUI mirror. They are the only
+        # coverage `vthost/tmux/ControlModeSpawn.cpp` gets at all.
+        #
+        # Ubuntu 24.04 ships tmux 3.4. That runs the four above, but NOT ImsgServer's
+        # "a real tmux binary attaches over imsg" — the rewritten imsg framing landed after 3.5,
+        # so that one still self-skips until a runner image ships tmux >= 3.6.
+        run: sudo apt -qy install tmux && tmux -V
       - name: "Post-fix embedded dependency permissions."
         run: sudo find _deps/sources -exec chown $UID {} \;
       # Ubuntu 24.04's distro Qt is 6.4.2, which does not provide the Qt6::GuiPrivate CMake package
@@ -739,7 +855,38 @@ jobs:
       - name: "build"
         run: cmake --build --preset gcc-debug -- -j3
       - name: "tests"
+        # A hung test (e.g. a dead-loop) must fail the matrix fast, not stall for hours.
+        #
+        # Budget, measured rather than assumed: the offscreen suite is ~2 minutes here. The e2e
+        # app runs and contour_gui_test dominate it (~20-30s each); the unit suites are all under
+        # 3s. The two vtconformance gates would add ~3 minutes, but they self-skip on a runner
+        # that has not fetched vttest/esctest. Keep an eye on this ceiling when adding an e2e run.
+        timeout-minutes: 5
         run: cmake --build --preset gcc-debug --target test
+      - name: "verify the tmux oracles actually ran"
+        # ctest prints nothing for a passing test, and a Catch2 SKIP exits 0 — so "the suite is
+        # green" cannot distinguish "the oracle agreed with us" from "no tmux, nothing ran". That
+        # ambiguity is exactly how these tests went their whole existence without executing. Assert
+        # it instead of inferring it: re-run the tagged subset and fail if anything reports skipped.
+        #
+        # imsgserver is excluded on purpose: its oracle needs the rewritten imsg framing from tmux
+        # >= 3.6, and Ubuntu 24.04 ships 3.4, so that ONE self-skips legitimately. Drop the
+        # exclusion once a runner image ships a new enough tmux.
+        run: |
+          set -o pipefail
+          for oracle in \
+              'out/gcc-debug/src/vthost/vthost_test|[oracle]~[imsgserver]' \
+              'out/gcc-debug/src/contour/contour_gui_test|[oracle]'; do
+            binary=${oracle%%|*}
+            filter=${oracle##*|}
+            echo "--- $binary $filter"
+            output=$("$binary" "$filter" 2>&1) || { printf '%s\n' "$output"; exit 1; }
+            printf '%s\n' "$output"
+            if printf '%s' "$output" | grep -q 'skipped'; then
+              echo "::error::$binary $filter reported SKIPPED; the tmux interop tests are not being exercised"
+              exit 1
+            fi
+          done
       - name: "install weston (headless compositor for display-gated GUI tests)"
         # Non-gating until proven on a GitHub runner: the local run is green (headless weston,
         # 32 cases), but this step has not yet been validated on ubuntu-24.04 CI, so it must not
@@ -762,6 +909,10 @@ jobs:
             out/gcc-debug/src/vtbackend/vtbackend_test
             out/gcc-debug/src/vtbackend/bench-headless
             out/gcc-debug/src/vtrasterizer/vtrasterizer_test
+            out/gcc-debug/src/coro/coro_test
+            out/gcc-debug/src/net/net_test
+            out/gcc-debug/src/vtworkspace/vtworkspace_test
+            out/gcc-debug/src/vthost/vthost_test
             out/gcc-debug/src/vtconformance/vtconformance-run
             test/images
           retention-days: 1
@@ -866,6 +1017,10 @@ jobs:
       - name: "build"
         run: cmake --build --preset gcc-release -- -j3
       - name: "tests"
+        # Same reasoning as the matrix job's cap: a hung test must fail this job fast rather than
+        # stall it for hours. Release rather than debug, so the budget is more generous than the
+        # ~2 minutes measured there.
+        timeout-minutes: 10
         run: cmake --build --preset gcc-release --target test
       - name: "CPack: Creating DEB package"
         run: |
@@ -924,6 +1079,21 @@ jobs:
         run: valgrind --error-exitcode=64 ./out/gcc-debug/src/vtbackend/vtbackend_test
       - name: "test: vtrasterizer (via valgrind)"
         run: valgrind --error-exitcode=64 ./out/gcc-debug/src/vtrasterizer/vtrasterizer_test
+      # The daemon's suites. Socket buffers, coroutine frames and fd ownership are precisely the
+      # code valgrind reads best, and this job is the closest thing the project has to a memory
+      # gate (no ASan/TSan job exists).
+      - name: "test: coro (via valgrind)"
+        run: valgrind --error-exitcode=64 ./out/gcc-debug/src/coro/coro_test
+      - name: "test: net (via valgrind)"
+        run: valgrind --error-exitcode=64 ./out/gcc-debug/src/net/net_test
+      - name: "test: vtworkspace (via valgrind)"
+        run: valgrind --error-exitcode=64 ./out/gcc-debug/src/vtworkspace/vtworkspace_test
+      - name: "test: vthost (via valgrind)"
+        # ~[oracle]: the tmux interop cases fork a real tmux server over a pty and talk to it on a
+        # timeout. Under valgrind the child runs at full speed while our side crawls, so those
+        # budgets expire and the failure says nothing about memory. The Linux matrix runs them
+        # natively and asserts they ran.
+        run: valgrind --error-exitcode=64 ./out/gcc-debug/src/vthost/vthost_test '~[oracle]'
   # }}}
   # {{{ Ubuntu 24.04: VT conformance (esctest gates, vttest is advisory)
   test_ubuntu2404_conformance:
