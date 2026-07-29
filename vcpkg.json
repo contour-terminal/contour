@@ -12,6 +12,7 @@
         {
             "name": "ms-gsl"
         },
+        "openssl",
         {
             "name": "yaml-cpp"
         },

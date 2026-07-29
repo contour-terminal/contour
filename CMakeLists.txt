@@ -207,9 +207,10 @@ if(CONTOUR_USE_CPM)
 endif()
 
 
-if(CONTOUR_FRONTEND_GUI)
-    include(FindQt)
-endif()
+# Unconditional, even for CONTOUR_FRONTEND_GUI=OFF: that build still needs Qt6::Core -- main.cpp
+# installs a Qt message handler, ContourApp uses QFile, and the resource compiler comes from the
+# Qt package. Only the Qt Quick/QML/Widgets half is optional, and src/contour guards that.
+include(FindQt)
 
 # The vendored third-party code (fetched via CPM/FetchContent) must NOT be run through clang-tidy: it
 # has no .clang-tidy config (clang-tidy then aborts with "no checks enabled") and is not ours to lint.
@@ -237,9 +238,7 @@ else()
     set(USING_TIDY_STRING "ON (${CMAKE_CXX_CLANG_TIDY})")
 endif()
 
-if(CONTOUR_FRONTEND_GUI)
-    find_package(Qt6 COMPONENTS Core QUIET)
-endif()
+find_package(Qt6 COMPONENTS Core QUIET)
 
 add_custom_target(package-verbose
     COMMAND ${CMAKE_CPACK_COMMAND} --config CPackConfig.cmake --verbose
