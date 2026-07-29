@@ -370,6 +370,48 @@ class TerminalDisplay: public QQuickItem
   private:
     // helper methods
     //
+
+    /// Blocks until no scene-graph frame is executing render-thread code for this display.
+    ///
+    /// The render node's prepare()/render() run on the render thread with the GUI thread UNBLOCKED, so a
+    /// frame may be mid-flight inside this display right now — every plain null check on a member the
+    /// render-thread frame path dereferences is therefore a TOCTOU, not a guard. A NoStage render job
+    /// runs on the render thread once the current frame completes (or synchronously here when no render
+    /// loop is active), so once it releases, the render thread is no longer inside this display. Frame
+    /// N+1 cannot slip in behind it either: its synchronize phase blocks on THIS thread, which is here.
+    /// No-op without a window — an item outside a scene belongs to no render loop.
+    ///
+    /// This is the mechanism for members whose *object* the render thread may dereference and whose
+    /// lifetime we do not control (@ref _session). Where the object's destruction is itself deferred to
+    /// a render-thread job — @ref _renderTarget, freed by a BeforeSynchronizingStage CleanupJob — the
+    /// cheaper remedy is to pin the pointer into a frame-local instead; @see prepareFrameRhi.
+    ///
+    /// Do NOT add a `hasRenderTarget()`/`hasSession()` early-out to make this cheaper. It looks free —
+    /// the frame path no-ops on both — but the member can be nulled by the GUI thread *after* a frame
+    /// passed that same check (releaseResources() moves _renderTarget out on the GUI thread while a
+    /// frame runs), so the null tells you nothing about whether a frame is executing. A null check is
+    /// what this fence exists to replace; using one as its precondition reinstates the bug.
+    ///
+    /// Cost: bounded by the REMAINING time of the frame already in flight, not by a frame period — the
+    /// render thread runs the job from its event loop, so with no frame in flight this is a thread
+    /// round-trip. Paid on pane close, split hand-off, tab rebind and session destruction: user-driven
+    /// transitions, never per frame or per keystroke.
+    ///
+    /// GUI THREAD ONLY, and the caller must hold no lock the render thread can take mid-frame (the
+    /// terminal's state mutex, the renderer's _applyMutex), or this deadlocks.
+    void fenceRenderThread();
+
+    /// The ONLY writer of @ref _session — fences the render thread out, then stores @p newSession.
+    ///
+    /// A private setter rather than the discipline of remembering to fence at each write site: a bare
+    /// store is a data race against the render-thread frame path (@see fenceRenderThread), and the two
+    /// existing writers reach it by different routes (a rebind through setSession(), a detach through
+    /// releaseSession()), so nothing but a single choke point keeps a third from getting it wrong.
+    ///
+    /// GUI THREAD ONLY. Does not emit sessionChanged() — the callers own that, since setSession() emits
+    /// only after it has finished wiring the new session up.
+    void assignSession(TerminalSession* newSession);
+
     void doDumpStateInternal();
 
     /// Logs the resolved Qt RHI backend (graphics API + device, and the OpenGL context version when

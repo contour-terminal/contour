@@ -309,6 +309,23 @@ TerminalSession::~TerminalSession()
     sessionLog()("Destroying terminal session.");
     _terminating = true;
 
+    // Detach any display still pointing here BEFORE this session's terminal is torn down. ~TerminalDisplay
+    // detaches in this direction already, but nothing did it in the other, so a session destroyed while a
+    // display still names it left that display's _session dangling — and a dangling pointer is non-null,
+    // so every guard on the render-thread frame path (prepareFrameRhi, paint) passes it straight through
+    // to terminal(). releaseSession() fences the render thread out first, so no frame is inside this
+    // session when it goes; it re-enters detachDisplay() on this still-valid object, which only clears the
+    // back-pointer below.
+    //
+    // DEFENSIVE, not a fix for an observed crash: today's shutdown order destroys the QML engine (and with
+    // it every TerminalDisplay) before the session manager that parents the sessions, and a closed pane
+    // only prunes bookkeeping without deleting its TerminalSession — so production should always reach
+    // here with _display already null. This closes the ordering as an invariant instead of an assumption,
+    // because the render-thread guards above cannot detect the difference. Pinned session-first in
+    // DisplayRendering_test's teardown-lifetimes section.
+    if (_display != nullptr)
+        _display->releaseSession();
+
     // Close the device first: that is what makes ExitWatcherThread's waitForClosed() return, so the
     // watcher ends by itself. terminate() alone could not do this job. It only REQUESTS termination and
     // does not wait, so the QThread was destroyed while its thread was still running -- Qt says as much
@@ -839,6 +856,20 @@ void TerminalSession::applyPendingFontChange(bool allow, bool remember)
 
     if (!spec.emoji.empty() && spec.emoji != "auto"sv)
         newFonts.emoji = text::font_description::parse(spec.emoji);
+
+    // Persist the approved font as THIS session's own, the way setFontSize() does. The profile is what
+    // every re-seeding path reads — TerminalDisplay::setSession() and configureDisplay() both re-apply
+    // profile().fonts — so leaving it at the pre-OSC-50 value made the approved font revert on the next
+    // scene-graph re-creation or tab rebind. Unlike setFontSize() this does not wait for the apply to
+    // succeed: the change may legitimately be deferred (no render target yet, see setFonts()), and the
+    // profile is the record of what this session's font *is*, which is what the deferral resumes from.
+    _profile.fonts.value() = newFonts;
+
+    // The permission answer can arrive long after the request — the pane may be gone by now. The pending
+    // change was consumed above deliberately: an approval for a display that no longer exists is
+    // finished, not queued. @see getFontDef()/setFontDef(), which guard the same pointer.
+    if (_display == nullptr)
+        return;
 
     _display->setFonts(newFonts);
 }
