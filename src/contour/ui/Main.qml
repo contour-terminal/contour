@@ -103,7 +103,7 @@ ApplicationWindow
     title: (win && win.activeSession) ? win.activeSession.title : ""
 
     // Create the first session/tab on startup. This used to be done by vtui's one-shot
-    // `session: terminalSessions.createSession()`; with the pane tree as the sole renderer, main.qml mints
+    // `session: terminalSessions.createSession()`; with the pane tree as the sole renderer, Main.qml mints
     // the initial session so activeTabRootPane becomes a non-null single-leaf proxy the PaneNode Loader
     // renders. createNewTab() creates the session in THIS window (the controller tags it with its
     // WindowId).

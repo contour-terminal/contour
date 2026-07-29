@@ -1817,27 +1817,29 @@ TEST_CASE("Config: every tab bar mode is described by its table", "[config]")
         for (auto const mode: enumerators)
         {
             using Mode = std::remove_cvref_t<decltype(mode)>;
-            auto const token = tabBarModeToken(mode);
+            auto const token = configEnumToken(mode);
             CHECK(!token.empty());
-            CHECK(!tabBarModeLabel(mode).empty());
-            CHECK(tabBarModeFromToken<Mode>(token) == mode);
+            CHECK(!configEnumLabel(mode).empty());
+            CHECK(configEnumFromToken<Mode>(token) == mode);
         }
     };
 
-    checkModes(tabBarModes<TabBarPosition>(), std::array { TabBarPosition::Top, TabBarPosition::Bottom });
-    checkModes(tabBarModes<TabBarVisibility>(),
+    checkModes(configEnumValues<TabBarPosition>(),
+               std::array { TabBarPosition::Top, TabBarPosition::Bottom });
+    checkModes(configEnumValues<TabBarVisibility>(),
                std::array { TabBarVisibility::Always, TabBarVisibility::Never, TabBarVisibility::Multiple });
+    checkModes(configEnumValues<UiStyle>(), std::array { UiStyle::Native, UiStyle::Terminal });
 
     // The reader is case-insensitive, and refuses what no row carries.
-    CHECK(tabBarModeFromToken<TabBarVisibility>("MULTIPLE") == TabBarVisibility::Multiple);
-    CHECK(tabBarModeFromToken<TabBarVisibility>("mUlTiPlE") == TabBarVisibility::Multiple);
-    CHECK(!tabBarModeFromToken<TabBarVisibility>("sometimes").has_value());
-    CHECK(!tabBarModeFromToken<TabBarPosition>("").has_value());
+    CHECK(configEnumFromToken<TabBarVisibility>("MULTIPLE") == TabBarVisibility::Multiple);
+    CHECK(configEnumFromToken<TabBarVisibility>("mUlTiPlE") == TabBarVisibility::Multiple);
+    CHECK(!configEnumFromToken<TabBarVisibility>("sometimes").has_value());
+    CHECK(!configEnumFromToken<TabBarPosition>("").has_value());
 
     // The labels are what a human reads, so they must be distinct -- two rows reading "Multiple"
     // would be indistinguishable in a menu even though the modes differ.
-    CHECK(tabBarModeLabel(TabBarVisibility::Always) != tabBarModeLabel(TabBarVisibility::Never));
-    CHECK(tabBarModeLabel(TabBarVisibility::Never) != tabBarModeLabel(TabBarVisibility::Multiple));
+    CHECK(configEnumLabel(TabBarVisibility::Always) != configEnumLabel(TabBarVisibility::Never));
+    CHECK(configEnumLabel(TabBarVisibility::Never) != configEnumLabel(TabBarVisibility::Multiple));
 }
 
 TEST_CASE("Config: tab_bar_position and tab_bar_visibility parse each value (ignore-case)", "[config]")
@@ -2400,6 +2402,98 @@ TEST_CASE("config.tab_switch_on_horizontal_wheel", "[config]")
 
         auto const reloaded = loadFromYaml(dir, written);
         CHECK_FALSE(reloaded.tabSwitchOnHorizontalWheel.value());
+    }
+}
+
+TEST_CASE("config.ui_style", "[config]")
+{
+    using contour::config::UiStyle;
+
+    QTemporaryDir dir;
+
+    SECTION("defaults to the native chrome")
+    {
+        // The default is the regression gate for the whole feature: an existing configuration must
+        // keep the appearance it had, so nothing here may change without an explicit opt-in.
+        CHECK(contour::config::Config {}.uiStyle.value() == UiStyle::Native);
+        CHECK(contour::config::Config {}.uiFontFamily.value().empty());
+        CHECK(contour::config::Config {}.uiFontSize.value() == 0.0);
+    }
+
+    SECTION("loads every value, ignoring case")
+    {
+        auto const profiles = "profiles:\n  main:\n    shell: \"/bin/bash\"\n";
+        CHECK(loadFromYaml(dir, std::string("ui_style: terminal\n") + profiles).uiStyle.value()
+              == UiStyle::Terminal);
+        CHECK(loadFromYaml(dir, std::string("ui_style: TERMINAL\n") + profiles).uiStyle.value()
+              == UiStyle::Terminal);
+        CHECK(loadFromYaml(dir, std::string("ui_style: native\n") + profiles).uiStyle.value()
+              == UiStyle::Native);
+    }
+
+    SECTION("keeps the default when the value is not a known token")
+    {
+        auto const config = loadFromYaml(dir,
+                                         "ui_style: ascii-art\n"
+                                         "profiles:\n  main:\n    shell: \"/bin/bash\"\n");
+        CHECK(config.uiStyle.value() == UiStyle::Native);
+    }
+
+    SECTION("loads the chrome font overrides")
+    {
+        auto const config = loadFromYaml(dir,
+                                         "ui_font_family: \"JetBrains Mono\"\n"
+                                         "ui_font_size: 11.5\n"
+                                         "profiles:\n  main:\n    shell: \"/bin/bash\"\n");
+        CHECK(config.uiFontFamily.value() == "JetBrains Mono");
+        CHECK(config.uiFontSize.value() == 11.5);
+    }
+
+    SECTION("round-trips through the generated config")
+    {
+        // The writer is the reflection walk in createForGlobal(), so this pins that the new entries
+        // are actually emitted -- a field it skipped would silently reset on every GUI-driven save.
+        auto config = contour::config::Config {};
+        config.uiStyle = UiStyle::Terminal;
+        config.uiFontFamily = "JetBrains Mono";
+        config.uiFontSize = 11.0;
+        auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+        REQUIRE(written.contains("ui_style"));
+        REQUIRE(written.contains("ui_font_family"));
+        REQUIRE(written.contains("ui_font_size"));
+
+        // The formatter must emit the token the reader accepts, not the enumerator name -- that is
+        // what makes the round trip work at all.
+        REQUIRE(written.contains("ui_style: terminal"));
+
+        auto const reloaded = loadFromYaml(dir, written);
+        CHECK(reloaded.uiStyle.value() == UiStyle::Terminal);
+        CHECK(reloaded.uiFontFamily.value() == "JetBrains Mono");
+        CHECK(reloaded.uiFontSize.value() == 11.0);
+    }
+
+    SECTION("round-trips the EMPTY chrome font, which is the line every installation gets")
+    {
+        // createDefaultConfig() writes from a default-constructed Config, so an unquoted template
+        // emits a bare `ui_font_family:` -- a YAML null, which the string reader cannot convert and
+        // which therefore logs a conversion failure on every single start, for a key nobody set.
+        auto const written =
+            contour::config::createString<contour::config::YAMLConfigWriter>(contour::config::Config {});
+        REQUIRE(written.contains("ui_font_family: \"\""));
+
+        auto const reloaded = loadFromYaml(dir, written);
+        CHECK(reloaded.uiFontFamily.value().empty());
+    }
+
+    SECTION("round-trips a family name YAML would otherwise reinterpret")
+    {
+        // "@MS Gothic" is a genuine Windows family, and a leading @ is a reserved YAML indicator --
+        // unquoted it is not a string the parser will hand back. The quotes are what make the
+        // writer's own `"`/`\` escaping mean anything, too.
+        auto config = contour::config::Config {};
+        config.uiFontFamily = "@MS Gothic";
+        auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+        CHECK(loadFromYaml(dir, written).uiFontFamily.value() == "@MS Gothic");
     }
 }
 

@@ -126,10 +126,10 @@ TEST_CASE("titleBarContextMenu: the tab bar submenu offers every mode and ticks 
     using contour::config::TabBarPosition;
     using contour::config::TabBarVisibility;
 
-    for (auto const& live: contour::config::tabBarModes<TabBarVisibility>())
+    for (auto const& live: contour::config::configEnumValues<TabBarVisibility>())
     {
         auto state = populatedState();
-        state.tabBarVisibility = live.mode;
+        state.tabBarVisibility = live.value;
 
         auto const entries = buildTitleBarContextMenu(state);
         auto const* tabBar = find(entries, "Tab Bar");
@@ -140,7 +140,7 @@ TEST_CASE("titleBarContextMenu: the tab bar submenu offers every mode and ticks 
         // the point of generating the rows: a mode added there shows up here with neither file touched.
         auto const modeRows =
             std::ranges::count_if(tabBar->children, [](auto const& e) { return e.checkable; });
-        CHECK(std::cmp_equal(modeRows, contour::config::tabBarModes<TabBarVisibility>().size()));
+        CHECK(std::cmp_equal(modeRows, contour::config::configEnumValues<TabBarVisibility>().size()));
 
         // Exactly one is ticked, and it is the one in force.
         auto ticked = std::vector<std::string> {};
@@ -168,8 +168,8 @@ TEST_CASE("titleBarContextMenu: the tab bar submenu offers every mode and ticks 
         auto const* position = find(tabBar->children, "Position");
         REQUIRE(position != nullptr);
         REQUIRE(position->kind == ContextMenuEntryKind::Submenu);
-        CHECK(
-            std::cmp_equal(position->children.size(), contour::config::tabBarModes<TabBarPosition>().size()));
+        CHECK(std::cmp_equal(position->children.size(),
+                             contour::config::configEnumValues<TabBarPosition>().size()));
 
         auto const* bottom = find(position->children, "Bottom");
         REQUIRE(bottom != nullptr);
@@ -200,10 +200,10 @@ TEST_CASE("titleBarContextMenu: no separator is ever left stranded", "[contour][
     // both rather than trusting the one arrangement that happens to be the common case.
     for (auto const tabCount: { 0, 1, 2, 7 })
         for (auto const profileCount: { 0, 1, 3 })
-            for (auto const& visibility: contour::config::tabBarModes<TabBarVisibility>())
+            for (auto const& visibility: contour::config::configEnumValues<TabBarVisibility>())
             {
                 auto state = TitleBarContextMenuState { .tabCount = tabCount,
-                                                        .tabBarVisibility = visibility.mode,
+                                                        .tabBarVisibility = visibility.value,
                                                         .tabBarPosition = TabBarPosition::Top,
                                                         .activeProfile = "main",
                                                         .profileNames = {} };

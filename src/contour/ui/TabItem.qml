@@ -28,9 +28,26 @@ Item {
     required property int tabPaneCount
     required property bool tabZoomed     // active pane is zoomed: only it is on screen (see vtworkspace::Tab)
 
-    implicitWidth: Math.min(240, Math.max(120,
-        label.implicitWidth + 56 + zoomBadge.width + zoomBadge.anchors.rightMargin))
-    implicitHeight: 32
+    // The tab's natural size, in whatever unit the chrome style counts in: logical pixels natively,
+    // whole character cells in the terminal style. `widthQuantum` is what expresses that difference
+    // -- it is 1 natively, so the rounding below is a no-op and the result is the historical pixel
+    // width, and one cell in the terminal style, where it snaps every tab onto the grid.
+    //
+    // The 56 that used to sit here was the label's leading inset, the gap after it and the close
+    // button -- 10 + 4 + 22 -- plus 20 pixels of breathing room the literal never spelled out. All
+    // four are tokens now, `tabSlack` being that leftover, so the sum says what it is made of AND
+    // still comes to 56 natively: a tab is exactly as wide as it always was. `trailingPadding` is
+    // part of that promise -- it is 0 natively, precisely so this sum is unchanged there.
+    readonly property real naturalWidth: label.implicitWidth + chromeStyle.labelPadding
+                                         + chromeStyle.labelGap + chromeStyle.controlWidth
+                                         + chromeStyle.trailingPadding
+                                         + separator.width + chromeStyle.tabSlack
+                                         + zoomBadge.width + zoomBadge.anchors.rightMargin
+    implicitWidth: chromeStyle.widthQuantum
+                   * Math.round(Math.min(chromeStyle.maxTabWidth,
+                                         Math.max(chromeStyle.minTabWidth, root.naturalWidth))
+                                / chromeStyle.widthQuantum)
+    implicitHeight: chromeStyle.tabHeight
 
     // Live OS palette handle so the tab adapts to dark/light in realtime (see TabContextMenu).
     SystemPalette {
@@ -41,10 +58,17 @@ Item {
     // Uncolored tabs report a transparent accentColor (WindowController ColorRole), so alpha is the flag.
     readonly property bool colored: root.tabColor.a > 0
 
+    // Whether this is the strip's trailing tab, which is what decides if it draws a separator (see
+    // the separator near the bottom of this file). Read from the view rather than passed in, so a
+    // TabItem stays instantiable on its own: `ListView.view` is null outside a strip, which reads as
+    // "there could be a tab after this one" and keeps the separator -- the conservative answer.
+    readonly property bool lastInStrip: root.ListView.view
+                                        ? root.tabIndex === root.ListView.view.count - 1
+                                        : false
+
     // Subtle highlight wash shared by the uncolored-tab hover fill and the close button's hover, so the
     // hover tint (color + alpha) is defined once.
-    readonly property color hoverWash: Qt.rgba(systemPalette.highlight.r, systemPalette.highlight.g,
-                                               systemPalette.highlight.b, 0.25)
+    readonly property color hoverWash: chromeStyle.wash(systemPalette.highlight)
 
     // The fill behind the label; also drives text contrast. Colored: the WT-style fade from
     // TabColorScheme.h (via the controller). Uncolored: OS highlight / hover wash / transparent.
@@ -201,10 +225,13 @@ Item {
         id: label
         objectName: "tabLabel"   // findChild() handle for the GUI test
         anchors.left: parent.left
-        anchors.leftMargin: 10
+        anchors.leftMargin: chromeStyle.labelPadding
         anchors.right: zoomBadge.left
-        anchors.rightMargin: 4
+        anchors.rightMargin: chromeStyle.labelGap
         anchors.verticalCenter: parent.verticalCenter
+        // The chrome font: the platform UI font natively, the terminal's monospace font in the
+        // terminal style, which is what puts the label on the same grid as the content below.
+        font: chromeStyle.font
         text: root.tabTitle
         color: root.foreground
         elide: Text.ElideRight
@@ -221,11 +248,11 @@ Item {
         // Collapse to nothing — width AND margin — when not zoomed. The label anchors to this item's
         // left edge, so anything it still occupies is stolen from every tab's title, zoomed or not:
         // a fixed margin here would elide the title 4px early on tabs that have no badge at all.
-        anchors.rightMargin: root.tabZoomed ? 4 : 0
+        anchors.rightMargin: root.tabZoomed ? chromeStyle.labelGap : 0
         anchors.verticalCenter: parent.verticalCenter
-        width: root.tabZoomed ? height : 0
-        height: 16
-        radius: 3
+        width: root.tabZoomed ? chromeStyle.badgeWidth : 0
+        height: chromeStyle.badgeHeight
+        radius: chromeStyle.radius
         visible: root.tabZoomed
         // Tinted from the tab's own foreground, so the badge tracks the active/inactive and
         // colored/uncolored variants instead of hardcoding a color per theme.
@@ -233,9 +260,8 @@ Item {
 
         Text {
             anchors.centerIn: parent
-            text: "Z"
-            font.pixelSize: 10
-            font.bold: true
+            text: chromeStyle.zoomGlyph
+            font: chromeStyle.badgeFont
             color: root.foreground
         }
     }
@@ -245,9 +271,9 @@ Item {
         id: renameLoader
         active: false
         anchors.left: parent.left
-        anchors.leftMargin: 8
+        anchors.leftMargin: chromeStyle.labelPadding
         anchors.right: zoomBadge.left
-        anchors.rightMargin: 4
+        anchors.rightMargin: chromeStyle.labelGap
         anchors.verticalCenter: parent.verticalCenter
         function start() { active = true }
         sourceComponent: TextField {
@@ -291,15 +317,44 @@ Item {
         }
     }
 
-    ToolButton {
-        id: closeButton
+    // The rule between this tab and the next. It lives inside the tab rather than between delegates
+    // so the ListView keeps one item per tab -- the drop-slot math in TabStrip walks itemAtIndex()
+    // and the drag payload is per delegate, both of which a wrapper Row would quietly break.
+    //
+    // A style that sets tabs flush reports an empty glyph, so this collapses to zero width and the
+    // strip looks exactly as it always did.
+    Text {
+        id: separator
+        objectName: "tabSeparator"
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
-        width: 22
-        height: 22
-        text: "✕" // ✕
+        // Nothing follows the last tab, so a rule there separates it from the "+" button rather than
+        // from a neighbour -- it reads as a tab cut off at the edge of the strip. Dropping the TEXT
+        // rather than hiding the item is what also returns its cell to that tab's label, because
+        // naturalWidth above sums this item's width.
+        //
+        // No emptiness guard on the glyph itself: a style that sets tabs flush reports an empty one,
+        // and an empty Text already has zero implicitWidth and paints nothing. Testing it here would
+        // be the QML asking which style is active, which it must never do.
+        text: root.lastInStrip ? "" : chromeStyle.tabSeparator
+        font: chromeStyle.font
+        color: root.foreground
+    }
+
+    ToolButton {
+        id: closeButton
+        objectName: "tabCloseButton"   // findChild() handle for the GUI test
+        anchors.right: separator.left
+        // The trailing counterpart of the label's leading inset. It is what keeps the glyph off
+        // whatever ends the tab -- in a style that rules between tabs, the close button sat flush
+        // against that rule, so "×│" read as one piece of box drawing instead of a button next to a
+        // border. Zero natively, where tabs have no drawn edge. @see naturalWidth, which sums it.
+        anchors.rightMargin: chromeStyle.trailingPadding
+        anchors.verticalCenter: parent.verticalCenter
+        width: chromeStyle.controlWidth
+        height: chromeStyle.controlHeight
+        text: chromeStyle.closeGlyph
         Accessible.name: qsTr("Close tab %1").arg(root.tabTitle)
-        font.pointSize: 8
         // Don't take keyboard focus away from the terminal when clicked.
         focusPolicy: Qt.NoFocus
         onClicked: root.controller.closeTabAtIndex(root.tabIndex)
@@ -311,7 +366,7 @@ Item {
         // Share the label's foreground so the glyph stays legible on colored fills and in light mode.
         contentItem: Text {
             text: closeButton.text
-            font: closeButton.font
+            font: chromeStyle.closeFont
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             color: root.foreground

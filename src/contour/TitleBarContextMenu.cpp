@@ -60,14 +60,14 @@ namespace
     {
         auto entries = std::vector<ContextMenuEntry> {};
 
-        for (auto const& info: config::tabBarModes<config::TabBarVisibility>())
+        for (auto const& info: config::configEnumValues<config::TabBarVisibility>())
             entries.emplace_back(
                 ContextMenuEntry { .kind = ContextMenuEntryKind::Command,
                                    .title = std::string { info.label },
-                                   .action = actions::SetTabBarVisibility { .mode = info.mode },
+                                   .action = actions::SetTabBarVisibility { .mode = info.value },
                                    .enabled = true,
                                    .checkable = true,
-                                   .checked = info.mode == state.tabBarVisibility,
+                                   .checked = info.value == state.tabBarVisibility,
                                    .children = {} });
 
         return entries;
@@ -78,14 +78,14 @@ namespace
     {
         auto entries = std::vector<ContextMenuEntry> {};
 
-        for (auto const& info: config::tabBarModes<config::TabBarPosition>())
+        for (auto const& info: config::configEnumValues<config::TabBarPosition>())
             entries.emplace_back(
                 ContextMenuEntry { .kind = ContextMenuEntryKind::Command,
                                    .title = std::string { info.label },
-                                   .action = actions::SetTabBarPosition { .position = info.mode },
+                                   .action = actions::SetTabBarPosition { .position = info.value },
                                    .enabled = true,
                                    .checkable = true,
-                                   .checked = info.mode == state.tabBarPosition,
+                                   .checked = info.value == state.tabBarPosition,
                                    .children = {} });
 
         return entries;

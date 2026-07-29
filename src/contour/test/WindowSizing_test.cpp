@@ -38,7 +38,7 @@ TEST_CASE("chromeHeight is a plain declared property with change notification", 
     QSignalSpy const spy(controller.controller, &contour::WindowController::chromeHeightChanged);
 
     // With no active display the setter is a pure property write + signal (no hint refresh) — the
-    // declared-chrome contract main.qml relies on when it binds chromeHeight before any display
+    // declared-chrome contract Main.qml relies on when it binds chromeHeight before any display
     // exists.
     controller->setChromeHeight(34);
     CHECK(controller->chromeHeight() == 34);

@@ -30,12 +30,16 @@ RowLayout {
     component ControlButton: ToolButton {
         id: control
         Layout.fillHeight: true
-        implicitWidth: 44
+        // Wider than a tab-strip control, and from the token table rather than a literal: these sit in
+        // the same bar as the tab strip, so in a one-row chrome a pinned 44px would be the one part
+        // that never joins the grid.
+        implicitWidth: chromeStyle.windowControlWidth
         // The glyphs below are Unicode window-control symbols (—, ❐, ▢, ✕), not code, so they render
-        // fine in the default UI font. Do NOT pin a "monospace"/"Monospace" family here: that generic
-        // alias has no match on some platforms (notably macOS), forcing Qt into an expensive
-        // font-family-alias populate ("Populating font family aliases took … ms") on startup.
-        font.pointSize: 10
+        // fine in the default UI font. The chrome font is used rather than a pinned point size, and
+        // resolveChromeFont() is what decides whether that is the platform UI font or the terminal's
+        // — so no "monospace"/"Monospace" family is ever pinned HERE, which on some platforms
+        // (notably macOS) has no match and forces an expensive font-family-alias populate on startup.
+        font: chromeStyle.windowControlFont
         // Window controls must not steal keyboard focus from the terminal.
         focusPolicy: Qt.NoFocus
 
@@ -43,11 +47,7 @@ RowLayout {
         // opaque style button panel; a subtle highlight wash gives hover feedback. The close button
         // overrides this with its red hover fill below.
         background: Rectangle {
-            color: control.hovered ? Qt.rgba(systemPalette.highlight.r,
-                                             systemPalette.highlight.g,
-                                             systemPalette.highlight.b,
-                                             0.25)
-                                   : "transparent"
+            color: control.hovered ? chromeStyle.wash(systemPalette.highlight) : "transparent"
         }
 
         // Explicit, theme-aware glyph rendering keeps the glyph legible on the transparent title bar

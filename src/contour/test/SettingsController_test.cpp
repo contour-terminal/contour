@@ -414,7 +414,7 @@ TEST_CASE("SettingsController: the tab bar fields are global and offer their tab
     // configuration reader accepts -- asserted against the table itself rather than a second literal
     // list, which is the whole point of the table.
     auto expected = QStringList {};
-    for (auto const& info: config::tabBarModes<config::TabBarVisibility>())
+    for (auto const& info: config::configEnumValues<config::TabBarVisibility>())
         expected.push_back(QString::fromUtf8(info.token.data(), static_cast<qsizetype>(info.token.size())));
 
     auto options = QStringList {};
@@ -441,6 +441,47 @@ TEST_CASE("SettingsController: the tab bar fields are global and offer their tab
         profileKeys.push_back(row.toMap().value("key").toString());
     CHECK(!profileKeys.contains("tab_bar_position"));
     CHECK(!profileKeys.contains("tab_bar_visibility"));
+}
+
+TEST_CASE("SettingsController: the chrome style is a global field offering its table's tokens", "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+
+    // Same discipline as the tab bar rows above: the options come from contour/UiStyle.h, so the page
+    // cannot offer a token the configuration reader would then reject.
+    auto expected = QStringList {};
+    for (auto const& info: config::configEnumValues<config::UiStyle>())
+        expected.push_back(QString::fromUtf8(info.token.data(), static_cast<qsizetype>(info.token.size())));
+
+    auto options = QStringList {};
+    auto type = QString {};
+    auto keys = QStringList {};
+    for (auto const& row: fx.controller->globalFields())
+    {
+        keys.push_back(row.toMap().value("key").toString());
+        if (row.toMap().value("key").toString() == "ui_style")
+        {
+            type = row.toMap().value("type").toString();
+            options = row.toMap().value("options").toStringList();
+        }
+    }
+    CHECK(type == "enum");
+    CHECK(options == expected);
+    CHECK(keys.contains("ui_font_family"));
+    CHECK(keys.contains("ui_font_size"));
+
+    REQUIRE(fx.controller->setGlobalField("ui_style", "terminal"));
+    CHECK(fx.cfg.uiStyle.value() == config::UiStyle::Terminal);
+
+    REQUIRE(fx.controller->setGlobalField("ui_font_family", "JetBrains Mono"));
+    CHECK(fx.cfg.uiFontFamily.value() == "JetBrains Mono");
+
+    REQUIRE(fx.controller->setGlobalField("ui_font_size", 11.0));
+    CHECK(fx.cfg.uiFontSize.value() == 11.0);
+
+    // Resetting drops the override, so the value falls back to what contour.yml says.
+    fx.controller->resetGlobalField("ui_style");
+    CHECK(fx.cfg.uiStyle.value() == config::UiStyle::Native);
 }
 
 TEST_CASE("SettingsController: exposes the configured keybindings read-only", "[settings]")

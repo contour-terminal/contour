@@ -75,7 +75,7 @@ ContourTerminal {
     // the sole window-close path now that the pane tree is the only renderer.
     onTerminated: {
         console.debug(paneLog, "Client process terminated in pane.");
-        // Ask THIS OS window's controller (main.qml's `win`) whether its last pane just exited. Per-window,
+        // Ask THIS OS window's controller (Main.qml's `win`) whether its last pane just exited. Per-window,
         // so the last pane of this window closes only this window; other in-process windows are unaffected.
         if (Window.window && Window.window.win && Window.window.win.canCloseWindow())
             Window.window.close();

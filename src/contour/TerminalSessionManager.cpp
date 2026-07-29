@@ -460,7 +460,7 @@ void TerminalSessionManager::launchLayout(std::string const& name, TerminalSessi
 
 bool TerminalSessionManager::consumeDefaultLayout(contour::WindowController* controller)
 {
-    // One-shot: main.qml calls this for EVERY window it loads, but the startup layout belongs to
+    // One-shot: Main.qml calls this for EVERY window it loads, but the startup layout belongs to
     // the first window only — a later NewTerminalWindow must not re-run all the layout's commands.
     if (_startupLayoutConsumed)
         return false;
@@ -1243,7 +1243,7 @@ void TerminalSessionManager::tearOffTabToNewWindow(vtworkspace::WindowId from,
     if (srcWindow != nullptr && srcWindow->tabCount() <= 1)
         return;
 
-    // Stage the transplant, then spawn a window. The new window's main.qml consumes the staged tab in
+    // Stage the transplant, then spawn a window. The new window's Main.qml consumes the staged tab in
     // Component.onCompleted (via consumePendingTransplant) INSTEAD of creating a fresh first tab, so the
     // torn-off tab becomes its sole tab — its sessions survive the move (nothing is torn down).
     _pendingTransplant = std::pair { from, tab->id() };

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Offscreen end-to-end load test for main.qml — the startup contract between the root
+// Offscreen end-to-end load test for Main.qml — the startup contract between the root
 // ApplicationWindow and its WindowController:
 //
 //   * the window is NOT visible after the QML loads (visible:false at declaration; only the
@@ -15,6 +15,7 @@
 // without PTYs or displays. activeTabRootPane stays null, so the pane tree (which would need a real
 // TerminalDisplay) never instantiates — exactly the pre-first-session state.
 
+#include <contour/test/QmlChromeStyle.h>
 #include <contour/test/QmlMessageCapture.h>
 
 #include <QtCore/QAbstractListModel>
@@ -38,7 +39,7 @@
 namespace
 {
 
-/// A trivial stand-in registered as Contour.Terminal/ContourTerminal so main.qml's static type
+/// A trivial stand-in registered as Contour.Terminal/ContourTerminal so Main.qml's static type
 /// chain (PaneNode -> TerminalPane -> ContourTerminal) resolves in the test engine. Never
 /// instantiated here: activeTabRootPane stays null, so the pane Loader remains inactive.
 class StubContourTerminal: public QQuickItem
@@ -67,7 +68,7 @@ class StubContourTerminal: public QQuickItem
 };
 
 /// Manager + WindowController in one mock: `terminalSessions` context property AND the object
-/// main.qml assigns to `win` (createWindowController returns this). The QAbstractListModel rows
+/// Main.qml assigns to `win` (createWindowController returns this). The QAbstractListModel rows
 /// feed the TitleBar's TabStrip like the production WindowController's model does.
 class MockMainController: public QAbstractListModel
 {
@@ -76,7 +77,7 @@ class MockMainController: public QAbstractListModel
     Q_PROPERTY(bool multimediaReady READ multimediaReady CONSTANT)
     Q_PROPERTY(bool titleBarVisible READ titleBarVisible NOTIFY titleBarVisibleChanged)
     // Tab-strip placement + resolved visibility, mirroring the production WindowController properties
-    // main.qml binds. Writable here so a test can flip them and re-load main.qml to assert the layout.
+    // Main.qml binds. Writable here so a test can flip them and re-load Main.qml to assert the layout.
     Q_PROPERTY(int tabBarPosition READ tabBarPosition WRITE setTabBarPosition NOTIFY tabBarPositionChanged)
     Q_PROPERTY(
         bool tabBarShouldShow READ tabBarShouldShow WRITE setTabBarShouldShow NOTIFY tabBarShouldShowChanged)
@@ -84,16 +85,16 @@ class MockMainController: public QAbstractListModel
     Q_PROPERTY(int chromeHeight READ chromeHeight WRITE setChromeHeight NOTIFY chromeHeightChanged)
     Q_PROPERTY(QObject* activeTabRootPane READ activeTabRootPane CONSTANT)
     Q_PROPERTY(QObject* activeSession READ activeSession CONSTANT)
-    // Mirrors WindowController's command-palette surface. main.qml instantiates CommandPalette.qml
+    // Mirrors WindowController's command-palette surface. Main.qml instantiates CommandPalette.qml
     // against this controller and Connections-targets its commandPaletteRequested signal, so the mock
     // must carry both — a missing signal is a QML warning, and the run-wide gate turns that into a
     // failure of the whole suite. A null model is what an unopened palette shows anyway.
     Q_PROPERTY(QObject* commandPalette READ commandPalette CONSTANT)
-    // Ditto for the context-menu surface: main.qml instantiates ActionContextMenu.qml against this
+    // Ditto for the context-menu surface: Main.qml instantiates ActionContextMenu.qml against this
     // controller, binds its `entries` to contextMenuModel and Connections-targets contextMenuRequested.
     // An empty model is what a menu that has never been opened holds anyway.
     Q_PROPERTY(QVariantList contextMenuModel READ contextMenuModel NOTIFY contextMenuModelChanged)
-    // Ditto for the title bar's own menu surface, which main.qml instantiates alongside it.
+    // Ditto for the title bar's own menu surface, which Main.qml instantiates alongside it.
     Q_PROPERTY(QVariantList titleBarContextMenuModel READ titleBarContextMenuModel NOTIFY
                    titleBarContextMenuModelChanged)
 
@@ -150,7 +151,7 @@ class MockMainController: public QAbstractListModel
     [[nodiscard]] QObject* commandPalette() const noexcept { return nullptr; }
     Q_INVOKABLE void runCommand(QString const&) {}
     /// Mirrors WindowController::openCommandPalette(): what the manager calls for the
-    /// OpenCommandPalette action, and what makes main.qml's popup appear.
+    /// OpenCommandPalette action, and what makes Main.qml's popup appear.
     Q_INVOKABLE void openCommandPalette() { emit commandPaletteRequested(); }
 
     [[nodiscard]] QVariantList contextMenuModel() const { return {}; }
@@ -159,10 +160,10 @@ class MockMainController: public QAbstractListModel
     Q_INVOKABLE void triggerTitleBarContextMenuAction(int /*actionId*/) {}
     Q_INVOKABLE void triggerContextMenuAction(int) {}
     /// Mirrors WindowController::openContextMenu(): what the manager calls for the OpenContextMenu
-    /// action, and what makes main.qml pop the terminal's right-click menu.
+    /// action, and what makes Main.qml pop the terminal's right-click menu.
     Q_INVOKABLE void openContextMenu() { emit contextMenuRequested(); }
 
-    // The startup sequence main.qml's Component.onCompleted drives, recorded for the order check.
+    // The startup sequence Main.qml's Component.onCompleted drives, recorded for the order check.
     Q_INVOKABLE QObject* createWindowController()
     {
         calls << QStringLiteral("createWindowController");
@@ -265,7 +266,7 @@ class MockMainController: public QAbstractListModel
     void tabTitleEditRequested(int /*index*/);
     // Matches TabItem's Connections handler; a missing signal here is a QML warning, not a silent no-op.
     void tabColorPickRequested(int /*index*/);
-    // Matches main.qml's Connections handler for the save-layout prompt; a missing signal here is a QML
+    // Matches Main.qml's Connections handler for the save-layout prompt; a missing signal here is a QML
     // warning, and the run-wide gate turns that into a failure of the whole suite.
     void saveLayoutRequested();
 
@@ -275,9 +276,9 @@ class MockMainController: public QAbstractListModel
     bool _tabBarShouldShow = true; // strip shown by default
 };
 
-/// Loads main.qml offscreen against @p controller and returns the created root object: registers the
+/// Loads Main.qml offscreen against @p controller and returns the created root object: registers the
 /// ContourTerminal stub type, pins the mock to C++ ownership, exposes it as `terminalSessions`, waits
-/// for the component to finish loading, and asserts a diagnostic-free load. Every main.qml load case
+/// for the component to finish loading, and asserts a diagnostic-free load. Every Main.qml load case
 /// (startup ordering + the tab-strip layout cases) goes through here so the load protocol lives in one
 /// place. Fails the enclosing test (via REQUIRE) if the component does not load cleanly.
 /// @param engine     The QML engine (kept alive by the caller for the root's lifetime).
@@ -295,12 +296,13 @@ class MockMainController: public QAbstractListModel
     QQmlEngine::setObjectOwnership(&controller, QQmlEngine::CppOwnership);
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/main.qml")));
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/Main.qml")));
     while (component.status() == QQmlComponent::Loading)
         QCoreApplication::processEvents();
     if (!component.isReady())
         for (auto const& error: component.errors())
-            UNSCOPED_INFO("main.qml error: " << error.toString().toStdString());
+            UNSCOPED_INFO("Main.qml error: " << error.toString().toStdString());
     REQUIRE(component.isReady());
 
     std::unique_ptr<QObject> root(component.create());
@@ -315,7 +317,7 @@ class MockMainController: public QAbstractListModel
 
 } // namespace
 
-TEST_CASE("main.qml startup: sized-before-shown ordering and declared chrome (offscreen)",
+TEST_CASE("Main.qml startup: sized-before-shown ordering and declared chrome (offscreen)",
           "[contour][gui][qml][mainwindow]")
 {
     QQmlEngine engine;
@@ -346,13 +348,13 @@ TEST_CASE("main.qml startup: sized-before-shown ordering and declared chrome (of
     CHECK(controller.chromeHeight() == 34);
 }
 
-TEST_CASE("main.qml tab strip: visibility gate collapses the chrome when hidden (offscreen)",
+TEST_CASE("Main.qml tab strip: visibility gate collapses the chrome when hidden (offscreen)",
           "[contour][gui][qml][mainwindow]")
 {
     // When win.tabBarShouldShow is false (tab_bar_visibility: Never, or Multiple with a single tab),
     // the TitleBar collapses: its effectiveHeight -> 0 -> the declared chromeHeight -> 0, and the strip
     // item is not visible. When true, the strip occupies its 34px implicitHeight (as the startup test
-    // already pins). Driving the mock property proves the real main.qml binding reacts.
+    // already pins). Driving the mock property proves the real Main.qml binding reacts.
     SECTION("hidden -> zero chrome, strip invisible")
     {
         QQmlEngine engine;
@@ -382,7 +384,7 @@ TEST_CASE("main.qml tab strip: visibility gate collapses the chrome when hidden 
     }
 }
 
-TEST_CASE("main.qml tab strip: position flips the title-bar / content stacking (offscreen)",
+TEST_CASE("Main.qml tab strip: position flips the title-bar / content stacking (offscreen)",
           "[contour][gui][qml][mainwindow]")
 {
     // The strip is pinned to the top OR bottom edge via conditional anchors; the content area fills the

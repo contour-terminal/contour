@@ -83,3 +83,16 @@ Parameter                 | Description
 `ActiveColor`             | color of the active tab
 `ActiveBackground`        | background color of the active tab
 
+!!! note "`{Tabs}` versus the GUI tab bar"
+
+    The indicator status line belongs to a *pane*, so with split panes a window draws one `{Tabs}`
+    list per pane rather than one per window — several tab lists side by side, each describing the
+    same tabs.
+
+    If what you want is the terminal look rather than the placement, set the global
+    [`ui_style`](index.md#ui_style) to `terminal`. That keeps the single window-level tab bar and
+    every one of its affordances (drag to reorder, tear off, rename, close, context menu) but draws
+    it cell-quantized, in the terminal font, with square corners and box-drawing separators.
+
+    `{Tabs}` remains fully supported, and the two can be used together.
+

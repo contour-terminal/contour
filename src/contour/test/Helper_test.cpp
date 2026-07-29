@@ -20,6 +20,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <ranges>
 
@@ -480,4 +481,30 @@ input_mapping:
         contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session);
         CHECK_FALSE(pty.stdinBuffer().empty());
     }
+}
+
+TEST_CASE("toQString decodes a path in the encoding it is actually stored in", "[contour][helper]")
+{
+    // QString::fromStdString(path.generic_string()) is the obvious spelling and is silently lossy on
+    // Windows: generic_string() narrows the native wide path through the ANSI code page while
+    // fromStdString() decodes UTF-8. Any non-ASCII character in a user's profile directory then comes
+    // back as replacement characters, and whatever the path was handed to -- a QML import path, a
+    // file watcher -- points at a directory that does not exist, with no diagnostic anywhere.
+    //
+    // Built from a u8 literal rather than a wide one: path's char8_t constructor is defined to read
+    // UTF-8 and encode to whatever the platform stores natively, so the fixture means the same thing
+    // on Windows and POSIX without depending on the runner's locale.
+    auto const home = std::filesystem::path(u8"C:/Users/J\u00fcrgen/AppData/Roaming/contour");
+    CHECK(contour::toQString(home) == QStringLiteral("C:/Users/J\u00fcrgen/AppData/Roaming/contour"));
+
+    // Round-tripping is the property that matters: whatever came out has to still name the same path.
+    CHECK(std::filesystem::path(contour::toQString(home).toStdU16String()) == home);
+
+    // Generic separators, so the result is in the form Qt's own path APIs use rather than the
+    // platform's -- which on Windows is the difference between a usable QML import path and one Qt
+    // will not match against.
+    CHECK(contour::toQString(home / "Contour" / "Ui")
+          == QStringLiteral("C:/Users/J\u00fcrgen/AppData/Roaming/contour/Contour/Ui"));
+
+    CHECK(contour::toQString(std::filesystem::path {}).isEmpty());
 }

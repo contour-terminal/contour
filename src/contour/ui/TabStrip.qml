@@ -106,8 +106,8 @@ Row {
         // rounded and opaque so the drop position is unmistakable during a drag.
         Rectangle {
             id: dropIndicator
-            width: 4
-            radius: 2
+            width: chromeStyle.dropCaretWidth
+            radius: chromeStyle.radius
             height: parent.height
             color: palette.highlight
             visible: dropArea.containsDrag
@@ -178,7 +178,7 @@ Row {
         // `=== true` coerces a missing/undefined property (a lightweight mock controller in the offscreen
         // tests) to a real bool, so the binding never assigns undefined.
         visible: root.controller !== null && root.controller.settingsActive === true
-        width: visible ? settingsTabRow.implicitWidth + 20 : 0
+        width: visible ? settingsTabRow.implicitWidth + (2 * chromeStyle.labelPadding) : 0
 
         SystemPalette {
             id: settingsTabPalette
@@ -195,36 +195,35 @@ Row {
             id: settingsTabRow
             anchors.verticalCenter: parent.verticalCenter
             anchors.left: parent.left
-            anchors.leftMargin: 10
-            spacing: 6
+            anchors.leftMargin: chromeStyle.labelPadding
+            spacing: chromeStyle.labelGap
 
             Label {
                 text: qsTr("⚙ Settings")
+                font: chromeStyle.font
                 color: settingsTabPalette.highlightedText
                 anchors.verticalCenter: parent.verticalCenter
             }
             ToolButton {
                 id: settingsTabClose
                 objectName: "settingsTabClose"
-                width: 20
-                height: 20
+                width: chromeStyle.controlWidth
+                height: chromeStyle.controlHeight
                 anchors.verticalCenter: parent.verticalCenter
                 focusPolicy: Qt.NoFocus
                 onClicked: if (root.controller) root.controller.closeSettings()
                 contentItem: Label {
-                    text: "✕"
+                    text: chromeStyle.closeGlyph
+                    font: chromeStyle.closeFont
                     Accessible.name: qsTr("Close settings")
                     color: settingsTabPalette.highlightedText
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                 }
                 background: Rectangle {
-                    radius: 3
-                    color: settingsTabClose.hovered
-                           ? Qt.rgba(settingsTabPalette.highlightedText.r,
-                                     settingsTabPalette.highlightedText.g,
-                                     settingsTabPalette.highlightedText.b, 0.25)
-                           : "transparent"
+                    radius: chromeStyle.radius
+                    color: settingsTabClose.hovered ? chromeStyle.wash(settingsTabPalette.highlightedText)
+                                                    : "transparent"
                 }
             }
         }
@@ -232,19 +231,20 @@ Row {
 
     ToolButton {
         id: newTabButton
+        objectName: "newTabButton"
         height: root.height
-        text: "+"
+        text: chromeStyle.newTabGlyph
         Accessible.name: qsTr("New tab")
-        font.pointSize: 12
+        // Wider than a tab's close glyph (see UiStyleTokens::stripButtonUnits): this and the dropdown
+        // beside it are permanent, frequently used targets, so the style pads them out.
+        width: chromeStyle.stripButtonWidth
+        font: chromeStyle.newTabFont
         focusPolicy: Qt.NoFocus
         onClicked: root.controller.createNewTab()
         // Flat, transparent chrome so the button blends into the strip background instead of showing
         // an opaque style button panel; a subtle highlight wash gives hover feedback.
         background: Rectangle {
-            color: newTabButton.hovered ? Qt.rgba(newTabButton.palette.highlight.r,
-                                                  newTabButton.palette.highlight.g,
-                                                  newTabButton.palette.highlight.b,
-                                                  0.25)
+            color: newTabButton.hovered ? chromeStyle.wash(newTabButton.palette.highlight)
                                         : "transparent"
         }
     }
@@ -255,18 +255,16 @@ Row {
         id: newTabMenuButton
         objectName: "newTabMenuButton"
         height: root.height
-        text: "▾"
+        text: chromeStyle.menuGlyph
         Accessible.name: qsTr("New tab with profile")
-        font.pointSize: 10
+        width: chromeStyle.stripButtonWidth
+        font: chromeStyle.menuFont
         focusPolicy: Qt.NoFocus
         ToolTip.visible: hovered
         ToolTip.text: qsTr("New tab with profile…")
         onClicked: newTabMenu.popup(newTabMenuButton, 0, newTabMenuButton.height)
         background: Rectangle {
-            color: newTabMenuButton.hovered ? Qt.rgba(newTabMenuButton.palette.highlight.r,
-                                                      newTabMenuButton.palette.highlight.g,
-                                                      newTabMenuButton.palette.highlight.b,
-                                                      0.25)
+            color: newTabMenuButton.hovered ? chromeStyle.wash(newTabMenuButton.palette.highlight)
                                             : "transparent"
         }
 

@@ -17,6 +17,7 @@
 #include <contour/ContextMenuModel.h>
 #include <contour/Shortcut.h>
 #include <contour/TabColorScheme.h>
+#include <contour/test/QmlChromeStyle.h>
 #include <contour/test/QmlMessageCapture.h>
 
 #include <QtCore/QAbstractListModel>
@@ -47,6 +48,7 @@
 #include <functional>
 #include <memory>
 #include <ranges>
+#include <utility>
 
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
@@ -64,7 +66,7 @@ class MockTabController: public QAbstractListModel
     // Mirrors TerminalSessionManager::multimediaReady, which SessionChrome.qml's bell Loader gates on.
     Q_PROPERTY(bool multimediaReady READ multimediaReady CONSTANT)
     // Mirrors TerminalSessionManager::titleBarVisible (re-homed from the removed vtui): the window-decoration
-    // axis main.qml binds its flags / custom controls / resize border to.
+    // axis Main.qml binds its flags / custom controls / resize border to.
     Q_PROPERTY(
         bool titleBarVisible READ titleBarVisible WRITE setTitleBarVisible NOTIFY titleBarVisibleChanged)
     // Mirrors TerminalSessionManager::splitHandleThickness; PaneNode.qml's explicit SplitView handle
@@ -528,26 +530,27 @@ TEST_CASE("GUI QML tab components load without errors (offscreen)", "[contour][g
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
-    // Each component is registered in resources.qrc under qrc:/contour/ui/.
+    contour::test::installChromeStyle(engine);
+    // Each component is registered in resources.qrc under qrc:/qt/qml/Contour/Ui/.
     auto const components = std::array {
-        QStringLiteral("qrc:/contour/ui/TabItem.qml"),
-        QStringLiteral("qrc:/contour/ui/TabContextMenu.qml"),
-        QStringLiteral("qrc:/contour/ui/TabColorFlyout.qml"),
-        QStringLiteral("qrc:/contour/ui/NewTabMenu.qml"),
-        QStringLiteral("qrc:/contour/ui/TabStrip.qml"),
-        QStringLiteral("qrc:/contour/ui/WindowControls.qml"),
-        QStringLiteral("qrc:/contour/ui/ResizeBorder.qml"),
-        QStringLiteral("qrc:/contour/ui/TitleBar.qml"),
-        QStringLiteral("qrc:/contour/ui/SessionChrome.qml"),
-        QStringLiteral("qrc:/contour/ui/CommandPalette.qml"),
-        QStringLiteral("qrc:/contour/ui/SaveLayoutDialog.qml"),
-        QStringLiteral("qrc:/contour/ui/ActionContextMenu.qml"),
-        QStringLiteral("qrc:/contour/ui/SettingsNavItem.qml"),
-        QStringLiteral("qrc:/contour/ui/SettingsListItem.qml"),
-        QStringLiteral("qrc:/contour/ui/ConfirmDialog.qml"),
-        QStringLiteral("qrc:/contour/ui/SettingRow.qml"),
-        QStringLiteral("qrc:/contour/ui/ColorSchemeEditor.qml"),
-        QStringLiteral("qrc:/contour/ui/SettingsPage.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/TabItem.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/TabContextMenu.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/TabColorFlyout.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/NewTabMenu.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/TabStrip.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/WindowControls.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/ResizeBorder.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/TitleBar.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/SessionChrome.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/CommandPalette.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/SaveLayoutDialog.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/ActionContextMenu.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsNavItem.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsListItem.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/ConfirmDialog.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingRow.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/ColorSchemeEditor.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsPage.qml"),
     };
 
     for (auto const& url: components)
@@ -573,7 +576,8 @@ TEST_CASE("Tab context menu exposes all its actions (offscreen)", "[contour][gui
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/TabContextMenu.qml")));
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TabContextMenu.qml")));
     REQUIRE(component.isReady());
 
     QVariantMap initial;
@@ -603,6 +607,7 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
+    contour::test::installChromeStyle(engine);
     auto const state = contour::ContextMenuState {
         .hasSelection = false, // Copy must come out present-but-disabled
         .clipboardHasText = true,
@@ -618,7 +623,7 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
     auto const model = contour::toContextMenuModel(contour::buildContextMenu(state), actions);
     REQUIRE_FALSE(model.isEmpty());
 
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/ActionContextMenu.qml")));
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/ActionContextMenu.qml")));
     INFO("component errors: " << component.errorString().toStdString());
     REQUIRE(component.isReady());
 
@@ -692,7 +697,8 @@ TEST_CASE("GUI tab strip instantiates and binds against a populated model (offsc
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/TabStrip.qml")));
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TabStrip.qml")));
     REQUIRE(component.isReady());
 
     QVariantMap initial;
@@ -721,7 +727,8 @@ TEST_CASE("A colored TabItem fills with the user color and picks contrasting tex
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/TabItem.qml")));
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TabItem.qml")));
     REQUIRE(component.isReady());
 
     // A dark palette red: active fill == the color itself; text must be white for contrast.
@@ -786,7 +793,7 @@ enum class TabStripAt : std::uint8_t
                                                     QString const& name)
 {
     QQmlComponent component(&engine);
-    component.setData(source.toUtf8(), QUrl(QStringLiteral("qrc:/contour/ui/%1").arg(name)));
+    component.setData(source.toUtf8(), QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/%1").arg(name)));
     while (component.status() == QQmlComponent::Loading)
         QCoreApplication::processEvents();
 
@@ -832,13 +839,14 @@ constexpr auto TabItemBindings = "    controller: terminalSessions\n"
 {
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
-    // `y` mirrors main.qml, which anchors the TitleBar to the bottom edge under `tab_bar_position: Bottom`
+    contour::test::installChromeStyle(engine);
+    // `y` mirrors Main.qml, which anchors the TitleBar to the bottom edge under `tab_bar_position: Bottom`
     // (`y: parent.height - titleBar.height`). `x` puts the tab at the window's RIGHT edge in that case
     // too, so one host covers both axes a popup can overflow on.
     auto const bottom = stripAt == TabStripAt::Bottom;
     auto const source = QStringLiteral("import QtQuick\n"
                                        "import QtQuick.Window\n"
-                                       "import \"qrc:/contour/ui\"\n"
+                                       "import Contour.Ui\n"
                                        "Window {\n"
                                        "  id: host\n"
                                        "  width: %1; height: 600; visible: true\n"
@@ -941,7 +949,7 @@ TEST_CASE("The tab color flyout opens inside the window, wherever the tab strip 
     // is only how it is honored when there is room there.
     //
     // The tab is hosted at the window's edge here, which is exactly what `tab_bar_position: Bottom` does
-    // (main.qml anchors the TitleBar at `parent.height - titleBar.height`) — and what the tests above, all
+    // (Main.qml anchors the TitleBar at `parent.height - titleBar.height`) — and what the tests above, all
     // of which host the tab at 0,0 in a big window, structurally cannot see.
     contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
@@ -1271,7 +1279,8 @@ TEST_CASE("A zoomed TabItem shows the zoom badge and gives it back its width whe
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/TabItem.qml")));
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TabItem.qml")));
     REQUIRE(component.isReady());
 
     QVariantMap initial;
@@ -1328,7 +1337,8 @@ TEST_CASE("GUI tab strip survives controller destruction without QML errors (off
     auto controller = std::make_unique<MockTabController>();
     engine.rootContext()->setContextProperty("terminalSessions", controller.get());
 
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/TabStrip.qml")));
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TabStrip.qml")));
     REQUIRE(component.isReady());
 
     QVariantMap initial;
@@ -1339,7 +1349,7 @@ TEST_CASE("GUI tab strip survives controller destruction without QML errors (off
     QCoreApplication::processEvents();
 
     // Push the null through the strip's `controller` property the way the app's teardown does:
-    // main.qml's `win` var property nulls with notification when the C++ controller dies, and QML
+    // Main.qml's `win` var property nulls with notification when the C++ controller dies, and QML
     // propagates that null down the binding chain (TitleBar.controller -> TabStrip.controller),
     // re-evaluating every dependent binding against null. The push happens here while the model
     // object is still alive, mirroring the propagation-before-model-teardown window (and keeping the
@@ -1373,7 +1383,8 @@ TEST_CASE("SessionChrome instantiates and wires a (null) session without errors 
     MockTabController controller; // provides the `terminalSessions.multimediaReady` the bell Loader gates on
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/SessionChrome.qml")));
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SessionChrome.qml")));
     while (component.status() == QQmlComponent::Loading)
         QCoreApplication::processEvents();
     {
@@ -1417,7 +1428,8 @@ TEST_CASE("SessionChrome scrollbar renders as a styled grabbable overlay (offscr
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/SessionChrome.qml")));
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SessionChrome.qml")));
     while (component.status() == QQmlComponent::Loading)
         QCoreApplication::processEvents();
     REQUIRE(component.isReady());
@@ -1468,13 +1480,13 @@ struct ChromeHost
     QQmlComponent component(&engine);
     component.setData(QByteArrayLiteral("import QtQuick\n"
                                         "import QtQuick.Window\n"
-                                        "import \"qrc:/contour/ui\"\n"
+                                        "import Contour.Ui\n"
                                         "Window {\n"
                                         "  width: 400; height: 300; visible: true\n"
                                         "  property alias chrome: chromeItem\n"
                                         "  SessionChrome { id: chromeItem; session: null }\n"
                                         "}\n"),
-                      QUrl(QStringLiteral("qrc:/contour/ui/ScrollBarWrapper.qml")));
+                      QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/ScrollBarWrapper.qml")));
     while (component.status() == QQmlComponent::Loading)
         QCoreApplication::processEvents();
     INFO("wrapper errors: " << component.errorString().toStdString());
@@ -1520,6 +1532,7 @@ TEST_CASE("SessionChrome scrollbar stays a thin edge overlay, whatever the sessi
     QQmlEngine engine;
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
     contour::test::QmlMessageCapture const warnings;
 
     auto host = createChromeInWindow(engine);
@@ -1591,7 +1604,7 @@ TEST_CASE("No QML detaches an anchor conditionally (the full-pane-scrollbar trap
     // transiently leaves both edges anchored; QQuickAnchors then stretches the item across its parent and
     // latches that as an explicit width/height (QQuickItem::setWidth marks widthValid), which the implicit
     // size can never undo. The item stays parent-sized for good. Bind `x`/`y` instead — see the vbar in
-    // SessionChrome.qml and the TitleBar in main.qml.
+    // SessionChrome.qml and the TitleBar in Main.qml.
     //
     // Comment lines are skipped: the two fix sites document the trap using the very syntax it flags.
     //
@@ -1603,31 +1616,50 @@ TEST_CASE("No QML detaches an anchor conditionally (the full-pane-scrollbar trap
     REQUIRE(conditionalDetach.isValid()); // an invalid pattern matches nothing and guards nothing
 
     auto offenders = QStringList {};
-    auto scanned = 0;
-    auto it = QDirIterator(QStringLiteral(":/contour/ui"),
-                           QStringList { QStringLiteral("*.qml") },
-                           QDir::Files,
-                           QDirIterator::Subdirectories);
-    while (it.hasNext())
-    {
-        auto file = QFile(it.next());
-        REQUIRE(file.open(QIODevice::ReadOnly | QIODevice::Text));
-        ++scanned;
-        auto lineNumber = 0;
-        auto stream = QTextStream(&file);
-        while (!stream.atEnd())
-        {
-            auto const line = stream.readLine();
-            ++lineNumber;
-            if (line.trimmed().startsWith(QStringLiteral("//")))
-                continue;
-            if (conditionalDetach.match(line).hasMatch())
-                offenders
-                    << QStringLiteral("%1:%2: %3").arg(file.fileName()).arg(lineNumber).arg(line.trimmed());
-        }
-    }
+    // EVERY QML module this application ships, by its own resource root (see qt_add_qml_module in
+    // CMakeLists.txt): the raw .qml files live there alongside the qmlcachegen output, which is what
+    // makes this source scan possible at all. A module missing from this list is not scanned and
+    // nothing says so -- the ContourTui style went unscanned exactly that way, because the other
+    // root's files kept a single shared count non-zero. Hence the per-root floor below.
+    auto const roots = std::array {
+        QStringLiteral(":/qt/qml/Contour/Ui"),
+        QStringLiteral(":/qt/qml/ContourTui"),
+    };
+    // Both modules hold well over this many components, so it is a floor on "did this root resolve to
+    // the module at all", not a headcount to keep updated when one file is added or removed.
+    constexpr auto LeastFilesPerRoot = 10;
 
-    REQUIRE(scanned > 0); // a zero-file scan would pass vacuously
+    for (auto const& root: roots)
+    {
+        auto scanned = 0;
+        auto it = QDirIterator(
+            root, QStringList { QStringLiteral("*.qml") }, QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext())
+        {
+            auto file = QFile(it.next());
+            REQUIRE(file.open(QIODevice::ReadOnly | QIODevice::Text));
+            ++scanned;
+            auto lineNumber = 0;
+            auto stream = QTextStream(&file);
+            while (!stream.atEnd())
+            {
+                auto const line = stream.readLine();
+                ++lineNumber;
+                if (line.trimmed().startsWith(QStringLiteral("//")))
+                    continue;
+                if (conditionalDetach.match(line).hasMatch())
+                    offenders << QStringLiteral("%1:%2: %3")
+                                     .arg(file.fileName())
+                                     .arg(lineNumber)
+                                     .arg(line.trimmed());
+            }
+        }
+
+        // Per root, so a root that resolves to nothing fails instead of hiding behind the other one's
+        // files -- which is exactly how the style module went unscanned when it was first added.
+        INFO("root: " << root.toStdString() << " scanned " << scanned);
+        REQUIRE(scanned >= LeastFilesPerRoot);
+    }
 
     // ONE ScopedMessage covering the CHECK: an INFO raised inside a loop is destroyed on each iteration
     // and never survives to the assertion, so a failure would name no file at all.
@@ -1640,7 +1672,7 @@ TEST_CASE("Tab color flyout offers a dependency-free arbitrary-color entry (offs
           "[contour][gui][qml]")
 {
     // Guards the arbitrary-RGB tab-color feature AND its robustness: the flyout must carry no hard
-    // QtQuick.Dialogs dependency (a missing such module used to cascade up and break the whole main.qml
+    // QtQuick.Dialogs dependency (a missing such module used to cascade up and break the whole Main.qml
     // where it is not installed), yet still expose a hex input field for entering any color. Loading the
     // component without error already proves the absent-module hazard is gone; finding the field proves
     // the entry point is there.
@@ -1648,7 +1680,8 @@ TEST_CASE("Tab color flyout offers a dependency-free arbitrary-color entry (offs
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/TabColorFlyout.qml")));
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TabColorFlyout.qml")));
     while (component.status() == QQmlComponent::Loading)
         QCoreApplication::processEvents();
     REQUIRE(component.isReady());
@@ -1686,6 +1719,7 @@ TEST_CASE("PaneNode renders a split tree without recursive-instantiation errors 
     // component error, so we must watch the message handler).
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
     contour::test::QmlMessageCapture const warnings;
 
     // A split node (vertical) with two leaf children.
@@ -1693,7 +1727,7 @@ TEST_CASE("PaneNode renders a split tree without recursive-instantiation errors 
     auto* rightLeaf = new MockPaneProxy(/*leaf*/ true);
     MockPaneProxy splitNode(/*leaf*/ false, leftLeaf, rightLeaf);
 
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/PaneNode.qml")));
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/PaneNode.qml")));
     {
         INFO("PaneNode.qml errors:");
         for (auto const& e: component.errors())
@@ -1739,13 +1773,14 @@ TEST_CASE("PaneNode survives node becoming null during split teardown (offscreen
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
+    contour::test::installChromeStyle(engine);
     contour::test::QmlMessageCapture const warnings;
 
     auto* leftLeaf = new MockPaneProxy(/*leaf*/ true);
     auto* rightLeaf = new MockPaneProxy(/*leaf*/ true);
     auto splitNode = std::make_unique<MockPaneProxy>(/*leaf*/ false, leftLeaf, rightLeaf);
 
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/PaneNode.qml")));
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/PaneNode.qml")));
     REQUIRE(component.isReady());
 
     QVariantMap initial;
@@ -1781,8 +1816,9 @@ TEST_CASE("PaneNode.clampRatio bounds a divider drag instead of discarding it (o
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
+    contour::test::installChromeStyle(engine);
     auto leaf = std::make_unique<MockPaneProxy>(/*leaf*/ true);
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/PaneNode.qml")));
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/PaneNode.qml")));
     REQUIRE(component.isReady());
     QVariantMap initial;
     initial.insert("node", QVariant::fromValue(static_cast<QObject*>(leaf.get())));
@@ -1824,13 +1860,14 @@ TEST_CASE("Custom window controls show only when the native frame is hidden (off
     // window decoration on every OS:
     //   true  -> native frame + OS window controls; our custom controls must be HIDDEN (no duplicate);
     //   false -> frameless + our custom controls SHOWN.
-    // main.qml wires `useCustomWindowControls: !terminalSessions.titleBarVisible` while the tab strip itself
+    // Main.qml wires `useCustomWindowControls: !terminalSessions.titleBarVisible` while the tab strip itself
     // stays visible regardless. This exercises that exact binding.
     QQmlEngine engine;
     MockTabController controller;
     controller.setTitleBarVisible(false); // profile show_title_bar: false -> frameless CSD
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
+    contour::test::installChromeStyle(engine);
     QQmlComponent component(&engine);
     component.setData(R"(
         import QtQuick
@@ -1863,19 +1900,20 @@ TEST_CASE("Custom window controls show only when the native frame is hidden (off
 TEST_CASE("ToggleTitleBar flips the native-frame axis without stacking decorations (offscreen)",
           "[contour][gui][qml][titlebar]")
 {
-    // ToggleTitleBar switches between native decoration and frameless CSD. main.qml keeps a single
+    // ToggleTitleBar switches between native decoration and frameless CSD. Main.qml keeps a single
     // source of truth (terminalSessions.titleBarVisible) that drives BOTH the window frame (flags) and
     // whether our custom controls render, so the two decorations can never stack into a double frame.
     QQmlEngine engine;
     MockTabController controller; // starts visible (native frame)
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
+    contour::test::installChromeStyle(engine);
     QQmlComponent component(&engine);
     component.setData(R"(
         import QtQuick
         import QtQuick.Window
         Item {
-            // Mirror main.qml: frameless exactly when the native frame is off; custom controls then on.
+            // Mirror Main.qml: frameless exactly when the native frame is off; custom controls then on.
             property bool frameless: !terminalSessions.titleBarVisible
             property bool customControls: !terminalSessions.titleBarVisible
         }
@@ -1915,10 +1953,11 @@ TEST_CASE("PaneNode renders a SINGLE leaf as the whole window without TypeErrors
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
+    contour::test::installChromeStyle(engine);
     contour::test::QmlMessageCapture const warnings;
     MockPaneProxy leaf(/*leaf*/ true);
 
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/PaneNode.qml")));
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/PaneNode.qml")));
     while (component.status() == QQmlComponent::Loading)
         QCoreApplication::processEvents();
     REQUIRE(component.isReady());
@@ -1941,27 +1980,28 @@ TEST_CASE("TerminalPane.onTerminated closes the window only when it is the last 
     // With the pane tree as the sole renderer, TerminalPane.onTerminated is the ONLY window-close path.
     // Bug "closing one pane of a split killed the whole window": after one pane exits, ONE survivor remains,
     // so canCloseWindow() (false while any session remains) must NOT close the window. Only the last exit
-    // does. onTerminated routes through THIS window's controller (main.qml exposes it as the window's `win`
+    // does. onTerminated routes through THIS window's controller (Main.qml exposes it as the window's `win`
     // property), so load the pane inside a Window that declares `property var win` pointing at the mock —
-    // mirroring how main.qml's ApplicationWindow exposes its WindowController.
+    // mirroring how Main.qml's ApplicationWindow exposes its WindowController.
     QQmlEngine engine;
     qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
+    contour::test::installChromeStyle(engine);
     contour::test::QmlMessageCapture const warnings;
 
     QQmlComponent component(&engine);
     component.setData(QByteArrayLiteral("import QtQuick\n"
                                         "import QtQuick.Window\n"
-                                        "import \"qrc:/contour/ui\"\n"
+                                        "import Contour.Ui\n"
                                         "Window {\n"
                                         "  width: 400; height: 300; visible: true\n"
                                         "  property var win: terminalSessions\n"
                                         "  property alias pane: paneItem\n"
                                         "  TerminalPane { id: paneItem; anchors.fill: parent }\n"
                                         "}\n"),
-                      QUrl(QStringLiteral("qrc:/contour/ui/TestWrapper.qml")));
+                      QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TestWrapper.qml")));
     while (component.status() == QQmlComponent::Loading)
         QCoreApplication::processEvents();
     REQUIRE(component.isReady());
@@ -2006,7 +2046,7 @@ namespace
                                                            QQuickWindow& window,
                                                            MockPaneProxy& node)
 {
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/PaneNode.qml")));
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/PaneNode.qml")));
     while (component.status() == QQmlComponent::Loading)
         QCoreApplication::processEvents();
     if (!component.isReady())
@@ -2038,6 +2078,7 @@ TEST_CASE("split: rebinding a leaf's session through null does not raise a TypeE
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
+    contour::test::installChromeStyle(engine);
     QQuickWindow window;
     window.resize(400, 300);
     window.show();
@@ -2078,6 +2119,7 @@ TEST_CASE("split: a pane created already-active renders without error (offscreen
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
+    contour::test::installChromeStyle(engine);
     QQuickWindow window;
     window.resize(400, 300);
     window.show();
@@ -2115,6 +2157,7 @@ TEST_CASE("split: a leaf becoming a split node renders two panes without errors 
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
+    contour::test::installChromeStyle(engine);
     QQuickWindow window;
     window.resize(400, 300);
     window.show();
@@ -2158,6 +2201,7 @@ TEST_CASE("split: collapsing a split node back to a leaf keeps the survivor rend
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
+    contour::test::installChromeStyle(engine);
     QQuickWindow window;
     window.resize(400, 300);
     window.show();
@@ -2205,6 +2249,7 @@ TEST_CASE("split: TerminalPane opacity follows the session opacity (offscreen)",
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
+    contour::test::installChromeStyle(engine);
     QQuickWindow window;
     window.resize(400, 300);
     window.show();
@@ -2262,6 +2307,7 @@ TEST_CASE("PaneNode: SplitView orientation follows node.orientation for both axe
         qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
         MockTabController controller;
         engine.rootContext()->setContextProperty("terminalSessions", &controller);
+        contour::test::installChromeStyle(engine);
         QQuickWindow window;
         window.resize(400, 300);
         window.show();
@@ -2271,7 +2317,7 @@ TEST_CASE("PaneNode: SplitView orientation follows node.orientation for both axe
         MockPaneProxy splitNode(/*leaf*/ false, left, right);
         splitNode.setOrientation(nodeOrientation);
 
-        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/PaneNode.qml")));
+        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/PaneNode.qml")));
         while (component.status() == QQmlComponent::Loading)
             QCoreApplication::processEvents();
         REQUIRE(component.isReady());
@@ -2311,6 +2357,7 @@ TEST_CASE("TerminalPane: active-pane focus border width follows node.active (off
     qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
     QQuickWindow window;
     window.resize(400, 300);
     window.show();
@@ -2357,6 +2404,7 @@ TEST_CASE("PaneNode: tapping a leaf routes to node.activate(), guarded against a
     qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
     QQuickWindow window;
     window.resize(400, 300);
     window.show();
@@ -2388,6 +2436,7 @@ TEST_CASE("PaneNode: a nested 3-pane tree renders three panes without warnings (
     qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
     QQuickWindow window;
     window.resize(600, 400);
     window.show();
@@ -2401,7 +2450,7 @@ TEST_CASE("PaneNode: a nested 3-pane tree renders three panes without warnings (
     auto* rightSplit = new MockPaneProxy(/*leaf*/ false, b, c);
     MockPaneProxy root(/*leaf*/ false, a, rightSplit);
 
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/PaneNode.qml")));
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/PaneNode.qml")));
     while (component.status() == QQmlComponent::Loading)
         QCoreApplication::processEvents();
     REQUIRE(component.isReady());
@@ -2436,9 +2485,10 @@ TEST_CASE("TerminalPane.dimOverlayColor implements the unfocused-dim policy (off
     qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
     contour::test::QmlMessageCapture const warnings;
 
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/contour/ui/TerminalPane.qml")));
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TerminalPane.qml")));
     while (component.status() == QQmlComponent::Loading)
         QCoreApplication::processEvents();
     REQUIRE(component.isReady());
@@ -2480,20 +2530,21 @@ TEST_CASE("TerminalPane dim overlay follows the session's dimUnfocused live (off
     MockTabController controller;
     MockSession session;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
     engine.rootContext()->setContextProperty("mockSession", &session);
     contour::test::QmlMessageCapture const warnings;
 
     QQmlComponent component(&engine);
     component.setData(QByteArrayLiteral("import QtQuick\n"
                                         "import QtQuick.Window\n"
-                                        "import \"qrc:/contour/ui\"\n"
+                                        "import Contour.Ui\n"
                                         "Window {\n"
                                         "  width: 400; height: 300; visible: true\n"
                                         "  property alias pane: paneItem\n"
                                         "  TerminalPane { id: paneItem; anchors.fill: parent;"
                                         " session: mockSession }\n"
                                         "}\n"),
-                      QUrl(QStringLiteral("qrc:/contour/ui/DimWrapper.qml")));
+                      QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/DimWrapper.qml")));
     while (component.status() == QQmlComponent::Loading)
         QCoreApplication::processEvents();
     REQUIRE(component.isReady());
@@ -2560,7 +2611,7 @@ class MockPaletteController: public QObject
     ///
     /// OpenCommandPalette is dispatched for real, not just recorded: that is the one command the palette
     /// offers that re-enters the palette (WindowController::runCommand -> executeAction -> the manager ->
-    /// WindowController::openCommandPalette -> commandPaletteRequested -> main.qml's `open()`), and the
+    /// WindowController::openCommandPalette -> commandPaletteRequested -> Main.qml's `open()`), and the
     /// re-entry is only reproducible if this mock closes that loop the way the real chain does.
     Q_INVOKABLE void runCommand(QString const& id)
     {
@@ -2578,7 +2629,7 @@ class MockPaletteController: public QObject
     std::function<void()> observeOnRun;
 
   signals:
-    /// What WindowController raises to ask its window to show the palette; main.qml answers it with open().
+    /// What WindowController raises to ask its window to show the palette; Main.qml answers it with open().
     void commandPaletteRequested();
 
   private:
@@ -2587,7 +2638,7 @@ class MockPaletteController: public QObject
     std::unique_ptr<contour::CommandPaletteModel> _model;
 };
 
-/// Hosts CommandPalette.qml in a Window that mirrors main.qml's ApplicationWindow — in particular it
+/// Hosts CommandPalette.qml in a Window that mirrors Main.qml's ApplicationWindow — in particular it
 /// declares restoreTerminalFocus(), which the popup calls on close to hand the keyboard back to the
 /// terminal, and counts the calls so a test can assert it actually happened.
 ///
@@ -2609,7 +2660,7 @@ struct PaletteHost
     QQmlComponent component(&engine);
     component.setData(QByteArrayLiteral("import QtQuick\n"
                                         "import QtQuick.Window\n"
-                                        "import \"qrc:/contour/ui\"\n"
+                                        "import Contour.Ui\n"
                                         "Window {\n"
                                         "  id: host\n"
                                         "  width: 800; height: 600; visible: true\n"
@@ -2624,7 +2675,7 @@ struct PaletteHost
                                         "    controller: paletteController\n"
                                         "    window: host\n"
                                         "  }\n"
-                                        // main.qml's wiring, verbatim: the controller asks, the window
+                                        // Main.qml's wiring, verbatim: the controller asks, the window
                                         // opens the palette. Without it here, the one command that re-opens
                                         // the palette (OpenCommandPalette) would look inert in a test and
                                         // its re-entry could not be tested at all.
@@ -2633,7 +2684,7 @@ struct PaletteHost
                                         "    function onCommandPaletteRequested() { paletteItem.open(); }\n"
                                         "  }\n"
                                         "}\n"),
-                      QUrl(QStringLiteral("qrc:/contour/ui/PaletteTestHost.qml")));
+                      QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/PaletteTestHost.qml")));
     while (component.status() == QQmlComponent::Loading)
         QCoreApplication::processEvents();
 
@@ -2897,7 +2948,7 @@ namespace
 {
 
 /// A stand-in for WindowController exposing exactly the save-layout surface SaveLayoutDialog.qml binds:
-/// the saveLayoutRequested signal main.qml opens the dialog on, and the saveLayoutAs() the dialog calls
+/// the saveLayoutRequested signal Main.qml opens the dialog on, and the saveLayoutAs() the dialog calls
 /// back with the typed name.
 class MockSaveLayoutController: public QObject
 {
@@ -2905,7 +2956,7 @@ class MockSaveLayoutController: public QObject
 
   public:
     /// Mirrors WindowController::beginSaveLayoutPrompt(): what the manager calls for a nameless
-    /// SaveLayout action, and what makes main.qml's prompt appear.
+    /// SaveLayout action, and what makes Main.qml's prompt appear.
     Q_INVOKABLE void beginSaveLayoutPrompt() { emit saveLayoutRequested(); }
 
     /// Records the name the dialog accepted, so a test can assert the accept routed through with it.
@@ -2913,13 +2964,13 @@ class MockSaveLayoutController: public QObject
     QStringList saved;
 
   signals:
-    /// What WindowController raises to ask its window to open the prompt; main.qml answers with open().
+    /// What WindowController raises to ask its window to open the prompt; Main.qml answers with open().
     void saveLayoutRequested();
 };
 
-/// Hosts SaveLayoutDialog.qml in a Window mirroring main.qml's ApplicationWindow — it declares
+/// Hosts SaveLayoutDialog.qml in a Window mirroring Main.qml's ApplicationWindow — it declares
 /// restoreTerminalFocus() (which the dialog calls on close) and wires saveLayoutRequested -> open(),
-/// exactly as main.qml does, so the open path and the focus-restore contract are both exercised.
+/// exactly as Main.qml does, so the open path and the focus-restore contract are both exercised.
 struct SaveLayoutHost
 {
     std::unique_ptr<QObject> window; //!< The wrapper Window.
@@ -2935,7 +2986,7 @@ struct SaveLayoutHost
 };
 
 /// Builds the host and locates the dialog (not yet opened — the tests open it via the controller's
-/// request, which is the path main.qml takes).
+/// request, which is the path Main.qml takes).
 [[nodiscard]] SaveLayoutHost makeSaveLayoutHost(QQmlEngine& engine, MockSaveLayoutController& controller)
 {
     engine.rootContext()->setContextProperty("saveLayoutController", &controller);
@@ -2943,7 +2994,7 @@ struct SaveLayoutHost
     QQmlComponent component(&engine);
     component.setData(QByteArrayLiteral("import QtQuick\n"
                                         "import QtQuick.Window\n"
-                                        "import \"qrc:/contour/ui\"\n"
+                                        "import Contour.Ui\n"
                                         "Window {\n"
                                         "  id: host\n"
                                         "  width: 800; height: 600; visible: true\n"
@@ -2955,14 +3006,14 @@ struct SaveLayoutHost
                                         "    controller: saveLayoutController\n"
                                         "    window: host\n"
                                         "  }\n"
-                                        // main.qml's wiring, verbatim: the controller asks, the window
+                                        // Main.qml's wiring, verbatim: the controller asks, the window
                                         // opens the prompt.
                                         "  Connections {\n"
                                         "    target: saveLayoutController\n"
                                         "    function onSaveLayoutRequested() { dialogItem.open(); }\n"
                                         "  }\n"
                                         "}\n"),
-                      QUrl(QStringLiteral("qrc:/contour/ui/SaveLayoutTestHost.qml")));
+                      QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SaveLayoutTestHost.qml")));
     while (component.status() == QQmlComponent::Loading)
         QCoreApplication::processEvents();
 
@@ -2981,7 +3032,7 @@ struct SaveLayoutHost
     return host;
 }
 
-/// Opens the dialog the way a nameless SaveLayout action does (controller request -> main.qml open()) and
+/// Opens the dialog the way a nameless SaveLayout action does (controller request -> Main.qml open()) and
 /// pumps the loop so the Popup materializes its field.
 void openSaveLayoutPrompt(MockSaveLayoutController& controller)
 {
@@ -3212,6 +3263,7 @@ TEST_CASE("SessionChrome shows the hyperlink tooltip only while there is a link 
     QQmlEngine engine;
     MockTabController controller;
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
     contour::test::QmlMessageCapture const warnings;
 
     auto host = createChromeInWindow(engine);
@@ -3352,9 +3404,10 @@ void postGesture(
 {
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
+    contour::test::installChromeStyle(engine);
     auto const source = QStringLiteral("import QtQuick\n"
                                        "import QtQuick.Window\n"
-                                       "import \"qrc:/contour/ui\"\n"
+                                       "import Contour.Ui\n"
                                        "Window {\n"
                                        "  id: host\n"
                                        "  width: 400; height: 300; visible: true\n"
@@ -3371,7 +3424,7 @@ void postGesture(
     return buildQmlHost(engine, source, QStringLiteral("TabItemBorderTestHost.qml"));
 }
 
-/// Hosts the REAL TitleBar under the REAL ResizeBorder, in main.qml's stacking order (bar at z:1, border
+/// Hosts the REAL TitleBar under the REAL ResizeBorder, in Main.qml's stacking order (bar at z:1, border
 /// filling the window at z:1000) — so the bar's window-move region really does sit beneath the border's top
 /// edge zone, as it does in the running application.
 ///
@@ -3383,9 +3436,10 @@ void postGesture(
 {
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
+    contour::test::installChromeStyle(engine);
     auto const source = QStringLiteral("import QtQuick\n"
                                        "import QtQuick.Window\n"
-                                       "import \"qrc:/contour/ui\"\n"
+                                       "import Contour.Ui\n"
                                        "Window {\n"
                                        "  id: host\n"
                                        "  width: 800; height: 400; visible: true\n"
@@ -3522,6 +3576,376 @@ TEST_CASE("A right-button drag over a tab does not start a tab drag (offscreen)"
     // ResizeBorder in this host, so nothing but acceptedButtons can hold the drag back.
     postGesture(*window, Qt::RightButton, QPoint(30, 16), QPoint(200, 90), GestureEnd::Released);
     CHECK(activations.isEmpty());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+namespace
+{
+/// What one chrome style produces for the component under test, read out while its engine is still
+/// alive -- the provider is parented to that engine, so nothing may outlive the call that made it.
+struct ChromeMetrics
+{
+    qreal value; //!< The component geometry the test is about.
+    qreal cellWidth;
+    qreal cellHeight;
+    qreal widthQuantum;
+};
+} // namespace
+
+TEST_CASE("The terminal chrome style quantizes the tab strip to whole cells (offscreen)",
+          "[contour][gui][qml]")
+{
+    // The end-to-end proof that the QML actually reads its metrics from the style tokens rather than
+    // from the literals it used to carry: the SAME component, loaded twice, differs only by which
+    // UiStyleProvider its engine was given.
+    contour::test::QmlMessageCapture const warnings;
+
+    auto const tabWidthUnder = [](contour::config::UiStyle style) {
+        QQmlEngine engine;
+        MockTabController controller;
+        engine.rootContext()->setContextProperty("terminalSessions", &controller);
+        contour::test::installChromeStyle(engine, style);
+
+        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TabItem.qml")));
+        INFO("TabItem errors: " << component.errorString().toStdString());
+        REQUIRE(component.isReady());
+
+        QVariantMap initial;
+        initial.insert("controller", QVariant::fromValue(&controller));
+        initial.insert("window", QVariant::fromValue(static_cast<QObject*>(&controller)));
+        initial.insert("tabIndex", 0);
+        initial.insert("tabTitle", QStringLiteral("a rather long tab title"));
+        initial.insert("tabRawTitle", QString {});
+        initial.insert("tabColor", QColor(Qt::transparent));
+        initial.insert("tabActive", true);
+        initial.insert("tabPaneCount", 1);
+        initial.insert("tabZoomed", false);
+        std::unique_ptr<QObject> tab(component.createWithInitialProperties(initial));
+        REQUIRE(tab != nullptr);
+
+        auto const* provider = engine.rootContext()
+                                   ->contextProperty(QStringLiteral("chromeStyle"))
+                                   .value<contour::UiStyleProvider*>();
+        REQUIRE(provider != nullptr);
+        return ChromeMetrics { .value = tab->property("implicitWidth").toReal(),
+                               .cellWidth = provider->cellWidth(),
+                               .cellHeight = provider->cellHeight(),
+                               .widthQuantum = provider->widthQuantum() };
+    };
+
+    SECTION("the native style leaves the historical pixel width alone")
+    {
+        auto const native = tabWidthUnder(contour::config::UiStyle::Native);
+        // Native's quantum is one logical pixel, so the rounding in TabItem is a no-op and the width
+        // stays inside the 120..240 band the strip has always used.
+        CHECK(native.widthQuantum == 1.0);
+        CHECK(native.value >= 120.0);
+        CHECK(native.value <= 240.0);
+    }
+
+    SECTION("the terminal style snaps the tab onto the character grid")
+    {
+        auto const terminal = tabWidthUnder(contour::config::UiStyle::Terminal);
+        REQUIRE(terminal.cellWidth > 0.0);
+        CHECK(terminal.widthQuantum == terminal.cellWidth);
+
+        // The point of the style: the tab is a whole number of cells wide, so a strip of them lines
+        // up as ASCII art rather than landing wherever the label happened to end.
+        auto const cells = terminal.value / terminal.cellWidth;
+        CHECK(std::abs(cells - std::round(cells)) < 0.001);
+        CHECK(cells >= 10.0); // minTabUnits
+        CHECK(cells <= 24.0); // maxTabUnits
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("A native tab keeps the exact width its historical literal gave it (offscreen)",
+          "[contour][gui][qml]")
+{
+    // The band check above cannot see a shift inside 120..240, and UiStyle_test pins the token values
+    // without adding them up -- so this is the only assertion that notices the tokenized sum coming to
+    // something other than the `label.implicitWidth + 56` it replaced. A drift there re-flows every tab
+    // in the strip of every user who never chose a style at all.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine, contour::config::UiStyle::Native);
+
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TabItem.qml")));
+    INFO("TabItem errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+
+    QVariantMap initial;
+    initial.insert("controller", QVariant::fromValue(&controller));
+    initial.insert("window", QVariant::fromValue(static_cast<QObject*>(&controller)));
+    initial.insert("tabIndex", 0);
+    initial.insert("tabTitle", QStringLiteral("a rather long tab title"));
+    initial.insert("tabRawTitle", QString {});
+    initial.insert("tabColor", QColor(Qt::transparent));
+    initial.insert("tabActive", true);
+    initial.insert("tabPaneCount", 1);
+    initial.insert("tabZoomed", false);
+    std::unique_ptr<QObject> tab(component.createWithInitialProperties(initial));
+    REQUIRE(tab != nullptr);
+
+    auto const* label = tab->findChild<QQuickItem*>(QStringLiteral("tabLabel"));
+    REQUIRE(label != nullptr);
+
+    // The literal 56, deliberately, rather than a sum of the same tokens the QML reads: re-deriving it
+    // here would agree with any token edit whatsoever, which is the one thing this must not do.
+    CHECK(tab->property("naturalWidth").toReal()
+          == Catch::Approx(label->property("implicitWidth").toReal() + 56.0));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("A tab's close button sits in clear space at both ends (offscreen)", "[contour][gui][qml]")
+{
+    // The trailing gap is the one that has to be stated. A style that rules between tabs ends every
+    // tab with that rule, and with the close button anchored straight onto it "×│" sat side by side --
+    // at one cell each, in the same monospace font, that reads as a single box-drawing figure rather
+    // than as a button beside a border.
+    //
+    // Native is asserted from the same measurement rather than left implicit: it deliberately keeps a
+    // trailing gap of 0 (its tabs have no drawn edge, so the gap the eye sees is the NEXT tab's
+    // leading inset), and a token edit that "fixed" that would silently widen every tab in the strip
+    // of every user who never chose a style at all.
+    contour::test::QmlMessageCapture const warnings;
+
+    struct TabGaps
+    {
+        qreal leading = 0.0;  ///< From the label's trailing edge to the close button.
+        qreal trailing = 0.0; ///< From the close button to whatever ends the tab.
+        qreal cellWidth = 0.0;
+    };
+
+    auto const gapsUnder = [](contour::config::UiStyle style) {
+        QQmlEngine engine;
+        MockTabController controller;
+        engine.rootContext()->setContextProperty("terminalSessions", &controller);
+        contour::test::installChromeStyle(engine, style);
+
+        // A real window rather than a bare component: these are anchor-resolved positions, and the
+        // hosted-and-realized path is the one the rest of this file has proven offscreen.
+        auto const host = buildQmlHost(engine,
+                                       QStringLiteral("import QtQuick\n"
+                                                      "import QtQuick.Window\n"
+                                                      "import Contour.Ui\n"
+                                                      "Window {\n"
+                                                      "  id: host\n"
+                                                      "  width: 600; height: 120; visible: true\n"
+                                                      "  TabItem {\n"
+                                                      "    objectName: \"probeTab\"\n"
+                                                      "%1"
+                                                      "  }\n"
+                                                      "}\n")
+                                           .arg(QLatin1StringView(TabItemBindings)),
+                                       QStringLiteral("TabGapTestHost.qml"));
+        QCoreApplication::processEvents();
+
+        auto const* tab = host->findChild<QQuickItem*>(QStringLiteral("probeTab"));
+        REQUIRE(tab != nullptr);
+        auto const* label = tab->findChild<QQuickItem*>(QStringLiteral("tabLabel"));
+        auto const* closeButton = tab->findChild<QQuickItem*>(QStringLiteral("tabCloseButton"));
+        auto const* separator = tab->findChild<QQuickItem*>(QStringLiteral("tabSeparator"));
+        REQUIRE(label != nullptr);
+        REQUIRE(closeButton != nullptr);
+        REQUIRE(separator != nullptr);
+
+        auto const* provider = engine.rootContext()
+                                   ->contextProperty(QStringLiteral("chromeStyle"))
+                                   .value<contour::UiStyleProvider*>();
+        REQUIRE(provider != nullptr);
+
+        // The separator is anchored to the tab's trailing edge and collapses to zero width in a style
+        // that draws none, so its left edge IS "wherever the tab ends" under either style.
+        return TabGaps { .leading = closeButton->x() - (label->x() + label->width()),
+                         .trailing = separator->x() - (closeButton->x() + closeButton->width()),
+                         .cellWidth = provider->cellWidth() };
+    };
+
+    SECTION("the terminal style keeps a whole cell either side")
+    {
+        auto const terminal = gapsUnder(contour::config::UiStyle::Terminal);
+        REQUIRE(terminal.cellWidth > 0.0);
+        CHECK(terminal.leading == Catch::Approx(terminal.cellWidth));
+        CHECK(terminal.trailing == Catch::Approx(terminal.cellWidth));
+    }
+
+    SECTION("the native style keeps the gaps it always had")
+    {
+        auto const native = gapsUnder(contour::config::UiStyle::Native);
+        CHECK(native.leading == Catch::Approx(4.0)); // labelGapUnits
+        CHECK(native.trailing == Catch::Approx(0.0).margin(0.001));
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("The terminal style rules BETWEEN tabs, not after the last one (offscreen)", "[contour][gui][qml]")
+{
+    // The separator lives inside each tab -- the strip's drop math walks itemAtIndex() and needs one
+    // ListView item per tab -- so nothing stops the trailing tab from drawing one. There it is not a
+    // separator at all: it hangs off the end of the strip, immediately before the "+" button, reading
+    // as a tab cut in half. It also costs that tab a cell of title, because naturalWidth sums it.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine, contour::config::UiStyle::Terminal);
+
+    // A ListView of its own rather than TabStrip itself: the strip sizes its list from the list's own
+    // contentWidth, which is 0 until delegates exist, so offscreen it converges over more incubation
+    // cycles than a test should wait on. What is under test here is TabItem's own question -- "is
+    // there a tab after me?" -- and being a horizontal ListView delegate is the whole of the context
+    // it asks it in, which this host reproduces exactly.
+    constexpr auto TabCount = 3;
+    auto const host = buildQmlHost(engine,
+                                   QStringLiteral("import QtQuick\n"
+                                                  "import QtQuick.Window\n"
+                                                  "import Contour.Ui\n"
+                                                  "Window {\n"
+                                                  "  id: host\n"
+                                                  "  width: 900; height: 120; visible: true\n"
+                                                  "  ListView {\n"
+                                                  "    objectName: \"probeStrip\"\n"
+                                                  "    anchors.fill: parent\n"
+                                                  "    orientation: ListView.Horizontal\n"
+                                                  "    model: %1\n"
+                                                  "    delegate: TabItem {\n"
+                                                  "      required property int index\n"
+                                                  "      height: 40\n"
+                                                  "      controller: terminalSessions\n"
+                                                  "      window: host\n"
+                                                  "      tabIndex: index\n"
+                                                  "      tabTitle: \"tab \" + index\n"
+                                                  "      tabRawTitle: \"\"\n"
+                                                  "      tabColor: \"transparent\"\n"
+                                                  "      tabActive: index === 0\n"
+                                                  "      tabPaneCount: 1\n"
+                                                  "      tabZoomed: false\n"
+                                                  "    }\n"
+                                                  "  }\n"
+                                                  "}\n")
+                                       .arg(TabCount),
+                                   QStringLiteral("TabSeparatorHost.qml"));
+    QCoreApplication::processEvents();
+
+    // itemAtIndex() rather than findChildren(): it asks the view where a given row actually went,
+    // which is the same handle TabStrip's own drop math uses, and it does not depend on a delegate's
+    // QObject parentage being anything in particular.
+    auto* strip = host->findChild<QQuickItem*>(QStringLiteral("probeStrip"));
+    REQUIRE(strip != nullptr);
+
+    for (auto const index: std::views::iota(0, TabCount))
+    {
+        INFO("tab " << index << " of " << TabCount);
+        QQuickItem* tab = nullptr;
+        REQUIRE(QMetaObject::invokeMethod(
+            strip, "itemAtIndex", Q_RETURN_ARG(QQuickItem*, tab), Q_ARG(int, index)));
+        REQUIRE(tab != nullptr);
+
+        auto const* separator = tab->findChild<QQuickItem*>(QStringLiteral("tabSeparator"));
+        REQUIRE(separator != nullptr);
+        CHECK(separator->property("text").toString().isEmpty() == (index == TabCount - 1));
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("The terminal chrome style makes the title bar one character row tall (offscreen)",
+          "[contour][gui][qml]")
+{
+    // The chrome height is what Main.qml declares to the WindowController, which turns it into the
+    // window's size hints -- so this is also what shrinks the terminal viewport. Native keeps the 34px
+    // MainWindowQml_test asserts on; Terminal must be exactly one row of the chrome font.
+    contour::test::QmlMessageCapture const warnings;
+
+    auto const chromeHeightUnder = [](contour::config::UiStyle style) {
+        QQmlEngine engine;
+        MockTabController controller;
+        engine.rootContext()->setContextProperty("terminalSessions", &controller);
+        contour::test::installChromeStyle(engine, style);
+
+        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TitleBar.qml")));
+        INFO("TitleBar errors: " << component.errorString().toStdString());
+        REQUIRE(component.isReady());
+
+        QVariantMap initial;
+        initial.insert("controller", QVariant::fromValue(&controller));
+        initial.insert("window", QVariant::fromValue(static_cast<QObject*>(&controller)));
+        std::unique_ptr<QObject> bar(component.createWithInitialProperties(initial));
+        REQUIRE(bar != nullptr);
+
+        auto const* provider = engine.rootContext()
+                                   ->contextProperty(QStringLiteral("chromeStyle"))
+                                   .value<contour::UiStyleProvider*>();
+        REQUIRE(provider != nullptr);
+        return ChromeMetrics { .value = bar->property("implicitHeight").toReal(),
+                               .cellWidth = provider->cellWidth(),
+                               .cellHeight = provider->cellHeight(),
+                               .widthQuantum = provider->widthQuantum() };
+    };
+
+    SECTION("native keeps its historical height")
+    {
+        CHECK(chromeHeightUnder(contour::config::UiStyle::Native).value == 34.0);
+    }
+
+    SECTION("terminal is exactly one cell row")
+    {
+        auto const terminal = chromeHeightUnder(contour::config::UiStyle::Terminal);
+        CHECK(terminal.cellHeight > 0.0);
+        CHECK(terminal.value == terminal.cellHeight);
+        // A status line is short: whatever the font, one row must be less than the GUI bar it replaces
+        // at any sane size -- otherwise the style is not buying the vertical space it promises.
+        CHECK(terminal.value < 34.0);
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("The tab strip's \"+\" and \"▾\" are padded wider than a tab's close button (offscreen)",
+          "[contour][gui][qml]")
+{
+    // Both are permanently visible, frequently used targets sitting at the end of the strip, so a
+    // width borrowed from the close glyph inside a tab makes them needlessly hard to hit. They take
+    // their own token instead; this pins that they read it, in both styles, rather than falling back
+    // to controlWidth.
+    contour::test::QmlMessageCapture const warnings;
+    auto const style = GENERATE(contour::config::UiStyle::Native, contour::config::UiStyle::Terminal);
+
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine, style);
+
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TabStrip.qml")));
+    INFO("TabStrip errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+
+    QVariantMap initial;
+    initial.insert("controller", QVariant::fromValue(&controller));
+    initial.insert("window", QVariant::fromValue(static_cast<QObject*>(&controller)));
+    std::unique_ptr<QObject> strip(component.createWithInitialProperties(initial));
+    REQUIRE(strip != nullptr);
+
+    auto const* provider = engine.rootContext()
+                               ->contextProperty(QStringLiteral("chromeStyle"))
+                               .value<contour::UiStyleProvider*>();
+    REQUIRE(provider != nullptr);
+    REQUIRE(provider->stripButtonWidth() > provider->controlWidth());
+
+    for (auto const* name: { "newTabButton", "newTabMenuButton" })
+    {
+        INFO("button: " << name);
+        auto const* button = strip->findChild<QQuickItem*>(QLatin1StringView(name));
+        REQUIRE(button != nullptr);
+        CHECK(button->width() == provider->stripButtonWidth());
+    }
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

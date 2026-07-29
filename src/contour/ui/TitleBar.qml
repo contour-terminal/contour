@@ -15,16 +15,19 @@ Item {
     Accessible.role: Accessible.TitleBar
     Accessible.name: qsTr("Title bar")
 
-    required property var controller // this window's WindowController (main.qml: appWindow.win)
+    required property var controller // this window's WindowController (Main.qml: appWindow.win)
     required property var window
 
     // Whether to draw our own min/max/close controls. Set false whenever the NATIVE frame is shown
     // (its server-side controls would otherwise be duplicated): that is when show_title_bar is on, on
-    // any OS, and always on macOS where the native frame is kept. The owner (main.qml) drives this from
+    // any OS, and always on macOS where the native frame is kept. The owner (Main.qml) drives this from
     // vtui.titleBarVisible; the default keeps the historical macOS behavior when unset.
     property bool useCustomWindowControls: Qt.platform.os !== "osx"
 
-    implicitHeight: 34
+    // The whole bar's height, and so the window's chrome height (Main.qml declares it to the
+    // WindowController, which feeds the WM size hints). One character row in the terminal style,
+    // the historical 34px in the native one -- see UiStyleProvider.
+    implicitHeight: chromeStyle.chromeHeight
 
     // Live OS palette handle: re-emits paletteChanged on an OS dark/light switch so the bar recolors
     // in realtime (see TabContextMenu for the same pattern).

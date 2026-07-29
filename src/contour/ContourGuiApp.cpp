@@ -54,6 +54,7 @@
 #include <filesystem>
 #include <iostream>
 #include <optional>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -77,6 +78,34 @@ namespace CLI = crispy::cli;
 
 namespace contour
 {
+
+fs::path uiModuleOverrideDirectory(fs::path const& configHome)
+{
+    return configHome / "Contour" / "Ui";
+}
+
+bool hasStrandedQmlOverrides(fs::path const& configHome)
+{
+    auto ec = std::error_code {};
+    auto const legacyDirectory = configHome / "ui";
+    if (!fs::is_directory(legacyDirectory, ec))
+        return false;
+
+    // Already migrated: the loose files are then leftovers, not a broken customization.
+    if (fs::exists(uiModuleOverrideDirectory(configHome) / "qmldir", ec))
+        return false;
+
+    // A failed directory_iterator construction yields end(), so the loop simply does not run; `ec` is
+    // left to the same fate as everywhere else this pattern appears (Config.cpp, SettingsController)
+    // -- an unreadable config directory is not news the QML loader can act on.
+    for (auto const& entry: fs::directory_iterator(legacyDirectory, ec))
+    {
+        auto entryError = std::error_code {};
+        if (entry.is_regular_file(entryError) && entry.path().extension() == ".qml")
+            return true;
+    }
+    return false;
+}
 
 ContourGuiApp::ContourGuiApp(std::unique_ptr<SessionFactory> sessionFactory,
                              std::unique_ptr<ExternalLauncher> externalLauncher,
@@ -269,7 +298,7 @@ int ContourGuiApp::clientAction()
         }
         _routingFactory->setDelegate(_nativeController.get());
         // A window spawned to host a daemon window binds itself here (from its
-        // main.qml, via consumeAttachWindow) instead of creating a fresh first tab.
+        // Main.qml, via consumeAttachWindow) instead of creating a fresh first tab.
         _sessionManager.setAttachWindowBinder(
             [this](WindowController* controller) { return bindPendingAttachWindow(controller); });
         // Reconcile the GUI against the daemon's authoritative window→tab→split tree
@@ -600,21 +629,6 @@ void ContourGuiApp::applyGuiTheme(config::GuiTheme theme)
 #endif
 }
 
-QUrl ContourGuiApp::resolveResource(std::string_view path)
-{
-    auto const localPath = config::configHome() / fs::path(path.data());
-    if (fs::exists(localPath))
-        return QUrl::fromLocalFile(QString::fromStdString(localPath.generic_string()));
-
-#if !defined(NDEBUG) && defined(CONTOUR_GUI_SOURCE_DIR)
-    auto const devPath = fs::path(CONTOUR_GUI_SOURCE_DIR) / fs::path(path.data());
-    if (fs::exists(devPath))
-        return QUrl::fromLocalFile(QString::fromStdString(devPath.generic_string()));
-#endif
-
-    return { "qrc:/contour/" + QString::fromLatin1(path.data(), static_cast<int>(path.size())) };
-}
-
 int ContourGuiApp::checkConfig()
 {
     auto const& flags = parameters();
@@ -876,7 +890,17 @@ int ContourGuiApp::terminalGuiAction()
     // gives the menu an opaque, themed, readable surface on our transparent window. NB: set
     // unconditionally — QQuickStyle::name() already resolves to the (non-empty) native default here, so
     // guarding on it silently skips Fusion.
-    QQuickStyle::setStyle("Fusion");
+    //
+    // `ui_style: terminal` swaps that for ContourTui, our own style (src/contour/styles/ContourTui),
+    // which paints a control as terminal chrome: cell-quantized, square-cornered, in the terminal
+    // font. Fusion stays the FALLBACK, so a control ContourTui does not implement still gets a
+    // readable, themed one rather than the flat Basic default.
+    //
+    // This is why `ui_style` takes effect on the next start rather than live: the style is resolved
+    // once, here, before the first control exists, and Qt offers no way to re-resolve it afterwards.
+    QQuickStyle::setFallbackStyle(QStringLiteral("Fusion"));
+    QQuickStyle::setStyle(
+        QString::fromUtf8(config::uiStyleTokens(_config.uiStyle.value()).quickControlsStyle));
 
     // Select the Qt RHI graphics API from the configured renderer backend, before the first
     // QQuickWindow is created. RenderingBackend::Auto leaves the choice to Qt, which resolves the
@@ -937,12 +961,45 @@ int ContourGuiApp::terminalGuiAction()
     qRegisterMetaType<SettingsController*>("SettingsController*");
     // clang-format on
 
+    // The chrome's design tokens. An injected instance rather than a QML-created singleton, because
+    // it is configured entirely at construction (see AGENT.md's complete-constructor rule) and its
+    // configuration is this app's, not the engine's -- there is nothing for QML to build it from.
+    _uiStyleProvider =
+        make_unique<UiStyleProvider>(_config.uiStyle.value(), resolveChromeFont(_config, profileName()));
+
     {
         auto const timer = ScopedTimer(startupLog, "QML engine setup");
         _qmlEngine = make_unique<QQmlApplicationEngine>();
 
+        // Keep the override seam resolveResource() gave the QML back when it shipped as loose qrc
+        // files, now expressed the way a QML module is overridden: the config directory becomes an
+        // import path, so a `Contour/Ui` module placed there (its own qmldir plus the components to
+        // replace) shadows the compiled-in one.
+        //
+        // Only this path, not the source tree resolveResource() also probed under !NDEBUG: an import
+        // path is searched for <path>/Contour/Ui/qmldir, and src/contour/ui is a flat directory of
+        // components with no module layout, so pointing at it would silently never resolve. The
+        // developer loop is a rebuild, which is what qmlcachegen wants anyway.
+        //
+        // The seam moved, so anyone still using the old one is told rather than left wondering why
+        // their customization stopped applying.
+        auto const configHome = config::configHome();
+        if (hasStrandedQmlOverrides(configHome))
+            errorLog()("Ignoring the QML overrides in '{}': the interface is loaded as a QML module "
+                       "now. Move them into '{}', alongside a qmldir naming each component, to have "
+                       "them apply again.",
+                       (configHome / "ui").generic_string(),
+                       uiModuleOverrideDirectory(configHome).generic_string());
+        _qmlEngine->addImportPath(toQString(configHome));
+
         QQmlContext* context = _qmlEngine->rootContext();
         context->setContextProperty("terminalSessions", &_sessionManager);
+        // A context property rather than a registered QML singleton: two separate modules read these
+        // tokens -- Contour.Ui and the ContourTui Quick Controls style -- and a singleton would make
+        // the style module import this application's own C++ URI, which a style that Qt resolves by
+        // name must not do. It also gives each test engine its own style (see test/QmlChromeStyle.h).
+        // See UiStyleProvider.h for the price this trade pays.
+        context->setContextProperty("chromeStyle", _uiStyleProvider.get());
     }
 
     // auto const HTS = "\033H";
@@ -1081,7 +1138,7 @@ void ContourGuiApp::newWindow(QScreen* targetScreen)
     // The engine is always up when one window spawns another (the GUI is running); the guard makes
     // the stage/consume contract exercisable headlessly, where no QML engine exists.
     if (_qmlEngine)
-        _qmlEngine->load(resolveResource("ui/main.qml"));
+        _qmlEngine->loadFromModule("Contour.Ui", "Main");
 }
 
 QScreen* ContourGuiApp::takePendingSpawnScreen() noexcept
@@ -1127,7 +1184,7 @@ void ContourGuiApp::reconcileAttachWindows()
             continue;
         }
 
-        // A new daemon window: spawn an OS window to host it. Its main.qml claims the
+        // A new daemon window: spawn an OS window to host it. Its Main.qml claims the
         // staged id (consumeAttachWindow → bindPendingAttachWindow), records the mapping
         // and reconciles — so it never creates a stray fresh tab. The QML load is
         // synchronous, so the stage is consumed before this returns.
@@ -1159,7 +1216,7 @@ bool ContourGuiApp::bindPendingAttachWindow(WindowController* controller)
     }
 
     // The boot (first) OS window in attach mode ADOPTS the daemon's primary window instead of
-    // authoring a fresh tab. Claiming it here makes main.qml skip win.createNewTab(), which in
+    // authoring a fresh tab. Claiming it here makes Main.qml skip win.createNewTab(), which in
     // attach mode would author a spurious extra tab on the daemon (and create no local first tab).
     // Bind the primary window now if the daemon already reported one; otherwise still claim the boot
     // window (return true) and let reconcileAttachWindows bind it once the first layout arrives.

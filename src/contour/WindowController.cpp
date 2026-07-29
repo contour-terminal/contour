@@ -679,8 +679,8 @@ void WindowController::setTitleBarVisible(bool visible)
     // Apply the native window-frame decoration unconditionally (not only on change) so a seed
     // re-asserts the frame on a freshly adopted window even when the value already matched: shown =>
     // keep the native frame, hidden => frameless so the custom client-side TitleBar is the only
-    // decoration. This is the C++ counterpart of main.qml's `flags` binding (both keyed on the same
-    // titleBarVisible value); main.qml drops our custom min/max/close controls whenever the native
+    // decoration. This is the C++ counterpart of Main.qml's `flags` binding (both keyed on the same
+    // titleBarVisible value); Main.qml drops our custom min/max/close controls whenever the native
     // frame shows, so the two decorations never stack.
     if (_osWindow != nullptr)
         _osWindow->setFlag(Qt::FramelessWindowHint, !visible);

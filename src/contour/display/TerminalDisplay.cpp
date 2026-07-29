@@ -248,10 +248,10 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     setFlag(Flag::ItemAcceptsInputMethod, imeEnabled);
     displayLog()("IME enabled: {}", imeEnabled);
 
-    // NB: The window frame is owned by QML now. main.qml makes the window frameless on the platforms
+    // NB: The window frame is owned by QML now. Main.qml makes the window frameless on the platforms
     // that use the custom client-side TitleBar (the tab strip + window controls). The profile's
     // show_title_bar setting controls the *custom* bar's visibility (not the native frame, which
-    // would otherwise double-decorate); main.qml binds the TitleBar's visibility to the CONTROLLER's
+    // would otherwise double-decorate); Main.qml binds the TitleBar's visibility to the CONTROLLER's
     // titleBarVisible. Only SEED the window default here (first-write-wins): re-applying the profile
     // value on every session rebind silently reverted a runtime ToggleTitleBar on each tab switch.
     // Announcements go through THIS display, which is the object an assistive client already knows

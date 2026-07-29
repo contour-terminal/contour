@@ -30,13 +30,14 @@ TEST_CASE("isBenignQtMessage.dropsKnownBenignNoise", "[contour][qt-log]")
 TEST_CASE("isBenignQtMessage.keepsRealDiagnostics", "[contour][qt-log]")
 {
     // Messages that are NOT in the benign table must pass through (return false) so real diagnostics survive.
-    auto const message = GENERATE(
-        std::string_view(""),
-        std::string_view("qrc:/contour/ui/main.qml:42: ReferenceError: terminalSessions is not defined"),
-        std::string_view("freetype: Failed to set LCD filter. unimplemented feature"),
-        std::string_view("qt.qpa.fonts: Populating font family aliases took 98 ms."),
-        // Mentions grabToImage but not the suppressed phrase -> must still be printed.
-        std::string_view("grabToImage() failed: item has no window"));
+    auto const message =
+        GENERATE(std::string_view(""),
+                 std::string_view(
+                     "qrc:/qt/qml/Contour/Ui/Main.qml:42: ReferenceError: terminalSessions is not defined"),
+                 std::string_view("freetype: Failed to set LCD filter. unimplemented feature"),
+                 std::string_view("qt.qpa.fonts: Populating font family aliases took 98 ms."),
+                 // Mentions grabToImage but not the suppressed phrase -> must still be printed.
+                 std::string_view("grabToImage() failed: item has no window"));
 
     CAPTURE(std::string { message });
     CHECK(!isBenignQtMessage(message));
