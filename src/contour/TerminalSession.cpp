@@ -309,6 +309,17 @@ TerminalSession::~TerminalSession()
     sessionLog()("Destroying terminal session.");
     _terminating = true;
 
+    // ~TerminalDisplay detaches in this direction, but nothing did it in the other: a session destroyed
+    // while a display still names it left that display's _session dangling — and dangling is non-null, so
+    // the render-thread frame path's guards pass it straight through to terminal(). releaseSession()
+    // fences that frame out first.
+    //
+    // DEFENSIVE: today's shutdown destroys the QML engine (and every display) before the session manager,
+    // so production should reach here with _display already null. Made an invariant rather than an
+    // assumption, since the guards cannot tell the difference. Pinned session-first in the tests.
+    if (_display != nullptr)
+        _display->releaseSession();
+
     // Close the device first: that is what makes ExitWatcherThread's waitForClosed() return, so the
     // watcher ends by itself. terminate() alone could not do this job. It only REQUESTS termination and
     // does not wait, so the QThread was destroyed while its thread was still running -- Qt says as much
@@ -839,6 +850,17 @@ void TerminalSession::applyPendingFontChange(bool allow, bool remember)
 
     if (!spec.emoji.empty() && spec.emoji != "auto"sv)
         newFonts.emoji = text::font_description::parse(spec.emoji);
+
+    // Persist as THIS session's own, the way setFontSize() does: setSession() and configureDisplay() both
+    // re-seed from profile().fonts, so leaving the pre-OSC-50 value made the approved font revert on the
+    // next scene-graph re-creation or tab rebind. Unlike setFontSize() this does not wait for the apply —
+    // it may legitimately be deferred (see setFonts()), and the profile is what the deferral resumes from.
+    _profile.fonts.value() = newFonts;
+
+    // The answer can arrive long after the request, so the pane may be gone. Consuming the pending change
+    // above is deliberate: an approval for a display that no longer exists is finished, not queued.
+    if (_display == nullptr)
+        return;
 
     _display->setFonts(newFonts);
 }

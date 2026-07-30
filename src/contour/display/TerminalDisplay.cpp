@@ -155,20 +155,10 @@ TerminalDisplay::~TerminalDisplay()
     // (Qt asserts in debug, UB in release). Sever it first: a dying display has no window business.
     QObject::disconnect(this, &QQuickItem::windowChanged, this, &TerminalDisplay::handleWindowChanged);
 
-    // The render node's prepare()/render() run in the scene graph's RENDER phase — the GUI thread is
-    // NOT blocked there, so a frame may be mid-flight inside this display right now. Two steps make
-    // destruction race-free: (1) publish null in the shared liveness cell, so any FUTURE node callback
-    // no-ops; (2) fence out the possibly in-flight frame that loaded `this` before the store — a
-    // NoStage render job runs on the render thread as soon as the current frame completes (or runs
-    // synchronously right here when no render loop is active), so once it releases, the render thread
-    // can no longer be executing display/renderer code.
+    // A frame may be mid-flight inside this display right now. The liveness cell stops any FUTURE node
+    // callback; the fence drains the current one. Order matters only here, where both steps exist.
     _nodeLiveness->store(nullptr, std::memory_order_release);
-    if (auto* win = window(); win != nullptr)
-    {
-        QSemaphore fence;
-        win->scheduleRenderJob(QRunnable::create([&fence]() { fence.release(); }), QQuickWindow::NoStage);
-        fence.acquire();
-    }
+    fenceRenderThread();
 
     // Free the RHI renderer. It is normally released by the scene-graph node's releaseResources() or
     // by sceneGraphInvalidated() → cleanup(), but neither fires when the item is still parented into a
@@ -186,6 +176,53 @@ TerminalDisplay::~TerminalDisplay()
         _manager->detachDisplay(this);
     if (_session)
         _session->detachDisplay(*this);
+}
+
+namespace
+{
+    /// A render job that releases @p fence when it is DESTROYED, not when it runs.
+    ///
+    /// scheduleRenderJob does not promise to run the job: QSGThreadedRenderLoop::postJob deletes it when
+    /// the window has no live render thread (unexposed, or the "offscreen" QPA platform). That is exactly
+    /// the case with no frame to fence, yet releasing from run() would block forever on a job that was
+    /// thrown away — it hung the whole test suite once. Qt deletes the job either way, so the destructor
+    /// releases exactly once on both paths.
+    class RenderThreadFence final: public QRunnable
+    {
+      public:
+        /// @param fence Released on destruction; outlived by construction, since the scheduling thread
+        ///              blocks until precisely that release.
+        explicit RenderThreadFence(QSemaphore& fence) noexcept: _fence { fence } {}
+
+        ~RenderThreadFence() override { _fence.release(); }
+
+        RenderThreadFence(RenderThreadFence const&) = delete;
+        RenderThreadFence(RenderThreadFence&&) = delete;
+        RenderThreadFence& operator=(RenderThreadFence const&) = delete;
+        RenderThreadFence& operator=(RenderThreadFence&&) = delete;
+
+        void run() override {} // the destructor is the fence; running only times it
+
+      private:
+        QSemaphore& _fence;
+    };
+} // namespace
+
+void TerminalDisplay::fenceRenderThread()
+{
+    // Contract and cost: see the declaration.
+    if (auto* win = window(); win != nullptr)
+    {
+        QSemaphore fence;
+        win->scheduleRenderJob(new RenderThreadFence(fence), QQuickWindow::NoStage);
+        fence.acquire();
+    }
+}
+
+void TerminalDisplay::assignSession(TerminalSession* newSession)
+{
+    fenceRenderThread();
+    _session = newSession;
 }
 
 void TerminalDisplay::setSession(TerminalSession* newSession)
@@ -226,7 +263,9 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
         _session->detachDisplay(*this);
     }
 
-    _session = newSession;
+    // A rebind (A -> B) never nulls _session, so the frame path's null guards cannot see it coming: an
+    // in-flight frame could tick A's terminal and then render B's. assignSession() drains it first.
+    assignSession(newSession);
 
     // Cache the manager so ~TerminalDisplay can self-evict from _displayStates even if this pane is
     // closed before it ever receives focus (focus-in is the other place the cache is set).
@@ -387,7 +426,10 @@ void TerminalDisplay::releaseSession()
     // it right after this call returns.
     if (_session->display() == this)
         _session->detachDisplay(*this);
-    _session = nullptr;
+
+    // prepareFrameRhi() and paint() check _session and then dereference it through terminal(), so both
+    // checks are a TOCTOU against this store — how a closing pane aborted in TerminalRenderNode.
+    assignSession(nullptr);
     emit sessionChanged(nullptr);
 }
 
@@ -1866,19 +1908,33 @@ bool TerminalDisplay::applyStagedFontReconfigNow()
 
 void TerminalDisplay::setFonts(vtrasterizer::FontDescriptions fontDescriptions)
 {
-    Require(_session != nullptr);
-    Require(_renderTarget != nullptr);
+    // Neither state below is a programmer error, so neither may be a Require (which std::abort()s in
+    // release too). This is a DISPATCH-TIME entry point: configureDisplay() is posted and
+    // applyPendingFontChange() is the tail of a permission dialog, so the pane can close or the scene
+    // graph be invalidated before it runs. An OSC 50 answered late must not take the process down.
+    if (!_session)
+        return;
 
-    if (applyFontDescription(fontDPI(), *_renderer, std::move(fontDescriptions)))
+    // Not a change: nothing staged, nothing to apply, either branch below.
+    if (!applyFontDescription(fontDPI(), *_renderer, std::move(fontDescriptions)))
+        return;
+
+    // Needs no render target, and must run on BOTH paths: the re-entry that materializes a deferred
+    // change finds the font already published, so applyFontDescription() returns false and skips it.
+    updateReGISTextRasterizer();
+
+    if (!hasRenderTarget())
     {
-        // The font change is only *staged* (see applyFontDescription). Apply it synchronously and
-        // re-derive geometry against the new cell size now; doing the recompute without the apply would
-        // use the *stale* cell size.
-        applyStagedFontReconfigNow();
-        // Rebuild the ReGIS text rasterizer against the new font so ReGIS text follows the reload.
-        updateReGISTextRasterizer();
-        // logDisplayInfo();
+        // Staged only — no frame to apply it. Deferred, not lost: createRenderer() materializes staged
+        // reconfigs and re-posts configureDisplay(). Same deferral applyFontDPI() takes. The WM hints
+        // need no render target.
+        if (window())
+            notifyCellGeometryChanged();
+        return;
     }
+
+    // Apply synchronously; recomputing geometry without the apply would use the stale cell size.
+    applyStagedFontReconfigNow();
 }
 
 void TerminalDisplay::updateReGISTextRasterizer()

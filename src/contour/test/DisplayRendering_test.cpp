@@ -12,6 +12,10 @@
 // TerminalSession paths (attachDisplay with a live window, configureDisplay, posted GUI lambdas),
 // helper.cpp's key/mouse/wheel event senders against a real display, the deferred screenshot
 // readback, and the display+session+window teardown ordering.
+//
+// Two cases at the very bottom are the exception and run UNGATED: they need a display that never had a
+// window (hence never had a render target), which the offscreen platform supplies perfectly well. See
+// the teardown-lifetimes section there.
 
 #include <contour/Actions.h>
 #include <contour/TerminalSession.h>
@@ -27,6 +31,8 @@
 
 #include <QtCore/QBuffer>
 #include <QtCore/QDir>
+#include <QtCore/QRunnable>
+#include <QtCore/QSemaphore>
 #include <QtGui/QClipboard>
 #include <QtGui/QCloseEvent>
 #include <QtGui/QColor>
@@ -39,6 +45,7 @@
 
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <format>
 #include <memory>
@@ -98,7 +105,19 @@ struct AccessibleEventProbe
     }
 };
 
-/// One live rendering session: app + session (vtpty::ChannelPty) + display item in a shown window.
+/// Whether the harness stands the display up inside a shown QQuickWindow.
+///
+/// Windowless is a real production state, not a degenerate one: a closed pane and an invalidated scene
+/// graph both leave a live display with no window, hence no render target. Needs no display server, so
+/// cases built on it run UNGATED.
+enum class HarnessWindow : uint8_t
+{
+    None,
+    Shown,
+};
+
+/// One live rendering session: app + session (vtpty::ChannelPty) + display item, in a shown window
+/// unless @ref HarnessWindow::None says otherwise.
 ///
 /// Construction wires everything the production QML path would (setSession attaches the display,
 /// starts the session's read loop, and creates the renderer on the first sync); pump() forces real
@@ -110,11 +129,12 @@ struct DisplayHarness
     contour::test::TestApp testApp;
     vtpty::ChannelPty* pty = nullptr; // owned by the session's terminal
     std::unique_ptr<contour::TerminalSession> session;
-    std::unique_ptr<QQuickWindow> window;
+    std::unique_ptr<QQuickWindow> window;                 // null under HarnessWindow::None
     contour::display::TerminalDisplay* display = nullptr; // manually deleted in teardown
     contour::WindowController* controller = nullptr;      // manager-owned; removed in teardown
 
-    DisplayHarness(): display(new contour::display::TerminalDisplay())
+    explicit DisplayHarness(HarnessWindow windowMode = HarnessWindow::Shown):
+        display(new contour::display::TerminalDisplay())
     {
         auto ptyOwned = std::make_unique<vtpty::ChannelPty>(
             vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) });
@@ -122,19 +142,23 @@ struct DisplayHarness
         session = std::make_unique<contour::TerminalSession>(
             &testApp.app().sessionsManager(), std::move(ptyOwned), testApp.app());
 
-        window = std::make_unique<QQuickWindow>();
-        window->resize(800, 600);
-        // Match production: Main.qml makes the ApplicationWindow transparent so the terminal paints
-        // its own (dark) background. A bare QQuickWindow otherwise clears to Qt's default WHITE, which
-        // both mismatches the real app and weakens the pixel-change assertions (white margins swamp
-        // the grid). Clear to black so grabbed frames reflect what a user actually sees.
-        window->setColor(QColor(Qt::black));
+        if (windowMode == HarnessWindow::Shown)
+        {
+            window = std::make_unique<QQuickWindow>();
+            window->resize(800, 600);
+            // Match production: Main.qml makes the ApplicationWindow transparent so the terminal paints
+            // its own (dark) background. A bare QQuickWindow otherwise clears to Qt's default WHITE,
+            // which both mismatches the real app and weakens the pixel-change assertions (white margins
+            // swamp the grid). Clear to black so grabbed frames reflect what a user actually sees.
+            window->setColor(QColor(Qt::black));
+            display->setParentItem(window->contentItem());
+        }
 
-        display->setParentItem(window->contentItem());
         display->setSize(QSizeF(800, 600));
         display->setSession(session.get());
 
-        window->show();
+        if (window)
+            window->show();
         pump();
     }
 
@@ -152,10 +176,13 @@ struct DisplayHarness
     }
 
     /// Forces one synchronous frame (scene-graph sync + render) and returns the grabbed image.
+    ///
+    /// Windowless there is no scene graph to drive, so this only drains the GUI queue (what the posted
+    /// display/session lambdas need) and returns a null image; pixel assertions are all display-gated.
     QImage pump() const
     {
         QCoreApplication::processEvents();
-        auto image = window->grabWindow();
+        auto image = window ? window->grabWindow() : QImage {};
         QCoreApplication::processEvents();
         return image;
     }
@@ -189,6 +216,17 @@ struct DisplayHarness
         QCoreApplication::processEvents();
     }
 };
+
+/// A font size no profile default uses, so "did the request land?" is unambiguous.
+constexpr auto RequestedFontSize = 13.0;
+
+/// An OSC 50 font request of @p size, leaving every family at "inherit" (an empty string).
+[[nodiscard]] vtbackend::FontDef fontRequest(double size)
+{
+    return vtbackend::FontDef {
+        .size = size, .regular = "", .bold = "", .italic = "", .boldItalic = "", .emoji = ""
+    };
+}
 
 } // namespace
 
@@ -625,8 +663,7 @@ TEST_CASE("display: the permission machinery routes guarded roles end-to-end", "
                      h.session.get(),
                      [&fontAsks]() { ++fontAsks; });
 
-    h.session->setFontDef(vtbackend::FontDef {
-        .size = 13.0, .regular = "", .bold = "", .italic = "", .boldItalic = "", .emoji = "" });
+    h.session->setFontDef(fontRequest(RequestedFontSize));
     for (int i = 0; i < 50 && fontAsks == 0; ++i)
         QTest::qWait(10);
     REQUIRE(fontAsks == 1);
@@ -634,8 +671,7 @@ TEST_CASE("display: the permission machinery routes guarded roles end-to-end", "
     QTest::qWait(20);
     h.pump();
 
-    h.session->setFontDef(vtbackend::FontDef {
-        .size = 14.0, .regular = "", .bold = "", .italic = "", .boldItalic = "", .emoji = "" });
+    h.session->setFontDef(fontRequest(RequestedFontSize + 1.0));
     for (int i = 0; i < 50 && h.display->fontSize().pt < 13.9; ++i)
         QTest::qWait(10);
     CHECK(fontAsks == 1); // remembered: applied without asking again
@@ -1646,3 +1682,160 @@ TEST_CASE("display: a Close event closes the PTY and emits terminated on the liv
 // NOTE: The WindowController tab-title-edit seam (beginActiveTabTitleEdit → tabTitleEditRequested)
 // is tested headlessly with real tabs in MultiWindow_test.cpp, where activeTabIndex() is populated;
 // the DisplayHarness session is not registered as a model tab, so it cannot exercise that path.
+
+// {{{ GUI-thread / render-thread teardown lifetimes
+//
+// Two crashes found by running the gated cases above — a resource the render thread reads mid-frame,
+// torn down by the GUI thread:
+//
+//   Require(_renderTarget != nullptr)  in setFonts()  <- TerminalSession::applyPendingFontChange
+//   assert(_session != nullptr)        in terminal()  <- paint() <- prepareFrameRhi <- prepare()
+//
+// The first three cases run UNGATED: a display that never had a window never had a render target, which
+// reproduces the abort exactly and pins it in CI everywhere. The last two need real in-flight frames.
+
+TEST_CASE("display: a font change approved with no render target is deferred, not fatal",
+          "[display][font][teardown]")
+{
+    DisplayHarness h { HarnessWindow::None };
+    REQUIRE(h.display->hasSession());
+    REQUIRE_FALSE(h.display->hasRenderTarget()); // never had a window, so never had one
+
+    // OSC 50 in, permission answer back. setFonts() used to Require() a render target here and abort.
+    h.session->setFontDef(fontRequest(RequestedFontSize));
+    CHECK_NOTHROW(h.session->applyPendingFontChange(/*allow=*/true, /*remember=*/false));
+
+    // Deferred, not dropped: recorded as this session's own font, which every re-seeding path applies
+    // once a render target exists again.
+    CHECK(h.session->profile().fonts.value().size.pt == RequestedFontSize);
+}
+
+TEST_CASE("display: a font change approved after the pane detached is a silent no-op",
+          "[display][font][teardown]")
+{
+    DisplayHarness h { HarnessWindow::None };
+
+    // Request while attached (setFontDef needs a display to post through), then lose the pane before the
+    // answer — a split collapse or closed tab. applyPendingFontChange() dereferenced _display blindly.
+    h.session->setFontDef(fontRequest(RequestedFontSize));
+    h.display->setSession(nullptr);
+    REQUIRE(h.session->display() == nullptr);
+
+    CHECK_NOTHROW(h.session->applyPendingFontChange(/*allow=*/true, /*remember=*/false));
+
+    // Re-attach so the fixture tears down along its normal path.
+    h.display->setSession(h.session.get());
+}
+
+TEST_CASE("display: a session destroyed before its display leaves no dangling back-pointer",
+          "[display][session][teardown]")
+{
+    // Teardown in the order no fixture used: SESSION first, while the display still names it. Only
+    // ~TerminalDisplay detached, so this direction left _session dangling — and dangling is non-null, so
+    // the frame path's guards pass it through. Built by hand: the harness deletes the display first.
+    contour::test::TestApp testApp;
+    auto display = std::make_unique<contour::display::TerminalDisplay>();
+    auto session = std::make_unique<contour::TerminalSession>(
+        &testApp.app().sessionsManager(),
+        std::make_unique<vtpty::ChannelPty>(
+            vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) }),
+        testApp.app());
+
+    display->setSize(QSizeF(800, 600));
+    display->setSession(session.get());
+    REQUIRE(display->hasSession());
+    REQUIRE(session->display() == display.get());
+
+    session->terminate();
+    QCoreApplication::processEvents();
+    session.reset();
+
+    // Null rather than dangling, and the display is still safe to use and to destroy.
+    CHECK_FALSE(display->hasSession());
+    CHECK_NOTHROW(display->scheduleRedraw());
+    CHECK_NOTHROW(display.reset());
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QCoreApplication::processEvents();
+}
+
+TEST_CASE("display: a font change approved across a render-target teardown still lands",
+          "[display][font][teardown]")
+{
+    // The gated half of the first case: the render target really goes and comes back. fontSize() reads
+    // the *published* descriptions, so this is the only place the deferral is observable end-to-end.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+    h.pump();
+    REQUIRE(h.display->hasRenderTarget());
+    auto const sizeBefore = h.display->fontSize().pt;
+    REQUIRE(sizeBefore < RequestedFontSize);
+
+    h.session->setFontDef(fontRequest(RequestedFontSize));
+
+    // Destroy it the way a scene-graph invalidation does: on the render thread, where RHI resources
+    // must be freed.
+    QSemaphore released;
+    h.window->scheduleRenderJob(QRunnable::create([display = h.display, &released]() {
+                                    display->releaseRenderResources();
+                                    released.release();
+                                }),
+                                QQuickWindow::NoStage);
+    released.acquire();
+    REQUIRE_FALSE(h.display->hasRenderTarget());
+
+    // The answer arrives with no render target to apply it to: staged only.
+    h.session->applyPendingFontChange(/*allow=*/true, /*remember=*/false);
+    CHECK(h.display->fontSize().pt == sizeBefore); // nothing published yet
+
+    // The next sync re-enters createRenderer(), which materializes whatever is staged.
+    for (int i = 0; i < 50 && h.display->fontSize().pt < RequestedFontSize; ++i)
+    {
+        QTest::qWait(10);
+        h.pump();
+    }
+    CHECK(h.display->hasRenderTarget());
+    CHECK(h.display->fontSize().pt == RequestedFontSize);
+}
+
+TEST_CASE("display: rebinding the session under live frames does not tear a frame apart",
+          "[display][session][teardown]")
+{
+    // The second crash: a rebinding pane torn out from under an in-flight frame. Why that races, and why
+    // a fence answers it, is at TerminalDisplay::fenceRenderThread() — the correctness rests on that
+    // argument, since this can only reproduce the shape, not an interleaving.
+    //
+    // QTest::qWait, NOT pump(): grabWindow() blocks the GUI thread for the whole frame, which is the one
+    // interleaving that cannot crash. Only the free-running render loop can.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+    h.pump();
+
+    auto secondPty = std::make_unique<vtpty::ChannelPty>(
+        vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) });
+    auto* second = secondPty.get();
+    auto secondSession = std::make_unique<contour::TerminalSession>(
+        &h.testApp.app().sessionsManager(), std::move(secondPty), h.testApp.app());
+
+    for (auto round = 0; round < 10; ++round)
+    {
+        // Keep both terminals dirty so the render loop really has frames to run.
+        h.pty->feed("first\r\n"sv);
+        second->feed("second\r\n"sv);
+
+        h.display->setSession(secondSession.get());
+        QTest::qWait(5);
+        h.display->setSession(h.session.get());
+        QTest::qWait(5);
+    }
+    h.pump();
+
+    // Both terminals survived, and the display ended up bound to the one it last refit.
+    CHECK(h.session->display() == h.display);
+    CHECK(h.session->terminal().totalPageSize().lines > vtbackend::LineCount(0));
+    CHECK(secondSession->terminal().totalPageSize().lines > vtbackend::LineCount(0));
+
+    secondSession->terminate();
+    QCoreApplication::processEvents();
+    secondSession.reset();
+}
+// }}}

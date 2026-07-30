@@ -370,6 +370,34 @@ class TerminalDisplay: public QQuickItem
   private:
     // helper methods
     //
+
+    /// Blocks until no scene-graph frame is executing render-thread code for this display.
+    ///
+    /// prepare()/render() run on the render thread with the GUI thread UNBLOCKED, so a null check on a
+    /// member that path dereferences is a TOCTOU, not a guard. A NoStage job runs once the current frame
+    /// completes; frame N+1 cannot slip in behind it, as its sync phase blocks on THIS thread. No-op
+    /// without a window. Costs the remaining time of the in-flight frame, on user-driven transitions
+    /// only — never per frame.
+    ///
+    /// For members whose object we do not own the lifetime of (@ref _session). Where destruction is
+    /// itself deferred to a render-thread job (@ref _renderTarget), pin the pointer instead;
+    /// @see prepareFrameRhi.
+    ///
+    /// Do NOT add a hasRenderTarget()/hasSession() early-out: the GUI thread can null the member *after*
+    /// a frame passed that same check, so the null says nothing about whether a frame is running. That
+    /// is the bug this replaces.
+    ///
+    /// GUI THREAD ONLY, holding no lock the render thread takes mid-frame (the terminal state mutex, the
+    /// renderer's _applyMutex), or this deadlocks.
+    void fenceRenderThread();
+
+    /// The ONLY writer of @ref _session: fences the render thread out, then stores @p newSession.
+    ///
+    /// A choke point rather than a rule to remember, since the two writers reach it by different routes
+    /// (setSession() rebinds, releaseSession() detaches). GUI THREAD ONLY. Does not emit
+    /// sessionChanged() — setSession() emits only once the new session is fully wired up.
+    void assignSession(TerminalSession* newSession);
+
     void doDumpStateInternal();
 
     /// Logs the resolved Qt RHI backend (graphics API + device, and the OpenGL context version when
