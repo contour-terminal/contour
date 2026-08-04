@@ -908,7 +908,7 @@ void WindowController::showInitial()
 
     // Size the still-unmapped window from the REAL cell metrics (headless FreeType math, done during
     // session attach) at the target screen's resolved scale, so the first map is the final geometry.
-    auto const scale = display->contentScale();
+    auto const scale = display->devicePixelRatio();
     auto const marginsDevice =
         geometry::scaled(session::toGeometryMargins(session->profile().margins.value()), scale);
     auto const totalPage = session->terminal().totalPageSize();
@@ -948,7 +948,7 @@ void WindowController::onWindowScaleMaybeChanged()
     if (display == nullptr || !display->hasSession())
         return;
 
-    auto const newScale = display->contentScale();
+    auto const newScale = display->devicePixelRatio();
     if (newScale == _lastAppliedScale)
         return; // idempotence latch: absorbs signal storms and self-induced echoes
     _lastAppliedScale = newScale;
@@ -997,7 +997,7 @@ void WindowController::updateSizeHintsFor(session::DisplaySurface& requester, Hi
     if (osWindow == nullptr || !requester.hasSession())
         return;
 
-    auto const scale = requester.contentScale();
+    auto const scale = requester.devicePixelRatio();
     auto const cellSize = requester.cellSize();
     auto const margins = session::toGeometryMargins(requester.session().profile().margins.value());
     auto const hints = geometry::sizeHintsFor(cellSize, margins, scale, chrome());
@@ -1117,7 +1117,7 @@ bool WindowController::resizeWindowForPage(session::DisplaySurface& requester,
     if (!requester.hasSession())
         return false;
 
-    auto const scale = requester.contentScale();
+    auto const scale = requester.devicePixelRatio();
     auto const marginsDevice =
         geometry::scaled(session::toGeometryMargins(requester.session().profile().margins.value()), scale);
     // The pane's requirement as a logical extent (ceil side of the rounding law; chrome added later).
@@ -1132,7 +1132,7 @@ bool WindowController::resizeWindowForContentPixels(session::DisplaySurface& req
     if (!requester.hasSession())
         return false;
     return applyContentDrivenResize(
-        requester, geometry::logicalSizeForDevicePixels(contentDevicePx, requester.contentScale()));
+        requester, geometry::logicalSizeForDevicePixels(contentDevicePx, requester.devicePixelRatio()));
 }
 
 bool WindowController::applyContentDrivenResize(session::DisplaySurface& requester,

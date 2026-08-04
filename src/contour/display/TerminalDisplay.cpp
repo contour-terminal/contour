@@ -325,7 +325,7 @@ void TerminalDisplay::setSession(session::TerminalSession* newSession)
         // geometry change: the mouse hit-test maps through it, and a zero origin under a configured
         // margin reports the cell the user clicked minus that margin.
         auto const marginsDevicePx =
-            geometry::scaled(session::toGeometryMargins(profile().margins.value()), contentScale());
+            geometry::scaled(session::toGeometryMargins(profile().margins.value()), devicePixelRatio());
         _renderer = make_unique<vtrasterizer::Renderer>(
             _session->profile().terminalSize.value(),
             vtrasterizer::PageMargin { .left = marginsDevicePx.horizontal,
@@ -457,7 +457,7 @@ void TerminalDisplay::applyDisplaySizeToGrid()
     // QWindow — the WM's size is obeyed as-is (grid alignment during interactive resizes is the WM's job,
     // via the size-increment hint where the platform supports it) — so a resize event can never re-enter
     // itself. Grid->window resizes exist only for content-driven requests through the WindowHost.
-    auto const deviceSize = geometry::availableDevicePixels(width(), height(), contentScale());
+    auto const deviceSize = geometry::availableDevicePixels(width(), height(), devicePixelRatio());
     displayLog()("Display size changed to {}x{} virtual ({} device).", width(), height(), deviceSize);
     session::applyResize(deviceSize, *_session, *_renderer);
 }
@@ -742,7 +742,11 @@ void TerminalDisplay::logDisplayInfo()
 
 void TerminalDisplay::onSceneGrapheInitialized()
 {
-    displayLog()("onSceneGrapheInitialized ({}x{}, DPR {})", width(), height(), contentScale());
+    displayLog()("onSceneGrapheInitialized ({}x{}, DPR {}, content scale {})",
+                 width(),
+                 height(),
+                 devicePixelRatio(),
+                 contentScale());
 }
 
 void TerminalDisplay::logRhiBackendInfoOnce()
@@ -877,12 +881,12 @@ void TerminalDisplay::createRenderer()
     // not by the render target.
     auto const precalculatedTargetSize = [this]() -> ImageSize {
         auto const uiSize = ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
-        return uiSize * contentScale();
+        return uiSize * devicePixelRatio();
     }();
 
     if (displayLog)
     {
-        auto const dpr = contentScale();
+        auto const dpr = devicePixelRatio();
         auto const viewSize =
             ImageSize { Width::cast_from(width() * dpr), Height::cast_from(height() * dpr) };
         auto const windowSize = window()->size() * dpr;
@@ -911,7 +915,7 @@ void TerminalDisplay::createRenderer()
     // sync the anchor layout may not have fully propagated yet; that is fine: geometryChange() re-derives
     // the grid the moment the committed geometry changes, and applyResize() no-ops once they match.
     session::applyResize(
-        geometry::availableDevicePixels(width(), height(), contentScale()), *_session, *_renderer);
+        geometry::availableDevicePixels(width(), height(), devicePixelRatio()), *_session, *_renderer);
 
     // Defer configureDisplay() until the GUI thread processes QML binding propagation
     // and the window is committed at its final initial size (e.g. 1136x600 at DPR 1.5).
@@ -1417,7 +1421,7 @@ QVariant TerminalDisplay::inputMethodQuery(Qt::InputMethodQuery query) const
             auto const cursor = screen.cursor().position;
             if (term.isCursorInViewport() && imeCursorAddressable(cursor, term.pageSize()))
                 return imeCursorRectangle(
-                    metrics.pageMargin, metrics.cellSize, cursor, screen.cellWidthAt(cursor), contentScale());
+                    metrics.pageMargin, metrics.cellSize, cursor, screen.cellWidthAt(cursor), devicePixelRatio());
             return QRectF();
         }
         case Qt::ImCursorPosition: {
@@ -1478,6 +1482,11 @@ void TerminalDisplay::onScrollBarValueChanged(int value)
     scheduleRedraw();
 }
 
+double TerminalDisplay::devicePixelRatio() const
+{
+    return devicePixelRatioForWindow(window());
+}
+
 double TerminalDisplay::contentScale() const
 {
     // THE content-scale read: the cached app-wide forced-DPI override (injected in setSession) wins over
@@ -1489,8 +1498,9 @@ double TerminalDisplay::contentScale() const
 TerminalDisplay::DevicePixelGeometry TerminalDisplay::itemDevicePixelGeometry() const
 {
     // The item's device-pixel extent. Scene position is no longer needed: the scene graph supplies the
-    // item→clip transform at render time (see renderFrame), so callers want only the size.
-    auto const dpr = contentScale();
+    // item→clip transform at render time (see renderFrame), so callers want only the size. The DPR, not
+    // the content scale: this is how many hardware pixels the item covers, which no font setting changes.
+    auto const dpr = devicePixelRatio();
     return DevicePixelGeometry {
         .width = width() * dpr,
         .height = height() * dpr,
@@ -1544,7 +1554,8 @@ vtbackend::ImageSize TerminalDisplay::pixelSize() const
     return geometry::requiredPixelsForPage(
         _session->terminal().totalPageSize(),
         _renderer->publishedCellSize(),
-        geometry::scaled(session::toGeometryMargins(_session->profile().margins.value()), contentScale()));
+        geometry::scaled(session::toGeometryMargins(_session->profile().margins.value()),
+                         devicePixelRatio()));
 }
 
 vtbackend::ImageSize TerminalDisplay::reportedPixelSize(vtbackend::PageSize totalPageSize) const
@@ -1575,8 +1586,9 @@ vtbackend::ImageSize TerminalDisplay::reportedPixelSize(vtbackend::PageSize tota
 double TerminalDisplay::reportedPixelScale() const
 {
     assert(_session);
-    return _session->profile().pixelReporting.value() == config::PixelReporting::Device ? 1.0
-                                                                                        : contentScale();
+    return _session->profile().pixelReporting.value() == config::PixelReporting::Device
+               ? 1.0
+               : devicePixelRatio();
 }
 
 vtbackend::ImageSize TerminalDisplay::cellSize() const
@@ -1832,7 +1844,7 @@ void TerminalDisplay::resizeTerminalToDisplaySize()
     Require(_session != nullptr);
 
     session::applyResize(
-        geometry::availableDevicePixels(width(), height(), contentScale()), *_session, *_renderer);
+        geometry::availableDevicePixels(width(), height(), devicePixelRatio()), *_session, *_renderer);
 }
 
 void TerminalDisplay::resizeWindow(vtbackend::Width newWidth, vtbackend::Height newHeight)

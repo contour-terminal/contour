@@ -101,4 +101,12 @@ double contentScaleForWindow(QWindow const* window, ForcedFontDpiProvider const*
                                          std::nullopt);
 }
 
+double devicePixelRatioForWindow(QWindow const* window) noexcept
+{
+    // No forced-DPI provider is consulted, and that is the whole point: a font setting cannot change how
+    // many hardware pixels a logical pixel is. Pre-map, QWindow::devicePixelRatio() already answers with
+    // the associated screen's ratio.
+    return window != nullptr ? window->devicePixelRatio() : 1.0;
+}
+
 } // namespace contour::display

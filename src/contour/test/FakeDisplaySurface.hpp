@@ -34,6 +34,7 @@ class FakeDisplaySurface final: public session::DisplaySurface
     vtbackend::RefreshRate refreshRateValue { 60.0 };
     double reportedPixelScaleValue = 1.0;
     double contentScaleValue = 1.0;
+    double devicePixelRatioValue = 1.0;
     vtrasterizer::GridMetrics gridMetricsValue {};
     vtbackend::FontDef fontDefValue {};
     /// What @ref setFontSize reports back — a test flips it to model a font that failed to load.
@@ -111,6 +112,7 @@ class FakeDisplaySurface final: public session::DisplaySurface
     }
     [[nodiscard]] double reportedPixelScale() const override { return reportedPixelScaleValue; }
     [[nodiscard]] double contentScale() const override { return contentScaleValue; }
+    [[nodiscard]] double devicePixelRatio() const override { return devicePixelRatioValue; }
     [[nodiscard]] vtrasterizer::GridMetrics gridMetrics() const override { return gridMetricsValue; }
     [[nodiscard]] bool hasRenderTarget() const override { return renderTargetPresent; }
 

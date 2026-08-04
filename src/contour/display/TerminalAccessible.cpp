@@ -298,7 +298,7 @@ QRect TerminalAccessible::characterRect(int offset) const
 
     auto const cell = cellAtFlatOffset(offset, columns);
     auto const local =
-        geometry::cellRectangle(metrics.pageMargin, metrics.cellSize, cell, 1, item->contentScale());
+        geometry::cellRectangle(metrics.pageMargin, metrics.cellSize, cell, 1, item->devicePixelRatio());
 
     return geometry::toGlobalRect(local, item->mapToGlobal(QPointF { 0.0, 0.0 }));
 }
@@ -358,7 +358,7 @@ int TerminalAccessible::offsetAtPoint(QPoint const& point) const
 
     auto const local = item->mapFromGlobal(QPointF { point });
     auto const metrics = item->gridMetrics();
-    auto const dpr = item->contentScale();
+    auto const dpr = item->devicePixelRatio();
 
     auto const cellWidth = unbox<double>(metrics.cellSize.width) / dpr;
     auto const cellHeight = unbox<double>(metrics.cellSize.height) / dpr;
@@ -538,8 +538,12 @@ QRect PromptAccessible::rect() const
     if (!span.has_value())
         return {};
 
-    auto const local = geometry::rowBandRectangle(
-        metrics.pageMargin, metrics.cellSize, span->firstLine, span->lastLine, columns, item->contentScale());
+    auto const local = geometry::rowBandRectangle(metrics.pageMargin,
+                                                  metrics.cellSize,
+                                                  span->firstLine,
+                                                  span->lastLine,
+                                                  columns,
+                                                  item->devicePixelRatio());
 
     return geometry::toGlobalRect(local, item->mapToGlobal(QPointF { 0.0, 0.0 }));
 }
