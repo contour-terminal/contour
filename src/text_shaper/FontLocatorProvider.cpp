@@ -21,8 +21,10 @@ FontLocatorProvider& FontLocatorProvider::get()
 
 FontLocator& FontLocatorProvider::native()
 {
-    if (!_native)
-    {
+    // call_once, not a bare null check: one renderer per split pane and one render thread per window means
+    // several threads can reach this at the same moment, and two of them racing here would each construct a
+    // locator and one would be leaked or freed under the other.
+    std::call_once(_nativeOnce, [this] {
 #ifdef __APPLE__
         _native = make_unique<CoreTextLocator>();
 #elifdef _WIN32
@@ -30,15 +32,13 @@ FontLocator& FontLocatorProvider::native()
 #else
         _native = make_unique<FontconfigLocator>();
 #endif
-    }
+    });
     return *_native;
 }
 
 FontLocator& FontLocatorProvider::mock()
 {
-    if (!_mock)
-        _mock = make_unique<MockFontLocator>();
-
+    std::call_once(_mockOnce, [this] { _mock = make_unique<MockFontLocator>(); });
     return *_mock;
 }
 

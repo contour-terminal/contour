@@ -920,6 +920,8 @@ struct ReconfigFixture
 
     vtbackend::ColorPalette colorPalette {};
     MockRenderTarget renderTarget {};
+    // Declared before `renderer`: the renderer holds it by reference for its whole lifetime.
+    MockFontLocator fontLocator {};
     Renderer renderer;
 
     ReconfigFixture():
@@ -930,6 +932,7 @@ struct ReconfigFixture
                  crispy::StrongHashtableSize { 1024 },
                  crispy::LRUCapacity { 4096 },
                  /* atlasDirectMapping */ false,
+                 fontLocator,
                  Decorator::Underline,
                  Decorator::Underline)
     {

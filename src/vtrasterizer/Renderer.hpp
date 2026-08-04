@@ -73,6 +73,10 @@ class Renderer
              crispy::StrongHashtableSize atlasHashtableSlotCount,
              crispy::LRUCapacity atlasTileCount,
              bool atlasDirectMapping,
+             /// The font locator this renderer's shaper resolves font descriptions through. Injected
+             /// rather than fetched from FontLocatorProvider so a renderer can be built against
+             /// MockFontLocator, and fixed for the renderer's lifetime like every other collaborator.
+             text::FontLocator& fontLocator,
              Decorator hyperlinkNormal,
              Decorator hyperlinkHover,
              // Must match Config's `text_scaling_method` default. When these disagreed, every
@@ -355,6 +359,9 @@ class Renderer
 
     Renderable::DirectMappingAllocator _directMappingAllocator;
     std::unique_ptr<Renderable::TextureAtlas> _textureAtlas;
+
+    /// Resolves font descriptions to files. Constructor-injected and fixed thereafter.
+    text::FontLocator& _fontLocator;
 
     FontDescriptions _fontDescriptions;
     std::unique_ptr<text::Shaper> _textShaper;

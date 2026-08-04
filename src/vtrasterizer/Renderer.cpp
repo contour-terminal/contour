@@ -136,6 +136,7 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
                    crispy::StrongHashtableSize atlasHashtableSlotCount,
                    crispy::LRUCapacity atlasTileCount,
                    bool atlasDirectMapping,
+                   text::FontLocator& fontLocator,
                    Decorator hyperlinkNormal,
                    Decorator hyperlinkHover,
                    GlyphScalingMethod textScalingMethod):
@@ -146,11 +147,11 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
     _atlasTileCount { atlasbudget::tileCountFor(atlasTileCount, pageSize) },
     _atlasDirectMapping { atlasDirectMapping },
     //.
+    _fontLocator { fontLocator },
     _fontDescriptions { std::move(fontDescriptions) },
     _textShaper { [&] {
-        auto shaper = createTextShaper(_fontDescriptions.textShapingEngine,
-                                       _fontDescriptions.dpi,
-                                       createFontLocator(_fontDescriptions.fontLocator));
+        auto shaper =
+            createTextShaper(_fontDescriptions.textShapingEngine, _fontDescriptions.dpi, fontLocator);
         shaper->setFontFallbackLimit(_fontDescriptions.maxFallbackCount);
         return shaper;
     }() },
@@ -362,14 +363,16 @@ void Renderer::applyFontDescriptions(FontDescriptions fontDescriptions)
             _textShaper->clearCache();
         _textShaper->setDPI(fontDescriptions.dpi);
         _textShaper->setFontFallbackLimit(fontDescriptions.maxFallbackCount);
-        if (_fontDescriptions.fontLocator != fontDescriptions.fontLocator)
-            _textShaper->setLocator(createFontLocator(fontDescriptions.fontLocator));
+        // The locator is a constructor-injected collaborator and is fixed for this renderer's lifetime, so
+        // a FontLocatorEngine change in the descriptions is not honored here. Selecting the engine is the
+        // composition root's job (@see createFontLocator), and switching it means a new Renderer -- which
+        // is the "configuration at construction time" rule, not an oversight. In practice only tests pick a
+        // non-native engine.
     }
     else
     {
-        _textShaper = createTextShaper(fontDescriptions.textShapingEngine,
-                                       fontDescriptions.dpi,
-                                       createFontLocator(fontDescriptions.fontLocator));
+        _textShaper =
+            createTextShaper(fontDescriptions.textShapingEngine, fontDescriptions.dpi, _fontLocator);
         _textShaper->setFontFallbackLimit(fontDescriptions.maxFallbackCount);
     }
 
