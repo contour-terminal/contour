@@ -235,8 +235,6 @@ class TextureAtlas
     /// This will create at least one atlas in the backend.
     TextureAtlas(AtlasBackend& backend, AtlasProperties atlasProperties);
 
-    void reset(AtlasProperties atlasProperties);
-
     [[nodiscard]] AtlasBackend& backend() noexcept { return _backend; }
 
     [[nodiscard]] vtbackend::ImageSize atlasSize() const noexcept { return _atlasSize; }
@@ -629,13 +627,6 @@ template <typename Metadata>
 void TextureAtlas<Metadata>::remove(crispy::StrongHash key)
 {
     _tileCache->remove(key);
-}
-
-template <typename Metadata>
-void TextureAtlas<Metadata>::reset(AtlasProperties atlasProperties)
-{
-    _atlasProperties = atlasProperties;
-    _tileCache->clear();
 }
 
 template <typename Metadata>
