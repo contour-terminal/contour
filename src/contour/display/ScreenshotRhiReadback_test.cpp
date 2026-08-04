@@ -10,12 +10,16 @@
 // software GL stack), so they harden coverage where possible without becoming a flaky gate.
 
 #include <contour/display/RhiRenderer.hpp>
+#include <contour/display/RhiTransform.hpp>
 #include <contour/display/ScreenshotReadback.hpp>
 
 #include <vtbackend/Color.hpp>
 #include <vtbackend/Primitives.hpp>
 
+#include <vtrasterizer/shared_defines.h>
+
 #include <QtGui/QColor>
+#include <QtGui/QMatrix4x4>
 #include <QtGui/QOffscreenSurface>
 #include <QtGui/QOpenGLContext>
 
@@ -23,6 +27,10 @@
 // QRhiGles2InitParams (the OpenGL backend init struct) lives in this private header; the umbrella
 // rhi/qrhi.h does not pull it. Linked via Qt6::GuiPrivate.
 #include <QtGui/private/qrhigles2_p.h>
+#ifdef Q_OS_MACOS
+    // Same story for the Metal backend's init struct, which the macOS route below creates the RHI with.
+    #include <QtGui/private/qrhimetal_p.h>
+#endif
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -44,8 +52,8 @@ using vtbackend::Width;
 namespace
 {
 
-/// Owns an offscreen OpenGL context + surface + QRhi for a headless readback test, or nothing if the
-/// platform cannot provide a GL context. Cleans up in reverse order.
+/// Owns an offscreen QRhi for a headless readback test (plus the GL context and surface the OpenGL
+/// backend needs), or nothing if the platform can provide neither. Cleans up in reverse order.
 struct OffscreenRhi
 {
     std::unique_ptr<QOpenGLContext> context;
@@ -55,9 +63,9 @@ struct OffscreenRhi
     [[nodiscard]] bool valid() const noexcept { return rhi != nullptr; }
 };
 
-/// Attempts to build an offscreen GLES2/OpenGL QRhi. Returns an OffscreenRhi whose valid() is false when the
-/// environment has no usable GL context (the caller then SKIPs rather than fails).
-OffscreenRhi makeOffscreenRhi()
+/// Attempts to build an offscreen GLES2/OpenGL QRhi, which needs a current context on a fallback surface.
+/// @return an OffscreenRhi whose valid() is false when the environment has no usable GL context.
+OffscreenRhi makeOffscreenGlRhi()
 {
     OffscreenRhi out;
 
@@ -79,6 +87,25 @@ OffscreenRhi makeOffscreenRhi()
     params.window = nullptr;
     out.rhi.reset(QRhi::create(QRhi::OpenGLES2, &params));
     return out;
+}
+
+/// Attempts to build an offscreen QRhi on the platform's native backend.
+///
+/// Metal is tried first on Apple platforms: it needs no context or surface, and it is the backend the
+/// app itself runs on there (the cocoa/offscreen plugins refuse createPlatformOpenGLContext, so the
+/// OpenGL route below can only ever SKIP on macOS — which silently cost these tests all their coverage
+/// on that platform). Everything else takes the OpenGL route, Qt's default on Linux.
+/// @return an OffscreenRhi whose valid() is false when no backend could be created (the caller SKIPs).
+OffscreenRhi makeOffscreenRhi()
+{
+#ifdef Q_OS_MACOS
+    OffscreenRhi metal;
+    QRhiMetalInitParams params;
+    metal.rhi.reset(QRhi::create(QRhi::Metal, &params));
+    if (metal.valid())
+        return metal;
+#endif
+    return makeOffscreenGlRhi();
 }
 
 /// A color + depth-stencil texture render target, mirroring the layout RhiRenderer::ensureScreenshotTarget()
@@ -259,3 +286,224 @@ TEST_CASE("RHI readback: a captured screenshot is delivered top-left origin, not
     CHECK(pixelAt(image, W, 0, TopHalf) == Transparent);   // first row below it
     CHECK(pixelAt(image, W, W - 1, H - 1) == Transparent); // bottom-right: outside the band
 }
+
+// {{{ #2040: a split pane at a fractional device origin must not resample its glyph tiles
+namespace
+{
+
+/// Red-channel step between adjacent tile columns. Eight columns must stay inside a uint8_t, so the
+/// brightest is 8 * 30 = 240 and every column is distinguishable from its neighbours and from the
+/// transparent background.
+constexpr int TileColumnStride = 30;
+
+/// Edge length of the single atlas tile the pane-placement case renders, in pixels.
+constexpr int TileExtent = 8;
+
+/// Builds the orthographic projection the scene graph feeds a render node at a given DPR: over the
+/// LOGICAL extent (device extent / DPR), top-left origin. Mirrors the helper in RhiVertexLayout_test.
+QMatrix4x4 sceneOrtho(int deviceWidth, int deviceHeight, float dpr)
+{
+    QMatrix4x4 m;
+    m.ortho(0.0f,
+            static_cast<float>(deviceWidth) / dpr,
+            static_cast<float>(deviceHeight) / dpr,
+            0.0f,
+            -1.0f,
+            1.0f);
+    return m;
+}
+
+/// Renders one atlas tile through the production draw path with the pane placed at @p paneOriginLogical,
+/// and returns the readback image (top-left origin, RGBA8) of the whole render target.
+///
+/// The tile's texels carry a distinct red value per column, so the caller can tell exactly which source
+/// columns survived to the framebuffer — the property #2040 breaks.
+/// @return the normalized readback buffer, or an empty vector if the environment could not render.
+std::vector<uint8_t> renderTileScaled(QRhi* rhi,
+                                      TextureTarget const& target,
+                                      int targetWidth,
+                                      int targetHeight,
+                                      float paneOriginLogical,
+                                      float projectionDpr,
+                                      float composeDpr)
+{
+    using namespace vtrasterizer;
+
+    constexpr int AtlasExtent = 16; // power of two: executeConfigureAtlas requires it
+
+    auto renderer = RhiRenderer(ImageSize { Width(targetWidth), Height(targetHeight) },
+                                ImageSize { Width(TileExtent), Height(TileExtent) });
+    renderer.initialize();
+    renderer.createPipelines(rhi, target.rpDesc.get());
+    if (!renderer.pipelinesReady())
+        return {};
+
+    // Qt's contract: projection * nodeMatrix * vertex, both in logical pixels. The node matrix is the
+    // pane's placement — the fractional translation a SplitView hands its second child. The scene graph
+    // builds its projection from the surface's REAL device-pixel ratio, while composeItemToClip divides
+    // by whatever the display reports; passing the two separately lets a case pin what a disagreement
+    // between them does to the glyph texels.
+    auto nodeMatrix = QMatrix4x4 {};
+    nodeMatrix.translate(paneOriginLogical, 0.0f);
+    renderer.setProjectionMatrix(contour::display::composeItemToClip(
+        sceneOrtho(targetWidth, targetHeight, projectionDpr), nodeMatrix, composeDpr));
+
+    // One RGBA tile whose column i is opaque red = 32*(i+1): every column distinguishable from its
+    // neighbours and from the transparent background, so a dropped or duplicated column is observable.
+    auto bitmap = atlas::Buffer(static_cast<size_t>(TileExtent) * TileExtent * 4, 0);
+    for (auto const row: std::views::iota(0, TileExtent))
+        for (auto const column: std::views::iota(0, TileExtent))
+        {
+            auto* px = bitmap.data() + (((static_cast<size_t>(row) * TileExtent) + column) * 4);
+            px[0] = static_cast<uint8_t>(TileColumnStride * (column + 1));
+            px[3] = 0xFF;
+        }
+
+    QRhiCommandBuffer* cb = nullptr;
+    if (rhi->beginOffscreenFrame(&cb) != QRhi::FrameOpSuccess)
+        return {};
+
+    renderer.beginFrame(rhi, cb, target.renderTarget.get());
+    renderer.configureAtlas(atlas::ConfigureAtlas {
+        .size = ImageSize { Width(AtlasExtent), Height(AtlasExtent) },
+        .properties =
+            atlas::AtlasProperties { .format = atlas::Format::RGBA,
+                                     .tileSize = ImageSize { Width(TileExtent), Height(TileExtent) },
+                                     .hashCount = crispy::StrongHashtableSize { 4 },
+                                     .tileCount = crispy::LRUCapacity { 4 },
+                                     .directMappingCount = 0 } });
+    renderer.uploadTile(atlas::UploadTile {
+        .location = atlas::TileLocation { atlas::TileLocation::X { 0 }, atlas::TileLocation::Y { 0 } },
+        .bitmapSize = ImageSize { Width(TileExtent), Height(TileExtent) },
+        .bitmapFormat = atlas::Format::RGBA,
+        .bitmap = std::move(bitmap),
+        .rowAlignment = 1 });
+    renderer.renderTile(atlas::RenderTile {
+        .x = atlas::RenderTile::X { 0 }, // item-local: the pane's own left edge
+        .y = atlas::RenderTile::Y { 0 },
+        .bitmapSize = ImageSize { Width(TileExtent), Height(TileExtent) },
+        .targetSize = ImageSize { Width(TileExtent), Height(TileExtent) },
+        .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+        .tileLocation = atlas::TileLocation { atlas::TileLocation::X { 0 }, atlas::TileLocation::Y { 0 } },
+        .normalizedLocation = atlas::NormalizedTileLocation { .x = 0.0f,
+                                                              .y = 0.0f,
+                                                              .width = float(TileExtent) / AtlasExtent,
+                                                              .height = float(TileExtent) / AtlasExtent },
+        .fragmentShaderSelector = FRAGMENT_SELECTOR_IMAGE_BGRA });
+    renderer.execute(std::chrono::steady_clock::now());
+    renderer.flushFrame();
+
+    cb->beginPass(target.renderTarget.get(), asQColor(RGBAColor { 0, 0, 0, 0 }), { 1.0f, 0 });
+    renderer.recordDraws();
+    cb->endPass();
+
+    QRhiReadbackResult readback;
+    auto* batch = rhi->nextResourceUpdateBatch();
+    batch->readBackTexture(QRhiReadbackDescription(target.texture.get()), &readback);
+    cb->resourceUpdate(batch);
+    rhi->endOffscreenFrame();
+
+    if (readback.data.isEmpty())
+        return {};
+
+    auto const* bytes = reinterpret_cast<uint8_t const*>(readback.data.constData());
+    return normalizeScreenshotBuffer(
+        std::span<uint8_t const>(bytes, static_cast<size_t>(readback.data.size())),
+        targetWidth,
+        targetHeight,
+        /*flip*/ rhi->isYUpInFramebuffer());
+}
+
+/// @return the red channel of every non-transparent pixel along row @p y, left to right — i.e. the source
+/// tile columns that actually reached the framebuffer, in order.
+std::vector<int> survivingColumns(std::span<uint8_t const> image, int width, int y)
+{
+    auto out = std::vector<int> {};
+    for (auto const x: std::views::iota(0, width))
+        if (auto const px = pixelAt(image, width, x, y); px.alpha() != 0)
+            out.push_back(px.red());
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("#2040: a pane at a fractional device origin renders every glyph column exactly once",
+          "[screenshot][rhi][splitpane]")
+{
+    // Regression pin for #2040 (split panes render mangled glyphs after a window resize). A SplitView
+    // sizes its first child as `view.width * ratio` with no rounding (ui/PaneNode.qml), so the second
+    // pane routinely starts at a fractional logical — hence fractional DEVICE — x. The glyph atlas is
+    // sampled with QRhiSampler::Nearest so each texel maps 1:1 to a hardware pixel; displace the quad by
+    // half a device pixel and the rasterizer's pixel centers land on texel boundaries, so source columns
+    // are dropped and duplicated at random. That is the doubled stems, the stray 1px bar and the cursor
+    // box missing its right edge in the issue's screenshots.
+    //
+    // The invariant this asserts is placement-independent: wherever the pane sits, each of the tile's
+    // eight distinct columns must reach the framebuffer exactly once, in order.
+    auto env = makeOffscreenRhi();
+    if (!env.valid())
+        SKIP("no usable OpenGL context in this environment");
+
+    auto* rhi = env.rhi.get();
+    constexpr int W = 32;
+    constexpr int H = 16;
+    constexpr float Dpr = 1.0f;
+
+    auto const target = makeTextureTarget(rhi, QSize(W, H));
+    if (!target.valid())
+        SKIP("could not create a texture render target");
+
+    // The eight column values the tile carries, in source order.
+    auto const expected = [] {
+        auto v = std::vector<int> {};
+        for (auto const column: std::views::iota(0, TileExtent))
+            v.push_back(TileColumnStride * (column + 1));
+        return v;
+    }();
+
+    // The tile is drawn at item-local y = 0 and is TileExtent tall, so any row in [0, TileExtent) cuts
+    // through every one of its columns. Take the middle one.
+    constexpr int SampleRow = TileExtent / 2;
+
+    SECTION("an integral pane origin renders the tile faithfully (the left pane / pre-split case)")
+    {
+        auto const image = renderTileScaled(rhi, target, W, H, /*paneOriginLogical*/ 4.0f, Dpr, Dpr);
+        if (image.empty())
+            SKIP("the RHI could not render this frame");
+        CHECK(survivingColumns(image, W, SampleRow) == expected);
+    }
+
+    SECTION("a fractional pane origin renders it just as faithfully (the right pane)")
+    {
+        // A pane at x.5 is the ordinary case for a SplitView's second child. A pure TRANSLATION is
+        // harmless under Nearest sampling however fractional it is: every sample point shifts by the same
+        // amount, so each still lands in a distinct texel and the tile is at worst displaced by one pixel.
+        // This case exists to keep that on the record — pane placement is not what #2040 was about.
+        auto const image = renderTileScaled(rhi, target, W, H, /*paneOriginLogical*/ 4.5f, Dpr, Dpr);
+        if (image.empty())
+            SKIP("the RHI could not render this frame");
+        CHECK(survivingColumns(image, W, SampleRow) == expected);
+    }
+
+    SECTION("a SCALE mismatch is what mangles the glyph: a column renders twice")
+    {
+        // The negative control, and the actual mechanism behind #2040. composeItemToClip divides the
+        // rasterizer's device-pixel vertices by a DPR the caller supplies; Qt builds the projection from
+        // the DPR of the surface it is about to rasterize into. Let those two disagree and the quad is
+        // scaled by their ratio, so with Nearest sampling source columns are duplicated (and, at other
+        // ratios, dropped) — the stray 1px stem and the uneven stroke weights in the issue's screenshots.
+        //
+        // 1.0 vs 0.94 is a ~6% scale, enough to duplicate exactly one column of an 8px tile. The
+        // production path must never produce a ratio other than 1, which is what deviceToLogicalScale()
+        // (RhiTransform.h) guarantees by deriving the divisor from the frame's own render target.
+        auto const image = renderTileScaled(rhi, target, W, H, /*paneOriginLogical*/ 4.0f, 1.0f, 0.94f);
+        if (image.empty())
+            SKIP("the RHI could not render this frame");
+
+        auto const columns = survivingColumns(image, W, SampleRow);
+        CHECK(columns.size() == expected.size() + 1); // one column too many: it was resampled
+        CHECK_FALSE(columns == expected);             // ... and so the tile is not faithful
+        CHECK(std::ranges::is_sorted(columns));       // duplicated, not shuffled
+    }
+}
+// }}}

@@ -58,7 +58,15 @@ void TerminalRenderNode::prepare()
     // correction lives in composeItemToClip() (RhiTransform.h), extracted so it can be unit-tested without a
     // window: it pre-scales the device-pixel vertices back to logical space with 1/DPR so the grid is
     // positioned correctly while each device-resolution glyph texel still maps 1:1 to a hardware pixel.
-    auto const dpr = static_cast<float>(display->contentScale());
+    //
+    // That divisor is derived from THIS frame's render target rather than read from the display's content
+    // scale (#2040). The two are not interchangeable: contentScale() resolves QWindow::devicePixelRatio()
+    // (and, under KDE, a forced font DPI that replaces it outright), while the scene graph builds
+    // projectionMatrix() from QQuickWindow::effectiveDevicePixelRatio(). When they disagree the quads are
+    // scaled by the ratio, and because the atlas sampler is Nearest, glyph columns are duplicated and
+    // dropped instead of merely displaced — mangled text in one pane, which is what the issue reported.
+    auto const dpr = deviceToLogicalScale(
+        rt->pixelSize(), display->window() != nullptr ? QSizeF(display->window()->size()) : QSizeF {});
     auto const itemToClip = composeItemToClip(*projectionMatrix(), *matrix(), dpr);
 
     // This item's top-left corner inside the render target, in device pixels. matrix() maps item-local

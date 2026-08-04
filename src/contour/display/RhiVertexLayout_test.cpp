@@ -198,4 +198,51 @@ TEST_CASE("composeItemToClip: non-positive DPR is treated as identity (no scale)
     CHECK(composeItemToClip(projection, node, 0.0f) == projection * node);
     CHECK(composeItemToClip(projection, node, -1.0f) == projection * node);
 }
+
+// Regression pins for #2040: the divisor composeItemToClip() is given must be the SAME ratio the scene
+// graph built the projection with. Any other value scales the rasterizer's device-pixel quads, and since
+// the glyph atlas is sampled with QRhiSampler::Nearest that duplicates and drops whole glyph columns
+// rather than merely displacing them (the readback case in ScreenshotRhiReadback_test demonstrates it on
+// real pixels). deviceToLogicalScale() removes the guesswork by deriving the ratio from the frame itself.
+TEST_CASE("deviceToLogicalScale: recovers the ratio the scene graph rasterizes at", "[rhi][dpr]")
+{
+    CHECK(deviceToLogicalScale(QSize(1600, 1200), QSizeF(800, 600)) == Catch::Approx(2.0f));
+    CHECK(deviceToLogicalScale(QSize(1000, 750), QSizeF(800, 600)) == Catch::Approx(1.25f));
+    CHECK(deviceToLogicalScale(QSize(800, 600), QSizeF(800, 600)) == Catch::Approx(1.0f));
+}
+
+TEST_CASE("deviceToLogicalScale: degenerate extents fall back to identity", "[rhi][dpr]")
+{
+    // Nothing sensible to divide by — before the surface has a size, or after it has been torn down.
+    CHECK(deviceToLogicalScale(QSize(0, 0), QSizeF(800, 600)) == Catch::Approx(1.0f));
+    CHECK(deviceToLogicalScale(QSize(800, 600), QSizeF(0, 0)) == Catch::Approx(1.0f));
+    // A degenerate WIDTH alone still has an answer: the height carries the same ratio.
+    CHECK(deviceToLogicalScale(QSize(0, 1200), QSizeF(0, 600)) == Catch::Approx(2.0f));
+}
+
+TEST_CASE("deviceToLogicalScale: the derived scale maps device pixels 1:1 into the projection", "[rhi][dpr]")
+{
+    // The property that matters, stated end to end: take a surface, build the projection the scene graph
+    // would build for it, derive the scale from the same surface, and the render target's far corner in
+    // DEVICE pixels must land exactly on the clip-cube edge. A separately-sampled DPR (contentScale(),
+    // which reads QWindow::devicePixelRatio() while Qt uses effectiveDevicePixelRatio()) is not
+    // guaranteed to satisfy this — which is the defect.
+    constexpr int DeviceW = 1000;
+    constexpr int DeviceH = 750;
+    constexpr float SceneGraphDpr = 1.25f;
+
+    auto const projection = logicalOrtho(DeviceW, DeviceH, SceneGraphDpr);
+    auto const derived = deviceToLogicalScale(QSize(DeviceW, DeviceH),
+                                              QSizeF(DeviceW / SceneGraphDpr, DeviceH / SceneGraphDpr));
+
+    auto const itemToClip = composeItemToClip(projection, QMatrix4x4 {}, derived);
+    auto const br = itemToClip.map(QVector3D(DeviceW, DeviceH, 0.0f));
+    CHECK(br.x() == Catch::Approx(1.0f).margin(1e-3));
+    CHECK(br.y() == Catch::Approx(-1.0f).margin(1e-3));
+
+    // And the counter-example: a divisor off by the amount two Qt DPR accessors can disagree by does NOT
+    // land on the edge, so the glyph texels no longer map 1:1 to hardware pixels.
+    auto const wrong = composeItemToClip(projection, QMatrix4x4 {}, 1.0f);
+    CHECK(wrong.map(QVector3D(DeviceW, DeviceH, 0.0f)).x() != Catch::Approx(1.0f).margin(1e-3));
+}
 // }}}
