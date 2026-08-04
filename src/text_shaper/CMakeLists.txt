@@ -35,10 +35,16 @@ if(APPLE)
     find_package(Fontconfig REQUIRED)
     find_package(Freetype REQUIRED)
     pkg_check_modules(harfbuzz REQUIRED IMPORTED_TARGET harfbuzz)
-    execute_process(
-        COMMAND sh -c "brew --prefix harfbuzz | cut -d. -f1 | tr -d $'\n'"
-        OUTPUT_VARIABLE HARFBUZZ_APPLE_INCLUDE)
-    include_directories("${HARFBUZZ_APPLE_INCLUDE}/include")
+    if(NOT DEFINED VCPKG_TOOLCHAIN)
+        # Homebrew-only fallback. It must not run under vcpkg: `include_directories` is
+        # global and would put Homebrew's harfbuzz headers ahead of the vcpkg ones we
+        # actually link against, which is a header/library version mismatch waiting to
+        # happen. Release packaging goes through vcpkg precisely to avoid Homebrew.
+        execute_process(
+            COMMAND sh -c "brew --prefix harfbuzz | cut -d. -f1 | tr -d $'\n'"
+            OUTPUT_VARIABLE HARFBUZZ_APPLE_INCLUDE)
+        include_directories("${HARFBUZZ_APPLE_INCLUDE}/include")
+    endif()
     list(APPEND TEXT_SHAPER_LIBS Freetype::Freetype)
     list(APPEND TEXT_SHAPER_LIBS PkgConfig::harfbuzz)
     list(APPEND TEXT_SHAPER_LIBS Fontconfig::Fontconfig)

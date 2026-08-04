@@ -535,7 +535,33 @@ install_deps_darwin() {
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
     # NB: Also available in brew: mimalloc
+    #
+    # Qt is deliberately absent. Homebrew ships Qt as ~40 separate per-module formulae,
+    # each in its own prefix, and macdeployqt resolves QML modules and plugins relative
+    # to a single Qt prefix -- so it silently misses the cross-prefix ones and produces a
+    # bundle that cannot launch anywhere but the build machine. Release builds use the
+    # official Qt binaries instead (install-qt-action in CI, aqtinstall locally); see
+    # docs/internals/macos-code-signing.md. Set CONTOUR_INSTALL_BREW_QT=ON to get the
+    # Homebrew Qt anyway, which is fine for a dev build that is never packaged.
+    local qt_formula=""
+    if [ "x$CONTOUR_INSTALL_BREW_QT" = "xON" ]; then
+        qt_formula="qt$QTVER"
+    fi
+
+    # autoconf/autoconf-archive/automake/libtool are build-host tools, not libraries: some
+    # vcpkg ports on the way to fontconfig (gperf) are autotools projects and fail to
+    # configure without them. Only the `macos-package` preset uses vcpkg, but installing
+    # four small tools unconditionally beats a confusing failure the first time someone
+    # tries to build a release .dmg.
+    #
+    # The libraries below serve the dev presets. Release packaging deliberately does NOT
+    # use them -- Homebrew ships one prebuilt bottle per macOS release, so a bundle built
+    # from them inherits the builder's macOS as its minimum. vcpkg builds the same
+    # libraries from source against a pinned deployment target instead.
     HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 brew install $SYSDEP_ASSUME_YES \
+        autoconf \
+        autoconf-archive \
+        automake \
         cairo \
         catch2 \
         cpp-gsl \
@@ -544,10 +570,11 @@ install_deps_darwin() {
         freetype \
         harfbuzz \
         libssh2 \
+        libtool \
         openssl \
         pkg-config \
-        qt$QTVER \
-        yaml-cpp
+        yaml-cpp \
+        $qt_formula
 }
 
 main() {
