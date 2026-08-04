@@ -63,6 +63,31 @@ struct ScissorRect
     return std::nullopt;
 }
 
+/// Computes the scissor a pane's draw must use, given the pane's own rectangle in the render target.
+///
+/// A terminal pane may never paint outside its own item rect, and nothing else guarantees that: no pane
+/// item sets `clip: true` (see ui/PaneNode.qml, ui/TerminalPane.qml), so the scene graph hands the node no
+/// clip at all and the transient inner scissor is only present while smooth-scrolling. Falling back to the
+/// full render target in that case — as this did — leaves containment resting entirely on a pane's
+/// vertices never exceeding its extent, which a frame composed mid-resize (the item already resized, the
+/// grid not yet reflowed) does not satisfy. The pane then bleeds over its neighbour.
+///
+/// Making the item rect the base of the clip is correct by construction and costs nothing: it is a
+/// rectangle the caller already knows, where `clip: true` would have cost a Quick clip node per pane.
+/// Both other clips can only shrink the result further.
+/// @param itemRectInTarget The pane's own rectangle in render-target coordinates (@see itemScissorToTarget).
+/// @param innerScissor     The transient inner scissor for this draw, if any, already in target coordinates.
+/// @param nodeScissor      The scene graph's clip rectangle for this node, if any.
+/// @return The effective clip; never absent, because the item rect always applies.
+[[nodiscard]] constexpr ScissorRect computePaneClip(ScissorRect const& itemRectInTarget,
+                                                    std::optional<ScissorRect> const& innerScissor,
+                                                    std::optional<ScissorRect> const& nodeScissor) noexcept
+{
+    if (auto const nested = computeEffectiveClip(innerScissor, nodeScissor))
+        return itemRectInTarget.intersect(*nested);
+    return itemRectInTarget;
+}
+
 /// Maps an item-relative inner scissor into render-target coordinates (both bottom-left origin,
 /// device pixels).
 ///

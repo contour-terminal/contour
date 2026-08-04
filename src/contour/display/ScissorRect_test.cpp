@@ -76,6 +76,60 @@ TEST_CASE("ScissorRect::empty flags zero-area rects", "[scissor]")
     CHECK_FALSE(contour::display::ScissorRect { .x = 0, .y = 0, .width = 1, .height = 1 }.empty());
 }
 
+TEST_CASE("computePaneClip keeps a pane inside its own rect when nothing else clips", "[scissor]")
+{
+    using contour::display::computePaneClip;
+
+    // The right pane of a vertical split: 960 device px wide, sitting at x=960 in a 1920px-wide target.
+    auto const pane = ScissorRect { .x = 960, .y = 0, .width = 960, .height = 966 };
+
+    SECTION("no inner scissor and no node clip still clips to the pane, not the whole target")
+    {
+        // The regression: this used to scissor the full render target, so a pane whose vertices outran
+        // its extent (a frame composed mid-resize) painted over its neighbour. No pane item sets
+        // clip: true, so this is the ORDINARY case, not a corner one.
+        auto const clip = computePaneClip(pane, std::nullopt, std::nullopt);
+        CHECK(clip.x == 960);
+        CHECK(clip.width == 960); // NOT 1920
+        CHECK(clip.height == 966);
+        CHECK_FALSE(clip.empty());
+    }
+
+    SECTION("an inner scissor can only shrink it further")
+    {
+        auto const inner = ScissorRect { .x = 1000, .y = 100, .width = 200, .height = 200 };
+        auto const clip = computePaneClip(pane, inner, std::nullopt);
+        CHECK(clip.x == 1000);
+        CHECK(clip.width == 200);
+    }
+
+    SECTION("an inner scissor reaching past the pane is cut at the pane edge")
+    {
+        // Item-relative geometry that has drifted wider than the pane: the excess must not survive.
+        auto const inner = ScissorRect { .x = 1800, .y = 0, .width = 400, .height = 966 };
+        auto const clip = computePaneClip(pane, inner, std::nullopt);
+        CHECK(clip.x == 1800);
+        CHECK(clip.width == 120); // 1920 - 1800, not the requested 400
+    }
+
+    SECTION("a node clip nests with the pane and the inner scissor")
+    {
+        auto const inner = ScissorRect { .x = 960, .y = 0, .width = 960, .height = 966 };
+        auto const node = ScissorRect { .x = 0, .y = 500, .width = 1920, .height = 466 };
+        auto const clip = computePaneClip(pane, inner, node);
+        CHECK(clip.x == 960);
+        CHECK(clip.y == 500);
+        CHECK(clip.width == 960);
+        CHECK(clip.height == 466);
+    }
+
+    SECTION("a pane disjoint from the node clip yields an empty (clip-everything) rect")
+    {
+        auto const node = ScissorRect { .x = 0, .y = 0, .width = 100, .height = 966 };
+        CHECK(computePaneClip(pane, std::nullopt, node).empty());
+    }
+}
+
 TEST_CASE("itemScissorToTarget maps an item-relative scissor into render-target coordinates", "[scissor]")
 {
     using contour::display::itemScissorToTarget;

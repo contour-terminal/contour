@@ -979,23 +979,37 @@ void RhiRenderer::applyScissor(QRhiGraphicsPipeline* pipeline,
                                    unbox<int>(_renderTargetSize.height),
                                    targetPixelSize.height());
     }();
+    // The pane's own rectangle is the base of the clip, so a draw can never paint over a sibling pane even
+    // when neither the scene graph nor the rasterizer supplies one (no pane item sets clip: true, and the
+    // inner scissor exists only while smooth-scrolling). Drawing into the item-sized offscreen screenshot
+    // target the item frame IS the target frame, so the base is simply the whole target.
+    auto const itemHeight = unbox<int>(_renderTargetSize.height);
+    auto const itemRect =
+        offscreen
+            ? ScissorRect { .x = 0,
+                            .y = 0,
+                            .width = targetPixelSize.width(),
+                            .height = targetPixelSize.height() }
+            : itemScissorToTarget(
+                  ScissorRect {
+                      .x = 0, .y = 0, .width = unbox<int>(_renderTargetSize.width), .height = itemHeight },
+                  _itemOriginLeftDevice,
+                  _itemOriginTopDevice,
+                  itemHeight,
+                  targetPixelSize.height());
+
     auto const clip =
-        computeEffectiveClip(targetInner, offscreen ? std::optional<ScissorRect> {} : _nodeScissor);
+        computePaneClip(itemRect, targetInner, offscreen ? std::optional<ScissorRect> {} : _nodeScissor);
 
     // A pipeline that declares UsesScissor must be given an explicit scissor every draw: the RHI otherwise
     // keeps the *last* scissor set in this render pass, which — since the scene graph clips earlier nodes
     // (e.g. the tab strip's ListView with clip:true sets a small scissor) — would confine the terminal to a
-    // stale sub-rectangle. So when no clip applies, scissor to the full render target (the whole viewport).
-    if (!clip.has_value())
-    {
-        _commandBuffer->setScissor(QRhiScissor(0, 0, targetPixelSize.width(), targetPixelSize.height()));
-        return;
-    }
-
+    // stale sub-rectangle. computePaneClip() always yields one, so there is no unclipped path left.
+    //
     // QRhiScissor uses bottom-left-origin pixels, matching ScissorRect (and the scene graph's scissorRect()
     // that fed _nodeScissor), so the rectangle maps across directly. A zero-area clip clips everything away.
-    auto const& r = *clip;
-    _commandBuffer->setScissor(QRhiScissor(r.x, r.y, std::max(0, r.width), std::max(0, r.height)));
+    _commandBuffer->setScissor(
+        QRhiScissor(clip.x, clip.y, std::max(0, clip.width), std::max(0, clip.height)));
 }
 
 void RhiRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)
