@@ -1038,6 +1038,73 @@ TEST_CASE("Renderer.reconfig.geometry_resizes_render_target_on_apply", "[rendere
     CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
 }
 
+TEST_CASE("Renderer.reconfig.atlas_budget_follows_the_page", "[renderer][atlas]")
+{
+    // A pane created small — which a freshly split pane always is — and then grown by a window resize
+    // used to keep the atlas it was constructed with, because the tile budget was computed once in the
+    // constructor and setPageSize()/applyResize() never revisited it. Once a frame needed more distinct
+    // tiles than that atlas held, a tile slot was recycled mid-frame and the quads already recorded
+    // against it sampled the wrong glyph. AtlasBudget_test pins the arithmetic; this pins that the resize
+    // path actually applies it and rebuilds the atlas.
+    configureMockFont();
+    ReconfigFixture fixture;
+    fixture.attachRenderTarget();
+    auto& renderer = fixture.renderer;
+    auto& backend = fixture.renderTarget.getMockBackend();
+
+    auto const configuresAfterAttach = backend.configureCount;
+    auto const tilesAfterAttach = backend.properties().tileCount.value;
+    REQUIRE(configuresAfterAttach > 0); // attaching built the first atlas
+
+    SECTION("growing the page past the budget rebuilds the atlas at the larger size")
+    {
+        auto const grown = PageSize { LineCount(120), ColumnCount(400) };
+        renderer.applyResize(
+            vtbackend::ImageSize { Width(4000), Height(2400) }, grown, vtrasterizer::PageMargin {});
+        vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+
+        CHECK(backend.properties().tileCount.value > tilesAfterAttach);
+        CHECK(backend.properties().tileCount.value
+              >= static_cast<uint32_t>(grown.area())); // covers the page it must render
+        CHECK(backend.configureCount > configuresAfterAttach);
+
+        // Kept proportional; it used to stay pinned while the tile count climbed with the page.
+        CHECK(backend.properties().hashCount.value >= backend.properties().tileCount.value);
+    }
+
+    SECTION("shrinking back does not rebuild the atlas again")
+    {
+        auto const grown = PageSize { LineCount(120), ColumnCount(400) };
+        renderer.applyResize(
+            vtbackend::ImageSize { Width(4000), Height(2400) }, grown, vtrasterizer::PageMargin {});
+        vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+        auto const grownTiles = backend.properties().tileCount.value;
+        auto const grownConfigures = backend.configureCount;
+
+        renderer.applyResize(vtbackend::ImageSize { Width(400), Height(300) },
+                             PageSize { LineCount(10), ColumnCount(20) },
+                             vtrasterizer::PageMargin {});
+        vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+
+        // Grow-only: a resize drag walks through dozens of sizes, and rebuilding on each would throw
+        // away every cached glyph mid-drag.
+        CHECK(backend.properties().tileCount.value == grownTiles);
+        CHECK(backend.configureCount == grownConfigures);
+    }
+
+    SECTION("a resize within the existing budget rebuilds nothing")
+    {
+        // Strictly smaller than the 24x80 the fixture was built for, so the existing atlas still covers
+        // it and there is nothing to do. (A page even slightly LARGER does grow the budget — the bound
+        // is the page's own cell count, not a round number near it.)
+        renderer.applyResize(vtbackend::ImageSize { Width(700), Height(400) },
+                             PageSize { LineCount(20), ColumnCount(70) },
+                             vtrasterizer::PageMargin {});
+        vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+        CHECK(backend.configureCount == configuresAfterAttach);
+    }
+}
+
 TEST_CASE("Renderer.reconfig.font_size_change_is_deferred", "[renderer]")
 {
     // A font-size change needs the (non-thread-safe) text shaper, so it is fully deferred: it only
