@@ -84,6 +84,18 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
 
     void updateFontMetrics();
 
+    /// The shaping-cache key for @p text in @p style under the renderer's CURRENT fonts and size.
+    ///
+    /// Exposed so the property the key exists for can be asserted directly: a font or size change must
+    /// change the key, so entries cached against the previous font become unreachable rather than
+    /// resolvable. The cached values are shape_results naming a specific font, and resolving one after
+    /// that font has been unloaded throws inside the shaper.
+    /// @param text  The codepoints being shaped.
+    /// @param style The text style the run is drawn in.
+    /// @return The cache key.
+    [[nodiscard]] crispy::StrongHash shapingCacheKeyFor(std::u32string_view text,
+                                                        TextStyle style) const noexcept;
+
     void setPressure(bool pressure) noexcept { _pressure = pressure; }
 
     /// Must be invoked before a new terminal frame is rendered.

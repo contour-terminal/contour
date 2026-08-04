@@ -287,10 +287,12 @@ void Renderer::executeImageDiscards()
 
 void Renderer::clearCache()
 {
-    if (!_renderTarget)
-        return;
-
-    _renderTarget->clearCache();
+    // Only the render target's own cache needs a target; every renderable's cache is CPU-side. Skipping
+    // the whole flush when detached left the shaping cache holding results that named fonts the caller
+    // had just invalidated — a pane that is occluded, minimized or between detachRenderTarget() and the
+    // next setRenderTarget() is exactly that case.
+    if (_renderTarget)
+        _renderTarget->clearCache();
 
     // TODO(?): below functions are actually doing the same again and again and again. delete them (and their
     // functions for that) either that, or only the render target is allowed to clear the actual atlas caches.

@@ -683,6 +683,117 @@ TEST_CASE("TextRenderer", "[renderer]")
     }
 }
 
+TEST_CASE("TextRenderer shaping cache key changes with the font generation", "[renderer][shapingcache]")
+{
+    // The shaping cache maps text -> shape_result, and a shape_result names the font it was shaped with.
+    // The key used to be text and style alone, which is sound only while every font change flushes the
+    // cache — and the flushes were conditional on a render target, so an occluded pane could keep entries
+    // naming fonts that had already been unloaded. Resolving one reaches OpenShaper::rasterize(), whose
+    // .at() on a dead key throws and costs the frame.
+    //
+    // Font keys are never reissued, so folding the key in makes a stale entry unreachable: the same text
+    // hashes differently after a reload, degrading a missed flush to a cache miss instead of a bad glyph.
+    REQUIRE(std::filesystem::exists(testFontPath));
+    MockFontLocator::configure(
+        { { .description = FontDescription::parse("regular"),
+            .source = FontPath { .value = std::filesystem::absolute(testFontPath).string() } } });
+    auto const restoreLocator = crispy::Finally { [] { MockFontLocator::configure({}); } };
+
+    auto locator = MockFontLocator {};
+    auto textShaper = OpenShaper { text::test::BDFFont::Dpi, locator };
+
+    auto const firstKey = textShaper.loadFont(FontDescription::parse("regular"), text::test::BDFFont::Size);
+    REQUIRE(firstKey.has_value());
+
+    auto const gridMetrics = GridMetrics { .pageSize = PageSize { LineCount(24), ColumnCount(80) },
+                                           .cellSize = ImageSize { Width(8), Height(20) },
+                                           .baseline = 15,
+                                           .underline = { .position = 17, .thickness = 1 } };
+
+    auto fontDescriptions = FontDescriptions {};
+    fontDescriptions.dpi = text::test::BDFFont::Dpi;
+    fontDescriptions.size = text::test::BDFFont::Size;
+    fontDescriptions.textShapingEngine = TextShapingEngine::OpenShaper;
+
+    auto fontKeys = FontKeys { .regular = *firstKey,
+                               .bold = *firstKey,
+                               .italic = *firstKey,
+                               .boldItalic = *firstKey,
+                               .emoji = *firstKey };
+
+    MockTextRendererEvents events;
+    auto renderer = TextRenderer { gridMetrics, textShaper, fontDescriptions, fontKeys, events };
+
+    auto const text = std::u32string { U"Building" };
+    auto const before = renderer.shapingCacheKeyFor(text, TextStyle::Regular);
+
+    SECTION("reloading the font changes the key for the same text")
+    {
+        // What applyFontDescriptions() does: drop every font key, then mint fresh ones. The old keys are
+        // dead afterwards, and nextFontKey only counts up so the new ones differ.
+        textShaper.clearCache();
+        auto const reloaded =
+            textShaper.loadFont(FontDescription::parse("regular"), text::test::BDFFont::Size);
+        REQUIRE(reloaded.has_value());
+        REQUIRE(reloaded->value != firstKey->value); // keys are never reissued
+
+        fontKeys.regular = *reloaded; // held by reference; this is the live font the renderer shapes with
+        CHECK(renderer.shapingCacheKeyFor(text, TextStyle::Regular) != before);
+    }
+
+    SECTION("changing the font size changes the key for the same text")
+    {
+        fontDescriptions.size = text::FontSize { fontDescriptions.size.pt + 3.0 };
+        CHECK(renderer.shapingCacheKeyFor(text, TextStyle::Regular) != before);
+    }
+
+    SECTION("the style still separates runs of identical text")
+    {
+        CHECK(renderer.shapingCacheKeyFor(text, TextStyle::Bold) != before);
+    }
+
+    SECTION("nothing changed means the same key, or the cache would never hit")
+    {
+        CHECK(renderer.shapingCacheKeyFor(text, TextStyle::Regular) == before);
+    }
+}
+
+TEST_CASE("TextRenderer flushes its caches without a render target", "[renderer][shapingcache]")
+{
+    // updateFontMetrics() early-returned when no render target was attached, so a font change applied to
+    // an occluded or not-yet-exposed pane advanced its metrics while leaving its caches behind. The
+    // caches are CPU-side; clearing them never needed a GPU.
+    REQUIRE(std::filesystem::exists(testFontPath));
+    MockFontLocator::configure(
+        { { .description = FontDescription::parse("regular"),
+            .source = FontPath { .value = std::filesystem::absolute(testFontPath).string() } } });
+    auto const restoreLocator = crispy::Finally { [] { MockFontLocator::configure({}); } };
+
+    auto locator = MockFontLocator {};
+    auto textShaper = OpenShaper { text::test::BDFFont::Dpi, locator };
+    auto const fontKey = textShaper.loadFont(FontDescription::parse("regular"), text::test::BDFFont::Size);
+    REQUIRE(fontKey.has_value());
+
+    auto const gridMetrics = GridMetrics { .pageSize = PageSize { LineCount(24), ColumnCount(80) },
+                                           .cellSize = ImageSize { Width(8), Height(20) },
+                                           .baseline = 15,
+                                           .underline = { .position = 17, .thickness = 1 } };
+    auto fontDescriptions = FontDescriptions {};
+    fontDescriptions.dpi = text::test::BDFFont::Dpi;
+    fontDescriptions.size = text::test::BDFFont::Size;
+    auto const fontKeys = FontKeys {
+        .regular = *fontKey, .bold = *fontKey, .italic = *fontKey, .boldItalic = *fontKey, .emoji = *fontKey
+    };
+
+    MockTextRendererEvents events;
+    auto renderer = TextRenderer { gridMetrics, textShaper, fontDescriptions, fontKeys, events };
+
+    // No setRenderTarget() call: this is the detached pane. The flush must run rather than be skipped,
+    // and must not reach for the atlas that does not exist.
+    REQUIRE_NOTHROW(renderer.updateFontMetrics());
+    REQUIRE_NOTHROW(renderer.clearCache());
+}
+
 TEST_CASE("Renderer.findCellPartitionPoint", "[renderer]")
 {
     SECTION("empty vector returns 0")

@@ -170,9 +170,26 @@ namespace
         // clang-format on
     }
 
-    StrongHash hashTextAndStyle(u32string_view text, TextStyle style) noexcept
+    /// Keys the shaping cache, whose values are ShapeResults full of GlyphKeys naming a specific font.
+    ///
+    /// The font must be part of the key. It used to be text and style alone, which is only sound while
+    /// every font/DPI/size change flushes the cache — and those flushes were conditional on a render
+    /// target being attached, so a pane that was occluded or not yet exposed kept entries naming fonts
+    /// that applyFontDescriptions() had already invalidated. Looking one up then reached
+    /// OpenShaper::rasterize(), whose .at() on a dead FontKey throws into Renderer::render()'s
+    /// catch-all and silently drops the frame.
+    ///
+    /// Font keys are never reissued (OpenShaper's nextFontKey only counts up, and clearCache() does not
+    /// reset it), so the key value doubles as a generation marker: after a font reload the same text
+    /// hashes differently and a stale entry simply becomes unreachable — a cache miss instead of a wrong
+    /// glyph. The size is folded in for the same reason glyph keys carry it.
+    StrongHash hashTextAndStyle(u32string_view text,
+                                TextStyle style,
+                                text::FontKey font,
+                                text::FontSize size) noexcept
     {
-        return StrongHash::compute(text) * static_cast<uint32_t>(style);
+        return StrongHash::compute(text) * static_cast<uint32_t>(style) * font.value
+               * StrongHash::compute(size.pt);
     }
 
     text::FontKey getFontForStyle(FontKeys const& fonts, TextStyle style)
@@ -416,11 +433,17 @@ Renderable::AtlasTileAttributes const* TextRenderer::ensureRasterizedIfDirectMap
     return &_textureAtlas->directMapped(tileIndex);
 }
 
+crispy::StrongHash TextRenderer::shapingCacheKeyFor(std::u32string_view text, TextStyle style) const noexcept
+{
+    return hashTextAndStyle(text, style, getFontForStyle(_fonts, style), _fontDescriptions.size);
+}
+
 void TextRenderer::updateFontMetrics()
 {
-    if (!renderTargetAvailable())
-        return;
-
+    // Unconditional. This used to early-out when no render target was attached, which left the shaping
+    // cache holding results from the font that was just replaced — the caches are CPU-side and clearing
+    // them needs no GPU, so there was never a reason to make the flush depend on one. clearCache() guards
+    // its own atlas-dependent step internally.
     clearCache();
 }
 
@@ -612,7 +635,7 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
     _textRendererEvents.onBeforeRenderingText();
     auto _ = crispy::Finally { [&]() noexcept { _textRendererEvents.onAfterRenderingText(); } };
 
-    auto const hash = hashTextAndStyle(codepoints, style);
+    auto const hash = shapingCacheKeyFor(codepoints, style);
     text::ShapeResult const& glyphPositions =
         getOrCreateCachedGlyphPositions(hash, codepoints, clusters, style);
     crispy::Point pen = _gridMetrics.mapBottomLeft(initialPenPosition, _smoothScrollYOffset);
