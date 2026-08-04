@@ -367,7 +367,7 @@ set_target_properties(contour_core PROPERTIES AUTORCC ON)
 target_include_directories(contour_core PUBLIC "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/..")
 # }}}
 
-add_executable(contour)
+qt_add_executable(contour)
 target_sources(contour PRIVATE ${_main_source_files})
 target_link_libraries(contour PRIVATE contour_core)
 
@@ -427,20 +427,25 @@ if(WIN32)
         )
     endif()
 elseif(APPLE)
-    set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/Modules" ${CMAKE_MODULE_PATH})
+    # qt_add_executable() sets MACOSX_BUNDLE_INFO_PLIST, so Info.plist comes from Qt's
+    # template and only the properties it substitutes have any effect -- which excludes
+    # the deprecated CFBundleGetInfoString and CFBundleLongVersionString. It supplies
+    # LSMinimumSystemVersion from CMAKE_OSX_DEPLOYMENT_TARGET, and omits
+    # NSHighResolutionCapable, whose absence means enabled. See
+    # docs/internals/macos-code-signing.md.
     set_target_properties(contour PROPERTIES
         OUTPUT_NAME "contour"
         MACOSX_RPATH ON
         MACOSX_BUNDLE ON
         MACOSX_BUNDLE_BUNDLE_NAME "Contour"
-        MACOSX_BUNDLE_INFO_STRING "Contour Terminal Emulator"
         MACOSX_BUNDLE_GUI_IDENTIFIER "${AppId}"
-        MACOSX_BUNDLE_LONG_VERSION_STRING "${CONTOUR_VERSION_STRING}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${CONTOUR_VERSION}"
         MACOSX_BUNDLE_BUNDLE_VERSION "${CONTOUR_VERSION}"
         XCODE_ATTRIBUTE_PRODUCT_NAME "Contour Terminal Emulator"
-        # TODO: MACOSX_BUNDLE_ICON_FILE "contour.icns"
-        # TODO: RESOURCE "images/icon.icns"
+        # Names the icon the install rules already place at Contents/Resources/contour.icns.
+        # Without it CFBundleIconFile renders empty and both the app and the disk image
+        # show the generic executable icon.
+        MACOSX_BUNDLE_ICON_FILE "contour.icns"
     )
 endif()
 # }}}
@@ -486,6 +491,7 @@ if(CONTOUR_FRONTEND_GUI)
         Qt6::Qml
         Qt6::QuickControls2
         Qt6::Widgets
+        Qt6::QuickTemplates2
     )
 
     if(OPENBSD)
