@@ -312,6 +312,15 @@ class Renderer
 
     void configureTextureAtlas();
 
+    /// Raises the atlas tile budget if @p pageSize needs more tiles than the atlas currently holds, and
+    /// rebuilds the atlas when it does.
+    ///
+    /// Called from the geometry branch of applyPendingReconfig(), i.e. on the render thread under
+    /// _applyMutex, because it replaces the texture atlas the in-flight frame would otherwise be reading.
+    /// Grow-only.
+    /// @param pageSize The page size being applied.
+    void growAtlasForPage(vtbackend::PageSize pageSize);
+
     /// Sets the smooth scroll Y pixel offset on all sub-renderers.
     ///
     /// @param offset  Y pixel offset for smooth scrolling.
@@ -329,6 +338,14 @@ class Renderer
     void renderLines(std::span<vtbackend::RenderLine const> lines);
 
     void executeImageDiscards();
+
+    /// The atlas sizing the *configuration* asked for, kept apart from the effective sizing below.
+    ///
+    /// The effective budget is raised to cover the page actually being rendered, and a resize can raise
+    /// it again — so the configured floor has to survive that, or each recomputation would compound the
+    /// previous one instead of being derived afresh.
+    crispy::StrongHashtableSize _configuredAtlasHashtableSlotCount;
+    crispy::LRUCapacity _configuredAtlasTileCount;
 
     crispy::StrongHashtableSize _atlasHashtableSlotCount;
     crispy::LRUCapacity _atlasTileCount;

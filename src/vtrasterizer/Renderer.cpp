@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtrasterizer/Renderer.hpp>
 
+#include <vtrasterizer/AtlasBudget.hpp>
 #include <vtrasterizer/TextRenderer.hpp>
 #include <vtrasterizer/Utils.hpp>
 
@@ -138,11 +139,11 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
                    Decorator hyperlinkNormal,
                    Decorator hyperlinkHover,
                    GlyphScalingMethod textScalingMethod):
-    _atlasHashtableSlotCount { crispy::nextPowerOfTwo(atlasHashtableSlotCount.value) },
-    _atlasTileCount {
-        std::max(atlasTileCount.value, static_cast<uint32_t>(pageSize.area() * 3))
-    }, // TODO instead of pagesize use size for fullscreen window
-       // 3 required for huge sixel images rendering due to initial page size smaller than
+    _configuredAtlasHashtableSlotCount { atlasHashtableSlotCount },
+    _configuredAtlasTileCount { atlasTileCount },
+    _atlasHashtableSlotCount { atlasbudget::slotCountFor(
+        atlasHashtableSlotCount, atlasbudget::tileCountFor(atlasTileCount, pageSize)) },
+    _atlasTileCount { atlasbudget::tileCountFor(atlasTileCount, pageSize) },
     _atlasDirectMapping { atlasDirectMapping },
     //.
     _fontDescriptions { std::move(fontDescriptions) },
@@ -239,6 +240,31 @@ void Renderer::configureTextureAtlas()
 
     for (gsl::not_null<Renderable*> const& renderable: renderables())
         renderable->setTextureAtlas(*_textureAtlas);
+}
+
+void Renderer::growAtlasForPage(vtbackend::PageSize pageSize)
+{
+    // The budget was previously fixed at construction, from the page size the renderer happened to start
+    // with. A pane created small — which a freshly split pane always is — and then grown by a window
+    // resize kept the small-pane atlas for the rest of its life, and once a frame needed more distinct
+    // tiles than that atlas held, tile slots were recycled mid-frame and glyphs rendered as each other.
+    auto const required = atlasbudget::tileCountFor(_configuredAtlasTileCount, pageSize);
+    if (required.value <= _atlasTileCount.value)
+        return; // grow-only: resize jitter must not churn the atlas every frame, and surplus only costs VRAM
+
+    _atlasTileCount = required;
+    _atlasHashtableSlotCount = atlasbudget::slotCountFor(_configuredAtlasHashtableSlotCount, required);
+
+    rendererLog()("Growing atlas tile budget to {} for page size {}.", _atlasTileCount.value, pageSize);
+
+    if (!_renderTarget)
+        return; // no atlas to rebuild yet; setRenderTarget() will build it at the new budget
+
+    // configureTextureAtlas() replaces the atlas wholesale, and a tile's normalized location was baked
+    // into vertex data against the OLD atlas, so every cache holding one must go with it — the same
+    // pairing updateFontMetrics() uses.
+    configureTextureAtlas();
+    clearCache();
 }
 
 void Renderer::discardImage(vtbackend::Image const& image)
@@ -446,6 +472,7 @@ void Renderer::applyPendingReconfig()
         }
         _gridMetrics.pageSize = geometry.pageSize;
         _gridMetrics.pageMargin = geometry.pageMargin;
+        growAtlasForPage(geometry.pageSize);
     }
 
     // Apply a pending font change (full descriptions or size-only): reconfigure the shaper, load the
