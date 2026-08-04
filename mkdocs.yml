@@ -135,3 +135,4 @@ nav:
     - internals/vthost.md
     - internals/text-stack.md
     - internals/vt-conformance.md
+    - internals/macos-code-signing.md

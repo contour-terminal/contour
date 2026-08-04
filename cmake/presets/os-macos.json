@@ -5,10 +5,19 @@
     ],
     "configurePresets": [
         {
+            "name": "macos-signing",
+            "hidden": true,
+            "description": "The project's macOS release identity, defined once.",
+            "cacheVariables": {
+                "CODE_SIGN_CERTIFICATE_ID": "Developer ID Application: Christian Parpart (6T525MU9UR)"
+            }
+        },
+        {
             "name": "appleclang-debug",
             "displayName": "Clang Debug",
             "inherits": [
                 "contour-common",
+                "macos-signing",
                 "debug"
             ],
             "generator": "Ninja",
@@ -19,7 +28,6 @@
             },
             "cacheVariables": {
                 "LIBTERMINAL_BUILD_BENCH_HEADLESS": "OFF",
-                "CODE_SIGN_CERTIFICATE_ID": "Developer ID Application: Christian Parpart (6T525MU9UR)",
                 "CMAKE_PREFIX_PATH": "/opt/homebrew/opt/qt"
             }
         },
@@ -28,6 +36,7 @@
             "displayName": "Clang Release",
             "inherits": [
                 "contour-common",
+                "macos-signing",
                 "release"
             ],
             "generator": "Ninja",
@@ -38,8 +47,35 @@
             },
             "cacheVariables": {
                 "LIBTERMINAL_BUILD_BENCH_HEADLESS": "OFF",
-                "CODE_SIGN_CERTIFICATE_ID": "Developer ID Application: Christian Parpart (6T525MU9UR)",
                 "CMAKE_PREFIX_PATH": "/opt/homebrew/opt/qt"
+            }
+        },
+        {
+            "name": "macos-package",
+            "displayName": "Clang Release (distributable .dmg)",
+            "description": "The one configuration that produces a shippable .dmg. CI uses this too.",
+            "inherits": [
+                "contour-common",
+                "macos-signing",
+                "release"
+            ],
+            "generator": "Ninja",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Darwin"
+            },
+            "cacheVariables": {
+                "CONTOUR_INSTALL_TOOLS": "OFF",
+                "LIBTERMINAL_BUILD_BENCH_HEADLESS": "OFF",
+                "CONTOUR_MACOS_NOTARIZE": "ON",
+                "CONTOUR_MACOS_STAPLE_APP": "ON",
+                "CONTOUR_MACOS_NOTARY_PROFILE": "contour-notary",
+                "CONTOUR_MACOS_MIN_SUPPORTED": "13.3",
+                "CMAKE_PREFIX_PATH": "$env{QT_ROOT_DIR}",
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+                "VCPKG_TARGET_TRIPLET": "arm64-osx-contour",
+                "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/vcpkg-triplets"
             }
         }
     ],
@@ -53,6 +89,11 @@
             "name": "appleclang-release",
             "displayName": "AppleClang - Release",
             "configurePreset": "appleclang-release"
+        },
+        {
+            "name": "macos-package",
+            "displayName": "AppleClang - Release (distributable .dmg)",
+            "configurePreset": "macos-package"
         }
     ],
     "testPresets": [
@@ -66,12 +107,23 @@
                 "noTestsAction": "error",
                 "stopOnFailure": true
             }
+        },
+        {
+            "name": "macos-package",
+            "configurePreset": "macos-package",
+            "output": {
+                "outputOnFailure": true
+            },
+            "execution": {
+                "noTestsAction": "error",
+                "stopOnFailure": true
+            }
         }
     ],
     "packagePresets": [
         {
-            "name": "appleclang-release",
-            "configurePreset": "appleclang-release",
+            "name": "macos-package",
+            "configurePreset": "macos-package",
             "generators": [
                 "DragNDrop"
             ]

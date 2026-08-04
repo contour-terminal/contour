@@ -91,6 +91,17 @@ endif()
 if(APPLE)
     #set(CMAKE_INSTALL_RPATH "@executable_path")
     set(CMAKE_INSTALL_RPATH "@executable_path/../Frameworks")
+    # vcpkg gives its dylibs an `@rpath/libfoo.dylib` install name, and macdeployqt expands
+    # @rpath using only the binary's own LC_RPATH -- its -libpath option is not consulted
+    # for this. Without a search path that resolves, macdeployqt reports "Cannot resolve
+    # rpath" and leaves openssl, freetype, harfbuzz, fontconfig and cairo out of the bundle.
+    # So the deployment step gets a resolvable rpath, and the install rules delete it again
+    # once macdeployqt has rewritten every reference to @executable_path/../Frameworks --
+    # a build-machine path has no business shipping inside a release binary.
+    if(DEFINED VCPKG_TOOLCHAIN AND DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
+        set(CONTOUR_MACOS_DEPLOY_RPATH "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib")
+        list(APPEND CMAKE_INSTALL_RPATH "${CONTOUR_MACOS_DEPLOY_RPATH}")
+    endif()
     set(CMAKE_BUILD_RPATH "${CMAKE_INSTALL_RPATH}")
     set(CMAKE_MACOSX_RPATH ON)
     #set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
@@ -367,7 +378,7 @@ set_target_properties(contour_core PROPERTIES AUTORCC ON)
 target_include_directories(contour_core PUBLIC "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/..")
 # }}}
 
-add_executable(contour)
+qt_add_executable(contour)
 target_sources(contour PRIVATE ${_main_source_files})
 target_link_libraries(contour PRIVATE contour_core)
 
@@ -427,20 +438,25 @@ if(WIN32)
         )
     endif()
 elseif(APPLE)
-    set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/Modules" ${CMAKE_MODULE_PATH})
+    # qt_add_executable() sets MACOSX_BUNDLE_INFO_PLIST, so Info.plist comes from Qt's
+    # template and only the properties it substitutes have any effect -- which excludes
+    # the deprecated CFBundleGetInfoString and CFBundleLongVersionString. It supplies
+    # LSMinimumSystemVersion from CMAKE_OSX_DEPLOYMENT_TARGET, and omits
+    # NSHighResolutionCapable, whose absence means enabled. See
+    # docs/internals/macos-code-signing.md.
     set_target_properties(contour PROPERTIES
         OUTPUT_NAME "contour"
         MACOSX_RPATH ON
         MACOSX_BUNDLE ON
         MACOSX_BUNDLE_BUNDLE_NAME "Contour"
-        MACOSX_BUNDLE_INFO_STRING "Contour Terminal Emulator"
         MACOSX_BUNDLE_GUI_IDENTIFIER "${AppId}"
-        MACOSX_BUNDLE_LONG_VERSION_STRING "${CONTOUR_VERSION_STRING}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${CONTOUR_VERSION}"
         MACOSX_BUNDLE_BUNDLE_VERSION "${CONTOUR_VERSION}"
         XCODE_ATTRIBUTE_PRODUCT_NAME "Contour Terminal Emulator"
-        # TODO: MACOSX_BUNDLE_ICON_FILE "contour.icns"
-        # TODO: RESOURCE "images/icon.icns"
+        # Names the icon the install rules already place at Contents/Resources/contour.icns.
+        # Without it CFBundleIconFile renders empty and both the app and the disk image
+        # show the generic executable icon.
+        MACOSX_BUNDLE_ICON_FILE "contour.icns"
     )
 endif()
 # }}}
@@ -486,6 +502,7 @@ if(CONTOUR_FRONTEND_GUI)
         Qt6::Qml
         Qt6::QuickControls2
         Qt6::Widgets
+        Qt6::QuickTemplates2
     )
 
     if(OPENBSD)
@@ -734,6 +751,49 @@ endif()
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "contour")
 
+# {{{ macOS signing and notarization settings
+# Declared here rather than next to their use in the install() rules below, because the
+# CPack block needs them too and CMake reads this file top to bottom.
+if(APPLE)
+    # "-" is an ad-hoc signature: enough to run locally, not enough to distribute.
+    # A release build passes the Developer ID; see cmake/presets/os-macos.json.
+    set(CODE_SIGN_CERTIFICATE_ID "-" CACHE STRING "macOS code signing identity, or '-' for ad-hoc")
+    option(CONTOUR_MACOS_NOTARIZE "Submit the macOS disk image to Apple's notary service" OFF)
+    # A second Apple round trip, so that the app dragged out of the image carries its own
+    # ticket and launches offline. Worth its minute on something users download; not worth
+    # paying on every push. @see cmake/MacOSNotarizeApp.cmake
+    option(CONTOUR_MACOS_STAPLE_APP "Also notarize and staple the app inside the image" OFF)
+    set(CONTOUR_MACOS_NOTARY_PROFILE "contour-notary" CACHE STRING
+        "notarytool keychain profile (see `xcrun notarytool store-credentials`)")
+
+    # The oldest macOS the produced .dmg promises to run on, checked against what the
+    # bundled binaries actually demand. Empty means "report the floor, do not enforce it",
+    # which is right for a dev machine -- the floor there is whatever the developer's
+    # Homebrew bottles were built for and is nobody's promise. A release build sets it, so
+    # that an artifact users cannot launch fails the build instead of reaching them.
+    set(CONTOUR_MACOS_MIN_SUPPORTED "" CACHE STRING
+        "Oldest macOS the package must run on, e.g. 15.0 (empty: report only)")
+
+    # Notarizing an ad-hoc-signed app is rejected by Apple, but only after a multi-minute
+    # wait -- so reject the combination here instead.
+    if((CONTOUR_MACOS_NOTARIZE OR CONTOUR_MACOS_STAPLE_APP)
+       AND CODE_SIGN_CERTIFICATE_ID STREQUAL "-")
+        message(FATAL_ERROR
+            "CONTOUR_MACOS_NOTARIZE requires a real CODE_SIGN_CERTIFICATE_ID; "
+            "Apple rejects ad-hoc signatures. Set a Developer ID identity, or turn "
+            "notarization off.")
+    endif()
+
+    set(CONTOUR_MACOS_BUNDLE_SCRIPT "${CMAKE_SOURCE_DIR}/scripts/macos-bundle.py")
+
+    # REQUIRED, unlike the QUIET lookup at the top level: scripts/macos-bundle.py is what
+    # verifies, signs and notarizes the bundle, so without an interpreter there is no way
+    # to produce a distributable artifact at all. Failing at configure time beats failing
+    # halfway through an install.
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+endif()
+# }}}
+
 # {{{ CPACK variable definitions
 if(NOT(CPACK_GENERATOR))
     if(APPLE)
@@ -774,12 +834,27 @@ if(WIN32)
 endif()
 if(APPLE)
     set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.icns")
+    set(CPACK_DMG_VOLUME_NAME "Contour")
+
+    # The disk image needs its own signature and its own notarization ticket: CPack
+    # assembles it *after* install(), so the signature the install step applies to
+    # contour.app does not cover the .dmg wrapping it. Both hooks read the settings
+    # below out of the CPack config, hence the CPACK_-prefixed names.
+    set(CPACK_CONTOUR_CODE_SIGN_IDENTITY "${CODE_SIGN_CERTIFICATE_ID}")
+    set(CPACK_CONTOUR_NOTARIZE "${CONTOUR_MACOS_NOTARIZE}")
+    set(CPACK_CONTOUR_STAPLE_APP "${CONTOUR_MACOS_STAPLE_APP}")
+    set(CPACK_CONTOUR_NOTARY_PROFILE "${CONTOUR_MACOS_NOTARY_PROFILE}")
+    set(CPACK_CONTOUR_BUNDLE_SCRIPT "${CONTOUR_MACOS_BUNDLE_SCRIPT}")
+    set(CPACK_CONTOUR_PYTHON "${Python3_EXECUTABLE}")
+    # Runs on the staged bundle before hdiutil, so the ticket ends up inside the image.
+    set(CPACK_PRE_BUILD_SCRIPTS "${CMAKE_SOURCE_DIR}/cmake/MacOSNotarizeApp.cmake")
+    # Runs on the finished .dmg.
+    set(CPACK_POST_BUILD_SCRIPTS "${CMAKE_SOURCE_DIR}/cmake/MacOSSignDmg.cmake")
 endif()
 # }}}
 
 # {{{ Qt bundle installation helpers
 set(INSTALLED_QT_VERSION 6)
-
 function(_qt_get_plugin_name_with_version target out_var)
     string(REGEX REPLACE "^Qt::(.+)" "Qt${INSTALLED_QT_VERSION}::\\1" qt_plugin_with_version "${target}")
     if(TARGET "${qt_plugin_with_version}")
@@ -788,23 +863,6 @@ function(_qt_get_plugin_name_with_version target out_var)
         set("${out_var}" "" PARENT_SCOPE)
     endif()
 endfunction()
-
-# if(APPLE)
-#    # Required when packaging, and set CMAKE_INSTALL_PREFIX to "/"
-#    set(CPACK_SET_DESTDIR TRUE)
-#    set(CMAKE_BUNDLE_NAME "contour")
-#    set(CMAKE_BUNDLE_LOCATION "/")
-#    # make sure CMAKE_INSTALL_PREFIX ends in /
-#    set(CMAKE_INSTALL_PREFIX "/${CMAKE_BUNDLE_NAME}.app/Contents")
-# endif(APPLE)
-
-
-
-# get_property(_Qt_Core_LOCATION TARGET Qt${INSTALLED_QT_VERSION}::Core PROPERTY LOCATION)
-# get_filename_component(Qt_BIN_DIR "${_Qt_Core_LOCATION}" PATH)
-# if(APPLE)
-#   get_filename_component(Qt_BIN_DIR "${Qt_BIN_DIR}" PATH)
-# endif()
 # }}}
 
 if(WIN32)
@@ -825,40 +883,19 @@ if(WIN32)
             PATTERN "*"
     )
 elseif(APPLE)
-    # {{{ NB: This would run macdeployqt after creating contour executable during build stage.
-    # This is currently disabled, because it seems like packaging would not work then,
-    # but instead, we invoke macdeployqt during cpack stage.
-    #
-    # include(DeployQt)
-    # add_custom_command(
-    #     TARGET contour POST_BUILD
-    #     COMMENT "Running ${MACDEPLOYQT_EXECUTABLE}"
-    #     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-    #     COMMAND ${MACDEPLOYQT_EXECUTABLE} contour.app -always-overwrite -verbose=3 -qmlimport=${CMAKE_CURRENT_SOURCE_DIR}/ui -qmldir=${CMAKE_CURRENT_SOURCE_DIR}/ui
-    #     VERBATIM
-    # )
-    # }}}
-
-    qt_import_qml_plugins(contour)
-
-    set(CPACK_COMPONENTS_ALL_IN_ONE_INSTALL TRUE)
-    include(InstallRequiredSystemLibraries)
-
     # See: https://stackoverflow.com/questions/35612687/cmake-macos-x-bundle-with-bundleutiliies-for-qt-application/48035834#48035834
     set(APP_NAME contour)
     set(App_Contents "${APP_NAME}.app/Contents")
     set(INSTALL_RUNTIME_DIR "${App_Contents}/MacOS")
     set(INSTALL_CMAKE_DIR "${App_Contents}/Resources")
 
-
-
     # Install application icon
     install(FILES "res/images/contour-logo.icns" DESTINATION "${INSTALL_CMAKE_DIR}" RENAME "contour.icns")
     install(DIRECTORY "${terminfo_basedir}" DESTINATION "${INSTALL_CMAKE_DIR}")
     install(DIRECTORY "shell-integration" DESTINATION "${INSTALL_CMAKE_DIR}")
 
-    #add_custom_target(Docs SOURCES README.md LICENSE.txt)
-    #TODO: install(TARGETS Docs ...)
+    # add_custom_target(Docs SOURCES README.md LICENSE.txt)
+    # TODO: install(TARGETS Docs ...)
 
     # Destination paths below are relative to ${CMAKE_INSTALL_PREFIX}
     install(TARGETS ${APP_NAME}
@@ -866,41 +903,80 @@ elseif(APPLE)
         RUNTIME DESTINATION "${INSTALL_RUNTIME_DIR}" COMPONENT Runtime
     )
 
-    # file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/qt.conf" "[Paths]\nPlugins = PlugIns\n")
-    # install(FILES "${CMAKE_CURRENT_BINARY_DIR}/qt.conf" DESTINATION "${INSTALL_CMAKE_DIR}")
-
-
-
-    set(CODE_SIGN_CERTIFICATE_ID "-" CACHE STRING "macOS Code signature ID") # TODO: Use proper ID on CI
     include(DeployQt)  # Just to get access to ${MACDEPLOYQT_EXECUTABLE}
     get_filename_component(_macdeployqt_path "${MACDEPLOYQT_EXECUTABLE}" PATH)
-    message(STATUS "macdeployqt path: ${_macdeployqt_path}")
     message(STATUS "macdeployqt location: ${MACDEPLOYQT_EXECUTABLE}")
 
-    set(MACDEPLOYQT_QML_WORKAROUND OFF CACHE BOOL "Workaround for macdeployqt not installing Qt QML files.")
-    if(MACDEPLOYQT_QML_WORKAROUND)
-        # Install Qt QML files
-        # This problem is specific to macdeployqt on Github CI, which does not seem to install
-        # the Qt QML files, so we do it manually here.
-        get_filename_component(Qt6_ROOT_DIR "${Qt6_DIR}/../../.." REALPATH)
-        message(STATUS "Using Qt6_ROOT_DIR: ${Qt6_ROOT_DIR}")
-        # Qt Qt5Compat QtMultimedia QtQml QtQuick
-        foreach(_name IN ITEMS Qt Qt5Compat QtMultimedia QtQml QtQuick)
-            get_filename_component(_dir "${Qt6_ROOT_DIR}/share/qt/qml/${_name}" REALPATH)
-            message(STATUS "Using _dir: ${_dir}")
-            install(DIRECTORY "${_dir}" DESTINATION ${App_Contents}/Resources/qml FILES_MATCHING PATTERN "*")
-        endforeach()
-    endif()
+    # Applied to contour.app only, never to nested code -- entitlements belong to the
+    # outermost signature. Both keys it contains relax hardened-runtime restrictions:
+    # allow-jit for the QML engine's V4 JIT (MAP_JIT), and disable-library-validation as
+    # insurance for Qt plugin loading. The file itself carries no comments explaining
+    # this, because the kernel's entitlements parser (AMFI) rejects XML comments outright;
+    # docs/internals/macos-code-signing.md has the reasoning.
+    set(_entitlements "${CMAKE_SOURCE_DIR}/support/macOS/entitlements.plist")
 
+    # Deploy, drop the plugins that cannot load, prove the result is self-contained,
+    # then sign it -- in that order, and with every step fatal on failure. macdeployqt
+    # reports unresolvable frameworks on stderr but still exits 0, so without the verify
+    # step a bundle missing half its Qt frameworks used to sail through the build and
+    # fail on the user's machine.
     install(CODE "
+        set(_app \"\${CMAKE_INSTALL_PREFIX}/contour.app\")
+
         execute_process(
-            WORKING_DIRECTORY \"${_macdeployqt_path}/..\" # is this specific working dir really required? (others believe so)
-            COMMAND ${MACDEPLOYQT_EXECUTABLE} \"\${CMAKE_INSTALL_PREFIX}/contour.app\"
+            WORKING_DIRECTORY \"${_macdeployqt_path}/..\" # macdeployqt resolves its QML imports relative to this
+            COMMAND ${MACDEPLOYQT_EXECUTABLE} \"\${_app}\"
                     -always-overwrite
                     -verbose=1
                     -no-strip
-                    -qmldir=${CMAKE_CURRENT_SOURCE_DIR}/ui
-                    \"-codesign=${CODE_SIGN_CERTIFICATE_ID}\"
+                    \"-qmldir=${CMAKE_CURRENT_SOURCE_DIR}/ui\"
+            COMMAND_ERROR_IS_FATAL ANY
+        )
+
+        # The deployment-only rpath from the top of this file has done its job; every
+        # reference now points into the bundle. Leaving it would ship an absolute path to
+        # the build machine's vcpkg tree inside the released binary. macdeployqt usually
+        # strips the rpaths it consumed itself, so this only has to handle the case where
+        # it did not -- hence the check rather than an unconditional delete, which fails
+        # hard on a missing LC_RPATH.
+        if(NOT \"${CONTOUR_MACOS_DEPLOY_RPATH}\" STREQUAL \"\")
+            execute_process(
+                COMMAND otool -l \"\${_app}/Contents/MacOS/contour\"
+                OUTPUT_VARIABLE _load_commands
+                COMMAND_ERROR_IS_FATAL ANY
+            )
+            string(FIND \"\${_load_commands}\" \"${CONTOUR_MACOS_DEPLOY_RPATH}\" _deploy_rpath_at)
+            if(NOT _deploy_rpath_at EQUAL -1)
+                message(STATUS \"Removing deployment-only rpath from contour\")
+                execute_process(
+                    COMMAND install_name_tool -delete_rpath \"${CONTOUR_MACOS_DEPLOY_RPATH}\"
+                            \"\${_app}/Contents/MacOS/contour\"
+                    COMMAND_ERROR_IS_FATAL ANY
+                )
+            endif()
+        endif()
+
+        execute_process(
+            COMMAND \"${Python3_EXECUTABLE}\" \"${CONTOUR_MACOS_BUNDLE_SCRIPT}\" prune \"\${_app}\"
+            COMMAND_ERROR_IS_FATAL ANY
+        )
+
+        set(_verify_args)  # unset, not \"\": an empty string is a list element, and would
+                           # reach the script as an empty argv entry
+        if(NOT \"${CONTOUR_MACOS_MIN_SUPPORTED}\" STREQUAL \"\")
+            list(APPEND _verify_args --max-minimum-os \"${CONTOUR_MACOS_MIN_SUPPORTED}\")
+        endif()
+        execute_process(
+            COMMAND \"${Python3_EXECUTABLE}\" \"${CONTOUR_MACOS_BUNDLE_SCRIPT}\" verify \"\${_app}\"
+                    \${_verify_args}
+            COMMAND_ERROR_IS_FATAL ANY
+        )
+
+        execute_process(
+            COMMAND \"${Python3_EXECUTABLE}\" \"${CONTOUR_MACOS_BUNDLE_SCRIPT}\" sign \"\${_app}\"
+                    --identity \"${CODE_SIGN_CERTIFICATE_ID}\"
+                    --entitlements \"${_entitlements}\"
+            COMMAND_ERROR_IS_FATAL ANY
         )
     ")
 else()

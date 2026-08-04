@@ -5,6 +5,16 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(Version)
 GetVersionInformation(CONTOUR_VERSION CONTOUR_VERSION_STRING)
 file(WRITE "${CMAKE_BINARY_DIR}/version.txt" "${CONTOUR_VERSION_STRING}")
+
+# Before project(), which is where CMake consumes it. This is a property of the code, not
+# of any one build configuration, so it lives here rather than being restated in every
+# preset and CI job: 13.3 is the first macOS whose libc++ exports the floating-point
+# std::to_chars that <format> needs, and we use std::format throughout. Building against
+# an older target fails to compile with "'to_chars' has been explicitly marked unavailable".
+if(APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "13.3" CACHE STRING "Minimum macOS version to build for")
+endif()
+
 project(contour VERSION "${CONTOUR_VERSION}" LANGUAGES CXX C)
 
 # setting defaults
