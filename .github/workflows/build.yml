@@ -421,56 +421,123 @@ jobs:
   # }}}
   # {{{ macOS
   macOSArm:
-    runs-on: macos-latest
+    # Pinned, not macos-latest, so the toolchain and SDK behind a release are reproducible
+    # and a GitHub image rotation cannot silently change what ships.
+    #
+    # The minimum macOS of the .dmg no longer depends on this: the libraries Contour links
+    # are built from source by vcpkg against CMAKE_OSX_DEPLOYMENT_TARGET (13.3), not taken
+    # from the runner's Homebrew bottles. CONTOUR_MACOS_MIN_SUPPORTED enforces that.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: set variables
         id: set_vars
         run: |
           ./scripts/ci-set-vars.sh
-          # Please read the following link on how to use MacOS code signing on Github CI:
-          # https://docs.github.com/en/actions/deployment/deploying-xcode-applications/installing-an-apple-certificate-on-macos-runners-for-xcode-development
-          echo "CODE_SIGN_CERTIFICATE_ID=Developer ID Application: Christian Parpart (6T525MU9UR)" >> "$GITHUB_OUTPUT"
+          # Signing is gated on whether the secrets are actually reachable, not on the
+          # branch name. GitHub withholds secrets from fork pull requests, which is the
+          # real precondition; a branch-name test only approximates it, and approximated
+          # it badly in both directions -- fork PRs still asked codesign for a Developer ID
+          # that was in no keychain (breaking every PR run of this job), while a release
+          # branch's signing path went completely unexercised until it was already on
+          # master. Signing has to be proven before the merge, not after it.
+          if [[ -n "$HAS_SIGNING_SECRETS" ]]; then
+            echo "CODE_SIGN_CERTIFICATE_ID=Developer ID Application: Christian Parpart (6T525MU9UR)" >> "$GITHUB_OUTPUT"
+            echo "NOTARIZE=ON" >> "$GITHUB_OUTPUT"
+          else
+            echo "CODE_SIGN_CERTIFICATE_ID=-" >> "$GITHUB_OUTPUT"
+            echo "NOTARIZE=OFF" >> "$GITHUB_OUTPUT"
+          fi
+          # Stapled together with the image, never separately. A ticket on the .dmg alone
+          # covers the download, but the app dragged out of it carries none -- so its first
+          # launch depends on Gatekeeper reaching Apple, and a user who is offline, behind a
+          # captive portal or on a restricted network gets exactly the dialog this pipeline
+          # exists to prevent: "Apple could not verify ... is free of malware". Stapling the
+          # app makes the installed copy self-sufficient. It costs a second Apple round trip
+          # of a minute or two, which is not a price worth haggling over against that.
+          if [[ -n "$HAS_SIGNING_SECRETS" ]]; then
+            echo "STAPLE_APP=ON" >> "$GITHUB_OUTPUT"
+          else
+            echo "STAPLE_APP=OFF" >> "$GITHUB_OUTPUT"
+          fi
         env:
           REPOSITORY: ${{ github.event.repository.name }}
-      - name: Install the Apple certificate and provisioning profile
-        if: github.ref == 'refs/heads/master' || github.head_ref == 'release'
+          # Via the environment, not interpolated into the script: a branch name is
+          # attacker-controlled on a fork's pull request.
+          GH_REF: ${{ github.ref }}
+          GH_HEAD_REF: ${{ github.head_ref }}
+          # Empty on fork pull requests, where GitHub withholds secrets. Only the
+          # emptiness is observable here -- the value never reaches the log.
+          HAS_SIGNING_SECRETS: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+      - name: Install the Apple signing certificate
+        if: steps.set_vars.outputs.NOTARIZE == 'ON'
         env:
           BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
           P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
-          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          # create variables
+          # @see https://docs.github.com/en/actions/deployment/deploying-xcode-applications/installing-an-apple-certificate-on-macos-runners-for-xcode-development
+          set -eu
           CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
-          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
 
-          # import certificate and provisioning profile from secrets
           echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o $CERTIFICATE_PATH
-          echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode -o $PP_PATH
 
-          # create temporary keychain
           security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
 
-          # import certificate to keychain
-          security import $CERTIFICATE_PATH -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          # -T grants codesign access to the imported key, and set-key-partition-list
+          # records that grant in the key's ACL. Without both, codesign blocks on a GUI
+          # confirmation prompt that never arrives on a runner, and the job hangs until
+          # its timeout rather than reporting anything useful.
+          security import $CERTIFICATE_PATH -P "$P12_PASSWORD" -A -t cert -f pkcs12 \
+                          -k $KEYCHAIN_PATH -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+                          -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security list-keychain -d user -s $KEYCHAIN_PATH
 
-          # apply provisioning profile
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles
+          security find-identity -v -p codesigning $KEYCHAIN_PATH
+      - name: Store the notarization credentials
+        if: steps.set_vars.outputs.NOTARIZE == 'ON'
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          # An App Store Connect API key rather than an Apple ID and app-specific
+          # password: it carries no personal account, can be scoped to the Developer
+          # role, and is revocable on its own.
+          set -eu
+          KEY_PATH=$RUNNER_TEMP/notary-key.p8
+          echo -n "$APPLE_API_KEY_P8" | base64 --decode -o $KEY_PATH
+          xcrun notarytool store-credentials contour-notary \
+                --key "$KEY_PATH" \
+                --key-id "$APPLE_API_KEY_ID" \
+                --issuer "$APPLE_API_ISSUER_ID"
+          rm -f "$KEY_PATH"
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: ccache-macosArm-r1
           max-size: 256M
+      - name: Install Qt
+        # The official Qt binaries, as on Linux and Windows -- not Homebrew's. Homebrew
+        # splits Qt across ~40 per-module prefixes and macdeployqt only follows one of
+        # them, so a brew-Qt bundle ships missing frameworks and unresolvable @rpath
+        # references. That is the defect this job used to hand to users as a .dmg.
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.11.*
+          modules: qtmultimedia qt5compat qtshadertools qtspeech
+          cache: true
       - name: "Install dependencies"
-        # Sometimes, brew thinks it needs to install from source rather than binary.
-        # For Qt this may take ages (many many hours). Let's not waste our CPU credits here,
-        # and limit the run time.
+        # Sometimes, brew thinks it needs to install from source rather than binary,
+        # so cap the runtime rather than burn CI credits on a source build.
+        #
+        # The libraries Contour links are NOT taken from Homebrew here -- see the vcpkg
+        # steps below for why. install-deps.sh also brings the autotools that some vcpkg
+        # ports need on the build host.
         timeout-minutes: 15
         run: |
           set -ex
@@ -480,26 +547,53 @@ jobs:
           brew uninstall aws-sam-cli azure-cli
 
           ./scripts/install-deps.sh
+      - name: "Cache vcpkg"
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/vcpkg/archives
+          key: vcpkg-macos-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/vcpkg-triplets/arm64-osx-contour.cmake') }}
+          restore-keys: vcpkg-macos-
+      - name: "vcpkg: clone and bootstrap"
+        # The libraries Contour links (openssl, libssh2, yaml-cpp, freetype, harfbuzz,
+        # cairo) are built from source against CMAKE_OSX_DEPLOYMENT_TARGET rather than
+        # taken from Homebrew. Homebrew ships one prebuilt bottle per macOS release and
+        # installs the one matching the runner, which made the .dmg's minimum macOS equal
+        # to the runner image's -- an invisible compatibility cliff that moved whenever
+        # GitHub rotated the image. vcpkg puts that floor under our control; the triplet at
+        # cmake/vcpkg-triplets/arm64-osx-contour.cmake is where it is set.
+        run: |
+          set -ex
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git "$RUNNER_TEMP/vcpkg"
+          "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+          echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
       - name: "install tmux (oracle for the tmux-interop tests)"
         # A CI-only tool, so it is here rather than in install-deps.sh, which lists what Contour
         # needs to BUILD. Without it the four tmux oracles self-skip, and switching this job to
         # ctest (below) would otherwise have reached them only to watch them do nothing -- macOS
         # is where the BSD socket and Apple-libc++ differences in that code path would show up.
         run: brew install tmux && tmux -V
-      - name: "Create build directory"
-        run: mkdir build
       - name: "Generate build files"
         run: |
-          cmake . \
-                -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-                -DCONTOUR_TESTING=ON \
-                -DCMAKE_PREFIX_PATH$="$(brew --prefix qt@6)" \
-                -DMACDEPLOYQT_EXECUTABLE="$(brew --prefix qt6)/bin/macdeployqt" \
-                -DMACDEPLOYQT_QML_WORKAROUND=ON \
+          # The `macos-package` preset IS the definition of a shippable macOS build --
+          # Qt prefix, deployment target, warning policy, what lands in the bundle. This
+          # job overrides only the two things a preset cannot know: which identity is
+          # available in this run's keychain, and whether notarization secrets exist.
+          # Everything else must come from the preset, or the .dmg users download would
+          # again be built by a configuration nothing else exercises.
+          #
+          # QT_ROOT_DIR is exported by install-qt-action and is what the preset's
+          # CMAKE_PREFIX_PATH reads.
+          # The preset carries CONTOUR_MACOS_MIN_SUPPORTED=13.3, and it is enforced: if the
+          # bundled dylibs demand anything newer, the package step fails rather than
+          # shipping a .dmg that cannot launch. Configuring also triggers the vcpkg
+          # manifest install, which builds those dylibs against that same target.
+          cmake --preset macos-package \
                 -DCODE_SIGN_CERTIFICATE_ID="${{ steps.set_vars.outputs.CODE_SIGN_CERTIFICATE_ID }}" \
-                -B build/
+                -DCONTOUR_MACOS_NOTARIZE="${{ steps.set_vars.outputs.NOTARIZE }}" \
+                -DCONTOUR_MACOS_STAPLE_APP="${{ steps.set_vars.outputs.STAPLE_APP }}"
       - name: "Build"
-        run: cmake --build build/
+        run: cmake --build --preset macos-package
       - name: "tests"
         # ctest, not a hand-written list of binaries: the previous four-line list predated
         # src/coro, src/net, src/vthost and src/vtworkspace, so those suites were built here and
@@ -509,7 +603,7 @@ jobs:
         # 15 rather than 10: with tmux installed the four oracles now actually run instead of
         # skipping, and each drives a real tmux server over a pty.
         timeout-minutes: 15
-        run: ctest --test-dir build/ --output-on-failure
+        run: ctest --preset macos-package
       - name: "verify the tmux oracles actually ran"
         # @see the identical assertion on the Linux matrix for why a green suite is not enough:
         # a Catch2 SKIP exits 0, so "no tmux, nothing ran" is indistinguishable from success.
@@ -518,7 +612,7 @@ jobs:
         # a mystery failure the day the formula moves.
         run: |
           set -o pipefail
-          binary=build/src/vthost/vthost_test
+          binary=out/macos-package/src/vthost/vthost_test
           output=$("$binary" '[oracle]~[imsgserver]' 2>&1) || { printf '%s\n' "$output"; exit 1; }
           printf '%s\n' "$output"
           if printf '%s' "$output" | grep -q 'skipped'; then
@@ -526,21 +620,75 @@ jobs:
             exit 1
           fi
       - name: "Create Package(s)"
+        # cpack deploys, prunes unloadable plugins, verifies the bundle is self-contained,
+        # signs it inside-out, notarizes and staples both the app and the image. Each of
+        # those steps is fatal on failure now, so a broken bundle stops here instead of
+        # being uploaded. Notarization waits on Apple, hence the generous timeout.
+        timeout-minutes: 30
         run: |
           set -ex
           echo killing...; sudo pkill -9 XProtect >/dev/null || true; # see https://github.com/actions/runner-images/issues/7522
           echo waiting...; while pgrep XProtect; do sleep 3; done;
-          cd build; cpack -G DragNDrop --verbose; cd -
-          # cmake --build build --target package-verbose
-          # ls -hl build/
-          # find build/src/contour/contour.app -print
-          BASENAME="contour-${{ steps.set_vars.outputs.version }}-macOS-arm"
-          mv -vf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "${BASENAME}.dmg"
+          cpack --preset macos-package --verbose
+          BASENAME="contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm"
+          mv -vf "out/macos-package/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "${BASENAME}.dmg"
+          echo "DMG=${BASENAME}.dmg" >> "$GITHUB_ENV"
+      - name: "verify the DMG is something a user can actually open"
+        # The assertion that was missing all along: a green package step used to mean only
+        # that hdiutil succeeded.
+        #
+        # Scoped to what cpack could not already check. The image's own signature, its
+        # staple and `spctl --type install` are asserted fatally inside the packaging run
+        # (macos-bundle.py sign/notarize and cmake/MacOSSignDmg.cmake), and the .dmg here
+        # is the byte-identical file cpack produced -- only `mv`'d. What is genuinely new
+        # is the app *as mounted from the image*, a different object from the staged
+        # bundle that was signed.
+        run: |
+          set -ex
+          MOUNT=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly -mountpoint "$MOUNT" "$DMG"
+          trap 'hdiutil detach "$MOUNT" || true' EXIT
+
+          codesign --verify --deep --strict --verbose=4 "$MOUNT/contour.app"
+
+          # The image ships the app and nothing else -- plus the /Applications symlink the
+          # DragNDrop generator adds for drag-installing. CONTOUR_INSTALL_TOOLS=OFF in the
+          # preset is what keeps bench-headless out of Contents/MacOS; assert it, because
+          # the day someone flips that option back on, the only visible symptom would be a
+          # developer benchmark tool shipping inside a user-facing release.
+          test "$(ls "$MOUNT" | sort | tr '\n' ' ')" = "Applications contour.app "
+          test "$(ls "$MOUNT/contour.app/Contents/MacOS")" = "contour"
+
+          if [[ "${{ steps.set_vars.outputs.NOTARIZE }}" != 'ON' ]]; then
+            echo "::notice::unsigned build (no secrets); skipping Gatekeeper assertions"
+            exit 0
+          fi
+
+          # Reproduce what the user actually does, because that is where the
+          # "Apple could not verify ... is free of malware" dialog comes from: they drag
+          # the app OUT of the image and launch the copy. A ticket stapled only to the
+          # .dmg does not travel with that copy, leaving first launch dependent on
+          # Gatekeeper reaching Apple -- which fails offline, behind a captive portal, or
+          # on a restricted network. So the checks below run against the copy, not against
+          # the app sitting on the mounted image.
+          INSTALLED=$(mktemp -d)/contour.app
+          ditto "$MOUNT/contour.app" "$INSTALLED"
+          # A downloaded image carries this; the copy must clear Gatekeeper with it set.
+          xattr -w com.apple.quarantine "0081;00000000;Safari;" "$INSTALLED"
+
+          # The ticket is embedded in the copy, so first launch needs no network at all.
+          xcrun stapler validate "$INSTALLED"
+          # The exact decision Gatekeeper makes when that copy is first launched.
+          spctl --assess --verbose=4 --type exec "$INSTALLED"
+
+          # And the same for the image a browser just downloaded.
+          xcrun stapler validate "$DMG"
+          spctl --assess --verbose=4 --type install "$DMG"
       - name: upload to artifact store (DMG)
         uses: actions/upload-artifact@v4
         with:
-          name: "contour-${{ steps.set_vars.outputs.version }}-macOS-arm.dmg"
-          path: "contour-${{ steps.set_vars.outputs.version }}-macOS-arm.dmg"
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm.dmg"
+          path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm.dmg"
           retention-days: 7
   # }}}
   # {{{ Windows
@@ -1483,7 +1631,9 @@ jobs:
       - name: "fetch artifact: MacOS (ARM)"
         uses: actions/download-artifact@v4
         with:
-          name: "contour-${{ steps.set_vars.outputs.version }}-macOS-arm.dmg"
+          # VERSION_STRING, matching the .deb above: `version` omits the `-prerelease`
+          # suffix, so a prerelease used to publish a .dmg whose name claimed otherwise.
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm.dmg"
       - name: "fetch artifact: Windows (MSI)"
         uses: actions/download-artifact@v4
         with:
