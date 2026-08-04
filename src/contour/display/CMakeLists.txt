@@ -1,4 +1,7 @@
-find_package(Qt6 COMPONENTS Core Gui GuiPrivate Quick QuickControls2 Multimedia REQUIRED)
+find_package(Qt6 COMPONENTS Core Gui Quick QuickControls2 Multimedia REQUIRED)
+if(Qt6_VERSION VERSION_GREATER_EQUAL 6.10)
+    find_package(Qt6 COMPONENTS GuiPrivate REQUIRED)
+endif()
 find_package(Qt6 COMPONENTS ShaderTools REQUIRED)
 
 set(QT_RESOURCES DisplayResources.qrc)

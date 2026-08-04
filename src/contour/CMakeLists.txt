@@ -25,8 +25,14 @@ NumberToHex(${PROJECT_VERSION_PATCH} HEX_PATCH)
 # NB: without the GUI frontend none of that is reachable -- what is left is `contour daemon` and
 #     the CLI verbs, which need Core alone. Asking for the rest anyway would make a headless build
 #     require a Qt that renders, which is the whole point of not building the frontend.
+# NB: Qt6_VERSION (used below) is set by find_package(Qt6). We find Core first — unconditionally
+#     and before building the component list — so the version check is available for all gates.
+find_package(Qt6 COMPONENTS Core REQUIRED)
 if(CONTOUR_FRONTEND_GUI)
-    set(QT_COMPONENTS Core Gui GuiPrivate Qml Quick QuickControls2 Network Multimedia Widgets DBus)
+    set(QT_COMPONENTS Core Gui Qml Quick QuickControls2 Network Multimedia Widgets DBus)
+    if(Qt6_VERSION VERSION_GREATER_EQUAL 6.10)
+        list(APPEND QT_COMPONENTS GuiPrivate)
+    endif()
 else()
     set(QT_COMPONENTS Core)
 endif()
