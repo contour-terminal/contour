@@ -79,11 +79,9 @@ foreach(shell IN LISTS SHELLS)
         math(EXPR index "${index} + 16")
     endwhile()
 
-    # shell-integration.bash -> ShellIntegrationBash
-    string(SUBSTRING "${shell}" 0 1 initial)
-    string(TOUPPER "${initial}" initial)
-    string(SUBSTRING "${shell}" 1 -1 remainder)
-    set(symbol "ShellIntegration${initial}${remainder}")
+    # The shell name verbatim: these symbols live in contour::detail and are referenced only by the
+    # table below, so nothing is gained by spelling them the way hand-written code would.
+    set(symbol "ShellIntegration_${shell}")
 
     # std::to_array rather than std::array's CTAD, which cannot take this many elements: libstdc++'s
     # deduction guide checks the element types with a fold expression over all of them, and clang

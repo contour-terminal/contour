@@ -163,11 +163,9 @@ set(_header_files
 # that verb's help text all derive from this list.
 set(CONTOUR_SHELL_INTEGRATION_SHELLS bash fish tcsh zsh)
 
-set(_shell_integration_scripts "")
-foreach(shell IN LISTS CONTOUR_SHELL_INTEGRATION_SHELLS)
-    list(APPEND _shell_integration_scripts
-         "${CMAKE_CURRENT_SOURCE_DIR}/shell-integration/shell-integration.${shell}")
-endforeach()
+list(TRANSFORM CONTOUR_SHELL_INTEGRATION_SHELLS
+     PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/shell-integration/shell-integration."
+     OUTPUT_VARIABLE _shell_integration_scripts)
 
 # The scripts used to reach the binary through resources.qrc, which made `contour generate
 # integration` -- a verb a GUI-less build keeps -- depend on Qt's resource system. See
@@ -184,7 +182,6 @@ add_custom_command(
     COMMENT "Embedding shell-integration scripts"
     VERBATIM
 )
-set_source_files_properties("${_shell_integration_data}" PROPERTIES GENERATED TRUE)
 # }}}
 # Sources are split into a reusable object library (contour_core) and the thin executable entry
 # point (main.cpp). The object library carries every translation unit of the frontend so that both
@@ -431,14 +428,6 @@ add_library(contour_core OBJECT)
 target_sources(contour_core
     PRIVATE ${_core_source_files} ${_header_files} ${_qt_resources} "${_shell_integration_data}")
 
-# Both moc and rcc are Qt tools, and without the GUI frontend there is nothing for either to do:
-# every Q_OBJECT in this directory belongs to a GUI-only translation unit, and resources.qrc is not
-# compiled above. Leaving them on would merely ask a Qt-free build for Qt's code generators.
-if(CONTOUR_FRONTEND_GUI)
-    set_target_properties(contour_core PROPERTIES AUTOMOC ON)
-    set_target_properties(contour_core PROPERTIES AUTORCC ON)
-endif()
-
 # Both the binary dir (for generated headers) and the parent src dir (so "#include <contour/...>"
 # resolves) must be PUBLIC so consumers of the object library inherit them.
 target_include_directories(contour_core PUBLIC "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/..")
@@ -455,9 +444,14 @@ endif()
 target_sources(contour PRIVATE ${_main_source_files})
 target_link_libraries(contour PRIVATE contour_core)
 
+# Everything Qt about these two targets, in one place. moc and rcc are Qt tools and without the GUI
+# frontend there is nothing for either to do: every Q_OBJECT in this directory belongs to a GUI-only
+# translation unit, and resources.qrc is not compiled above. Leaving them on would merely ask a
+# Qt-free build for Qt's code generators.
 if(CONTOUR_FRONTEND_GUI)
-    set_target_properties(contour PROPERTIES AUTOMOC ON)
-    set_target_properties(contour PROPERTIES AUTORCC ON)
+    set_target_properties(contour_core contour PROPERTIES AUTOMOC ON AUTORCC ON)
+    # Disable all deprecated Qt functions prior to Qt 6.0.
+    target_compile_definitions(contour_core PUBLIC QT_DISABLE_DEPRECATED_BEFORE=0x050F00)
 endif()
 
 target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
@@ -476,11 +470,6 @@ target_compile_definitions(contour_core PUBLIC
     CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
     CONTOUR_APP_ID="${AppId}"
 )
-
-# Disable all deprecated Qt functions prior to Qt 6.0
-if(CONTOUR_FRONTEND_GUI)
-    target_compile_definitions(contour_core PUBLIC QT_DISABLE_DEPRECATED_BEFORE=0x050F00)
-endif()
 
 # Create custom target to execute contour
 add_custom_target(run COMMAND contour)
@@ -559,20 +548,19 @@ target_link_libraries(contour_core
     vthost
 )
 
+# {{{ GUI: Declare Qt build dependencies
 # The QML modules are GUI-only (see the guard above), so the dependency on them is too -- as is
 # Qt6::Core itself, which no longer has a single caller outside the frontend.
-if(CONTOUR_FRONTEND_GUI)
-    target_link_libraries(contour_core PUBLIC Qt6::Core contour_qml contour_tui_style)
-endif()
-
-# {{{ GUI: Declare Qt build dependencies
 if(CONTOUR_FRONTEND_GUI)
     if(OPENBSD)
         find_package(X11 REQUIRED)
     endif()
     target_link_libraries(contour_core
         PUBLIC
+        contour_qml
+        contour_tui_style
         ContourTerminalDisplay
+        Qt6::Core
         Qt6::DBus
         Qt6::Multimedia
         Qt6::Network
@@ -779,40 +767,51 @@ endif()
 # A CMake script rather than a shell script (as the other e2e tests are), because it must also run
 # on Windows, where `sh` is not available and where the daemon gets the least coverage otherwise.
 if(CONTOUR_TESTING)
+    # Registers one `cmake -P` end-to-end test against the built contour binary.
+    #
+    # The verdict is MARKER, not the exit code: `cmake -P` returns 0 even after message(FATAL_ERROR)
+    # before CMake 3.31, so a failing assertion would otherwise pass silently. CONTOUR_BINARY is
+    # passed for every such test, and QT_QPA_PLATFORM=offscreen set for every one: in a GUI build
+    # these run the Qt-linked binary, and a CI runner has no display for it to fall back on.
+    #
+    # NAME   Test name, also naming test/e2e/<NAME>.cmake's sibling script via SCRIPT.
+    # SCRIPT The script under test/e2e/ to run.
+    # MARKER The success line the script prints last.
+    # ARGS   Further `-D VAR=value` arguments, script-specific.
+    function(contour_add_e2e_cmake_test)
+        cmake_parse_arguments(E2E "" "NAME;SCRIPT;MARKER" "ARGS" ${ARGN})
+        add_test(NAME ${E2E_NAME}
+            COMMAND ${CMAKE_COMMAND}
+                    -D "CONTOUR_BINARY=$<TARGET_FILE:contour>"
+                    ${E2E_ARGS}
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/${E2E_SCRIPT})
+        set_tests_properties(${E2E_NAME} PROPERTIES
+            TIMEOUT 60
+            LABELS e2e
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+            PASS_REGULAR_EXPRESSION "${E2E_MARKER}")
+    endfunction()
+
     if(CONTOUR_FRONTEND_GUI)
         set(_frontend_kind "gui")
     else()
         set(_frontend_kind "headless")
     endif()
-    add_test(NAME contour_e2e_cli_verbs
-        COMMAND ${CMAKE_COMMAND}
-                -D "CONTOUR_BINARY=$<TARGET_FILE:contour>"
-                -D "FRONTEND=${_frontend_kind}"
-                -P ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/CliVerbs.cmake)
-    # The verdict is the marker, not the exit code: `cmake -P` returns 0 even after
-    # message(FATAL_ERROR) before CMake 3.31, so a failing assertion would otherwise pass silently.
-    # QT_QPA_PLATFORM=offscreen for the same reason the sibling e2e tests set it: in a GUI build
-    # this runs the Qt-linked binary, and a CI runner has no display for it to fall back on.
-    set_tests_properties(contour_e2e_cli_verbs PROPERTIES
-        TIMEOUT 60
-        LABELS e2e
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-        PASS_REGULAR_EXPRESSION "cli-verbs: OK")
+    contour_add_e2e_cmake_test(
+        NAME contour_e2e_cli_verbs
+        SCRIPT CliVerbs.cmake
+        MARKER "cli-verbs: OK"
+        ARGS -D "FRONTEND=${_frontend_kind}")
 
-    # Outside the guard for the same reason: `generate integration` is a verb the GUI-less build
-    # keeps, and its scripts are embedded by EmbedShellIntegration.cmake for both configurations.
-    add_test(NAME contour_e2e_shell_integration
-        COMMAND ${CMAKE_COMMAND}
-                -D "CONTOUR_BINARY=$<TARGET_FILE:contour>"
-                -D "SHELLS=${CONTOUR_SHELL_INTEGRATION_SHELLS}"
-                -D "SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
-                -D "WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}"
-                -P ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/ShellIntegration.cmake)
-    set_tests_properties(contour_e2e_shell_integration PROPERTIES
-        TIMEOUT 60
-        LABELS e2e
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-        PASS_REGULAR_EXPRESSION "shell-integration: OK")
+    # Registered outside the guard for the same reason: `generate integration` is a verb the GUI-less
+    # build keeps, and its scripts are embedded by EmbedShellIntegration.cmake for both configurations.
+    contour_add_e2e_cmake_test(
+        NAME contour_e2e_shell_integration
+        SCRIPT ShellIntegration.cmake
+        MARKER "shell-integration: OK"
+        ARGS -D "SHELLS=${CONTOUR_SHELL_INTEGRATION_SHELLS}"
+             -D "SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+             -D "WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}")
 endif()
 # }}}
 
@@ -1093,10 +1092,18 @@ elseif(CONTOUR_MACOS_APP_BUNDLE)
 else()
     # Any other Unix -- and, since the branch above now takes only bundle builds, a GUI-less macOS
     # build too. That one produces a plain command-line binary, so it installs like any other Unix
-    # CLI tool. What it must NOT pick up is everything addressed at a freedesktop desktop
+    # CLI tool: the executable and the data every platform wants, first.
+    include(GNUInstallDirs)
+    install(TARGETS contour DESTINATION bin)
+    install(DIRECTORY "shell-integration" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
+    install(FILES "${PROJECT_SOURCE_DIR}/LICENSE.txt" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
+    install(FILES "${PROJECT_SOURCE_DIR}/README.md" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
+    install(DIRECTORY "${terminfo_basedir}" DESTINATION "${CMAKE_INSTALL_DATADIR}")
+
+    # What a macOS build must NOT pick up is everything addressed at a freedesktop desktop
     # environment (the .desktop entries, the KIO service menus, the hicolor icons, the AppStream
     # metainfo) or at Debian packaging: macOS reads none of it, and `lsb_release` is not there to
-    # ask. Hence the guards below rather than a second, near-identical branch.
+    # ask. Hence this one guard rather than a second, near-identical branch.
     if(NOT APPLE)
         find_program(LSB_RELEASE_EXEC lsb_release)
         execute_process(COMMAND ${LSB_RELEASE_EXEC} -rs
@@ -1132,11 +1139,7 @@ else()
         set(CPACK_DEBIAN_CONTOUR_PACKAGE_NAME "contour")
 
         set(CPACK_COMPONENTS_ALL "contour")
-    endif()
 
-    include(GNUInstallDirs)
-    install(TARGETS contour DESTINATION bin)
-    if(NOT APPLE)
         install(FILES "contour.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/applications" RENAME "${AppId}.desktop")
         install(FILES "contour-run.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus" RENAME "${AppId}.RunIn.desktop")
         install(FILES "${AppId}.OpenHere.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus")
@@ -1147,10 +1150,6 @@ else()
         install(FILES "res/images/contour-logo-32.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/32x32/apps" RENAME "${AppId}.png")
         install(FILES "${PROJECT_SOURCE_DIR}/metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo" RENAME "${AppId}.metainfo.xml")
     endif()
-    install(DIRECTORY "shell-integration" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
-    install(FILES "${PROJECT_SOURCE_DIR}/LICENSE.txt" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
-    install(FILES "${PROJECT_SOURCE_DIR}/README.md" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
-    install(DIRECTORY "${terminfo_basedir}" DESTINATION "${CMAKE_INSTALL_DATADIR}")
 endif()
 
 
