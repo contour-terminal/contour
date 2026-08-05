@@ -987,8 +987,10 @@ TEST_CASE("Config: environment variables in values are expanded (defined and und
     // deterministic; use a clearly-undefined name for the other branch. qputenv/qunsetenv are Qt's
     // portable env wrappers (POSIX ::setenv is unavailable on MSVC) -- Qt is fine here because this
     // suite only ever builds with the GUI frontend, and writing through it is in fact the stronger
-    // assertion: the replacer reads crispy::live_environment, so this also proves that reader sees a
-    // variable written after the process started, which is the whole reason it is not the snapshot.
+    // assertion: the replacer reads a crispy::live_environment, so this also proves that reader sees
+    // a variable written after the process started, which is the whole reason it is not the cached
+    // one. (A test that needs to control what the replacer reads injects its own environment into
+    // YAMLConfigReader instead; loadFromYaml goes through the production entry point on purpose.)
     qputenv("CONTOUR_CFG_TEST_VAR", QByteArray("expanded-value"));
     qunsetenv("CONTOUR_CFG_UNDEFINED_VAR");
 

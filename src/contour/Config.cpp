@@ -186,23 +186,31 @@ namespace
 
     auto const configLog = logstore::category("config", "Logs configuration file loading.");
 
-    /// Reads an environment variable as the raw bytes the environment holds.
+    /// This translation unit's one environment reader.
     ///
-    /// crispy::live_environment rather than crispy::snapshot_environment: `${VAR}` expansion has to
-    /// see the environment as it stands when the config is read, not as it stood when the process
-    /// started. The live reader is nonetheless thread safe, which is what rules out a bare getenv()
-    /// here -- config (re)load runs while the PTY threads are live.
+    /// A crispy::live_environment, constructed on the spot rather than the process-wide cached one:
+    /// `${VAR}` expansion has to see the environment as it stands when the config is read, not as it
+    /// stood when the process started. The live reader is nonetheless thread safe, which is what
+    /// rules out a bare getenv() here -- config (re)load runs while the PTY threads are live.
     ///
-    /// Raw bytes rather than decoded text, because what is read here names filesystem paths and a
-    /// path is a byte string that has to survive intact -- a mangled one simply does not exist, and
-    /// contour then silently falls back to its defaults as though the user's configuration had
-    /// never been there.
+    /// What it answers with is raw bytes rather than decoded text, because what is read here names
+    /// filesystem paths and a path is a byte string that has to survive intact -- a mangled one
+    /// simply does not exist, and contour then silently falls back to its defaults as though the
+    /// user's configuration had never been there.
+    ///
+    /// @return A reference to a function-local static; it outlives every caller.
+    [[nodiscard]] crispy::environment const& configEnvironment()
+    {
+        static crispy::live_environment const instance;
+        return instance;
+    }
+
+    /// Reads an environment variable, treating "unset" and "empty" alike.
     ///
     /// @param name Name of the variable to read.
-    /// @param env Environment to read from; the process's own live environment by default.
+    /// @param env Environment to read from.
     /// @return The variable's value as raw bytes, or an empty string if it is unset.
-    [[nodiscard]] std::string environmentBytes(
-        char const* name, crispy::environment const& env = crispy::defaultLiveEnvironment())
+    [[nodiscard]] std::string environmentBytes(std::string_view name, crispy::environment const& env)
     {
         return env.get(name).value_or("");
     }
@@ -319,7 +327,8 @@ namespace
 
         locations.emplace_back(Process::homeDirectory() / ".terminfo");
 
-        if (auto const terminfoDirs = environmentBytes("TERMINFO_DIRS"); !terminfoDirs.empty())
+        if (auto const terminfoDirs = environmentBytes("TERMINFO_DIRS", configEnvironment());
+            !terminfoDirs.empty())
             for (auto const dir: crispy::split(string_view(terminfoDirs), ':'))
                 locations.emplace_back(string(dir));
 
@@ -369,7 +378,7 @@ namespace
 fs::path configHome(string const& programName)
 {
 #if defined(__unix__) || defined(__APPLE__)
-    if (auto const value = environmentBytes("XDG_CONFIG_HOME"); !value.empty())
+    if (auto const value = environmentBytes("XDG_CONFIG_HOME", configEnvironment()); !value.empty())
         return fs::path { value } / programName;
     else
         return Process::homeDirectory() / ".config" / programName;
@@ -624,7 +633,7 @@ static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
         std::error_code ec;
         if (!loaded->globalOverrides.empty() && std::filesystem::exists(settingsPath, ec) && !ec)
         {
-            auto overrides = YAMLConfigReader(settingsPath.string(), configLog);
+            auto overrides = YAMLConfigReader(settingsPath.string(), configLog, configEnvironment());
             overrides.loadFromEntry("word_delimiters", config.wordDelimiters);
             overrides.loadFromEntry("read_buffer_size", config.ptyReadBufferSize);
             overrides.loadFromEntry("pty_buffer_size", config.ptyBufferObjectSize);
@@ -670,7 +679,7 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
     config.profileOrigins.clear();
     config.colorSchemeOrigins.clear();
 
-    auto yamlVisitor = YAMLConfigReader(config.configFile.string(), logger);
+    auto yamlVisitor = YAMLConfigReader(config.configFile.string(), logger, configEnvironment());
     yamlVisitor.load(config);
 
     // Merge the machine-managed sibling layouts.yml (written by SaveLayout). Its entries override
@@ -714,7 +723,7 @@ std::expected<std::unordered_map<std::string, Layout>, std::string> loadLayoutsF
         return std::unexpected(std::string(e.what()));
     }
 
-    auto reader = YAMLConfigReader(path.string(), configLog);
+    auto reader = YAMLConfigReader(path.string(), configLog, configEnvironment());
     reader.loadLayoutsInto(layouts);
     return layouts;
 }
@@ -730,14 +739,14 @@ optional<std::string> readConfigFile(std::string const& filename)
 
 YAMLConfigReader::YAMLConfigReader(std::string const& filename,
                                    logstore::category const& log,
+                                   crispy::environment const& env,
                                    VariableReplacer replacer):
     configFile(filename), logger { log }, variableReplacer { std::move(replacer) }
 {
     if (!variableReplacer)
     {
-        variableReplacer = [&log = logger](std::string_view name) -> std::string {
-            auto const key = std::string(name);
-            if (auto value = crispy::defaultLiveEnvironment().get(key))
+        variableReplacer = [&log = logger, &env](std::string_view name) -> std::string {
+            if (auto value = env.get(name))
                 return std::move(*value);
             log()("Undefined environment variable: ${{{}}}", name);
             return {};
@@ -3709,7 +3718,7 @@ std::optional<vtbackend::ColorPalette> loadColorSchemeFile(std::filesystem::path
 
     try
     {
-        auto reader = YAMLConfigReader(path.string(), configLog);
+        auto reader = YAMLConfigReader(path.string(), configLog, configEnvironment());
         auto palette = vtbackend::ColorPalette {};
         reader.loadFromEntry(YAML::Load(*contents), palette);
         return palette;
