@@ -536,9 +536,12 @@ int runDaemon(DaemonConfig const& config)
     auto source = net::PollEventSource {};
     auto loop = net::EventLoop { source };
 
-    auto host = SessionHost {
-        loop, makeShellPtyFactory(config.shell), config.settings, /*startPumps=*/true, config.sizePolicy
-    };
+    auto host = SessionHost { loop,
+                              makeShellPtyFactory(config.shell),
+                              config.settings,
+                              crispy::defaultEnvironment(),
+                              /*startPumps=*/true,
+                              config.sizePolicy };
 
     auto listener = bindDaemonEndpoint(loop, config.socketPath.string());
     if (!listener)
@@ -718,9 +721,12 @@ int runDaemon(DaemonConfig const& config)
     auto source = net::PollEventSource {};
     auto loop = net::EventLoop { source };
 
-    auto host = SessionHost {
-        loop, makeShellPtyFactory(config.shell), config.settings, /*startPumps=*/true, config.sizePolicy
-    };
+    auto host = SessionHost { loop,
+                              makeShellPtyFactory(config.shell),
+                              config.settings,
+                              crispy::defaultEnvironment(),
+                              /*startPumps=*/true,
+                              config.sizePolicy };
 
     auto listener = bindDaemonEndpoint(loop, config.socketPath.string());
     if (!listener)

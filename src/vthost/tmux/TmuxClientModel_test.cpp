@@ -48,6 +48,7 @@ struct ModelHarness
     SessionHost host { loop,
                        [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
                        vtbackend::Settings {},
+                       crispy::defaultEnvironment(),
                        /*startPumps=*/false };
     net::testing::SocketPair pair = *net::testing::makeSocketPair(loop);
     std::unique_ptr<ControlSession> server = std::make_unique<ControlSession>(

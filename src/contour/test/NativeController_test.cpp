@@ -72,6 +72,7 @@ struct DaemonFixture
             loop,
             [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
             vtbackend::Settings {},
+            crispy::defaultEnvironment(),
             /*startPumps=*/false);
         auto listener = net::listen(loop, "127.0.0.1", 0);
         REQUIRE(listener.has_value());
@@ -227,8 +228,11 @@ struct MirrorPane
         auto settings = vtbackend::Settings {};
         settings.pageSize = pty->pageSize();
         auto* device = pty.get();
-        terminal = std::make_unique<vtbackend::Terminal>(
-            events, std::move(pty), std::move(settings), std::chrono::steady_clock::now());
+        terminal = std::make_unique<vtbackend::Terminal>(events,
+                                                         crispy::defaultEnvironment(),
+                                                         std::move(pty),
+                                                         std::move(settings),
+                                                         std::chrono::steady_clock::now());
         factory.bindTerminal(device, *terminal);
     }
 
@@ -1225,8 +1229,11 @@ TEST_CASE("the routing session factory forwards every verb to its delegate", "[a
     auto settings = vtbackend::Settings {};
     auto pty = std::make_unique<vtpty::MockPty>(settings.pageSize);
     auto* device = pty.get();
-    auto terminal =
-        vtbackend::Terminal { events, std::move(pty), std::move(settings), std::chrono::steady_clock::now() };
+    auto terminal = vtbackend::Terminal { events,
+                                          crispy::defaultEnvironment(),
+                                          std::move(pty),
+                                          std::move(settings),
+                                          std::chrono::steady_clock::now() };
 
     CHECK(router.createPty(std::nullopt) == nullptr);
     CHECK_FALSE(router.canCreateSession());

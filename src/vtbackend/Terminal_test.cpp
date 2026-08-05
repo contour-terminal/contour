@@ -9,6 +9,7 @@
 #include <vtpty/MockPty.h>
 
 #include <crispy/App.h>
+#include <crispy/testing/environment.h>
 #include <crispy/times.h>
 #include <crispy/utils.h>
 
@@ -5474,9 +5475,12 @@ TEST_CASE("Terminal reports the identity its settings named", "[terminal]")
     settings.pageSize = pageSize;
     settings.terminalId = vtbackend::VTType::VT340;
 
-    auto terminal = vtbackend::Terminal {
-        events, std::make_unique<vtpty::MockPty>(pageSize), settings, std::chrono::steady_clock::now()
-    };
+    auto const environment = crispy::testing::fake_environment {};
+    auto terminal = vtbackend::Terminal { events,
+                                          environment,
+                                          std::make_unique<vtpty::MockPty>(pageSize),
+                                          settings,
+                                          std::chrono::steady_clock::now() };
 
     CHECK(terminal.terminalId() == vtbackend::VTType::VT340);
     // The operating level follows the identity at birth, as setTerminalId() also makes it do -- a
@@ -5501,11 +5505,13 @@ TEST_CASE("a terminal constructed below VT525 narrows its sequence table too", "
     auto events = vtbackend::Terminal::NullEvents {};
     auto const pageSize = vtbackend::PageSize { vtbackend::LineCount(5), vtbackend::ColumnCount(20) };
 
+    auto const environment = crispy::testing::fake_environment {};
     auto makeTerminal = [&](vtbackend::VTType id) {
         auto settings = vtbackend::Settings {};
         settings.pageSize = pageSize;
         settings.terminalId = id;
         return vtbackend::Terminal { events,
+                                     environment,
                                      std::make_unique<vtpty::MockPty>(pageSize),
                                      settings,
                                      std::chrono::steady_clock::time_point() };

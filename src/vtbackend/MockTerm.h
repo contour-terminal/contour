@@ -251,6 +251,7 @@ inline MockTerm<PtyDevice>::MockTerm(PageSize pageSize,
                                      LineCount maxHistoryLineCount,
                                      size_t ptyReadBufferSize):
     terminal { *this,
+               crispy::defaultEnvironment(),
                std::make_unique<PtyDevice>(pageSize),
                createSettings(pageSize, maxHistoryLineCount, ptyReadBufferSize),
                std::chrono::steady_clock::time_point() } // explicitly start with empty timepoint

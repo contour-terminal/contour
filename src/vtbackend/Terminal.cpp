@@ -163,10 +163,18 @@ namespace // {{{ helpers
 // }}}
 
 Terminal::Terminal(Events& eventListener,
+                   crispy::environment const& env,
                    std::unique_ptr<vtpty::Pty> pty,
                    Settings factorySettings,
                    chrono::steady_clock::time_point now):
     _eventListener { eventListener },
+    _homeDirectory { env.get("HOME").value_or("") },
+    // Read here rather than per reply: what it names is how this terminal was launched, and a
+    // configuration value re-read on every DA/DSR/CPR is a lookup on a path that answers thousands
+    // of times a second.
+    _syncPtyOutput { env.get("CONTOUR_SYNC_PTY_OUTPUT")
+                         .transform([](std::string const& value) { return !value.starts_with('0'); })
+                         .value_or(false) },
     _factorySettings { std::move(factorySettings) },
     _settings { _factorySettings },
     _currentTime { now },
@@ -2556,7 +2564,7 @@ std::optional<std::string> Terminal::localPathAtMousePosition() const
     auto const lineText = currentScreen().lineTextAt(mousePosition->line, false, false);
     auto const mouseColumn = static_cast<size_t>(*mousePosition->column);
     auto const cwd = extractPathFromFileUrl(currentWorkingDirectory());
-    auto const home = crispy::defaultEnvironment().get("HOME").value_or("");
+    auto const& home = _homeDirectory;
 
     static auto const localPathRegex = [] {
         // Matches, in order: drive-letter absolute paths (C:/foo, C:\foo) for Windows,
@@ -2662,7 +2670,7 @@ void Terminal::activateHintMode(HintModeRequest request)
     auto const cwd = extractPathFromFileUrl(cwdUrl);
     if (!cwd.empty())
     {
-        auto const home = crispy::defaultEnvironment().get("HOME").value_or("");
+        auto const& home = _homeDirectory;
         for (auto& pattern: mutablePatterns)
         {
             if (pattern.name != "filepath")
@@ -2965,9 +2973,7 @@ void Terminal::reply(string_view text)
     else
         _inputGenerator.generateRaw(text);
 
-    auto const syncReply = crispy::defaultEnvironment().get("CONTOUR_SYNC_PTY_OUTPUT");
-
-    if (syncReply && !syncReply->starts_with('0'))
+    if (_syncPtyOutput)
         flushInput();
 }
 

@@ -64,6 +64,7 @@ struct EndToEndHarness
     SessionHost host { loop,
                        [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
                        vtbackend::Settings {},
+                       crispy::defaultEnvironment(),
                        /*startPumps=*/false };
     net::testing::SocketPair pair = *net::testing::makeSocketPair(loop);
     net::ISocket* serverConn = pair.first.get(); ///< Captured before the move, to simulate a daemon exit.
@@ -481,6 +482,7 @@ void tokenAttach(std::string serverToken, std::string clientToken, bool* gotSnap
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
                               vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
                               /*startPumps=*/false };
     host.createTab();
     auto pair = *net::testing::makeSocketPair(loop);
@@ -596,6 +598,7 @@ TEST_CASE("attach mirrors over a real TCP transport with token auth", "[vthost][
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
                               vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
                               /*startPumps=*/false };
     host.createTab();
 
@@ -653,6 +656,7 @@ TEST_CASE("attach mirrors over TLS-encrypted TCP with token auth", "[vthost][att
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
                               vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
                               /*startPumps=*/false };
     host.createTab();
 
@@ -688,6 +692,7 @@ TEST_CASE("attach mirrors over TLS with a generated self-signed dev certificate"
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
                               vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
                               /*startPumps=*/false };
     host.createTab();
 
@@ -763,6 +768,7 @@ TEST_CASE("attach receives the daemon's tab and pane layout", "[vthost][attach]"
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
                               vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
                               /*startPumps=*/false };
     auto* tab = host.createTab();
     // Split the tab into two panes (a vertical divider at 60/40).
@@ -805,6 +811,7 @@ TEST_CASE("a client authors a tab, honored by the daemon and mirrored back", "[v
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
                               vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
                               /*startPumps=*/false };
     host.createTab(); // the daemon starts with one tab
 
@@ -843,6 +850,7 @@ TEST_CASE("a client authors a new window, honored by the daemon (B4)", "[vthost]
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
                               vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
                               /*startPumps=*/false };
     host.createTab(); // the daemon starts with one window (with one tab)
 

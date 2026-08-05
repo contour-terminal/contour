@@ -185,6 +185,7 @@ struct ControlHarness
         host { loop,
                [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
                std::move(settings),
+               crispy::defaultEnvironment(),
                /*startPumps=*/false }
     {
         // A fixed clock so guard timestamps are deterministic.
