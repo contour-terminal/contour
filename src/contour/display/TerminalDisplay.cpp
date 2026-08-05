@@ -1420,8 +1420,11 @@ QVariant TerminalDisplay::inputMethodQuery(Qt::InputMethodQuery query) const
             auto const& screen = term.currentScreen();
             auto const cursor = screen.cursor().position;
             if (term.isCursorInViewport() && imeCursorAddressable(cursor, term.pageSize()))
-                return imeCursorRectangle(
-                    metrics.pageMargin, metrics.cellSize, cursor, screen.cellWidthAt(cursor), devicePixelRatio());
+                return imeCursorRectangle(metrics.pageMargin,
+                                          metrics.cellSize,
+                                          cursor,
+                                          screen.cellWidthAt(cursor),
+                                          devicePixelRatio());
             return QRectF();
         }
         case Qt::ImCursorPosition: {
@@ -1586,9 +1589,9 @@ vtbackend::ImageSize TerminalDisplay::reportedPixelSize(vtbackend::PageSize tota
 double TerminalDisplay::reportedPixelScale() const
 {
     assert(_session);
-    return _session->profile().pixelReporting.value() == config::PixelReporting::Device
-               ? 1.0
-               : devicePixelRatio();
+    if (_session->profile().pixelReporting.value() == config::PixelReporting::Device)
+        return 1.0;
+    return devicePixelRatio();
 }
 
 vtbackend::ImageSize TerminalDisplay::cellSize() const

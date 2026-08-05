@@ -42,8 +42,9 @@ TEST_CASE("atlas budget: a grown page requires more tiles than the page it grew 
     auto const smallBudget = tileCountFor(configured, small);
     auto const grownBudget = tileCountFor(configured, grown);
 
+    auto const grownCells = static_cast<uint32_t>(grown.area());
     CHECK(grownBudget.value > smallBudget.value);
-    CHECK(grownBudget.value >= static_cast<uint32_t>(grown.area()));
+    CHECK(grownBudget.value >= grownCells);
 }
 
 TEST_CASE("atlas budget: a degenerate page falls back to the configured floor", "[atlas][budget]")
