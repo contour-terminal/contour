@@ -10,13 +10,13 @@
 
 #include <string>
 
-namespace contour
+namespace contour::config
 {
-
-namespace config
-{
-    struct Config;
+struct Config;
 }
+
+namespace contour::window
+{
 
 /// Every chrome extent one style paints with, resolved to logical pixels.
 ///
@@ -218,4 +218,4 @@ class UiStyleProvider: public QObject
 /// @return A font ready to hand to UiStyleProvider.
 [[nodiscard]] QFont resolveChromeFont(config::Config const& config, std::string const& profileName);
 
-} // namespace contour
+} // namespace contour::window

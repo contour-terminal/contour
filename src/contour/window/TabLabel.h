@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-namespace contour
+namespace contour::window
 {
 
 /// Values available to a tab-label template when it is expanded.
@@ -52,4 +52,4 @@ struct TabLabelContext
 /// @return @p path with the home prefix replaced by `~`, or @p path unchanged.
 [[nodiscard]] std::string abbreviateHomePath(std::string_view path, std::string_view home);
 
-} // namespace contour
+} // namespace contour::window

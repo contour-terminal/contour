@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ContourGuiApp.h>
 #include <contour/Logging.h>
-#include <contour/WindowController.h>
 #include <contour/config/Actions.h>
 #include <contour/display/ContentScale.h>
 #include <contour/display/ImeQueryRect.h>
@@ -16,6 +15,7 @@
 #include <contour/platform/QtInvoke.h>
 #include <contour/session/FontControl.h>
 #include <contour/session/SessionInput.h>
+#include <contour/window/WindowController.h>
 
 #include <vtbackend/Color.h>
 #include <vtbackend/Metrics.h>
@@ -1496,7 +1496,7 @@ TerminalDisplay::DevicePixelGeometry TerminalDisplay::itemDevicePixelGeometry() 
     };
 }
 
-WindowController* TerminalDisplay::windowController()
+window::WindowController* TerminalDisplay::windowController()
 {
     return _manager != nullptr ? _manager->controllerForDisplay(this) : nullptr;
 }

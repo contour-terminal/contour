@@ -17,10 +17,10 @@
 // is the tested path. All cases here run headless: no [display] tag, nothing skips offscreen.
 
 #include <contour/ContourGuiApp.h>
-#include <contour/WindowController.h>
 #include <contour/session/TerminalSession.h>
 #include <contour/session/TerminalSessionManager.h>
 #include <contour/test/GuiTestFixtures.h>
+#include <contour/window/WindowController.h>
 
 #include <vtbackend/primitives.h>
 
@@ -80,7 +80,7 @@ void clearPtyInput(contour::session::TerminalSession& session)
 }
 
 /// Closes every tab of @p controller, mirroring how the multi-window tests wind sessions down.
-void closeAllTabs(contour::WindowController& controller)
+void closeAllTabs(contour::window::WindowController& controller)
 {
     for (int row = controller.count() - 1; row >= 0; --row)
         controller.closeTabAtIndex(row);

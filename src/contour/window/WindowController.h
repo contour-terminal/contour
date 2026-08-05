@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/CommandPaletteModel.h>
-#include <contour/ContextMenuModel.h>
 #include <contour/command/CommandCatalog.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/input/HorizontalWheelGesture.h>
 #include <contour/session/PaneProxy.h>
+#include <contour/window/CommandPaletteModel.h>
+#include <contour/window/ContextMenuModel.h>
 
 #include <vtbackend/Color.h>
 
@@ -28,14 +28,15 @@ class Tab;
 class Window;
 } // namespace vtworkspace
 
-namespace contour
+namespace contour::session
+{
+class TerminalSessionManager;
+class TerminalSession;
+} // namespace contour::session
+
+namespace contour::window
 {
 
-namespace session
-{
-    class TerminalSessionManager;
-    class TerminalSession;
-} // namespace session
 class SettingsController;
 
 /// Per-OS-window Qt/QML adapter over one vtworkspace::Window.
@@ -66,7 +67,7 @@ class WindowController: public QAbstractListModel, public command::TabTitleProvi
     /// This window's command palette list. Per-window (not per-app) because the filter text and the
     /// selection are things the user is doing IN this window; the recently-used list behind it is
     /// app-wide and lives on the manager.
-    Q_PROPERTY(contour::CommandPaletteModel* commandPalette READ commandPalette CONSTANT)
+    Q_PROPERTY(contour::window::CommandPaletteModel* commandPalette READ commandPalette CONSTANT)
     Q_PROPERTY(QVariantList contextMenuModel READ contextMenuModel NOTIFY contextMenuModelChanged)
     Q_PROPERTY(QVariantList titleBarContextMenuModel READ titleBarContextMenuModel NOTIFY
                    titleBarContextMenuModelChanged)
@@ -85,7 +86,7 @@ class WindowController: public QAbstractListModel, public command::TabTitleProvi
     Q_PROPERTY(bool tabBarShouldShow READ tabBarShouldShow NOTIFY tabBarShouldShowChanged)
     Q_PROPERTY(int chromeHeight READ chromeHeight WRITE setChromeHeight NOTIFY chromeHeightChanged)
     Q_PROPERTY(bool settingsActive READ settingsActive NOTIFY settingsActiveChanged)
-    Q_PROPERTY(contour::SettingsController* settingsController READ settingsController CONSTANT)
+    Q_PROPERTY(contour::window::SettingsController* settingsController READ settingsController CONSTANT)
     QML_ELEMENT
     QML_UNCREATABLE("Created by the session manager")
 
@@ -714,4 +715,4 @@ class WindowController: public QAbstractListModel, public command::TabTitleProvi
     bool _inContentDrivenResize = false;
 };
 
-} // namespace contour
+} // namespace contour::window

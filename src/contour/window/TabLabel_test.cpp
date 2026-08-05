@@ -5,13 +5,13 @@
 // and substitutes from a TabLabelContext, so it is tested here in isolation from the QAbstractListModel
 // integration covered in TabListModel_test.
 
-#include <contour/TabLabel.h>
+#include <contour/window/TabLabel.h>
 
 #include <catch2/catch_test_macros.hpp>
 
-using contour::abbreviateHomePath;
-using contour::expandTabLabel;
-using contour::TabLabelContext;
+using contour::window::abbreviateHomePath;
+using contour::window::expandTabLabel;
+using contour::window::TabLabelContext;
 
 TEST_CASE("expandTabLabel: default template yields the window title verbatim", "[contour][tablabel]")
 {

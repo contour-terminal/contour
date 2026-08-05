@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/TabLabel.h>
+#include <contour/window/TabLabel.h>
 
 #include <crispy/interpolated_string.h>
 
 #include <format>
 #include <variant>
 
-namespace contour
+namespace contour::window
 {
 
 std::string expandTabLabel(std::string_view tmpl, TabLabelContext const& ctx)
@@ -53,4 +53,4 @@ std::string abbreviateHomePath(std::string_view path, std::string_view home)
 
     return "~" + std::string { path.substr(home.size()) };
 }
-} // namespace contour
+} // namespace contour::window

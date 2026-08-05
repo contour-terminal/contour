@@ -8,9 +8,9 @@
 // native chrome, a lost fixed-pitch hint -- would first be seen by a user whose title bar and tab
 // strip are drawn in the wrong font.
 
-#include <contour/UiStyleProvider.h>
 #include <contour/config/Config.h>
 #include <contour/config/UiStyle.h>
+#include <contour/window/UiStyleProvider.h>
 
 #include <text_shaper/font.h>
 
@@ -24,8 +24,8 @@
 
 #include <utility>
 
-using contour::resolveChromeFont;
 using contour::config::UiStyle;
+using contour::window::resolveChromeFont;
 
 namespace
 {
@@ -156,14 +156,14 @@ TEST_CASE("UiStyleProvider resolves the token row against the chrome font's cell
     auto const font = QGuiApplication::font();
     auto const metrics = QFontMetricsF(font);
 
-    auto const native = contour::UiStyleProvider(UiStyle::Native, font);
+    auto const native = contour::window::UiStyleProvider(UiStyle::Native, font);
     auto const& nativeTokens = contour::config::uiStyleTokens(UiStyle::Native);
     CHECK(native.widthQuantum() == 1.0); // pixels: every token passes through unscaled
     CHECK(native.labelPadding() == nativeTokens.labelPaddingUnits);
     CHECK(native.trailingPadding() == nativeTokens.trailingPaddingUnits);
     CHECK(native.tabSlack() == nativeTokens.tabSlackUnits);
 
-    auto const terminal = contour::UiStyleProvider(UiStyle::Terminal, font);
+    auto const terminal = contour::window::UiStyleProvider(UiStyle::Terminal, font);
     auto const& terminalTokens = contour::config::uiStyleTokens(UiStyle::Terminal);
     CHECK(terminal.widthQuantum() == terminal.cellWidth());
     CHECK(terminal.cellWidth() == metrics.horizontalAdvance(QStringLiteral("M")));
@@ -180,7 +180,7 @@ TEST_CASE("UiStyleProvider resolves the token row against the chrome font's cell
     auto const shadow = QColor(0x20, 0x30, 0x40);
     for (auto const style: { UiStyle::Native, UiStyle::Terminal })
     {
-        auto const provider = contour::UiStyleProvider(style, font);
+        auto const provider = contour::window::UiStyleProvider(style, font);
         auto const& tokens = contour::config::uiStyleTokens(style);
         INFO("style: " << static_cast<int>(style));
 
@@ -203,7 +203,7 @@ TEST_CASE("UiStyleProvider resolves the token row against the chrome font's cell
     // `chromeStyle.modalScrim(control.palette.shadow)` -- so being Q_INVOKABLE is part of the
     // contract, not an implementation detail. A plain member function leaves the binding resolving to
     // undefined, i.e. a fully transparent scrim, behind a runtime warning nobody reads.
-    auto styleProvider = contour::UiStyleProvider(UiStyle::Terminal, font);
+    auto styleProvider = contour::window::UiStyleProvider(UiStyle::Terminal, font);
     for (auto const* name: { "wash", "modalScrim", "modelessScrim" })
     {
         INFO("method: " << name);
@@ -218,7 +218,7 @@ TEST_CASE("UiStyleProvider resolves the token row against the chrome font's cell
     // draws it silently disappears. The separator is the documented exception.
     for (auto const style: { UiStyle::Native, UiStyle::Terminal })
     {
-        auto const provider = contour::UiStyleProvider(style, font);
+        auto const provider = contour::window::UiStyleProvider(style, font);
         INFO("style: " << static_cast<int>(style));
         CHECK(!provider.closeGlyph().isEmpty());
         CHECK(!provider.zoomGlyph().isEmpty());

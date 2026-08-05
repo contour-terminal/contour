@@ -49,16 +49,16 @@
 #include <vthost/client/ScreenMirror.h>
 #include <vtworkspace/Primitives.h>
 
-namespace contour
+namespace contour::session
 {
-
-namespace session
-{
-    class TerminalSessionManager;
+class TerminalSessionManager;
 }
 
+namespace contour::remote
+{
+
 /// The attach-mode session factory and remote-session registry.
-class NativeController final: public QObject, public session::SessionFactory, public RemoteController
+class NativeController final: public QObject, public contour::session::SessionFactory, public RemoteController
 {
     Q_OBJECT
 
@@ -378,4 +378,4 @@ class NativeController final: public QObject, public session::SessionFactory, pu
     vthost::client::NativeClient* _client = nullptr; ///< Reactor-owned; valid while serving.
 };
 
-} // namespace contour
+} // namespace contour::remote

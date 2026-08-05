@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/WindowGeometry.h>
+#include <contour/geometry/WindowGeometry.h>
 
 #include <crispy/utils.h>
 

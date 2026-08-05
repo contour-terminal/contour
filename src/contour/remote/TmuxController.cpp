@@ -13,7 +13,7 @@
 #include <vthost/tmux/ControlModeSpawn.h>
 #include <vtworkspace/LayoutConvert.h>
 
-namespace contour
+namespace contour::remote
 {
 
 namespace
@@ -367,7 +367,7 @@ void TmuxController::windowRenamed(uint64_t window, std::string const& name)
     emit tabTitleChanged();
 }
 
-void TmuxController::applyPendingRenames(session::TerminalSessionManager& manager)
+void TmuxController::applyPendingRenames(contour::session::TerminalSessionManager& manager)
 {
     // Resolve each pending rename to its tab's session under the lock (the acting-session
     // map is shared with the reactor thread), then apply outside it — setTabTitleForSession
@@ -612,7 +612,7 @@ std::unique_ptr<vtpty::Pty> TmuxController::createPty(std::optional<std::string>
     return pty;
 }
 
-void TmuxController::adoptPendingPanes(session::TerminalSessionManager& manager,
+void TmuxController::adoptPendingPanes(contour::session::TerminalSessionManager& manager,
                                        vtworkspace::WindowId guiWindow)
 {
     // Splits performed here (whole-tree realize, or an incremental split of an existing tmux pane)
@@ -671,14 +671,14 @@ void TmuxController::adoptPendingPanes(session::TerminalSessionManager& manager,
     applyPendingRenames(manager);
 }
 
-void TmuxController::realizeWindowLayout(session::TerminalSessionManager& manager,
+void TmuxController::realizeWindowLayout(contour::session::TerminalSessionManager& manager,
                                          vtworkspace::WindowId guiWindow,
                                          uint64_t tmuxWindow,
                                          vthost::tmux::BinaryLayout const& tree)
 {
     auto const converted = tmuxLayoutToWindowLayout(tree);
     manager.applyLayoutToWindow(
-        guiWindow, converted.layout, std::nullopt, [&](config::LayoutPane const& leaf) {
+        guiWindow, converted.layout, std::nullopt, [&](contour::config::LayoutPane const& leaf) {
             if (auto const it = converted.leafPane.find(&leaf); it != converted.leafPane.end())
                 setNextBindPane(it->second);
         });
@@ -694,7 +694,8 @@ void TmuxController::realizeWindowLayout(session::TerminalSessionManager& manage
         }
 }
 
-bool TmuxController::realizeOnePane(session::TerminalSessionManager& manager, vtworkspace::WindowId guiWindow)
+bool TmuxController::realizeOnePane(contour::session::TerminalSessionManager& manager,
+                                    vtworkspace::WindowId guiWindow)
 {
     auto record = PendingPane {};
     {
@@ -721,7 +722,7 @@ bool TmuxController::realizeOnePane(session::TerminalSessionManager& manager, vt
     }();
     auto* acting = manager.sessionForId(anchor);
 
-    auto* created = static_cast<session::TerminalSession*>(nullptr);
+    auto* created = static_cast<contour::session::TerminalSession*>(nullptr);
     if (acting == nullptr)
         created = manager.createSessionInBackground(guiWindow);
     else
@@ -740,4 +741,4 @@ bool TmuxController::realizeOnePane(session::TerminalSessionManager& manager, vt
     return true;
 }
 
-} // namespace contour
+} // namespace contour::remote

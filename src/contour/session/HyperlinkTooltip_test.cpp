@@ -4,13 +4,13 @@
 // hide it. The tooltip itself is a QML popup and cannot be opened offscreen, so this is the seam that
 // carries the behaviour under test.
 
-#include <contour/HyperlinkTooltip.h>
+#include <contour/session/HyperlinkTooltip.h>
 
 #include <catch2/catch_test_macros.hpp>
 
-using contour::elideMiddle;
-using contour::HyperlinkHoverTracker;
-using contour::hyperlinkTooltipText;
+using contour::session::elideMiddle;
+using contour::session::HyperlinkHoverTracker;
+using contour::session::hyperlinkTooltipText;
 using vtbackend::CellLocation;
 using vtbackend::ColumnOffset;
 using vtbackend::LineOffset;

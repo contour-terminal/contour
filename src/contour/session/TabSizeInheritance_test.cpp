@@ -15,10 +15,10 @@
 // display is pinned by the [display] case in DisplayRendering_test.
 
 #include <contour/ContourGuiApp.h>
-#include <contour/WindowController.h>
 #include <contour/session/TerminalSession.h>
 #include <contour/session/TerminalSessionManager.h>
 #include <contour/test/GuiTestFixtures.h>
+#include <contour/window/WindowController.h>
 
 #include <catch2/catch_test_macros.hpp>
 

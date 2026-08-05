@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/CommandPaletteModel.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/Logging.h>
-#include <contour/RenderingBackendSelection.h>
-#include <contour/SettingsController.h>
-#include <contour/WindowController.h>
 #include <contour/config/Config.h>
 #include <contour/display/ContentScale.h>
 #include <contour/display/Logging.h>
+#include <contour/display/RenderingBackendSelection.h>
 #include <contour/display/ShaderConfig.h> // createSurfaceFormat
 #include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
@@ -20,6 +17,9 @@
 #include <contour/remote/TmuxController.h>
 #include <contour/session/PaneProxy.h>
 #include <contour/session/SessionFactory.h>
+#include <contour/window/CommandPaletteModel.h>
+#include <contour/window/SettingsController.h>
+#include <contour/window/WindowController.h>
 
 #include <vtpty/Process.h>
 
@@ -118,9 +118,9 @@ ContourGuiApp::ContourGuiApp(crispy::environment const& env,
                              std::unique_ptr<command::CommandHistoryStore> commandHistoryStore,
                              std::unique_ptr<platform::SpeechSynthesizer> speechSynthesizer):
     ContourApp { env },
-    _sessionFactory(std::make_unique<RoutingSessionFactory>(
+    _sessionFactory(std::make_unique<remote::RoutingSessionFactory>(
         sessionFactory ? std::move(sessionFactory) : std::make_unique<session::AppSessionFactory>(*this))),
-    _routingFactory(static_cast<RoutingSessionFactory*>(_sessionFactory.get())),
+    _routingFactory(static_cast<remote::RoutingSessionFactory*>(_sessionFactory.get())),
     _externalLauncher(externalLauncher ? std::move(externalLauncher)
                                        : std::make_unique<platform::QtExternalLauncher>()),
     _layoutStore(layoutStore ? std::move(layoutStore) : std::make_unique<config::FileLayoutStore>()),
@@ -206,7 +206,7 @@ int ContourGuiApp::clientAction()
     auto adopt = std::function<void()> {};
     if (wantsTmux)
     {
-        _tmuxController = std::make_unique<TmuxController>(tmuxSocket);
+        _tmuxController = std::make_unique<remote::TmuxController>(tmuxSocket);
         if (auto connected = _tmuxController->connectAndWait(std::chrono::seconds(10)); !connected)
         {
             cerr << std::format("contour client --tmux: {}\n", connected.error());
@@ -218,18 +218,21 @@ int ContourGuiApp::clientAction()
             if (auto const window = _sessionManager.focusedWindow())
                 _tmuxController->adoptPendingPanes(_sessionManager, *window);
         };
-        connect(
-            _tmuxController.get(), &TmuxController::remotePaneDiscovered, this, adopt, Qt::QueuedConnection);
+        connect(_tmuxController.get(),
+                &remote::TmuxController::remotePaneDiscovered,
+                this,
+                adopt,
+                Qt::QueuedConnection);
         // A %window-renamed reflects onto the owning tab's title (a tmux window is a tab).
         connect(
             _tmuxController.get(),
-            &TmuxController::tabTitleChanged,
+            &remote::TmuxController::tabTitleChanged,
             this,
             [this] { _tmuxController->applyPendingRenames(_sessionManager); },
             Qt::QueuedConnection);
         connect(
             _tmuxController.get(),
-            &TmuxController::connectionClosed,
+            &remote::TmuxController::connectionClosed,
             this,
             [this] { _tmuxController->stop(); },
             Qt::QueuedConnection);
@@ -295,7 +298,7 @@ int ContourGuiApp::clientAction()
                                 resolved.error());
 
         _nativeController =
-            std::make_unique<NativeController>(std::move(endpoint), std::move(sessionSettings));
+            std::make_unique<remote::NativeController>(std::move(endpoint), std::move(sessionSettings));
         if (auto connected = _nativeController->connectAndWait(std::chrono::seconds(5)); !connected)
         {
             cerr << std::format("contour client: {} ({})\n", connected.error(), endpointLabel);
@@ -306,7 +309,7 @@ int ContourGuiApp::clientAction()
         // A window spawned to host a daemon window binds itself here (from its
         // Main.qml, via consumeAttachWindow) instead of creating a fresh first tab.
         _sessionManager.setAttachWindowBinder(
-            [this](WindowController* controller) { return bindPendingAttachWindow(controller); });
+            [this](window::WindowController* controller) { return bindPendingAttachWindow(controller); });
         // Reconcile the GUI against the daemon's authoritative window→tab→split tree
         // (B2/B4): whenever a layout arrives or changes (GUI boot, or a window/tab/
         // split authored on the daemon, here or by another client), map each daemon
@@ -317,10 +320,14 @@ int ContourGuiApp::clientAction()
         adopt = [this] {
             reconcileAttachWindows();
         };
-        connect(_nativeController.get(), &NativeController::layoutChanged, this, adopt, Qt::QueuedConnection);
+        connect(_nativeController.get(),
+                &remote::NativeController::layoutChanged,
+                this,
+                adopt,
+                Qt::QueuedConnection);
         connect(
             _nativeController.get(),
-            &NativeController::connectionClosed,
+            &remote::NativeController::connectionClosed,
             this,
             [this] {
                 // Before stop(), which closes every mirror pty — the order matters.
@@ -933,7 +940,7 @@ int ContourGuiApp::terminalGuiAction()
     // maps a window but never composites the scene graph, leaving the user with an invisible window —
     // self-heals to Auto so a mis-set config never prevents startup or hangs on a dead window.
     auto const configuredBackend = _config.renderer.value().renderingBackend;
-    auto const requestedBackend = resolveRenderingBackend(currentRhiPlatform(), configuredBackend);
+    auto const requestedBackend = resolveRenderingBackend(display::currentRhiPlatform(), configuredBackend);
     if (requestedBackend != configuredBackend)
         errorLog()("Renderer backend {} is not available on this platform; falling back to auto.",
                    configuredBackend);
@@ -957,21 +964,21 @@ int ContourGuiApp::terminalGuiAction()
     qmlRegisterUncreatableType<session::TerminalSession>("Contour.Terminal", 1, 0, "TerminalSession", "Use factory.");
     qmlRegisterUncreatableType<session::TerminalSessionManager>("Contour.Terminal", 1, 0, "TerminalSessionManager", "Do not use me directly.");
     qmlRegisterUncreatableType<session::PaneProxy>("Contour.Terminal", 1, 0, "PaneProxy", "Created by the session manager.");
-    qmlRegisterUncreatableType<WindowController>("Contour.Terminal", 1, 0, "WindowController", "Created by the session manager.");
-    qmlRegisterUncreatableType<CommandPaletteModel>("Contour.Terminal", 1, 0, "CommandPaletteModel", "Created by the window controller.");
-    qmlRegisterUncreatableType<SettingsController>("Contour.Terminal", 1, 0, "SettingsController", "Created by the window controller.");
+    qmlRegisterUncreatableType<window::WindowController>("Contour.Terminal", 1, 0, "WindowController", "Created by the session manager.");
+    qmlRegisterUncreatableType<window::CommandPaletteModel>("Contour.Terminal", 1, 0, "CommandPaletteModel", "Created by the window controller.");
+    qmlRegisterUncreatableType<window::SettingsController>("Contour.Terminal", 1, 0, "SettingsController", "Created by the window controller.");
     qRegisterMetaType<session::TerminalSession*>("TerminalSession*");
     qRegisterMetaType<session::PaneProxy*>("PaneProxy*");
-    qRegisterMetaType<WindowController*>("WindowController*");
-    qRegisterMetaType<CommandPaletteModel*>("CommandPaletteModel*");
-    qRegisterMetaType<SettingsController*>("SettingsController*");
+    qRegisterMetaType<window::WindowController*>("WindowController*");
+    qRegisterMetaType<window::CommandPaletteModel*>("CommandPaletteModel*");
+    qRegisterMetaType<window::SettingsController*>("SettingsController*");
     // clang-format on
 
     // The chrome's design tokens. An injected instance rather than a QML-created singleton, because
     // it is configured entirely at construction (see AGENT.md's complete-constructor rule) and its
     // configuration is this app's, not the engine's -- there is nothing for QML to build it from.
-    _uiStyleProvider =
-        make_unique<UiStyleProvider>(_config.uiStyle.value(), resolveChromeFont(_config, profileName()));
+    _uiStyleProvider = make_unique<window::UiStyleProvider>(
+        _config.uiStyle.value(), window::resolveChromeFont(_config, profileName()));
 
     {
         auto const timer = crispy::scoped_timer(startupLog, "QML engine setup");
@@ -1171,7 +1178,8 @@ void ContourGuiApp::reconcileAttachWindows()
         if (auto const mapped = _attachWindowMap.find(daemonWindow); mapped != _attachWindowMap.end())
         {
             // Already shown: bring its tree up to date.
-            contour::applyRemoteLayout(_sessionManager, mapped->second, *_nativeController, daemonWindow);
+            contour::remote::applyRemoteLayout(
+                _sessionManager, mapped->second, *_nativeController, daemonWindow);
             continue;
         }
         if (_pendingAttachWindow == daemonWindow)
@@ -1207,7 +1215,7 @@ std::optional<std::uint64_t> primaryDaemonWindowToAdopt(bool anyWindowMapped,
     return daemonWindowIds.front(); // windowIds() is ascending, so front() is the primary window
 }
 
-bool ContourGuiApp::bindPendingAttachWindow(WindowController* controller)
+bool ContourGuiApp::bindPendingAttachWindow(window::WindowController* controller)
 {
     if (!_nativeController || controller == nullptr)
         return false;
@@ -1239,7 +1247,7 @@ bool ContourGuiApp::bindPendingAttachWindow(WindowController* controller)
 void ContourGuiApp::bindDaemonWindow(std::uint64_t daemonWindow, vtworkspace::WindowId osWindow)
 {
     _attachWindowMap.emplace(daemonWindow, osWindow);
-    contour::applyRemoteLayout(_sessionManager, osWindow, *_nativeController, daemonWindow);
+    contour::remote::applyRemoteLayout(_sessionManager, osWindow, *_nativeController, daemonWindow);
 }
 
 display::ForcedFontDpiProvider* ContourGuiApp::forcedFontDpiProvider()

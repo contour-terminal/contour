@@ -13,7 +13,7 @@
 #include <memory>
 #include <string>
 
-namespace contour
+namespace contour::window
 {
 
 /// The editable bridge between the GUI settings page and the configuration.
@@ -257,4 +257,4 @@ class SettingsController: public QObject
     bool _hasSchemeDraft = false;
 };
 
-} // namespace contour
+} // namespace contour::window

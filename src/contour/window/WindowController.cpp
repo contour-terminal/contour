@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/ContextMenuModel.h>
 #include <contour/ContourGuiApp.h>
-#include <contour/SettingsController.h>
-#include <contour/TabColorScheme.h>
-#include <contour/TabLabel.h>
-#include <contour/WindowController.h>
 #include <contour/command/ContextMenu.h>
 #include <contour/command/Shortcut.h>
 #include <contour/command/TitleBarContextMenu.h>
@@ -16,6 +11,11 @@
 #include <contour/session/PaneProxy.h>
 #include <contour/session/TerminalSession.h>
 #include <contour/session/TerminalSessionManager.h>
+#include <contour/window/ContextMenuModel.h>
+#include <contour/window/SettingsController.h>
+#include <contour/window/TabColorScheme.h>
+#include <contour/window/TabLabel.h>
+#include <contour/window/WindowController.h>
 
 #include <QtCore/QDir>
 #include <QtGui/QCursor>
@@ -32,7 +32,7 @@
 #include <vtworkspace/SessionModel.h>
 #include <vtworkspace/Tab.h>
 
-namespace contour
+namespace contour::window
 {
 
 WindowController::WindowController(session::TerminalSessionManager& manager, vtworkspace::WindowId windowId):
@@ -549,13 +549,16 @@ QVariantList WindowController::tabColorPalette() const
 namespace
 {
     /// Maps the two focus axes (tab-active, window-active) plus hover to a single tab visual state.
-    [[nodiscard]] TabVisualState tabVisualStateFor(bool active, bool hovered, bool windowActive) noexcept
+    [[nodiscard]] window::TabVisualState tabVisualStateFor(bool active,
+                                                           bool hovered,
+                                                           bool windowActive) noexcept
     {
         if (active)
-            return TabVisualState::Active;
+            return window::TabVisualState::Active;
         if (hovered)
-            return TabVisualState::Hover;
-        return windowActive ? TabVisualState::Inactive : TabVisualState::InactiveWindowUnfocused;
+            return window::TabVisualState::Hover;
+        return windowActive ? window::TabVisualState::Inactive
+                            : window::TabVisualState::InactiveWindowUnfocused;
     }
 } // namespace
 
@@ -566,13 +569,13 @@ QColor WindowController::tabBackgroundColor(QColor const& tabColor,
                                             bool const windowActive) const
 {
     auto const state = tabVisualStateFor(active, hovered, windowActive);
-    return platform::toQColor(contour::tabBackgroundColor(
+    return platform::toQColor(contour::window::tabBackgroundColor(
         platform::toRGBColor(tabColor), platform::toRGBColor(rowBackground), state));
 }
 
 QColor WindowController::tabTextColor(QColor const& tabBackground) const
 {
-    return platform::toQColor(contrastingTextColor(platform::toRGBColor(tabBackground)));
+    return platform::toQColor(window::contrastingTextColor(platform::toRGBColor(tabBackground)));
 }
 
 void WindowController::closeWindow()
@@ -1424,4 +1427,4 @@ void WindowController::updateStatusLine()
 }
 // }}}
 
-} // namespace contour
+} // namespace contour::window

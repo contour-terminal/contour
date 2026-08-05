@@ -24,7 +24,7 @@
 // platform. The oracle tests below (real `tmux` binary) are POSIX-only.
 TEST_CASE("tmux %window-renamed retitles the mirrored tab (B5)", "[attach][tmux]")
 {
-    auto ctrlOwned = std::make_unique<contour::TmuxController>(std::string {}); // not connected
+    auto ctrlOwned = std::make_unique<contour::remote::TmuxController>(std::string {}); // not connected
     auto* ctrl = ctrlOwned.get();
     contour::test::TestApp app { std::move(ctrlOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -60,18 +60,18 @@ TEST_CASE("tmux %window-renamed retitles the mirrored tab (B5)", "[attach][tmux]
 // the same contract is covered in ControlSession_test ("refresh-client -A pauses and resumes ...").
 TEST_CASE("tmux resume-pane command matches the server's refresh-client format (B5)", "[attach][tmux]")
 {
-    CHECK(contour::tmuxResumePaneCommand(1) == "refresh-client -A %1:continue");
-    CHECK(contour::tmuxResumePaneCommand(42) == "refresh-client -A %42:continue");
+    CHECK(contour::remote::tmuxResumePaneCommand(1) == "refresh-client -A %1:continue");
+    CHECK(contour::remote::tmuxResumePaneCommand(42) == "refresh-client -A %42:continue");
 }
 
 // B5: the split/kill commands must match the server's split-window/kill-pane handlers
 // (ControlSession::commandSplitWindow maps -h -> Vertical; default -> Horizontal).
 TEST_CASE("tmux split/kill commands match the server's command format (B5)", "[attach][tmux]")
 {
-    CHECK(contour::tmuxSplitWindowCommand(3, /*vertical=*/true) == "split-window -h -t %3");
-    CHECK(contour::tmuxSplitWindowCommand(3, /*vertical=*/false) == "split-window -t %3");
-    CHECK(contour::tmuxKillPaneCommand(7) == "kill-pane -t %7");
-    CHECK(contour::tmuxNewWindowCommand() == "new-window");
+    CHECK(contour::remote::tmuxSplitWindowCommand(3, /*vertical=*/true) == "split-window -h -t %3");
+    CHECK(contour::remote::tmuxSplitWindowCommand(3, /*vertical=*/false) == "split-window -t %3");
+    CHECK(contour::remote::tmuxKillPaneCommand(7) == "kill-pane -t %7");
+    CHECK(contour::remote::tmuxNewWindowCommand() == "new-window");
 }
 
 // A GUI "new tab" in tmux mirror mode is authored on the server as a new window (requestRemoteTab
@@ -79,7 +79,7 @@ TEST_CASE("tmux split/kill commands match the server's command format (B5)", "[a
 // refuses in steady state) — the regression that made the "+"/new-tab gesture a silent no-op.
 TEST_CASE("a GUI new tab in tmux mode is authored on the tmux server", "[attach][tmux]")
 {
-    auto ctrlOwned = std::make_unique<contour::TmuxController>(std::string {});
+    auto ctrlOwned = std::make_unique<contour::remote::TmuxController>(std::string {});
     auto* ctrl = ctrlOwned.get();
     contour::test::TestApp const app { std::move(ctrlOwned) };
 
@@ -94,7 +94,7 @@ TEST_CASE("a GUI new tab in tmux mode is authored on the tmux server", "[attach]
 // true so the manager does NOT split locally); a pty not bound to a tmux pane is not routed.
 TEST_CASE("a GUI split in tmux mode is authored on the tmux server (B5)", "[attach][tmux]")
 {
-    auto ctrlOwned = std::make_unique<contour::TmuxController>(std::string {});
+    auto ctrlOwned = std::make_unique<contour::remote::TmuxController>(std::string {});
     auto* ctrl = ctrlOwned.get();
     contour::test::TestApp app { std::move(ctrlOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -131,7 +131,7 @@ TEST_CASE("tmux binary layout converts to a ratio-bearing vtworkspace layout (F3
     auto const tree2 = vthost::tmux::collapseToBinary(*parsed2);
     REQUIRE(tree2.leafCount() == 2);
 
-    auto const conv2 = contour::tmuxLayoutToWindowLayout(tree2);
+    auto const conv2 = contour::remote::tmuxLayoutToWindowLayout(tree2);
     REQUIRE(conv2.layout.tabs.size() == 1);
     auto const& root2 = conv2.layout.tabs.front().root;
     REQUIRE_FALSE(root2.isLeaf());
@@ -148,7 +148,7 @@ TEST_CASE("tmux binary layout converts to a ratio-bearing vtworkspace layout (F3
         vthost::tmux::parseLayout(wireOf("160x50,0,0{53x50,0,0,1,52x50,54,0,2,53x50,107,0,3}"));
     REQUIRE(parsed3.has_value());
     auto const tree3 = vthost::tmux::collapseToBinary(*parsed3);
-    auto const conv3 = contour::tmuxLayoutToWindowLayout(tree3);
+    auto const conv3 = contour::remote::tmuxLayoutToWindowLayout(tree3);
     auto const& root3 = conv3.layout.tabs.front().root;
     REQUIRE(root3.children.size() == 2);
     CHECK(conv3.leafPane.at(root3.children.data()) == 1); // head leaf
@@ -163,7 +163,7 @@ TEST_CASE("tmux binary layout converts to a ratio-bearing vtworkspace layout (F3
 // that realizeWindowLayout uses.
 TEST_CASE("tmux whole-tree realize reproduces the split ratio and shape (F3)", "[attach][tmux]")
 {
-    auto ctrlOwned = std::make_unique<contour::TmuxController>(std::string {});
+    auto ctrlOwned = std::make_unique<contour::remote::TmuxController>(std::string {});
     auto* ctrl = ctrlOwned.get();
     contour::test::TestApp app { std::move(ctrlOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -173,7 +173,7 @@ TEST_CASE("tmux whole-tree realize reproduces the split ratio and shape (F3)", "
         vthost::tmux::parseLayout(std::format("{:04x},{}", vthost::tmux::layoutChecksum(body), body));
     REQUIRE(parsed.has_value());
     auto const tree = vthost::tmux::collapseToBinary(*parsed);
-    auto const converted = contour::tmuxLayoutToWindowLayout(tree);
+    auto const converted = contour::remote::tmuxLayoutToWindowLayout(tree);
 
     // Both leaf panes discovered, so createPty can size them.
     ctrl->paneAdded(/*window=*/1, /*pane=*/1, 70, 50);
@@ -203,7 +203,7 @@ TEST_CASE("tmux whole-tree realize reproduces the split ratio and shape (F3)", "
 // model-owned sink survives, so output arriving in between is buffered and flushed on the new bind.
 TEST_CASE("a tmux pane moved before it was realized lands in the DESTINATION tab", "[attach][tmux]")
 {
-    auto ctrlOwned = std::make_unique<contour::TmuxController>(std::string {});
+    auto ctrlOwned = std::make_unique<contour::remote::TmuxController>(std::string {});
     auto* ctrl = ctrlOwned.get();
     contour::test::TestApp app { std::move(ctrlOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -230,7 +230,7 @@ TEST_CASE("a tmux pane moved before it was realized lands in the DESTINATION tab
 TEST_CASE("a realized tmux pane's move closes the local binding and defers the re-realization",
           "[attach][tmux]")
 {
-    auto ctrlOwned = std::make_unique<contour::TmuxController>(std::string {});
+    auto ctrlOwned = std::make_unique<contour::remote::TmuxController>(std::string {});
     auto* ctrl = ctrlOwned.get();
     contour::test::TestApp app { std::move(ctrlOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -267,7 +267,7 @@ TEST_CASE("a realized tmux pane's move closes the local binding and defers the r
 // authored by the caller that knows, through SessionFactory::requestRemoteClose.
 TEST_CASE("closing a mirrored pane's pty does not kill it on tmux", "[attach][tmux]")
 {
-    auto ctrlOwned = std::make_unique<contour::TmuxController>(std::string {});
+    auto ctrlOwned = std::make_unique<contour::remote::TmuxController>(std::string {});
     auto* ctrl = ctrlOwned.get();
     contour::test::TestApp app { std::move(ctrlOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -292,7 +292,7 @@ TEST_CASE("closing a mirrored pane's pty does not kill it on tmux", "[attach][tm
 // ...and the deliberate close DOES route: requestRemoteClose resolves the pty to its tmux pane.
 TEST_CASE("requestRemoteClose resolves a mirrored pane, and ignores a foreign pty", "[attach][tmux]")
 {
-    auto ctrlOwned = std::make_unique<contour::TmuxController>(std::string {});
+    auto ctrlOwned = std::make_unique<contour::remote::TmuxController>(std::string {});
     auto* ctrl = ctrlOwned.get();
     contour::test::TestApp app { std::move(ctrlOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -324,7 +324,7 @@ TEST_CASE("a remote resize updates a not-yet-realized pane's extent", "[attach][
     // realization: once a pane has a display, the widget geometry drives its grid (@see
     // TerminalSession::resizeTerminalToDisplaySize) and immediately overwrites whatever it was born
     // at — which is exactly why PaneFeed::resize leaves a realized pane alone.
-    auto controller = contour::TmuxController { std::string {} };
+    auto controller = contour::remote::TmuxController { std::string {} };
 
     controller.paneAdded(/*window=*/1, /*pane=*/10, 80, 24);
     controller.notePaneExtent(/*pane=*/10, 120, 40);
@@ -433,7 +433,7 @@ TEST_CASE("tmux controller mirrors a real tmux session", "[attach][tmux][oracle]
     std::ignore = runShellCapture(
         std::format("tmux -S {} send-keys -t mirror 'echo tmux-mirror-seed' Enter 2>&1", server->socketPath));
 
-    auto controller = contour::TmuxController { server->socketPath };
+    auto controller = contour::remote::TmuxController { server->socketPath };
     auto const connected = controller.connectAndWait(15s);
     REQUIRE(connected.has_value());
     REQUIRE(controller.canCreateSession());

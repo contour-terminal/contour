@@ -2,13 +2,13 @@
 #pragma once
 
 #include <contour/ContourGuiApp.h>
-#include <contour/WindowController.h>
 #include <contour/command/CommandCatalog.h>
 #include <contour/command/CommandHistoryStore.h>
 #include <contour/config/LayoutStore.h>
 #include <contour/platform/ExternalLauncher.h>
 #include <contour/session/SessionFactory.h>
 #include <contour/session/TerminalSessionManager.h>
+#include <contour/window/WindowController.h>
 
 #include <vtpty/ChannelPty.h>
 #include <vtpty/MockPty.h>
@@ -415,7 +415,7 @@ class TestApp
 struct ScopedController
 {
     contour::session::TerminalSessionManager& manager;
-    contour::WindowController* controller;
+    contour::window::WindowController* controller;
     vtworkspace::WindowId id;
 
     explicit ScopedController(contour::session::TerminalSessionManager& m):
@@ -432,8 +432,8 @@ struct ScopedController
     ScopedController(ScopedController&&) = delete;
     ScopedController& operator=(ScopedController&&) = delete;
 
-    [[nodiscard]] contour::WindowController* operator->() const noexcept { return controller; }
-    [[nodiscard]] contour::WindowController& operator*() const noexcept { return *controller; }
+    [[nodiscard]] contour::window::WindowController* operator->() const noexcept { return controller; }
+    [[nodiscard]] contour::window::WindowController& operator*() const noexcept { return *controller; }
 };
 
 } // namespace contour::test

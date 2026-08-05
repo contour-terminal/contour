@@ -23,7 +23,7 @@
 #include <net/EventLoop.h>
 #include <net/PollEventSource.h>
 
-namespace contour
+namespace contour::remote
 {
 
 /// @brief Owns a net::EventLoop running on a dedicated thread.
@@ -155,4 +155,4 @@ class ReactorThread
     std::string _failure;
 };
 
-} // namespace contour
+} // namespace contour::remote

@@ -17,7 +17,7 @@
 #include <vtworkspace/SessionModel.h>
 #include <vtworkspace/Tab.h>
 
-namespace contour
+namespace contour::remote
 {
 
 namespace
@@ -95,12 +95,12 @@ namespace
     /// Maps each remote session to its local TerminalSession, by matching the pane's
     /// pty against the controller's bindings. Rebuilt after each split so a
     /// just-created pane is available to seed the next.
-    [[nodiscard]] std::unordered_map<uint64_t, session::TerminalSession*> remoteToLocal(
-        session::TerminalSessionManager& manager,
+    [[nodiscard]] std::unordered_map<uint64_t, contour::session::TerminalSession*> remoteToLocal(
+        contour::session::TerminalSessionManager& manager,
         vtworkspace::WindowId window,
         NativeController const& controller)
     {
-        auto out = std::unordered_map<uint64_t, session::TerminalSession*> {};
+        auto out = std::unordered_map<uint64_t, contour::session::TerminalSession*> {};
         auto* win = manager.model().window(window);
         if (win == nullptr)
             return out;
@@ -120,7 +120,7 @@ namespace
     /// no-op instead of a ratio written onto the wrong divider. Pure over the map, so it needs neither
     /// the manager nor the controller — and pays no locked binding scan per leaf.
     [[nodiscard]] bool sameTree(
-        std::unordered_map<uint64_t, session::TerminalSession*> const& remoteToLocalSession,
+        std::unordered_map<uint64_t, contour::session::TerminalSession*> const& remoteToLocalSession,
         vthost::proto::WirePane const& wire,
         vtworkspace::Pane const& local)
     {
@@ -144,7 +144,7 @@ namespace
     /// what stops these writes echoing back to the daemon — applyRemoteLayout runs inside
     /// setRealizingLayout(), and NativeController::reportSplitRatio drops a report while that holds.
     /// This only keeps a converged push from costing a model write and a QML relayout.
-    void applyRatios(session::TerminalSessionManager& manager,
+    void applyRatios(contour::session::TerminalSessionManager& manager,
                      vtworkspace::TabId tab,
                      vthost::proto::WirePane const& wire,
                      vtworkspace::Pane& local)
@@ -158,7 +158,7 @@ namespace
     }
 
     /// Realizes ONE whole daemon tab (no leaf yet bound) via the shared realizer.
-    void realizeWholeTab(session::TerminalSessionManager& manager,
+    void realizeWholeTab(contour::session::TerminalSessionManager& manager,
                          vtworkspace::WindowId window,
                          NativeController& controller,
                          vthost::proto::WireTab const& wireTab,
@@ -167,15 +167,16 @@ namespace
         auto single = vthost::proto::LayoutState {};
         single.tabs.push_back(wireTab);
         auto const wl = vthost::client::wireToLayout(single);
-        manager.applyLayoutToWindow(window, wl.layout, pageSize, [&](config::LayoutPane const& leaf) {
-            auto const it = wl.leafSession.find(&leaf);
-            if (it != wl.leafSession.end())
-                controller.setNextBindSession(it->second);
-        });
+        manager.applyLayoutToWindow(
+            window, wl.layout, pageSize, [&](contour::config::LayoutPane const& leaf) {
+                auto const it = wl.leafSession.find(&leaf);
+                if (it != wl.leafSession.end())
+                    controller.setNextBindSession(it->second);
+            });
     }
 } // namespace
 
-void applyRemoteLayout(session::TerminalSessionManager& manager,
+void applyRemoteLayout(contour::session::TerminalSessionManager& manager,
                        vtworkspace::WindowId window,
                        NativeController& controller,
                        std::optional<uint64_t> daemonWindow,
@@ -220,7 +221,7 @@ void applyRemoteLayout(session::TerminalSessionManager& manager,
     for (auto const& wireTab: layout->tabs)
         collectSessions(wireTab.root, layoutSessions);
     auto sessionMap = remoteToLocal(manager, window, controller);
-    auto toClose = std::vector<session::TerminalSession*> {};
+    auto toClose = std::vector<contour::session::TerminalSession*> {};
     for (auto const& [remote, local]: sessionMap)
         if (!layoutSessions.contains(remote))
             toClose.push_back(local);
@@ -234,7 +235,7 @@ void applyRemoteLayout(session::TerminalSessionManager& manager,
         // at it would at best echo a dead session id — and would destroy a live one the moment a
         // session can leave a window's layout without dying (a cross-window pane move;
         // vtworkspace::moveTabToWindow already models it).
-        manager.closeActivePane(local, session::SessionEnd::Detach);
+        manager.closeActivePane(local, contour::session::SessionEnd::Detach);
     }
     if (!toClose.empty())
         sessionMap = remoteToLocal(manager, window, controller); // only a close can stale it
@@ -257,4 +258,4 @@ void applyRemoteLayout(session::TerminalSessionManager& manager,
     controller.setRealizingLayout(false);
 }
 
-} // namespace contour
+} // namespace contour::remote

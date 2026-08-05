@@ -6,9 +6,9 @@
 // disk exactly as the production apply does. So a test exercises the whole stack (controller → store →
 // loader), not a mock of it.
 
-#include <contour/SettingsController.h>
 #include <contour/config/Config.h>
 #include <contour/config/GuiConfigStore.h>
+#include <contour/window/SettingsController.h>
 
 #include <vtbackend/Color.h>
 
@@ -24,6 +24,7 @@
 #include <string_view>
 
 using namespace contour;
+using namespace contour::window;
 
 namespace
 {

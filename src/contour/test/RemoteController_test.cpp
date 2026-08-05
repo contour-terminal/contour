@@ -18,9 +18,9 @@
 #include <net/EventLoop.h>
 
 using namespace std::chrono_literals;
-using contour::awaitMuxConnect;
-using contour::makeUnboundFallbackPty;
-using contour::MuxConnectPhase;
+using contour::remote::awaitMuxConnect;
+using contour::remote::makeUnboundFallbackPty;
+using contour::remote::MuxConnectPhase;
 
 TEST_CASE("awaitMuxConnect reports Ready without waiting once the phase is set", "[mux][controller]")
 {
@@ -29,7 +29,7 @@ TEST_CASE("awaitMuxConnect reports Ready without waiting once the phase is set",
     auto phase = MuxConnectPhase::Ready; // already transitioned
     auto const failure = std::string {};
 
-    auto const outcome = awaitMuxConnect(mutex, cv, phase, failure, 5s);
+    auto const outcome = contour::remote::awaitMuxConnect(mutex, cv, phase, failure, 5s);
 
     CHECK(outcome.ready);
     CHECK_FALSE(outcome.timedOut);
@@ -42,7 +42,7 @@ TEST_CASE("awaitMuxConnect surfaces the recorded failure reason", "[mux][control
     auto phase = MuxConnectPhase::Failed;
     auto const failure = std::string { "daemon refused" };
 
-    auto const outcome = awaitMuxConnect(mutex, cv, phase, failure, 5s);
+    auto const outcome = contour::remote::awaitMuxConnect(mutex, cv, phase, failure, 5s);
 
     CHECK_FALSE(outcome.ready);
     CHECK_FALSE(outcome.timedOut);
@@ -56,7 +56,7 @@ TEST_CASE("awaitMuxConnect times out while still Connecting", "[mux][controller]
     auto phase = MuxConnectPhase::Connecting; // never transitions
     auto const failure = std::string {};
 
-    auto const outcome = awaitMuxConnect(mutex, cv, phase, failure, 20ms);
+    auto const outcome = contour::remote::awaitMuxConnect(mutex, cv, phase, failure, 20ms);
 
     CHECK(outcome.timedOut);
     CHECK_FALSE(outcome.ready);
@@ -79,7 +79,7 @@ TEST_CASE("awaitMuxConnect wakes on a cross-thread transition", "[mux][controlle
         cv.notify_all();
     } };
 
-    auto const outcome = awaitMuxConnect(mutex, cv, phase, failure, 5s);
+    auto const outcome = contour::remote::awaitMuxConnect(mutex, cv, phase, failure, 5s);
     reactor.join();
 
     CHECK(outcome.ready);
@@ -102,11 +102,11 @@ TEST_CASE("SelfUnbindingChannelPty runs its on-destroy callback exactly once", "
 {
     auto unbinds = 0;
     {
-        auto pty = contour::SelfUnbindingChannelPty { vtpty::PageSize { vtpty::LineCount(12),
-                                                                        vtpty::ColumnCount(40) },
-                                                      {}, // write sink — unused by this test
-                                                      {}, // resize sink — unused by this test
-                                                      [&unbinds] { ++unbinds; } };
+        auto pty = contour::remote::SelfUnbindingChannelPty { vtpty::PageSize { vtpty::LineCount(12),
+                                                                                vtpty::ColumnCount(40) },
+                                                              {}, // write sink — unused by this test
+                                                              {}, // resize sink — unused by this test
+                                                              [&unbinds] { ++unbinds; } };
         CHECK(pty.pageSize() == vtpty::PageSize { vtpty::LineCount(12), vtpty::ColumnCount(40) });
         CHECK(unbinds == 0); // not until the terminal destroys it
     }
@@ -117,7 +117,7 @@ TEST_CASE("stopMuxReactor tears the reactor down once and ignores a second stop"
 {
     auto mutex = std::mutex {};
     auto stopped = false;
-    auto reactor = contour::ReactorThread {};
+    auto reactor = contour::remote::ReactorThread {};
 
     // A root task that parks forever, so only requestStop can end it.
     reactor.start([](net::EventLoop* loop) -> coro::Task<void> {
@@ -131,13 +131,13 @@ TEST_CASE("stopMuxReactor tears the reactor down once and ignores a second stop"
     };
 
     // First stop: performs the teardown (posts the detach, cancels, joins).
-    CHECK(contour::stopMuxReactor(mutex, stopped, reactor, detach));
+    CHECK(contour::remote::stopMuxReactor(mutex, stopped, reactor, detach));
     CHECK(stopped);
     CHECK(detaches.load(std::memory_order_relaxed) == 1);
     CHECK(reactor.wasCancelled());
 
     // Second stop: already stopped, so it neither re-posts nor re-joins.
-    CHECK_FALSE(contour::stopMuxReactor(mutex, stopped, reactor, detach));
+    CHECK_FALSE(contour::remote::stopMuxReactor(mutex, stopped, reactor, detach));
     CHECK(detaches.load(std::memory_order_relaxed) == 1);
 }
 
@@ -182,7 +182,7 @@ namespace
 // half of that guarantee.
 TEST_CASE("the reactor thread survives an exception escaping the root task", "[mux][controller]")
 {
-    auto reactor = contour::ReactorThread {};
+    auto reactor = contour::remote::ReactorThread {};
     auto reported = std::string {};
 
     reactor.start(rootTaskThrowing([] { throw std::runtime_error { "malformed peer" }; }),
@@ -198,7 +198,7 @@ TEST_CASE("the reactor thread survives an exception escaping the root task", "[m
 
 TEST_CASE("the reactor thread survives a non-std exception too", "[mux][controller]")
 {
-    auto reactor = contour::ReactorThread {};
+    auto reactor = contour::remote::ReactorThread {};
     // Deliberately not derived from std::exception: a third-party library's throw need not be, and
     // the thread body must still not let it escape.
     struct ForeignThrow
@@ -216,7 +216,7 @@ TEST_CASE("a cancelled reactor root task is still the silent shutdown", "[mux][c
     // requestStop() unwinds the root task by throwing OperationCancelled; that is the INTENDED
     // shutdown and must stay distinguishable from a failure — the catch-all above must not swallow
     // it into a reported error.
-    auto reactor = contour::ReactorThread {};
+    auto reactor = contour::remote::ReactorThread {};
     auto reported = std::string {};
 
     reactor.start(rootTaskThrowing([] { throw coro::OperationCancelled {}; }),

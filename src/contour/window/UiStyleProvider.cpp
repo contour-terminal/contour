@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/UiStyleProvider.h>
 #include <contour/config/Config.h>
+#include <contour/window/UiStyleProvider.h>
 
 #include <crispy/logstore.h>
 
@@ -10,7 +10,7 @@
 #include <cmath>
 #include <string>
 
-namespace contour
+namespace contour::window
 {
 
 namespace
@@ -197,4 +197,4 @@ QFont resolveChromeFont(config::Config const& config, std::string const& profile
     return font;
 }
 
-} // namespace contour
+} // namespace contour::window

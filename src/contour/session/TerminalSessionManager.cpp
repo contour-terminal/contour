@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ContourGuiApp.h>
-#include <contour/SettingsController.h>
-#include <contour/TabLabel.h>
-#include <contour/WindowController.h>
 #include <contour/config/LayoutBuilder.h>
 #include <contour/platform/ColorConversion.h>
 #include <contour/session/Logging.h>
 #include <contour/session/PaneProxy.h>
 #include <contour/session/TerminalSession.h>
 #include <contour/session/TerminalSessionManager.h>
+#include <contour/window/SettingsController.h>
+#include <contour/window/TabLabel.h>
+#include <contour/window/WindowController.h>
 
 #include <vtbackend/primitives.h>
 
@@ -107,12 +107,12 @@ int TerminalSessionManager::rowOfTab(vtworkspace::TabId tab) const noexcept
     return win != nullptr ? win->indexOf(tab) : -1;
 }
 
-WindowController* TerminalSessionManager::createWindowController()
+window::WindowController* TerminalSessionManager::createWindowController()
 {
     // Every OS window gets its own vtworkspace::Window; the controller adapts exactly that window (all its
     // reads and writes are keyed by the WindowId).
     auto* window = _model->createWindow();
-    auto* controller = new WindowController(*this, window->id());
+    auto* controller = new window::WindowController(*this, window->id());
     QQmlEngine::setObjectOwnership(controller, QQmlEngine::CppOwnership);
     _controllersByWindow[window->id().value] = controller;
     // A freshly spawned window is the one the user is looking at. Seeding ownership here (rather than
@@ -122,13 +122,13 @@ WindowController* TerminalSessionManager::createWindowController()
     return controller;
 }
 
-WindowController* TerminalSessionManager::controllerFor(vtworkspace::WindowId window) const noexcept
+window::WindowController* TerminalSessionManager::controllerFor(vtworkspace::WindowId window) const noexcept
 {
     auto const it = _controllersByWindow.find(window.value);
     return it != _controllersByWindow.end() ? it->second : nullptr;
 }
 
-WindowController* TerminalSessionManager::controllerForDisplay(
+window::WindowController* TerminalSessionManager::controllerForDisplay(
     display::TerminalDisplay* display) const noexcept
 {
     if (_controllersByWindow.empty())
@@ -328,7 +328,7 @@ void TerminalSessionManager::clearFocusedWindow(vtworkspace::WindowId window)
     setFocusedSession(nullptr);
 }
 
-void TerminalSessionManager::syncFocusForWindow(WindowController* controller)
+void TerminalSessionManager::syncFocusForWindow(window::WindowController* controller)
 {
     if (controller == nullptr)
         return;
@@ -459,7 +459,7 @@ void TerminalSessionManager::launchLayout(std::string const& name, TerminalSessi
     applyLayoutToWindow(win->id(), *layout, acting->terminal().totalPageSize());
 }
 
-bool TerminalSessionManager::consumeDefaultLayout(contour::WindowController* controller)
+bool TerminalSessionManager::consumeDefaultLayout(contour::window::WindowController* controller)
 {
     // One-shot: Main.qml calls this for EVERY window it loads, but the startup layout belongs to
     // the first window only — a later NewTerminalWindow must not re-run all the layout's commands.
@@ -1014,7 +1014,8 @@ void TerminalSessionManager::paneSplit(vtworkspace::TabId tab, vtworkspace::Pane
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
     {
         c->notifyTabRowChanged(
-            tab, { WindowController::Roles::TitleRole, WindowController::Roles::PaneCountRole });
+            tab,
+            { window::WindowController::Roles::TitleRole, window::WindowController::Roles::PaneCountRole });
         c->rebuildActiveTabPaneProxies();
     }
 }
@@ -1024,7 +1025,8 @@ void TerminalSessionManager::paneClosed(vtworkspace::TabId tab, vtworkspace::Pan
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
     {
         c->notifyTabRowChanged(
-            tab, { WindowController::Roles::TitleRole, WindowController::Roles::PaneCountRole });
+            tab,
+            { window::WindowController::Roles::TitleRole, window::WindowController::Roles::PaneCountRole });
         c->rebuildActiveTabPaneProxies();
     }
 }
@@ -1033,7 +1035,7 @@ void TerminalSessionManager::activePaneChanged(vtworkspace::TabId tab, vtworkspa
 {
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
     {
-        c->notifyTabRowChanged(tab, { WindowController::Roles::TitleRole });
+        c->notifyTabRowChanged(tab, { window::WindowController::Roles::TitleRole });
         c->notifyActivePaneChanged();
         c->emitActiveSessionChanged();
         // Move terminal focus to the newly active pane's leaf (symmetric out/in via setFocusedSession).
@@ -1102,7 +1104,7 @@ void TerminalSessionManager::paneZoomChanged(vtworkspace::TabId tab, std::option
     // (SessionModel::announceZoomChange -> tabTitleChanged), so every host gets it, not just this one.
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
     {
-        c->notifyTabRowChanged(tab, { WindowController::Roles::ZoomedRole });
+        c->notifyTabRowChanged(tab, { window::WindowController::Roles::ZoomedRole });
         c->refreshActiveTabLayoutRoot();
     }
 }
@@ -1113,7 +1115,8 @@ void TerminalSessionManager::paneTreeRestructured(vtworkspace::TabId tab)
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
     {
         c->notifyTabRowChanged(
-            tab, { WindowController::Roles::TitleRole, WindowController::Roles::PaneCountRole });
+            tab,
+            { window::WindowController::Roles::TitleRole, window::WindowController::Roles::PaneCountRole });
         c->rebuildActiveTabPaneProxies();
     }
 }
@@ -1125,15 +1128,16 @@ void TerminalSessionManager::tabTitleChanged(vtworkspace::TabId tab)
     // the status line until an unrelated event next refreshes it.
     updateStatusLine();
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
-        c->notifyTabRowChanged(tab,
-                               { WindowController::Roles::TitleRole, WindowController::Roles::RawTitleRole });
+        c->notifyTabRowChanged(
+            tab,
+            { window::WindowController::Roles::TitleRole, window::WindowController::Roles::RawTitleRole });
 }
 
 void TerminalSessionManager::tabColorChanged(vtworkspace::TabId tab)
 {
     updateStatusLine();
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
-        c->notifyTabRowChanged(tab, { WindowController::Roles::ColorRole });
+        c->notifyTabRowChanged(tab, { window::WindowController::Roles::ColorRole });
 }
 
 void TerminalSessionManager::refreshAllTabTitles()
@@ -1150,7 +1154,7 @@ void TerminalSessionManager::refreshTabForSession(vtworkspace::SessionId session
     // renders from. (Emitting on the manager reached nothing: no QML binds the manager's rows.)
     if (auto* tab = findTabHostingSession(session))
         if (auto* c = controllerFor(_model->windowOfTab(tab->id())))
-            c->notifyTabRowChanged(tab->id(), { WindowController::Roles::TitleRole });
+            c->notifyTabRowChanged(tab->id(), { window::WindowController::Roles::TitleRole });
 }
 
 void TerminalSessionManager::setTabTitleForSession(vtworkspace::SessionId session, std::string title)
@@ -1251,7 +1255,7 @@ void TerminalSessionManager::tearOffTabToNewWindow(vtworkspace::WindowId from,
     _app.newWindow(targetScreen);
 }
 
-bool TerminalSessionManager::consumePendingTransplant(WindowController* newController)
+bool TerminalSessionManager::consumePendingTransplant(window::WindowController* newController)
 {
     if (!_pendingTransplant.has_value() || newController == nullptr)
         return false;

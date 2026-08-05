@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/SettingsController.h>
 #include <contour/platform/QtPath.h>
+#include <contour/window/SettingsController.h>
 
 #include <vtbackend/StatusLineBuilder.h>
 
@@ -18,7 +18,7 @@
 #include <string_view>
 #include <utility>
 
-namespace contour
+namespace contour::window
 {
 
 using config::SettingsOrigin;
@@ -1896,4 +1896,4 @@ void SettingsController::setIndicatorSegment(int segmentIndex, QString const& va
 
 // }}}
 
-} // namespace contour
+} // namespace contour::window

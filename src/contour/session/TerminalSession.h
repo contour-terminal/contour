@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/HyperlinkTooltip.h>
 #include <contour/command/ContextMenu.h>
 #include <contour/config/Actions.h>
 #include <contour/config/Config.h>
@@ -11,6 +10,7 @@
 #include <contour/platform/Announcer.h>
 #include <contour/platform/Audio.h>
 #include <contour/platform/ColorConversion.h>
+#include <contour/session/HyperlinkTooltip.h>
 #ifdef __linux__
     #include <contour/platform/FreeDesktopNotifier.h>
 #endif

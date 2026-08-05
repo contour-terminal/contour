@@ -11,10 +11,10 @@
 // untouched.
 
 #include <contour/ContourGuiApp.h>
-#include <contour/WindowController.h>
 #include <contour/session/PaneProxy.h>
 #include <contour/session/TerminalSessionManager.h>
 #include <contour/test/GuiTestFixtures.h>
+#include <contour/window/WindowController.h>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>
@@ -41,17 +41,17 @@ using contour::test::TestApp;
 
 /// Mints @p n model tabs in the controller's window (no backing sessions).
 void createTabs(contour::session::TerminalSessionManager& manager,
-                contour::WindowController& controller,
+                contour::window::WindowController& controller,
                 int n)
 {
     for (int i = 0; i < n; ++i)
         REQUIRE(manager.model().createTab(controller.windowId()) != nullptr);
 }
 
-[[nodiscard]] QString rawTitleAt(contour::WindowController& controller, int row)
+[[nodiscard]] QString rawTitleAt(contour::window::WindowController& controller, int row)
 {
     return controller
-        .data(controller.index(row), static_cast<int>(contour::WindowController::Roles::RawTitleRole))
+        .data(controller.index(row), static_cast<int>(contour::window::WindowController::Roles::RawTitleRole))
         .toString();
 }
 
@@ -106,7 +106,8 @@ TEST_CASE("tab strip Multiple gate tracks the live tab count and re-notifies QML
     window->seedTabBarVisibility(TabBarVisibility::Multiple);
     // The seed itself emits the change once (mode is one input to the resolved gate). Spy AFTER seeding
     // so the counts below reflect only the count-driven add/close notifications.
-    QSignalSpy const shouldShowSpy(window.controller, &contour::WindowController::tabBarShouldShowChanged);
+    QSignalSpy const shouldShowSpy(window.controller,
+                                   &contour::window::WindowController::tabBarShouldShowChanged);
 
     // One tab: Multiple hides the strip.
     createTabs(manager, *window, 1);
@@ -172,9 +173,12 @@ TEST_CASE("a config reload overrides the seeded tab strip state", "[contour][mul
     window->seedTabBarPosition(TabBarPosition::Bottom);
     window->seedTabBarVisibility(TabBarVisibility::Never);
 
-    auto positionSpy = QSignalSpy(window.controller, &contour::WindowController::tabBarPositionChanged);
-    auto visibilitySpy = QSignalSpy(window.controller, &contour::WindowController::tabBarVisibilityChanged);
-    auto shouldShowSpy = QSignalSpy(window.controller, &contour::WindowController::tabBarShouldShowChanged);
+    auto positionSpy =
+        QSignalSpy(window.controller, &contour::window::WindowController::tabBarPositionChanged);
+    auto visibilitySpy =
+        QSignalSpy(window.controller, &contour::window::WindowController::tabBarVisibilityChanged);
+    auto shouldShowSpy =
+        QSignalSpy(window.controller, &contour::window::WindowController::tabBarShouldShowChanged);
 
     window->applyTabBarFromConfig(TabBarPosition::Top, TabBarVisibility::Multiple);
     CHECK(window->tabBarPosition() == static_cast<int>(TabBarPosition::Top));
@@ -236,7 +240,8 @@ TEST_CASE("settings tab: no terminal tab reads active while the settings page is
 
     auto const isActive = [&](int row) {
         return window
-            ->data(window->index(row), static_cast<int>(contour::WindowController::Roles::IsActiveRole))
+            ->data(window->index(row),
+                   static_cast<int>(contour::window::WindowController::Roles::IsActiveRole))
             .toBool();
     };
 
@@ -330,8 +335,8 @@ TEST_CASE("beginActiveTabTitleEdit requests the active tab's inline editor, per 
     windowB->activateTab(2);
     REQUIRE(windowB->activeTabIndex() == 2);
 
-    auto spyB = QSignalSpy(windowB.controller, &contour::WindowController::tabTitleEditRequested);
-    auto spyA = QSignalSpy(windowA.controller, &contour::WindowController::tabTitleEditRequested);
+    auto spyB = QSignalSpy(windowB.controller, &contour::window::WindowController::tabTitleEditRequested);
+    auto spyA = QSignalSpy(windowA.controller, &contour::window::WindowController::tabTitleEditRequested);
 
     windowB->beginActiveTabTitleEdit();
 
@@ -349,7 +354,7 @@ TEST_CASE("beginActiveTabTitleEdit is a no-op when the window has no tabs", "[co
     ScopedController window { manager };
     REQUIRE(window->activeTabIndex() < 0);
 
-    auto spy = QSignalSpy(window.controller, &contour::WindowController::tabTitleEditRequested);
+    auto spy = QSignalSpy(window.controller, &contour::window::WindowController::tabTitleEditRequested);
     window->beginActiveTabTitleEdit();
     CHECK(spy.count() == 0);
 }
@@ -442,14 +447,14 @@ TEST_CASE("WindowController projects real-session tabs and routes rename/color t
 
     // roleNames exposes every projected role name.
     auto const roles = window->roleNames();
-    CHECK(roles.contains(static_cast<int>(contour::WindowController::Roles::TitleRole)));
-    CHECK(roles.contains(static_cast<int>(contour::WindowController::Roles::RawTitleRole)));
-    CHECK(roles.contains(static_cast<int>(contour::WindowController::Roles::IsActiveRole)));
+    CHECK(roles.contains(static_cast<int>(contour::window::WindowController::Roles::TitleRole)));
+    CHECK(roles.contains(static_cast<int>(contour::window::WindowController::Roles::RawTitleRole)));
+    CHECK(roles.contains(static_cast<int>(contour::window::WindowController::Roles::IsActiveRole)));
 
     // A never-renamed tab has an empty raw title but a resolved (template-expanded) title.
     CHECK(rawTitleAt(*window, 0).isEmpty());
     CHECK_NOTHROW(
-        window->data(window->index(0), static_cast<int>(contour::WindowController::Roles::TitleRole))
+        window->data(window->index(0), static_cast<int>(contour::window::WindowController::Roles::TitleRole))
             .toString());
 
     // Rename routes to the model and surfaces through RawTitleRole; reset restores the default.
@@ -501,7 +506,7 @@ TEST_CASE("a background (unfocused) tab's title updates in real time", "[contour
     REQUIRE(backgroundSession != nullptr);
 
     // Watch the tab strip for a TitleRole change on row 1.
-    auto spy = QSignalSpy(window.controller, &contour::WindowController::dataChanged);
+    auto spy = QSignalSpy(window.controller, &contour::window::WindowController::dataChanged);
 
     // Program-driven title change on the BACKGROUND session (as an OSC title sequence would do).
     backgroundSession->setTitle(QStringLiteral("background-build-running"));
@@ -510,9 +515,10 @@ TEST_CASE("a background (unfocused) tab's title updates in real time", "[contour
     QCoreApplication::processEvents();
 
     // The background tab's resolved title now reflects the change...
-    CHECK(window->data(window->index(1), static_cast<int>(contour::WindowController::Roles::TitleRole))
-              .toString()
-          == QStringLiteral("background-build-running"));
+    CHECK(
+        window->data(window->index(1), static_cast<int>(contour::window::WindowController::Roles::TitleRole))
+            .toString()
+        == QStringLiteral("background-build-running"));
     // ...and a dataChanged carrying TitleRole was emitted for row 1 (not row 0, the active tab).
     auto sawRow1TitleChange = false;
     for (auto const& emission: spy)
@@ -520,7 +526,7 @@ TEST_CASE("a background (unfocused) tab's title updates in real time", "[contour
         auto const topLeft = emission.at(0).toModelIndex();
         auto const roles = emission.at(2).value<QList<int>>();
         if (topLeft.row() == 1
-            && roles.contains(static_cast<int>(contour::WindowController::Roles::TitleRole)))
+            && roles.contains(static_cast<int>(contour::window::WindowController::Roles::TitleRole)))
             sawRow1TitleChange = true;
     }
     CHECK(sawRow1TitleChange);
@@ -640,7 +646,7 @@ TEST_CASE("the SetTabColor / ResetTabColor actions color the acting session's ta
 
     SECTION("a colorless SetTabColor opens the picker instead of coloring anything")
     {
-        auto spy = QSignalSpy(window.controller, &contour::WindowController::tabColorPickRequested);
+        auto spy = QSignalSpy(window.controller, &contour::window::WindowController::tabColorPickRequested);
 
         CHECK((*session)(contour::actions::SetTabColor {}));
 
@@ -667,8 +673,8 @@ TEST_CASE("beginActiveTabColorPick requests the active tab's picker, per window"
     windowB->activateTab(2);
     REQUIRE(windowB->activeTabIndex() == 2);
 
-    auto spyB = QSignalSpy(windowB.controller, &contour::WindowController::tabColorPickRequested);
-    auto spyA = QSignalSpy(windowA.controller, &contour::WindowController::tabColorPickRequested);
+    auto spyB = QSignalSpy(windowB.controller, &contour::window::WindowController::tabColorPickRequested);
+    auto spyA = QSignalSpy(windowA.controller, &contour::window::WindowController::tabColorPickRequested);
 
     windowB->beginActiveTabColorPick();
 
@@ -681,7 +687,7 @@ TEST_CASE("beginActiveTabColorPick requests the active tab's picker, per window"
         ScopedController empty { manager };
         REQUIRE(empty->activeTabIndex() < 0);
 
-        auto spy = QSignalSpy(empty.controller, &contour::WindowController::tabColorPickRequested);
+        auto spy = QSignalSpy(empty.controller, &contour::window::WindowController::tabColorPickRequested);
         empty->beginActiveTabColorPick();
         CHECK(spy.count() == 0);
 
@@ -725,7 +731,7 @@ TEST_CASE("the SaveLayout action saves the acting window, and nameless opens the
 
     SECTION("a nameless SaveLayout opens the save-as prompt instead of saving anything")
     {
-        auto spy = QSignalSpy(window.controller, &contour::WindowController::saveLayoutRequested);
+        auto spy = QSignalSpy(window.controller, &contour::window::WindowController::saveLayoutRequested);
 
         CHECK((*session)(contour::actions::SaveLayout {}));
 
@@ -758,8 +764,8 @@ TEST_CASE("beginSaveLayoutPrompt requests the save-as prompt, per window", "[con
     createTabs(manager, *windowA, 2);
     createTabs(manager, *windowB, 1);
 
-    auto spyB = QSignalSpy(windowB.controller, &contour::WindowController::saveLayoutRequested);
-    auto spyA = QSignalSpy(windowA.controller, &contour::WindowController::saveLayoutRequested);
+    auto spyB = QSignalSpy(windowB.controller, &contour::window::WindowController::saveLayoutRequested);
+    auto spyA = QSignalSpy(windowA.controller, &contour::window::WindowController::saveLayoutRequested);
 
     windowB->beginSaveLayoutPrompt();
 
@@ -1063,7 +1069,8 @@ TEST_CASE("WindowController: the tab strip stops saying \"Multiple panes\" while
     REQUIRE(tab != nullptr);
 
     auto const label = [&] {
-        return window->data(window->index(0), static_cast<int>(contour::WindowController::Roles::TitleRole))
+        return window
+            ->data(window->index(0), static_cast<int>(contour::window::WindowController::Roles::TitleRole))
             .toString()
             .toStdString();
     };

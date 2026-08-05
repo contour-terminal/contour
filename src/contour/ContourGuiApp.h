@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/UiStyleProvider.h>
 #include <contour/cli/ContourApp.h>
 #include <contour/command/CommandHistoryStore.h>
 #include <contour/config/Config.h>
@@ -11,6 +10,7 @@
 #include <contour/platform/SpeechSynthesizer.h>
 #include <contour/session/ExitCode.h>
 #include <contour/session/TerminalSessionManager.h>
+#include <contour/window/UiStyleProvider.h>
 
 #include <vtpty/Process.h>
 #include <vtpty/SshSession.h>
@@ -41,14 +41,22 @@ namespace display
     class ForcedFontDpiProvider;
 }
 
-class NativeController;
-class RoutingSessionFactory;
+namespace remote
+{
+    class NativeController;
+    class RoutingSessionFactory;
+    class TmuxController;
+} // namespace remote
+
 namespace session
 {
     class TerminalSession;
-}
-class TmuxController;
-class WindowController;
+} // namespace session
+
+namespace window
+{
+    class WindowController;
+} // namespace window
 
 /// The daemon window the boot (first) OS window should adopt when attaching, rather than authoring
 /// a fresh tab. In attach mode the boot window mirrors the daemon's primary (lowest-id) window; a
@@ -247,7 +255,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// its own first tab.
     /// @param controller The freshly-created controller of the just-spawned OS window.
     /// @return true if @p controller's window was bound to a pending daemon window.
-    bool bindPendingAttachWindow(WindowController* controller);
+    bool bindPendingAttachWindow(window::WindowController* controller);
 
     /// Records the daemon-window → OS-window mapping and immediately reconciles that daemon window's
     /// tab/pane tree into @p osWindow — the one place the "a mapping always implies a reconcile"
@@ -258,8 +266,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
 
     /// The attach engines, declared FIRST so they are destroyed LAST: remote-
     /// backed sessions hold ptys that unregister from them on destruction.
-    std::unique_ptr<NativeController> _nativeController;
-    std::unique_ptr<TmuxController> _tmuxController;
+    std::unique_ptr<remote::NativeController> _nativeController;
+    std::unique_ptr<remote::TmuxController> _tmuxController;
 
     /// Invoked by terminalGuiAction right after the first window booted —
     /// attach mode adopts the remaining remote sessions as tabs here.
@@ -279,7 +287,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     // Always a RoutingSessionFactory wrapping the injected/default factory,
     // so attach mode can switch the route without touching the manager.
     std::unique_ptr<session::SessionFactory> _sessionFactory;
-    RoutingSessionFactory* _routingFactory = nullptr; ///< The concrete view of _sessionFactory.
+    remote::RoutingSessionFactory* _routingFactory = nullptr; ///< The concrete view of _sessionFactory.
     // The external-resource launcher (URL open / process spawn), reached by sessions via _app.
     std::unique_ptr<platform::ExternalLauncher> _externalLauncher;
     // Declared before _sessionManager: the manager holds a reference to the store.
@@ -318,7 +326,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// The chrome's design tokens, handed to QML as the `chromeStyle` context property. Declared
     /// BEFORE the engine so it outlives it: a context property is a borrowed pointer the engine keeps
     /// dereferencing, and members are destroyed in reverse declaration order.
-    std::unique_ptr<UiStyleProvider> _uiStyleProvider;
+    std::unique_ptr<window::UiStyleProvider> _uiStyleProvider;
 
     std::unique_ptr<QQmlApplicationEngine> _qmlEngine;
 };

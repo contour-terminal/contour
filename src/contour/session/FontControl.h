@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/WindowGeometry.h>
 #include <contour/config/Config.h>
+#include <contour/geometry/WindowGeometry.h>
 
 #include <vtbackend/primitives.h>
 

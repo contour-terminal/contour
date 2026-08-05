@@ -9,13 +9,13 @@
 // Plus the promise that makes the MRU safe to persist: a remembered command that no longer EXISTS
 // (its profile was deleted, its tab was closed) quietly stops appearing, instead of leaving a dead row.
 
-#include <contour/CommandPaletteModel.h>
 #include <contour/command/CommandCatalog.h>
 #include <contour/command/CommandHistory.h>
 #include <contour/command/FuzzyFilter.h>
 #include <contour/command/Shortcut.h>
 #include <contour/config/Config.h>
 #include <contour/test/GuiTestFixtures.h>
+#include <contour/window/CommandPaletteModel.h>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -24,6 +24,7 @@
 #include <vector>
 
 using namespace contour;
+using namespace contour::window;
 
 namespace
 {

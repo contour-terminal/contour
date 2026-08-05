@@ -44,14 +44,17 @@ class QRhiRenderPassDescriptor;
 class QScreen;
 QT_END_NAMESPACE
 
-namespace contour
+namespace contour::session
 {
-namespace session
-{
-    class TerminalSessionManager;
+class TerminalSessionManager;
 }
+
+namespace contour::window
+{
+// The per-OS-window adapter this display asks to resize, focus or full-screen its window. Named
+// rather than included: it sits a layer above, and it is what display/WindowHost.h will replace.
 class WindowController;
-} // namespace contour
+} // namespace contour::window
 
 namespace contour::display
 {
@@ -479,7 +482,7 @@ class TerminalDisplay: public QQuickItem
 
     /// This display's per-OS-window controller (the window-geometry authority), or nullptr when the
     /// display is not registered with a manager (offscreen tests).
-    [[nodiscard]] WindowController* windowController();
+    [[nodiscard]] window::WindowController* windowController();
 
     /// Notifies the window-geometry authority that this display's cell geometry (font/DPI/margins)
     /// changed, so it refreshes the WM size hints. No-op without a controller.

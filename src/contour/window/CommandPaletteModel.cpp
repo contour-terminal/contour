@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/CommandPaletteModel.h>
 #include <contour/command/CommandHistory.h>
 #include <contour/command/FuzzyFilter.h>
+#include <contour/window/CommandPaletteModel.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace contour
+namespace contour::window
 {
 
 namespace
@@ -275,4 +275,4 @@ QHash<int, QByteArray> CommandPaletteModel::roleNames() const
     };
 }
 
-} // namespace contour
+} // namespace contour::window

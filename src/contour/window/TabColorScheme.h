@@ -7,7 +7,7 @@
 #include <cmath>
 #include <cstdint>
 
-namespace contour
+namespace contour::window
 {
 
 /// How a user-colored tab is painted: the whole tab is filled with the user's color, faded toward the
@@ -113,4 +113,4 @@ inline constexpr float TabTextLightnessThreshold = 0.6F;
                                                                    : vtbackend::RGBColor { 255, 255, 255 };
 }
 
-} // namespace contour
+} // namespace contour::window

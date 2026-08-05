@@ -13,8 +13,8 @@
 //   * rows track tabs, not sessions/panes (a split must not grow the row count);
 //   * structural changes use the proper begin/end* notifications.
 
-#include <contour/TabLabel.h>
-#include <contour/WindowController.h> // for the production Roles enum the static_asserts pin to
+#include <contour/window/TabLabel.h>
+#include <contour/window/WindowController.h> // for the production Roles enum the static_asserts pin to
 
 #include <QtCore/QAbstractListModel>
 #include <QtGui/QColor>
@@ -59,17 +59,17 @@ class TabListModel: public QAbstractListModel, public ModelEvents
     // value so a reorder/insert in WindowController::Roles is a COMPILE error here rather than a
     // silently-passing stale test. If a role is added, add it here AND to data()/roleNames() below.
     static_assert(static_cast<int>(Roles::TitleRole)
-                  == static_cast<int>(contour::WindowController::Roles::TitleRole));
+                  == static_cast<int>(contour::window::WindowController::Roles::TitleRole));
     static_assert(static_cast<int>(Roles::ColorRole)
-                  == static_cast<int>(contour::WindowController::Roles::ColorRole));
+                  == static_cast<int>(contour::window::WindowController::Roles::ColorRole));
     static_assert(static_cast<int>(Roles::IsActiveRole)
-                  == static_cast<int>(contour::WindowController::Roles::IsActiveRole));
+                  == static_cast<int>(contour::window::WindowController::Roles::IsActiveRole));
     static_assert(static_cast<int>(Roles::PaneCountRole)
-                  == static_cast<int>(contour::WindowController::Roles::PaneCountRole));
+                  == static_cast<int>(contour::window::WindowController::Roles::PaneCountRole));
     static_assert(static_cast<int>(Roles::SessionIdRole)
-                  == static_cast<int>(contour::WindowController::Roles::SessionIdRole));
+                  == static_cast<int>(contour::window::WindowController::Roles::SessionIdRole));
     static_assert(static_cast<int>(Roles::RawTitleRole)
-                  == static_cast<int>(contour::WindowController::Roles::RawTitleRole));
+                  == static_cast<int>(contour::window::WindowController::Roles::RawTitleRole));
 
     TabListModel():
         _model { *this, [this] { return SessionId { _nextSession++ }; } }, _window { _model.createWindow() }
@@ -268,8 +268,8 @@ class TabListModel: public QAbstractListModel, public ModelEvents
             templ = Tab::MultiplePanesLabel;
         else
             templ = _tabLabelTemplate;
-        return QString::fromStdString(contour::expandTabLabel(
-            templ, contour::TabLabelContext { .position = row + 1, .windowTitle = windowTitle }));
+        return QString::fromStdString(contour::window::expandTabLabel(
+            templ, contour::window::TabLabelContext { .position = row + 1, .windowTitle = windowTitle }));
     }
 
     uint64_t _nextSession = 1;

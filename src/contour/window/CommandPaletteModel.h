@@ -16,13 +16,13 @@
 
 #include <QtQmlIntegration/QtQmlIntegration>
 
-namespace contour
+namespace contour::command
 {
-
-namespace command
-{
-    class CommandHistory;
+class CommandHistory;
 }
+
+namespace contour::window
+{
 
 /// The list the command palette shows: every runnable command, filtered and ordered for display.
 ///
@@ -137,4 +137,4 @@ class CommandPaletteModel: public QAbstractListModel
     QString _filter;
 };
 
-} // namespace contour
+} // namespace contour::window

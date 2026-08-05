@@ -5,14 +5,14 @@
 // QQuickWindow. These assert the whole (platform x backend) matrix on any host — including the macOS
 // rule that rejects desktop OpenGL, whose RHI path maps a window but never composites it.
 
-#include <contour/RenderingBackendSelection.h>
+#include <contour/display/RenderingBackendSelection.h>
 
 #include <catch2/catch_test_macros.hpp>
 
-using contour::currentRhiPlatform;
-using contour::isRenderingBackendAvailable;
-using contour::resolveRenderingBackend;
-using contour::RhiPlatform;
+using contour::display::currentRhiPlatform;
+using contour::display::isRenderingBackendAvailable;
+using contour::display::resolveRenderingBackend;
+using contour::display::RhiPlatform;
 using RB = contour::config::RenderingBackend;
 
 TEST_CASE("Auto and Software are available on every platform", "[rendering-backend]")

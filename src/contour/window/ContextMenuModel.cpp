@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/ContextMenuModel.h>
+#include <contour/window/ContextMenuModel.h>
 
 #include <QtCore/QString>
 #include <QtCore/QVariantMap>
 
-namespace contour
+namespace contour::window
 {
 
 QVariantList toContextMenuModel(std::vector<command::ContextMenuEntry> const& entries,
@@ -48,4 +48,4 @@ QVariantList toContextMenuModel(std::vector<command::ContextMenuEntry> const& en
     return rows;
 }
 
-} // namespace contour
+} // namespace contour::window

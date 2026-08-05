@@ -4,7 +4,7 @@
 
 #include <vtpty/ChannelPty.h>
 
-namespace contour
+namespace contour::remote
 {
 
 MuxConnectOutcome awaitMuxConnect(std::mutex& mutex,
@@ -79,4 +79,4 @@ void RemoteController::stop()
         closeReactorBindings();
 }
 
-} // namespace contour
+} // namespace contour::remote

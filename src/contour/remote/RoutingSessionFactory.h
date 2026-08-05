@@ -12,16 +12,16 @@
 #include <memory>
 #include <utility>
 
-namespace contour
+namespace contour::remote
 {
 
 /// Delegating SessionFactory: attach mode installs a delegate, everything
 /// else flows to the default factory.
-class RoutingSessionFactory final: public session::SessionFactory
+class RoutingSessionFactory final: public contour::session::SessionFactory
 {
   public:
     /// @param defaultFactory The factory used while no delegate is set (owned).
-    explicit RoutingSessionFactory(std::unique_ptr<session::SessionFactory> defaultFactory):
+    explicit RoutingSessionFactory(std::unique_ptr<contour::session::SessionFactory> defaultFactory):
         _default(std::move(defaultFactory))
     {
     }
@@ -32,7 +32,7 @@ class RoutingSessionFactory final: public session::SessionFactory
     ///       factory reference is held for the app's lifetime, and attach mode
     ///       swaps in a delegate at runtime rather than replacing the factory
     ///       pointer.
-    void setDelegate(session::SessionFactory* delegate) noexcept { _delegate = delegate; }
+    void setDelegate(contour::session::SessionFactory* delegate) noexcept { _delegate = delegate; }
 
     [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(
         std::optional<std::string> cwd,
@@ -71,13 +71,13 @@ class RoutingSessionFactory final: public session::SessionFactory
     }
 
   private:
-    [[nodiscard]] session::SessionFactory& active() const noexcept
+    [[nodiscard]] contour::session::SessionFactory& active() const noexcept
     {
         return _delegate ? *_delegate : *_default;
     }
 
-    std::unique_ptr<session::SessionFactory> _default;
-    session::SessionFactory* _delegate = nullptr;
+    std::unique_ptr<contour::session::SessionFactory> _default;
+    contour::session::SessionFactory* _delegate = nullptr;
 };
 
-} // namespace contour
+} // namespace contour::remote

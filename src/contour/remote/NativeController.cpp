@@ -10,7 +10,7 @@
 
 #include <net/Sockets.h>
 
-namespace contour
+namespace contour::remote
 {
 
 using vthost::client::NativeClient;
@@ -606,4 +606,4 @@ std::unique_ptr<vtpty::Pty> NativeController::createPty(std::optional<std::strin
     return pty;
 }
 
-} // namespace contour
+} // namespace contour::remote

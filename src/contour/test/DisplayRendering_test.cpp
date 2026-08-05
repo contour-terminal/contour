@@ -17,7 +17,6 @@
 // window (hence never had a render target), which the offscreen platform supplies perfectly well. See
 // the teardown-lifetimes section there.
 
-#include <contour/WindowController.h>
 #include <contour/config/Actions.h>
 #include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
@@ -25,6 +24,7 @@
 #include <contour/session/TerminalSession.h>
 #include <contour/session/TerminalSessionManager.h>
 #include <contour/test/GuiTestFixtures.h>
+#include <contour/window/WindowController.h>
 
 #include <vtbackend/primitives.h>
 
@@ -130,9 +130,9 @@ struct DisplayHarness
     contour::test::TestApp testApp;
     vtpty::ChannelPty* pty = nullptr; // owned by the session's terminal
     std::unique_ptr<contour::session::TerminalSession> session;
-    std::unique_ptr<QQuickWindow> window;                 // null under HarnessWindow::None
-    contour::display::TerminalDisplay* display = nullptr; // manually deleted in teardown
-    contour::WindowController* controller = nullptr;      // manager-owned; removed in teardown
+    std::unique_ptr<QQuickWindow> window;                    // null under HarnessWindow::None
+    contour::display::TerminalDisplay* display = nullptr;    // manually deleted in teardown
+    contour::window::WindowController* controller = nullptr; // manager-owned; removed in teardown
 
     explicit DisplayHarness(HarnessWindow windowMode = HarnessWindow::Shown):
         display(new contour::display::TerminalDisplay())
@@ -167,7 +167,7 @@ struct DisplayHarness
     /// controller (window-geometry authority: size hints, show-modes, content-driven resize,
     /// fullscreen) resolve via windowController() exactly as in production. Opt-in because most
     /// display tests don't need it; call it right after construction.
-    contour::WindowController& bindController()
+    contour::window::WindowController& bindController()
     {
         controller = testApp.app().sessionsManager().createWindowController();
         controller->bindWindow(window.get());

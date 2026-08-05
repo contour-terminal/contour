@@ -5,17 +5,17 @@
 // Terminal's 1.0 / 0.6 / 0.3 look), the OKLab lightness metric, and the resulting black/white text
 // decision. Reference L values were cross-checked against WT's ColorFix::GetLightness pipeline.
 
-#include <contour/TabColorScheme.h>
+#include <contour/window/TabColorScheme.h>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-using contour::contrastingTextColor;
-using contour::oklabLightness;
-using contour::tabBackgroundColor;
-using contour::tabColorFraction;
-using contour::TabTextLightnessThreshold;
-using contour::TabVisualState;
+using contour::window::contrastingTextColor;
+using contour::window::oklabLightness;
+using contour::window::tabBackgroundColor;
+using contour::window::tabColorFraction;
+using contour::window::TabTextLightnessThreshold;
+using contour::window::TabVisualState;
 using vtbackend::RGBColor;
 
 TEST_CASE("tabColorFraction returns the tabled fraction per state", "[tabcolor]")

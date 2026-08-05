@@ -7,7 +7,7 @@
 #include <string>
 #include <string_view>
 
-namespace contour
+namespace contour::session
 {
 
 /// Middle-elides @p text to at most @p maxLength codepoints.
@@ -72,4 +72,4 @@ class HyperlinkHoverTracker
     vtbackend::CellLocation _anchor {};
 };
 
-} // namespace contour
+} // namespace contour::session

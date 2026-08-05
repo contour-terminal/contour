@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-namespace contour
+namespace contour::window
 {
 
 /// The context menu, as QML consumes it.
@@ -59,4 +59,4 @@ struct PublishedContextMenu
     }
 };
 
-} // namespace contour
+} // namespace contour::window

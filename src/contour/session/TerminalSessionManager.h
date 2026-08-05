@@ -1,12 +1,12 @@
 #pragma once
 
-#include <contour/WindowController.h>
 #include <contour/command/CommandHistory.h>
 #include <contour/command/CommandHistoryStore.h>
 #include <contour/config/LayoutStore.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/session/SessionFactory.h>
 #include <contour/session/TerminalSession.h>
+#include <contour/window/WindowController.h>
 
 #include <QtCore/QObject>
 #include <QtGui/QColor>
@@ -32,12 +32,10 @@
 
 class QScreen;
 
-namespace contour
+namespace contour::window
 {
-// The per-OS-window Qt/QML adapter. It sits a layer above this one -- the manager mints one per
-// window and routes model changes to it -- so it is named, not included.
 class WindowController;
-} // namespace contour
+} // namespace contour::window
 
 namespace contour::session
 {
@@ -476,7 +474,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// operations back to this manager tagged with its WindowId. Owned via QQmlEngine CppOwnership
     /// (like sessions and proxies). Main.qml calls this from Component.onCompleted before creating its
     /// first tab.
-    Q_INVOKABLE contour::WindowController* createWindowController();
+    Q_INVOKABLE contour::window::WindowController* createWindowController();
 
     /// If a tab tear-off is pending (staged by tearOffTabToNewWindow before this window was spawned),
     /// transplants that tab into @p newController's window and returns true; the window must NOT then
@@ -484,7 +482,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Main.qml creates the usual fresh first tab. Consumes the staged request (fires at most once).
     /// @param newController The freshly-created controller of the just-spawned window.
     /// @return true if a torn-off tab was adopted; false if the window should create its own first tab.
-    Q_INVOKABLE bool consumePendingTransplant(contour::WindowController* newController);
+    Q_INVOKABLE bool consumePendingTransplant(contour::window::WindowController* newController);
 
     /// Looks up the app's startup layout (ContourGuiApp::layoutName(), from `--layout` or the config's
     /// `default_layout`) and, if found, applies it to @p controller's window. Called by Main.qml right
@@ -496,13 +494,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @return true if a startup layout was found and applied; false if there is none configured, it is
     ///         unknown, it has no tabs, or it was already consumed by an earlier window, in which case
     ///         the window should create its usual first tab.
-    Q_INVOKABLE bool consumeDefaultLayout(contour::WindowController* controller);
+    Q_INVOKABLE bool consumeDefaultLayout(contour::window::WindowController* controller);
 
     /// Installs the attach-mode window binder (ContourGuiApp installs it once attached). It decides
     /// whether a freshly-spawned OS window should adopt a pending daemon window's layout instead of
     /// creating the usual fresh first tab. Cleared (nullptr) when detaching. @see consumeAttachWindow.
     /// @param binder Invoked with each spawned window's controller; returns true if it adopted it.
-    void setAttachWindowBinder(std::function<bool(contour::WindowController*)> binder)
+    void setAttachWindowBinder(std::function<bool(contour::window::WindowController*)> binder)
     {
         _attachWindowBinder = std::move(binder);
     }
@@ -513,21 +511,22 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// create its own first tab — its tabs come from reconciling the daemon window's layout instead.
     /// @param controller The freshly-created controller of the just-spawned window.
     /// @return true if the window was bound to a pending daemon window; false otherwise.
-    Q_INVOKABLE bool consumeAttachWindow(contour::WindowController* controller)
+    Q_INVOKABLE bool consumeAttachWindow(contour::window::WindowController* controller)
     {
         return _attachWindowBinder && controller != nullptr ? _attachWindowBinder(controller) : false;
     }
 
     /// The controller adapting @p window, or nullptr. Used by the ModelEvents router to forward each Qt
     /// row/signal emission to the owning window's controller.
-    [[nodiscard]] WindowController* controllerFor(vtworkspace::WindowId window) const noexcept;
+    [[nodiscard]] window::WindowController* controllerFor(vtworkspace::WindowId window) const noexcept;
 
     /// The controller owning @p display's OS window, for routing focus. Matches the controller that has
     /// adopted this display's QQuickWindow (ownsOSWindow); falls back to the sole controller before any
     /// window has recorded its QQuickWindow (first focus-in). Null if there are no controllers.
     /// @param display The display that just focused in (may be null).
     /// @return The owning controller, or nullptr.
-    [[nodiscard]] WindowController* controllerForDisplay(display::TerminalDisplay* display) const noexcept;
+    [[nodiscard]] window::WindowController* controllerForDisplay(
+        display::TerminalDisplay* display) const noexcept;
 
     /// Drops the controller for a closed OS window (WindowController::closeWindow calls this last). "Last
     /// window" is _controllersByWindow.size() == 1; when it is, the manager clears residual session
@@ -643,7 +642,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// focused display, moves focus to its new active-leaf session (symmetric out/in). A background
     /// window's change does not steal focus.
     /// @param controller The window whose active tab/pane just changed.
-    void syncFocusForWindow(WindowController* controller);
+    void syncFocusForWindow(window::WindowController* controller);
 
     /// Creates a TerminalSession backing the given vtworkspace session id, registers it in the
     /// SessionId<->TerminalSession maps, and claims C++ ownership. Does NOT touch the model (the
@@ -746,7 +745,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param session The backing session that received the keybinding.
     /// @return The hosting window's controller, or nullptr when the session has no window (or no
     ///         controller has been registered for it).
-    [[nodiscard]] WindowController* controllerHostingSession(TerminalSession* session) const noexcept
+    [[nodiscard]] window::WindowController* controllerHostingSession(TerminalSession* session) const noexcept
     {
         auto* win = windowHostingSession(session);
         return win != nullptr ? controllerFor(win->id()) : nullptr;
@@ -823,7 +822,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     std::unique_ptr<vtworkspace::SessionModel> _model;
     // Per-OS-window QML adapters, keyed by vtworkspace::WindowId. The ModelEvents router forwards each Qt
     // row/signal emission to the controller for the event's window. Owned via QQmlEngine CppOwnership.
-    std::unordered_map<uint64_t, WindowController*> _controllersByWindow;
+    std::unordered_map<uint64_t, window::WindowController*> _controllersByWindow;
     // Registry mapping a vtworkspace session id to the Qt TerminalSession that backs it. The reverse
     // (TerminalSession -> SessionId) needs no map: each TerminalSession stores its own
     // modelSessionId().
@@ -848,7 +847,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     // Attach-mode window binder installed by ContourGuiApp (B4): a freshly-spawned window asks it
     // (via consumeAttachWindow, from Main.qml) whether it hosts a pending daemon window. Empty when
     // not attached, so consumeAttachWindow is a no-op for ordinary local windows.
-    std::function<bool(contour::WindowController*)> _attachWindowBinder;
+    std::function<bool(contour::window::WindowController*)> _attachWindowBinder;
 
     // Cached QVariantList of the (immutable) tab-color palette, built lazily on first request.
     mutable QVariantList _tabColorPaletteCache;

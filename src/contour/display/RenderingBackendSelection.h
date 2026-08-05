@@ -5,7 +5,7 @@
 
 #include <cstdint>
 
-namespace contour
+namespace contour::display
 {
 
 /// The host platform, as far as RHI-backend availability is concerned.
@@ -84,4 +84,4 @@ enum class RhiPlatform : uint8_t
     return isRenderingBackendAvailable(platform, backend) ? backend : config::RenderingBackend::Auto;
 }
 
-} // namespace contour
+} // namespace contour::display

@@ -187,9 +187,9 @@ struct UnusedDefaultFactory final: contour::session::SessionFactory
 /// makes these tests able to see it.
 struct AttachRoute
 {
-    contour::RoutingSessionFactory router { std::make_unique<UnusedDefaultFactory>() };
+    contour::remote::RoutingSessionFactory router { std::make_unique<UnusedDefaultFactory>() };
 
-    explicit AttachRoute(contour::NativeController& controller) { router.setDelegate(&controller); }
+    explicit AttachRoute(contour::remote::NativeController& controller) { router.setDelegate(&controller); }
 
     AttachRoute(AttachRoute const&) = delete;
     AttachRoute& operator=(AttachRoute const&) = delete;
@@ -253,7 +253,7 @@ struct MirrorPane
 /// controller's own reason (a timeout, a closed connection, a TLS error) rather
 /// than a bare `false` -- the difference between a diagnosable CI failure and a
 /// guess.
-void requireConnected(contour::RemoteController& controller, std::chrono::milliseconds timeout = 10s)
+void requireConnected(contour::remote::RemoteController& controller, std::chrono::milliseconds timeout = 10s)
 {
     auto const connected = controller.connectAndWait(timeout);
     INFO("connectAndWait: " << (connected ? std::string { "ok" } : connected.error()));
@@ -262,14 +262,14 @@ void requireConnected(contour::RemoteController& controller, std::chrono::millis
 
 /// Connects @p controller, waits for the daemon's first layout, and realizes it into @p window.
 /// @return The realized tab, or nullptr if no layout ever arrived.
-[[nodiscard]] vtworkspace::Tab* attachAndRealize(contour::NativeController& controller,
+[[nodiscard]] vtworkspace::Tab* attachAndRealize(contour::remote::NativeController& controller,
                                                  contour::session::TerminalSessionManager& manager,
                                                  vtworkspace::WindowId window)
 {
     requireConnected(controller);
     if (!waitUntil([&] { return controller.layout().has_value(); }))
         return nullptr;
-    contour::applyRemoteLayout(manager, window, controller);
+    contour::remote::applyRemoteLayout(manager, window, controller);
     return manager.model().window(window)->tabAt(0);
 }
 } // namespace
@@ -306,7 +306,7 @@ TEST_CASE("attach controller mirrors a remote session over a real socket", "[att
     auto daemon = DaemonFixture {};
     auto const session = daemon.seedSession("hello attach");
 
-    auto controller = contour::NativeController { daemon.endpoint(), std::nullopt };
+    auto controller = contour::remote::NativeController { daemon.endpoint(), std::nullopt };
     auto const connected = controller.connectAndWait(10s);
     REQUIRE(connected.has_value());
     REQUIRE(controller.pendingCount() == 1);
@@ -360,7 +360,7 @@ TEST_CASE("attach controller captures the daemon's tab and pane layout", "[attac
         return 0;
     });
 
-    auto controller = contour::NativeController { daemon.endpoint(), std::nullopt };
+    auto controller = contour::remote::NativeController { daemon.endpoint(), std::nullopt };
     auto const connected = controller.connectAndWait(10s);
     REQUIRE(connected.has_value());
 
@@ -397,7 +397,7 @@ TEST_CASE("attach realizes a split daemon layout as a 2-pane tab", "[attach][con
     });
 
     // The NativeController is the manager's session factory (attach mode).
-    auto acOwned = std::make_unique<contour::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -415,7 +415,7 @@ TEST_CASE("attach realizes a split daemon layout as a 2-pane tab", "[attach][con
     REQUIRE(wl.layout.tabs.size() == 1);
 
     // Realize the daemon's tree into the GUI window.
-    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
 
     auto* window = app.manager().model().window(win.id);
     REQUIRE(window != nullptr);
@@ -437,7 +437,7 @@ TEST_CASE("attach reconciles a split authored on the daemon after attach", "[att
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("only");
 
-    auto acOwned = std::make_unique<contour::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -445,7 +445,7 @@ TEST_CASE("attach reconciles a split authored on the daemon after attach", "[att
     requireConnected(*ac);
     for (auto i = 0; i < 200 && !ac->layout().has_value(); ++i)
         std::this_thread::sleep_for(5ms);
-    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
     REQUIRE(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 1);
 
     // Split the tab on the daemon (after the client attached) and wait for the
@@ -464,7 +464,7 @@ TEST_CASE("attach reconciles a split authored on the daemon after attach", "[att
     REQUIRE_FALSE(ac->layout()->tabs.front().root.children.empty());
 
     // Reconcile: the already-shown tab grows a second pane.
-    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
     CHECK(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 2);
     CHECK(app.manager().model().window(win.id)->tabCount() == 1); // it stayed one tab, now split
 
@@ -479,7 +479,7 @@ TEST_CASE("attach reconciles an uneven daemon split with matching proportions", 
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("only");
 
-    auto acOwned = std::make_unique<contour::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -487,7 +487,7 @@ TEST_CASE("attach reconciles an uneven daemon split with matching proportions", 
     requireConnected(*ac);
     for (auto i = 0; i < 200 && !ac->layout().has_value(); ++i)
         std::this_thread::sleep_for(5ms);
-    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
     REQUIRE(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 1);
 
     // A distinctly uneven split (0.7 to the first/acting child) authored on the daemon.
@@ -504,7 +504,7 @@ TEST_CASE("attach reconciles an uneven daemon split with matching proportions", 
     }
     REQUIRE_FALSE(ac->layout()->tabs.front().root.children.empty());
 
-    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
     auto* root = app.manager().model().window(win.id)->tabAt(0)->rootPane();
     REQUIRE_FALSE(root->isLeaf());
     // The first child's share is ~0.7, NOT the 0.5 default the dropped ratio produced.
@@ -527,14 +527,14 @@ TEST_CASE("attach reconciles a pane closed on the daemon by removing it locally"
         return tab->activePane()->session(); // the new (active) pane's session
     });
 
-    auto acOwned = std::make_unique<contour::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
     requireConnected(*ac);
     for (auto i = 0; i < 200 && !ac->layout().has_value(); ++i)
         std::this_thread::sleep_for(5ms);
-    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
     REQUIRE(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 2);
 
     // Close the second pane ON THE DAEMON; wait for the layout to drop it.
@@ -552,7 +552,7 @@ TEST_CASE("attach reconciles a pane closed on the daemon by removing it locally"
 
     // Reconcile: the local pane for the vanished session is terminated (async
     // teardown, so pump the event loop until the tab is back to a single pane).
-    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
     auto const closed = [&] {
         for (auto i = 0; i < 200; ++i)
         {
@@ -585,7 +585,7 @@ TEST_CASE("releasing a mirrored pty leaves its remote session running", "[attach
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("keep me running");
 
-    auto controller = contour::NativeController { daemon.endpoint(), std::nullopt };
+    auto controller = contour::remote::NativeController { daemon.endpoint(), std::nullopt };
     requireConnected(controller);
     REQUIRE(controller.pendingCount() == 1);
     auto const liveSessions = [&daemon] {
@@ -623,7 +623,7 @@ TEST_CASE("the ClosePane action ends a remote session like a local one", "[attac
         return 0;
     });
 
-    auto acOwned = std::make_unique<contour::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -636,7 +636,7 @@ TEST_CASE("the ClosePane action ends a remote session like a local one", "[attac
             break;
         std::this_thread::sleep_for(5ms);
     }
-    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
     REQUIRE(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 2);
     auto const liveSessions = [&daemon] {
         return daemon.onDaemon([&daemon] { return daemon.host->sessionCount(); });
@@ -665,14 +665,14 @@ TEST_CASE("attach sizes remote panes to the panes the GUI renders", "[attach][co
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("root");
 
-    auto acOwned = std::make_unique<contour::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
 
     REQUIRE(ac->connectAndWait(10s).has_value());
     REQUIRE(waitUntil([&] { return ac->layout().has_value(); }));
-    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
     auto* tab = app.manager().model().window(win.id)->tabAt(0);
     REQUIRE(app.manager().sessionsOfTab(tab).size() == 1);
 
@@ -700,7 +700,7 @@ TEST_CASE("attach sizes remote panes to the panes the GUI renders", "[attach][co
         auto const pushed = ac->layout();
         return pushed && pushed->tabs.front().root.children.size() == 2;
     }));
-    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
     REQUIRE(app.manager().sessionsOfTab(tab).size() == 2);
 
     // Which remote session backs which local pane (first child = left, second = right). layout()
@@ -773,7 +773,7 @@ TEST_CASE("attach authors a split on the daemon and reconciles it locally", "[at
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("only");
 
-    auto acOwned = std::make_unique<contour::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -781,7 +781,7 @@ TEST_CASE("attach authors a split on the daemon and reconciles it locally", "[at
     requireConnected(*ac);
     for (auto i = 0; i < 200 && !ac->layout().has_value(); ++i)
         std::this_thread::sleep_for(5ms);
-    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
     auto* tab = app.manager().model().window(win.id)->tabAt(0);
     REQUIRE(app.manager().sessionsOfTab(tab).size() == 1);
 
@@ -796,7 +796,7 @@ TEST_CASE("attach authors a split on the daemon and reconciles it locally", "[at
     REQUIRE_FALSE(ac->layout()->tabs.front().root.children.empty());
 
     // Reconcile: the local tab grows a second pane, still one tab.
-    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
     CHECK(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 2);
     CHECK(app.manager().model().window(win.id)->tabCount() == 1);
 
@@ -822,7 +822,7 @@ TEST_CASE("attach reports a moved divider, so a re-attaching client restores it"
 
     {
         // The first client splits and then drags the divider well off centre.
-        auto acOwned = std::make_unique<contour::NativeController>(daemon.endpoint(), std::nullopt);
+        auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
         auto* ac = acOwned.get();
         contour::test::TestApp app { std::move(acOwned) };
         contour::test::ScopedController const win { app.manager() };
@@ -840,7 +840,7 @@ TEST_CASE("attach reports a moved divider, so a re-attaching client restores it"
             auto const wire = ac->layout();
             return wire.has_value() && !wire->tabs.empty() && wire->tabs.front().root.isSplit();
         }));
-        contour::applyRemoteLayout(app.manager(), win.id, *ac);
+        contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
         REQUIRE(tab->paneCount() == 2);
 
         // The drag itself. Both ratio mutators land on paneRatioChanged, so this is the same route a
@@ -854,7 +854,7 @@ TEST_CASE("attach reports a moved divider, so a re-attaching client restores it"
 
     // A brand-new client, with nothing claimed: applyRemoteLayout realizes the WHOLE tab from the
     // daemon's layout — the path that used to hand back an even split.
-    auto acOwned = std::make_unique<contour::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -875,7 +875,7 @@ TEST_CASE("a divider moved on the daemon re-flows an already realized tab", "[at
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("only");
 
-    auto acOwned = std::make_unique<contour::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -887,7 +887,7 @@ TEST_CASE("a divider moved on the daemon re-flows an already realized tab", "[at
         auto const layout = ac->layout();
         return layout && !layout->tabs.front().root.children.empty();
     }));
-    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
     REQUIRE(tab->paneCount() == 2);
     REQUIRE(tab->rootPane()->ratio() == 0.5);
 
@@ -903,7 +903,7 @@ TEST_CASE("a divider moved on the daemon re-flows an already realized tab", "[at
         return layout && layout->tabs.front().root.ratio == 3000;
     }));
 
-    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
     CHECK(tab->rootPane()->ratio() == 0.3);
 
     // ...and settles there. The pass writes through the model, which re-emits paneRatioChanged; if
@@ -929,7 +929,7 @@ TEST_CASE("attach authors a tab on the daemon and reconciles it locally", "[atta
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("first");
 
-    auto acOwned = std::make_unique<contour::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -937,7 +937,7 @@ TEST_CASE("attach authors a tab on the daemon and reconciles it locally", "[atta
     requireConnected(*ac);
     for (auto i = 0; i < 200 && !ac->layout().has_value(); ++i)
         std::this_thread::sleep_for(5ms);
-    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
     REQUIRE(app.manager().model().window(win.id)->tabCount() == 1);
 
     // A GUI "new tab" in attach mode routes to the daemon (requestRemoteTab ->
@@ -953,7 +953,7 @@ TEST_CASE("attach authors a tab on the daemon and reconciles it locally", "[atta
     REQUIRE(ac->layout()->tabs.size() == 2);
 
     // Reconcile: the daemon's new tab appears locally (the first is left untouched).
-    contour::applyRemoteLayout(app.manager(), win.id, *ac);
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
     CHECK(app.manager().model().window(win.id)->tabCount() == 2);
 
     ac->stop();
@@ -967,7 +967,7 @@ TEST_CASE("attach maps each daemon window onto its own GUI window", "[attach][co
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("win one"); // the primary daemon window
 
-    auto acOwned = std::make_unique<contour::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win1 { app.manager() };
@@ -995,8 +995,8 @@ TEST_CASE("attach maps each daemon window onto its own GUI window", "[attach][co
 
     // Reconcile each daemon window into its own GUI window.
     contour::test::ScopedController const win2 { app.manager() };
-    contour::applyRemoteLayout(app.manager(), win1.id, *ac, ids[0]);
-    contour::applyRemoteLayout(app.manager(), win2.id, *ac, ids[1]);
+    contour::remote::applyRemoteLayout(app.manager(), win1.id, *ac, ids[0]);
+    contour::remote::applyRemoteLayout(app.manager(), win2.id, *ac, ids[1]);
 
     // Each GUI window mirrors exactly its daemon window's single tab...
     REQUIRE(app.manager().model().window(win1.id)->tabCount() == 1);
@@ -1024,7 +1024,7 @@ TEST_CASE("attach authors a tab in the window the request came from", "[attach][
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("win one");
 
-    auto acOwned = std::make_unique<contour::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win1 { app.manager() };
@@ -1039,8 +1039,8 @@ TEST_CASE("attach authors a tab in the window the request came from", "[attach][
     auto const ids = ac->windowIds();
 
     contour::test::ScopedController const win2 { app.manager() };
-    contour::applyRemoteLayout(app.manager(), win1.id, *ac, ids[0]);
-    contour::applyRemoteLayout(app.manager(), win2.id, *ac, ids[1]);
+    contour::remote::applyRemoteLayout(app.manager(), win1.id, *ac, ids[0]);
+    contour::remote::applyRemoteLayout(app.manager(), win2.id, *ac, ids[1]);
     REQUIRE(app.manager().model().window(win1.id)->tabCount() == 1);
     REQUIRE(app.manager().model().window(win2.id)->tabCount() == 1);
 
@@ -1070,7 +1070,7 @@ TEST_CASE("a closed mirrored tab does not resurrect on later remote output", "[a
     auto daemon = DaemonFixture {};
     auto const session = daemon.seedSession("first line");
 
-    auto controller = contour::NativeController { daemon.endpoint(), std::nullopt };
+    auto controller = contour::remote::NativeController { daemon.endpoint(), std::nullopt };
     requireConnected(controller);
     REQUIRE(controller.pendingCount() == 1);
 
@@ -1111,7 +1111,7 @@ TEST_CASE("a closed mirrored tab does not resurrect on later remote output", "[a
 TEST_CASE("attach controller reports an unreachable daemon", "[attach][controller]")
 {
     // Port 1 on loopback has nothing listening: connect is refused before any TLS.
-    auto controller = contour::NativeController {
+    auto controller = contour::remote::NativeController {
         vthost::TcpEndpoint { .host = "127.0.0.1", .port = 1, .token = {}, .caPem = {} }, std::nullopt
     };
     auto const connected = controller.connectAndWait(2s);
@@ -1134,9 +1134,9 @@ TEST_CASE("consumeAttachWindow routes a spawned window to the installed binder",
 
     // An installed binder is consulted with the exact window being bootstrapped, and its
     // verdict is returned verbatim.
-    contour::WindowController* seen = nullptr;
+    contour::window::WindowController* seen = nullptr;
     auto verdict = false;
-    app.manager().setAttachWindowBinder([&](contour::WindowController* c) {
+    app.manager().setAttachWindowBinder([&](contour::window::WindowController* c) {
         seen = c;
         return verdict;
     });
@@ -1222,7 +1222,7 @@ TEST_CASE("the routing session factory forwards every verb to its delegate", "[a
     };
 
     auto delegate = RecordingFactory {};
-    auto router = contour::RoutingSessionFactory { std::make_unique<RecordingFactory>() };
+    auto router = contour::remote::RoutingSessionFactory { std::make_unique<RecordingFactory>() };
     router.setDelegate(&delegate);
 
     auto events = vtbackend::Terminal::NullEvents {};

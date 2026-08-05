@@ -39,14 +39,14 @@
 #include <vtworkspace/LayoutTree.h>
 #include <vtworkspace/Primitives.h>
 
-namespace contour
+namespace contour::session
 {
+class TerminalSessionManager;
+class TerminalSession;
+} // namespace contour::session
 
-namespace session
+namespace contour::remote
 {
-    class TerminalSessionManager;
-    class TerminalSession;
-} // namespace session
 
 /// The tmux control-mode command that resumes a paused pane. tmux sends `%pause` for a pane whose
 /// output it is buffering; the mirror consumes output as fast as it arrives, so it always wants the
@@ -97,7 +97,7 @@ struct TmuxWindowLayout
 /// The tmux-mirror session factory and pane registry.
 class TmuxController final:
     public QObject,
-    public session::SessionFactory,
+    public contour::session::SessionFactory,
     public vthost::tmux::TmuxModelEvents,
     public RemoteController
 {
@@ -123,7 +123,7 @@ class TmuxController final:
     /// multi-pane layout (all its panes pending) is realized as its WHOLE tree via
     /// applyLayoutToWindow — faithful split ratios and shape. A window's first (or only) pane, or a
     /// pane arriving after the window is already shown, is realized as a tab / an incremental split.
-    void adoptPendingPanes(session::TerminalSessionManager& manager, vtworkspace::WindowId window);
+    void adoptPendingPanes(contour::session::TerminalSessionManager& manager, vtworkspace::WindowId window);
 
     /// Binds the NEXT createPty() to tmux pane @p pane rather than popping the FIFO pending queue. The
     /// whole-tree realizer calls this — via applyLayoutToWindow's beforeLeafSeed — right before each
@@ -133,7 +133,7 @@ class TmuxController final:
     /// Applies any pending `%window-renamed` titles to the tabs of realized tmux
     /// windows (a tmux window maps to a tab). A rename for a not-yet-realized window
     /// stays pending until its first pane is adopted. Runs on the GUI thread.
-    void applyPendingRenames(session::TerminalSessionManager& manager);
+    void applyPendingRenames(contour::session::TerminalSessionManager& manager);
 
     // SessionFactory: hands out a ChannelPty bound to the next pending pane.
     [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(
@@ -241,7 +241,7 @@ class TmuxController final:
 
     /// Realizes tmux window @p tmuxWindow's whole layout @p tree as a tab in @p guiWindow, binding each
     /// leaf to its tmux pane and seeding the window's split anchor. Runs on the GUI thread.
-    void realizeWindowLayout(session::TerminalSessionManager& manager,
+    void realizeWindowLayout(contour::session::TerminalSessionManager& manager,
                              vtworkspace::WindowId guiWindow,
                              uint64_t tmuxWindow,
                              vthost::tmux::BinaryLayout const& tree);
@@ -249,7 +249,7 @@ class TmuxController final:
     /// Realizes ONE pending pane of @p window incrementally: its first pane as a background tab, a
     /// later pane as a split of the window's anchor (at the pane's remote ratio). Runs on the GUI
     /// thread. @return true if a pane was consumed (progress made); false if creation stalled.
-    [[nodiscard]] bool realizeOnePane(session::TerminalSessionManager& manager,
+    [[nodiscard]] bool realizeOnePane(contour::session::TerminalSessionManager& manager,
                                       vtworkspace::WindowId guiWindow);
 
   protected:
@@ -320,4 +320,4 @@ class TmuxController final:
     vthost::tmux::TmuxClientModel _model;
 };
 
-} // namespace contour
+} // namespace contour::remote

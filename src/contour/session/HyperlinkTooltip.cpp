@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/HyperlinkTooltip.h>
+#include <contour/session/HyperlinkTooltip.h>
 
 #include <algorithm>
 #include <ranges>
 #include <vector>
 
-namespace contour
+namespace contour::session
 {
 
 namespace
@@ -139,4 +139,4 @@ HyperlinkHoverTracker::Change HyperlinkHoverTracker::clear()
     return { .changed = true, .text = {}, .anchor = _anchor };
 }
 
-} // namespace contour
+} // namespace contour::session

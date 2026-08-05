@@ -161,8 +161,8 @@ if(CONTOUR_MACOS_APP_BUNDLE)
 endif()
 
 set(_header_files
-    HyperlinkTooltip.h
-    TabLabel.h
+    session/HyperlinkTooltip.h
+    window/TabLabel.h
 )
 
 # Sources are split into a reusable object library (contour_core) and the thin executable entry
@@ -174,8 +174,8 @@ set(_header_files
 # symbol-stripping, which would otherwise drop AUTOMOC/AUTORCC registration objects whose symbols
 # are only referenced reflectively at runtime.
 set(_core_source_files
-    HyperlinkTooltip.cpp
-    TabLabel.cpp
+    session/HyperlinkTooltip.cpp
+    window/TabLabel.cpp
 )
 # The executable entry point lives outside the object library so the test can supply its own main
 # (Catch2's) without a duplicate-symbol clash.
@@ -188,18 +188,18 @@ set(_main_source_files
 # which is why a GUI-less build is worth having at all.
 if(CONTOUR_FRONTEND_GUI)
     list(APPEND _header_files
-        CommandPaletteModel.h
-        ContextMenuModel.h
+        window/CommandPaletteModel.h
+        window/ContextMenuModel.h
         ContourGuiApp.h
         session/ExitCode.h
         config/LayoutBuilder.h
         config/LayoutStore.h
         session/PaneProxy.h
         session/SessionFactory.h
-        SettingsController.h
+        window/SettingsController.h
         session/TerminalSession.h
         session/TerminalSessionManager.h
-        UiStyleProvider.h
+        window/UiStyleProvider.h
         session/SessionInput.h
         session/FontControl.h
         session/SpawnCommand.h
@@ -214,19 +214,19 @@ if(CONTOUR_FRONTEND_GUI)
         remote/TmuxController.h
     )
     list(APPEND _core_source_files
-        CommandPaletteModel.cpp
-        ContextMenuModel.cpp
+        window/CommandPaletteModel.cpp
+        window/ContextMenuModel.cpp
         ContourGuiApp.cpp
         session/PaneProxy.cpp
         config/LayoutBuilder.cpp
         config/LayoutStore.cpp
         session/SessionFactory.cpp
-        SettingsController.cpp
+        window/SettingsController.cpp
         session/TerminalSession.cpp
         display/TerminalAccessible.cpp
         session/TerminalSessionManager.cpp
-        UiStyleProvider.cpp
-        WindowController.cpp
+        window/UiStyleProvider.cpp
+        window/WindowController.cpp
         session/SessionInput.cpp
         session/FontControl.cpp
         session/SpawnCommand.cpp
@@ -580,9 +580,9 @@ if(CONTOUR_FRONTEND_GUI)
             cli/CatImageArgs_test.cpp
             command/CommandCatalog_test.cpp
             command/CommandHistory_test.cpp
-            test/CommandPaletteModel_test.cpp
+            window/CommandPaletteModel_test.cpp
             config/Config_test.cpp
-            test/SettingsController_test.cpp
+            window/SettingsController_test.cpp
             test/SettingsPageQml_test.cpp
             test/Accessibility_qml_test.cpp
             command/ContextMenu_test.cpp
@@ -600,17 +600,17 @@ if(CONTOUR_FRONTEND_GUI)
             test/CaretReportGate_test.cpp
             test/TerminalAccessible_test.cpp
             test/Helper_test.cpp
-            test/HyperlinkTooltip_test.cpp
+            session/HyperlinkTooltip_test.cpp
             input/HorizontalWheelGesture_test.cpp
             test/ImeQueryRect_test.cpp
             test/ViewportTextIndex_test.cpp
             session/KeyboardRouting_test.cpp
             test/MainWindowQml_test.cpp
             session/FocusRouting_test.cpp
-            test/MultiWindow_test.cpp
+            window/MultiWindow_test.cpp
             platform/NotificationRouter_test.cpp
             test/QmlDiagnosticPredicate_test.cpp
-            test/RenderingBackendSelection_test.cpp
+            display/RenderingBackendSelection_test.cpp
             test/ScissorRect_test.cpp
             test/RhiVertexLayout_test.cpp
             test/ScreenshotReadback_test.cpp
@@ -619,14 +619,14 @@ if(CONTOUR_FRONTEND_GUI)
             session/TerminalSessionManager_test.cpp
             session/TerminalSession_test.cpp
             test/QmlComponents_test.cpp
-            test/TabColorScheme_test.cpp
+            window/TabColorScheme_test.cpp
             test/ContourTuiStyle_test.cpp
             config/UiStyle_test.cpp
-            test/UiStyleProvider_test.cpp
-            test/TabListModel_test.cpp
-            test/TabLabel_test.cpp
-            test/WindowGeometry_test.cpp
-            test/WindowSizing_test.cpp
+            window/UiStyleProvider_test.cpp
+            window/TabListModel_test.cpp
+            window/TabLabel_test.cpp
+            geometry/WindowGeometry_test.cpp
+            window/WindowSizing_test.cpp
         )
         set_target_properties(contour_gui_test PROPERTIES AUTOMOC ON)
         target_link_libraries(contour_gui_test

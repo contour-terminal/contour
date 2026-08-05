@@ -9,10 +9,10 @@
 // window), the displayless early-outs, and that tab switching never touches window geometry.
 
 #include <contour/ContourGuiApp.h>
-#include <contour/WindowController.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/session/TerminalSessionManager.h>
 #include <contour/test/GuiTestFixtures.h>
+#include <contour/window/WindowController.h>
 
 #include <QtCore/QCoreApplication>
 #include <QtGui/QGuiApplication>
@@ -35,7 +35,7 @@ TEST_CASE("chromeHeight is a plain declared property with change notification", 
 {
     TestApp app;
     ScopedController controller { app.manager() };
-    QSignalSpy const spy(controller.controller, &contour::WindowController::chromeHeightChanged);
+    QSignalSpy const spy(controller.controller, &contour::window::WindowController::chromeHeightChanged);
 
     // With no active display the setter is a pure property write + signal (no hint refresh) — the
     // declared-chrome contract Main.qml relies on when it binds chromeHeight before any display
