@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <crispy/environment.h>
+#include <crispy/testing/environment.h>
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <optional>
 #include <string>
-#include <string_view>
 #include <utility>
 
 #ifdef _WIN32
@@ -88,31 +87,18 @@ class scoped_variable
 #endif
 };
 
-/// Test double standing in for a real environment, as production code injects one.
-class fake_environment final: public crispy::environment
-{
-  public:
-    explicit fake_environment(std::optional<std::string> answer): _answer { std::move(answer) } {}
-
-    [[nodiscard]] std::optional<std::string> get(std::string_view /*name*/) const override { return _answer; }
-
-  private:
-    std::optional<std::string> _answer;
-};
-
 } // namespace
 
-TEST_CASE("snapshot_environment resolves names the way the host getenv() does", "[environment]")
+TEST_CASE("live_environment resolves names the way the host getenv() does", "[environment]")
 {
-    // The snapshot is keyed by a comparator that has to mirror the platform's own name resolution.
-    // Windows preserves whatever casing the creating process used but matches case-insensitively, so
-    // a byte-wise map answers nullopt for a `LOCALAPPDATA` lookup against a block spelling it
-    // `LocalAppData` -- and callers that fall back on a missing variable (xdgStateHome() drops to the
-    // temp directory) silently lose the user's state. POSIX resolves names byte-wise, and must keep
-    // treating two spellings as two distinct variables.
+    // Name resolution is the platform's, not a comparator of ours: Windows preserves whatever casing
+    // the creating process used but matches case-insensitively, so a `LOCALAPPDATA` lookup must find
+    // a block that spells it `LocalAppData` -- get that wrong and every Windows user's state lands
+    // in the fallback (a temp directory). POSIX resolves names byte-wise, and must keep treating two
+    // spellings as two distinct variables.
     //
     // PATH is the one name that exists on every platform this builds for.
-    auto const environment = crispy::snapshot_environment {};
+    auto const environment = crispy::live_environment {};
 
     auto const path = environment.get("PATH");
     REQUIRE(path.has_value());
@@ -144,23 +130,23 @@ TEST_CASE("snapshot_environment resolves names the way the host getenv() does", 
     }
 }
 
-TEST_CASE("live_environment observes what a snapshot cannot", "[environment]")
+TEST_CASE("live_environment observes what a cache cannot", "[environment]")
 {
-    // The whole reason the live reader exists: config (re)loading expands `${VAR}` against the
+    // The whole reason the reader is live: config (re)loading expands `${VAR}` against the
     // environment as it stands at that moment, not as it stood when the process started.
     auto constexpr Name = "CONTOUR_ENVIRONMENT_TEST_VARIABLE";
 
-    // Both taken before the variable exists, so the snapshot can never have seen it.
-    auto const snapshot = crispy::snapshot_environment {};
     auto const live = crispy::live_environment {};
+    auto const cached = crispy::caching_environment { live };
 
-    REQUIRE(!snapshot.get(Name).has_value());
+    // Read through the cache before the variable exists, so the miss is the answer it remembers.
+    REQUIRE(!cached.get(Name).has_value());
     REQUIRE(!live.get(Name).has_value());
 
     {
         auto const variable = scoped_variable { Name, "observed" };
 
-        CHECK(!snapshot.get(Name).has_value());
+        CHECK(!cached.get(Name).has_value());
         REQUIRE(live.get(Name).has_value());
         CHECK(live.get(Name) == "observed");
     }
@@ -169,17 +155,34 @@ TEST_CASE("live_environment observes what a snapshot cannot", "[environment]")
     CHECK(!live.get(Name).has_value());
 }
 
+TEST_CASE("caching_environment reads a name once", "[environment]")
+{
+    auto constexpr Name = "CONTOUR_ENVIRONMENT_TEST_VARIABLE";
+
+    auto const live = crispy::live_environment {};
+    auto const cached = crispy::caching_environment { live };
+
+    {
+        auto const variable = scoped_variable { Name, "first" };
+        REQUIRE(cached.get(Name) == "first");
+    }
+
+    // The variable is gone from the block, yet the cache still answers -- which is exactly the
+    // "frozen for the process's lifetime" property its users depend on.
+    CHECK(cached.get(Name) == "first");
+}
+
 TEST_CASE("environment is reached through the interface", "[environment]")
 {
     // What every injecting caller does: hold the abstraction, not an implementation.
-    auto const substitute = fake_environment { "substituted" };
+    auto const substitute = crispy::testing::fake_environment { { { "SOME_NAME", "substituted" } } };
     auto const& injected = static_cast<crispy::environment const&>(substitute);
 
-    CHECK(injected.get("ANY_NAME_AT_ALL") == "substituted");
+    CHECK(injected.get("SOME_NAME") == "substituted");
+    CHECK(!injected.get("ANY_OTHER_NAME").has_value());
 
-    SECTION("and the process-wide defaults answer through it too")
+    SECTION("and the process-wide default answers through it too")
     {
         CHECK(crispy::defaultEnvironment().get("PATH").has_value());
-        CHECK(crispy::defaultLiveEnvironment().get("PATH").has_value());
     }
 }

@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <crispy/environment.h>
 
-#include <algorithm>
-#include <cstdlib>
-#include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -13,12 +11,12 @@
     #include <Windows.h>
 #else
     #include <mutex>
-#endif
 
-#ifdef __APPLE__
-    #include <crt_externs.h>
-#elifndef _WIN32
+    #ifdef __APPLE__
+        #include <crt_externs.h>
+    #else
 extern "C" char** environ;
+    #endif
 #endif
 
 namespace crispy
@@ -26,12 +24,7 @@ namespace crispy
 
 namespace
 {
-#ifdef _WIN32
-    [[nodiscard]] constexpr char toLowerASCII(char ch) noexcept
-    {
-        return 'A' <= ch && ch <= 'Z' ? static_cast<char>(ch - 'A' + 'a') : ch;
-    }
-#else
+#ifndef _WIN32
     /// Serializes this translation unit's reads of the environment block against one another.
     ///
     /// Process-wide rather than a member, because what it guards is process-wide: two
@@ -42,33 +35,24 @@ namespace
         static std::mutex instance;
         return instance;
     }
-#endif
 
-    [[nodiscard]] char** currentEnviron() noexcept
-    {
-#ifdef __APPLE__
-        return *_NSGetEnviron();
-#elifdef _WIN32
-        return _environ;
-#else
-        return environ;
-#endif
-    }
-
-#ifndef _WIN32
     /// Looks a name up in the environment block as it stands right now.
     ///
     /// A scan of the block rather than a getenv() call, which does exactly this scan and no better:
-    /// glibc's getenv() walks the same array, so a hand-rolled walk is neither slower nor less safe,
-    /// and it keeps both implementations here reading the environment through one primitive --
-    /// snapshot_environment copies the same block, once. It also avoids the thread-unsafe getenv()
-    /// that this project's clang-tidy configuration rejects outright.
+    /// glibc's getenv() walks the same array, so a hand-rolled walk is neither slower nor less safe.
+    /// It also avoids the thread-unsafe getenv() that this project's clang-tidy configuration
+    /// rejects outright.
     ///
     /// @param name Name of the variable to look up.
     /// @return Its value, or std::nullopt if it is not set.
     [[nodiscard]] std::optional<std::string> lookupInEnviron(std::string_view name)
     {
-        for (char** entry = currentEnviron(); entry != nullptr && *entry != nullptr; ++entry)
+    #ifdef __APPLE__
+        auto* const* entry = *_NSGetEnviron();
+    #else
+        auto* const* entry = environ;
+    #endif
+        for (; entry != nullptr && *entry != nullptr; ++entry)
         {
             auto const line = std::string_view { *entry };
             if (auto const separator = line.find('=');
@@ -79,32 +63,6 @@ namespace
     }
 #endif
 } // namespace
-
-bool snapshot_environment::name_less::operator()(std::string_view a, std::string_view b) const noexcept
-{
-#ifdef _WIN32
-    return std::ranges::lexicographical_compare(a, b, std::ranges::less {}, toLowerASCII, toLowerASCII);
-#else
-    return a < b;
-#endif
-}
-
-snapshot_environment::snapshot_environment()
-{
-    for (char** entry = currentEnviron(); entry != nullptr && *entry != nullptr; ++entry)
-    {
-        auto const line = std::string_view { *entry };
-        if (auto const separator = line.find('='); separator != std::string_view::npos)
-            _entries.emplace(line.substr(0, separator), line.substr(separator + 1));
-    }
-}
-
-std::optional<std::string> snapshot_environment::get(std::string_view name) const
-{
-    if (auto const i = _entries.find(name); i != _entries.end())
-        return i->second;
-    return std::nullopt;
-}
 
 std::optional<std::string> live_environment::get(std::string_view name) const
 {
@@ -134,15 +92,26 @@ std::optional<std::string> live_environment::get(std::string_view name) const
 #endif
 }
 
-environment& defaultEnvironment()
+caching_environment::caching_environment(environment const& source) noexcept: _source { source }
 {
-    static snapshot_environment instance;
-    return instance;
 }
 
-environment& defaultLiveEnvironment() noexcept
+std::optional<std::string> caching_environment::get(std::string_view name) const
 {
-    static live_environment instance;
+    // The source is consulted under this lock as well, so two threads racing on the same unseen
+    // name read it once rather than twice. The two mutexes are only ever taken in this order.
+    auto const lock = std::scoped_lock { _mutex };
+
+    if (auto const i = _cache.find(name); i != _cache.end())
+        return i->second;
+
+    return _cache.emplace(name, _source.get(name)).first->second;
+}
+
+environment& defaultEnvironment()
+{
+    static live_environment const source;
+    static caching_environment instance { source };
     return instance;
 }
 
