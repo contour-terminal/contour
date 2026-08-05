@@ -206,6 +206,8 @@ if(CONTOUR_FRONTEND_GUI)
         session/Logging.h
         Logging.h
         display/RenderState.h
+        display/RenderingBackendSelection.h
+        geometry/WindowGeometry.h
         remote/NativeController.h
         remote/RemoteController.h
         remote/ReactorThread.h
