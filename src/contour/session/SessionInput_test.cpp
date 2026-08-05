@@ -32,7 +32,7 @@
 using contour::input::makeModifiers;
 using contour::input::makeMouseButton;
 
-TEST_CASE("makeMouseButton maps Qt buttons onto VT buttons", "[helper][input]")
+TEST_CASE("makeMouseButton maps Qt buttons onto VT buttons", "[session][input]")
 {
     STATIC_CHECK(contour::input::makeMouseButton(Qt::LeftButton) == vtbackend::MouseButton::Left);
     STATIC_CHECK(contour::input::makeMouseButton(Qt::MiddleButton) == vtbackend::MouseButton::Middle);
@@ -41,7 +41,7 @@ TEST_CASE("makeMouseButton maps Qt buttons onto VT buttons", "[helper][input]")
     STATIC_CHECK(contour::input::makeMouseButton(Qt::BackButton) == vtbackend::MouseButton::Left);
 }
 
-TEST_CASE("makeModifiers maps Qt keyboard modifiers onto VT modifiers", "[helper][input]")
+TEST_CASE("makeModifiers maps Qt keyboard modifiers onto VT modifiers", "[session][input]")
 {
     CHECK(contour::input::makeModifiers(Qt::NoModifier) == vtbackend::Modifiers {});
     CHECK(contour::input::makeModifiers(Qt::ShiftModifier)
@@ -67,7 +67,7 @@ TEST_CASE("makeModifiers maps Qt keyboard modifiers onto VT modifiers", "[helper
     CHECK(combined.locks.none());
 }
 
-TEST_CASE("unshiftedCodepoint inverts the US-ASCII shift level", "[helper][input]")
+TEST_CASE("unshiftedCodepoint inverts the US-ASCII shift level", "[session][input]")
 {
     using contour::input::unshiftedCodepoint;
     // Punctuation and number-row shifted symbols map back to the base key label a binding is written
@@ -92,7 +92,7 @@ TEST_CASE("unshiftedCodepoint inverts the US-ASCII shift level", "[helper][input
 }
 
 #if !defined(_WIN32) && !defined(__APPLE__)
-TEST_CASE("makeModifiers derives CapsLock/NumLock from the X11 native modifier mask", "[helper][input]")
+TEST_CASE("makeModifiers derives CapsLock/NumLock from the X11 native modifier mask", "[session][input]")
 {
     // On Linux the lock states come from the XCB/XKB native mask (CapsLock = XCB_MOD_MASK_LOCK 0x02,
     // NumLock = XCB_MOD_MASK_2 0x10), independent of the Qt modifier bits.
@@ -147,7 +147,7 @@ namespace
 using contour::test::mockPtyOf;
 } // namespace
 
-TEST_CASE("sendKeyEvent maps Qt key events onto the terminal's PTY encoding", "[helper][input]")
+TEST_CASE("sendKeyEvent maps Qt key events onto the terminal's PTY encoding", "[session][input]")
 {
     contour::test::TestApp app;
     auto session = makeSession(app.app());
@@ -190,7 +190,7 @@ TEST_CASE("sendKeyEvent maps Qt key events onto the terminal's PTY encoding", "[
     }
 }
 
-TEST_CASE("the macOS layout reads Carbon key codes as positions, not codepoints", "[helper][input]")
+TEST_CASE("the macOS layout reads Carbon key codes as positions, not codepoints", "[session][input]")
 {
     auto const& layout = macUsAnsiLayout();
 
@@ -227,7 +227,7 @@ TEST_CASE("the macOS layout reads Carbon key codes as positions, not codepoints"
     CHECK(layout.win32VirtualKeyOf(0x20) == 0);
 }
 
-TEST_CASE("the passthrough layout decodes the X11 Unicode keysym form", "[helper][input]")
+TEST_CASE("the passthrough layout decodes the X11 Unicode keysym form", "[session][input]")
 {
     auto const& layout = passthroughLayout();
 
@@ -241,7 +241,7 @@ TEST_CASE("the passthrough layout decodes the X11 Unicode keysym form", "[helper
     CHECK(layout.unshiftedKeyOf(0x1008'FF11) == 0); // XF86AudioLowerVolume
 }
 
-TEST_CASE("Ctrl+U reaches the application as Ctrl+U under the Kitty keyboard protocol", "[helper][input]")
+TEST_CASE("Ctrl+U reaches the application as Ctrl+U under the Kitty keyboard protocol", "[session][input]")
 {
     // The reported bug, end to end: a Qt event carrying a macOS key code, through the real key path,
     // out to the PTY. fish enables the Kitty protocol, which transmits the key IDENTITY rather than
@@ -272,7 +272,7 @@ TEST_CASE("Ctrl+U reaches the application as Ctrl+U under the Kitty keyboard pro
     CHECK(pty.stdinBuffer() == "\033[117;5u");
 }
 
-TEST_CASE("the browser tab-switch chords are claimed before the terminal encodes them", "[helper][input]")
+TEST_CASE("the browser tab-switch chords are claimed before the terminal encodes them", "[session][input]")
 {
     contour::test::TestApp app;
 
@@ -318,7 +318,7 @@ TEST_CASE("the browser tab-switch chords are claimed before the terminal encodes
     CHECK(reachedThePty(Qt::Key_PageDown, Qt::NoModifier));
 }
 
-TEST_CASE("sendKeyEvent covers the whole special-key mapping table", "[helper][input]")
+TEST_CASE("sendKeyEvent covers the whole special-key mapping table", "[session][input]")
 {
     contour::test::TestApp app;
     auto session = makeSession(app.app());
@@ -378,7 +378,7 @@ TEST_CASE("sendKeyEvent covers the whole special-key mapping table", "[helper][i
     }
 }
 
-TEST_CASE("wheel and mouse event helpers route through the session", "[helper][input]")
+TEST_CASE("wheel and mouse event helpers route through the session", "[session][input]")
 {
     contour::test::TestApp app;
     auto session = makeSession(app.app());
@@ -454,7 +454,7 @@ TEST_CASE("buildSpawnTerminalCommand assembles arguments and resolves the workin
     }
 }
 
-TEST_CASE("foldedBindingCodepoint folds only the ASCII letter case", "[helper][input]")
+TEST_CASE("foldedBindingCodepoint folds only the ASCII letter case", "[session][input]")
 {
     using contour::config::foldedBindingCodepoint;
 
@@ -490,7 +490,7 @@ TEST_CASE("foldedBindingCodepoint folds only the ASCII letter case", "[helper][i
     }
 }
 
-TEST_CASE("the binding fold and unshiftedCodepoint cannot fight", "[helper][input]")
+TEST_CASE("the binding fold and unshiftedCodepoint cannot fight", "[session][input]")
 {
     using contour::config::foldedBindingCodepoint;
     using contour::input::unshiftedCodepoint;
@@ -516,7 +516,7 @@ TEST_CASE("the binding fold and unshiftedCodepoint cannot fight", "[helper][inpu
     }
 }
 
-TEST_CASE("a bound letter chord fires whichever route delivered it", "[helper][input]")
+TEST_CASE("a bound letter chord fires whichever route delivered it", "[session][input]")
 {
     // sendKeyEvent has several routes to a character binding and they disagree about letter case:
     // the Ctrl branch and the CharMappings table both report the UPPERCASE key label, while

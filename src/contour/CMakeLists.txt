@@ -572,9 +572,9 @@ if(CONTOUR_FRONTEND_GUI)
         # resources.qrc again — doing so would duplicate the resource registration symbols.
         add_executable(contour_gui_test
             test/test_main.cpp
-            test/NativeController_test.cpp
-            test/RemoteController_test.cpp
-            test/TmuxController_test.cpp
+            remote/NativeController_test.cpp
+            remote/RemoteController_test.cpp
+            remote/TmuxController_test.cpp
             platform/AudioNote_test.cpp
             test/BenignQtMessages_test.cpp
             window/CommandPaletteModel_test.cpp
@@ -584,17 +584,17 @@ if(CONTOUR_FRONTEND_GUI)
             test/Accessibility_qml_test.cpp
             platform/SpeechSynthesizer_test.cpp
             test/ContourGuiApp_test.cpp
-            test/DisplayRendering_test.cpp
-            test/ContentScale_test.cpp
+            display/DisplayRendering_test.cpp
+            display/ContentScale_test.cpp
             session/ExitCode_test.cpp
-            test/CaretGeometry_test.cpp
-            test/CaretReportGate_test.cpp
-            test/TerminalAccessible_test.cpp
-            test/Helper_test.cpp
+            display/CaretGeometry_test.cpp
+            display/CaretReportGate_test.cpp
+            display/TerminalAccessible_test.cpp
+            session/SessionInput_test.cpp
             session/HyperlinkTooltip_test.cpp
             input/HorizontalWheelGesture_test.cpp
-            test/ImeQueryRect_test.cpp
-            test/ViewportTextIndex_test.cpp
+            display/ImeQueryRect_test.cpp
+            display/ViewportTextIndex_test.cpp
             session/KeyboardRouting_test.cpp
             test/MainWindowQml_test.cpp
             session/FocusRouting_test.cpp
@@ -602,10 +602,10 @@ if(CONTOUR_FRONTEND_GUI)
             platform/NotificationRouter_test.cpp
             test/QmlDiagnosticPredicate_test.cpp
             display/RenderingBackendSelection_test.cpp
-            test/ScissorRect_test.cpp
-            test/RhiVertexLayout_test.cpp
-            test/ScreenshotReadback_test.cpp
-            test/ScreenshotRhiReadback_test.cpp
+            display/ScissorRect_test.cpp
+            display/RhiVertexLayout_test.cpp
+            display/ScreenshotReadback_test.cpp
+            display/ScreenshotRhiReadback_test.cpp
             session/TabSizeInheritance_test.cpp
             session/TerminalSessionManager_test.cpp
             session/TerminalSession_test.cpp
