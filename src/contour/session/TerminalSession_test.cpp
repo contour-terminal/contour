@@ -19,6 +19,7 @@
 #include <contour/input/MouseMapping.h>
 #include <contour/session/TerminalSession.h>
 #include <contour/session/TerminalSessionManager.h>
+#include <contour/test/FakeDisplaySurface.h>
 #include <contour/test/GuiTestFixtures.h>
 
 #include <vtbackend/Hyperlink.h>
@@ -44,6 +45,7 @@
 #include <mutex>
 #include <ranges>
 #include <thread>
+#include <variant>
 
 using namespace std::string_literals;
 
@@ -2249,3 +2251,218 @@ TEST_CASE("TerminalSession: things with no place in the accessibility tree are a
         CHECK(quietRecorder->said.empty());
     }
 }
+
+// {{{ What a session asks of its VIEW
+//
+// Every case above runs display-less, because until session::DisplaySurface existed the only view was a
+// QQuickItem needing a window, a scene graph and an RHI device — so "does this reach the display?" could
+// not be asked at all, only "does it survive the display being absent?". These attach a recording
+// surface and assert the other half.
+
+namespace
+{
+
+/// A session with a recording surface attached, so the two die together and in the right order.
+struct SessionWithSurface
+{
+    std::unique_ptr<contour::session::TerminalSession> session;
+    std::unique_ptr<contour::test::FakeDisplaySurface> surface;
+
+    contour::session::TerminalSession* operator->() const noexcept { return session.get(); }
+    contour::session::TerminalSession& operator*() const noexcept { return *session; }
+
+    ~SessionWithSurface()
+    {
+        // The session outlives nothing here, but it holds a raw back-pointer to the surface: detach
+        // first so a destructor-time post cannot reach freed memory.
+        if (session && surface && session->display() == surface.get())
+            session->detachDisplay(*surface);
+    }
+
+    SessionWithSurface(SessionWithSurface const&) = delete;
+    SessionWithSurface& operator=(SessionWithSurface const&) = delete;
+    SessionWithSurface(SessionWithSurface&&) = default;
+    SessionWithSurface& operator=(SessionWithSurface&&) = delete;
+
+    SessionWithSurface(std::unique_ptr<contour::session::TerminalSession> s,
+                       std::unique_ptr<contour::test::FakeDisplaySurface> d):
+        session { std::move(s) }, surface { std::move(d) }
+    {
+    }
+};
+
+/// Builds a MockPty-backed session with a recording surface already attached.
+[[nodiscard]] SessionWithSurface makeSessionWithSurface(contour::ContourGuiApp& app)
+{
+    auto session = makeDisplaylessSession(app);
+    auto surface = std::make_unique<contour::test::FakeDisplaySurface>();
+    surface->attachedSession = session.get();
+    session->attachDisplay(*surface);
+    return { std::move(session), std::move(surface) };
+}
+
+} // namespace
+
+TEST_CASE("TerminalSession::attachDisplay hands the surface the state it missed", "[contour][session][view]")
+{
+    TestApp testApp;
+    auto held = makeSessionWithSurface(testApp.app());
+    auto& surface = *held.surface;
+
+    // The surface IS the session's view now, by the interface and not by the concrete type.
+    CHECK(held->display() == &surface);
+
+    // Attach establishes the pointer shape (the primary screen's default, since no OSC 22 is
+    // outstanding) and asks for a frame — a freshly bound pane must not stay blank until the next
+    // keystroke.
+    REQUIRE_FALSE(surface.cursorShapes.empty());
+    CHECK(surface.cursorShapes.back() == contour::input::MouseCursorShape::IBeam);
+    CHECK(surface.redrawCount >= 1);
+}
+
+TEST_CASE("TerminalSession routes the application's pointer shape to the surface", "[contour][session][view]")
+{
+    TestApp testApp;
+    auto held = makeSessionWithSurface(testApp.app());
+    auto& surface = *held.surface;
+    surface.cursorShapes.clear();
+
+    // OSC 22 names a CSS pointer; the surface speaks the input:: enum, and the mapping is the point.
+    held->terminal().writeToScreen("\033]22;pointer\033\\");
+    REQUIRE_FALSE(surface.cursorShapes.empty());
+    CHECK(surface.cursorShapes.back() == contour::input::MouseCursorShape::PointingHand);
+
+    // Withdrawing it returns to the screen-type default rather than leaving the last shape pinned.
+    surface.cursorShapes.clear();
+    held->terminal().writeToScreen("\033]22;\033\\");
+    REQUIRE_FALSE(surface.cursorShapes.empty());
+    CHECK(surface.cursorShapes.back() == contour::input::MouseCursorShape::IBeam);
+}
+
+TEST_CASE("TerminalSession relays window-resize requests to the surface", "[contour][session][view]")
+{
+    TestApp testApp;
+    auto held = makeSessionWithSurface(testApp.app());
+    auto& surface = *held.surface;
+
+    // CSI 8 t: cells. The request crosses to the GUI thread through post(), which is why the fake runs
+    // posted work immediately — the assertion is about what ARRIVES, not about the hop.
+    held->requestWindowResize(vtbackend::LineCount(30), vtbackend::ColumnCount(90));
+    REQUIRE(surface.pageResizeRequests.size() == 1);
+    CHECK(surface.pageResizeRequests.front().first == vtbackend::LineCount(30));
+    CHECK(surface.pageResizeRequests.front().second == vtbackend::ColumnCount(90));
+
+    // CSI 4 t: device pixels, a separate entry point that must not be folded into the cell one.
+    held->requestWindowResize(vtbackend::Width(800), vtbackend::Height(600));
+    REQUIRE(surface.pixelResizeRequests.size() == 1);
+    CHECK(surface.pixelResizeRequests.front().first == vtbackend::Width(800));
+    CHECK(surface.pixelResizeRequests.front().second == vtbackend::Height(600));
+
+    // And the window->grid direction is a third, distinct request.
+    held->resizeTerminalToDisplaySize();
+    CHECK(surface.terminalResizeRequests == 1);
+}
+
+TEST_CASE("TerminalSession arms the surface's screenshot capture", "[contour][session][view]")
+{
+    TestApp testApp;
+    auto held = makeSessionWithSurface(testApp.app());
+    auto& surface = *held.surface;
+
+    // SaveScreenshot names a file; CopyScreenshot asks for the frame in memory. Both go through the
+    // same one-shot arm, and telling them apart is exactly what the variant is for.
+    CHECK((*held)(contour::actions::SaveScreenshot {}));
+    REQUIRE(surface.screenshotOutputs.size() == 1);
+    REQUIRE(surface.screenshotOutputs.front().has_value());
+    CHECK(std::holds_alternative<std::filesystem::path>(*surface.screenshotOutputs.front()));
+
+    CHECK((*held)(contour::actions::CopyScreenshot {}));
+    REQUIRE(surface.screenshotOutputs.size() == 2);
+    REQUIRE(surface.screenshotOutputs.back().has_value());
+    CHECK(std::holds_alternative<std::monostate>(*surface.screenshotOutputs.back()));
+}
+
+TEST_CASE("TerminalSession relays the window-scoped view actions", "[contour][session][view]")
+{
+    TestApp testApp;
+    auto held = makeSessionWithSurface(testApp.app());
+    auto& surface = *held.surface;
+
+    // These are WINDOW decisions the session is asked to make while knowing only its surface, which
+    // forwards them to display::WindowHost. What is assertable here is that they leave the session.
+    CHECK((*held)(contour::actions::ToggleFullscreen {}));
+    CHECK(surface.fullScreenToggles == 1);
+
+    CHECK((*held)(contour::actions::ToggleTitleBar {}));
+    CHECK(surface.titleBarToggles == 1);
+
+    CHECK((*held)(contour::actions::ToggleInputMethodHandling {}));
+    CHECK(surface.imeToggles == 1);
+
+    CHECK((*held)(contour::actions::SetTabBarVisibility { contour::config::TabBarVisibility::Never }));
+    REQUIRE(surface.tabBarVisibilities.size() == 1);
+    CHECK(surface.tabBarVisibilities.front() == contour::config::TabBarVisibility::Never);
+
+    CHECK((*held)(contour::actions::SetTabBarPosition { contour::config::TabBarPosition::Bottom }));
+    REQUIRE(surface.tabBarPositions.size() == 1);
+    CHECK(surface.tabBarPositions.front() == contour::config::TabBarPosition::Bottom);
+}
+
+TEST_CASE("TerminalSession reports a caret move once per pending post", "[contour][session][view]")
+{
+    TestApp testApp;
+    auto held = makeSessionWithSurface(testApp.app());
+    auto& surface = *held.surface;
+
+    // The caret notification fires once per frame AND twice a second from the blink, so it coalesces
+    // to at most one outstanding post. Hold the queue to observe that: three notifications, one post.
+    surface.runPostsImmediately = false;
+    for (auto i = 0; i < 3; ++i)
+        held->cursorPositionChanged();
+    CHECK(surface.pendingPosts.size() == 1);
+
+    surface.drainPosts();
+    CHECK(surface.cursorMovedReports == 1);
+
+    // Draining re-arms it: the coalescing latch must not stay set for the session's life.
+    held->cursorPositionChanged();
+    CHECK(surface.pendingPosts.size() == 1);
+    surface.drainPosts();
+    CHECK(surface.cursorMovedReports == 2);
+}
+
+TEST_CASE("TerminalSession tells the surface which screen buffer is live", "[contour][session][view]")
+{
+    TestApp testApp;
+    auto held = makeSessionWithSurface(testApp.app());
+    auto& surface = *held.surface;
+    surface.bufferChanges.clear();
+
+    // DECSET 1049: to the alternate screen and back. The surface keys state to the buffer, so it must
+    // be told — and told the direction, not merely that something changed.
+    held->terminal().writeToScreen("\033[?1049h");
+    REQUIRE_FALSE(surface.bufferChanges.empty());
+    CHECK(surface.bufferChanges.back() == vtbackend::ScreenType::Alternate);
+
+    held->terminal().writeToScreen("\033[?1049l");
+    CHECK(surface.bufferChanges.back() == vtbackend::ScreenType::Primary);
+}
+
+TEST_CASE("TerminalSession::attachDisplay releases a surface it is taking the session from",
+          "[contour][session][view]")
+{
+    TestApp testApp;
+    auto held = makeSessionWithSurface(testApp.app());
+
+    // One session, one surface: binding a second must tell the first to let go, or both believe they
+    // own the session and the loser's later detach trips the precondition. (The split hand-off.)
+    auto second = contour::test::FakeDisplaySurface {};
+    second.attachedSession = held.session.get();
+    held->attachDisplay(second);
+
+    CHECK(held.surface->releaseSessionCount == 1);
+    CHECK(held->display() == &second);
+
+    held->detachDisplay(second);
+}
+// }}}

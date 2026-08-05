@@ -15,7 +15,6 @@
 #include <contour/platform/QtInvoke.h>
 #include <contour/session/FontControl.h>
 #include <contour/session/SessionInput.h>
-#include <contour/window/WindowController.h>
 
 #include <vtbackend/Color.h>
 #include <vtbackend/Metrics.h>
@@ -306,15 +305,15 @@ void TerminalDisplay::setSession(session::TerminalSession* newSession)
     // bind, so a rebound session speaks through the display it is actually shown in.
     _session->setAnnouncer(std::make_unique<platform::QtAnnouncer>(this));
 
-    if (auto* controller = windowController())
+    if (auto* host = windowHost())
     {
-        controller->seedTitleBarVisible(profile().showTitleBar.value());
+        host->seedTitleBarVisible(profile().showTitleBar.value());
         // Tab-strip placement + visibility are window state seeded once from the configuration, same
         // first-write-wins contract as the title bar (so a runtime state is never reset on rebind).
         // They are global rather than per-profile: one window shows one tab bar, whichever profiles
         // its tabs happen to run.
-        controller->seedTabBarPosition(_session->config().tabBarPosition.value());
-        controller->seedTabBarVisibility(_session->config().tabBarVisibility.value());
+        host->seedTabBarPosition(_session->config().tabBarPosition.value());
+        host->seedTabBarVisibility(_session->config().tabBarVisibility.value());
     }
 
     if (!_renderer)
@@ -455,7 +454,7 @@ void TerminalDisplay::applyDisplaySizeToGrid()
     // and apply it; the sub-cell remainder renders as background padding. This path never mutates the
     // QWindow — the WM's size is obeyed as-is (grid alignment during interactive resizes is the WM's job,
     // via the size-increment hint where the platform supports it) — so a resize event can never re-enter
-    // itself. Grid->window resizes exist only for content-driven requests through the WindowController.
+    // itself. Grid->window resizes exist only for content-driven requests through the WindowHost.
     auto const deviceSize = geometry::availableDevicePixels(width(), height(), contentScale());
     displayLog()("Display size changed to {}x{} virtual ({} device).", width(), height(), deviceSize);
     session::applyResize(deviceSize, *_session, *_renderer);
@@ -497,17 +496,17 @@ void TerminalDisplay::handleWindowChanged(QQuickWindow* newWindow)
                 &TerminalDisplay::cleanup,
                 Qt::DirectConnection);
 
-        // setSession() may have run before a window existed, in which case windowController() could not
-        // route to THIS window's controller (it matches by the display's OS window) and the chrome
+        // setSession() may have run before a window existed, in which case windowHost() could not
+        // route to THIS window (it matches by the display's OS window) and the chrome
         // seeds were dropped or mis-targeted a no-op. Re-seed now that the window exists; all three are
         // first-write-wins per window, so an already-seeded window is unaffected. The tab bar pair is
         // seeded here too, not just the title bar: they are dropped by the very same race.
         if (_session != nullptr)
-            if (auto* controller = windowController())
+            if (auto* host = windowHost())
             {
-                controller->seedTitleBarVisible(_session->profile().showTitleBar.value());
-                controller->seedTabBarPosition(_session->config().tabBarPosition.value());
-                controller->seedTabBarVisibility(_session->config().tabBarVisibility.value());
+                host->seedTitleBarVisible(_session->profile().showTitleBar.value());
+                host->seedTabBarPosition(_session->config().tabBarPosition.value());
+                host->seedTabBarVisibility(_session->config().tabBarVisibility.value());
             }
     }
     else
@@ -1496,18 +1495,18 @@ TerminalDisplay::DevicePixelGeometry TerminalDisplay::itemDevicePixelGeometry() 
     };
 }
 
-window::WindowController* TerminalDisplay::windowController()
+WindowHost* TerminalDisplay::windowHost()
 {
-    return _manager != nullptr ? _manager->controllerForDisplay(this) : nullptr;
+    return _manager != nullptr ? _manager->windowHostForDisplay(this) : nullptr;
 }
 
 void TerminalDisplay::notifyCellGeometryChanged()
 {
-    // Window-level hints are the controller's job (the window-geometry authority); it derives them from
+    // Window-level hints are the window host's job (the window-geometry authority); it derives them from
     // this display's cell size, margins, content scale and the QML-declared chrome. Displays without a
-    // controller (offscreen tests) simply have no WM hints to maintain.
-    if (auto* controller = windowController())
-        controller->updateSizeHintsFor(*this);
+    // window host (offscreen tests) simply have no WM hints to maintain.
+    if (auto* host = windowHost())
+        host->updateSizeHintsFor(*this);
 
     // Every cell rectangle we hand out is derived from the cell size, the margins and the content scale,
     // so all three of this seam's callers (font size, DPI/content scale, profile margins) move the caret
@@ -1671,12 +1670,6 @@ vtbackend::FontDef TerminalDisplay::getFontDef()
 {
     Require(_renderer);
     return session::getFontDefinition(*_renderer);
-}
-
-void TerminalDisplay::copyToClipboard(std::string_view data)
-{
-    if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
-        clipboard->setText(QString::fromUtf8(data.data(), static_cast<int>(data.size())));
 }
 
 void TerminalDisplay::inspect()
@@ -1845,11 +1838,11 @@ void TerminalDisplay::resizeWindow(vtbackend::Width newWidth, vtbackend::Height 
     Require(_session != nullptr);
 
     // CSI 4 t: pixel-size request for this pane's content area (device pixels). Routed through the
-    // controller choke point: it resizes the WINDOW, and the grid follows from the resulting resize
+    // window host's choke point: it resizes the WINDOW, and the grid follows from the resulting resize
     // event via the normal window->grid path. (The former direct applyResize() here resized the grid
     // WITHOUT the window — a guaranteed grid/window divergence.)
-    if (auto* controller = windowController())
-        controller->resizeWindowForContentPixels(*this, vtbackend::ImageSize { newWidth, newHeight });
+    if (auto* host = windowHost())
+        host->resizeWindowForContentPixels(*this, vtbackend::ImageSize { newWidth, newHeight });
 }
 
 void TerminalDisplay::resizeWindow(vtbackend::LineCount newLineCount, vtbackend::ColumnCount newColumnCount)
@@ -1864,8 +1857,8 @@ void TerminalDisplay::resizeWindow(vtbackend::LineCount newLineCount, vtbackend:
     if (*newLineCount)
         requestedPageSize.lines = newLineCount + terminal().statusLineHeight();
 
-    if (auto* controller = windowController())
-        controller->resizeWindowForPage(*this, requestedPageSize);
+    if (auto* host = windowHost())
+        host->resizeWindowForPage(*this, requestedPageSize);
 }
 
 void TerminalDisplay::recomputeGeometryAfterFontReconfig()
@@ -2000,20 +1993,20 @@ void TerminalDisplay::setMouseCursorShape(input::MouseCursorShape newCursorShape
 
 void TerminalDisplay::setWindowFullScreen()
 {
-    if (auto* controller = windowController())
-        controller->setWindowFullScreen(*this);
+    if (auto* host = windowHost())
+        host->setWindowFullScreen(*this);
 }
 
 void TerminalDisplay::setWindowMaximized()
 {
-    if (auto* controller = windowController())
-        controller->setWindowMaximized(*this);
+    if (auto* host = windowHost())
+        host->setWindowMaximized(*this);
 }
 
 void TerminalDisplay::setWindowNormal()
 {
-    if (auto* controller = windowController())
-        controller->setWindowNormal(*this);
+    if (auto* host = windowHost())
+        host->setWindowNormal(*this);
 }
 
 void TerminalDisplay::setBlurBehind(bool enable)
@@ -2023,29 +2016,29 @@ void TerminalDisplay::setBlurBehind(bool enable)
 
 void TerminalDisplay::toggleFullScreen()
 {
-    if (auto* controller = windowController())
-        controller->toggleFullScreen(*this);
+    if (auto* host = windowHost())
+        host->toggleFullScreen(*this);
 }
 
 void TerminalDisplay::setTabBarVisibility(config::TabBarVisibility mode)
 {
-    if (auto* controller = windowController())
-        controller->setTabBarVisibility(mode);
+    if (auto* host = windowHost())
+        host->setTabBarVisibility(mode);
 }
 
 void TerminalDisplay::setTabBarPosition(config::TabBarPosition position)
 {
-    if (auto* controller = windowController())
-        controller->setTabBarPosition(position);
+    if (auto* host = windowHost())
+        host->setTabBarPosition(position);
 }
 
 void TerminalDisplay::toggleTitleBar()
 {
-    // Title-bar visibility is WINDOW state: it lives on the WindowController (the window authority),
+    // Title-bar visibility is WINDOW state: it lives on the WindowHost (the window authority),
     // so a toggle from any pane flips the whole window's decoration and survives pane-focus changes
     // and tab switches (per-display storage silently reverted it on the next focus).
-    if (auto* controller = windowController())
-        controller->toggleTitleBar();
+    if (auto* host = windowHost())
+        host->toggleTitleBar();
 }
 
 void TerminalDisplay::toggleInputMethodEditorHandling()

@@ -16,6 +16,7 @@ add_library(contour_platform STATIC
     Audio.cpp Audio.h
     AudioNote.h
     BlurBehind.cpp BlurBehind.h
+    Clipboard.cpp Clipboard.h
     ColorConversion.h
     ExternalLauncher.h
     # Its whole translation unit is inside `#ifdef __linux__`, so it compiles to nothing elsewhere.

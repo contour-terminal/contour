@@ -957,7 +957,7 @@ void WindowController::onWindowScaleMaybeChanged()
         resizeWindowForPage(*display, pageBefore);
 }
 
-QQuickWindow* WindowController::osWindowFor(display::TerminalDisplay& requester) noexcept
+QQuickWindow* WindowController::osWindowFor(session::DisplaySurface& requester) noexcept
 {
     auto* requesterWindow = requester.window();
     if (_osWindow == nullptr && requesterWindow != nullptr)
@@ -972,10 +972,10 @@ void WindowController::setChromeHeight(int height)
     _chromeHeight = height;
     emit chromeHeightChanged();
     if (_activeDisplay != nullptr)
-        updateSizeHintsFor(*_activeDisplay);
+        updateSizeHintsFor(*_activeDisplay, HintApplyMode::RespectWindowState);
 }
 
-void WindowController::updateSizeHintsFor(display::TerminalDisplay& requester, HintApplyMode mode)
+void WindowController::updateSizeHintsFor(session::DisplaySurface& requester, HintApplyMode mode)
 {
     auto* osWindow = osWindowFor(requester);
     if (osWindow == nullptr || !requester.hasSession())
@@ -1030,7 +1030,7 @@ namespace
     }
 } // namespace
 
-void WindowController::setWindowFullScreen(display::TerminalDisplay& requester)
+void WindowController::setWindowFullScreen(session::DisplaySurface& requester)
 {
     auto* osWindow = osWindowFor(requester);
     if (osWindow == nullptr)
@@ -1038,7 +1038,7 @@ void WindowController::setWindowFullScreen(display::TerminalDisplay& requester)
     showWithoutSizeIncrements(*osWindow, &QWindow::showFullScreen);
 }
 
-void WindowController::setWindowMaximized(display::TerminalDisplay& requester)
+void WindowController::setWindowMaximized(session::DisplaySurface& requester)
 {
     auto* osWindow = osWindowFor(requester);
     if (osWindow == nullptr)
@@ -1047,7 +1047,7 @@ void WindowController::setWindowMaximized(display::TerminalDisplay& requester)
     _maximizedState = true;
 }
 
-void WindowController::setWindowNormal(display::TerminalDisplay& requester)
+void WindowController::setWindowNormal(session::DisplaySurface& requester)
 {
     auto* osWindow = osWindowFor(requester);
     if (osWindow == nullptr)
@@ -1095,7 +1095,7 @@ void WindowController::minimizeWindow()
         _osWindow->showMinimized();
 }
 
-bool WindowController::resizeWindowForPage(display::TerminalDisplay& requester,
+bool WindowController::resizeWindowForPage(session::DisplaySurface& requester,
                                            vtbackend::PageSize totalPageSize)
 {
     if (!requester.hasSession())
@@ -1110,7 +1110,7 @@ bool WindowController::resizeWindowForPage(display::TerminalDisplay& requester,
     return applyContentDrivenResize(requester, leafLogical);
 }
 
-bool WindowController::resizeWindowForContentPixels(display::TerminalDisplay& requester,
+bool WindowController::resizeWindowForContentPixels(session::DisplaySurface& requester,
                                                     vtbackend::ImageSize contentDevicePx)
 {
     if (!requester.hasSession())
@@ -1119,7 +1119,7 @@ bool WindowController::resizeWindowForContentPixels(display::TerminalDisplay& re
         requester, geometry::logicalSizeForDevicePixels(contentDevicePx, requester.contentScale()));
 }
 
-bool WindowController::applyContentDrivenResize(display::TerminalDisplay& requester,
+bool WindowController::applyContentDrivenResize(session::DisplaySurface& requester,
                                                 geometry::LogicalSize leafContentLogical)
 {
     auto* osWindow = osWindowFor(requester);
@@ -1189,7 +1189,7 @@ bool WindowController::applyContentDrivenResize(display::TerminalDisplay& reques
     return true;
 }
 
-void WindowController::toggleFullScreen(display::TerminalDisplay& requester)
+void WindowController::toggleFullScreen(session::DisplaySurface& requester)
 {
     auto* osWindow = osWindowFor(requester);
     if (osWindow == nullptr)

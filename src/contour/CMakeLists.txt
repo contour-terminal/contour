@@ -207,6 +207,7 @@ if(CONTOUR_FRONTEND_GUI)
         Logging.h
         display/RenderState.h
         display/RenderingBackendSelection.h
+        geometry/CellRectangle.h
         geometry/WindowGeometry.h
         remote/NativeController.h
         remote/RemoteController.h
@@ -561,7 +562,6 @@ if(CONTOUR_FRONTEND_GUI)
             display/DisplayRendering_test.cpp
             display/ContentScale_test.cpp
             session/ExitCode_test.cpp
-            display/CaretGeometry_test.cpp
             display/CaretReportGate_test.cpp
             display/TerminalAccessible_test.cpp
             session/SessionInput_test.cpp
@@ -589,6 +589,7 @@ if(CONTOUR_FRONTEND_GUI)
             window/UiStyleProvider_test.cpp
             window/TabListModel_test.cpp
             window/TabLabel_test.cpp
+            geometry/CellRectangle_test.cpp
             geometry/WindowGeometry_test.cpp
             window/WindowSizing_test.cpp
         )

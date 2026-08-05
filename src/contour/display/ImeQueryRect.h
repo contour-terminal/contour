@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/display/CaretGeometry.h>
+#include <contour/geometry/CellRectangle.h>
 
 #include <vtbackend/primitives.h>
 
@@ -55,8 +55,8 @@ namespace contour::display
 {
     // The IME rectangle is simply the cursor cell's. Named separately because the two answer different
     // questions — where to park a candidate window, versus where a cell is — and only the geometry is
-    // shared; see CaretGeometry.h.
-    return cellRectangle(pageMargin, cellSize, cursor, cellWidth, dpr);
+    // shared; see geometry/CellRectangle.h.
+    return geometry::cellRectangle(pageMargin, cellSize, cursor, cellWidth, dpr);
 }
 
 } // namespace contour::display

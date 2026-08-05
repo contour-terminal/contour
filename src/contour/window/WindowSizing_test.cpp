@@ -107,7 +107,8 @@ TEST_CASE("updateSizeHintsFor is a displayless no-op and leaves the window untou
     contour::display::TerminalDisplay requester; // hasSession() == false
 
     auto const before = window.sizeIncrement();
-    controller->updateSizeHintsFor(requester);
+    controller->updateSizeHintsFor(requester,
+                                   contour::window::WindowController::HintApplyMode::RespectWindowState);
     CHECK(window.sizeIncrement() == before);
     CHECK(window.minimumSize() == QSize(0, 0));
 }

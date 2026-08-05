@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ContourGuiApp.h>
 #include <contour/config/Actions.h>
-#include <contour/display/CaretGeometry.h>
-#include <contour/display/Logging.h>
 #include <contour/display/TerminalDisplay.h>
+#include <contour/geometry/CellRectangle.h>
 #include <contour/input/KeyMapping.h>
 #include <contour/input/Logging.h>
 #include <contour/input/MouseMapping.h>
+#include <contour/platform/Clipboard.h>
 #include <contour/platform/ExternalLauncher.h>
 #include <contour/platform/QtInvoke.h>
 #include <contour/platform/SpeechSynthesizer.h>
@@ -352,7 +352,7 @@ TerminalSession::~TerminalSession()
         _screenUpdateThread->join();
 }
 
-void TerminalSession::detachDisplay(display::TerminalDisplay& display)
+void TerminalSession::detachDisplay(DisplaySurface& display)
 {
     sessionLog()("Detaching display from session.");
     Require(_display == &display);
@@ -369,9 +369,9 @@ input::KeyboardLayout const& TerminalSession::keyboardLayout() const noexcept
     return _app.keyboardLayout();
 }
 
-void TerminalSession::attachDisplay(display::TerminalDisplay& newDisplay)
+void TerminalSession::attachDisplay(DisplaySurface& newDisplay)
 {
-    sessionLog()("Attaching session to display {}x{}.", newDisplay.width(), newDisplay.height());
+    sessionLog()("Attaching session to display of {} device pixels.", newDisplay.pixelSize());
 
     // Enforce the one-session-one-display invariant: if a different display is still attached (e.g.
     // the hidden single-pane view after the active tab was split, which is only made invisible — not
@@ -759,7 +759,7 @@ void TerminalSession::executePendingBufferCapture(bool allow, bool remember)
 
     _terminal.primaryScreen().captureBuffer(capture.lines, capture.logical);
 
-    display::displayLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
+    sessionLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
     flushInput();
 }
 
@@ -781,7 +781,7 @@ void TerminalSession::executeShowHostWritableStatusLine(bool allow, bool remembe
         return;
 
     _terminal.setStatusDisplay(vtbackend::StatusDisplayType::HostWritable);
-    display::displayLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
+    sessionLog()("Host-writable status line shown. Waking up I/O thread.");
     flushInput();
     _terminal.setSyncWindowTitleWithHostWritableStatusDisplay(false);
 }
@@ -883,7 +883,7 @@ void TerminalSession::setPointerShape(std::string_view cssName)
     {
         _applicationPointerShape = std::nullopt;
         if (_display)
-            platform::postToObject(_display, [this]() { setDefaultCursor(); });
+            _display->post([this]() { setDefaultCursor(); });
         return;
     }
 
@@ -913,8 +913,7 @@ void TerminalSession::setPointerShape(std::string_view cssName)
 
     // The event arrives on the parser thread; the cursor belongs to the GUI thread.
     if (_display)
-        platform::postToObject(
-            _display, [display = _display, shape = *shape]() { display->setMouseCursorShape(shape); });
+        _display->post([display = _display, shape = *shape]() { display->setMouseCursorShape(shape); });
 }
 
 void TerminalSession::copyToClipboard(std::string_view data)
@@ -922,7 +921,7 @@ void TerminalSession::copyToClipboard(std::string_view data)
     if (!_display)
         return;
 
-    _display->post([data = string(data)]() { display::TerminalDisplay::copyToClipboard(data); });
+    _display->post([data = string(data)]() { platform::copyToClipboard(data); });
 }
 
 void TerminalSession::openDocument(std::string_view fileOrUrl)
@@ -1051,16 +1050,13 @@ void TerminalSession::focusTerminalWindow()
 {
     if (_display)
     {
-        QMetaObject::invokeMethod(
-            _display,
-            [display = _display]() {
-                if (auto* window = display->window())
-                {
-                    window->raise();
-                    window->requestActivate();
-                }
-            },
-            Qt::QueuedConnection);
+        _display->post([display = _display]() {
+            if (auto* window = display->window())
+            {
+                window->raise();
+                window->requestActivate();
+            }
+        });
     }
 }
 
@@ -1731,11 +1727,11 @@ void TerminalSession::updateHyperlinkHover(std::string_view uri, vtbackend::Cell
     _hyperlinkTooltipText = QString::fromStdString(change.text);
     // The anchor is only meaningful while something is shown, and computing it needs a display.
     if (!change.text.empty() && _display != nullptr)
-        _hyperlinkTooltipAnchor = display::cellRectangle(_display->gridMetrics().pageMargin,
-                                                         _display->cellSize(),
-                                                         change.anchor,
-                                                         1,
-                                                         _display->contentScale());
+        _hyperlinkTooltipAnchor = geometry::cellRectangle(_display->gridMetrics().pageMargin,
+                                                          _display->cellSize(),
+                                                          change.anchor,
+                                                          1,
+                                                          _display->contentScale());
     emit hyperlinkHoverChanged();
 }
 

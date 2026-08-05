@@ -10,6 +10,7 @@
 #include <contour/platform/Announcer.h>
 #include <contour/platform/Audio.h>
 #include <contour/platform/ColorConversion.h>
+#include <contour/session/DisplaySurface.h>
 #include <contour/session/HyperlinkTooltip.h>
 #ifdef __linux__
     #include <contour/platform/FreeDesktopNotifier.h>
@@ -47,7 +48,6 @@ namespace contour
 namespace display
 {
     class ForcedFontDpiProvider;
-    class TerminalDisplay;
 } // namespace display
 
 class ContourGuiApp;
@@ -447,8 +447,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return The directory, or an empty string when none can be determined.
     [[nodiscard]] std::string displayWorkingDirectory() const;
 
-    display::TerminalDisplay* display() noexcept { return _display; }
-    display::TerminalDisplay const* display() const noexcept { return _display; }
+    /// The view this session renders through (@ref DisplaySurface), or nullptr while it has none —
+    /// a background tab that was never shown, or a headless test.
+    [[nodiscard]] DisplaySurface* display() noexcept { return _display; }
+    [[nodiscard]] DisplaySurface const* display() const noexcept { return _display; }
 
     /// @return The shape the application last requested via `OSC 22`, or nullopt while it has
     ///         requested none. Survives a display hand-off; see _applicationPointerShape.
@@ -457,8 +459,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return _applicationPointerShape.load();
     }
 
-    void attachDisplay(display::TerminalDisplay& display);
-    void detachDisplay(display::TerminalDisplay& display);
+    void attachDisplay(DisplaySurface& display);
+    void detachDisplay(DisplaySurface& display);
 
     TerminalSessionManager* getTerminalManager() const noexcept { return _manager; }
 
@@ -834,7 +836,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     vtbackend::Terminal _terminal;
     bool _terminatedAndWaitingForKeyPress = false;
-    display::TerminalDisplay* _display = nullptr;
+    DisplaySurface* _display = nullptr;
 
     std::unique_ptr<QFileSystemWatcher> _configFileChangeWatcher;
 

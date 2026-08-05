@@ -203,6 +203,21 @@ Two rules keep this honest:
 
 *   **The consumer declares the interface, the provider depends on the consumer.** Where a lower
     layer has to call back into a higher one, the seam is an interface owned by the lower layer.
+    The two that carry the graph above are:
+
+    | Interface | Declared in | Implemented by | What it is |
+    |---|---|---|---|
+    | `session::DisplaySurface` | `session/` | `display::TerminalDisplay` | the view a session drives — redraw, fonts, cursor shape, resize requests |
+    | `display::WindowHost` | `display/` | `window::WindowController` | the OS window a display is shown in — full-screen, WM size hints, title bar, tab strip |
+
+    Without them the arrows between `session/`, `display/` and `window/` point both ways. With
+    them the concrete types are named only downwards, and `session/` compiles without knowing that
+    a `QQuickItem` exists — which is what makes `TerminalSession` constructible against a recording
+    stub (`test::FakeDisplaySurface`) instead of a scene graph and an RHI device.
+
+    The window layer speaks `DisplaySurface` too: a window sizes itself from the pane it shows, so
+    `WindowHost` takes one as its "requester" rather than a display class. A handful of surface
+    methods therefore exist for the window rather than the session, and are marked as such.
 *   **Where a decision can be separated from the machinery that acts on it, it is.**
     `NotificationRouter` vs `FreeDesktopNotifier`, `AudioNote` vs `Audio`, `ContextMenu` vs
     `ContextMenuModel`, `speakableText` vs `QtSpeechSynthesizer` — in each pair the first half is

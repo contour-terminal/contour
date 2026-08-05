@@ -1,1 +1,2 @@
-IDI_ICON1    ICON         "res/images/contour-logo.ico"
+// Relative to THIS file, which lives in packaging/ -- hence the ../ back into res/.
+IDI_ICON1    ICON         "../res/images/contour-logo.ico"

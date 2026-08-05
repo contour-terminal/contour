@@ -3,6 +3,7 @@
 
 #include <contour/command/CommandCatalog.h>
 #include <contour/display/TerminalDisplay.h>
+#include <contour/display/WindowHost.h>
 #include <contour/input/HorizontalWheelGesture.h>
 #include <contour/session/PaneProxy.h>
 #include <contour/window/CommandPaletteModel.h>
@@ -60,7 +61,14 @@ class SettingsController;
 ///
 /// Created only by TerminalSessionManager::createWindowController() (which mints the backing
 /// vtworkspace::Window) and owned via QQmlEngine CppOwnership; destroyed when its ApplicationWindow closes.
-class WindowController: public QAbstractListModel, public command::TabTitleProvider
+///
+/// It is also the window half of the display/window seam: it implements @c display::WindowHost, the
+/// interface the display layer declares for "the OS window I am shown in". Everything a display asks of
+/// its window arrives through those overrides, so the display names no window type at all.
+class WindowController:
+    public QAbstractListModel,
+    public command::TabTitleProvider,
+    public display::WindowHost
 {
     Q_OBJECT
     Q_PROPERTY(int count READ count NOTIFY countChanged)
@@ -336,7 +344,7 @@ class WindowController: public QAbstractListModel, public command::TabTitleProvi
     /// First-write-wins: only the first seed after construction takes effect, so session rebinds
     /// (tab switches, split collapses) never reset a runtime toggle.
     /// @param visible The profile's show_title_bar value.
-    void seedTitleBarVisible(bool visible);
+    void seedTitleBarVisible(bool visible) override;
 
     /// Sets the window's title-bar visibility: stores the window-scoped state, applies the native
     /// window-frame decoration (Qt::FramelessWindowHint on the adopted OS window — shown => native
@@ -346,7 +354,7 @@ class WindowController: public QAbstractListModel, public command::TabTitleProvi
     void setTitleBarVisible(bool visible);
 
     /// Flips the window's title-bar visibility (the ToggleTitleBar action, routed here by the display).
-    void toggleTitleBar();
+    void toggleTitleBar() override;
     // }}}
 
     // {{{ Tab strip (tab bar) placement + visibility
@@ -368,12 +376,12 @@ class WindowController: public QAbstractListModel, public command::TabTitleProvi
     /// Seeds this window's tab strip position from the global tab_bar_position setting.
     /// First-write-wins (see seedTitleBarVisible).
     /// @param position The configured tab_bar_position value.
-    void seedTabBarPosition(config::TabBarPosition position);
+    void seedTabBarPosition(config::TabBarPosition position) override;
 
     /// Seeds this window's tab strip visibility mode from the global tab_bar_visibility setting.
     /// First-write-wins (see seedTitleBarVisible).
     /// @param visibility The configured tab_bar_visibility value.
-    void seedTabBarVisibility(config::TabBarVisibility visibility);
+    void seedTabBarVisibility(config::TabBarVisibility visibility) override;
 
     /// Re-applies the configured tab strip placement and visibility to this window.
     ///
@@ -391,10 +399,10 @@ class WindowController: public QAbstractListModel, public command::TabTitleProvi
     /// A view toggle, in the same spirit as toggleTitleBar(): it applies to THIS window for as long as
     /// it lives, and the settings page remains where the choice is made permanent. Marks the mode as
     /// seeded so a later session rebind cannot revert it.
-    void setTabBarVisibility(config::TabBarVisibility visibility);
+    void setTabBarVisibility(config::TabBarVisibility visibility) override;
 
     /// Sets this window's tab strip placement at runtime. @see setTabBarVisibility.
-    void setTabBarPosition(config::TabBarPosition position);
+    void setTabBarPosition(config::TabBarPosition position) override;
     // }}}
 
     /// This window's currently focused display (for window services + status-line targeting).
@@ -436,48 +444,26 @@ class WindowController: public QAbstractListModel, public command::TabTitleProvi
     /// Sets the declared chrome height (QML binding write) and refreshes the WM size hints.
     void setChromeHeight(int height);
 
-    /// How much of the WM size-hint set @ref updateSizeHintsFor may (re)write.
-    ///
-    /// The character-cell resize grid (base + increment, the X11 @c PResizeInc pair) is deliberately
-    /// CLEARED while the window is maximized/fullscreen (see @c showWithoutSizeIncrements) so the WM
-    /// fills the screen exactly rather than snapping to the nearest cell multiple. An INCIDENTAL hint
-    /// refresh (a split's font reconcile, a DPR settle, a title-bar toggle) must therefore not re-arm
-    /// the increment while the window is non-normal — on WMs that honor @c PResizeInc that re-writes a
-    /// sub-cell gap around the maximized window, and can even drop the maximized state. The @c minimum
-    /// hint is always safe (it never disturbs the maximized state) and is written unconditionally.
-    enum class HintApplyMode : uint8_t
-    {
-        /// Incidental refresh: write the resize grid only while the window is @c Windowed; write
-        /// @c minimum always. Used by font/DPI/chrome refreshes that may fire while maximized.
-        RespectWindowState,
-        /// Establishing the normal-state hints: write the full set unconditionally. Used by the
-        /// restore-into-normal paths, which call this BEFORE @c showNormal() settles @c visibility()
-        /// (so a live @c visibility() read would still see the old maximized value); they KNOW the
-        /// window is becoming normal, so intent — not the not-yet-settled state — drives the write.
-        Full,
-    };
-
     /// Recomputes and applies the WM size hints (minimum/base/increment) for this window from
     /// @p requester's cell geometry, profile margins, content scale and the declared chrome.
     /// Refresh triggers: font/DPI reconfiguration (via the display), chrome changes, and
     /// restore-from-fullscreen/maximize. NEVER called from a resize path.
     /// @param requester The display whose cell geometry defines the hints (the active pane).
     /// @param mode Whether to gate the resize grid on the live window state (@ref HintApplyMode).
-    void updateSizeHintsFor(display::TerminalDisplay& requester,
-                            HintApplyMode mode = HintApplyMode::RespectWindowState);
+    void updateSizeHintsFor(session::DisplaySurface& requester, HintApplyMode mode) override;
 
     /// Shows this window fullscreen (size increments cleared while non-normal).
     /// @param requester The display forwarding the request (resolves the OS window).
-    void setWindowFullScreen(display::TerminalDisplay& requester);
+    void setWindowFullScreen(session::DisplaySurface& requester) override;
     /// Shows this window maximized (size increments cleared while non-normal).
     /// @param requester The display forwarding the request (resolves the OS window).
-    void setWindowMaximized(display::TerminalDisplay& requester);
+    void setWindowMaximized(session::DisplaySurface& requester) override;
     /// Restores this window to normal state and re-applies the WM size hints.
     /// @param requester The display forwarding the request (resolves the OS window).
-    void setWindowNormal(display::TerminalDisplay& requester);
+    void setWindowNormal(session::DisplaySurface& requester) override;
     /// Toggles fullscreen, restoring the previous maximized state on exit.
     /// @param requester The display forwarding the request (resolves the OS window).
-    void toggleFullScreen(display::TerminalDisplay& requester);
+    void toggleFullScreen(session::DisplaySurface& requester) override;
 
     /// THE grid->window choke point: every programmatic window resize (DECSLPP / CSI 8 t, font zoom's
     /// grid restore, profile switch, DPR settlement) lands here; nothing else may resize the window.
@@ -489,15 +475,15 @@ class WindowController: public QAbstractListModel, public command::TabTitleProvi
     /// @param requester     The display whose pane the grid request targets.
     /// @param totalPageSize The requested total page (main page + status line).
     /// @return True if a window resize was issued.
-    bool resizeWindowForPage(display::TerminalDisplay& requester, vtbackend::PageSize totalPageSize);
+    bool resizeWindowForPage(session::DisplaySurface& requester, vtbackend::PageSize totalPageSize) override;
 
     /// Pixel-flavored choke-point entry (CSI 4 t): requests the content area of @p requester's pane in
     /// device pixels; otherwise identical to resizeWindowForPage().
     /// @param requester       The display whose pane the request targets.
     /// @param contentDevicePx The requested pane content extent in device pixels.
     /// @return True if a window resize was issued.
-    bool resizeWindowForContentPixels(display::TerminalDisplay& requester,
-                                      vtbackend::ImageSize contentDevicePx);
+    bool resizeWindowForContentPixels(session::DisplaySurface& requester,
+                                      vtbackend::ImageSize contentDevicePx) override;
     // }}}
 
     /// Whether @p osWindow is this controller's OS window. A controller adopts the QQuickWindow of the
@@ -602,7 +588,7 @@ class WindowController: public QAbstractListModel, public command::TabTitleProvi
     /// Resolves the OS window to operate on for a geometry request from @p requester, adopting the
     /// requester's QQuickWindow as _osWindow when none is recorded yet (same rule as focusDisplay).
     /// @return The window to operate on, or nullptr when none exists.
-    [[nodiscard]] QQuickWindow* osWindowFor(display::TerminalDisplay& requester) noexcept;
+    [[nodiscard]] QQuickWindow* osWindowFor(session::DisplaySurface& requester) noexcept;
 
     /// The declared chrome as the geometry module's type (width is structurally 0 in this layout).
     [[nodiscard]] geometry::Chrome chrome() const noexcept { return { .width = 0, .height = _chromeHeight }; }
@@ -612,7 +598,7 @@ class WindowController: public QAbstractListModel, public command::TabTitleProvi
     /// @param requester          The display whose pane the request targets.
     /// @param leafContentLogical The pane's required content extent in logical pixels.
     /// @return True if a window resize was issued.
-    bool applyContentDrivenResize(display::TerminalDisplay& requester,
+    bool applyContentDrivenResize(session::DisplaySurface& requester,
                                   geometry::LogicalSize leafContentLogical);
 
     /// Scale-settlement handler (DevicePixelRatioChange / screenChanged): when the window's resolved

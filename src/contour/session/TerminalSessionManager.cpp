@@ -145,6 +145,14 @@ window::WindowController* TerminalSessionManager::controllerForDisplay(
     return _controllersByWindow.begin()->second;
 }
 
+display::WindowHost* TerminalSessionManager::windowHostForDisplay(
+    display::TerminalDisplay* display) const noexcept
+{
+    // The upcast is the whole point: it happens HERE, in the one place that already knows both types,
+    // so display/ never has to.
+    return controllerForDisplay(display);
+}
+
 TerminalSession* TerminalSessionManager::createSessionInBackground(
     vtworkspace::WindowId window, std::optional<std::string> const& profileName)
 {

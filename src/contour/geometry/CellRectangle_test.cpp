@@ -5,13 +5,13 @@
 // divided out exactly once, on the way out. Scaling again when lifting into screen coordinates is the
 // classic HiDPI double-scale bug, and is pinned against below.
 
-#include <contour/display/CaretGeometry.h>
+#include <contour/geometry/CellRectangle.h>
 
 #include <catch2/catch_test_macros.hpp>
 
-using contour::display::cellRectangle;
-using contour::display::rowBandRectangle;
-using contour::display::toGlobalRect;
+using contour::geometry::cellRectangle;
+using contour::geometry::rowBandRectangle;
+using contour::geometry::toGlobalRect;
 using vtbackend::CellLocation;
 using vtbackend::ColumnCount;
 using vtbackend::ColumnOffset;
@@ -32,7 +32,7 @@ constexpr CellLocation cell(int line, int column) noexcept
 
 } // namespace
 
-TEST_CASE("CaretGeometry.rowBandRectangle spans whole rows at full width", "[contour][a11y]")
+TEST_CASE("CellRectangle.rowBandRectangle spans whole rows at full width", "[contour][a11y]")
 {
     auto const margin = vtrasterizer::PageMargin { .left = 4, .top = 6, .bottom = 0 };
     auto const band =
@@ -46,7 +46,7 @@ TEST_CASE("CaretGeometry.rowBandRectangle spans whole rows at full width", "[con
     CHECK(band.height() == 48.0);
 }
 
-TEST_CASE("CaretGeometry.a single-row band equals that row's full width", "[contour][a11y]")
+TEST_CASE("CellRectangle.a single-row band equals that row's full width", "[contour][a11y]")
 {
     auto const margin = vtrasterizer::PageMargin { .left = 0, .top = 0, .bottom = 0 };
     auto const band =
@@ -57,7 +57,7 @@ TEST_CASE("CaretGeometry.a single-row band equals that row's full width", "[cont
     CHECK(band.width() == 40.0);
 }
 
-TEST_CASE("CaretGeometry.a reversed band is clamped rather than inverted", "[contour][a11y]")
+TEST_CASE("CellRectangle.a reversed band is clamped rather than inverted", "[contour][a11y]")
 {
     // A prompt whose last line is above its first is nonsense, but a negative height would be worse: Qt
     // treats it as an empty or mirrored rect and the client would point at nothing.
@@ -68,7 +68,7 @@ TEST_CASE("CaretGeometry.a reversed band is clamped rather than inverted", "[con
     CHECK(band.height() == 16.0);
 }
 
-TEST_CASE("CaretGeometry.device pixels divide by the DPR exactly once", "[contour][a11y]")
+TEST_CASE("CellRectangle.device pixels divide by the DPR exactly once", "[contour][a11y]")
 {
     auto const margin = vtrasterizer::PageMargin { .left = 10, .top = 20, .bottom = 0 };
     auto const band =
@@ -80,7 +80,7 @@ TEST_CASE("CaretGeometry.device pixels divide by the DPR exactly once", "[contou
     CHECK(band.height() == 16.0);
 }
 
-TEST_CASE("CaretGeometry.toGlobalRect translates without rescaling", "[contour][a11y]")
+TEST_CASE("CellRectangle.toGlobalRect translates without rescaling", "[contour][a11y]")
 {
     // The DPR was already divided out upstream. Applying it again here -- the obvious-looking "convert to
     // device pixels for the screen" step -- puts the caret at twice its distance from the window origin
@@ -94,7 +94,7 @@ TEST_CASE("CaretGeometry.toGlobalRect translates without rescaling", "[contour][
     CHECK(global.height() == 16);
 }
 
-TEST_CASE("CaretGeometry.toGlobalRect at the origin is the identity", "[contour][a11y]")
+TEST_CASE("CellRectangle.toGlobalRect at the origin is the identity", "[contour][a11y]")
 {
     auto const itemLocal = QRectF { 3.0, 4.0, 8.0, 16.0 };
     auto const global = toGlobalRect(itemLocal, QPointF { 0.0, 0.0 });
@@ -103,7 +103,7 @@ TEST_CASE("CaretGeometry.toGlobalRect at the origin is the identity", "[contour]
     CHECK(global.y() == 4);
 }
 
-TEST_CASE("CaretGeometry.cellRectangle still answers the IME question", "[contour][a11y]")
+TEST_CASE("CellRectangle.cellRectangle still answers the IME question", "[contour][a11y]")
 {
     // ImeQueryRect.h is now a thin alias over this; the shared geometry must keep behaving identically.
     auto const margin = vtrasterizer::PageMargin { .left = 4, .top = 6, .bottom = 0 };

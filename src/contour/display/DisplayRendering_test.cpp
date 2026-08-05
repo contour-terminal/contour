@@ -1027,7 +1027,8 @@ TEST_CASE("display: an incidental hint refresh does not re-arm the resize grid w
     CHECK(h.window->sizeIncrement() == QSize(0, 0));
 
     // Incidental refresh (default RespectWindowState): the increment must stay zeroed while maximized.
-    controller.updateSizeHintsFor(*h.display);
+    controller.updateSizeHintsFor(*h.display,
+                                  contour::window::WindowController::HintApplyMode::RespectWindowState);
     h.pump();
     CHECK(h.window->sizeIncrement() == QSize(0, 0));
 
@@ -1088,7 +1089,7 @@ TEST_CASE("display: the accessibility interface reports the caret", "[display][a
     // The event side cannot be asserted here: delivery needs an attached assistive client, and neither
     // the offscreen platform nor CI has one. So this drives the interface DIRECTLY -- which is also what
     // an AT-SPI or UIA bridge does once a client attaches. The decisions those events are built from are
-    // unit-tested without Qt at all (CaretReportGate_test, CaretGeometry_test, ViewportTextIndex_test).
+    // unit-tested without Qt at all (CaretReportGate_test, CellRectangle_test, ViewportTextIndex_test).
     REQUIRE_DISPLAY_OR_SKIP();
     DisplayHarness h;
 

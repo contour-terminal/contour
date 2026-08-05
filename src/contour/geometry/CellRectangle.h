@@ -9,7 +9,7 @@
 #include <QtCore/QRect>
 #include <QtCore/QRectF>
 
-namespace contour::display
+namespace contour::geometry
 {
 
 /// The rectangle of a run of cells, in ITEM-LOCAL LOGICAL coordinates.
@@ -83,4 +83,4 @@ namespace contour::display
     return itemLocal.translated(itemOriginGlobal).toRect();
 }
 
-} // namespace contour::display
+} // namespace contour::geometry

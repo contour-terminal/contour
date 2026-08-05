@@ -528,6 +528,16 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     [[nodiscard]] window::WindowController* controllerForDisplay(
         display::TerminalDisplay* display) const noexcept;
 
+    /// The same routing as @ref controllerForDisplay, answered as the interface the DISPLAY layer
+    /// declares for its window (@c display::WindowHost) rather than as the concrete controller.
+    ///
+    /// This is what lets a display forward a full-screen or resize request without naming a window type:
+    /// it sees only the role, while the manager -- which is the window/display registry, and so knows
+    /// both -- performs the lookup. Null when there is no window yet (offscreen tests, pre-show).
+    /// @param display The display asking for its window (may be null).
+    /// @return The owning window host, or nullptr.
+    [[nodiscard]] display::WindowHost* windowHostForDisplay(display::TerminalDisplay* display) const noexcept;
+
     /// Drops the controller for a closed OS window (WindowController::closeWindow calls this last). "Last
     /// window" is _controllersByWindow.size() == 1; when it is, the manager clears residual session
     /// registries. deleteLater()s the controller.
