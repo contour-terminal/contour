@@ -1063,9 +1063,9 @@ TEST_CASE("Renderer.reconfig.atlas_budget_follows_the_page", "[renderer][atlas]"
             vtbackend::ImageSize { Width(4000), Height(2400) }, grown, vtrasterizer::PageMargin {});
         vtrasterizer::RendererTest::applyPendingReconfig(renderer);
 
+        auto const grownCells = static_cast<uint32_t>(grown.area());
         CHECK(backend.properties().tileCount.value > tilesAfterAttach);
-        CHECK(backend.properties().tileCount.value
-              >= static_cast<uint32_t>(grown.area())); // covers the page it must render
+        CHECK(backend.properties().tileCount.value >= grownCells); // covers the page it must render
         CHECK(backend.configureCount > configuresAfterAttach);
 
         // Kept proportional; it used to stay pinned while the tile count climbed with the page.
