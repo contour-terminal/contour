@@ -2556,7 +2556,7 @@ std::optional<std::string> Terminal::localPathAtMousePosition() const
     auto const lineText = currentScreen().lineTextAt(mousePosition->line, false, false);
     auto const mouseColumn = static_cast<size_t>(*mousePosition->column);
     auto const cwd = extractPathFromFileUrl(currentWorkingDirectory());
-    auto const home = std::string(crispy::environment::get("HOME").value_or(""));
+    auto const home = crispy::defaultEnvironment().get("HOME").value_or("");
 
     static auto const localPathRegex = [] {
         // Matches, in order: drive-letter absolute paths (C:/foo, C:\foo) for Windows,
@@ -2662,7 +2662,7 @@ void Terminal::activateHintMode(HintModeRequest request)
     auto const cwd = extractPathFromFileUrl(cwdUrl);
     if (!cwd.empty())
     {
-        auto const home = std::string(crispy::environment::get("HOME").value_or(""));
+        auto const home = crispy::defaultEnvironment().get("HOME").value_or("");
         for (auto& pattern: mutablePatterns)
         {
             if (pattern.name != "filepath")
@@ -2965,7 +2965,7 @@ void Terminal::reply(string_view text)
     else
         _inputGenerator.generateRaw(text);
 
-    auto const syncReply = crispy::environment::get("CONTOUR_SYNC_PTY_OUTPUT");
+    auto const syncReply = crispy::defaultEnvironment().get("CONTOUR_SYNC_PTY_OUTPUT");
 
     if (syncReply && !syncReply->starts_with('0'))
         flushInput();

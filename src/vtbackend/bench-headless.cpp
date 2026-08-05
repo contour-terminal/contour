@@ -195,7 +195,7 @@ class ContourHeadlessBench: public crispy::app
         link("bench-headless.pty", bind(&ContourHeadlessBench::benchPTY));
         link("bench-headless.meta", bind(&ContourHeadlessBench::showMetaInfo));
 
-        if (auto const logFilterString = crispy::environment::get("LOG"))
+        if (auto const logFilterString = crispy::defaultEnvironment().get("LOG"))
         {
             logstore::configure(*logFilterString);
             crispy::app::customizeLogStoreOutput();

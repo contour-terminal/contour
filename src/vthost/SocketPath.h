@@ -57,22 +57,31 @@ namespace vthost
 #ifndef _WIN32
     auto const user = std::to_string(::getuid());
 #else
-    auto const user = std::string { crispy::environment::get("USERNAME").value_or("user") };
+    auto const user = crispy::defaultEnvironment().get("USERNAME").value_or("user");
 #endif
     return fs::temp_directory_path() / ("contour-" + user) / label;
 }
 
-/// Production entry point: derives the path from the process environment.
+/// Production entry point: derives the path from a process environment.
 /// @param label The socket label; "default" for the unnamed one.
 /// @param explicitPath A user-supplied path override, or empty.
+/// @param env The environment to read `$CONTOUR_MUX` and `$XDG_RUNTIME_DIR` from.
 /// @return The resolved socket file path.
-[[nodiscard]] inline std::filesystem::path muxSocketPath(std::string_view label = "default",
-                                                         std::string_view explicitPath = {})
+[[nodiscard]] inline std::filesystem::path muxSocketPath(
+    std::string_view label = "default",
+    std::string_view explicitPath = {},
+    crispy::environment const& env = crispy::defaultEnvironment())
 {
-    return muxSocketPath(label,
-                         explicitPath,
-                         crispy::environment::get("CONTOUR_MUX"),
-                         crispy::environment::get("XDG_RUNTIME_DIR"));
+    // Held in named locals, because the pure core above views them rather than owning them.
+    auto const contourMux = env.get("CONTOUR_MUX");
+    auto const xdgRuntimeDir = env.get("XDG_RUNTIME_DIR");
+    auto const viewOf = [](std::optional<std::string> const& value) -> std::optional<std::string_view> {
+        if (!value)
+            return std::nullopt;
+        return std::string_view { *value };
+    };
+
+    return muxSocketPath(label, explicitPath, viewOf(contourMux), viewOf(xdgRuntimeDir));
 }
 
 // The daemon's sibling endpoints derive from the control-socket path by

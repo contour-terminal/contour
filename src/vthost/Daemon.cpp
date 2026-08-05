@@ -268,7 +268,7 @@ namespace
         // crispy::environment, not getenv: this runs on a client that already has a live reactor
         // thread, and the snapshot exists precisely so an environment read is not racing it.
         auto const image =
-            resolveExecutablePath(args[0], crispy::environment::get("PATH").value_or(""), isExecutableFile);
+            resolveExecutablePath(args[0], crispy::defaultEnvironment().get("PATH").value_or(""), isExecutableFile);
 
         auto argv = std::vector<char*> {};
         argv.reserve(args.size() + 1);

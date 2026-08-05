@@ -1873,7 +1873,7 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint,
         auto const supersamplingFactor = []() {
             auto constexpr EnvName = "SSA_FACTOR";
             auto constexpr DefaultFactor = 4;
-            auto const envValue = crispy::environment::get(EnvName);
+            auto const envValue = crispy::defaultEnvironment().get(EnvName);
             if (!envValue)
                 return DefaultFactor;
 

@@ -78,11 +78,11 @@ unsigned screenWidth()
 
 fs::path xdgStateHome()
 {
-    if (auto const p = crispy::environment::get("XDG_STATE_HOME"); p && !p->empty())
+    if (auto const p = crispy::defaultEnvironment().get("XDG_STATE_HOME"); p && !p->empty())
         return { *p };
 
 #ifdef _WIN32
-    if (auto const p = crispy::environment::get("LOCALAPPDATA"); p && !p->empty())
+    if (auto const p = crispy::defaultEnvironment().get("LOCALAPPDATA"); p && !p->empty())
         return { *p };
 #else
     if (auto const home = crispy::userHomeDirectory(); !home.empty())
@@ -105,7 +105,7 @@ app::app(std::string appName, std::string appTitle, std::string appVersion, std:
     _appLicense { std::move(appLicense) },
     _localStateDir { xdgStateHome() / _appName }
 {
-    if (auto const logFilterString = crispy::environment::get("LOG"))
+    if (auto const logFilterString = crispy::defaultEnvironment().get("LOG"))
     {
         logstore::configure(*logFilterString);
         customizeLogStoreOutput();

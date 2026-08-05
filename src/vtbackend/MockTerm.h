@@ -255,7 +255,7 @@ inline MockTerm<PtyDevice>::MockTerm(PageSize pageSize,
                createSettings(pageSize, maxHistoryLineCount, ptyReadBufferSize),
                std::chrono::steady_clock::time_point() } // explicitly start with empty timepoint
 {
-    if (auto const logFilterString = crispy::environment::get("LOG"))
+    if (auto const logFilterString = crispy::defaultEnvironment().get("LOG"))
     {
         logstore::configure(*logFilterString);
         crispy::app::customizeLogStoreOutput();
