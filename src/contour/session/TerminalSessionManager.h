@@ -70,6 +70,13 @@ enum class SessionEnd : uint8_t
  * TabId -> WindowId). Session -> display ownership lives solely on the pane tree (the QML `session:`
  * binding -> TerminalDisplay::setSession); the manager holds no per-display session map.
  *
+ * It is the one thing in session/ that still names the concrete display and window types, and that is
+ * deliberate: it IS the window/display registry, so routing "which window owns this display" needs
+ * both. Everything else in the layer speaks the interfaces instead -- TerminalSession holds a
+ * DisplaySurface, and windowHostForDisplay() below is where the concrete controller becomes the
+ * display::WindowHost the display layer declared. Moving the registry above session/ would finish the
+ * job; nothing else depends on it happening.
+ *
  * It is NOT a list model: the GUI tab strip renders from the per-window WindowController's
  * QAbstractListModel (WindowController::Roles). Every tab/pane operation here is routed by an
  * explicit window identity — either the calling controller's vtworkspace::WindowId or the acting
