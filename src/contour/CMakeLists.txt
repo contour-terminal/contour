@@ -153,10 +153,41 @@ set(_header_files
     ModifierNames.h
     Shortcut.h
     ConfigEnum.h
+    ShellIntegration.h
     TabBarMode.h
     TabLabel.h
     UiStyle.h
 )
+
+# {{{ shell-integration scripts, embedded
+# One row per supported shell. Adding a shell is dropping its script beside the others in
+# shell-integration/ and adding it here: the embedded data, the `generate integration` dispatch and
+# that verb's help text all derive from this list.
+set(CONTOUR_SHELL_INTEGRATION_SHELLS bash fish tcsh zsh)
+
+set(_shell_integration_scripts "")
+foreach(shell IN LISTS CONTOUR_SHELL_INTEGRATION_SHELLS)
+    list(APPEND _shell_integration_scripts
+         "${CMAKE_CURRENT_SOURCE_DIR}/shell-integration/shell-integration.${shell}")
+endforeach()
+
+# The scripts used to reach the binary through resources.qrc, which made `contour generate
+# integration` -- a verb a GUI-less build keeps -- depend on Qt's resource system. See
+# EmbedShellIntegration.cmake for why the replacement is a CMake script.
+set(_shell_integration_data "${CMAKE_CURRENT_BINARY_DIR}/ShellIntegrationData.h")
+add_custom_command(
+    OUTPUT "${_shell_integration_data}"
+    COMMAND "${CMAKE_COMMAND}"
+            "-DSHELLS=${CONTOUR_SHELL_INTEGRATION_SHELLS}"
+            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DOUTPUT=${_shell_integration_data}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/EmbedShellIntegration.cmake"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/EmbedShellIntegration.cmake" ${_shell_integration_scripts}
+    COMMENT "Embedding shell-integration scripts"
+    VERBATIM
+)
+set_source_files_properties("${_shell_integration_data}" PROPERTIES GENERATED TRUE)
+# }}}
 # Sources are split into a reusable object library (contour_core) and the thin executable entry
 # point (main.cpp). The object library carries every translation unit of the frontend so that both
 # the `contour` executable AND the `contour_gui_test` target can link the exact same objects — this
@@ -181,6 +212,7 @@ set(_core_source_files
     GuiConfigStore.cpp
     HyperlinkTooltip.cpp
     SpeechSynthesizer.cpp
+    ShellIntegration.cpp
     Shortcut.cpp
     TabLabel.cpp
 )
@@ -390,7 +422,10 @@ source_group(QML FILES ${_qml_files})
 
 # {{{ contour_core: the reusable object library (everything but main.cpp)
 add_library(contour_core OBJECT)
-target_sources(contour_core PRIVATE ${_core_source_files} ${_header_files} ${_qt_resources})
+# The generated header is listed as a source so that building contour_core runs the custom command
+# that produces it; nothing compiles it on its own.
+target_sources(contour_core
+    PRIVATE ${_core_source_files} ${_header_files} ${_qt_resources} "${_shell_integration_data}")
 
 set_target_properties(contour_core PROPERTIES AUTOMOC ON)
 set_target_properties(contour_core PROPERTIES AUTORCC ON)
@@ -588,6 +623,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/SpeechSynthesizer_test.cpp
             test/TitleBarContextMenu_test.cpp
             test/FuzzyFilter_test.cpp
+            test/ShellIntegration_test.cpp
             test/Shortcut_test.cpp
             test/LayoutBuilder_test.cpp
             test/ContourGuiApp_test.cpp
@@ -742,6 +778,21 @@ if(CONTOUR_TESTING)
         LABELS e2e
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
         PASS_REGULAR_EXPRESSION "cli-verbs: OK")
+
+    # Outside the guard for the same reason: `generate integration` is a verb the GUI-less build
+    # keeps, and its scripts are embedded by EmbedShellIntegration.cmake for both configurations.
+    add_test(NAME contour_e2e_shell_integration
+        COMMAND ${CMAKE_COMMAND}
+                -D "CONTOUR_BINARY=$<TARGET_FILE:contour>"
+                -D "SHELLS=${CONTOUR_SHELL_INTEGRATION_SHELLS}"
+                -D "SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+                -D "WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/ShellIntegration.cmake)
+    set_tests_properties(contour_e2e_shell_integration PROPERTIES
+        TIMEOUT 60
+        LABELS e2e
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        PASS_REGULAR_EXPRESSION "shell-integration: OK")
 endif()
 # }}}
 

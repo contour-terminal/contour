@@ -3,6 +3,7 @@
 #include <contour/CatImageArgs.h>
 #include <contour/Config.h>
 #include <contour/ContourApp.h>
+#include <contour/ShellIntegration.h>
 
 #include <vtbackend/Capabilities.h>
 #include <vtbackend/Functions.h>
@@ -15,8 +16,6 @@
 #include <crispy/base64.h>
 #include <crispy/logsink.h>
 #include <crispy/utils.h>
-
-#include <QtCore/QFile>
 
 #include <charconv>
 #include <chrono>
@@ -220,6 +219,17 @@ namespace
                 .helpText = verb.helpText,
                 .options = daemonServiceOptions(verb.action == contour::DaemonServiceAction::Install) });
         return commands;
+    }
+
+    /// Help text for `generate integration`'s `shell` option, naming the shells this binary was
+    /// actually built with rather than a list maintained by hand beside them.
+    /// @return A view of storage with process lifetime, because crispy::cli::option::helpText
+    ///         borrows rather than owns.
+    [[nodiscard]] std::string_view integrationShellHelpText()
+    {
+        static std::string const text = std::format(
+            "Shell name to create the integration for. Supported shells: {}", contour::supportedShellsText());
+        return text;
     }
 
 } // namespace
@@ -535,24 +545,17 @@ int ContourApp::integrationAction()
 {
     return withOutput(parameters(), "contour.generate.integration.to", [&](auto& stream) {
         auto const shell = parameters().get<string>("contour.generate.integration.shell");
-        QFile file;
-        if (shell == "zsh")
-            file.setFileName(":/contour/shell-integration/shell-integration.zsh");
-        else if (shell == "fish")
-            file.setFileName(":/contour/shell-integration/shell-integration.fish");
-        else if (shell == "tcsh")
-            file.setFileName(":/contour/shell-integration/shell-integration.tcsh");
-        else if (shell == "bash")
-            file.setFileName(":/contour/shell-integration/shell-integration.bash");
-        else
+        auto const script = shellIntegrationScript(shell);
+        if (!script)
         {
-            std::cerr << std::format("Cannot generate shell integration for an unsupported shell, {}.\n",
-                                     shell);
+            std::cerr << std::format(
+                "Cannot generate shell integration for an unsupported shell, {}. Supported shells: {}.\n",
+                shell,
+                supportedShellsText());
             return EXIT_FAILURE;
         }
-        Require(file.open(QFile::ReadOnly));
-        auto const contents = file.readAll();
-        stream.write(contents.constData(), contents.size());
+
+        stream.write(script->data(), static_cast<std::streamsize>(script->size()));
         return EXIT_SUCCESS;
     });
 }
@@ -1074,8 +1077,7 @@ crispy::cli::command ContourApp::parameterDefinition() const
                         CLI::option_list {
                             CLI::option { "shell",
                                           CLI::value { ""s },
-                                          "Shell name to create the integration for. "
-                                          "Supported shells: fish, zsh, tcsh",
+                                          integrationShellHelpText(),
                                           "SHELL",
                                           CLI::presence::Required },
                             CLI::option { "to",
