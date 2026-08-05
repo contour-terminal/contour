@@ -213,7 +213,7 @@ namespace
     };
 } // namespace
 
-void TerminalDisplay::fenceRenderThread()
+void TerminalDisplay::fenceRenderThread() const
 {
     // Contract and cost: see the declaration.
     if (auto* win = window(); win != nullptr)
