@@ -14,7 +14,7 @@
         #include <QtCore/QtLogging>
     #endif
 #else
-    #include <contour/ContourApp.h>
+    #include <contour/cli/ContourApp.h>
 #endif
 
 #include <crispy/SuppressWindowsDialogs.hpp>

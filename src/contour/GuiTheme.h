@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/Config.h>
+#include <contour/config/Config.h>
 
 #include <QtCore/Qt>
 #include <QtGui/QColor>

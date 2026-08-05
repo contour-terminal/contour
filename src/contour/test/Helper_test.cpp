@@ -3,7 +3,7 @@
 // Unit tests for the Qt→vtbackend input translation helpers (helper.h/helper.cpp): the pure
 // mapping functions every key/mouse event flows through before reaching a terminal session.
 
-#include <contour/Config.h>
+#include <contour/config/Config.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/TerminalSession.h>
 #include <contour/helper.h>

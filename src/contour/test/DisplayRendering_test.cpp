@@ -17,7 +17,7 @@
 // window (hence never had a render target), which the offscreen platform supplies perfectly well. See
 // the teardown-lifetimes section there.
 
-#include <contour/Actions.h>
+#include <contour/config/Actions.h>
 #include <contour/TerminalSession.h>
 #include <contour/TerminalSessionManager.h>
 #include <contour/WindowController.h>

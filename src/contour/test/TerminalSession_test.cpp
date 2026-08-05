@@ -14,7 +14,7 @@
 // terminate() early-returned for a display-less session, so the device stayed open and the session —
 // plus its shell process — leaked.
 
-#include <contour/Actions.h>
+#include <contour/config/Actions.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/TerminalSession.h>
 #include <contour/TerminalSessionManager.h>

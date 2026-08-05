@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/Config.h>
+#include <contour/config/Config.h>
 #include <contour/display/ContentScale.h>
 #include <contour/helper.h>
 

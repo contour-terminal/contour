@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/CommandHistoryStore.h>
-#include <contour/Config.h>
-#include <contour/ContourApp.h>
+#include <contour/command/CommandHistoryStore.h>
+#include <contour/config/Config.h>
+#include <contour/cli/ContourApp.h>
 #include <contour/ExitCode.h>
 #include <contour/ExternalLauncher.h>
-#include <contour/LayoutStore.h>
+#include <contour/config/LayoutStore.h>
 #include <contour/SpeechSynthesizer.h>
 #include <contour/TerminalSessionManager.h>
 #include <contour/UiStyleProvider.h>

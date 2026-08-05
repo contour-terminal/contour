@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/CommandPaletteModel.h>
-#include <contour/Config.h>
+#include <contour/config/Config.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/GuiTheme.h>
 #include <contour/PaneProxy.h>

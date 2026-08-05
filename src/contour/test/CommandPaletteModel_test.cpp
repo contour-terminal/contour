@@ -9,12 +9,12 @@
 // Plus the promise that makes the MRU safe to persist: a remembered command that no longer EXISTS
 // (its profile was deleted, its tab was closed) quietly stops appearing, instead of leaving a dead row.
 
-#include <contour/CommandCatalog.h>
-#include <contour/CommandHistory.h>
+#include <contour/command/CommandCatalog.h>
+#include <contour/command/CommandHistory.h>
 #include <contour/CommandPaletteModel.h>
-#include <contour/Config.h>
-#include <contour/FuzzyFilter.h>
-#include <contour/Shortcut.h>
+#include <contour/config/Config.h>
+#include <contour/command/FuzzyFilter.h>
+#include <contour/command/Shortcut.h>
 #include <contour/test/GuiTestFixtures.h>
 
 #include <catch2/catch_test_macros.hpp>

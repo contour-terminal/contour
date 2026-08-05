@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/CommandHistory.h>
+#include <contour/command/CommandHistory.h>
 #include <contour/CommandPaletteModel.h>
-#include <contour/FuzzyFilter.h>
+#include <contour/command/FuzzyFilter.h>
 
 #include <algorithm>
 #include <cstddef>

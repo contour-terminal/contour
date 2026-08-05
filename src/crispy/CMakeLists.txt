@@ -18,6 +18,7 @@ set(crispy_SOURCES
     TrieMap.h
     AlignedAllocator.h
     algorithm.h
+    ascii.h
     assert.h
     base64.h
     compose.h

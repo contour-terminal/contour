@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/Actions.h>
-#include <contour/ContextMenu.h>
+#include <contour/config/Actions.h>
+#include <contour/command/ContextMenu.h>
 
 #include <QtCore/QVariantList>
 

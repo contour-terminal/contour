@@ -1,8 +1,8 @@
 #pragma once
 
-#include <contour/CommandHistory.h>
-#include <contour/CommandHistoryStore.h>
-#include <contour/LayoutStore.h>
+#include <contour/command/CommandHistory.h>
+#include <contour/command/CommandHistoryStore.h>
+#include <contour/config/LayoutStore.h>
 #include <contour/SessionFactory.h>
 #include <contour/TerminalSession.h>
 #include <contour/WindowController.h>

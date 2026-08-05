@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ColorConversion.h>
 #include <contour/ContourGuiApp.h>
-#include <contour/LayoutBuilder.h>
+#include <contour/config/LayoutBuilder.h>
 #include <contour/PaneProxy.h>
 #include <contour/SettingsController.h>
 #include <contour/TabLabel.h>

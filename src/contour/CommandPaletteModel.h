@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/Command.h>
-#include <contour/CommandCatalog.h>
+#include <contour/command/Command.h>
+#include <contour/command/CommandCatalog.h>
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QHash>

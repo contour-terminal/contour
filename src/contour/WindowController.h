@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/CommandCatalog.h>
+#include <contour/command/CommandCatalog.h>
 #include <contour/CommandPaletteModel.h>
 #include <contour/ContextMenuModel.h>
 #include <contour/HorizontalWheelGesture.h>

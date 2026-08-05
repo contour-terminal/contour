@@ -6,8 +6,8 @@
 // disk exactly as the production apply does. So a test exercises the whole stack (controller → store →
 // loader), not a mock of it.
 
-#include <contour/Config.h>
-#include <contour/GuiConfigStore.h>
+#include <contour/config/Config.h>
+#include <contour/config/GuiConfigStore.h>
 #include <contour/SettingsController.h>
 
 #include <vtbackend/Color.h>

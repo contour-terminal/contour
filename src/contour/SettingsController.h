@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/Config.h>
-#include <contour/GuiConfigStore.h>
+#include <contour/config/Config.h>
+#include <contour/config/GuiConfigStore.h>
 
 #include <QtCore/QObject>
 #include <QtCore/QVariantList>

@@ -9,13 +9,13 @@
 // having to boot a full terminal session.
 
 #include <contour/ColorConversion.h>
-#include <contour/CommandCatalog.h>
-#include <contour/CommandHistory.h>
+#include <contour/command/CommandCatalog.h>
+#include <contour/command/CommandHistory.h>
 #include <contour/CommandPaletteModel.h>
-#include <contour/Config.h>
-#include <contour/ContextMenu.h>
+#include <contour/config/Config.h>
+#include <contour/command/ContextMenu.h>
 #include <contour/ContextMenuModel.h>
-#include <contour/Shortcut.h>
+#include <contour/command/Shortcut.h>
 #include <contour/TabColorScheme.h>
 #include <contour/test/QmlChromeStyle.h>
 #include <contour/test/QmlMessageCapture.h>

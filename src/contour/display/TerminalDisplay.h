@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/Actions.h>
-#include <contour/Config.h>
+#include <contour/config/Actions.h>
+#include <contour/config/Config.h>
 #include <contour/TerminalSession.h>
 #include <contour/display/ContentScale.h>
 #include <contour/display/TerminalRenderNode.h>

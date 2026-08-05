@@ -4,7 +4,7 @@
     #include <windows.h>
 #endif
 
-#include <contour/Config.h>
+#include <contour/config/Config.h>
 #include <contour/TerminalSession.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/helper.h>

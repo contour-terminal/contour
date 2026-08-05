@@ -130,41 +130,41 @@ if(CONTOUR_MACOS_APP_BUNDLE)
 endif()
 
 set(_header_files
-    Actions.h
-    AsciiText.h
-    AtomicFileWrite.h
-    CaptureScreen.h
-    CatImageArgs.h
-    Command.h
-    CommandCatalog.h
-    CommandHistory.h
-    CommandHistoryStore.h
-    Config.h
-    ContextMenu.h
-    ContextMenuTable.h
-    TitleBarContextMenu.h
-    ContourApp.h
-    FuzzyFilter.h
-    GuiConfigStore.h
+    config/Actions.h
+    config/AtomicFileWrite.h
+    config/Config.h
+    config/ConfigDocumentation.h
+    config/ConfigEnum.h
+    config/GuiConfigStore.h
+    config/ModifierNames.h
+    config/TabBarMode.h
+    config/UiStyle.h
+    command/Command.h
+    command/CommandCatalog.h
+    command/CommandHistory.h
+    command/CommandHistoryStore.h
+    command/ContextMenu.h
+    command/ContextMenuTable.h
+    command/FuzzyFilter.h
+    command/Shortcut.h
+    command/TitleBarContextMenu.h
+    cli/CaptureScreen.h
+    cli/CatImageArgs.h
+    cli/ContourApp.h
+    cli/ShellIntegration.h
     HyperlinkTooltip.h
     SpeechSynthesizer.h
-    ModifierNames.h
-    Shortcut.h
-    ConfigEnum.h
-    ShellIntegration.h
-    TabBarMode.h
     TabLabel.h
-    UiStyle.h
 )
 
 # {{{ shell-integration scripts, embedded
 # One row per supported shell. Adding a shell is dropping its script beside the others in
-# shell-integration/ and adding it here: the embedded data, the `generate integration` dispatch and
+# cli/shell-integration/ and adding it here: the embedded data, the `generate integration` dispatch and
 # that verb's help text all derive from this list.
 set(CONTOUR_SHELL_INTEGRATION_SHELLS bash fish tcsh zsh)
 
 list(TRANSFORM CONTOUR_SHELL_INTEGRATION_SHELLS
-     PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/shell-integration/shell-integration."
+     PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/cli/shell-integration/shell-integration."
      OUTPUT_VARIABLE _shell_integration_scripts)
 
 # The scripts used to reach the binary through resources.qrc, which made `contour generate
@@ -175,10 +175,10 @@ add_custom_command(
     OUTPUT "${_shell_integration_data}"
     COMMAND "${CMAKE_COMMAND}"
             "-DSHELLS=${CONTOUR_SHELL_INTEGRATION_SHELLS}"
-            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/cli"
             "-DOUTPUT=${_shell_integration_data}"
-            -P "${CMAKE_CURRENT_SOURCE_DIR}/EmbedShellIntegration.cmake"
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/EmbedShellIntegration.cmake" ${_shell_integration_scripts}
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cli/EmbedShellIntegration.cmake"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/cli/EmbedShellIntegration.cmake" ${_shell_integration_scripts}
     COMMENT "Embedding shell-integration scripts"
     VERBATIM
 )
@@ -191,23 +191,23 @@ add_custom_command(
 # objects without a static archive's symbol-stripping, which would otherwise drop AUTOMOC/AUTORCC
 # registration objects whose symbols are only referenced reflectively at runtime.
 set(_core_source_files
-    Actions.cpp
-    AtomicFileWrite.cpp
-    CaptureScreen.cpp
-    Command.cpp
-    CommandCatalog.cpp
-    CommandHistory.cpp
-    CommandHistoryStore.cpp
-    Config.cpp
-    ContextMenu.cpp
-    TitleBarContextMenu.cpp
-    ContourApp.cpp
-    FuzzyFilter.cpp
-    GuiConfigStore.cpp
+    config/Actions.cpp
+    config/AtomicFileWrite.cpp
+    config/Config.cpp
+    config/GuiConfigStore.cpp
+    command/Command.cpp
+    command/CommandCatalog.cpp
+    command/CommandHistory.cpp
+    command/CommandHistoryStore.cpp
+    command/ContextMenu.cpp
+    command/FuzzyFilter.cpp
+    command/Shortcut.cpp
+    command/TitleBarContextMenu.cpp
+    cli/CaptureScreen.cpp
+    cli/ContourApp.cpp
+    cli/ShellIntegration.cpp
     HyperlinkTooltip.cpp
     SpeechSynthesizer.cpp
-    ShellIntegration.cpp
-    Shortcut.cpp
     TabLabel.cpp
 )
 # The executable entry point lives outside the object library so the test can supply its own main
@@ -231,7 +231,8 @@ if(CONTOUR_FRONTEND_GUI)
         ExternalLauncher.h
         FreeDesktopNotifier.h
         KeyboardLayout.h
-        LayoutStore.h
+        config/LayoutBuilder.h
+        config/LayoutStore.h
         NotificationRouter.h
         PaneProxy.h
         QtExternalLauncher.h
@@ -258,8 +259,8 @@ if(CONTOUR_FRONTEND_GUI)
         KeyboardLayout.cpp
         PaneProxy.cpp
         QtExternalLauncher.cpp
-        LayoutBuilder.cpp
-        LayoutStore.cpp
+        config/LayoutBuilder.cpp
+        config/LayoutStore.cpp
         SessionFactory.cpp
         SettingsController.cpp
         TerminalSession.cpp
@@ -612,28 +613,28 @@ if(CONTOUR_FRONTEND_GUI)
         # resources.qrc again — doing so would duplicate the resource registration symbols.
         add_executable(contour_gui_test
             test/test_main.cpp
-            test/Actions_test.cpp
+            config/Actions_test.cpp
             test/NativeController_test.cpp
             test/RemoteController_test.cpp
             test/TmuxController_test.cpp
             test/AudioNote_test.cpp
             test/BenignQtMessages_test.cpp
-            test/CaptureScreen_test.cpp
-            test/CatImageArgs_test.cpp
-            test/CommandCatalog_test.cpp
-            test/CommandHistory_test.cpp
+            cli/CaptureScreen_test.cpp
+            cli/CatImageArgs_test.cpp
+            command/CommandCatalog_test.cpp
+            command/CommandHistory_test.cpp
             test/CommandPaletteModel_test.cpp
-            test/Config_test.cpp
+            config/Config_test.cpp
             test/SettingsController_test.cpp
             test/SettingsPageQml_test.cpp
             test/Accessibility_qml_test.cpp
-            test/ContextMenu_test.cpp
+            command/ContextMenu_test.cpp
             test/SpeechSynthesizer_test.cpp
-            test/TitleBarContextMenu_test.cpp
-            test/FuzzyFilter_test.cpp
-            test/ShellIntegration_test.cpp
-            test/Shortcut_test.cpp
-            test/LayoutBuilder_test.cpp
+            command/TitleBarContextMenu_test.cpp
+            command/FuzzyFilter_test.cpp
+            cli/ShellIntegration_test.cpp
+            command/Shortcut_test.cpp
+            config/LayoutBuilder_test.cpp
             test/ContourGuiApp_test.cpp
             test/DisplayRendering_test.cpp
             test/ContentScale_test.cpp
@@ -663,7 +664,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/QmlComponents_test.cpp
             test/TabColorScheme_test.cpp
             test/ContourTuiStyle_test.cpp
-            test/UiStyle_test.cpp
+            config/UiStyle_test.cpp
             test/UiStyleProvider_test.cpp
             test/TabListModel_test.cpp
             test/TabLabel_test.cpp
@@ -810,7 +811,7 @@ if(CONTOUR_TESTING)
         SCRIPT ShellIntegration.cmake
         MARKER "shell-integration: OK"
         ARGS -D "SHELLS=${CONTOUR_SHELL_INTEGRATION_SHELLS}"
-             -D "SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+             -D "SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/cli"
              -D "WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}")
 endif()
 # }}}
@@ -1002,7 +1003,7 @@ elseif(CONTOUR_MACOS_APP_BUNDLE)
     # Install application icon
     install(FILES "res/images/contour-logo.icns" DESTINATION "${INSTALL_CMAKE_DIR}" RENAME "contour.icns")
     install(DIRECTORY "${terminfo_basedir}" DESTINATION "${INSTALL_CMAKE_DIR}")
-    install(DIRECTORY "shell-integration" DESTINATION "${INSTALL_CMAKE_DIR}")
+    install(DIRECTORY "cli/shell-integration" DESTINATION "${INSTALL_CMAKE_DIR}")
 
     # add_custom_target(Docs SOURCES README.md LICENSE.txt)
     # TODO: install(TARGETS Docs ...)
@@ -1095,7 +1096,7 @@ else()
     # CLI tool: the executable and the data every platform wants, first.
     include(GNUInstallDirs)
     install(TARGETS contour DESTINATION bin)
-    install(DIRECTORY "shell-integration" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
+    install(DIRECTORY "cli/shell-integration" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(FILES "${PROJECT_SOURCE_DIR}/LICENSE.txt" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(FILES "${PROJECT_SOURCE_DIR}/README.md" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(DIRECTORY "${terminfo_basedir}" DESTINATION "${CMAKE_INSTALL_DATADIR}")

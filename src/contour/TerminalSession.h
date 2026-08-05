@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/Actions.h>
+#include <contour/config/Actions.h>
 #include <contour/Audio.h>
 #include <contour/ColorConversion.h>
-#include <contour/Config.h>
-#include <contour/ContextMenu.h>
+#include <contour/config/Config.h>
+#include <contour/command/ContextMenu.h>
 #include <contour/HorizontalWheelGesture.h>
 #include <contour/HyperlinkTooltip.h>
 #include <contour/display/Announcer.h>

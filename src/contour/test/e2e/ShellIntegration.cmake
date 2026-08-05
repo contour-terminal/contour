@@ -1,6 +1,6 @@
 # End-to-end check for the contour_e2e_shell_integration test: asserts that
 # `contour generate integration` emits, for every supported shell, exactly the script that lives in
-# src/contour/shell-integration/.
+# src/contour/cli/shell-integration/.
 #
 # Run by ctest as
 #   cmake -D CONTOUR_BINARY=... -D SHELLS=... -D SOURCE_DIR=... -D WORK_DIR=... -P ShellIntegration.cmake

@@ -6,8 +6,8 @@
 // config picked it up. This proves the QML actually wires its controls to the controller; the
 // controller's own logic is unit-tested separately in SettingsController_test.cpp.
 
-#include <contour/Config.h>
-#include <contour/GuiConfigStore.h>
+#include <contour/config/Config.h>
+#include <contour/config/GuiConfigStore.h>
 #include <contour/SettingsController.h>
 #include <contour/test/QmlChromeStyle.h>
 #include <contour/test/QmlMessageCapture.h>

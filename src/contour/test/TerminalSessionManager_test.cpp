@@ -9,7 +9,7 @@
 // set, so the testable invariant — window count as windows are created and removed — is exercised here
 // against the Qt-free model. (Per-window tab/pane isolation is covered in SessionModel_test.cpp.)
 
-#include <contour/Config.h>
+#include <contour/config/Config.h>
 #include <contour/TerminalSessionManager.h>
 #include <contour/test/GuiTestFixtures.h>
 
