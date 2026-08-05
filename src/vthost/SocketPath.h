@@ -20,15 +20,16 @@ namespace vthost
 {
 
 /// The pure derivation core: resolves the control-socket path for @p label from
-/// explicitly passed inputs (fully deterministic, so tests need no environment
-/// mutation — which crispy::environment's snapshot semantics forbid anyway).
+/// explicitly passed inputs. Every input is a parameter — the user identity of
+/// the fallback included — so this is fully deterministic and a test drives it
+/// without touching the environment or the host it happens to run on.
 ///
 /// Precedence mirrors tmux's socket discovery, adapted to XDG conventions:
 ///  1. @p explicitPath (the `--socket PATH` flag) verbatim, if non-empty;
 ///  2. @p contourMuxEnv verbatim, if set and non-empty (the `$CONTOUR_MUX`
 ///     override, analogous to tmux's `$TMUX` naming the active server's socket);
 ///  3. `<xdgRuntimeDir>/contour/<label>`;
-///  4. `<temp>/contour-<uid>/<label>` as the fallback when no runtime dir exists
+///  4. `<temp>/contour-<user>/<label>` as the fallback when no runtime dir exists
 ///     (tmux's `/tmp/tmux-<uid>/<label>` shape).
 ///
 /// The parent directory is NOT created here; the listener's bind path hardens
@@ -37,11 +38,14 @@ namespace vthost
 /// @param explicitPath A user-supplied path override, or empty.
 /// @param contourMuxEnv The value of `$CONTOUR_MUX`, if set.
 /// @param xdgRuntimeDir The value of `$XDG_RUNTIME_DIR`, if set.
+/// @param user What identifies this user in the fallback directory's name: the
+///             numeric uid on POSIX, `$USERNAME` on Windows.
 /// @return The resolved socket file path.
 [[nodiscard]] inline std::filesystem::path muxSocketPath(std::string_view label,
                                                          std::string_view explicitPath,
                                                          std::optional<std::string_view> contourMuxEnv,
-                                                         std::optional<std::string_view> xdgRuntimeDir)
+                                                         std::optional<std::string_view> xdgRuntimeDir,
+                                                         std::string_view user)
 {
     namespace fs = std::filesystem;
 
@@ -54,18 +58,14 @@ namespace vthost
     if (xdgRuntimeDir && !xdgRuntimeDir->empty())
         return fs::path { *xdgRuntimeDir } / "contour" / label;
 
-#ifndef _WIN32
-    auto const user = std::to_string(::getuid());
-#else
-    auto const user = crispy::defaultEnvironment().get("USERNAME").value_or("user");
-#endif
-    return fs::temp_directory_path() / ("contour-" + user) / label;
+    return fs::temp_directory_path() / ("contour-" + std::string { user }) / label;
 }
 
 /// Production entry point: derives the path from a process environment.
 /// @param label The socket label; "default" for the unnamed one.
 /// @param explicitPath A user-supplied path override, or empty.
-/// @param env The environment to read `$CONTOUR_MUX` and `$XDG_RUNTIME_DIR` from.
+/// @param env The environment to read `$CONTOUR_MUX`, `$XDG_RUNTIME_DIR` and (on
+///            Windows) `$USERNAME` from.
 /// @return The resolved socket file path.
 [[nodiscard]] inline std::filesystem::path muxSocketPath(
     std::string_view label = "default",
@@ -75,13 +75,18 @@ namespace vthost
     // Held in named locals, because the pure core above views them rather than owning them.
     auto const contourMux = env.get("CONTOUR_MUX");
     auto const xdgRuntimeDir = env.get("XDG_RUNTIME_DIR");
-    auto const viewOf = [](std::optional<std::string> const& value) -> std::optional<std::string_view> {
-        if (!value)
-            return std::nullopt;
-        return std::string_view { *value };
+    auto const asView = [](std::string const& value) {
+        return std::string_view { value };
     };
 
-    return muxSocketPath(label, explicitPath, viewOf(contourMux), viewOf(xdgRuntimeDir));
+#ifndef _WIN32
+    auto const user = std::to_string(::getuid());
+#else
+    auto const user = env.get("USERNAME").value_or("user");
+#endif
+
+    return muxSocketPath(
+        label, explicitPath, contourMux.transform(asView), xdgRuntimeDir.transform(asView), user);
 }
 
 // The daemon's sibling endpoints derive from the control-socket path by
