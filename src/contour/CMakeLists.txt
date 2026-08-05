@@ -98,13 +98,40 @@ endif()
 # }}}
 
 # The imported-target name differs between a vendored yaml-cpp and a system one, so
-# resolve it once here -- before add_subdirectory(display), which needs it too
-# (ContourTerminalDisplay includes contour/Config.h, hence yaml-cpp's headers).
+# resolve it once here -- before add_subdirectory(config), which puts it in contour_config's
+# PUBLIC interface (Config.h exposes yaml-cpp's headers).
 if (TARGET yaml-cpp::yaml-cpp)
     set(YAML_CPP_LIBRARIES yaml-cpp::yaml-cpp)
 else()
     set(YAML_CPP_LIBRARIES yaml-cpp)
 endif()
+
+# {{{ The frontend-independent layers
+# Three Qt-free libraries, lowest first: the configuration model, the command vocabulary built on
+# it, and the headless CLI application. Each is a target of its own rather than a pile of sources
+# in contour_core, which is what makes the layering checkable instead of merely documented --
+# contour_config cannot reach a QObject, because it does not link Qt.
+#
+# Added before display/ and before contour_core, both of which consume them.
+add_subdirectory(config)
+add_subdirectory(command)
+add_subdirectory(cli)
+
+# Declared once, on the lowest layer, and inherited by every consumer through contour_config's
+# PUBLIC usage requirements -- contour_command, contour_cli, contour_core, and through those the
+# executable and both test binaries.
+target_compile_definitions(contour_config PUBLIC
+    CONTOUR_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+    CONTOUR_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+    CONTOUR_VERSION_PATCH=${PROJECT_VERSION_PATCH}
+    CONTOUR_VERSION_STRING="${CONTOUR_VERSION_STRING}"
+    CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+    CONTOUR_APP_ID="${AppId}"
+)
+if(CONTOUR_FRONTEND_GUI)
+    target_compile_definitions(contour_config PUBLIC CONTOUR_FRONTEND_GUI)
+endif()
+# }}}
 
 if(CONTOUR_FRONTEND_GUI)
     add_subdirectory(display)
@@ -130,82 +157,20 @@ if(CONTOUR_MACOS_APP_BUNDLE)
 endif()
 
 set(_header_files
-    config/Actions.h
-    config/AtomicFileWrite.h
-    config/Config.h
-    config/ConfigDocumentation.h
-    config/ConfigEnum.h
-    config/GuiConfigStore.h
-    config/ModifierNames.h
-    config/TabBarMode.h
-    config/UiStyle.h
-    command/Command.h
-    command/CommandCatalog.h
-    command/CommandHistory.h
-    command/CommandHistoryStore.h
-    command/ContextMenu.h
-    command/ContextMenuTable.h
-    command/FuzzyFilter.h
-    command/Shortcut.h
-    command/TitleBarContextMenu.h
-    cli/CaptureScreen.h
-    cli/CatImageArgs.h
-    cli/ContourApp.h
-    cli/ShellIntegration.h
     HyperlinkTooltip.h
     SpeechSynthesizer.h
     TabLabel.h
 )
 
-# {{{ shell-integration scripts, embedded
-# One row per supported shell. Adding a shell is dropping its script beside the others in
-# cli/shell-integration/ and adding it here: the embedded data, the `generate integration` dispatch and
-# that verb's help text all derive from this list.
-set(CONTOUR_SHELL_INTEGRATION_SHELLS bash fish tcsh zsh)
-
-list(TRANSFORM CONTOUR_SHELL_INTEGRATION_SHELLS
-     PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/cli/shell-integration/shell-integration."
-     OUTPUT_VARIABLE _shell_integration_scripts)
-
-# The scripts used to reach the binary through resources.qrc, which made `contour generate
-# integration` -- a verb a GUI-less build keeps -- depend on Qt's resource system. See
-# EmbedShellIntegration.cmake for why the replacement is a CMake script.
-set(_shell_integration_data "${CMAKE_CURRENT_BINARY_DIR}/ShellIntegrationData.h")
-add_custom_command(
-    OUTPUT "${_shell_integration_data}"
-    COMMAND "${CMAKE_COMMAND}"
-            "-DSHELLS=${CONTOUR_SHELL_INTEGRATION_SHELLS}"
-            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/cli"
-            "-DOUTPUT=${_shell_integration_data}"
-            -P "${CMAKE_CURRENT_SOURCE_DIR}/cli/EmbedShellIntegration.cmake"
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/cli/EmbedShellIntegration.cmake" ${_shell_integration_scripts}
-    COMMENT "Embedding shell-integration scripts"
-    VERBATIM
-)
-# }}}
 # Sources are split into a reusable object library (contour_core) and the thin executable entry
-# point (main.cpp). The object library carries every translation unit of the frontend so that both
-# the `contour` executable AND the `contour_gui_test` target can link the exact same objects — this
-# is what lets the GUI tests construct real TerminalSession/ContourGuiApp objects instead of only
-# Qt-free surrogates. An OBJECT library (not STATIC) is used deliberately: it shares the compiled
-# objects without a static archive's symbol-stripping, which would otherwise drop AUTOMOC/AUTORCC
-# registration objects whose symbols are only referenced reflectively at runtime.
+# point (main.cpp). The object library carries every translation unit of the frontend that is not
+# yet a module of its own, so that both the `contour` executable AND the `contour_gui_test` target
+# can link the exact same objects — this is what lets the GUI tests construct real
+# TerminalSession/ContourGuiApp objects instead of only Qt-free surrogates. An OBJECT library (not
+# STATIC) is used deliberately: it shares the compiled objects without a static archive's
+# symbol-stripping, which would otherwise drop AUTOMOC/AUTORCC registration objects whose symbols
+# are only referenced reflectively at runtime.
 set(_core_source_files
-    config/Actions.cpp
-    config/AtomicFileWrite.cpp
-    config/Config.cpp
-    config/GuiConfigStore.cpp
-    command/Command.cpp
-    command/CommandCatalog.cpp
-    command/CommandHistory.cpp
-    command/CommandHistoryStore.cpp
-    command/ContextMenu.cpp
-    command/FuzzyFilter.cpp
-    command/Shortcut.cpp
-    command/TitleBarContextMenu.cpp
-    cli/CaptureScreen.cpp
-    cli/ContourApp.cpp
-    cli/ShellIntegration.cpp
     HyperlinkTooltip.cpp
     SpeechSynthesizer.cpp
     TabLabel.cpp
@@ -424,10 +389,7 @@ source_group(QML FILES ${_qml_files})
 
 # {{{ contour_core: the reusable object library (everything but main.cpp)
 add_library(contour_core OBJECT)
-# The generated header is listed as a source so that building contour_core runs the custom command
-# that produces it; nothing compiles it on its own.
-target_sources(contour_core
-    PRIVATE ${_core_source_files} ${_header_files} ${_qt_resources} "${_shell_integration_data}")
+target_sources(contour_core PRIVATE ${_core_source_files} ${_header_files} ${_qt_resources})
 
 # Both the binary dir (for generated headers) and the parent src dir (so "#include <contour/...>"
 # resolves) must be PUBLIC so consumers of the object library inherit them.
@@ -461,16 +423,11 @@ target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 # QML debugging can be enabled at runtime via -qmljsdebugger=... or QT_QML_DEBUG env var.
 # Avoid compile-time defines that force the "QML debugging is enabled" message on every
 # invocation, including headless CLI commands like `contour cat`.
-# These are attached to contour_core (which compiles the sources) as PUBLIC so the executable and
-# the test target both inherit them when they consume the object library.
-target_compile_definitions(contour_core PUBLIC
-    CONTOUR_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
-    CONTOUR_VERSION_MINOR=${PROJECT_VERSION_MINOR}
-    CONTOUR_VERSION_PATCH=${PROJECT_VERSION_PATCH}
-    CONTOUR_VERSION_STRING="${CONTOUR_VERSION_STRING}"
-    CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
-    CONTOUR_APP_ID="${AppId}"
-)
+#
+# The version/app-identity definitions are NOT repeated here: they are declared once on
+# contour_config (see the top of this file) and reach contour_core, the executable and both test
+# binaries through its PUBLIC usage requirements. Only what is genuinely frontend-specific lives
+# below.
 
 # Create custom target to execute contour
 add_custom_target(run COMMAND contour)
@@ -482,10 +439,6 @@ endif()
 if(CONTOUR_WITH_TTS)
     target_compile_definitions(contour_core PUBLIC CONTOUR_WITH_TTS)
     target_link_libraries(contour_core PUBLIC Qt6::TextToSpeech)
-endif()
-
-if(CONTOUR_FRONTEND_GUI)
-    target_compile_definitions(contour_core PUBLIC CONTOUR_FRONTEND_GUI)
 endif()
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
@@ -535,16 +488,17 @@ endif()
 
 # Link dependencies go on contour_core as PUBLIC so they propagate to the `contour` executable and
 # the `contour_gui_test` target through the object library's usage requirements.
-# vtrasterizer is Qt-free and Config.h includes its headers unconditionally (BoxDrawingRenderer,
-# Decorator, FontDescriptions, GlyphScaling), so it belongs here rather than with the GUI's Qt
-# dependencies -- which is what lets Config.cpp configure the box-drawing styles in either build.
+#
+# contour_command and contour_cli carry the layers beneath the frontend, and contour_config comes
+# with them -- along with crispy, vtbackend, vtpty, vtrasterizer, vtworkspace and yaml-cpp, which
+# are its PUBLIC interface and so need no restating here. vtworkspace is named anyway because the
+# frontend's own sources (the session manager's tab/pane tree) use it directly rather than through
+# the configuration model.
 target_link_libraries(contour_core
     PUBLIC
-    crispy::core
-    vtbackend
-    vtrasterizer
+    contour_command
+    contour_cli
     vtworkspace
-    ${YAML_CPP_LIBRARIES}
     PRIVATE
     vthost
 )
