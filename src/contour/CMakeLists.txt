@@ -238,7 +238,7 @@ if(CONTOUR_FRONTEND_GUI)
 endif()
 
 if(WIN32)
-    list(APPEND _main_source_files contour.rc)
+    list(APPEND _main_source_files packaging/contour.rc)
 endif()
 
 # Both QML modules exist only for the GUI frontend, so they are built only for it. Outside that
@@ -259,40 +259,40 @@ if(CONTOUR_FRONTEND_GUI)
     # NB: a QML module's type name is its file's stem, which must therefore start uppercase -- that is why
     # the window is Main.qml rather than the historical main.qml.
     set(_qml_files
-        ui/Main.qml
-        ui/BellSound.qml
-        ui/RequestPermission.qml
-        ui/SessionChrome.qml
-        ui/TitleBar.qml
-        ui/TabStrip.qml
-        ui/NewTabMenu.qml
-        ui/TabItem.qml
-        ui/TabContextMenu.qml
-        ui/TabColorFlyout.qml
-        ui/WindowControls.qml
-        ui/ResizeBorder.qml
-        ui/PaneNode.qml
-        ui/TerminalPane.qml
-        ui/ActionContextMenu.qml
-        ui/CommandPalette.qml
-        ui/SaveLayoutDialog.qml
-        ui/SettingsPage.qml
-        ui/SettingsNavItem.qml
-        ui/SettingsListItem.qml
-        ui/ConfirmDialog.qml
-        ui/SettingRow.qml
-        ui/SettingsSection.qml
-        ui/ColorSchemeEditor.qml
-        ui/StatusLineIndicatorEditor.qml
-        ui/StatusLineSegmentRow.qml
-        ui/StatusLineChip.qml
-        ui/StatusLineItemDialog.qml
-        ui/StatusLinePreviewItem.qml
-        ui/ColorSlotField.qml
+        qml/Main.qml
+        qml/BellSound.qml
+        qml/RequestPermission.qml
+        qml/SessionChrome.qml
+        qml/TitleBar.qml
+        qml/TabStrip.qml
+        qml/NewTabMenu.qml
+        qml/TabItem.qml
+        qml/TabContextMenu.qml
+        qml/TabColorFlyout.qml
+        qml/WindowControls.qml
+        qml/ResizeBorder.qml
+        qml/PaneNode.qml
+        qml/TerminalPane.qml
+        qml/ActionContextMenu.qml
+        qml/CommandPalette.qml
+        qml/SaveLayoutDialog.qml
+        qml/SettingsPage.qml
+        qml/SettingsNavItem.qml
+        qml/SettingsListItem.qml
+        qml/ConfirmDialog.qml
+        qml/SettingRow.qml
+        qml/SettingsSection.qml
+        qml/ColorSchemeEditor.qml
+        qml/StatusLineIndicatorEditor.qml
+        qml/StatusLineSegmentRow.qml
+        qml/StatusLineChip.qml
+        qml/StatusLineItemDialog.qml
+        qml/StatusLinePreviewItem.qml
+        qml/ColorSlotField.qml
     )
 
     # The files live in ui/ but the module is flat: without an alias each one would land at
-    # :/qt/qml/Contour/Ui/ui/<Name>.qml, leaving a stray directory level in every resource path and in
+    # :/qt/qml/Contour/Ui/qml/<Name>.qml, leaving a stray directory level in every resource path and in
     # the qmldir. Aliasing to the bare file name makes the resource layout match the module identity.
     foreach(_qml_file IN LISTS _qml_files)
         get_filename_component(_qml_name "${_qml_file}" NAME)
@@ -889,7 +889,7 @@ set(CPACK_WIX_PRODUCT_GUID "0E736497-2B72-4117-95E9-54EC6D${HEX_MAJOR}${HEX_MINO
 set(CPACK_WIX_UPGRADE_GUID "0E736497-2B72-4117-95E9-54EC6D000000")
 if(WIN32)
     set(CPACK_PACKAGE_INSTALL_DIRECTORY "Contour Terminal Emulator ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
-    set(CPACK_WIX_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/wix_patch.xml")
+    set(CPACK_WIX_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/packaging/wix_patch.xml")
     set(CPACK_WIX_PROPERTY_WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT "Launch Contour")
 endif()
 if(CONTOUR_MACOS_APP_BUNDLE)
@@ -997,7 +997,7 @@ elseif(CONTOUR_MACOS_APP_BUNDLE)
                     -always-overwrite
                     -verbose=1
                     -no-strip
-                    \"-qmldir=${CMAKE_CURRENT_SOURCE_DIR}/ui\"
+                    \"-qmldir=${CMAKE_CURRENT_SOURCE_DIR}/qml\"
             COMMAND_ERROR_IS_FATAL ANY
         )
 
@@ -1098,9 +1098,9 @@ else()
 
         set(CPACK_COMPONENTS_ALL "contour")
 
-        install(FILES "contour.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/applications" RENAME "${AppId}.desktop")
-        install(FILES "contour-run.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus" RENAME "${AppId}.RunIn.desktop")
-        install(FILES "${AppId}.OpenHere.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus")
+        install(FILES "packaging/contour.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/applications" RENAME "${AppId}.desktop")
+        install(FILES "packaging/contour-run.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus" RENAME "${AppId}.RunIn.desktop")
+        install(FILES "packaging/${AppId}.OpenHere.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus")
         install(FILES "res/images/contour-logo-512.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512/apps" RENAME "${AppId}.png")
         install(FILES "res/images/contour-logo-256.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps" RENAME "${AppId}.png")
         install(FILES "res/images/contour-logo-128.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/128x128/apps" RENAME "${AppId}.png")

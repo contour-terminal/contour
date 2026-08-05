@@ -990,7 +990,7 @@ int ContourGuiApp::terminalGuiAction()
         // replace) shadows the compiled-in one.
         //
         // Only this path, not the source tree resolveResource() also probed under !NDEBUG: an import
-        // path is searched for <path>/Contour/Ui/qmldir, and src/contour/ui is a flat directory of
+        // path is searched for <path>/Contour/Ui/qmldir, and src/contour/qml is a flat directory of
         // components with no module layout, so pointing at it would silently never resolve. The
         // developer loop is a rebuild, which is what qmlcachegen wants anyway.
         //

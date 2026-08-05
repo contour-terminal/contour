@@ -52,7 +52,7 @@ enum class ChromeFontSource : uint8_t
 /// Every corner radius, inset and decorative glyph the chrome QML used to carry as a literal lives
 /// here instead, so a style is described by a row of data that the QML interprets.
 ///
-/// @note "Adding a style is adding a row" holds for the hand-drawn chrome in @c src/contour/ui --
+/// @note "Adding a style is adding a row" holds for the hand-drawn chrome in @c src/contour/qml --
 ///       those files never learn which style is active. It does NOT cover the Qt Quick Controls half:
 ///       a new style also needs its own @c src/contour/styles/<Name>/ module of control files, which
 ///       is inherent to how Qt resolves a Quick Controls style by name.
