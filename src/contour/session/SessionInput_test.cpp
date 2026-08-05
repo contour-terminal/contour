@@ -34,30 +34,26 @@ using contour::input::makeMouseButton;
 
 TEST_CASE("makeMouseButton maps Qt buttons onto VT buttons", "[session][input]")
 {
-    STATIC_CHECK(contour::input::makeMouseButton(Qt::LeftButton) == vtbackend::MouseButton::Left);
-    STATIC_CHECK(contour::input::makeMouseButton(Qt::MiddleButton) == vtbackend::MouseButton::Middle);
-    STATIC_CHECK(contour::input::makeMouseButton(Qt::RightButton) == vtbackend::MouseButton::Right);
+    STATIC_CHECK(makeMouseButton(Qt::LeftButton) == vtbackend::MouseButton::Left);
+    STATIC_CHECK(makeMouseButton(Qt::MiddleButton) == vtbackend::MouseButton::Middle);
+    STATIC_CHECK(makeMouseButton(Qt::RightButton) == vtbackend::MouseButton::Right);
     // Unknown buttons deliberately degrade to Left (the safest default for VT mouse reports).
-    STATIC_CHECK(contour::input::makeMouseButton(Qt::BackButton) == vtbackend::MouseButton::Left);
+    STATIC_CHECK(makeMouseButton(Qt::BackButton) == vtbackend::MouseButton::Left);
 }
 
 TEST_CASE("makeModifiers maps Qt keyboard modifiers onto VT modifiers", "[session][input]")
 {
-    CHECK(contour::input::makeModifiers(Qt::NoModifier) == vtbackend::Modifiers {});
-    CHECK(contour::input::makeModifiers(Qt::ShiftModifier)
-          == vtbackend::Modifiers { vtbackend::Modifier::Shift });
-    CHECK(contour::input::makeModifiers(Qt::ControlModifier)
-          == vtbackend::Modifiers { vtbackend::Modifier::Control });
-    CHECK(contour::input::makeModifiers(Qt::AltModifier)
-          == vtbackend::Modifiers { vtbackend::Modifier::Alt });
-    CHECK(contour::input::makeModifiers(Qt::MetaModifier)
-          == vtbackend::Modifiers { vtbackend::Modifier::Super });
+    CHECK(makeModifiers(Qt::NoModifier) == vtbackend::Modifiers {});
+    CHECK(makeModifiers(Qt::ShiftModifier) == vtbackend::Modifiers { vtbackend::Modifier::Shift });
+    CHECK(makeModifiers(Qt::ControlModifier) == vtbackend::Modifiers { vtbackend::Modifier::Control });
+    CHECK(makeModifiers(Qt::AltModifier) == vtbackend::Modifiers { vtbackend::Modifier::Alt });
+    CHECK(makeModifiers(Qt::MetaModifier) == vtbackend::Modifiers { vtbackend::Modifier::Super });
 
     // stripAltGr=false so the raw Qt->Modifier mapping is asserted: with the default (true), Win32
     // treats a Ctrl+Alt combination as AltGr and strips both, which is correct platform behavior but
     // not what this basic-mapping case is checking.
-    auto const combined = contour::input::makeModifiers(
-        Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier, 0, /*stripAltGr=*/false);
+    auto const combined =
+        makeModifiers(Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier, 0, /*stripAltGr=*/false);
     CHECK(combined.chord.contains(vtbackend::Modifier::Shift));
     CHECK(combined.chord.contains(vtbackend::Modifier::Control));
     CHECK(combined.chord.contains(vtbackend::Modifier::Alt));
@@ -99,12 +95,10 @@ TEST_CASE("makeModifiers derives CapsLock/NumLock from the X11 native modifier m
     constexpr quint32 XcbCapsLockMask = 0x02;
     constexpr quint32 XcbNumLockMask = 0x10;
 
-    CHECK(contour::input::makeModifiers(Qt::NoModifier, XcbCapsLockMask)
-              .locks.contains(vtbackend::LockKey::CapsLock));
-    CHECK(contour::input::makeModifiers(Qt::NoModifier, XcbNumLockMask)
-              .locks.contains(vtbackend::LockKey::NumLock));
+    CHECK(makeModifiers(Qt::NoModifier, XcbCapsLockMask).locks.contains(vtbackend::LockKey::CapsLock));
+    CHECK(makeModifiers(Qt::NoModifier, XcbNumLockMask).locks.contains(vtbackend::LockKey::NumLock));
 
-    auto const both = contour::input::makeModifiers(Qt::ShiftModifier, XcbCapsLockMask | XcbNumLockMask);
+    auto const both = makeModifiers(Qt::ShiftModifier, XcbCapsLockMask | XcbNumLockMask);
     CHECK(both.chord.contains(vtbackend::Modifier::Shift));
     CHECK(both.locks.contains(vtbackend::LockKey::CapsLock));
     CHECK(both.locks.contains(vtbackend::LockKey::NumLock));
@@ -113,7 +107,7 @@ TEST_CASE("makeModifiers derives CapsLock/NumLock from the X11 native modifier m
     CHECK(both.chord == vtbackend::Modifiers { vtbackend::Modifier::Shift });
 
     // No native bits set -> no lock keys.
-    auto const none = contour::input::makeModifiers(Qt::ControlModifier, 0);
+    auto const none = makeModifiers(Qt::ControlModifier, 0);
     CHECK(none.locks.none());
 }
 #endif
