@@ -2,6 +2,7 @@
 #pragma once
 
 #include <crispy/CLI.h>
+#include <crispy/environment.h>
 #include <crispy/logsink.h>
 
 #include <expected>
@@ -20,7 +21,18 @@ namespace crispy
 class app
 {
   public:
-    app(std::string appName, std::string appTitle, std::string appVersion, std::string appLicense);
+    /// @param env    The process environment to read from. It must outlive this object, and is the
+    ///               one every part of the application derives its own from -- an app is the
+    ///               process's composition root, so this is where the choice is made once.
+    /// @param appName    Program name, as the CLI spells it.
+    /// @param appTitle   Human-readable title.
+    /// @param appVersion Version string.
+    /// @param appLicense SPDX license identifier.
+    app(environment const& env,
+        std::string appName,
+        std::string appTitle,
+        std::string appVersion,
+        std::string appLicense);
     virtual ~app();
 
     static app* instance() noexcept { return _instance; }
@@ -44,6 +56,10 @@ class app
     /// The test-facing alias of reparseParameters(): constructs an app instance with a fully-formed
     /// parameters() (e.g. so a default profile resolves) without launching the GUI event loop.
     [[nodiscard]] bool parseParametersForTesting(int argc, char const* argv[]);
+
+    /// The environment this application was constructed with, for the collaborators it builds.
+    /// @return A reference to it; it outlives this object.
+    [[nodiscard]] environment const& processEnvironment() const noexcept { return _environment; }
 
     [[nodiscard]] std::string const& appName() const noexcept { return _appName; }
     [[nodiscard]] std::string const& appVersion() const noexcept { return _appVersion; }
@@ -83,6 +99,7 @@ class app
 
     static app* _instance; // NOLINT(readability-identifier-naming)
 
+    environment const& _environment;
     std::string _appName;
     std::string _appTitle;
     std::string _appVersion;

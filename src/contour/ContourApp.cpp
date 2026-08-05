@@ -235,7 +235,8 @@ namespace
 } // namespace
 // }}}
 
-ContourApp::ContourApp(): app("contour", "Contour Terminal Emulator", CONTOUR_VERSION_STRING, "Apache-2.0")
+ContourApp::ContourApp(crispy::environment const& env):
+    app(env, "contour", "Contour Terminal Emulator", CONTOUR_VERSION_STRING, "Apache-2.0")
 {
     using Project = crispy::cli::about::project;
     crispy::cli::about::registerProjects(

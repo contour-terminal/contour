@@ -76,13 +76,15 @@ unsigned screenWidth()
     return DefaultWidth;
 }
 
-fs::path xdgStateHome()
+/// @param env The environment to read the state-directory variables from.
+/// @return The base directory this application's local state belongs under.
+fs::path xdgStateHome(crispy::environment const& env)
 {
-    if (auto const p = crispy::defaultEnvironment().get("XDG_STATE_HOME"); p && !p->empty())
+    if (auto const p = env.get("XDG_STATE_HOME"); p && !p->empty())
         return { *p };
 
 #ifdef _WIN32
-    if (auto const p = crispy::defaultEnvironment().get("LOCALAPPDATA"); p && !p->empty())
+    if (auto const p = env.get("LOCALAPPDATA"); p && !p->empty())
         return { *p };
 #else
     if (auto const home = crispy::userHomeDirectory(); !home.empty())
@@ -98,14 +100,19 @@ namespace crispy
 
 app* app::_instance = nullptr;
 
-app::app(std::string appName, std::string appTitle, std::string appVersion, std::string appLicense):
+app::app(environment const& env,
+         std::string appName,
+         std::string appTitle,
+         std::string appVersion,
+         std::string appLicense):
+    _environment { env },
     _appName { std::move(appName) },
     _appTitle { std::move(appTitle) },
     _appVersion { std::move(appVersion) },
     _appLicense { std::move(appLicense) },
-    _localStateDir { xdgStateHome() / _appName }
+    _localStateDir { xdgStateHome(env) / _appName }
 {
-    if (auto const logFilterString = crispy::defaultEnvironment().get("LOG"))
+    if (auto const logFilterString = env.get("LOG"))
     {
         logstore::configure(*logFilterString);
         customizeLogStoreOutput();

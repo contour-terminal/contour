@@ -29,7 +29,8 @@ enum class DaemonServiceAction : std::uint8_t
 class ContourApp: public crispy::app
 {
   public:
-    ContourApp();
+    /// @param env The process environment every part of the application reads through.
+    explicit ContourApp(crispy::environment const& env);
 
     [[nodiscard]] crispy::cli::command parameterDefinition() const override;
 

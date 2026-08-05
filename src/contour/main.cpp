@@ -18,6 +18,7 @@
 #endif
 
 #include <crispy/SuppressWindowsDialogs.hpp>
+#include <crispy/environment.h>
 
 #include <cstddef>
 #include <cstdio>
@@ -160,14 +161,18 @@ int main(int argc, char const* argv[])
         crispy::suppressWindowsDialogs();
 #endif
 
+    // This is the process's composition root, and the environment is the one ambient resource
+    // everything below reads: the app takes it here, once, and hands it on to what it builds.
+    auto& environment = crispy::defaultEnvironment();
+
 #ifdef CONTOUR_FRONTEND_GUI
     qInstallMessageHandler(qtCustomMessageOutput);
 
-    contour::ContourGuiApp app;
+    contour::ContourGuiApp app { environment };
 #else
     // Without the GUI frontend there is no window to open, so `contour client` is gone with it;
     // what remains is `contour daemon` and the CLI verbs, which need nothing beyond Qt Core.
-    contour::ContourApp app;
+    contour::ContourApp app { environment };
 #endif
 
     return app.run(argc, argv);

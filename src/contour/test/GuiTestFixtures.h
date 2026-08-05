@@ -15,6 +15,8 @@
 #include <vtpty/Process.h>
 #include <vtpty/Pty.h>
 
+#include <crispy/environment.h>
+
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>
 #include <QtCore/QTemporaryDir>
@@ -341,7 +343,8 @@ class TestApp
                      std::unique_ptr<contour::LayoutStore> layoutStore = nullptr,
                      std::unique_ptr<contour::CommandHistoryStore> commandHistoryStore = nullptr,
                      std::unique_ptr<contour::SpeechSynthesizer> speech = nullptr):
-        _app(std::move(factory),
+        _app(_environment,
+             std::move(factory),
              makeRecordingLauncher(),
              std::move(layoutStore),
              std::move(commandHistoryStore),
@@ -358,7 +361,7 @@ class TestApp
     /// @param args The command tokens after the program name (e.g. {"font-locator"}).
     explicit TestApp(std::initializer_list<char const*> args,
                      std::unique_ptr<contour::SessionFactory> factory = nullptr):
-        _app(std::move(factory), makeRecordingLauncher(), nullptr, nullptr, defaultSpeech())
+        _app(_environment, std::move(factory), makeRecordingLauncher(), nullptr, nullptr, defaultSpeech())
     {
         std::vector<char const*> argv;
         argv.reserve(args.size() + 1);
@@ -396,6 +399,9 @@ class TestApp
     }
 
     RecordingExternalLauncher* _launcher = nullptr;
+    /// The process's own environment: what the fixture exercises is the GUI, not what any variable
+    /// reads as. A test that cares injects a crispy::testing::fake_environment instead.
+    crispy::live_environment _environment;
     contour::ContourGuiApp _app;
 };
 

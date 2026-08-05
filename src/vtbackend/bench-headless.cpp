@@ -178,8 +178,9 @@ namespace
 class ContourHeadlessBench: public crispy::app
 {
   public:
-    ContourHeadlessBench():
-        app("bench-headless", "Contour Headless Benchmark", CONTOUR_VERSION_STRING, "Apache-2.0")
+    /// @param env The process environment every part of the benchmark reads through.
+    explicit ContourHeadlessBench(crispy::environment const& env):
+        app(env, "bench-headless", "Contour Headless Benchmark", CONTOUR_VERSION_STRING, "Apache-2.0")
     {
         using Project = crispy::cli::about::project;
         crispy::cli::about::registerProjects(
@@ -195,7 +196,7 @@ class ContourHeadlessBench: public crispy::app
         link("bench-headless.pty", bind(&ContourHeadlessBench::benchPTY));
         link("bench-headless.meta", bind(&ContourHeadlessBench::showMetaInfo));
 
-        if (auto const logFilterString = crispy::defaultEnvironment().get("LOG"))
+        if (auto const logFilterString = env.get("LOG"))
         {
             logstore::configure(*logFilterString);
             crispy::app::customizeLogStoreOutput();
@@ -473,6 +474,6 @@ class ContourHeadlessBench: public crispy::app
 
 int main(int argc, char const* argv[])
 {
-    ContourHeadlessBench app;
+    ContourHeadlessBench app { crispy::defaultEnvironment() };
     return app.run(argc, argv);
 }
