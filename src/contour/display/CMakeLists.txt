@@ -53,6 +53,11 @@ target_link_libraries(ContourTerminalDisplay PUBLIC vtrasterizer)
 # model's interface -- yaml-cpp included, which Config.h exposes in its own right. Linking the
 # target that owns it beats restating its dependencies here.
 target_link_libraries(ContourTerminalDisplay PUBLIC contour_config)
+# The display drives blur-behind and the accessibility announcer through platform/, and translates
+# its own mouse events through input/. Naming them is what puts these archives AFTER this one on the
+# link line: GNU ld resolves a static archive only against what precedes it, so an undeclared
+# dependency here is an undefined reference on Linux -- which ld64 on macOS happily links anyway.
+target_link_libraries(ContourTerminalDisplay PUBLIC contour_input contour_platform)
 target_link_libraries(ContourTerminalDisplay PUBLIC
     Qt6::Core
     Qt6::Gui
