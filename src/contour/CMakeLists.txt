@@ -434,11 +434,6 @@ if(CONTOUR_PERF_STATS)
     target_compile_definitions(contour_core PUBLIC CONTOUR_PERF_STATS)
 endif()
 
-if(CONTOUR_WITH_TTS)
-    target_compile_definitions(contour_core PUBLIC CONTOUR_WITH_TTS)
-    target_link_libraries(contour_core PUBLIC Qt6::TextToSpeech)
-endif()
-
 if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     target_compile_definitions(contour_core PUBLIC CONTOUR_GUI_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
@@ -530,33 +525,12 @@ if(CONTOUR_FRONTEND_GUI)
         Qt6::QuickTemplates2
     )
 
-    if(OPENBSD)
-        target_link_libraries(contour_core PUBLIC X11::xcb X11::xcb_cursor)
-    elseif(NOT(WIN32) AND NOT(APPLE))
-        target_link_libraries(contour_core PUBLIC xcb)
-    endif()
-
-    if(APPLE)
-        # KeyboardLayout.cpp asks the Text Input Sources API what the active layout makes of a key
-        # code, because [NSEvent keyCode] -- which is what Qt hands us -- is positional and says
-        # nothing about the character. TIS* and UCKeyTranslate both live in Carbon/HIToolbox.
-        find_library(CARBON_LIBRARY Carbon REQUIRED)
-        target_link_libraries(contour_core PUBLIC ${CARBON_LIBRARY})
-    endif()
+    # xcb, Carbon and the Wayland blur protocol are declared by the targets that actually use them:
+    # xcb and Wayland by contour_platform (BlurBehind.cpp is the only caller of either), Carbon by
+    # contour_input (KeyboardLayout.cpp is the only caller). Restating them here would have generated
+    # the Wayland protocol sources a second time, into a target that no longer holds the .xml.
     if(CONTOUR_BUILD_STATIC)
         qt_import_qml_plugins(contour)
-    endif()
-
-    if(LINUX AND CONTOUR_WAYLAND)
-        find_package(Qt6 COMPONENTS WaylandClient WaylandClientPrivate)
-        target_compile_definitions(contour_core PUBLIC CONTOUR_WAYLAND)
-        target_link_libraries(contour_core PUBLIC Qt6::WaylandClient Qt6::WaylandClientPrivate)
-        # The Wayland protocol client sources are generated against contour_core (which owns the
-        # frontend translation units that reference them).
-        qt6_generate_wayland_protocol_client_sources(contour_core FILES "${CMAKE_CURRENT_SOURCE_DIR}/protocols/blur.xml")
-        # Explicitly add the generated protocol source code to the target, as the macro sometimes fails to do so.
-        target_sources(contour_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/wayland-blur-protocol.c")
-        target_sources(contour_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/qwayland-blur.cpp")
     endif()
 
     # {{{ GUI frontend E2E tests (run under the Qt offscreen platform; no display server needed)
