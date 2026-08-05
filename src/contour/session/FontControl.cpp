@@ -80,9 +80,7 @@ bool applyFontDescription(text::DPI dpi,
     return true;
 }
 
-void applyResize(vtbackend::ImageSize newPixelSize,
-                 TerminalSession& session,
-                 vtrasterizer::Renderer& renderer)
+void applyResize(ImageSize newPixelSize, TerminalSession& session, vtrasterizer::Renderer& renderer)
 {
     if (*newPixelSize.width == 0 || *newPixelSize.height == 0)
         return;
@@ -90,7 +88,7 @@ void applyResize(vtbackend::ImageSize newPixelSize,
     vtbackend::Terminal& terminal = session.terminal();
     auto const oldPageSize = terminal.totalPageSize();
     // Read the published cell size once (lock-free), reused for both the page size and margin below.
-    vtbackend::ImageSize const cellSize = renderer.publishedCellSize();
+    ImageSize const cellSize = renderer.publishedCellSize();
     auto const marginsDevicePx = geometry::scaled(toGeometryMargins(session.profile().margins.value()),
                                                   session.display()->contentScale());
 

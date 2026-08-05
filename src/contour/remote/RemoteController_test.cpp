@@ -29,7 +29,7 @@ TEST_CASE("awaitMuxConnect reports Ready without waiting once the phase is set",
     auto phase = MuxConnectPhase::Ready; // already transitioned
     auto const failure = std::string {};
 
-    auto const outcome = contour::remote::awaitMuxConnect(mutex, cv, phase, failure, 5s);
+    auto const outcome = awaitMuxConnect(mutex, cv, phase, failure, 5s);
 
     CHECK(outcome.ready);
     CHECK_FALSE(outcome.timedOut);
@@ -42,7 +42,7 @@ TEST_CASE("awaitMuxConnect surfaces the recorded failure reason", "[mux][control
     auto phase = MuxConnectPhase::Failed;
     auto const failure = std::string { "daemon refused" };
 
-    auto const outcome = contour::remote::awaitMuxConnect(mutex, cv, phase, failure, 5s);
+    auto const outcome = awaitMuxConnect(mutex, cv, phase, failure, 5s);
 
     CHECK_FALSE(outcome.ready);
     CHECK_FALSE(outcome.timedOut);
@@ -56,7 +56,7 @@ TEST_CASE("awaitMuxConnect times out while still Connecting", "[mux][controller]
     auto phase = MuxConnectPhase::Connecting; // never transitions
     auto const failure = std::string {};
 
-    auto const outcome = contour::remote::awaitMuxConnect(mutex, cv, phase, failure, 20ms);
+    auto const outcome = awaitMuxConnect(mutex, cv, phase, failure, 20ms);
 
     CHECK(outcome.timedOut);
     CHECK_FALSE(outcome.ready);
@@ -79,7 +79,7 @@ TEST_CASE("awaitMuxConnect wakes on a cross-thread transition", "[mux][controlle
         cv.notify_all();
     } };
 
-    auto const outcome = contour::remote::awaitMuxConnect(mutex, cv, phase, failure, 5s);
+    auto const outcome = awaitMuxConnect(mutex, cv, phase, failure, 5s);
     reactor.join();
 
     CHECK(outcome.ready);

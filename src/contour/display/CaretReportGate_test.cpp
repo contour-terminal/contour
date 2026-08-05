@@ -17,14 +17,14 @@ using vtbackend::LineOffset;
 namespace
 {
 
-contour::display::CaretState visibleAt(int line, int column)
+CaretState visibleAt(int line, int column)
 {
     return { .visible = true,
              .position = { .line = LineOffset(line), .column = ColumnOffset(column) },
              .prompt = std::nullopt };
 }
 
-contour::display::CaretState hidden()
+CaretState hidden()
 {
     return { .visible = false, .position = {}, .prompt = std::nullopt };
 }

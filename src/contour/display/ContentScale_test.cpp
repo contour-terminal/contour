@@ -47,6 +47,6 @@ TEST_CASE("content-scale resolvers fall back to 1.0 for null screen/window witho
 {
     // No screen/window and no forced-DPI provider: the resolver has nothing to scale by and returns
     // the identity scale, which the pre-window headless sizing path relies on.
-    CHECK(contour::display::contentScaleForScreen(nullptr, nullptr) == 1.0);
-    CHECK(contour::display::contentScaleForWindow(nullptr, nullptr) == 1.0);
+    CHECK(contentScaleForScreen(nullptr, nullptr) == 1.0);
+    CHECK(contentScaleForWindow(nullptr, nullptr) == 1.0);
 }
