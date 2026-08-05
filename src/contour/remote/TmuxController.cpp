@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/TerminalSession.h>
-#include <contour/TerminalSessionManager.h>
 #include <contour/remote/TmuxController.h>
+#include <contour/session/TerminalSession.h>
+#include <contour/session/TerminalSessionManager.h>
 
 #include <algorithm>
 #include <format>
@@ -367,7 +367,7 @@ void TmuxController::windowRenamed(uint64_t window, std::string const& name)
     emit tabTitleChanged();
 }
 
-void TmuxController::applyPendingRenames(TerminalSessionManager& manager)
+void TmuxController::applyPendingRenames(session::TerminalSessionManager& manager)
 {
     // Resolve each pending rename to its tab's session under the lock (the acting-session
     // map is shared with the reactor thread), then apply outside it — setTabTitleForSession
@@ -612,7 +612,8 @@ std::unique_ptr<vtpty::Pty> TmuxController::createPty(std::optional<std::string>
     return pty;
 }
 
-void TmuxController::adoptPendingPanes(TerminalSessionManager& manager, vtworkspace::WindowId guiWindow)
+void TmuxController::adoptPendingPanes(session::TerminalSessionManager& manager,
+                                       vtworkspace::WindowId guiWindow)
 {
     // Splits performed here (whole-tree realize, or an incremental split of an existing tmux pane)
     // must build the mirror pane locally, not author a new split back to tmux. (Mirrors
@@ -670,7 +671,7 @@ void TmuxController::adoptPendingPanes(TerminalSessionManager& manager, vtworksp
     applyPendingRenames(manager);
 }
 
-void TmuxController::realizeWindowLayout(TerminalSessionManager& manager,
+void TmuxController::realizeWindowLayout(session::TerminalSessionManager& manager,
                                          vtworkspace::WindowId guiWindow,
                                          uint64_t tmuxWindow,
                                          vthost::tmux::BinaryLayout const& tree)
@@ -693,7 +694,7 @@ void TmuxController::realizeWindowLayout(TerminalSessionManager& manager,
         }
 }
 
-bool TmuxController::realizeOnePane(TerminalSessionManager& manager, vtworkspace::WindowId guiWindow)
+bool TmuxController::realizeOnePane(session::TerminalSessionManager& manager, vtworkspace::WindowId guiWindow)
 {
     auto record = PendingPane {};
     {
@@ -720,7 +721,7 @@ bool TmuxController::realizeOnePane(TerminalSessionManager& manager, vtworkspace
     }();
     auto* acting = manager.sessionForId(anchor);
 
-    auto* created = static_cast<TerminalSession*>(nullptr);
+    auto* created = static_cast<session::TerminalSession*>(nullptr);
     if (acting == nullptr)
         created = manager.createSessionInBackground(guiWindow);
     else

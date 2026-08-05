@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/TerminalSessionManager.h>
 #include <contour/remote/NativeController.h>
+#include <contour/session/TerminalSessionManager.h>
 
 #include <crispy/utils.h>
 

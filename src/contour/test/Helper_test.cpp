@@ -4,12 +4,13 @@
 // mapping functions every key/mouse event flows through before reaching a terminal session.
 
 #include <contour/ContourGuiApp.h>
-#include <contour/TerminalSession.h>
 #include <contour/config/Config.h>
-#include <contour/helper.h>
 #include <contour/input/KeyMapping.h>
 #include <contour/input/MouseMapping.h>
 #include <contour/platform/QtPath.h>
+#include <contour/session/SessionInput.h>
+#include <contour/session/SpawnCommand.h>
+#include <contour/session/TerminalSession.h>
 #include <contour/test/GuiTestFixtures.h>
 
 #include <vtbackend/InputGenerator.h>
@@ -31,7 +32,7 @@
 using contour::input::makeModifiers;
 using contour::input::makeMouseButton;
 
-TEST_CASE("contour::input::makeMouseButton maps Qt buttons onto VT buttons", "[helper][input]")
+TEST_CASE("makeMouseButton maps Qt buttons onto VT buttons", "[helper][input]")
 {
     STATIC_CHECK(contour::input::makeMouseButton(Qt::LeftButton) == vtbackend::MouseButton::Left);
     STATIC_CHECK(contour::input::makeMouseButton(Qt::MiddleButton) == vtbackend::MouseButton::Middle);
@@ -40,7 +41,7 @@ TEST_CASE("contour::input::makeMouseButton maps Qt buttons onto VT buttons", "[h
     STATIC_CHECK(contour::input::makeMouseButton(Qt::BackButton) == vtbackend::MouseButton::Left);
 }
 
-TEST_CASE("contour::input::makeModifiers maps Qt keyboard modifiers onto VT modifiers", "[helper][input]")
+TEST_CASE("makeModifiers maps Qt keyboard modifiers onto VT modifiers", "[helper][input]")
 {
     CHECK(contour::input::makeModifiers(Qt::NoModifier) == vtbackend::Modifiers {});
     CHECK(contour::input::makeModifiers(Qt::ShiftModifier)
@@ -66,7 +67,7 @@ TEST_CASE("contour::input::makeModifiers maps Qt keyboard modifiers onto VT modi
     CHECK(combined.locks.none());
 }
 
-TEST_CASE("contour::input::unshiftedCodepoint inverts the US-ASCII shift level", "[helper][input]")
+TEST_CASE("unshiftedCodepoint inverts the US-ASCII shift level", "[helper][input]")
 {
     using contour::input::unshiftedCodepoint;
     // Punctuation and number-row shifted symbols map back to the base key label a binding is written
@@ -91,8 +92,7 @@ TEST_CASE("contour::input::unshiftedCodepoint inverts the US-ASCII shift level",
 }
 
 #if !defined(_WIN32) && !defined(__APPLE__)
-TEST_CASE("contour::input::makeModifiers derives CapsLock/NumLock from the X11 native modifier mask",
-          "[helper][input]")
+TEST_CASE("makeModifiers derives CapsLock/NumLock from the X11 native modifier mask", "[helper][input]")
 {
     // On Linux the lock states come from the XCB/XKB native mask (CapsLock = XCB_MOD_MASK_LOCK 0x02,
     // NumLock = XCB_MOD_MASK_2 0x10), independent of the Qt modifier bits.
@@ -121,11 +121,11 @@ TEST_CASE("contour::input::makeModifiers derives CapsLock/NumLock from the X11 n
 namespace
 {
 /// Display-less session over a MockPty (the helper.cpp key path needs a session but no display).
-[[nodiscard]] std::unique_ptr<contour::TerminalSession> makeSession(contour::ContourGuiApp& app)
+[[nodiscard]] std::unique_ptr<contour::session::TerminalSession> makeSession(contour::ContourGuiApp& app)
 {
     auto pty =
         std::make_unique<vtpty::MockPty>(vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) });
-    return std::make_unique<contour::TerminalSession>(&app.sessionsManager(), std::move(pty), app);
+    return std::make_unique<contour::session::TerminalSession>(&app.sessionsManager(), std::move(pty), app);
 }
 
 /// The layout for every test that is not about layouts: passthrough leaves the native key
@@ -157,7 +157,8 @@ TEST_CASE("sendKeyEvent maps Qt key events onto the terminal's PTY encoding", "[
     {
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_X, Qt::NoModifier, QStringLiteral("x"));
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
+        contour::session::sendKeyEvent(
+            &ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         CHECK(pty.stdinBuffer() == "x");
     }
 
@@ -165,7 +166,8 @@ TEST_CASE("sendKeyEvent maps Qt key events onto the terminal's PTY encoding", "[
     {
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
+        contour::session::sendKeyEvent(
+            &ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         CHECK(pty.stdinBuffer() == "\r");
     }
 
@@ -173,7 +175,8 @@ TEST_CASE("sendKeyEvent maps Qt key events onto the terminal's PTY encoding", "[
     {
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier);
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
+        contour::session::sendKeyEvent(
+            &ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         CHECK(pty.stdinBuffer().contains('\033'));
     }
 
@@ -181,7 +184,8 @@ TEST_CASE("sendKeyEvent maps Qt key events onto the terminal's PTY encoding", "[
     {
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier, QStringLiteral("\x03"));
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
+        contour::session::sendKeyEvent(
+            &ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         CHECK(pty.stdinBuffer().contains('\x03'));
     }
 }
@@ -264,7 +268,7 @@ TEST_CASE("Ctrl+U reaches the application as Ctrl+U under the Kitty keyboard pro
                         /*autorep=*/false,
                         /*count=*/1);
     pty.stdinBuffer().clear();
-    contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, macUsAnsiLayout());
+    contour::session::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, macUsAnsiLayout());
     CHECK(pty.stdinBuffer() == "\033[117;5u");
 }
 
@@ -294,7 +298,8 @@ TEST_CASE("the browser tab-switch chords are claimed before the terminal encodes
     auto const reachedThePty = [&](Qt::Key key, Qt::KeyboardModifiers modifiers) {
         QKeyEvent ev(QEvent::KeyPress, key, modifiers);
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
+        contour::session::sendKeyEvent(
+            &ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         return !pty.stdinBuffer().empty();
     };
 
@@ -331,7 +336,8 @@ TEST_CASE("sendKeyEvent covers the whole special-key mapping table", "[helper][i
     {
         QKeyEvent ev(QEvent::KeyPress, key, Qt::NoModifier);
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
+        contour::session::sendKeyEvent(
+            &ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         INFO("key = " << static_cast<int>(key));
         CHECK_FALSE(pty.stdinBuffer().empty());
     }
@@ -340,7 +346,8 @@ TEST_CASE("sendKeyEvent covers the whole special-key mapping table", "[helper][i
     {
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_Backtab, Qt::ShiftModifier);
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
+        contour::session::sendKeyEvent(
+            &ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         CHECK_FALSE(pty.stdinBuffer().empty());
     }
     for (auto const key: { Qt::Key_0,
@@ -355,7 +362,8 @@ TEST_CASE("sendKeyEvent covers the whole special-key mapping table", "[helper][i
     {
         QKeyEvent ev(QEvent::KeyPress, key, Qt::KeypadModifier);
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
+        contour::session::sendKeyEvent(
+            &ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         INFO("keypad key = " << static_cast<int>(key));
         CHECK_FALSE(pty.stdinBuffer().empty());
     }
@@ -364,7 +372,8 @@ TEST_CASE("sendKeyEvent covers the whole special-key mapping table", "[helper][i
     {
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_CapsLock, Qt::NoModifier);
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
+        contour::session::sendKeyEvent(
+            &ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         CHECK(pty.stdinBuffer().empty());
     }
 }
@@ -388,7 +397,7 @@ TEST_CASE("wheel and mouse event helpers route through the session", "[helper][i
                        Qt::NoScrollPhase,
                        false);
         pty.stdinBuffer().clear();
-        contour::sendWheelEvent(&ev, *session);
+        contour::session::sendWheelEvent(&ev, *session);
         // A display-less session drops wheel events before mapping (session.display() == nullptr),
         // so this only pins that the phase-less-wheel path is non-crashing offscreen. The actual
         // routing into the wheel-glide momentum path is covered by the model-layer
@@ -402,17 +411,17 @@ TEST_CASE("wheel and mouse event helpers route through the session", "[helper][i
                           Qt::LeftButton,
                           Qt::NoModifier);
         pty.stdinBuffer().clear();
-        contour::sendMousePressEvent(&press, *session);
+        contour::session::sendMousePressEvent(&press, *session);
         QMouseEvent release(QEvent::MouseButtonRelease,
                             QPointF(12, 12),
                             QPointF(12, 12),
                             Qt::LeftButton,
                             Qt::NoButton,
                             Qt::NoModifier);
-        contour::sendMouseReleaseEvent(&release, *session);
+        contour::session::sendMouseReleaseEvent(&release, *session);
         QMouseEvent move(
             QEvent::MouseMove, QPointF(30, 30), QPointF(30, 30), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
-        contour::sendMouseMoveEvent(&move, *session);
+        contour::session::sendMouseMoveEvent(&move, *session);
     }
     SUCCEED("display-less mouse/wheel routing is crash-free");
 }
@@ -422,8 +431,8 @@ TEST_CASE("buildSpawnTerminalCommand assembles arguments and resolves the workin
 {
     // Full set: config + profile + a local-host cwd URL all forwarded, in order.
     {
-        auto const cmd =
-            contour::buildSpawnTerminalCommand("/usr/bin/contour", "/tmp/c.yml", "main", "file:///tmp");
+        auto const cmd = contour::session::buildSpawnTerminalCommand(
+            "/usr/bin/contour", "/tmp/c.yml", "main", "file:///tmp");
         CHECK(cmd.program == "/usr/bin/contour");
         CHECK(cmd.arguments
               == QStringList { "config", "/tmp/c.yml", "profile", "main", "working-directory", "/tmp" });
@@ -431,7 +440,7 @@ TEST_CASE("buildSpawnTerminalCommand assembles arguments and resolves the workin
 
     // Empty config + empty profile omit those flags; a non-local host drops the working directory.
     {
-        auto const cmd = contour::buildSpawnTerminalCommand(
+        auto const cmd = contour::session::buildSpawnTerminalCommand(
             "/usr/bin/contour", "", "", "file://not-this-host.invalid/somewhere");
         CHECK(cmd.program == "/usr/bin/contour");
         CHECK(cmd.arguments.isEmpty());
@@ -439,7 +448,8 @@ TEST_CASE("buildSpawnTerminalCommand assembles arguments and resolves the workin
 
     // A bare (host-less) path URL is forwarded as the working directory.
     {
-        auto const cmd = contour::buildSpawnTerminalCommand("/usr/bin/contour", "", "work", "file:///home/x");
+        auto const cmd =
+            contour::session::buildSpawnTerminalCommand("/usr/bin/contour", "", "work", "file:///home/x");
         CHECK(cmd.arguments == QStringList { "profile", "work", "working-directory", "/home/x" });
     }
 }
@@ -480,7 +490,7 @@ TEST_CASE("foldedBindingCodepoint folds only the ASCII letter case", "[helper][i
     }
 }
 
-TEST_CASE("the binding fold and contour::input::unshiftedCodepoint cannot fight", "[helper][input]")
+TEST_CASE("the binding fold and unshiftedCodepoint cannot fight", "[helper][input]")
 {
     using contour::config::foldedBindingCodepoint;
     using contour::input::unshiftedCodepoint;
@@ -542,7 +552,8 @@ input_mapping:
     {
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_P, ctrlShift, QStringLiteral("\x10"));
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
+        contour::session::sendKeyEvent(
+            &ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         CHECK(pty.stdinBuffer().empty());
     }
 
@@ -551,7 +562,8 @@ input_mapping:
         // Empty text, so sendKeyEvent falls back to its Qt::Key -> character table.
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_P, ctrlShift, QString());
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
+        contour::session::sendKeyEvent(
+            &ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         CHECK(pty.stdinBuffer().empty());
     }
 
@@ -577,7 +589,8 @@ input_mapping:
 #endif
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_P, Qt::AltModifier, QStringLiteral("p"));
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
+        contour::session::sendKeyEvent(
+            &ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         CHECK(pty.stdinBuffer().empty());
     }
 
@@ -587,13 +600,13 @@ input_mapping:
         // simply made the session swallow all input.
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_Y, ctrlShift, QStringLiteral("y"));
         pty.stdinBuffer().clear();
-        contour::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
+        contour::session::sendKeyEvent(
+            &ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
         CHECK_FALSE(pty.stdinBuffer().empty());
     }
 }
 
-TEST_CASE("contour::platform::toQString decodes a path in the encoding it is actually stored in",
-          "[contour][helper]")
+TEST_CASE("toQString decodes a path in the encoding it is actually stored in", "[contour][helper]")
 {
     // QString::fromStdString(path.generic_string()) is the obvious spelling and is silently lossy on
     // Windows: generic_string() narrows the native wide path through the ANSI code page while

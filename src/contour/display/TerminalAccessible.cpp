@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/TerminalSession.h>
 #include <contour/display/CaretGeometry.h>
 #include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/display/ViewportTextIndex.h>
+#include <contour/session/TerminalSession.h>
 
 #include <vtbackend/Terminal.h>
 

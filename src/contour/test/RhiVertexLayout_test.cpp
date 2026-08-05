@@ -90,7 +90,7 @@ TEST_CASE("computeEffectiveClip: no inner and no node clip yields no clip", "[rh
 
 TEST_CASE("computeEffectiveClip: only the inner scissor applies", "[rhi][scissor]")
 {
-    auto const inner = ScissorRect { .x = 10, .y = 20, .width = 100, .height = 50 };
+    auto const inner = contour::display::ScissorRect { .x = 10, .y = 20, .width = 100, .height = 50 };
     auto const clip = computeEffectiveClip(inner, std::nullopt);
     REQUIRE(clip.has_value());
     CHECK(clip->x == 10);
@@ -101,7 +101,7 @@ TEST_CASE("computeEffectiveClip: only the inner scissor applies", "[rhi][scissor
 
 TEST_CASE("computeEffectiveClip: only the node clip applies", "[rhi][scissor]")
 {
-    auto const node = ScissorRect { .x = 0, .y = 33, .width = 1024, .height = 600 };
+    auto const node = contour::display::ScissorRect { .x = 0, .y = 33, .width = 1024, .height = 600 };
     auto const clip = computeEffectiveClip(std::nullopt, node);
     REQUIRE(clip.has_value());
     CHECK(clip->x == 0);
@@ -114,8 +114,8 @@ TEST_CASE("computeEffectiveClip: both present yields their intersection (only sh
 {
     // The node clips the terminal to its item rect; the inner scissor confines smooth-scroll to the main
     // area. The effective clip is the overlap and is never larger than either.
-    auto const node = ScissorRect { .x = 0, .y = 0, .width = 1024, .height = 600 };
-    auto const inner = ScissorRect { .x = 100, .y = 50, .width = 2000, .height = 2000 };
+    auto const node = contour::display::ScissorRect { .x = 0, .y = 0, .width = 1024, .height = 600 };
+    auto const inner = contour::display::ScissorRect { .x = 100, .y = 50, .width = 2000, .height = 2000 };
     auto const clip = computeEffectiveClip(inner, node);
     REQUIRE(clip.has_value());
     CHECK(clip->x == 100);
@@ -131,8 +131,8 @@ TEST_CASE("computeEffectiveClip: both present yields their intersection (only sh
 TEST_CASE("computeEffectiveClip: disjoint inner and node yield an empty (clip-everything) rect",
           "[rhi][scissor]")
 {
-    auto const node = ScissorRect { .x = 0, .y = 0, .width = 100, .height = 100 };
-    auto const inner = ScissorRect { .x = 500, .y = 500, .width = 100, .height = 100 };
+    auto const node = contour::display::ScissorRect { .x = 0, .y = 0, .width = 100, .height = 100 };
+    auto const inner = contour::display::ScissorRect { .x = 500, .y = 500, .width = 100, .height = 100 };
     auto const clip = computeEffectiveClip(inner, node);
     REQUIRE(clip.has_value());
     CHECK(clip->empty());

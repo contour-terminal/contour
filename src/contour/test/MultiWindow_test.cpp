@@ -11,9 +11,9 @@
 // untouched.
 
 #include <contour/ContourGuiApp.h>
-#include <contour/PaneProxy.h>
-#include <contour/TerminalSessionManager.h>
 #include <contour/WindowController.h>
+#include <contour/session/PaneProxy.h>
+#include <contour/session/TerminalSessionManager.h>
 #include <contour/test/GuiTestFixtures.h>
 
 #include <QtCore/QCoreApplication>
@@ -40,7 +40,9 @@ using contour::test::ScopedController;
 using contour::test::TestApp;
 
 /// Mints @p n model tabs in the controller's window (no backing sessions).
-void createTabs(contour::TerminalSessionManager& manager, contour::WindowController& controller, int n)
+void createTabs(contour::session::TerminalSessionManager& manager,
+                contour::WindowController& controller,
+                int n)
 {
     for (int i = 0; i < n; ++i)
         REQUIRE(manager.model().createTab(controller.windowId()) != nullptr);
@@ -900,7 +902,7 @@ TEST_CASE("TerminalSessionManager splits, focuses and closes panes through the a
     CHECK_NOTHROW(manager.focusPane(vtworkspace::FocusDirection::Right, acting));
 
     // Closing the active pane collapses the split back to a single leaf.
-    manager.closeActivePane(window->activeSession(), contour::SessionEnd::Destroy);
+    manager.closeActivePane(window->activeSession(), contour::session::SessionEnd::Destroy);
     CHECK(tab->rootPane()->isLeaf());
 
     window->closeTabAtIndex(0);
@@ -1220,7 +1222,7 @@ TEST_CASE("manager tab switching and moving route for the acting session", "[con
     manager.moveTabToRight(nullptr);
     manager.closeTab(nullptr);
     manager.splitActivePane(true, nullptr);
-    manager.closeActivePane(nullptr, contour::SessionEnd::Destroy);
+    manager.closeActivePane(nullptr, contour::session::SessionEnd::Destroy);
     manager.focusPane(vtworkspace::FocusDirection::Left, nullptr);
     CHECK(window->activeTabIndex() == before);
 
@@ -1275,7 +1277,7 @@ TEST_CASE("manager pane split/close/focus operate on the acting session's tab", 
     QCoreApplication::processEvents();
 
     // Close the active pane; the tab collapses back to a single pane.
-    manager.closeActivePane(window->activeSession(), contour::SessionEnd::Destroy);
+    manager.closeActivePane(window->activeSession(), contour::session::SessionEnd::Destroy);
     QCoreApplication::processEvents();
     CHECK_FALSE(tab->hasMultiplePanes());
 
@@ -1303,5 +1305,5 @@ TEST_CASE("manager guards unknown windows and null acting sessions", "[contour][
     CHECK_NOTHROW(manager.moveTabToRight(nullptr));
     CHECK_NOTHROW(manager.splitActivePane(/*vertical*/ true, nullptr));
     CHECK_NOTHROW(manager.focusPane(vtworkspace::FocusDirection::Left, nullptr));
-    CHECK_NOTHROW(manager.closeActivePane(nullptr, contour::SessionEnd::Destroy));
+    CHECK_NOTHROW(manager.closeActivePane(nullptr, contour::session::SessionEnd::Destroy));
 }

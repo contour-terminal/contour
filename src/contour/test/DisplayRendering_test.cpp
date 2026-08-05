@@ -17,12 +17,13 @@
 // window (hence never had a render target), which the offscreen platform supplies perfectly well. See
 // the teardown-lifetimes section there.
 
-#include <contour/TerminalSession.h>
-#include <contour/TerminalSessionManager.h>
 #include <contour/WindowController.h>
 #include <contour/config/Actions.h>
 #include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
+#include <contour/input/MouseMapping.h>
+#include <contour/session/TerminalSession.h>
+#include <contour/session/TerminalSessionManager.h>
 #include <contour/test/GuiTestFixtures.h>
 
 #include <vtbackend/primitives.h>
@@ -128,7 +129,7 @@ struct DisplayHarness
 {
     contour::test::TestApp testApp;
     vtpty::ChannelPty* pty = nullptr; // owned by the session's terminal
-    std::unique_ptr<contour::TerminalSession> session;
+    std::unique_ptr<contour::session::TerminalSession> session;
     std::unique_ptr<QQuickWindow> window;                 // null under HarnessWindow::None
     contour::display::TerminalDisplay* display = nullptr; // manually deleted in teardown
     contour::WindowController* controller = nullptr;      // manager-owned; removed in teardown
@@ -139,7 +140,7 @@ struct DisplayHarness
         auto ptyOwned = std::make_unique<vtpty::ChannelPty>(
             vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) });
         pty = ptyOwned.get();
-        session = std::make_unique<contour::TerminalSession>(
+        session = std::make_unique<contour::session::TerminalSession>(
             &testApp.app().sessionsManager(), std::move(ptyOwned), testApp.app());
 
         if (windowMode == HarnessWindow::Shown)
@@ -207,7 +208,7 @@ struct DisplayHarness
             testApp.app().sessionsManager().removeWindowController(controller->windowId());
             controller = nullptr;
         }
-        delete display; // while the session still lives: ~TerminalDisplay detaches from it
+        delete display; // while the session still lives: ~contour::display::TerminalDisplay detaches from it
         display = nullptr;
         QCoreApplication::processEvents();
         session.reset(); // joins the session threads (PTY already closed)
@@ -659,7 +660,7 @@ TEST_CASE("display: the permission machinery routes guarded roles end-to-end", "
     // next request without asking again.
     auto fontAsks = 0;
     QObject::connect(h.session.get(),
-                     &contour::TerminalSession::requestPermissionForFontChange,
+                     &contour::session::TerminalSession::requestPermissionForFontChange,
                      h.session.get(),
                      [&fontAsks]() { ++fontAsks; });
 
@@ -698,10 +699,14 @@ TEST_CASE("display: bell rings the session signals and the alert path", "[displa
 
     auto bells = 0;
     auto alerts = 0;
-    QObject::connect(
-        h.session.get(), &contour::TerminalSession::onBell, h.session.get(), [&bells](float) { ++bells; });
-    QObject::connect(
-        h.session.get(), &contour::TerminalSession::onAlert, h.session.get(), [&alerts]() { ++alerts; });
+    QObject::connect(h.session.get(),
+                     &contour::session::TerminalSession::onBell,
+                     h.session.get(),
+                     [&bells](float) { ++bells; });
+    QObject::connect(h.session.get(),
+                     &contour::session::TerminalSession::onAlert,
+                     h.session.get(),
+                     [&alerts]() { ++alerts; });
 
     h.feedAndSettle("\a"sv);
     for (int i = 0; i < 50 && bells == 0; ++i)
@@ -815,7 +820,7 @@ TEST_CASE("display: a font-size change on one session does not leak to another o
     // Session B is a "second tab": a distinct session bound onto the SAME display.
     auto secondPty = std::make_unique<vtpty::ChannelPty>(
         vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) });
-    auto sessionB = std::make_unique<contour::TerminalSession>(
+    auto sessionB = std::make_unique<contour::session::TerminalSession>(
         &h.testApp.app().sessionsManager(), std::move(secondPty), h.testApp.app());
 
     // Switch to B, then increase B's font. The renderer now shows B's larger font.
@@ -1560,7 +1565,7 @@ TEST_CASE("display: a session re-bound onto a resized display adopts the live gr
     // produce for a brand-new window — deliberately NOT pre-sized to the resized display.
     auto const birthSize = vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) };
     auto secondPty = std::make_unique<vtpty::ChannelPty>(birthSize);
-    auto second = std::make_unique<contour::TerminalSession>(
+    auto second = std::make_unique<contour::session::TerminalSession>(
         &h.testApp.app().sessionsManager(), std::move(secondPty), h.testApp.app());
     REQUIRE(second->terminal().totalPageSize() == birthSize);
 
@@ -1735,7 +1740,7 @@ TEST_CASE("display: a session destroyed before its display leaves no dangling ba
     // the frame path's guards pass it through. Built by hand: the harness deletes the display first.
     contour::test::TestApp testApp;
     auto display = std::make_unique<contour::display::TerminalDisplay>();
-    auto session = std::make_unique<contour::TerminalSession>(
+    auto session = std::make_unique<contour::session::TerminalSession>(
         &testApp.app().sessionsManager(),
         std::make_unique<vtpty::ChannelPty>(
             vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) }),
@@ -1813,7 +1818,7 @@ TEST_CASE("display: rebinding the session under live frames does not tear a fram
     auto secondPty = std::make_unique<vtpty::ChannelPty>(
         vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) });
     auto* second = secondPty.get();
-    auto secondSession = std::make_unique<contour::TerminalSession>(
+    auto secondSession = std::make_unique<contour::session::TerminalSession>(
         &h.testApp.app().sessionsManager(), std::move(secondPty), h.testApp.app());
 
     for (auto round = 0; round < 10; ++round)

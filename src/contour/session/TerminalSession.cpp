@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ContourGuiApp.h>
-#include <contour/TerminalSession.h>
 #include <contour/config/Actions.h>
 #include <contour/display/CaretGeometry.h>
 #include <contour/display/Logging.h>
 #include <contour/display/TerminalDisplay.h>
-#include <contour/helper.h>
 #include <contour/input/KeyMapping.h>
 #include <contour/input/Logging.h>
 #include <contour/input/MouseMapping.h>
 #include <contour/platform/ExternalLauncher.h>
 #include <contour/platform/QtInvoke.h>
 #include <contour/platform/SpeechSynthesizer.h>
+#include <contour/session/Logging.h>
+#include <contour/session/SpawnCommand.h>
+#include <contour/session/TerminalSession.h>
 
 #include <vtbackend/HintModeHandler.h>
 #include <vtbackend/MatchModes.h>
@@ -76,7 +77,7 @@ using namespace vtbackend;
 
 namespace fs = std::filesystem;
 
-namespace contour
+namespace contour::session
 {
 
 namespace
@@ -3107,7 +3108,7 @@ void TerminalSession::spawnNewTerminal(string const& profileName)
     if (_config.spawnNewProcess.value())
     {
         sessionLog()("spawning new process");
-        auto const command = ::contour::buildSpawnTerminalCommand(
+        auto const command = buildSpawnTerminalCommand(
             _app.programPath(), _config.configFile.generic_string(), profileName, wd);
         _app.externalLauncher().runDetached(command.program, command.arguments);
     }
@@ -3541,4 +3542,4 @@ bool TerminalSession::setData(QModelIndex const& index, QVariant const& value, i
 }
 // }}}
 
-} // namespace contour
+} // namespace contour::session

@@ -22,7 +22,10 @@ namespace contour
 {
 
 class NativeController;
-class TerminalSessionManager;
+namespace session
+{
+    class TerminalSessionManager;
+}
 
 /// Reconciles one daemon window's tab/pane tree into @p window of @p manager,
 /// binding each realized pane to its remote session (via the controller's
@@ -36,7 +39,7 @@ class TerminalSessionManager;
 ///        (lowest-id) window — the single-window path.
 /// @param pageSize The size each realized pane's grid/pty is born at (the live
 ///        window size), or nullopt for the profile default.
-void applyRemoteLayout(TerminalSessionManager& manager,
+void applyRemoteLayout(session::TerminalSessionManager& manager,
                        vtworkspace::WindowId window,
                        NativeController& controller,
                        std::optional<uint64_t> daemonWindow = std::nullopt,

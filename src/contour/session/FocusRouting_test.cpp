@@ -17,9 +17,9 @@
 // is the tested path. All cases here run headless: no [display] tag, nothing skips offscreen.
 
 #include <contour/ContourGuiApp.h>
-#include <contour/TerminalSession.h>
-#include <contour/TerminalSessionManager.h>
 #include <contour/WindowController.h>
+#include <contour/session/TerminalSession.h>
+#include <contour/session/TerminalSessionManager.h>
 #include <contour/test/GuiTestFixtures.h>
 
 #include <vtbackend/primitives.h>
@@ -49,28 +49,27 @@ using contour::test::ScopedController;
 using contour::test::TestApp;
 
 /// Turns on focus reporting (DECSET 1004) for @p session, as an application like vim would.
-void enableFocusTracking(contour::TerminalSession& session)
+void enableFocusTracking(contour::session::TerminalSession& session)
 {
     session.terminal().setMode(vtbackend::DECMode::FocusTracking, true);
 }
 
 /// Drops whatever the session has written so far, so a following assertion sees only the bytes the
 /// operation under test produced.
-void clearPtyInput(contour::TerminalSession& session)
+void clearPtyInput(contour::session::TerminalSession& session)
 {
     mockPtyOf(session).stdinBuffer().clear();
 }
 
 /// Escaped view of everything @p session wrote towards the shell (readable Catch2 diffs).
-[[nodiscard]] std::string writtenBy(contour::TerminalSession& session)
+[[nodiscard]] std::string writtenBy(contour::session::TerminalSession& session)
 {
     return crispy::escape(mockPtyOf(session).stdinBuffer());
 }
 
 /// The session backing the active pane of tab @p index in @p window.
-[[nodiscard]] contour::TerminalSession* sessionOfTabAt(contour::TerminalSessionManager& manager,
-                                                       vtworkspace::WindowId window,
-                                                       int index)
+[[nodiscard]] contour::session::TerminalSession* sessionOfTabAt(
+    contour::session::TerminalSessionManager& manager, vtworkspace::WindowId window, int index)
 {
     auto* modelWindow = manager.model().window(window);
     REQUIRE(modelWindow != nullptr);

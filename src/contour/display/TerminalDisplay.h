@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/TerminalSession.h>
 #include <contour/config/Actions.h>
 #include <contour/config/Config.h>
 #include <contour/display/ContentScale.h>
+#include <contour/display/RenderState.h>
 #include <contour/display/TerminalRenderNode.h>
-#include <contour/helper.h>
 #include <contour/input/MouseMapping.h>
+#include <contour/session/SessionInput.h>
+#include <contour/session/TerminalSession.h>
 
 #include <vtbackend/Color.h>
 #include <vtbackend/Metrics.h>
@@ -24,6 +25,7 @@
 #include <QtGui/QVector4D>
 #include <QtQml/QtQml>
 #include <QtQuick/QQuickItem>
+#include <QtQuick/QQuickWindow>
 #include <QtQuick/QSGRenderNode>
 
 #include <filesystem>
@@ -44,7 +46,10 @@ QT_END_NAMESPACE
 
 namespace contour
 {
-class TerminalSessionManager;
+namespace session
+{
+    class TerminalSessionManager;
+}
 class WindowController;
 } // namespace contour
 
@@ -58,12 +63,12 @@ class RhiRenderer;
 class TerminalDisplay: public QQuickItem
 {
     Q_OBJECT
-    Q_PROPERTY(TerminalSession* session READ getSessionHelper WRITE setSession NOTIFY sessionChanged)
+    Q_PROPERTY(session::TerminalSession* session READ getSessionHelper WRITE setSession NOTIFY sessionChanged)
     Q_PROPERTY(QString profile READ profileName WRITE setProfileName NOTIFY profileNameChanged)
     Q_PROPERTY(QString title READ title NOTIFY titleChanged)
     QML_ELEMENT
 
-    TerminalSession* getSessionHelper() { return _session; }
+    session::TerminalSession* getSessionHelper() { return _session; }
 
   public:
     explicit TerminalDisplay(QQuickItem* parent = nullptr);
@@ -111,7 +116,7 @@ class TerminalDisplay: public QQuickItem
     [[nodiscard]] bool hasRenderTarget() const noexcept { return _renderTarget != nullptr; }
 
     // NB: Use TerminalSession.attachDisplay, that one is calling this here. TODO(PR) ?
-    void setSession(TerminalSession* newSession);
+    void setSession(session::TerminalSession* newSession);
 
     /// Clears this display's session pointer, and — if the session's back-pointer still names this
     /// display — the session's back-pointer too. Called by TerminalSession::attachDisplay when another
@@ -121,7 +126,7 @@ class TerminalDisplay: public QQuickItem
     /// the session from posting into this display after it is destroyed.
     void releaseSession();
 
-    [[nodiscard]] TerminalSession& session() noexcept
+    [[nodiscard]] session::TerminalSession& session() noexcept
     {
         assert(_session != nullptr);
         return *_session;
@@ -348,7 +353,7 @@ class TerminalDisplay: public QQuickItem
   signals:
     void profileNameChanged();
     void titleChanged(QString const&);
-    void sessionChanged(TerminalSession*);
+    void sessionChanged(session::TerminalSession*);
     void terminalBufferChanged(vtbackend::ScreenType);
     void terminated();
     void showNotification(QString const& title, QString const& body);
@@ -397,7 +402,7 @@ class TerminalDisplay: public QQuickItem
     /// A choke point rather than a rule to remember, since the two writers reach it by different routes
     /// (setSession() rebinds, releaseSession() detaches). GUI THREAD ONLY. Does not emit
     /// sessionChanged() — setSession() emits only once the new session is fully wired up.
-    void assignSession(TerminalSession* newSession);
+    void assignSession(session::TerminalSession* newSession);
 
     void doDumpStateInternal();
 
@@ -507,12 +512,12 @@ class TerminalDisplay: public QQuickItem
     //
     std::string _profileName;
     std::string _programPath;
-    TerminalSession* _session = nullptr;
+    session::TerminalSession* _session = nullptr;
     /// The session manager this display is registered with, cached the first time the display learns
     /// of one (focus-in / setSession). Used by ~TerminalDisplay to evict this display from the
     /// manager's per-display bookkeeping even when the session has already been detached (a closed
     /// split pane is destroyed session-less), which a _session-routed call could not reach.
-    TerminalSessionManager* _manager = nullptr;
+    session::TerminalSessionManager* _manager = nullptr;
     std::chrono::steady_clock::time_point _startTime;
     text::DPI _lastFontDPI {};
     /// The app-wide forced-font-DPI provider (see ContentScale.h), injected in setSession(). Null until
@@ -542,7 +547,7 @@ class TerminalDisplay: public QQuickItem
 
     // {{{ Auto-scroll state for drag-selection outside window
     QTimer _autoScrollTimer;
-    AutoScrollInfo _autoScrollState;
+    session::AutoScrollInfo _autoScrollState;
     // }}}
 
     RenderStateManager _state;

@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/ExitCode.h>
-#include <contour/TerminalSessionManager.h>
 #include <contour/UiStyleProvider.h>
 #include <contour/cli/ContourApp.h>
 #include <contour/command/CommandHistoryStore.h>
 #include <contour/config/Config.h>
 #include <contour/config/LayoutStore.h>
 #include <contour/display/Logging.h>
-#include <contour/helper.h>
 #include <contour/platform/ExternalLauncher.h>
 #include <contour/platform/SpeechSynthesizer.h>
+#include <contour/session/ExitCode.h>
+#include <contour/session/TerminalSessionManager.h>
 
 #include <vtpty/Process.h>
 #include <vtpty/SshSession.h>
@@ -44,7 +43,10 @@ namespace display
 
 class NativeController;
 class RoutingSessionFactory;
-class TerminalSession;
+namespace session
+{
+    class TerminalSession;
+}
 class TmuxController;
 class WindowController;
 
@@ -103,7 +105,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     ///                       service (on Linux that is a speech-dispatcher connection per use).
     /// @param env            The process environment every part of the application reads through.
     explicit ContourGuiApp(crispy::environment const& env,
-                           std::unique_ptr<SessionFactory> sessionFactory = nullptr,
+                           std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
                            std::unique_ptr<platform::ExternalLauncher> externalLauncher = nullptr,
                            std::unique_ptr<config::LayoutStore> layoutStore = nullptr,
                            std::unique_ptr<command::CommandHistoryStore> commandHistoryStore = nullptr,
@@ -160,13 +162,13 @@ class ContourGuiApp: public QObject, public cli::ContourApp
 
     /// The session exit status (Process/SSH exit variant, or nullopt). Single source of truth in
     /// ExitCode.h, shared with the pure exitCodeFor() mapping used by run().
-    using ExitStatus = SessionExitStatus;
+    using ExitStatus = session::SessionExitStatus;
 
     [[nodiscard]] ExitStatus exitStatus() const noexcept { return _exitStatus; }
 
     [[nodiscard]] std::optional<std::filesystem::path> dumpStateAtExit() const;
 
-    void onExit(TerminalSession& session);
+    void onExit(session::TerminalSession& session);
 
     config::Config& config() noexcept { return _config; }
     [[nodiscard]] config::Config const& config() const noexcept { return _config; }
@@ -180,7 +182,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
 
     [[nodiscard]] bool liveConfig() const noexcept { return _config.live.value(); }
 
-    TerminalSessionManager& sessionsManager() noexcept { return _sessionManager; }
+    session::TerminalSessionManager& sessionsManager() noexcept { return _sessionManager; }
 
     [[nodiscard]] std::chrono::seconds earlyExitThreshold() const;
 
@@ -276,7 +278,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     // Declared before _sessionManager: the manager holds a reference to the factory.
     // Always a RoutingSessionFactory wrapping the injected/default factory,
     // so attach mode can switch the route without touching the manager.
-    std::unique_ptr<SessionFactory> _sessionFactory;
+    std::unique_ptr<session::SessionFactory> _sessionFactory;
     RoutingSessionFactory* _routingFactory = nullptr; ///< The concrete view of _sessionFactory.
     // The external-resource launcher (URL open / process spawn), reached by sessions via _app.
     std::unique_ptr<platform::ExternalLauncher> _externalLauncher;
@@ -286,7 +288,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     std::unique_ptr<command::CommandHistoryStore> _commandHistoryStore;
     // Shared by every session, reached via _app; @see speechSynthesizer().
     std::unique_ptr<platform::SpeechSynthesizer> _speechSynthesizer;
-    TerminalSessionManager _sessionManager;
+    session::TerminalSessionManager _sessionManager;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
     // Shared by every display, reached via the session; @see keyboardLayout(). Unlike the DPI
     // provider this needs no Qt application, so it is built eagerly with the app.

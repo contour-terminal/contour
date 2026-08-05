@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ContourGuiApp.h>
-#include <contour/PaneProxy.h>
 #include <contour/SettingsController.h>
 #include <contour/TabLabel.h>
-#include <contour/TerminalSession.h>
-#include <contour/TerminalSessionManager.h>
 #include <contour/WindowController.h>
 #include <contour/config/LayoutBuilder.h>
 #include <contour/platform/ColorConversion.h>
+#include <contour/session/Logging.h>
+#include <contour/session/PaneProxy.h>
+#include <contour/session/TerminalSession.h>
+#include <contour/session/TerminalSessionManager.h>
 
 #include <vtbackend/primitives.h>
 
@@ -25,7 +26,7 @@
 
 using namespace std::string_literals;
 
-namespace contour
+namespace contour::session
 {
 
 TerminalSessionManager::TerminalSessionManager(ContourGuiApp& app,
@@ -1535,4 +1536,4 @@ void TerminalSessionManager::activatePane(vtworkspace::TabId tab, vtworkspace::P
 
 // }}}
 
-} // namespace contour
+} // namespace contour::session

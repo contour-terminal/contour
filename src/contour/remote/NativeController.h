@@ -18,9 +18,9 @@
 /// terminal, which does not exist when `createPty` hands out the pty, so
 /// `bindTerminal` closes the cycle and primes the mirror.
 
-#include <contour/SessionFactory.h>
 #include <contour/remote/ReactorThread.h>
 #include <contour/remote/RemoteController.h>
+#include <contour/session/SessionFactory.h>
 
 #include <vtbackend/Settings.h>
 
@@ -52,10 +52,13 @@
 namespace contour
 {
 
-class TerminalSessionManager;
+namespace session
+{
+    class TerminalSessionManager;
+}
 
 /// The attach-mode session factory and remote-session registry.
-class NativeController final: public QObject, public SessionFactory, public RemoteController
+class NativeController final: public QObject, public session::SessionFactory, public RemoteController
 {
     Q_OBJECT
 

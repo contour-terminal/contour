@@ -6,6 +6,7 @@
 #include <contour/command/CommandCatalog.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/input/HorizontalWheelGesture.h>
+#include <contour/session/PaneProxy.h>
 
 #include <vtbackend/Color.h>
 
@@ -30,9 +31,11 @@ class Window;
 namespace contour
 {
 
-class TerminalSessionManager;
-class TerminalSession;
-class PaneProxy;
+namespace session
+{
+    class TerminalSessionManager;
+    class TerminalSession;
+} // namespace session
 class SettingsController;
 
 /// Per-OS-window Qt/QML adapter over one vtworkspace::Window.
@@ -69,8 +72,10 @@ class WindowController: public QAbstractListModel, public command::TabTitleProvi
                    titleBarContextMenuModelChanged)
     Q_PROPERTY(int activeTabIndex READ activeTabIndex NOTIFY activeTabIndexChanged)
     Q_PROPERTY(bool multimediaReady READ isMultimediaReady NOTIFY multimediaReadyChanged)
-    Q_PROPERTY(contour::PaneProxy* activeTabRootPane READ activeTabRootPane NOTIFY activeTabRootPaneChanged)
-    Q_PROPERTY(contour::TerminalSession* activeSession READ activeSession NOTIFY activeSessionChanged)
+    Q_PROPERTY(
+        contour::session::PaneProxy* activeTabRootPane READ activeTabRootPane NOTIFY activeTabRootPaneChanged)
+    Q_PROPERTY(
+        contour::session::TerminalSession* activeSession READ activeSession NOTIFY activeSessionChanged)
     Q_PROPERTY(bool titleBarVisible READ titleBarVisible NOTIFY titleBarVisibleChanged)
     // Tab-strip (tab bar) placement + visibility, exposed to Main.qml. `tabBarPosition` is an int
     // (0 = Top, 1 = Bottom) matching the TabBarPosition enumerator order. `tabBarShouldShow`
@@ -102,7 +107,7 @@ class WindowController: public QAbstractListModel, public command::TabTitleProvi
 
     /// @param manager  The session-lifetime service + model host (must outlive this controller).
     /// @param windowId The backing vtworkspace::Window this controller adapts.
-    WindowController(TerminalSessionManager& manager, vtworkspace::WindowId windowId);
+    WindowController(session::TerminalSessionManager& manager, vtworkspace::WindowId windowId);
     ~WindowController() override;
 
     WindowController(WindowController const&) = delete;
@@ -315,8 +320,8 @@ class WindowController: public QAbstractListModel, public command::TabTitleProvi
     [[nodiscard]] std::vector<std::string> tabTitles() const override;
 
     // {{{ PaneProxy tree + window-service reads
-    [[nodiscard]] PaneProxy* activeTabRootPane() const noexcept { return _activeTabRootProxy; }
-    [[nodiscard]] TerminalSession* activeSession() const noexcept;
+    [[nodiscard]] session::PaneProxy* activeTabRootPane() const noexcept { return _activeTabRootProxy; }
+    [[nodiscard]] session::TerminalSession* activeSession() const noexcept;
     [[nodiscard]] bool titleBarVisible() const noexcept;
     [[nodiscard]] bool isMultimediaReady() const noexcept;
     // }}}
@@ -512,7 +517,7 @@ class WindowController: public QAbstractListModel, public command::TabTitleProvi
 
     /// Get-or-create a PaneProxy for @p id (reused across rebuilds so QML items survive). Public so the
     /// PaneProxy can be constructed against the manager. (Used only by rebuildActiveTabPaneProxies.)
-    [[nodiscard]] PaneProxy* getProxy(vtworkspace::PaneId id);
+    [[nodiscard]] session::PaneProxy* getProxy(vtworkspace::PaneId id);
 
     // {{{ Called by the manager's ModelEvents router (dispatched here by WindowId)
     void onTabAboutToBeAdded(int index);
@@ -589,7 +594,9 @@ class WindowController: public QAbstractListModel, public command::TabTitleProvi
     /// The row index of @p tab in this window, or -1.
     [[nodiscard]] int rowOfTab(vtworkspace::TabId tab) const noexcept;
     /// Resolves the label shown on @p row's tab.
-    [[nodiscard]] QString resolvedTabLabel(vtworkspace::Tab* tab, TerminalSession* session, int row) const;
+    [[nodiscard]] QString resolvedTabLabel(vtworkspace::Tab* tab,
+                                           session::TerminalSession* session,
+                                           int row) const;
 
     /// Resolves the OS window to operate on for a geometry request from @p requester, adopting the
     /// requester's QQuickWindow as _osWindow when none is recorded yet (same rule as focusDisplay).
@@ -618,7 +625,7 @@ class WindowController: public QAbstractListModel, public command::TabTitleProvi
     /// away from Contour notifies the shell (DECSET 1004) even when no display holds Qt item focus.
     void onOSWindowActiveChanged();
 
-    TerminalSessionManager& _manager;
+    session::TerminalSessionManager& _manager;
     vtworkspace::WindowId _windowId;
 
     // Wheel state for the tab strip. Separate from the grid's (which lives on TerminalSession) so a
@@ -662,7 +669,7 @@ class WindowController: public QAbstractListModel, public command::TabTitleProvi
     /// open (the clicked pane's shell exits, the model activates a sibling in its place), and "Close Pane"
     /// or "Paste" would then land on a terminal the user never pointed at. A QPointer, so a pane that dies
     /// under the open menu makes the row a no-op rather than a use-after-free.
-    QPointer<TerminalSession> _contextMenuSession;
+    QPointer<session::TerminalSession> _contextMenuSession;
     // }}}
 
     display::TerminalDisplay* _activeDisplay = nullptr;
@@ -677,8 +684,8 @@ class WindowController: public QAbstractListModel, public command::TabTitleProvi
 
     // PaneProxy tree for this window's active tab. Owned here, reused by PaneId across rebuilds so a
     // surviving pane's QML item / display is not torn down when a sibling splits or closes.
-    std::unordered_map<uint64_t, PaneProxy*> _paneProxies;
-    PaneProxy* _activeTabRootProxy = nullptr;
+    std::unordered_map<uint64_t, session::PaneProxy*> _paneProxies;
+    session::PaneProxy* _activeTabRootProxy = nullptr;
 
     // Carries beginMoveRows()'s result from onTabAboutToBeMoved() to onTabMoved().
     bool _tabMoveInProgress = false;

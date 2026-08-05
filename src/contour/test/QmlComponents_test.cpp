@@ -107,7 +107,8 @@ class MockTabController: public QAbstractListModel
         PaneCountRole = Qt::UserRole + 4,
         SessionIdRole = Qt::UserRole + 5,
         RawTitleRole =
-            Qt::UserRole + 6, //!< Must mirror TerminalSessionManager; TabStrip's delegate requires it.
+            Qt::UserRole
+            + 6, //!< Must mirror contour::session::TerminalSessionManager; TabStrip's delegate requires it.
         ZoomedRole =
             Qt::UserRole + 7, //!< Ditto: TabStrip's delegate requires it (drives TabItem's zoom badge).
     };

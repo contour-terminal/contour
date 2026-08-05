@@ -10,7 +10,7 @@
 #include <optional>
 #include <variant>
 
-namespace contour
+namespace contour::session
 {
 
 /// The terminal's session exit status: the process (or SSH) exit variant, or nullopt when the app
@@ -57,4 +57,4 @@ using SessionExitStatus = std::optional<std::variant<vtpty::Process::ExitStatus
 #endif
 }
 
-} // namespace contour
+} // namespace contour::session

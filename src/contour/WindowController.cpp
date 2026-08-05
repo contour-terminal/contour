@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ContextMenuModel.h>
 #include <contour/ContourGuiApp.h>
-#include <contour/PaneProxy.h>
 #include <contour/SettingsController.h>
 #include <contour/TabColorScheme.h>
 #include <contour/TabLabel.h>
-#include <contour/TerminalSession.h>
-#include <contour/TerminalSessionManager.h>
 #include <contour/WindowController.h>
 #include <contour/command/ContextMenu.h>
 #include <contour/command/Shortcut.h>
 #include <contour/command/TitleBarContextMenu.h>
 #include <contour/config/GuiConfigStore.h>
 #include <contour/display/Logging.h>
-#include <contour/helper.h>
 #include <contour/input/MouseMapping.h>
 #include <contour/platform/ColorConversion.h>
+#include <contour/session/FontControl.h>
+#include <contour/session/PaneProxy.h>
+#include <contour/session/TerminalSession.h>
+#include <contour/session/TerminalSessionManager.h>
 
 #include <QtCore/QDir>
 #include <QtGui/QCursor>
@@ -35,7 +35,7 @@
 namespace contour
 {
 
-WindowController::WindowController(TerminalSessionManager& manager, vtworkspace::WindowId windowId):
+WindowController::WindowController(session::TerminalSessionManager& manager, vtworkspace::WindowId windowId):
     _manager { manager },
     _windowId { windowId },
     // The palette's sources. They hold references into the app's Config, which outlives every window
@@ -325,7 +325,9 @@ int WindowController::activeTabIndex() const noexcept
     return win != nullptr ? win->activeTabIndex() : -1;
 }
 
-QString WindowController::resolvedTabLabel(vtworkspace::Tab* tab, TerminalSession* session, int row) const
+QString WindowController::resolvedTabLabel(vtworkspace::Tab* tab,
+                                           session::TerminalSession* session,
+                                           int row) const
 {
     if (tab == nullptr)
         return session != nullptr ? QString::fromStdString(session->name().value_or("")) : QString {};
@@ -592,7 +594,7 @@ void WindowController::closeWindow()
     // degrades to local registry cleanup because their tabs are already gone), and finally close the OS
     // window and ask the manager to drop this controller.
     auto* win = window();
-    std::vector<TerminalSession*> doomed;
+    std::vector<session::TerminalSession*> doomed;
     if (win != nullptr)
         for (auto const row: std::views::iota(0, win->tabCount()))
             if (auto* tab = win->tabAt(row); tab != nullptr)
@@ -615,11 +617,11 @@ void WindowController::closeWindow()
         emit activeTabRootPaneChanged();
     }
 
-    // SessionEnd::Detach: closing a WINDOW is not ending its sessions. That only differs for a
+    // session::SessionEnd::Detach: closing a WINDOW is not ending its sessions. That only differs for a
     // session this process does not own — in attach mode the daemon keeps them running and the next
     // `contour client` shows them again, which is the whole point of daemon mode. Ending one is the
     // ClosePane/CloseTab action, not this.
-    _manager.terminate(doomed, SessionEnd::Detach);
+    _manager.terminate(doomed, session::SessionEnd::Detach);
 
     // Close the OS window itself. When the user clicked the close button, the QQuickWindow is already
     // closing and this is a harmless no-op; when we got here programmatically (an emptied window after a
@@ -653,7 +655,7 @@ bool WindowController::canCloseWindow() const noexcept
 // }}}
 
 // {{{ Window-service reads
-TerminalSession* WindowController::activeSession() const noexcept
+session::TerminalSession* WindowController::activeSession() const noexcept
 {
     if (auto* tab = activeModelTab())
         if (auto* active = tab->activePane())
@@ -888,7 +890,8 @@ void WindowController::showInitial()
     // Size the still-unmapped window from the REAL cell metrics (headless FreeType math, done during
     // session attach) at the target screen's resolved scale, so the first map is the final geometry.
     auto const scale = display->contentScale();
-    auto const marginsDevice = geometry::scaled(toGeometryMargins(session->profile().margins.value()), scale);
+    auto const marginsDevice =
+        geometry::scaled(session::toGeometryMargins(session->profile().margins.value()), scale);
     auto const totalPage = session->terminal().totalPageSize();
     auto const size =
         geometry::windowSizeForPage(totalPage, display->cellSize(), marginsDevice, scale, chrome());
@@ -977,7 +980,7 @@ void WindowController::updateSizeHintsFor(display::TerminalDisplay& requester, H
 
     auto const scale = requester.contentScale();
     auto const cellSize = requester.cellSize();
-    auto const margins = toGeometryMargins(requester.session().profile().margins.value());
+    auto const margins = session::toGeometryMargins(requester.session().profile().margins.value());
     auto const hints = geometry::sizeHintsFor(cellSize, margins, scale, chrome());
 
     // The character-cell resize grid (base + increment) is cleared while maximized/fullscreen. An
@@ -1097,7 +1100,7 @@ bool WindowController::resizeWindowForPage(display::TerminalDisplay& requester,
 
     auto const scale = requester.contentScale();
     auto const marginsDevice =
-        geometry::scaled(toGeometryMargins(requester.session().profile().margins.value()), scale);
+        geometry::scaled(session::toGeometryMargins(requester.session().profile().margins.value()), scale);
     // The pane's requirement as a logical extent (ceil side of the rounding law; chrome added later).
     auto const leafLogical = geometry::windowSizeForPage(
         totalPageSize, requester.cellSize(), marginsDevice, scale, geometry::Chrome {});
@@ -1216,12 +1219,12 @@ void WindowController::onDisplayDetached(display::TerminalDisplay* display) noex
 }
 
 // {{{ PaneProxy tree
-PaneProxy* WindowController::getProxy(vtworkspace::PaneId id)
+session::PaneProxy* WindowController::getProxy(vtworkspace::PaneId id)
 {
     auto it = _paneProxies.find(id.value);
     if (it != _paneProxies.end())
         return it->second;
-    auto* proxy = new PaneProxy(_manager, id);
+    auto* proxy = new session::PaneProxy(_manager, id);
     // Parent the proxy to this controller: the rebuild/close paths deleteLater() pruned proxies
     // explicitly, but a controller torn down through removeWindowController() alone (without a
     // preceding closeWindow(), e.g. in tests) would otherwise strand its live proxies.

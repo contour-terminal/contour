@@ -165,7 +165,7 @@ struct DaemonFixture
 }
 
 /// The router's default factory, unreachable in these tests: attach mode always installs a delegate.
-struct UnusedDefaultFactory final: contour::SessionFactory
+struct UnusedDefaultFactory final: contour::session::SessionFactory
 {
     [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(std::optional<std::string>,
                                                         std::optional<vtbackend::PageSize>,
@@ -223,7 +223,7 @@ struct MirrorPane
 
     /// @param factory The ROUTER, not the controller — @see AttachRoute.
     /// @param pty The pty that factory handed out.
-    MirrorPane(contour::SessionFactory& factory, std::unique_ptr<vtpty::Pty> pty)
+    MirrorPane(contour::session::SessionFactory& factory, std::unique_ptr<vtpty::Pty> pty)
     {
         auto settings = vtbackend::Settings {};
         settings.pageSize = pty->pageSize();
@@ -263,7 +263,7 @@ void requireConnected(contour::RemoteController& controller, std::chrono::millis
 /// Connects @p controller, waits for the daemon's first layout, and realizes it into @p window.
 /// @return The realized tab, or nullptr if no layout ever arrived.
 [[nodiscard]] vtworkspace::Tab* attachAndRealize(contour::NativeController& controller,
-                                                 contour::TerminalSessionManager& manager,
+                                                 contour::session::TerminalSessionManager& manager,
                                                  vtworkspace::WindowId window)
 {
     requireConnected(controller);
@@ -286,7 +286,7 @@ namespace
 {
 
 /// A factory that can never back a session (the attach guard's stand-in).
-struct RefusingFactory final: contour::SessionFactory
+struct RefusingFactory final: contour::session::SessionFactory
 {
     [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(std::optional<std::string> /*cwd*/,
                                                         std::optional<vtbackend::PageSize> pageSize,
@@ -645,7 +645,7 @@ TEST_CASE("the ClosePane action ends a remote session like a local one", "[attac
 
     // The ClosePane action's own path: TerminalSession::operator()(actions::ClosePane) forwards
     // here, and the acting session names the tab whose ACTIVE pane closes.
-    app.manager().closeActivePane(win->activeSession(), contour::SessionEnd::Destroy);
+    app.manager().closeActivePane(win->activeSession(), contour::session::SessionEnd::Destroy);
 
     CHECK(waitUntil([&] { return liveSessions() == 1; }));
     CHECK(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 1);
@@ -708,7 +708,7 @@ TEST_CASE("attach sizes remote panes to the panes the GUI renders", "[attach][co
     auto const pushed = ac->layout();
     auto const leftSession = pushed->tabs.front().root.children[0].session;
     auto const rightSession = pushed->tabs.front().root.children[1].session;
-    auto const paneFor = [&](uint64_t remote) -> contour::TerminalSession* {
+    auto const paneFor = [&](uint64_t remote) -> contour::session::TerminalSession* {
         for (auto* session: app.manager().sessionsOfTab(tab))
             if (ac->sessionForPty(&session->terminal().device()) == remote)
                 return session;
@@ -1168,7 +1168,7 @@ TEST_CASE("a refusing session factory blocks every creation entry point", "[atta
 // because they call NativeController::bindTerminal directly.
 TEST_CASE("the routing session factory forwards every verb to its delegate", "[attach][factory]")
 {
-    struct RecordingFactory final: contour::SessionFactory
+    struct RecordingFactory final: contour::session::SessionFactory
     {
         int ptys = 0;
         int tabs = 0;

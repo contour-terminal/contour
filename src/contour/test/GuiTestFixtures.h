@@ -2,13 +2,13 @@
 #pragma once
 
 #include <contour/ContourGuiApp.h>
-#include <contour/SessionFactory.h>
-#include <contour/TerminalSessionManager.h>
 #include <contour/WindowController.h>
 #include <contour/command/CommandCatalog.h>
 #include <contour/command/CommandHistoryStore.h>
 #include <contour/config/LayoutStore.h>
 #include <contour/platform/ExternalLauncher.h>
+#include <contour/session/SessionFactory.h>
+#include <contour/session/TerminalSessionManager.h>
 
 #include <vtpty/ChannelPty.h>
 #include <vtpty/MockPty.h>
@@ -43,7 +43,7 @@ namespace contour::test
 /// session-creation paths (new tab, new split pane) run headlessly — no process is spawned, and a
 /// test can seed/inspect each PTY's buffers. Records the cwd handed to each creation so
 /// working-directory inheritance is assertable.
-class MockPtySessionFactory final: public contour::SessionFactory
+class MockPtySessionFactory final: public contour::session::SessionFactory
 {
   public:
     /// The page size a created PTY falls back to when the caller passes no explicit @c pageSize (a
@@ -84,7 +84,7 @@ class MockPtySessionFactory final: public contour::SessionFactory
 /// towards the shell (key/mouse encodings, replies, focus events).
 /// @param session A session created over a MockPty (via MockPtySessionFactory or directly).
 /// @return The session's PTY, downcast. Throws std::bad_cast if it is not a MockPty.
-[[nodiscard]] inline vtpty::MockPty& mockPtyOf(contour::TerminalSession& session)
+[[nodiscard]] inline vtpty::MockPty& mockPtyOf(contour::session::TerminalSession& session)
 {
     return dynamic_cast<vtpty::MockPty&>(session.terminal().device());
 }
@@ -339,7 +339,7 @@ class TestApp
     /// @param speech Optional speech override; pass a RecordingSpeechSynthesizer (keep a raw
     ///                observation pointer first) to drive the read-aloud path. @see defaultSpeech()
     ///                for what a test app gets without one.
-    explicit TestApp(std::unique_ptr<contour::SessionFactory> factory = nullptr,
+    explicit TestApp(std::unique_ptr<contour::session::SessionFactory> factory = nullptr,
                      std::unique_ptr<contour::config::LayoutStore> layoutStore = nullptr,
                      std::unique_ptr<contour::command::CommandHistoryStore> commandHistoryStore = nullptr,
                      std::unique_ptr<contour::platform::SpeechSynthesizer> speech = nullptr):
@@ -360,7 +360,7 @@ class TestApp
     /// info, documentation) whose action reads its own contour.<cmd>.* parameters.
     /// @param args The command tokens after the program name (e.g. {"font-locator"}).
     explicit TestApp(std::initializer_list<char const*> args,
-                     std::unique_ptr<contour::SessionFactory> factory = nullptr):
+                     std::unique_ptr<contour::session::SessionFactory> factory = nullptr):
         _app(_environment, std::move(factory), makeRecordingLauncher(), nullptr, nullptr, defaultSpeech())
     {
         std::vector<char const*> argv;
@@ -372,7 +372,10 @@ class TestApp
     }
 
     [[nodiscard]] contour::ContourGuiApp& app() noexcept { return _app; }
-    [[nodiscard]] contour::TerminalSessionManager& manager() noexcept { return _app.sessionsManager(); }
+    [[nodiscard]] contour::session::TerminalSessionManager& manager() noexcept
+    {
+        return _app.sessionsManager();
+    }
     /// The recording launcher wired into this app (records URL-open / process-spawn requests).
     [[nodiscard]] RecordingExternalLauncher& launcher() noexcept { return *_launcher; }
 
@@ -411,11 +414,11 @@ class TestApp
 /// test may also remove the controller explicitly.
 struct ScopedController
 {
-    contour::TerminalSessionManager& manager;
+    contour::session::TerminalSessionManager& manager;
     contour::WindowController* controller;
     vtworkspace::WindowId id;
 
-    explicit ScopedController(contour::TerminalSessionManager& m):
+    explicit ScopedController(contour::session::TerminalSessionManager& m):
         manager(m), controller(m.createWindowController()), id(controller->windowId())
     {
     }

@@ -1,13 +1,12 @@
 #pragma once
 
-#include <contour/SessionFactory.h>
-#include <contour/TerminalSession.h>
 #include <contour/WindowController.h>
 #include <contour/command/CommandHistory.h>
 #include <contour/command/CommandHistoryStore.h>
 #include <contour/config/LayoutStore.h>
 #include <contour/display/TerminalDisplay.h>
-#include <contour/helper.h>
+#include <contour/session/SessionFactory.h>
+#include <contour/session/TerminalSession.h>
 
 #include <QtCore/QObject>
 #include <QtGui/QColor>
@@ -35,9 +34,15 @@ class QScreen;
 
 namespace contour
 {
+// The per-OS-window Qt/QML adapter. It sits a layer above this one -- the manager mints one per
+// window and routes model changes to it -- so it is named, not included.
+class WindowController;
+} // namespace contour
+
+namespace contour::session
+{
 
 class PaneProxy;
-class WindowController;
 
 /// Why a set of sessions is being torn down — the caller's intent, which nothing downstream can
 /// recover: a PTY is destroyed on a pane close, a tab close, a window close and an app quit alike.
@@ -109,14 +114,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Creates a backing session + its model tab in @p window (the calling controller's window).
     /// @param window      The target window.
     /// @param profileName Profile to launch the session with, or std::nullopt for the app default.
-    contour::TerminalSession* createSessionInBackground(
-        vtworkspace::WindowId window, std::optional<std::string> const& profileName = std::nullopt);
+    TerminalSession* createSessionInBackground(vtworkspace::WindowId window,
+                                               std::optional<std::string> const& profileName = std::nullopt);
 
     /// Creates a new tab in @p window (the GUI "+" button entry point, via WindowController).
     /// @param window      The target window.
     /// @param profileName Profile to launch the tab with, or std::nullopt for the app default.
-    contour::TerminalSession* createSession(vtworkspace::WindowId window,
-                                            std::optional<std::string> const& profileName = std::nullopt);
+    TerminalSession* createSession(vtworkspace::WindowId window,
+                                   std::optional<std::string> const& profileName = std::nullopt);
 
     /// Creates and activates a new tab in @p window.
     /// @param window      The target window.
@@ -651,7 +656,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param commandOverride Command to launch instead of the profile's configured shell, if any.
     /// @param profileName Profile to run this session under, if any; @c std::nullopt (the default)
     ///                    selects the application's default profile.
-    contour::TerminalSession* createBackingSession(
+    TerminalSession* createBackingSession(
         vtworkspace::SessionId sessionId,
         std::optional<std::string> cwd,
         std::optional<vtbackend::PageSize> pageSize = std::nullopt,
@@ -850,6 +855,6 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     // }}}
 };
 
-} // namespace contour
+} // namespace contour::session
 
-Q_DECLARE_INTERFACE(contour::TerminalSessionManager, "org.contour.TerminalSessionManager")
+Q_DECLARE_INTERFACE(contour::session::TerminalSessionManager, "org.contour.TerminalSessionManager")

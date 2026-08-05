@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ContourGuiApp.h>
-#include <contour/SessionFactory.h>
+#include <contour/session/SessionFactory.h>
 
 #include <vtpty/Process.h>
 #ifdef VTPTY_LIBSSH2
@@ -13,7 +13,7 @@
 using std::make_unique;
 using std::nullopt;
 
-namespace contour
+namespace contour::session
 {
 
 vtbackend::PageSize childPtyPageSize(vtbackend::PageSize total,
@@ -92,4 +92,4 @@ void AppSessionFactory::requestSshHostkeyVerification(
 }
 #endif
 
-} // namespace contour
+} // namespace contour::session

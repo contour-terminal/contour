@@ -15,9 +15,9 @@
 // display is pinned by the [display] case in DisplayRendering_test.
 
 #include <contour/ContourGuiApp.h>
-#include <contour/TerminalSession.h>
-#include <contour/TerminalSessionManager.h>
 #include <contour/WindowController.h>
+#include <contour/session/TerminalSession.h>
+#include <contour/session/TerminalSessionManager.h>
 #include <contour/test/GuiTestFixtures.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -44,14 +44,14 @@ struct ManagerFixture
 
     /// Grows (or shrinks) a running session's grid to simulate the user having resized the window,
     /// so the NEXT tab created in that window inherits this size.
-    static void resizeSessionGrid(contour::TerminalSession& session, vtbackend::PageSize to)
+    static void resizeSessionGrid(contour::session::TerminalSession& session, vtbackend::PageSize to)
     {
         auto const _ = std::scoped_lock { session.terminal() };
         session.terminal().resizeScreen(to, std::nullopt);
     }
 
   private:
-    std::unique_ptr<contour::SessionFactory> makeFactory()
+    std::unique_ptr<contour::session::SessionFactory> makeFactory()
     {
         auto owned = std::make_unique<MockPtySessionFactory>();
         factory = owned.get();

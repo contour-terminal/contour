@@ -16,8 +16,13 @@
 
 namespace contour
 {
-
+// The composition root, which owns the configuration this factory reads. Named rather than
+// included: session/ sits below it, and phase 3's AppServices seam is what removes the name.
 class ContourGuiApp;
+} // namespace contour
+
+namespace contour::session
+{
 
 /// The winsize a session's child PTY must be born with, given the terminal's TOTAL page size and its
 /// status-line type: the status line reserves the bottom row(s), so the child's usable area is the total
@@ -179,4 +184,4 @@ class AppSessionFactory final: public SessionFactory
     ContourGuiApp& _app;
 };
 
-} // namespace contour
+} // namespace contour::session

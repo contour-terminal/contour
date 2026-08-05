@@ -15,9 +15,10 @@
 // plus its shell process — leaked.
 
 #include <contour/ContourGuiApp.h>
-#include <contour/TerminalSession.h>
-#include <contour/TerminalSessionManager.h>
 #include <contour/config/Actions.h>
+#include <contour/input/MouseMapping.h>
+#include <contour/session/TerminalSession.h>
+#include <contour/session/TerminalSessionManager.h>
 #include <contour/test/GuiTestFixtures.h>
 
 #include <vtbackend/Hyperlink.h>
@@ -55,17 +56,18 @@ constexpr auto TestPageSize = vtpty::PageSize { vtpty::LineCount(24), vtpty::Col
 
 /// Creates a TerminalSession backed by @p pty, with NO display attached (the default state).
 /// The session owns the PTY; the caller owns the session.
-[[nodiscard]] std::unique_ptr<contour::TerminalSession> makeSessionWith(contour::ContourGuiApp& app,
-                                                                        std::unique_ptr<vtpty::Pty> pty)
+[[nodiscard]] std::unique_ptr<contour::session::TerminalSession> makeSessionWith(
+    contour::ContourGuiApp& app, std::unique_ptr<vtpty::Pty> pty)
 {
     // Pass the app's real session manager so the sessionClosed->removeSession wiring matches
     // production; we never pump the Qt event loop here, so that slot does not actually fire and the
     // test stays deterministic.
-    return std::make_unique<contour::TerminalSession>(&app.sessionsManager(), std::move(pty), app);
+    return std::make_unique<contour::session::TerminalSession>(&app.sessionsManager(), std::move(pty), app);
 }
 
 /// The common case: a session over a plain MockPty.
-[[nodiscard]] std::unique_ptr<contour::TerminalSession> makeDisplaylessSession(contour::ContourGuiApp& app)
+[[nodiscard]] std::unique_ptr<contour::session::TerminalSession> makeDisplaylessSession(
+    contour::ContourGuiApp& app)
 {
     return makeSessionWith(app, std::make_unique<vtpty::MockPty>(TestPageSize));
 }
@@ -212,9 +214,9 @@ TEST_CASE("TerminalSession::start reports a device that fails to start instead o
     // The pane is not a zombie: the next key press prunes it, exactly as the early-exit notice does
     // for a shell that dies right after starting.
     auto closed = 0;
-    QObject::connect(session.get(), &contour::TerminalSession::sessionClosed, [&](contour::TerminalSession&) {
-        ++closed;
-    });
+    QObject::connect(session.get(),
+                     &contour::session::TerminalSession::sessionClosed,
+                     [&](contour::session::TerminalSession&) { ++closed; });
     session->sendKeyEvent(vtbackend::Key::Enter,
                           vtbackend::Modifiers {},
                           vtbackend::KeyboardEventType::Press,
@@ -263,9 +265,9 @@ TEST_CASE("TerminalSession::start runs a session that started with a diagnostic"
 
     // Not armed for dismissal: a key press is input for the shell, not an acknowledgement.
     auto closed = 0;
-    QObject::connect(session.get(), &contour::TerminalSession::sessionClosed, [&](contour::TerminalSession&) {
-        ++closed;
-    });
+    QObject::connect(session.get(),
+                     &contour::session::TerminalSession::sessionClosed,
+                     [&](contour::session::TerminalSession&) { ++closed; });
     session->sendKeyEvent(vtbackend::Key::Enter,
                           vtbackend::Modifiers {},
                           vtbackend::KeyboardEventType::Press,
@@ -300,12 +302,12 @@ std::string registerProfile(contour::ContourGuiApp& app, std::string const& name
 
 /// Creates a display-less MockPty-backed session running under the named @p profileName (which must
 /// already be registered in @p app's config, e.g. via registerProfile()).
-[[nodiscard]] std::unique_ptr<contour::TerminalSession> makeSessionWithProfile(contour::ContourGuiApp& app,
-                                                                               std::string profileName)
+[[nodiscard]] std::unique_ptr<contour::session::TerminalSession> makeSessionWithProfile(
+    contour::ContourGuiApp& app, std::string profileName)
 {
     auto pty =
         std::make_unique<vtpty::MockPty>(vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) });
-    return std::make_unique<contour::TerminalSession>(
+    return std::make_unique<contour::session::TerminalSession>(
         &app.sessionsManager(), std::move(pty), app, std::move(profileName));
 }
 
@@ -367,8 +369,8 @@ TEST_CASE("TerminalSession: right-click opens the context menu exactly when a se
 
     auto menuRequests = 0;
     QObject::connect(&testApp.app().sessionsManager(),
-                     &contour::TerminalSessionManager::contextMenuRequested,
-                     [&](contour::TerminalSession*) { ++menuRequests; });
+                     &contour::session::TerminalSessionManager::contextMenuRequested,
+                     [&](contour::session::TerminalSession*) { ++menuRequests; });
 
     SECTION("no mouse protocol: the application hears nothing, and the menu takes the click")
     {
@@ -789,9 +791,9 @@ TEST_CASE("TerminalSession: pasteFromClipboard writes clipboard text and enforce
 
     // > 512 KB: requires permission; nothing written until granted.
     int permissionRequests = 0;
-    QObject::connect(session.get(), &contour::TerminalSession::requestPermissionForPasteLargeFile, [&] {
-        ++permissionRequests;
-    });
+    QObject::connect(session.get(),
+                     &contour::session::TerminalSession::requestPermissionForPasteLargeFile,
+                     [&] { ++permissionRequests; });
     clipboard->setText(QString((1024 * 512) + 1, QChar('y')));
     session->pasteFromClipboard(1, false);
     CHECK(permissionRequests == 1);
@@ -1323,8 +1325,9 @@ TEST_CASE("TerminalSession: inputModeChanged configures the cursor for each Vi m
 
     // onScrollOffsetChanged emits scrollOffsetChanged with the unboxed value.
     int seen = -1;
-    QObject::connect(
-        session.get(), &contour::TerminalSession::scrollOffsetChanged, [&seen](int value) { seen = value; });
+    QObject::connect(session.get(),
+                     &contour::session::TerminalSession::scrollOffsetChanged,
+                     [&seen](int value) { seen = value; });
     session->onScrollOffsetChanged(vtbackend::ScrollOffset(7));
     CHECK(seen == 7);
 }
@@ -1338,8 +1341,8 @@ TEST_CASE("TerminalSession: a spontaneous early exit shows the notice and a key 
 
     bool closed = false;
     QObject::connect(session.get(),
-                     &contour::TerminalSession::sessionClosed,
-                     [&closed](contour::TerminalSession&) { closed = true; });
+                     &contour::session::TerminalSession::sessionClosed,
+                     [&closed](contour::session::TerminalSession&) { closed = true; });
 
     // The shell "dies" moments after startup: onClosed() must route through the early-exit notice
     // (deliberately NOT emitting sessionClosed) because the default early-exit threshold is 5s.
@@ -1772,7 +1775,7 @@ namespace
 /// Writes an OSC-8 hyperlink cell to @p session's screen and hovers the mouse over it, so
 /// terminal().tryGetHoveringHyperlink() resolves — the precondition FollowHyperlink needs to reach
 /// TerminalSession::followHyperlink() without a display. @p uri is the OSC-8 target.
-void seedHoveredHyperlink(contour::TerminalSession& session, std::string const& uri)
+void seedHoveredHyperlink(contour::session::TerminalSession& session, std::string const& uri)
 {
     // OSC 8 ; params ; URI ST  <text>  OSC 8 ; ; ST
     session.terminal().writeToScreen(std::format("\033]8;;{}\033\\LINK\033]8;;\033\\", uri));

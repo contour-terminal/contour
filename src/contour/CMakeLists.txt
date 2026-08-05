@@ -191,16 +191,21 @@ if(CONTOUR_FRONTEND_GUI)
         CommandPaletteModel.h
         ContextMenuModel.h
         ContourGuiApp.h
-        ExitCode.h
+        session/ExitCode.h
         config/LayoutBuilder.h
         config/LayoutStore.h
-        PaneProxy.h
-        SessionFactory.h
+        session/PaneProxy.h
+        session/SessionFactory.h
         SettingsController.h
-        TerminalSession.h
-        TerminalSessionManager.h
+        session/TerminalSession.h
+        session/TerminalSessionManager.h
         UiStyleProvider.h
-        helper.h
+        session/SessionInput.h
+        session/FontControl.h
+        session/SpawnCommand.h
+        session/Logging.h
+        Logging.h
+        display/RenderState.h
         remote/NativeController.h
         remote/RemoteController.h
         remote/ReactorThread.h
@@ -212,17 +217,19 @@ if(CONTOUR_FRONTEND_GUI)
         CommandPaletteModel.cpp
         ContextMenuModel.cpp
         ContourGuiApp.cpp
-        PaneProxy.cpp
+        session/PaneProxy.cpp
         config/LayoutBuilder.cpp
         config/LayoutStore.cpp
-        SessionFactory.cpp
+        session/SessionFactory.cpp
         SettingsController.cpp
-        TerminalSession.cpp
+        session/TerminalSession.cpp
         display/TerminalAccessible.cpp
-        TerminalSessionManager.cpp
+        session/TerminalSessionManager.cpp
         UiStyleProvider.cpp
         WindowController.cpp
-        helper.cpp
+        session/SessionInput.cpp
+        session/FontControl.cpp
+        session/SpawnCommand.cpp
         remote/NativeController.cpp
         remote/RemoteController.cpp
         remote/RemoteLayout.cpp
@@ -588,7 +595,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/ContourGuiApp_test.cpp
             test/DisplayRendering_test.cpp
             test/ContentScale_test.cpp
-            test/ExitCode_test.cpp
+            session/ExitCode_test.cpp
             test/CaretGeometry_test.cpp
             test/CaretReportGate_test.cpp
             test/TerminalAccessible_test.cpp
@@ -597,9 +604,9 @@ if(CONTOUR_FRONTEND_GUI)
             input/HorizontalWheelGesture_test.cpp
             test/ImeQueryRect_test.cpp
             test/ViewportTextIndex_test.cpp
-            test/KeyboardRouting_test.cpp
+            session/KeyboardRouting_test.cpp
             test/MainWindowQml_test.cpp
-            test/FocusRouting_test.cpp
+            session/FocusRouting_test.cpp
             test/MultiWindow_test.cpp
             platform/NotificationRouter_test.cpp
             test/QmlDiagnosticPredicate_test.cpp
@@ -608,9 +615,9 @@ if(CONTOUR_FRONTEND_GUI)
             test/RhiVertexLayout_test.cpp
             test/ScreenshotReadback_test.cpp
             test/ScreenshotRhiReadback_test.cpp
-            test/TabSizeInheritance_test.cpp
-            test/TerminalSessionManager_test.cpp
-            test/TerminalSession_test.cpp
+            session/TabSizeInheritance_test.cpp
+            session/TerminalSessionManager_test.cpp
+            session/TerminalSession_test.cpp
             test/QmlComponents_test.cpp
             test/TabColorScheme_test.cpp
             test/ContourTuiStyle_test.cpp

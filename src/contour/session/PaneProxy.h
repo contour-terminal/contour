@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/TerminalSession.h>
+#include <contour/session/TerminalSession.h>
 
 #include <QtCore/QObject>
 #include <QtQml/QtQml>
@@ -9,7 +9,7 @@
 #include <vtworkspace/Pane.h>
 #include <vtworkspace/Primitives.h>
 
-namespace contour
+namespace contour::session
 {
 
 class TerminalSessionManager;
@@ -28,9 +28,9 @@ class PaneProxy: public QObject
     Q_PROPERTY(bool isLeaf READ isLeaf NOTIFY changed)
     Q_PROPERTY(int orientation READ orientation NOTIFY changed) // vtworkspace::SplitState as int
     Q_PROPERTY(double ratio READ ratio NOTIFY ratioChanged)
-    Q_PROPERTY(contour::PaneProxy* first READ first NOTIFY changed)
-    Q_PROPERTY(contour::PaneProxy* second READ second NOTIFY changed)
-    Q_PROPERTY(contour::TerminalSession* session READ session NOTIFY changed)
+    Q_PROPERTY(contour::session::PaneProxy* first READ first NOTIFY changed)
+    Q_PROPERTY(contour::session::PaneProxy* second READ second NOTIFY changed)
+    Q_PROPERTY(contour::session::TerminalSession* session READ session NOTIFY changed)
     Q_PROPERTY(bool active READ active NOTIFY activeChanged)
     Q_PROPERTY(int paneId READ paneId CONSTANT)
     QML_ELEMENT
@@ -102,4 +102,4 @@ class PaneProxy: public QObject
     PaneProxy* _second = nullptr;
 };
 
-} // namespace contour
+} // namespace contour::session

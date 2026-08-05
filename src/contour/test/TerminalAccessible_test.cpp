@@ -54,11 +54,11 @@ struct EventProbe
 TEST_CASE("a11y: the terminal's interfaces leave Qt's accessibility cache with their display",
           "[contour][a11y]")
 {
-    TerminalAccessible::installFactory();
+    contour::display::TerminalAccessible::installFactory();
 
-    auto display = std::make_unique<TerminalDisplay>();
-    auto* accessible =
-        dynamic_cast<TerminalAccessible*>(QAccessible::queryAccessibleInterface(display.get()));
+    auto display = std::make_unique<contour::display::TerminalDisplay>();
+    auto* accessible = dynamic_cast<contour::display::TerminalAccessible*>(
+        QAccessible::queryAccessibleInterface(display.get()));
     REQUIRE(accessible != nullptr);
 
     // uniqueId() registers on a miss, so both ids are live cache entries from here on. The terminal's
@@ -83,11 +83,11 @@ TEST_CASE("a11y: every emitted event names a subject Qt can resolve", "[contour]
     // and Qt DISCARDS the event: the caret report simply never reaches the OS, with nothing but
     // "Invalid child in QAccessibleEvent" on stderr to say so. See notifySubject() in
     // TerminalAccessible.cpp, which picks the overload by whether there is a QObject to name.
-    TerminalAccessible::installFactory();
+    contour::display::TerminalAccessible::installFactory();
 
-    auto display = std::make_unique<TerminalDisplay>();
-    auto* accessible =
-        dynamic_cast<TerminalAccessible*>(QAccessible::queryAccessibleInterface(display.get()));
+    auto display = std::make_unique<contour::display::TerminalDisplay>();
+    auto* accessible = dynamic_cast<contour::display::TerminalAccessible*>(
+        QAccessible::queryAccessibleInterface(display.get()));
     REQUIRE(accessible != nullptr);
 
     EventProbe::reset();

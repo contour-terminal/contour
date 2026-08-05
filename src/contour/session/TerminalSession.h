@@ -6,6 +6,7 @@
 #include <contour/config/Actions.h>
 #include <contour/config/Config.h>
 #include <contour/input/HorizontalWheelGesture.h>
+#include <contour/input/KeyboardLayout.h>
 #include <contour/input/MouseMapping.h>
 #include <contour/platform/Announcer.h>
 #include <contour/platform/Audio.h>
@@ -13,7 +14,6 @@
 #ifdef __linux__
     #include <contour/platform/FreeDesktopNotifier.h>
 #endif
-#include <contour/helper.h>
 
 #include <vtbackend/Terminal.h>
 
@@ -51,6 +51,12 @@ namespace display
 } // namespace display
 
 class ContourGuiApp;
+
+} // namespace contour
+
+namespace contour::session
+{
+
 class TerminalSessionManager;
 
 /**
@@ -891,24 +897,24 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 #endif
 };
 
-} // namespace contour
+} // namespace contour::session
 
-Q_DECLARE_INTERFACE(contour::TerminalSession, "org.contour.TerminalSession")
+Q_DECLARE_INTERFACE(contour::session::TerminalSession, "org.contour.TerminalSession")
 
 template <>
-struct std::formatter<contour::GuardedRole>: std::formatter<std::string_view>
+struct std::formatter<contour::session::GuardedRole>: std::formatter<std::string_view>
 {
     template <typename FormatContext>
-    auto format(contour::GuardedRole value, FormatContext& ctx) const
+    auto format(contour::session::GuardedRole value, FormatContext& ctx) const
     {
         std::string_view output;
         // clang-format off
         switch (value)
         {
-            case contour::GuardedRole::ChangeFont: output = "Change Font"; break;
-            case contour::GuardedRole::CaptureBuffer: output = "Capture Buffer"; break;
-            case contour::GuardedRole::ShowHostWritableStatusLine:  output = "show Host Writable Statusline"; break;
-            case contour::GuardedRole::BigPaste:  output = "paste large number of characters"; break;
+            case contour::session::GuardedRole::ChangeFont: output = "Change Font"; break;
+            case contour::session::GuardedRole::CaptureBuffer: output = "Capture Buffer"; break;
+            case contour::session::GuardedRole::ShowHostWritableStatusLine:  output = "show Host Writable Statusline"; break;
+            case contour::session::GuardedRole::BigPaste:  output = "paste large number of characters"; break;
         }
         // clang-format on
         return formatter<string_view>::format(output, ctx);

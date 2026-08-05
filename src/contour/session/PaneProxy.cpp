@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/PaneProxy.h>
-#include <contour/TerminalSessionManager.h>
+#include <contour/session/PaneProxy.h>
+#include <contour/session/TerminalSessionManager.h>
 
-namespace contour
+namespace contour::session
 {
 
 bool PaneProxy::isLeaf() const noexcept
@@ -46,4 +46,4 @@ void PaneProxy::activate()
     _manager.activatePane(_tab, _id);
 }
 
-} // namespace contour
+} // namespace contour::session

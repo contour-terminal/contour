@@ -2,7 +2,6 @@
 #include <contour/config/Config.h>
 #include <contour/display/ContentScale.h>
 #include <contour/display/Logging.h>
-#include <contour/helper.h>
 
 #include <crispy/utils.h>
 

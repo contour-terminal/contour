@@ -9,9 +9,9 @@
 // window), the displayless early-outs, and that tab switching never touches window geometry.
 
 #include <contour/ContourGuiApp.h>
-#include <contour/TerminalSessionManager.h>
 #include <contour/WindowController.h>
 #include <contour/display/TerminalDisplay.h>
+#include <contour/session/TerminalSessionManager.h>
 #include <contour/test/GuiTestFixtures.h>
 
 #include <QtCore/QCoreApplication>

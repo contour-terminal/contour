@@ -4,7 +4,6 @@
 #include <contour/display/RhiVertexLayout.h>
 #include <contour/display/ScreenshotReadback.h>
 #include <contour/display/ShaderConfig.h>
-#include <contour/helper.h>
 
 #include <vtbackend/primitives.h>
 
@@ -424,8 +423,8 @@ void RhiRenderer::createPipelines(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc)
         createPipeline(rhi, rpDesc, entry.descriptor, *entry.slot);
 
     display::displayLog()("createPipelines: rect={} text={}",
-                 _rectPipeline.pipeline != nullptr,
-                 _textPipeline.pipeline != nullptr);
+                          _rectPipeline.pipeline != nullptr,
+                          _textPipeline.pipeline != nullptr);
 }
 // }}}
 

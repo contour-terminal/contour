@@ -3,7 +3,7 @@
 // Unit tests for exitCodeFor() — the pure policy behind ContourGuiApp::run()'s return value,
 // extracted from the Qt event loop so the exit-status → exit-code mapping is testable in isolation.
 
-#include <contour/ExitCode.h>
+#include <contour/session/ExitCode.h>
 
 #include <vtpty/Process.h>
 
@@ -11,8 +11,8 @@
 
 #include <cstdlib>
 
-using contour::exitCodeFor;
-using contour::SessionExitStatus;
+using contour::session::exitCodeFor;
+using contour::session::SessionExitStatus;
 
 TEST_CASE("exitCodeFor: no session status preserves the event-loop fallback", "[contour][exitcode]")
 {

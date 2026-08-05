@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/CommandPaletteModel.h>
 #include <contour/ContourGuiApp.h>
-#include <contour/PaneProxy.h>
+#include <contour/Logging.h>
 #include <contour/RenderingBackendSelection.h>
-#include <contour/SessionFactory.h>
 #include <contour/SettingsController.h>
 #include <contour/WindowController.h>
 #include <contour/config/Config.h>
@@ -19,6 +18,8 @@
 #include <contour/remote/RemoteLayout.h>
 #include <contour/remote/RoutingSessionFactory.h>
 #include <contour/remote/TmuxController.h>
+#include <contour/session/PaneProxy.h>
+#include <contour/session/SessionFactory.h>
 
 #include <vtpty/Process.h>
 
@@ -111,14 +112,14 @@ bool hasStrandedQmlOverrides(fs::path const& configHome)
 }
 
 ContourGuiApp::ContourGuiApp(crispy::environment const& env,
-                             std::unique_ptr<SessionFactory> sessionFactory,
+                             std::unique_ptr<session::SessionFactory> sessionFactory,
                              std::unique_ptr<platform::ExternalLauncher> externalLauncher,
                              std::unique_ptr<config::LayoutStore> layoutStore,
                              std::unique_ptr<command::CommandHistoryStore> commandHistoryStore,
                              std::unique_ptr<platform::SpeechSynthesizer> speechSynthesizer):
     ContourApp { env },
     _sessionFactory(std::make_unique<RoutingSessionFactory>(
-        sessionFactory ? std::move(sessionFactory) : std::make_unique<AppSessionFactory>(*this))),
+        sessionFactory ? std::move(sessionFactory) : std::make_unique<session::AppSessionFactory>(*this))),
     _routingFactory(static_cast<RoutingSessionFactory*>(_sessionFactory.get())),
     _externalLauncher(externalLauncher ? std::move(externalLauncher)
                                        : std::make_unique<platform::QtExternalLauncher>()),
@@ -577,7 +578,7 @@ std::optional<fs::path> ContourGuiApp::dumpStateAtExit() const
     return fs::path(path);
 }
 
-void ContourGuiApp::onExit(TerminalSession& session)
+void ContourGuiApp::onExit(session::TerminalSession& session)
 {
     if (auto const* localProcess = dynamic_cast<vtpty::Process const*>(&session.terminal().device()))
         _exitStatus = localProcess->checkStatus();
@@ -953,14 +954,14 @@ int ContourGuiApp::terminalGuiAction()
 
     // clang-format off
     qmlRegisterType<display::TerminalDisplay>("Contour.Terminal", 1, 0, "ContourTerminal");
-    qmlRegisterUncreatableType<TerminalSession>("Contour.Terminal", 1, 0, "TerminalSession", "Use factory.");
-    qmlRegisterUncreatableType<TerminalSessionManager>("Contour.Terminal", 1, 0, "TerminalSessionManager", "Do not use me directly.");
-    qmlRegisterUncreatableType<PaneProxy>("Contour.Terminal", 1, 0, "PaneProxy", "Created by the session manager.");
+    qmlRegisterUncreatableType<session::TerminalSession>("Contour.Terminal", 1, 0, "TerminalSession", "Use factory.");
+    qmlRegisterUncreatableType<session::TerminalSessionManager>("Contour.Terminal", 1, 0, "TerminalSessionManager", "Do not use me directly.");
+    qmlRegisterUncreatableType<session::PaneProxy>("Contour.Terminal", 1, 0, "PaneProxy", "Created by the session manager.");
     qmlRegisterUncreatableType<WindowController>("Contour.Terminal", 1, 0, "WindowController", "Created by the session manager.");
     qmlRegisterUncreatableType<CommandPaletteModel>("Contour.Terminal", 1, 0, "CommandPaletteModel", "Created by the window controller.");
     qmlRegisterUncreatableType<SettingsController>("Contour.Terminal", 1, 0, "SettingsController", "Created by the window controller.");
-    qRegisterMetaType<TerminalSession*>("TerminalSession*");
-    qRegisterMetaType<PaneProxy*>("PaneProxy*");
+    qRegisterMetaType<session::TerminalSession*>("TerminalSession*");
+    qRegisterMetaType<session::PaneProxy*>("PaneProxy*");
     qRegisterMetaType<WindowController*>("WindowController*");
     qRegisterMetaType<CommandPaletteModel*>("CommandPaletteModel*");
     qRegisterMetaType<SettingsController*>("SettingsController*");
@@ -1058,7 +1059,7 @@ int ContourGuiApp::terminalGuiAction()
     // so it is unit-testable without the event loop. NB: sequenced explicitly — passing exec() as an
     // argument alongside _exitStatus would read _exitStatus before the loop populated it.
     auto const loopResult = QApplication::exec();
-    auto const rv = exitCodeFor(_exitStatus, loopResult);
+    auto const rv = session::exitCodeFor(_exitStatus, loopResult);
 
     // Ensure the multimedia warmup thread has finished before destroying Qt objects -- but keep serving
     // this thread's event queue while waiting, rather than blocking straight into join().

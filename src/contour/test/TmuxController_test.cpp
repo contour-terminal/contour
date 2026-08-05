@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/TerminalSession.h>
-#include <contour/TerminalSessionManager.h>
 #include <contour/remote/TmuxController.h>
+#include <contour/session/TerminalSession.h>
+#include <contour/session/TerminalSessionManager.h>
 #include <contour/test/GuiTestFixtures.h>
 
 #include <vtpty/ChannelPty.h>
@@ -281,7 +281,7 @@ TEST_CASE("closing a mirrored pane's pty does not kill it on tmux", "[attach][tm
 
     // The window closes: the manager terminates its sessions with SessionEnd::Detach, which
     // deliberately does NOT author a remote close — but every pty is still destroyed.
-    app.manager().terminate(std::array { session }, contour::SessionEnd::Detach);
+    app.manager().terminate(std::array { session }, contour::session::SessionEnd::Detach);
 
     // Nothing was queued for the reactor, and the controller is still usable. (With no gateway
     // there is no wire to observe, so what this pins is that the DECISION is no longer taken here:

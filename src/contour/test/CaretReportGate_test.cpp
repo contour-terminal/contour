@@ -17,14 +17,14 @@ using vtbackend::LineOffset;
 namespace
 {
 
-CaretState visibleAt(int line, int column)
+contour::display::CaretState visibleAt(int line, int column)
 {
     return { .visible = true,
              .position = { .line = LineOffset(line), .column = ColumnOffset(column) },
              .prompt = std::nullopt };
 }
 
-CaretState hidden()
+contour::display::CaretState hidden()
 {
     return { .visible = false, .position = {}, .prompt = std::nullopt };
 }
@@ -42,7 +42,7 @@ TEST_CASE("CaretReportGate.a stationary blinking cursor is reported exactly once
 {
     // THE case this class exists for. The blink makes the terminal fire repeatedly at the same
     // blink-free state; everything after the first must be swallowed.
-    auto gate = CaretReportGate {};
+    auto gate = contour::display::CaretReportGate {};
 
     CHECK(gate.shouldReport(visibleAt(3, 5)));
     for (auto i = 0; i < 10; ++i)
@@ -51,7 +51,7 @@ TEST_CASE("CaretReportGate.a stationary blinking cursor is reported exactly once
 
 TEST_CASE("CaretReportGate.a move is reported", "[contour][a11y]")
 {
-    auto gate = CaretReportGate {};
+    auto gate = contour::display::CaretReportGate {};
 
     CHECK(gate.shouldReport(visibleAt(3, 5)));
     CHECK(gate.shouldReport(visibleAt(3, 6)));
@@ -62,7 +62,7 @@ TEST_CASE("CaretReportGate.becoming visible again is reported even at the same p
 {
     // Required behaviour: the client stopped tracking when the caret went away, so it must be told when
     // the caret comes back -- position unchanged or not.
-    auto gate = CaretReportGate {};
+    auto gate = contour::display::CaretReportGate {};
 
     CHECK(gate.shouldReport(visibleAt(3, 5)));
     CHECK_FALSE(gate.shouldReport(hidden()));
@@ -73,7 +73,7 @@ TEST_CASE("CaretReportGate.becoming invisible is never reported", "[contour][a11
 {
     // There is no caret to point at, so there is nothing to say. The state is still recorded, which is
     // what makes the transition back reportable.
-    auto gate = CaretReportGate {};
+    auto gate = contour::display::CaretReportGate {};
 
     CHECK(gate.shouldReport(visibleAt(3, 5)));
     CHECK_FALSE(gate.shouldReport(hidden()));
@@ -84,7 +84,7 @@ TEST_CASE("CaretReportGate.entering a prompt is reported without the caret movin
 {
     // The shell repaints its prompt around a caret that never moved; the region the client should be
     // pointing at changed all the same.
-    auto gate = CaretReportGate {};
+    auto gate = contour::display::CaretReportGate {};
 
     auto outside = visibleAt(3, 5);
     CHECK(gate.shouldReport(outside));
@@ -99,7 +99,7 @@ TEST_CASE("CaretReportGate.entering a prompt is reported without the caret movin
 
 TEST_CASE("CaretReportGate.a prompt that moves is reported", "[contour][a11y]")
 {
-    auto gate = CaretReportGate {};
+    auto gate = contour::display::CaretReportGate {};
 
     auto state = visibleAt(3, 5);
     state.prompt = promptSpan(3, 3, 2);
@@ -112,7 +112,7 @@ TEST_CASE("CaretReportGate.a prompt that moves is reported", "[contour][a11y]")
 
 TEST_CASE("CaretReportGate.leaving a prompt is reported", "[contour][a11y]")
 {
-    auto gate = CaretReportGate {};
+    auto gate = contour::display::CaretReportGate {};
 
     auto state = visibleAt(3, 5);
     state.prompt = promptSpan(3, 3, 2);
@@ -126,7 +126,7 @@ TEST_CASE("CaretReportGate.reset forces the next visible state to be reported", 
 {
     // Focus moved to another pane and back. The client is now pointing somewhere else, so this pane must
     // re-announce itself even though nothing about its own caret changed.
-    auto gate = CaretReportGate {};
+    auto gate = contour::display::CaretReportGate {};
 
     CHECK(gate.shouldReport(visibleAt(3, 5)));
     CHECK_FALSE(gate.shouldReport(visibleAt(3, 5)));
@@ -138,7 +138,7 @@ TEST_CASE("CaretReportGate.reset forces the next visible state to be reported", 
 
 TEST_CASE("CaretReportGate.an invisible caret is never reported first", "[contour][a11y]")
 {
-    auto gate = CaretReportGate {};
+    auto gate = contour::display::CaretReportGate {};
 
     CHECK_FALSE(gate.shouldReport(hidden()));
 }

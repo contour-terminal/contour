@@ -214,7 +214,7 @@ TEST_CASE("RHI readback: a captured screenshot is delivered top-left origin, not
         SKIP("could not create a texture render target");
 
     auto const captureSize = ImageSize { Width(W), Height(H) };
-    auto renderer = RhiRenderer(captureSize, ImageSize { Width(4), Height(4) });
+    auto renderer = contour::display::RhiRenderer(captureSize, ImageSize { Width(4), Height(4) });
     renderer.initialize();
     renderer.createPipelines(rhi, frameTarget.rpDesc.get());
     if (!renderer.pipelinesReady())
