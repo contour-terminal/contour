@@ -267,8 +267,8 @@ namespace
         // is what the daemon's `ps` line and its own commandLine() replay should show.
         // crispy::environment, not getenv: this runs on a client that already has a live reactor
         // thread, and the snapshot exists precisely so an environment read is not racing it.
-        auto const image =
-            resolveExecutablePath(args[0], crispy::defaultEnvironment().get("PATH").value_or(""), isExecutableFile);
+        auto const image = resolveExecutablePath(
+            args[0], crispy::defaultEnvironment().get("PATH").value_or(""), isExecutableFile);
 
         auto argv = std::vector<char*> {};
         argv.reserve(args.size() + 1);
