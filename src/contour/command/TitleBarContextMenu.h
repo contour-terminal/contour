@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace contour
+namespace contour::command
 {
 
 /// The world, as the title bar's context menu needs to see it.
@@ -37,4 +37,4 @@ struct TitleBarContextMenuState
 /// @return The menu, top to bottom.
 [[nodiscard]] std::vector<ContextMenuEntry> buildTitleBarContextMenu(TitleBarContextMenuState const& state);
 
-} // namespace contour
+} // namespace contour::command

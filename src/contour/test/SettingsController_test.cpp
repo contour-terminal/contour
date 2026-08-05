@@ -6,9 +6,9 @@
 // disk exactly as the production apply does. So a test exercises the whole stack (controller → store →
 // loader), not a mock of it.
 
+#include <contour/SettingsController.h>
 #include <contour/config/Config.h>
 #include <contour/config/GuiConfigStore.h>
-#include <contour/SettingsController.h>
 
 #include <vtbackend/Color.h>
 
@@ -45,14 +45,14 @@ struct Fixture
     QTemporaryDir dir;
     config::Config cfg;
     std::filesystem::path configPath;
-    std::shared_ptr<FileGuiConfigStore> store;
+    std::shared_ptr<config::FileGuiConfigStore> store;
     std::unique_ptr<SettingsController> controller;
 
     explicit Fixture(std::string_view yaml)
     {
         configPath = writeConfig(dir, yaml);
         config::loadConfigFromFile(cfg, configPath);
-        store = std::make_shared<FileGuiConfigStore>(std::filesystem::path(dir.path().toStdString()));
+        store = std::make_shared<config::FileGuiConfigStore>(std::filesystem::path(dir.path().toStdString()));
         controller = std::make_unique<SettingsController>([this]() -> config::Config const& { return cfg; },
                                                           store,
                                                           [this]() {

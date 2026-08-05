@@ -5,7 +5,7 @@
 #include <array>
 #include <span>
 
-namespace contour
+namespace contour::command
 {
 
 namespace
@@ -154,4 +154,4 @@ std::vector<ContextMenuEntry> buildTitleBarContextMenu(TitleBarContextMenuState 
     return entries;
 }
 
-} // namespace contour
+} // namespace contour::command

@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-namespace contour
+namespace contour::config
 {
 
 /// Replaces @p path with @p content atomically: writes a temp sibling, then renames it over the target.
@@ -30,4 +30,4 @@ namespace contour
 [[nodiscard]] std::expected<void, std::string> atomicWriteFile(std::filesystem::path const& path,
                                                                std::string_view content);
 
-} // namespace contour
+} // namespace contour::config

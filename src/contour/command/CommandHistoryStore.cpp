@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/config/AtomicFileWrite.h>
 #include <contour/command/CommandHistoryStore.h>
+#include <contour/config/AtomicFileWrite.h>
 
 #include <yaml-cpp/yaml.h>
 
@@ -8,7 +8,7 @@
 #include <format>
 #include <string>
 
-namespace contour
+namespace contour::command
 {
 
 std::expected<std::vector<std::string>, std::string> FileCommandHistoryStore::load(
@@ -56,7 +56,7 @@ std::expected<void, std::string> FileCommandHistoryStore::save(std::filesystem::
     // Atomically, like the layout store: losing the MRU costs the user some ordering rather than their
     // work, but a HALF-written file would fail to parse on the next start, and a store the program
     // cannot read back is one the user has to go delete by hand. See atomicWriteFile().
-    return atomicWriteFile(path, std::format("{}\n", out.c_str()));
+    return config::atomicWriteFile(path, std::format("{}\n", out.c_str()));
 }
 
-} // namespace contour
+} // namespace contour::command

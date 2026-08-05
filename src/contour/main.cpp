@@ -172,7 +172,7 @@ int main(int argc, char const* argv[])
 #else
     // Without the GUI frontend there is no window to open, so `contour client` is gone with it;
     // what remains is `contour daemon` and the CLI verbs, which need nothing beyond Qt Core.
-    contour::ContourApp app { environment };
+    contour::cli::ContourApp app { environment };
 #endif
 
     return app.run(argc, argv);

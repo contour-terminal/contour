@@ -16,6 +16,7 @@
 // (emitLayoutsYaml) and its round trip through the config parser.
 
 using namespace contour;
+using namespace contour::config;
 using contour::test::loadConfigFromYaml;
 
 TEST_CASE("emitLayoutsYaml: round-trips a leaf + bare + split layout through the parser",
@@ -147,7 +148,7 @@ TEST_CASE("emitLayoutsYaml: round-trips an asymmetric split ratio through save",
     auto const& parsedRoot = cfg.layouts.value().at("work").tabs.at(0).root;
     REQUIRE_FALSE(parsedRoot.isLeaf());
     REQUIRE(parsedRoot.children.size() == 2);
-    CHECK(ratioForFirst(parsedRoot) == Catch::Approx(0.7));
+    CHECK(vtworkspace::ratioForFirst(parsedRoot) == Catch::Approx(0.7));
 }
 
 TEST_CASE("emitLayoutsYaml: a YAML-significant layout name is quoted and round-trips", "[layout][save]")

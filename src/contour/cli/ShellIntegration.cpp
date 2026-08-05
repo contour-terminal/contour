@@ -9,7 +9,7 @@
 
 #include <ShellIntegrationData.h>
 
-namespace contour
+namespace contour::cli
 {
 
 std::span<ShellIntegrationRow const> supportedShells() noexcept
@@ -38,4 +38,4 @@ std::string_view supportedShellsText()
     return text;
 }
 
-} // namespace contour
+} // namespace contour::cli

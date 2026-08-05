@@ -7,12 +7,13 @@
 // chord the user cannot type, and attaching a chord to the wrong command.
 
 #include <contour/command/Command.h>
-#include <contour/config/Config.h>
 #include <contour/command/Shortcut.h>
+#include <contour/config/Config.h>
 
 #include <catch2/catch_test_macros.hpp>
 
 using namespace contour;
+using namespace contour::command;
 using vtbackend::Key;
 using vtbackend::Modifier;
 using vtbackend::Modifiers;

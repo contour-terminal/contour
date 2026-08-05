@@ -1077,7 +1077,7 @@ namespace
 } // namespace
 
 SettingsController::SettingsController(ConfigAccessor config,
-                                       std::shared_ptr<GuiConfigStore> store,
+                                       std::shared_ptr<config::GuiConfigStore> store,
                                        ApplyCallback apply,
                                        QObject* parent):
     QObject { parent },

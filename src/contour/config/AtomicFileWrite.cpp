@@ -4,7 +4,7 @@
 #include <format>
 #include <fstream>
 
-namespace contour
+namespace contour::config
 {
 
 std::expected<void, std::string> atomicWriteFile(std::filesystem::path const& path, std::string_view content)
@@ -48,4 +48,4 @@ std::expected<void, std::string> atomicWriteFile(std::filesystem::path const& pa
     return {};
 }
 
-} // namespace contour
+} // namespace contour::config

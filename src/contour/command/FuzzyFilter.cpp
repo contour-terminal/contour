@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/ascii.h>
 #include <contour/command/FuzzyFilter.h>
+
+#include <crispy/ascii.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -11,7 +12,7 @@
 #include <string_view>
 #include <vector>
 
-namespace contour
+namespace contour::command
 {
 
 namespace
@@ -236,4 +237,4 @@ std::optional<FuzzyMatch> fuzzyMatch(std::string_view query,
     return FuzzyMatch { .score = bestScore, .positions = std::move(positions) };
 }
 
-} // namespace contour
+} // namespace contour::command

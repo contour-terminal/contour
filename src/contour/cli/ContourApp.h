@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace contour
+namespace contour::cli
 {
 
 /// What `contour daemon-service <verb>` was asked to do.
@@ -68,4 +68,4 @@ class ContourApp: public crispy::app
         std::string const& prefix, std::string const& label) const;
 };
 
-} // namespace contour
+} // namespace contour::cli

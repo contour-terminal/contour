@@ -1,11 +1,11 @@
 #pragma once
 
-#include <contour/command/CommandHistory.h>
-#include <contour/command/CommandHistoryStore.h>
-#include <contour/config/LayoutStore.h>
 #include <contour/SessionFactory.h>
 #include <contour/TerminalSession.h>
 #include <contour/WindowController.h>
+#include <contour/command/CommandHistory.h>
+#include <contour/command/CommandHistoryStore.h>
+#include <contour/config/LayoutStore.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/helper.h>
 
@@ -91,8 +91,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///                outlive this manager.
     TerminalSessionManager(ContourGuiApp& app,
                            SessionFactory& factory,
-                           LayoutStore& layouts,
-                           CommandHistoryStore& commands);
+                           config::LayoutStore& layouts,
+                           command::CommandHistoryStore& commands);
 
     /// The owning application (spawn context, app-wide services). For the window controllers.
     [[nodiscard]] ContourGuiApp& app() noexcept { return _app; }
@@ -154,13 +154,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Looks up @p name in the app's configured layouts and appends its tabs to the window hosting
     /// @p acting (the LaunchLayout action). Logs and no-ops if the layout is unknown or @p acting has
     /// no hosting window.
-    /// @param name   The layout's key in config::Config::layouts.
+    /// @param name   The layout's key in Config::layouts.
     /// @param acting The session that triggered the action; its hosting window is the target.
     void launchLayout(std::string const& name, TerminalSession* acting);
 
     /// Saves the window hosting @p acting as a named layout, persisted to layouts.yml (the SaveLayout
     /// action). Thin wrapper around saveWindowLayout(); no-ops if @p acting has no hosting window.
-    /// @param name   The key to save the layout under in config::Config::layouts.
+    /// @param name   The key to save the layout under in Config::layouts.
     /// @param acting The session that triggered the action; its hosting window is serialized.
     void saveLayout(std::string const& name, TerminalSession* acting);
 
@@ -170,14 +170,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param acting The session that triggered the action; its hosting window shows the prompt.
     void beginSaveLayoutPrompt(TerminalSession* acting);
 
-    /// Serializes @p window's live tab/pane tree into a config::Layout, persists it through the
+    /// Serializes @p window's live tab/pane tree into a Layout, persists it through the
     /// injected LayoutStore, and — only once the store has accepted it, so runtime state can never
     /// claim more than what is actually saved — stores it under @p name in the app's in-memory config.
     /// @param window The window whose tabs/panes to serialize.
     /// @param name   The key to save the layout under.
     /// @return Nothing on success, or the reason the layout could not be saved.
-    [[nodiscard]] std::expected<void, LayoutSaveError> saveWindowLayout(vtworkspace::WindowId window,
-                                                                        std::string const& name);
+    [[nodiscard]] std::expected<void, config::LayoutSaveError> saveWindowLayout(vtworkspace::WindowId window,
+                                                                                std::string const& name);
 
     /// Where layouts are persisted: the `layouts.yml` sibling of the loaded config file — which is
     /// exactly where loadConfigFromFile() merges it back from, so saving and loading can never
@@ -221,7 +221,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     void recordCommand(std::string const& id);
 
     /// The app-wide most-recently-used command list, for the palette models to read.
-    [[nodiscard]] CommandHistory const& commandHistory() const noexcept { return _commandHistory; }
+    [[nodiscard]] command::CommandHistory const& commandHistory() const noexcept { return _commandHistory; }
 
     /// Brings the history into a usable state: re-applies the configured
     /// `command_palette_recent_count` (so editing it and reloading the config takes effect without a
@@ -786,12 +786,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
     ContourGuiApp& _app;
     SessionFactory& _sessionFactory;
-    LayoutStore& _layoutStore;
-    CommandHistoryStore& _commandHistoryStore;
+    config::LayoutStore& _layoutStore;
+    command::CommandHistoryStore& _commandHistoryStore;
     /// The app-wide most-recently-used command list. Seeded from the store on the first palette open
     /// (see openCommandPalette()); every window's palette model reads it, and recordCommand() writes it
     /// back through the store.
-    CommandHistory _commandHistory;
+    command::CommandHistory _commandHistory;
     /// Whether _commandHistory has been seeded from the store yet. The seeding is deferred rather than
     /// done in the constructor because the configured capacity is not known that early — see there.
     bool _commandHistoryLoaded = false;

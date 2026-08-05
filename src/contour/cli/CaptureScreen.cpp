@@ -52,7 +52,7 @@ using std::unique_ptr;
 
 using namespace std::string_view_literals;
 
-namespace contour
+namespace contour::cli
 {
 
 namespace
@@ -351,4 +351,4 @@ bool captureScreen(CaptureSettings const& settings)
     return captureScreen(settings, tty, output);
 }
 
-} // namespace contour
+} // namespace contour::cli

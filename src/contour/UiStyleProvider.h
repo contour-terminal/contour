@@ -75,7 +75,7 @@ struct ChromeGlyphs
 ///
 /// Everything is CONSTANT because the style cannot change within a process: the Qt Quick Controls
 /// half of it is chosen once, before the first control exists (see ContourGuiApp), so a live-updating
-/// geometry half would only produce a half-switched window. @see config::UiStyle.
+/// geometry half would only produce a half-switched window. @see UiStyle.
 ///
 /// Deliberately a context property rather than a registered QML singleton. Two separate QML modules
 /// read these tokens -- @c Contour.Ui and the @c ContourTui Quick Controls style -- and a singleton

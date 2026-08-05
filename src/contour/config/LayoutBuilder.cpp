@@ -10,7 +10,7 @@
 #include <ranges>
 #include <string>
 
-namespace contour
+namespace contour::config
 {
 
 namespace
@@ -141,4 +141,4 @@ std::string emitLayoutsYaml(std::unordered_map<std::string, config::Layout> cons
     return std::string { out.c_str() } + "\n";
 }
 
-} // namespace contour
+} // namespace contour::config

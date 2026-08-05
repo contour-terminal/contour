@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace contour
+namespace contour::command
 {
 
 /// Persistence for the command palette's most-recently-used list: the boundary between the in-memory
@@ -53,4 +53,4 @@ class FileCommandHistoryStore final: public CommandHistoryStore
                                                         std::span<std::string const> ids) override;
 };
 
-} // namespace contour
+} // namespace contour::command

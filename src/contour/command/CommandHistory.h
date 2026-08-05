@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-namespace contour
+namespace contour::command
 {
 
 /// The command palette's most-recently-used list: which commands the user ran, newest first.
@@ -67,4 +67,4 @@ class CommandHistory
     std::vector<std::string> _recent;
 };
 
-} // namespace contour
+} // namespace contour::command

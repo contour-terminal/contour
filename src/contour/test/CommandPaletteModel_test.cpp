@@ -9,12 +9,12 @@
 // Plus the promise that makes the MRU safe to persist: a remembered command that no longer EXISTS
 // (its profile was deleted, its tab was closed) quietly stops appearing, instead of leaving a dead row.
 
+#include <contour/CommandPaletteModel.h>
 #include <contour/command/CommandCatalog.h>
 #include <contour/command/CommandHistory.h>
-#include <contour/CommandPaletteModel.h>
-#include <contour/config/Config.h>
 #include <contour/command/FuzzyFilter.h>
 #include <contour/command/Shortcut.h>
+#include <contour/config/Config.h>
 #include <contour/test/GuiTestFixtures.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -80,11 +80,11 @@ namespace
 TEST_CASE("With no filter, the palette shows Recent first, then everything alphabetically",
           "[contour][palette]")
 {
-    auto history = CommandHistory { 3 };
+    auto history = command::CommandHistory { 3 };
     history.record("SplitVertical");
     history.record("CreateNewTab"); // newest
 
-    auto const actionCommands = ActionCommandSource {};
+    auto const actionCommands = command::ActionCommandSource {};
     auto model = CommandPaletteModel { history };
     model.setSources({ &actionCommands });
     model.refresh();
@@ -141,9 +141,9 @@ TEST_CASE("A remembered command that no longer exists quietly stops appearing", 
     // then closed it; the stored "SwitchToTab:2" must not become a dead row that does nothing when
     // picked — it must simply be gone.
     auto tabs = test::StubTabs { { "zsh", "vim" } };
-    auto const tabCommands = TabCommandSource { tabs };
+    auto const tabCommands = command::TabCommandSource { tabs };
 
-    auto history = CommandHistory { 5 };
+    auto history = command::CommandHistory { 5 };
     history.record("SwitchToTab:2");
 
     auto model = CommandPaletteModel { history };
@@ -161,8 +161,8 @@ TEST_CASE("A remembered command that no longer exists quietly stops appearing", 
 
 TEST_CASE("Typing collapses the sections into one ranked list", "[contour][palette]")
 {
-    auto history = CommandHistory { 3 };
-    auto const actionCommands = ActionCommandSource {};
+    auto history = command::CommandHistory { 3 };
+    auto const actionCommands = command::ActionCommandSource {};
 
     auto model = CommandPaletteModel { history };
     model.setSources({ &actionCommands });
@@ -208,7 +208,7 @@ TEST_CASE("Typing collapses the sections into one ranked list", "[contour][palet
         for (auto row = 0; row < model.rowCount(); ++row)
         {
             INFO("row " << row << ": " << titleAt(model, row));
-            CHECK(fuzzyScore("spl", titleAt(model, row)).has_value());
+            CHECK(command::fuzzyScore("spl", titleAt(model, row)).has_value());
         }
     }
 
@@ -229,8 +229,8 @@ TEST_CASE("Typing collapses the sections into one ranked list", "[contour][palet
 TEST_CASE("The palette reports which title characters the filter matched", "[contour][palette]")
 {
     // These indices are what QML bolds; they must point at the characters the filter actually landed on.
-    auto history = CommandHistory { 3 };
-    auto const actionCommands = ActionCommandSource {};
+    auto history = command::CommandHistory { 3 };
+    auto const actionCommands = command::ActionCommandSource {};
 
     auto model = CommandPaletteModel { history };
     model.setSources({ &actionCommands });
@@ -274,9 +274,9 @@ TEST_CASE("Title-match highlight indices are UTF-16 code units, not UTF-8 byte o
     // U+2192 (→) is 3 UTF-8 bytes but a single UTF-16 code unit, so raw byte offsets run two ahead of the
     // indices QML needs.
     auto tabs = test::StubTabs { { "→zephyr" } }; // → then a run of letters unique to the title
-    auto const tabCommands = TabCommandSource { tabs };
+    auto const tabCommands = command::TabCommandSource { tabs };
 
-    auto history = CommandHistory { 3 };
+    auto history = command::CommandHistory { 3 };
     auto model = CommandPaletteModel { history };
     model.setSources({ &tabCommands });
     model.refresh();
@@ -303,10 +303,10 @@ TEST_CASE("Recency breaks a tie between two equally good matches", "[contour][pa
 {
     // Two commands score the same against "toggle"; the one the user reached for last time should be
     // the one under the cursor.
-    auto history = CommandHistory { 5 };
+    auto history = command::CommandHistory { 5 };
     history.record("ToggleStatusLine");
 
-    auto const actionCommands = ActionCommandSource {};
+    auto const actionCommands = command::ActionCommandSource {};
     auto model = CommandPaletteModel { history };
     model.setSources({ &actionCommands });
     model.refresh();
@@ -318,12 +318,12 @@ TEST_CASE("Recency breaks a tie between two equally good matches", "[contour][pa
 
 TEST_CASE("The shortcut column advertises the chord that runs the command", "[contour][palette]")
 {
-    auto history = CommandHistory { 3 };
-    auto const actionCommands = ActionCommandSource {};
+    auto history = command::CommandHistory { 3 };
+    auto const actionCommands = command::ActionCommandSource {};
 
     auto model = CommandPaletteModel { history };
     model.setSources({ &actionCommands });
-    model.setShortcuts(shortcutIndex(config::defaultInputMappings()));
+    model.setShortcuts(command::shortcutIndex(config::defaultInputMappings()));
     model.refresh();
 
     model.setFilter(QStringLiteral("SplitVertical"));
@@ -344,10 +344,10 @@ TEST_CASE("The shortcut column advertises the chord that runs the command", "[co
 
 TEST_CASE("A zero recent_count turns the Recent section off entirely", "[contour][palette]")
 {
-    auto history = CommandHistory { 0 };
+    auto history = command::CommandHistory { 0 };
     history.record("SplitVertical");
 
-    auto const actionCommands = ActionCommandSource {};
+    auto const actionCommands = command::ActionCommandSource {};
     auto model = CommandPaletteModel { history };
     model.setSources({ &actionCommands });
     model.refresh();

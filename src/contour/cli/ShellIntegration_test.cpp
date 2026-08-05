@@ -37,13 +37,13 @@ namespace
 
 TEST_CASE("shellIntegrationScript serves every shell the build compiled in", "[shell-integration]")
 {
-    auto const shells = contour::supportedShells();
+    auto const shells = contour::cli::supportedShells();
     REQUIRE(!shells.empty());
 
     for (auto const& row: shells)
     {
         INFO("shell: " << row.name);
-        auto const script = contour::shellIntegrationScript(row.name);
+        auto const script = contour::cli::shellIntegrationScript(row.name);
         REQUIRE(script.has_value());
         CHECK(!script->empty());
         CHECK(*script == row.script);
@@ -56,16 +56,16 @@ TEST_CASE("shellIntegrationScript serves every shell the build compiled in", "[s
 
 TEST_CASE("shellIntegrationScript rejects a shell it carries no script for", "[shell-integration]")
 {
-    auto const script = contour::shellIntegrationScript("nosuchshell");
+    auto const script = contour::cli::shellIntegrationScript("nosuchshell");
 
     REQUIRE(!script.has_value());
-    CHECK(script.error() == contour::ShellIntegrationError::UnsupportedShell);
+    CHECK(script.error() == contour::cli::ShellIntegrationError::UnsupportedShell);
 
     SECTION("and does not match a prefix of a supported one")
     {
-        CHECK(!contour::shellIntegrationScript("ba").has_value());
-        CHECK(!contour::shellIntegrationScript("bashx").has_value());
-        CHECK(!contour::shellIntegrationScript("").has_value());
+        CHECK(!contour::cli::shellIntegrationScript("ba").has_value());
+        CHECK(!contour::cli::shellIntegrationScript("bashx").has_value());
+        CHECK(!contour::cli::shellIntegrationScript("").has_value());
     }
 }
 
@@ -74,7 +74,7 @@ TEST_CASE("the embedded scripts are the ones in the source tree", "[shell-integr
     auto const shellIntegrationDir = std::filesystem::path { CONTOUR_PROJECT_SOURCE_DIR } / "src" / "contour"
                                      / "cli" / "shell-integration";
 
-    for (auto const& row: contour::supportedShells())
+    for (auto const& row: contour::cli::supportedShells())
     {
         INFO("shell: " << row.name);
         auto const onDisk =
@@ -86,8 +86,8 @@ TEST_CASE("the embedded scripts are the ones in the source tree", "[shell-integr
 
 TEST_CASE("supportedShellsText names exactly the compiled-in shells", "[shell-integration]")
 {
-    auto const text = contour::supportedShellsText();
-    auto const shells = contour::supportedShells();
+    auto const text = contour::cli::supportedShellsText();
+    auto const shells = contour::cli::supportedShells();
 
     for (auto const& row: shells)
     {

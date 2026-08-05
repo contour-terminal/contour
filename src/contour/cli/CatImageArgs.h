@@ -9,7 +9,7 @@
 #include <string_view>
 #include <system_error>
 
-namespace contour
+namespace contour::cli
 {
 
 /// Pure argument parsers for the `contour cat` image subcommand, extracted from ContourApp so the
@@ -87,4 +87,4 @@ namespace contour
     return 1; // default: replace
 }
 
-} // namespace contour
+} // namespace contour::cli

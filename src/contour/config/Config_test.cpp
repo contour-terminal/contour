@@ -6,10 +6,10 @@
 // renamed/retyped YAML key or a broken loadFromEntry overload fails here instead of silently
 // falling back to defaults at runtime.
 
+#include <contour/GuiTheme.h>
 #include <contour/config/Actions.h>
 #include <contour/config/Config.h>
 #include <contour/config/GuiConfigStore.h>
-#include <contour/GuiTheme.h>
 #include <contour/config/ModifierNames.h>
 
 #include <vtbackend/Color.h>
@@ -2983,7 +2983,7 @@ TEST_CASE("Config: FileGuiConfigStore writes and removes side files the loader p
     auto profile = *base.findProfile("main");
     profile.showTitleBar = false;
 
-    auto store = contour::FileGuiConfigStore(configDir);
+    auto store = contour::config::FileGuiConfigStore(configDir);
     REQUIRE(store.saveProfile("saved", profile).has_value());
     REQUIRE(store
                 .saveGuiSettings(
@@ -3095,7 +3095,7 @@ TEST_CASE("Config: every modifier the UI can render parses back from config", "[
 
         // "Meta" is the one deliberate exception: it is spelled for Super, so it parses but not to
         // itself. Everything else must round-trip exactly. @see contour::ConfigModifierTable
-        if (row.modifier == contour::ModifierWithoutConfigSpelling)
+        if (row.modifier == contour::config::ModifierWithoutConfigSpelling)
             CHECK(bound->modifiers == vtbackend::Modifiers { vtbackend::Modifier::Super });
         else
             CHECK(bound->modifiers == vtbackend::Modifiers { row.modifier });

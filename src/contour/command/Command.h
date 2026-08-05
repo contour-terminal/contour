@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-namespace contour
+namespace contour::command
 {
 
 /// One entry the command palette can offer.
@@ -98,4 +98,4 @@ struct CommandArguments
 /// @return Its words, space-separated, e.g. "Toggle Split Orientation".
 [[nodiscard]] std::string splitCamelCase(std::string_view identifier);
 
-} // namespace contour
+} // namespace contour::command

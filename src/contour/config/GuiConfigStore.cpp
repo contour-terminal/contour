@@ -6,7 +6,7 @@
 #include <system_error>
 #include <utility>
 
-namespace contour
+namespace contour::config
 {
 
 namespace
@@ -57,4 +57,4 @@ std::expected<void, std::string> FileGuiConfigStore::saveGuiSettings(
     return atomicWriteFile(_configDir / "settings.yml", config::emitGuiSettingsYaml(settings));
 }
 
-} // namespace contour
+} // namespace contour::config

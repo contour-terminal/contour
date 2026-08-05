@@ -7,7 +7,7 @@
 #include <span>
 #include <string_view>
 
-namespace contour
+namespace contour::command
 {
 
 namespace
@@ -179,4 +179,4 @@ std::vector<ContextMenuEntry> buildContextMenu(ContextMenuState const& state)
     return entries;
 }
 
-} // namespace contour
+} // namespace contour::command

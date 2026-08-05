@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/config/Actions.h>
 #include <contour/command/ContextMenu.h>
+#include <contour/config/Actions.h>
 
 #include <QtCore/QVariantList>
 
@@ -27,7 +27,7 @@ namespace contour
 /// @param entries The menu, as buildContextMenu() produced it.
 /// @param actions Out: the actions the rows run, indexed by their `actionId`. Appended to.
 /// @return The rows, in menu order.
-[[nodiscard]] QVariantList toContextMenuModel(std::vector<ContextMenuEntry> const& entries,
+[[nodiscard]] QVariantList toContextMenuModel(std::vector<command::ContextMenuEntry> const& entries,
                                               std::vector<actions::Action>& actions);
 
 /// A published context menu: the rows QML renders, plus the actions those rows carry.
@@ -41,7 +41,7 @@ struct PublishedContextMenu
     std::vector<actions::Action> actions; ///< What the rows run, indexed by their `actionId`.
 
     /// Replaces the published rows with @p entries.
-    void publish(std::vector<ContextMenuEntry> const& entries)
+    void publish(std::vector<command::ContextMenuEntry> const& entries)
     {
         actions.clear();
         model = toContextMenuModel(entries, actions);

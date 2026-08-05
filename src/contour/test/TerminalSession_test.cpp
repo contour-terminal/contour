@@ -14,10 +14,10 @@
 // terminate() early-returned for a display-less session, so the device stayed open and the session —
 // plus its shell process — leaked.
 
-#include <contour/config/Actions.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/TerminalSession.h>
 #include <contour/TerminalSessionManager.h>
+#include <contour/config/Actions.h>
 #include <contour/test/GuiTestFixtures.h>
 
 #include <vtbackend/Hyperlink.h>
@@ -926,7 +926,7 @@ TEST_CASE("TerminalSession: a modifier-bound char dispatches its action instead 
           "[contour][session][input]")
 {
     // Ctrl+0 is bound to ResetFontSize in the default char mappings with no mode restriction, so
-    // sending it runs the char keybinding-dispatch path (config::apply -> executeAllActions) and
+    // sending it runs the char keybinding-dispatch path (apply -> executeAllActions) and
     // consumes the character: nothing reaches the PTY.
     TestApp testApp;
     auto session = makeDisplaylessSession(testApp.app());
@@ -2037,7 +2037,7 @@ TEST_CASE("TerminalSession: a Ctrl-spelled chord fires its binding (issue #1987)
 {
     // End-to-end counterpart to the parse-level test in Config_test.cpp. That one proves a binding
     // OBJECT exists; this proves the chord actually fires — which additionally exercises the exact
-    // modifier equality in config::apply, the mode gate, and the codepoint the input routes deliver.
+    // modifier equality in apply, the mode gate, and the codepoint the input routes deliver.
     //
     // NB: this drives sendCharEvent directly rather than a QKeyEvent, so it is independent of
     // makeModifiers and runs identically on every platform. (On Windows the real Qt path additionally
@@ -2071,7 +2071,7 @@ input_mapping:
     CHECK(mockPtyOf(*session).stdinBuffer().empty()); // consumed by the binding
     CHECK(session->terminal().primaryScreen().historyLineCount() == vtbackend::LineCount(0));
 
-    // A subset of the chord must NOT match: config::apply compares modifiers with ==, and this is the
+    // A subset of the chord must NOT match: apply compares modifiers with ==, and this is the
     // property that keeps Ctrl+Q from firing a binding written for Ctrl+Alt+Shift+Q.
     mockPtyOf(*session).stdinBuffer().clear();
     session->sendCharEvent(U'Q',

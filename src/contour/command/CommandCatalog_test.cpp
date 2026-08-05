@@ -19,6 +19,7 @@
 #include <vector>
 
 using namespace contour;
+using namespace contour::command;
 
 namespace
 {

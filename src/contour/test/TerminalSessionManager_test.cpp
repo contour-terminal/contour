@@ -9,8 +9,8 @@
 // set, so the testable invariant — window count as windows are created and removed — is exercised here
 // against the Qt-free model. (Per-window tab/pane isolation is covered in SessionModel_test.cpp.)
 
-#include <contour/config/Config.h>
 #include <contour/TerminalSessionManager.h>
+#include <contour/config/Config.h>
 #include <contour/test/GuiTestFixtures.h>
 
 #include <vtbackend/primitives.h>
@@ -125,7 +125,7 @@ TEST_CASE("SessionModel: removing a window with tabs closes only that window's t
 
 // Manager-level coverage for applyLayoutToWindow, exercised directly (rather than through
 // launchLayout) so the test needs no config injection or acting-session setup: it builds a
-// contour::config::Layout by hand and asserts the resulting real, PTY-backed tabs/colors on the
+// contour::Layout by hand and asserts the resulting real, PTY-backed tabs/colors on the
 // manager's authoritative vtworkspace::SessionModel.
 TEST_CASE("TerminalSessionManager: applyLayoutToWindow builds tabs with colors", "[manager][layout]")
 {
@@ -390,17 +390,19 @@ TEST_CASE("TerminalSessionManager: SaveLayout reports why a save failed", "[mana
     contour::test::ScopedController const win { app.manager() };
 
     // Each failure is a distinct, reportable cause — not a bare "false".
-    CHECK(app.manager().saveWindowLayout(win.id, "").error() == contour::LayoutSaveError::EmptyName);
+    CHECK(app.manager().saveWindowLayout(win.id, "").error() == contour::config::LayoutSaveError::EmptyName);
     CHECK(app.manager().saveWindowLayout(vtworkspace::WindowId { 4711 }, "x").error()
-          == contour::LayoutSaveError::UnknownWindow);
+          == contour::config::LayoutSaveError::UnknownWindow);
 
     store->loadError = "corrupt";
-    CHECK(app.manager().saveWindowLayout(win.id, "x").error() == contour::LayoutSaveError::StoreUnreadable);
+    CHECK(app.manager().saveWindowLayout(win.id, "x").error()
+          == contour::config::LayoutSaveError::StoreUnreadable);
     CHECK(store->savedPaths.empty()); // an unreadable store is never written over
 
     store->loadError.reset();
     store->saveError = "disk full";
-    CHECK(app.manager().saveWindowLayout(win.id, "x").error() == contour::LayoutSaveError::WriteFailed);
+    CHECK(app.manager().saveWindowLayout(win.id, "x").error()
+          == contour::config::LayoutSaveError::WriteFailed);
     // A failed write must NOT leave the in-memory config claiming a layout that was never saved.
     CHECK_FALSE(app.app().config().layouts.value().contains("x"));
 }

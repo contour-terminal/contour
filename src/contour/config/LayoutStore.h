@@ -10,7 +10,7 @@
 #include <string_view>
 #include <unordered_map>
 
-namespace contour
+namespace contour::config
 {
 
 /// Named layouts, keyed by layout name — the unit of layout persistence.
@@ -82,4 +82,4 @@ class FileLayoutStore final: public LayoutStore
                                                         LayoutMap const& layouts) override;
 };
 
-} // namespace contour
+} // namespace contour::config

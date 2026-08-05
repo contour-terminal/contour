@@ -23,7 +23,7 @@ namespace
 {
 
 /// Canned VT peer: replies to the screen-size query and the capture request from a script.
-class CannedTransport final: public contour::CaptureTransport
+class CannedTransport final: public contour::cli::CaptureTransport
 {
   public:
     explicit CannedTransport(std::string captureReply, bool answerScreenSize = true):
@@ -114,12 +114,12 @@ TEST_CASE("captureScreen: the request it sends is the one the engine calls XTCAP
 {
     auto transport = CannedTransport { "\033^314;x\033\\"
                                        "\033^314;\033\\" };
-    auto settings = contour::CaptureSettings {};
+    auto settings = contour::cli::CaptureSettings {};
     settings.timeout = 1.0;
     settings.lineCount = vtbackend::LineCount(2);
 
     auto out = std::ostringstream {};
-    REQUIRE(contour::captureScreen(settings, transport, out));
+    REQUIRE(contour::cli::captureScreen(settings, transport, out));
 
     auto const* const resolved = resolveCsi(transport.requests);
     REQUIRE(resolved != nullptr);
@@ -131,12 +131,12 @@ TEST_CASE("captureScreen: a full capture round-trip lands the payload in the out
     // Reply = one PM 314 chunk with the content, one empty PM 314 chunk as the end marker.
     auto transport = CannedTransport { "\033^314;hello capture\n\033\\"
                                        "\033^314;\033\\" };
-    auto settings = contour::CaptureSettings {};
+    auto settings = contour::cli::CaptureSettings {};
     settings.timeout = 1.0;
     settings.lineCount = vtbackend::LineCount(2);
 
     auto out = std::ostringstream {};
-    CHECK(contour::captureScreen(settings, transport, out));
+    CHECK(contour::cli::captureScreen(settings, transport, out));
     CHECK(out.str() == "hello capture\n");
     // The request must carry the physical-lines flag and the line count, under the ',' intermediate that
     // distinguishes XTCAPTURE from xterm's XTSMTITLE. @see vtbackend/Functions.h, XTCAPTURE.
@@ -147,12 +147,12 @@ TEST_CASE("captureScreen: words mode splits the payload one word per line", "[ca
 {
     auto transport = CannedTransport { "\033^314;alpha beta\033\\"
                                        "\033^314;\033\\" };
-    auto settings = contour::CaptureSettings {};
+    auto settings = contour::cli::CaptureSettings {};
     settings.words = true;
     settings.logicalLines = true;
 
     auto out = std::ostringstream {};
-    CHECK(contour::captureScreen(settings, transport, out));
+    CHECK(contour::cli::captureScreen(settings, transport, out));
     CHECK(out.str() == "alpha\nbeta\n");
     CHECK(transport.requests.contains("\033[>1;0,t")); // logical-lines flag
 }
@@ -160,22 +160,22 @@ TEST_CASE("captureScreen: words mode splits the payload one word per line", "[ca
 TEST_CASE("captureScreen: an unanswered capture request times out cleanly", "[capture]")
 {
     auto transport = CannedTransport { /*captureReply=*/"" };
-    auto settings = contour::CaptureSettings {};
+    auto settings = contour::cli::CaptureSettings {};
     settings.timeout = 0.05;
 
     auto out = std::ostringstream {};
-    CHECK_FALSE(contour::captureScreen(settings, transport, out));
+    CHECK_FALSE(contour::cli::captureScreen(settings, transport, out));
     CHECK(out.str().empty());
 }
 
 TEST_CASE("captureScreen: a peer that ignores the screen-size query fails the session", "[capture]")
 {
     auto transport = CannedTransport { "", /*answerScreenSize=*/false };
-    auto settings = contour::CaptureSettings {};
+    auto settings = contour::cli::CaptureSettings {};
     settings.timeout = 0.05;
 
     auto out = std::ostringstream {};
-    CHECK_FALSE(contour::captureScreen(settings, transport, out));
+    CHECK_FALSE(contour::cli::captureScreen(settings, transport, out));
 }
 
 TEST_CASE("captureScreen: verbose mode logs the screen size and still captures", "[capture]")
@@ -184,12 +184,12 @@ TEST_CASE("captureScreen: verbose mode logs the screen size and still captures",
     // the capture itself must still succeed and land the payload.
     auto transport = CannedTransport { "\033^314;verbose payload\n\033\\"
                                        "\033^314;\033\\" };
-    auto settings = contour::CaptureSettings {};
+    auto settings = contour::cli::CaptureSettings {};
     settings.timeout = 1.0;
     settings.verbosityLevel = 1;
     settings.outputFile = "-";
 
     auto out = std::ostringstream {};
-    CHECK(contour::captureScreen(settings, transport, out));
+    CHECK(contour::cli::captureScreen(settings, transport, out));
     CHECK(out.str() == "verbose payload\n");
 }

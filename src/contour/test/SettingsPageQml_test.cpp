@@ -6,9 +6,9 @@
 // config picked it up. This proves the QML actually wires its controls to the controller; the
 // controller's own logic is unit-tested separately in SettingsController_test.cpp.
 
+#include <contour/SettingsController.h>
 #include <contour/config/Config.h>
 #include <contour/config/GuiConfigStore.h>
-#include <contour/SettingsController.h>
 #include <contour/test/QmlChromeStyle.h>
 #include <contour/test/QmlMessageCapture.h>
 
@@ -55,7 +55,7 @@ TEST_CASE("SettingsPage opens on the global settings pane", "[contour][gui][qml]
 
     config::Config cfg;
     config::loadConfigFromFile(cfg, configPath);
-    auto store = std::make_shared<FileGuiConfigStore>(configDir);
+    auto store = std::make_shared<config::FileGuiConfigStore>(configDir);
     auto controller = SettingsController([&]() -> config::Config const& { return cfg; }, store, [&]() {});
 
     QQmlEngine engine;
@@ -104,7 +104,7 @@ TEST_CASE("SettingsPage creates a profile through the QML and it lands on disk (
 
     config::Config cfg;
     config::loadConfigFromFile(cfg, configPath);
-    auto store = std::make_shared<FileGuiConfigStore>(configDir);
+    auto store = std::make_shared<config::FileGuiConfigStore>(configDir);
     auto controller = SettingsController([&]() -> config::Config const& { return cfg; },
                                          store,
                                          [&]() {
@@ -179,7 +179,7 @@ struct PageFixture
     config::Config cfg;
     std::filesystem::path configDir;
     std::filesystem::path configPath;
-    std::shared_ptr<FileGuiConfigStore> store;
+    std::shared_ptr<config::FileGuiConfigStore> store;
     std::unique_ptr<SettingsController> controller;
     QQmlEngine engine;
     IncubationDriver incubation;
@@ -198,7 +198,7 @@ struct PageFixture
             out << yaml;
         }
         config::loadConfigFromFile(cfg, configPath);
-        store = std::make_shared<FileGuiConfigStore>(configDir);
+        store = std::make_shared<config::FileGuiConfigStore>(configDir);
         controller = std::make_unique<SettingsController>([this]() -> config::Config const& { return cfg; },
                                                           store,
                                                           [this]() {

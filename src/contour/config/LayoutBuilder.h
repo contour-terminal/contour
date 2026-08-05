@@ -8,20 +8,13 @@
 
 #include <vtworkspace/LayoutTree.h>
 
-namespace contour
+namespace contour::config
 {
 
 // The layout tree model (structs, realize, serialize) lives in vtworkspace::LayoutTree so the Qt-free
-// daemon shares it; these aliases keep the GUI's historical spellings working. Only the YAML
-// emission below is contour-specific (it is the sole yaml-cpp-coupled piece).
-using vtworkspace::LeafResolver;
-using vtworkspace::leftmostLeaf;
-using vtworkspace::PaneLeafData;
-using vtworkspace::PaneSeeder;
-using vtworkspace::ratioForFirst;
-using vtworkspace::realizeLayoutTab;
-using vtworkspace::serializePane;
-using vtworkspace::serializeTab;
+// daemon shares it. Callers name it there; this header used to re-export those names under
+// `contour::` to keep the GUI's historical spellings working, which only hid where they come from.
+// Only the YAML emission below is contour-specific (it is the sole yaml-cpp-coupled piece).
 
 /// Renders a full `layouts:` YAML document (the exact text later written to `layouts.yml`) from
 /// @p layouts, via yaml-cpp's YAML::Emitter — so quoting/escaping of names, commands, arguments and
@@ -32,4 +25,4 @@ using vtworkspace::serializeTab;
 /// @return The complete YAML document text.
 [[nodiscard]] std::string emitLayoutsYaml(std::unordered_map<std::string, config::Layout> const& layouts);
 
-} // namespace contour
+} // namespace contour::config

@@ -9,7 +9,7 @@
 #include <filesystem>
 #include <string>
 
-namespace contour
+namespace contour::config
 {
 
 /// Persistence for the GUI-managed configuration side files — the write-side counterpart to the
@@ -80,4 +80,4 @@ class FileGuiConfigStore final: public GuiConfigStore
     std::filesystem::path _configDir;
 };
 
-} // namespace contour
+} // namespace contour::config

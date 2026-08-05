@@ -7,7 +7,7 @@
 namespace contour
 {
 
-QVariantList toContextMenuModel(std::vector<ContextMenuEntry> const& entries,
+QVariantList toContextMenuModel(std::vector<command::ContextMenuEntry> const& entries,
                                 std::vector<actions::Action>& actions)
 {
     auto rows = QVariantList {};
@@ -19,11 +19,11 @@ QVariantList toContextMenuModel(std::vector<ContextMenuEntry> const& entries,
 
         switch (entry.kind)
         {
-            case ContextMenuEntryKind::Separator: //
+            case command::ContextMenuEntryKind::Separator: //
                 row["kind"] = QStringLiteral("separator");
                 break;
 
-            case ContextMenuEntryKind::Submenu:
+            case command::ContextMenuEntryKind::Submenu:
                 row["kind"] = QStringLiteral("submenu");
                 row["title"] = QString::fromStdString(entry.title);
                 // Recursing before the parent row is pushed keeps the ids in the order the rows are
@@ -31,7 +31,7 @@ QVariantList toContextMenuModel(std::vector<ContextMenuEntry> const& entries,
                 row["children"] = toContextMenuModel(entry.children, actions);
                 break;
 
-            case ContextMenuEntryKind::Command:
+            case command::ContextMenuEntryKind::Command:
                 row["kind"] = QStringLiteral("command");
                 row["title"] = QString::fromStdString(entry.title);
                 row["enabled"] = entry.enabled;

@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ColorConversion.h>
-#include <contour/command/ContextMenu.h>
 #include <contour/ContextMenuModel.h>
 #include <contour/ContourGuiApp.h>
-#include <contour/config/GuiConfigStore.h>
 #include <contour/PaneProxy.h>
 #include <contour/SettingsController.h>
-#include <contour/command/Shortcut.h>
 #include <contour/TabColorScheme.h>
 #include <contour/TabLabel.h>
 #include <contour/TerminalSession.h>
 #include <contour/TerminalSessionManager.h>
-#include <contour/command/TitleBarContextMenu.h>
 #include <contour/WindowController.h>
+#include <contour/command/ContextMenu.h>
+#include <contour/command/Shortcut.h>
+#include <contour/command/TitleBarContextMenu.h>
+#include <contour/config/GuiConfigStore.h>
 #include <contour/helper.h>
 
 #include <QtCore/QDir>
@@ -53,7 +53,7 @@ WindowController::WindowController(TerminalSessionManager& manager, vtworkspace:
     // rooted at the config directory, and an apply step that reloads every session after a save.
     _settingsController = std::make_unique<SettingsController>(
         [this]() -> config::Config const& { return _manager.app().config(); },
-        std::make_shared<FileGuiConfigStore>(_manager.app().config().configFile.parent_path()),
+        std::make_shared<config::FileGuiConfigStore>(_manager.app().config().configFile.parent_path()),
         [this]() {
             _manager.reloadAllSessions();
             // Re-apply the GUI chrome theme live: a settings-page change to `theme` is already in the
@@ -69,7 +69,7 @@ void WindowController::openCommandPalette()
 {
     // Re-read the bindings on every open, not once at construction: a ReloadConfig can have rebound a
     // key since, and a shortcut column that advertises the OLD chord is worse than none at all.
-    _commandPalette->setShortcuts(shortcutIndex(_manager.app().config().inputMappings.value()));
+    _commandPalette->setShortcuts(command::shortcutIndex(_manager.app().config().inputMappings.value()));
 
     // Re-queries the sources (so the tab rows track the tabs that exist now) and clears any filter the
     // last open left behind.
@@ -121,7 +121,7 @@ void WindowController::openContextMenu()
     auto const* tab = activeModelTab();
     state.hasSplits = tab != nullptr && tab->hasMultiplePanes();
 
-    auto const entries = buildContextMenu(state);
+    auto const entries = command::buildContextMenu(state);
 
     _paneContextMenu.publish(entries);
 
@@ -156,7 +156,7 @@ void WindowController::triggerContextMenuAction(int actionId)
 
 void WindowController::openTitleBarContextMenu()
 {
-    auto state = TitleBarContextMenuState {
+    auto state = command::TitleBarContextMenuState {
         .tabCount = count(),
         // The WINDOW's live modes, not the configuration's: these rows set a runtime override, so a
         // window changed since startup must show what it is actually doing.
@@ -173,7 +173,7 @@ void WindowController::openTitleBarContextMenu()
         state.profileNames.push_back(name);
     std::ranges::sort(state.profileNames);
 
-    _titleBarContextMenu.publish(buildTitleBarContextMenu(state));
+    _titleBarContextMenu.publish(command::buildTitleBarContextMenu(state));
 
     // Model first, then the request to show: both are synchronous, so QML has rebuilt the rows by the
     // time it is told to pop them.

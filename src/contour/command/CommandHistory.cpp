@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <string>
 
-namespace contour
+namespace contour::command
 {
 
 void CommandHistory::record(std::string_view id)
@@ -40,4 +40,4 @@ void CommandHistory::trim()
         _recent.resize(_capacity);
 }
 
-} // namespace contour
+} // namespace contour::command

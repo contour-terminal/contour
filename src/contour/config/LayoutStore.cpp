@@ -3,7 +3,7 @@
 #include <contour/config/LayoutBuilder.h>
 #include <contour/config/LayoutStore.h>
 
-namespace contour
+namespace contour::config
 {
 
 std::expected<LayoutMap, std::string> FileLayoutStore::load(std::filesystem::path const& path) const
@@ -19,4 +19,4 @@ std::expected<void, std::string> FileLayoutStore::save(std::filesystem::path con
     return atomicWriteFile(path, emitLayoutsYaml(layouts));
 }
 
-} // namespace contour
+} // namespace contour::config

@@ -19,7 +19,10 @@
 namespace contour
 {
 
-class CommandHistory;
+namespace command
+{
+    class CommandHistory;
+}
 
 /// The list the command palette shows: every runnable command, filtered and ordered for display.
 ///
@@ -63,7 +66,7 @@ class CommandPaletteModel: public QAbstractListModel
 
     /// @param history The app-wide most-recently-used list. Must outlive this model.
     /// @param parent  Qt parent.
-    explicit CommandPaletteModel(CommandHistory const& history, QObject* parent = nullptr);
+    explicit CommandPaletteModel(command::CommandHistory const& history, QObject* parent = nullptr);
 
     /// Points this model at the sources it draws commands from.
     ///
@@ -72,7 +75,7 @@ class CommandPaletteModel: public QAbstractListModel
     /// Every source must outlive this model.
     ///
     /// @param sources The sources, in precedence order (see collectCommands()).
-    void setSources(std::vector<CommandSource const*> sources);
+    void setSources(std::vector<command::CommandSource const*> sources);
 
     /// The shortcut to advertise per command id, from shortcutIndex().
     /// @param shortcuts Command id -> rendered shortcut.
@@ -88,7 +91,7 @@ class CommandPaletteModel: public QAbstractListModel
     /// command whether or not the current filter happens to be showing it.
     ///
     /// @param id The command id to look up.
-    [[nodiscard]] Command const* commandById(std::string_view id) const noexcept;
+    [[nodiscard]] command::Command const* commandById(std::string_view id) const noexcept;
 
     // {{{ QAbstractListModel
     [[nodiscard]] QVariant data(QModelIndex const& index, int role = Qt::DisplayRole) const override;
@@ -113,7 +116,7 @@ class CommandPaletteModel: public QAbstractListModel
     /// every keystroke, for nothing.
     struct Row
     {
-        Command const* command;
+        command::Command const* command;
         Section section;
         /// UTF-8 byte offsets into the command's title that the active filter matched, ascending. These
         /// are converted to UTF-16 code-unit indices at the TitleMatchesRole boundary (what QML bolds).
@@ -125,12 +128,12 @@ class CommandPaletteModel: public QAbstractListModel
     /// Rebuilds _rows from _commands, applying the current filter and ordering (see the class comment).
     void rebuildRows();
 
-    CommandHistory const& _history;
-    std::vector<CommandSource const*> _sources;
+    command::CommandHistory const& _history;
+    std::vector<command::CommandSource const*> _sources;
     std::unordered_map<std::string, std::string> _shortcuts;
 
-    std::vector<Command> _commands; //!< Everything the sources offer; rebuilt by refresh().
-    std::vector<Row> _rows;         //!< What is currently displayed; rebuilt by rebuildRows().
+    std::vector<command::Command> _commands; //!< Everything the sources offer; rebuilt by refresh().
+    std::vector<Row> _rows;                  //!< What is currently displayed; rebuilt by rebuildRows().
     QString _filter;
 };
 

@@ -7,7 +7,7 @@
 #include <format>
 #include <string>
 
-namespace contour
+namespace contour::command
 {
 
 namespace
@@ -79,4 +79,4 @@ std::unordered_map<std::string, std::string> shortcutIndex(config::InputMappings
     return result;
 }
 
-} // namespace contour
+} // namespace contour::command

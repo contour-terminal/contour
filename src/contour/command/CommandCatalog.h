@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace contour
+namespace contour::command
 {
 
 /// Merges the commands of every source in @p sources into one list.
@@ -108,4 +108,4 @@ class TabCommandSource final: public CommandSource
     TabTitleProvider const& _tabs;
 };
 
-} // namespace contour
+} // namespace contour::command

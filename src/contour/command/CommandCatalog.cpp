@@ -7,7 +7,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace contour
+namespace contour::command
 {
 
 namespace
@@ -143,4 +143,4 @@ std::vector<Command> TabCommandSource::commands() const
     return result;
 }
 
-} // namespace contour
+} // namespace contour::command

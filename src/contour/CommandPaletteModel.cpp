@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/command/CommandHistory.h>
 #include <contour/CommandPaletteModel.h>
+#include <contour/command/CommandHistory.h>
 #include <contour/command/FuzzyFilter.h>
 
 #include <algorithm>
@@ -21,7 +21,7 @@ namespace
     /// Compares on the title the user actually reads, not on the id — "Switch To Tab 3: vim" belongs
     /// under S, wherever its id happens to sort. Titles are ASCII and consistently capitalized (they
     /// are derived from the action names), so a plain byte comparison already reads as alphabetical.
-    [[nodiscard]] bool byTitle(Command const& a, Command const& b) noexcept
+    [[nodiscard]] bool byTitle(command::Command const& a, command::Command const& b) noexcept
     {
         return a.title < b.title;
     }
@@ -69,12 +69,12 @@ namespace
     }
 } // namespace
 
-CommandPaletteModel::CommandPaletteModel(CommandHistory const& history, QObject* parent):
+CommandPaletteModel::CommandPaletteModel(command::CommandHistory const& history, QObject* parent):
     QAbstractListModel { parent }, _history { history }
 {
 }
 
-void CommandPaletteModel::setSources(std::vector<CommandSource const*> sources)
+void CommandPaletteModel::setSources(std::vector<command::CommandSource const*> sources)
 {
     _sources = std::move(sources);
 }
@@ -86,7 +86,7 @@ void CommandPaletteModel::setShortcuts(std::unordered_map<std::string, std::stri
 
 void CommandPaletteModel::refresh()
 {
-    _commands = collectCommands(_sources);
+    _commands = command::collectCommands(_sources);
 
     // Clearing the filter here rather than making the caller do it with setFilter({}): that would
     // rebuild the rows once against the OLD command list, only for this refresh to throw the result
@@ -144,7 +144,7 @@ void CommandPaletteModel::rebuildRows()
         // user reached for last time comes up under the cursor.
         struct Scored
         {
-            Command const* command;
+            command::Command const* command;
             int score;
             int recency; //!< Position in the MRU list; lower is more recent. Absent -> past the end.
             std::vector<int> titleMatches; //!< Title indices this query matched; empty if matched via id.
@@ -168,14 +168,14 @@ void CommandPaletteModel::rebuildRows()
             // an id-only hit highlights nothing, there being no id text on screen to mark.
             auto score = std::optional<int> {};
             auto titleMatches = std::vector<int> {};
-            if (auto match = fuzzyMatch(query, command.title))
+            if (auto match = command::fuzzyMatch(query, command.title))
             {
                 score = match->score;
                 titleMatches = std::move(match->positions);
             }
             else
             {
-                score = fuzzyScore(query, command.id);
+                score = command::fuzzyScore(query, command.id);
             }
             if (!score)
                 continue;
@@ -203,7 +203,7 @@ void CommandPaletteModel::rebuildRows()
     endResetModel();
 }
 
-Command const* CommandPaletteModel::commandById(std::string_view id) const noexcept
+command::Command const* CommandPaletteModel::commandById(std::string_view id) const noexcept
 {
     auto const found = std::ranges::find_if(_commands, [&](auto const& command) { return command.id == id; });
     if (found == _commands.end())

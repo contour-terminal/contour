@@ -4,8 +4,8 @@
 // optional Qt module and a platform voice, neither of which a test can rely on — so the part that is
 // pinned here is the part that is ours: the text preparation, and the decision to stay quiet.
 
-#include <contour/command/ContextMenu.h>
 #include <contour/SpeechSynthesizer.h>
+#include <contour/command/ContextMenu.h>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -78,19 +78,19 @@ TEST_CASE("without a speech engine the feature does not offer itself", "[contour
 
     // ...and the menu row goes with it. A row that is permanently dead teaches the user the feature is
     // broken, when in truth this build or this machine simply has no voice.
-    auto state = contour::ContextMenuState {};
+    auto state = contour::command::ContextMenuState {};
     state.hasSelection = true;
     state.canSpeak = false;
-    auto const withoutSpeech = contour::buildContextMenu(state);
+    auto const withoutSpeech = contour::command::buildContextMenu(state);
     auto const hasReadAloud = [](auto const& entries) {
         return std::ranges::any_of(entries, [](auto const& e) { return e.title == "Read Aloud"; });
     };
     CHECK_FALSE(hasReadAloud(withoutSpeech));
 
     state.canSpeak = true;
-    CHECK(hasReadAloud(contour::buildContextMenu(state)));
+    CHECK(hasReadAloud(contour::command::buildContextMenu(state)));
 
     // With a voice but nothing selected there is nothing to read, so the row stays away.
     state.hasSelection = false;
-    CHECK_FALSE(hasReadAloud(contour::buildContextMenu(state)));
+    CHECK_FALSE(hasReadAloud(contour::command::buildContextMenu(state)));
 }

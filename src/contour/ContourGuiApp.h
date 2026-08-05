@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/command/CommandHistoryStore.h>
-#include <contour/config/Config.h>
-#include <contour/cli/ContourApp.h>
 #include <contour/ExitCode.h>
 #include <contour/ExternalLauncher.h>
-#include <contour/config/LayoutStore.h>
 #include <contour/SpeechSynthesizer.h>
 #include <contour/TerminalSessionManager.h>
 #include <contour/UiStyleProvider.h>
+#include <contour/cli/ContourApp.h>
+#include <contour/command/CommandHistoryStore.h>
+#include <contour/config/Config.h>
+#include <contour/config/LayoutStore.h>
 #include <contour/helper.h>
 
 #include <vtpty/Process.h>
@@ -76,7 +76,7 @@ class WindowController;
 [[nodiscard]] std::filesystem::path uiModuleOverrideDirectory(std::filesystem::path const& configHome);
 
 /// Extends ContourApp with terminal GUI capability.
-class ContourGuiApp: public QObject, public ContourApp
+class ContourGuiApp: public QObject, public cli::ContourApp
 {
     Q_OBJECT
 
@@ -104,12 +104,12 @@ class ContourGuiApp: public QObject, public ContourApp
     explicit ContourGuiApp(crispy::environment const& env,
                            std::unique_ptr<SessionFactory> sessionFactory = nullptr,
                            std::unique_ptr<ExternalLauncher> externalLauncher = nullptr,
-                           std::unique_ptr<LayoutStore> layoutStore = nullptr,
-                           std::unique_ptr<CommandHistoryStore> commandHistoryStore = nullptr,
+                           std::unique_ptr<config::LayoutStore> layoutStore = nullptr,
+                           std::unique_ptr<command::CommandHistoryStore> commandHistoryStore = nullptr,
                            std::unique_ptr<SpeechSynthesizer> speechSynthesizer = nullptr);
     ~ContourGuiApp() override;
 
-    static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(ContourApp::instance()); }
+    static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(cli::ContourApp::instance()); }
 
     int run(int argc, char const* argv[]) override;
     [[nodiscard]] crispy::cli::command parameterDefinition() const override;
@@ -280,9 +280,9 @@ class ContourGuiApp: public QObject, public ContourApp
     // The external-resource launcher (URL open / process spawn), reached by sessions via _app.
     std::unique_ptr<ExternalLauncher> _externalLauncher;
     // Declared before _sessionManager: the manager holds a reference to the store.
-    std::unique_ptr<LayoutStore> _layoutStore;
+    std::unique_ptr<config::LayoutStore> _layoutStore;
     // Likewise: the manager holds a reference to the command-history store.
-    std::unique_ptr<CommandHistoryStore> _commandHistoryStore;
+    std::unique_ptr<command::CommandHistoryStore> _commandHistoryStore;
     // Shared by every session, reached via _app; @see speechSynthesizer().
     std::unique_ptr<SpeechSynthesizer> _speechSynthesizer;
     TerminalSessionManager _sessionManager;

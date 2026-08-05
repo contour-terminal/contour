@@ -6,7 +6,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-using namespace contour;
+using namespace contour::cli;
 using namespace std::string_view_literals;
 
 TEST_CASE("parseCatSize accepts WxH and rejects malformed input", "[cat][image]")

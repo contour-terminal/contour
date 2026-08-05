@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/config/Actions.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/ExternalLauncher.h>
 #include <contour/SpeechSynthesizer.h>
 #include <contour/TerminalSession.h>
+#include <contour/config/Actions.h>
 #include <contour/display/CaretGeometry.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/helper.h>
@@ -1900,7 +1900,7 @@ bool TerminalSession::operator()(actions::OpenContextMenu)
     return true;
 }
 
-ContextMenuState TerminalSession::contextMenuState()
+command::ContextMenuState TerminalSession::contextMenuState()
 {
     auto profileNames = std::vector<std::string> {};
     for (auto const& name: _config.profiles.value() | std::views::keys)
@@ -1928,7 +1928,7 @@ ContextMenuState TerminalSession::contextMenuState()
         auto const block = terminal().lastCommandBlock();
         auto const hyperlink = terminal().tryGetHoveringHyperlink();
 
-        return ContextMenuState {
+        return command::ContextMenuState {
             .hasSelection = terminal().selectionAvailable(),
             .clipboardHasText = clipboardHasText,
             // An empty block is no block. A shell that emits OSC 133;D at its very first prompt (tcsh

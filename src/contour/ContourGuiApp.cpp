@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/CommandPaletteModel.h>
-#include <contour/config/Config.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/GuiTheme.h>
 #include <contour/PaneProxy.h>
@@ -9,6 +8,7 @@
 #include <contour/SessionFactory.h>
 #include <contour/SettingsController.h>
 #include <contour/WindowController.h>
+#include <contour/config/Config.h>
 #include <contour/display/ContentScale.h>
 #include <contour/display/ShaderConfig.h> // display::createSurfaceFormat
 #include <contour/display/TerminalAccessible.h>
@@ -110,8 +110,8 @@ bool hasStrandedQmlOverrides(fs::path const& configHome)
 ContourGuiApp::ContourGuiApp(crispy::environment const& env,
                              std::unique_ptr<SessionFactory> sessionFactory,
                              std::unique_ptr<ExternalLauncher> externalLauncher,
-                             std::unique_ptr<LayoutStore> layoutStore,
-                             std::unique_ptr<CommandHistoryStore> commandHistoryStore,
+                             std::unique_ptr<config::LayoutStore> layoutStore,
+                             std::unique_ptr<command::CommandHistoryStore> commandHistoryStore,
                              std::unique_ptr<SpeechSynthesizer> speechSynthesizer):
     ContourApp { env },
     _sessionFactory(std::make_unique<RoutingSessionFactory>(
@@ -119,9 +119,9 @@ ContourGuiApp::ContourGuiApp(crispy::environment const& env,
     _routingFactory(static_cast<RoutingSessionFactory*>(_sessionFactory.get())),
     _externalLauncher(externalLauncher ? std::move(externalLauncher)
                                        : std::make_unique<QtExternalLauncher>()),
-    _layoutStore(layoutStore ? std::move(layoutStore) : std::make_unique<FileLayoutStore>()),
+    _layoutStore(layoutStore ? std::move(layoutStore) : std::make_unique<config::FileLayoutStore>()),
     _commandHistoryStore(commandHistoryStore ? std::move(commandHistoryStore)
-                                             : std::make_unique<FileCommandHistoryStore>()),
+                                             : std::make_unique<command::FileCommandHistoryStore>()),
     _speechSynthesizer(speechSynthesizer ? std::move(speechSynthesizer) : makeSpeechSynthesizer()),
     _sessionManager(*this, *_sessionFactory, *_layoutStore, *_commandHistoryStore)
 {
@@ -368,12 +368,12 @@ int ContourGuiApp::run(int argc, char const* argv[])
     _argc = argc;
     _argv = argv;
 
-    return ContourApp::run(argc, argv);
+    return cli::ContourApp::run(argc, argv);
 }
 
 crispy::cli::command ContourGuiApp::parameterDefinition() const
 {
-    auto command = ContourApp::parameterDefinition();
+    auto command = cli::ContourApp::parameterDefinition();
 
     // NOLINTBEGIN
     command.children.insert(
@@ -535,7 +535,7 @@ std::chrono::seconds ContourGuiApp::earlyExitThreshold() const
     auto const configThreshold = config().earlyExitThreshold.value();
     auto const parameterThreshold = parameters().get<int>("contour.terminal.early-exit-threshold");
 
-    // default threshold is config::documentation::DefaultEarlyExitThreshold seconds
+    // default threshold is documentation::DefaultEarlyExitThreshold seconds
     if (parameterThreshold >= 0)
         return std::chrono::seconds(parameterThreshold);
 

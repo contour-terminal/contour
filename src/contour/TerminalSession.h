@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/config/Actions.h>
 #include <contour/Audio.h>
 #include <contour/ColorConversion.h>
-#include <contour/config/Config.h>
-#include <contour/command/ContextMenu.h>
 #include <contour/HorizontalWheelGesture.h>
 #include <contour/HyperlinkTooltip.h>
+#include <contour/command/ContextMenu.h>
+#include <contour/config/Actions.h>
+#include <contour/config/Config.h>
 #include <contour/display/Announcer.h>
 #ifdef __linux__
     #include <contour/FreeDesktopNotifier.h>
@@ -649,7 +649,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     ///
     /// @return The snapshot, with `hasSplits` left for the window to fill in (a session does not know
     ///         whether its tab holds siblings).
-    [[nodiscard]] ContextMenuState contextMenuState();
+    [[nodiscard]] command::ContextMenuState contextMenuState();
 
     /// Runs @p action against this session — the same dispatch a key binding takes.
     ///

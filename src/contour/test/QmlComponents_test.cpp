@@ -9,14 +9,14 @@
 // having to boot a full terminal session.
 
 #include <contour/ColorConversion.h>
+#include <contour/CommandPaletteModel.h>
+#include <contour/ContextMenuModel.h>
+#include <contour/TabColorScheme.h>
 #include <contour/command/CommandCatalog.h>
 #include <contour/command/CommandHistory.h>
-#include <contour/CommandPaletteModel.h>
-#include <contour/config/Config.h>
 #include <contour/command/ContextMenu.h>
-#include <contour/ContextMenuModel.h>
 #include <contour/command/Shortcut.h>
-#include <contour/TabColorScheme.h>
+#include <contour/config/Config.h>
 #include <contour/test/QmlChromeStyle.h>
 #include <contour/test/QmlMessageCapture.h>
 
@@ -608,7 +608,7 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
     contour::test::installChromeStyle(engine);
-    auto const state = contour::ContextMenuState {
+    auto const state = contour::command::ContextMenuState {
         .hasSelection = false, // Copy must come out present-but-disabled
         .clipboardHasText = true,
         .hasLastCommand = false, // the three "last command" rows must be absent
@@ -620,7 +620,7 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
     };
 
     auto actions = std::vector<contour::actions::Action> {};
-    auto const model = contour::toContextMenuModel(contour::buildContextMenu(state), actions);
+    auto const model = contour::toContextMenuModel(contour::command::buildContextMenu(state), actions);
     REQUIRE_FALSE(model.isEmpty());
 
     QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/ActionContextMenu.qml")));
@@ -656,7 +656,7 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
     REQUIRE(pickedSpy.count() == 1);
     CHECK(pickedSpy.at(0).at(0).toInt() == 0);
     REQUIRE_FALSE(actions.empty());
-    CHECK(contour::commandId(actions[0]) == "CopySelection");
+    CHECK(contour::command::commandId(actions[0]) == "CopySelection");
 
     SECTION("rebuilding it, as every right-click does, leaks nothing")
     {
@@ -2600,7 +2600,7 @@ class MockPaletteController: public QObject
     {
         _history.record("TogglePaneZoom");
         _model->setSources({ &_actionCommands });
-        _model->setShortcuts(contour::shortcutIndex(contour::config::defaultInputMappings()));
+        _model->setShortcuts(contour::command::shortcutIndex(contour::config::defaultInputMappings()));
         _model->refresh();
     }
 
@@ -2633,8 +2633,8 @@ class MockPaletteController: public QObject
     void commandPaletteRequested();
 
   private:
-    contour::CommandHistory _history;
-    contour::ActionCommandSource _actionCommands;
+    contour::command::CommandHistory _history;
+    contour::command::ActionCommandSource _actionCommands;
     std::unique_ptr<contour::CommandPaletteModel> _model;
 };
 

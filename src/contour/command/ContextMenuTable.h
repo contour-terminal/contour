@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/config/Actions.h>
 #include <contour/command/Command.h>
 #include <contour/command/ContextMenu.h>
+#include <contour/config/Actions.h>
 
 #include <span>
 #include <string_view>
 #include <utility>
 #include <vector>
 
-namespace contour::detail
+namespace contour::command::detail
 {
 
 /// The machinery a context menu is described with, parameterized on the state that menu reads.
@@ -230,4 +230,4 @@ inline void dropRedundantSeparators(std::vector<ContextMenuEntry>& entries)
     entries = std::move(kept);
 }
 
-} // namespace contour::detail
+} // namespace contour::command::detail

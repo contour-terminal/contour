@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/command/CommandCatalog.h>
 #include <contour/CommandPaletteModel.h>
 #include <contour/ContextMenuModel.h>
 #include <contour/HorizontalWheelGesture.h>
+#include <contour/command/CommandCatalog.h>
 #include <contour/display/TerminalDisplay.h>
 
 #include <vtbackend/Color.h>
@@ -56,7 +56,7 @@ class SettingsController;
 ///
 /// Created only by TerminalSessionManager::createWindowController() (which mints the backing
 /// vtworkspace::Window) and owned via QQmlEngine CppOwnership; destroyed when its ApplicationWindow closes.
-class WindowController: public QAbstractListModel, public TabTitleProvider
+class WindowController: public QAbstractListModel, public command::TabTitleProvider
 {
     Q_OBJECT
     Q_PROPERTY(int count READ count NOTIFY countChanged)
@@ -73,7 +73,7 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     Q_PROPERTY(contour::TerminalSession* activeSession READ activeSession NOTIFY activeSessionChanged)
     Q_PROPERTY(bool titleBarVisible READ titleBarVisible NOTIFY titleBarVisibleChanged)
     // Tab-strip (tab bar) placement + visibility, exposed to Main.qml. `tabBarPosition` is an int
-    // (0 = Top, 1 = Bottom) matching the config::TabBarPosition enumerator order. `tabBarShouldShow`
+    // (0 = Top, 1 = Bottom) matching the TabBarPosition enumerator order. `tabBarShouldShow`
     // is the resolved gate (mode + live tab count) the QML binds its `visible` to.
     Q_PROPERTY(int tabBarPosition READ tabBarPosition NOTIFY tabBarPositionChanged)
     Q_PROPERTY(int tabBarVisibility READ tabBarVisibility NOTIFY tabBarVisibilityChanged)
@@ -347,10 +347,10 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     // Like title-bar visibility, these are WINDOW state seeded once from the profile (first-write-wins),
     // so later session rebinds (tab switch, split collapse) never clobber them.
 
-    /// The tab strip position as an int for QML (0 = Top, 1 = Bottom; see config::TabBarPosition).
+    /// The tab strip position as an int for QML (0 = Top, 1 = Bottom; see TabBarPosition).
     [[nodiscard]] int tabBarPosition() const noexcept;
 
-    /// The tab strip visibility mode as an int for QML (see config::TabBarVisibility).
+    /// The tab strip visibility mode as an int for QML (see TabBarVisibility).
     [[nodiscard]] int tabBarVisibility() const noexcept;
 
     /// Whether the tab strip should currently be shown, resolving the visibility mode against the live
@@ -633,11 +633,11 @@ class WindowController: public QAbstractListModel, public TabTitleProvider
     // richer rows beat the generic ones — "Switch To Tab 2: vim" from the tab source outranks the bare
     // "Switch To Tab 2" a key binding would contribute. The action catalog comes last: it is the floor
     // that guarantees an unbound action is still reachable.
-    TabCommandSource _tabCommands;
-    ProfileCommandSource _profileCommands;
-    LayoutCommandSource _layoutCommands;
-    BoundCommandSource _boundCommands;
-    ActionCommandSource _actionCommands;
+    command::TabCommandSource _tabCommands;
+    command::ProfileCommandSource _profileCommands;
+    command::LayoutCommandSource _layoutCommands;
+    command::BoundCommandSource _boundCommands;
+    command::ActionCommandSource _actionCommands;
     std::unique_ptr<CommandPaletteModel> _commandPalette;
     // }}}
 

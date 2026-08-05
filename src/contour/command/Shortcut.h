@@ -13,12 +13,12 @@
 #include <unordered_map>
 #include <variant>
 
-namespace contour
+namespace contour::command
 {
 
 /// What a key binding is bound TO: a named key (F3, Enter, arrows) or a character ('P', '\\').
 ///
-/// Mirrors the two halves of config::InputMappings — KeyInputMapping keys on vtbackend::Key,
+/// Mirrors the two halves of InputMappings — KeyInputMapping keys on vtbackend::Key,
 /// CharInputMapping on char32_t — so one renderer can serve both without either caller unwrapping
 /// its own binding first.
 using ShortcutInput = std::variant<vtbackend::Key, char32_t>;
@@ -57,13 +57,13 @@ static_assert(ShortcutModifierTable.size() == vtbackend::ChordModifierTable.size
 
 static_assert(std::ranges::all_of(ShortcutModifierTable,
                                   [](auto const& row) {
-                                      return row.modifier == ModifierWithoutConfigSpelling
-                                             || parseModifierName(row.name) == row.modifier;
+                                      return row.modifier == config::ModifierWithoutConfigSpelling
+                                             || config::parseModifierName(row.name) == row.modifier;
                                   }),
               "every name shown in the shortcut column must be a spelling contour.yml ACCEPTS: this "
               "table is what teaches a user how to write a chord, so a display name the config "
               "parser refuses sends them to a binding that silently never fires -- which is exactly "
-              "what issue #1987 was. Add the spelling to contour::ConfigModifierTable as an alias.");
+              "what issue #1987 was. Add the spelling to contour::config::ConfigModifierTable as an alias.");
 
 /// Renders a key chord the way a UI shows it, e.g. "Ctrl+Shift+P" or "Alt+Enter".
 ///
@@ -87,4 +87,4 @@ static_assert(std::ranges::all_of(ShortcutModifierTable,
 [[nodiscard]] std::unordered_map<std::string, std::string> shortcutIndex(
     config::InputMappings const& mappings);
 
-} // namespace contour
+} // namespace contour::command

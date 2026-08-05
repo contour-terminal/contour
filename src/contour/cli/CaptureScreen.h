@@ -9,7 +9,7 @@
 
 struct timeval;
 
-namespace contour
+namespace contour::cli
 {
 
 struct CaptureSettings
@@ -49,4 +49,4 @@ bool captureScreen(CaptureSettings const& settings, CaptureTransport& transport,
 /// stdout) before delegating to the transport-based overload above.
 bool captureScreen(CaptureSettings const& settings);
 
-} // namespace contour
+} // namespace contour::cli

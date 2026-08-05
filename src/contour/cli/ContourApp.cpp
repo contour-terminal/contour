@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/cli/CaptureScreen.h>
 #include <contour/cli/CatImageArgs.h>
-#include <contour/config/Config.h>
 #include <contour/cli/ContourApp.h>
 #include <contour/cli/ShellIntegration.h>
+#include <contour/config/Config.h>
 
 #include <vtbackend/Capabilities.h>
 #include <vtbackend/Functions.h>
@@ -57,7 +57,7 @@ using namespace std::string_view_literals;
 
 namespace CLI = crispy::cli;
 
-namespace contour
+namespace contour::cli
 {
 
 // {{{ helper
@@ -129,7 +129,7 @@ namespace
     {
         std::string_view name;
         std::string_view helpText;
-        contour::DaemonServiceAction action;
+        contour::cli::DaemonServiceAction action;
     };
 
     constexpr auto DaemonServiceVerbs = std::array {
@@ -139,20 +139,21 @@ namespace
         DaemonServiceVerb { "install",
                             "(experimental) Registers the daemon so it starts on its own (see "
                             "--start).",
-                            contour::DaemonServiceAction::Install },
+                            contour::cli::DaemonServiceAction::Install },
         DaemonServiceVerb { "uninstall",
                             "Stops the daemon and removes its registration.",
-                            contour::DaemonServiceAction::Uninstall },
+                            contour::cli::DaemonServiceAction::Uninstall },
         DaemonServiceVerb { "start",
                             "Starts the registered daemon now, without waiting for its trigger.",
-                            contour::DaemonServiceAction::Start },
+                            contour::cli::DaemonServiceAction::Start },
+        DaemonServiceVerb { "stop",
+                            "Stops the running daemon, leaving it registered.",
+                            contour::cli::DaemonServiceAction::Stop },
         DaemonServiceVerb {
-            "stop", "Stops the running daemon, leaving it registered.", contour::DaemonServiceAction::Stop },
-        DaemonServiceVerb {
-            "restart", "Stops it and starts it again.", contour::DaemonServiceAction::Restart },
+            "restart", "Stops it and starts it again.", contour::cli::DaemonServiceAction::Restart },
         DaemonServiceVerb { "status",
                             "Reports whether it is registered and running, and what it runs.",
-                            contour::DaemonServiceAction::Status },
+                            contour::cli::DaemonServiceAction::Status },
     };
 
     /// The option set each `daemon-service` verb carries.
@@ -217,7 +218,7 @@ namespace
             commands.emplace_back(crispy::cli::command {
                 .name = verb.name,
                 .helpText = verb.helpText,
-                .options = daemonServiceOptions(verb.action == contour::DaemonServiceAction::Install) });
+                .options = daemonServiceOptions(verb.action == contour::cli::DaemonServiceAction::Install) });
         return commands;
     }
 
@@ -227,8 +228,9 @@ namespace
     ///         borrows rather than owns.
     [[nodiscard]] std::string_view integrationShellHelpText()
     {
-        static std::string const text = std::format(
-            "Shell name to create the integration for. Supported shells: {}", contour::supportedShellsText());
+        static std::string const text =
+            std::format("Shell name to create the integration for. Supported shells: {}",
+                        contour::cli::supportedShellsText());
         return text;
     }
 
@@ -580,7 +582,7 @@ int ContourApp::terminfoAction()
 int ContourApp::captureAction()
 {
     // clang-format off
-    auto captureSettings = contour::CaptureSettings {};
+    auto captureSettings = contour::cli::CaptureSettings {};
     captureSettings.logicalLines = parameters().get<bool>("contour.capture.logical");
     captureSettings.words = parameters().get<bool>("contour.capture.words");
     captureSettings.timeout = parameters().get<double>("contour.capture.timeout");
@@ -588,7 +590,7 @@ int ContourApp::captureAction()
     captureSettings.outputFile = parameters().get<string>("contour.capture.to");
     // clang-format on
 
-    if (contour::captureScreen(captureSettings))
+    if (contour::cli::captureScreen(captureSettings))
         return EXIT_SUCCESS;
     else
         return EXIT_FAILURE;
@@ -1261,4 +1263,4 @@ crispy::cli::command ContourApp::parameterDefinition() const
     // NOLINTEND
 }
 
-} // namespace contour
+} // namespace contour::cli

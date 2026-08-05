@@ -19,10 +19,10 @@ namespace contour
 /// The editable bridge between the GUI settings page and the configuration.
 ///
 /// It follows Windows Terminal's "edit a clone, then Save" model: the controller never mutates the
-/// live @ref config::Config, it edits an in-memory *draft* of one profile (or one color scheme) and
+/// live @ref Config, it edits an in-memory *draft* of one profile (or one color scheme) and
 /// persists that draft to a GUI-owned side file on Save, then asks the host to reload so the change
 /// takes effect. It NEVER writes the hand-maintained `contour.yml`; profiles and schemes defined there
-/// are surfaced read-only (see @ref config::SettingsOrigin), and only the GUI's own side-file entities
+/// are surfaced read-only (see @ref SettingsOrigin), and only the GUI's own side-file entities
 /// are editable.
 ///
 /// Every collaborator it touches is injected (per the project's DI principle), so the whole
@@ -97,7 +97,7 @@ class SettingsController: public QObject
     /// @param apply  Invoked after a successful save/delete so the change takes effect immediately.
     /// @param parent Optional QObject parent.
     SettingsController(ConfigAccessor config,
-                       std::shared_ptr<GuiConfigStore> store,
+                       std::shared_ptr<config::GuiConfigStore> store,
                        ApplyCallback apply,
                        QObject* parent = nullptr);
 
@@ -236,7 +236,7 @@ class SettingsController: public QObject
     bool fail(std::string const& error);
 
     ConfigAccessor _config;
-    std::shared_ptr<GuiConfigStore> _store;
+    std::shared_ptr<config::GuiConfigStore> _store;
     ApplyCallback _apply;
 
     bool _locked = false;

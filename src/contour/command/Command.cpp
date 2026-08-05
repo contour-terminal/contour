@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/ascii.h>
 #include <contour/command/Command.h>
 
 #include <vtbackend/Color.h>
 
+#include <crispy/ascii.h>
 #include <crispy/escape.h>
 #include <crispy/utils.h>
 
@@ -12,7 +12,7 @@
 #include <string>
 #include <string_view>
 
-namespace contour
+namespace contour::command
 {
 
 namespace
@@ -164,4 +164,4 @@ std::string commandTitle(actions::Action const& action)
     return splitCamelCase(actions::name(action)) + commandArguments(action).title;
 }
 
-} // namespace contour
+} // namespace contour::command

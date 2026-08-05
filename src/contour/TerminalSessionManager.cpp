@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ColorConversion.h>
 #include <contour/ContourGuiApp.h>
-#include <contour/config/LayoutBuilder.h>
 #include <contour/PaneProxy.h>
 #include <contour/SettingsController.h>
 #include <contour/TabLabel.h>
 #include <contour/TerminalSession.h>
 #include <contour/TerminalSessionManager.h>
 #include <contour/WindowController.h>
+#include <contour/config/LayoutBuilder.h>
 
 #include <vtbackend/primitives.h>
 
@@ -30,8 +30,8 @@ namespace contour
 
 TerminalSessionManager::TerminalSessionManager(ContourGuiApp& app,
                                                SessionFactory& factory,
-                                               LayoutStore& layouts,
-                                               CommandHistoryStore& commands):
+                                               config::LayoutStore& layouts,
+                                               command::CommandHistoryStore& commands):
     _app { app },
     _sessionFactory { factory },
     _layoutStore { layouts },
@@ -417,7 +417,7 @@ bool TerminalSessionManager::applyLayoutToWindow(
             return createBackingSession(sessionId, std::move(cwd), pageSize, command, profileName) != nullptr;
         };
 
-        auto* modelTab = realizeLayoutTab(*_model, window, tabSpec, seeder);
+        auto* modelTab = vtworkspace::realizeLayoutTab(*_model, window, tabSpec, seeder);
         _pendingSessionId.reset(); // consumed by the allocator; clear any leftover
         if (modelTab != nullptr)
         {
@@ -614,18 +614,18 @@ void TerminalSessionManager::recordCommand(std::string const& id)
     }
 }
 
-std::expected<void, LayoutSaveError> TerminalSessionManager::saveWindowLayout(vtworkspace::WindowId windowId,
-                                                                              std::string const& name)
+std::expected<void, config::LayoutSaveError> TerminalSessionManager::saveWindowLayout(
+    vtworkspace::WindowId windowId, std::string const& name)
 {
     if (name.empty())
-        return std::unexpected(LayoutSaveError::EmptyName);
+        return std::unexpected(config::LayoutSaveError::EmptyName);
 
     auto* window = _model->window(windowId);
     if (window == nullptr)
-        return std::unexpected(LayoutSaveError::UnknownWindow);
+        return std::unexpected(config::LayoutSaveError::UnknownWindow);
 
     auto const resolve = [this](vtworkspace::SessionId id) {
-        PaneLeafData data;
+        vtworkspace::PaneLeafData data;
         if (auto* session = sessionForId(id))
         {
             if (auto const dir = session->workingDirectory(); !dir.empty())
@@ -648,7 +648,7 @@ std::expected<void, LayoutSaveError> TerminalSessionManager::saveWindowLayout(vt
     config::Layout layout;
     for (auto const i: std::views::iota(0, window->tabCount()))
         if (auto* tab = window->tabAt(i))
-            layout.tabs.push_back(serializeTab(*tab, resolve));
+            layout.tabs.push_back(vtworkspace::serializeTab(*tab, resolve));
 
     // Persist the store's OWN prior contents plus this layout — not the merged inline+file view
     // held in memory: the store wins name collisions on load, so writing the merged view back out
@@ -663,14 +663,14 @@ std::expected<void, LayoutSaveError> TerminalSessionManager::saveWindowLayout(vt
                      name,
                      path.string(),
                      storedLayouts.error());
-        return std::unexpected(LayoutSaveError::StoreUnreadable);
+        return std::unexpected(config::LayoutSaveError::StoreUnreadable);
     }
     (*storedLayouts)[name] = layout;
 
     if (auto const written = _layoutStore.save(path, *storedLayouts); !written)
     {
         managerLog()("Failed to save layout '{}': {}", name, written.error());
-        return std::unexpected(LayoutSaveError::WriteFailed);
+        return std::unexpected(config::LayoutSaveError::WriteFailed);
     }
 
     // Only now that the store has accepted the layout do we update the in-memory config, so a

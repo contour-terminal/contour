@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/command/CommandCatalog.h>
-#include <contour/command/CommandHistoryStore.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/ExternalLauncher.h>
-#include <contour/config/LayoutStore.h>
 #include <contour/SessionFactory.h>
 #include <contour/TerminalSessionManager.h>
 #include <contour/WindowController.h>
+#include <contour/command/CommandCatalog.h>
+#include <contour/command/CommandHistoryStore.h>
+#include <contour/config/LayoutStore.h>
 
 #include <vtpty/ChannelPty.h>
 #include <vtpty/MockPty.h>
@@ -112,10 +112,10 @@ class MockPtySessionFactory final: public contour::SessionFactory
 /// filesystem at all, and a test can inspect exactly what was handed to persistence. @c loadError
 /// makes the store report an unreadable backing file, to exercise the refuse-rather-than-destroy
 /// path without corrupting a real one.
-class InMemoryLayoutStore final: public contour::LayoutStore
+class InMemoryLayoutStore final: public contour::config::LayoutStore
 {
   public:
-    [[nodiscard]] std::expected<contour::LayoutMap, std::string> load(
+    [[nodiscard]] std::expected<contour::config::LayoutMap, std::string> load(
         std::filesystem::path const& path) const override
     {
         loadedPaths.push_back(path);
@@ -125,7 +125,7 @@ class InMemoryLayoutStore final: public contour::LayoutStore
     }
 
     [[nodiscard]] std::expected<void, std::string> save(std::filesystem::path const& path,
-                                                        contour::LayoutMap const& newLayouts) override
+                                                        contour::config::LayoutMap const& newLayouts) override
     {
         savedPaths.push_back(path);
         if (saveError)
@@ -136,7 +136,7 @@ class InMemoryLayoutStore final: public contour::LayoutStore
 
     /// The store's contents (seed it to model a pre-existing layouts.yml; read it back to assert
     /// what SaveLayout persisted).
-    contour::LayoutMap layouts;
+    contour::config::LayoutMap layouts;
     /// When set, load() fails with this message (an unreadable/corrupt backing file).
     std::optional<std::string> loadError;
     /// When set, save() fails with this message (permissions, disk full, ...).
@@ -149,7 +149,7 @@ class InMemoryLayoutStore final: public contour::LayoutStore
 /// An in-memory CommandHistoryStore: the command palette's record -> persist -> reload cycle runs end
 /// to end with no filesystem at all. Mirrors InMemoryLayoutStore, including the injectable failures,
 /// so a test can drive the "the history file is corrupt" path without corrupting a real one.
-class InMemoryCommandHistoryStore final: public contour::CommandHistoryStore
+class InMemoryCommandHistoryStore final: public contour::command::CommandHistoryStore
 {
   public:
     [[nodiscard]] std::expected<std::vector<std::string>, std::string> load(
@@ -185,7 +185,7 @@ class InMemoryCommandHistoryStore final: public contour::CommandHistoryStore
 
 /// A TabTitleProvider over a fixed list of titles, so the command palette's tab source can be driven —
 /// and its rows asserted — without a window, an event loop, or a live session behind it.
-class StubTabs final: public contour::TabTitleProvider
+class StubTabs final: public contour::command::TabTitleProvider
 {
   public:
     explicit StubTabs(std::vector<std::string> titles): _titles { std::move(titles) } {}
@@ -340,8 +340,8 @@ class TestApp
     ///                observation pointer first) to drive the read-aloud path. @see defaultSpeech()
     ///                for what a test app gets without one.
     explicit TestApp(std::unique_ptr<contour::SessionFactory> factory = nullptr,
-                     std::unique_ptr<contour::LayoutStore> layoutStore = nullptr,
-                     std::unique_ptr<contour::CommandHistoryStore> commandHistoryStore = nullptr,
+                     std::unique_ptr<contour::config::LayoutStore> layoutStore = nullptr,
+                     std::unique_ptr<contour::command::CommandHistoryStore> commandHistoryStore = nullptr,
                      std::unique_ptr<contour::SpeechSynthesizer> speech = nullptr):
         _app(_environment,
              std::move(factory),

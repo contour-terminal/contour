@@ -12,10 +12,10 @@
 #include <ranges>
 #include <utility>
 
-using contour::buildTitleBarContextMenu;
-using contour::ContextMenuEntry;
-using contour::ContextMenuEntryKind;
-using contour::TitleBarContextMenuState;
+using contour::command::buildTitleBarContextMenu;
+using contour::command::ContextMenuEntry;
+using contour::command::ContextMenuEntryKind;
+using contour::command::TitleBarContextMenuState;
 namespace actions = contour::actions;
 
 namespace

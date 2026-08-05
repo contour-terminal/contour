@@ -6,7 +6,7 @@
 #include <span>
 #include <string_view>
 
-namespace contour
+namespace contour::cli
 {
 
 /// One shell's integration script, as compiled into this binary.
@@ -40,4 +40,4 @@ enum class ShellIntegrationError : uint8_t
 /// @return A view of storage with process lifetime, so callers may hold it.
 [[nodiscard]] std::string_view supportedShellsText();
 
-} // namespace contour
+} // namespace contour::cli

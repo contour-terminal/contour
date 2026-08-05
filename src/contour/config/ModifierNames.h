@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <crispy/ascii.h>
-
 #include <vtbackend/InputGenerator.h>
+
+#include <crispy/ascii.h>
 
 #include <algorithm>
 #include <array>
 #include <optional>
 #include <string_view>
 
-namespace contour
+namespace contour::config
 {
 
 /// One spelling contour.yml accepts in a `mods:` entry, and the modifier it denotes.
@@ -59,7 +59,8 @@ namespace detail
     /// Compares two modifier spellings case-insensitively. @see crispy::ascii::fold
     [[nodiscard]] constexpr bool sameSpelling(std::string_view a, std::string_view b) noexcept
     {
-        return std::ranges::equal(a, b, [](char x, char y) { return crispy::ascii::fold(x) == crispy::ascii::fold(y); });
+        return std::ranges::equal(
+            a, b, [](char x, char y) { return crispy::ascii::fold(x) == crispy::ascii::fold(y); });
     }
 } // namespace detail
 
@@ -93,4 +94,4 @@ static_assert(std::ranges::all_of(ConfigModifierTable,
               "claims it first, which means a duplicate spelling is resolving by table ORDER and "
               "reordering these rows would be a silent behaviour change");
 
-} // namespace contour
+} // namespace contour::config

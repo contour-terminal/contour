@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace contour
+namespace contour::command
 {
 
 /// The world, as the terminal pane's context menu needs to see it.
@@ -79,4 +79,4 @@ struct ContextMenuEntry
 /// @return The menu, top to bottom.
 [[nodiscard]] std::vector<ContextMenuEntry> buildContextMenu(ContextMenuState const& state);
 
-} // namespace contour
+} // namespace contour::command

@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-namespace contour
+namespace contour::command
 {
 
 /// Scoring weights for fuzzyScore(), as data rather than as constants buried in the algorithm — so
@@ -74,4 +74,4 @@ struct FuzzyMatch
                                                    std::string_view candidate,
                                                    FuzzyWeights const& weights = {});
 
-} // namespace contour
+} // namespace contour::command
