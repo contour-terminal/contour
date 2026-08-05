@@ -15,26 +15,18 @@
 
 #include <algorithm>
 #include <array>
-#include <mutex>
 
 using std::array;
 using std::clamp;
 using std::nullopt;
 using std::optional;
 using std::pair;
-using std::scoped_lock;
-using std::string;
 using std::u32string;
 using std::chrono::steady_clock;
 
 using crispy::point;
-using crispy::Zero;
 
-using vtbackend::Height;
-using vtbackend::ImageSize;
-using vtbackend::PageSize;
 using vtbackend::PixelCoordinate;
-using vtbackend::Width;
 
 namespace contour::session
 {

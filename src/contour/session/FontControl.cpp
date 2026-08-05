@@ -10,16 +10,12 @@
 #include <vtrasterizer/Renderer.h>
 
 #include <algorithm>
+#include <mutex>
 
-using std::nullopt;
-using std::optional;
 using std::scoped_lock;
 using std::string;
 
-using vtbackend::Height;
 using vtbackend::ImageSize;
-using vtbackend::PageSize;
-using vtbackend::Width;
 
 namespace contour::session
 {
