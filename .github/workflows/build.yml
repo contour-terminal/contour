@@ -178,7 +178,7 @@ jobs:
               -D CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON \
               -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}"
     - name: "build"
-      run: cmake --build build --target contour
+      run: cmake --build build --target contour contour_test
     # ...and that the linked result carries no Qt either, which the configure-time gate above cannot
     # see: a transitive Qt6::Core from some other target would still land here.
     - name: "verify the binary links no Qt"
@@ -188,13 +188,18 @@ jobs:
           echo "::error::GUI-less build links Qt"
           exit 1
         fi
+    # contour_test is the unit suite for the layers this configuration is made of -- the
+    # configuration model, the command vocabulary and the CLI -- and it links no Qt, which is the
+    # only reason it can run here at all. Before it existed, this job built the binary and asserted
+    # nothing about its behaviour.
+    #
     # contour_e2e_cli_verbs asserts the verb surface this configuration is supposed to expose --
     # `daemon` present, `client` gone. contour_e2e_shell_integration asserts that `generate
     # integration` still emits the scripts verbatim, which is the verb that used to read them out of
-    # a Qt resource. Both are ctest tests rather than steps of this job, so they also run in the
+    # a Qt resource. All three are ctest tests rather than steps of this job, so they also run in the
     # ordinary GUI builds, where they assert the other half.
     - name: "tests"
-      run: ctest --test-dir build -R "contour_e2e_cli_verbs|contour_e2e_shell_integration" --output-on-failure
+      run: ctest --test-dir build -R "contour_test|contour_e2e_cli_verbs|contour_e2e_shell_integration" --output-on-failure
     # Building is not the same as being installable: this configuration reached issue #1780 with a
     # `contour` binary that compiled and an install target that errored out on a missing one. The
     # install rules are a per-configuration decision, so they need a per-configuration run.

@@ -8,6 +8,7 @@
 #include <contour/platform/ExternalLauncher.h>
 #include <contour/session/SessionFactory.h>
 #include <contour/session/TerminalSessionManager.h>
+#include <contour/test/CoreFixtures.h>
 #include <contour/window/WindowController.h>
 
 #include <vtpty/ChannelPty.h>
@@ -89,25 +90,6 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     return dynamic_cast<vtpty::MockPty&>(session.terminal().device());
 }
 
-/// Loads @p yaml through the PRODUCTION config file loader (writing it to a throwaway temp file
-/// first), so a test asserts what a real user's configuration would parse to — including the
-/// sibling-layouts merge and every fallback loadConfigFromFile applies.
-/// @param yaml The inline configuration document.
-/// @return The parsed configuration.
-[[nodiscard]] inline contour::config::Config loadConfigFromYaml(std::string_view yaml)
-{
-    QTemporaryDir const dir;
-    REQUIRE(dir.isValid());
-    auto const path = std::filesystem::path(dir.path().toStdString()) / "contour.yml";
-    {
-        auto out = std::ofstream(path);
-        out << yaml;
-    }
-    auto config = contour::config::Config {};
-    contour::config::loadConfigFromFile(config, path);
-    return config;
-}
-
 /// An in-memory LayoutStore: SaveLayout runs end to end (serialize -> persist -> re-read) with no
 /// filesystem at all, and a test can inspect exactly what was handed to persistence. @c loadError
 /// makes the store report an unreadable backing file, to exercise the refuse-rather-than-destroy
@@ -144,59 +126,6 @@ class InMemoryLayoutStore final: public contour::config::LayoutStore
     /// The path each load()/save() was asked for, so a test can assert WHERE layouts persist.
     mutable std::vector<std::filesystem::path> loadedPaths;
     std::vector<std::filesystem::path> savedPaths;
-};
-
-/// An in-memory CommandHistoryStore: the command palette's record -> persist -> reload cycle runs end
-/// to end with no filesystem at all. Mirrors InMemoryLayoutStore, including the injectable failures,
-/// so a test can drive the "the history file is corrupt" path without corrupting a real one.
-class InMemoryCommandHistoryStore final: public contour::command::CommandHistoryStore
-{
-  public:
-    [[nodiscard]] std::expected<std::vector<std::string>, std::string> load(
-        std::filesystem::path const& path) const override
-    {
-        loadedPaths.push_back(path);
-        if (loadError)
-            return std::unexpected(*loadError);
-        return ids;
-    }
-
-    [[nodiscard]] std::expected<void, std::string> save(std::filesystem::path const& path,
-                                                        std::span<std::string const> newIds) override
-    {
-        savedPaths.push_back(path);
-        if (saveError)
-            return std::unexpected(*saveError);
-        ids.assign(newIds.begin(), newIds.end());
-        return {};
-    }
-
-    /// The store's contents, newest first (seed it to model a pre-existing command-history.yml; read
-    /// it back to assert what the palette persisted).
-    std::vector<std::string> ids;
-    /// When set, load() fails with this message (an unreadable/corrupt backing file).
-    std::optional<std::string> loadError;
-    /// When set, save() fails with this message (permissions, disk full, ...).
-    std::optional<std::string> saveError;
-    /// The path each load()/save() was asked for, so a test can assert WHERE the history persists.
-    mutable std::vector<std::filesystem::path> loadedPaths;
-    std::vector<std::filesystem::path> savedPaths;
-};
-
-/// A TabTitleProvider over a fixed list of titles, so the command palette's tab source can be driven —
-/// and its rows asserted — without a window, an event loop, or a live session behind it.
-class StubTabs final: public contour::command::TabTitleProvider
-{
-  public:
-    explicit StubTabs(std::vector<std::string> titles): _titles { std::move(titles) } {}
-
-    [[nodiscard]] std::vector<std::string> tabTitles() const override { return _titles; }
-
-    /// Models tabs opening and closing under a palette that is already showing them.
-    void setTitles(std::vector<std::string> titles) { _titles = std::move(titles); }
-
-  private:
-    std::vector<std::string> _titles;
 };
 
 /// Records every URL-open / process-spawn request instead of launching it, so tests can assert the

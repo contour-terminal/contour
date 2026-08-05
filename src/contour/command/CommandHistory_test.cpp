@@ -7,7 +7,7 @@
 
 #include <contour/command/CommandHistory.h>
 #include <contour/command/CommandHistoryStore.h>
-#include <contour/test/GuiTestFixtures.h>
+#include <contour/test/CoreFixtures.h>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -164,9 +164,9 @@ TEST_CASE("FileCommandHistoryStore round-trips through a real file", "[contour][
     // The production store, against a real (temporary) file — the in-memory double above cannot catch a
     // YAML quoting bug, and an id CAN carry YAML-significant characters (a SendChars binding's escape
     // sequence), which would otherwise produce a file that fails to parse on the next start.
-    auto const tempDir = QTemporaryDir {};
+    auto const tempDir = contour::test::TempDir {};
     REQUIRE(tempDir.isValid());
-    auto const path = std::filesystem::path(tempDir.path().toStdString()) / "command-history.yml";
+    auto const path = std::filesystem::path(tempDir.path().string()) / "command-history.yml";
 
     auto store = FileCommandHistoryStore {};
 

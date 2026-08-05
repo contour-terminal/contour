@@ -570,28 +570,17 @@ if(CONTOUR_FRONTEND_GUI)
         # resources.qrc again — doing so would duplicate the resource registration symbols.
         add_executable(contour_gui_test
             test/test_main.cpp
-            config/Actions_test.cpp
             test/NativeController_test.cpp
             test/RemoteController_test.cpp
             test/TmuxController_test.cpp
             platform/AudioNote_test.cpp
             test/BenignQtMessages_test.cpp
-            cli/CaptureScreen_test.cpp
-            cli/CatImageArgs_test.cpp
-            command/CommandCatalog_test.cpp
-            command/CommandHistory_test.cpp
             window/CommandPaletteModel_test.cpp
             config/Config_test.cpp
             window/SettingsController_test.cpp
             test/SettingsPageQml_test.cpp
             test/Accessibility_qml_test.cpp
-            command/ContextMenu_test.cpp
             platform/SpeechSynthesizer_test.cpp
-            command/TitleBarContextMenu_test.cpp
-            command/FuzzyFilter_test.cpp
-            cli/ShellIntegration_test.cpp
-            command/Shortcut_test.cpp
-            config/LayoutBuilder_test.cpp
             test/ContourGuiApp_test.cpp
             test/DisplayRendering_test.cpp
             test/ContentScale_test.cpp
@@ -621,7 +610,6 @@ if(CONTOUR_FRONTEND_GUI)
             test/QmlComponents_test.cpp
             window/TabColorScheme_test.cpp
             test/ContourTuiStyle_test.cpp
-            config/UiStyle_test.cpp
             window/UiStyleProvider_test.cpp
             window/TabListModel_test.cpp
             window/TabLabel_test.cpp
@@ -714,6 +702,40 @@ if(CONTOUR_FRONTEND_GUI)
         # }}}
     endif()
     # }}}
+endif()
+# }}}
+
+# {{{ contour_test: the Qt-free unit tests, in BOTH frontend configurations
+# config/, command/ and cli/ link no Qt, so their tests need none either -- and a build configured
+# without the GUI frontend has none to give them. That is how that configuration came to have no
+# unit tests at all: every one of them lived in contour_gui_test, which needs a QGuiApplication.
+#
+# Config_test stays with the GUI tests deliberately: besides the configuration model it also asserts
+# the Qt colour-scheme mapping and uses qputenv, so it is not Qt-free however Qt-free the model is.
+if(CONTOUR_TESTING)
+    enable_testing()
+    add_executable(contour_test
+        test/core_test_main.cpp
+        config/Actions_test.cpp
+        config/LayoutBuilder_test.cpp
+        config/UiStyle_test.cpp
+        command/CommandCatalog_test.cpp
+        command/CommandHistory_test.cpp
+        command/ContextMenu_test.cpp
+        command/FuzzyFilter_test.cpp
+        command/Shortcut_test.cpp
+        command/TitleBarContextMenu_test.cpp
+        cli/CaptureScreen_test.cpp
+        cli/CatImageArgs_test.cpp
+        cli/ShellIntegration_test.cpp
+    )
+    target_link_libraries(contour_test PRIVATE contour_command contour_cli Catch2::Catch2)
+    target_include_directories(contour_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+    if(NOT WIN32)
+        # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+        target_compile_options(contour_test PRIVATE -Wno-c2y-extensions)
+    endif()
+    add_test(NAME contour_test COMMAND $<TARGET_FILE:contour_test>)
 endif()
 # }}}
 

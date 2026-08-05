@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/Config.h>
 #include <contour/config/LayoutBuilder.h>
-#include <contour/test/GuiTestFixtures.h>
+#include <contour/test/CoreFixtures.h>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>

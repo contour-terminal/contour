@@ -9,7 +9,7 @@
 #include <contour/command/Command.h>
 #include <contour/command/CommandCatalog.h>
 #include <contour/config/Config.h>
-#include <contour/test/GuiTestFixtures.h>
+#include <contour/test/CoreFixtures.h>
 
 #include <catch2/catch_test_macros.hpp>
 
