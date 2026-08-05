@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/config/Config.h>
 #include <contour/UiStyleProvider.h>
+#include <contour/config/Config.h>
 
 #include <crispy/logstore.h>
 

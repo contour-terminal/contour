@@ -7,7 +7,7 @@
 
 #include <utility>
 
-namespace contour::display
+namespace contour::platform
 {
 
 /// Speaks a short message to whatever assistive technology is listening.
@@ -82,4 +82,4 @@ class NullAnnouncer final: public Announcer
     void announce(QString const& /*message*/, QAccessible::AnnouncementPoliteness /*politeness*/) override {}
 };
 
-} // namespace contour::display
+} // namespace contour::platform

@@ -3,7 +3,7 @@
 // Unit tests for the pure PCM bell synthesis (contour/AudioNote.h), extracted from Audio.cpp's
 // anonymous namespace so the waveform math is verifiable without an audio device.
 
-#include <contour/AudioNote.h>
+#include <contour/platform/AudioNote.h>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -13,7 +13,7 @@
 #include <cmath>
 #include <span>
 
-using namespace contour::audio;
+using namespace contour::platform;
 
 TEST_CASE("audio: squareWave alternates with period 2", "[audio]")
 {
@@ -59,8 +59,8 @@ TEST_CASE("audio: synthesizeNote yields ceil(duration/32*rate) samples scaled by
 
 TEST_CASE("audio: renderNotesToPcm concatenates notes as 16-bit PCM bytes", "[audio]")
 {
-    using contour::audio::createMusicalNote;
-    using contour::audio::renderNotesToPcm;
+    using contour::platform::createMusicalNote;
+    using contour::platform::renderNotesToPcm;
 
     // Two notes render to the concatenation of their per-note sample bytes (2 bytes/sample).
     auto const notes = std::array<int, 2> { 10, 12 };

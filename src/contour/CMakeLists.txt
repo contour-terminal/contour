@@ -133,7 +133,11 @@ if(CONTOUR_FRONTEND_GUI)
 endif()
 # }}}
 
+# input/ and platform/ are GUI-only: one translates Qt events, the other adapts to Qt and the OS.
+# Both sit below display/ and session/, which is why they are added before them.
 if(CONTOUR_FRONTEND_GUI)
+    add_subdirectory(input)
+    add_subdirectory(platform)
     add_subdirectory(display)
 endif()
 
@@ -158,7 +162,6 @@ endif()
 
 set(_header_files
     HyperlinkTooltip.h
-    SpeechSynthesizer.h
     TabLabel.h
 )
 
@@ -172,7 +175,6 @@ set(_header_files
 # are only referenced reflectively at runtime.
 set(_core_source_files
     HyperlinkTooltip.cpp
-    SpeechSynthesizer.cpp
     TabLabel.cpp
 )
 # The executable entry point lives outside the object library so the test can supply its own main
@@ -186,21 +188,13 @@ set(_main_source_files
 # which is why a GUI-less build is worth having at all.
 if(CONTOUR_FRONTEND_GUI)
     list(APPEND _header_files
-        Audio.h
-        AudioNote.h
-        BlurBehind.h
         CommandPaletteModel.h
         ContextMenuModel.h
         ContourGuiApp.h
         ExitCode.h
-        ExternalLauncher.h
-        FreeDesktopNotifier.h
-        KeyboardLayout.h
         config/LayoutBuilder.h
         config/LayoutStore.h
-        NotificationRouter.h
         PaneProxy.h
-        QtExternalLauncher.h
         SessionFactory.h
         SettingsController.h
         TerminalSession.h
@@ -215,15 +209,10 @@ if(CONTOUR_FRONTEND_GUI)
         remote/TmuxController.h
     )
     list(APPEND _core_source_files
-        Audio.cpp
-        BlurBehind.cpp
         CommandPaletteModel.cpp
         ContextMenuModel.cpp
         ContourGuiApp.cpp
-        FreeDesktopNotifier.cpp
-        KeyboardLayout.cpp
         PaneProxy.cpp
-        QtExternalLauncher.cpp
         config/LayoutBuilder.cpp
         config/LayoutStore.cpp
         SessionFactory.cpp
@@ -503,6 +492,13 @@ target_link_libraries(contour_core
     vthost
 )
 
+# The GUI-only layers beneath the frontend. Guarded for the same reason they are only added as
+# subdirectories under it: without a frontend there is no Qt event to translate and no compositor,
+# audio device or notification bus to adapt to.
+if(CONTOUR_FRONTEND_GUI)
+    target_link_libraries(contour_core PUBLIC contour_input contour_platform)
+endif()
+
 # {{{ GUI: Declare Qt build dependencies
 # The QML modules are GUI-only (see the guard above), so the dependency on them is too -- as is
 # Qt6::Core itself, which no longer has a single caller outside the frontend.
@@ -571,7 +567,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/NativeController_test.cpp
             test/RemoteController_test.cpp
             test/TmuxController_test.cpp
-            test/AudioNote_test.cpp
+            platform/AudioNote_test.cpp
             test/BenignQtMessages_test.cpp
             cli/CaptureScreen_test.cpp
             cli/CatImageArgs_test.cpp
@@ -583,7 +579,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/SettingsPageQml_test.cpp
             test/Accessibility_qml_test.cpp
             command/ContextMenu_test.cpp
-            test/SpeechSynthesizer_test.cpp
+            platform/SpeechSynthesizer_test.cpp
             command/TitleBarContextMenu_test.cpp
             command/FuzzyFilter_test.cpp
             cli/ShellIntegration_test.cpp
@@ -598,14 +594,14 @@ if(CONTOUR_FRONTEND_GUI)
             test/TerminalAccessible_test.cpp
             test/Helper_test.cpp
             test/HyperlinkTooltip_test.cpp
-            test/HorizontalWheelGesture_test.cpp
+            input/HorizontalWheelGesture_test.cpp
             test/ImeQueryRect_test.cpp
             test/ViewportTextIndex_test.cpp
             test/KeyboardRouting_test.cpp
             test/MainWindowQml_test.cpp
             test/FocusRouting_test.cpp
             test/MultiWindow_test.cpp
-            test/NotificationRouter_test.cpp
+            platform/NotificationRouter_test.cpp
             test/QmlDiagnosticPredicate_test.cpp
             test/RenderingBackendSelection_test.cpp
             test/ScissorRect_test.cpp

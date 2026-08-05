@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/config/Actions.h>
-#include <contour/BlurBehind.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/WindowController.h>
-#include <contour/display/Announcer.h>
+#include <contour/config/Actions.h>
 #include <contour/display/ContentScale.h>
 #include <contour/display/ImeQueryRect.h>
+#include <contour/display/Logging.h>
 #include <contour/display/RhiRenderer.h>
 #include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/display/TerminalRenderNode.h>
 #include <contour/helper.h>
+#include <contour/input/MouseMapping.h>
+#include <contour/platform/Announcer.h>
+#include <contour/platform/BlurBehind.h>
+#include <contour/platform/QtInvoke.h>
 
 #include <vtbackend/Color.h>
 #include <vtbackend/Metrics.h>
@@ -18,6 +21,7 @@
 #include <vtpty/Pty.h>
 
 #include <crispy/App.h>
+#include <crispy/ScopedTimer.h>
 #include <crispy/logstore.h>
 #include <crispy/utils.h>
 
@@ -100,7 +104,7 @@ namespace
 
     void reportUnhandledException(std::string_view const& where, exception const& e)
     {
-        displayLog()("{}", unhandledExceptionMessage(where, e));
+        display::displayLog()("{}", unhandledExceptionMessage(where, e));
         cerr << unhandledExceptionMessage(where, e) << '\n';
     }
 
@@ -121,7 +125,7 @@ TerminalDisplay::TerminalDisplay(QQuickItem* parent):
     _lastFontDPI = fontDPI();
 
     startupLog()("TerminalDisplay constructed (QML component instantiation reached)");
-    auto const timer = ScopedTimer(startupLog, "TerminalDisplay constructor");
+    auto const timer = crispy::scoped_timer(startupLog, "TerminalDisplay constructor");
     initializeDisplayResources();
 
     setFlag(Flag::ItemIsFocusScope);
@@ -148,7 +152,7 @@ TerminalDisplay::TerminalDisplay(QQuickItem* parent):
 
 TerminalDisplay::~TerminalDisplay()
 {
-    displayLog()("Destroying terminal widget.");
+    display::displayLog()("Destroying terminal widget.");
     // ~QQuickItem (running AFTER this body) unparents the item and re-emits windowChanged(nullptr)
     // — at which point the TerminalDisplay part of `this` no longer exists, so the ctor's
     // windowChanged→handleWindowChanged connection would invoke a slot on a half-destroyed object
@@ -227,7 +231,7 @@ void TerminalDisplay::assignSession(TerminalSession* newSession)
 
 void TerminalDisplay::setSession(TerminalSession* newSession)
 {
-    displayLog()("TerminalDisplay::setSession: {} -> {}\n", (void*) _session, (void*) newSession);
+    display::displayLog()("TerminalDisplay::setSession: {} -> {}\n", (void*) _session, (void*) newSession);
     if (_session == newSession)
         return;
 
@@ -243,19 +247,19 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     }
 
     // This will print the same pointer address for `this` but a new one for newSession (model data).
-    displayLog()("Assigning session to display({} <- {}): shell={}, terminalSize={}, fontSize={}, "
-                 "contentScale={}",
-                 (void const*) this,
-                 (void const*) newSession,
-                 newSession->profile().ssh.value().hostname.empty()
-                     ? std::format("program={}", newSession->profile().shell.value().program)
-                     : std::format("{}@{}:{}",
-                                   newSession->profile().ssh.value().username,
-                                   newSession->profile().ssh.value().hostname,
-                                   newSession->profile().ssh.value().port),
-                 newSession->profile().terminalSize.value(),
-                 newSession->profile().fonts.value().size,
-                 contentScale());
+    display::displayLog()("Assigning session to display({} <- {}): shell={}, terminalSize={}, fontSize={}, "
+                          "contentScale={}",
+                          (void const*) this,
+                          (void const*) newSession,
+                          newSession->profile().ssh.value().hostname.empty()
+                              ? std::format("program={}", newSession->profile().shell.value().program)
+                              : std::format("{}@{}:{}",
+                                            newSession->profile().ssh.value().username,
+                                            newSession->profile().ssh.value().hostname,
+                                            newSession->profile().ssh.value().port),
+                          newSession->profile().terminalSize.value(),
+                          newSession->profile().fonts.value().size,
+                          contentScale());
 
     if (_session)
     {
@@ -285,7 +289,7 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
 
     auto const imeEnabled = profile().inputMethodEditor.value();
     setFlag(Flag::ItemAcceptsInputMethod, imeEnabled);
-    displayLog()("IME enabled: {}", imeEnabled);
+    display::displayLog()("IME enabled: {}", imeEnabled);
 
     // NB: The window frame is owned by QML now. Main.qml makes the window frameless on the platforms
     // that use the custom client-side TitleBar (the tab strip + window controls). The profile's
@@ -296,7 +300,7 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     // Announcements go through THIS display, which is the object an assistive client already knows
     // about (TerminalAccessible::installFactory hands out its interface). Installed on every session
     // bind, so a rebound session speaks through the display it is actually shown in.
-    _session->setAnnouncer(std::make_unique<QtAnnouncer>(this));
+    _session->setAnnouncer(std::make_unique<platform::QtAnnouncer>(this));
 
     if (auto* controller = windowController())
     {
@@ -311,7 +315,7 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
 
     if (!_renderer)
     {
-        auto const timer = ScopedTimer(startupLog, "Renderer construction");
+        auto const timer = crispy::scoped_timer(startupLog, "Renderer construction");
         // The profile's own margin, scaled to device pixels, exactly as applyResize() derives it
         // (@see geometry::fitPageToPixels, which takes left/top straight from these). Seeded here so
         // the published grid origin is right from the very first event rather than from the first
@@ -353,7 +357,7 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     // guessing a cell size. UnixPty::resizeScreen() stashes a size reported before start() precisely so
     // this ordering works.
     {
-        auto const timer = ScopedTimer(startupLog, "Session start");
+        auto const timer = crispy::scoped_timer(startupLog, "Session start");
         _session->start();
     }
 
@@ -416,8 +420,9 @@ void TerminalDisplay::releaseSession()
 {
     if (!_session)
         return;
-    displayLog()("TerminalDisplay::releaseSession: dropping session {} (taken over by another display)",
-                 (void*) _session);
+    display::displayLog()(
+        "TerminalDisplay::releaseSession: dropping session {} (taken over by another display)",
+        (void*) _session);
     QObject::disconnect(_session, &TerminalSession::titleChanged, this, &TerminalDisplay::titleChanged);
     // Clear the session's back-pointer as well: on the transient-null collapse path (setSession(nullptr))
     // no other display takes the session over before this one may be destroyed, and ~TerminalDisplay
@@ -448,7 +453,8 @@ void TerminalDisplay::applyDisplaySizeToGrid()
     // via the size-increment hint where the platform supports it) — so a resize event can never re-enter
     // itself. Grid->window resizes exist only for content-driven requests through the WindowController.
     auto const deviceSize = geometry::availableDevicePixels(width(), height(), contentScale());
-    displayLog()("Display size changed to {}x{} virtual ({} device).", width(), height(), deviceSize);
+    display::displayLog()(
+        "Display size changed to {}x{} virtual ({} device).", width(), height(), deviceSize);
     applyResize(deviceSize, *_session, *_renderer);
 }
 
@@ -469,7 +475,7 @@ void TerminalDisplay::handleWindowChanged(QQuickWindow* newWindow)
 {
     if (newWindow)
     {
-        displayLog()("Attaching widget {} to window {}.", (void*) this, (void*) newWindow);
+        display::displayLog()("Attaching widget {} to window {}.", (void*) this, (void*) newWindow);
         connect(newWindow,
                 &QQuickWindow::sceneGraphInitialized,
                 this,
@@ -502,7 +508,7 @@ void TerminalDisplay::handleWindowChanged(QQuickWindow* newWindow)
             }
     }
     else
-        displayLog()("Detaching widget {} from window.", (void*) this);
+        display::displayLog()("Detaching widget {} from window.", (void*) this);
 }
 
 namespace
@@ -525,7 +531,7 @@ namespace
 
 void TerminalDisplay::releaseResources()
 {
-    displayLog()("Releasing resources.");
+    display::displayLog()("Releasing resources.");
     // QQuickItem::releaseResources() runs on the GUI thread, but GL teardown must happen on the render
     // thread with the context current — so defer it via a render job. The renderer may already be gone
     // (the scene-graph node's releaseResources() destroys it on the render thread), in which case there
@@ -547,7 +553,7 @@ void TerminalDisplay::releaseResources()
 
 void TerminalDisplay::cleanup()
 {
-    displayLog()("Cleaning up.");
+    display::displayLog()("Cleaning up.");
     destroyRenderer();
 }
 
@@ -566,7 +572,7 @@ void TerminalDisplay::onRefreshRateChanged()
     if (_session == nullptr || window() == nullptr)
         return;
     auto const rate = refreshRate();
-    displayLog()("Refresh rate changed to {}.", rate.value);
+    display::displayLog()("Refresh rate changed to {}.", rate.value);
     _session->terminal().setRefreshRate(rate);
 }
 
@@ -606,7 +612,7 @@ void TerminalDisplay::applyContentScaleChange()
 
 void TerminalDisplay::onScreenChanged()
 {
-    displayLog()("Screen changed.");
+    display::displayLog()("Screen changed.");
     configureScreenHooks(); // re-home the per-screen hooks to the new screen
     applyFontDPI();
     // Re-derive the screen-dependent terminal facts from the ACTUAL screen (the window-level
@@ -624,10 +630,10 @@ void TerminalDisplay::applyFontDPI()
     if (newFontDPI == _lastFontDPI)
         return;
 
-    displayLog()("Applying DPI {} (via content scale {}, {}).",
-                 newFontDPI,
-                 contentScale(),
-                 window() ? "Window present" : "No window");
+    display::displayLog()("Applying DPI {} (via content scale {}, {}).",
+                          newFontDPI,
+                          contentScale(),
+                          window() ? "Window present" : "No window");
 
     // NB: _lastFontDPI is the dedup guard above; it is committed only once the renderer confirms it
     // actually applied the new DPI (see end of this function). Committing it here — before the staged
@@ -711,28 +717,28 @@ void TerminalDisplay::logDisplayInfo()
     auto const gm = gridMetrics();
     auto const fd = _renderer->fontDescriptions();
 #ifdef CONTOUR_BUILD_TYPE
-    displayLog()("[FYI] Build type          : {}", CONTOUR_BUILD_TYPE);
+    display::displayLog()("[FYI] Build type          : {}", CONTOUR_BUILD_TYPE);
 #endif
-    displayLog()("[FYI] Application PID     : {}", QCoreApplication::applicationPid());
-    displayLog()("[FYI] Qt platform         : {}", QGuiApplication::platformName().toStdString());
-    displayLog()("[FYI] Refresh rate        : {} Hz", refreshRate().value);
-    displayLog()("[FYI] Screen size         : {}", actualScreenSize);
-    displayLog()("[FYI] Device pixel ratio  : {}", window()->devicePixelRatio());
-    displayLog()("[FYI] Effective DPR       : {}", window()->effectiveDevicePixelRatio());
-    displayLog()("[FYI] Content scale       : {}", contentScale());
-    displayLog()("[FYI] Font DPI            : {} ({})", fontDPI(), fd.dpi);
-    displayLog()("[FYI] Font size           : {} ({} px)", fd.size, fontSizeInPx);
-    displayLog()("[FYI] Cell size           : {} px", gm.cellSize);
-    displayLog()("[FYI] Page size           : {}", gm.pageSize);
-    displayLog()("[FYI] Font baseline       : {} px", gm.baseline);
-    displayLog()("[FYI] Underline position  : {} px", gm.underline.position);
-    displayLog()("[FYI] Underline thickness : {} px", gm.underline.thickness);
+    display::displayLog()("[FYI] Application PID     : {}", QCoreApplication::applicationPid());
+    display::displayLog()("[FYI] Qt platform         : {}", QGuiApplication::platformName().toStdString());
+    display::displayLog()("[FYI] Refresh rate        : {} Hz", refreshRate().value);
+    display::displayLog()("[FYI] Screen size         : {}", actualScreenSize);
+    display::displayLog()("[FYI] Device pixel ratio  : {}", window()->devicePixelRatio());
+    display::displayLog()("[FYI] Effective DPR       : {}", window()->effectiveDevicePixelRatio());
+    display::displayLog()("[FYI] Content scale       : {}", contentScale());
+    display::displayLog()("[FYI] Font DPI            : {} ({})", fontDPI(), fd.dpi);
+    display::displayLog()("[FYI] Font size           : {} ({} px)", fd.size, fontSizeInPx);
+    display::displayLog()("[FYI] Cell size           : {} px", gm.cellSize);
+    display::displayLog()("[FYI] Page size           : {}", gm.pageSize);
+    display::displayLog()("[FYI] Font baseline       : {} px", gm.baseline);
+    display::displayLog()("[FYI] Underline position  : {} px", gm.underline.position);
+    display::displayLog()("[FYI] Underline thickness : {} px", gm.underline.thickness);
     // clang-format on
 }
 
 void TerminalDisplay::onSceneGrapheInitialized()
 {
-    displayLog()("onSceneGrapheInitialized ({}x{}, DPR {})", width(), height(), contentScale());
+    display::displayLog()("onSceneGrapheInitialized ({}x{}, DPR {})", width(), height(), contentScale());
 }
 
 void TerminalDisplay::logRhiBackendInfoOnce()
@@ -749,9 +755,9 @@ void TerminalDisplay::logRhiBackendInfoOnce()
         return;
     _rhiBackendLogged = true;
 
-    displayLog()("[FYI] Qt RHI backend      : {} on {}",
-                 rhi->backendName(),
-                 rhi->driverInfo().deviceName.toStdString());
+    display::displayLog()("[FYI] Qt RHI backend      : {} on {}",
+                          rhi->backendName(),
+                          rhi->driverInfo().deviceName.toStdString());
     if (auto const* glContext = QOpenGLContext::currentContext())
     {
         auto const profileName = [](QSurfaceFormat::OpenGLContextProfile profile) {
@@ -764,11 +770,11 @@ void TerminalDisplay::logRhiBackendInfoOnce()
             return "no profile";
         };
         auto const format = glContext->format();
-        displayLog()("[FYI] OpenGL context      : {}.{} {} ({})",
-                     format.majorVersion(),
-                     format.minorVersion(),
-                     profileName(format.profile()),
-                     glContext->isOpenGLES() ? "OpenGL ES" : "desktop OpenGL");
+        display::displayLog()("[FYI] OpenGL context      : {}.{} {} ({})",
+                              format.majorVersion(),
+                              format.minorVersion(),
+                              profileName(format.profile()),
+                              glContext->isOpenGLES() ? "OpenGL ES" : "desktop OpenGL");
     }
 }
 
@@ -812,7 +818,7 @@ void TerminalDisplay::onBeforeSynchronize()
             // session's own thread instead, matching how every other GUI-mutating callback in this render
             // path is deferred (and how TerminalSession fires onClosed() from its exit watcher). The inner
             // guard covers the display being torn down between this post and its dispatch.
-            postToObject(_session, [session = _session]() { session->onClosed(); });
+            platform::postToObject(_session, [session = _session]() { session->onClosed(); });
         }
     }
 
@@ -870,20 +876,20 @@ void TerminalDisplay::createRenderer()
         return uiSize * contentScale();
     }();
 
-    if (displayLog)
+    if (display::displayLog)
     {
         auto const dpr = contentScale();
         auto const viewSize =
             ImageSize { Width::cast_from(width() * dpr), Height::cast_from(height() * dpr) };
         auto const windowSize = window()->size() * dpr;
-        displayLog()("Creating renderer: {}x+{}y+{}z ({} DPR, {} viewSize, {}x{} windowSize)\n",
-                     x(),
-                     y(),
-                     z(),
-                     dpr,
-                     viewSize,
-                     windowSize.width(),
-                     windowSize.height());
+        display::displayLog()("Creating renderer: {}x+{}y+{}z ({} DPR, {} viewSize, {}x{} windowSize)\n",
+                              x(),
+                              y(),
+                              z(),
+                              dpr,
+                              viewSize,
+                              windowSize.width(),
+                              windowSize.height());
     }
 
     _renderTarget = std::make_unique<RhiRenderer>(precalculatedTargetSize, textureTileSize);
@@ -916,7 +922,7 @@ void TerminalDisplay::createRenderer()
             _session->configureDisplay();
     });
 
-    displayLog()("Implicit size: {}x{}", implicitWidth(), implicitHeight());
+    display::displayLog()("Implicit size: {}x{}", implicitWidth(), implicitHeight());
 }
 
 QMatrix4x4 TerminalDisplay::createModelMatrix() const
@@ -1063,13 +1069,13 @@ void TerminalDisplay::paint()
             ++renderCount_;
             auto const updateCount = stats_.updatesSinceRendering.exchange(0);
             auto const renderCount = stats_.consecutiveRenderCount.exchange(0);
-            if (displayLog)
-                displayLog()("paintGL/{}: {} renders, {} updates since last paint ({}/{}).",
-                             renderCount_.load(),
-                             renderCount,
-                             updateCount,
-                             lastState,
-                             to_string(_session->terminal().renderBufferState()));
+            if (display::displayLog)
+                display::displayLog()("paintGL/{}: {} renders, {} updates since last paint ({}/{}).",
+                                      renderCount_.load(),
+                                      renderCount,
+                                      updateCount,
+                                      lastState,
+                                      to_string(_session->terminal().renderBufferState()));
         }
 #endif
 
@@ -1578,7 +1584,7 @@ vtbackend::ImageSize TerminalDisplay::cellSize() const
 // {{{ TerminalDisplay: (user requested) actions
 void TerminalDisplay::post(std::function<void()> fn)
 {
-    postToObject(this, std::move(fn));
+    platform::postToObject(this, std::move(fn));
 }
 
 namespace
@@ -1753,7 +1759,7 @@ void TerminalDisplay::doDumpStateInternal()
 
     fs::create_symlink(workDirName, targetBaseDir / latestDirName);
 
-    displayLog()("Dumping state into directory: {}", targetDir.generic_string());
+    display::displayLog()("Dumping state into directory: {}", targetDir.generic_string());
 
     // TODO: The above should be done from the outside and the targetDir being passed into this call.
     // TODO: maybe zip this dir in the end.
@@ -1792,7 +1798,7 @@ void TerminalDisplay::doDumpStateInternal()
 
         vtrasterizer::AtlasTextureScreenshot const& info = infoOpt.value();
         auto const fileName = targetDir / "texture-atlas-rgba.png";
-        displayLog()("Saving image {} to: {}", info.size, fileName.generic_string());
+        display::displayLog()("Saving image {} to: {}", info.size, fileName.generic_string());
 
         QImage(info.buffer.data(),
                info.size.width.as<int>(),
@@ -1802,7 +1808,7 @@ void TerminalDisplay::doDumpStateInternal()
     } while (0);
 
     auto screenshotFilePath = targetDir / "screenshot.png";
-    displayLog()("Requesting screenshot for state dump: {}", screenshotFilePath.generic_string());
+    display::displayLog()("Requesting screenshot for state dump: {}", screenshotFilePath.generic_string());
 
     // Deferred capture: the RHI reads the offscreen render back a frame or two later, so save it when it
     // arrives and only *then* terminate on the at-exit path — terminating now would close the window before
@@ -1958,7 +1964,7 @@ bool TerminalDisplay::setFontSize(text::font_size newFontSize)
 {
     Require(_renderer != nullptr);
 
-    displayLog()("Setting display font size and recompute metrics: {}pt", newFontSize.pt);
+    display::displayLog()("Setting display font size and recompute metrics: {}pt", newFontSize.pt);
 
     if (!_renderer->setFontSize(newFontSize))
         return false;
@@ -1980,9 +1986,9 @@ bool TerminalDisplay::setFontSize(text::font_size newFontSize)
     return _renderer->fontDescriptions().size.pt == newFontSize.pt;
 }
 
-void TerminalDisplay::setMouseCursorShape(MouseCursorShape newCursorShape)
+void TerminalDisplay::setMouseCursorShape(input::MouseCursorShape newCursorShape)
 {
-    if (auto const qtShape = toQtMouseShape(newCursorShape); qtShape != cursor().shape())
+    if (auto const qtShape = input::toQtMouseShape(newCursorShape); qtShape != cursor().shape())
         setCursor(qtShape);
 }
 
@@ -2006,7 +2012,7 @@ void TerminalDisplay::setWindowNormal()
 
 void TerminalDisplay::setBlurBehind(bool enable)
 {
-    BlurBehind::setEnabled(window(), enable);
+    platform::setBlurBehind(window(), enable);
 }
 
 void TerminalDisplay::toggleFullScreen()
@@ -2039,7 +2045,7 @@ void TerminalDisplay::toggleTitleBar()
 void TerminalDisplay::toggleInputMethodEditorHandling()
 {
     auto const enabled = !static_cast<bool>(flags() & Flag::ItemAcceptsInputMethod);
-    displayLog()("{} IME (input method editor) handling", enabled ? "Enabling" : "Disabling");
+    display::displayLog()("{} IME (input method editor) handling", enabled ? "Enabling" : "Disabling");
     setFlag(Flag::ItemAcceptsInputMethod, enabled);
 }
 
@@ -2088,7 +2094,7 @@ void TerminalDisplay::renderBufferUpdated()
 
 void TerminalDisplay::closeDisplay()
 {
-    displayLog()("closeDisplay");
+    display::displayLog()("closeDisplay");
     emit terminated();
 }
 

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/ColorConversion.h>
 #include <contour/ContextMenuModel.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/PaneProxy.h>
@@ -13,7 +12,10 @@
 #include <contour/command/Shortcut.h>
 #include <contour/command/TitleBarContextMenu.h>
 #include <contour/config/GuiConfigStore.h>
+#include <contour/display/Logging.h>
 #include <contour/helper.h>
+#include <contour/input/MouseMapping.h>
+#include <contour/platform/ColorConversion.h>
 
 #include <QtCore/QDir>
 #include <QtGui/QCursor>
@@ -292,7 +294,7 @@ QVariant WindowController::data(QModelIndex const& index, int role) const
         case Roles::ColorRole: {
             // color() resolves across the tab's color sources, so ask once.
             auto const color = tab != nullptr ? tab->color() : std::nullopt;
-            return color.has_value() ? toQColor(*color) : QColor(Qt::transparent);
+            return color.has_value() ? platform::toQColor(*color) : QColor(Qt::transparent);
         }
         // No terminal tab reads as active while the settings "tab" is showing — the settings tab is the
         // active view then, so the strip must not highlight two tabs at once.
@@ -395,7 +397,7 @@ void WindowController::dispatchTabStripWheel(
     auto const angleDelta = crispy::point { .x = angleDeltaX, .y = angleDeltaY };
     // Translated, not cast: QML can only hand the phase across as an int, and the two enumerations
     // agreeing numerically today is a coincidence rather than a contract.
-    auto const scrollPhase = mapScrollPhase(static_cast<Qt::ScrollPhase>(phase));
+    auto const scrollPhase = input::mapScrollPhase(static_cast<Qt::ScrollPhase>(phase));
 
     if (!_tabStripWheelGesture.acceptsHorizontal(pixelDelta, angleDelta, scrollPhase, inverted))
         return;
@@ -426,7 +428,7 @@ void WindowController::dispatchTabStripWheel(
     // the call rather than after a decline.
     auto const towardsRight = (pixelDelta.x != 0 ? pixelDelta.x : angleDeltaX) > 0;
     session->applyFallbackMouseBinding(
-        horizontalNavigationButton(towardsRight, _tabStripWheelGesture.usesNaturalDirection()));
+        input::horizontalNavigationButton(towardsRight, _tabStripWheelGesture.usesNaturalDirection()));
 }
 
 void WindowController::moveTab(int fromIndex, int toIndex)
@@ -499,7 +501,7 @@ void WindowController::saveLayoutAs(QString const& name)
 // tabAtRow() bounds-checks into a null tab — the no-op the header promises, without a second guard.
 void WindowController::setActiveTabColor(vtbackend::RGBColor color)
 {
-    setTabColor(activeTabIndex(), toQColor(color));
+    setTabColor(activeTabIndex(), platform::toQColor(color));
 }
 
 void WindowController::resetActiveTabColor()
@@ -510,7 +512,8 @@ void WindowController::resetActiveTabColor()
 void WindowController::setTabColor(int index, QColor const& color)
 {
     if (auto* tab = tabAtRow(index); tab != nullptr)
-        _manager.model().setTabColor(tab->id(), vtworkspace::TabColorSource::User, toRGBColor(color));
+        _manager.model().setTabColor(
+            tab->id(), vtworkspace::TabColorSource::User, platform::toRGBColor(color));
 }
 
 void WindowController::resetTabColor(int index)
@@ -561,12 +564,13 @@ QColor WindowController::tabBackgroundColor(QColor const& tabColor,
                                             bool const windowActive) const
 {
     auto const state = tabVisualStateFor(active, hovered, windowActive);
-    return toQColor(contour::tabBackgroundColor(toRGBColor(tabColor), toRGBColor(rowBackground), state));
+    return platform::toQColor(contour::tabBackgroundColor(
+        platform::toRGBColor(tabColor), platform::toRGBColor(rowBackground), state));
 }
 
 QColor WindowController::tabTextColor(QColor const& tabBackground) const
 {
-    return toQColor(contrastingTextColor(toRGBColor(tabBackground)));
+    return platform::toQColor(contrastingTextColor(platform::toRGBColor(tabBackground)));
 }
 
 void WindowController::closeWindow()
@@ -876,7 +880,7 @@ void WindowController::showInitial()
     if (display == nullptr || !display->hasSession())
     {
         // Never leave the user windowless: map at whatever size the window has.
-        displayLog()("showInitial: no display metrics available; showing at default size.");
+        display::displayLog()("showInitial: no display metrics available; showing at default size.");
         _osWindow->show();
         return;
     }
@@ -889,13 +893,13 @@ void WindowController::showInitial()
     auto const size =
         geometry::windowSizeForPage(totalPage, display->cellSize(), marginsDevice, scale, chrome());
 
-    displayLog()("Initial window size {}x{} (page {}, cell {}, scale {}, chrome {}).",
-                 size.width,
-                 size.height,
-                 totalPage,
-                 display->cellSize(),
-                 scale,
-                 _chromeHeight);
+    display::displayLog()("Initial window size {}x{} (page {}, cell {}, scale {}, chrome {}).",
+                          size.width,
+                          size.height,
+                          totalPage,
+                          display->cellSize(),
+                          scale,
+                          _chromeHeight);
     _osWindow->resize(size.width, size.height);
     _lastAppliedScale = scale;
 
@@ -928,7 +932,7 @@ void WindowController::onWindowScaleMaybeChanged()
     _lastAppliedScale = newScale;
 
     auto const pageBefore = session->terminal().totalPageSize();
-    displayLog()("Content scale settled to {} (page {}).", newScale, pageBefore);
+    display::displayLog()("Content scale settled to {} (page {}).", newScale, pageBefore);
 
     // New scale => new font DPI => new cell size; this reflows the grid in place (unconditionally
     // correct: the grid always fits the item) and guarantees cellSize() is fresh even when the scale
@@ -996,16 +1000,17 @@ void WindowController::updateSizeHintsFor(display::TerminalDisplay& requester, H
     if (policy.applyIncrement && applyResizeGrid)
         osWindow->setSizeIncrement(QSize(hints.increment.width, hints.increment.height));
 
-    displayLog()("Size hints: min={}x{}, base={}x{}, increment={}x{} (cellSize={}, scale={}, chrome={})",
-                 hints.minimum.width,
-                 hints.minimum.height,
-                 hints.base.width,
-                 hints.base.height,
-                 hints.increment.width,
-                 hints.increment.height,
-                 cellSize,
-                 scale,
-                 _chromeHeight);
+    display::displayLog()(
+        "Size hints: min={}x{}, base={}x{}, increment={}x{} (cellSize={}, scale={}, chrome={})",
+        hints.minimum.width,
+        hints.minimum.height,
+        hints.base.width,
+        hints.base.height,
+        hints.increment.width,
+        hints.increment.height,
+        cellSize,
+        scale,
+        _chromeHeight);
 }
 
 namespace
@@ -1124,7 +1129,7 @@ bool WindowController::applyContentDrivenResize(display::TerminalDisplay& reques
         // correctly inside the maximized window. Leaving maximized to fit the window is a UX refinement
         // tracked separately — it needs Wayland-correct unmaximize/resize ordering (a naive
         // resize()-after-showNormal() is a fatal xdg-shell protocol error).
-        displayLog()("Refusing content-driven window resize while fullscreen/maximized.");
+        display::displayLog()("Refusing content-driven window resize while fullscreen/maximized.");
         return false;
     }
 
@@ -1136,7 +1141,8 @@ bool WindowController::applyContentDrivenResize(display::TerminalDisplay& reques
                      : nullptr;
     if (leaf == nullptr)
     {
-        displayLog()("Refusing content-driven window resize: requesting pane is not in the active tab.");
+        display::displayLog()(
+            "Refusing content-driven window resize: requesting pane is not in the active tab.");
         return false;
     }
 
@@ -1147,7 +1153,7 @@ bool WindowController::applyContentDrivenResize(display::TerminalDisplay& reques
     auto* const layoutRoot = tab->layoutRoot();
     if (!layoutRoot->contains(leaf))
     {
-        displayLog()("Refusing content-driven window resize: requesting pane is not on screen.");
+        display::displayLog()("Refusing content-driven window resize: requesting pane is not on screen.");
         return false;
     }
 
@@ -1161,12 +1167,12 @@ bool WindowController::applyContentDrivenResize(display::TerminalDisplay& reques
         vtworkspace::DefaultSplitHandleThickness,
         *layoutRoot);
 
-    displayLog()("Content-driven window resize: leaf {}x{} -> content {}x{} + {} chrome.",
-                 leafContentLogical.width,
-                 leafContentLogical.height,
-                 content.width,
-                 content.height,
-                 _chromeHeight);
+    display::displayLog()("Content-driven window resize: leaf {}x{} -> content {}x{} + {} chrome.",
+                          leafContentLogical.width,
+                          leafContentLogical.height,
+                          content.width,
+                          content.height,
+                          _chromeHeight);
 
     // Straddle guard for the DPR-settlement handler: a resize can move the window's center across a
     // mixed-DPR monitor boundary, whose DevicePixelRatioChange must NOT answer with another resize.

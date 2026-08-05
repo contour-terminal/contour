@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <memory>
 
-namespace contour
+namespace contour::input
 {
 
 /// Translates a windowing system's native key identifier into the vocabularies the keyboard
@@ -58,4 +58,4 @@ class KeyboardLayout
 /// macOS regression be tested at all. Reports 0 for keys that carry no character.
 [[nodiscard]] std::unique_ptr<KeyboardLayout> makeMacUsAnsiKeyboardLayout();
 
-} // namespace contour
+} // namespace contour::input

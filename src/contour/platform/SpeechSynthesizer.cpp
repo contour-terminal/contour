@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/SpeechSynthesizer.h>
+#include <contour/platform/SpeechSynthesizer.h>
 
 #ifdef CONTOUR_WITH_TTS
     #include <QtTextToSpeech/QTextToSpeech>
@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <vector>
 
-namespace contour
+namespace contour::platform
 {
 
 std::string speakableText(std::string_view text, size_t maxChars)
@@ -137,4 +137,4 @@ std::unique_ptr<SpeechSynthesizer> makeSpeechSynthesizer()
 
 #endif
 
-} // namespace contour
+} // namespace contour::platform

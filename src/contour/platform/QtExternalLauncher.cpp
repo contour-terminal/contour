@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/QtExternalLauncher.h>
+#include <contour/platform/QtExternalLauncher.h>
 
 #include <QtCore/QProcess>
 #include <QtGui/QDesktopServices>
 
-namespace contour
+namespace contour::platform
 {
 
 bool QtExternalLauncher::openUrl(QUrl const& url)
@@ -22,4 +22,4 @@ int QtExternalLauncher::execute(QString const& program, QStringList const& argum
     return QProcess::execute(program, arguments);
 }
 
-} // namespace contour
+} // namespace contour::platform

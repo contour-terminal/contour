@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/KeyboardLayout.h>
+#include <contour/input/KeyboardLayout.h>
 
 #include <libunicode/convert.h>
 
@@ -12,7 +12,7 @@
     #include <Carbon/Carbon.h>
 #endif
 
-namespace contour
+namespace contour::input
 {
 
 namespace
@@ -296,4 +296,4 @@ std::unique_ptr<KeyboardLayout> makePlatformKeyboardLayout()
 #endif
 }
 
-} // namespace contour
+} // namespace contour::input

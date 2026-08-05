@@ -17,10 +17,10 @@
 // window (hence never had a render target), which the offscreen platform supplies perfectly well. See
 // the teardown-lifetimes section there.
 
-#include <contour/config/Actions.h>
 #include <contour/TerminalSession.h>
 #include <contour/TerminalSessionManager.h>
 #include <contour/WindowController.h>
+#include <contour/config/Actions.h>
 #include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/test/GuiTestFixtures.h>
@@ -942,10 +942,10 @@ TEST_CASE("display: resize-to-display and mouse-cursor-shape run through the liv
     h.pump();
 
     // The mouse-cursor-shape setter drives the QQuickItem cursor; every shape must apply cleanly.
-    for (auto const shape: { contour::MouseCursorShape::Hidden,
-                             contour::MouseCursorShape::PointingHand,
-                             contour::MouseCursorShape::IBeam,
-                             contour::MouseCursorShape::Arrow })
+    for (auto const shape: { contour::input::MouseCursorShape::Hidden,
+                             contour::input::MouseCursorShape::PointingHand,
+                             contour::input::MouseCursorShape::IBeam,
+                             contour::input::MouseCursorShape::Arrow })
         CHECK_NOTHROW(h.display->setMouseCursorShape(shape));
     h.pump();
 }
@@ -1285,9 +1285,9 @@ TEST_CASE("display: mouse press/move drive selection and the cursor shape on the
     h.pump();
 
     // Direct cursor-shape setter (used by hideWhileTyping and hover-over-hyperlink).
-    CHECK_NOTHROW(h.display->setMouseCursorShape(contour::MouseCursorShape::Hidden));
-    CHECK_NOTHROW(h.display->setMouseCursorShape(contour::MouseCursorShape::IBeam));
-    CHECK_NOTHROW(h.display->setMouseCursorShape(contour::MouseCursorShape::PointingHand));
+    CHECK_NOTHROW(h.display->setMouseCursorShape(contour::input::MouseCursorShape::Hidden));
+    CHECK_NOTHROW(h.display->setMouseCursorShape(contour::input::MouseCursorShape::IBeam));
+    CHECK_NOTHROW(h.display->setMouseCursorShape(contour::input::MouseCursorShape::PointingHand));
     h.pump();
 }
 

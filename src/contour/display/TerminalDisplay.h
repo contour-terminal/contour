@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/TerminalSession.h>
 #include <contour/config/Actions.h>
 #include <contour/config/Config.h>
-#include <contour/TerminalSession.h>
 #include <contour/display/ContentScale.h>
 #include <contour/display/TerminalRenderNode.h>
 #include <contour/helper.h>
+#include <contour/input/MouseMapping.h>
 
 #include <vtbackend/Color.h>
 #include <vtbackend/Metrics.h>
@@ -253,7 +254,7 @@ class TerminalDisplay: public QQuickItem
     /// from a just-requested size while a staged change is pending or after a swallowed font-load failure.
     [[nodiscard]] text::font_size fontSize() const { return _renderer->fontDescriptions().size; }
 
-    void setMouseCursorShape(MouseCursorShape newCursorShape);
+    void setMouseCursorShape(input::MouseCursorShape newCursorShape);
     void setWindowFullScreen();
     void setWindowMaximized();
     void setWindowNormal();

@@ -3,10 +3,13 @@
 // Unit tests for the Qt→vtbackend input translation helpers (helper.h/helper.cpp): the pure
 // mapping functions every key/mouse event flows through before reaching a terminal session.
 
-#include <contour/config/Config.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/TerminalSession.h>
+#include <contour/config/Config.h>
 #include <contour/helper.h>
+#include <contour/input/KeyMapping.h>
+#include <contour/input/MouseMapping.h>
+#include <contour/platform/QtPath.h>
 #include <contour/test/GuiTestFixtures.h>
 
 #include <vtbackend/InputGenerator.h>
@@ -25,31 +28,35 @@
 #include <memory>
 #include <ranges>
 
-using contour::makeModifiers;
-using contour::makeMouseButton;
+using contour::input::makeModifiers;
+using contour::input::makeMouseButton;
 
-TEST_CASE("makeMouseButton maps Qt buttons onto VT buttons", "[helper][input]")
+TEST_CASE("contour::input::makeMouseButton maps Qt buttons onto VT buttons", "[helper][input]")
 {
-    STATIC_CHECK(makeMouseButton(Qt::LeftButton) == vtbackend::MouseButton::Left);
-    STATIC_CHECK(makeMouseButton(Qt::MiddleButton) == vtbackend::MouseButton::Middle);
-    STATIC_CHECK(makeMouseButton(Qt::RightButton) == vtbackend::MouseButton::Right);
+    STATIC_CHECK(contour::input::makeMouseButton(Qt::LeftButton) == vtbackend::MouseButton::Left);
+    STATIC_CHECK(contour::input::makeMouseButton(Qt::MiddleButton) == vtbackend::MouseButton::Middle);
+    STATIC_CHECK(contour::input::makeMouseButton(Qt::RightButton) == vtbackend::MouseButton::Right);
     // Unknown buttons deliberately degrade to Left (the safest default for VT mouse reports).
-    STATIC_CHECK(makeMouseButton(Qt::BackButton) == vtbackend::MouseButton::Left);
+    STATIC_CHECK(contour::input::makeMouseButton(Qt::BackButton) == vtbackend::MouseButton::Left);
 }
 
-TEST_CASE("makeModifiers maps Qt keyboard modifiers onto VT modifiers", "[helper][input]")
+TEST_CASE("contour::input::makeModifiers maps Qt keyboard modifiers onto VT modifiers", "[helper][input]")
 {
-    CHECK(makeModifiers(Qt::NoModifier) == vtbackend::Modifiers {});
-    CHECK(makeModifiers(Qt::ShiftModifier) == vtbackend::Modifiers { vtbackend::Modifier::Shift });
-    CHECK(makeModifiers(Qt::ControlModifier) == vtbackend::Modifiers { vtbackend::Modifier::Control });
-    CHECK(makeModifiers(Qt::AltModifier) == vtbackend::Modifiers { vtbackend::Modifier::Alt });
-    CHECK(makeModifiers(Qt::MetaModifier) == vtbackend::Modifiers { vtbackend::Modifier::Super });
+    CHECK(contour::input::makeModifiers(Qt::NoModifier) == vtbackend::Modifiers {});
+    CHECK(contour::input::makeModifiers(Qt::ShiftModifier)
+          == vtbackend::Modifiers { vtbackend::Modifier::Shift });
+    CHECK(contour::input::makeModifiers(Qt::ControlModifier)
+          == vtbackend::Modifiers { vtbackend::Modifier::Control });
+    CHECK(contour::input::makeModifiers(Qt::AltModifier)
+          == vtbackend::Modifiers { vtbackend::Modifier::Alt });
+    CHECK(contour::input::makeModifiers(Qt::MetaModifier)
+          == vtbackend::Modifiers { vtbackend::Modifier::Super });
 
     // stripAltGr=false so the raw Qt->Modifier mapping is asserted: with the default (true), Win32
     // treats a Ctrl+Alt combination as AltGr and strips both, which is correct platform behavior but
     // not what this basic-mapping case is checking.
-    auto const combined =
-        makeModifiers(Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier, 0, /*stripAltGr=*/false);
+    auto const combined = contour::input::makeModifiers(
+        Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier, 0, /*stripAltGr=*/false);
     CHECK(combined.chord.contains(vtbackend::Modifier::Shift));
     CHECK(combined.chord.contains(vtbackend::Modifier::Control));
     CHECK(combined.chord.contains(vtbackend::Modifier::Alt));
@@ -59,42 +66,45 @@ TEST_CASE("makeModifiers maps Qt keyboard modifiers onto VT modifiers", "[helper
     CHECK(combined.locks.none());
 }
 
-TEST_CASE("unshiftedCodepoint inverts the US-ASCII shift level", "[helper][input]")
+TEST_CASE("contour::input::unshiftedCodepoint inverts the US-ASCII shift level", "[helper][input]")
 {
-    using contour::unshiftedCodepoint;
+    using contour::input::unshiftedCodepoint;
     // Punctuation and number-row shifted symbols map back to the base key label a binding is written
     // with (this is what lets `Ctrl+Shift+,` fire when Qt delivers the shifted '<').
-    CHECK(unshiftedCodepoint(U'<') == U',');
-    CHECK(unshiftedCodepoint(U'>') == U'.');
-    CHECK(unshiftedCodepoint(U'?') == U'/');
-    CHECK(unshiftedCodepoint(U':') == U';');
-    CHECK(unshiftedCodepoint(U'"') == U'\'');
-    CHECK(unshiftedCodepoint(U'{') == U'[');
-    CHECK(unshiftedCodepoint(U'|') == U'\\');
-    CHECK(unshiftedCodepoint(U'_') == U'-');
-    CHECK(unshiftedCodepoint(U'+') == U'=');
-    CHECK(unshiftedCodepoint(U'!') == U'1');
-    CHECK(unshiftedCodepoint(U'@') == U'2');
-    CHECK(unshiftedCodepoint(U')') == U'0');
+    CHECK(contour::input::unshiftedCodepoint(U'<') == U',');
+    CHECK(contour::input::unshiftedCodepoint(U'>') == U'.');
+    CHECK(contour::input::unshiftedCodepoint(U'?') == U'/');
+    CHECK(contour::input::unshiftedCodepoint(U':') == U';');
+    CHECK(contour::input::unshiftedCodepoint(U'"') == U'\'');
+    CHECK(contour::input::unshiftedCodepoint(U'{') == U'[');
+    CHECK(contour::input::unshiftedCodepoint(U'|') == U'\\');
+    CHECK(contour::input::unshiftedCodepoint(U'_') == U'-');
+    CHECK(contour::input::unshiftedCodepoint(U'+') == U'=');
+    CHECK(contour::input::unshiftedCodepoint(U'!') == U'1');
+    CHECK(contour::input::unshiftedCodepoint(U'@') == U'2');
+    CHECK(contour::input::unshiftedCodepoint(U')') == U'0');
     // Non-shifted symbols and letters (shift-invariant here) are returned unchanged.
-    CHECK(unshiftedCodepoint(U',') == U',');
-    CHECK(unshiftedCodepoint(U'P') == U'P');
-    CHECK(unshiftedCodepoint(U'a') == U'a');
-    CHECK(unshiftedCodepoint(U'5') == U'5');
+    CHECK(contour::input::unshiftedCodepoint(U',') == U',');
+    CHECK(contour::input::unshiftedCodepoint(U'P') == U'P');
+    CHECK(contour::input::unshiftedCodepoint(U'a') == U'a');
+    CHECK(contour::input::unshiftedCodepoint(U'5') == U'5');
 }
 
 #if !defined(_WIN32) && !defined(__APPLE__)
-TEST_CASE("makeModifiers derives CapsLock/NumLock from the X11 native modifier mask", "[helper][input]")
+TEST_CASE("contour::input::makeModifiers derives CapsLock/NumLock from the X11 native modifier mask",
+          "[helper][input]")
 {
     // On Linux the lock states come from the XCB/XKB native mask (CapsLock = XCB_MOD_MASK_LOCK 0x02,
     // NumLock = XCB_MOD_MASK_2 0x10), independent of the Qt modifier bits.
     constexpr quint32 XcbCapsLockMask = 0x02;
     constexpr quint32 XcbNumLockMask = 0x10;
 
-    CHECK(makeModifiers(Qt::NoModifier, XcbCapsLockMask).locks.contains(vtbackend::LockKey::CapsLock));
-    CHECK(makeModifiers(Qt::NoModifier, XcbNumLockMask).locks.contains(vtbackend::LockKey::NumLock));
+    CHECK(contour::input::makeModifiers(Qt::NoModifier, XcbCapsLockMask)
+              .locks.contains(vtbackend::LockKey::CapsLock));
+    CHECK(contour::input::makeModifiers(Qt::NoModifier, XcbNumLockMask)
+              .locks.contains(vtbackend::LockKey::NumLock));
 
-    auto const both = makeModifiers(Qt::ShiftModifier, XcbCapsLockMask | XcbNumLockMask);
+    auto const both = contour::input::makeModifiers(Qt::ShiftModifier, XcbCapsLockMask | XcbNumLockMask);
     CHECK(both.chord.contains(vtbackend::Modifier::Shift));
     CHECK(both.locks.contains(vtbackend::LockKey::CapsLock));
     CHECK(both.locks.contains(vtbackend::LockKey::NumLock));
@@ -103,7 +113,7 @@ TEST_CASE("makeModifiers derives CapsLock/NumLock from the X11 native modifier m
     CHECK(both.chord == vtbackend::Modifiers { vtbackend::Modifier::Shift });
 
     // No native bits set -> no lock keys.
-    auto const none = makeModifiers(Qt::ControlModifier, 0);
+    auto const none = contour::input::makeModifiers(Qt::ControlModifier, 0);
     CHECK(none.locks.none());
 }
 #endif
@@ -120,17 +130,17 @@ namespace
 
 /// The layout for every test that is not about layouts: passthrough leaves the native key
 /// identifier alone, which for the events built here (nativeVirtualKey 0) means "unknown".
-[[nodiscard]] contour::KeyboardLayout const& passthroughLayout()
+[[nodiscard]] contour::input::KeyboardLayout const& passthroughLayout()
 {
-    static auto const layout = contour::makePassthroughKeyboardLayout();
+    static auto const layout = contour::input::makePassthroughKeyboardLayout();
     return *layout;
 }
 
 /// Reads native key identifiers as macOS does — as positional Carbon key codes — so the macOS
 /// regression can be driven through the real key path on any platform.
-[[nodiscard]] contour::KeyboardLayout const& macUsAnsiLayout()
+[[nodiscard]] contour::input::KeyboardLayout const& macUsAnsiLayout()
 {
-    static auto const layout = contour::makeMacUsAnsiKeyboardLayout();
+    static auto const layout = contour::input::makeMacUsAnsiKeyboardLayout();
     return *layout;
 }
 
@@ -470,10 +480,10 @@ TEST_CASE("foldedBindingCodepoint folds only the ASCII letter case", "[helper][i
     }
 }
 
-TEST_CASE("the binding fold and unshiftedCodepoint cannot fight", "[helper][input]")
+TEST_CASE("the binding fold and contour::input::unshiftedCodepoint cannot fight", "[helper][input]")
 {
-    using contour::unshiftedCodepoint;
     using contour::config::foldedBindingCodepoint;
+    using contour::input::unshiftedCodepoint;
 
     // TerminalSession::sendCharEvent applies both: it folds the delivered codepoint, then retries
     // through unshiftedCodepoint when Shift is held. That is only sound because their domains are
@@ -483,16 +493,16 @@ TEST_CASE("the binding fold and unshiftedCodepoint cannot fight", "[helper][inpu
         CAPTURE(static_cast<uint32_t>(ch));
 
         // Whatever unshiftedCodepoint rewrites, the fold leaves alone...
-        if (unshiftedCodepoint(ch) != ch)
+        if (contour::input::unshiftedCodepoint(ch) != ch)
             CHECK(foldedBindingCodepoint(ch) == ch);
 
         // ...and whatever the fold rewrites, unshiftedCodepoint leaves alone.
         if (foldedBindingCodepoint(ch) != ch)
-            CHECK(unshiftedCodepoint(ch) == ch);
+            CHECK(contour::input::unshiftedCodepoint(ch) == ch);
 
         // Therefore they commute, and applying one before the other cannot change the outcome.
-        CHECK(unshiftedCodepoint(foldedBindingCodepoint(ch))
-              == foldedBindingCodepoint(unshiftedCodepoint(ch)));
+        CHECK(contour::input::unshiftedCodepoint(foldedBindingCodepoint(ch))
+              == foldedBindingCodepoint(contour::input::unshiftedCodepoint(ch)));
     }
 }
 
@@ -582,7 +592,8 @@ input_mapping:
     }
 }
 
-TEST_CASE("toQString decodes a path in the encoding it is actually stored in", "[contour][helper]")
+TEST_CASE("contour::platform::toQString decodes a path in the encoding it is actually stored in",
+          "[contour][helper]")
 {
     // QString::fromStdString(path.generic_string()) is the obvious spelling and is silently lossy on
     // Windows: generic_string() narrows the native wide path through the ANSI code page while
@@ -594,16 +605,17 @@ TEST_CASE("toQString decodes a path in the encoding it is actually stored in", "
     // UTF-8 and encode to whatever the platform stores natively, so the fixture means the same thing
     // on Windows and POSIX without depending on the runner's locale.
     auto const home = std::filesystem::path(u8"C:/Users/J\u00fcrgen/AppData/Roaming/contour");
-    CHECK(contour::toQString(home) == QStringLiteral("C:/Users/J\u00fcrgen/AppData/Roaming/contour"));
+    CHECK(contour::platform::toQString(home)
+          == QStringLiteral("C:/Users/J\u00fcrgen/AppData/Roaming/contour"));
 
     // Round-tripping is the property that matters: whatever came out has to still name the same path.
-    CHECK(std::filesystem::path(contour::toQString(home).toStdU16String()) == home);
+    CHECK(std::filesystem::path(contour::platform::toQString(home).toStdU16String()) == home);
 
     // Generic separators, so the result is in the form Qt's own path APIs use rather than the
     // platform's -- which on Windows is the difference between a usable QML import path and one Qt
     // will not match against.
-    CHECK(contour::toQString(home / "Contour" / "Ui")
+    CHECK(contour::platform::toQString(home / "Contour" / "Ui")
           == QStringLiteral("C:/Users/J\u00fcrgen/AppData/Roaming/contour/Contour/Ui"));
 
-    CHECK(contour::toQString(std::filesystem::path {}).isEmpty());
+    CHECK(contour::platform::toQString(std::filesystem::path {}).isEmpty());
 }

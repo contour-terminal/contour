@@ -3,7 +3,7 @@
 
 #ifdef __linux__
 
-    #include <contour/NotificationRouter.h>
+    #include <contour/platform/NotificationRouter.h>
 
     #include <vtbackend/DesktopNotification.h>
 
@@ -13,7 +13,7 @@
     #include <cstdint>
     #include <string>
 
-namespace contour
+namespace contour::platform
 {
 
 /// D-Bus backend for the Kitty OSC 99 desktop notification protocol on Linux.
@@ -76,6 +76,6 @@ class FreeDesktopNotifier: public QObject
     std::unique_ptr<QDBusInterface> _interface;
 };
 
-} // namespace contour
+} // namespace contour::platform
 
 #endif // defined(__linux__)

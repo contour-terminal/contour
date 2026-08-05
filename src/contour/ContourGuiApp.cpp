@@ -1,18 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/CommandPaletteModel.h>
 #include <contour/ContourGuiApp.h>
-#include <contour/GuiTheme.h>
 #include <contour/PaneProxy.h>
-#include <contour/QtExternalLauncher.h>
 #include <contour/RenderingBackendSelection.h>
 #include <contour/SessionFactory.h>
 #include <contour/SettingsController.h>
 #include <contour/WindowController.h>
 #include <contour/config/Config.h>
 #include <contour/display/ContentScale.h>
-#include <contour/display/ShaderConfig.h> // display::createSurfaceFormat
+#include <contour/display/Logging.h>
+#include <contour/display/ShaderConfig.h> // createSurfaceFormat
 #include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
+#include <contour/platform/GuiTheme.h>
+#include <contour/platform/QtExternalLauncher.h>
+#include <contour/platform/QtPath.h>
 #include <contour/remote/NativeController.h>
 #include <contour/remote/RemoteLayout.h>
 #include <contour/remote/RoutingSessionFactory.h>
@@ -23,6 +25,7 @@
 #include <text_shaper/font_locator.h>
 
 #include <crispy/CLI.h>
+#include <crispy/ScopedTimer.h>
 #include <crispy/logsink.h>
 #include <crispy/logstore.h>
 #include <crispy/utils.h>
@@ -109,20 +112,20 @@ bool hasStrandedQmlOverrides(fs::path const& configHome)
 
 ContourGuiApp::ContourGuiApp(crispy::environment const& env,
                              std::unique_ptr<SessionFactory> sessionFactory,
-                             std::unique_ptr<ExternalLauncher> externalLauncher,
+                             std::unique_ptr<platform::ExternalLauncher> externalLauncher,
                              std::unique_ptr<config::LayoutStore> layoutStore,
                              std::unique_ptr<command::CommandHistoryStore> commandHistoryStore,
-                             std::unique_ptr<SpeechSynthesizer> speechSynthesizer):
+                             std::unique_ptr<platform::SpeechSynthesizer> speechSynthesizer):
     ContourApp { env },
     _sessionFactory(std::make_unique<RoutingSessionFactory>(
         sessionFactory ? std::move(sessionFactory) : std::make_unique<AppSessionFactory>(*this))),
     _routingFactory(static_cast<RoutingSessionFactory*>(_sessionFactory.get())),
     _externalLauncher(externalLauncher ? std::move(externalLauncher)
-                                       : std::make_unique<QtExternalLauncher>()),
+                                       : std::make_unique<platform::QtExternalLauncher>()),
     _layoutStore(layoutStore ? std::move(layoutStore) : std::make_unique<config::FileLayoutStore>()),
     _commandHistoryStore(commandHistoryStore ? std::move(commandHistoryStore)
                                              : std::make_unique<command::FileCommandHistoryStore>()),
-    _speechSynthesizer(speechSynthesizer ? std::move(speechSynthesizer) : makeSpeechSynthesizer()),
+    _speechSynthesizer(speechSynthesizer ? std::move(speechSynthesizer) : platform::makeSpeechSynthesizer()),
     _sessionManager(*this, *_sessionFactory, *_layoutStore, *_commandHistoryStore)
 {
     link("contour.terminal", bind(&ContourGuiApp::terminalGuiAction, this));
@@ -586,9 +589,9 @@ void ContourGuiApp::onExit(TerminalSession& session)
 
 void ContourGuiApp::applyGuiTheme(config::GuiTheme theme)
 {
-    // qtColorSchemeFor() is the pure decision (see GuiTheme.h): a forced scheme for dark/light,
+    // platform::qtColorSchemeFor() is the pure decision (see GuiTheme.h): a forced scheme for dark/light,
     // std::nullopt for system.
-    auto const scheme = qtColorSchemeFor(theme);
+    auto const scheme = platform::qtColorSchemeFor(theme);
 
     // Force the chrome palette explicitly. This is the load-bearing step: QStyleHints::setColorScheme
     // does NOT regenerate QGuiApplication::palette() on platforms whose platform-theme plugin owns the
@@ -603,20 +606,20 @@ void ContourGuiApp::applyGuiTheme(config::GuiTheme theme)
             _guiSystemPalette = QGuiApplication::palette();
             _guiPaletteOverridden = true;
         }
-        displayLog()("Applying GUI theme override: {}", theme);
-        QGuiApplication::setPalette(buildThemePalette(*scheme));
+        display::displayLog()("Applying GUI theme override: {}", theme);
+        QGuiApplication::setPalette(platform::buildThemePalette(*scheme));
     }
     else if (_guiPaletteOverridden)
     {
         // Returning to System after a prior dark/light override: restore the captured OS palette.
         // Note: once an explicit palette has been set, Qt no longer auto-tracks live OS theme
         // switches for the chrome until the next restart (the documented System-mode tradeoff).
-        displayLog()("Applying GUI theme: system (restore OS palette)");
+        display::displayLog()("Applying GUI theme: system (restore OS palette)");
         QGuiApplication::setPalette(_guiSystemPalette);
         _guiPaletteOverridden = false;
     }
     else
-        displayLog()("Applying GUI theme: system (follow OS color scheme)");
+        display::displayLog()("Applying GUI theme: system (follow OS color scheme)");
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
     // Also drive QStyleHints so QStyleHints::colorScheme() reports the pinned scheme: Qt Quick
@@ -777,7 +780,7 @@ int ContourGuiApp::fontConfigAction()
 int ContourGuiApp::terminalGuiAction()
 {
     {
-        auto const timer = ScopedTimer(startupLog, "loadConfig");
+        auto const timer = crispy::scoped_timer(startupLog, "loadConfig");
         if (!loadConfig("terminal"))
             return EXIT_FAILURE;
     }
@@ -860,7 +863,7 @@ int ContourGuiApp::terminalGuiAction()
                            ? vtbackend::ColorPreference::Dark
                            : vtbackend::ColorPreference::Light;
 
-    displayLog()("Color theme mode at startup: {}", _colorPreference);
+    display::displayLog()("Color theme mode at startup: {}", _colorPreference);
 
     connect(
         QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, [this](Qt::ColorScheme newScheme) {
@@ -876,7 +879,7 @@ int ContourGuiApp::terminalGuiAction()
                 return;
 
             _colorPreference = newValue;
-            displayLog()("Color preference changed to {} mode\n", _colorPreference);
+            display::displayLog()("Color preference changed to {} mode\n", _colorPreference);
             sessionsManager().updateColorPreference(_colorPreference);
         });
 #endif
@@ -970,7 +973,7 @@ int ContourGuiApp::terminalGuiAction()
         make_unique<UiStyleProvider>(_config.uiStyle.value(), resolveChromeFont(_config, profileName()));
 
     {
-        auto const timer = ScopedTimer(startupLog, "QML engine setup");
+        auto const timer = crispy::scoped_timer(startupLog, "QML engine setup");
         _qmlEngine = make_unique<QQmlApplicationEngine>();
 
         // Keep the override seam resolveResource() gave the QML back when it shipped as loose qrc
@@ -992,7 +995,7 @@ int ContourGuiApp::terminalGuiAction()
                        "them apply again.",
                        (configHome / "ui").generic_string(),
                        uiModuleOverrideDirectory(configHome).generic_string());
-        _qmlEngine->addImportPath(toQString(configHome));
+        _qmlEngine->addImportPath(platform::toQString(configHome));
 
         QQmlContext* context = _qmlEngine->rootContext();
         context->setContextProperty("terminalSessions", &_sessionManager);
@@ -1041,7 +1044,7 @@ int ContourGuiApp::terminalGuiAction()
 
     // Spawn initial window.
     {
-        auto const timer = ScopedTimer(startupLog, "newWindow (QML load)");
+        auto const timer = crispy::scoped_timer(startupLog, "newWindow (QML load)");
         newWindow();
     }
 

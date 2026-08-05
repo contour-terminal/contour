@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/ColorConversion.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/PaneProxy.h>
 #include <contour/SettingsController.h>
@@ -8,6 +7,7 @@
 #include <contour/TerminalSessionManager.h>
 #include <contour/WindowController.h>
 #include <contour/config/LayoutBuilder.h>
+#include <contour/platform/ColorConversion.h>
 
 #include <vtbackend/primitives.h>
 
@@ -1368,7 +1368,7 @@ QVariantList TerminalSessionManager::tabColorPalette() const
     // The palette is immutable for the model's lifetime; build the QVariantList once and cache it.
     if (_tabColorPaletteCache.isEmpty())
         for (auto const& color: _model->colorPalette())
-            _tabColorPaletteCache.append(toQColor(color));
+            _tabColorPaletteCache.append(platform::toQColor(color));
     return _tabColorPaletteCache;
 }
 // }}}

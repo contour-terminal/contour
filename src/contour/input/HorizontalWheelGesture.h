@@ -7,7 +7,7 @@
 
 #include <cstdlib>
 
-namespace contour
+namespace contour::input
 {
 
 /// Decides whether the horizontal component of a wheel event is an intentional sideways gesture, or
@@ -178,4 +178,4 @@ class HorizontalWheelGesture
     return right ? vtbackend::MouseButton::WheelRight : vtbackend::MouseButton::WheelLeft;
 }
 
-} // namespace contour
+} // namespace contour::input

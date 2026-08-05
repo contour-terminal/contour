@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/display/Logging.h>
 #include <contour/display/RhiRenderer.h>
 #include <contour/display/RhiVertexLayout.h>
 #include <contour/display/ScreenshotReadback.h>
@@ -146,7 +147,7 @@ RhiRenderer::RhiRenderer(vtbackend::ImageSize targetSurfaceSize,
 {
     // Log the requested argument, not _renderTargetSize: setRenderSize() below is what assigns the member,
     // so reading it here would always report the default-constructed 0x0.
-    displayLog()("RhiRenderer: Constructing with render size {}.", targetSurfaceSize);
+    display::displayLog()("RhiRenderer: Constructing with render size {}.", targetSurfaceSize);
     setRenderSize(targetSurfaceSize);
 }
 
@@ -161,7 +162,7 @@ void RhiRenderer::setRenderSize(vtbackend::ImageSize targetSurfaceSize)
     // Renderer), which is expressed bottom-left relative to this size.
     _renderTargetSize = targetSurfaceSize;
 
-    displayLog()("Setting render target size to {}.", _renderTargetSize);
+    display::displayLog()("Setting render target size to {}.", _renderTargetSize);
 }
 
 void RhiRenderer::setProjectionMatrix(QMatrix4x4 const& matrix) noexcept
@@ -190,7 +191,7 @@ atlas::AtlasBackend& RhiRenderer::textureScheduler()
 
 RhiRenderer::~RhiRenderer()
 {
-    displayLog()("~RhiRenderer");
+    display::displayLog()("~RhiRenderer");
     // RHI resources are released through their std::unique_ptr<QRhiResource*, QRhiResourceDeleter>
     // members in reverse declaration order; nothing raw to clean up here.
 }
@@ -422,7 +423,7 @@ void RhiRenderer::createPipelines(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc)
     for (auto const& entry: passes)
         createPipeline(rhi, rpDesc, entry.descriptor, *entry.slot);
 
-    displayLog()("createPipelines: rect={} text={}",
+    display::displayLog()("createPipelines: rect={} text={}",
                  _rectPipeline.pipeline != nullptr,
                  _textPipeline.pipeline != nullptr);
 }
@@ -441,7 +442,7 @@ void RhiRenderer::configureAtlas(atlas::ConfigureAtlas atlas)
     _atlasTextureSize = atlas.size;
     _atlasProperties = atlas.properties;
 
-    displayLog()("configureAtlas: {} {}", atlas.size, atlas.properties.format);
+    display::displayLog()("configureAtlas: {} {}", atlas.size, atlas.properties.format);
 }
 
 void RhiRenderer::uploadTile(atlas::UploadTile tile)
@@ -1347,7 +1348,7 @@ void RhiRenderer::recordScreenshotPass(QRhi* rhi, QRhiCommandBuffer* cb)
     // rightly never flips.) The orientation is a property of THIS capture, so it is recorded with it —
     // deliverScreenshot() then reverses the rows without re-deriving it.
     _screenshotFlipRows = rhi->isYUpInFramebuffer();
-    displayLog()("Screenshot: scheduled offscreen capture ({}).", size);
+    display::displayLog()("Screenshot: scheduled offscreen capture ({}).", size);
 }
 
 void RhiRenderer::deliverScreenshot()
@@ -1370,7 +1371,7 @@ void RhiRenderer::deliverScreenshot()
         std::span<uint8_t const>(bytes, static_cast<size_t>(_screenshotReadbackResult.data.size()));
     auto buffer = normalizeScreenshotBuffer(source, width, height, _screenshotFlipRows);
 
-    displayLog()("Screenshot: delivering captured frame ({}).", _screenshotSize);
+    display::displayLog()("Screenshot: delivering captured frame ({}).", _screenshotSize);
     _pendingScreenshotCallback.value()(buffer, _screenshotSize);
 
     _pendingScreenshotCallback.reset();

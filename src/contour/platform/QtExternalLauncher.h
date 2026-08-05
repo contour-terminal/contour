@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/ExternalLauncher.h>
+#include <contour/platform/ExternalLauncher.h>
 
-namespace contour
+namespace contour::platform
 {
 
 /// The production ExternalLauncher: forwards to Qt's desktop-integration statics
@@ -16,4 +16,4 @@ class QtExternalLauncher final: public ExternalLauncher
     int execute(QString const& program, QStringList const& arguments) override;
 };
 
-} // namespace contour
+} // namespace contour::platform

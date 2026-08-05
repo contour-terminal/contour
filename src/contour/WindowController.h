@@ -3,9 +3,9 @@
 
 #include <contour/CommandPaletteModel.h>
 #include <contour/ContextMenuModel.h>
-#include <contour/HorizontalWheelGesture.h>
 #include <contour/command/CommandCatalog.h>
 #include <contour/display/TerminalDisplay.h>
+#include <contour/input/HorizontalWheelGesture.h>
 
 #include <vtbackend/Color.h>
 
@@ -624,7 +624,7 @@ class WindowController: public QAbstractListModel, public command::TabTitleProvi
     // Wheel state for the tab strip. Separate from the grid's (which lives on TerminalSession) so a
     // gesture over the strip is judged on its own, and so the accumulator does not jump when the
     // pointer crosses between strip and grid mid-scroll.
-    HorizontalWheelGesture _tabStripWheelGesture;
+    input::HorizontalWheelGesture _tabStripWheelGesture;
     int _tabStripWheelAccumulator = 0;
 
     // {{{ Command palette

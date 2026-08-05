@@ -8,7 +8,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace contour
+namespace contour::platform
 {
 
 /// The dependency-free identifier-mapping and urgency policy shared by the desktop-notification
@@ -96,4 +96,4 @@ class NotificationRouter
     std::unordered_map<std::string, ServerId> _oscToServer;
 };
 
-} // namespace contour
+} // namespace contour::platform

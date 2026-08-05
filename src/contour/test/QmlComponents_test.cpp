@@ -8,7 +8,6 @@
 // loads with no QML errors. This catches QML syntax/binding regressions deterministically without
 // having to boot a full terminal session.
 
-#include <contour/ColorConversion.h>
 #include <contour/CommandPaletteModel.h>
 #include <contour/ContextMenuModel.h>
 #include <contour/TabColorScheme.h>
@@ -17,6 +16,7 @@
 #include <contour/command/ContextMenu.h>
 #include <contour/command/Shortcut.h>
 #include <contour/config/Config.h>
+#include <contour/platform/ColorConversion.h>
 #include <contour/test/QmlChromeStyle.h>
 #include <contour/test/QmlMessageCapture.h>
 
@@ -221,12 +221,13 @@ class MockTabController: public QAbstractListModel
             return windowActive ? contour::TabVisualState::Inactive
                                 : contour::TabVisualState::InactiveWindowUnfocused;
         }();
-        return contour::toQColor(contour::tabBackgroundColor(
-            contour::toRGBColor(tabColor), contour::toRGBColor(rowBackground), state));
+        return contour::platform::toQColor(contour::tabBackgroundColor(
+            contour::platform::toRGBColor(tabColor), contour::platform::toRGBColor(rowBackground), state));
     }
     Q_INVOKABLE [[nodiscard]] QColor tabTextColor(QColor const& tabBackground) const
     {
-        return contour::toQColor(contour::contrastingTextColor(contour::toRGBColor(tabBackground)));
+        return contour::platform::toQColor(
+            contour::contrastingTextColor(contour::platform::toRGBColor(tabBackground)));
     }
 
   signals:

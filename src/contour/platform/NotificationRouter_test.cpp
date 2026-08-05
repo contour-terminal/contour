@@ -5,13 +5,13 @@
 // and server-event dispatch paths that the D-Bus backend would otherwise only reach with a live
 // notification server.
 
-#include <contour/NotificationRouter.h>
+#include <contour/platform/NotificationRouter.h>
 
 #include <vtbackend/DesktopNotification.h>
 
 #include <catch2/catch_test_macros.hpp>
 
-using contour::NotificationRouter;
+using contour::platform::NotificationRouter;
 
 TEST_CASE("NotificationRouter maps urgency onto the freedesktop byte", "[notification]")
 {

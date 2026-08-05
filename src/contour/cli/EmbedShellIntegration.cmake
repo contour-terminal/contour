@@ -79,9 +79,13 @@ foreach(shell IN LISTS SHELLS)
         math(EXPR index "${index} + 16")
     endwhile()
 
-    # The shell name verbatim: these symbols live in contour::cli::detail and are referenced only by the
-    # table below, so nothing is gained by spelling them the way hand-written code would.
-    set(symbol "ShellIntegration_${shell}")
+    # CamelCase, because generated code is still linted: readability-identifier-naming wants
+    # ConstexprVariableCase CamelCase, and a `ShellIntegration_bash` reaches clang-tidy through the
+    # translation unit that includes this header just as a hand-written name would.
+    string(SUBSTRING "${shell}" 0 1 shellInitial)
+    string(TOUPPER "${shellInitial}" shellInitial)
+    string(SUBSTRING "${shell}" 1 -1 shellRest)
+    set(symbol "ShellIntegration${shellInitial}${shellRest}")
 
     # std::to_array rather than std::array's CTAD, which cannot take this many elements: libstdc++'s
     # deduction guide checks the element types with a fold expression over all of them, and clang

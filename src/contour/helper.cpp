@@ -4,10 +4,14 @@
     #include <windows.h>
 #endif
 
-#include <contour/config/Config.h>
 #include <contour/TerminalSession.h>
+#include <contour/config/Config.h>
+#include <contour/display/Logging.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/helper.h>
+#include <contour/input/KeyMapping.h>
+#include <contour/input/Logging.h>
+#include <contour/input/MouseMapping.h>
 
 #include <vtbackend/Terminal.h>
 
@@ -48,106 +52,6 @@ using vtbackend::Width;
 
 namespace contour
 {
-
-namespace
-{
-#ifdef _WIN32
-    // Bit positions Contour uses to carry the CapsLock/NumLock toggle state into makeModifiers()
-    // through its `nativeModifiers` argument on Windows, where Qt's native modifier mask omits lock
-    // toggles. (X11 encodes these as 0x02/0x10 and macOS as 0x00010000, read in their own branches.)
-    constexpr quint32 Win32CapsLockBit = 0x0001;
-    constexpr quint32 Win32NumLockBit = 0x0002;
-#endif
-
-    /// Returns the native modifier mask to hand makeModifiers() for a key event, with the CapsLock/
-    /// NumLock toggle state folded in. This is the single OS-boundary seam for lock state: on Windows
-    /// it reads the live toggle state from the OS (GetKeyState) — which Qt does not surface in its
-    /// native modifier mask — and encodes it into the Win32 lock bits; on X11/Wayland/macOS the lock
-    /// state already rides in Qt's native mask, so it is returned unchanged. Isolating the ambient
-    /// query here keeps makeModifiers() a pure function of its arguments, and therefore unit-testable
-    /// without depending on the machine's live lock state.
-    /// @param qtNativeModifiers Qt's native modifier mask for the event (QKeyEvent::nativeModifiers()).
-    /// @return The native modifier mask to pass to makeModifiers().
-    [[nodiscard]] quint32 nativeModifiersWithLockState([[maybe_unused]] quint32 qtNativeModifiers) noexcept
-    {
-#ifdef _WIN32
-        quint32 bits = 0;
-        if ((GetKeyState(VK_CAPITAL) & 0x0001) != 0)
-            bits |= Win32CapsLockBit;
-        if ((GetKeyState(VK_NUMLOCK) & 0x0001) != 0)
-            bits |= Win32NumLockBit;
-        return bits;
-#else
-        return qtNativeModifiers;
-#endif
-    }
-} // namespace
-
-vtbackend::KeyboardModifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
-                                           quint32 nativeModifiers,
-                                           [[maybe_unused]] bool stripAltGr)
-{
-    using vtbackend::LockKey;
-    using vtbackend::Modifier;
-    using vtbackend::Modifiers;
-
-    Modifiers chord {};
-
-    // Standard modifiers from Qt
-    if (qtModifiers & Qt::AltModifier)
-        chord |= Modifier::Alt;
-    if (qtModifiers & Qt::ShiftModifier)
-        chord |= Modifier::Shift;
-    if (qtModifiers & Qt::ControlModifier)
-        chord |= Modifier::Control;
-    if (qtModifiers & Qt::MetaModifier)
-        chord |= Modifier::Super;
-
-    vtbackend::LockKeys locks {};
-
-#ifdef _WIN32
-    // Windows: Handle AltGr (Ctrl+Alt combination).
-    // In Win32 Input Mode, we keep the raw modifier state so ConPTY receives
-    // the correct dwControlKeyState flags.
-    if (stripAltGr)
-    {
-        auto constexpr AltGrEquivalent = Modifiers { Modifier::Alt, Modifier::Control };
-        if (chord.contains(AltGrEquivalent))
-            chord = chord.without(AltGrEquivalent);
-    }
-
-    // Windows: CapsLock/NumLock are not part of Qt's native modifier mask, so the Qt event boundary
-    // (nativeModifiersWithLockState) folds the live toggle state into these bits before calling us.
-    // Reading it from the argument here — rather than querying GetKeyState directly — keeps this
-    // mapping pure and testable, matching the X11/macOS branches which also read lock state from
-    // nativeModifiers.
-    if ((nativeModifiers & Win32CapsLockBit) != 0)
-        locks |= LockKey::CapsLock;
-    if ((nativeModifiers & Win32NumLockBit) != 0)
-        locks |= LockKey::NumLock;
-
-#elifdef __APPLE__
-    // macOS: NSEventModifierFlagCapsLock = 0x00010000
-    constexpr quint32 MacCapsLock = 0x00010000;
-    if (nativeModifiers & MacCapsLock)
-        locks |= LockKey::CapsLock;
-    // NumLock doesn't exist on standard macOS keyboards
-
-#else
-    // Linux (X11/Wayland): XCB/XKB modifier masks
-    // CapsLock = XCB_MOD_MASK_LOCK (bit 1, value 0x02) - fixed by X11 protocol
-    // NumLock = XCB_MOD_MASK_2 (bit 4, value 0x10) - conventional mapping
-    constexpr quint32 XcbCapsLock = 0x02;
-    constexpr quint32 XcbNumLock = 0x10;
-
-    if (nativeModifiers & XcbCapsLock)
-        locks |= LockKey::CapsLock;
-    if (nativeModifiers & XcbNumLock)
-        locks |= LockKey::NumLock;
-#endif
-
-    return { chord, locks };
-}
 
 namespace
 {
@@ -322,14 +226,15 @@ namespace
         session.addToAccumulatedScroll(pixelDelta, angleDelta, scrollPhase, platformInverted);
         auto const [linesScroll, columnsScroll] = session.consumeScroll();
 
-        inputLog()("[{}] Accumulate scroll with by value {} pixelDelta / {} angleDelta, {} lines, {} columns "
-                   "(against {})",
-                   modifiers,
-                   pixelDelta,
-                   angleDelta,
-                   linesScroll,
-                   columnsScroll,
-                   session.terminal().cellPixelSize());
+        input::inputLog()(
+            "[{}] Accumulate scroll with by value {} pixelDelta / {} angleDelta, {} lines, {} columns "
+            "(against {})",
+            modifiers,
+            pixelDelta,
+            angleDelta,
+            linesScroll,
+            columnsScroll,
+            session.terminal().cellPixelSize());
 
         auto const horizontalScrollEvent =
             columnsScroll.as<int>() > 0 ? VTMouseButton::WheelRight : VTMouseButton::WheelLeft;
@@ -350,55 +255,10 @@ namespace
 
 } // namespace
 
-vtbackend::ScrollPhase mapScrollPhase(Qt::ScrollPhase phase) noexcept
-{
-    switch (phase)
-    {
-        case Qt::ScrollBegin: return vtbackend::ScrollPhase::Begin;
-        case Qt::ScrollUpdate: return vtbackend::ScrollPhase::Update;
-        case Qt::ScrollEnd: return vtbackend::ScrollPhase::End;
-        case Qt::ScrollMomentum: return vtbackend::ScrollPhase::Momentum;
-        case Qt::NoScrollPhase: return vtbackend::ScrollPhase::NoPhase;
-    }
-    return vtbackend::ScrollPhase::NoPhase;
-}
-
-char32_t unshiftedCodepoint(char32_t ch) noexcept
-{
-    // The US-ASCII shifted -> base inverse of the shift level, kept consistent with the CharMappings
-    // table below (which reports the *shifted* symbol for a Shift+key chord). A row per shifted symbol,
-    // so extending it is data, not logic.
-    switch (ch)
-    {
-        case U')': return U'0';
-        case U'!': return U'1';
-        case U'@': return U'2';
-        case U'#': return U'3';
-        case U'$': return U'4';
-        case U'%': return U'5';
-        case U'^': return U'6';
-        case U'&': return U'7';
-        case U'*': return U'8';
-        case U'(': return U'9';
-        case U'<': return U',';
-        case U'>': return U'.';
-        case U'?': return U'/';
-        case U':': return U';';
-        case U'"': return U'\'';
-        case U'{': return U'[';
-        case U'}': return U']';
-        case U'|': return U'\\';
-        case U'~': return U'`';
-        case U'_': return U'-';
-        case U'+': return U'=';
-        default: return ch;
-    }
-}
-
 bool sendKeyEvent(QKeyEvent* event,
                   vtbackend::KeyboardEventType eventType,
                   TerminalSession& session,
-                  KeyboardLayout const& keyboardLayout)
+                  input::KeyboardLayout const& keyboardLayout)
 {
     using vtbackend::Key;
     using vtbackend::Modifier;
@@ -563,9 +423,9 @@ bool sendKeyEvent(QKeyEvent* event,
     }; // }}}
 
     auto const isWin32Mode = session.terminal().isModeEnabled(vtbackend::DECMode::Win32InputMode);
-    auto const modifiers = makeModifiers(event->modifiers(),
-                                         nativeModifiersWithLockState(event->nativeModifiers()),
-                                         /*stripAltGr=*/!isWin32Mode);
+    auto const modifiers = input::makeModifiers(event->modifiers(),
+                                                input::nativeModifiersWithLockState(event->nativeModifiers()),
+                                                /*stripAltGr=*/!isWin32Mode);
     auto const key = event->key();
 
     if (event->modifiers().testFlag(Qt::KeypadModifier))
@@ -689,7 +549,7 @@ bool sendKeyEvent(QKeyEvent* event,
         return true;
     }
 
-    inputLog()("Input not handled for mods {} key 0x{:X}", modifiers, key);
+    input::inputLog()("Input not handled for mods {} key 0x{:X}", modifiers, key);
     return false;
 }
 
@@ -710,7 +570,7 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
 
     // Mouse events carry no lock state: makeModifiers() derives it from the native modifier mask,
     // which Qt only populates for key events. Take the chord and be explicit about it.
-    auto const modifiers = makeModifiers(event->modifiers()).chord;
+    auto const modifiers = input::makeModifiers(event->modifiers()).chord;
 
     auto const pixelPosition = makeMousePixelPosition(
         event, session.display()->gridMetrics().pageMargin, session.display()->contentScale());
@@ -742,7 +602,7 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
         return { .x = numDegrees.x(), .y = numDegrees.y() };
     }();
 
-    auto const scrollPhase = mapScrollPhase(event->phase());
+    auto const scrollPhase = input::mapScrollPhase(event->phase());
     sendWheelEvent(pixelDelta, angleDelta, pixelPosition, modifiers, scrollPhase, event->inverted(), session);
     event->accept();
 }
@@ -754,8 +614,8 @@ void sendMousePressEvent(QMouseEvent* event, TerminalSession& session)
     // display-dependent event paths' guards.
     if (session.display() == nullptr)
         return;
-    session.sendMousePressEvent(makeModifiers(event->modifiers()).chord,
-                                makeMouseButton(event->button()),
+    session.sendMousePressEvent(input::makeModifiers(event->modifiers()).chord,
+                                input::makeMouseButton(event->button()),
                                 makeMousePixelPosition(event,
                                                        session.display()->gridMetrics().pageMargin,
                                                        session.display()->contentScale()));
@@ -769,8 +629,8 @@ void sendMouseReleaseEvent(QMouseEvent* event, TerminalSession& session)
     // display-dependent event paths' guards.
     if (session.display() == nullptr)
         return;
-    session.sendMouseReleaseEvent(makeModifiers(event->modifiers()).chord,
-                                  makeMouseButton(event->button()),
+    session.sendMouseReleaseEvent(input::makeModifiers(event->modifiers()).chord,
+                                  input::makeMouseButton(event->button()),
                                   makeMousePixelPosition(event,
                                                          session.display()->gridMetrics().pageMargin,
                                                          session.display()->contentScale()));
@@ -784,7 +644,7 @@ void sendMouseMoveEvent(QMouseEvent* event, TerminalSession& session)
     // display-dependent event paths' guards.
     if (session.display() == nullptr)
         return;
-    session.sendMouseMoveEvent(makeModifiers(event->modifiers()).chord,
+    session.sendMouseMoveEvent(input::makeModifiers(event->modifiers()).chord,
                                makeMouseCellLocation(event->pos().x(), event->pos().y(), session),
                                makeMousePixelPosition(event,
                                                       session.display()->gridMetrics().pageMargin,
@@ -800,7 +660,7 @@ void sendMouseMoveEvent(QHoverEvent* event, TerminalSession& session)
     if (session.display() == nullptr)
         return;
     auto const position = event->position().toPoint();
-    session.sendMouseMoveEvent(makeModifiers(event->modifiers()).chord,
+    session.sendMouseMoveEvent(input::makeModifiers(event->modifiers()).chord,
                                makeMouseCellLocation(position.x(), position.y(), session),
                                makeMousePixelPosition(event,
                                                       session.display()->gridMetrics().pageMargin,
@@ -960,19 +820,19 @@ void applyResize(vtbackend::ImageSize newPixelSize,
     // decides whether the display's content scale is divided out first, and margins are excluded
     // because resizeScreen() divides this by the page to recover the cell size.
     auto const viewSize = session.display()->reportedPixelSize(fit.pageSize);
-    displayLog()("Applying resize {}/{} pixels (margins {}) and {} -> {} cells.",
-                 viewSize,
-                 newPixelSize,
-                 session.profile().margins.value(),
-                 terminal.pageSize(),
-                 fit.pageSize);
+    display::displayLog()("Applying resize {}/{} pixels (margins {}) and {} -> {} cells.",
+                          viewSize,
+                          newPixelSize,
+                          session.profile().margins.value(),
+                          terminal.pageSize(),
+                          fit.pageSize);
 
     auto const l = scoped_lock { terminal };
 
     // fit.pageSize is already clamped (see above), so a direct comparison decides the early-out.
     if (fit.pageSize == terminal.totalPageSize())
     {
-        displayLog()("No resize necessary. New size is same as old size of {}.", fit.pageSize);
+        display::displayLog()("No resize necessary. New size is same as old size of {}.", fit.pageSize);
         return;
     }
 

@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/Audio.h>
-#include <contour/ColorConversion.h>
-#include <contour/HorizontalWheelGesture.h>
 #include <contour/HyperlinkTooltip.h>
 #include <contour/command/ContextMenu.h>
 #include <contour/config/Actions.h>
 #include <contour/config/Config.h>
-#include <contour/display/Announcer.h>
+#include <contour/input/HorizontalWheelGesture.h>
+#include <contour/input/MouseMapping.h>
+#include <contour/platform/Announcer.h>
+#include <contour/platform/Audio.h>
+#include <contour/platform/ColorConversion.h>
 #ifdef __linux__
-    #include <contour/FreeDesktopNotifier.h>
+    #include <contour/platform/FreeDesktopNotifier.h>
 #endif
 #include <contour/helper.h>
 
@@ -151,7 +152,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     ///
     /// Injected rather than constructed here, so the DECISIONS below (what is worth announcing) are
     /// assertable against a recording implementation with no accessibility bridge in sight.
-    void setAnnouncer(std::unique_ptr<display::Announcer> announcer) { _announcer = std::move(announcer); }
+    void setAnnouncer(std::unique_ptr<platform::Announcer> announcer) { _announcer = std::move(announcer); }
 
   private:
     /// Feeds the hovered-link tracker and publishes any change to QML.
@@ -204,7 +205,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
                          ? _terminal.colorPalette().defaultForeground
                          : _terminal.colorPalette().defaultBackground;
         auto alpha = static_cast<uint8_t>(_profile.background.value().opacity);
-        return toQColor(color, alpha);
+        return platform::toQColor(color, alpha);
     }
     float getOpacityBackground() const noexcept
     {
@@ -376,7 +377,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     ///
     /// Total: a device that cannot be started is REPORTED into this session's screen, never
     /// propagated. Callers reach start() from inside Qt event handlers (see
-    /// display::TerminalDisplay::setSession), where an escaping exception would abandon a
+    /// TerminalDisplay::setSession), where an escaping exception would abandon a
     /// half-constructed display — the crash of issue #1711.
     void start();
 
@@ -445,7 +446,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// @return The shape the application last requested via `OSC 22`, or nullopt while it has
     ///         requested none. Survives a display hand-off; see _applicationPointerShape.
-    [[nodiscard]] std::optional<MouseCursorShape> applicationPointerShape() const noexcept
+    [[nodiscard]] std::optional<input::MouseCursorShape> applicationPointerShape() const noexcept
     {
         return _applicationPointerShape.load();
     }
@@ -463,7 +464,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// The app-wide keyboard layout (see KeyboardLayout.h), for the display's key path. Routed
     /// through the session for the same reason as the DPI provider above.
     /// @return The layout; never nullptr.
-    [[nodiscard]] KeyboardLayout const& keyboardLayout() const noexcept;
+    [[nodiscard]] input::KeyboardLayout const& keyboardLayout() const noexcept;
 
     Q_INVOKABLE void applyPendingFontChange(bool allow, bool remember);
     Q_INVOKABLE void applyPendingPaste(bool allow, bool remember);
@@ -817,11 +818,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     crispy::point _accumulatedPixelScroll;
     crispy::point _accumulatedAngleScroll;
-    HorizontalWheelGesture _horizontalWheelGesture;
+    input::HorizontalWheelGesture _horizontalWheelGesture;
     HyperlinkHoverTracker _hyperlinkHover;
     /// Never null: a NullAnnouncer stands in wherever there is nothing to announce through, so the call
     /// sites never have to ask whether announcing is possible.
-    std::unique_ptr<display::Announcer> _announcer = std::make_unique<display::NullAnnouncer>();
+    std::unique_ptr<platform::Announcer> _announcer = std::make_unique<platform::NullAnnouncer>();
     QString _hyperlinkTooltipText;
     QRectF _hyperlinkTooltipAnchor;
 
@@ -855,9 +856,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Atomic because it is now written on the parser thread (where `OSC 22` arrives) and read on the
     /// GUI thread in setDefaultCursor(). Caching it here rather than reading the pointer-shape stack
     /// back is still the point: that stack belongs to the parser thread.
-    std::atomic<std::optional<MouseCursorShape>> _applicationPointerShape;
+    std::atomic<std::optional<input::MouseCursorShape>> _applicationPointerShape;
     bool _allowKeyMappings = true;
-    std::unique_ptr<Audio> _audio;
+    std::unique_ptr<platform::Audio> _audio;
     std::vector<int> _musicalNotesBuffer;
 
     vtbackend::LineCount _lastHistoryLineCount;
@@ -886,7 +887,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     std::atomic<bool> _transportLost = false;
 
 #ifdef __linux__
-    FreeDesktopNotifier _desktopNotifier;
+    platform::FreeDesktopNotifier _desktopNotifier;
 #endif
 };
 

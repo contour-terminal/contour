@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ContourGuiApp.h>
-#include <contour/ExternalLauncher.h>
-#include <contour/SpeechSynthesizer.h>
 #include <contour/TerminalSession.h>
 #include <contour/config/Actions.h>
 #include <contour/display/CaretGeometry.h>
+#include <contour/display/Logging.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/helper.h>
+#include <contour/input/KeyMapping.h>
+#include <contour/input/Logging.h>
+#include <contour/input/MouseMapping.h>
+#include <contour/platform/ExternalLauncher.h>
+#include <contour/platform/QtInvoke.h>
+#include <contour/platform/SpeechSynthesizer.h>
 
 #include <vtbackend/HintModeHandler.h>
 #include <vtbackend/MatchModes.h>
@@ -256,7 +261,7 @@ namespace
             sessionLog()("ExitWatcherThread: Started.");
             _session.terminal().device().waitForClosed();
             sessionLog()("ExitWatcherThread: Terminal device closed.");
-            postToObject(&_session, [&]() { _session.onClosed(); });
+            platform::postToObject(&_session, [&]() { _session.onClosed(); });
         }
 
       private:
@@ -358,7 +363,7 @@ display::ForcedFontDpiProvider* TerminalSession::forcedFontDpiProvider() noexcep
     return _app.forcedFontDpiProvider();
 }
 
-KeyboardLayout const& TerminalSession::keyboardLayout() const noexcept
+input::KeyboardLayout const& TerminalSession::keyboardLayout() const noexcept
 {
     return _app.keyboardLayout();
 }
@@ -460,7 +465,7 @@ void TerminalSession::start()
     // A device that will not start is an expected, recoverable outcome, and vtpty reports it as one.
     // The catch is the backstop for what a signature cannot cover — std::bad_alloc, a throw from
     // inside a platform call — because start() is reached from a Qt event handler (see
-    // display::TerminalDisplay::setSession), and an exception escaping it abandons a half-constructed
+    // TerminalDisplay::setSession), and an exception escaping it abandons a half-constructed
     // display mid-mutation. That was the crash of issue #1711; nothing may leave this function.
     auto const started = [this]() -> vtpty::StartResult {
         try
@@ -753,7 +758,7 @@ void TerminalSession::executePendingBufferCapture(bool allow, bool remember)
 
     _terminal.primaryScreen().captureBuffer(capture.lines, capture.logical);
 
-    displayLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
+    display::displayLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
     flushInput();
 }
 
@@ -775,7 +780,7 @@ void TerminalSession::executeShowHostWritableStatusLine(bool allow, bool remembe
         return;
 
     _terminal.setStatusDisplay(vtbackend::StatusDisplayType::HostWritable);
-    displayLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
+    display::displayLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
     flushInput();
     _terminal.setSyncWindowTitleWithHostWritableStatusDisplay(false);
 }
@@ -877,21 +882,21 @@ void TerminalSession::setPointerShape(std::string_view cssName)
     {
         _applicationPointerShape = std::nullopt;
         if (_display)
-            postToObject(_display, [this]() { setDefaultCursor(); });
+            platform::postToObject(_display, [this]() { setDefaultCursor(); });
         return;
     }
 
     // OSC 22 speaks CSS pointer names; the display speaks its own enum. The mapping is the whole
     // binding between the two, and only names vtbackend advertises as supported can arrive here.
-    auto const shape = [cssName]() -> std::optional<MouseCursorShape> {
+    auto const shape = [cssName]() -> std::optional<input::MouseCursorShape> {
         if (cssName == "text")
-            return MouseCursorShape::IBeam;
+            return input::MouseCursorShape::IBeam;
         if (cssName == "pointer")
-            return MouseCursorShape::PointingHand;
+            return input::MouseCursorShape::PointingHand;
         if (cssName == "default")
-            return MouseCursorShape::Arrow;
+            return input::MouseCursorShape::Arrow;
         if (cssName == "none")
-            return MouseCursorShape::Hidden;
+            return input::MouseCursorShape::Hidden;
         return std::nullopt;
     }();
 
@@ -907,8 +912,8 @@ void TerminalSession::setPointerShape(std::string_view cssName)
 
     // The event arrives on the parser thread; the cursor belongs to the GUI thread.
     if (_display)
-        postToObject(_display,
-                     [display = _display, shape = *shape]() { display->setMouseCursorShape(shape); });
+        platform::postToObject(
+            _display, [display = _display, shape = *shape]() { display->setMouseCursorShape(shape); });
 }
 
 void TerminalSession::copyToClipboard(std::string_view data)
@@ -984,7 +989,7 @@ void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification con
         auto const identifier = notification.identifier;
         QObject::connect(
             &_desktopNotifier,
-            &FreeDesktopNotifier::notificationClosed,
+            &platform::FreeDesktopNotifier::notificationClosed,
             this,
             [this, identifier](QString const& closedId, uint /*reason*/) {
                 if (closedId.toStdString() == identifier)
@@ -1003,7 +1008,7 @@ void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification con
     {
         QObject::connect(
             &_desktopNotifier,
-            &FreeDesktopNotifier::actionInvoked,
+            &platform::FreeDesktopNotifier::actionInvoked,
             this,
             [this, identifier](QString const& activatedId) {
                 if (activatedId.toStdString() == identifier)
@@ -1017,7 +1022,7 @@ void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification con
     {
         QObject::connect(
             &_desktopNotifier,
-            &FreeDesktopNotifier::actionInvoked,
+            &platform::FreeDesktopNotifier::actionInvoked,
             this,
             [this, identifier](QString const& activatedId) {
                 if (activatedId.toStdString() == identifier)
@@ -1382,7 +1387,7 @@ void TerminalSession::refreshGuiTabInfoForStatusLine()
     // display. postToObject targets `this`, so Qt auto-cancels the queued call if the session is
     // destroyed first (e.g. closing a tab while its shell still emits an OSC title change), avoiding a
     // use-after-free on _manager.
-    postToObject(this, [this]() {
+    platform::postToObject(this, [this]() {
         _manager->update();                               // indicator status line
         _manager->refreshTabForSession(modelSessionId()); // GUI tab strip label
     });
@@ -1414,15 +1419,15 @@ void TerminalSession::setWindowFrameColor(vtbackend::RGBColor color)
     // updateStatusLine() would re-lock the non-recursive mutex — see refreshGuiTabInfoForStatusLine).
     // Post the mutation to the GUI thread; postToObject targets `this`, so Qt auto-cancels the queued
     // call if the session is destroyed first, avoiding a use-after-free on _manager.
-    postToObject(this,
-                 [this, color, id = modelSessionId()]() { _manager->setTabColorForSession(id, color); });
+    platform::postToObject(
+        this, [this, color, id = modelSessionId()]() { _manager->setTabColorForSession(id, color); });
 }
 
 void TerminalSession::resetWindowFrameColor()
 {
     // DECAC item 2 with no colors, or a hard reset (RIS): clear the tab color. Same threading
     // constraint as setWindowFrameColor() above.
-    postToObject(this, [this, id = modelSessionId()]() { _manager->resetTabColorForSession(id); });
+    platform::postToObject(this, [this, id = modelSessionId()]() { _manager->resetTabColorForSession(id); });
 }
 
 void TerminalSession::setTerminalProfile(string const& configProfileName)
@@ -1492,7 +1497,7 @@ void TerminalSession::sendKeyEvent(Key key,
                                    KeyboardEventType eventType,
                                    Timestamp now)
 {
-    inputLog()("Key {} event received: {} {}", eventType, modifiers, key);
+    input::inputLog()("Key {} event received: {} {}", eventType, modifiers, key);
 
     if (_terminatedAndWaitingForKeyPress && eventType == KeyboardEventType::Press)
     {
@@ -1509,7 +1514,7 @@ void TerminalSession::sendKeyEvent(Key key,
     // Guarded like sendCharEvent: a display-less session (background pane, headless test) has no
     // mouse cursor to hide.
     if (_profile.mouse.value().hideWhileTyping && _display != nullptr)
-        _display->setMouseCursorShape(MouseCursorShape::Hidden);
+        _display->setMouseCursorShape(input::MouseCursorShape::Hidden);
 
     if (eventType != KeyboardEventType::Release)
     {
@@ -1546,10 +1551,10 @@ void TerminalSession::sendCharEvent(char32_t value,
                                     KeyboardEventType eventType,
                                     Timestamp now)
 {
-    inputLog()("Character {} event received: {} '{}'",
-               eventType,
-               modifiers,
-               crispy::escape(unicode::convert_to<char>(value)));
+    input::inputLog()("Character {} event received: {} '{}'",
+                      eventType,
+                      modifiers,
+                      crispy::escape(unicode::convert_to<char>(value)));
 
     // The early-exit-notice acknowledge must run whether or not a display is attached, exactly like
     // sendKeyEvent above: the notice can be showing on a background/display-less pane, and a
@@ -1566,7 +1571,7 @@ void TerminalSession::sendCharEvent(char32_t value,
     }
 
     if (_profile.mouse.value().hideWhileTyping && _display != nullptr)
-        _display->setMouseCursorShape(MouseCursorShape::Hidden);
+        _display->setMouseCursorShape(input::MouseCursorShape::Hidden);
 
     if (eventType != KeyboardEventType::Release)
     {
@@ -1590,7 +1595,7 @@ void TerminalSession::sendCharEvent(char32_t value,
         // rewrites only digits and punctuation, foldedBindingCodepoint() only ASCII letters — so they
         // compose in either order.
         if (actions == nullptr && modifiers.chord.test(vtbackend::Modifier::Shift))
-            if (auto const base = unshiftedCodepoint(folded); base != folded)
+            if (auto const base = input::unshiftedCodepoint(folded); base != folded)
                 actions = config::apply(charMappings, base, modifiers.chord, flags);
 
         if (actions != nullptr && !_terminal.inputHandler().isEditingSearch())
@@ -1611,7 +1616,7 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
                                           PixelCoordinate pixelPosition)
 {
     auto const uiHandledHint = false;
-    inputLog()("Mouse press received: {} {}\n", modifiers, button);
+    input::inputLog()("Mouse press received: {} {}\n", modifiers, button);
 
     terminal().tick(steady_clock::now());
 
@@ -1649,8 +1654,8 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
         // Note this sits AFTER the user's own mouseMappings were consulted, so an explicitly bound
         // WheelLeft keeps meaning the button it names. That is deliberate: following the finger is a
         // property of the built-in tab-switching default, not of the button.
-        button = horizontalNavigationButton(button == MouseButton::WheelRight,
-                                            _horizontalWheelGesture.usesNaturalDirection());
+        button = input::horizontalNavigationButton(button == MouseButton::WheelRight,
+                                                   _horizontalWheelGesture.usesNaturalDirection());
     }
 
     // The user's mappings did not claim this button, so fall back to the built-in ones. They are consulted
@@ -1704,7 +1709,7 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
         _currentMousePosition = pos;
         if (terminal().isMouseHoveringHyperlink()
             || (modifiers.contains(vtbackend::Modifier::Control) && terminal().localPathAtMousePosition()))
-            _display->setMouseCursorShape(MouseCursorShape::PointingHand);
+            _display->setMouseCursorShape(input::MouseCursorShape::PointingHand);
         else
             setDefaultCursor();
 
@@ -1802,7 +1807,7 @@ void TerminalSession::onHighlightUpdate()
 void TerminalSession::playSound(vtbackend::Sequence::Parameters const& params)
 {
     if (!_audio)
-        _audio = std::make_unique<Audio>();
+        _audio = std::make_unique<platform::Audio>();
 
     auto range = params.range();
     _musicalNotesBuffer.clear();
@@ -2543,7 +2548,7 @@ bool TerminalSession::operator()(actions::SendChars const& event)
 bool TerminalSession::operator()(actions::ToggleAllKeyMaps)
 {
     _allowKeyMappings = !_allowKeyMappings;
-    inputLog()("{} key mappings.", _allowKeyMappings ? "Enabling" : "Disabling");
+    input::inputLog()("{} key mappings.", _allowKeyMappings ? "Enabling" : "Disabling");
 
     // Locked: setStatusDisplay() resizes the page and reflows the grid, exactly as ViNormalMode does.
     auto const l = scoped_lock { _terminal };
@@ -2690,7 +2695,7 @@ bool TerminalSession::operator()(actions::SpeakSelection)
     // which the parser thread mutates. The say() below is Qt and must not hold the lock.
     auto const text = [&]() {
         auto const l = scoped_lock { _terminal };
-        return speakableText(terminal().extractSelectionText(), MaxSpokenChars);
+        return platform::speakableText(terminal().extractSelectionText(), MaxSpokenChars);
     }();
     if (text.empty())
         return false;
@@ -2978,8 +2983,8 @@ void TerminalSession::setDefaultCursor()
     using Type = vtbackend::ScreenType;
     switch (_terminal.screenType())
     {
-        case Type::Primary: _display->setMouseCursorShape(MouseCursorShape::IBeam); break;
-        case Type::Alternate: _display->setMouseCursorShape(MouseCursorShape::Arrow); break;
+        case Type::Primary: _display->setMouseCursorShape(input::MouseCursorShape::IBeam); break;
+        case Type::Alternate: _display->setMouseCursorShape(input::MouseCursorShape::Arrow); break;
     }
 }
 
@@ -3023,7 +3028,7 @@ int TerminalSession::executeAllActions(std::vector<actions::Action> const& actio
         return ex;
     }
 
-    inputLog()("Key mappings are currently disabled via ToggleAllKeyMaps input mapping action.");
+    input::inputLog()("Key mappings are currently disabled via ToggleAllKeyMaps input mapping action.");
     return 0;
 }
 

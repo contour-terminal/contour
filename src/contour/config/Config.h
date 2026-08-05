@@ -2,7 +2,6 @@
 #pragma once
 
 #include <contour/config/Actions.h>
-#include <crispy/ascii.h>
 #include <contour/config/ConfigDocumentation.h>
 #include <contour/config/TabBarMode.h>
 #include <contour/config/UiStyle.h>
@@ -31,6 +30,7 @@
 #include <text_shaper/mock_font_locator.h>
 
 #include <crispy/StrongLRUHashtable.h>
+#include <crispy/ascii.h>
 #include <crispy/assert.h>
 #include <crispy/environment.h>
 #include <crispy/flags.h>

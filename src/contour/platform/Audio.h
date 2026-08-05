@@ -8,7 +8,7 @@
 
 #include <memory>
 
-namespace contour
+namespace contour::platform
 {
 
 class Audio: public QObject
@@ -33,4 +33,4 @@ class Audio: public QObject
     QThread _soundThread;
     std::unique_ptr<QAudioSink> _audioSink;
 };
-} // namespace contour
+} // namespace contour::platform

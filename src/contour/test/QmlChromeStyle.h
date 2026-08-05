@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/config/UiStyle.h>
 #include <contour/UiStyleProvider.h>
+#include <contour/config/UiStyle.h>
 
 #include <QtGui/QGuiApplication>
 #include <QtQml/QQmlContext>

@@ -4,7 +4,7 @@
 #include <QtCore/QStringList>
 #include <QtCore/QUrl>
 
-namespace contour
+namespace contour::platform
 {
 
 /// Launches external resources on behalf of a terminal session: opening URLs/documents in the
@@ -41,4 +41,4 @@ class ExternalLauncher
     virtual int execute(QString const& program, QStringList const& arguments) = 0;
 };
 
-} // namespace contour
+} // namespace contour::platform

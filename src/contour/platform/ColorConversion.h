@@ -7,7 +7,7 @@
 
 #include <cstdint>
 
-namespace contour
+namespace contour::platform
 {
 
 /// Converts a vtbackend RGB color to a Qt QColor.
@@ -36,4 +36,4 @@ namespace contour
                                  static_cast<std::uint8_t>(color.blue()) };
 }
 
-} // namespace contour
+} // namespace contour::platform

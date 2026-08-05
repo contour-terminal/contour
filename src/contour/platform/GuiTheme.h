@@ -10,7 +10,7 @@
 #include <array>
 #include <optional>
 
-namespace contour
+namespace contour::platform
 {
 
 /// Maps the configured GUI theme to the Qt color-scheme override that should be applied to the
@@ -104,4 +104,4 @@ namespace detail
     return palette;
 }
 
-} // namespace contour
+} // namespace contour::platform

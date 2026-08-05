@@ -1241,15 +1241,15 @@ TEST_CASE("TerminalSession: an OSC 22 pointer shape is remembered without a disp
     REQUIRE(session->display() == nullptr);
 
     session->setPointerShape("pointer");
-    CHECK(session->applicationPointerShape() == contour::MouseCursorShape::PointingHand);
+    CHECK(session->applicationPointerShape() == contour::input::MouseCursorShape::PointingHand);
 
     // Each supported CSS name maps to its own shape, display or no display.
     session->setPointerShape("text");
-    CHECK(session->applicationPointerShape() == contour::MouseCursorShape::IBeam);
+    CHECK(session->applicationPointerShape() == contour::input::MouseCursorShape::IBeam);
     session->setPointerShape("none");
-    CHECK(session->applicationPointerShape() == contour::MouseCursorShape::Hidden);
+    CHECK(session->applicationPointerShape() == contour::input::MouseCursorShape::Hidden);
     session->setPointerShape("default");
-    CHECK(session->applicationPointerShape() == contour::MouseCursorShape::Arrow);
+    CHECK(session->applicationPointerShape() == contour::input::MouseCursorShape::Arrow);
 
     // The empty name is the documented reset, and must clear the memory rather than pin the last
     // shape -- otherwise the alternate screen would never get its own default back.
@@ -1260,7 +1260,7 @@ TEST_CASE("TerminalSession: an OSC 22 pointer shape is remembered without a disp
     // reset, and inventing one would let an unsupported request clear a supported one.
     session->setPointerShape("pointer");
     session->setPointerShape("zoom-in");
-    CHECK(session->applicationPointerShape() == contour::MouseCursorShape::PointingHand);
+    CHECK(session->applicationPointerShape() == contour::input::MouseCursorShape::PointingHand);
 }
 
 TEST_CASE("TerminalSession: desktop notification wiring is display-safe and reports back over the PTY",
@@ -2180,7 +2180,7 @@ namespace
 {
 /// An Announcer that records instead of speaking, so the DECISIONS are assertable with no
 /// accessibility bridge in sight (offscreen QPA has none).
-class RecordingAnnouncer final: public contour::display::Announcer
+class RecordingAnnouncer final: public contour::platform::Announcer
 {
   public:
     struct Said

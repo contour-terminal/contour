@@ -5,7 +5,7 @@
 #include <string>
 #include <string_view>
 
-namespace contour
+namespace contour::platform
 {
 
 /// Prepares @p text for being spoken aloud.
@@ -67,4 +67,4 @@ class NullSpeechSynthesizer final: public SpeechSynthesizer
 /// build log rather than leaving it to be discovered from a bug report.
 [[nodiscard]] std::unique_ptr<SpeechSynthesizer> makeSpeechSynthesizer();
 
-} // namespace contour
+} // namespace contour::platform

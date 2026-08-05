@@ -1,13 +1,13 @@
 
-#include <contour/Audio.h>
-#include <contour/AudioNote.h>
+#include <contour/platform/Audio.h>
+#include <contour/platform/AudioNote.h>
 
 #include <crispy/assert.h>
 #include <crispy/logstore.h>
 
 #include <QtMultimedia/QMediaDevices>
 
-using namespace contour;
+using namespace contour::platform;
 
 Audio::Audio()
 {
@@ -42,10 +42,9 @@ Audio::~Audio()
 
 void Audio::fillBuffer(int volume, int duration, gsl::span<int const> notes)
 {
-    // The note→PCM assembly is pure (audio::renderNotesToPcm, unit-tested); this only appends the
+    // The note→PCM assembly is pure (renderNotesToPcm, unit-tested); this only appends the
     // bytes into the Qt buffer the sink reads from.
-    auto const pcm =
-        audio::renderNotesToPcm(volume, duration, std::span<int const>(notes.data(), notes.size()));
+    auto const pcm = renderNotesToPcm(volume, duration, std::span<int const>(notes.data(), notes.size()));
     _byteArray.append(pcm.data(), static_cast<int>(pcm.size()));
 }
 

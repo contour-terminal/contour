@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #ifdef __linux__
 
-    #include <contour/FreeDesktopNotifier.h>
+    #include <contour/platform/FreeDesktopNotifier.h>
 
     #include <crispy/logstore.h>
 
     #include <QtDBus/QDBusConnection>
     #include <QtDBus/QDBusReply>
 
-namespace contour
+namespace contour::platform
 {
 
 namespace
@@ -149,6 +149,6 @@ void FreeDesktopNotifier::onActionInvoked(uint id, QString const& actionKey)
     emit actionInvoked(QString::fromStdString(*oscId));
 }
 
-} // namespace contour
+} // namespace contour::platform
 
 #endif // defined(__linux__)

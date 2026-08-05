@@ -11,7 +11,7 @@
 // Pure PCM synthesis for the terminal bell (DECPS): dependency-free (no Qt, no audio device) so the
 // waveform math is unit-testable — the established extraction pattern (ScissorRect, WindowGeometry,
 // ScreenshotReadback). contour::Audio interprets these samples through QAudioSink.
-namespace contour::audio
+namespace contour::platform
 {
 
 /// Samples per second of the synthesized PCM stream (matches the QAudioSink format in Audio.cpp).
@@ -85,4 +85,4 @@ CONTOUR_CONSTEXPR_UNLESS_MSVC inline double squareWave(double x) noexcept
     return bytes;
 }
 
-} // namespace contour::audio
+} // namespace contour::platform

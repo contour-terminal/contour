@@ -14,6 +14,7 @@ set(crispy_SOURCES
     Comparison.h
     LRUCache.h
     StrongLRUCache.h
+    ScopedTimer.h
     StackTrace.cpp StackTrace.h
     TrieMap.h
     AlignedAllocator.h

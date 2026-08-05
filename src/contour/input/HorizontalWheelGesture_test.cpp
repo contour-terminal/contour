@@ -5,11 +5,11 @@
 // vertical scroll must never reach the binding table. The rule is a per-gesture latch: one vertically
 // dominant event silences the horizontal axis for the rest of that gesture.
 
-#include <contour/HorizontalWheelGesture.h>
+#include <contour/input/HorizontalWheelGesture.h>
 
 #include <catch2/catch_test_macros.hpp>
 
-using contour::HorizontalWheelGesture;
+using contour::input::HorizontalWheelGesture;
 using vtbackend::ScrollPhase;
 
 namespace
@@ -362,7 +362,7 @@ TEST_CASE("HorizontalWheelGesture.a swipe follows the finger, a wheel tilt does 
 
 TEST_CASE("horizontalNavigationButton states one rule for both wheel paths", "[contour][wheel]")
 {
-    using contour::horizontalNavigationButton;
+    using contour::input::horizontalNavigationButton;
     using vtbackend::MouseButton;
 
     // A wheel tilt means what it says.

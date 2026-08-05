@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/SettingsController.h>
+#include <contour/platform/QtPath.h>
 
 #include <vtbackend/StatusLineBuilder.h>
 

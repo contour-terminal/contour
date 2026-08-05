@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/BlurBehind.h>
 #include <contour/ContourGuiApp.h>
+#include <contour/platform/BlurBehind.h>
 
 #include <crispy/utils.h>
 
@@ -31,7 +31,7 @@
     #include <qpa/qplatformwindow.h>
 #endif
 
-namespace BlurBehind
+namespace contour::platform
 {
 
 using std::nullopt;
@@ -141,7 +141,7 @@ namespace
 } // namespace
 #endif
 
-void setEnabled(QWindow* window, bool enable, QRegion const& region)
+void setBlurBehind(QWindow* window, bool enable, QRegion const& region)
 {
     crispy::ignore_unused(region);
 
@@ -311,4 +311,4 @@ void setEnabled(QWindow* window, bool enable, QRegion const& region)
     crispy::ignore_unused(window, enable);
 }
 
-} // namespace BlurBehind
+} // namespace contour::platform

@@ -6,11 +6,11 @@
 // renamed/retyped YAML key or a broken loadFromEntry overload fails here instead of silently
 // falling back to defaults at runtime.
 
-#include <contour/GuiTheme.h>
 #include <contour/config/Actions.h>
 #include <contour/config/Config.h>
 #include <contour/config/GuiConfigStore.h>
 #include <contour/config/ModifierNames.h>
+#include <contour/platform/GuiTheme.h>
 
 #include <vtbackend/Color.h>
 #include <vtbackend/InputGenerator.h>
@@ -1775,8 +1775,8 @@ profiles:
 
 TEST_CASE("GuiTheme: qtColorSchemeFor maps each theme to a Qt color-scheme override", "[config]")
 {
-    using contour::qtColorSchemeFor;
     using contour::config::GuiTheme;
+    using contour::platform::qtColorSchemeFor;
 
     // System defers to the OS (unsetColorScheme), so no override is produced.
     CHECK_FALSE(qtColorSchemeFor(GuiTheme::System).has_value());
@@ -1786,7 +1786,7 @@ TEST_CASE("GuiTheme: qtColorSchemeFor maps each theme to a Qt color-scheme overr
 
 TEST_CASE("GuiTheme: buildThemePalette forces a legible dark/light chrome palette", "[config]")
 {
-    using contour::buildThemePalette;
+    using contour::platform::buildThemePalette;
 
     // The explicit palette is what actually recolors the chrome on platform themes (KDE/GNOME) that
     // own the palette and ignore QStyleHints::setColorScheme. Assert the two schemes differ and each

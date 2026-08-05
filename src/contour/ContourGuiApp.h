@@ -2,15 +2,16 @@
 #pragma once
 
 #include <contour/ExitCode.h>
-#include <contour/ExternalLauncher.h>
-#include <contour/SpeechSynthesizer.h>
 #include <contour/TerminalSessionManager.h>
 #include <contour/UiStyleProvider.h>
 #include <contour/cli/ContourApp.h>
 #include <contour/command/CommandHistoryStore.h>
 #include <contour/config/Config.h>
 #include <contour/config/LayoutStore.h>
+#include <contour/display/Logging.h>
 #include <contour/helper.h>
+#include <contour/platform/ExternalLauncher.h>
+#include <contour/platform/SpeechSynthesizer.h>
 
 #include <vtpty/Process.h>
 #include <vtpty/SshSession.h>
@@ -103,10 +104,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @param env            The process environment every part of the application reads through.
     explicit ContourGuiApp(crispy::environment const& env,
                            std::unique_ptr<SessionFactory> sessionFactory = nullptr,
-                           std::unique_ptr<ExternalLauncher> externalLauncher = nullptr,
+                           std::unique_ptr<platform::ExternalLauncher> externalLauncher = nullptr,
                            std::unique_ptr<config::LayoutStore> layoutStore = nullptr,
                            std::unique_ptr<command::CommandHistoryStore> commandHistoryStore = nullptr,
-                           std::unique_ptr<SpeechSynthesizer> speechSynthesizer = nullptr);
+                           std::unique_ptr<platform::SpeechSynthesizer> speechSynthesizer = nullptr);
     ~ContourGuiApp() override;
 
     static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(cli::ContourApp::instance()); }
@@ -140,7 +141,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// process-global ambient state, and the macOS implementation registers an observer for changes
     /// to it, so one instance is shared rather than one per pane.
     /// @return The layout; never nullptr.
-    [[nodiscard]] KeyboardLayout const& keyboardLayout() const noexcept { return *_keyboardLayout; }
+    [[nodiscard]] input::KeyboardLayout const& keyboardLayout() const noexcept { return *_keyboardLayout; }
 
     [[nodiscard]] std::string profileName() const;
 
@@ -173,7 +174,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     {
         if (auto const* const profile = config().profile(profileName()))
             return *profile;
-        displayLog()("Failed to access config profile.");
+        display::displayLog()("Failed to access config profile.");
         Require(false);
     }
 
@@ -194,14 +195,14 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     }
 
     /// The external-resource launcher (URL opening, child-process spawning) for this app's sessions.
-    [[nodiscard]] ExternalLauncher& externalLauncher() noexcept { return *_externalLauncher; }
+    [[nodiscard]] platform::ExternalLauncher& externalLauncher() noexcept { return *_externalLauncher; }
 
     /// The voice this app's sessions read selections through.
     ///
     /// One per app rather than one per session, because a machine has one voice: two sessions
     /// speaking at once is not a thing the platform can do, and with an engine each, "Stop Speaking"
     /// in one tab could not stop what another tab had started.
-    [[nodiscard]] SpeechSynthesizer& speechSynthesizer() noexcept { return *_speechSynthesizer; }
+    [[nodiscard]] platform::SpeechSynthesizer& speechSynthesizer() noexcept { return *_speechSynthesizer; }
 
     [[nodiscard]] vtbackend::ColorPreference colorPreference() const noexcept { return _colorPreference; }
 
@@ -278,18 +279,18 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     std::unique_ptr<SessionFactory> _sessionFactory;
     RoutingSessionFactory* _routingFactory = nullptr; ///< The concrete view of _sessionFactory.
     // The external-resource launcher (URL open / process spawn), reached by sessions via _app.
-    std::unique_ptr<ExternalLauncher> _externalLauncher;
+    std::unique_ptr<platform::ExternalLauncher> _externalLauncher;
     // Declared before _sessionManager: the manager holds a reference to the store.
     std::unique_ptr<config::LayoutStore> _layoutStore;
     // Likewise: the manager holds a reference to the command-history store.
     std::unique_ptr<command::CommandHistoryStore> _commandHistoryStore;
     // Shared by every session, reached via _app; @see speechSynthesizer().
-    std::unique_ptr<SpeechSynthesizer> _speechSynthesizer;
+    std::unique_ptr<platform::SpeechSynthesizer> _speechSynthesizer;
     TerminalSessionManager _sessionManager;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
     // Shared by every display, reached via the session; @see keyboardLayout(). Unlike the DPI
     // provider this needs no Qt application, so it is built eagerly with the app.
-    std::unique_ptr<KeyboardLayout> _keyboardLayout = makePlatformKeyboardLayout();
+    std::unique_ptr<input::KeyboardLayout> _keyboardLayout = input::makePlatformKeyboardLayout();
     // Spawn context: the screen the next window should open on (QPointer: screens can be unplugged
     // between staging and consumption).
     QPointer<QScreen> _pendingSpawnScreen;
