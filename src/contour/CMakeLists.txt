@@ -11,6 +11,19 @@ endif()
 option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 option(CONTOUR_WAYLAND "Enables Wayland specific code paths." ON)
 
+# Whether this build produces a macOS application bundle, as opposed to a plain executable.
+#
+# A .app exists to be double-clicked, and everything that assembles one -- the
+# @executable_path/../Frameworks rpath, macdeployqt, the Info.plist keys, the icon, code signing,
+# notarization and the DragNDrop disk image -- serves that window. A GUI-less build produces a
+# command-line binary instead: none of that applies to it, and all of it needs a Qt that renders,
+# which is the whole point of not building the frontend. So it installs like any other Unix CLI
+# tool. Every bundle-only block below is gated on this rather than on APPLE.
+set(CONTOUR_MACOS_APP_BUNDLE OFF)
+if(APPLE AND CONTOUR_FRONTEND_GUI)
+    set(CONTOUR_MACOS_APP_BUNDLE ON)
+endif()
+
 NumberToHex(${PROJECT_VERSION_MAJOR} HEX_MAJOR)
 NumberToHex(${PROJECT_VERSION_MINOR} HEX_MINOR)
 NumberToHex(${PROJECT_VERSION_PATCH} HEX_PATCH)
@@ -98,7 +111,7 @@ if(CONTOUR_FRONTEND_GUI)
     add_subdirectory(display)
 endif()
 
-if(APPLE)
+if(CONTOUR_MACOS_APP_BUNDLE)
     #set(CMAKE_INSTALL_RPATH "@executable_path")
     set(CMAKE_INSTALL_RPATH "@executable_path/../Frameworks")
     # vcpkg gives its dylibs an `@rpath/libfoo.dylib` install name, and macdeployqt expands
@@ -446,7 +459,7 @@ if(WIN32)
             LINK_FLAGS "/ENTRY:mainCRTStartup"
         )
     endif()
-elseif(APPLE)
+elseif(CONTOUR_MACOS_APP_BUNDLE)
     # qt_add_executable() sets MACOSX_BUNDLE_INFO_PLIST, so Info.plist comes from Qt's
     # template and only the properties it substitutes have any effect -- which excludes
     # the deprecated CFBundleGetInfoString and CFBundleLongVersionString. It supplies
@@ -766,7 +779,14 @@ set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "contour")
 if(APPLE)
     # "-" is an ad-hoc signature: enough to run locally, not enough to distribute.
     # A release build passes the Developer ID; see cmake/presets/os-macos.json.
+    #
+    # Declared for every macOS build rather than only for bundle ones, because every macOS preset
+    # sets it: a cache entry no target reads is merely unused, but one the project never declares is
+    # reported back to the user as a variable they got wrong.
     set(CODE_SIGN_CERTIFICATE_ID "-" CACHE STRING "macOS code signing identity, or '-' for ad-hoc")
+endif()
+
+if(CONTOUR_MACOS_APP_BUNDLE)
     option(CONTOUR_MACOS_NOTARIZE "Submit the macOS disk image to Apple's notary service" OFF)
     # A second Apple round trip, so that the app dragged out of the image carries its own
     # ticket and launches offline. Worth its minute on something users download; not worth
@@ -805,7 +825,10 @@ endif()
 
 # {{{ CPACK variable definitions
 if(NOT(CPACK_GENERATOR))
-    if(APPLE)
+    # A disk image is a way to hand someone an app to drag into /Applications; without a bundle to
+    # put in it there is nothing to drag, so a GUI-less macOS build falls through to CPack's own
+    # default (a tarball) like any other Unix CLI tool.
+    if(CONTOUR_MACOS_APP_BUNDLE)
         set(CPACK_GENERATOR DragNDrop)
     elseif(WIN32)
         set(CPACK_GENERATOR WIX ZIP)
@@ -841,7 +864,7 @@ if(WIN32)
     set(CPACK_WIX_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/wix_patch.xml")
     set(CPACK_WIX_PROPERTY_WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT "Launch Contour")
 endif()
-if(APPLE)
+if(CONTOUR_MACOS_APP_BUNDLE)
     set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.icns")
     set(CPACK_DMG_VOLUME_NAME "Contour")
 
@@ -891,7 +914,7 @@ if(WIN32)
             PATTERN "unicode_tablegen.exe" EXCLUDE
             PATTERN "*"
     )
-elseif(APPLE)
+elseif(CONTOUR_MACOS_APP_BUNDLE)
     # See: https://stackoverflow.com/questions/35612687/cmake-macos-x-bundle-with-bundleutiliies-for-qt-application/48035834#48035834
     set(APP_NAME contour)
     set(App_Contents "${APP_NAME}.app/Contents")
@@ -989,53 +1012,62 @@ elseif(APPLE)
         )
     ")
 else()
-    # any other Unix
-    find_program(LSB_RELEASE_EXEC lsb_release)
-    execute_process(COMMAND ${LSB_RELEASE_EXEC} -rs
-        OUTPUT_VARIABLE LSB_RELEASE_NUMBER
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
+    # Any other Unix -- and, since the branch above now takes only bundle builds, a GUI-less macOS
+    # build too. That one produces a plain command-line binary, so it installs like any other Unix
+    # CLI tool. What it must NOT pick up is everything addressed at a freedesktop desktop
+    # environment (the .desktop entries, the KIO service menus, the hicolor icons, the AppStream
+    # metainfo) or at Debian packaging: macOS reads none of it, and `lsb_release` is not there to
+    # ask. Hence the guards below rather than a second, near-identical branch.
+    if(NOT APPLE)
+        find_program(LSB_RELEASE_EXEC lsb_release)
+        execute_process(COMMAND ${LSB_RELEASE_EXEC} -rs
+            OUTPUT_VARIABLE LSB_RELEASE_NUMBER
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
 
-    # yaml-cpp's runtime library soname is tied to the distro release: 0.6 on 20.04, 0.7 on 22.04,
-    # and 0.8 from 24.04 onward (24.04, 26.04, …). Newer releases keep 0.8, so it is the default.
-    set(DEPENDS_EXTRA ", libyaml-cpp0.8")
-    if("${LSB_RELEASE_NUMBER}" STREQUAL "20.04")
-        set(DEPENDS_EXTRA ", libyaml-cpp0.6")
+        # yaml-cpp's runtime library soname is tied to the distro release: 0.6 on 20.04, 0.7 on 22.04,
+        # and 0.8 from 24.04 onward (24.04, 26.04, …). Newer releases keep 0.8, so it is the default.
+        set(DEPENDS_EXTRA ", libyaml-cpp0.8")
+        if("${LSB_RELEASE_NUMBER}" STREQUAL "20.04")
+            set(DEPENDS_EXTRA ", libyaml-cpp0.6")
+        endif()
+        if("${LSB_RELEASE_NUMBER}" STREQUAL "22.04")
+            set(DEPENDS_EXTRA ", libyaml-cpp0.7")
+        endif()
+
+        if(LINUX)
+            set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libutempter0")
+        endif()
+
+        set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libqt6core6, libqt6multimedia6, libqt6opengl6, libqt6openglwidgets6, libqt6widgets6, libssh2-1, qml6-module-qt-labs-platform, qml6-module-qt5compat-graphicaleffects, qml6-module-qtmultimedia, qml6-module-qtqml-workerscript, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, qml6-module-qtquick-templates, qml6-module-qtquick-window, qt6-qpa-plugins")
+
+        # Generator: Debian
+        # see https://cmake.org/cmake/help/v3.6/module/CPackDeb.html#variable:CPACK_DEBIAN_PACKAGE_DEPENDS
+        set(CPACK_DEBIAN_PACKAGE_DEPENDS "libfreetype6, libharfbuzz0b${DEPENDS_EXTRA}")
+        set(CPACK_DEBIAN_PACKAGE_SECTION "x11")
+        set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/contour-terminal/contour/")
+        set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "xdg-open")
+        set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ON)
+        set(CPACK_DEB_COMPONENT_INSTALL ON)
+        # Override because component-based install would create "contour-contour".
+        set(CPACK_DEBIAN_CONTOUR_PACKAGE_NAME "contour")
+
+        set(CPACK_COMPONENTS_ALL "contour")
     endif()
-    if("${LSB_RELEASE_NUMBER}" STREQUAL "22.04")
-        set(DEPENDS_EXTRA ", libyaml-cpp0.7")
-    endif()
-
-    if(LINUX)
-        set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libutempter0")
-    endif()
-
-    set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libqt6core6, libqt6multimedia6, libqt6opengl6, libqt6openglwidgets6, libqt6widgets6, libssh2-1, qml6-module-qt-labs-platform, qml6-module-qt5compat-graphicaleffects, qml6-module-qtmultimedia, qml6-module-qtqml-workerscript, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, qml6-module-qtquick-templates, qml6-module-qtquick-window, qt6-qpa-plugins")
-
-    # Generator: Debian
-    # see https://cmake.org/cmake/help/v3.6/module/CPackDeb.html#variable:CPACK_DEBIAN_PACKAGE_DEPENDS
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libfreetype6, libharfbuzz0b${DEPENDS_EXTRA}")
-    set(CPACK_DEBIAN_PACKAGE_SECTION "x11")
-    set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/contour-terminal/contour/")
-    set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "xdg-open")
-    set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ON)
-    set(CPACK_DEB_COMPONENT_INSTALL ON)
-    # Override because component-based install would create "contour-contour".
-    set(CPACK_DEBIAN_CONTOUR_PACKAGE_NAME "contour")
-
-    set(CPACK_COMPONENTS_ALL "contour")
 
     include(GNUInstallDirs)
     install(TARGETS contour DESTINATION bin)
-    install(FILES "contour.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/applications" RENAME "${AppId}.desktop")
-    install(FILES "contour-run.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus" RENAME "${AppId}.RunIn.desktop")
-    install(FILES "${AppId}.OpenHere.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus")
-    install(FILES "res/images/contour-logo-512.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512/apps" RENAME "${AppId}.png")
-    install(FILES "res/images/contour-logo-256.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps" RENAME "${AppId}.png")
-    install(FILES "res/images/contour-logo-128.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/128x128/apps" RENAME "${AppId}.png")
-    install(FILES "res/images/contour-logo-64.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64/apps" RENAME "${AppId}.png")
-    install(FILES "res/images/contour-logo-32.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/32x32/apps" RENAME "${AppId}.png")
-    install(FILES "${PROJECT_SOURCE_DIR}/metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo" RENAME "${AppId}.metainfo.xml")
+    if(NOT APPLE)
+        install(FILES "contour.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/applications" RENAME "${AppId}.desktop")
+        install(FILES "contour-run.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus" RENAME "${AppId}.RunIn.desktop")
+        install(FILES "${AppId}.OpenHere.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus")
+        install(FILES "res/images/contour-logo-512.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512/apps" RENAME "${AppId}.png")
+        install(FILES "res/images/contour-logo-256.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps" RENAME "${AppId}.png")
+        install(FILES "res/images/contour-logo-128.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/128x128/apps" RENAME "${AppId}.png")
+        install(FILES "res/images/contour-logo-64.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64/apps" RENAME "${AppId}.png")
+        install(FILES "res/images/contour-logo-32.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/32x32/apps" RENAME "${AppId}.png")
+        install(FILES "${PROJECT_SOURCE_DIR}/metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo" RENAME "${AppId}.metainfo.xml")
+    endif()
     install(DIRECTORY "shell-integration" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(FILES "${PROJECT_SOURCE_DIR}/LICENSE.txt" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(FILES "${PROJECT_SOURCE_DIR}/README.md" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
