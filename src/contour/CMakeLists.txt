@@ -25,10 +25,11 @@ NumberToHex(${PROJECT_VERSION_PATCH} HEX_PATCH)
 # NB: without the GUI frontend none of that is reachable -- what is left is `contour daemon` and
 #     the CLI verbs, which need Core alone. Asking for the rest anyway would make a headless build
 #     require a Qt that renders, which is the whole point of not building the frontend.
-# NB: Qt6_VERSION (used below) is set by find_package(Qt6). We find Core first — unconditionally
-#     and before building the component list — so the version check is available for all gates.
-find_package(Qt6 COMPONENTS Core REQUIRED)
 if(CONTOUR_FRONTEND_GUI)
+    # Gating GuiPrivate needs Qt6_VERSION, which nothing but find_package(Qt6) sets -- hence this
+    # lookup, one line ahead of the gate that reads it. Inside the branch on purpose: it exists for
+    # the GUI's version check alone, and the headless build below asks for Core in its own right.
+    find_package(Qt6 COMPONENTS Core REQUIRED)
     set(QT_COMPONENTS Core Gui Qml Quick QuickControls2 Network Multimedia Widgets DBus)
     if(Qt6_VERSION VERSION_GREATER_EQUAL 6.10)
         list(APPEND QT_COMPONENTS GuiPrivate)
@@ -51,6 +52,9 @@ find_package(Qt6 COMPONENTS ${QT_COMPONENTS} REQUIRED)
 # So a gate does not print its own warning. It records itself here, and the single report at the
 # bottom of this file names every excluded feature at once. Adding a gated feature is adding one
 # contour_note_excluded_feature() call next to the gate; the reporting needs no edit.
+#
+# NB: that report is printed for GUI builds only, because every gate so far belongs to the frontend.
+# The first gate that can fire in a headless build has to widen it -- see the guard around it.
 set(CONTOUR_QT_VALIDATED_VERSION "6.11")
 
 # Records that FEATURE is not built, and why.
@@ -67,11 +71,17 @@ endfunction()
 # must not make every packager carry another Qt module. When it is missing the feature compiles out and
 # the menu row disappears -- and the report at the bottom of this file names it, so that is visible in
 # the build log rather than discovered from a bug report.
-find_package(Qt6 COMPONENTS TextToSpeech QUIET)
-if(Qt6TextToSpeech_FOUND)
-    set(CONTOUR_WITH_TTS ON)
-else()
-    contour_note_excluded_feature("Read selection aloud" "Qt6::TextToSpeech not found")
+#
+# Guarded, because the action lives in a context menu: a headless build has nowhere to offer it from,
+# so probing for the module there would ask a build that renders nothing for a Qt that speaks, and
+# then report a GUI feature as excluded from a binary that never had it.
+if(CONTOUR_FRONTEND_GUI)
+    find_package(Qt6 COMPONENTS TextToSpeech QUIET)
+    if(Qt6TextToSpeech_FOUND)
+        set(CONTOUR_WITH_TTS ON)
+    else()
+        contour_note_excluded_feature("Read selection aloud" "Qt6::TextToSpeech not found")
+    endif()
 endif()
 # }}}
 
@@ -105,7 +115,6 @@ if(APPLE)
     set(CMAKE_BUILD_RPATH "${CMAKE_INSTALL_RPATH}")
     set(CMAKE_MACOSX_RPATH ON)
     #set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
-    find_package(Qt6 COMPONENTS Core Quick REQUIRED)
 endif()
 
 set(_header_files
@@ -1064,35 +1073,41 @@ endif()
 include(CPack)
 
 # {{{ Report what this build left out (see contour_note_excluded_feature above)
-get_property(_contour_excluded_features GLOBAL PROPERTY CONTOUR_EXCLUDED_FEATURES)
-if(_contour_excluded_features)
-    # A GLOBAL property accumulates for the whole configure run, and a gate may be evaluated more
-    # than once (a re-processed subdirectory, a second find_package pass) — report each feature once.
-    list(REMOVE_DUPLICATES _contour_excluded_features)
-    # NB: string(CONCAT), not set() with several quoted arguments — the latter builds a LIST, and
-    # expanding it back into the message would separate the pieces with a semicolon.
-    list(JOIN _contour_excluded_features "\n  - " _contour_excluded_list)
-    string(CONCAT _contour_notice "Some features are not built into this binary:"
-                                  "\n  - ${_contour_excluded_list}")
-else()
-    set(_contour_notice "")
-endif()
-
-if(Qt6_VERSION VERSION_LESS CONTOUR_QT_VALIDATED_VERSION)
-    # Only the second branch may claim a feature was dropped. An older Qt does not by itself exclude
-    # anything -- the gates above decide that, and each one records itself -- so a build that gated
-    # nothing must say so, or the warning teaches the reader to distrust it.
-    string(CONCAT _contour_qt_notice
-           "Qt ${Qt6_VERSION} was detected, which is older than Qt ${CONTOUR_QT_VALIDATED_VERSION}"
-           " — the version Contour is built and tested against.")
-    if(_contour_notice)
-        message(WARNING "${_contour_qt_notice}\n${_contour_notice}"
-                        "\nInstall Qt ${CONTOUR_QT_VALIDATED_VERSION} or newer to include them.")
+# GUI-only, because both halves of this report are claims about the GUI stack: every gated feature
+# is one, and CONTOUR_QT_VALIDATED_VERSION names the Qt the frontend is tested against. The headless
+# job builds against whatever Qt6::Core the distro ships -- deliberately, to prove that build needs
+# nothing more -- so telling it that its Qt is older than the one CI covers would be simply untrue.
+if(CONTOUR_FRONTEND_GUI)
+    get_property(_contour_excluded_features GLOBAL PROPERTY CONTOUR_EXCLUDED_FEATURES)
+    if(_contour_excluded_features)
+        # A GLOBAL property accumulates for the whole configure run, and a gate may be evaluated more
+        # than once (a re-processed subdirectory, a second find_package pass) — report each feature once.
+        list(REMOVE_DUPLICATES _contour_excluded_features)
+        # NB: string(CONCAT), not set() with several quoted arguments — the latter builds a LIST, and
+        # expanding it back into the message would separate the pieces with a semicolon.
+        list(JOIN _contour_excluded_features "\n  - " _contour_excluded_list)
+        string(CONCAT _contour_notice "Some features are not built into this binary:"
+                                      "\n  - ${_contour_excluded_list}")
     else()
-        message(WARNING "${_contour_qt_notice} Everything Contour offers is built into this binary,"
-                        " but this combination is not one CI covers.")
+        set(_contour_notice "")
     endif()
-elseif(_contour_notice)
-    message(WARNING "${_contour_notice}")
+
+    if(Qt6_VERSION VERSION_LESS CONTOUR_QT_VALIDATED_VERSION)
+        # Only the second branch may claim a feature was dropped. An older Qt does not by itself exclude
+        # anything -- the gates above decide that, and each one records itself -- so a build that gated
+        # nothing must say so, or the warning teaches the reader to distrust it.
+        string(CONCAT _contour_qt_notice
+               "Qt ${Qt6_VERSION} was detected, which is older than Qt ${CONTOUR_QT_VALIDATED_VERSION}"
+               " — the version Contour is built and tested against.")
+        if(_contour_notice)
+            message(WARNING "${_contour_qt_notice}\n${_contour_notice}"
+                            "\nInstall Qt ${CONTOUR_QT_VALIDATED_VERSION} or newer to include them.")
+        else()
+            message(WARNING "${_contour_qt_notice} Everything Contour offers is built into this binary,"
+                            " but this combination is not one CI covers.")
+        endif()
+    elseif(_contour_notice)
+        message(WARNING "${_contour_notice}")
+    endif()
 endif()
 # }}}

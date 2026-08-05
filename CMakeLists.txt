@@ -217,9 +217,13 @@ if(CONTOUR_USE_CPM)
 endif()
 
 
-# Unconditional, even for CONTOUR_FRONTEND_GUI=OFF: that build still needs Qt6::Core -- main.cpp
-# installs a Qt message handler, ContourApp uses QFile, and the resource compiler comes from the
-# Qt package. Only the Qt Quick/QML/Widgets half is optional, and src/contour guards that.
+# A search-path hint, not a requirement: cmake/FindQt.cmake returns immediately on Linux and the
+# BSDs, and on Windows and macOS only appends whatever Qt it discovers to CMAKE_PREFIX_PATH, saying
+# so in a status line when it finds none. It stays unconditional because CONTOUR_FRONTEND_GUI=OFF
+# still links Qt6::Core -- main.cpp installs a Qt message handler, ContourApp uses QFile, and the
+# resource compiler comes from the Qt package -- so skipping the hint would break that build on any
+# Windows or macOS machine whose Qt is not already on CMAKE_PREFIX_PATH. Only the Qt
+# Quick/QML/Widgets half is optional, and src/contour guards every lookup of it.
 include(FindQt)
 
 # The vendored third-party code (fetched via CPM/FetchContent) must NOT be run through clang-tidy: it
@@ -247,8 +251,6 @@ if("${CMAKE_CXX_CLANG_TIDY}" STREQUAL "")
 else()
     set(USING_TIDY_STRING "ON (${CMAKE_CXX_CLANG_TIDY})")
 endif()
-
-find_package(Qt6 COMPONENTS Core QUIET)
 
 add_custom_target(package-verbose
     COMMAND ${CMAKE_CPACK_COMMAND} --config CPackConfig.cmake --verbose
