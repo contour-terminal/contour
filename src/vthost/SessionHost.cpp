@@ -28,6 +28,7 @@ using vtworkspace::WindowId;
 // HostedSession
 
 HostedSession::HostedSession(SessionId id,
+                             crispy::environment const& env,
                              std::unique_ptr<vtpty::Pty> pty,
                              vtbackend::Settings settings,
                              std::function<void()> onScreenUpdated,
@@ -37,7 +38,7 @@ HostedSession::HostedSession(SessionId id,
                              std::function<void()> onClosed):
     _id(id),
     _events(std::move(onScreenUpdated), std::move(onBell), std::move(onNotify), std::move(onCopyToClipboard)),
-    _terminal(_events, std::move(pty), std::move(settings), std::chrono::steady_clock::now()),
+    _terminal(_events, env, std::move(pty), std::move(settings), std::chrono::steady_clock::now()),
     _onClosed(std::move(onClosed))
 {
     // DECSSDT 2 only REQUESTS the host-writable status line; the frontend decides.
@@ -109,6 +110,7 @@ void HostedSession::pumpLoop()
 SessionHost::SessionHost(net::EventLoop& loop,
                          PtyFactory ptyFactory,
                          vtbackend::Settings settings,
+                         crispy::environment const& env,
                          bool startPumps,
                          ClientSizePolicy sizePolicy):
     _loop(loop),
@@ -116,6 +118,7 @@ SessionHost::SessionHost(net::EventLoop& loop,
     // Normalized once, here, so _pageSize and every session that does not override it are derived
     // from settings a host can actually serve.
     _settings(hostedSessionSettings(std::move(settings))),
+    _environment(env),
     _pageSize(_settings.pageSize),
     _startPumps(startPumps),
     _sizePolicy(sizePolicy),
@@ -181,6 +184,7 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& req
 
     auto session = std::make_unique<HostedSession>(
         id,
+        _environment,
         std::move(tapped),
         std::move(settings),
         /*onScreenUpdated=*/

@@ -100,7 +100,9 @@ class ContourGuiApp: public QObject, public ContourApp
     ///                       (the default) wires the production one; tests pass a
     ///                       NullSpeechSynthesizer, which keeps the suite off the platform's speech
     ///                       service (on Linux that is a speech-dispatcher connection per use).
-    explicit ContourGuiApp(std::unique_ptr<SessionFactory> sessionFactory = nullptr,
+    /// @param env            The process environment every part of the application reads through.
+    explicit ContourGuiApp(crispy::environment const& env,
+                           std::unique_ptr<SessionFactory> sessionFactory = nullptr,
                            std::unique_ptr<ExternalLauncher> externalLauncher = nullptr,
                            std::unique_ptr<LayoutStore> layoutStore = nullptr,
                            std::unique_ptr<CommandHistoryStore> commandHistoryStore = nullptr,

@@ -129,6 +129,7 @@ struct NativeHarness
     SessionHost host { loop,
                        [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
                        hostSettings(options.history),
+                       crispy::defaultEnvironment(),
                        /*startPumps=*/false };
     net::testing::SocketPair pair = *net::testing::makeSocketPair(loop);
     std::unique_ptr<NativeSession> session =
@@ -246,6 +247,7 @@ struct TwoClientHarness
     SessionHost host { loop,
                        [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
                        hostSettings(vtbackend::LineCount(0)),
+                       crispy::defaultEnvironment(),
                        /*startPumps=*/false };
     net::testing::SocketPair firstPair = *net::testing::makeSocketPair(loop);
     net::testing::SocketPair secondPair = *net::testing::makeSocketPair(loop);
@@ -841,6 +843,7 @@ TEST_CASE("a token mismatch is reported without either token", "[vthost][native]
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
                               vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
                               /*startPumps=*/false };
     auto pair = *net::testing::makeSocketPair(loop);
     auto session = std::make_unique<NativeSession>(

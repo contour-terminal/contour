@@ -191,6 +191,7 @@ struct HostHarness
     SessionHost host { loop,
                        [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
                        vtbackend::Settings {},
+                       crispy::defaultEnvironment(),
                        /*startPumps=*/false,
                        policy };
 };
@@ -498,6 +499,7 @@ TEST_CASE("stream events fan out to every subscriber independently", "[vthost][h
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
                               vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
                               /*startPumps=*/false };
     auto first = StreamRecorder {};
     auto second = StreamRecorder {};
@@ -558,6 +560,7 @@ TEST_CASE("a failing PTY factory is reported", "[vthost][host][diagnostics]")
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize) { return std::unique_ptr<vtpty::Pty> {}; },
                               vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
                               /*startPumps=*/false };
 
     CHECK(host.createTab() == nullptr);
@@ -619,6 +622,7 @@ TEST_CASE("a hosted session with a parked pump can still be torn down", "[vthost
             return pty;
         },
         vtbackend::Settings {},
+        crispy::defaultEnvironment(),
         /*startPumps=*/true);
 
     REQUIRE(host->createTab() != nullptr);

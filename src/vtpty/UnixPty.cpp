@@ -97,13 +97,14 @@ namespace
     }
 
 #if defined(__linux__) && defined(UTEMPTER)
-    char const* hostnameForUtmp()
+    /// @return The display name to record in utmp, or empty if this session has none.
+    std::string hostnameForUtmp()
     {
         for (auto const* env: { "DISPLAY", "WAYLAND_DISPLAY" })
-            if (auto const* value = crispy::environment::getCString(env))
-                return value;
+            if (auto value = crispy::defaultEnvironment().get(env))
+                return std::move(*value);
 
-        return nullptr;
+        return {};
     }
 #endif
 } // namespace
@@ -237,7 +238,10 @@ StartResult UnixPty::start()
     _readSelector.want_read(_stdoutFastPipe.reader());
 
 #if defined(__linux__) && defined(UTEMPTER)
-    utempter_add_record(_masterFd, hostnameForUtmp());
+    // Held in a local: utempter wants a C string, and a temporary's would dangle the moment the
+    // full expression ended.
+    auto const utmpHostname = hostnameForUtmp();
+    utempter_add_record(_masterFd, utmpHostname.empty() ? nullptr : utmpHostname.c_str());
 #endif
 
     return {};

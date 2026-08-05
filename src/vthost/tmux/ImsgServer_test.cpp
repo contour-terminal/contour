@@ -188,6 +188,7 @@ struct ImsgHarness
                                    return std::make_unique<vtpty::MockPty>(size);
                                },
                                vtbackend::Settings {},
+                               crispy::defaultEnvironment(),
                                /*startPumps=*/false };
     FakeTmuxClient client;
     std::unique_ptr<net::ISocket> serverEnd;
@@ -492,6 +493,7 @@ TEST_CASE("a real tmux binary attaches over imsg", "[vthost][imsgserver][oracle]
         loop,
         [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
         vtbackend::Settings {},
+        crispy::defaultEnvironment(),
         /*startPumps=*/false,
     };
     host.createTab();

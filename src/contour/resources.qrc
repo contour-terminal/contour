@@ -4,12 +4,13 @@
         <file alias="bell.wav">res/bell.wav</file>
         <file alias="logo-256.png">res/images/contour-logo-256.png</file>
         <file alias="logo.png">res/images/contour-logo-256.png</file>
-        <file>shell-integration/shell-integration.zsh</file>
-        <file>shell-integration/shell-integration.fish</file>
-        <file>shell-integration/shell-integration.tcsh</file>
-        <file>shell-integration/shell-integration.bash</file>
     </qresource>
 </RCC>
+<!-- Everything here is GUI-only, which is what lets CMakeLists.txt compile this file for the GUI
+     frontend alone. The shell-integration scripts used to live here too, but `contour generate
+     integration` is a CLI verb that a GUI-less build keeps, and reading them through Qt's resource
+     system made that build need Qt. They are embedded by EmbedShellIntegration.cmake instead.
+  -->
 <!-- The application's QML is NOT here: it is delivered as the Contour.Ui QML module, declared with
      qt_add_qml_module() in CMakeLists.txt. See the comment there for why.
   -->

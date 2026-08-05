@@ -11,6 +11,19 @@ endif()
 option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 option(CONTOUR_WAYLAND "Enables Wayland specific code paths." ON)
 
+# Whether this build produces a macOS application bundle, as opposed to a plain executable.
+#
+# A .app exists to be double-clicked, and everything that assembles one -- the
+# @executable_path/../Frameworks rpath, macdeployqt, the Info.plist keys, the icon, code signing,
+# notarization and the DragNDrop disk image -- serves that window. A GUI-less build produces a
+# command-line binary instead: none of that applies to it, and all of it needs a Qt that renders,
+# which is the whole point of not building the frontend. So it installs like any other Unix CLI
+# tool. Every bundle-only block below is gated on this rather than on APPLE.
+set(CONTOUR_MACOS_APP_BUNDLE OFF)
+if(APPLE AND CONTOUR_FRONTEND_GUI)
+    set(CONTOUR_MACOS_APP_BUNDLE ON)
+endif()
+
 NumberToHex(${PROJECT_VERSION_MAJOR} HEX_MAJOR)
 NumberToHex(${PROJECT_VERSION_MINOR} HEX_MINOR)
 NumberToHex(${PROJECT_VERSION_PATCH} HEX_PATCH)
@@ -22,25 +35,25 @@ NumberToHex(${PROJECT_VERSION_PATCH} HEX_PATCH)
 #     readback test. It must be requested here explicitly: relying on a sibling subdirectory's
 #     find_package to have populated the Qt6::GuiPrivate target is order-dependent and fails on some
 #     Qt packagings (e.g. Homebrew Qt on macOS), where contour_gui_test then cannot link it.
-# NB: without the GUI frontend none of that is reachable -- what is left is `contour daemon` and
-#     the CLI verbs, which need Core alone. Asking for the rest anyway would make a headless build
-#     require a Qt that renders, which is the whole point of not building the frontend.
-# NB: Qt6_VERSION (used below) is set by find_package(Qt6). We find Core first — unconditionally
-#     and before building the component list — so the version check is available for all gates.
-find_package(Qt6 COMPONENTS Core REQUIRED)
+# NB: without the GUI frontend, Qt is not looked for at all. What is left of the binary is
+#     `contour daemon` and the CLI verbs, and none of them touches Qt: the message handler in
+#     main.cpp is compiled out, the shell-integration scripts are embedded as C++ data rather than
+#     as a Qt resource, and Config.cpp reads the environment through crispy::environment. Requiring
+#     Qt for that build would put a Qt that renders in the way of the very configuration whose point
+#     is not to render -- and on a platform where Qt6 does not exist, in the way of building at all.
 if(CONTOUR_FRONTEND_GUI)
+    # Gating GuiPrivate needs Qt6_VERSION, which nothing but find_package(Qt6) sets -- hence this
+    # lookup, one line ahead of the gate that reads it.
+    find_package(Qt6 COMPONENTS Core REQUIRED)
     set(QT_COMPONENTS Core Gui Qml Quick QuickControls2 Network Multimedia Widgets DBus)
     if(Qt6_VERSION VERSION_GREATER_EQUAL 6.10)
         list(APPEND QT_COMPONENTS GuiPrivate)
     endif()
-else()
-    set(QT_COMPONENTS Core)
+
+    message(STATUS "Qt components: ${QT_COMPONENTS}")
+    find_package(Qt6 COMPONENTS ${QT_COMPONENTS} REQUIRED)
 endif()
 # }}}
-
-message(STATUS "Qt components: ${QT_COMPONENTS}")
-
-find_package(Qt6 COMPONENTS ${QT_COMPONENTS} REQUIRED)
 
 # {{{ Optional features excluded from this build
 # The Qt version CI builds and validates against. Building against an older Qt is supported, but a
@@ -51,6 +64,9 @@ find_package(Qt6 COMPONENTS ${QT_COMPONENTS} REQUIRED)
 # So a gate does not print its own warning. It records itself here, and the single report at the
 # bottom of this file names every excluded feature at once. Adding a gated feature is adding one
 # contour_note_excluded_feature() call next to the gate; the reporting needs no edit.
+#
+# NB: that report is printed for GUI builds only, because every gate so far belongs to the frontend.
+# The first gate that can fire in a headless build has to widen it -- see the guard around it.
 set(CONTOUR_QT_VALIDATED_VERSION "6.11")
 
 # Records that FEATURE is not built, and why.
@@ -67,11 +83,17 @@ endfunction()
 # must not make every packager carry another Qt module. When it is missing the feature compiles out and
 # the menu row disappears -- and the report at the bottom of this file names it, so that is visible in
 # the build log rather than discovered from a bug report.
-find_package(Qt6 COMPONENTS TextToSpeech QUIET)
-if(Qt6TextToSpeech_FOUND)
-    set(CONTOUR_WITH_TTS ON)
-else()
-    contour_note_excluded_feature("Read selection aloud" "Qt6::TextToSpeech not found")
+#
+# Guarded, because the action lives in a context menu: a headless build has nowhere to offer it from,
+# so probing for the module there would ask a build that renders nothing for a Qt that speaks, and
+# then report a GUI feature as excluded from a binary that never had it.
+if(CONTOUR_FRONTEND_GUI)
+    find_package(Qt6 COMPONENTS TextToSpeech QUIET)
+    if(Qt6TextToSpeech_FOUND)
+        set(CONTOUR_WITH_TTS ON)
+    else()
+        contour_note_excluded_feature("Read selection aloud" "Qt6::TextToSpeech not found")
+    endif()
 endif()
 # }}}
 
@@ -88,7 +110,7 @@ if(CONTOUR_FRONTEND_GUI)
     add_subdirectory(display)
 endif()
 
-if(APPLE)
+if(CONTOUR_MACOS_APP_BUNDLE)
     #set(CMAKE_INSTALL_RPATH "@executable_path")
     set(CMAKE_INSTALL_RPATH "@executable_path/../Frameworks")
     # vcpkg gives its dylibs an `@rpath/libfoo.dylib` install name, and macdeployqt expands
@@ -105,7 +127,6 @@ if(APPLE)
     set(CMAKE_BUILD_RPATH "${CMAKE_INSTALL_RPATH}")
     set(CMAKE_MACOSX_RPATH ON)
     #set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
-    find_package(Qt6 COMPONENTS Core Quick REQUIRED)
 endif()
 
 set(_header_files
@@ -120,7 +141,6 @@ set(_header_files
     CommandHistoryStore.h
     Config.h
     ContextMenu.h
-    ContextMenuModel.h
     ContextMenuTable.h
     TitleBarContextMenu.h
     ContourApp.h
@@ -131,10 +151,38 @@ set(_header_files
     ModifierNames.h
     Shortcut.h
     ConfigEnum.h
+    ShellIntegration.h
     TabBarMode.h
     TabLabel.h
     UiStyle.h
 )
+
+# {{{ shell-integration scripts, embedded
+# One row per supported shell. Adding a shell is dropping its script beside the others in
+# shell-integration/ and adding it here: the embedded data, the `generate integration` dispatch and
+# that verb's help text all derive from this list.
+set(CONTOUR_SHELL_INTEGRATION_SHELLS bash fish tcsh zsh)
+
+list(TRANSFORM CONTOUR_SHELL_INTEGRATION_SHELLS
+     PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/shell-integration/shell-integration."
+     OUTPUT_VARIABLE _shell_integration_scripts)
+
+# The scripts used to reach the binary through resources.qrc, which made `contour generate
+# integration` -- a verb a GUI-less build keeps -- depend on Qt's resource system. See
+# EmbedShellIntegration.cmake for why the replacement is a CMake script.
+set(_shell_integration_data "${CMAKE_CURRENT_BINARY_DIR}/ShellIntegrationData.h")
+add_custom_command(
+    OUTPUT "${_shell_integration_data}"
+    COMMAND "${CMAKE_COMMAND}"
+            "-DSHELLS=${CONTOUR_SHELL_INTEGRATION_SHELLS}"
+            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DOUTPUT=${_shell_integration_data}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/EmbedShellIntegration.cmake"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/EmbedShellIntegration.cmake" ${_shell_integration_scripts}
+    COMMENT "Embedding shell-integration scripts"
+    VERBATIM
+)
+# }}}
 # Sources are split into a reusable object library (contour_core) and the thin executable entry
 # point (main.cpp). The object library carries every translation unit of the frontend so that both
 # the `contour` executable AND the `contour_gui_test` target can link the exact same objects — this
@@ -152,13 +200,13 @@ set(_core_source_files
     CommandHistoryStore.cpp
     Config.cpp
     ContextMenu.cpp
-    ContextMenuModel.cpp
     TitleBarContextMenu.cpp
     ContourApp.cpp
     FuzzyFilter.cpp
     GuiConfigStore.cpp
     HyperlinkTooltip.cpp
     SpeechSynthesizer.cpp
+    ShellIntegration.cpp
     Shortcut.cpp
     TabLabel.cpp
 )
@@ -177,6 +225,7 @@ if(CONTOUR_FRONTEND_GUI)
         AudioNote.h
         BlurBehind.h
         CommandPaletteModel.h
+        ContextMenuModel.h
         ContourGuiApp.h
         ExitCode.h
         ExternalLauncher.h
@@ -203,6 +252,7 @@ if(CONTOUR_FRONTEND_GUI)
         Audio.cpp
         BlurBehind.cpp
         CommandPaletteModel.cpp
+        ContextMenuModel.cpp
         ContourGuiApp.cpp
         FreeDesktopNotifier.cpp
         KeyboardLayout.cpp
@@ -358,8 +408,13 @@ if(CONTOUR_FRONTEND_GUI)
 
 endif()
 
-set(_qt_resources resources.qrc)
-qt_add_resources(_qt_resources ${_qt_resources})
+# Everything in resources.qrc is GUI-only (the bell sounds and the window icon), so a GUI-less build
+# neither compiles it nor needs the resource compiler that would come with the Qt package.
+set(_qt_resources "")
+if(CONTOUR_FRONTEND_GUI)
+    set(_qt_resources resources.qrc)
+    qt_add_resources(_qt_resources ${_qt_resources})
+endif()
 
 source_group(Sources FILES ${_core_source_files} ${_main_source_files})
 source_group(Headers FILES ${_header_files})
@@ -368,22 +423,36 @@ source_group(QML FILES ${_qml_files})
 
 # {{{ contour_core: the reusable object library (everything but main.cpp)
 add_library(contour_core OBJECT)
-target_sources(contour_core PRIVATE ${_core_source_files} ${_header_files} ${_qt_resources})
-
-set_target_properties(contour_core PROPERTIES AUTOMOC ON)
-set_target_properties(contour_core PROPERTIES AUTORCC ON)
+# The generated header is listed as a source so that building contour_core runs the custom command
+# that produces it; nothing compiles it on its own.
+target_sources(contour_core
+    PRIVATE ${_core_source_files} ${_header_files} ${_qt_resources} "${_shell_integration_data}")
 
 # Both the binary dir (for generated headers) and the parent src dir (so "#include <contour/...>"
 # resolves) must be PUBLIC so consumers of the object library inherit them.
 target_include_directories(contour_core PUBLIC "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/..")
 # }}}
 
-qt_add_executable(contour)
+# qt_add_executable() is a Qt command, and it does Qt things -- QML plugin importing, the Android and
+# macOS finalizers. A GUI-less build wants a plain command-line executable and, more to the point,
+# must not need the Qt CMake package to declare one.
+if(CONTOUR_FRONTEND_GUI)
+    qt_add_executable(contour)
+else()
+    add_executable(contour)
+endif()
 target_sources(contour PRIVATE ${_main_source_files})
 target_link_libraries(contour PRIVATE contour_core)
 
-set_target_properties(contour PROPERTIES AUTOMOC ON)
-set_target_properties(contour PROPERTIES AUTORCC ON)
+# Everything Qt about these two targets, in one place. moc and rcc are Qt tools and without the GUI
+# frontend there is nothing for either to do: every Q_OBJECT in this directory belongs to a GUI-only
+# translation unit, and resources.qrc is not compiled above. Leaving them on would merely ask a
+# Qt-free build for Qt's code generators.
+if(CONTOUR_FRONTEND_GUI)
+    set_target_properties(contour_core contour PROPERTIES AUTOMOC ON AUTORCC ON)
+    # Disable all deprecated Qt functions prior to Qt 6.0.
+    target_compile_definitions(contour_core PUBLIC QT_DISABLE_DEPRECATED_BEFORE=0x050F00)
+endif()
 
 target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 
@@ -401,9 +470,6 @@ target_compile_definitions(contour_core PUBLIC
     CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
     CONTOUR_APP_ID="${AppId}"
 )
-
-# Disable all deprecated Qt functions prior to Qt 6.0
-target_compile_definitions(contour_core PUBLIC QT_DISABLE_DEPRECATED_BEFORE=0x050F00)
 
 # Create custom target to execute contour
 add_custom_target(run COMMAND contour)
@@ -437,7 +503,7 @@ if(WIN32)
             LINK_FLAGS "/ENTRY:mainCRTStartup"
         )
     endif()
-elseif(APPLE)
+elseif(CONTOUR_MACOS_APP_BUNDLE)
     # qt_add_executable() sets MACOSX_BUNDLE_INFO_PLIST, so Info.plist comes from Qt's
     # template and only the properties it substitutes have any effect -- which excludes
     # the deprecated CFBundleGetInfoString and CFBundleLongVersionString. It supplies
@@ -477,25 +543,24 @@ target_link_libraries(contour_core
     vtbackend
     vtrasterizer
     vtworkspace
-    Qt6::Core
     ${YAML_CPP_LIBRARIES}
     PRIVATE
     vthost
 )
 
-# The QML modules are GUI-only (see the guard above), so the dependency on them is too.
-if(CONTOUR_FRONTEND_GUI)
-    target_link_libraries(contour_core PUBLIC contour_qml contour_tui_style)
-endif()
-
 # {{{ GUI: Declare Qt build dependencies
+# The QML modules are GUI-only (see the guard above), so the dependency on them is too -- as is
+# Qt6::Core itself, which no longer has a single caller outside the frontend.
 if(CONTOUR_FRONTEND_GUI)
     if(OPENBSD)
         find_package(X11 REQUIRED)
     endif()
     target_link_libraries(contour_core
         PUBLIC
+        contour_qml
+        contour_tui_style
         ContourTerminalDisplay
+        Qt6::Core
         Qt6::DBus
         Qt6::Multimedia
         Qt6::Network
@@ -566,6 +631,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/SpeechSynthesizer_test.cpp
             test/TitleBarContextMenu_test.cpp
             test/FuzzyFilter_test.cpp
+            test/ShellIntegration_test.cpp
             test/Shortcut_test.cpp
             test/LayoutBuilder_test.cpp
             test/ContourGuiApp_test.cpp
@@ -701,25 +767,51 @@ endif()
 # A CMake script rather than a shell script (as the other e2e tests are), because it must also run
 # on Windows, where `sh` is not available and where the daemon gets the least coverage otherwise.
 if(CONTOUR_TESTING)
+    # Registers one `cmake -P` end-to-end test against the built contour binary.
+    #
+    # The verdict is MARKER, not the exit code: `cmake -P` returns 0 even after message(FATAL_ERROR)
+    # before CMake 3.31, so a failing assertion would otherwise pass silently. CONTOUR_BINARY is
+    # passed for every such test, and QT_QPA_PLATFORM=offscreen set for every one: in a GUI build
+    # these run the Qt-linked binary, and a CI runner has no display for it to fall back on.
+    #
+    # NAME   Test name, also naming test/e2e/<NAME>.cmake's sibling script via SCRIPT.
+    # SCRIPT The script under test/e2e/ to run.
+    # MARKER The success line the script prints last.
+    # ARGS   Further `-D VAR=value` arguments, script-specific.
+    function(contour_add_e2e_cmake_test)
+        cmake_parse_arguments(E2E "" "NAME;SCRIPT;MARKER" "ARGS" ${ARGN})
+        add_test(NAME ${E2E_NAME}
+            COMMAND ${CMAKE_COMMAND}
+                    -D "CONTOUR_BINARY=$<TARGET_FILE:contour>"
+                    ${E2E_ARGS}
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/${E2E_SCRIPT})
+        set_tests_properties(${E2E_NAME} PROPERTIES
+            TIMEOUT 60
+            LABELS e2e
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+            PASS_REGULAR_EXPRESSION "${E2E_MARKER}")
+    endfunction()
+
     if(CONTOUR_FRONTEND_GUI)
         set(_frontend_kind "gui")
     else()
         set(_frontend_kind "headless")
     endif()
-    add_test(NAME contour_e2e_cli_verbs
-        COMMAND ${CMAKE_COMMAND}
-                -D "CONTOUR_BINARY=$<TARGET_FILE:contour>"
-                -D "FRONTEND=${_frontend_kind}"
-                -P ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/CliVerbs.cmake)
-    # The verdict is the marker, not the exit code: `cmake -P` returns 0 even after
-    # message(FATAL_ERROR) before CMake 3.31, so a failing assertion would otherwise pass silently.
-    # QT_QPA_PLATFORM=offscreen for the same reason the sibling e2e tests set it: in a GUI build
-    # this runs the Qt-linked binary, and a CI runner has no display for it to fall back on.
-    set_tests_properties(contour_e2e_cli_verbs PROPERTIES
-        TIMEOUT 60
-        LABELS e2e
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-        PASS_REGULAR_EXPRESSION "cli-verbs: OK")
+    contour_add_e2e_cmake_test(
+        NAME contour_e2e_cli_verbs
+        SCRIPT CliVerbs.cmake
+        MARKER "cli-verbs: OK"
+        ARGS -D "FRONTEND=${_frontend_kind}")
+
+    # Registered outside the guard for the same reason: `generate integration` is a verb the GUI-less
+    # build keeps, and its scripts are embedded by EmbedShellIntegration.cmake for both configurations.
+    contour_add_e2e_cmake_test(
+        NAME contour_e2e_shell_integration
+        SCRIPT ShellIntegration.cmake
+        MARKER "shell-integration: OK"
+        ARGS -D "SHELLS=${CONTOUR_SHELL_INTEGRATION_SHELLS}"
+             -D "SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+             -D "WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}")
 endif()
 # }}}
 
@@ -757,7 +849,14 @@ set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "contour")
 if(APPLE)
     # "-" is an ad-hoc signature: enough to run locally, not enough to distribute.
     # A release build passes the Developer ID; see cmake/presets/os-macos.json.
+    #
+    # Declared for every macOS build rather than only for bundle ones, because every macOS preset
+    # sets it: a cache entry no target reads is merely unused, but one the project never declares is
+    # reported back to the user as a variable they got wrong.
     set(CODE_SIGN_CERTIFICATE_ID "-" CACHE STRING "macOS code signing identity, or '-' for ad-hoc")
+endif()
+
+if(CONTOUR_MACOS_APP_BUNDLE)
     option(CONTOUR_MACOS_NOTARIZE "Submit the macOS disk image to Apple's notary service" OFF)
     # A second Apple round trip, so that the app dragged out of the image carries its own
     # ticket and launches offline. Worth its minute on something users download; not worth
@@ -796,7 +895,10 @@ endif()
 
 # {{{ CPACK variable definitions
 if(NOT(CPACK_GENERATOR))
-    if(APPLE)
+    # A disk image is a way to hand someone an app to drag into /Applications; without a bundle to
+    # put in it there is nothing to drag, so a GUI-less macOS build falls through to CPack's own
+    # default (a tarball) like any other Unix CLI tool.
+    if(CONTOUR_MACOS_APP_BUNDLE)
         set(CPACK_GENERATOR DragNDrop)
     elseif(WIN32)
         set(CPACK_GENERATOR WIX ZIP)
@@ -832,7 +934,7 @@ if(WIN32)
     set(CPACK_WIX_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/wix_patch.xml")
     set(CPACK_WIX_PROPERTY_WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT "Launch Contour")
 endif()
-if(APPLE)
+if(CONTOUR_MACOS_APP_BUNDLE)
     set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.icns")
     set(CPACK_DMG_VOLUME_NAME "Contour")
 
@@ -866,23 +968,31 @@ endfunction()
 # }}}
 
 if(WIN32)
-    include(DeployQt)
-    windeployqt(contour)
     install(TARGETS contour DESTINATION bin)
-    install(
-        DIRECTORY "$<TARGET_FILE_DIR:contour>/"
-        DESTINATION "bin"
-        USE_SOURCE_PERMISSIONS
-        FILES_MATCHING
-            PATTERN "CMakeFiles" EXCLUDE
-            PATTERN "*_autogen" EXCLUDE
-            PATTERN "*.h" EXCLUDE
-            PATTERN "*_test.*" EXCLUDE
-            PATTERN "*.pdb" EXCLUDE
-            PATTERN "unicode_tablegen.exe" EXCLUDE
-            PATTERN "*"
-    )
-elseif(APPLE)
+    # windeployqt stages the Qt runtime beside the executable, and the directory install below exists
+    # to pick that staging up. Both are gated, because a GUI-less build links no Qt: there would be
+    # nothing to deploy, DeployQt.cmake's find_package(Qt6Core REQUIRED) would put Qt back in the way
+    # of the one configuration whose point is not to need it, and what remains to install is the
+    # single command-line executable already installed above. This is the Windows twin of the
+    # app-bundle gate that CONTOUR_MACOS_APP_BUNDLE makes below.
+    if(CONTOUR_FRONTEND_GUI)
+        include(DeployQt)
+        windeployqt(contour)
+        install(
+            DIRECTORY "$<TARGET_FILE_DIR:contour>/"
+            DESTINATION "bin"
+            USE_SOURCE_PERMISSIONS
+            FILES_MATCHING
+                PATTERN "CMakeFiles" EXCLUDE
+                PATTERN "*_autogen" EXCLUDE
+                PATTERN "*.h" EXCLUDE
+                PATTERN "*_test.*" EXCLUDE
+                PATTERN "*.pdb" EXCLUDE
+                PATTERN "unicode_tablegen.exe" EXCLUDE
+                PATTERN "*"
+        )
+    endif()
+elseif(CONTOUR_MACOS_APP_BUNDLE)
     # See: https://stackoverflow.com/questions/35612687/cmake-macos-x-bundle-with-bundleutiliies-for-qt-application/48035834#48035834
     set(APP_NAME contour)
     set(App_Contents "${APP_NAME}.app/Contents")
@@ -980,57 +1090,66 @@ elseif(APPLE)
         )
     ")
 else()
-    # any other Unix
-    find_program(LSB_RELEASE_EXEC lsb_release)
-    execute_process(COMMAND ${LSB_RELEASE_EXEC} -rs
-        OUTPUT_VARIABLE LSB_RELEASE_NUMBER
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-
-    # yaml-cpp's runtime library soname is tied to the distro release: 0.6 on 20.04, 0.7 on 22.04,
-    # and 0.8 from 24.04 onward (24.04, 26.04, …). Newer releases keep 0.8, so it is the default.
-    set(DEPENDS_EXTRA ", libyaml-cpp0.8")
-    if("${LSB_RELEASE_NUMBER}" STREQUAL "20.04")
-        set(DEPENDS_EXTRA ", libyaml-cpp0.6")
-    endif()
-    if("${LSB_RELEASE_NUMBER}" STREQUAL "22.04")
-        set(DEPENDS_EXTRA ", libyaml-cpp0.7")
-    endif()
-
-    if(LINUX)
-        set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libutempter0")
-    endif()
-
-    set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libqt6core6, libqt6multimedia6, libqt6opengl6, libqt6openglwidgets6, libqt6widgets6, libssh2-1, qml6-module-qt-labs-platform, qml6-module-qt5compat-graphicaleffects, qml6-module-qtmultimedia, qml6-module-qtqml-workerscript, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, qml6-module-qtquick-templates, qml6-module-qtquick-window, qt6-qpa-plugins")
-
-    # Generator: Debian
-    # see https://cmake.org/cmake/help/v3.6/module/CPackDeb.html#variable:CPACK_DEBIAN_PACKAGE_DEPENDS
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libfreetype6, libharfbuzz0b${DEPENDS_EXTRA}")
-    set(CPACK_DEBIAN_PACKAGE_SECTION "x11")
-    set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/contour-terminal/contour/")
-    set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "xdg-open")
-    set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ON)
-    set(CPACK_DEB_COMPONENT_INSTALL ON)
-    # Override because component-based install would create "contour-contour".
-    set(CPACK_DEBIAN_CONTOUR_PACKAGE_NAME "contour")
-
-    set(CPACK_COMPONENTS_ALL "contour")
-
+    # Any other Unix -- and, since the branch above now takes only bundle builds, a GUI-less macOS
+    # build too. That one produces a plain command-line binary, so it installs like any other Unix
+    # CLI tool: the executable and the data every platform wants, first.
     include(GNUInstallDirs)
     install(TARGETS contour DESTINATION bin)
-    install(FILES "contour.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/applications" RENAME "${AppId}.desktop")
-    install(FILES "contour-run.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus" RENAME "${AppId}.RunIn.desktop")
-    install(FILES "${AppId}.OpenHere.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus")
-    install(FILES "res/images/contour-logo-512.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512/apps" RENAME "${AppId}.png")
-    install(FILES "res/images/contour-logo-256.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps" RENAME "${AppId}.png")
-    install(FILES "res/images/contour-logo-128.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/128x128/apps" RENAME "${AppId}.png")
-    install(FILES "res/images/contour-logo-64.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64/apps" RENAME "${AppId}.png")
-    install(FILES "res/images/contour-logo-32.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/32x32/apps" RENAME "${AppId}.png")
-    install(FILES "${PROJECT_SOURCE_DIR}/metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo" RENAME "${AppId}.metainfo.xml")
     install(DIRECTORY "shell-integration" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(FILES "${PROJECT_SOURCE_DIR}/LICENSE.txt" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(FILES "${PROJECT_SOURCE_DIR}/README.md" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(DIRECTORY "${terminfo_basedir}" DESTINATION "${CMAKE_INSTALL_DATADIR}")
+
+    # What a macOS build must NOT pick up is everything addressed at a freedesktop desktop
+    # environment (the .desktop entries, the KIO service menus, the hicolor icons, the AppStream
+    # metainfo) or at Debian packaging: macOS reads none of it, and `lsb_release` is not there to
+    # ask. Hence this one guard rather than a second, near-identical branch.
+    if(NOT APPLE)
+        find_program(LSB_RELEASE_EXEC lsb_release)
+        execute_process(COMMAND ${LSB_RELEASE_EXEC} -rs
+            OUTPUT_VARIABLE LSB_RELEASE_NUMBER
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+
+        # yaml-cpp's runtime library soname is tied to the distro release: 0.6 on 20.04, 0.7 on 22.04,
+        # and 0.8 from 24.04 onward (24.04, 26.04, …). Newer releases keep 0.8, so it is the default.
+        set(DEPENDS_EXTRA ", libyaml-cpp0.8")
+        if("${LSB_RELEASE_NUMBER}" STREQUAL "20.04")
+            set(DEPENDS_EXTRA ", libyaml-cpp0.6")
+        endif()
+        if("${LSB_RELEASE_NUMBER}" STREQUAL "22.04")
+            set(DEPENDS_EXTRA ", libyaml-cpp0.7")
+        endif()
+
+        if(LINUX)
+            set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libutempter0")
+        endif()
+
+        set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libqt6core6, libqt6multimedia6, libqt6opengl6, libqt6openglwidgets6, libqt6widgets6, libssh2-1, qml6-module-qt-labs-platform, qml6-module-qt5compat-graphicaleffects, qml6-module-qtmultimedia, qml6-module-qtqml-workerscript, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, qml6-module-qtquick-templates, qml6-module-qtquick-window, qt6-qpa-plugins")
+
+        # Generator: Debian
+        # see https://cmake.org/cmake/help/v3.6/module/CPackDeb.html#variable:CPACK_DEBIAN_PACKAGE_DEPENDS
+        set(CPACK_DEBIAN_PACKAGE_DEPENDS "libfreetype6, libharfbuzz0b${DEPENDS_EXTRA}")
+        set(CPACK_DEBIAN_PACKAGE_SECTION "x11")
+        set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/contour-terminal/contour/")
+        set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "xdg-open")
+        set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ON)
+        set(CPACK_DEB_COMPONENT_INSTALL ON)
+        # Override because component-based install would create "contour-contour".
+        set(CPACK_DEBIAN_CONTOUR_PACKAGE_NAME "contour")
+
+        set(CPACK_COMPONENTS_ALL "contour")
+
+        install(FILES "contour.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/applications" RENAME "${AppId}.desktop")
+        install(FILES "contour-run.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus" RENAME "${AppId}.RunIn.desktop")
+        install(FILES "${AppId}.OpenHere.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus")
+        install(FILES "res/images/contour-logo-512.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512/apps" RENAME "${AppId}.png")
+        install(FILES "res/images/contour-logo-256.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps" RENAME "${AppId}.png")
+        install(FILES "res/images/contour-logo-128.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/128x128/apps" RENAME "${AppId}.png")
+        install(FILES "res/images/contour-logo-64.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64/apps" RENAME "${AppId}.png")
+        install(FILES "res/images/contour-logo-32.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/32x32/apps" RENAME "${AppId}.png")
+        install(FILES "${PROJECT_SOURCE_DIR}/metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo" RENAME "${AppId}.metainfo.xml")
+    endif()
 endif()
 
 
@@ -1064,35 +1183,41 @@ endif()
 include(CPack)
 
 # {{{ Report what this build left out (see contour_note_excluded_feature above)
-get_property(_contour_excluded_features GLOBAL PROPERTY CONTOUR_EXCLUDED_FEATURES)
-if(_contour_excluded_features)
-    # A GLOBAL property accumulates for the whole configure run, and a gate may be evaluated more
-    # than once (a re-processed subdirectory, a second find_package pass) — report each feature once.
-    list(REMOVE_DUPLICATES _contour_excluded_features)
-    # NB: string(CONCAT), not set() with several quoted arguments — the latter builds a LIST, and
-    # expanding it back into the message would separate the pieces with a semicolon.
-    list(JOIN _contour_excluded_features "\n  - " _contour_excluded_list)
-    string(CONCAT _contour_notice "Some features are not built into this binary:"
-                                  "\n  - ${_contour_excluded_list}")
-else()
-    set(_contour_notice "")
-endif()
-
-if(Qt6_VERSION VERSION_LESS CONTOUR_QT_VALIDATED_VERSION)
-    # Only the second branch may claim a feature was dropped. An older Qt does not by itself exclude
-    # anything -- the gates above decide that, and each one records itself -- so a build that gated
-    # nothing must say so, or the warning teaches the reader to distrust it.
-    string(CONCAT _contour_qt_notice
-           "Qt ${Qt6_VERSION} was detected, which is older than Qt ${CONTOUR_QT_VALIDATED_VERSION}"
-           " — the version Contour is built and tested against.")
-    if(_contour_notice)
-        message(WARNING "${_contour_qt_notice}\n${_contour_notice}"
-                        "\nInstall Qt ${CONTOUR_QT_VALIDATED_VERSION} or newer to include them.")
+# GUI-only, because both halves of this report are claims about the GUI stack: every gated feature
+# is one, and CONTOUR_QT_VALIDATED_VERSION names the Qt the frontend is tested against. The headless
+# job builds against whatever Qt6::Core the distro ships -- deliberately, to prove that build needs
+# nothing more -- so telling it that its Qt is older than the one CI covers would be simply untrue.
+if(CONTOUR_FRONTEND_GUI)
+    get_property(_contour_excluded_features GLOBAL PROPERTY CONTOUR_EXCLUDED_FEATURES)
+    if(_contour_excluded_features)
+        # A GLOBAL property accumulates for the whole configure run, and a gate may be evaluated more
+        # than once (a re-processed subdirectory, a second find_package pass) — report each feature once.
+        list(REMOVE_DUPLICATES _contour_excluded_features)
+        # NB: string(CONCAT), not set() with several quoted arguments — the latter builds a LIST, and
+        # expanding it back into the message would separate the pieces with a semicolon.
+        list(JOIN _contour_excluded_features "\n  - " _contour_excluded_list)
+        string(CONCAT _contour_notice "Some features are not built into this binary:"
+                                      "\n  - ${_contour_excluded_list}")
     else()
-        message(WARNING "${_contour_qt_notice} Everything Contour offers is built into this binary,"
-                        " but this combination is not one CI covers.")
+        set(_contour_notice "")
     endif()
-elseif(_contour_notice)
-    message(WARNING "${_contour_notice}")
+
+    if(Qt6_VERSION VERSION_LESS CONTOUR_QT_VALIDATED_VERSION)
+        # Only the second branch may claim a feature was dropped. An older Qt does not by itself exclude
+        # anything -- the gates above decide that, and each one records itself -- so a build that gated
+        # nothing must say so, or the warning teaches the reader to distrust it.
+        string(CONCAT _contour_qt_notice
+               "Qt ${Qt6_VERSION} was detected, which is older than Qt ${CONTOUR_QT_VALIDATED_VERSION}"
+               " — the version Contour is built and tested against.")
+        if(_contour_notice)
+            message(WARNING "${_contour_qt_notice}\n${_contour_notice}"
+                            "\nInstall Qt ${CONTOUR_QT_VALIDATED_VERSION} or newer to include them.")
+        else()
+            message(WARNING "${_contour_qt_notice} Everything Contour offers is built into this binary,"
+                            " but this combination is not one CI covers.")
+        endif()
+    elseif(_contour_notice)
+        message(WARNING "${_contour_notice}")
+    endif()
 endif()
 # }}}

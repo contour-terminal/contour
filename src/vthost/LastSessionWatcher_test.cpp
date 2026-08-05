@@ -45,6 +45,7 @@ struct WatcherHarness
     SessionHost host { loop,
                        [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
                        vtbackend::Settings {},
+                       crispy::defaultEnvironment(),
                        /*startPumps=*/false };
     int shutdowns = 0;
     LastSessionWatcher watcher { host, loop, [this] { ++shutdowns; } };
@@ -155,6 +156,7 @@ TEST_CASE("the last session's exit unwinds the daemon's accept loop", "[vthost][
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
                               vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
                               /*startPumps=*/false };
 
     auto listener = net::listenUnix(loop, socketPath);
@@ -210,6 +212,7 @@ TEST_CASE("the watcher unsubscribes itself before the host outlives it", "[vthos
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
                               vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
                               /*startPumps=*/false };
     auto shutdowns = 0;
     {

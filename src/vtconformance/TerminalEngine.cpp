@@ -47,7 +47,7 @@ TerminalEngine::TerminalEngine(std::unique_ptr<vtpty::Pty> device, Options optio
     settings.allowClipboardRead = true;
 
     _terminal = std::make_unique<vtbackend::Terminal>(
-        *this, std::move(device), settings, std::chrono::steady_clock::now());
+        *this, crispy::defaultEnvironment(), std::move(device), settings, std::chrono::steady_clock::now());
 
     // The frontend's half of the window: a headless engine has no font and no screen, so nothing else
     // would fill these in -- and a terminal that reports a cell of zero pixels, or a screen exactly as

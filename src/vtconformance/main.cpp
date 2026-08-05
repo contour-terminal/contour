@@ -29,7 +29,9 @@ namespace
 class ConformanceApp: public crispy::app
 {
   public:
-    ConformanceApp(): crispy::app("vtconformance", "Contour VT conformance harness", "0.1.0", "Apache-2.0")
+    /// @param env The process environment every part of the harness reads through.
+    explicit ConformanceApp(crispy::environment const& env):
+        crispy::app(env, "vtconformance", "Contour VT conformance harness", "0.1.0", "Apache-2.0")
     {
         link("vtconformance.run", [this] { return runCommand(); });
     }
@@ -184,6 +186,6 @@ class ConformanceApp: public crispy::app
 
 int main(int argc, char const* argv[])
 {
-    auto app = ConformanceApp {};
+    auto app = ConformanceApp { crispy::defaultEnvironment() };
     return app.run(argc, argv);
 }

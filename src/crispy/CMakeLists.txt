@@ -32,6 +32,7 @@ set(crispy_SOURCES
     overloaded.h
     reference.h
     ring.h
+    testing/environment.h
     times.h
     user_info.cpp user_info.h
     utils.cpp utils.h

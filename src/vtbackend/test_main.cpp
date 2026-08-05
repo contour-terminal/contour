@@ -12,7 +12,7 @@ int main(int argc, char const* argv[])
 {
     crispy::suppressWindowsDialogs();
 
-    if (auto const logFilterString = crispy::environment::get("LOG"))
+    if (auto const logFilterString = crispy::defaultEnvironment().get("LOG"))
     {
         logstore::configure(*logFilterString);
         crispy::app::customizeLogStoreOutput();

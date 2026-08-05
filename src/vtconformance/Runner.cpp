@@ -244,7 +244,7 @@ bool isProgramAvailable(std::string const& program)
     if (program.contains('/'))
         return fs::exists(program);
 
-    auto const pathEnv = crispy::environment::get("PATH");
+    auto const pathEnv = crispy::defaultEnvironment().get("PATH");
     if (!pathEnv)
         return false;
 

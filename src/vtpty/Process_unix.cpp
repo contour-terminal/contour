@@ -536,7 +536,7 @@ std::string Process::userName()
     if (auto const pw = crispy::currentUserPasswordEntry(); pw.has_value() && !pw->name.empty())
         return pw->name;
 
-    if (auto const user = crispy::environment::get("USER"); user.has_value())
+    if (auto const user = crispy::defaultEnvironment().get("USER"); user.has_value())
         return std::string { *user };
 
     return "unknown";
@@ -544,7 +544,7 @@ std::string Process::userName()
 
 fs::path Process::homeDirectory()
 {
-    if (auto const home = crispy::environment::get("HOME"); home.has_value())
+    if (auto const home = crispy::defaultEnvironment().get("HOME"); home.has_value())
         return { *home };
     else if (auto const pw = crispy::currentUserPasswordEntry(); pw.has_value() && !pw->homeDirectory.empty())
         return { pw->homeDirectory };

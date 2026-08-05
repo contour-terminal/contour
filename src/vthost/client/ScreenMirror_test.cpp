@@ -91,6 +91,7 @@ struct MirrorHarness
     SessionHost host { loop,
                        [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
                        gipSettings(ServerHistoryLines),
+                       crispy::defaultEnvironment(),
                        /*startPumps=*/false };
     net::testing::SocketPair pair = *net::testing::makeSocketPair(loop);
     std::unique_ptr<NativeSession> server = std::make_unique<NativeSession>(
@@ -107,6 +108,7 @@ struct MirrorHarness
     {
         auto settings = gipSettings(MirrorHistoryLines);
         mirror = std::make_unique<vtbackend::Terminal>(mirrorEvents,
+                                                       crispy::defaultEnvironment(),
                                                        std::make_unique<vtpty::MockPty>(settings.pageSize),
                                                        std::move(settings),
                                                        std::chrono::steady_clock::now());
@@ -238,6 +240,7 @@ struct BareMirror
         settings.pageSize = vtbackend::PageSize { vtbackend::LineCount(1), vtbackend::ColumnCount(5) };
         settings.maxHistoryLineCount = history;
         terminal = std::make_unique<vtbackend::Terminal>(events,
+                                                         crispy::defaultEnvironment(),
                                                          std::make_unique<vtpty::MockPty>(settings.pageSize),
                                                          std::move(settings),
                                                          std::chrono::steady_clock::now());

@@ -19,6 +19,8 @@
 #include <vtpty/PageSize.h>
 #include <vtpty/Pty.h>
 
+#include <crispy/environment.h>
+
 #include <functional>
 #include <memory>
 #include <optional>
@@ -117,7 +119,9 @@ class HostedSession
     ///        input batch (the host marshals it onto the loop).
     /// @param onClosed Invoked on the PUMP thread once the PTY closed and the
     ///        pump loop ended (the host marshals it onto the loop).
+    /// @param env The process environment the hosted terminal reads through.
     HostedSession(vtworkspace::SessionId id,
+                  crispy::environment const& env,
                   std::unique_ptr<vtpty::Pty> pty,
                   vtbackend::Settings settings,
                   std::function<void()> onScreenUpdated,
@@ -244,9 +248,11 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param sizePolicy How the authoritative client area is resolved when several attached
     ///        clients report different ones. Fixed at construction: two differently-configured
     ///        daemons are two different daemons, not one in two states.
+    /// @param env The process environment every session this host spawns reads through.
     SessionHost(net::EventLoop& loop,
                 PtyFactory ptyFactory,
                 vtbackend::Settings settings,
+                crispy::environment const& env,
                 bool startPumps = true,
                 ClientSizePolicy sizePolicy = ClientSizePolicy::Latest);
     ~SessionHost() override;
@@ -457,6 +463,7 @@ class SessionHost final: public vtworkspace::ModelEvents
     net::EventLoop& _loop;
     PtyFactory _ptyFactory;
     vtbackend::Settings _settings;
+    crispy::environment const& _environment;
     vtpty::PageSize _pageSize; ///< The RESOLVED authoritative client area (see pageSize()).
     bool _startPumps;
     ClientSizePolicy _sizePolicy;

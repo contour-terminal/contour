@@ -32,6 +32,7 @@
 #include <crispy/BufferObject.h>
 #include <crispy/assert.h>
 #include <crispy/defines.h>
+#include <crispy/environment.h>
 
 #include <gsl/pointers>
 
@@ -394,7 +395,15 @@ class Terminal
         void onScrollOffsetChanged(ScrollOffset) override {}
     };
 
+    /// @param eventListener   Receives everything the terminal wants its host to do.
+    /// @param env             The process environment. Read here and only here: what this terminal
+    ///                        takes from it (`$HOME`, `$CONTOUR_SYNC_PTY_OUTPUT`) describes how the
+    ///                        session was launched, so it is resolved once, at construction.
+    /// @param pty             The pseudo-terminal this drives.
+    /// @param factorySettings The settings a hard reset (RIS) restores.
+    /// @param now             The current time, as the caller's clock reads it.
     Terminal(Events& eventListener,
+             crispy::environment const& env,
              std::unique_ptr<vtpty::Pty> pty,
              Settings factorySettings,
              std::chrono::steady_clock::time_point now /* = std::chrono::steady_clock::now()*/);
@@ -1994,6 +2003,14 @@ class Terminal
     //
 
     Events& _eventListener;
+
+    /// The user's home directory, for abbreviating and expanding `~` in the paths this terminal
+    /// recognizes on screen. Empty when the environment names none.
+    std::string _homeDirectory;
+
+    /// Whether a reply is flushed to the PTY before this call returns (`$CONTOUR_SYNC_PTY_OUTPUT`).
+    /// A test-harness knob: it makes replies observable in the order they were generated.
+    bool _syncPtyOutput;
 
     // configuration state
     Settings _factorySettings;

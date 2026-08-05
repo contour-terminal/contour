@@ -32,6 +32,7 @@
 
 #include <crispy/StrongLRUHashtable.h>
 #include <crispy/assert.h>
+#include <crispy/environment.h>
 #include <crispy/flags.h>
 #include <crispy/logstore.h>
 #include <crispy/size.h>
@@ -1262,8 +1263,14 @@ struct YAMLConfigReader
     logstore::category const& logger;
     VariableReplacer variableReplacer;
 
+    /// @param filename The document to parse.
+    /// @param log      Where parse diagnostics go.
+    /// @param env      The environment `${VAR}` expands against. It must outlive this reader: the
+    ///                 default replacer holds a reference to it.
+    /// @param replacer An expansion policy of the caller's own; the default one reads @p env.
     YAMLConfigReader(std::string const& filename,
                      logstore::category const& log,
+                     crispy::environment const& env,
                      VariableReplacer replacer = {});
 
     /// Expands `${VAR}` tokens in @p input using the configured variable replacer.

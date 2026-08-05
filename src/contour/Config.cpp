@@ -11,13 +11,12 @@
 #include <text_shaper/font.h>
 
 #include <crispy/StrongHash.h>
+#include <crispy/environment.h>
 #include <crispy/escape.h>
 
-#include <yaml-cpp/emitter.h>
+#include <libunicode/convert.h>
 
-#include <QtCore/QFile>
-#include <QtCore/QString>
-#include <QtCore/QtGlobal>
+#include <yaml-cpp/emitter.h>
 
 #include <algorithm>
 #include <array>
@@ -187,25 +186,33 @@ namespace
 
     auto const configLog = logstore::category("config", "Logs configuration file loading.");
 
-    /// Reads an environment variable as the raw bytes the environment holds.
+    /// This translation unit's one environment reader.
     ///
-    /// qgetenv() rather than qEnvironmentVariable(): the latter decodes through QString's local 8-bit
-    /// codec, so under a non-UTF-8 locale any byte that codec cannot represent comes back as U+FFFD.
-    /// What is read here names filesystem paths, and a path is a byte string that has to survive
-    /// intact -- a mangled one simply does not exist, and contour then silently falls back to its
-    /// defaults as though the user's configuration had never been there.
+    /// A crispy::live_environment, constructed on the spot rather than the process-wide cached one:
+    /// `${VAR}` expansion has to see the environment as it stands when the config is read, not as it
+    /// stood when the process started. The live reader is nonetheless thread safe, which is what
+    /// rules out a bare getenv() here -- config (re)load runs while the PTY threads are live.
     ///
-    /// Not crispy::environment either: that serves an immutable snapshot taken at first access, and
-    /// `${VAR}` expansion has to see the environment as it stands when the config is read. qgetenv()
-    /// is nonetheless thread safe (Qt guards the environment with its own lock), which is what ruled
-    /// out plain getenv() here -- config (re)load runs while the PTY threads are live.
+    /// What it answers with is raw bytes rather than decoded text, because what is read here names
+    /// filesystem paths and a path is a byte string that has to survive intact -- a mangled one
+    /// simply does not exist, and contour then silently falls back to its defaults as though the
+    /// user's configuration had never been there.
+    ///
+    /// @return A reference to a function-local static; it outlives every caller.
+    [[nodiscard]] crispy::environment const& configEnvironment()
+    {
+        static crispy::live_environment const instance;
+        return instance;
+    }
+
+    /// Reads an environment variable, treating "unset" and "empty" alike.
     ///
     /// @param name Name of the variable to read.
+    /// @param env Environment to read from.
     /// @return The variable's value as raw bytes, or an empty string if it is unset.
-    [[nodiscard]] std::string environmentBytes(char const* name)
+    [[nodiscard]] std::string environmentBytes(std::string_view name, crispy::environment const& env)
     {
-        auto const value = qgetenv(name);
-        return std::string { value.constData(), static_cast<std::size_t>(value.size()) };
+        return env.get(name).value_or("");
     }
 
     /// Parses a resize/direction keyword ("Left"/"Right"/"Up"/"Down", case-insensitive) into the
@@ -320,7 +327,8 @@ namespace
 
         locations.emplace_back(Process::homeDirectory() / ".terminfo");
 
-        if (auto const terminfoDirs = environmentBytes("TERMINFO_DIRS"); !terminfoDirs.empty())
+        if (auto const terminfoDirs = environmentBytes("TERMINFO_DIRS", configEnvironment());
+            !terminfoDirs.empty())
             for (auto const dir: crispy::split(string_view(terminfoDirs), ':'))
                 locations.emplace_back(string(dir));
 
@@ -370,7 +378,7 @@ namespace
 fs::path configHome(string const& programName)
 {
 #if defined(__unix__) || defined(__APPLE__)
-    if (auto const value = environmentBytes("XDG_CONFIG_HOME"); !value.empty())
+    if (auto const value = environmentBytes("XDG_CONFIG_HOME", configEnvironment()); !value.empty())
         return fs::path { value } / programName;
     else
         return Process::homeDirectory() / ".config" / programName;
@@ -625,7 +633,7 @@ static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
         std::error_code ec;
         if (!loaded->globalOverrides.empty() && std::filesystem::exists(settingsPath, ec) && !ec)
         {
-            auto overrides = YAMLConfigReader(settingsPath.string(), configLog);
+            auto overrides = YAMLConfigReader(settingsPath.string(), configLog, configEnvironment());
             overrides.loadFromEntry("word_delimiters", config.wordDelimiters);
             overrides.loadFromEntry("read_buffer_size", config.ptyReadBufferSize);
             overrides.loadFromEntry("pty_buffer_size", config.ptyBufferObjectSize);
@@ -671,7 +679,7 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
     config.profileOrigins.clear();
     config.colorSchemeOrigins.clear();
 
-    auto yamlVisitor = YAMLConfigReader(config.configFile.string(), logger);
+    auto yamlVisitor = YAMLConfigReader(config.configFile.string(), logger, configEnvironment());
     yamlVisitor.load(config);
 
     // Merge the machine-managed sibling layouts.yml (written by SaveLayout). Its entries override
@@ -715,7 +723,7 @@ std::expected<std::unordered_map<std::string, Layout>, std::string> loadLayoutsF
         return std::unexpected(std::string(e.what()));
     }
 
-    auto reader = YAMLConfigReader(path.string(), configLog);
+    auto reader = YAMLConfigReader(path.string(), configLog, configEnvironment());
     reader.loadLayoutsInto(layouts);
     return layouts;
 }
@@ -731,15 +739,15 @@ optional<std::string> readConfigFile(std::string const& filename)
 
 YAMLConfigReader::YAMLConfigReader(std::string const& filename,
                                    logstore::category const& log,
+                                   crispy::environment const& env,
                                    VariableReplacer replacer):
     configFile(filename), logger { log }, variableReplacer { std::move(replacer) }
 {
     if (!variableReplacer)
     {
-        variableReplacer = [&log = logger](std::string_view name) -> std::string {
-            auto const key = std::string(name);
-            if (qEnvironmentVariableIsSet(key.c_str()))
-                return environmentBytes(key.c_str());
+        variableReplacer = [&log = logger, &env](std::string_view name) -> std::string {
+            if (auto value = env.get(name))
+                return std::move(*value);
             log()("Undefined environment variable: ${{{}}}", name);
             return {};
         };
@@ -2662,7 +2670,7 @@ std::optional<std::variant<vtbackend::Key, char32_t>> YAMLConfigReader::parseKey
     if (auto const key = parseKey(name); key.has_value())
         return key.value();
 
-    auto const text = QString::fromUtf8(name.c_str()).toUcs4();
+    auto const text = unicode::convert_to<char32_t>(std::string_view { name });
     if (text.size() == 1)
         // Folded, because the case a letter arrives in is decided by the input route rather than by
         // the user; the lookup in TerminalSession::sendCharEvent folds the delivered codepoint to
@@ -3710,7 +3718,7 @@ std::optional<vtbackend::ColorPalette> loadColorSchemeFile(std::filesystem::path
 
     try
     {
-        auto reader = YAMLConfigReader(path.string(), configLog);
+        auto reader = YAMLConfigReader(path.string(), configLog, configEnvironment());
         auto palette = vtbackend::ColorPalette {};
         reader.loadFromEntry(YAML::Load(*contents), palette);
         return palette;

@@ -1870,10 +1870,12 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint,
     }
     else
     {
-        auto const supersamplingFactor = []() {
+        // Read once: this is a developer knob set before the process starts, and the alternative is
+        // an environment lookup on the path that rasterizes every box-drawing glyph.
+        static auto const supersamplingFactor = []() {
             auto constexpr EnvName = "SSA_FACTOR";
             auto constexpr DefaultFactor = 4;
-            auto const envValue = crispy::environment::get(EnvName);
+            auto const envValue = crispy::defaultEnvironment().get(EnvName);
             if (!envValue)
                 return DefaultFactor;
 

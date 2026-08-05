@@ -107,11 +107,13 @@ bool hasStrandedQmlOverrides(fs::path const& configHome)
     return false;
 }
 
-ContourGuiApp::ContourGuiApp(std::unique_ptr<SessionFactory> sessionFactory,
+ContourGuiApp::ContourGuiApp(crispy::environment const& env,
+                             std::unique_ptr<SessionFactory> sessionFactory,
                              std::unique_ptr<ExternalLauncher> externalLauncher,
                              std::unique_ptr<LayoutStore> layoutStore,
                              std::unique_ptr<CommandHistoryStore> commandHistoryStore,
                              std::unique_ptr<SpeechSynthesizer> speechSynthesizer):
+    ContourApp { env },
     _sessionFactory(std::make_unique<RoutingSessionFactory>(
         sessionFactory ? std::move(sessionFactory) : std::make_unique<AppSessionFactory>(*this))),
     _routingFactory(static_cast<RoutingSessionFactory*>(_sessionFactory.get())),
