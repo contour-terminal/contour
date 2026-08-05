@@ -2,6 +2,10 @@
 #pragma once
 
 #include <algorithm>
+// std::begin/std::end, and the unqualified begin()/end() below: a C array has no associated
+// namespace for ADL to find them in, so <iterator> has to be here rather than arriving by luck
+// through whatever a consumer happened to include first.
+#include <iterator>
 
 namespace crispy
 {
