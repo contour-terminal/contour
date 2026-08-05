@@ -50,7 +50,7 @@ TEST_CASE("shellIntegrationScript serves every shell the build compiled in", "[s
 
         // A shell script with CRLF in it is a broken shell script: the CR ends up part of every
         // command. The generator folds them, and a Windows checkout is exactly where it matters.
-        CHECK(script->find('\r') == std::string_view::npos);
+        CHECK(!script->contains('\r'));
     }
 }
 
@@ -92,7 +92,7 @@ TEST_CASE("supportedShellsText names exactly the compiled-in shells", "[shell-in
     for (auto const& row: shells)
     {
         INFO("shell: " << row.name);
-        CHECK(text.find(row.name) != std::string_view::npos);
+        CHECK(text.contains(row.name));
     }
 
     // ...and names nothing else: a joined list has one separator fewer than it has entries.

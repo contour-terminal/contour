@@ -32,7 +32,7 @@ namespace
         return 'A' <= ch && ch <= 'Z' ? static_cast<char>(ch - 'A' + 'a') : ch;
     }
 #else
-    /// Serializes this translation unit's getenv() calls against one another.
+    /// Serializes this translation unit's reads of the environment block against one another.
     ///
     /// Process-wide rather than a member, because what it guards is process-wide: two
     /// live_environment instances read the same block, so a per-instance lock would serialize
@@ -54,6 +54,30 @@ namespace
         return environ;
 #endif
     }
+
+#ifndef _WIN32
+    /// Looks a name up in the environment block as it stands right now.
+    ///
+    /// A scan of the block rather than a getenv() call, which does exactly this scan and no better:
+    /// glibc's getenv() walks the same array, so a hand-rolled walk is neither slower nor less safe,
+    /// and it keeps both implementations here reading the environment through one primitive --
+    /// snapshot_environment copies the same block, once. It also avoids the thread-unsafe getenv()
+    /// that this project's clang-tidy configuration rejects outright.
+    ///
+    /// @param name Name of the variable to look up.
+    /// @return Its value, or std::nullopt if it is not set.
+    [[nodiscard]] std::optional<std::string> lookupInEnviron(std::string_view name)
+    {
+        for (char** entry = currentEnviron(); entry != nullptr && *entry != nullptr; ++entry)
+        {
+            auto const line = std::string_view { *entry };
+            if (auto const separator = line.find('=');
+                separator != std::string_view::npos && line.substr(0, separator) == name)
+                return std::string { line.substr(separator + 1) };
+        }
+        return std::nullopt;
+    }
+#endif
 } // namespace
 
 bool snapshot_environment::name_less::operator()(std::string_view a, std::string_view b) const noexcept
@@ -84,10 +108,10 @@ std::optional<std::string> snapshot_environment::get(std::string_view name) cons
 
 std::optional<std::string> live_environment::get(std::string_view name) const
 {
-    // Both platform APIs below want a NUL-terminated name, which a string_view does not promise.
+#ifdef _WIN32
+    // GetEnvironmentVariableA wants a NUL-terminated name, which a string_view does not promise.
     auto const terminatedName = std::string { name };
 
-#ifdef _WIN32
     // The Win32 block rather than the CRT's copy of it: SetEnvironmentVariable() writes the former
     // and the operating system synchronizes reads of it, whereas the CRT copy is only refreshed by
     // the CRT's own setters.
@@ -103,12 +127,10 @@ std::optional<std::string> live_environment::get(std::string_view name) const
         return std::nullopt;
     return std::string { buffer.data(), written };
 #else
-    // The copy has to happen under the lock, not after it: getenv() hands back a pointer into a
-    // block that a concurrent setenv() may reallocate.
+    // The copy has to happen under the lock, not after it: the block holds pointers that a
+    // concurrent setenv() may reallocate out from under a reader.
     auto const lock = std::scoped_lock { environmentMutex() };
-    if (char const* value = std::getenv(terminatedName.c_str()))
-        return std::string { value };
-    return std::nullopt;
+    return lookupInEnviron(name);
 #endif
 }
 

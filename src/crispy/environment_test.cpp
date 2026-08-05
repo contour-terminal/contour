@@ -6,31 +6,87 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #ifdef _WIN32
     #include <Windows.h>
 #else
-    #include <cstdlib>
+    #include <vector>
+
+    #ifdef __APPLE__
+        #include <crt_externs.h>
+    #else
+extern "C" char** environ;
+    #endif
 #endif
 
 namespace
 {
 
-/// Sets or clears a variable in the process environment, so the live/snapshot distinction can be
-/// observed. Writes the Win32 block on Windows, which is what live_environment reads there.
-/// @param name Name of the variable to write.
-/// @param value Its new value, or nullptr to unset it.
-void writeEnvironmentVariable(char const* name, char const* value)
+#ifndef _WIN32
+/// @return The process's environment block, as the readers under test see it.
+[[nodiscard]] char**& processEnviron() noexcept
 {
-#ifdef _WIN32
-    SetEnvironmentVariableA(name, value);
-#else
-    if (value != nullptr)
-        ::setenv(name, value, 1);
-    else
-        ::unsetenv(name);
-#endif
+    #ifdef __APPLE__
+    return *_NSGetEnviron();
+    #else
+    return environ;
+    #endif
 }
+#endif
+
+/// Makes a variable visible to the readers under test for as long as it is alive, and puts the
+/// environment back afterwards.
+///
+/// Not setenv()/unsetenv(): both are thread-unsafe, and this project's clang-tidy configuration
+/// rejects them outright (concurrency-mt-unsafe). What live_environment consults on POSIX is the
+/// environment block itself, so the test installs its own -- the original entries plus one -- and
+/// restores the original pointer on the way out. Windows keeps a separate block that
+/// SetEnvironmentVariableA writes and live_environment reads, so there it simply writes that.
+class scoped_variable
+{
+  public:
+    /// @param name Name of the variable to make visible.
+    /// @param value The value it should read as.
+    scoped_variable(std::string name, std::string const& value): _name { std::move(name) }
+    {
+#ifdef _WIN32
+        SetEnvironmentVariableA(_name.c_str(), value.c_str());
+#else
+        // Appended to a copy of the existing block rather than replacing it, so everything else the
+        // process (and the rest of this suite) reads from the environment survives.
+        _entry = _name + "=" + value;
+        for (char** e = _saved; e != nullptr && *e != nullptr; ++e)
+            _block.push_back(*e);
+        _block.push_back(_entry.data());
+        _block.push_back(nullptr);
+        processEnviron() = _block.data();
+#endif
+    }
+
+    ~scoped_variable()
+    {
+#ifdef _WIN32
+        SetEnvironmentVariableA(_name.c_str(), nullptr);
+#else
+        processEnviron() = _saved;
+#endif
+    }
+
+    scoped_variable(scoped_variable const&) = delete;
+    scoped_variable& operator=(scoped_variable const&) = delete;
+    scoped_variable(scoped_variable&&) = delete;
+    scoped_variable& operator=(scoped_variable&&) = delete;
+
+  private:
+    std::string _name;
+#ifndef _WIN32
+    std::string _entry;
+    /// The block to put back, captured before the constructor body installs its own.
+    char** _saved = processEnviron();
+    std::vector<char*> _block;
+#endif
+};
 
 /// Test double standing in for a real environment, as production code injects one.
 class fake_environment final: public crispy::environment
@@ -93,27 +149,24 @@ TEST_CASE("live_environment observes what a snapshot cannot", "[environment]")
     // The whole reason the live reader exists: config (re)loading expands `${VAR}` against the
     // environment as it stands at that moment, not as it stood when the process started.
     auto constexpr Name = "CONTOUR_ENVIRONMENT_TEST_VARIABLE";
-    writeEnvironmentVariable(Name, nullptr);
 
+    // Both taken before the variable exists, so the snapshot can never have seen it.
     auto const snapshot = crispy::snapshot_environment {};
     auto const live = crispy::live_environment {};
 
     REQUIRE(!snapshot.get(Name).has_value());
     REQUIRE(!live.get(Name).has_value());
 
-    writeEnvironmentVariable(Name, "observed");
-
-    CHECK(!snapshot.get(Name).has_value());
-    REQUIRE(live.get(Name).has_value());
-    CHECK(live.get(Name) == "observed");
-
-    SECTION("and observes an unset just as promptly")
     {
-        writeEnvironmentVariable(Name, nullptr);
-        CHECK(!live.get(Name).has_value());
+        auto const variable = scoped_variable { Name, "observed" };
+
+        CHECK(!snapshot.get(Name).has_value());
+        REQUIRE(live.get(Name).has_value());
+        CHECK(live.get(Name) == "observed");
     }
 
-    writeEnvironmentVariable(Name, nullptr);
+    // ...and it observes the removal just as promptly.
+    CHECK(!live.get(Name).has_value());
 }
 
 TEST_CASE("environment is reached through the interface", "[environment]")
