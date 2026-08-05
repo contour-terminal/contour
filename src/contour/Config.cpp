@@ -11,13 +11,12 @@
 #include <text_shaper/font.h>
 
 #include <crispy/StrongHash.h>
+#include <crispy/environment.h>
 #include <crispy/escape.h>
 
-#include <yaml-cpp/emitter.h>
+#include <libunicode/convert.h>
 
-#include <QtCore/QFile>
-#include <QtCore/QString>
-#include <QtCore/QtGlobal>
+#include <yaml-cpp/emitter.h>
 
 #include <algorithm>
 #include <array>
@@ -189,23 +188,23 @@ namespace
 
     /// Reads an environment variable as the raw bytes the environment holds.
     ///
-    /// qgetenv() rather than qEnvironmentVariable(): the latter decodes through QString's local 8-bit
-    /// codec, so under a non-UTF-8 locale any byte that codec cannot represent comes back as U+FFFD.
-    /// What is read here names filesystem paths, and a path is a byte string that has to survive
-    /// intact -- a mangled one simply does not exist, and contour then silently falls back to its
-    /// defaults as though the user's configuration had never been there.
+    /// crispy::live_environment rather than crispy::snapshot_environment: `${VAR}` expansion has to
+    /// see the environment as it stands when the config is read, not as it stood when the process
+    /// started. The live reader is nonetheless thread safe, which is what rules out a bare getenv()
+    /// here -- config (re)load runs while the PTY threads are live.
     ///
-    /// Not crispy::environment either: that serves an immutable snapshot taken at first access, and
-    /// `${VAR}` expansion has to see the environment as it stands when the config is read. qgetenv()
-    /// is nonetheless thread safe (Qt guards the environment with its own lock), which is what ruled
-    /// out plain getenv() here -- config (re)load runs while the PTY threads are live.
+    /// Raw bytes rather than decoded text, because what is read here names filesystem paths and a
+    /// path is a byte string that has to survive intact -- a mangled one simply does not exist, and
+    /// contour then silently falls back to its defaults as though the user's configuration had
+    /// never been there.
     ///
     /// @param name Name of the variable to read.
+    /// @param env Environment to read from; the process's own live environment by default.
     /// @return The variable's value as raw bytes, or an empty string if it is unset.
-    [[nodiscard]] std::string environmentBytes(char const* name)
+    [[nodiscard]] std::string environmentBytes(
+        char const* name, crispy::environment const& env = crispy::defaultLiveEnvironment())
     {
-        auto const value = qgetenv(name);
-        return std::string { value.constData(), static_cast<std::size_t>(value.size()) };
+        return env.get(name).value_or("");
     }
 
     /// Parses a resize/direction keyword ("Left"/"Right"/"Up"/"Down", case-insensitive) into the
@@ -738,8 +737,8 @@ YAMLConfigReader::YAMLConfigReader(std::string const& filename,
     {
         variableReplacer = [&log = logger](std::string_view name) -> std::string {
             auto const key = std::string(name);
-            if (qEnvironmentVariableIsSet(key.c_str()))
-                return environmentBytes(key.c_str());
+            if (auto value = crispy::defaultLiveEnvironment().get(key))
+                return std::move(*value);
             log()("Undefined environment variable: ${{{}}}", name);
             return {};
         };
@@ -2662,7 +2661,7 @@ std::optional<std::variant<vtbackend::Key, char32_t>> YAMLConfigReader::parseKey
     if (auto const key = parseKey(name); key.has_value())
         return key.value();
 
-    auto const text = QString::fromUtf8(name.c_str()).toUcs4();
+    auto const text = unicode::convert_to<char32_t>(std::string_view { name });
     if (text.size() == 1)
         // Folded, because the case a letter arrives in is decided by the input route rather than by
         // the user; the lookup in TerminalSession::sendCharEvent folds the delivered codepoint to

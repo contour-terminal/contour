@@ -35,26 +35,25 @@ NumberToHex(${PROJECT_VERSION_PATCH} HEX_PATCH)
 #     readback test. It must be requested here explicitly: relying on a sibling subdirectory's
 #     find_package to have populated the Qt6::GuiPrivate target is order-dependent and fails on some
 #     Qt packagings (e.g. Homebrew Qt on macOS), where contour_gui_test then cannot link it.
-# NB: without the GUI frontend none of that is reachable -- what is left is `contour daemon` and
-#     the CLI verbs, which need Core alone. Asking for the rest anyway would make a headless build
-#     require a Qt that renders, which is the whole point of not building the frontend.
+# NB: without the GUI frontend, Qt is not looked for at all. What is left of the binary is
+#     `contour daemon` and the CLI verbs, and none of them touches Qt: the message handler in
+#     main.cpp is compiled out, the shell-integration scripts are embedded as C++ data rather than
+#     as a Qt resource, and Config.cpp reads the environment through crispy::environment. Requiring
+#     Qt for that build would put a Qt that renders in the way of the very configuration whose point
+#     is not to render -- and on a platform where Qt6 does not exist, in the way of building at all.
 if(CONTOUR_FRONTEND_GUI)
     # Gating GuiPrivate needs Qt6_VERSION, which nothing but find_package(Qt6) sets -- hence this
-    # lookup, one line ahead of the gate that reads it. Inside the branch on purpose: it exists for
-    # the GUI's version check alone, and the headless build below asks for Core in its own right.
+    # lookup, one line ahead of the gate that reads it.
     find_package(Qt6 COMPONENTS Core REQUIRED)
     set(QT_COMPONENTS Core Gui Qml Quick QuickControls2 Network Multimedia Widgets DBus)
     if(Qt6_VERSION VERSION_GREATER_EQUAL 6.10)
         list(APPEND QT_COMPONENTS GuiPrivate)
     endif()
-else()
-    set(QT_COMPONENTS Core)
+
+    message(STATUS "Qt components: ${QT_COMPONENTS}")
+    find_package(Qt6 COMPONENTS ${QT_COMPONENTS} REQUIRED)
 endif()
 # }}}
-
-message(STATUS "Qt components: ${QT_COMPONENTS}")
-
-find_package(Qt6 COMPONENTS ${QT_COMPONENTS} REQUIRED)
 
 # {{{ Optional features excluded from this build
 # The Qt version CI builds and validates against. Building against an older Qt is supported, but a
@@ -142,7 +141,6 @@ set(_header_files
     CommandHistoryStore.h
     Config.h
     ContextMenu.h
-    ContextMenuModel.h
     ContextMenuTable.h
     TitleBarContextMenu.h
     ContourApp.h
@@ -205,7 +203,6 @@ set(_core_source_files
     CommandHistoryStore.cpp
     Config.cpp
     ContextMenu.cpp
-    ContextMenuModel.cpp
     TitleBarContextMenu.cpp
     ContourApp.cpp
     FuzzyFilter.cpp
@@ -231,6 +228,7 @@ if(CONTOUR_FRONTEND_GUI)
         AudioNote.h
         BlurBehind.h
         CommandPaletteModel.h
+        ContextMenuModel.h
         ContourGuiApp.h
         ExitCode.h
         ExternalLauncher.h
@@ -257,6 +255,7 @@ if(CONTOUR_FRONTEND_GUI)
         Audio.cpp
         BlurBehind.cpp
         CommandPaletteModel.cpp
+        ContextMenuModel.cpp
         ContourGuiApp.cpp
         FreeDesktopNotifier.cpp
         KeyboardLayout.cpp
@@ -412,8 +411,13 @@ if(CONTOUR_FRONTEND_GUI)
 
 endif()
 
-set(_qt_resources resources.qrc)
-qt_add_resources(_qt_resources ${_qt_resources})
+# Everything in resources.qrc is GUI-only (the bell sounds and the window icon), so a GUI-less build
+# neither compiles it nor needs the resource compiler that would come with the Qt package.
+set(_qt_resources "")
+if(CONTOUR_FRONTEND_GUI)
+    set(_qt_resources resources.qrc)
+    qt_add_resources(_qt_resources ${_qt_resources})
+endif()
 
 source_group(Sources FILES ${_core_source_files} ${_main_source_files})
 source_group(Headers FILES ${_header_files})
@@ -427,20 +431,34 @@ add_library(contour_core OBJECT)
 target_sources(contour_core
     PRIVATE ${_core_source_files} ${_header_files} ${_qt_resources} "${_shell_integration_data}")
 
-set_target_properties(contour_core PROPERTIES AUTOMOC ON)
-set_target_properties(contour_core PROPERTIES AUTORCC ON)
+# Both moc and rcc are Qt tools, and without the GUI frontend there is nothing for either to do:
+# every Q_OBJECT in this directory belongs to a GUI-only translation unit, and resources.qrc is not
+# compiled above. Leaving them on would merely ask a Qt-free build for Qt's code generators.
+if(CONTOUR_FRONTEND_GUI)
+    set_target_properties(contour_core PROPERTIES AUTOMOC ON)
+    set_target_properties(contour_core PROPERTIES AUTORCC ON)
+endif()
 
 # Both the binary dir (for generated headers) and the parent src dir (so "#include <contour/...>"
 # resolves) must be PUBLIC so consumers of the object library inherit them.
 target_include_directories(contour_core PUBLIC "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/..")
 # }}}
 
-qt_add_executable(contour)
+# qt_add_executable() is a Qt command, and it does Qt things -- QML plugin importing, the Android and
+# macOS finalizers. A GUI-less build wants a plain command-line executable and, more to the point,
+# must not need the Qt CMake package to declare one.
+if(CONTOUR_FRONTEND_GUI)
+    qt_add_executable(contour)
+else()
+    add_executable(contour)
+endif()
 target_sources(contour PRIVATE ${_main_source_files})
 target_link_libraries(contour PRIVATE contour_core)
 
-set_target_properties(contour PROPERTIES AUTOMOC ON)
-set_target_properties(contour PROPERTIES AUTORCC ON)
+if(CONTOUR_FRONTEND_GUI)
+    set_target_properties(contour PROPERTIES AUTOMOC ON)
+    set_target_properties(contour PROPERTIES AUTORCC ON)
+endif()
 
 target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 
@@ -460,7 +478,9 @@ target_compile_definitions(contour_core PUBLIC
 )
 
 # Disable all deprecated Qt functions prior to Qt 6.0
-target_compile_definitions(contour_core PUBLIC QT_DISABLE_DEPRECATED_BEFORE=0x050F00)
+if(CONTOUR_FRONTEND_GUI)
+    target_compile_definitions(contour_core PUBLIC QT_DISABLE_DEPRECATED_BEFORE=0x050F00)
+endif()
 
 # Create custom target to execute contour
 add_custom_target(run COMMAND contour)
@@ -534,15 +554,15 @@ target_link_libraries(contour_core
     vtbackend
     vtrasterizer
     vtworkspace
-    Qt6::Core
     ${YAML_CPP_LIBRARIES}
     PRIVATE
     vthost
 )
 
-# The QML modules are GUI-only (see the guard above), so the dependency on them is too.
+# The QML modules are GUI-only (see the guard above), so the dependency on them is too -- as is
+# Qt6::Core itself, which no longer has a single caller outside the frontend.
 if(CONTOUR_FRONTEND_GUI)
-    target_link_libraries(contour_core PUBLIC contour_qml contour_tui_style)
+    target_link_libraries(contour_core PUBLIC Qt6::Core contour_qml contour_tui_style)
 endif()
 
 # {{{ GUI: Declare Qt build dependencies
@@ -949,22 +969,30 @@ endfunction()
 # }}}
 
 if(WIN32)
-    include(DeployQt)
-    windeployqt(contour)
     install(TARGETS contour DESTINATION bin)
-    install(
-        DIRECTORY "$<TARGET_FILE_DIR:contour>/"
-        DESTINATION "bin"
-        USE_SOURCE_PERMISSIONS
-        FILES_MATCHING
-            PATTERN "CMakeFiles" EXCLUDE
-            PATTERN "*_autogen" EXCLUDE
-            PATTERN "*.h" EXCLUDE
-            PATTERN "*_test.*" EXCLUDE
-            PATTERN "*.pdb" EXCLUDE
-            PATTERN "unicode_tablegen.exe" EXCLUDE
-            PATTERN "*"
-    )
+    # windeployqt stages the Qt runtime beside the executable, and the directory install below exists
+    # to pick that staging up. Both are gated, because a GUI-less build links no Qt: there would be
+    # nothing to deploy, DeployQt.cmake's find_package(Qt6Core REQUIRED) would put Qt back in the way
+    # of the one configuration whose point is not to need it, and what remains to install is the
+    # single command-line executable already installed above. This is the Windows twin of the
+    # app-bundle gate that CONTOUR_MACOS_APP_BUNDLE makes below.
+    if(CONTOUR_FRONTEND_GUI)
+        include(DeployQt)
+        windeployqt(contour)
+        install(
+            DIRECTORY "$<TARGET_FILE_DIR:contour>/"
+            DESTINATION "bin"
+            USE_SOURCE_PERMISSIONS
+            FILES_MATCHING
+                PATTERN "CMakeFiles" EXCLUDE
+                PATTERN "*_autogen" EXCLUDE
+                PATTERN "*.h" EXCLUDE
+                PATTERN "*_test.*" EXCLUDE
+                PATTERN "*.pdb" EXCLUDE
+                PATTERN "unicode_tablegen.exe" EXCLUDE
+                PATTERN "*"
+        )
+    endif()
 elseif(CONTOUR_MACOS_APP_BUNDLE)
     # See: https://stackoverflow.com/questions/35612687/cmake-macos-x-bundle-with-bundleutiliies-for-qt-application/48035834#48035834
     set(APP_NAME contour)

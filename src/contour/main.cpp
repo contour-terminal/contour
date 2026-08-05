@@ -1,21 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#include <contour/BenignQtMessages.h>
-
+// Everything Qt in this file serves the message handler installed below, which exists to tidy up
+// what Qt itself prints. A build without the GUI frontend links no Qt, so nothing there emits a Qt
+// message and there is no handler to install.
 #ifdef CONTOUR_FRONTEND_GUI
+    #include <contour/BenignQtMessages.h>
     #include <contour/ContourGuiApp.h>
+
+    #include <QtCore/QByteArray>
+    #include <QtCore/QString>
+
+    #if __has_include(<QtCore/QtLogging>)
+        #include <QtCore/QtLogging>
+    #endif
 #else
     #include <contour/ContourApp.h>
 #endif
 
 #include <crispy/SuppressWindowsDialogs.hpp>
-
-#include <QtCore/QByteArray>
-#include <QtCore/QString>
-
-#if __has_include(<QtCore/QtLogging>)
-    #include <QtCore/QtLogging>
-#endif
 
 #include <cstddef>
 #include <cstdio>
@@ -93,6 +95,7 @@ void tryAttachConsole()
 }
 #endif
 
+#ifdef CONTOUR_FRONTEND_GUI
 /// Human-readable severity prefix for a Qt message type.
 /// @param type The Qt message severity.
 /// @return The prefix printed ahead of the message text.
@@ -142,6 +145,7 @@ void qtCustomMessageOutput(QtMsgType type, QMessageLogContext const& context, QS
     if (type == QtFatalMsg)
         abort();
 }
+#endif
 } // namespace
 
 int main(int argc, char const* argv[])
@@ -156,9 +160,9 @@ int main(int argc, char const* argv[])
         crispy::suppressWindowsDialogs();
 #endif
 
+#ifdef CONTOUR_FRONTEND_GUI
     qInstallMessageHandler(qtCustomMessageOutput);
 
-#ifdef CONTOUR_FRONTEND_GUI
     contour::ContourGuiApp app;
 #else
     // Without the GUI frontend there is no window to open, so `contour client` is gone with it;

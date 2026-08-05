@@ -219,12 +219,14 @@ endif()
 
 # A search-path hint, not a requirement: cmake/FindQt.cmake returns immediately on Linux and the
 # BSDs, and on Windows and macOS only appends whatever Qt it discovers to CMAKE_PREFIX_PATH, saying
-# so in a status line when it finds none. It stays unconditional because CONTOUR_FRONTEND_GUI=OFF
-# still links Qt6::Core -- main.cpp installs a Qt message handler, ContourApp uses QFile, and the
-# resource compiler comes from the Qt package -- so skipping the hint would break that build on any
-# Windows or macOS machine whose Qt is not already on CMAKE_PREFIX_PATH. Only the Qt
-# Quick/QML/Widgets half is optional, and src/contour guards every lookup of it.
-include(FindQt)
+# so in a status line when it finds none.
+#
+# Guarded all the same, because a hint that finds nothing still prints as though something were
+# missing. Without the GUI frontend nothing in the build asks for Qt at all -- src/contour looks it
+# up only inside the same guard -- so a machine with no Qt installed should hear nothing about it.
+if(CONTOUR_FRONTEND_GUI)
+    include(FindQt)
+endif()
 
 # The vendored third-party code (fetched via CPM/FetchContent) must NOT be run through clang-tidy: it
 # has no .clang-tidy config (clang-tidy then aborts with "no checks enabled") and is not ours to lint.

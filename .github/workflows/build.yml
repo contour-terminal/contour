@@ -161,6 +161,11 @@ jobs:
         wget https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
         sudo ./llvm.sh ${LLVM_VERSION}
+    # CMAKE_DISABLE_FIND_PACKAGE_Qt6 makes every find_package(Qt6 ...) fail, so this configuration
+    # cannot merely happen to build against a Qt that is lying around -- it has to want none. The
+    # step above installed Qt, which is what makes the assertion worth anything: the point is not
+    # that Qt is absent from the runner, it is that the build never reaches for it. Issue #2042 is
+    # reported from a machine where Qt6 does not exist at all.
     - name: "cmake"
       run: |
         cmake \
@@ -170,14 +175,26 @@ jobs:
               -D CONTOUR_WAYLAND=OFF \
               -D CONTOUR_FRONTEND_GUI=OFF \
               -D CONTOUR_TESTING=ON \
+              -D CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON \
               -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}"
     - name: "build"
       run: cmake --build build --target contour
+    # ...and that the linked result carries no Qt either, which the configure-time gate above cannot
+    # see: a transitive Qt6::Core from some other target would still land here.
+    - name: "verify the binary links no Qt"
+      run: |
+        set -eu
+        if ldd build/src/contour/contour | grep -i "libQt"; then
+          echo "::error::GUI-less build links Qt"
+          exit 1
+        fi
     # contour_e2e_cli_verbs asserts the verb surface this configuration is supposed to expose --
-    # `daemon` present, `client` gone. It is a ctest test rather than a step of this job, so it
-    # also runs in the ordinary GUI builds, where it asserts the other half.
+    # `daemon` present, `client` gone. contour_e2e_shell_integration asserts that `generate
+    # integration` still emits the scripts verbatim, which is the verb that used to read them out of
+    # a Qt resource. Both are ctest tests rather than steps of this job, so they also run in the
+    # ordinary GUI builds, where they assert the other half.
     - name: "tests"
-      run: ctest --test-dir build -R contour_e2e_cli_verbs --output-on-failure
+      run: ctest --test-dir build -R "contour_e2e_cli_verbs|contour_e2e_shell_integration" --output-on-failure
     # Building is not the same as being installable: this configuration reached issue #1780 with a
     # `contour` binary that compiled and an install target that errored out on a missing one. The
     # install rules are a per-configuration decision, so they need a per-configuration run.
@@ -207,6 +224,8 @@ jobs:
     # CONTOUR_INSTALL_BREW_QT: install-deps.sh leaves Qt out on macOS because Homebrew's split
     # per-module prefixes break macdeployqt for release bundles. This build makes no bundle, so the
     # Homebrew Qt is exactly the "dev build that is never packaged" case that script documents.
+    # It is installed here even though this configuration must not use it, for the same reason as in
+    # the Linux job: a Qt that is present and still untouched is the assertion worth making.
     - name: "install dependencies"
       run: env CONTOUR_INSTALL_BREW_QT=ON QTVER=6 ./scripts/install-deps.sh
     - name: "cmake"
@@ -215,7 +234,8 @@ jobs:
               --preset appleclang-debug \
               -B build \
               -D CONTOUR_FRONTEND_GUI=OFF \
-              -D CONTOUR_TESTING=OFF
+              -D CONTOUR_TESTING=OFF \
+              -D CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON
     - name: "verify no app-bundle machinery was generated"
       run: |
         set -eu
