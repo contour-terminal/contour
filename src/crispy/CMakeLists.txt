@@ -34,7 +34,7 @@ set(crispy_SOURCES
     Overloaded.hpp
     Reference.hpp
     Ring.hpp
-    testing/environment.hpp
+    testing/Environment.hpp
     Times.hpp
     UserInfo.cpp UserInfo.hpp
     Utils.cpp Utils.hpp
