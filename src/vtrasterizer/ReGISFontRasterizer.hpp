@@ -29,7 +29,7 @@ namespace vtrasterizer
 /// @param ascender        Font ascender in pixels, positive, measured up from the baseline.
 /// @param descender       Font descender in pixels, negative, measured down from the baseline.
 /// @param glyphTopBearing Glyph bitmap top above the baseline in pixels, positive up
-///                        (@c text::rasterized_glyph::position.y).
+///                        (@c text::RasterizedGlyph::position.y).
 /// @return Row offset from the cell top for the glyph bitmap's top row; may be negative when the
 ///         glyph is taller than the cell (the caller clips out-of-cell rows).
 [[nodiscard]] constexpr int regisGlyphBaselineOffsetY(int cellHeight,
@@ -49,7 +49,7 @@ namespace vtrasterizer
 /// default, and the display injects this so ReGIS text renders through the same font engine as normal
 /// terminal text -- without vtbackend ever depending on the font stack.
 ///
-/// It owns a dedicated @ref text::shaper so it can be called from the terminal's parser thread
+/// It owns a dedicated @ref text::Shaper so it can be called from the terminal's parser thread
 /// without racing the render thread's shaper. A single instance is shared across every session bound
 /// to a display, so @ref rasterize serializes access to the shaper with @ref _mutex -- two sessions
 /// may drive ReGIS text on their own parser threads at the same time.
@@ -58,14 +58,14 @@ class ReGISFontRasterizer final: public vtbackend::regis::ReGISTextRasterizer
   public:
     /// @param dpi The display DPI, used to size fonts for a requested pixel cell.
     /// @param font The font to shape ReGIS text with (typically the profile's regular font).
-    ReGISFontRasterizer(text::DPI dpi, text::font_description font);
+    ReGISFontRasterizer(text::DPI dpi, text::FontDescription font);
 
     [[nodiscard]] std::optional<vtbackend::regis::ReGISGlyphBitmap> rasterize(
         char32_t codepoint, vtpty::ImageSize cellSize) const override;
 
   private:
-    std::unique_ptr<text::shaper> _shaper;
-    text::font_description _font;
+    std::unique_ptr<text::Shaper> _shaper;
+    text::FontDescription _font;
     text::DPI _dpi;
 
     /// Serializes access to @ref _shaper (which is not thread-safe) and @ref _cachedFont across the
@@ -76,7 +76,7 @@ class ReGISFontRasterizer final: public vtbackend::regis::ReGISTextRasterizer
     /// point size), so this avoids reloading the font -- and rebuilding its fallback chain -- for every
     /// glyph. Keying by size rather than holding a single entry keeps sessions that render at different
     /// sizes from evicting each other on every glyph. Guarded by @ref _mutex.
-    mutable std::unordered_map<int, text::font_key> _fontKeyByPointSize;
+    mutable std::unordered_map<int, text::FontKey> _fontKeyByPointSize;
 };
 
 } // namespace vtrasterizer

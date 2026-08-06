@@ -126,7 +126,7 @@ TerminalDisplay::TerminalDisplay(QQuickItem* parent):
     _lastFontDPI = fontDPI();
 
     startupLog()("TerminalDisplay constructed (QML component instantiation reached)");
-    auto const timer = crispy::scoped_timer(startupLog, "TerminalDisplay constructor");
+    auto const timer = crispy::ScopedTimer(startupLog, "TerminalDisplay constructor");
     initializeDisplayResources();
 
     setFlag(Flag::ItemIsFocusScope);
@@ -318,7 +318,7 @@ void TerminalDisplay::setSession(session::TerminalSession* newSession)
 
     if (!_renderer)
     {
-        auto const timer = crispy::scoped_timer(startupLog, "Renderer construction");
+        auto const timer = crispy::ScopedTimer(startupLog, "Renderer construction");
         // The profile's own margin, scaled to device pixels, exactly as applyResize() derives it
         // (@see geometry::fitPageToPixels, which takes left/top straight from these). Seeded here so
         // the published grid origin is right from the very first event rather than from the first
@@ -360,7 +360,7 @@ void TerminalDisplay::setSession(session::TerminalSession* newSession)
     // guessing a cell size. UnixPty::resizeScreen() stashes a size reported before start() precisely so
     // this ordering works.
     {
-        auto const timer = crispy::scoped_timer(startupLog, "Session start");
+        auto const timer = crispy::ScopedTimer(startupLog, "Session start");
         _session->start();
     }
 
@@ -1121,7 +1121,7 @@ void TerminalDisplay::paint()
             auto const destination = _saveScreenshot.value();
             _saveScreenshot = std::nullopt;
             requestScreenshot([destination](QImage const& image) {
-                std::visit(crispy::overloaded { [&](std::filesystem::path const& path) {
+                std::visit(crispy::Overloaded { [&](std::filesystem::path const& path) {
                                                    image.save(QString::fromStdString(path.string()));
                                                },
                                                 [&](std::monostate) {
@@ -1744,7 +1744,7 @@ void TerminalDisplay::doDumpStateInternal()
     Require(_renderer);
 
     // clang-format off
-    auto const targetBaseDir = _session->app().dumpStateAtExit().value_or(crispy::app::instance()->localStateDir() / "dump");
+    auto const targetBaseDir = _session->app().dumpStateAtExit().value_or(crispy::App::instance()->localStateDir() / "dump");
     auto const workDirName = fs::path(std::format("contour-dump-{:%Y-%m-%d-%H-%M-%S}", chrono::system_clock::now()));
     auto const targetDir = targetBaseDir / workDirName;
     auto const latestDirName = fs::path("latest");
@@ -1959,7 +1959,7 @@ void TerminalDisplay::updateReGISTextRasterizer()
     _session->terminal().setReGISTextRasterizer(_regisTextRasterizer);
 }
 
-bool TerminalDisplay::setFontSize(text::font_size newFontSize)
+bool TerminalDisplay::setFontSize(text::FontSize newFontSize)
 {
     Require(_renderer != nullptr);
 

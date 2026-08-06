@@ -197,7 +197,7 @@ namespace
                     "double",
                     [](TerminalProfile const& p) { return QVariant(p.fonts.value().size.pt); },
                     [](TerminalProfile& p, QVariant const& v) {
-                        p.fonts.value().size = text::font_size { v.toDouble() };
+                        p.fonts.value().size = text::FontSize { v.toDouble() };
                     } },
                   boolField("draw_bold_text_with_bright_colors",
                             "Bold text uses bright colors",

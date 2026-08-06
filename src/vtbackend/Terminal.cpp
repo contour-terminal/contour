@@ -163,7 +163,7 @@ namespace // {{{ helpers
 // }}}
 
 Terminal::Terminal(Events& eventListener,
-                   crispy::environment const& env,
+                   crispy::Environment const& env,
                    std::unique_ptr<vtpty::Pty> pty,
                    Settings factorySettings,
                    chrono::steady_clock::time_point now):
@@ -899,7 +899,7 @@ void Terminal::updateIndicatorStatusLine()
     _colorPalette.defaultForeground = colors.foreground;
     _colorPalette.defaultBackground = colors.background;
 
-    auto const _ = crispy::finally { [&]() {
+    auto const _ = crispy::Finally { [&]() {
         // Cleaning up.
         _colorPalette.defaultForeground = backupForeground;
         _colorPalette.defaultBackground = backupBackground;

@@ -70,7 +70,7 @@ namespace vthost
 [[nodiscard]] inline std::filesystem::path muxSocketPath(
     std::string_view label = "default",
     std::string_view explicitPath = {},
-    crispy::environment const& env = crispy::defaultEnvironment())
+    crispy::Environment const& env = crispy::defaultEnvironment())
 {
     // Held in named locals, because the pure core above views them rather than owning them.
     auto const contourMux = env.get("CONTOUR_MUX");

@@ -63,7 +63,7 @@ std::size_t ChannelPty::bufferedOutputBytes() const
     return _outputBuffer.size();
 }
 
-std::optional<Pty::ReadResult> ChannelPty::read(crispy::buffer_object<char>& storage,
+std::optional<Pty::ReadResult> ChannelPty::read(crispy::BufferObject<char>& storage,
                                                 std::optional<std::chrono::milliseconds> timeout,
                                                 size_t size)
 {

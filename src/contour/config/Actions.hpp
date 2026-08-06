@@ -292,7 +292,7 @@ concept NonRepeatableActionConcept = crispy::one_of<T,
 /// member), false otherwise.
 [[nodiscard]] inline bool isNonRepeatable(Action const& action) noexcept
 {
-    return std::visit(crispy::overloaded {
+    return std::visit(crispy::Overloaded {
                           [](NonRepeatableActionConcept auto const&) { return true; },
                           [](auto const&) { return false; },
                       },
@@ -348,7 +348,7 @@ concept ParameterizedActionConcept = crispy::one_of<T,
 /// ParameterizedActionConcept member), false if it is runnable as-is.
 [[nodiscard]] inline bool isParameterized(Action const& action) noexcept
 {
-    return std::visit(crispy::overloaded {
+    return std::visit(crispy::Overloaded {
                           [](ParameterizedActionConcept auto const&) { return true; },
                           [](auto const&) { return false; },
                       },
@@ -839,7 +839,7 @@ struct std::formatter<contour::actions::Direction>: std::formatter<std::string_v
 {
     using namespace contour::actions;
     return std::visit(
-        crispy::overloaded {
+        crispy::Overloaded {
             [](ResizePane const& a) {
                 return std::format(", direction: {}, percent: {}", a.direction, a.percent);
             },

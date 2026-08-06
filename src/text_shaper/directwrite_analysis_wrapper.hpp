@@ -15,13 +15,13 @@ using Microsoft::WRL::RuntimeClassFlags;
 
 namespace text
 {
-class dwrite_analysis_wrapper:
+class DWriteAnalysisWrapper:
     public RuntimeClass<RuntimeClassFlags<ClassicCom | InhibitFtmBase>,
                         IDWriteTextAnalysisSource,
                         IDWriteTextAnalysisSink>
 {
   public:
-    dwrite_analysis_wrapper(std::wstring const& _text, std::wstring const& _userLocale):
+    DWriteAnalysisWrapper(std::wstring const& _text, std::wstring const& _userLocale):
         text(_text), userLocale(_userLocale)
     {
     }
@@ -34,10 +34,10 @@ class dwrite_analysis_wrapper:
         *textString = nullptr;
         *textLength = 0;
 
-        if (textPosition < text.size())
+        if (textPosition < text.Size())
         {
             *textString = &text.at(textPosition);
-            *textLength = text.size() - textPosition;
+            *textLength = text.Size() - textPosition;
         }
 
         return S_OK;
@@ -50,7 +50,7 @@ class dwrite_analysis_wrapper:
         *textString = nullptr;
         *textLength = 0;
 
-        if (textPosition > 0 && textPosition <= text.size())
+        if (textPosition > 0 && textPosition <= text.Size())
         {
             *textString = text.data();
             *textLength = textPosition;
@@ -70,7 +70,7 @@ class dwrite_analysis_wrapper:
                           _Outptr_result_z_ WCHAR const** localeName) override
     {
         *localeName = userLocale.c_str();
-        *textLength = text.size() - textPosition;
+        *textLength = text.Size() - textPosition;
 
         return S_OK;
     }
@@ -81,7 +81,7 @@ class dwrite_analysis_wrapper:
     {
 
         *numberSubstitution = nullptr;
-        *textLength = text.size() - textPosition;
+        *textLength = text.Size() - textPosition;
 
         return S_OK;
     }

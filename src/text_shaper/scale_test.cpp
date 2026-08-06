@@ -12,8 +12,8 @@ using namespace vtbackend;
 
 TEST_CASE("scale alpha mask", "[scale]")
 {
-    rasterized_glyph glyph;
-    glyph.format = bitmap_format::alpha_mask;
+    RasterizedGlyph glyph;
+    glyph.format = BitmapFormat::AlphaMask;
     glyph.bitmapSize = ImageSize { Width(10), Height(10) };
     glyph.bitmap.resize(static_cast<std::size_t>(10 * 10), 0xFF);
     glyph.position = { .x = 0, .y = 0 };
@@ -22,7 +22,7 @@ TEST_CASE("scale alpha mask", "[scale]")
 
     auto [scaled, factor] = scale(glyph, targetSize);
 
-    CHECK(scaled.format == bitmap_format::alpha_mask);
+    CHECK(scaled.format == BitmapFormat::AlphaMask);
     CHECK(scaled.bitmapSize.width == Width(5));
     CHECK(scaled.bitmapSize.height == Height(5));
     CHECK(factor == 2.0f);
@@ -30,8 +30,8 @@ TEST_CASE("scale alpha mask", "[scale]")
 
 TEST_CASE("scale non-integer ratio RGBA", "[scale]")
 {
-    rasterized_glyph glyph;
-    glyph.format = bitmap_format::rgba;
+    RasterizedGlyph glyph;
+    glyph.format = BitmapFormat::RGBA;
     glyph.bitmapSize = ImageSize { Width(100), Height(100) };
     glyph.bitmap.resize(static_cast<std::size_t>(100 * 100 * 4), 255); // Fill with white
     glyph.position = { .x = 0, .y = 0 };

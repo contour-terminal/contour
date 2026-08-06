@@ -103,7 +103,7 @@ constexpr bool operator!=(Margin const& a, PageSize b) noexcept
 }
 // }}}
 
-using Lines = crispy::ring<Line>;
+using Lines = crispy::Ring<Line>;
 
 struct RenderPassHints
 {

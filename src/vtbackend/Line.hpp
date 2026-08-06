@@ -53,7 +53,7 @@ struct TrivialLineBuffer
     HyperlinkId hyperlink {};
 
     ColumnCount usedColumns {};
-    crispy::buffer_fragment<char> text {};
+    crispy::BufferFragment<char> text {};
 
     void reset(GraphicsAttributes attributes) noexcept
     {

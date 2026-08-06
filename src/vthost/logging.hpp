@@ -32,31 +32,31 @@ namespace vthost
 /// feedback that the daemon came up and which sockets it bound. Keep this category
 /// BANNER-GRADE — anything chattier belongs in one of the disabled categories below, or it
 /// will spam a user who never asked for logging.
-auto inline const daemonLog = logstore::category("vthost.daemon",
+auto inline const daemonLog = logstore::Category("vthost.daemon",
                                                  "Daemon lifecycle: endpoints bound, listeners "
                                                  "started, shutdown and what asked for it "
                                                  "(a signal, or the last session closing).",
-                                                 logstore::category::state::Enabled);
+                                                 logstore::Category::State::Enabled);
 
 auto inline const connectionLog =
-    logstore::category("vthost.conn", "Client connections: accept, handshake, disconnect and why.");
+    logstore::Category("vthost.conn", "Client connections: accept, handshake, disconnect and why.");
 
-auto inline const sessionLog = logstore::category("vthost.session",
+auto inline const sessionLog = logstore::Category("vthost.session",
                                                   "Hosted session lifecycle: spawn, PTY-factory "
                                                   "failure, model refusal, resize, exit.");
 
-auto inline const tmuxLog = logstore::category("vthost.tmux",
+auto inline const tmuxLog = logstore::Category("vthost.tmux",
                                                "tmux control-mode and imsg endpoints: attach, "
                                                "rejection, failure.");
 
-auto inline const clientLog = logstore::category("vthost.client",
+auto inline const clientLog = logstore::Category("vthost.client",
                                                  "Native-protocol CLIENT engine: connect, "
                                                  "handshake, disconnect, failures.");
 
 auto inline const protocolTraceLog =
-    logstore::category("vthost.trace.proto", "Traces every native PDU sent and received.");
+    logstore::Category("vthost.trace.proto", "Traces every native PDU sent and received.");
 
 auto inline const tmuxTraceLog =
-    logstore::category("vthost.trace.tmux", "Traces every tmux control-mode line, both directions.");
+    logstore::Category("vthost.trace.tmux", "Traces every tmux control-mode line, both directions.");
 
 } // namespace vthost

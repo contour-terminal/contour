@@ -12,9 +12,9 @@ using namespace std;
 using namespace std::string_view_literals;
 
 // NOLINTBEGIN(misc-const-correctness,readability-function-cognitive-complexity)
-TEST_CASE("strong_lru_cache.operator_index", "")
+TEST_CASE("StrongLRUCache.operator_index", "")
 {
-    auto cache = strong_lru_cache<int, string_view>(strong_hashtable_size { 8 }, lru_capacity { 4 });
+    auto cache = StrongLRUCache<int, string_view>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
 
     cache[1] = "1"sv;
     REQUIRE(cache[1] == "1"sv);
@@ -41,9 +41,9 @@ TEST_CASE("strong_lru_cache.operator_index", "")
     REQUIRE(joinHumanReadable(cache.keys()) == "6, 5, 4, 3");
 }
 
-TEST_CASE("strong_lru_cache.at", "")
+TEST_CASE("StrongLRUCache.at", "")
 {
-    auto cache = strong_lru_cache<int, string>(strong_hashtable_size { 8 }, lru_capacity { 4 });
+    auto cache = StrongLRUCache<int, string>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = std::to_string(i);
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
@@ -52,9 +52,9 @@ TEST_CASE("strong_lru_cache.at", "")
     CHECK_NOTHROW(cache.at(1));
 }
 
-TEST_CASE("strong_lru_cache.clear", "[lrucache]")
+TEST_CASE("StrongLRUCache.clear", "[lrucache]")
 {
-    auto cache = strong_lru_cache<int, string>(strong_hashtable_size { 8 }, lru_capacity { 4 });
+    auto cache = StrongLRUCache<int, string>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = std::to_string(i);
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
@@ -64,9 +64,9 @@ TEST_CASE("strong_lru_cache.clear", "[lrucache]")
     CHECK(cache.size() == 0);
 }
 
-TEST_CASE("strong_lru_cache.touch", "")
+TEST_CASE("StrongLRUCache.touch", "")
 {
-    auto cache = strong_lru_cache<int, string>(strong_hashtable_size { 8 }, lru_capacity { 4 });
+    auto cache = StrongLRUCache<int, string>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = std::to_string(i);
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
@@ -88,9 +88,9 @@ TEST_CASE("strong_lru_cache.touch", "")
     REQUIRE(joinHumanReadable(cache.keys()) == "1, 3, 4, 2");
 }
 
-TEST_CASE("strong_lru_cache.contains", "")
+TEST_CASE("StrongLRUCache.contains", "")
 {
-    auto cache = strong_lru_cache<int, string>(strong_hashtable_size { 8 }, lru_capacity { 4 });
+    auto cache = StrongLRUCache<int, string>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = std::to_string(i);
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
@@ -112,9 +112,9 @@ TEST_CASE("strong_lru_cache.contains", "")
     REQUIRE(joinHumanReadable(cache.keys()) == "1, 3, 4, 2");
 }
 
-TEST_CASE("strong_lru_cache.try_emplace", "")
+TEST_CASE("StrongLRUCache.try_emplace", "")
 {
-    auto cache = strong_lru_cache<int, int>(strong_hashtable_size { 4 }, lru_capacity { 2 });
+    auto cache = StrongLRUCache<int, int>(StrongHashtableSize { 4 }, LRUCapacity { 2 });
 
     auto rv = cache.try_emplace(2, [](auto) { return 4; });
     CHECK(rv);
@@ -134,9 +134,9 @@ TEST_CASE("strong_lru_cache.try_emplace", "")
     CHECK(cache.at(3) == 6);
 }
 
-TEST_CASE("strong_lru_cache.try_get", "")
+TEST_CASE("StrongLRUCache.try_get", "")
 {
-    auto cache = strong_lru_cache<int, string>(strong_hashtable_size { 8 }, lru_capacity { 4 });
+    auto cache = StrongLRUCache<int, string>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = std::to_string(i);
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
@@ -164,9 +164,9 @@ TEST_CASE("strong_lru_cache.try_get", "")
     REQUIRE(joinHumanReadable(cache.keys()) == "1, 3, 4, 2");
 }
 
-TEST_CASE("strong_lru_cache.get_or_emplace", "[lrucache]")
+TEST_CASE("StrongLRUCache.get_or_emplace", "[lrucache]")
 {
-    auto cache = strong_lru_cache<int, int>(strong_hashtable_size { 4 }, lru_capacity { 2 });
+    auto cache = StrongLRUCache<int, int>(StrongHashtableSize { 4 }, LRUCapacity { 2 });
 
     int const& a = cache.get_or_emplace(2, [](auto) { return 4; });
     CHECK(a == 4);
@@ -200,9 +200,9 @@ TEST_CASE("strong_lru_cache.get_or_emplace", "[lrucache]")
     CHECK(cache.size() == 2);
 }
 
-TEST_CASE("strong_lru_cache.remove", "")
+TEST_CASE("StrongLRUCache.remove", "")
 {
-    auto cache = strong_lru_cache<int, string>(strong_hashtable_size { 8 }, lru_capacity { 4 });
+    auto cache = StrongLRUCache<int, string>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = std::to_string(i);
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
@@ -227,23 +227,22 @@ TEST_CASE("strong_lru_cache.remove", "")
 namespace
 {
 // clang-format off
-struct colliding_hasher
+struct CollidingHasher
 {
-    strong_hash operator()(int v) noexcept
+    StrongHash operator()(int v) noexcept
     {
         // Since the hashtable lookup only looks at the
         // least significant 32 bit, this will always cause
         // a hash-table entry collision.
-        return strong_hash { 0, 0, static_cast<uint32_t>(v), 0 };
+        return StrongHash { 0, 0, static_cast<uint32_t>(v), 0 };
     }
 };
 // clang-format on
 } // namespace
 
-TEST_CASE("strong_lru_cache.insert_with_cache_collision", "")
+TEST_CASE("StrongLRUCache.insert_with_cache_collision", "")
 {
-    auto cache =
-        strong_lru_cache<int, int, colliding_hasher>(strong_hashtable_size { 8 }, lru_capacity { 4 });
+    auto cache = StrongLRUCache<int, int, CollidingHasher>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
 
     cache[1] = 1;
     REQUIRE(joinHumanReadable(cache.keys()) == "1");
@@ -258,10 +257,9 @@ TEST_CASE("strong_lru_cache.insert_with_cache_collision", "")
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 }
 
-TEST_CASE("strong_lru_cache.remove_with_hashTable_lookup_collision", "")
+TEST_CASE("StrongLRUCache.remove_with_hashTable_lookup_collision", "")
 {
-    auto cache =
-        strong_lru_cache<int, int, colliding_hasher>(strong_hashtable_size { 8 }, lru_capacity { 4 });
+    auto cache = StrongLRUCache<int, int, CollidingHasher>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = 2 * i;
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");

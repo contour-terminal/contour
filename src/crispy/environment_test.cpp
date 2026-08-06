@@ -38,16 +38,16 @@ namespace
 /// environment back afterwards.
 ///
 /// Not setenv()/unsetenv(): both are thread-unsafe, and this project's clang-tidy configuration
-/// rejects them outright (concurrency-mt-unsafe). What live_environment consults on POSIX is the
+/// rejects them outright (concurrency-mt-unsafe). What LiveEnvironment consults on POSIX is the
 /// environment block itself, so the test installs its own -- the original entries plus one -- and
 /// restores the original pointer on the way out. Windows keeps a separate block that
-/// SetEnvironmentVariableA writes and live_environment reads, so there it simply writes that.
-class scoped_variable
+/// SetEnvironmentVariableA writes and LiveEnvironment reads, so there it simply writes that.
+class ScopedVariable
 {
   public:
     /// @param name Name of the variable to make visible.
     /// @param value The value it should read as.
-    scoped_variable(std::string name, std::string const& value): _name { std::move(name) }
+    ScopedVariable(std::string name, std::string const& value): _name { std::move(name) }
     {
 #ifdef _WIN32
         SetEnvironmentVariableA(_name.c_str(), value.c_str());
@@ -63,7 +63,7 @@ class scoped_variable
 #endif
     }
 
-    ~scoped_variable()
+    ~ScopedVariable()
     {
 #ifdef _WIN32
         SetEnvironmentVariableA(_name.c_str(), nullptr);
@@ -72,10 +72,10 @@ class scoped_variable
 #endif
     }
 
-    scoped_variable(scoped_variable const&) = delete;
-    scoped_variable& operator=(scoped_variable const&) = delete;
-    scoped_variable(scoped_variable&&) = delete;
-    scoped_variable& operator=(scoped_variable&&) = delete;
+    ScopedVariable(ScopedVariable const&) = delete;
+    ScopedVariable& operator=(ScopedVariable const&) = delete;
+    ScopedVariable(ScopedVariable&&) = delete;
+    ScopedVariable& operator=(ScopedVariable&&) = delete;
 
   private:
     std::string _name;
@@ -89,7 +89,7 @@ class scoped_variable
 
 } // namespace
 
-TEST_CASE("live_environment resolves names the way the host getenv() does", "[environment]")
+TEST_CASE("LiveEnvironment resolves names the way the host getenv() does", "[environment]")
 {
     // Name resolution is the platform's, not a comparator of ours: Windows preserves whatever casing
     // the creating process used but matches case-insensitively, so a `LOCALAPPDATA` lookup must find
@@ -98,7 +98,7 @@ TEST_CASE("live_environment resolves names the way the host getenv() does", "[en
     // spellings as two distinct variables.
     //
     // PATH is the one name that exists on every platform this builds for.
-    auto const environment = crispy::live_environment {};
+    auto const environment = crispy::LiveEnvironment {};
 
     auto const path = environment.get("PATH");
     REQUIRE(path.has_value());
@@ -130,21 +130,21 @@ TEST_CASE("live_environment resolves names the way the host getenv() does", "[en
     }
 }
 
-TEST_CASE("live_environment observes what a cache cannot", "[environment]")
+TEST_CASE("LiveEnvironment observes what a cache cannot", "[environment]")
 {
     // The whole reason the reader is live: config (re)loading expands `${VAR}` against the
     // environment as it stands at that moment, not as it stood when the process started.
     auto constexpr Name = "CONTOUR_ENVIRONMENT_TEST_VARIABLE";
 
-    auto const live = crispy::live_environment {};
-    auto const cached = crispy::caching_environment { live };
+    auto const live = crispy::LiveEnvironment {};
+    auto const cached = crispy::CachingEnvironment { live };
 
     // Read through the cache before the variable exists, so the miss is the answer it remembers.
     REQUIRE(!cached.get(Name).has_value());
     REQUIRE(!live.get(Name).has_value());
 
     {
-        auto const variable = scoped_variable { Name, "observed" };
+        auto const variable = ScopedVariable { Name, "observed" };
 
         CHECK(!cached.get(Name).has_value());
         REQUIRE(live.get(Name).has_value());
@@ -155,15 +155,15 @@ TEST_CASE("live_environment observes what a cache cannot", "[environment]")
     CHECK(!live.get(Name).has_value());
 }
 
-TEST_CASE("caching_environment reads a name once", "[environment]")
+TEST_CASE("CachingEnvironment reads a name once", "[environment]")
 {
     auto constexpr Name = "CONTOUR_ENVIRONMENT_TEST_VARIABLE";
 
-    auto const live = crispy::live_environment {};
-    auto const cached = crispy::caching_environment { live };
+    auto const live = crispy::LiveEnvironment {};
+    auto const cached = crispy::CachingEnvironment { live };
 
     {
-        auto const variable = scoped_variable { Name, "first" };
+        auto const variable = ScopedVariable { Name, "first" };
         REQUIRE(cached.get(Name) == "first");
     }
 
@@ -175,8 +175,8 @@ TEST_CASE("caching_environment reads a name once", "[environment]")
 TEST_CASE("environment is reached through the interface", "[environment]")
 {
     // What every injecting caller does: hold the abstraction, not an implementation.
-    auto const substitute = crispy::testing::fake_environment { { { "SOME_NAME", "substituted" } } };
-    auto const& injected = static_cast<crispy::environment const&>(substitute);
+    auto const substitute = crispy::testing::FakeEnvironment { { { "SOME_NAME", "substituted" } } };
+    auto const& injected = static_cast<crispy::Environment const&>(substitute);
 
     CHECK(injected.get("SOME_NAME") == "substituted");
     CHECK(!injected.get("ANY_OTHER_NAME").has_value());

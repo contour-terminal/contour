@@ -312,7 +312,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
 }
 
 void DecorationRenderer::renderDecoration(Decorator decoration,
-                                          crispy::point pos,
+                                          crispy::Point pos,
                                           vtbackend::ColumnCount columnCount,
                                           vtbackend::RGBColor const& color)
 {

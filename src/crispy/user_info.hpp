@@ -8,7 +8,7 @@ namespace crispy
 {
 
 /// The fields we care about from the calling user's entry in the password database.
-struct password_entry
+struct PasswordEntry
 {
     std::string name;          ///< Login name, e.g. "jane".
     std::string homeDirectory; ///< Home directory, e.g. "/home/jane".
@@ -21,7 +21,7 @@ struct password_entry
 /// static buffer that concurrent callers would race on.
 ///
 /// @return The entry, or std::nullopt if the user has none or it could not be read.
-[[nodiscard]] std::optional<password_entry> currentUserPasswordEntry();
+[[nodiscard]] std::optional<PasswordEntry> currentUserPasswordEntry();
 
 /// Convenience wrapper around currentUserPasswordEntry().
 ///

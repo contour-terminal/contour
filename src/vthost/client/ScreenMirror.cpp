@@ -603,7 +603,7 @@ void ScreenMirror::applyEvent(proto::SessionEventPdu const& event)
     // One overload per event shape, so each reads only the fields it has. The visit is exhaustive by
     // construction: a fourth event alternative fails to compile until it gets its own arm.
     std::visit(
-        overloaded {
+        Overloaded {
             [this](proto::SessionBell const&) { _terminal->bell(); },
             [this](proto::SessionNotify const& notify) { _terminal->notify(notify.title, notify.body); },
             [this](proto::SessionClipboard const& clipboard) {

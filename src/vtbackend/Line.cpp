@@ -14,7 +14,7 @@ namespace vtbackend
 
 LineSoA Line::reflow(ColumnCount newColumnCount)
 {
-    using crispy::comparison;
+    using crispy::Comparison;
 
     // Blank lines have no content to reflow — just adopt the new logical width.
     // No allocation, no overflow generated.
@@ -26,12 +26,12 @@ LineSoA Line::reflow(ColumnCount newColumnCount)
 
     switch (crispy::strongCompare(newColumnCount, size()))
     {
-        case comparison::Equal: break;
-        case comparison::Greater:
+        case Comparison::Equal: break;
+        case Comparison::Greater:
             resizeLineSoA(_storage, newColumnCount);
             _columns = newColumnCount;
             break;
-        case comparison::Less: {
+        case Comparison::Less: {
             if (wrappable())
             {
                 auto const newCols = unbox<size_t>(newColumnCount);

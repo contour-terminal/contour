@@ -5,7 +5,7 @@
 #include <cmath>
 #include <numbers>
 
-using crispy::point;
+using crispy::Point;
 
 namespace vtbackend::regis
 {
@@ -126,13 +126,13 @@ bool ReGISRasterizer::patternPaintsNext(Pen const& pen) noexcept
     return paints != 0;
 }
 
-void ReGISRasterizer::plotDot(Pen const& pen, point p) noexcept
+void ReGISRasterizer::plotDot(Pen const& pen, Point p) noexcept
 {
     // A dot always paints regardless of line pattern.
     stamp(pen, p.x, p.y);
 }
 
-void ReGISRasterizer::plotLine(Pen const& pen, point from, point to) noexcept
+void ReGISRasterizer::plotLine(Pen const& pen, Point from, Point to) noexcept
 {
     // Zingl's integer Bresenham line, consuming one pattern step per pixel.
     auto x0 = from.x;
@@ -144,7 +144,7 @@ void ReGISRasterizer::plotLine(Pen const& pen, point from, point to) noexcept
     auto const sx = x0 < x1 ? 1 : -1;
     auto const sy = y0 < y1 ? 1 : -1;
     auto err = dx + dy;
-    // Cap the walk: endpoints derive from unbounded wire coordinates, so a line to a far-off point
+    // Cap the walk: endpoints derive from unbounded wire coordinates, so a line to a far-off Point
     // would spin here. MaxPlotSteps far exceeds the on-canvas span, so the visible line is unaffected.
     for (auto stepsLeft = MaxPlotSteps; stepsLeft-- > 0;)
     {
@@ -166,7 +166,7 @@ void ReGISRasterizer::plotLine(Pen const& pen, point from, point to) noexcept
     }
 }
 
-void ReGISRasterizer::plotCircle(Pen const& pen, point center, int radius) noexcept
+void ReGISRasterizer::plotCircle(Pen const& pen, Point center, int radius) noexcept
 {
     if (radius <= 0)
     {
@@ -199,7 +199,7 @@ void ReGISRasterizer::plotCircle(Pen const& pen, point center, int radius) noexc
 }
 
 void ReGISRasterizer::plotArc(
-    Pen const& pen, point center, int radius, double startDegrees, double sweepDegrees) noexcept
+    Pen const& pen, Point center, int radius, double startDegrees, double sweepDegrees) noexcept
 {
     if (radius <= 0)
     {
@@ -225,7 +225,7 @@ void ReGISRasterizer::plotArc(
     }
 }
 
-void ReGISRasterizer::plotCurve(Pen const& pen, std::span<point const> points, bool closed) noexcept
+void ReGISRasterizer::plotCurve(Pen const& pen, std::span<Point const> points, bool closed) noexcept
 {
     auto const n = static_cast<int>(points.size());
     if (n < 2)
@@ -235,7 +235,7 @@ void ReGISRasterizer::plotCurve(Pen const& pen, std::span<point const> points, b
         return;
     }
     // Catmull-Rom interpolating spline: each segment between p1 and p2 is shaped by neighbours p0/p3.
-    auto const at = [&](int i) -> point {
+    auto const at = [&](int i) -> Point {
         if (closed)
             return points[static_cast<size_t>(((i % n) + n) % n)];
         return points[static_cast<size_t>(std::clamp(i, 0, n - 1))];
@@ -265,7 +265,7 @@ void ReGISRasterizer::plotCurve(Pen const& pen, std::span<point const> points, b
                                + (((2.0 * p0.y) - (5.0 * p1.y) + (4.0 * p2.y) - p3.y) * t2)
                                + ((-p0.y + (3.0 * p1.y) - (3.0 * p2.y) + p3.y) * t3));
             auto const current =
-                point { .x = static_cast<int>(std::lround(cx)), .y = static_cast<int>(std::lround(cy)) };
+                Point { .x = static_cast<int>(std::lround(cx)), .y = static_cast<int>(std::lround(cy)) };
             plotLine(pen, previous, current);
             previous = current;
         }
@@ -311,7 +311,7 @@ void ReGISRasterizer::compositePixel(
 }
 
 void ReGISRasterizer::blendCoverage(Pen const& pen,
-                                    point origin,
+                                    Point origin,
                                     ImageSize size,
                                     std::span<uint8_t const> coverage) noexcept
 {
@@ -327,7 +327,7 @@ void ReGISRasterizer::blendCoverage(Pen const& pen,
         }
 }
 
-void ReGISRasterizer::fillPolygon(Pen const& pen, std::span<point const> points) noexcept
+void ReGISRasterizer::fillPolygon(Pen const& pen, std::span<Point const> points) noexcept
 {
     if (points.size() < 3)
         return;

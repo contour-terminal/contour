@@ -36,16 +36,16 @@ namespace crispy
 
 /// Implements waiting for a set of file descriptors to become readable.
 ///
-class posix_read_selector
+class PosixReadSelector
 {
   public:
-    posix_read_selector()
+    PosixReadSelector()
     {
         int pfd[2];
         int const rv = pipe(pfd);
         Require(rv == 0);
-        _breakPipeReader = file_descriptor::from_native(pfd[0]);
-        _breakPipeWriter = file_descriptor::from_native(pfd[1]);
+        _breakPipeReader = FileDescriptor::from_native(pfd[0]);
+        _breakPipeWriter = FileDescriptor::from_native(pfd[1]);
 
         int currentFlags = 0;
         for (int const fd: pfd)
@@ -181,20 +181,20 @@ class posix_read_selector
                                   //!< kernel, the posix backend must synchronize the vector itself.
     std::vector<int> _fds;
     std::deque<int> _pending;
-    file_descriptor _breakPipeReader;
-    file_descriptor _breakPipeWriter;
+    FileDescriptor _breakPipeReader;
+    FileDescriptor _breakPipeWriter;
 };
 
-// {{{ epoll_read_selector, implements waiting for a set of file descriptors to become readable.
+// {{{ EpollReadSelector, implements waiting for a set of file descriptors to become readable.
 #ifdef __linux__
 
 /// Implements waiting for a set of file descriptors to become readable.
 ///
-class epoll_read_selector
+class EpollReadSelector
 {
   public:
-    epoll_read_selector();
-    ~epoll_read_selector() = default;
+    EpollReadSelector();
+    ~EpollReadSelector() = default;
 
     void want_read(int fd) noexcept;
     void cancel_read(int fd) noexcept;
@@ -208,17 +208,17 @@ class epoll_read_selector
     std::optional<int> try_pop_pending() noexcept;
 
   private:
-    file_descriptor _epollFd;
-    file_descriptor _eventFd;
+    FileDescriptor _epollFd;
+    FileDescriptor _eventFd;
     mutable std::mutex _fdsMutex; //!< Guards @c _fds against concurrent cancel_read()/want_read().
     std::vector<int> _fds;
     std::deque<int> _pending;
 };
 
-inline epoll_read_selector::epoll_read_selector()
+inline EpollReadSelector::EpollReadSelector()
 {
-    _epollFd = file_descriptor::from_native(epoll_create1(EPOLL_CLOEXEC));
-    _eventFd = file_descriptor::from_native(eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC));
+    _epollFd = FileDescriptor::from_native(epoll_create1(EPOLL_CLOEXEC));
+    _eventFd = FileDescriptor::from_native(eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC));
 
     auto event = epoll_event {};
     event.events = EPOLLIN;
@@ -227,7 +227,7 @@ inline epoll_read_selector::epoll_read_selector()
 }
 
 // NOLINTNEXTLINE(readability-make-member-function-const)
-inline void epoll_read_selector::want_read(int fd) noexcept
+inline void EpollReadSelector::want_read(int fd) noexcept
 {
     auto event = epoll_event {};
     event.events = EPOLLIN;
@@ -238,7 +238,7 @@ inline void epoll_read_selector::want_read(int fd) noexcept
 }
 
 // NOLINTNEXTLINE(readability-make-member-function-const)
-inline void epoll_read_selector::cancel_read(int fd) noexcept
+inline void EpollReadSelector::cancel_read(int fd) noexcept
 {
     auto event = epoll_event {};
     event.events = EPOLLIN;
@@ -249,19 +249,19 @@ inline void epoll_read_selector::cancel_read(int fd) noexcept
     _fds.erase(gc.begin(), gc.end());
 }
 
-inline size_t epoll_read_selector::size() const noexcept
+inline size_t EpollReadSelector::size() const noexcept
 {
     auto const _ = std::scoped_lock { _fdsMutex };
     return _fds.size();
 }
 
-inline bool epoll_read_selector::is_wanted(int fd) const noexcept
+inline bool EpollReadSelector::is_wanted(int fd) const noexcept
 {
     auto const _ = std::scoped_lock { _fdsMutex };
     return std::ranges::find(_fds, fd) != _fds.end();
 }
 
-inline void epoll_read_selector::wakeup() const noexcept
+inline void EpollReadSelector::wakeup() const noexcept
 {
     auto const value = eventfd_t { 1 };
     auto written = write(_eventFd, &value, sizeof(value));
@@ -269,7 +269,7 @@ inline void epoll_read_selector::wakeup() const noexcept
         errorLog()("Writing to eventFd failed. {}", std::generic_category().message(errno));
 }
 
-inline std::optional<int> epoll_read_selector::try_pop_pending() noexcept
+inline std::optional<int> EpollReadSelector::try_pop_pending() noexcept
 {
     if (_pending.empty())
         return std::nullopt;
@@ -279,7 +279,7 @@ inline std::optional<int> epoll_read_selector::try_pop_pending() noexcept
     return fd;
 }
 
-inline std::optional<int> epoll_read_selector::wait_one(
+inline std::optional<int> EpollReadSelector::wait_one(
     std::optional<std::chrono::milliseconds> timeout) noexcept
 {
     if (auto const fd = try_pop_pending(); fd.has_value())
@@ -329,9 +329,9 @@ inline std::optional<int> epoll_read_selector::wait_one(
 
 /// Implements waiting for a set of file descriptors to become readable.
 #ifdef __linux__
-using read_selector = epoll_read_selector;
+using ReadSelector = EpollReadSelector;
 #else
-using read_selector = posix_read_selector;
+using ReadSelector = PosixReadSelector;
 #endif
 
 } // namespace crispy

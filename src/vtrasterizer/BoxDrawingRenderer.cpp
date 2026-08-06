@@ -24,7 +24,7 @@ using std::optional;
 using std::pair;
 using std::string_view;
 
-using crispy::point;
+using crispy::Point;
 
 namespace Ranges = std::ranges;
 namespace Views = std::views;
@@ -34,10 +34,10 @@ namespace vtrasterizer
 
 namespace
 {
-    auto inline const boxDrawingLog = logstore::category("renderer.boxdrawing",
+    auto inline const boxDrawingLog = logstore::Category("renderer.boxdrawing",
                                                          "Logs box drawing debugging.",
-                                                         logstore::category::state::Disabled,
-                                                         logstore::category::visibility::Hidden);
+                                                         logstore::Category::State::Disabled,
+                                                         logstore::Category::Visibility::Hidden);
 
     // TODO: Do not depend on this function but rather construct the pixmaps using the correct Y-coordinates.
     atlas::Buffer invertY(atlas::Buffer const& image, ImageSize cellSize)
@@ -143,7 +143,7 @@ namespace detail
             // inner circle
             drawEllipseArc(putpixel,
                            imageSize,
-                           crispy::point { // radius
+                           crispy::Point { // radius
                                            .x = (unbox<int>(imageSize.width) / 2) - (int(thickness) / 2),
                                            .y = (unbox<int>(imageSize.height) / 2) - (int(thickness) / 2) },
                            arc);
@@ -152,7 +152,7 @@ namespace detail
             drawEllipseArc(
                 putpixel,
                 imageSize,
-                crispy::point { // radius
+                crispy::Point { // radius
                                 .x = (unbox<int>(imageSize.width) / 2) + (int(thickness) / 2) - 1,
                                 .y = (unbox<int>(imageSize.height) / 2) + (int(thickness) / 2) - 1 },
                 arc);
@@ -724,7 +724,7 @@ namespace detail
         template <Dir Direction, int DivisorX>
         auto getTriangleProps(ImageSize size)
         {
-            auto const c = point { .x = Direction == Dir::Left
+            auto const c = Point { .x = Direction == Dir::Left
                                             ? unbox<int>(size.width) / DivisorX
                                             : unbox<int>(size.width) - (unbox<int>(size.width) / DivisorX),
                                    .y = unbox<int>(size.height) / 2 };
@@ -774,7 +774,7 @@ namespace detail
         template <int P>
         auto triChecker(ImageSize size)
         {
-            auto const c = point { .x = unbox<int>(size.width) / 2, .y = unbox<int>(size.height) / 2 };
+            auto const c = Point { .x = unbox<int>(size.width) / 2, .y = unbox<int>(size.height) / 2 };
             auto const w = unbox<int>(size.width) - 1;
 
             auto const f = linearEq({ .x = 0, .y = 0 }, c);
@@ -800,7 +800,7 @@ namespace detail
             auto constexpr Set = Inv == Inverted::No ? 255 : 0;
             auto constexpr Unset = 255 - Set;
 
-            auto const c = point { .x = unbox<int>(size.width) / 2, .y = unbox<int>(size.height) / 2 };
+            auto const c = Point { .x = unbox<int>(size.width) / 2, .y = unbox<int>(size.height) / 2 };
             auto const w = unbox<int>(size.width) - 1;
 
             auto const f = linearEq({ .x = 0, .y = 0 }, c);
@@ -1974,7 +1974,7 @@ Renderable::AtlasTileAttributes const* BoxDrawingRenderer::getOrCreateCachedTile
     auto const cacheKey = (static_cast<uint32_t>(codepoint) << 9)
                           | (static_cast<uint32_t>(cacheKeyFlags) << 1) | static_cast<uint32_t>(subIndex);
     return textureAtlas().get_or_try_emplace(
-        crispy::strong_hash { 31, 13, 8, cacheKey },
+        crispy::StrongHash { 31, 13, 8, cacheKey },
         [this, codepoint, flags, subIndex](
             atlas::TileLocation tileLocation) -> optional<TextureAtlas::TileCreateData> {
             return createTileData(codepoint, flags, tileLocation, subIndex);

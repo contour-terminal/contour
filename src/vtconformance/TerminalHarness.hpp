@@ -161,8 +161,8 @@ class TerminalHarness
     std::optional<MarkerScanner> _scanner;
 
     /// The buffer `readBatch` reads into. `Pty::read` requires a pooled buffer object.
-    crispy::buffer_object_pool<char> _bufferPool { ReadBufferSize };
-    crispy::buffer_object_ptr<char> _readBuffer;
+    crispy::BufferObjectPool<char> _bufferPool { ReadBufferSize };
+    crispy::BufferObjectPtr<char> _readBuffer;
 };
 
 } // namespace vtconformance

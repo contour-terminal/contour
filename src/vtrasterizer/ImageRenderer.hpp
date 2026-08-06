@@ -57,7 +57,7 @@ class ImageRenderer: public Renderable, public TextRendererEvents
     /// Reconfigures the slicing properties of existing images.
     void setCellSize(ImageSize cellSize);
 
-    void renderImage(crispy::point pos, vtbackend::ImageFragment const& fragment);
+    void renderImage(crispy::Point pos, vtbackend::ImageFragment const& fragment);
 
     /// notify underlying cache that this fragment is not going to be rendered anymore, maybe freeing up some
     /// GPU caches.
@@ -102,7 +102,7 @@ class ImageRenderer: public Renderable, public TextRendererEvents
     /// @param color     the gap colour: the background colour current when the image was placed.
     /// @param aboveText which side of the text the fill belongs on -- the image's own side, since the
     ///                  gap is part of its composite.
-    void fillGap(crispy::point pos,
+    void fillGap(crispy::Point pos,
                  vtbackend::FragmentPlacement const& placement,
                  vtbackend::RGBAColor color,
                  bool aboveText);

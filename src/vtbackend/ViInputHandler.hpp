@@ -242,7 +242,7 @@ class ViInputHandler: public InputHandler
     } _settings;
 
     using CommandHandler = std::function<void()>;
-    using CommandHandlerMap = crispy::trie_map<std::string, CommandHandler>;
+    using CommandHandlerMap = crispy::TrieMap<std::string, CommandHandler>;
 
     void registerAllCommands();
     void registerCommand(ModeSelect modes, std::string_view command, CommandHandler handler);

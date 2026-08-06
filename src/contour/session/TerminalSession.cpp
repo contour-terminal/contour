@@ -833,17 +833,17 @@ void TerminalSession::applyPendingFontChange(bool allow, bool remember)
         return;
 
     if (spec.size != 0.0)
-        newFonts.size = text::font_size { spec.size };
+        newFonts.size = text::FontSize { spec.size };
 
     if (!spec.regular.empty())
-        newFonts.regular = text::font_description::parse(spec.regular);
+        newFonts.regular = text::FontDescription::parse(spec.regular);
 
-    auto const styledFont = [&](string_view font) -> text::font_description {
+    auto const styledFont = [&](string_view font) -> text::FontDescription {
         // if a styled font is "auto" then infer froom regular font"
         if (font == "auto"sv)
             return currentFonts.regular;
         else
-            return text::font_description::parse(font);
+            return text::FontDescription::parse(font);
     };
 
     if (!spec.bold.empty())
@@ -856,7 +856,7 @@ void TerminalSession::applyPendingFontChange(bool allow, bool remember)
         newFonts.boldItalic = styledFont(spec.boldItalic);
 
     if (!spec.emoji.empty() && spec.emoji != "auto"sv)
-        newFonts.emoji = text::font_description::parse(spec.emoji);
+        newFonts.emoji = text::FontDescription::parse(spec.emoji);
 
     // Persist as THIS session's own, the way setFontSize() does: setSession() and configureDisplay() both
     // re-seed from profile().fonts, so leaving the pre-OSC-50 value made the approved font revert on the
@@ -1297,8 +1297,8 @@ void TerminalSession::requestWindowResize(Width width, Height height)
     });
 }
 
-void TerminalSession::addToAccumulatedScroll(crispy::point pixelDelta,
-                                             crispy::point angleDelta,
+void TerminalSession::addToAccumulatedScroll(crispy::Point pixelDelta,
+                                             crispy::Point angleDelta,
                                              vtbackend::ScrollPhase phase,
                                              bool platformInverted) noexcept
 {
@@ -1323,7 +1323,7 @@ std::tuple<LineOffset, ColumnOffset> TerminalSession::consumeScroll() noexcept
 {
     if (_accumulatedPixelScroll)
     {
-        auto const pixelStepSize = crispy::point {
+        auto const pixelStepSize = crispy::Point {
             .x = _display->cellSize().width.as<int>(),
             .y = _display->cellSize().height.as<int>(),
         };
@@ -2066,7 +2066,7 @@ bool TerminalSession::operator()(actions::CreateSelection const& customSelector)
 
 bool TerminalSession::operator()(actions::DecreaseFontSize)
 {
-    auto constexpr OnePt = text::font_size { 1.0 };
+    auto constexpr OnePt = text::FontSize { 1.0 };
     setFontSize(profile().fonts.value().size - OnePt);
 
     emit fontSizeChanged();
@@ -2213,7 +2213,7 @@ bool TerminalSession::operator()(actions::HintMode const& action)
 
 bool TerminalSession::operator()(actions::IncreaseFontSize)
 {
-    auto constexpr OnePt = text::font_size { 1.0 };
+    auto constexpr OnePt = text::FontSize { 1.0 };
     // auto const currentFontSize = view().renderer().fontDescriptions().size;
     // auto const newFontSize = currentFontSize + OnePt;
     // setFontSize(newFontSize);
@@ -2383,7 +2383,7 @@ bool TerminalSession::operator()(actions::ScreenshotVT)
 bool TerminalSession::operator()(actions::SaveScreenshot)
 {
     auto savePath =
-        app().dumpStateAtExit().value_or(crispy::app::instance()->localStateDir())
+        app().dumpStateAtExit().value_or(crispy::App::instance()->localStateDir())
         / fs::path(std::format("contour-screenshot-{:%Y-%m-%d-%H-%M-%S}.png", chrono::system_clock::now()));
 
     _display->setScreenshotOutput(savePath);
@@ -3354,7 +3354,7 @@ uint8_t TerminalSession::matchModeFlags() const
     return flags;
 }
 
-void TerminalSession::setFontSize(text::font_size size)
+void TerminalSession::setFontSize(text::FontSize size)
 {
     // No display (a background tab/split pane whose display was detached on the last tab switch):
     // there is no renderer to reconfigure, so persist the requested size to the profile directly. It

@@ -13,31 +13,31 @@ namespace text
 
 using std::make_unique;
 
-font_locator_provider& font_locator_provider::get()
+FontLocatorProvider& FontLocatorProvider::get()
 {
-    auto static instance = font_locator_provider {};
+    auto static instance = FontLocatorProvider {};
     return instance;
 }
 
-font_locator& font_locator_provider::native()
+FontLocator& FontLocatorProvider::native()
 {
     if (!_native)
     {
 #ifdef __APPLE__
-        _native = make_unique<coretext_locator>();
+        _native = make_unique<CoreTextLocator>();
 #elifdef _WIN32
-        _native = make_unique<directwrite_locator>();
+        _native = make_unique<DirectWriteLocator>();
 #else
-        _native = make_unique<fontconfig_locator>();
+        _native = make_unique<FontconfigLocator>();
 #endif
     }
     return *_native;
 }
 
-font_locator& font_locator_provider::mock()
+FontLocator& FontLocatorProvider::mock()
 {
     if (!_mock)
-        _mock = make_unique<mock_font_locator>();
+        _mock = make_unique<MockFontLocator>();
 
     return *_mock;
 }

@@ -45,13 +45,13 @@ constexpr RatioBlock left(double r) noexcept  { return RatioBlock { .from={ .x=0
 constexpr RatioBlock right(double r) noexcept { return RatioBlock { .from={ .x=1.f - r, .y=0.f }, .to={ .x=1.f, .y=1.f } }; }
 // clang-format on
 
-constexpr crispy::point operator*(vtbackend::ImageSize a, Ratio b) noexcept
+constexpr crispy::Point operator*(vtbackend::ImageSize a, Ratio b) noexcept
 {
-    return crispy::point { .x = static_cast<int>(a.width.as<double>() * b.x),
+    return crispy::Point { .x = static_cast<int>(a.width.as<double>() * b.x),
                            .y = static_cast<int>(a.height.as<double>() * b.y) };
 }
 
-constexpr auto linearEq(crispy::point p1, crispy::point p2) noexcept
+constexpr auto linearEq(crispy::Point p1, crispy::Point p2) noexcept
 {
     auto const dx = double(p2.x - p1.x);
     auto const m = (dx != 0.0) ? double(p2.y - p1.y) / dx : 0.0;
@@ -105,7 +105,7 @@ auto makeDraw4WaySymmetric(Arc arc, vtbackend::ImageSize size, F putpixel)
 }
 
 template <typename F>
-constexpr void drawEllipse(F doDraw4WaySymmetric, crispy::point radius)
+constexpr void drawEllipse(F doDraw4WaySymmetric, crispy::Point radius)
 {
     auto const rx = radius.x;
     auto const ry = radius.y;
@@ -171,7 +171,7 @@ constexpr void drawEllipse(F doDraw4WaySymmetric, crispy::point radius)
 template <typename PutPixel>
 constexpr void drawEllipseArc(PutPixel putpixel,
                               vtbackend::ImageSize imageSize,
-                              crispy::point radius,
+                              crispy::Point radius,
                               Arc arc)
 {
     drawEllipse(makeDraw4WaySymmetric(arc, imageSize, std::move(putpixel)), radius);

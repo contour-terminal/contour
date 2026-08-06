@@ -6,14 +6,15 @@
 #include <crispy/file_descriptor.hpp>
 #include <crispy/logstore.hpp>
 #include <crispy/overloaded.hpp>
-#include <crispy/result.hpp>
 
 #include <atomic>
 #include <condition_variable>
+#include <expected>
 #include <functional>
 #include <map>
 #include <mutex>
 #include <optional>
+#include <system_error>
 #include <variant>
 
 namespace vtpty
@@ -39,8 +40,8 @@ struct SshHostConfig
 
 using SshHostConfigMap = std::map<std::string, SshHostConfig>;
 
-crispy::result<SshHostConfigMap> loadSshConfig(std::filesystem::path const& configPath);
-crispy::result<SshHostConfigMap> loadSshConfig();
+std::expected<SshHostConfigMap, std::error_code> loadSshConfig(std::filesystem::path const& configPath);
+std::expected<SshHostConfigMap, std::error_code> loadSshConfig();
 
 /// SSH Host Key information.
 ///
@@ -122,7 +123,7 @@ class SshSession final: public Pty
     void close() override;
     void waitForClosed() override;
     [[nodiscard]] bool isClosed() const noexcept override;
-    [[nodiscard]] std::optional<ReadResult> read(crispy::buffer_object<char>& storage,
+    [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
                                                  std::optional<std::chrono::milliseconds> timeout,
                                                  size_t size) override;
     void wakeupReader() override;
@@ -321,7 +322,7 @@ struct std::formatter<vtpty::SshSession::ExitStatus>: std::formatter<std::string
 {
     auto format(vtpty::SshSession::ExitStatus const& status, auto& ctx) const
     {
-        return std::visit(overloaded { [&](vtpty::SshSession::NormalExit exit) {
+        return std::visit(Overloaded { [&](vtpty::SshSession::NormalExit exit) {
                                           return std::formatter<std::string>::format(
                                               std::format("{} (normal exit)", exit.exitCode), ctx);
                                       },

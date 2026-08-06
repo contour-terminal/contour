@@ -9,20 +9,20 @@
 namespace text
 {
 
-class font_locator;
+class FontLocator;
 
 /**
  * Text shaping and rendering engine using open source technologies,
  * fontconfig + harfbuzz + freetype.
  */
-class open_shaper: public shaper
+class OpenShaper: public Shaper
 {
   public:
-    explicit open_shaper(DPI dpi, font_locator& locator);
+    explicit OpenShaper(DPI dpi, FontLocator& locator);
 
     void set_dpi(DPI dpi) override;
 
-    void set_locator(font_locator& locator) override;
+    void set_locator(FontLocator& locator) override;
 
     void clear_cache() override;
 
@@ -34,28 +34,28 @@ class open_shaper: public shaper
     /// can drive the refusal without paying for hundreds of real font loads to get there.
     void set_resized_font_limit(size_t limit);
 
-    [[nodiscard]] std::optional<font_key> load_font(font_description const& description,
-                                                    font_size size) override;
+    [[nodiscard]] std::optional<FontKey> load_font(FontDescription const& description,
+                                                   FontSize size) override;
 
-    [[nodiscard]] font_metrics metrics(font_key key) const override;
-    [[nodiscard]] font_key resize_font(font_key key, font_size size) override;
+    [[nodiscard]] FontMetrics metrics(FontKey key) const override;
+    [[nodiscard]] FontKey resize_font(FontKey key, FontSize size) override;
 
-    void shape(font_key font,
+    void shape(FontKey font,
                std::u32string_view codepoints,
                gsl::span<unsigned> clusters,
                unicode::Script script,
                unicode::PresentationStyle presentation,
-               shape_result& result) override;
+               ShapeResult& result) override;
 
-    [[nodiscard]] std::optional<glyph_position> shape(font_key font, char32_t codepoint) override;
+    [[nodiscard]] std::optional<GlyphPosition> shape(FontKey font, char32_t codepoint) override;
 
-    [[nodiscard]] std::optional<rasterized_glyph> rasterize(glyph_key glyph,
-                                                            render_mode mode,
-                                                            float outlineThickness = 0.0f) override;
+    [[nodiscard]] std::optional<RasterizedGlyph> rasterize(GlyphKey glyph,
+                                                           RenderMode mode,
+                                                           float outlineThickness = 0.0f) override;
 
   private:
-    struct private_open_shaper;
-    std::unique_ptr<private_open_shaper, void (*)(private_open_shaper*)> _d;
+    struct PrivateOpenShaper;
+    std::unique_ptr<PrivateOpenShaper, void (*)(PrivateOpenShaper*)> _d;
 };
 
 } // namespace text

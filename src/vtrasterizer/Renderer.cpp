@@ -34,7 +34,7 @@ namespace vtrasterizer
 namespace
 {
 
-    void loadGridMetricsFromFont(text::font_key font, GridMetrics& gm, text::shaper& textShaper)
+    void loadGridMetricsFromFont(text::FontKey font, GridMetrics& gm, text::Shaper& textShaper)
     {
         auto const m = textShaper.metrics(font);
 
@@ -53,10 +53,10 @@ namespace
         rendererLog()("Loading grid metrics {}", gm);
     }
 
-    GridMetrics loadGridMetrics(text::font_key font,
+    GridMetrics loadGridMetrics(text::FontKey font,
                                 vtbackend::PageSize pageSize,
                                 PageMargin pageMargin,
-                                text::shaper& textShaper)
+                                text::Shaper& textShaper)
     {
         auto gm = GridMetrics {};
 
@@ -77,11 +77,11 @@ namespace
     ///
     /// @throws std::runtime_error if the @e regular font fails to load. The regular key is the
     ///         anchor every other style falls back to, and a default-constructed (invalid) font_key
-    ///         would later abort inside text::shaper::metrics() (Require on the key mapping). Throwing
+    ///         would later abort inside text::Shaper::metrics() (Require on the key mapping). Throwing
     ///         instead lets applyPendingReconfig()'s try/catch keep the previously loaded font, honoring
     ///         the "keep previous font on failure" guarantee, and surfaces a startup font-load failure
     ///         as a clear error rather than a deep abort.
-    FontKeys loadFontKeys(FontDescriptions const& fd, text::shaper& shaper)
+    FontKeys loadFontKeys(FontDescriptions const& fd, text::Shaper& shaper)
     {
         FontKeys output {};
         auto const regularOpt = shaper.load_font(fd.regular, fd.size);
@@ -96,7 +96,7 @@ namespace
         return output;
     }
 
-    unique_ptr<text::shaper> createTextShaper(TextShapingEngine engine, DPI dpi, text::font_locator& locator)
+    unique_ptr<text::Shaper> createTextShaper(TextShapingEngine engine, DPI dpi, text::FontLocator& locator)
     {
         switch (engine)
         {
@@ -104,7 +104,7 @@ namespace
 #ifdef _WIN32
                 rendererLog()("Using DirectWrite text shaping engine.");
                 // TODO: do we want to use custom font locator here?
-                return make_unique<text::directwrite_shaper>(dpi, locator);
+                return make_unique<text::DirectWriteShaper>(dpi, locator);
 #else
                 rendererLog()("DirectWrite not available on this platform.");
                 break;
@@ -123,7 +123,7 @@ namespace
         }
 
         rendererLog()("Using OpenShaper text shaping engine.");
-        return make_unique<text::open_shaper>(dpi, locator);
+        return make_unique<text::OpenShaper>(dpi, locator);
     }
 
 } // namespace
@@ -132,8 +132,8 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
                    PageMargin pageMargin,
                    FontDescriptions fontDescriptions,
                    vtbackend::ColorPalette const& colorPalette,
-                   crispy::strong_hashtable_size atlasHashtableSlotCount,
-                   crispy::lru_capacity atlasTileCount,
+                   crispy::StrongHashtableSize atlasHashtableSlotCount,
+                   crispy::LRUCapacity atlasTileCount,
                    bool atlasDirectMapping,
                    Decorator hyperlinkNormal,
                    Decorator hyperlinkHover,
@@ -362,7 +362,7 @@ void Renderer::applyFontDescriptions(FontDescriptions fontDescriptions)
                                       _fontDescriptions.textOutline.color);
 }
 
-bool Renderer::setFontSize(text::font_size fontSize)
+bool Renderer::setFontSize(text::FontSize fontSize)
 {
     if (fontSize.pt < 5.) // Let's not be crazy.
         return false;
@@ -677,7 +677,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
             auto const renderHeight = renderSize.height.as<int>();
             auto const scissorY = renderHeight - (mainAreaTop + mainAreaHeight);
             _renderTarget->setScissorRect(0, scissorY, renderWidth, mainAreaHeight);
-            auto const scissorGuard = crispy::finally([this] { _renderTarget->clearScissorRect(); });
+            auto const scissorGuard = crispy::Finally([this] { _renderTarget->clearScissorRect(); });
             _renderTarget->execute(now);
         }
 
@@ -704,7 +704,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
             auto const fromPixel = _gridMetrics.map(*cursor.animateFrom, smoothPixelOffset);
             auto const toPixel = _gridMetrics.map(cursor.position, smoothPixelOffset);
             auto const animationProgress = cursor.animationProgress;
-            auto const interpolated = crispy::point {
+            auto const interpolated = crispy::Point {
                 .x = fromPixel.x
                      + static_cast<int>(animationProgress * static_cast<float>(toPixel.x - fromPixel.x)),
                 .y = fromPixel.y
@@ -736,7 +736,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
             auto const renderHeight = renderSize.height.as<int>();
             auto const scissorY = renderHeight - (mainAreaTop + mainAreaHeight);
             _renderTarget->setScissorRect(0, scissorY, renderWidth, mainAreaHeight);
-            auto const scissorGuard = crispy::finally([this] { _renderTarget->clearScissorRect(); });
+            auto const scissorGuard = crispy::Finally([this] { _renderTarget->clearScissorRect(); });
             _renderTarget->execute(now);
         }
     }

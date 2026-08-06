@@ -13,17 +13,17 @@ namespace crispy
 /// STL-compatible allocator that returns 64-byte aligned memory.
 /// 64 bytes = one cache line = sufficient for SSE (16B), AVX2 (32B), and AVX-512 (64B).
 template <typename T>
-class aligned_allocator
+class AlignedAllocator
 {
   public:
     using value_type = T;
 
     static constexpr std::size_t Alignment = 64;
 
-    constexpr aligned_allocator() noexcept = default;
+    constexpr AlignedAllocator() noexcept = default;
 
     template <typename U>
-    constexpr aligned_allocator(aligned_allocator<U> const&) noexcept
+    constexpr AlignedAllocator(AlignedAllocator<U> const&) noexcept
     {
     }
 
@@ -61,13 +61,13 @@ class aligned_allocator
     }
 
     template <typename U>
-    [[nodiscard]] constexpr bool operator==(aligned_allocator<U> const&) const noexcept
+    [[nodiscard]] constexpr bool operator==(AlignedAllocator<U> const&) const noexcept
     {
         return true;
     }
 
     template <typename U>
-    [[nodiscard]] constexpr bool operator!=(aligned_allocator<U> const&) const noexcept
+    [[nodiscard]] constexpr bool operator!=(AlignedAllocator<U> const&) const noexcept
     {
         return false;
     }
@@ -75,6 +75,6 @@ class aligned_allocator
 
 /// Convenience alias: std::vector with 64-byte cache-line aligned allocation.
 template <typename T>
-using aligned_vector = std::vector<T, aligned_allocator<T>>;
+using AlignedVector = std::vector<T, AlignedAllocator<T>>;
 
 } // namespace crispy

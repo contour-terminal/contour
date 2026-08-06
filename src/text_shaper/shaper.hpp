@@ -26,37 +26,35 @@
 namespace text
 {
 
-auto inline const rasterizerLog = logstore::category("font.render", "Logs details about rendering glyphs.");
-auto inline const textShapingLog = logstore::category("font.textshaping", "Logs details about text shaping.");
+auto inline const rasterizerLog = logstore::Category("font.render", "Logs details about rendering glyphs.");
+auto inline const textShapingLog = logstore::Category("font.textshaping", "Logs details about text shaping.");
 
-// NOLINTBEGIN(readability-identifier-naming)
-enum class bitmap_format : uint8_t
+enum class BitmapFormat : uint8_t
 {
-    alpha_mask, ///< 1 byte/pixel (R = coverage)
-    rgb,        ///< 3 bytes/pixel (LCD subpixel)
-    rgba,       ///< 4 bytes/pixel (color emoji/images)
-    outlined,   ///< 4 bytes/pixel RGBA (R=fill alpha, G=outline alpha, B=0, A=max)
+    AlphaMask, ///< 1 byte/pixel (R = coverage)
+    RGB,       ///< 3 bytes/pixel (LCD subpixel)
+    RGBA,      ///< 4 bytes/pixel (color emoji/images)
+    Outlined,  ///< 4 bytes/pixel RGBA (R=fill alpha, G=outline alpha, B=0, A=max)
 };
-// NOLINTEND(readability-identifier-naming)
 
-constexpr size_t pixel_size(bitmap_format format) noexcept
+constexpr size_t pixel_size(BitmapFormat format) noexcept
 {
     switch (format)
     {
-        case bitmap_format::rgba: return 4;
-        case bitmap_format::outlined: return 4;
-        case bitmap_format::rgb: return 3;
-        case bitmap_format::alpha_mask: return 1;
+        case BitmapFormat::RGBA: return 4;
+        case BitmapFormat::Outlined: return 4;
+        case BitmapFormat::RGB: return 3;
+        case BitmapFormat::AlphaMask: return 1;
     }
     return 1;
 }
 
-struct rasterized_glyph
+struct RasterizedGlyph
 {
-    glyph_index index {};               // Glyph index.
+    GlyphIndex index {};                // Glyph index.
     vtbackend::ImageSize bitmapSize {}; // Glyph bitmap size in pixels.
-    crispy::point position {};          // top-left position of the bitmap, relative to the baseline's origin.
-    bitmap_format format {};            // Bitmap pixel format.
+    crispy::Point position {};          // top-left position of the bitmap, relative to the baseline's origin.
+    BitmapFormat format {};             // Bitmap pixel format.
     std::vector<uint8_t> bitmap {};     // Raw bitmap data.
 
     [[nodiscard]] bool valid() const
@@ -67,28 +65,28 @@ struct rasterized_glyph
     }
 };
 
-std::tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, vtbackend::ImageSize boundingBox);
+std::tuple<RasterizedGlyph, float> scale(RasterizedGlyph const& bitmap, vtbackend::ImageSize boundingBox);
 
-struct glyph_position
+struct GlyphPosition
 {
-    glyph_key glyph;
-    crispy::point offset;
-    crispy::point advance;
+    GlyphKey glyph;
+    crispy::Point offset;
+    crispy::Point advance;
 
     unicode::PresentationStyle presentation {};
 };
 
-using shape_result = std::vector<glyph_position>;
+using ShapeResult = std::vector<GlyphPosition>;
 
-class font_locator;
+class FontLocator;
 
 /**
  * Platform-independent font loading, text shaping, and glyph rendering API.
  */
-class shaper
+class Shaper
 {
   public:
-    virtual ~shaper() = default;
+    virtual ~Shaper() = default;
 
     /**
      * Sets or updates DPI to the given value.
@@ -98,7 +96,7 @@ class shaper
     /**
      * Configures the font location API to be used.
      */
-    virtual void set_locator(font_locator& locator) = 0;
+    virtual void set_locator(FontLocator& locator) = 0;
 
     /**
      * Clears internal caches (if any).
@@ -116,31 +114,31 @@ class shaper
      * on Windows it will be a DirectWrite font,
      * and on Apple it will be using CoreText (but for now it'll be freetype, too).
      */
-    [[nodiscard]] virtual std::optional<font_key> load_font(font_description const& description,
-                                                            font_size size) = 0;
+    [[nodiscard]] virtual std::optional<FontKey> load_font(FontDescription const& description,
+                                                           FontSize size) = 0;
 
     /**
      * Retrieves global font metrics of font identified by @p key.
      */
-    [[nodiscard]] virtual font_metrics metrics(font_key key) const = 0;
+    [[nodiscard]] virtual FontMetrics metrics(FontKey key) const = 0;
 
     /**
      * Returns the SAME face as @p key, loaded at @p size.
      *
-     * A font_key already encodes its size -- load_font() takes one -- so a caller that wants a glyph
-     * rasterized larger cannot get there by editing glyph_key::size, which the rasterizer ignores.
+     * A FontKey already encodes its size -- load_font() takes one -- so a caller that wants a glyph
+     * rasterized larger cannot get there by editing GlyphKey::size, which the rasterizer ignores.
      * This is the way to ask for it, and it is what makes scaled text (`OSC 66`) crisp rather than
      * magnified.
      *
      * The default returns @p key unchanged, which degrades to rasterizing at the original size --
      * correct, merely not crisp -- on backends that have not implemented it.
      */
-    [[nodiscard]] virtual font_key resize_font(font_key key, font_size /*size*/) { return key; }
+    [[nodiscard]] virtual FontKey resize_font(FontKey key, FontSize /*size*/) { return key; }
 
     /**
      * Shapes the given text @p text using the font face @p font.
      *
-     * @param font     font_key identifying the font to use for text shaping.
+     * @param font     FontKey identifying the font to use for text shaping.
      * @param font     the font to use for text shaping.
      * @param text     the sequence of codepoints to shape (must be all of the same script).
      * @param clusters codepoint clusters
@@ -151,14 +149,14 @@ class shaper
      * The call always returns a usable shape result, optionally using font fallback if the given
      * font did not satisfy.
      */
-    virtual void shape(font_key font,
+    virtual void shape(FontKey font,
                        std::u32string_view text,
                        gsl::span<unsigned> clusters,
                        unicode::Script script,
                        unicode::PresentationStyle presentation,
-                       shape_result& result) = 0;
+                       ShapeResult& result) = 0;
 
-    [[nodiscard]] virtual std::optional<glyph_position> shape(font_key font, char32_t codepoint) = 0;
+    [[nodiscard]] virtual std::optional<GlyphPosition> shape(FontKey font, char32_t codepoint) = 0;
 
     /**
      * Rasterizes (renders) the glyph using the given render mode.
@@ -167,35 +165,35 @@ class shaper
      * @param mode              render technique to use.
      * @param outlineThickness  outline thickness in pixel units (0 = no outline).
      */
-    [[nodiscard]] virtual std::optional<rasterized_glyph> rasterize(glyph_key glyph,
-                                                                    render_mode mode,
-                                                                    float outlineThickness = 0.0f) = 0;
+    [[nodiscard]] virtual std::optional<RasterizedGlyph> rasterize(GlyphKey glyph,
+                                                                   RenderMode mode,
+                                                                   float outlineThickness = 0.0f) = 0;
 };
 
 } // end namespace text
 
 // {{{ fmtlib support
 template <>
-struct std::formatter<text::bitmap_format>: std::formatter<std::string_view>
+struct std::formatter<text::BitmapFormat>: std::formatter<std::string_view>
 {
-    auto format(text::bitmap_format value, auto& ctx) const
+    auto format(text::BitmapFormat value, auto& ctx) const
     {
         string_view name;
         switch (value)
         {
-            case text::bitmap_format::alpha_mask: name = "alpha_mask"; break;
-            case text::bitmap_format::rgb: name = "rgb"; break;
-            case text::bitmap_format::rgba: name = "rgba"; break;
-            case text::bitmap_format::outlined: name = "outlined"; break;
+            case text::BitmapFormat::AlphaMask: name = "alpha_mask"; break;
+            case text::BitmapFormat::RGB: name = "rgb"; break;
+            case text::BitmapFormat::RGBA: name = "rgba"; break;
+            case text::BitmapFormat::Outlined: name = "outlined"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct std::formatter<text::glyph_position>: std::formatter<std::string>
+struct std::formatter<text::GlyphPosition>: std::formatter<std::string>
 {
-    auto format(text::glyph_position const& gpos, auto& ctx) const
+    auto format(text::GlyphPosition const& gpos, auto& ctx) const
     {
         return formatter<std::string>::format(std::format("({}+{}+{}|{}+{})",
                                                           gpos.glyph.index.value,
@@ -208,11 +206,11 @@ struct std::formatter<text::glyph_position>: std::formatter<std::string>
 };
 
 template <>
-struct std::formatter<text::rasterized_glyph>: std::formatter<std::string>
+struct std::formatter<text::RasterizedGlyph>: std::formatter<std::string>
 {
-    auto format(text::rasterized_glyph const& glyph, auto& ctx) const
+    auto format(text::RasterizedGlyph const& glyph, auto& ctx) const
     {
-        return formatter<std::string>::format(std::format("rasterized_glyph({}, {}+{}, {})",
+        return formatter<std::string>::format(std::format("RasterizedGlyph({}, {}+{}, {})",
                                                           glyph.index.value,
                                                           glyph.bitmapSize,
                                                           glyph.position,

@@ -6,7 +6,7 @@
 namespace crispy
 {
 
-struct [[nodiscard]] point
+struct [[nodiscard]] Point
 {
     int x {};
     int y {};
@@ -18,67 +18,67 @@ struct [[nodiscard]] point
 template <typename T>
 constexpr inline T Zero {};
 template <>
-constexpr inline point Zero<point> = point { .x = 0, .y = 0 };
+constexpr inline Point Zero<Point> = Point { .x = 0, .y = 0 };
 
-constexpr point operator*(point p, double s) noexcept
+constexpr Point operator*(Point p, double s) noexcept
 {
-    return point {
+    return Point {
         .x = static_cast<int>(static_cast<double>(p.x) * s),
         .y = static_cast<int>(static_cast<double>(p.y) * s),
     };
 }
 
-constexpr point operator/(point p, double s) noexcept
+constexpr Point operator/(Point p, double s) noexcept
 {
-    return point {
+    return Point {
         .x = static_cast<int>(static_cast<double>(p.x) / s),
         .y = static_cast<int>(static_cast<double>(p.y) / s),
     };
 }
 
-constexpr point operator*(point a, point b) noexcept
+constexpr Point operator*(Point a, Point b) noexcept
 {
-    return point {
+    return Point {
         .x = a.x * b.x,
         .y = a.y * b.y,
     };
 }
 
-constexpr point operator/(point a, point b) noexcept
+constexpr Point operator/(Point a, Point b) noexcept
 {
-    return point {
+    return Point {
         .x = a.x / b.x,
         .y = a.y / b.y,
     };
 }
 
-constexpr point operator+(point a, point b) noexcept
+constexpr Point operator+(Point a, Point b) noexcept
 {
-    return point { .x = a.x + b.x, .y = a.y + b.y };
+    return Point { .x = a.x + b.x, .y = a.y + b.y };
 }
 
-constexpr point& operator+=(point& a, point b) noexcept
+constexpr Point& operator+=(Point& a, Point b) noexcept
 {
     a.x += b.x;
     a.y += b.y;
     return a;
 }
 
-constexpr point& operator-=(point& a, point b) noexcept
+constexpr Point& operator-=(Point& a, Point b) noexcept
 {
     a.x -= b.x;
     a.y -= b.y;
     return a;
 }
 
-constexpr void swap(point& a, point& b) noexcept
+constexpr void swap(Point& a, Point& b) noexcept
 {
-    point const c = a;
+    Point const c = a;
     a = b;
     b = c;
 }
 
-constexpr int compare(point const& a, point const& b) noexcept
+constexpr int compare(Point const& a, Point const& b) noexcept
 {
     if (auto const dr = a.y - b.y; dr != 0)
         return dr;
@@ -86,32 +86,32 @@ constexpr int compare(point const& a, point const& b) noexcept
         return a.x - b.x;
 }
 
-constexpr bool operator<(point const& a, point const& b) noexcept
+constexpr bool operator<(Point const& a, Point const& b) noexcept
 {
     return compare(a, b) < 0;
 }
 
-constexpr bool operator<=(point const& a, point const& b) noexcept
+constexpr bool operator<=(Point const& a, Point const& b) noexcept
 {
     return compare(a, b) <= 0;
 }
 
-constexpr bool operator>(point const& a, point const& b) noexcept
+constexpr bool operator>(Point const& a, Point const& b) noexcept
 {
     return compare(a, b) > 0;
 }
 
-constexpr bool operator>=(point const& a, point const& b) noexcept
+constexpr bool operator>=(Point const& a, Point const& b) noexcept
 {
     return compare(a, b) >= 0;
 }
 
-constexpr bool operator==(point const& a, point const& b) noexcept
+constexpr bool operator==(Point const& a, Point const& b) noexcept
 {
     return a.x == b.x && a.y == b.y;
 }
 
-constexpr bool operator!=(point const& a, point const& b) noexcept
+constexpr bool operator!=(Point const& a, Point const& b) noexcept
 {
     return !(a == b);
 }
@@ -119,9 +119,9 @@ constexpr bool operator!=(point const& a, point const& b) noexcept
 } // namespace crispy
 
 template <>
-struct std::formatter<crispy::point>: formatter<std::string>
+struct std::formatter<crispy::Point>: formatter<std::string>
 {
-    auto format(crispy::point coord, auto& ctx) const
+    auto format(crispy::Point coord, auto& ctx) const
     {
         return formatter<std::string>::format(std::format("({}, {})", coord.x, coord.y), ctx);
     }

@@ -10,69 +10,69 @@ namespace crispy
 //
 // Usage:
 // ======
-//     enum class flag_type
+//     enum class FlagType
 //     {
-//         flag1 = 1 << 0,
-//         flag2 = 1 << 1,
-//         flag3 = 1 << 2,
+//         Flag1 = 1 << 0,
+//         Flag2 = 1 << 1,
+//         Flag3 = 1 << 2,
 //     };
-//     using flags = crispy::flags<flag_type>;
-//     flags f;
-//     f.enable(flag_type::flag1);
-//     if (f & flag_type::flag1) { ... }
+//     using MyFlags = crispy::Flags<FlagType>;
+//     MyFlags f;
+//     f.enable(FlagType::Flag1);
+//     if (f & FlagType::Flag1) { ... }
 //
 template <typename flag_type>
-class flags
+class Flags
 {
   public:
     using value_type = std::underlying_type_t<flag_type>;
 
-    constexpr flags(flag_type flag) noexcept: _value(static_cast<value_type>(flag)) {}
-    constexpr flags(std::initializer_list<flag_type> bits) noexcept
+    constexpr Flags(flag_type flag) noexcept: _value(static_cast<value_type>(flag)) {}
+    constexpr Flags(std::initializer_list<flag_type> bits) noexcept
     {
         for (auto const bit: bits)
             enable(bit);
     }
-    constexpr flags() noexcept = default;
-    constexpr flags(flags&&) noexcept = default;
-    constexpr flags(flags const&) noexcept = default;
-    constexpr flags& operator=(flags&&) noexcept = default;
-    constexpr flags& operator=(flags const&) noexcept = default;
+    constexpr Flags() noexcept = default;
+    constexpr Flags(Flags&&) noexcept = default;
+    constexpr Flags(Flags const&) noexcept = default;
+    constexpr Flags& operator=(Flags&&) noexcept = default;
+    constexpr Flags& operator=(Flags const&) noexcept = default;
 
     constexpr void enable(flag_type flag) noexcept { _value |= static_cast<value_type>(flag); }
     constexpr void disable(flag_type flag) noexcept { _value &= ~static_cast<value_type>(flag); }
 
-    constexpr void enable(flags<flag_type> flags) noexcept { _value |= flags._value; }
+    constexpr void enable(Flags<flag_type> flags) noexcept { _value |= flags._value; }
 
-    constexpr void disable(flags<flag_type> flags) noexcept { _value &= ~flags._value; }
+    constexpr void disable(Flags<flag_type> flags) noexcept { _value &= ~flags._value; }
 
     // Tests for existence of all given flags to be present.
     // @return true if all flags are set in this flags set, false otherwise.
-    [[nodiscard]] constexpr bool contains(flags<flag_type> flags) const noexcept
+    [[nodiscard]] constexpr bool contains(Flags<flag_type> flags) const noexcept
     {
         return (_value & flags.value()) == flags.value();
     }
 
     [[nodiscard]] constexpr bool test(flag_type flag) const noexcept { return contains(flag); }
 
-    [[nodiscard]] constexpr flags<flag_type> operator&(flags<flag_type> other) const noexcept
+    [[nodiscard]] constexpr Flags<flag_type> operator&(Flags<flag_type> other) const noexcept
     {
-        return flags<flag_type>::from_value(_value & other.value());
+        return Flags<flag_type>::from_value(_value & other.value());
     }
 
-    constexpr flags& operator|=(flags<flag_type> flags) noexcept
+    constexpr Flags& operator|=(Flags<flag_type> flags) noexcept
     {
         _value |= flags._value;
         return *this;
     }
 
-    constexpr flags& operator|=(flag_type flag) noexcept
+    constexpr Flags& operator|=(flag_type flag) noexcept
     {
         enable(flag);
         return *this;
     }
 
-    constexpr flags& operator&=(flag_type flag) noexcept
+    constexpr Flags& operator&=(flag_type flag) noexcept
     {
         disable(flag);
         return *this;
@@ -81,7 +81,7 @@ class flags
     [[nodiscard]] constexpr bool none() const noexcept { return _value == 0; }
     [[nodiscard]] constexpr bool any() const noexcept { return _value != 0; }
 
-    [[nodiscard]] constexpr bool any(flags<flag_type> other) const noexcept
+    [[nodiscard]] constexpr bool any(Flags<flag_type> other) const noexcept
     {
         return (_value & other.value()) != 0;
     }
@@ -92,43 +92,43 @@ class flags
     [[nodiscard]] constexpr value_type value() const noexcept { return _value; }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    [[nodiscard]] static constexpr flags<flag_type> from_value(value_type value) noexcept
+    [[nodiscard]] static constexpr Flags<flag_type> from_value(value_type value) noexcept
     {
-        auto result = flags<flag_type> {};
+        auto result = Flags<flag_type> {};
         result._value = value;
         return result;
     }
 
-    [[nodiscard]] constexpr flags<flag_type> with(flag_type other) const noexcept
+    [[nodiscard]] constexpr Flags<flag_type> with(flag_type other) const noexcept
     {
-        return flags<flag_type>::from_value(_value | static_cast<value_type>(other));
+        return Flags<flag_type>::from_value(_value | static_cast<value_type>(other));
     }
 
-    [[nodiscard]] constexpr flags<flag_type> with(flags<flag_type> other) const noexcept
+    [[nodiscard]] constexpr Flags<flag_type> with(Flags<flag_type> other) const noexcept
     {
-        return flags<flag_type>::from_value(_value | other.value());
+        return Flags<flag_type>::from_value(_value | other.value());
     }
 
-    [[nodiscard]] constexpr flags<flag_type> intersect(flags<flag_type> other) const noexcept
+    [[nodiscard]] constexpr Flags<flag_type> intersect(Flags<flag_type> other) const noexcept
     {
-        return flags<flag_type>::from_value(_value & other.value());
+        return Flags<flag_type>::from_value(_value & other.value());
     }
 
-    [[nodiscard]] constexpr flags<flag_type> without(flags<flag_type> other) const noexcept
+    [[nodiscard]] constexpr Flags<flag_type> without(Flags<flag_type> other) const noexcept
     {
-        return flags<flag_type>::from_value(_value & ~other.value());
+        return Flags<flag_type>::from_value(_value & ~other.value());
     }
 
-    [[nodiscard]] constexpr auto operator<=>(flags<flag_type> const& other) const noexcept = default;
+    [[nodiscard]] constexpr auto operator<=>(Flags<flag_type> const& other) const noexcept = default;
 
-    [[nodiscard]] constexpr flags<flag_type> operator|(flags<flag_type> other) const noexcept
+    [[nodiscard]] constexpr Flags<flag_type> operator|(Flags<flag_type> other) const noexcept
     {
-        return flags<flag_type>::from_value(_value | other.value());
+        return Flags<flag_type>::from_value(_value | other.value());
     }
 
-    [[nodiscard]] constexpr flags<flag_type> operator|(flag_type other) const noexcept
+    [[nodiscard]] constexpr Flags<flag_type> operator|(flag_type other) const noexcept
     {
-        return flags<flag_type>::from_value(_value | static_cast<value_type>(other));
+        return Flags<flag_type>::from_value(_value | static_cast<value_type>(other));
     }
 
     [[nodiscard]] auto reduce(auto init, auto f) const
@@ -147,9 +147,10 @@ class flags
 } // namespace crispy
 
 template <typename Enum>
-struct std::formatter<crispy::flags<Enum>>: public std::formatter<std::string>
+// NOLINTNEXTLINE(readability-identifier-naming): std::formatter is the standard's spelling.
+struct std::formatter<crispy::Flags<Enum>>: public std::formatter<std::string>
 {
-    auto format(crispy::flags<Enum> const& flags, auto& ctx) const
+    auto format(crispy::Flags<Enum> const& flags, auto& ctx) const
     {
         std::string result;
         for (auto i = 0u; i < sizeof(Enum) * 8; ++i)

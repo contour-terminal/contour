@@ -42,11 +42,11 @@ namespace
 
     auto& mainProfile = profiles.at("main");
     mainProfile.fonts.value().regular.familyName = "Main Mono";
-    mainProfile.fonts.value().size = text::font_size { 12.0 };
+    mainProfile.fonts.value().size = text::FontSize { 12.0 };
 
     auto big = mainProfile;
     big.fonts.value().regular.familyName = "Big Mono";
-    big.fonts.value().size = text::font_size { 20.0 };
+    big.fonts.value().size = text::FontSize { 20.0 };
     profiles["big"] = std::move(big);
 
     config.defaultProfileName = "main";

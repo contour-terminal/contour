@@ -30,7 +30,7 @@ namespace detail
 } // namespace detail
 // }}}
 
-struct lru_hashtable_stats
+struct LRUHashtableStats
 {
     uint32_t hits;
     uint32_t misses;
@@ -40,9 +40,9 @@ struct lru_hashtable_stats
 
 // {{{ fmt
 template <>
-struct std::formatter<crispy::lru_hashtable_stats>: std::formatter<std::string>
+struct std::formatter<crispy::LRUHashtableStats>: std::formatter<std::string>
 {
-    auto format(crispy::lru_hashtable_stats stats, auto& ctx) const
+    auto format(crispy::LRUHashtableStats stats, auto& ctx) const
     {
         return formatter<std::string>::format(
             std::format(
@@ -62,13 +62,13 @@ struct std::formatter<crispy::lru_hashtable_stats>: std::formatter<std::string>
 namespace crispy
 {
 // Defines the number of hashes the hashtable can store.
-struct strong_hashtable_size
+struct StrongHashtableSize
 {
     uint32_t value;
 };
 
-// Number of entries the LRU strong_lru_hashtable can store at most.
-struct lru_capacity
+// Number of entries the LRU StrongLRUHashtable can store at most.
+struct LRUCapacity
 {
     uint32_t value;
 };
@@ -79,25 +79,25 @@ struct lru_capacity
 // NOTE!
 //     Cache locality could be further improved by having one single
 //     memory region instead of two.
-//     Or even overloading operator new of strong_lru_hashtable
+//     Or even overloading operator new of StrongLRUHashtable
 //     and put the dynamic data at the end of the primary data.
 template <typename Value>
-class strong_lru_hashtable
+class StrongLRUHashtable
 {
   private:
-    strong_lru_hashtable(strong_hashtable_size hashCount, lru_capacity entryCount, std::string name);
+    StrongLRUHashtable(StrongHashtableSize hashCount, LRUCapacity entryCount, std::string name);
 
   public:
-    ~strong_lru_hashtable();
+    ~StrongLRUHashtable();
 
-    using ptr = std::unique_ptr<strong_lru_hashtable, std::function<void(strong_lru_hashtable*)>>;
+    using Ptr = std::unique_ptr<StrongLRUHashtable, std::function<void(StrongLRUHashtable*)>>;
 
-    [[nodiscard]] static constexpr size_t requiredMemorySize(strong_hashtable_size hashCount,
-                                                             lru_capacity entryCount);
+    [[nodiscard]] static constexpr size_t requiredMemorySize(StrongHashtableSize hashCount,
+                                                             LRUCapacity entryCount);
 
     template <typename Allocator = std::allocator<unsigned char>>
-    [[nodiscard]] static ptr create(strong_hashtable_size hashCount,
-                                    lru_capacity entryCount,
+    [[nodiscard]] static Ptr create(StrongHashtableSize hashCount,
+                                    LRUCapacity entryCount,
                                     std::string name = "");
 
     /// Returns the actual number of entries currently hold in this hashtable.
@@ -111,48 +111,48 @@ class strong_lru_hashtable
 
     /// Returns gathered stats and clears the local stats state to start
     /// counting from zero again.
-    lru_hashtable_stats fetchAndClearStats() noexcept;
+    LRUHashtableStats fetchAndClearStats() noexcept;
 
     /// Clears all entries from the hashtable.
     void clear();
 
     // Deletes the hash entry and its associated value from the LRU hashtable
-    void remove(strong_hash const& hash);
+    void remove(StrongHash const& hash);
 
     /// Touches a given hash key, putting it to the front of the LRU chain.
     /// Nothing is done if the hash key was not found.
-    void touch(strong_hash const& hash) noexcept;
+    void touch(StrongHash const& hash) noexcept;
 
     /// Returns an ordered list of keys in this hash.
     /// Ordering is from most recent to least recent access.
-    [[nodiscard]] std::vector<strong_hash> hashes() const;
+    [[nodiscard]] std::vector<StrongHash> hashes() const;
 
     /// Tests for the exitence of the given hash key in this hash table.
-    [[nodiscard]] bool contains(strong_hash const& hash) const noexcept;
+    [[nodiscard]] bool contains(StrongHash const& hash) const noexcept;
 
     /// Returns the value for the given hash key if found, nullptr otherwise.
-    [[nodiscard]] Value* try_get(strong_hash const& hash) noexcept;
-    [[nodiscard]] Value const* try_get(strong_hash const& hash) const noexcept;
+    [[nodiscard]] Value* try_get(StrongHash const& hash) noexcept;
+    [[nodiscard]] Value const* try_get(StrongHash const& hash) const noexcept;
 
     /// Returns the value for the given hash key,
     /// throwing std::out_of_range if hash key was not found.
-    [[nodiscard]] Value& at(strong_hash const& hash);
+    [[nodiscard]] Value& at(StrongHash const& hash);
 
     /// like at() but does not change LRU order.
-    [[nodiscard]] Value& peek(strong_hash const& hash);
-    [[nodiscard]] Value const& peek(strong_hash const& hash) const;
+    [[nodiscard]] Value& peek(StrongHash const& hash);
+    [[nodiscard]] Value const& peek(StrongHash const& hash) const;
 
     /// Returns the value for the given hash key, default-constructing it in case
     /// if it wasn't in the hashtable just yet.
-    [[nodiscard]] Value& operator[](strong_hash const& hash) noexcept;
+    [[nodiscard]] Value& operator[](StrongHash const& hash) noexcept;
 
     /// Assigns the given value to the given hash key.
     /// If the hash key was not found, it is being created,
     /// otherwise the value will be re-assigned with the new value.
-    Value& emplace(strong_hash const& hash, Value value) noexcept;
+    Value& emplace(StrongHash const& hash, Value value) noexcept;
 
     template <typename ValueConstructFn>
-    Value& emplace(strong_hash const& hash, ValueConstructFn constructValue) noexcept;
+    Value& emplace(StrongHash const& hash, ValueConstructFn constructValue) noexcept;
 
     /// Conditionally creates a new item to the LRU-Cache iff its hash key
     /// was not present yet.
@@ -160,12 +160,12 @@ class strong_lru_hashtable
     /// @retval true the hash key did not exist in hashtable yet, a new value was constructed.
     /// @retval false The hash key is already in the hashtable, no entry was constructed.
     template <typename ValueConstructFn>
-    [[nodiscard]] bool try_emplace(strong_hash const& hash, ValueConstructFn constructValue);
+    [[nodiscard]] bool try_emplace(StrongHash const& hash, ValueConstructFn constructValue);
 
     /// Always returns either the existing item by the given hash key, if found,
     /// or a newly created one by invoking constructValue().
     template <typename ValueConstructFn>
-    [[nodiscard]] Value& get_or_emplace(strong_hash const& hash, ValueConstructFn constructValue);
+    [[nodiscard]] Value& get_or_emplace(StrongHash const& hash, ValueConstructFn constructValue);
 
     /**
      * Like get_or_emplace but allows failure in @p constructValue call to cause the hash entry not
@@ -176,7 +176,7 @@ class strong_lru_hashtable
      * If creation has failed, nullptr is returned instead.
      */
     template <typename ValueConstructFn>
-    [[nodiscard]] Value* get_or_try_emplace(strong_hash const& hash, ValueConstructFn constructValue);
+    [[nodiscard]] Value* get_or_try_emplace(StrongHash const& hash, ValueConstructFn constructValue);
 
     /// Retrieves the value stored at the given entry index.
     [[nodiscard]] Value& valueAtEntryIndex(uint32_t entryIndex) noexcept;
@@ -187,23 +187,21 @@ class strong_lru_hashtable
     void inspect(std::ostream& output) const;
 
     // {{{ public detail
-    struct next_with_same_hash
+    struct NextWithSameHash
     {
-        explicit next_with_same_hash(uint32_t v): value { v } {}
+        explicit NextWithSameHash(uint32_t v): value { v } {}
         uint32_t value;
     };
 
-    struct entry
+    struct Entry
     {
-        entry(entry const&) = default;
-        entry(entry&&) noexcept = default;
-        entry& operator=(entry const&) = default;
-        entry& operator=(entry&&) noexcept = default;
-        entry(next_with_same_hash initialNextWithSameHash): nextWithSameHash { initialNextWithSameHash.value }
-        {
-        }
+        Entry(Entry const&) = default;
+        Entry(Entry&&) noexcept = default;
+        Entry& operator=(Entry const&) = default;
+        Entry& operator=(Entry&&) noexcept = default;
+        Entry(NextWithSameHash initialNextWithSameHash): nextWithSameHash { initialNextWithSameHash.value } {}
 
-        strong_hash hashValue {};
+        StrongHash hashValue {};
 
         uint32_t prevInLRU = 0;
         uint32_t nextInLRU = 0;
@@ -220,24 +218,24 @@ class strong_lru_hashtable
   private:
     // {{{ details
     // Maps the given hash hash key to a slot in the hash table.
-    [[nodiscard]] uint32_t* hashTableSlot(strong_hash const& hash) noexcept;
+    [[nodiscard]] uint32_t* hashTableSlot(StrongHash const& hash) noexcept;
 
     // Returns entry index to an unused entry, possibly by evicting
     // the least recently used entry if no free entries are available.
     //
     // This entry is not inserted into the LRU-chain yet.
-    [[nodiscard]] uint32_t allocateEntry(strong_hash const& hash, uint32_t* slot);
+    [[nodiscard]] uint32_t allocateEntry(StrongHash const& hash, uint32_t* slot);
 
     // Re-links the given entry to the front of the LRU-chain.
     void linkToLRUChainHead(uint32_t entryIndex) noexcept;
 
     // Unlinks given entry from LRU chain without touching the entry itself.
-    void unlinkFromLRUChain(entry& entry) noexcept;
+    void unlinkFromLRUChain(Entry& entry) noexcept;
 
     // Returns the index to the entry associated with the given hash key.
     // If the hash key was not found and force is set to true, it'll be created,
     // otherwise 0 is returned.
-    [[nodiscard]] uint32_t findEntry(strong_hash const& hash, bool force);
+    [[nodiscard]] uint32_t findEntry(StrongHash const& hash, bool force);
 
     // Evicts the least recently used entry in the LRU chain
     // and links it to the unused-entries chain.
@@ -247,20 +245,20 @@ class strong_lru_hashtable
 
     int validateChange(int adj);
 
-    [[nodiscard]] entry& sentinelEntry() noexcept { return _entries[0]; }
-    [[nodiscard]] entry const& sentinelEntry() const noexcept { return _entries[0]; }
+    [[nodiscard]] Entry& sentinelEntry() noexcept { return _entries[0]; }
+    [[nodiscard]] Entry const& sentinelEntry() const noexcept { return _entries[0]; }
     // }}}
 
-    lru_hashtable_stats _stats;
+    LRUHashtableStats _stats;
     uint32_t _hashMask;
-    strong_hashtable_size _hashCount;
+    StrongHashtableSize _hashCount;
     uint32_t _size = 0;
-    lru_capacity _capacity;
+    LRUCapacity _capacity;
     std::string _name;
 
     // The hash table maps hash codes to indices into the entry table.
     uint32_t* _hashTable;
-    entry* _entries;
+    Entry* _entries;
 
 #ifdef DEBUG_STRONG_LRU_HASHTABLE
     int _lastLRUCount = 0;
@@ -270,9 +268,9 @@ class strong_lru_hashtable
 // {{{ implementation
 
 template <typename Value>
-strong_lru_hashtable<Value>::strong_lru_hashtable(strong_hashtable_size hashCount,
-                                                  lru_capacity entryCount,
-                                                  std::string name):
+StrongLRUHashtable<Value>::StrongLRUHashtable(StrongHashtableSize hashCount,
+                                              LRUCapacity entryCount,
+                                              std::string name):
     _stats {},
     _hashMask { hashCount.value - 1 },
     _hashCount { hashCount },
@@ -280,12 +278,12 @@ strong_lru_hashtable<Value>::strong_lru_hashtable(strong_hashtable_size hashCoun
     _name { std::move(name) },
     _hashTable { (uint32_t*) (this + 1) },
     _entries { [this]() {
-        constexpr uintptr_t Alignment = std::alignment_of_v<entry>;
+        constexpr uintptr_t Alignment = std::alignment_of_v<Entry>;
         static_assert(detail::isPowerOfTwo(Alignment));
         constexpr uintptr_t AlignMask = Alignment - 1;
 
         auto* hashTableEnd = _hashTable + _hashCount.value;
-        auto* entryTable = (entry*) (uintptr_t((char*) hashTableEnd + AlignMask) & ~AlignMask);
+        auto* entryTable = (Entry*) (uintptr_t((char*) hashTableEnd + AlignMask) & ~AlignMask);
 
         return entryTable;
     }() }
@@ -298,37 +296,37 @@ strong_lru_hashtable<Value>::strong_lru_hashtable(strong_hashtable_size hashCoun
 
     for (uint32_t entryIndex = 0; entryIndex <= entryCount.value; ++entryIndex)
     {
-        entry* ent = _entries + entryIndex;
-        new (ent) entry(next_with_same_hash(entryIndex + 1));
+        Entry* ent = _entries + entryIndex;
+        new (ent) Entry(NextWithSameHash(entryIndex + 1));
     }
-    new (_entries + entryCount.value) entry(next_with_same_hash(0));
+    new (_entries + entryCount.value) Entry(NextWithSameHash(0));
 }
 
 template <typename Value>
-strong_lru_hashtable<Value>::~strong_lru_hashtable()
+StrongLRUHashtable<Value>::~StrongLRUHashtable()
 {
     std::destroy_n(_entries, 1 + _capacity.value);
 }
 
 template <typename Value>
-constexpr size_t strong_lru_hashtable<Value>::requiredMemorySize(strong_hashtable_size hashCount,
-                                                                 lru_capacity entryCount)
+constexpr size_t StrongLRUHashtable<Value>::requiredMemorySize(StrongHashtableSize hashCount,
+                                                               LRUCapacity entryCount)
 {
     Require(detail::isPowerOfTwo(hashCount.value)); // Hash capacity must be power of 2.
     Require(hashCount.value >= 1);
     Require(entryCount.value >= 2);
 
     auto const hashSize = hashCount.value * sizeof(uint32_t);
-    auto const entrySize = ((1 + entryCount.value) * sizeof(entry)) + std::alignment_of_v<entry>;
-    auto const totalSize = sizeof(strong_lru_hashtable) + hashSize + entrySize;
+    auto const entrySize = ((1 + entryCount.value) * sizeof(Entry)) + std::alignment_of_v<Entry>;
+    auto const totalSize = sizeof(StrongLRUHashtable) + hashSize + entrySize;
     return totalSize;
 }
 
 template <typename Value>
 template <typename Allocator>
-auto strong_lru_hashtable<Value>::create(strong_hashtable_size hashCount,
-                                         lru_capacity entryCount,
-                                         std::string name) -> ptr
+auto StrongLRUHashtable<Value>::create(StrongHashtableSize hashCount,
+                                       LRUCapacity entryCount,
+                                       std::string name) -> Ptr
 {
     // payload memory layout
     // =====================
@@ -342,50 +340,50 @@ auto strong_lru_hashtable<Value>::create(strong_hashtable_size hashCount,
 
     Allocator allocator;
     auto const size = requiredMemorySize(hashCount, entryCount);
-    auto* obj = (strong_lru_hashtable*) allocator.allocate(size);
+    auto* obj = (StrongLRUHashtable*) allocator.allocate(size);
 
     // clang-format off
     if (!obj)
-        return ptr { nullptr, [](auto) {} };
+        return Ptr { nullptr, [](auto) {} };
     // clang-format on
 
     memset((void*) obj, 0, size);
-    new (obj) strong_lru_hashtable(hashCount, entryCount, std::move(name));
+    new (obj) StrongLRUHashtable(hashCount, entryCount, std::move(name));
 
     auto deleter = [size, allocator = std::move(allocator)](auto p) mutable {
         std::destroy_n(p, 1);
         allocator.deallocate(reinterpret_cast<unsigned char*>(p), size);
     };
 
-    return ptr(obj, std::move(deleter));
+    return Ptr(obj, std::move(deleter));
 }
 
 template <typename Value>
-inline size_t strong_lru_hashtable<Value>::size() const noexcept
+inline size_t StrongLRUHashtable<Value>::size() const noexcept
 {
     return _size;
 }
 
 template <typename Value>
-inline size_t strong_lru_hashtable<Value>::capacity() const noexcept
+inline size_t StrongLRUHashtable<Value>::capacity() const noexcept
 {
     return _capacity.value;
 }
 
 template <typename Value>
-inline size_t strong_lru_hashtable<Value>::storageSize() const noexcept
+inline size_t StrongLRUHashtable<Value>::storageSize() const noexcept
 {
     auto const hashTableSize = _hashCount.value * sizeof(uint32_t);
 
     // +1 for sentinel entry in the front
     // +1 for alignment
-    auto const entryTableSize = (1 + _capacity.value) * sizeof(entry);
+    auto const entryTableSize = (1 + _capacity.value) * sizeof(Entry);
 
-    return sizeof(strong_lru_hashtable) + hashTableSize + entryTableSize;
+    return sizeof(StrongLRUHashtable) + hashTableSize + entryTableSize;
 }
 
 template <typename Value>
-inline uint32_t* strong_lru_hashtable<Value>::hashTableSlot(strong_hash const& hash) noexcept
+inline uint32_t* StrongLRUHashtable<Value>::hashTableSlot(StrongHash const& hash) noexcept
 {
     auto const index = hash.d();
     auto const slot = index & _hashMask;
@@ -393,21 +391,21 @@ inline uint32_t* strong_lru_hashtable<Value>::hashTableSlot(strong_hash const& h
 }
 
 template <typename Value>
-lru_hashtable_stats strong_lru_hashtable<Value>::fetchAndClearStats() noexcept
+LRUHashtableStats StrongLRUHashtable<Value>::fetchAndClearStats() noexcept
 {
     auto st = _stats;
-    _stats = lru_hashtable_stats {};
+    _stats = LRUHashtableStats {};
     return st;
 }
 
 template <typename Value>
-void strong_lru_hashtable<Value>::clear()
+void StrongLRUHashtable<Value>::clear()
 {
-    entry const& sentinel = sentinelEntry();
+    Entry const& sentinel = sentinelEntry();
     auto entryIndex = sentinel.nextInLRU;
     while (entryIndex)
     {
-        entry& entry = _entries[entryIndex];
+        Entry& entry = _entries[entryIndex];
         entry.value.reset();
         entryIndex = entry.nextInLRU;
     }
@@ -416,10 +414,10 @@ void strong_lru_hashtable<Value>::clear()
 
     while (entryIndex <= _capacity.value)
     {
-        _entries[entryIndex] = entry(next_with_same_hash(1 + entryIndex));
+        _entries[entryIndex] = Entry(NextWithSameHash(1 + entryIndex));
         ++entryIndex;
     }
-    _entries[_capacity.value] = entry(next_with_same_hash(0));
+    _entries[_capacity.value] = Entry(NextWithSameHash(0));
 
     auto const oldSize = static_cast<int>(_size);
     _size = 0;
@@ -427,12 +425,12 @@ void strong_lru_hashtable<Value>::clear()
 }
 
 template <typename Value>
-void strong_lru_hashtable<Value>::remove(strong_hash const& hash)
+void StrongLRUHashtable<Value>::remove(StrongHash const& hash)
 {
     uint32_t* slot = hashTableSlot(hash);
     uint32_t entryIndex = *slot;
     uint32_t prevWithSameHash = 0;
-    entry* ent = nullptr;
+    Entry* ent = nullptr;
 
     while (entryIndex)
     {
@@ -446,8 +444,8 @@ void strong_lru_hashtable<Value>::remove(strong_hash const& hash)
     if (entryIndex == 0)
         return;
 
-    entry& prev = _entries[ent->prevInLRU];
-    entry& next = _entries[ent->nextInLRU];
+    Entry& prev = _entries[ent->prevInLRU];
+    Entry& next = _entries[ent->nextInLRU];
 
     // unlink from LRU chain
     prev.nextInLRU = ent->nextInLRU;
@@ -461,7 +459,7 @@ void strong_lru_hashtable<Value>::remove(strong_hash const& hash)
         *slot = ent->nextWithSameHash;
 
     // relink into free-chain
-    entry& sentinel = sentinelEntry();
+    Entry& sentinel = sentinelEntry();
     ent->prevInLRU = 0;
     ent->nextInLRU = sentinel.nextInLRU;
     ent->nextWithSameHash = sentinel.nextWithSameHash;
@@ -473,19 +471,19 @@ void strong_lru_hashtable<Value>::remove(strong_hash const& hash)
 }
 
 template <typename Value>
-inline void strong_lru_hashtable<Value>::touch(strong_hash const& hash) noexcept
+inline void StrongLRUHashtable<Value>::touch(StrongHash const& hash) noexcept
 {
     (void) findEntry(hash, false);
 }
 
 template <typename Value>
-inline bool strong_lru_hashtable<Value>::contains(strong_hash const& hash) const noexcept
+inline bool StrongLRUHashtable<Value>::contains(StrongHash const& hash) const noexcept
 {
-    return const_cast<strong_lru_hashtable*>(this)->findEntry(hash, false) != 0;
+    return const_cast<StrongLRUHashtable*>(this)->findEntry(hash, false) != 0;
 }
 
 template <typename Value>
-inline Value* strong_lru_hashtable<Value>::try_get(strong_hash const& hash) noexcept
+inline Value* StrongLRUHashtable<Value>::try_get(StrongHash const& hash) noexcept
 {
     uint32_t const entryIndex = findEntry(hash, false);
     if (!entryIndex)
@@ -494,13 +492,13 @@ inline Value* strong_lru_hashtable<Value>::try_get(strong_hash const& hash) noex
 }
 
 template <typename Value>
-inline Value const* strong_lru_hashtable<Value>::try_get(strong_hash const& hash) const noexcept
+inline Value const* StrongLRUHashtable<Value>::try_get(StrongHash const& hash) const noexcept
 {
-    return const_cast<strong_lru_hashtable*>(this)->try_get(hash);
+    return const_cast<StrongLRUHashtable*>(this)->try_get(hash);
 }
 
 template <typename Value>
-inline Value& strong_lru_hashtable<Value>::at(strong_hash const& hash)
+inline Value& StrongLRUHashtable<Value>::at(StrongHash const& hash)
 {
     uint32_t const entryIndex = findEntry(hash, false);
     if (!entryIndex)
@@ -509,13 +507,13 @@ inline Value& strong_lru_hashtable<Value>::at(strong_hash const& hash)
 }
 
 template <typename Value>
-inline Value& strong_lru_hashtable<Value>::peek(strong_hash const& hash)
+inline Value& StrongLRUHashtable<Value>::peek(StrongHash const& hash)
 {
     uint32_t* slot = hashTableSlot(hash);
     uint32_t entryIndex = *slot;
     while (entryIndex)
     {
-        entry& entry = _entries[entryIndex];
+        Entry& entry = _entries[entryIndex];
         if (entry.hashValue == hash)
             return *entry.value;
         entryIndex = entry.nextWithSameHash;
@@ -525,13 +523,13 @@ inline Value& strong_lru_hashtable<Value>::peek(strong_hash const& hash)
 }
 
 template <typename Value>
-inline Value const& strong_lru_hashtable<Value>::peek(strong_hash const& hash) const
+inline Value const& StrongLRUHashtable<Value>::peek(StrongHash const& hash) const
 {
-    return const_cast<strong_lru_hashtable*>(this)->peek(hash);
+    return const_cast<StrongLRUHashtable*>(this)->peek(hash);
 }
 
 template <typename Value>
-inline Value& strong_lru_hashtable<Value>::operator[](strong_hash const& hash) noexcept
+inline Value& StrongLRUHashtable<Value>::operator[](StrongHash const& hash) noexcept
 {
     uint32_t const entryIndex = findEntry(hash, true);
     return *_entries[entryIndex].value;
@@ -539,7 +537,7 @@ inline Value& strong_lru_hashtable<Value>::operator[](strong_hash const& hash) n
 
 template <typename Value>
 template <typename ValueConstructFn>
-inline bool strong_lru_hashtable<Value>::try_emplace(strong_hash const& hash, ValueConstructFn constructValue)
+inline bool StrongLRUHashtable<Value>::try_emplace(StrongHash const& hash, ValueConstructFn constructValue)
 {
     if (contains(hash))
         return false;
@@ -551,15 +549,15 @@ inline bool strong_lru_hashtable<Value>::try_emplace(strong_hash const& hash, Va
 
 template <typename Value>
 template <typename ValueConstructFn>
-inline Value& strong_lru_hashtable<Value>::get_or_emplace(strong_hash const& hash,
-                                                          ValueConstructFn constructValue)
+inline Value& StrongLRUHashtable<Value>::get_or_emplace(StrongHash const& hash,
+                                                        ValueConstructFn constructValue)
 {
     uint32_t* slot = hashTableSlot(hash);
 
     uint32_t entryIndex = *slot;
     while (entryIndex)
     {
-        entry& candidateEntry = _entries[entryIndex];
+        Entry& candidateEntry = _entries[entryIndex];
         if (candidateEntry.hashValue == hash)
         {
             ++_stats.hits;
@@ -575,22 +573,22 @@ inline Value& strong_lru_hashtable<Value>::get_or_emplace(strong_hash const& has
     ++_stats.misses;
 
     entryIndex = allocateEntry(hash, slot);
-    entry& result = _entries[entryIndex];
+    Entry& result = _entries[entryIndex];
     result.value.emplace(constructValue(entryIndex)); // TODO: not yet exception safe
     return *result.value;
 }
 
 template <typename Value>
 template <typename ValueConstructFn>
-inline Value* strong_lru_hashtable<Value>::get_or_try_emplace(strong_hash const& hash,
-                                                              ValueConstructFn constructValue)
+inline Value* StrongLRUHashtable<Value>::get_or_try_emplace(StrongHash const& hash,
+                                                            ValueConstructFn constructValue)
 {
     uint32_t* slot = hashTableSlot(hash);
 
     uint32_t entryIndex = *slot;
     while (entryIndex)
     {
-        entry& candidateEntry = _entries[entryIndex];
+        Entry& candidateEntry = _entries[entryIndex];
         if (candidateEntry.hashValue == hash)
         {
             ++_stats.hits;
@@ -606,7 +604,7 @@ inline Value* strong_lru_hashtable<Value>::get_or_try_emplace(strong_hash const&
     ++_stats.misses;
 
     entryIndex = allocateEntry(hash, slot);
-    entry& result = _entries[entryIndex];
+    Entry& result = _entries[entryIndex];
 
     Require(1 <= entryIndex && entryIndex <= _capacity.value);
     std::optional<Value> constructedValue = constructValue(entryIndex);
@@ -621,19 +619,19 @@ inline Value* strong_lru_hashtable<Value>::get_or_try_emplace(strong_hash const&
 }
 
 template <typename Value>
-Value& strong_lru_hashtable<Value>::valueAtEntryIndex(uint32_t entryIndex) noexcept
+Value& StrongLRUHashtable<Value>::valueAtEntryIndex(uint32_t entryIndex) noexcept
 {
     return _entries[entryIndex];
 }
 
 template <typename Value>
-Value const& strong_lru_hashtable<Value>::valueAtEntryIndex(uint32_t entryIndex) const noexcept
+Value const& StrongLRUHashtable<Value>::valueAtEntryIndex(uint32_t entryIndex) const noexcept
 {
     return _entries[entryIndex];
 }
 
 template <typename Value>
-inline Value& strong_lru_hashtable<Value>::emplace(strong_hash const& hash, Value value) noexcept
+inline Value& StrongLRUHashtable<Value>::emplace(StrongHash const& hash, Value value) noexcept
 {
     uint32_t const entryIndex = findEntry(hash, true);
     return *_entries[entryIndex].value = std::move(value);
@@ -641,7 +639,7 @@ inline Value& strong_lru_hashtable<Value>::emplace(strong_hash const& hash, Valu
 
 template <typename Value>
 template <typename ValueConstructFn>
-Value& strong_lru_hashtable<Value>::emplace(strong_hash const& hash, ValueConstructFn constructValue) noexcept
+Value& StrongLRUHashtable<Value>::emplace(StrongHash const& hash, ValueConstructFn constructValue) noexcept
 {
     uint32_t const entryIndex = findEntry(hash, true);
     _entries[entryIndex].value.emplace(constructValue(entryIndex));
@@ -649,13 +647,13 @@ Value& strong_lru_hashtable<Value>::emplace(strong_hash const& hash, ValueConstr
 }
 
 template <typename Value>
-std::vector<strong_hash> strong_lru_hashtable<Value>::hashes() const
+std::vector<StrongHash> StrongLRUHashtable<Value>::hashes() const
 {
-    auto result = std::vector<strong_hash> {};
-    entry const& sentinel = sentinelEntry();
+    auto result = std::vector<StrongHash> {};
+    Entry const& sentinel = sentinelEntry();
     for (uint32_t entryIndex = sentinel.nextInLRU; entryIndex != 0;)
     {
-        entry const& entry = _entries[entryIndex];
+        Entry const& entry = _entries[entryIndex];
         result.emplace_back(entry.hashValue);
         entryIndex = entry.nextInLRU;
     }
@@ -665,14 +663,14 @@ std::vector<strong_hash> strong_lru_hashtable<Value>::hashes() const
 }
 
 template <typename Value>
-void strong_lru_hashtable<Value>::inspect(std::ostream& output) const
+void StrongLRUHashtable<Value>::inspect(std::ostream& output) const
 {
-    entry const& sentinel = sentinelEntry();
+    Entry const& sentinel = sentinelEntry();
     uint32_t entryIndex = sentinel.prevInLRU;
     uint32_t hashSlotCollisions = 0;
     while (entryIndex != 0)
     {
-        entry const& entry = _entries[entryIndex];
+        Entry const& entry = _entries[entryIndex];
         // output << std::format("  entry[{:03}]   : LRU: {} <- -> {}, alt: {}; := {}\n",
         //                       entryIndex,
         //                       entry.prevInLRU,
@@ -714,14 +712,14 @@ void strong_lru_hashtable<Value>::inspect(std::ostream& output) const
 
 // {{{ helpers
 template <typename Value>
-uint32_t strong_lru_hashtable<Value>::findEntry(strong_hash const& hash, bool force)
+uint32_t StrongLRUHashtable<Value>::findEntry(StrongHash const& hash, bool force)
 {
     uint32_t* slot = hashTableSlot(hash);
     uint32_t entryIndex = *slot;
-    entry* result = nullptr;
+    Entry* result = nullptr;
     while (entryIndex)
     {
-        entry& entry = _entries[entryIndex];
+        Entry& entry = _entries[entryIndex];
         if (entry.hashValue == hash)
         {
             result = &entry;
@@ -754,10 +752,10 @@ uint32_t strong_lru_hashtable<Value>::findEntry(strong_hash const& hash, bool fo
 }
 
 template <typename Value>
-inline void strong_lru_hashtable<Value>::unlinkFromLRUChain(entry& ent) noexcept
+inline void StrongLRUHashtable<Value>::unlinkFromLRUChain(Entry& ent) noexcept
 {
-    entry& prev = _entries[ent.prevInLRU];
-    entry& next = _entries[ent.nextInLRU];
+    Entry& prev = _entries[ent.prevInLRU];
+    Entry& next = _entries[ent.nextInLRU];
     prev.nextInLRU = ent.nextInLRU;
     next.prevInLRU = ent.prevInLRU;
 
@@ -765,13 +763,13 @@ inline void strong_lru_hashtable<Value>::unlinkFromLRUChain(entry& ent) noexcept
 }
 
 template <typename Value>
-inline void strong_lru_hashtable<Value>::linkToLRUChainHead(uint32_t entryIndex) noexcept
+inline void StrongLRUHashtable<Value>::linkToLRUChainHead(uint32_t entryIndex) noexcept
 {
     // The entry must be already unlinked
 
-    entry& sentinel = sentinelEntry();
-    entry& oldHead = _entries[sentinel.nextInLRU];
-    entry& newHead = _entries[entryIndex];
+    Entry& sentinel = sentinelEntry();
+    Entry& oldHead = _entries[sentinel.nextInLRU];
+    Entry& newHead = _entries[entryIndex];
 
     newHead.nextInLRU = sentinel.nextInLRU;
     newHead.prevInLRU = 0;
@@ -786,9 +784,9 @@ inline void strong_lru_hashtable<Value>::linkToLRUChainHead(uint32_t entryIndex)
 }
 
 template <typename Value>
-uint32_t strong_lru_hashtable<Value>::allocateEntry(strong_hash const& hash, uint32_t* slot)
+uint32_t StrongLRUHashtable<Value>::allocateEntry(StrongHash const& hash, uint32_t* slot)
 {
-    entry& sentinel = sentinelEntry();
+    Entry& sentinel = sentinelEntry();
 
     if (sentinel.nextWithSameHash == 0)
         recycle();
@@ -798,7 +796,7 @@ uint32_t strong_lru_hashtable<Value>::allocateEntry(strong_hash const& hash, uin
     uint32_t const poppedEntryIndex = sentinel.nextWithSameHash;
     Require(1 <= poppedEntryIndex && poppedEntryIndex <= _capacity.value);
 
-    entry& poppedEntry = _entries[poppedEntryIndex];
+    Entry& poppedEntry = _entries[poppedEntryIndex];
     sentinel.nextWithSameHash = poppedEntry.nextWithSameHash;
     poppedEntry.nextWithSameHash = 0;
 
@@ -813,16 +811,16 @@ uint32_t strong_lru_hashtable<Value>::allocateEntry(strong_hash const& hash, uin
 }
 
 template <typename Value>
-void strong_lru_hashtable<Value>::recycle()
+void StrongLRUHashtable<Value>::recycle()
 {
     Require(_size == _capacity.value);
 
-    entry& sentinel = sentinelEntry();
+    Entry& sentinel = sentinelEntry();
     Require(sentinel.prevInLRU != 0);
 
     uint32_t const entryIndex = sentinel.prevInLRU;
-    entry& ent = _entries[entryIndex];
-    entry& prev = _entries[ent.prevInLRU];
+    Entry& ent = _entries[entryIndex];
+    Entry& prev = _entries[ent.prevInLRU];
 
     prev.nextInLRU = 0;
     sentinel.prevInLRU = ent.prevInLRU;
@@ -845,17 +843,17 @@ void strong_lru_hashtable<Value>::recycle()
 }
 
 template <typename Value>
-inline int strong_lru_hashtable<Value>::validateChange(int adj)
+inline int StrongLRUHashtable<Value>::validateChange(int adj)
 {
 #ifdef DEBUG_STRONG_LRU_HASHTABLE
     int count = 0;
 
-    entry const& sentinel = sentinelEntry();
+    Entry const& sentinel = sentinelEntry();
     size_t lastOrdering = sentinel.ordering;
 
     for (uint32_t entryIndex = sentinel.nextInLRU; entryIndex != 0;)
     {
-        entry const& entry = _entries[entryIndex];
+        Entry const& entry = _entries[entryIndex];
         Require(entry.ordering < lastOrdering);
         lastOrdering = entry.ordering;
         entryIndex = entry.nextInLRU;

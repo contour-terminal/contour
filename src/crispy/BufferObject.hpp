@@ -32,21 +32,21 @@ template <typename T>
 concept BufferObjectElementType = std::is_trivial_v<T> && std::is_standard_layout_v<T>;
 
 template <BufferObjectElementType>
-class buffer_object;
+class BufferObject;
 
 template <BufferObjectElementType>
-class buffer_fragment;
+class BufferFragment;
 
 template <BufferObjectElementType T>
-using buffer_object_release = std::function<void(buffer_object<T>*)>;
+using BufferObjectRelease = std::function<void(BufferObject<T>*)>;
 
 template <BufferObjectElementType T>
-using buffer_object_ptr = std::shared_ptr<buffer_object<T>>;
+using BufferObjectPtr = std::shared_ptr<BufferObject<T>>;
 
-auto inline const bufferObjectLog = logstore::category("BufferObject",
+auto inline const bufferObjectLog = logstore::Category("BufferObject",
                                                        "Logs buffer object pool activity.",
-                                                       logstore::category::state::Disabled,
-                                                       logstore::category::visibility::Hidden);
+                                                       logstore::Category::State::Disabled,
+                                                       logstore::Category::Visibility::Hidden);
 
 /**
  * BufferObject is the buffer object a Pty's read-call will use to store
@@ -64,13 +64,13 @@ auto inline const bufferObjectLog = logstore::category("BufferObject",
  * - This buffer does not grow or shrink.
  */
 template <BufferObjectElementType T>
-class buffer_object: public std::enable_shared_from_this<buffer_object<T>>
+class BufferObject: public std::enable_shared_from_this<BufferObject<T>>
 {
   public:
-    explicit buffer_object(size_t capacity) noexcept;
-    ~buffer_object();
+    explicit BufferObject(size_t capacity) noexcept;
+    ~BufferObject();
 
-    static buffer_object_ptr<T> create(size_t capacity, buffer_object_release<T> release = {});
+    static BufferObjectPtr<T> create(size_t capacity, BufferObjectRelease<T> release = {});
 
     void reset() noexcept;
 
@@ -94,7 +94,7 @@ class buffer_object: public std::enable_shared_from_this<buffer_object<T>>
     [[nodiscard]] T* data() noexcept;
     [[nodiscard]] T const* data() const noexcept;
 
-    [[nodiscard]] buffer_fragment<T> ref(std::size_t offset, std::size_t size) noexcept;
+    [[nodiscard]] BufferFragment<T> ref(std::size_t offset, std::size_t size) noexcept;
 
     /// Returns a pointer to the first byte in the internal data storage.
     T* begin() noexcept { return data(); }
@@ -129,59 +129,59 @@ class buffer_object: public std::enable_shared_from_this<buffer_object<T>>
     T* _hotEnd;
     T* _end;
 
-    friend class buffer_fragment<T>;
+    friend class BufferFragment<T>;
 
     std::mutex _mutex;
 };
 
 /**
- * buffer_object_pool manages reusable buffer_object objects.
+ * BufferObjectPool manages reusable BufferObject objects.
  *
- * buffer_object objects that are about to be disposed
+ * BufferObject objects that are about to be disposed
  * are not getting its resources deleted but ownership moved
- * back to buffer_object_pool.
+ * back to BufferObjectPool.
  */
 template <BufferObjectElementType T>
-class buffer_object_pool
+class BufferObjectPool
 {
   public:
-    explicit buffer_object_pool(size_t bufferSize = 4096);
-    ~buffer_object_pool();
+    explicit BufferObjectPool(size_t bufferSize = 4096);
+    ~BufferObjectPool();
 
     void releaseUnusedBuffers();
     [[nodiscard]] size_t unusedBuffers() const noexcept;
-    [[nodiscard]] buffer_object_ptr<T> allocateBufferObject();
+    [[nodiscard]] BufferObjectPtr<T> allocateBufferObject();
 
   private:
-    void release(buffer_object<T>* ptr);
+    void release(BufferObject<T>* ptr);
 
     bool _reuseBuffers = true;
     size_t _bufferSize;
-    std::list<buffer_object_ptr<T>> _unusedBuffers;
+    std::list<BufferObjectPtr<T>> _unusedBuffers;
 };
 
 /**
- * BufferFragment safely holds a reference to a region of buffer_object.
+ * BufferFragment safely holds a reference to a region of BufferObject.
  */
 template <BufferObjectElementType T>
-class buffer_fragment
+class BufferFragment
 {
   public:
-    using span_type = gsl::span<T const>;
+    using SpanType = gsl::span<T const>;
 
-    buffer_fragment(buffer_object_ptr<T> buffer, span_type region) noexcept;
+    BufferFragment(BufferObjectPtr<T> buffer, SpanType region) noexcept;
 
-    buffer_fragment() noexcept = default;
-    buffer_fragment(buffer_fragment&&) noexcept = default;
-    buffer_fragment(buffer_fragment const&) noexcept = default;
-    buffer_fragment& operator=(buffer_fragment&&) noexcept = default;
-    buffer_fragment& operator=(buffer_fragment const&) noexcept = default;
+    BufferFragment() noexcept = default;
+    BufferFragment(BufferFragment&&) noexcept = default;
+    BufferFragment(BufferFragment const&) noexcept = default;
+    BufferFragment& operator=(BufferFragment&&) noexcept = default;
+    BufferFragment& operator=(BufferFragment const&) noexcept = default;
 
     void reset() noexcept { _region = {}; }
 
     void growBy(std::size_t byteCount) noexcept
     {
-        _region = span_type(_region.data(), _region.size() + byteCount);
+        _region = SpanType(_region.data(), _region.size() + byteCount);
     }
 
     [[nodiscard]] std::basic_string_view<T> view() const noexcept
@@ -189,8 +189,8 @@ class buffer_fragment
         return std::basic_string_view<T>(_region.data(), _region.size());
     }
 
-    [[nodiscard]] span_type span() const noexcept { return _region; }
-    [[nodiscard]] buffer_object_ptr<T> const& owner() const noexcept { return _buffer; }
+    [[nodiscard]] SpanType span() const noexcept { return _region; }
+    [[nodiscard]] BufferObjectPtr<T> const& owner() const noexcept { return _buffer; }
 
     [[nodiscard]] bool empty() const noexcept { return _region.empty(); }
     [[nodiscard]] std::size_t size() const noexcept { return _region.size(); }
@@ -204,19 +204,19 @@ class buffer_fragment
     [[nodiscard]] std::size_t endOffset() const noexcept;
 
   private:
-    buffer_object_ptr<T> _buffer;
-    span_type _region;
+    BufferObjectPtr<T> _buffer;
+    SpanType _region;
 };
 
 template <BufferObjectElementType T>
-buffer_fragment(buffer_object_ptr<T>, gsl::span<T const>) -> buffer_fragment<T>;
+BufferFragment(BufferObjectPtr<T>, gsl::span<T const>) -> BufferFragment<T>;
 
 template <BufferObjectElementType T>
-buffer_fragment(buffer_object_ptr<T>, std::basic_string_view<T>) -> buffer_fragment<T>;
+BufferFragment(BufferObjectPtr<T>, std::basic_string_view<T>) -> BufferFragment<T>;
 
-// {{{ buffer_object implementation
+// {{{ BufferObject implementation
 template <BufferObjectElementType T>
-buffer_object<T>::buffer_object(size_t capacity) noexcept:
+BufferObject<T>::BufferObject(size_t capacity) noexcept:
 #ifndef BUFFER_OBJECT_INLINE
     data_ { new T[capacity] },
 #endif
@@ -231,7 +231,7 @@ buffer_object<T>::buffer_object(size_t capacity) noexcept:
 }
 
 template <BufferObjectElementType T>
-buffer_object<T>::~buffer_object()
+BufferObject<T>::~BufferObject()
 {
     if (bufferObjectLog)
         bufferObjectLog()("Destroying BufferObject: {}..{}.", (void*) data(), (void*) end());
@@ -243,21 +243,21 @@ buffer_object<T>::~buffer_object()
 }
 
 template <BufferObjectElementType T>
-buffer_object_ptr<T> buffer_object<T>::create(size_t capacity, buffer_object_release<T> release)
+BufferObjectPtr<T> BufferObject<T>::create(size_t capacity, BufferObjectRelease<T> release)
 {
 #ifdef BUFFER_OBJECT_INLINE
-    auto const totalCapacity = nextPowerOfTwo(static_cast<uint32_t>(sizeof(buffer_object) + capacity));
-    auto const nettoCapacity = totalCapacity - sizeof(buffer_object);
-    auto ptr = (buffer_object*) malloc(totalCapacity);
-    new (ptr) buffer_object(nettoCapacity);
-    return buffer_object_ptr<T>(ptr, std::move(release));
+    auto const totalCapacity = nextPowerOfTwo(static_cast<uint32_t>(sizeof(BufferObject) + capacity));
+    auto const nettoCapacity = totalCapacity - sizeof(BufferObject);
+    auto ptr = (BufferObject*) malloc(totalCapacity);
+    new (ptr) BufferObject(nettoCapacity);
+    return BufferObjectPtr<T>(ptr, std::move(release));
 #else
-    return buffer_object_ptr<T>(new buffer_object<T>(nextPowerOfTwo(capacity)), std::move(release));
+    return BufferObjectPtr<T>(new BufferObject<T>(nextPowerOfTwo(capacity)), std::move(release));
 #endif
 }
 
 template <BufferObjectElementType T>
-gsl::span<T const> buffer_object<T>::writeAtEnd(gsl::span<T const> data) noexcept
+gsl::span<T const> BufferObject<T>::writeAtEnd(gsl::span<T const> data) noexcept
 {
     assert(_hotEnd + data.size() <= _end);
     std::memcpy(_hotEnd, data.data(), data.size());
@@ -265,13 +265,13 @@ gsl::span<T const> buffer_object<T>::writeAtEnd(gsl::span<T const> data) noexcep
 }
 
 template <BufferObjectElementType T>
-void buffer_object<T>::reset() noexcept
+void BufferObject<T>::reset() noexcept
 {
     _hotEnd = data();
 }
 
 template <BufferObjectElementType T>
-inline T* buffer_object<T>::data() noexcept
+inline T* BufferObject<T>::data() noexcept
 {
 #ifdef BUFFER_OBJECT_INLINE
     return (T*) (this + 1);
@@ -281,7 +281,7 @@ inline T* buffer_object<T>::data() noexcept
 }
 
 template <BufferObjectElementType T>
-inline T const* buffer_object<T>::data() const noexcept
+inline T const* BufferObject<T>::data() const noexcept
 {
 #ifdef BUFFER_OBJECT_INLINE
     return (T*) (this + 1);
@@ -291,7 +291,7 @@ inline T const* buffer_object<T>::data() const noexcept
 }
 
 template <BufferObjectElementType T>
-inline gsl::span<T> buffer_object<T>::advance(size_t n) noexcept
+inline gsl::span<T> BufferObject<T>::advance(size_t n) noexcept
 {
     assert(_hotEnd + n <= _end);
     auto result = gsl::span<T>(_hotEnd, _hotEnd + n);
@@ -300,41 +300,41 @@ inline gsl::span<T> buffer_object<T>::advance(size_t n) noexcept
 }
 
 template <BufferObjectElementType T>
-inline void buffer_object<T>::advanceHotEndUntil(T const* ptr) noexcept
+inline void BufferObject<T>::advanceHotEndUntil(T const* ptr) noexcept
 {
     assert(_hotEnd <= ptr && ptr <= _end);
     _hotEnd = const_cast<T*>(ptr);
 }
 
 template <BufferObjectElementType T>
-inline void buffer_object<T>::clear() noexcept
+inline void BufferObject<T>::clear() noexcept
 {
     _hotEnd = data();
 }
 
 template <BufferObjectElementType T>
-inline buffer_fragment<T> buffer_object<T>::ref(std::size_t offset, std::size_t size) noexcept
+inline BufferFragment<T> BufferObject<T>::ref(std::size_t offset, std::size_t size) noexcept
 {
-    return buffer_fragment<T>(this->shared_from_this(), gsl::span<T const>(this->data() + offset, size));
+    return BufferFragment<T>(this->shared_from_this(), gsl::span<T const>(this->data() + offset, size));
 }
 // }}}
 
 // {{{ BufferFragment implementation
 template <BufferObjectElementType T>
-buffer_fragment<T>::buffer_fragment(buffer_object_ptr<T> buffer, gsl::span<T const> region) noexcept:
+BufferFragment<T>::BufferFragment(BufferObjectPtr<T> buffer, gsl::span<T const> region) noexcept:
     _buffer { std::move(buffer) }, _region { region }
 {
     assert(_buffer->begin() <= _region.data() && (_region.data() + _region.size()) <= _buffer->end());
 }
 
 template <BufferObjectElementType T>
-inline std::size_t buffer_fragment<T>::startOffset() const noexcept
+inline std::size_t BufferFragment<T>::startOffset() const noexcept
 {
     return static_cast<std::size_t>(std::distance((T const*) _buffer->data(), (T const*) data()));
 }
 
 template <BufferObjectElementType T>
-inline std::size_t buffer_fragment<T>::endOffset() const noexcept
+inline std::size_t BufferFragment<T>::endOffset() const noexcept
 {
     return startOffset() + size();
 }
@@ -342,26 +342,26 @@ inline std::size_t buffer_fragment<T>::endOffset() const noexcept
 
 // {{{ BufferObjectPool implementation
 template <BufferObjectElementType T>
-buffer_object_pool<T>::buffer_object_pool(size_t bufferSize): _bufferSize { bufferSize }
+BufferObjectPool<T>::BufferObjectPool(size_t bufferSize): _bufferSize { bufferSize }
 {
     bufferObjectLog()("Creating BufferObject pool with chunk size {}",
                       crispy::humanReadableBytes(bufferSize));
 }
 
 template <BufferObjectElementType T>
-buffer_object_pool<T>::~buffer_object_pool()
+BufferObjectPool<T>::~BufferObjectPool()
 {
     _reuseBuffers = false;
 }
 
 template <BufferObjectElementType T>
-size_t buffer_object_pool<T>::unusedBuffers() const noexcept
+size_t BufferObjectPool<T>::unusedBuffers() const noexcept
 {
     return _unusedBuffers.size();
 }
 
 template <BufferObjectElementType T>
-void buffer_object_pool<T>::releaseUnusedBuffers()
+void BufferObjectPool<T>::releaseUnusedBuffers()
 {
     _reuseBuffers = false;
     _unusedBuffers.clear();
@@ -369,12 +369,12 @@ void buffer_object_pool<T>::releaseUnusedBuffers()
 }
 
 template <BufferObjectElementType T>
-buffer_object_ptr<T> buffer_object_pool<T>::allocateBufferObject()
+BufferObjectPtr<T> BufferObjectPool<T>::allocateBufferObject()
 {
     if (_unusedBuffers.empty())
-        return buffer_object<T>::create(_bufferSize, [this](auto p) { release(p); });
+        return BufferObject<T>::create(_bufferSize, [this](auto p) { release(p); });
 
-    buffer_object_ptr<T> buffer = std::move(_unusedBuffers.front());
+    BufferObjectPtr<T> buffer = std::move(_unusedBuffers.front());
     if (bufferObjectLog)
         bufferObjectLog()("Recycling BufferObject from pool: @{}.", (void*) buffer.get());
     _unusedBuffers.pop_front();
@@ -382,7 +382,7 @@ buffer_object_ptr<T> buffer_object_pool<T>::allocateBufferObject()
 }
 
 template <BufferObjectElementType T>
-void buffer_object_pool<T>::release(buffer_object<T>* ptr)
+void BufferObjectPool<T>::release(BufferObject<T>* ptr)
 {
     if (_reuseBuffers)
     {

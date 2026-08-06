@@ -5,7 +5,7 @@
 /// `ControlSession` — one tmux-control-mode client connection.
 ///
 /// Speaks the line protocol pinned to tmux 3.7b semantics: guarded command
-/// responses (`%begin/%end/%error <time> <number> <flags>`, flags bit 0 =
+/// responses (`%begin/%end/%error <time> <number> <Flags>`, flags bit 0 =
 /// client-originated), asynchronous notifications, and byte-exact %output via
 /// the ControlOutput ordering queue. The id mapping is fixed: the host's single
 /// window is session `$0`, a vtworkspace Tab is a window `@N` (its TabId), a vtworkspace

@@ -25,7 +25,7 @@ std::string expandTabLabel(std::string_view tmpl, TabLabelContext const& ctx)
         // ignored; only the name selects a value. An unrecognized name is echoed verbatim (its exact
         // original `{...}` slice), matching parseStatusLineSegment's handling so both surfaces treat an
         // unknown placeholder the same way — the user sees what they typed rather than it vanishing.
-        auto const& interpolation = std::get<crispy::string_interpolation>(fragment);
+        auto const& interpolation = std::get<crispy::StringInterpolation>(fragment);
         if (interpolation.name == "WindowTitle")
             result += ctx.windowTitle;
         else if (interpolation.name == "TabPosition")

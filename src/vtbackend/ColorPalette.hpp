@@ -30,7 +30,7 @@ struct ImageData
     ImageSize size;
     std::vector<uint8_t> pixels;
 
-    crispy::strong_hash hash;
+    crispy::StrongHash hash;
 
     void updateHash() noexcept;
 };
@@ -42,7 +42,7 @@ struct BackgroundImage
     using Location = std::variant<std::filesystem::path, ImageDataPtr>;
 
     Location location;
-    crispy::strong_hash hash {};
+    crispy::StrongHash hash {};
 
     // image configuration
     float opacity = 0.5; // normalized value

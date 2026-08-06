@@ -83,7 +83,7 @@ TEST_CASE("InputGenerator.Modifier.chordModifierTable")
 
     SECTION("a value naming no chord modifier formats empty")
     {
-        // crispy::flags's formatter walks every bit position of the underlying type and skips the
+        // crispy::Flags's formatter walks every bit position of the underlying type and skips the
         // ones that format empty. Were a lock bit to name itself here, it would leak into the
         // rendering of a Modifiers set.
         CHECK(std::format("{}", static_cast<Modifier>(LockKey::CapsLock)).empty());

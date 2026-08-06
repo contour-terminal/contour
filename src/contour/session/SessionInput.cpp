@@ -24,7 +24,7 @@ using std::pair;
 using std::u32string;
 using std::chrono::steady_clock;
 
-using crispy::point;
+using crispy::Point;
 
 using vtbackend::PixelCoordinate;
 
@@ -119,8 +119,8 @@ namespace
         return QPoint { p.y(), p.x() };
     }
 
-    void sendWheelEvent(crispy::point const& pixelDelta,
-                        crispy::point const& angleDelta,
+    void sendWheelEvent(crispy::Point const& pixelDelta,
+                        crispy::Point const& angleDelta,
                         PixelCoordinate const& currentMousePixelPosition,
                         vtbackend::Modifiers modifiers,
                         vtbackend::ScrollPhase scrollPhase,
@@ -557,7 +557,7 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
     //       it will send horizontal wheel events instead of vertical ones. We need to compensate
     //       for that here.
 
-    auto const pixelDelta = [&]() -> crispy::point {
+    auto const pixelDelta = [&]() -> crispy::Point {
         if (event->pixelDelta().isNull())
             return { .x = 0, .y = 0 };
 
@@ -570,7 +570,7 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
             return { .x = x, .y = y };
     }();
 
-    auto const angleDelta = [&]() -> crispy::point {
+    auto const angleDelta = [&]() -> crispy::Point {
         if (event->angleDelta().isNull())
             return { .x = 0, .y = 0 };
 

@@ -231,7 +231,7 @@ void ViCommands::updateSearchTerm(std::u32string const& text)
 
 void ViCommands::modeChanged(ViMode mode)
 {
-    auto _ = crispy::finally { [this, mode]() { _lastMode = mode; } };
+    auto _ = crispy::Finally { [this, mode]() { _lastMode = mode; } };
 
     inputLog()("mode changed to {}\n", mode);
 

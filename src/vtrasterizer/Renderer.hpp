@@ -33,11 +33,11 @@ namespace vtrasterizer
 
 struct RenderCursor
 {
-    crispy::point position;
+    crispy::Point position;
     vtbackend::CursorShape shape;
     int width;
 
-    RenderCursor(crispy::point position, vtbackend::CursorShape shape, int width):
+    RenderCursor(crispy::Point position, vtbackend::CursorShape shape, int width):
         position(position), shape(shape), width(width)
     {
     }
@@ -70,8 +70,8 @@ class Renderer
              PageMargin pageMargin,
              FontDescriptions fontDescriptions,
              vtbackend::ColorPalette const& colorPalette,
-             crispy::strong_hashtable_size atlasHashtableSlotCount,
-             crispy::lru_capacity atlasTileCount,
+             crispy::StrongHashtableSize atlasHashtableSlotCount,
+             crispy::LRUCapacity atlasTileCount,
              bool atlasDirectMapping,
              Decorator hyperlinkNormal,
              Decorator hyperlinkHover,
@@ -104,7 +104,7 @@ class Renderer
     /// everything, atlas included.
     void detachRenderTarget() noexcept;
 
-    bool setFontSize(text::font_size fontSize);
+    bool setFontSize(text::FontSize fontSize);
     void updateFontMetrics();
 
     /// Returns the most recently *published* font descriptions.
@@ -123,7 +123,7 @@ class Renderer
 
     /// Returns just the published font DPI, without deep-copying the whole FontDescriptions.
     ///
-    /// fontDescriptions() copies five text::font_description objects (each with std::strings and feature
+    /// fontDescriptions() copies five text::FontDescription objects (each with std::strings and feature
     /// vectors) under the lock. Callers that only need the DPI — e.g. the dedup guard in
     /// TerminalDisplay::applyFontDPI() — use this to avoid that heap-allocating copy.
     [[nodiscard]] DPI publishedFontDPI() const noexcept
@@ -330,8 +330,8 @@ class Renderer
 
     void executeImageDiscards();
 
-    crispy::strong_hashtable_size _atlasHashtableSlotCount;
-    crispy::lru_capacity _atlasTileCount;
+    crispy::StrongHashtableSize _atlasHashtableSlotCount;
+    crispy::LRUCapacity _atlasTileCount;
     bool _atlasDirectMapping;
 
     RenderTarget* _renderTarget = nullptr;
@@ -340,7 +340,7 @@ class Renderer
     std::unique_ptr<Renderable::TextureAtlas> _textureAtlas;
 
     FontDescriptions _fontDescriptions;
-    std::unique_ptr<text::shaper> _textShaper;
+    std::unique_ptr<text::Shaper> _textShaper;
     FontKeys _fonts;
 
     /// The live grid metrics, mutated *only* on the render thread (at the start of renderImpl()).
@@ -370,7 +370,7 @@ class Renderer
         /// change (fontDescriptions, which supersedes a size-only change). Only the *inputs* are
         /// staged; the heavyweight work (font loading, metric computation via the non-thread-safe
         /// text shaper, atlas rebuild) is performed on the render thread during applyPendingReconfig().
-        std::optional<text::font_size> fontSize;          //!< Set when only the font size changed.
+        std::optional<text::FontSize> fontSize;           //!< Set when only the font size changed.
         std::optional<FontDescriptions> fontDescriptions; //!< Set when the full font config changed.
         std::optional<Geometry> geometry;                 //!< Set when a geometry change is pending.
     };

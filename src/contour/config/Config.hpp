@@ -423,8 +423,8 @@ enum class RenderingBackend : uint8_t
 struct RendererConfig
 {
     RenderingBackend renderingBackend { RenderingBackend::Auto };
-    crispy::lru_capacity textureAtlasTileCount { 4000u };
-    crispy::strong_hashtable_size textureAtlasHashtableSlots { 4096u };
+    crispy::LRUCapacity textureAtlasTileCount { 4000u };
+    crispy::StrongHashtableSize textureAtlasHashtableSlots { 4096u };
     bool textureAtlasDirectMapping { false };
 };
 
@@ -534,32 +534,32 @@ inline auto defaultFamilyName = "monospace";
         .dpiScale = 1.0,
         .dpi = { 0, 0 },
         .size = { 12 },
-        .regular = text::font_description { .familyName = { defaultFamilyName },
-                                            .weight = text::font_weight::normal,
-                                            .slant = text::font_slant::normal,
-                                            .spacing = text::font_spacing::mono,
-                                            .strictSpacing = false,
-                                            .features = {} },
-        .bold = text::font_description { .familyName = { defaultFamilyName },
-                                         .weight = text::font_weight::bold,
-                                         .slant = text::font_slant::normal,
-                                         .spacing = text::font_spacing::mono,
-                                         .strictSpacing = false,
-                                         .features = {} },
-        .italic = text::font_description { .familyName = { defaultFamilyName },
-                                           .weight = text::font_weight::normal,
-                                           .slant = text::font_slant::italic,
-                                           .spacing = text::font_spacing::mono,
+        .regular = text::FontDescription { .familyName = { defaultFamilyName },
+                                           .weight = text::FontWeight::Normal,
+                                           .slant = text::FontSlant::Normal,
+                                           .spacing = text::FontSpacing::Mono,
                                            .strictSpacing = false,
                                            .features = {} },
-        .boldItalic = text::font_description { .familyName = { defaultFamilyName },
-                                               .weight = text::font_weight::bold,
-                                               .slant = text::font_slant::italic,
-                                               .spacing = text::font_spacing::mono,
-                                               .strictSpacing = false,
-                                               .features = {} },
-        .emoji = text::font_description { .familyName = { "emoji" } },
-        .renderMode = text::render_mode::gray,
+        .bold = text::FontDescription { .familyName = { defaultFamilyName },
+                                        .weight = text::FontWeight::Bold,
+                                        .slant = text::FontSlant::Normal,
+                                        .spacing = text::FontSpacing::Mono,
+                                        .strictSpacing = false,
+                                        .features = {} },
+        .italic = text::FontDescription { .familyName = { defaultFamilyName },
+                                          .weight = text::FontWeight::Normal,
+                                          .slant = text::FontSlant::Italic,
+                                          .spacing = text::FontSpacing::Mono,
+                                          .strictSpacing = false,
+                                          .features = {} },
+        .boldItalic = text::FontDescription { .familyName = { defaultFamilyName },
+                                              .weight = text::FontWeight::Bold,
+                                              .slant = text::FontSlant::Italic,
+                                              .spacing = text::FontSpacing::Mono,
+                                              .strictSpacing = false,
+                                              .features = {} },
+        .emoji = text::FontDescription { .familyName = { "emoji" } },
+        .renderMode = text::RenderMode::Gray,
         .textShapingEngine = vtrasterizer::TextShapingEngine::OpenShaper,
         .fontLocator = vtrasterizer::FontLocatorEngine::Native,
         .builtinBoxDrawing = true,
@@ -1260,7 +1260,7 @@ struct YAMLConfigReader
 
     std::filesystem::path configFile;
     YAML::Node doc;
-    logstore::category const& logger;
+    logstore::Category const& logger;
     VariableReplacer variableReplacer;
 
     /// @param filename The document to parse.
@@ -1269,8 +1269,8 @@ struct YAMLConfigReader
     ///                 default replacer holds a reference to it.
     /// @param replacer An expansion policy of the caller's own; the default one reads @p env.
     YAMLConfigReader(std::string const& filename,
-                     logstore::category const& log,
-                     crispy::environment const& env,
+                     logstore::Category const& log,
+                     crispy::Environment const& env,
                      VariableReplacer replacer = {});
 
     /// Expands `${VAR}` tokens in @p input using the configured variable replacer.
@@ -1406,9 +1406,9 @@ struct YAMLConfigReader
     // clang-format off
     void loadFromEntry(YAML::Node const& node, std::string const& entry, std::filesystem::path& where) const;
     void loadFromEntry(YAML::Node const& node, std::string const& entry, RenderingBackend& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, crispy::strong_hashtable_size& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, crispy::StrongHashtableSize& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::MaxHistoryLineCount& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, crispy::lru_capacity& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, crispy::LRUCapacity& where);
     void loadFromEntry(YAML::Node const& node,
                        std::string const& entry,
                        vtrasterizer::GlyphScalingMethod& where);
@@ -1430,16 +1430,16 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarVisibility& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, UiStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::FontDescriptions& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, text::render_mode& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, text::RenderMode& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::TextOutlineConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::FontLocatorEngine& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::TextShapingEngine& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ColorConfig& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, text::font_description& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, std::vector<text::font_feature>& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, text::font_weight& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, text::font_slant& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, text::font_size& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, text::FontDescription& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, std::vector<text::FontFeature>& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, text::FontWeight& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, text::FontSlant& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, text::FontSize& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::LineCount& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::VTType& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtpty::PageSize& where);
@@ -1584,7 +1584,7 @@ struct Writer
                       actionAndModes);
     }
 
-    [[nodiscard]] std::string static format(std::vector<text::font_feature> const& v)
+    [[nodiscard]] std::string static format(std::vector<text::FontFeature> const& v)
     {
 
         auto result = std::string { "[" };
@@ -2181,9 +2181,9 @@ struct std::formatter<vtbackend::Opacity>: formatter<float>
 };
 
 template <>
-struct std::formatter<crispy::strong_hashtable_size>: formatter<unsigned>
+struct std::formatter<crispy::StrongHashtableSize>: formatter<unsigned>
 {
-    auto format(crispy::strong_hashtable_size value, auto& ctx) const
+    auto format(crispy::StrongHashtableSize value, auto& ctx) const
     {
         return formatter<unsigned>::format(value.value, ctx);
     }
@@ -2232,9 +2232,9 @@ struct std::formatter<vtbackend::StatusDisplayType>: formatter<std::string_view>
 };
 
 template <>
-struct std::formatter<crispy::lru_capacity>: formatter<unsigned>
+struct std::formatter<crispy::LRUCapacity>: formatter<unsigned>
 {
-    auto format(crispy::lru_capacity value, auto& ctx) const
+    auto format(crispy::LRUCapacity value, auto& ctx) const
     {
         return formatter<unsigned>::format(value.value, ctx);
     }

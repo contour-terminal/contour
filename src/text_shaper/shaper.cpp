@@ -90,7 +90,7 @@ namespace
 
 } // namespace
 
-tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, vtbackend::ImageSize boundingBox)
+tuple<RasterizedGlyph, float> scale(RasterizedGlyph const& bitmap, vtbackend::ImageSize boundingBox)
 {
     // NB: We're only supporting down-scaling.
     assert(bitmap.bitmapSize.width >= boundingBox.width || bitmap.bitmapSize.height >= boundingBox.height);
@@ -116,19 +116,19 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, vtbackend::
     vector<uint8_t> dest {};
     switch (bitmap.format)
     {
-        case bitmap_format::rgba:
-        case bitmap_format::outlined:
+        case BitmapFormat::RGBA:
+        case BitmapFormat::Outlined:
             dest = scaleDown<4>(bitmap.bitmap, bitmap.bitmapSize, newSize, ratio);
             break;
-        case bitmap_format::rgb: //
+        case BitmapFormat::RGB: //
             dest = scaleDown<3>(bitmap.bitmap, bitmap.bitmapSize, newSize, ratio);
             break;
-        case bitmap_format::alpha_mask:
+        case BitmapFormat::AlphaMask:
             dest = scaleDown<1>(bitmap.bitmap, bitmap.bitmapSize, newSize, ratio);
             break;
     }
 
-    auto output = rasterized_glyph {};
+    auto output = RasterizedGlyph {};
     output.format = bitmap.format;
     output.bitmapSize = newSize;
     output.position = bitmap.position;

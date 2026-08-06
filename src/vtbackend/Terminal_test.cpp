@@ -235,7 +235,7 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
         file << "test";
     }
 
-    auto const cleanup = crispy::finally { [&]() { fs::remove_all(tmpRoot); } };
+    auto const cleanup = crispy::Finally { [&]() { fs::remove_all(tmpRoot); } };
     auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
     auto constexpr UiHandledHint = false;
 
@@ -5275,7 +5275,7 @@ TEST_CASE("Terminal.hint_mode_validates_and_resolves_paths_against_the_working_d
         auto file = std::ofstream(tmpRoot / "Makefile");
         file << "all:\n";
     }
-    auto const cleanup = crispy::finally { [&]() { fs::remove_all(tmpRoot); } };
+    auto const cleanup = crispy::Finally { [&]() { fs::remove_all(tmpRoot); } };
 
     auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(60) }, LineCount(10) };
     mock.terminal.setCurrentWorkingDirectory("file://" + tmpRoot.generic_string());
@@ -5475,7 +5475,7 @@ TEST_CASE("Terminal reports the identity its settings named", "[terminal]")
     settings.pageSize = pageSize;
     settings.terminalId = vtbackend::VTType::VT340;
 
-    auto const environment = crispy::testing::fake_environment {};
+    auto const environment = crispy::testing::FakeEnvironment {};
     auto terminal = vtbackend::Terminal { events,
                                           environment,
                                           std::make_unique<vtpty::MockPty>(pageSize),
@@ -5505,7 +5505,7 @@ TEST_CASE("a terminal constructed below VT525 narrows its sequence table too", "
     auto events = vtbackend::Terminal::NullEvents {};
     auto const pageSize = vtbackend::PageSize { vtbackend::LineCount(5), vtbackend::ColumnCount(20) };
 
-    auto const environment = crispy::testing::fake_environment {};
+    auto const environment = crispy::testing::FakeEnvironment {};
     auto makeTerminal = [&](vtbackend::VTType id) {
         auto settings = vtbackend::Settings {};
         settings.pageSize = pageSize;

@@ -409,7 +409,7 @@ struct RealTmuxServer
 /// Drains @p pty until @p needle shows up (bounded), returning what was read.
 std::string drainUntil(vtpty::Pty& pty, std::string_view needle)
 {
-    auto pool = crispy::buffer_object_pool<char> { 65536 };
+    auto pool = crispy::BufferObjectPool<char> { 65536 };
     auto collected = std::string {};
     for (auto i = 0; i < 300 && !collected.contains(needle); ++i)
     {

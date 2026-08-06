@@ -8,7 +8,7 @@
 #include <format>
 #include <numbers>
 
-using crispy::point;
+using crispy::Point;
 
 namespace vtbackend::regis
 {
@@ -44,7 +44,7 @@ namespace
         return std::clamp(v, -MaxCanvasCoord, MaxCanvasCoord);
     }
 
-    [[nodiscard]] crispy::point clampCanvasPoint(crispy::point p) noexcept
+    [[nodiscard]] crispy::Point clampCanvasPoint(crispy::Point p) noexcept
     {
         return { .x = clampCanvasCoord(p.x), .y = clampCanvasCoord(p.y) };
     }
@@ -152,7 +152,7 @@ bool ReGISParser::parse(std::string_view regis,
                         ReGISTextRasterizer const& textRasterizer,
                         ReGISEvents& events)
 {
-    // Non-owning shared_ptr: this test entry point owns the rasterizer's lifetime itself, so the
+    // Non-owning shared_ptr: this test entry Point owns the rasterizer's lifetime itself, so the
     // parser must not delete it. (Production hands the parser a real owning shared_ptr.)
     auto const nonOwning =
         std::shared_ptr<ReGISTextRasterizer const> { std::shared_ptr<void> {}, &textRasterizer };
@@ -273,7 +273,7 @@ ReGISParser::Coord ReGISParser::scanCoordinate() noexcept
     return coord;
 }
 
-point ReGISParser::resolveCoordinate(Coord const& coord) const noexcept
+Point ReGISParser::resolveCoordinate(Coord const& coord) const noexcept
 {
     auto p = _context.position;
     if (coord.x)
@@ -285,12 +285,12 @@ point ReGISParser::resolveCoordinate(Coord const& coord) const noexcept
     return clampCanvasPoint(p);
 }
 
-void ReGISParser::moveTo(point p) noexcept
+void ReGISParser::moveTo(Point p) noexcept
 {
     _context.position = clampCanvasPoint(p);
 }
 
-void ReGISParser::drawLineTo(point p) noexcept
+void ReGISParser::drawLineTo(Point p) noexcept
 {
     p = clampCanvasPoint(p);
     _canvas.plotLine(_context.currentPen(), _context.position, p);
@@ -569,8 +569,8 @@ void ReGISParser::applyPositionOption(char option, Command command)
             if (!_context.positionStack.empty())
             {
                 // Position stacks are LIFO and nestable, so (E) closes back to the most recently
-                // saved point and pops only that frame; (V) draws the closing edge. (Using front() +
-                // clear() would restore to the outermost point and discard every nested frame at once.)
+                // saved Point and pops only that frame; (V) draws the closing edge. (Using front() +
+                // clear() would restore to the outermost Point and discard every nested frame at once.)
                 auto const saved = _context.positionStack.back();
                 _context.positionStack.pop_back();
                 if (command == Command::Vector)
@@ -611,7 +611,7 @@ void ReGISParser::applyCurveOption(char option)
                 if (_curvePoints.size() >= 2)
                 {
                     _canvas.plotCurve(_context.currentPen(), _curvePoints, _curveClosed);
-                    // A closed curve returns the cursor to its start; an open one ends at the last point.
+                    // A closed curve returns the cursor to its start; an open one ends at the last Point.
                     _context.position = _curveClosed ? _curvePoints.front() : _curvePoints.back();
                     _drew = true;
                 }
@@ -626,7 +626,7 @@ void ReGISParser::applyCurveOption(char option)
     }
 }
 
-void ReGISParser::drawCurveItem(crispy::point p)
+void ReGISParser::drawCurveItem(crispy::Point p)
 {
     // A bracketed coordinate under C draws a circle or arc. With (C) the bracket is the centre and
     // the current position lies on the circumference; otherwise the current position is the centre.
@@ -739,7 +739,7 @@ void ReGISParser::drawText(std::string_view text)
         if (auto const glyph = _textRasterizer->rasterize(static_cast<char32_t>(ch), cellSize))
             _canvas.blendCoverage(pen, _context.position, glyph->size, glyph->coverage);
         _context.position = clampCanvasPoint(
-            point { .x = _context.position.x + advanceX, .y = _context.position.y + advanceY });
+            Point { .x = _context.position.x + advanceX, .y = _context.position.y + advanceY });
     }
     _drew = true;
 }
@@ -889,7 +889,7 @@ void ReGISParser::parsePixelVectorRun(Command command)
         auto const delta = PixelVectorDelta[digit];
         // The pixel-vector step is one logical pixel per unit; scale onto the supersampled canvas.
         auto const multiplier = static_cast<int>(_context.pixelVectorMultiplier * _context.supersample);
-        auto next = clampCanvasPoint(point { .x = _context.position.x + (delta.dx * multiplier),
+        auto next = clampCanvasPoint(Point { .x = _context.position.x + (delta.dx * multiplier),
                                              .y = _context.position.y + (delta.dy * multiplier) });
         if (_fillSink)
         {
@@ -919,7 +919,7 @@ void ReGISParser::parseFill()
         advance();
 
     // The fill outline starts at the current graphics cursor, so it is the first vertex.
-    auto vertices = std::vector<point> { _context.position };
+    auto vertices = std::vector<Point> { _context.position };
     _fillSink = &vertices;
     while (!atEnd())
     {

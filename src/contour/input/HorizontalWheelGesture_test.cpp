@@ -15,12 +15,12 @@ using vtbackend::ScrollPhase;
 namespace
 {
 
-constexpr crispy::point delta(int x, int y) noexcept
+constexpr crispy::Point delta(int x, int y) noexcept
 {
     return { .x = x, .y = y };
 }
 
-constexpr auto NoDelta = crispy::point { .x = 0, .y = 0 };
+constexpr auto NoDelta = crispy::Point { .x = 0, .y = 0 };
 
 /// Feeds a pixel-precise (trackpad-style) event.
 bool pixels(HorizontalWheelGesture& gesture, int x, int y, ScrollPhase phase, bool inverted = false)

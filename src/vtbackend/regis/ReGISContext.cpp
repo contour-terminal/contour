@@ -3,7 +3,7 @@
 
 #include <cmath>
 
-using crispy::point;
+using crispy::Point;
 
 namespace vtbackend::regis
 {
@@ -21,7 +21,7 @@ void ReGISContext::reset()
     canvasSize = keepCanvasSize;
 }
 
-point ReGISContext::userToPixel(double userX, double userY) const noexcept
+Point ReGISContext::userToPixel(double userX, double userY) const noexcept
 {
     auto const canvasWidth = unbox<double>(canvasSize.width);
     auto const canvasHeight = unbox<double>(canvasSize.height);
@@ -29,10 +29,10 @@ point ReGISContext::userToPixel(double userX, double userY) const noexcept
     auto const spanY = window.y1 - window.y0;
     auto const px = spanX != 0.0 ? ((userX - window.x0) / spanX) * (canvasWidth - 1.0) : 0.0;
     auto const py = spanY != 0.0 ? ((userY - window.y0) / spanY) * (canvasHeight - 1.0) : 0.0;
-    return point { .x = static_cast<int>(std::lround(px)), .y = static_cast<int>(std::lround(py)) };
+    return Point { .x = static_cast<int>(std::lround(px)), .y = static_cast<int>(std::lround(py)) };
 }
 
-std::pair<double, double> ReGISContext::pixelToUser(point p) const noexcept
+std::pair<double, double> ReGISContext::pixelToUser(Point p) const noexcept
 {
     auto const canvasWidth = unbox<double>(canvasSize.width);
     auto const canvasHeight = unbox<double>(canvasSize.height);
@@ -47,7 +47,7 @@ std::pair<double, double> ReGISContext::pixelToUser(point p) const noexcept
     return { userX, userY };
 }
 
-point ReGISContext::userDeltaToPixel(double dx, double dy) const noexcept
+Point ReGISContext::userDeltaToPixel(double dx, double dy) const noexcept
 {
     auto const canvasWidth = unbox<double>(canvasSize.width);
     auto const canvasHeight = unbox<double>(canvasSize.height);
@@ -55,7 +55,7 @@ point ReGISContext::userDeltaToPixel(double dx, double dy) const noexcept
     auto const spanY = window.y1 - window.y0;
     auto const px = spanX != 0.0 ? (dx / spanX) * (canvasWidth - 1.0) : 0.0;
     auto const py = spanY != 0.0 ? (dy / spanY) * (canvasHeight - 1.0) : 0.0;
-    return point { .x = static_cast<int>(std::lround(px)), .y = static_cast<int>(std::lround(py)) };
+    return Point { .x = static_cast<int>(std::lround(px)), .y = static_cast<int>(std::lround(py)) };
 }
 
 Pen ReGISContext::currentPen() const noexcept

@@ -175,11 +175,11 @@ namespace CLI = crispy::cli;
 
 namespace
 {
-class ContourHeadlessBench: public crispy::app
+class ContourHeadlessBench: public crispy::App
 {
   public:
     /// @param env The process environment every part of the benchmark reads through.
-    explicit ContourHeadlessBench(crispy::environment const& env):
+    explicit ContourHeadlessBench(crispy::Environment const& env):
         app(env, "bench-headless", "Contour Headless Benchmark", CONTOUR_VERSION_STRING, "Apache-2.0")
     {
         using Project = crispy::cli::about::project;
@@ -199,76 +199,76 @@ class ContourHeadlessBench: public crispy::app
         if (auto const logFilterString = env.get("LOG"))
         {
             logstore::configure(*logFilterString);
-            crispy::app::customizeLogStoreOutput();
+            crispy::App::customizeLogStoreOutput();
         }
     }
 
-    [[nodiscard]] crispy::cli::command parameterDefinition() const override
+    [[nodiscard]] crispy::cli::Command parameterDefinition() const override
     {
-        auto const perfOptions = CLI::option_list {
-            CLI::option { .name = "size",
-                          .v = CLI::value { 32u },
+        auto const perfOptions = CLI::OptionList {
+            CLI::Option { .name = "size",
+                          .v = CLI::Value { 32u },
                           .helpText = "Number of megabyte to process per test.",
                           .placeholder = "MB" },
-            CLI::option { .name = "cat",
-                          .v = CLI::value { false },
+            CLI::Option { .name = "cat",
+                          .v = CLI::Value { false },
                           .helpText = "Enable cat-style short-line ASCII stream test." },
-            CLI::option { .name = "long",
-                          .v = CLI::value { false },
+            CLI::Option { .name = "long",
+                          .v = CLI::Value { false },
                           .helpText = "Enable long-line ASCII stream test." },
-            CLI::option { .name = "sgr", .v = CLI::value { false }, .helpText = "Enable SGR stream test." },
-            CLI::option {
-                .name = "binary", .v = CLI::value { false }, .helpText = "Enable binary stream test." },
+            CLI::Option { .name = "sgr", .v = CLI::Value { false }, .helpText = "Enable SGR stream test." },
+            CLI::Option {
+                .name = "binary", .v = CLI::Value { false }, .helpText = "Enable binary stream test." },
         };
 
-        return CLI::command {
+        return CLI::Command {
             .name = "bench-headless",
             .helpText = "Contour Terminal Emulator " CONTOUR_VERSION_STRING
                         " - https://github.com/contour-terminal/contour/ ;-)",
-            .options = CLI::option_list {},
+            .options = CLI::OptionList {},
             .children =
-                CLI::command_list {
-                    CLI::command { .name = "help", .helpText = "Shows this help and exits." },
-                    CLI::command { .name = "meta",
+                CLI::CommandList {
+                    CLI::Command { .name = "help", .helpText = "Shows this help and exits." },
+                    CLI::Command { .name = "meta",
                                    .helpText = "Shows some terminal backend meta information and exits." },
-                    CLI::command { .name = "version", .helpText = "Shows the version and exits." },
-                    CLI::command {
+                    CLI::Command { .name = "version", .helpText = "Shows the version and exits." },
+                    CLI::Command {
                         .name = "license",
                         .helpText = "Shows the license, and project URL of the used projects and Contour." },
-                    CLI::command {
+                    CLI::Command {
                         .name = "grid",
                         .helpText = "Performs performance tests utilizing the full grid including VT parser.",
                         .options = perfOptions },
-                    CLI::command { .name = "parser",
+                    CLI::Command { .name = "parser",
                                    .helpText = "Performs performance tests utilizing the VT parser only.",
                                    .options = perfOptions },
-                    CLI::command { .name = "pty",
+                    CLI::Command { .name = "pty",
                                    .helpText = "Performs performance tests utilizing the underlying "
                                                "operating system's PTY only." },
-                    CLI::command {
+                    CLI::Command {
                         .name = "sixel",
                         .helpText = "Measures sixel decode throughput: VT parse, sixel decode and "
                                     "placement into the grid, with no rendering.",
                         .options =
-                            CLI::option_list {
-                                CLI::option { .name = "file",
-                                              .v = CLI::value { ""s },
+                            CLI::OptionList {
+                                CLI::Option { .name = "file",
+                                              .v = CLI::Value { ""s },
                                               .helpText = "File holding one complete sixel sequence.",
                                               .placeholder = "PATH" },
-                                CLI::option { .name = "iterations",
-                                              .v = CLI::value { 100u },
+                                CLI::Option { .name = "iterations",
+                                              .v = CLI::Value { 100u },
                                               .helpText = "How many times to feed the frame." },
-                                CLI::option { .name = "columns",
-                                              .v = CLI::value { 240u },
+                                CLI::Option { .name = "columns",
+                                              .v = CLI::Value { 240u },
                                               .helpText = "Grid width in cells." },
-                                CLI::option { .name = "lines",
-                                              .v = CLI::value { 63u },
+                                CLI::Option { .name = "lines",
+                                              .v = CLI::Value { 63u },
                                               .helpText = "Grid height in cells." },
-                                CLI::option { .name = "cell-width",
-                                              .v = CLI::value { 8u },
+                                CLI::Option { .name = "cell-width",
+                                              .v = CLI::Value { 8u },
                                               .helpText = "Cell width in pixels." },
-                                CLI::option { .name = "cell-height",
-                                              .v = CLI::value { 17u },
+                                CLI::Option { .name = "cell-height",
+                                              .v = CLI::Value { 17u },
                                               .helpText = "Cell height in pixels." },
                             } },
                 }
@@ -393,7 +393,7 @@ class ContourHeadlessBench: public crispy::app
         auto& ptySlave = pty.slave();
         (void) ptySlave.configure();
 
-        auto bufferObjectPool = crispy::buffer_object_pool<char>(4llu * 1024 * 1024);
+        auto bufferObjectPool = crispy::BufferObjectPool<char>(4llu * 1024 * 1024);
         auto bufferObject = bufferObjectPool.allocateBufferObject();
 
         auto bytesTransferred = uint64_t { 0 };
@@ -411,7 +411,7 @@ class ContourHeadlessBench: public crispy::app
                 loopIterations++;
             }
         } };
-        auto cleanupReader = crispy::finally { [&]() {
+        auto cleanupReader = crispy::Finally { [&]() {
             pty.close();
             ptyStdoutReaderThread.join();
         } };

@@ -31,38 +31,38 @@ namespace text
 {
 namespace // {{{ support
 {
-    font_weight dwFontWeight(int _weight)
+    FontWeight dwFontWeight(int _weight)
     {
         switch (_weight)
         {
-            case DWRITE_FONT_WEIGHT_THIN: return font_weight::thin;
-            case DWRITE_FONT_WEIGHT_EXTRA_LIGHT: return font_weight::extra_light;
-            case DWRITE_FONT_WEIGHT_LIGHT: return font_weight::light;
-            case DWRITE_FONT_WEIGHT_SEMI_LIGHT: return font_weight::demilight;
+            case DWRITE_FONT_WEIGHT_THIN: return FontWeight::Thin;
+            case DWRITE_FONT_WEIGHT_EXTRA_LIGHT: return FontWeight::ExtraLight;
+            case DWRITE_FONT_WEIGHT_LIGHT: return FontWeight::Light;
+            case DWRITE_FONT_WEIGHT_SEMI_LIGHT: return FontWeight::DemiLight;
             case DWRITE_FONT_WEIGHT_REGULAR:
-                return font_weight::normal;
-                // XXX What about font_weight::book (which does exist via fontconfig)?
-            case DWRITE_FONT_WEIGHT_MEDIUM: return font_weight::medium;
-            case DWRITE_FONT_WEIGHT_DEMI_BOLD: return font_weight::demibold;
-            case DWRITE_FONT_WEIGHT_BOLD: return font_weight::bold;
-            case DWRITE_FONT_WEIGHT_EXTRA_BOLD: return font_weight::extra_bold;
-            case DWRITE_FONT_WEIGHT_BLACK: return font_weight::black;
-            case DWRITE_FONT_WEIGHT_EXTRA_BLACK: return font_weight::extra_black;
+                return FontWeight::Normal;
+                // XXX What about FontWeight::Book (which does exist via fontconfig)?
+            case DWRITE_FONT_WEIGHT_MEDIUM: return FontWeight::Medium;
+            case DWRITE_FONT_WEIGHT_DEMI_BOLD: return FontWeight::DemiBold;
+            case DWRITE_FONT_WEIGHT_BOLD: return FontWeight::Bold;
+            case DWRITE_FONT_WEIGHT_EXTRA_BOLD: return FontWeight::ExtraBold;
+            case DWRITE_FONT_WEIGHT_BLACK: return FontWeight::Black;
+            case DWRITE_FONT_WEIGHT_EXTRA_BLACK: return FontWeight::ExtraBlack;
             default: // TODO: the others
                 break;
         }
-        return font_weight::normal; // TODO: rename normal to regular
+        return FontWeight::Normal; // TODO: rename normal to regular
     }
 
-    font_slant dwFontSlant(int _style)
+    FontSlant dwFontSlant(int _style)
     {
         switch (_style)
         {
-            case DWRITE_FONT_STYLE_NORMAL: return font_slant::normal;
-            case DWRITE_FONT_STYLE_ITALIC: return font_slant::italic;
-            case DWRITE_FONT_STYLE_OBLIQUE: return font_slant::oblique;
+            case DWRITE_FONT_STYLE_NORMAL: return FontSlant::Normal;
+            case DWRITE_FONT_STYLE_ITALIC: return FontSlant::Italic;
+            case DWRITE_FONT_STYLE_OBLIQUE: return FontSlant::Oblique;
         }
-        return font_slant::normal;
+        return FontSlant::Normal;
     }
 
     std::wstring get_font_path(IDWriteFontFace* fontFace)
@@ -90,7 +90,7 @@ namespace // {{{ support
     }
 } // namespace
 
-struct directwrite_locator::Private
+struct DirectWriteLocator::Private
 {
     ComPtr<IDWriteFactory7> factory;
     ComPtr<IDWriteFontCollection> systemFontCollection;
@@ -113,15 +113,15 @@ struct directwrite_locator::Private
     }
 };
 
-directwrite_locator::directwrite_locator(): _d { new Private(), [](Private* p) { delete p; } }
+DirectWriteLocator::DirectWriteLocator(): _d { new Private(), [](Private* p) { delete p; } }
 {
 }
 
-font_source_list directwrite_locator::locate(font_description const& _fd)
+FontSourceList DirectWriteLocator::locate(FontDescription const& _fd)
 {
     locatorLog()("Locating font chain for: {}", _fd);
 
-    font_source_list output;
+    FontSourceList output;
 
     // TODO: use libunicode for that (TODO: create wchar_t/char16_t converters in libunicode)
     std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> wStringConverter;
@@ -146,44 +146,44 @@ font_source_list directwrite_locator::locate(font_description const& _fd)
         ComPtr<IDWriteFont> font;
         fontFamily->GetFont(k, font.GetAddressOf());
 
-        font_weight weight = dwFontWeight(font->GetWeight());
+        FontWeight weight = dwFontWeight(font->GetWeight());
         if (weight != _fd.weight)
             continue;
 
-        font_slant slant = dwFontSlant(font->GetStyle());
+        FontSlant slant = dwFontSlant(font->GetStyle());
         if (slant != _fd.slant)
             continue;
 
         ComPtr<IDWriteFontFace> fontFace;
         font->CreateFontFace(&fontFace);
-        output.emplace_back(font_path { wStringConverter.to_bytes(get_font_path(fontFace.Get())) });
+        output.emplace_back(FontPath { wStringConverter.to_bytes(get_font_path(fontFace.Get())) });
         locatorLog()("Adding font file: {}", output.back());
     }
 
     return output;
 }
 
-font_source_list directwrite_locator::all()
+FontSourceList DirectWriteLocator::all()
 {
     // TODO;
     return {};
 }
 
-font_source_list directwrite_locator::resolve(gsl::span<char32_t const> codepoints)
+FontSourceList DirectWriteLocator::resolve(gsl::span<char32_t const> codepoints)
 {
-    font_source_list output;
+    FontSourceList output;
 
     std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv1;
-    std::string bytes = conv1.to_bytes(std::u32string { codepoints.data(), codepoints.size() });
+    std::string bytes = conv1.to_bytes(std::u32string { codepoints.data(), codepoints.Size() });
     std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> conv2;
     std::wstring wText = conv2.from_bytes(bytes);
 
-    const UINT32 textLength = wText.size();
+    const UINT32 textLength = wText.Size();
     UINT32 mappedLength = 0;
     ComPtr<IDWriteFont> mappedFont;
     FLOAT scale = 0.0f;
 
-    dwrite_analysis_wrapper analysisWrapper(wText, _d->userLocale);
+    DWriteAnalysisWrapper analysisWrapper(wText, _d->userLocale);
 
     _d->systemFontFallback->MapCharacters(&analysisWrapper,
                                           0,
@@ -205,7 +205,7 @@ font_source_list directwrite_locator::resolve(gsl::span<char32_t const> codepoin
         // TODO: use libunicode for that (TODO: create wchar_t/char16_t converters in libunicode)
         std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> wStringConverter;
 
-        output.emplace_back(font_path { wStringConverter.to_bytes(get_font_path(fontFace.Get())) });
+        output.emplace_back(FontPath { wStringConverter.to_bytes(get_font_path(fontFace.Get())) });
     }
 
     return output;

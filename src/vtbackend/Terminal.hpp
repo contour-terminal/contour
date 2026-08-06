@@ -403,7 +403,7 @@ class Terminal
     /// @param factorySettings The settings a hard reset (RIS) restores.
     /// @param now             The current time, as the caller's clock reads it.
     Terminal(Events& eventListener,
-             crispy::environment const& env,
+             crispy::Environment const& env,
              std::unique_ptr<vtpty::Pty> pty,
              Settings factorySettings,
              std::chrono::steady_clock::time_point now /* = std::chrono::steady_clock::now()*/);
@@ -1716,7 +1716,7 @@ class Terminal
     void applyPageSizeToCurrentBuffer();
     void applyPageSizeToMainDisplay(ScreenType screenType);
 
-    [[nodiscard]] crispy::buffer_object_ptr<char> currentPtyBuffer() const noexcept
+    [[nodiscard]] crispy::BufferObjectPtr<char> currentPtyBuffer() const noexcept
     {
         return _currentPtyBuffer;
     }
@@ -1724,7 +1724,7 @@ class Terminal
     /// Returns the buffer currently being parsed by parseFragment().
     /// This is used to ensure buffer_fragment holds the correct buffer reference
     /// when creating TrivialLineBuffer entries during parsing.
-    [[nodiscard]] crispy::buffer_object_ptr<char> parsingBuffer() const noexcept
+    [[nodiscard]] crispy::BufferObjectPtr<char> parsingBuffer() const noexcept
     {
         return _parsingBuffer ? _parsingBuffer : _currentPtyBuffer;
     }
@@ -1992,7 +1992,7 @@ class Terminal
     struct PtyReadResult
     {
         vtpty::Pty::ReadResult readResult;
-        crispy::buffer_object_ptr<char> buffer; // The buffer that was read into
+        crispy::BufferObjectPtr<char> buffer; // The buffer that was read into
     };
     [[nodiscard]] std::optional<PtyReadResult> readFromPty();
 
@@ -2031,10 +2031,9 @@ class Terminal
     std::chrono::steady_clock::time_point _currentTime;
 
     // {{{ PTY and PTY read buffer management
-    crispy::buffer_object_pool<char> _ptyBufferPool;
-    crispy::buffer_object_ptr<char> _currentPtyBuffer;
-    crispy::buffer_object_ptr<char>
-        _parsingBuffer; // Buffer currently being parsed (set during parseFragment)
+    crispy::BufferObjectPool<char> _ptyBufferPool;
+    crispy::BufferObjectPtr<char> _currentPtyBuffer;
+    crispy::BufferObjectPtr<char> _parsingBuffer; // Buffer currently being parsed (set during parseFragment)
     size_t _ptyReadBufferSize;
     std::unique_ptr<vtpty::Pty> _pty;
     // }}}

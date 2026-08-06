@@ -58,24 +58,24 @@ struct GridMetrics
     /// @param yPixelOffset  sub-cell Y pixel offset for smooth scrolling (default: 0)
     ///
     /// @return 2D point into the grid cell's top left in drawing system coordinates.
-    constexpr crispy::point map(vtbackend::LineOffset line,
+    constexpr crispy::Point map(vtbackend::LineOffset line,
                                 vtbackend::ColumnOffset column,
                                 int yPixelOffset = 0) const noexcept
     {
         return mapTopLeft(line, column, yPixelOffset);
     }
 
-    constexpr crispy::point map(vtbackend::CellLocation pos, int yPixelOffset = 0) const noexcept
+    constexpr crispy::Point map(vtbackend::CellLocation pos, int yPixelOffset = 0) const noexcept
     {
         return map(pos.line, pos.column, yPixelOffset);
     }
 
-    constexpr crispy::point mapTopLeft(vtbackend::CellLocation pos, int yPixelOffset = 0) const noexcept
+    constexpr crispy::Point mapTopLeft(vtbackend::CellLocation pos, int yPixelOffset = 0) const noexcept
     {
         return mapTopLeft(pos.line, pos.column, yPixelOffset);
     }
 
-    constexpr crispy::point mapTopLeft(vtbackend::LineOffset line,
+    constexpr crispy::Point mapTopLeft(vtbackend::LineOffset line,
                                        vtbackend::ColumnOffset column,
                                        int yPixelOffset = 0) const noexcept
     {
@@ -85,11 +85,11 @@ struct GridMetrics
         return { .x = x, .y = y };
     }
 
-    constexpr crispy::point mapBottomLeft(vtbackend::CellLocation pos, int yPixelOffset = 0) const noexcept
+    constexpr crispy::Point mapBottomLeft(vtbackend::CellLocation pos, int yPixelOffset = 0) const noexcept
     {
         return mapBottomLeft(pos.line, pos.column, yPixelOffset);
     }
-    constexpr crispy::point mapBottomLeft(vtbackend::LineOffset line,
+    constexpr crispy::Point mapBottomLeft(vtbackend::LineOffset line,
                                           vtbackend::ColumnOffset column,
                                           int yPixelOffset = 0) const noexcept
     {

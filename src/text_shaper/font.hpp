@@ -29,7 +29,7 @@
 namespace text
 {
 
-auto inline const locatorLog = logstore::category("font.locator", "Logs about font loads.");
+auto inline const locatorLog = logstore::Category("font.locator", "Logs about font loads.");
 
 namespace detail
 {
@@ -77,155 +77,147 @@ constexpr double average(DPI dpi) noexcept
     return 0.5 * static_cast<double>(dpi.x + dpi.y);
 }
 
-// NOLINTBEGIN(readability-identifier-naming)
-enum class font_weight : uint8_t
+enum class FontWeight : uint8_t
 {
-    thin,
-    extra_light, // aka. ultralight
-    light,
-    demilight, // aka. semilight
-    book,
-    normal, // aka. regular
-    medium,
-    demibold, // aka. semibold
-    bold,
-    extra_bold, // aka. ultrabold
-    black,
-    extra_black, // aka. ultrablack
+    Thin,
+    ExtraLight, // aka. ultralight
+    Light,
+    DemiLight, // aka. semilight
+    Book,
+    Normal, // aka. regular
+    Medium,
+    DemiBold, // aka. semibold
+    Bold,
+    ExtraBold, // aka. ultrabold
+    Black,
+    ExtraBlack, // aka. ultrablack
 };
-// NOLINTEND(readability-identifier-naming)
 
-constexpr std::optional<font_weight> make_font_weight(std::string_view text)
+constexpr std::optional<FontWeight> make_font_weight(std::string_view text)
 {
     using namespace std::string_view_literals;
     using std::pair;
     return detail::try_match(text,
-                             { pair { "thin"sv, font_weight::thin },
-                               pair { "extra light"sv, font_weight::extra_light },
-                               pair { "light"sv, font_weight::light },
-                               pair { "demilight"sv, font_weight::demilight },
-                               pair { "book"sv, font_weight::book },
-                               pair { "normal"sv, font_weight::normal },
-                               pair { "medium"sv, font_weight::medium },
-                               pair { "demibold"sv, font_weight::demibold },
-                               pair { "bold"sv, font_weight::bold },
-                               pair { "extra bold"sv, font_weight::extra_black },
-                               pair { "black"sv, font_weight::black },
-                               pair { "extra black"sv, font_weight::extra_black } });
+                             { pair { "thin"sv, FontWeight::Thin },
+                               pair { "extra light"sv, FontWeight::ExtraLight },
+                               pair { "light"sv, FontWeight::Light },
+                               pair { "demilight"sv, FontWeight::DemiLight },
+                               pair { "book"sv, FontWeight::Book },
+                               pair { "normal"sv, FontWeight::Normal },
+                               pair { "medium"sv, FontWeight::Medium },
+                               pair { "demibold"sv, FontWeight::DemiBold },
+                               pair { "bold"sv, FontWeight::Bold },
+                               pair { "extra bold"sv, FontWeight::ExtraBlack },
+                               pair { "black"sv, FontWeight::Black },
+                               pair { "extra black"sv, FontWeight::ExtraBlack } });
 }
 
-// NOLINTBEGIN(readability-identifier-naming)
-enum class font_slant : uint8_t
+enum class FontSlant : uint8_t
 {
-    normal,
-    italic,
-    oblique
+    Normal,
+    Italic,
+    Oblique
 };
-// NOLINTEND(readability-identifier-naming)
 
-constexpr std::optional<font_slant> make_font_slant(std::string_view text)
+constexpr std::optional<FontSlant> make_font_slant(std::string_view text)
 {
     using namespace std::string_view_literals;
     using std::pair;
     return detail::try_match(text,
-                             { pair { "thin"sv, font_slant::normal },
-                               pair { "italic"sv, font_slant::italic },
-                               pair { "oblique"sv, font_slant::oblique } });
+                             { pair { "thin"sv, FontSlant::Normal },
+                               pair { "italic"sv, FontSlant::Italic },
+                               pair { "oblique"sv, FontSlant::Oblique } });
 }
 
-// NOLINTBEGIN(readability-identifier-naming)
-enum class font_spacing : uint8_t
+enum class FontSpacing : uint8_t
 {
-    proportional,
-    mono
+    Proportional,
+    Mono
 };
-// NOLINTEND(readability-identifier-naming)
 
-constexpr std::optional<font_spacing> make_font_spacing(std::string_view text)
+constexpr std::optional<FontSpacing> make_font_spacing(std::string_view text)
 {
     using namespace std::string_view_literals;
     using std::pair;
     return detail::try_match(
-        text,
-        { pair { "proportional"sv, font_spacing::proportional }, pair { "mono"sv, font_spacing::mono } });
+        text, { pair { "proportional"sv, FontSpacing::Proportional }, pair { "mono"sv, FontSpacing::Mono } });
 }
 
-struct font_feature
+struct FontFeature
 {
     std::array<char, 4> name; // well defined unique four-letter font feature identifier.
     bool enabled = true;
 
-    font_feature(char a, char b, char c, char d, bool enabled = true):
-        name { a, b, c, d }, enabled { enabled }
+    FontFeature(char a, char b, char c, char d, bool enabled = true): name { a, b, c, d }, enabled { enabled }
     {
     }
 
-    font_feature(font_feature const&) = default;
-    font_feature(font_feature&&) = default;
-    font_feature& operator=(font_feature const&) = default;
-    font_feature& operator=(font_feature&&) = default;
+    FontFeature(FontFeature const&) = default;
+    FontFeature(FontFeature&&) = default;
+    FontFeature& operator=(FontFeature const&) = default;
+    FontFeature& operator=(FontFeature&&) = default;
 };
 
-struct font_fallback_none
+struct FontFallbackNone
 {
 };
-struct font_fallback_list
+struct FontFallbackList
 {
     std::vector<std::string> fallbackFonts;
 };
 
-struct font_description
+struct FontDescription
 {
     std::string familyName { "regular" };
 #ifdef _WIN32
     std::wstring wFamilyName { L"regular" };
 #endif
 
-    font_weight weight = font_weight::normal;
-    font_slant slant = font_slant::normal;
-    font_spacing spacing = font_spacing::proportional;
+    FontWeight weight = FontWeight::Normal;
+    FontSlant slant = FontSlant::Normal;
+    FontSpacing spacing = FontSpacing::Proportional;
     bool strictSpacing = false; // TODO Default value used in config.h while loading fonts
 
-    std::vector<font_feature> features {};
+    std::vector<FontFeature> features {};
 
     // std::monostate for the case when no fallback is defined.
-    std::variant<std::monostate, font_fallback_none, font_fallback_list> fontFallback { std::monostate {} };
+    std::variant<std::monostate, FontFallbackNone, FontFallbackList> fontFallback { std::monostate {} };
 
     // returns "familyName [weight] [slant]"
     [[nodiscard]] std::string toPattern() const;
 
-    // Parses a font pattern of form "familyName" into a font_description."
-    [[nodiscard]] static font_description parse(std::string_view pattern);
+    // Parses a font pattern of form "familyName" into a FontDescription."
+    [[nodiscard]] static FontDescription parse(std::string_view pattern);
 };
 
-inline bool operator==(font_fallback_none const&, font_fallback_none const&) noexcept
+inline bool operator==(FontFallbackNone const&, FontFallbackNone const&) noexcept
 {
     return true;
 }
 
-inline bool operator==(font_fallback_list const& a, font_fallback_list const& b) noexcept
+inline bool operator==(FontFallbackList const& a, FontFallbackList const& b) noexcept
 {
     return a.fallbackFonts == b.fallbackFonts;
 }
 
-inline bool operator==(font_feature const& a, font_feature const& b) noexcept
+inline bool operator==(FontFeature const& a, FontFeature const& b) noexcept
 {
     return a.name == b.name && a.enabled == b.enabled;
 }
 
-inline bool operator==(font_description const& a, font_description const& b)
+inline bool operator==(FontDescription const& a, FontDescription const& b)
 {
     return a.familyName == b.familyName && a.weight == b.weight && a.slant == b.slant
            && a.spacing == b.spacing && a.strictSpacing == b.strictSpacing && a.features == b.features
            && a.fontFallback == b.fontFallback;
 }
 
-inline bool operator!=(font_description const& a, font_description const& b)
+inline bool operator!=(FontDescription const& a, FontDescription const& b)
 {
     return !(a == b);
 }
 
-struct font_metrics
+struct FontMetrics
 {
     int lineHeight;
     int advance;
@@ -236,52 +228,52 @@ struct font_metrics
 };
 
 // use boxed type
-struct font_size
+struct FontSize
 {
     double pt;
 };
 
-constexpr font_size operator+(font_size a, font_size b) noexcept
+constexpr FontSize operator+(FontSize a, FontSize b) noexcept
 {
-    return font_size { a.pt + b.pt };
+    return FontSize { a.pt + b.pt };
 }
 
-constexpr font_size operator-(font_size a, font_size b) noexcept
+constexpr FontSize operator-(FontSize a, FontSize b) noexcept
 {
-    return font_size { a.pt - b.pt };
+    return FontSize { a.pt - b.pt };
 }
 
-constexpr bool operator<(font_size a, font_size b) noexcept
+constexpr bool operator<(FontSize a, FontSize b) noexcept
 {
     return a.pt < b.pt;
 }
 
-struct font_key
+struct FontKey
 {
     unsigned value = 0;
 };
 
-constexpr bool operator<(font_key a, font_key b) noexcept
+constexpr bool operator<(FontKey a, FontKey b) noexcept
 {
     return a.value < b.value;
 }
 
-constexpr bool operator==(font_key a, font_key b) noexcept
+constexpr bool operator==(FontKey a, FontKey b) noexcept
 {
     return a.value == b.value;
 }
 
-struct glyph_index
+struct GlyphIndex
 {
     unsigned value;
 };
 
 // NB: Ensure this struct does NOT contain padding (or adapt strong hash creation).
-struct glyph_key
+struct GlyphKey
 {
-    font_size size {};
-    font_key font;
-    glyph_index index {};
+    FontSize size {};
+    FontKey font;
+    GlyphIndex index {};
 
 #ifdef GLYPH_KEY_DEBUG
     std::u32string text = {};
@@ -291,27 +283,25 @@ struct glyph_key
 #endif
 };
 
-constexpr bool operator==(glyph_key const& a, glyph_key const& b) noexcept
+constexpr bool operator==(GlyphKey const& a, GlyphKey const& b) noexcept
 {
     return a.font.value == b.font.value && a.size.pt == b.size.pt && a.index.value == b.index.value;
 }
 
-constexpr bool operator<(glyph_key const& a, glyph_key const& b) noexcept
+constexpr bool operator<(GlyphKey const& a, GlyphKey const& b) noexcept
 {
     return a.font.value < b.font.value || (a.font.value == b.font.value && a.size.pt < b.size.pt)
            || (a.font.value == b.font.value && a.size.pt == b.size.pt && a.index.value < b.index.value);
 }
 
-// NOLINTBEGIN(readability-identifier-naming)
-enum class render_mode : uint8_t
+enum class RenderMode : uint8_t
 {
-    bitmap, //!< bitmaps are preferred
-    gray,   //!< gray-scale anti-aliasing
-    light,  //!< gray-scale anti-aliasing for optimized for LCD screens
-    lcd,    //!< LCD-optimized anti-aliasing
-    color   //!< embedded color bitmaps are preferred
+    Bitmap, //!< bitmaps are preferred
+    Gray,   //!< gray-scale anti-aliasing
+    Light,  //!< gray-scale anti-aliasing for optimized for LCD screens
+    LCD,    //!< LCD-optimized anti-aliasing
+    Color   //!< embedded color bitmaps are preferred
 };
-// NOLINTEND(readability-identifier-naming)
 
 } // namespace text
 
@@ -319,21 +309,21 @@ enum class render_mode : uint8_t
 namespace std
 {
 template <>
-struct hash<text::font_key>
+struct hash<text::FontKey>
 {
-    std::size_t operator()(text::font_key key) const noexcept { return key.value; } // NOLINT
+    std::size_t operator()(text::FontKey key) const noexcept { return key.value; } // NOLINT
 };
 
 template <>
-struct hash<text::glyph_index>
+struct hash<text::GlyphIndex>
 {
-    std::size_t operator()(text::glyph_index index) const noexcept { return index.value; } // NOLINT
+    std::size_t operator()(text::GlyphIndex index) const noexcept { return index.value; } // NOLINT
 };
 
 template <>
-struct hash<text::glyph_key>
+struct hash<text::GlyphKey>
 {
-    std::size_t operator()(text::glyph_key const& key) const noexcept
+    std::size_t operator()(text::GlyphKey const& key) const noexcept
     {
         // Pack the three components into disjoint bit fields: font at bits 32..47,
         // glyph index at bits 16..31, and the size (in tenths of a point) at bits 0..15.
@@ -356,16 +346,16 @@ struct hash<text::glyph_key>
 };
 
 template <>
-struct hash<text::font_description>
+struct hash<text::FontDescription>
 {
-    std::size_t operator()(text::font_description const& fd) const noexcept
+    std::size_t operator()(text::FontDescription const& fd) const noexcept
     {
-        auto fnv = crispy::fnv<char>();
+        auto fnv = crispy::FNV<char>();
         auto h = fnv(fnv(fnv(fnv(fnv(fd.familyName), char(fd.weight)), char(fd.slant)), char(fd.spacing)),
                      char(fd.strictSpacing));
         // Include fontFallback variant index and content in the hash
         h = fnv(h, char(fd.fontFallback.index()));
-        if (auto const* fallbackList = std::get_if<text::font_fallback_list>(&fd.fontFallback))
+        if (auto const* fallbackList = std::get_if<text::FontFallbackList>(&fd.fontFallback))
             for (auto const& name: fallbackList->fallbackFonts)
                 h = fnv(h, name);
         // Include features in the hash
@@ -389,65 +379,65 @@ struct std::formatter<text::DPI>: std::formatter<std::string>
 };
 
 template <>
-struct std::formatter<text::font_weight>: formatter<string_view>
+struct std::formatter<text::FontWeight>: formatter<string_view>
 {
-    auto format(text::font_weight value, auto& ctx) const
+    auto format(text::FontWeight value, auto& ctx) const
     {
         string_view name;
         switch (value)
         {
-            case text::font_weight::thin: name = "Thin"; break;
-            case text::font_weight::extra_light: name = "ExtraLight"; break;
-            case text::font_weight::light: name = "Light"; break;
-            case text::font_weight::demilight: name = "DemiLight"; break;
-            case text::font_weight::book: name = "Book"; break;
-            case text::font_weight::normal: name = "Regular"; break;
-            case text::font_weight::medium: name = "Medium"; break;
-            case text::font_weight::demibold: name = "DemiBold"; break;
-            case text::font_weight::bold: name = "Bold"; break;
-            case text::font_weight::extra_bold: name = "ExtraBold"; break;
-            case text::font_weight::black: name = "Black"; break;
-            case text::font_weight::extra_black: name = "ExtraBlack"; break;
+            case text::FontWeight::Thin: name = "Thin"; break;
+            case text::FontWeight::ExtraLight: name = "ExtraLight"; break;
+            case text::FontWeight::Light: name = "Light"; break;
+            case text::FontWeight::DemiLight: name = "DemiLight"; break;
+            case text::FontWeight::Book: name = "Book"; break;
+            case text::FontWeight::Normal: name = "Regular"; break;
+            case text::FontWeight::Medium: name = "Medium"; break;
+            case text::FontWeight::DemiBold: name = "DemiBold"; break;
+            case text::FontWeight::Bold: name = "Bold"; break;
+            case text::FontWeight::ExtraBold: name = "ExtraBold"; break;
+            case text::FontWeight::Black: name = "Black"; break;
+            case text::FontWeight::ExtraBlack: name = "ExtraBlack"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct std::formatter<text::font_slant>: formatter<string_view>
+struct std::formatter<text::FontSlant>: formatter<string_view>
 {
-    auto format(text::font_slant value, auto& ctx) const
+    auto format(text::FontSlant value, auto& ctx) const
     {
         string_view name;
         switch (value)
         {
-            case text::font_slant::normal: name = "Normal"; break;
-            case text::font_slant::italic: name = "Italic"; break;
-            case text::font_slant::oblique: name = "Oblique"; break;
+            case text::FontSlant::Normal: name = "Normal"; break;
+            case text::FontSlant::Italic: name = "Italic"; break;
+            case text::FontSlant::Oblique: name = "Oblique"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct std::formatter<text::font_spacing>: formatter<string_view>
+struct std::formatter<text::FontSpacing>: formatter<string_view>
 {
-    auto format(text::font_spacing value, auto& ctx) const
+    auto format(text::FontSpacing value, auto& ctx) const
     {
         string_view name;
         switch (value)
         {
-            case text::font_spacing::proportional: name = "Proportional"; break;
-            case text::font_spacing::mono: name = "Monospace"; break;
+            case text::FontSpacing::Proportional: name = "Proportional"; break;
+            case text::FontSpacing::Mono: name = "Monospace"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct std::formatter<text::font_description>: std::formatter<std::string>
+struct std::formatter<text::FontDescription>: std::formatter<std::string>
 {
-    auto format(text::font_description const& desc, auto& ctx) const
+    auto format(text::FontDescription const& desc, auto& ctx) const
     {
         return formatter<std::string>::format(
             std::format("(family={} weight={} slant={} spacing={}, strict_spacing={})",
@@ -461,9 +451,9 @@ struct std::formatter<text::font_description>: std::formatter<std::string>
 };
 
 template <>
-struct std::formatter<text::font_metrics>: std::formatter<std::string>
+struct std::formatter<text::FontMetrics>: std::formatter<std::string>
 {
-    auto format(text::font_metrics const& metrics, auto& ctx) const
+    auto format(text::FontMetrics const& metrics, auto& ctx) const
     {
         return formatter<std::string>::format(std::format("({}, {}, {}, {}, {}, {})",
                                                           metrics.lineHeight,
@@ -477,36 +467,36 @@ struct std::formatter<text::font_metrics>: std::formatter<std::string>
 };
 
 template <>
-struct std::formatter<text::font_size>: std::formatter<std::string>
+struct std::formatter<text::FontSize>: std::formatter<std::string>
 {
-    auto format(text::font_size size, auto& ctx) const
+    auto format(text::FontSize size, auto& ctx) const
     {
         return formatter<std::string>::format(std::format("{}pt", size.pt), ctx);
     }
 };
 
 template <>
-struct std::formatter<text::font_key>: std::formatter<std::string>
+struct std::formatter<text::FontKey>: std::formatter<std::string>
 {
-    auto format(text::font_key key, auto& ctx) const
+    auto format(text::FontKey key, auto& ctx) const
     {
         return formatter<std::string>::format(std::format("{}", key.value), ctx);
     }
 };
 
 template <>
-struct std::formatter<text::glyph_index>: std::formatter<std::string>
+struct std::formatter<text::GlyphIndex>: std::formatter<std::string>
 {
-    auto format(text::glyph_index value, auto& ctx) const
+    auto format(text::GlyphIndex value, auto& ctx) const
     {
         return formatter<std::string>::format(std::format("{}", value.value), ctx);
     }
 };
 
 template <>
-struct std::formatter<text::glyph_key>: std::formatter<std::string>
+struct std::formatter<text::GlyphKey>: std::formatter<std::string>
 {
-    auto format(text::glyph_key const& key, auto& ctx) const
+    auto format(text::GlyphKey const& key, auto& ctx) const
     {
 #ifdef GLYPH_KEY_DEBUG
         return formatter<std::string>::format(
@@ -524,9 +514,9 @@ struct std::formatter<text::glyph_key>: std::formatter<std::string>
 };
 
 template <>
-struct std::formatter<text::font_feature>: std::formatter<std::string>
+struct std::formatter<text::FontFeature>: std::formatter<std::string>
 {
-    auto format(text::font_feature value, auto& ctx) const
+    auto format(text::FontFeature value, auto& ctx) const
     {
         return formatter<std::string>::format(std::format("{}{}{}{}{}",
                                                           value.enabled ? '+' : '-',
@@ -539,18 +529,18 @@ struct std::formatter<text::font_feature>: std::formatter<std::string>
 };
 
 template <>
-struct std::formatter<text::render_mode>: std::formatter<std::string_view>
+struct std::formatter<text::RenderMode>: std::formatter<std::string_view>
 {
-    auto format(text::render_mode value, auto& ctx) const
+    auto format(text::RenderMode value, auto& ctx) const
     {
         string_view name;
         switch (value)
         {
-            case text::render_mode::bitmap: name = "Bitmap"; break;
-            case text::render_mode::gray: name = "Gray"; break;
-            case text::render_mode::light: name = "Light"; break;
-            case text::render_mode::lcd: name = "LCD"; break;
-            case text::render_mode::color: name = "Color"; break;
+            case text::RenderMode::Bitmap: name = "Bitmap"; break;
+            case text::RenderMode::Gray: name = "Gray"; break;
+            case text::RenderMode::Light: name = "Light"; break;
+            case text::RenderMode::LCD: name = "LCD"; break;
+            case text::RenderMode::Color: name = "Color"; break;
         }
         return std::formatter<string_view>::format(name, ctx);
     }

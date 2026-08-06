@@ -56,7 +56,7 @@ enum Modifier : uint8_t
     Meta = 32,
 };
 
-using Modifiers = crispy::flags<Modifier>;
+using Modifiers = crispy::Flags<Modifier>;
 
 namespace detail
 {
@@ -116,7 +116,7 @@ enum LockKey : uint8_t
     NumLock = 128,
 };
 
-using LockKeys = crispy::flags<LockKey>;
+using LockKeys = crispy::Flags<LockKey>;
 
 static_assert(static_cast<unsigned>(LockKey::CapsLock) == (1u << ChordModifierBitWidth)
                   && static_cast<unsigned>(LockKey::NumLock) == (2u << ChordModifierBitWidth),
@@ -338,7 +338,7 @@ enum class Win32ControlKeyFlag : uint16_t
 };
 
 /// Type-safe bitset for Win32 control key state flags.
-using Win32ControlKeyState = crispy::flags<Win32ControlKeyFlag>;
+using Win32ControlKeyState = crispy::Flags<Win32ControlKeyFlag>;
 
 std::string to_string(Key key);
 
@@ -528,7 +528,7 @@ enum class KeyboardEventFlag : uint8_t
     ReportAssociatedText = 16,
 };
 
-using KeyboardEventFlags = crispy::flags<KeyboardEventFlag>;
+using KeyboardEventFlags = crispy::Flags<KeyboardEventFlag>;
 
 // Implements extended CSIu keyboard input mode.
 class ExtendedKeyboardInputGenerator final: public StandardKeyboardInputGenerator
@@ -913,7 +913,7 @@ struct std::formatter<vtbackend::Modifier>: formatter<std::string_view>
         auto const row = std::ranges::find(
             vtbackend::ChordModifierTable, value, &vtbackend::detail::ChordModifierRow::modifier);
 
-        // A value that names no chord modifier formats empty on purpose: crispy::flags's formatter
+        // A value that names no chord modifier formats empty on purpose: crispy::Flags's formatter
         // walks every bit position and skips the ones that yield an empty string.
         auto const name = row != vtbackend::ChordModifierTable.end() ? row->name : std::string_view {};
 

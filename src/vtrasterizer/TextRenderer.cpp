@@ -78,7 +78,7 @@ Initializing  the reserved glyph slots:
     constexpr auto LastReservedChar = 0x7E;
     for (char ch = FirstReservedChar; ch <= LastReservedChar; ++ch)
     {
-        glyph_key glyphKey = get_glyph_key(ch);
+        GlyphKey glyphKey = get_glyph_key(ch);
         auto reservedSlotIndex = ch - FirstChar
         reservedGlyphKeyMapping[glyphKey.index.value] = reservedSlotIndex;
         setDirectMapping(reservedSlotIndex, getOrCreateRasterizedMetadata(glyphKey));
@@ -86,7 +86,7 @@ Initializing  the reserved glyph slots:
 
 Making use of reserved glyph slots
 
-    auto getOrCreateRasterizedMetadata(text::glyph_key glyphKey,
+    auto getOrCreateRasterizedMetadata(text::GlyphKey glyphKey,
                                        unicode::PresentationStyle presentationStyle)
     {
         if (isReserved(glyphKey))
@@ -94,7 +94,7 @@ Making use of reserved glyph slots
         // else: standard implementation
     }
 
-    bool isReserved(glyph_key glyphKey) const noexcept
+    bool isReserved(GlyphKey glyphKey) const noexcept
     {
         // reservedGlyphKeyMapping should therefore be a sorted vector.
         // we could then do binary search OR we lookup O(1) on a large enough vector (space issues?).
@@ -130,8 +130,8 @@ Making use of reserved glyph slots
 #include <algorithm>
 #include <ranges>
 
-using crispy::point;
-using crispy::strong_hash;
+using crispy::Point;
+using crispy::StrongHash;
 
 using unicode::out;
 
@@ -157,25 +157,25 @@ namespace
     constexpr auto LastReservedChar = char32_t { 0x7E };
     constexpr auto DirectMappedCharsCount = LastReservedChar - FirstReservedChar + 1;
 
-    strong_hash hashGlyphKeyAndPresentation(text::glyph_key const& glyphKey,
-                                            unicode::PresentationStyle presentation) noexcept
+    StrongHash hashGlyphKeyAndPresentation(text::GlyphKey const& glyphKey,
+                                           unicode::PresentationStyle presentation) noexcept
     {
         // return StrongHash::compute(key) * static_cast<uint32_t>(presentation);
         // clang-format off
-        return strong_hash::compute(glyphKey.font.value)
+        return StrongHash::compute(glyphKey.font.value)
                * static_cast<uint32_t>(glyphKey.index.value)
-               * strong_hash::compute(glyphKey.size.pt)
+               * StrongHash::compute(glyphKey.size.pt)
                * static_cast<uint32_t>(presentation)
                ;
         // clang-format on
     }
 
-    strong_hash hashTextAndStyle(u32string_view text, TextStyle style) noexcept
+    StrongHash hashTextAndStyle(u32string_view text, TextStyle style) noexcept
     {
-        return strong_hash::compute(text) * static_cast<uint32_t>(style);
+        return StrongHash::compute(text) * static_cast<uint32_t>(style);
     }
 
-    text::font_key getFontForStyle(FontKeys const& fonts, TextStyle style)
+    text::FontKey getFontForStyle(FontKeys const& fonts, TextStyle style)
     {
         switch (style)
         {
@@ -188,30 +188,30 @@ namespace
         return fonts.regular;
     }
 
-    atlas::Format toAtlasFormat(text::bitmap_format format)
+    atlas::Format toAtlasFormat(text::BitmapFormat format)
     {
         switch (format)
         {
-            case text::bitmap_format::alpha_mask: return atlas::Format::Red;
-            case text::bitmap_format::rgb: return atlas::Format::RGB;
-            case text::bitmap_format::rgba: return atlas::Format::RGBA;
-            case text::bitmap_format::outlined: return atlas::Format::RGBA;
+            case text::BitmapFormat::AlphaMask: return atlas::Format::Red;
+            case text::BitmapFormat::RGB: return atlas::Format::RGB;
+            case text::BitmapFormat::RGBA: return atlas::Format::RGBA;
+            case text::BitmapFormat::Outlined: return atlas::Format::RGBA;
         }
 
         (void) SoftRequire(false);
         return atlas::Format::RGBA;
     }
 
-    uint32_t toFragmentShaderSelector(text::bitmap_format glyphFormat)
+    uint32_t toFragmentShaderSelector(text::BitmapFormat glyphFormat)
     {
         auto const lcdShaderId = FRAGMENT_SELECTOR_GLYPH_LCD;
         // TODO ^^^ configurable vs FRAGMENT_SELECTOR_GLYPH_LCD_SIMPLE
         switch (glyphFormat)
         {
-            case text::bitmap_format::alpha_mask: return FRAGMENT_SELECTOR_GLYPH_ALPHA;
-            case text::bitmap_format::rgb: return lcdShaderId;
-            case text::bitmap_format::rgba: return FRAGMENT_SELECTOR_IMAGE_BGRA;
-            case text::bitmap_format::outlined: return FRAGMENT_SELECTOR_GLYPH_OUTLINED;
+            case text::BitmapFormat::AlphaMask: return FRAGMENT_SELECTOR_GLYPH_ALPHA;
+            case text::BitmapFormat::RGB: return lcdShaderId;
+            case text::BitmapFormat::RGBA: return FRAGMENT_SELECTOR_IMAGE_BGRA;
+            case text::BitmapFormat::Outlined: return FRAGMENT_SELECTOR_GLYPH_OUTLINED;
         }
         (void) SoftRequire(false);
         return FRAGMENT_SELECTOR_IMAGE_BGRA;
@@ -229,12 +229,12 @@ namespace
     }
 } // namespace
 
-text::font_locator& createFontLocator(FontLocatorEngine engine)
+text::FontLocator& createFontLocator(FontLocatorEngine engine)
 {
     switch (engine)
     {
-        case FontLocatorEngine::Mock: return text::font_locator_provider::get().mock();
-        default: return text::font_locator_provider::get().native();
+        case FontLocatorEngine::Mock: return text::FontLocatorProvider::get().mock();
+        default: return text::FontLocatorProvider::get().native();
     }
 
     crispy::unreachable();
@@ -245,7 +245,7 @@ text::font_locator& createFontLocator(FontLocatorEngine engine)
 constexpr uint32_t TextShapingCacheSize = 4000;
 
 TextRenderer::TextRenderer(GridMetrics const& gridMetrics,
-                           text::shaper& textShaper,
+                           text::Shaper& textShaper,
                            FontDescriptions& fontDescriptions,
                            FontKeys const& fontKeys,
                            TextRendererEvents& eventHandler,
@@ -255,8 +255,8 @@ TextRenderer::TextRenderer(GridMetrics const& gridMetrics,
     _textRendererEvents { eventHandler },
     _fontDescriptions { fontDescriptions },
     _fonts { fontKeys },
-    _textShapingCache { ShapingResultCache::create(crispy::strong_hashtable_size { 16384 },
-                                                   crispy::lru_capacity { TextShapingCacheSize },
+    _textShapingCache { ShapingResultCache::create(crispy::StrongHashtableSize { 16384 },
+                                                   crispy::LRUCapacity { TextShapingCacheSize },
                                                    "Text shaping cache") },
     _textShaper { textShaper },
     _boxDrawingRenderer { gridMetrics },
@@ -268,8 +268,8 @@ GlyphScaler const& TextRenderer::defaultGlyphScaler() noexcept
 {
     // Re-rasterizing, matching Config's `text_scaling_method` default: asking the font for the
     // outline at the larger size re-hints it, where stretching magnifies an ordinary-size raster.
-    // This became real once shaper::resize_font gave a caller the same face at another size -- a
-    // font_key encodes its size, so scaling `glyph_key.size.pt` alone never reached FreeType.
+    // This became real once Shaper::resize_font gave a caller the same face at another size -- a
+    // font_key encodes its size, so scaling `GlyphKey.size.pt` alone never reached FreeType.
     // @see GlyphScalingMethod.
     static auto const scaler = RerasterizingGlyphScaler {};
     return scaler;
@@ -367,9 +367,9 @@ void TextRenderer::initializeDirectMapping()
 
     for (char32_t const codepoint: std::views::iota(FirstReservedChar, LastReservedChar + 1))
     {
-        if (optional<text::glyph_position> gposOpt = _textShaper.shape(_fonts.regular, codepoint))
+        if (optional<text::GlyphPosition> gposOpt = _textShaper.shape(_fonts.regular, codepoint))
         {
-            text::glyph_key const& glyph = gposOpt.value().glyph;
+            text::GlyphKey const& glyph = gposOpt.value().glyph;
             if (glyph.index.value >= _directMappedGlyphKeyToTileIndex.size())
                 _directMappedGlyphKeyToTileIndex.resize(glyph.index.value
                                                         + (LastReservedChar - codepoint + 1));
@@ -380,7 +380,7 @@ void TextRenderer::initializeDirectMapping()
 }
 
 Renderable::AtlasTileAttributes const* TextRenderer::ensureRasterizedIfDirectMapped(
-    text::glyph_key const& glyph)
+    text::GlyphKey const& glyph)
 {
     if (!isGlyphDirectMapped(glyph))
         return nullptr;
@@ -466,9 +466,9 @@ void TextRenderer::endFrame()
     _textClusterGrouper.endFrame();
 }
 
-point TextRenderer::applyGlyphPositionToPen(point pen,
+Point TextRenderer::applyGlyphPositionToPen(Point pen,
                                             AtlasTileAttributes const& tileAttributes,
-                                            text::glyph_position const& gpos) const noexcept
+                                            text::GlyphPosition const& gpos) const noexcept
 {
     auto const& glyphMetrics = tileAttributes.metadata;
 
@@ -491,7 +491,7 @@ point TextRenderer::applyGlyphPositionToPen(point pen,
     //            tileAttributes.bitmapSize.height,
     //            gpos.presentation);
 
-    return point { .x = x, .y = y };
+    return Point { .x = x, .y = y };
 }
 
 /**
@@ -503,7 +503,7 @@ point TextRenderer::applyGlyphPositionToPen(point pen,
  * @param _glyphPos     glyph positioning relative to the pen's baseline pos (cacheable)
  *
  */
-void TextRenderer::renderRasterizedGlyph(crispy::point pen,
+void TextRenderer::renderRasterizedGlyph(crispy::Point pen,
                                          vtbackend::RGBAColor color,
                                          AtlasTileAttributes const& attributes)
 {
@@ -539,11 +539,11 @@ bool TextRenderer::renderBoxDrawingCell(vtbackend::CellLocation position,
     return false;
 }
 
-static crispy::point adjustPenForLineFlags(vtbackend::LineFlags lineFlags,
+static crispy::Point adjustPenForLineFlags(vtbackend::LineFlags lineFlags,
                                            GridMetrics const& gridMetrics,
                                            int glyphHeight,
                                            int glyphBearingY,
-                                           crispy::point pen) noexcept
+                                           crispy::Point pen) noexcept
 {
     using vtbackend::LineFlag;
 
@@ -610,12 +610,12 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
         return;
 
     _textRendererEvents.onBeforeRenderingText();
-    auto _ = crispy::finally { [&]() noexcept { _textRendererEvents.onAfterRenderingText(); } };
+    auto _ = crispy::Finally { [&]() noexcept { _textRendererEvents.onAfterRenderingText(); } };
 
     auto const hash = hashTextAndStyle(codepoints, style);
-    text::shape_result const& glyphPositions =
+    text::ShapeResult const& glyphPositions =
         getOrCreateCachedGlyphPositions(hash, codepoints, clusters, style);
-    crispy::point pen = _gridMetrics.mapBottomLeft(initialPenPosition, _smoothScrollYOffset);
+    crispy::Point pen = _gridMetrics.mapBottomLeft(initialPenPosition, _smoothScrollYOffset);
 
     using vtbackend::LineFlag;
 
@@ -690,7 +690,7 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
         }
 
         // TODO: The font's advance is a stand-in for the datum the pipeline actually has and then drops:
-        // the glyph's cluster, i.e. which cell it belongs to. Carrying the cluster on glyph_position would
+        // the glyph's cluster, i.e. which cell it belongs to. Carrying the cluster on GlyphPosition would
         // let the pen step by the exact cell delta -- zero for a combining mark, N for a ligature spanning
         // N cells -- with no rounding at all. That awaits TextClusterGrouper's east-asian-width fixme,
         // since clusters presently count cells appended rather than columns occupied.
@@ -704,7 +704,7 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
 /// placed at its block baseline with `v`/`h` applied -- kitty does the same in render_group() before
 /// extract_cell_region() cuts the sprites.
 std::optional<TextRenderer::BlockCanvas> TextRenderer::buildBlockCanvas(
-    std::span<text::glyph_position const> cluster,
+    std::span<text::GlyphPosition const> cluster,
     vtbackend::CellScale const& cellScale,
     GlyphScaleAdjustment adjustment,
     int cellsAtOneX)
@@ -748,14 +748,14 @@ std::optional<TextRenderer::BlockCanvas> TextRenderer::buildBlockCanvas(
     // cluster they position glyphs against each other, not against the cell grid.
     struct Placement
     {
-        text::rasterized_glyph glyph;
+        text::RasterizedGlyph glyph;
         int x;
         int y;
     };
     auto placements = std::vector<Placement> {};
     placements.reserve(cluster.size());
 
-    auto pen = crispy::point { .x = box.originX, .y = box.originY };
+    auto pen = crispy::Point { .x = box.originX, .y = box.originY };
 
     for (auto const& glyphPosition: cluster)
     {
@@ -840,14 +840,14 @@ std::optional<TextRenderer::TextureAtlas::TileCreateData> TextRenderer::createBl
 /// Both strategies must hand back a raster at its FINAL size, because the block canvas composites
 /// pixels: there is no later opportunity to enlarge. That is what makes the two methods differ only
 /// in fidelity (a re-hinted outline versus a magnified bitmap) rather than in code path.
-std::optional<text::rasterized_glyph> TextRenderer::rasterizeAtBlockSize(text::glyph_key const& glyphKey,
-                                                                         GlyphScaleAdjustment adjustment)
+std::optional<text::RasterizedGlyph> TextRenderer::rasterizeAtBlockSize(text::GlyphKey const& glyphKey,
+                                                                        GlyphScaleAdjustment adjustment)
 {
     auto key = glyphKey;
     auto rerasterized = false;
     if (adjustment.requiresRerasterization)
     {
-        // A font_key already encodes its size, so editing glyph_key::size alone would change nothing
+        // A font_key already encodes its size, so editing GlyphKey::size alone would change nothing
         // FreeType can see. Ask the shaper for the SAME face at the larger size; that re-hints it.
         key.size.pt *= adjustment.factor;
         key.font = _textShaper.resize_font(glyphKey.font, key.size);
@@ -897,8 +897,8 @@ std::optional<text::rasterized_glyph> TextRenderer::rasterizeAtBlockSize(text::g
     return glyph;
 }
 
-void TextRenderer::renderBlockGroup(text::shape_result const& glyphPositions,
-                                    crispy::point pen,
+void TextRenderer::renderBlockGroup(text::ShapeResult const& glyphPositions,
+                                    crispy::Point pen,
                                     vtbackend::RGBColor color,
                                     vtbackend::LineFlags lineFlags,
                                     vtbackend::GlyphSizing const& sizing,
@@ -966,7 +966,7 @@ void TextRenderer::renderBlockGroup(text::shape_result const& glyphPositions,
 }
 
 Renderable::AtlasTileAttributes const* TextRenderer::getOrCreateRasterizedMetadata(
-    strong_hash const& hash, text::glyph_key const& glyphKey, unicode::PresentationStyle presentationStyle)
+    StrongHash const& hash, text::GlyphKey const& glyphKey, unicode::PresentationStyle presentationStyle)
 {
     // clang-format off
     return textureAtlas().get_or_try_emplace(
@@ -981,9 +981,9 @@ Renderable::AtlasTileAttributes const* TextRenderer::getOrCreateRasterizedMetada
 }
 
 auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
-                                               text::glyph_key const& glyphKey,
+                                               text::GlyphKey const& glyphKey,
                                                unicode::PresentationStyle presentation,
-                                               strong_hash const& hash)
+                                               StrongHash const& hash)
     -> optional<TextureAtlas::TileCreateData>
 {
     auto result = createRasterizedGlyph(tileLocation, glyphKey, presentation);
@@ -1060,7 +1060,7 @@ auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
 }
 
 auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
-                                         text::glyph_key const& glyphKey,
+                                         text::GlyphKey const& glyphKey,
                                          unicode::PresentationStyle presentation,
                                          GlyphWidthPolicy widthPolicy)
     -> optional<TextureAtlas::TileCreateData>
@@ -1070,7 +1070,7 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     if (!theGlyphOpt.has_value())
         return nullopt;
 
-    text::rasterized_glyph& glyph = theGlyphOpt.value();
+    text::RasterizedGlyph& glyph = theGlyphOpt.value();
     if (!SoftRequire(glyph.bitmap.size()
                      == text::pixel_size(glyph.format) * unbox<size_t>(glyph.bitmapSize.width)
                             * unbox<size_t>(glyph.bitmapSize.height)))
@@ -1092,7 +1092,7 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
         vtbackend::Width(_gridMetrics.cellSize.width.value * numCells),
         vtbackend::Height::cast_from(unbox<int>(_gridMetrics.cellSize.height) - _gridMetrics.baseline)
     };
-    if (glyph.format == text::bitmap_format::rgba)
+    if (glyph.format == text::BitmapFormat::RGBA)
     {
         if (glyph.bitmapSize.height
                 > vtbackend::Height::cast_from(unbox<double>(emojiBoundingBox.height) * 1.1)
@@ -1244,26 +1244,26 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
                             toFragmentShaderSelector(glyph.format)) };
 }
 
-text::shape_result const& TextRenderer::getOrCreateCachedGlyphPositions(strong_hash hash,
-                                                                        u32string_view codepoints,
-                                                                        gsl::span<unsigned> clusters,
-                                                                        TextStyle style)
+text::ShapeResult const& TextRenderer::getOrCreateCachedGlyphPositions(StrongHash hash,
+                                                                       u32string_view codepoints,
+                                                                       gsl::span<unsigned> clusters,
+                                                                       TextStyle style)
 {
     return _textShapingCache->get_or_emplace(hash, [this, codepoints, clusters, style](auto) {
         return createTextShapedGlyphPositions(codepoints, clusters, style);
     });
 }
 
-text::shape_result TextRenderer::createTextShapedGlyphPositions(u32string_view codepoints,
-                                                                gsl::span<unsigned> clusters,
-                                                                TextStyle style)
+text::ShapeResult TextRenderer::createTextShapedGlyphPositions(u32string_view codepoints,
+                                                               gsl::span<unsigned> clusters,
+                                                               TextStyle style)
 {
-    auto glyphPositions = text::shape_result {};
+    auto glyphPositions = text::ShapeResult {};
 
     auto run = unicode::run_segmenter::range {};
     auto rs = unicode::run_segmenter(codepoints); // TODO Consider moving run segmentation to text grouper
     while (rs.consume(out(run)))
-        for (text::glyph_position const& glyphPosition: shapeTextRun(run, codepoints, clusters, style))
+        for (text::GlyphPosition const& glyphPosition: shapeTextRun(run, codepoints, clusters, style))
             glyphPositions.emplace_back(glyphPosition);
 
     return glyphPositions;
@@ -1277,10 +1277,10 @@ text::shape_result TextRenderer::createTextShapedGlyphPositions(u32string_view c
  *  - same language tag
  *  - same SGR attributes (font style, color)
  */
-text::shape_result TextRenderer::shapeTextRun(unicode::run_segmenter::range const& run,
-                                              u32string_view totalCodepoints,
-                                              gsl::span<unsigned> totalClusters,
-                                              TextStyle style)
+text::ShapeResult TextRenderer::shapeTextRun(unicode::run_segmenter::range const& run,
+                                             u32string_view totalCodepoints,
+                                             gsl::span<unsigned> totalClusters,
+                                             TextStyle style)
 {
     // TODO(where to apply cell-advances) auto const advanceX = _gridMetrics.cellSize.width;
     auto const count = static_cast<size_t>(run.end - run.start);
@@ -1291,7 +1291,7 @@ text::shape_result TextRenderer::shapeTextRun(unicode::run_segmenter::range cons
     auto const isEmojiPresentation = presentationStyle == unicode::PresentationStyle::Emoji;
     auto const font = isEmojiPresentation ? _fonts.emoji : getFontForStyle(_fonts, style);
 
-    text::shape_result glyphPosition;
+    text::ShapeResult glyphPosition;
     glyphPosition.reserve(clusters.size());
     _textShaper.shape(font,
                       codepoints,
@@ -1328,7 +1328,7 @@ text::shape_result TextRenderer::shapeTextRun(unicode::run_segmenter::range cons
         // font.filePath());
 
         msg.append("with metrics:");
-        for (text::glyph_position const& gp: glyphPosition)
+        for (text::GlyphPosition const& gp: glyphPosition)
             msg.append(" {}", gp);
     }
 

@@ -68,25 +68,25 @@ class ReGISRasterizer
     void resetPattern() noexcept { _patternPhase = 0; }
 
     /// Plots a single point (the @c V[] dot), honouring the pen's colour, mode and line width.
-    void plotDot(Pen const& pen, crispy::point p) noexcept;
+    void plotDot(Pen const& pen, crispy::Point p) noexcept;
 
     /// Draws a straight line from @p from to @p to (patterned Bresenham).
-    void plotLine(Pen const& pen, crispy::point from, crispy::point to) noexcept;
+    void plotLine(Pen const& pen, crispy::Point from, crispy::Point to) noexcept;
 
     /// Draws a full circle of @p radius pixels centred at @p center (midpoint circle).
-    void plotCircle(Pen const& pen, crispy::point center, int radius) noexcept;
+    void plotCircle(Pen const& pen, crispy::Point center, int radius) noexcept;
 
     /// Draws a circular arc centred at @p center through @p radius, from @p startDegrees sweeping
     /// @p sweepDegrees (a negative sweep goes clockwise).
     void plotArc(
-        Pen const& pen, crispy::point center, int radius, double startDegrees, double sweepDegrees) noexcept;
+        Pen const& pen, crispy::Point center, int radius, double startDegrees, double sweepDegrees) noexcept;
 
     /// Fills the polygon with vertices @p points using the even-odd (scanline) rule.
-    void fillPolygon(Pen const& pen, std::span<crispy::point const> points) noexcept;
+    void fillPolygon(Pen const& pen, std::span<crispy::Point const> points) noexcept;
 
     /// Draws a smooth curve interpolating @p points (a Catmull-Rom spline flattened to segments).
     /// @param closed Whether the curve wraps from the last point back to the first.
-    void plotCurve(Pen const& pen, std::span<crispy::point const> points, bool closed) noexcept;
+    void plotCurve(Pen const& pen, std::span<crispy::Point const> points, bool closed) noexcept;
 
     /// Composites an alpha-coverage glyph mask at @p origin using the pen colour.
     ///
@@ -95,7 +95,7 @@ class ReGISRasterizer
     ///                 "over" compositing gives anti-aliased text against the (possibly transparent)
     ///                 canvas.
     void blendCoverage(Pen const& pen,
-                       crispy::point origin,
+                       crispy::Point origin,
                        ImageSize size,
                        std::span<uint8_t const> coverage) noexcept;
 

@@ -263,8 +263,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param angleDelta       Angle delta (wheels), or {0,0}.
     /// @param phase            The gesture phase the windowing system reported.
     /// @param platformInverted Whether the platform already flipped the delta (natural scrolling).
-    void addToAccumulatedScroll(crispy::point pixelDelta,
-                                crispy::point angleDelta,
+    void addToAccumulatedScroll(crispy::Point pixelDelta,
+                                crispy::Point angleDelta,
                                 vtbackend::ScrollPhase phase,
                                 bool platformInverted) noexcept;
 
@@ -785,7 +785,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return false when the scrollback holds no finished command (no OSC 133 shell integration).
     bool copyLastCommandBlock(vtbackend::CommandBlockPart part);
 
-    void setFontSize(text::font_size size);
+    void setFontSize(text::FontSize size);
 
     /// Posts a refresh of the indicator status-line tab info (tab names) to the GUI thread.
     ///
@@ -824,8 +824,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     ContourGuiApp& _app;
     vtbackend::ColorPreference _currentColorPreference;
 
-    crispy::point _accumulatedPixelScroll;
-    crispy::point _accumulatedAngleScroll;
+    crispy::Point _accumulatedPixelScroll;
+    crispy::Point _accumulatedAngleScroll;
     input::HorizontalWheelGesture _horizontalWheelGesture;
     HyperlinkHoverTracker _hyperlinkHover;
     /// Never null: a NullAnnouncer stands in wherever there is nothing to announce through, so the call

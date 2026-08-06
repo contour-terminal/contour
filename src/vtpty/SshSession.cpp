@@ -64,14 +64,14 @@
 // It would be nice to move to NB IO mode, but I didn't have the time to debug it.
 // #define SSH_SESSION_NB_IO /* BUGGY EZ */
 
-using crispy::file_descriptor;
+using crispy::FileDescriptor;
 
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 
 #ifdef _WIN32
 template <>
-struct crispy::close_native_handle<SOCKET>
+struct crispy::CloseNativeHandle<SOCKET>
 {
     void operator()(SOCKET handle) { closesocket(handle); }
 };
@@ -80,7 +80,7 @@ struct crispy::close_native_handle<SOCKET>
 namespace vtpty
 {
 
-static auto inline sshLog = logstore::category("ssh", "SSH I/O logger", logstore::category::state::Enabled);
+static auto inline sshLog = logstore::Category("ssh", "SSH I/O logger", logstore::Category::State::Enabled);
 
 // {{{ helper
 namespace
@@ -321,9 +321,9 @@ namespace
 
 #ifdef _WIN32
 // Why is it, that Windows API is so much more complicated than POSIX? Extrawurst!
-using socket_handle = crispy::native_handle<SOCKET, INVALID_SOCKET>;
+using socket_handle = crispy::NativeHandle<SOCKET, INVALID_SOCKET>;
 #else
-using socket_handle = crispy::native_handle<int, -1>;
+using socket_handle = crispy::NativeHandle<int, -1>;
 #endif
 
 std::string SshHostConfig::toString() const
@@ -399,7 +399,7 @@ std::string SshHostConfig::toKnownhostComment() const
         return std::format("{}@{} (added by Contour)", username, hostname);
 }
 
-crispy::result<SshHostConfigMap> loadSshConfig(std::filesystem::path const& configPath)
+std::expected<SshHostConfigMap, std::error_code> loadSshConfig(std::filesystem::path const& configPath)
 {
     std::ifstream file(configPath);
     SshHostConfigMap configs;
@@ -408,7 +408,7 @@ crispy::result<SshHostConfigMap> loadSshConfig(std::filesystem::path const& conf
     std::string currentHost;
 
     if (!file)
-        return crispy::failure { std::make_error_code(std::errc::no_such_file_or_directory) };
+        return std::unexpected { std::make_error_code(std::errc::no_such_file_or_directory) };
 
     while (std::getline(file, line))
     {
@@ -463,7 +463,7 @@ crispy::result<SshHostConfigMap> loadSshConfig(std::filesystem::path const& conf
     return configs;
 }
 
-crispy::result<SshHostConfigMap> loadSshConfig()
+std::expected<SshHostConfigMap, std::error_code> loadSshConfig()
 {
     auto const configFilePath = Process::homeDirectory() / ".ssh" / "config";
     return loadSshConfig(configFilePath);
@@ -910,7 +910,7 @@ void SshSession::waitForClosed()
     _closedCV.wait(lock, [this]() -> bool { return isClosed(); });
 }
 
-std::optional<SshSession::ReadResult> SshSession::read(crispy::buffer_object<char>& storage,
+std::optional<SshSession::ReadResult> SshSession::read(crispy::BufferObject<char>& storage,
                                                        std::optional<std::chrono::milliseconds> timeout,
                                                        size_t size)
 {
@@ -1225,7 +1225,7 @@ bool SshSession::connect(std::string_view host, int port)
             logError("Failed to resolve host \"{}\". {}", host, gai_strerror(rc));
             return false;
         }
-        auto const _ = crispy::finally([&]() { freeaddrinfo(addrList); });
+        auto const _ = crispy::Finally([&]() { freeaddrinfo(addrList); });
         for (addrinfo* addrEntry = addrList; addrEntry != nullptr; addrEntry = addrEntry->ai_next)
         {
             char addrStr[100] = {};

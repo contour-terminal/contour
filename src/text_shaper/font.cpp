@@ -9,19 +9,19 @@ using std::string_view;
 namespace text
 {
 
-string font_description::toPattern() const
+string FontDescription::toPattern() const
 {
     string m;
-    if (weight != font_weight::normal)
+    if (weight != FontWeight::Normal)
         m = std::format(" {}", weight);
-    if (slant != font_slant::normal)
+    if (slant != FontSlant::Normal)
         m = std::format(" {}", slant);
     return std::format("{}{}", familyName, m);
 }
 
-font_description font_description::parse(string_view pattern)
+FontDescription FontDescription::parse(string_view pattern)
 {
-    font_description fd {};
+    FontDescription fd {};
 
     // TODO: find proper style suffix
     // auto const i = pattern.rfind(' ');

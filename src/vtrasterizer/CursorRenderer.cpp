@@ -161,7 +161,7 @@ auto CursorRenderer::createTileData(vtbackend::CursorShape cursorShape,
     return {};
 }
 
-void CursorRenderer::render(crispy::point pos, int columnWidth, vtbackend::RGBColor color)
+void CursorRenderer::render(crispy::Point pos, int columnWidth, vtbackend::RGBColor color)
 {
     for (uint32_t i = 0; std::cmp_less(i, uint32_t(columnWidth)); ++i)
     {

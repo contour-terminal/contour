@@ -236,7 +236,7 @@ void ConPty::close()
     }
 }
 
-std::optional<Pty::ReadResult> ConPty::read(crispy::buffer_object<char>& buffer,
+std::optional<Pty::ReadResult> ConPty::read(crispy::BufferObject<char>& buffer,
                                             std::optional<std::chrono::milliseconds> timeout,
                                             size_t size)
 {

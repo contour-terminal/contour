@@ -7,6 +7,6 @@ namespace contour::display
 {
 
 auto inline const displayLog =
-    logstore::category("gui.display", "Logs display driver details (e.g. OpenGL).");
+    logstore::Category("gui.display", "Logs display driver details (e.g. OpenGL).");
 
 } // namespace contour::display

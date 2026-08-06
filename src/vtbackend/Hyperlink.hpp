@@ -70,7 +70,7 @@ using HyperlinkId = boxed::boxed<uint16_t, detail::HyperlinkTag>;
 
 bool is_local(HyperlinkInfo const& hyperlink);
 
-using HyperlinkCache = crispy::lru_cache<HyperlinkId, std::shared_ptr<HyperlinkInfo>>;
+using HyperlinkCache = crispy::LRUCache<HyperlinkId, std::shared_ptr<HyperlinkInfo>>;
 
 struct HyperlinkStorage
 {

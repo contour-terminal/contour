@@ -670,7 +670,7 @@ class RhiRenderer final:
         float backgroundImageOpacity = 1.0f;
         bool backgroundImageBlur = false;
         QSize backgroundResolution;
-        crispy::strong_hash backgroundImageHash {};
+        crispy::StrongHash backgroundImageHash {};
     } _renderStateCache;
 };
 

@@ -36,7 +36,7 @@
     #include <unistd.h>
 #endif
 
-auto constexpr MinimumFontSize = text::font_size { 8.0 };
+auto constexpr MinimumFontSize = text::FontSize { 8.0 };
 
 using namespace std;
 using crispy::homeResolvedPath;
@@ -184,11 +184,11 @@ ActionList const* applyBuiltinFallback(Config const& config,
 namespace
 {
 
-    auto const configLog = logstore::category("config", "Logs configuration file loading.");
+    auto const configLog = logstore::Category("config", "Logs configuration file loading.");
 
     /// This translation unit's one environment reader.
     ///
-    /// A crispy::live_environment, constructed on the spot rather than the process-wide cached one:
+    /// A crispy::LiveEnvironment, constructed on the spot rather than the process-wide cached one:
     /// `${VAR}` expansion has to see the environment as it stands when the config is read, not as it
     /// stood when the process started. The live reader is nonetheless thread safe, which is what
     /// rules out a bare getenv() here -- config (re)load runs while the PTY threads are live.
@@ -199,9 +199,9 @@ namespace
     /// user's configuration had never been there.
     ///
     /// @return A reference to a function-local static; it outlives every caller.
-    [[nodiscard]] crispy::environment const& configEnvironment()
+    [[nodiscard]] crispy::Environment const& configEnvironment()
     {
-        static crispy::live_environment const instance;
+        static crispy::LiveEnvironment const instance;
         return instance;
     }
 
@@ -210,7 +210,7 @@ namespace
     /// @param name Name of the variable to read.
     /// @param env Environment to read from.
     /// @return The variable's value as raw bytes, or an empty string if it is unset.
-    [[nodiscard]] std::string environmentBytes(std::string_view name, crispy::environment const& env)
+    [[nodiscard]] std::string environmentBytes(std::string_view name, crispy::Environment const& env)
     {
         return env.get(name).value_or("");
     }
@@ -738,8 +738,8 @@ optional<std::string> readConfigFile(std::string const& filename)
 }
 
 YAMLConfigReader::YAMLConfigReader(std::string const& filename,
-                                   logstore::category const& log,
-                                   crispy::environment const& env,
+                                   logstore::Category const& log,
+                                   crispy::Environment const& env,
                                    VariableReplacer replacer):
     configFile(filename), logger { log }, variableReplacer { std::move(replacer) }
 {
@@ -1470,7 +1470,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         loadFromEntry(child, "blur", where->blur);
         auto const resolved = resolvedPath(filename);
         where->location = resolved;
-        where->hash = crispy::strong_hash::compute(resolved.string());
+        where->hash = crispy::StrongHash::compute(resolved.string());
     }
 }
 
@@ -1612,7 +1612,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     std::vector<text::font_feature>& where)
+                                     std::vector<text::FontFeature>& where)
 {
     if (auto child = node[entry])
     {
@@ -1756,7 +1756,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         where = vtbackend::LineCount(child.as<int>());
 }
 
-void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, text::font_size& where)
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, text::FontSize& where)
 {
     if (auto const child = node[entry])
     {
@@ -1772,9 +1772,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     logger()("Loading entry: {}, value {}", entry, where.pt);
 }
 
-void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
-                                     std::string const& entry,
-                                     text::font_slant& where)
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, text::FontSlant& where)
 {
     if (auto const child = node[entry])
     {
@@ -1786,7 +1784,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     text::font_weight& where)
+                                     text::FontWeight& where)
 {
     if (auto const child = node[entry])
     {
@@ -1799,7 +1797,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     text::font_description& where)
+                                     text::FontDescription& where)
 {
     if (auto const child = node[entry])
     {
@@ -1814,12 +1812,12 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
             {
                 if (child["fallback"].IsScalar() && (child["fallback"].as<std::string>() == "none"))
                 {
-                    where.fontFallback = text::font_fallback_none {};
+                    where.fontFallback = text::FontFallbackNone {};
                 }
                 else if (child["fallback"].IsSequence())
                 {
-                    where.fontFallback = text::font_fallback_list {};
-                    auto& list = std::get<text::font_fallback_list>(where.fontFallback);
+                    where.fontFallback = text::FontFallbackList {};
+                    auto& list = std::get<text::FontFallbackList>(where.fontFallback);
                     for (auto&& fallback: child["fallback"])
                     {
                         list.fallbackFonts.emplace_back(fallback.as<std::string>());
@@ -2074,17 +2072,17 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     text::render_mode& where)
+                                     text::RenderMode& where)
 {
-    auto parseModifierKey = [&](std::string const& key) -> std::optional<text::render_mode> {
+    auto parseModifierKey = [&](std::string const& key) -> std::optional<text::RenderMode> {
         auto const literal = crispy::toLower(key);
 
         auto constexpr static Mappings = std::array {
-            std::pair { "lcd", text::render_mode::lcd },
-            std::pair { "light", text::render_mode::light },
-            std::pair { "gray", text::render_mode::gray },
-            std::pair { "", text::render_mode::gray },
-            std::pair { "monochrome", text::render_mode::bitmap },
+            std::pair { "lcd", text::RenderMode::LCD },
+            std::pair { "light", text::RenderMode::Light },
+            std::pair { "gray", text::RenderMode::Gray },
+            std::pair { "", text::RenderMode::Gray },
+            std::pair { "monochrome", text::RenderMode::Bitmap },
         };
         for (auto const& mapping: Mappings)
             if (mapping.first == literal)
@@ -2119,17 +2117,17 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
             loadFromEntry(textShaping, "engine", where.textShapingEngine);
         loadFromEntry(child, "builtin_box_drawing", where.builtinBoxDrawing);
         loadFromEntry(child, "max_fallback_count", where.maxFallbackCount);
-        loadFromEntry(child, "render_mode", where.renderMode);
+        loadFromEntry(child, "RenderMode", where.renderMode);
         loadFromEntry(child, "regular", where.regular);
 
         // inherit fonts from regular
         where.bold = where.regular;
-        where.bold.weight = text::font_weight::bold;
+        where.bold.weight = text::FontWeight::Bold;
         where.italic = where.regular;
-        where.italic.slant = text::font_slant::italic;
+        where.italic.slant = text::FontSlant::Italic;
         where.boldItalic = where.regular;
-        where.boldItalic.slant = text::font_slant::italic;
-        where.boldItalic.weight = text::font_weight::bold;
+        where.boldItalic.slant = text::FontSlant::Italic;
+        where.boldItalic.weight = text::FontWeight::Bold;
 
         loadFromEntry(child, "bold", where.bold);
         loadFromEntry(child, "italic", where.italic);
@@ -2286,7 +2284,7 @@ namespace
     void loadConfigEnum(YAML::Node const& node,
                         std::string const& entry,
                         Enum& where,
-                        logstore::category const& logger)
+                        logstore::Category const& logger)
     {
         auto const child = node[entry];
         if (!child)
@@ -3321,7 +3319,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     crispy::lru_capacity& where)
+                                     crispy::LRUCapacity& where)
 {
     if (auto const child = node[entry])
         where.value = child.as<uint32_t>();
@@ -3348,7 +3346,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     crispy::strong_hashtable_size& where)
+                                     crispy::StrongHashtableSize& where)
 {
     if (auto const child = node[entry])
         where.value = child.as<uint32_t>();
@@ -3386,7 +3384,7 @@ static std::string createForGlobal(Config const& c)
             doc.append(writer.process(writer.whichDoc(v), name, escapeSequence(v.value())));
         };
 
-    auto completeOverload = crispy::overloaded {
+    auto completeOverload = crispy::Overloaded {
         processConfigEntry,
         processConfigEntryWithEscape,
         // Ignored entries
@@ -3454,7 +3452,7 @@ static void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile co
             }()));
         };
 
-    auto completeOverload = crispy::overloaded {
+    auto completeOverload = crispy::Overloaded {
         processConfigEntryWithExecInfo,
         processConfigEntry,
         [&]([[maybe_unused]] auto const& name, [[maybe_unused]] auto const& v) {},

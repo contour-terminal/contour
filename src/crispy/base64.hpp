@@ -47,14 +47,14 @@ namespace detail
     }
 } // namespace detail
 
-struct encoder_state
+struct EncoderState
 {
     uint8_t modulo = 0;
     uint8_t pending[3] {};
 };
 
 template <typename Alphabet, typename sink>
-constexpr void encode(uint8_t ch, Alphabet const& alphabet, encoder_state& state, sink const& s)
+constexpr void encode(uint8_t ch, Alphabet const& alphabet, EncoderState& state, sink const& s)
 {
     state.pending[state.modulo] = ch;
     if (++state.modulo != 3)
@@ -69,7 +69,7 @@ constexpr void encode(uint8_t ch, Alphabet const& alphabet, encoder_state& state
 }
 
 template <typename Alphabet, typename sink>
-constexpr void finish(Alphabet const& alphabet, encoder_state& state, sink const& s)
+constexpr void finish(Alphabet const& alphabet, EncoderState& state, sink const& s)
 {
     if (state.modulo == 0)
         return;
@@ -99,16 +99,16 @@ constexpr void finish(Alphabet const& alphabet, encoder_state& state, sink const
     }
 }
 
-template <typename sink>
-constexpr void encode(uint8_t ch, encoder_state& state, sink&& s)
+template <typename Sink>
+constexpr void encode(uint8_t ch, EncoderState& state, Sink&& s)
 {
-    return encode(ch, detail::Base64Alphabet, state, std::forward<sink>(s));
+    return encode(ch, detail::Base64Alphabet, state, std::forward<Sink>(s));
 }
 
-template <typename sink>
-constexpr void finish(encoder_state& state, sink&& s)
+template <typename Sink>
+constexpr void finish(EncoderState& state, Sink&& s)
 {
-    finish(detail::Base64Alphabet, state, std::forward<sink>(s));
+    finish(detail::Base64Alphabet, state, std::forward<Sink>(s));
 }
 
 template <typename Iterator, typename Alphabet>
@@ -124,7 +124,7 @@ std::string encode(Iterator begin, Iterator end, Alphabet alphabet)
         output += d;
     };
 
-    auto state = encoder_state {};
+    auto state = EncoderState {};
     for (auto i = begin; i != end; ++i)
         encode(static_cast<uint8_t>(*i), alphabet, state, flusher);
     finish(alphabet, state, flusher);

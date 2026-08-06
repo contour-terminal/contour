@@ -63,7 +63,7 @@ enum class CellFlag : uint32_t
 #undef VTBACKEND_CELL_FLAG_ENUMERATOR
 };
 
-using CellFlags = crispy::flags<CellFlag>;
+using CellFlags = crispy::Flags<CellFlag>;
 
 /// Every `CellFlag`, in declaration order, excluding `None`.
 ///

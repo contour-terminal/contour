@@ -60,8 +60,8 @@ class DecorationProbe
             _renderTarget.textureScheduler(),
             atlas::AtlasProperties { .format = atlas::Format::RGBA,
                                      .tileSize = _gridMetrics.cellSize,
-                                     .hashCount = crispy::strong_hashtable_size { 64 },
-                                     .tileCount = crispy::lru_capacity { 64 },
+                                     .hashCount = crispy::StrongHashtableSize { 64 },
+                                     .tileCount = crispy::LRUCapacity { 64 },
                                      .directMappingCount = _allocator.currentlyAllocatedCount });
         _renderer.setTextureAtlas(*_atlas);
     }

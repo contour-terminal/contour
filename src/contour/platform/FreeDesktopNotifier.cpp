@@ -13,7 +13,7 @@ namespace contour::platform
 
 namespace
 {
-    auto const notifierLog = logstore::category("gui.notifier", "Desktop notification backend");
+    auto const notifierLog = logstore::Category("gui.notifier", "Desktop notification backend");
 } // namespace
 
 FreeDesktopNotifier::FreeDesktopNotifier(QObject* parent): QObject(parent)

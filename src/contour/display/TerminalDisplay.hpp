@@ -262,11 +262,11 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     void resizeWindow(vtbackend::LineCount, vtbackend::ColumnCount) final;
     void resizeWindow(vtbackend::Width, vtbackend::Height) final;
     void setFonts(vtrasterizer::FontDescriptions fontDescriptions) final;
-    bool setFontSize(text::font_size newFontSize) final;
+    bool setFontSize(text::FontSize newFontSize) final;
 
     /// The font size the renderer has actually loaded (its published font descriptions), which may differ
     /// from a just-requested size while a staged change is pending or after a swallowed font-load failure.
-    [[nodiscard]] text::font_size fontSize() const { return _renderer->fontDescriptions().size; }
+    [[nodiscard]] text::FontSize fontSize() const { return _renderer->fontDescriptions().size; }
 
     void setMouseCursorShape(input::MouseCursorShape newCursorShape) final;
     void setWindowFullScreen();
@@ -539,7 +539,7 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     std::shared_ptr<vtrasterizer::ReGISFontRasterizer> _regisTextRasterizer;
     /// The font description and DPI @ref _regisTextRasterizer was built with, so it is rebuilt only
     /// when they change (a font-family change or profile switch), not on every session rebind.
-    text::font_description _regisTextRasterizerFont {};
+    text::FontDescription _regisTextRasterizerFont {};
     text::DPI _regisTextRasterizerDpi {};
     bool _renderingPressure = false;
     /// The RHI render target. Owned here; released on the render thread (its GPU resources must be)

@@ -226,7 +226,7 @@ namespace
 
             _handshaking = true;
             auto outcome = std::expected<void, NetError> {};
-            auto const openGate = crispy::finally([this]() noexcept { openHandshakeGate(); });
+            auto const openGate = crispy::Finally([this]() noexcept { openHandshakeGate(); });
             while (true)
             {
                 auto const result = SSL_do_handshake(_ssl);

@@ -9,19 +9,19 @@ namespace text
 {
 
 /// Provides access to platform-native and mock font locators.
-class font_locator_provider
+class FontLocatorProvider
 {
   public:
-    static font_locator_provider& get();
+    static FontLocatorProvider& get();
 
     /// Returns the native font locator, initializing it lazily if necessary.
-    font_locator& native();
+    FontLocator& native();
 
-    font_locator& mock();
+    FontLocator& mock();
 
   private:
-    std::unique_ptr<font_locator> _native {};
-    std::unique_ptr<font_locator> _mock {};
+    std::unique_ptr<FontLocator> _native {};
+    std::unique_ptr<FontLocator> _mock {};
 };
 
 } // namespace text

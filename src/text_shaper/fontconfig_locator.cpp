@@ -42,30 +42,30 @@ namespace
         }
     }
 
-    auto constexpr FontWeightMappings = std::array<std::pair<font_weight, int>, 12> { {
-        { font_weight::thin, FC_WEIGHT_THIN },
-        { font_weight::extra_light, FC_WEIGHT_EXTRALIGHT },
-        { font_weight::light, FC_WEIGHT_LIGHT },
-        { font_weight::demilight, FC_WEIGHT_DEMILIGHT },
-        { font_weight::book, FC_WEIGHT_BOOK },
-        { font_weight::normal, FC_WEIGHT_NORMAL },
-        { font_weight::medium, FC_WEIGHT_MEDIUM },
-        { font_weight::demibold, FC_WEIGHT_DEMIBOLD },
-        { font_weight::bold, FC_WEIGHT_BOLD },
-        { font_weight::extra_bold, FC_WEIGHT_EXTRABOLD },
-        { font_weight::black, FC_WEIGHT_BLACK },
-        { font_weight::extra_black, FC_WEIGHT_EXTRABLACK },
+    auto constexpr FontWeightMappings = std::array<std::pair<FontWeight, int>, 12> { {
+        { FontWeight::Thin, FC_WEIGHT_THIN },
+        { FontWeight::ExtraLight, FC_WEIGHT_EXTRALIGHT },
+        { FontWeight::Light, FC_WEIGHT_LIGHT },
+        { FontWeight::DemiLight, FC_WEIGHT_DEMILIGHT },
+        { FontWeight::Book, FC_WEIGHT_BOOK },
+        { FontWeight::Normal, FC_WEIGHT_NORMAL },
+        { FontWeight::Medium, FC_WEIGHT_MEDIUM },
+        { FontWeight::DemiBold, FC_WEIGHT_DEMIBOLD },
+        { FontWeight::Bold, FC_WEIGHT_BOLD },
+        { FontWeight::ExtraBold, FC_WEIGHT_EXTRABOLD },
+        { FontWeight::Black, FC_WEIGHT_BLACK },
+        { FontWeight::ExtraBlack, FC_WEIGHT_EXTRABLACK },
     } };
 
     // clang-format off
-    auto constexpr FontSlantMappings = std::array<std::pair<font_slant, int>, 3>{ {
-        { font_slant::italic, FC_SLANT_ITALIC },
-        { font_slant::oblique, FC_SLANT_OBLIQUE },
-        { font_slant::normal, FC_SLANT_ROMAN }
+    auto constexpr FontSlantMappings = std::array<std::pair<FontSlant, int>, 3>{ {
+        { FontSlant::Italic, FC_SLANT_ITALIC },
+        { FontSlant::Oblique, FC_SLANT_OBLIQUE },
+        { FontSlant::Normal, FC_SLANT_ROMAN }
     } };
     // clang-format on
 
-    constexpr optional<font_weight> fcToFontWeight(int value) noexcept
+    constexpr optional<FontWeight> fcToFontWeight(int value) noexcept
     {
         for (auto const& mapping: FontWeightMappings)
             if (mapping.second == value)
@@ -73,7 +73,7 @@ namespace
         return nullopt;
     }
 
-    constexpr optional<font_slant> fcToFontSlant(int value) noexcept
+    constexpr optional<FontSlant> fcToFontSlant(int value) noexcept
     {
         for (auto const& mapping: FontSlantMappings)
             if (mapping.second == value)
@@ -81,7 +81,7 @@ namespace
         return nullopt;
     }
 
-    int fcWeight(font_weight weight) noexcept
+    int fcWeight(FontWeight weight) noexcept
     {
         for (auto const& mapping: FontWeightMappings)
             if (mapping.first == weight)
@@ -89,7 +89,7 @@ namespace
         crispy::fatal("Implementation error. font weight cannot be mapped.");
     }
 
-    constexpr int fcSlant(font_slant slant) noexcept
+    constexpr int fcSlant(FontSlant slant) noexcept
     {
         for (auto const& mapping: FontSlantMappings)
             if (mapping.first == slant)
@@ -130,19 +130,19 @@ namespace
         }
     }
 
-    /// Appends @p font to @p output as a font_path, unless it names no file.
+    /// Appends @p font to @p output as a FontPath, unless it names no file.
     ///
     /// Shared by both queries this locator answers -- by description and by coverage -- so that a font
     /// resolved one way carries exactly the same collection index, weight and slant as the other.
-    void appendFontSource(FcPattern* font, font_source_list& output)
+    void appendFontSource(FcPattern* font, FontSourceList& output)
     {
         FcChar8* file = nullptr;
         if (FcPatternGetString(font, FC_FILE, 0, &file) != FcResultMatch)
             return;
 
         auto integerValue = -1;
-        auto weight = optional<font_weight> { nullopt };
-        auto slant = optional<font_slant> { nullopt };
+        auto weight = optional<FontWeight> { nullopt };
+        auto slant = optional<FontSlant> { nullopt };
         auto ttcIndex = -1;
 
         if (FcPatternGetInteger(font, FC_INDEX, 0, &integerValue) == FcResultMatch && integerValue >= 0)
@@ -152,12 +152,12 @@ namespace
         if (FcPatternGetInteger(font, FC_SLANT, 0, &integerValue) == FcResultMatch)
             slant = fcToFontSlant(integerValue);
 
-        output.emplace_back(font_path { .value = string { (char const*) file },
-                                        .collectionIndex = ttcIndex,
-                                        .weight = weight,
-                                        .slant = slant });
+        output.emplace_back(FontPath { .value = string { (char const*) file },
+                                       .collectionIndex = ttcIndex,
+                                       .weight = weight,
+                                       .slant = slant });
         locatorLog()("Font {} (ttc index {}, weight {}, slant {}) in chain: {}",
-                     output.size(),
+                     output.Size(),
                      ttcIndex,
                      weight.has_value() ? std::format("{}", *weight) : "NONE",
                      slant.has_value() ? std::format("{}", *slant) : "NONE",
@@ -166,12 +166,12 @@ namespace
 
 } // namespace
 
-struct fontconfig_locator::private_tag
+struct FontconfigLocator::PrivateTag
 {
     // currently empty, maybe later something (such as caching)?
     FcConfig* ftConfig = nullptr;
 
-    private_tag(): ftConfig(FcInitLoadConfigAndFonts())
+    PrivateTag(): ftConfig(FcInitLoadConfigAndFonts())
     {
         auto const start = std::chrono::steady_clock::now();
         FcInit();
@@ -183,19 +183,19 @@ struct fontconfig_locator::private_tag
         locatorLog()("FcInitLoadConfigAndFonts: {:.1f} ms", ms);
     }
 
-    ~private_tag()
+    ~PrivateTag()
     {
-        locatorLog()("~fontconfig_locator.dtor");
+        locatorLog()("~FontconfigLocator.dtor");
         FcConfigDestroy(ftConfig);
         FcFini();
     }
 };
 
-fontconfig_locator::fontconfig_locator(): _d { new private_tag(), [](private_tag* p) { delete p; } }
+FontconfigLocator::FontconfigLocator(): _d { new PrivateTag(), [](PrivateTag* p) { delete p; } }
 {
 }
 
-font_source_list fontconfig_locator::locate(font_description const& description)
+FontSourceList FontconfigLocator::locate(FontDescription const& description)
 {
     locatorLog()("Locating font chain for: {}", description);
     auto pat =
@@ -214,7 +214,7 @@ font_source_list fontconfig_locator::locate(font_description const& description)
     if (!description.familyName.empty())
         FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) description.familyName.c_str());
 
-    if (description.spacing != font_spacing::proportional)
+    if (description.spacing != FontSpacing::Proportional)
     {
 #ifdef _WIN32
         // On Windows FontConfig can't find "monospace". We need to use "Consolas" instead.
@@ -232,9 +232,9 @@ font_source_list fontconfig_locator::locate(font_description const& description)
         FcPatternAddInteger(pat.get(), FC_SPACING, FC_DUAL);
     }
 
-    if (description.weight != font_weight::normal)
+    if (description.weight != FontWeight::Normal)
         FcPatternAddInteger(pat.get(), FC_WEIGHT, fcWeight(description.weight));
-    if (description.slant != font_slant::normal)
+    if (description.slant != FontSlant::Normal)
         FcPatternAddInteger(pat.get(), FC_SLANT, fcSlant(description.slant));
 
     FcConfigSubstitute(_d->ftConfig, pat.get(), FcMatchPattern);
@@ -245,14 +245,14 @@ font_source_list fontconfig_locator::locate(font_description const& description)
         FcFontSort(_d->ftConfig, pat.get(), /*unicode-trim*/ FcTrue, /*FcCharSet***/ nullptr, &result),
         [](auto p) { FcFontSetDestroy(p); });
 
-    if (!fs || result != FcResultMatch)
+    if (!fs || Result != FcResultMatch)
         return {};
 
-    font_source_list output;
+    FontSourceList output;
 
 #ifdef _WIN32
     auto const addFontFile = [&](std::string_view path) {
-        output.emplace_back(font_path { string { path } });
+        output.emplace_back(FontPath { string { path } });
     };
 #endif
 
@@ -268,8 +268,8 @@ font_source_list fontconfig_locator::locate(font_description const& description)
             // Some fonts don't seem to tell us their spacing attribute. ;-(
             // But instead of ignoring them all together, try to be more friendly.
             if (spacing != -1
-                && ((description.spacing == font_spacing::proportional && spacing < FC_PROPORTIONAL)
-                    || (description.spacing == font_spacing::mono && spacing < FC_MONO)))
+                && ((description.spacing == FontSpacing::Proportional && spacing < FC_PROPORTIONAL)
+                    || (description.spacing == FontSpacing::Mono && spacing < FC_MONO)))
             {
                 locatorLog()("Skipping font: {} ({} < {}).",
                              (char const*) file,
@@ -286,9 +286,9 @@ font_source_list fontconfig_locator::locate(font_description const& description)
     // include that one.on.
     addFont(fs->fonts[0]);
 
-    std::visit(crispy::overloaded {
-                   [](font_fallback_none) {},
-                   [&](font_fallback_list const& list) {
+    std::visit(crispy::Overloaded {
+                   [](FontFallbackNone) {},
+                   [&](FontFallbackList const& list) {
                        // find font in the fallback list and add it
                        for (auto&& fallbackFont: list.fallbackFonts)
                        {
@@ -332,17 +332,17 @@ font_source_list fontconfig_locator::locate(font_description const& description)
         addFontFile(FONTDIR "seguiemj.ttf");
         addFontFile(FONTDIR "seguisym.ttf");
     }
-    else if (description.weight != font_weight::normal && description.slant != font_slant::normal)
+    else if (description.weight != FontWeight::Normal && description.slant != FontSlant::Normal)
     {
         addFontFile(FONTDIR "consolaz.ttf");
         addFontFile(FONTDIR "seguisbi.ttf");
     }
-    else if (description.weight != font_weight::normal)
+    else if (description.weight != FontWeight::Normal)
     {
         addFontFile(FONTDIR "consolab.ttf");
         addFontFile(FONTDIR "seguisb.ttf");
     }
-    else if (description.slant != font_slant::normal)
+    else if (description.slant != FontSlant::Normal)
     {
         addFontFile(FONTDIR "consolai.ttf");
         addFontFile(FONTDIR "seguisli.ttf");
@@ -359,7 +359,7 @@ font_source_list fontconfig_locator::locate(font_description const& description)
     return output;
 }
 
-font_source_list fontconfig_locator::all()
+FontSourceList FontconfigLocator::all()
 {
     FcPattern* pat = FcPatternCreate();
     FcObjectSet* os = FcObjectSetBuild(
@@ -385,7 +385,7 @@ font_source_list fontconfig_locator::all()
         NULL);
     FcFontSet* fs = FcFontList(_d->ftConfig, pat, os);
 
-    font_source_list output;
+    FontSourceList output;
 
     for (auto i = 0; i < fs->nfont; ++i)
     {
@@ -410,7 +410,7 @@ font_source_list fontconfig_locator::all()
             continue;
 
         locatorLog()("font({}, {}, {})", fcWeightStr(weight), fcSlantStr(slant), (char*) family);
-        output.emplace_back(font_path { .value = (char const*) filename });
+        output.emplace_back(FontPath { .value = (char const*) filename });
     }
 
     FcObjectSetDestroy(os);
@@ -420,7 +420,7 @@ font_source_list fontconfig_locator::all()
     return output;
 }
 
-font_source_list fontconfig_locator::resolve(gsl::span<char32_t const> codepoints)
+FontSourceList FontconfigLocator::resolve(gsl::span<char32_t const> codepoints)
 {
     // A coverage-driven lookup -- "which fonts contain THESE characters" -- as opposed to locate()'s
     // "which fonts are near this description".
@@ -458,22 +458,22 @@ font_source_list fontconfig_locator::resolve(gsl::span<char32_t const> codepoint
         FcFontSort(_d->ftConfig, pat.get(), /*unicode-trim*/ FcTrue, /*FcCharSet***/ nullptr, &result),
         [](auto p) { FcFontSetDestroy(p); });
 
-    if (!fs || result != FcResultMatch)
+    if (!fs || Result != FcResultMatch)
         return {};
 
     // Only the best few are of interest: this is consulted when every configured fallback has already
     // failed, and a font that fontconfig ranks below these for a charset query will not do better.
     constexpr auto MaxCandidates = 4;
 
-    font_source_list output;
+    FontSourceList output;
     for (auto const i: std::views::iota(0, fs->nfont))
     {
-        if (output.size() >= MaxCandidates)
+        if (output.Size() >= MaxCandidates)
             break;
         appendFontSource(fs->fonts[i], output);
     }
 
-    locatorLog()("Resolved {} font(s) covering {} codepoint(s).", output.size(), codepoints.size());
+    locatorLog()("Resolved {} font(s) covering {} codepoint(s).", output.Size(), codepoints.Size());
     return output;
 }
 

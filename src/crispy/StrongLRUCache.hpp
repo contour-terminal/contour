@@ -23,7 +23,7 @@ namespace crispy
 namespace detail
 {
     template <typename Key, typename Value>
-    struct lru_cache_entry
+    struct LRUCacheEntry
     {
         Key key {};
         Value value {};
@@ -39,16 +39,16 @@ namespace detail
 //     memory region instead of two.
 //     Or even overloading operator new of StrongLRUCache
 //     and put the dynamic data at the end of the primary data.
-template <typename Key, typename Value, typename Hasher = strong_hasher<Key>>
-class strong_lru_cache
+template <typename Key, typename Value, typename Hasher = StrongHasher<Key>>
+class StrongLRUCache
 {
   public:
-    strong_lru_cache(strong_hashtable_size hashCount, lru_capacity entryCount, std::string name = "");
-    strong_lru_cache(strong_lru_cache&&) noexcept = default;
-    strong_lru_cache(strong_lru_cache const&) noexcept = delete;
-    strong_lru_cache& operator=(strong_lru_cache&&) noexcept = default;
-    strong_lru_cache& operator=(strong_lru_cache const&) noexcept = delete;
-    ~strong_lru_cache() = default;
+    StrongLRUCache(StrongHashtableSize hashCount, LRUCapacity entryCount, std::string name = "");
+    StrongLRUCache(StrongLRUCache&&) noexcept = default;
+    StrongLRUCache(StrongLRUCache const&) noexcept = delete;
+    StrongLRUCache& operator=(StrongLRUCache&&) noexcept = default;
+    StrongLRUCache& operator=(StrongLRUCache const&) noexcept = delete;
+    ~StrongLRUCache() = default;
 
     /// Returns the actual number of entries currently hold in this cache.
     [[nodiscard]] size_t size() const noexcept;
@@ -58,7 +58,7 @@ class strong_lru_cache
 
     /// Returns gathered stats and clears the local stats state to start
     /// counting from zero again.
-    lru_hashtable_stats fetchAndClearStats() noexcept;
+    LRUHashtableStats fetchAndClearStats() noexcept;
 
     /// Clears all entries from the cache.
     void clear();
@@ -109,89 +109,89 @@ class strong_lru_cache
     void inspect(std::ostream& output) const;
 
   private:
-    using entry = detail::lru_cache_entry<Key, Value>;
-    using hashtable = strong_lru_hashtable<entry>;
-    using hashtable_ptr = hashtable::ptr;
+    using Entry = detail::LRUCacheEntry<Key, Value>;
+    using Hashtable = StrongLRUHashtable<Entry>;
+    using HashtablePtr = Hashtable::Ptr;
 
-    hashtable_ptr _hashtable;
+    HashtablePtr _hashtable;
 };
 
 // {{{ implementation
 
 template <typename Key, typename Value, typename Hasher>
-strong_lru_cache<Key, Value, Hasher>::strong_lru_cache(strong_hashtable_size hashCount,
-                                                       lru_capacity entryCount,
-                                                       std::string name):
-    _hashtable { hashtable::create(hashCount, entryCount, std::move(name)) }
+StrongLRUCache<Key, Value, Hasher>::StrongLRUCache(StrongHashtableSize hashCount,
+                                                   LRUCapacity entryCount,
+                                                   std::string name):
+    _hashtable { Hashtable::create(hashCount, entryCount, std::move(name)) }
 {
 }
 
 template <typename Key, typename Value, typename Hasher>
-inline size_t strong_lru_cache<Key, Value, Hasher>::size() const noexcept
+inline size_t StrongLRUCache<Key, Value, Hasher>::size() const noexcept
 {
     return _hashtable->size();
 }
 
 template <typename Key, typename Value, typename Hasher>
-inline size_t strong_lru_cache<Key, Value, Hasher>::capacity() const noexcept
+inline size_t StrongLRUCache<Key, Value, Hasher>::capacity() const noexcept
 {
     return _hashtable->capacity();
 }
 
 template <typename Key, typename Value, typename Hasher>
-lru_hashtable_stats strong_lru_cache<Key, Value, Hasher>::fetchAndClearStats() noexcept
+LRUHashtableStats StrongLRUCache<Key, Value, Hasher>::fetchAndClearStats() noexcept
 {
     return _hashtable->fetchAndClearStats();
 }
 
 template <typename Key, typename Value, typename Hasher>
-void strong_lru_cache<Key, Value, Hasher>::clear()
+void StrongLRUCache<Key, Value, Hasher>::clear()
 {
     _hashtable->clear();
 }
 
 template <typename Key, typename Value, typename Hasher>
-void strong_lru_cache<Key, Value, Hasher>::remove(Key const& key)
+void StrongLRUCache<Key, Value, Hasher>::remove(Key const& key)
 {
     _hashtable->remove(Hasher {}(key));
 }
 
 template <typename Key, typename Value, typename Hasher>
-inline void strong_lru_cache<Key, Value, Hasher>::touch(Key const& key) noexcept
+inline void StrongLRUCache<Key, Value, Hasher>::touch(Key const& key) noexcept
 {
     _hashtable->touch(Hasher {}(key));
 }
 
 template <typename Key, typename Value, typename Hasher>
-inline bool strong_lru_cache<Key, Value, Hasher>::contains(Key const& key) const noexcept
+inline bool StrongLRUCache<Key, Value, Hasher>::contains(Key const& key) const noexcept
 {
     return _hashtable->contains(Hasher {}(key));
 }
 
 template <typename Key, typename Value, typename Hasher>
-inline Value* strong_lru_cache<Key, Value, Hasher>::try_get(Key const& key) noexcept
+inline Value* StrongLRUCache<Key, Value, Hasher>::try_get(Key const& key) noexcept
 {
-    if (entry* e = _hashtable->try_get(Hasher {}(key)))
+    if (Entry* e = _hashtable->try_get(Hasher {}(key)))
         return &e->value;
     return nullptr;
 }
 
 template <typename Key, typename Value, typename Hasher>
-inline Value const* strong_lru_cache<Key, Value, Hasher>::try_get(Key const& key) const noexcept
+inline Value const* StrongLRUCache<Key, Value, Hasher>::try_get(Key const& key) const noexcept
 {
-    if (entry const* e = _hashtable->try_get(Hasher {}(key)))
+    if (Entry const* e = _hashtable->try_get(Hasher {}(key)))
         return &e->value;
     return nullptr;
 }
 
 template <typename Key, typename Value, typename Hasher>
-inline Value& strong_lru_cache<Key, Value, Hasher>::at(Key const& key)
+inline Value& StrongLRUCache<Key, Value, Hasher>::at(Key const& key)
 {
     return _hashtable->at(Hasher {}(key)).value;
 }
 
 template <typename Key, typename Value, typename Hasher>
-inline Value& strong_lru_cache<Key, Value, Hasher>::operator[](Key const& key) noexcept
+inline Value& StrongLRUCache<Key, Value, Hasher>::operator[](Key const& key) noexcept
 {
     // NB: the callback runs only after the hashtable may have recycled its LRU tail, which destroys
     // that entry along with the Key it owns. Were `key` to alias the storage of the evicted entry --
@@ -199,48 +199,48 @@ inline Value& strong_lru_cache<Key, Value, Hasher>::operator[](Key const& key) n
     // out of freed memory. The copy is therefore taken up front, before anything can be evicted.
     auto keyCopy = key;
     return _hashtable
-        ->get_or_emplace(Hasher {}(key), [&](auto) { return entry { std::move(keyCopy), Value {} }; })
+        ->get_or_emplace(Hasher {}(key), [&](auto) { return Entry { std::move(keyCopy), Value {} }; })
         .value;
 }
 
 template <typename Key, typename Value, typename Hasher>
 template <typename ValueConstructFn>
-inline bool strong_lru_cache<Key, Value, Hasher>::try_emplace(Key const& key, ValueConstructFn constructValue)
+inline bool StrongLRUCache<Key, Value, Hasher>::try_emplace(Key const& key, ValueConstructFn constructValue)
 {
     auto keyCopy = key; // @see operator[] for why this cannot be captured by reference.
     return _hashtable->try_emplace(
-        Hasher {}(key), [&](auto v) { return entry { std::move(keyCopy), constructValue(std::move(v)) }; });
+        Hasher {}(key), [&](auto v) { return Entry { std::move(keyCopy), constructValue(std::move(v)) }; });
 }
 
 template <typename Key, typename Value, typename Hasher>
 template <typename ValueConstructFn>
-inline Value& strong_lru_cache<Key, Value, Hasher>::get_or_emplace(Key const& key,
-                                                                   ValueConstructFn constructValue)
+inline Value& StrongLRUCache<Key, Value, Hasher>::get_or_emplace(Key const& key,
+                                                                 ValueConstructFn constructValue)
 {
     auto keyCopy = key; // @see operator[] for why this cannot be captured by reference.
     return _hashtable
         ->get_or_emplace(Hasher {}(key),
-                         [&](auto v) { return entry { std::move(keyCopy), constructValue(v) }; })
+                         [&](auto v) { return Entry { std::move(keyCopy), constructValue(v) }; })
         .value;
 }
 
 template <typename Key, typename Value, typename Hasher>
-inline Value& strong_lru_cache<Key, Value, Hasher>::emplace(Key const& key, Value value) noexcept
+inline Value& StrongLRUCache<Key, Value, Hasher>::emplace(Key const& key, Value value) noexcept
 {
-    return _hashtable->emplace(Hasher {}(key), entry { key, std::move(value) }).value;
+    return _hashtable->emplace(Hasher {}(key), Entry { key, std::move(value) }).value;
 }
 
 template <typename Key, typename Value, typename Hasher>
-std::vector<Key> strong_lru_cache<Key, Value, Hasher>::keys() const
+std::vector<Key> StrongLRUCache<Key, Value, Hasher>::keys() const
 {
     auto result = std::vector<Key> {};
-    for (strong_hash const& hash: _hashtable->hashes())
+    for (StrongHash const& hash: _hashtable->hashes())
         result.emplace_back(_hashtable->peek(hash).key);
     return result;
 }
 
 template <typename Key, typename Value, typename Hasher>
-void strong_lru_cache<Key, Value, Hasher>::inspect(std::ostream& output) const
+void StrongLRUCache<Key, Value, Hasher>::inspect(std::ostream& output) const
 {
     _hashtable->inspect(output);
 }
@@ -251,10 +251,11 @@ void strong_lru_cache<Key, Value, Hasher>::inspect(std::ostream& output) const
 
 // {{{ fmt
 template <typename K, typename V>
-struct std::formatter<crispy::detail::lru_cache_entry<K, V>>
+// NOLINTNEXTLINE(readability-identifier-naming): std::formatter is the standard's spelling.
+struct std::formatter<crispy::detail::LRUCacheEntry<K, V>>
 {
     auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    auto format(crispy::detail::lru_cache_entry<K, V> const& entry, auto& ctx) const
+    auto format(crispy::detail::LRUCacheEntry<K, V> const& entry, auto& ctx) const
     {
         return std::format_to(ctx.out(), "{}: {}", entry.key, entry.value);
     }

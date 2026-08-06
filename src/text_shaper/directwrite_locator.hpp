@@ -14,14 +14,14 @@ namespace text
  *
  * This is available only on Windows.
  */
-class directwrite_locator: public font_locator
+class DirectWriteLocator: public FontLocator
 {
   public:
-    directwrite_locator();
+    DirectWriteLocator();
 
-    font_source_list locate(font_description const& description) override;
-    font_source_list all() override;
-    font_source_list resolve(gsl::span<char32_t const> codepoints) override;
+    FontSourceList locate(FontDescription const& description) override;
+    FontSourceList all() override;
+    FontSourceList resolve(gsl::span<char32_t const> codepoints) override;
 
   private:
     struct Private;

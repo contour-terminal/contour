@@ -78,7 +78,7 @@ namespace
         // released, and the ControlSession plus every pane it drives stayed resident until daemon
         // shutdown — one leaked session, and one leaked fd, per malformed frame. A scope guard
         // rather than three call sites, so a fourth exit cannot forget.
-        auto const unwindControlSession = crispy::finally([bridge]() noexcept { bridge->close(); });
+        auto const unwindControlSession = crispy::Finally([bridge]() noexcept { bridge->close(); });
 
         auto buffer = std::array<std::byte, 4096> {};
         while (true)

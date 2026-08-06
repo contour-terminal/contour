@@ -26,7 +26,7 @@ class CursorRenderer: public Renderable
     [[nodiscard]] vtbackend::CursorShape shape() const noexcept { return _shape; }
     void setShape(vtbackend::CursorShape shape);
 
-    void render(crispy::point pos, int columnWidth, vtbackend::RGBColor color);
+    void render(crispy::Point pos, int columnWidth, vtbackend::RGBColor color);
 
     void inspect(std::ostream& output) const override;
 

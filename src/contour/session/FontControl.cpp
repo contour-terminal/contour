@@ -26,10 +26,10 @@ vtbackend::FontDef getFontDefinition(vtrasterizer::Renderer& renderer)
     // observe a single consistent set of descriptions (and so the by-reference helpers below do not bind
     // to a temporary).
     auto const fonts = renderer.fontDescriptions();
-    auto const fontByStyle = [&](text::font_weight weight,
-                                 text::font_slant slant) -> text::font_description const& {
-        auto const bold = weight != text::font_weight::normal;
-        auto const italic = slant != text::font_slant::normal;
+    auto const fontByStyle = [&](text::FontWeight weight,
+                                 text::FontSlant slant) -> text::FontDescription const& {
+        auto const bold = weight != text::FontWeight::Normal;
+        auto const italic = slant != text::FontSlant::Normal;
         if (bold && italic)
             return fonts.boldItalic;
         else if (bold)
@@ -39,7 +39,7 @@ vtbackend::FontDef getFontDefinition(vtrasterizer::Renderer& renderer)
         else
             return fonts.regular;
     };
-    auto const nameOfStyledFont = [&](text::font_weight weight, text::font_slant slant) -> string {
+    auto const nameOfStyledFont = [&](text::FontWeight weight, text::FontSlant slant) -> string {
         auto const& regularFont = fonts.regular;
         auto const& styledFont = fontByStyle(weight, slant);
         if (styledFont.familyName == regularFont.familyName)
@@ -49,9 +49,9 @@ vtbackend::FontDef getFontDefinition(vtrasterizer::Renderer& renderer)
     };
     return { .size = fonts.size.pt,
              .regular = fonts.regular.familyName,
-             .bold = nameOfStyledFont(text::font_weight::bold, text::font_slant::normal),
-             .italic = nameOfStyledFont(text::font_weight::normal, text::font_slant::italic),
-             .boldItalic = nameOfStyledFont(text::font_weight::bold, text::font_slant::italic),
+             .bold = nameOfStyledFont(text::FontWeight::Bold, text::FontSlant::Normal),
+             .italic = nameOfStyledFont(text::FontWeight::Normal, text::FontSlant::Italic),
+             .boldItalic = nameOfStyledFont(text::FontWeight::Bold, text::FontSlant::Italic),
              .emoji = fonts.emoji.toPattern() };
 }
 

@@ -24,15 +24,15 @@ namespace
 {
 /// A category that exists only for the duration of one test.
 ///
-/// logstore::category asserts name uniqueness process-wide and deregisters itself on
+/// logstore::Category asserts name uniqueness process-wide and deregisters itself on
 /// destruction, so a function-local category is the only way to build messages in a test
 /// without colliding with the real ones.
-struct test_category
+struct TestCategory
 {
-    logstore::category value;
+    logstore::Category value;
 
-    explicit test_category(std::string_view name):
-        value { name, "Test-only category.", logstore::category::state::Enabled }
+    explicit TestCategory(std::string_view name):
+        value { name, "Test-only category.", logstore::Category::State::Enabled }
     {
     }
 };
@@ -46,21 +46,21 @@ struct test_category
 ///
 /// Deletion is the non-throwing overload, because a destructor must not throw and a leftover file
 /// in the temp directory is not worth failing a test over.
-class scratch_log
+class ScratchLog
 {
   public:
-    explicit scratch_log(std::string_view stem):
+    explicit ScratchLog(std::string_view stem):
         _path(std::filesystem::temp_directory_path() / std::format("crispy-logsink-{}.log", stem))
     {
         remove(); // a leftover from an earlier crashed run would make an append test lie
     }
 
-    ~scratch_log() { remove(); }
+    ~ScratchLog() { remove(); }
 
-    scratch_log(scratch_log const&) = delete;
-    scratch_log& operator=(scratch_log const&) = delete;
-    scratch_log(scratch_log&&) = delete;
-    scratch_log& operator=(scratch_log&&) = delete;
+    ScratchLog(ScratchLog const&) = delete;
+    ScratchLog& operator=(ScratchLog const&) = delete;
+    ScratchLog(ScratchLog&&) = delete;
+    ScratchLog& operator=(ScratchLog&&) = delete;
 
     [[nodiscard]] std::filesystem::path const& path() const noexcept { return _path; }
 
@@ -84,8 +84,8 @@ TEST_CASE("parseLogFileSpec maps the standard-error spellings onto nullopt", "[c
 
 TEST_CASE("the standard formatter lays a line out as configured", "[crispy][logsink]")
 {
-    auto category = test_category { "test.formatter" };
-    auto capture = logstore::scoped_capture { "test.formatter" };
+    auto category = TestCategory { "test.formatter" };
+    auto capture = logstore::ScopedCapture { "test.formatter" };
 
     SECTION("uncoloured output carries no escape sequences")
     {
@@ -133,8 +133,8 @@ TEST_CASE("the standard formatter lays a line out as configured", "[crispy][logs
 
 TEST_CASE("the error formatter tags its lines so they stand out", "[crispy][logsink]")
 {
-    auto category = test_category { "test.errorformat" };
-    auto capture = logstore::scoped_capture { "test.errorformat" };
+    auto category = TestCategory { "test.errorformat" };
+    auto capture = logstore::ScopedCapture { "test.errorformat" };
 
     category.value.set_formatter(logstore::makeErrorFormatter({ .colorize = false, .showTimestamp = false }));
     category.value()("it broke");
@@ -143,7 +143,7 @@ TEST_CASE("the error formatter tags its lines so they stand out", "[crispy][logs
 
 TEST_CASE("unmatchedFilters names filter patterns that select nothing", "[crispy][logsink]")
 {
-    auto category = test_category { "test.filters" };
+    auto category = TestCategory { "test.filters" };
 
     CHECK(logstore::unmatchedFilters("test.filters").empty());
     CHECK(logstore::unmatchedFilters("test.*").empty());
@@ -153,13 +153,13 @@ TEST_CASE("unmatchedFilters names filter patterns that select nothing", "[crispy
     CHECK(logstore::unmatchedFilters("test.filters,nope.*") == std::vector<std::string> { "nope.*" });
 }
 
-TEST_CASE("scoped_output writes to a file without escape sequences", "[crispy][logsink]")
+TEST_CASE("ScopedOutput writes to a file without escape sequences", "[crispy][logsink]")
 {
-    auto const log = scratch_log { "file" };
-    auto category = test_category { "test.filesink" };
+    auto const log = ScratchLog { "file" };
+    auto category = TestCategory { "test.filesink" };
 
     {
-        auto output = logstore::scoped_output::create({ .file = log.path() });
+        auto output = logstore::ScopedOutput::create({ .file = log.path() });
         REQUIRE(output.has_value());
         category.value()("to the file");
     }
@@ -173,16 +173,16 @@ TEST_CASE("scoped_output writes to a file without escape sequences", "[crispy][l
     CHECK_FALSE(contents.contains('\033'));
 }
 
-TEST_CASE("scoped_output appends rather than truncating", "[crispy][logsink]")
+TEST_CASE("ScopedOutput appends rather than truncating", "[crispy][logsink]")
 {
     // A daemon restarted against the same --log-file must not erase the evidence of why the
     // previous run died.
-    auto const log = scratch_log { "append" };
-    auto category = test_category { "test.appendsink" };
+    auto const log = ScratchLog { "append" };
+    auto category = TestCategory { "test.appendsink" };
 
     for (auto const* const text: { "first run", "second run" })
     {
-        auto output = logstore::scoped_output::create({ .file = log.path() });
+        auto output = logstore::ScopedOutput::create({ .file = log.path() });
         REQUIRE(output.has_value());
         category.value()("{}", text);
     }
@@ -193,28 +193,28 @@ TEST_CASE("scoped_output appends rather than truncating", "[crispy][logsink]")
     CHECK(contents.contains("second run"));
 }
 
-TEST_CASE("scoped_output reports an unopenable log file", "[crispy][logsink]")
+TEST_CASE("ScopedOutput reports an unopenable log file", "[crispy][logsink]")
 {
     // A DIRECTORY is the only destination portably guaranteed to refuse an ofstream: POSIX answers
     // EISDIR, Windows EACCES. A path under an unwritable directory is not — create() creates the
     // parent first, and an absolute POSIX path like "/proc/nope/x.log" is a perfectly valid
     // DRIVE-RELATIVE path on Windows, so create_directories() happily makes it and the open
     // succeeds. That is exactly how this test used to fail on Windows CI alone.
-    auto const output = logstore::scoped_output::create({ .file = std::filesystem::temp_directory_path() });
+    auto const output = logstore::ScopedOutput::create({ .file = std::filesystem::temp_directory_path() });
     REQUIRE_FALSE(output.has_value());
     CHECK(output.error().contains("cannot open log file"));
 }
 
-TEST_CASE("scoped_output restores the previous sink", "[crispy][logsink]")
+TEST_CASE("ScopedOutput restores the previous sink", "[crispy][logsink]")
 {
     // The regression test for logstore's reference_wrapper hazard: a category left pointing at
     // a destroyed sink corrupts every later log call in the process.
-    auto category = test_category { "test.restore" };
+    auto category = TestCategory { "test.restore" };
     auto const* const before = &category.value.sink();
 
-    auto const log = scratch_log { "restore" };
+    auto const log = ScratchLog { "restore" };
     {
-        auto output = logstore::scoped_output::create({ .file = log.path() });
+        auto output = logstore::ScopedOutput::create({ .file = log.path() });
         REQUIRE(output.has_value());
         CHECK(&category.value.sink() != before);
     }
@@ -222,31 +222,31 @@ TEST_CASE("scoped_output restores the previous sink", "[crispy][logsink]")
     CHECK(&category.value.sink() == before);
 }
 
-TEST_CASE("scoped_output leaves an empty filter alone", "[crispy][logsink]")
+TEST_CASE("ScopedOutput leaves an empty filter alone", "[crispy][logsink]")
 {
     // configure("") matches no pattern and would therefore DISABLE every category, `error`
     // included. An empty --log must mean "keep whatever $LOG set", never "log nothing".
-    auto category = test_category { "test.emptyfilter" };
+    auto category = TestCategory { "test.emptyfilter" };
     REQUIRE(category.value.is_enabled());
 
-    auto output = logstore::scoped_output::create({ .filter = "" });
+    auto output = logstore::ScopedOutput::create({ .filter = "" });
     REQUIRE(output.has_value());
     CHECK(category.value.is_enabled());
     CHECK(logstore::errorLog.is_enabled());
 }
 
-TEST_CASE("scoped_output serialises concurrent writers", "[crispy][logsink]")
+TEST_CASE("ScopedOutput serialises concurrent writers", "[crispy][logsink]")
 {
     // The daemon logs from its event loop, its sigwait thread and every PTY pump thread, while
     // logstore's own sink does no locking at all. Without the writer's mutex, lines tear.
     constexpr auto ThreadCount = 4;
     constexpr auto LinesPerThread = 200;
 
-    auto const log = scratch_log { "threads" };
-    auto category = test_category { "test.threads" };
+    auto const log = ScratchLog { "threads" };
+    auto category = TestCategory { "test.threads" };
 
     {
-        auto output = logstore::scoped_output::create({ .file = log.path() });
+        auto output = logstore::ScopedOutput::create({ .file = log.path() });
         REQUIRE(output.has_value());
 
         auto writers = std::vector<std::thread> {};
@@ -271,14 +271,14 @@ TEST_CASE("scoped_output serialises concurrent writers", "[crispy][logsink]")
     }));
 }
 
-TEST_CASE("scoped_capture enables and restores what it captures", "[crispy][logsink]")
+TEST_CASE("ScopedCapture enables and restores what it captures", "[crispy][logsink]")
 {
-    auto category = logstore::category { "test.capture", "Test-only category." };
+    auto category = logstore::Category { "test.capture", "Test-only category." };
     REQUIRE_FALSE(category.is_enabled());
     auto const* const before = &category.sink();
 
     {
-        auto capture = logstore::scoped_capture { "test.capture" };
+        auto capture = logstore::ScopedCapture { "test.capture" };
         CHECK(category.is_enabled()); // capturing a category implies enabling it
         category()("recorded");
         CHECK(capture.contains("recorded"));
@@ -295,7 +295,7 @@ TEST_CASE("configure's prefix match is bounded by the category name", "[crispy][
     // PATTERN range. Any pattern longer than a registered category's name — "vthost.*" is 7
     // characters against the built-in "error" at 5 — read past the end of that name. ASan
     // caught it the first time a real `--log=vthost.*` ran.
-    auto category = test_category { "test.prefixbound" };
+    auto category = TestCategory { "test.prefixbound" };
 
     logstore::configure("averyveryverylongprefixthatnocategoryhas.*");
     CHECK_FALSE(category.value.is_enabled());
@@ -317,10 +317,10 @@ TEST_CASE("an explicit filter never silences the error category", "[crispy][logs
     // Left alone, `--log vthost.trace.proto` would switch off the very failure lines an
     // operator turned logging on to see. Caught by running a real daemon, not by a unit test —
     // hence this one.
-    auto category = test_category { "test.filterkeepserror" };
+    auto category = TestCategory { "test.filterkeepserror" };
     logstore::errorLog.disable();
 
-    auto output = logstore::scoped_output::create({ .filter = "test.filterkeepserror" });
+    auto output = logstore::ScopedOutput::create({ .filter = "test.filterkeepserror" });
     REQUIRE(output.has_value());
 
     CHECK(category.value.is_enabled());

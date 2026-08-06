@@ -1186,7 +1186,7 @@ enum class TitleKind : uint8_t
 };
 
 /// A set of titles a single XTPUSHTITLE, XTPOPTITLE or `OSC 0` acts on.
-using TitleKinds = crispy::flags<TitleKind>;
+using TitleKinds = crispy::Flags<TitleKind>;
 
 /// One entry of the title stack: the titles a single XTPUSHTITLE saved.
 ///

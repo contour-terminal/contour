@@ -22,7 +22,7 @@ namespace crispy
 //   Guarantee()
 
 /// Function signature for custom assertion failure handlers.
-using fail_handler_t = std::function<void(std::string_view, std::string_view, std::string_view, int)>;
+using FailHandler = std::function<void(std::string_view, std::string_view, std::string_view, int)>;
 
 #ifdef __GNUC__
 // GCC 4.8+, Clang, Intel and other compilers compatible with GCC (-std=c++0x or above)
@@ -48,9 +48,9 @@ using fail_handler_t = std::function<void(std::string_view, std::string_view, st
 
 namespace detail
 {
-    inline fail_handler_t& fail_handler() noexcept
+    inline FailHandler& fail_handler() noexcept
     {
-        static fail_handler_t storage {};
+        static FailHandler storage {};
         return storage;
     }
 
@@ -77,7 +77,7 @@ namespace detail
 ///
 /// This handler is supposed to report and terminate but may very well
 /// just ignore either or both.
-inline void set_fail_handler(fail_handler_t handler)
+inline void set_fail_handler(FailHandler handler)
 {
     detail::fail_handler() = std::move(handler);
 }
@@ -92,10 +92,10 @@ inline void set_fail_handler(fail_handler_t handler)
 }
 
 [[noreturn]] inline void fatal(std::string_view message,
-                               logstore::source_location location = logstore::source_location::current())
+                               logstore::SourceLocation location = logstore::SourceLocation::current())
 {
     auto static fatalLog =
-        logstore::category("fatal", "Fatal error Logger", logstore::category::state::Enabled);
+        logstore::Category("fatal", "Fatal error Logger", logstore::Category::State::Enabled);
 
     if (!message.empty())
         fatalLog(location)("Fatal error. {}", message);
@@ -134,7 +134,7 @@ namespace detail
     [[nodiscard]] inline bool softRequire(
         bool condition,
         char const* conditionText,
-        logstore::source_location location = logstore::source_location::current()) noexcept
+        logstore::SourceLocation location = logstore::SourceLocation::current()) noexcept
     {
         if (condition) [[likely]]
             return true;

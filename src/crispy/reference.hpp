@@ -4,18 +4,18 @@
 #include <functional>
 
 template <typename T>
-class reference
+class Reference
 {
   public:
-    constexpr explicit reference(T& _ref) noexcept: ref_ { &_ref } {}
-    constexpr reference(std::reference_wrapper<T> _ref) noexcept: ref_ { &_ref.get() } {}
+    constexpr explicit Reference(T& _ref) noexcept: ref_ { &_ref } {}
+    constexpr Reference(std::reference_wrapper<T> _ref) noexcept: ref_ { &_ref.get() } {}
 
-    reference(reference const&) = default;
-    reference(reference&&) noexcept = default;
-    reference& operator=(reference const&) = default;
-    reference& operator=(reference&&) noexcept = default;
+    Reference(Reference const&) = default;
+    Reference(Reference&&) noexcept = default;
+    Reference& operator=(Reference const&) = default;
+    Reference& operator=(Reference&&) noexcept = default;
 
-    constexpr reference& operator=(T& _ref)
+    constexpr Reference& operator=(T& _ref)
     {
         ref_ = _ref.ref_;
         return *this;
@@ -29,7 +29,7 @@ class reference
 };
 
 template <typename T>
-constexpr reference<T> mut(T& _ref) noexcept
+constexpr Reference<T> mut(T& _ref) noexcept
 {
-    return reference<T>(_ref);
+    return Reference<T>(_ref);
 }

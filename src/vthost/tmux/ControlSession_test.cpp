@@ -243,7 +243,7 @@ TEST_CASE("a control session reports the transport error that ended it", "[vthos
     // Every readLine failure used to print "end of stream", so a reset or a bad handle was
     // indistinguishable from a peer hanging up cleanly — which is what made a daemon's log
     // unreadable when a second daemon's bind probe poked it.
-    auto capture = logstore::scoped_capture { "vthost.tmux" };
+    auto capture = logstore::ScopedCapture { "vthost.tmux" };
 
     auto h = ControlHarness { {},
                               {},
@@ -263,7 +263,7 @@ TEST_CASE("the detach line counts the commands the client issued", "[vthost][con
     // quit. The count is what tells the two apart.
     SECTION("a peer that never speaks")
     {
-        auto capture = logstore::scoped_capture { "vthost.tmux" };
+        auto capture = logstore::ScopedCapture { "vthost.tmux" };
         auto h = ControlHarness {};
         std::ignore = h.exchange({});
         CHECK(capture.contains("0 commands"));
@@ -271,7 +271,7 @@ TEST_CASE("the detach line counts the commands the client issued", "[vthost][con
 
     SECTION("a peer that issued commands")
     {
-        auto capture = logstore::scoped_capture { "vthost.tmux" };
+        auto capture = logstore::ScopedCapture { "vthost.tmux" };
         auto h = ControlHarness {};
         std::ignore = h.exchange({ "new-window", "list-panes" });
         CHECK(capture.contains("2 commands"));

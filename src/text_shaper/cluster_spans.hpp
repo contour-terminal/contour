@@ -11,7 +11,7 @@ namespace text
 {
 
 /// A shaped glyph reduced to what font fallback needs in order to decide about it.
-struct shaped_glyph_ref
+struct ShapedGlyphRef
 {
     unsigned cluster {}; ///< The input cluster the shaper assigned to this glyph.
     bool missing {};     ///< Whether the shaping font had no glyph for it (glyph index 0, .notdef).
@@ -19,7 +19,7 @@ struct shaped_glyph_ref
 
 /// A maximal group of consecutive shaped glyphs sharing one cluster value, together with the half-open
 /// range of input codepoints that produced them.
-struct cluster_group
+struct ClusterGroup
 {
     std::size_t glyphBegin {};     ///< First glyph index, into the shaped run.
     std::size_t glyphEnd {};       ///< One past the last glyph index.
@@ -30,7 +30,7 @@ struct cluster_group
     /// @return Whether this group maps to no input codepoints at all.
     [[nodiscard]] constexpr bool empty() const noexcept { return codepointBegin >= codepointEnd; }
 
-    [[nodiscard]] constexpr bool operator==(cluster_group const&) const noexcept = default;
+    [[nodiscard]] constexpr bool operator==(ClusterGroup const&) const noexcept = default;
 };
 
 /// Segments a shaped run into cluster groups, mapping each group back to the input codepoints that
@@ -53,13 +53,13 @@ struct cluster_group
 ///                      cell share a value. Must be non-decreasing.
 /// @return The cluster groups covering the whole run, or std::nullopt if either input violates the
 ///         monotone-cluster guarantee, in which case the caller must treat the run as indivisible.
-[[nodiscard]] inline std::optional<std::vector<cluster_group>> clusterGroups(
-    std::span<shaped_glyph_ref const> glyphs, std::span<unsigned const> inputClusters)
+[[nodiscard]] inline std::optional<std::vector<ClusterGroup>> clusterGroups(
+    std::span<ShapedGlyphRef const> glyphs, std::span<unsigned const> inputClusters)
 {
     if (!std::ranges::is_sorted(inputClusters))
         return std::nullopt;
 
-    auto groups = std::vector<cluster_group> {};
+    auto groups = std::vector<ClusterGroup> {};
     if (glyphs.empty())
         return groups;
 
@@ -95,11 +95,11 @@ struct cluster_group
         auto const codepointEnd =
             glyphEnd < glyphs.size() ? advanceTo(glyphs[glyphEnd].cluster) : inputClusters.size();
 
-        groups.emplace_back(cluster_group { .glyphBegin = glyphIndex,
-                                            .glyphEnd = glyphEnd,
-                                            .codepointBegin = codepointBegin,
-                                            .codepointEnd = codepointEnd,
-                                            .missing = missing });
+        groups.emplace_back(ClusterGroup { .glyphBegin = glyphIndex,
+                                           .glyphEnd = glyphEnd,
+                                           .codepointBegin = codepointBegin,
+                                           .codepointEnd = codepointEnd,
+                                           .missing = missing });
         glyphIndex = glyphEnd;
     }
 
@@ -119,15 +119,15 @@ struct cluster_group
 ///
 /// @param glyphs         The shaped glyphs of the run.
 /// @param codepointCount The number of input codepoints the run was shaped from.
-[[nodiscard]] inline cluster_group indivisibleGroup(std::span<shaped_glyph_ref const> glyphs,
-                                                    std::size_t codepointCount)
+[[nodiscard]] inline ClusterGroup indivisibleGroup(std::span<ShapedGlyphRef const> glyphs,
+                                                   std::size_t codepointCount)
 {
-    return cluster_group { .glyphBegin = 0,
-                           .glyphEnd = glyphs.size(),
-                           .codepointBegin = 0,
-                           .codepointEnd = codepointCount,
-                           .missing = std::ranges::any_of(
-                               glyphs, [](shaped_glyph_ref const& ref) { return ref.missing; }) };
+    return ClusterGroup { .glyphBegin = 0,
+                          .glyphEnd = glyphs.size(),
+                          .codepointBegin = 0,
+                          .codepointEnd = codepointCount,
+                          .missing = std::ranges::any_of(
+                              glyphs, [](ShapedGlyphRef const& ref) { return ref.missing; }) };
 }
 
 /// Coalesces neighbouring uncovered groups into single fallback segments.
@@ -139,9 +139,9 @@ struct cluster_group
 ///
 /// @param groups The cluster groups of one shaped run, as returned by clusterGroups().
 /// @return The same run, with runs of missing groups merged.
-[[nodiscard]] inline std::vector<cluster_group> mergeAdjacentMissing(std::span<cluster_group const> groups)
+[[nodiscard]] inline std::vector<ClusterGroup> mergeAdjacentMissing(std::span<ClusterGroup const> groups)
 {
-    auto segments = std::vector<cluster_group> {};
+    auto segments = std::vector<ClusterGroup> {};
     segments.reserve(groups.size());
 
     for (auto index = std::size_t { 0 }; index < groups.size();)
@@ -157,11 +157,11 @@ struct cluster_group
         while (last + 1 < groups.size() && groups[last + 1].missing)
             ++last;
 
-        segments.emplace_back(cluster_group { .glyphBegin = groups[index].glyphBegin,
-                                              .glyphEnd = groups[last].glyphEnd,
-                                              .codepointBegin = groups[index].codepointBegin,
-                                              .codepointEnd = groups[last].codepointEnd,
-                                              .missing = true });
+        segments.emplace_back(ClusterGroup { .glyphBegin = groups[index].glyphBegin,
+                                             .glyphEnd = groups[last].glyphEnd,
+                                             .codepointBegin = groups[index].codepointBegin,
+                                             .codepointEnd = groups[last].codepointEnd,
+                                             .missing = true });
         index = last + 1;
     }
 
@@ -178,8 +178,8 @@ struct cluster_group
 /// @param glyphs   The shaped glyphs of the run, in visual (left-to-right) order.
 /// @param clusters The per-codepoint cluster values the run was shaped with.
 /// @return The segments, in order, covering the run end to end.
-[[nodiscard]] inline std::vector<cluster_group> fallbackSegments(std::span<shaped_glyph_ref const> glyphs,
-                                                                 std::span<unsigned const> clusters)
+[[nodiscard]] inline std::vector<ClusterGroup> fallbackSegments(std::span<ShapedGlyphRef const> glyphs,
+                                                                std::span<unsigned const> clusters)
 {
     if (auto const groups = clusterGroups(glyphs, clusters))
         return mergeAdjacentMissing(*groups);

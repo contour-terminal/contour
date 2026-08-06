@@ -41,7 +41,7 @@ enum class ChecksumFlag : uint8_t
     RawCodepoint = 1 << 4,
 };
 
-using ChecksumFlags = crispy::flags<ChecksumFlag>;
+using ChecksumFlags = crispy::Flags<ChecksumFlag>;
 
 /// One DEC video attribute, and the Contour cell flags that stand for it.
 ///

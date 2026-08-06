@@ -53,8 +53,8 @@ ImageFragment::~ImageFragment()
 
 ImagePool::ImagePool(OnImageRemove onImageRemove, ImageId nextImageId):
     _nextImageId { nextImageId },
-    _imageNameToImageCache { crispy::strong_hashtable_size { 1024 },
-                             crispy::lru_capacity { 100 },
+    _imageNameToImageCache { crispy::StrongHashtableSize { 1024 },
+                             crispy::LRUCapacity { 100 },
                              "ImagePool name-to-image mappings" },
     _onImageRemove { std::move(onImageRemove) }
 {

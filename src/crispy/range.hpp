@@ -8,14 +8,13 @@ namespace crispy
 {
 
 template <typename Iter>
-// NOLINTNEXTLINE(readability-identifier-naming)
-class range
+class Range
 {
   public:
     using iterator = Iter;
     using const_iterator = Iter; // std::add_const_t<Iter>;
 
-    range(Iter begin, Iter end): _begin { begin }, _end { end } {}
+    Range(Iter begin, Iter end): _begin { begin }, _end { end } {}
 
     [[nodiscard]] constexpr iterator begin() const { return _begin; }
     [[nodiscard]] constexpr iterator end() const { return _end; }
@@ -33,12 +32,12 @@ class range
 };
 
 template <typename Iter>
-range(Iter, Iter) -> range<Iter>;
+Range(Iter, Iter) -> Range<Iter>;
 
 template <typename Container>
 auto reversed(Container&& container)
 {
-    return range(std::forward<Container>(container).rbegin(), std::forward<Container>(container).rend());
+    return Range(std::forward<Container>(container).rbegin(), std::forward<Container>(container).rend());
 }
 
 } // namespace crispy

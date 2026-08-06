@@ -14,18 +14,18 @@ namespace text
  *
  * @note on Windows, fontconfig still can NOT find user installed fonts.
  */
-class fontconfig_locator: public font_locator
+class FontconfigLocator: public FontLocator
 {
   public:
-    fontconfig_locator();
+    FontconfigLocator();
 
-    [[nodiscard]] font_source_list locate(font_description const& description) override;
-    [[nodiscard]] font_source_list all() override;
-    [[nodiscard]] font_source_list resolve(gsl::span<char32_t const> codepoints) override;
+    [[nodiscard]] FontSourceList locate(FontDescription const& description) override;
+    [[nodiscard]] FontSourceList all() override;
+    [[nodiscard]] FontSourceList resolve(gsl::span<char32_t const> codepoints) override;
 
   private:
-    struct private_tag;
-    std::unique_ptr<private_tag, void (*)(private_tag*)> _d;
+    struct PrivateTag;
+    std::unique_ptr<PrivateTag, void (*)(PrivateTag*)> _d;
 };
 
 } // namespace text

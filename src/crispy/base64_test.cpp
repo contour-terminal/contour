@@ -13,7 +13,7 @@ using namespace crispy;
 static std::string streamingEncode(std::string_view input)
 {
     std::string output;
-    auto state = base64::encoder_state {};
+    auto state = base64::EncoderState {};
     auto const writer = [&](char a, char b, char c, char d) {
         output += a;
         output += b;

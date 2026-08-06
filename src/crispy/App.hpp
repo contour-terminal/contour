@@ -18,7 +18,7 @@ namespace crispy
 {
 
 /// General purpose Application main with CLI parameter handling and stuff.
-class app
+class App
 {
   public:
     /// @param env    The process environment to read from. It must outlive this object, and is the
@@ -28,17 +28,17 @@ class app
     /// @param appTitle   Human-readable title.
     /// @param appVersion Version string.
     /// @param appLicense SPDX license identifier.
-    app(environment const& env,
+    App(Environment const& env,
         std::string appName,
         std::string appTitle,
         std::string appVersion,
         std::string appLicense);
-    virtual ~app();
+    virtual ~App();
 
-    static app* instance() noexcept { return _instance; }
+    static App* instance() noexcept { return _instance; }
 
-    [[nodiscard]] virtual crispy::cli::command parameterDefinition() const = 0;
-    [[nodiscard]] cli::flag_store const& parameters() const noexcept { return _flags.value(); }
+    [[nodiscard]] virtual crispy::cli::Command parameterDefinition() const = 0;
+    [[nodiscard]] cli::FlagStore const& parameters() const noexcept { return _flags.value(); }
 
     void link(std::string command, std::function<int()> handler);
 
@@ -59,7 +59,7 @@ class app
 
     /// The environment this application was constructed with, for the collaborators it builds.
     /// @return A reference to it; it outlives this object.
-    [[nodiscard]] environment const& processEnvironment() const noexcept { return _environment; }
+    [[nodiscard]] Environment const& processEnvironment() const noexcept { return _environment; }
 
     [[nodiscard]] std::string const& appName() const noexcept { return _appName; }
     [[nodiscard]] std::string const& appVersion() const noexcept { return _appVersion; }
@@ -97,9 +97,9 @@ class app
     int licenseAction();
     int helpAction();
 
-    static app* _instance; // NOLINT(readability-identifier-naming)
+    static App* _instance; // NOLINT(readability-identifier-naming)
 
-    environment const& _environment;
+    Environment const& _environment;
     std::string _appName;
     std::string _appTitle;
     std::string _appVersion;
@@ -108,9 +108,9 @@ class app
     std::filesystem::path _localStateDir;
     /// The installed log destination; categories hold a reference into it, so it must outlive
     /// every one of them — hence a member of the app rather than a local of a verb handler.
-    std::unique_ptr<logstore::scoped_output> _logOutput;
-    std::optional<crispy::cli::command> _syntax;
-    std::optional<crispy::cli::flag_store> _flags;
+    std::unique_ptr<logstore::ScopedOutput> _logOutput;
+    std::optional<crispy::cli::Command> _syntax;
+    std::optional<crispy::cli::FlagStore> _flags;
     std::map<std::string, std::function<int()>> _handlers;
 };
 

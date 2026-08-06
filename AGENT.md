@@ -16,10 +16,15 @@
 - **Header files use the `.hpp` extension.** `.h` is reserved for what is genuinely a C header —
   system and third-party headers, and files shared with GLSL (`src/vtrasterizer/shared_defines.h`
   is the sole first-party example). Every header carries `#pragma once`, never an include guard.
-- Naming conventions and static-analysis rules live in **`.clang-tidy` files** (`./.clang-tidy` at
-  the repository root is the base, so every first-party tree resolves to it by clang-tidy's normal
-  parent-directory search; `src/crispy/` and `src/text_shaper/` override it for their snake_case
-  naming). These files are the authoritative source and win over any prose here.
+- Naming conventions and static-analysis rules live in **`./.clang-tidy`**, the single config for
+  the whole tree: it sits at the repository root so every first-party directory resolves to it by
+  clang-tidy's normal parent-directory search. There are deliberately no module-local overrides —
+  one style, one config. It is the authoritative source and wins over any prose here.
+- **Types are `CamelCase`, everything else `camelBack`**, with a leading underscore on non-public
+  data members. The exceptions are names the standard library binds to *by spelling* — member
+  typedefs (`value_type`, `iterator`, `difference_type`, …), nested `iterator` classes, container
+  methods (`begin`, `push_back`, …) and `std::formatter`/`std::hash` specializations. Each such
+  name carries a `// NOLINT(readability-identifier-naming)` at its declaration.
 - C++ code formatting rules are defined in `.clang-format`; run `clang-format` after changes.
 - Use smart pointers for ownership; do not use raw owning pointers
 - Do not introduce new third-party dependencies without strong justification

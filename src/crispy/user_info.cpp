@@ -22,7 +22,7 @@ namespace
     }
 } // namespace
 
-std::optional<password_entry> currentUserPasswordEntry()
+std::optional<PasswordEntry> currentUserPasswordEntry()
 {
 #ifdef _WIN32
     return std::nullopt;
@@ -46,9 +46,9 @@ std::optional<password_entry> currentUserPasswordEntry()
         if (rc != 0 || result == nullptr)
             return std::nullopt;
 
-        return password_entry { .name = orEmpty(result->pw_name),
-                                .homeDirectory = orEmpty(result->pw_dir),
-                                .shell = orEmpty(result->pw_shell) };
+        return PasswordEntry { .name = orEmpty(result->pw_name),
+                               .homeDirectory = orEmpty(result->pw_dir),
+                               .shell = orEmpty(result->pw_shell) };
     }
 #endif
 }

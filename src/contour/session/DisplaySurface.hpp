@@ -135,7 +135,7 @@ class DisplaySurface
     /// Changes the font size (the zoom actions and OSC 50).
     /// @param newFontSize The requested size.
     /// @return True if the size was applied; false if it was rejected or the fonts failed to load.
-    virtual bool setFontSize(text::font_size newFontSize) = 0;
+    virtual bool setFontSize(text::FontSize newFontSize) = 0;
 
     /// Sets how hyperlinks are underlined, normally and while hovered.
     /// @param normal The decoration for a hyperlink at rest.

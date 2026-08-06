@@ -44,13 +44,13 @@ struct FontDescriptions
 {
     double dpiScale = 1.0;
     DPI dpi = { 0, 0 }; // 0 => auto-fill with defaults
-    text::font_size size { 12.0 };
-    text::font_description regular;
-    text::font_description bold;
-    text::font_description italic;
-    text::font_description boldItalic;
-    text::font_description emoji;
-    text::render_mode renderMode;
+    text::FontSize size { 12.0 };
+    text::FontDescription regular;
+    text::FontDescription bold;
+    text::FontDescription italic;
+    text::FontDescription boldItalic;
+    text::FontDescription emoji;
+    text::RenderMode renderMode;
     TextShapingEngine textShapingEngine = TextShapingEngine::OpenShaper;
     FontLocatorEngine fontLocator = FontLocatorEngine::Native;
     bool builtinBoxDrawing = true;
@@ -92,7 +92,7 @@ enum class TextSizeFlag : uint8_t
     DoubleWidth = 0x04,
 };
 
-using TextSizeFlags = crispy::flags<TextSizeFlag>;
+using TextSizeFlags = crispy::Flags<TextSizeFlag>;
 
 enum class TextStyle : uint8_t
 {

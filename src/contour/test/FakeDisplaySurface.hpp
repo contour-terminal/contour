@@ -45,7 +45,7 @@ class FakeDisplaySurface final: public session::DisplaySurface
     // {{{ What the session asked for
     std::vector<input::MouseCursorShape> cursorShapes;
     std::vector<vtrasterizer::FontDescriptions> fontsSet;
-    std::vector<text::font_size> fontSizesRequested;
+    std::vector<text::FontSize> fontSizesRequested;
     std::vector<std::pair<vtbackend::LineCount, vtbackend::ColumnCount>> pageResizeRequests;
     std::vector<std::pair<vtbackend::Width, vtbackend::Height>> pixelResizeRequests;
     std::vector<std::pair<vtrasterizer::Decorator, vtrasterizer::Decorator>> hyperlinkDecorations;
@@ -129,7 +129,7 @@ class FakeDisplaySurface final: public session::DisplaySurface
     {
         fontsSet.push_back(std::move(fontDescriptions));
     }
-    bool setFontSize(text::font_size newFontSize) override
+    bool setFontSize(text::FontSize newFontSize) override
     {
         fontSizesRequested.push_back(newFontSize);
         return fontSizeApplies;

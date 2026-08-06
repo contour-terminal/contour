@@ -7,10 +7,10 @@
 namespace text
 {
 
-struct font_description_and_source
+struct FontDescriptionAndSource
 {
-    font_description description;
-    font_source source;
+    FontDescription description;
+    FontSource source;
 };
 
 /**
@@ -19,17 +19,17 @@ struct font_description_and_source
  *
  * This should be available on all platforms.
  */
-class mock_font_locator: public font_locator
+class MockFontLocator: public FontLocator
 {
   public:
-    [[nodiscard]] font_source_list locate(font_description const& description) override;
-    [[nodiscard]] font_source_list all() override;
-    [[nodiscard]] font_source_list resolve(gsl::span<char32_t const> codepoints) override;
+    [[nodiscard]] FontSourceList locate(FontDescription const& description) override;
+    [[nodiscard]] FontSourceList all() override;
+    [[nodiscard]] FontSourceList resolve(gsl::span<char32_t const> codepoints) override;
 
-    static void configure(std::vector<font_description_and_source> registry);
+    static void configure(std::vector<FontDescriptionAndSource> registry);
 
     /// Sets what resolve() answers with. Cleared by configure(), so a case cannot leak into the next.
-    static void configureCoverage(font_source_list sources);
+    static void configureCoverage(FontSourceList sources);
 };
 
 } // namespace text

@@ -15,7 +15,7 @@ namespace text
 {
 
 /// Holds the system path to a font file.
-struct font_path
+struct FontPath
 {
     std::string value;
 
@@ -23,22 +23,22 @@ struct font_path
     // can be used to mandate which font within this TTC is to be used.
     int collectionIndex = 0;
 
-    std::optional<font_weight> weight = std::nullopt;
-    std::optional<font_slant> slant = std::nullopt;
+    std::optional<FontWeight> weight = std::nullopt;
+    std::optional<FontSlant> slant = std::nullopt;
 };
 
 /// Holds a view into the contents of a font file.
-struct font_memory_ref
+struct FontMemoryRef
 {
     std::string identifier;  //!< a unique identifier for this font
     gsl::span<uint8_t> data; //!< font file contents (non-owned)
 };
 
 /// Represents a font source (such as file path or memory).
-using font_source = std::variant<font_path, font_memory_ref>;
+using FontSource = std::variant<FontPath, FontMemoryRef>;
 
 /// Holds a list of fonts.
-using font_source_list = std::vector<font_source>;
+using FontSourceList = std::vector<FontSource>;
 
 /**
  * Font location API.
@@ -46,36 +46,36 @@ using font_source_list = std::vector<font_source>;
  * Used for locating fonts and fallback fonts to be used
  * for text shaping and glyph rendering.
  */
-class font_locator
+class FontLocator
 {
   public:
-    virtual ~font_locator() = default;
+    virtual ~FontLocator() = default;
 
     /**
      * Enumerates all available fonts.
      */
-    [[nodiscard]] virtual font_source_list all() = 0;
+    [[nodiscard]] virtual FontSourceList all() = 0;
 
     /**
      * Locates the font matching the given description the best
      * and an ordered list of fallback fonts.
      */
-    [[nodiscard]] virtual font_source_list locate(font_description const& description) = 0;
+    [[nodiscard]] virtual FontSourceList locate(FontDescription const& description) = 0;
 
     /**
      * Resolves the given codepoint sequence into an ordered list of
      * possible fonts that can be used for text shaping the given
      * codepoint sequence.
      */
-    [[nodiscard]] virtual font_source_list resolve(gsl::span<char32_t const> codepoints) = 0;
+    [[nodiscard]] virtual FontSourceList resolve(gsl::span<char32_t const> codepoints) = 0;
 };
 
 } // namespace text
 
 template <>
-struct std::formatter<text::font_path>: std::formatter<std::string>
+struct std::formatter<text::FontPath>: std::formatter<std::string>
 {
-    auto format(text::font_path spec, auto& ctx) const
+    auto format(text::FontPath spec, auto& ctx) const
     {
         auto weightMod = spec.weight ? std::format(" {}", spec.weight.value()) : "";
         auto slantMod = spec.slant ? std::format(" {}", spec.slant.value()) : "";
@@ -85,24 +85,24 @@ struct std::formatter<text::font_path>: std::formatter<std::string>
 };
 
 template <>
-struct std::formatter<text::font_memory_ref>: std::formatter<std::string>
+struct std::formatter<text::FontMemoryRef>: std::formatter<std::string>
 {
-    auto format(text::font_memory_ref ref, auto& ctx) const
+    auto format(text::FontMemoryRef ref, auto& ctx) const
     {
         return formatter<std::string>::format(std::format("in-memory: {}", ref.identifier), ctx);
     }
 };
 
 template <>
-struct std::formatter<text::font_source>: std::formatter<std::string>
+struct std::formatter<text::FontSource>: std::formatter<std::string>
 {
-    auto format(text::font_source source, auto& ctx) const
+    auto format(text::FontSource source, auto& ctx) const
     {
         std::string text;
-        if (std::holds_alternative<text::font_path>(source))
-            text = std::format("{}", std::get<text::font_path>(source));
-        else if (std::holds_alternative<text::font_memory_ref>(source))
-            text = std::format("{}", std::get<text::font_memory_ref>(source));
+        if (std::holds_alternative<text::FontPath>(source))
+            text = std::format("{}", std::get<text::FontPath>(source));
+        else if (std::holds_alternative<text::FontMemoryRef>(source))
+            text = std::format("{}", std::get<text::FontMemoryRef>(source));
         return formatter<std::string>::format(text, ctx);
     }
 };

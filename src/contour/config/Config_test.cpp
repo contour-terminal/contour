@@ -922,8 +922,8 @@ profiles:
     // The three 4-letter feature codes are parsed into the feature vector.
     CHECK(profile->fonts.value().regular.features.size() == 3);
     // The fallback sequence populates a font_fallback_list.
-    REQUIRE(std::holds_alternative<text::font_fallback_list>(profile->fonts.value().regular.fontFallback));
-    auto const& list = std::get<text::font_fallback_list>(profile->fonts.value().regular.fontFallback);
+    REQUIRE(std::holds_alternative<text::FontFallbackList>(profile->fonts.value().regular.fontFallback));
+    auto const& list = std::get<text::FontFallbackList>(profile->fonts.value().regular.fontFallback);
     CHECK(list.fallbackFonts.size() == 2);
 }
 
@@ -943,7 +943,7 @@ profiles:
 
     auto const* profile = config.profile("main");
     REQUIRE(profile != nullptr);
-    CHECK(std::holds_alternative<text::font_fallback_none>(profile->fonts.value().regular.fontFallback));
+    CHECK(std::holds_alternative<text::FontFallbackNone>(profile->fonts.value().regular.fontFallback));
 }
 
 TEST_CASE("Config: text-shaping engine names map to their engines", "[config]")
@@ -987,7 +987,7 @@ TEST_CASE("Config: environment variables in values are expanded (defined and und
     // deterministic; use a clearly-undefined name for the other branch. qputenv/qunsetenv are Qt's
     // portable env wrappers (POSIX ::setenv is unavailable on MSVC) -- Qt is fine here because this
     // suite only ever builds with the GUI frontend, and writing through it is in fact the stronger
-    // assertion: the replacer reads a crispy::live_environment, so this also proves that reader sees
+    // assertion: the replacer reads a crispy::LiveEnvironment, so this also proves that reader sees
     // a variable written after the process started, which is the whole reason it is not the cached
     // one. (A test that needs to control what the replacer reads injects its own environment into
     // YAMLConfigReader instead; loadFromYaml goes through the production entry point on purpose.)
@@ -3309,7 +3309,7 @@ TEST_CASE("Config: a dropped input_mapping entry is reported", "[config][input-m
     // The silence was the whole reason issue #1987 was hard to diagnose: a row vanished and nothing
     // anywhere said so. These assertions stay deliberately weak -- that the offending row and field
     // are NAMED -- rather than pinning the sentence, which would break on any rewording.
-    auto capture = logstore::scoped_capture { "error" };
+    auto capture = logstore::ScopedCapture { "error" };
 
     auto const config = loadFromYaml(dir, R"(
 default_profile: main
@@ -3347,7 +3347,7 @@ TEST_CASE("Config: an input_mapping that is not a list is reported, not silently
     // malformed section leaves the user with nothing bound at all -- the worst version of the silent
     // loss behind issue #1987, and now the most likely one, since the docs tell people the section
     // replaces the defaults.
-    auto capture = logstore::scoped_capture { "error" };
+    auto capture = logstore::ScopedCapture { "error" };
 
     auto const config = loadFromYaml(dir, R"(
 default_profile: main

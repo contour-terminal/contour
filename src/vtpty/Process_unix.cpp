@@ -495,7 +495,7 @@ namespace
                 char buf[1024];
                 auto const cmd = std::format("flatpak-spawn --host getent passwd {}", pw->name);
                 FILE* fp = popen(cmd.c_str(), "r");
-                auto fpCloser = crispy::finally { [fp]() { pclose(fp); } };
+                auto fpCloser = crispy::Finally { [fp]() { pclose(fp); } };
                 size_t const nread = fread(buf, sizeof(char), sizeof(buf) / sizeof(char), fp);
                 auto const output = trimRight(string_view(buf, nread));
                 auto const colonIndex = output.rfind(':');

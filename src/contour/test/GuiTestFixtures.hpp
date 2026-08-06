@@ -332,8 +332,8 @@ class TestApp
 
     RecordingExternalLauncher* _launcher = nullptr;
     /// The process's own environment: what the fixture exercises is the GUI, not what any variable
-    /// reads as. A test that cares injects a crispy::testing::fake_environment instead.
-    crispy::live_environment _environment;
+    /// reads as. A test that cares injects a crispy::testing::FakeEnvironment instead.
+    crispy::LiveEnvironment _environment;
     contour::ContourGuiApp _app;
 };
 

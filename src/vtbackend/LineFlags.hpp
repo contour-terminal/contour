@@ -47,7 +47,7 @@ enum class LineFlag : uint16_t
 #undef VTBACKEND_LINE_FLAG_ENUMERATOR
 };
 
-using LineFlags = crispy::flags<LineFlag>;
+using LineFlags = crispy::Flags<LineFlag>;
 
 /// Every `LineFlag`, in declaration order, excluding `None`.
 ///

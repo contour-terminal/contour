@@ -9,9 +9,9 @@ namespace
 {
 
 /// Builds the shaped-glyph view the segmenter consumes: one entry per output glyph, in visual order.
-[[nodiscard]] std::vector<shaped_glyph_ref> glyphsOf(std::initializer_list<shaped_glyph_ref> glyphs)
+[[nodiscard]] std::vector<ShapedGlyphRef> glyphsOf(std::initializer_list<ShapedGlyphRef> glyphs)
 {
-    return std::vector<shaped_glyph_ref> { glyphs };
+    return std::vector<ShapedGlyphRef> { glyphs };
 }
 
 [[nodiscard]] std::vector<unsigned> clustersOf(std::initializer_list<unsigned> clusters)
@@ -41,13 +41,13 @@ TEST_CASE("cluster_spans.one_to_one_all_covered", "[cluster_spans]")
     REQUIRE(groups->size() == 3);
 
     CHECK((*groups)[0]
-          == cluster_group {
+          == ClusterGroup {
               .glyphBegin = 0, .glyphEnd = 1, .codepointBegin = 0, .codepointEnd = 1, .missing = false });
     CHECK((*groups)[1]
-          == cluster_group {
+          == ClusterGroup {
               .glyphBegin = 1, .glyphEnd = 2, .codepointBegin = 1, .codepointEnd = 2, .missing = false });
     CHECK((*groups)[2]
-          == cluster_group {
+          == ClusterGroup {
               .glyphBegin = 2, .glyphEnd = 3, .codepointBegin = 2, .codepointEnd = 3, .missing = false });
 }
 

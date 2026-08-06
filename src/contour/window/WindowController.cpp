@@ -395,8 +395,8 @@ void WindowController::dispatchTabStripWheel(
     if (session == nullptr)
         return;
 
-    auto const pixelDelta = crispy::point { .x = pixelDeltaX, .y = pixelDeltaY };
-    auto const angleDelta = crispy::point { .x = angleDeltaX, .y = angleDeltaY };
+    auto const pixelDelta = crispy::Point { .x = pixelDeltaX, .y = pixelDeltaY };
+    auto const angleDelta = crispy::Point { .x = angleDeltaX, .y = angleDeltaY };
     // Translated, not cast: QML can only hand the phase across as an int, and the two enumerations
     // agreeing numerically today is a coincidence rather than a contract.
     auto const scrollPhase = input::mapScrollPhase(static_cast<Qt::ScrollPhase>(phase));

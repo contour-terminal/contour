@@ -10,22 +10,22 @@ using namespace text;
 
 namespace
 {
-[[nodiscard]] glyph_key makeKey(unsigned fontValue, unsigned indexValue, double pt)
+[[nodiscard]] GlyphKey makeKey(unsigned fontValue, unsigned indexValue, double pt)
 {
-    auto key = glyph_key {};
-    key.font = font_key { fontValue };
-    key.index = glyph_index { indexValue };
-    key.size = font_size { pt };
+    auto key = GlyphKey {};
+    key.font = FontKey { fontValue };
+    key.index = GlyphIndex { indexValue };
+    key.size = FontSize { pt };
     return key;
 }
 
-[[nodiscard]] std::size_t hashOf(glyph_key const& key)
+[[nodiscard]] std::size_t hashOf(GlyphKey const& key)
 {
-    return std::hash<glyph_key> {}(key);
+    return std::hash<GlyphKey> {}(key);
 }
 } // namespace
 
-TEST_CASE("glyph_key hash keeps its three components distinct", "[font]")
+TEST_CASE("GlyphKey hash keeps its three components distinct", "[font]")
 {
     // The hash packs font, glyph index and size (in tenths of a point) into disjoint bit fields. It
     // used to build that packing in size_t and shift the font component left by 32 -- which is exactly

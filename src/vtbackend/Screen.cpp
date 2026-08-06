@@ -89,10 +89,10 @@ auto constexpr inline ColorPaletteUpdateDsrReplyId = 997;
 
 auto constexpr inline TabWidth = ColumnCount(8);
 
-auto inline const vtCaptureBufferLog = logstore::category("vt.ext.capturebuffer",
+auto inline const vtCaptureBufferLog = logstore::Category("vt.ext.capturebuffer",
                                                           "Capture Buffer debug logging.",
-                                                          logstore::category::state::Disabled,
-                                                          logstore::category::visibility::Hidden);
+                                                          logstore::Category::State::Disabled,
+                                                          logstore::Category::Visibility::Hidden);
 
 #define SAFE_SYS_CALL(x)                \
     while ((x) == -1 && errno == EINTR) \
@@ -448,7 +448,7 @@ void Screen::writeText(string_view text, size_t cellCount)
 
     // Do not log individual characters, as we already logged the whole string above
     _logCharTrace = false;
-    auto const _ = crispy::finally { [&]() { _logCharTrace = true; } };
+    auto const _ = crispy::Finally { [&]() { _logCharTrace = true; } };
 #endif
 
     assert(std::cmp_less_equal(cellCount, pageSize().columns.value - _cursor.position.column.value));
@@ -1185,7 +1185,7 @@ void Screen::linefeed()
         && _terminal->settings().smoothLineScrolling.count() != 0)
     {
         _terminal->unlock();
-        auto const _ = crispy::finally([&]() { _terminal->lock(); });
+        auto const _ = crispy::Finally([&]() { _terminal->lock(); });
         if (!_terminal->isModeEnabled(DECMode::BatchedRendering))
             _terminal->screenUpdated();
         sleep_for(_terminal->settings().smoothLineScrolling);
@@ -3269,7 +3269,7 @@ void Screen::smGraphics(XtSmGraphics::Item item, XtSmGraphics::Action action, Xt
                     break;
                 }
                 case Action::SetToValue:
-                    visit(overloaded {
+                    visit(Overloaded {
                               [&](int number) {
                                   _terminal->sixelColorPalette()->setSize(static_cast<unsigned>(number));
                                   reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Success, number);
@@ -4125,7 +4125,7 @@ namespace impl
         /// OSC 9 — ConEmu-style notification and progress indicator.
         ///
         /// Simple notification: OSC 9 ; <message> ST
-        /// Progress indicator:  OSC 9 ; 4 ; <state> ; <progress> ST
+        /// Progress indicator:  OSC 9 ; 4 ; <State> ; <progress> ST
 
         ApplyResult CONEMU(Sequence const& seq, Screen& screen)
         {
@@ -6024,7 +6024,7 @@ void Screen::processShellIntegration(Sequence const& seq)
 
     auto const forEachKeyValue = []<typename Callback>(std::string_view text, Callback&& callback) {
         crispy::for_each_key_value(
-            crispy::for_each_key_value_params {
+            crispy::ForEachKeyValueParams {
                 .text = text,
                 .entryDelimiter = ';',
                 .assignmentDelimiter = '=',
@@ -7140,7 +7140,7 @@ unique_ptr<ParserExtension> Screen::hookReGIS(Sequence const& seq)
                     return std::nullopt;
                 auto const canvasWidth = unbox<double>(_regisCanvas->size().width);
                 auto const canvasHeight = unbox<double>(_regisCanvas->size().height);
-                auto const pixel = crispy::point {
+                auto const pixel = crispy::Point {
                     .x = static_cast<int>((unbox<double>(gridPosition->column) / columns) * canvasWidth),
                     .y = static_cast<int>((unbox<double>(gridPosition->line) / lines) * canvasHeight),
                 };

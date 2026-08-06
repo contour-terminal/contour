@@ -34,15 +34,15 @@
 namespace vtrasterizer
 {
 
-text::font_locator& createFontLocator(FontLocatorEngine engine);
+text::FontLocator& createFontLocator(FontLocatorEngine engine);
 
 struct FontKeys
 {
-    text::font_key regular;
-    text::font_key bold;
-    text::font_key italic;
-    text::font_key boldItalic;
-    text::font_key emoji;
+    text::FontKey regular;
+    text::FontKey bold;
+    text::FontKey italic;
+    text::FontKey boldItalic;
+    text::FontKey emoji;
 };
 
 struct TextRendererEvents
@@ -60,7 +60,7 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
 
   public:
     TextRenderer(GridMetrics const& gridMetrics,
-                 text::shaper& textShaper,
+                 text::Shaper& textShaper,
                  FontDescriptions& fontDescriptions,
                  FontKeys const& fontKeys,
                  TextRendererEvents& eventHandler,
@@ -117,17 +117,17 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     void initializeDirectMapping();
 
     /// Gets the text shaping result of the current text cluster group
-    text::shape_result const& getOrCreateCachedGlyphPositions(crispy::strong_hash hash,
-                                                              std::u32string_view codepoints,
-                                                              gsl::span<unsigned> clusters,
-                                                              TextStyle style);
-    text::shape_result createTextShapedGlyphPositions(std::u32string_view codepoints,
-                                                      gsl::span<unsigned> clusters,
-                                                      TextStyle style);
-    text::shape_result shapeTextRun(unicode::run_segmenter::range const& run,
-                                    std::u32string_view codepoints,
-                                    gsl::span<unsigned> clusters,
-                                    TextStyle style);
+    text::ShapeResult const& getOrCreateCachedGlyphPositions(crispy::StrongHash hash,
+                                                             std::u32string_view codepoints,
+                                                             gsl::span<unsigned> clusters,
+                                                             TextStyle style);
+    text::ShapeResult createTextShapedGlyphPositions(std::u32string_view codepoints,
+                                                     gsl::span<unsigned> clusters,
+                                                     TextStyle style);
+    text::ShapeResult shapeTextRun(unicode::run_segmenter::range const& run,
+                                   std::u32string_view codepoints,
+                                   gsl::span<unsigned> clusters,
+                                   TextStyle style);
 
     /// One text-sizing block's raster, sized to whole cells so that cutting it into atlas tiles is
     /// exact. @see buildBlockCanvas.
@@ -146,8 +146,8 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     /// Separate from the ordinary path because it is a different shape of work, and must stay so:
     /// unscaled text is the overwhelming majority of what a terminal draws and must not pay for any
     /// of this.
-    void renderBlockGroup(text::shape_result const& glyphPositions,
-                          crispy::point pen,
+    void renderBlockGroup(text::ShapeResult const& glyphPositions,
+                          crispy::Point pen,
                           vtbackend::RGBColor color,
                           vtbackend::LineFlags lineFlags,
                           vtbackend::GlyphSizing const& sizing,
@@ -155,7 +155,7 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
 
     /// @param cluster one grapheme cluster: a base glyph followed by its zero-advance marks. They
     ///                share one canvas, or a Devanagari conjunct is torn into its pieces.
-    std::optional<BlockCanvas> buildBlockCanvas(std::span<text::glyph_position const> cluster,
+    std::optional<BlockCanvas> buildBlockCanvas(std::span<text::GlyphPosition const> cluster,
                                                 vtbackend::CellScale const& cellScale,
                                                 GlyphScaleAdjustment adjustment,
                                                 int cellsAtOneX);
@@ -165,11 +165,11 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
                                                                 uint32_t column,
                                                                 uint32_t band);
 
-    std::optional<text::rasterized_glyph> rasterizeAtBlockSize(text::glyph_key const& glyphKey,
-                                                               GlyphScaleAdjustment adjustment);
+    std::optional<text::RasterizedGlyph> rasterizeAtBlockSize(text::GlyphKey const& glyphKey,
+                                                              GlyphScaleAdjustment adjustment);
 
-    AtlasTileAttributes const* getOrCreateRasterizedMetadata(crispy::strong_hash const& hash,
-                                                             text::glyph_key const& glyphKey,
+    AtlasTileAttributes const* getOrCreateRasterizedMetadata(crispy::StrongHash const& hash,
+                                                             text::GlyphKey const& glyphKey,
                                                              unicode::PresentationStyle presentationStyle);
 
     /**
@@ -178,23 +178,23 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
      */
     std::optional<TextureAtlas::TileCreateData> createSlicedRasterizedGlyph(
         atlas::TileLocation tileLocation,
-        text::glyph_key const& glyphKey,
+        text::GlyphKey const& glyphKey,
         unicode::PresentationStyle presentation,
-        crispy::strong_hash const& hash);
+        crispy::StrongHash const& hash);
 
     std::optional<TextureAtlas::TileCreateData> createRasterizedGlyph(
         atlas::TileLocation tileLocation,
-        text::glyph_key const& glyphKey,
+        text::GlyphKey const& glyphKey,
         unicode::PresentationStyle presentation,
         GlyphWidthPolicy widthPolicy = GlyphWidthPolicy::Sliced);
 
     void restrictToTileSize(TextureAtlas::TileCreateData& tileCreateData);
 
-    crispy::point applyGlyphPositionToPen(crispy::point pen,
+    crispy::Point applyGlyphPositionToPen(crispy::Point pen,
                                           AtlasTileAttributes const& tileAttributes,
-                                          text::glyph_position const& gpos) const noexcept;
+                                          text::GlyphPosition const& gpos) const noexcept;
 
-    void renderRasterizedGlyph(crispy::point pen,
+    void renderRasterizedGlyph(crispy::Point pen,
                                vtbackend::RGBAColor color,
                                AtlasTileAttributes const& attributes);
 
@@ -209,19 +209,19 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     //
     bool _pressure = false;
 
-    using ShapingResultCache = crispy::strong_lru_hashtable<text::shape_result>;
-    using ShapingResultCachePtr = ShapingResultCache::ptr;
+    using ShapingResultCache = crispy::StrongLRUHashtable<text::ShapeResult>;
+    using ShapingResultCachePtr = ShapingResultCache::Ptr;
 
     ShapingResultCachePtr _textShapingCache;
     // TODO: make unique_ptr, get owned, export cref for other users in Renderer impl.
-    text::shaper& _textShaper;
+    text::Shaper& _textShaper;
 
     DirectMapping _directMapping {};
 
     // Maps from glyph index to tile index.
     std::vector<uint32_t> _directMappedGlyphKeyToTileIndex {};
 
-    [[nodiscard]] bool isGlyphDirectMapped(text::glyph_key const& glyph) const noexcept
+    [[nodiscard]] bool isGlyphDirectMapped(text::GlyphKey const& glyph) const noexcept
     {
         return _directMapping                  // Is direct mapping enabled?
                && glyph.font == _fonts.regular // Only regular font is direct-mapped for now.
@@ -229,7 +229,7 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
                && _directMappedGlyphKeyToTileIndex[glyph.index.value] != 0;
     }
 
-    AtlasTileAttributes const* ensureRasterizedIfDirectMapped(text::glyph_key const& glyphKey);
+    AtlasTileAttributes const* ensureRasterizedIfDirectMapped(text::GlyphKey const& glyphKey);
 
     // sub-renderer
     //

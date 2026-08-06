@@ -18,11 +18,11 @@ namespace contour::cli
 /// back — so these encode the CLI's tolerance policy in one place.
 
 /// Parses a size string in the format "WxH" (e.g. "80x24"); returns {0,0} on any invalid format.
-[[nodiscard]] inline crispy::size parseCatSize(std::string_view text) noexcept
+[[nodiscard]] inline crispy::Size parseCatSize(std::string_view text) noexcept
 {
     auto const pos = text.find('x');
     if (pos == std::string_view::npos || pos == 0 || pos == text.size() - 1)
-        return crispy::size {};
+        return crispy::Size {};
 
     auto const widthStr = text.substr(0, pos);
     auto const heightStr = text.substr(pos + 1);
@@ -32,9 +32,9 @@ namespace contour::cli
     auto const [we, werr] = std::from_chars(widthStr.data(), widthStr.data() + widthStr.size(), width);
     auto const [he, herr] = std::from_chars(heightStr.data(), heightStr.data() + heightStr.size(), height);
     if (werr != std::errc {} || herr != std::errc {})
-        return crispy::size {};
+        return crispy::Size {};
 
-    return crispy::size { .width = width, .height = height };
+    return crispy::Size { .width = width, .height = height };
 }
 
 /// Parses an image alignment string; unrecognized values default to MiddleCenter.

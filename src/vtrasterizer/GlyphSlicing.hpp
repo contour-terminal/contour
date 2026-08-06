@@ -261,11 +261,11 @@ enum class GlyphWidthPolicy : uint8_t
 /// @param scale        the block's full sizing: its scale plus the fraction and alignment, all of
 ///                     which change the pixels rather than merely the extent.
 /// @param cellsAtOneX  how many cells the block's content occupies at scale 1.
-[[nodiscard]] inline crispy::strong_hash blockCanvasHash(vtbackend::CellScale const& scale,
-                                                         uint32_t cellsAtOneX) noexcept
+[[nodiscard]] inline crispy::StrongHash blockCanvasHash(vtbackend::CellScale const& scale,
+                                                        uint32_t cellsAtOneX) noexcept
 {
     // The `+ 1` guards keep a zero factor from collapsing the whole product.
-    return crispy::strong_hash::compute(static_cast<uint32_t>(scale.scale))
+    return crispy::StrongHash::compute(static_cast<uint32_t>(scale.scale))
            * (vtbackend::packTextScaleExtras(scale) + 1u) * (cellsAtOneX + 1u);
 }
 

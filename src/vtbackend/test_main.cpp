@@ -15,7 +15,7 @@ int main(int argc, char const* argv[])
     if (auto const logFilterString = crispy::defaultEnvironment().get("LOG"))
     {
         logstore::configure(*logFilterString);
-        crispy::app::customizeLogStoreOutput();
+        crispy::App::customizeLogStoreOutput();
     }
     int const result = Catch::Session().run(argc, argv);
 

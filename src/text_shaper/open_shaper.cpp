@@ -73,8 +73,8 @@ namespace
 struct FontInfo // NOLINT(readability-identifier-naming)
 {
     string path;
-    text::font_size size;
-    text::font_weight weight;
+    text::FontSize size;
+    text::FontWeight weight;
 };
 
 [[maybe_unused]] bool operator==(FontInfo const& a, FontInfo const& b) noexcept
@@ -90,9 +90,9 @@ static void cleanup_cairo_font_face(void*)
     // No-op destructor callback: the FT_Face lifetime is managed elsewhere.
 }
 
-static std::optional<text::rasterized_glyph> rasterizeWithCairo(FT_Face ftFace,
-                                                                text::glyph_key const& glyph,
-                                                                text::render_mode /*mode*/)
+static std::optional<text::RasterizedGlyph> rasterizeWithCairo(FT_Face ftFace,
+                                                               text::GlyphKey const& glyph,
+                                                               text::RenderMode /*mode*/)
 {
     // 1. Setup Cairo surface
     auto width = static_cast<int>(ceil(static_cast<double>(ftFace->glyph->metrics.width) / 64.0));
@@ -183,12 +183,12 @@ static std::optional<text::rasterized_glyph> rasterizeWithCairo(FT_Face ftFace,
     cairo_surface_flush(surface);
 
     // 6. Copy to output
-    auto output = text::rasterized_glyph {};
+    auto output = text::RasterizedGlyph {};
     output.bitmapSize.width = vtbackend::Width::cast_from(width);
     output.bitmapSize.height = vtbackend::Height::cast_from(height);
     output.position.x = static_cast<int>(floor(extents.x_bearing));
     output.position.y = static_cast<int>(floor(-extents.y_bearing));
-    output.format = text::bitmap_format::rgba;
+    output.format = text::BitmapFormat::RGBA;
     output.bitmap = std::move(buffer);
 
     auto const pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
@@ -232,7 +232,7 @@ struct hash<FontInfo>
 {
     size_t operator()(FontInfo const& fd) const noexcept
     {
-        auto fnv = crispy::fnv<char>();
+        auto fnv = crispy::FNV<char>();
         return size_t(
             fnv(fnv(fd.path), to_string(fd.size.pt), std::format("{}", fd.weight))); // SSO should kick in.
     }
@@ -243,9 +243,9 @@ struct hash<FontInfo>
 namespace text
 {
 
-using hb_buffer_ptr = unique_ptr<hb_buffer_t, void (*)(hb_buffer_t*)>;
-using hb_font_ptr = unique_ptr<hb_font_t, void (*)(hb_font_t*)>;
-using ft_face_ptr = unique_ptr<FT_FaceRec_, void (*)(FT_FaceRec_*)>;
+using HbBufferPtr = unique_ptr<hb_buffer_t, void (*)(hb_buffer_t*)>;
+using HbFontPtr = unique_ptr<hb_font_t, void (*)(hb_font_t*)>;
+using FtFacePtr = unique_ptr<FT_FaceRec_, void (*)(FT_FaceRec_*)>;
 
 auto constexpr MissingGlyphId = 0xFFFDu;
 
@@ -267,20 +267,20 @@ constexpr size_t InitialFallbackCount = 8;
 /// the order they were asked for. That is the cost of having a hard bound at all -- eviction is not
 /// available here, because font_keys are baked into texture-atlas keys -- and unbounded memory
 /// growth driven by whatever is writing to the terminal is the worse of the two.
-/// @see open_shaper::resize_font.
+/// @see OpenShaper::resize_font.
 constexpr size_t MaxResizedFonts = 512;
 
 namespace
 {
     struct HbFontInfo // NOLINT(readability-identifier-naming)
     {
-        font_source primary;
-        font_source_list fallbacks;
-        font_source_list allFallbacks; ///< Complete fallback list for on-demand extension.
-        font_size size;
-        ft_face_ptr ftFace;
-        hb_font_ptr hbFont;
-        std::optional<font_metrics> metrics {};
+        FontSource primary;
+        FontSourceList fallbacks;
+        FontSourceList allFallbacks; ///< Complete fallback list for on-demand extension.
+        FontSize size;
+        FtFacePtr ftFace;
+        HbFontPtr hbFont;
+        std::optional<FontMetrics> metrics {};
 
         /// The weight this face was actually loaded at, which together with @c size is its cache identity.
         ///
@@ -288,17 +288,17 @@ namespace
         /// load_font(), so every key minted for a fallback face or a resize carried a default-constructed
         /// description. Reading the weight from there filed those faces under a weight they were never
         /// loaded at.
-        font_weight weight { font_weight::normal };
+        FontWeight weight { FontWeight::Normal };
 
-        font_description description {};
+        FontDescription description {};
     };
 
-    string identifierOf(font_source const& source)
+    string identifierOf(FontSource const& source)
     {
-        if (holds_alternative<font_path>(source))
-            return get<font_path>(source).value;
-        if (holds_alternative<font_memory_ref>(source))
-            return get<font_memory_ref>(source).identifier;
+        if (holds_alternative<FontPath>(source))
+            return get<FontPath>(source).value;
+        if (holds_alternative<FontMemoryRef>(source))
+            return get<FontMemoryRef>(source).identifier;
         throw invalid_argument("source");
     }
 
@@ -314,33 +314,33 @@ namespace
     }
     // clang-format on
 
-    constexpr bool glyphMissing(text::glyph_position const& gp) noexcept
+    constexpr bool glyphMissing(text::GlyphPosition const& gp) noexcept
     {
         return gp.glyph.index.value == 0;
     }
 
-    constexpr int ftRenderFlag(render_mode mode) noexcept
+    constexpr int ftRenderFlag(RenderMode mode) noexcept
     {
         switch (mode)
         {
-            case render_mode::bitmap: return FT_LOAD_MONOCHROME;
-            case render_mode::light: return FT_LOAD_TARGET_LIGHT;
-            case render_mode::lcd: return FT_LOAD_TARGET_LCD;
-            case render_mode::color: return FT_LOAD_COLOR;
-            case render_mode::gray: return FT_LOAD_DEFAULT;
+            case RenderMode::Bitmap: return FT_LOAD_MONOCHROME;
+            case RenderMode::Light: return FT_LOAD_TARGET_LIGHT;
+            case RenderMode::LCD: return FT_LOAD_TARGET_LCD;
+            case RenderMode::Color: return FT_LOAD_COLOR;
+            case RenderMode::Gray: return FT_LOAD_DEFAULT;
         }
         return FT_LOAD_DEFAULT;
     }
 
-    constexpr FT_Render_Mode ftRenderMode(render_mode mode) noexcept
+    constexpr FT_Render_Mode ftRenderMode(RenderMode mode) noexcept
     {
         switch (mode)
         {
-            case render_mode::bitmap: return FT_RENDER_MODE_MONO;
-            case render_mode::gray: return FT_RENDER_MODE_NORMAL;
-            case render_mode::light: return FT_RENDER_MODE_LIGHT;
-            case render_mode::lcd: return FT_RENDER_MODE_LCD;
-            case render_mode::color: return FT_RENDER_MODE_NORMAL; break;
+            case RenderMode::Bitmap: return FT_RENDER_MODE_MONO;
+            case RenderMode::Gray: return FT_RENDER_MODE_NORMAL;
+            case RenderMode::Light: return FT_RENDER_MODE_LIGHT;
+            case RenderMode::LCD: return FT_RENDER_MODE_LCD;
+            case RenderMode::Color: return FT_RENDER_MODE_NORMAL; break;
         }
         return FT_RENDER_MODE_NORMAL;
     }
@@ -402,13 +402,13 @@ namespace
         return bestIndex;
     }
 
-    optional<ft_face_ptr> loadFace(font_source const& source, font_size fontSize, DPI dpi, FT_Library ft)
+    optional<FtFacePtr> loadFace(FontSource const& source, FontSize fontSize, DPI dpi, FT_Library ft)
     {
         FT_Face ftFace = nullptr;
 
-        if (holds_alternative<font_path>(source))
+        if (holds_alternative<FontPath>(source))
         {
-            auto const& sourcePath = get<font_path>(source);
+            auto const& sourcePath = get<FontPath>(source);
             FT_Error const ec =
                 FT_New_Face(ft, sourcePath.value.c_str(), sourcePath.collectionIndex, &ftFace);
             if (!ftFace)
@@ -419,10 +419,10 @@ namespace
                 return nullopt;
             }
         }
-        else if (holds_alternative<font_memory_ref>(source))
+        else if (holds_alternative<FontMemoryRef>(source))
         {
             int const faceIndex = 0;
-            auto const& memory = get<font_memory_ref>(source);
+            auto const& memory = get<FontMemoryRef>(source);
             FT_Error const ec = FT_New_Memory_Face(
                 ft, memory.data.data(), static_cast<FT_Long>(memory.data.size()), faceIndex, &ftFace);
             if (!ftFace)
@@ -433,7 +433,7 @@ namespace
         }
         else
         {
-            errorLog()("Unsupported font_source type.");
+            errorLog()("Unsupported FontSource type.");
             return nullopt;
         }
 
@@ -486,7 +486,7 @@ namespace
             }
         }
 
-        return optional<ft_face_ptr> { ft_face_ptr(ftFace, [](FT_Face p) { FT_Done_Face(p); }) };
+        return optional<FtFacePtr> { FtFacePtr(ftFace, [](FT_Face p) { FT_Done_Face(p); }) };
     }
 
     /// Substitutes the replacement character for every glyph that no font in the fallback chain could
@@ -495,7 +495,7 @@ namespace
     /// @param ftFace The primary font's face, which supplies the replacement glyph.
     /// @param glyphs The glyphs of a single shaped run. Unresolved glyphs are expected to carry the
     ///               primary font's key, so that index and face agree.
-    void replaceMissingGlyphs(FT_Face ftFace, std::span<glyph_position> glyphs)
+    void replaceMissingGlyphs(FT_Face ftFace, std::span<GlyphPosition> glyphs)
     {
         auto const missingGlyph = FT_Get_Char_Index(ftFace, MissingGlyphId);
 
@@ -504,7 +504,7 @@ namespace
 
         for (auto& gpos: glyphs)
             if (glyphMissing(gpos))
-                gpos.glyph.index = glyph_index { missingGlyph };
+                gpos.glyph.index = GlyphIndex { missingGlyph };
     }
 
     void prepareBuffer(hb_buffer_t* hbBuf,
@@ -524,11 +524,11 @@ namespace
     }
 
     /// A run as shaped by exactly one font.
-    struct shaped_run
+    struct ShapedRun
     {
-        shape_result glyphs;           ///< The shaped glyphs, in visual (left-to-right) order.
-        vector<shaped_glyph_ref> refs; ///< Parallel to @c glyphs: cluster value and .notdef flag.
-        bool anyMissing = false;       ///< Whether the font came up short on any glyph at all.
+        ShapeResult glyphs;          ///< The shaped glyphs, in visual (left-to-right) order.
+        vector<ShapedGlyphRef> refs; ///< Parallel to @c glyphs: cluster value and .notdef flag.
+        bool anyMissing = false;     ///< Whether the font came up short on any glyph at all.
     };
 
     /// Which spacing class a fallback pass accepts.
@@ -537,16 +537,16 @@ namespace
     /// before one that does not. A terminal wants a monospaced fallback where one exists, because a
     /// proportional face's advances do not line up with the cell grid -- but a proportional face still
     /// beats a replacement box, so it is accepted once nothing better has answered.
-    enum class fallback_pass : uint8_t
+    enum class FallbackPass : uint8_t
     {
         Preferred, ///< Fonts whose spacing matches the primary font description's.
         Alternate  ///< The remainder. Skipped entirely under strict spacing.
     };
 
     /// A position in the two-pass walk over a font's fallback chain.
-    struct fallback_cursor
+    struct FallbackCursor
     {
-        fallback_pass pass = fallback_pass::Preferred;
+        FallbackPass pass = FallbackPass::Preferred;
         size_t index = 0;
 
         /// Whether the coverage-driven lookup has already been spent on this span.
@@ -572,14 +572,14 @@ namespace
     /// @param codepoints  The codepoints to shape.
     /// @param clusters    Per-codepoint cluster values.
     /// @return The shaped glyphs, each paired with its cluster and whether the font had a glyph for it.
-    [[nodiscard]] shaped_run shapeWithFont(font_key font,
-                                           HbFontInfo const& fontInfo,
-                                           hb_buffer_t* hbBuf,
-                                           hb_font_t* hbFont,
-                                           unicode::Script script,
-                                           unicode::PresentationStyle presentation,
-                                           u32string_view codepoints,
-                                           std::span<unsigned const> clusters)
+    [[nodiscard]] ShapedRun shapeWithFont(FontKey font,
+                                          HbFontInfo const& fontInfo,
+                                          hb_buffer_t* hbBuf,
+                                          hb_font_t* hbFont,
+                                          unicode::Script script,
+                                          unicode::PresentationStyle presentation,
+                                          u32string_view codepoints,
+                                          std::span<unsigned const> clusters)
     {
         assert(hbFont != nullptr);
         assert(hbBuf != nullptr);
@@ -593,7 +593,7 @@ namespace
         prepareBuffer(hbBuf, codepoints, clusters, script);
 
         vector<hb_feature_t> hbFeatures;
-        for (font_feature const feature: fontInfo.description.features)
+        for (FontFeature const feature: fontInfo.description.features)
         {
             hb_feature_t hbFeature;
             hbFeature.tag = HB_TAG(feature.name[0], feature.name[1], feature.name[2], feature.name[3]);
@@ -610,15 +610,15 @@ namespace
         hb_glyph_info_t const* info = hb_buffer_get_glyph_infos(hbBuf, nullptr);
         hb_glyph_position_t const* pos = hb_buffer_get_glyph_positions(hbBuf, nullptr);
 
-        auto output = shaped_run {};
+        auto output = ShapedRun {};
         output.glyphs.reserve(glyphCount);
         output.refs.reserve(glyphCount);
 
         for (auto const i: iota(0u, glyphCount))
         {
-            glyph_position gpos {};
+            GlyphPosition gpos {};
             gpos.glyph =
-                glyph_key { .size = fontInfo.size, .font = font, .index = glyph_index { info[i].codepoint } };
+                GlyphKey { .size = fontInfo.size, .font = font, .index = GlyphIndex { info[i].codepoint } };
 #ifdef GLYPH_KEY_DEBUG
             {
                 auto const cluster = info[i].cluster;
@@ -637,14 +637,14 @@ namespace
             output.anyMissing = output.anyMissing || missing;
 
             output.glyphs.emplace_back(gpos);
-            output.refs.emplace_back(shaped_glyph_ref { .cluster = info[i].cluster, .missing = missing });
+            output.refs.emplace_back(ShapedGlyphRef { .cluster = info[i].cluster, .missing = missing });
         }
 
         return output;
     }
 
     /// Appends the segment's glyphs unchanged.
-    void appendGlyphs(shape_result& result, shaped_run const& shaped, cluster_group const& segment)
+    void appendGlyphs(ShapeResult& result, ShapedRun const& shaped, ClusterGroup const& segment)
     {
         result.insert(result.end(),
                       shaped.glyphs.begin() + static_cast<ptrdiff_t>(segment.glyphBegin),
@@ -656,10 +656,10 @@ namespace
     /// Without this, replaceMissingGlyphs() would stamp the primary face's replacement glyph index onto a
     /// key still naming whichever fallback font was tried last -- an index that means nothing in that
     /// font.
-    void appendUnresolvedGlyphs(shape_result& result,
-                                shaped_run const& shaped,
-                                cluster_group const& segment,
-                                font_key primaryFont)
+    void appendUnresolvedGlyphs(ShapeResult& result,
+                                ShapedRun const& shaped,
+                                ClusterGroup const& segment,
+                                FontKey primaryFont)
     {
         for (auto const i: iota(segment.glyphBegin, segment.glyphEnd))
         {
@@ -671,27 +671,27 @@ namespace
     }
 } // namespace
 
-struct open_shaper::private_open_shaper // {{{
+struct OpenShaper::PrivateOpenShaper // {{{
 {
-    crispy::finally ftCleanup;
+    crispy::Finally ftCleanup;
     FT_Library ft {};
-    font_locator* locator = nullptr;
+    FontLocator* locator = nullptr;
     DPI dpi;
     // Default must match vtrasterizer::DefaultMaxFallbackCount.
     // Cannot include the header directly due to dependency direction (vtrasterizer depends on
     // text_shaper). The actual value is passed at runtime via set_font_fallback_limit().
     int fontFallbackLimit = 16; ///< Maximum total fallback fonts per key. -1 = unlimited, 0 = disabled.
-    unordered_map<FontInfo, font_key> fontPathAndSizeToKeyMapping;
-    unordered_map<font_key, HbFontInfo> fontKeyToHbFontInfoMapping; // from font_key to FontInfo struct
+    unordered_map<FontInfo, FontKey> fontPathAndSizeToKeyMapping;
+    unordered_map<FontKey, HbFontInfo> fontKeyToHbFontInfoMapping; // from FontKey to FontInfo struct
 
     /// Persistent cache for locate() results.
     /// Survives clear_cache() since font descriptions map to the same font files
     /// regardless of DPI or font size changes.
-    unordered_map<font_description, font_source_list> locateCache;
+    unordered_map<FontDescription, FontSourceList> locateCache;
 
     /// One remembered answer from resolveByCoverage(), with the face parameters it was found for.
     ///
-    /// The answer is a font_key, and a font_key encodes a point size and a weight as well as a file,
+    /// The answer is a FontKey, and a FontKey encodes a point size and a weight as well as a file,
     /// so an answer found at one size is wrong at another. A font-size-only change reloads the font
     /// keys WITHOUT clearing this cache (@see Renderer::applyPendingReconfig), which is how a
     /// coverage-resolved CJK glyph kept rasterizing at the pre-zoom size while the text around it
@@ -701,11 +701,11 @@ struct open_shaper::private_open_shaper // {{{
     /// the guard that stops a span being resolved over and over: there must be an entry for a
     /// codepoint once it has been tried, whatever the outcome. A key that varied with the face
     /// parameters could miss forever, and shapeRunWithFallback() does not terminate if it does.
-    struct coverage_cache_entry
+    struct CoverageCacheEntry
     {
-        font_size size {};
-        font_weight weight = font_weight::normal;
-        optional<font_key> resolved; ///< nullopt when no installed font covers the codepoint.
+        FontSize size {};
+        FontWeight weight = FontWeight::Normal;
+        optional<FontKey> resolved; ///< nullopt when no installed font covers the codepoint.
     };
 
     /// Cache for resolveByCoverage(), keyed by the first codepoint of an unresolvable span. Holds
@@ -713,32 +713,32 @@ struct open_shaper::private_open_shaper // {{{
     ///
     /// Unlike @c locateCache this does NOT survive clear_cache(): its values are font_keys owned by
     /// @c fontKeyToHbFontInfoMapping, not font files, and outliving that map would make them dangle.
-    unordered_map<char32_t, coverage_cache_entry> coverageCache;
+    unordered_map<char32_t, CoverageCacheEntry> coverageCache;
 
     /// How many faces resize_font() has minted, against @c resizedFontLimit.
     size_t resizedFontCount = 0;
 
-    /// The ceiling on @c resizedFontCount. @see MaxResizedFonts, open_shaper::set_resized_font_limit.
+    /// The ceiling on @c resizedFontCount. @see MaxResizedFonts, OpenShaper::set_resized_font_limit.
     size_t resizedFontLimit = MaxResizedFonts;
 
     // Blacklisted font files as we tried them already and failed.
     std::vector<std::string> blacklistedSources;
 
     // The key (for caching) should be composed out of:
-    // (file_path, file_mtime, font_weight, font_slant, pixel_size)
+    // (file_path, file_mtime, FontWeight, FontSlant, pixel_size)
 
-    unordered_map<glyph_key, rasterized_glyph> glyphs;
-    hb_buffer_ptr hbBuf;
-    font_key nextFontKey;
+    unordered_map<GlyphKey, RasterizedGlyph> glyphs;
+    HbBufferPtr hbBuf;
+    FontKey nextFontKey;
 
-    font_key create_font_key()
+    FontKey create_font_key()
     {
         auto result = nextFontKey;
         nextFontKey.value++;
         return result;
     }
 
-    [[nodiscard]] bool has_color(font_key font) const noexcept
+    [[nodiscard]] bool has_color(FontKey font) const noexcept
     {
         return FT_HAS_COLOR(fontKeyToHbFontInfoMapping.at(font).ftFace.get());
     }
@@ -747,18 +747,18 @@ struct open_shaper::private_open_shaper // {{{
     ///
     /// Lets a caller find out whether a request is a cache HIT without paying for the miss, which is
     /// what resize_font() needs to keep a budget on faces it would otherwise mint without limit.
-    [[nodiscard]] optional<font_key> findKeyForFont(font_source const& source,
-                                                    font_size fontSize,
-                                                    font_weight fontWeight) const
+    [[nodiscard]] optional<FontKey> findKeyForFont(FontSource const& source,
+                                                   FontSize fontSize,
+                                                   FontWeight fontWeight) const
     {
         auto const i = fontPathAndSizeToKeyMapping.find(
             FontInfo { .path = identifierOf(source), .size = fontSize, .weight = fontWeight });
         return i != fontPathAndSizeToKeyMapping.end() ? optional { i->second } : nullopt;
     }
 
-    optional<font_key> getOrCreateKeyForFont(font_source const& source,
-                                             font_size fontSize,
-                                             font_weight fontWeight)
+    optional<FontKey> getOrCreateKeyForFont(FontSource const& source,
+                                            FontSize fontSize,
+                                            FontWeight fontWeight)
     {
         if (auto const existing = findKeyForFont(source, fontSize, fontWeight))
             return existing;
@@ -784,7 +784,7 @@ struct open_shaper::private_open_shaper // {{{
 
         auto ftFacePtr = std::move(ftFacePtrOpt.value());
         auto hbFontPtr =
-            hb_font_ptr(hb_ft_font_create_referenced(ftFacePtr.get()), [](auto p) { hb_font_destroy(p); });
+            HbFontPtr(hb_ft_font_create_referenced(ftFacePtr.get()), [](auto p) { hb_font_destroy(p); });
 
         auto fontInfo = HbFontInfo { .primary = source,
                                      .fallbacks = {},
@@ -803,12 +803,12 @@ struct open_shaper::private_open_shaper // {{{
         return key;
     }
 
-    font_metrics metrics(font_key key)
+    FontMetrics metrics(FontKey key)
     {
         Require(fontKeyToHbFontInfoMapping.count(key) == 1);
         auto* ftFace = fontKeyToHbFontInfoMapping.at(key).ftFace.get();
 
-        font_metrics output {};
+        FontMetrics output {};
 
         output.lineHeight = scaleVertical(ftFace, ftFace->height);
         output.advance = computeAverageAdvance(ftFace);
@@ -822,7 +822,7 @@ struct open_shaper::private_open_shaper // {{{
         return output;
     }
 
-    private_open_shaper(DPI dpi, font_locator& locator):
+    PrivateOpenShaper(DPI dpi, FontLocator& locator):
         ftCleanup { [this]() { FT_Done_FreeType(ft); } },
         locator { &locator },
         dpi { dpi },
@@ -901,13 +901,13 @@ struct open_shaper::private_open_shaper // {{{
 
     /// @return Whether @p fallbackFontInfo is a font that @p pass accepts.
     [[nodiscard]] static bool admissibleInPass(HbFontInfo const& primaryFontInfo,
-                                               fallback_pass pass,
+                                               FallbackPass pass,
                                                HbFontInfo const& fallbackFontInfo) noexcept
     {
         auto const spacingMatchesPrimary =
-            isMonospace(fallbackFontInfo) == (primaryFontInfo.description.spacing == font_spacing::mono);
+            isMonospace(fallbackFontInfo) == (primaryFontInfo.description.spacing == FontSpacing::Mono);
 
-        return spacingMatchesPrimary == (pass == fallback_pass::Preferred);
+        return spacingMatchesPrimary == (pass == FallbackPass::Preferred);
     }
 
     /// Resolves the next usable fallback font, advancing @p cursor past it.
@@ -920,17 +920,17 @@ struct open_shaper::private_open_shaper // {{{
     /// @param fontInfo The primary font, which owns the fallback chain.
     /// @param cursor   Where to resume the walk. Advanced past the returned font.
     /// @return The next font to try, or nullopt once both passes are exhausted.
-    [[nodiscard]] optional<font_key> nextFallbackFont(HbFontInfo& fontInfo, fallback_cursor& cursor)
+    [[nodiscard]] optional<FontKey> nextFallbackFont(HbFontInfo& fontInfo, FallbackCursor& cursor)
     {
         for (;;)
         {
             if (cursor.index >= fontInfo.fallbacks.size() && !extendFallbacks(fontInfo))
             {
                 // This pass has run out of fonts. Strict spacing forbids the alternate pass outright.
-                if (cursor.pass == fallback_pass::Alternate || fontInfo.description.strictSpacing)
+                if (cursor.pass == FallbackPass::Alternate || fontInfo.description.strictSpacing)
                     return nullopt;
 
-                cursor = fallback_cursor { .pass = fallback_pass::Alternate, .index = 0 };
+                cursor = FallbackCursor { .pass = FallbackPass::Alternate, .index = 0 };
                 continue;
             }
 
@@ -966,7 +966,7 @@ struct open_shaper::private_open_shaper // {{{
     /// @param fontInfo   The primary font, supplying the size and weight to load a candidate at.
     /// @param codepoints The span that no font in the chain could render.
     /// @return A font covering @p codepoints, or nullopt when the locator names none that loads.
-    [[nodiscard]] optional<font_key> resolveByCoverage(HbFontInfo const& fontInfo, u32string_view codepoints)
+    [[nodiscard]] optional<FontKey> resolveByCoverage(HbFontInfo const& fontInfo, u32string_view codepoints)
     {
         if (codepoints.empty() || !locator)
             return nullopt;
@@ -979,14 +979,14 @@ struct open_shaper::private_open_shaper // {{{
         // it holds encodes a size and a weight, so one found at another size would rasterize the glyph
         // at that size while the text around it scaled. A stale entry is re-resolved and overwritten
         // rather than sitting alongside a second one, which is what keeps this a guard as well as a
-        // cache -- @see coverage_cache_entry.
+        // cache -- @see CoverageCacheEntry.
         auto const cacheKey = codepoints.front();
         if (auto const i = coverageCache.find(cacheKey); i != coverageCache.end()
                                                          && i->second.size.pt == fontInfo.size.pt
                                                          && i->second.weight == fontInfo.weight)
             return i->second.resolved;
 
-        auto resolved = optional<font_key> { nullopt };
+        auto resolved = optional<FontKey> { nullopt };
         for (auto const& source: locator->resolve(gsl::span(codepoints.data(), codepoints.size())))
         {
             resolved = getOrCreateKeyForFont(source, fontInfo.size, fontInfo.weight);
@@ -1000,7 +1000,7 @@ struct open_shaper::private_open_shaper // {{{
         }
 
         coverageCache[cacheKey] =
-            coverage_cache_entry { .size = fontInfo.size, .weight = fontInfo.weight, .resolved = resolved };
+            CoverageCacheEntry { .size = fontInfo.size, .weight = fontInfo.weight, .resolved = resolved };
         return resolved;
     }
 
@@ -1009,7 +1009,7 @@ struct open_shaper::private_open_shaper // {{{
     ///
     /// Glyphs the shaping font covers keep its key; only the maximal cluster-aligned spans that came out
     /// .notdef are re-shaped, and their glyphs are spliced back where they belong, so left-to-right order
-    /// survives. The run may therefore end up spanning several fonts, which is fine: every glyph_key
+    /// survives. The run may therefore end up spanning several fonts, which is fine: every GlyphKey
     /// carries its own font key and the rasterizer honours it.
     ///
     /// @param primaryFont     The font the run was requested with. Owns the fallback chain, and takes
@@ -1023,15 +1023,15 @@ struct open_shaper::private_open_shaper // {{{
     /// @param clusters        Per-codepoint cluster values.
     /// @param result          Receives the shaped glyphs, appended.
     /// @return Whether every glyph appended was resolved by some font.
-    bool shapeRunWithFallback(font_key primaryFont,
+    bool shapeRunWithFallback(FontKey primaryFont,
                               HbFontInfo& primaryFontInfo,
-                              font_key shapingFont,
-                              fallback_cursor cursor,
+                              FontKey shapingFont,
+                              FallbackCursor cursor,
                               unicode::Script script,
                               unicode::PresentationStyle presentation,
                               u32string_view codepoints,
                               std::span<unsigned const> clusters,
-                              shape_result& result)
+                              ShapeResult& result)
     {
         auto const fontInfoIterator = fontKeyToHbFontInfoMapping.find(shapingFont);
         Require(fontInfoIterator != fontKeyToHbFontInfoMapping.end());
@@ -1059,7 +1059,7 @@ struct open_shaper::private_open_shaper // {{{
         auto const segments = fallbackSegments(shaped.refs, clusters);
         auto allResolved = true;
 
-        for (cluster_group const& segment: segments)
+        for (ClusterGroup const& segment: segments)
         {
             if (!segment.missing)
             {
@@ -1107,12 +1107,12 @@ struct open_shaper::private_open_shaper // {{{
     }
 }; // }}}
 
-open_shaper::open_shaper(DPI dpi, font_locator& locator):
-    _d(new private_open_shaper(dpi, locator), [](private_open_shaper* p) { delete p; })
+OpenShaper::OpenShaper(DPI dpi, FontLocator& locator):
+    _d(new PrivateOpenShaper(dpi, locator), [](PrivateOpenShaper* p) { delete p; })
 {
 }
 
-void open_shaper::set_dpi(DPI dpi)
+void OpenShaper::set_dpi(DPI dpi)
 {
     if (!dpi)
         return;
@@ -1129,22 +1129,22 @@ void open_shaper::set_dpi(DPI dpi)
         _d->updateFaceDpi(fontInfo, dpi);
 }
 
-void open_shaper::set_locator(font_locator& locator)
+void OpenShaper::set_locator(FontLocator& locator)
 {
     _d->locator = &locator;
 }
 
-void open_shaper::set_font_fallback_limit(int limit)
+void OpenShaper::set_font_fallback_limit(int limit)
 {
     _d->fontFallbackLimit = limit;
 }
 
-void open_shaper::set_resized_font_limit(size_t limit)
+void OpenShaper::set_resized_font_limit(size_t limit)
 {
     _d->resizedFontLimit = limit;
 }
 
-void open_shaper::clear_cache()
+void OpenShaper::clear_cache()
 {
     locatorLog()("Clearing cache ({} keys, {} font infos).",
                  _d->fontPathAndSizeToKeyMapping.size(),
@@ -1163,7 +1163,7 @@ void open_shaper::clear_cache()
     _d->resizedFontCount = 0;
 }
 
-optional<font_key> open_shaper::load_font(font_description const& description, font_size size)
+optional<FontKey> OpenShaper::load_font(FontDescription const& description, FontSize size)
 {
     // Check the persistent locate cache before calling into fontconfig.
     auto cacheIt = _d->locateCache.find(description);
@@ -1182,7 +1182,7 @@ optional<font_key> open_shaper::load_font(font_description const& description, f
         return nullopt;
 
     // Build the full fallback list (excluding the primary font).
-    auto allFallbacks = font_source_list(cachedSources.begin() + 1, cachedSources.end());
+    auto allFallbacks = FontSourceList(cachedSources.begin() + 1, cachedSources.end());
 
     // Apply the global fallback limit.
     if (_d->fontFallbackLimit == 0)
@@ -1198,7 +1198,7 @@ optional<font_key> open_shaper::load_font(font_description const& description, f
     // Initially load only a limited number of fallbacks; the rest are extended on demand.
     auto const initialCount = std::min(allFallbacks.size(), InitialFallbackCount);
     auto initialFallbacks =
-        font_source_list(allFallbacks.begin(), allFallbacks.begin() + static_cast<ptrdiff_t>(initialCount));
+        FontSourceList(allFallbacks.begin(), allFallbacks.begin() + static_cast<ptrdiff_t>(initialCount));
 
     auto& fontInfo = _d->fontKeyToHbFontInfoMapping.at(*fontKeyOpt);
     fontInfo.fallbacks = std::move(initialFallbacks);
@@ -1208,7 +1208,7 @@ optional<font_key> open_shaper::load_font(font_description const& description, f
     return fontKeyOpt;
 }
 
-font_key open_shaper::resize_font(font_key key, font_size size)
+FontKey OpenShaper::resize_font(FontKey key, FontSize size)
 {
     auto const i = _d->fontKeyToHbFontInfoMapping.find(key);
     if (i == _d->fontKeyToHbFontInfoMapping.end())
@@ -1249,7 +1249,7 @@ font_key open_shaper::resize_font(font_key key, font_size size)
     return *minted;
 }
 
-font_metrics open_shaper::metrics(font_key key) const
+FontMetrics OpenShaper::metrics(FontKey key) const
 {
     Require(_d->fontKeyToHbFontInfoMapping.count(key) == 1);
     HbFontInfo& fontInfo = _d->fontKeyToHbFontInfoMapping.at(key);
@@ -1261,7 +1261,7 @@ font_metrics open_shaper::metrics(font_key key) const
     return fontInfo.metrics.value();
 }
 
-optional<glyph_position> open_shaper::shape(font_key font, char32_t codepoint)
+optional<GlyphPosition> OpenShaper::shape(FontKey font, char32_t codepoint)
 {
     auto const fontInfoIterator = _d->fontKeyToHbFontInfoMapping.find(font);
     Require(fontInfoIterator != _d->fontKeyToHbFontInfoMapping.end());
@@ -1269,9 +1269,9 @@ optional<glyph_position> open_shaper::shape(font_key font, char32_t codepoint)
 
     // The font the glyph is finally found in, which need not be the one that was asked for.
     auto resolvedFont = font;
-    auto glyphIndex = glyph_index { FT_Get_Char_Index(fontInfo.ftFace.get(), codepoint) };
+    auto glyphIndex = GlyphIndex { FT_Get_Char_Index(fontInfo.ftFace.get(), codepoint) };
 
-    auto cursor = fallback_cursor {};
+    auto cursor = FallbackCursor {};
     while (!glyphIndex.value)
     {
         auto const fallbackKeyOpt = _d->nextFallbackFont(fontInfo, cursor);
@@ -1279,30 +1279,30 @@ optional<glyph_position> open_shaper::shape(font_key font, char32_t codepoint)
             return nullopt;
 
         auto const& fallbackFontInfo = _d->fontKeyToHbFontInfoMapping.at(*fallbackKeyOpt);
-        glyphIndex = glyph_index { FT_Get_Char_Index(fallbackFontInfo.ftFace.get(), codepoint) };
+        glyphIndex = GlyphIndex { FT_Get_Char_Index(fallbackFontInfo.ftFace.get(), codepoint) };
         resolvedFont = *fallbackKeyOpt;
     }
 
-    glyph_position gpos {};
+    GlyphPosition gpos {};
 
     // A glyph index means nothing outside the face it came from, so the key has to name that face rather
     // than the font that was asked for.
-    gpos.glyph = glyph_key { .size = fontInfo.size, .font = resolvedFont, .index = glyphIndex };
+    gpos.glyph = GlyphKey { .size = fontInfo.size, .font = resolvedFont, .index = glyphIndex };
 #ifdef GLYPH_KEY_DEBUG
     gpos.glyph.text = std::u32string(1, codepoint);
 #endif
     gpos.advance.x = this->metrics(font).advance;
-    gpos.offset = crispy::point {}; // TODO (load from glyph metrics. Is this needed?)
+    gpos.offset = crispy::Point {}; // TODO (load from glyph metrics. Is this needed?)
 
     return gpos;
 }
 
-void open_shaper::shape(font_key font,
-                        u32string_view codepoints,
-                        gsl::span<unsigned> clusters,
-                        unicode::Script script,
-                        unicode::PresentationStyle presentation,
-                        shape_result& result)
+void OpenShaper::shape(FontKey font,
+                       u32string_view codepoints,
+                       gsl::span<unsigned> clusters,
+                       unicode::Script script,
+                       unicode::PresentationStyle presentation,
+                       ShapeResult& result)
 {
     assert(clusters.size() == codepoints.size());
     textShapingLog()("Shaping using font key: {}, text: \"{}\"", font, unicode::convert_to<char>(codepoints));
@@ -1333,20 +1333,13 @@ void open_shaper::shape(font_key font,
     auto const resultOffset = result.size();
     auto const inputClusters = std::span<unsigned const> { clusters.data(), clusters.size() };
 
-    if (_d->shapeRunWithFallback(font,
-                                 fontInfo,
-                                 font,
-                                 fallback_cursor {},
-                                 script,
-                                 presentation,
-                                 codepoints,
-                                 inputClusters,
-                                 result))
+    if (_d->shapeRunWithFallback(
+            font, fontInfo, font, FallbackCursor {}, script, presentation, codepoints, inputClusters, result))
         return;
 
     textShapingLog()("Shaping incomplete; substituting the replacement character.");
 
-    replaceMissingGlyphs(fontInfo.ftFace.get(), std::span<glyph_position> { result }.subspan(resultOffset));
+    replaceMissingGlyphs(fontInfo.ftFace.get(), std::span<GlyphPosition> { result }.subspan(resultOffset));
 }
 
 /// Rasterizes a glyph with a pre-computed FT_Stroker outline into a two-channel RGBA bitmap.
@@ -1361,9 +1354,9 @@ void open_shaper::shape(font_key font,
 /// @param glyphIndex      FreeType glyph index.
 /// @param outlineThickness outline radius in pixel units.
 ///
-/// @return rasterized_glyph with bitmap_format::outlined, or nullopt on failure.
-static optional<rasterized_glyph> rasterizeOutlined(
-    FT_Library ftLib, FT_Face ftFace, glyph_key const& glyph, glyph_index glyphIndex, float outlineThickness)
+/// @return RasterizedGlyph with BitmapFormat::Outlined, or nullopt on failure.
+static optional<RasterizedGlyph> rasterizeOutlined(
+    FT_Library ftLib, FT_Face ftFace, GlyphKey const& glyph, GlyphIndex glyphIndex, float outlineThickness)
 {
     // Load the glyph outline (vector, not bitmap).
     auto ec = FT_Load_Glyph(ftFace, glyphIndex.value, FT_LOAD_NO_BITMAP);
@@ -1396,7 +1389,7 @@ static optional<rasterized_glyph> rasterizeOutlined(
 
     // Rasterize the fill glyph (grayscale).
     // Outlined glyphs always use FT_RENDER_MODE_NORMAL regardless of the configured
-    // render_mode because the fill and outline are composited as separate alpha channels
+    // RenderMode because the fill and outline are composited as separate alpha channels
     // in the shader. Sub-pixel (LCD) rendering is not applicable to this two-channel format.
     ec = FT_Glyph_To_Bitmap(&fillGlyph, FT_RENDER_MODE_NORMAL, nullptr, true);
     if (ec != FT_Err_Ok)
@@ -1471,13 +1464,13 @@ static optional<rasterized_glyph> rasterizeOutlined(
     auto const outHeight = static_cast<int>(outlineBmp.rows);
 
     // Composite into RGBA: R=fill, G=outline, B=0, A=max(fill,outline)
-    auto output = rasterized_glyph {};
+    auto output = RasterizedGlyph {};
     output.index = glyphIndex;
     output.bitmapSize.width = vtbackend::Width::cast_from(outWidth);
     output.bitmapSize.height = vtbackend::Height::cast_from(outHeight);
     output.position.x = outlineBitmapGlyph->left;
     output.position.y = outlineBitmapGlyph->top;
-    output.format = bitmap_format::outlined;
+    output.format = BitmapFormat::Outlined;
     output.bitmap.resize(static_cast<size_t>(outWidth) * static_cast<size_t>(outHeight) * 4);
 
     // FT_Bitmap::pitch is signed: positive means rows are top-down, negative means bottom-up.
@@ -1522,7 +1515,7 @@ static optional<rasterized_glyph> rasterizeOutlined(
     return output;
 }
 
-optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode mode, float outlineThickness)
+optional<RasterizedGlyph> OpenShaper::rasterize(GlyphKey glyph, RenderMode mode, float outlineThickness)
 {
     auto const font = glyph.font;
     auto* ftFace = _d->fontKeyToHbFontInfoMapping.at(font).ftFace.get();
@@ -1586,7 +1579,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
         }
     }
 
-    auto output = rasterized_glyph {};
+    auto output = RasterizedGlyph {};
     output.bitmapSize.width = vtbackend::Width::cast_from(ftFace->glyph->bitmap.width);
     output.bitmapSize.height = vtbackend::Height::cast_from(ftFace->glyph->bitmap.rows);
     output.position.x = ftFace->glyph->bitmap_left;
@@ -1608,7 +1601,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
 
             ftBitmap.num_grays = 256;
 
-            output.format = bitmap_format::alpha_mask;
+            output.format = BitmapFormat::AlphaMask;
             output.bitmap.resize(height.as<size_t>()
                                  * width.as<size_t>()); // 8-bit channel (with values 0 or 255)
 
@@ -1623,7 +1616,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
             break;
         }
         case FT_PIXEL_MODE_GRAY: {
-            output.format = bitmap_format::alpha_mask;
+            output.format = BitmapFormat::AlphaMask;
             output.bitmap.resize(unbox<size_t>(output.bitmapSize.height)
                                  * unbox<size_t>(output.bitmapSize.width));
 
@@ -1637,7 +1630,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
         case FT_PIXEL_MODE_LCD: {
             auto const& ftBitmap = ftFace->glyph->bitmap;
 
-            output.format = bitmap_format::rgb; // LCD
+            output.format = BitmapFormat::RGB; // LCD
             output.bitmap.resize(static_cast<size_t>(ftBitmap.width) * static_cast<size_t>(ftBitmap.rows));
             output.bitmapSize.width /= vtbackend::Width(3);
 
@@ -1663,7 +1656,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
             auto const width = output.bitmapSize.width;
             auto const height = output.bitmapSize.height;
 
-            output.format = bitmap_format::rgba;
+            output.format = BitmapFormat::RGBA;
             output.bitmap.resize(output.bitmapSize.area() * 4);
             auto t = output.bitmap.begin();
 

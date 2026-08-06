@@ -23,7 +23,7 @@ namespace
     void parseMetadata(string_view metadata, DesktopNotification& notification)
     {
         crispy::for_each_key_value(
-            crispy::for_each_key_value_params {
+            crispy::ForEachKeyValueParams {
                 .text = metadata,
                 .entryDelimiter = ':',
                 .assignmentDelimiter = '=',

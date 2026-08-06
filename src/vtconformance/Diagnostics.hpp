@@ -99,7 +99,7 @@ class DiagnosticsCollector
 
     mutable std::mutex _mutex;
     std::vector<Diagnostic> _diagnostics;
-    std::unique_ptr<logstore::sink> _sink;
+    std::unique_ptr<logstore::Sink> _sink;
 };
 
 } // namespace vtconformance

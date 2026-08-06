@@ -37,8 +37,8 @@ class HorizontalWheelGesture
     ///                         (QWheelEvent::inverted). Recorded here rather than asked for later: the
     ///                         event that finally claims the navigation step is usually not this one.
     /// @return true when the horizontal component is an intentional horizontal gesture.
-    [[nodiscard]] bool acceptsHorizontal(crispy::point pixelDelta,
-                                         crispy::point angleDelta,
+    [[nodiscard]] bool acceptsHorizontal(crispy::Point pixelDelta,
+                                         crispy::Point angleDelta,
                                          vtbackend::ScrollPhase phase,
                                          bool platformInverted) noexcept
     {
@@ -54,7 +54,7 @@ class HorizontalWheelGesture
         // Both latch for the gesture. Judged per event they would flicker: a trackpad interleaves
         // pixel-precise events with angle-only ones inside a single swipe, so the direction could flip
         // halfway through it.
-        _pixelPrecise = _pixelPrecise || pixelDelta != crispy::point {};
+        _pixelPrecise = _pixelPrecise || pixelDelta != crispy::Point {};
         _platformInverted = _platformInverted || platformInverted;
 
         // Judge on whichever delta actually carries the motion, preferring the pixel-precise one — that

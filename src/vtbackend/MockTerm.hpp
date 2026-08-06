@@ -259,7 +259,7 @@ inline MockTerm<PtyDevice>::MockTerm(PageSize pageSize,
     if (auto const logFilterString = crispy::defaultEnvironment().get("LOG"))
     {
         logstore::configure(*logFilterString);
-        crispy::app::customizeLogStoreOutput();
+        crispy::App::customizeLogStoreOutput();
     }
 }
 

@@ -30,7 +30,7 @@ std::expected<std::string_view, ShellIntegrationError> shellIntegrationScript(st
 std::string_view supportedShellsText()
 {
     // Function-local static, because the one caller that most needs this is a CLI help string, and
-    // crispy::cli::option::helpText is a string_view that borrows rather than owns. The list is the
+    // crispy::cli::Option::helpText is a string_view that borrows rather than owns. The list is the
     // same for every call, so building it once is also what it wants.
     static std::string const text =
         crispy::joinHumanReadable(supportedShells() | std::views::transform(&ShellIntegrationRow::name));

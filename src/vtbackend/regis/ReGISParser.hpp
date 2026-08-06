@@ -134,7 +134,7 @@ class ReGISParser: public ParserExtension
     bool applyBracketedCellSize();
     void applyCurveOption(char option);
     void drawText(std::string_view text);
-    void drawCurveItem(crispy::point p);
+    void drawCurveItem(crispy::Point p);
     void parseFill();
     void parseCoordinateItem(Command command);
     void parsePixelVectorRun(Command command);
@@ -149,14 +149,14 @@ class ReGISParser: public ParserExtension
         [[nodiscard]] bool empty() const noexcept { return !x && !y; }
     };
     [[nodiscard]] Coord scanCoordinate() noexcept;
-    [[nodiscard]] crispy::point resolveCoordinate(Coord const& coord) const noexcept;
+    [[nodiscard]] crispy::Point resolveCoordinate(Coord const& coord) const noexcept;
 
     // --- colour ----------------------------------------------------------------------------------
     [[nodiscard]] unsigned parseColorReference() noexcept; ///< register index for W(I..)/S(I..).
     [[nodiscard]] std::optional<RGBColor> parseColorSpecParens() noexcept; ///< the "( ... )" body.
 
-    void moveTo(crispy::point p) noexcept;
-    void drawLineTo(crispy::point p) noexcept;
+    void moveTo(crispy::Point p) noexcept;
+    void drawLineTo(crispy::Point p) noexcept;
 
     ReGISContext& _context;
     ReGISRasterizer& _canvas;
@@ -170,14 +170,14 @@ class ReGISParser: public ParserExtension
     bool _committedStateDirty = false; ///< Whether the canvas changed externally (reset) and must commit.
 
     // Collects vertices while parsing an F(V ...) polygon; empty otherwise.
-    std::vector<crispy::point>* _fillSink = nullptr;
+    std::vector<crispy::Point>* _fillSink = nullptr;
 
     // Curve (C command) state.
     bool _curveCenterMode = false;   ///< Whether the bracket names the centre (C(C)) vs. circumference.
     std::optional<double> _curveArc; ///< Arc sweep in degrees (C(A<deg>)), or nullopt for a full circle.
     bool _collectingCurve = false;   ///< Whether inside a C(B)/(S)...(E) interpolated-curve sequence.
     bool _curveClosed = false;       ///< Whether the collected curve is closed (C(B)) vs. open (C(S)).
-    std::vector<crispy::point> _curvePoints; ///< Control points of the interpolated curve.
+    std::vector<crispy::Point> _curvePoints; ///< Control points of the interpolated curve.
 };
 
 } // namespace vtbackend::regis

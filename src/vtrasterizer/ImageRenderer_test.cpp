@@ -84,7 +84,7 @@ void renderRow(ImageRenderer& renderer, std::shared_ptr<RasterizedImage> const& 
             image, CellLocation { .line = LineOffset(0), .column = ColumnOffset::cast_from(column) }
         };
         renderer.renderImage(
-            crispy::point { .x = static_cast<int>(column * unbox<unsigned>(CellSize.width)), .y = 0 },
+            crispy::Point { .x = static_cast<int>(column * unbox<unsigned>(CellSize.width)), .y = 0 },
             fragment);
     }
     renderer.endPass();
@@ -270,7 +270,7 @@ TEST_CASE("ImageRenderer.never evicts an image the current frame draws", "[image
         auto const fragment =
             ImageFragment { image, CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) } };
         imageRenderer.renderImage(
-            crispy::point { .x = static_cast<int>(index) * unbox<int>(CellSize.width), .y = 0 }, fragment);
+            crispy::Point { .x = static_cast<int>(index) * unbox<int>(CellSize.width), .y = 0 }, fragment);
     }
     imageRenderer.endPass();
 
@@ -511,7 +511,7 @@ TEST_CASE("ImageRenderer.does not evict what an earlier pass of the same frame d
     auto const renderOnePass = [&](std::shared_ptr<RasterizedImage> const& image) {
         imageRenderer.beginPass();
         imageRenderer.renderImage(
-            crispy::point { .x = 0, .y = 0 },
+            crispy::Point { .x = 0, .y = 0 },
             ImageFragment { image, CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) } });
         imageRenderer.endPass();
     };

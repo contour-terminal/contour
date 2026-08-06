@@ -28,7 +28,7 @@ namespace
     /// Serializes this translation unit's reads of the environment block against one another.
     ///
     /// Process-wide rather than a member, because what it guards is process-wide: two
-    /// live_environment instances read the same block, so a per-instance lock would serialize
+    /// LiveEnvironment instances read the same block, so a per-instance lock would serialize
     /// nothing.
     [[nodiscard]] std::mutex& environmentMutex() noexcept
     {
@@ -64,7 +64,7 @@ namespace
 #endif
 } // namespace
 
-std::optional<std::string> live_environment::get(std::string_view name) const
+std::optional<std::string> LiveEnvironment::get(std::string_view name) const
 {
 #ifdef _WIN32
     // GetEnvironmentVariableA wants a NUL-terminated name, which a string_view does not promise.
@@ -92,11 +92,11 @@ std::optional<std::string> live_environment::get(std::string_view name) const
 #endif
 }
 
-caching_environment::caching_environment(environment const& source) noexcept: _source { source }
+CachingEnvironment::CachingEnvironment(Environment const& source) noexcept: _source { source }
 {
 }
 
-std::optional<std::string> caching_environment::get(std::string_view name) const
+std::optional<std::string> CachingEnvironment::get(std::string_view name) const
 {
     // The source is consulted under this lock as well, so two threads racing on the same unseen
     // name read it once rather than twice. The two mutexes are only ever taken in this order.
@@ -108,10 +108,10 @@ std::optional<std::string> caching_environment::get(std::string_view name) const
     return _cache.emplace(name, _source.get(name)).first->second;
 }
 
-environment& defaultEnvironment()
+Environment& defaultEnvironment()
 {
-    static live_environment const source;
-    static caching_environment instance { source };
+    static LiveEnvironment const source;
+    static CachingEnvironment instance { source };
     return instance;
 }
 

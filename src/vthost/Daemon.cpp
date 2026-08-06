@@ -265,7 +265,7 @@ namespace
         // Resolved in the PARENT: the child may only call async-signal-safe functions between fork
         // and exec, and a PATH walk is not one. argv[0] itself stays as the caller named it — that
         // is what the daemon's `ps` line and its own commandLine() replay should show.
-        // crispy::environment, not getenv: this runs on a client that already has a live reactor
+        // crispy::Environment, not getenv: this runs on a client that already has a live reactor
         // thread, and the snapshot exists precisely so an environment read is not racing it.
         auto const image = resolveExecutablePath(
             args[0], crispy::defaultEnvironment().get("PATH").value_or(""), isExecutableFile);

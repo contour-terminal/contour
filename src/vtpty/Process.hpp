@@ -93,7 +93,7 @@ class [[nodiscard]] Process: public Pty
     void close() override { pty().close(); }
     void waitForClosed() override;
     [[nodiscard]] bool isClosed() const noexcept override { return pty().isClosed(); }
-    [[nodiscard]] std::optional<ReadResult> read(crispy::buffer_object<char>& storage, std::optional<std::chrono::milliseconds> timeout, size_t n) override { return pty().read(storage, timeout, n); }
+    [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage, std::optional<std::chrono::milliseconds> timeout, size_t n) override { return pty().read(storage, timeout, n); }
     void wakeupReader() override { pty().wakeupReader(); }
     [[nodiscard]] int write(std::string_view data) override { return pty().write(data); }
     [[nodiscard]] PageSize pageSize() const noexcept override { return pty().pageSize(); }
@@ -113,7 +113,7 @@ struct std::formatter<vtpty::Process::ExitStatus>: std::formatter<std::string>
     auto format(vtpty::Process::ExitStatus const& status, auto& ctx) const
     {
         auto const text =
-            std::visit(overloaded { [&](vtpty::Process::NormalExit exit) {
+            std::visit(Overloaded { [&](vtpty::Process::NormalExit exit) {
                                        return std::format("{} (normal exit)", exit.exitCode);
                                    },
                                     [&](vtpty::Process::SignalExit exit) {

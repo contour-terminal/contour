@@ -66,7 +66,7 @@ struct std::formatter<vtbackend::LogEvent>
     {
         using namespace vtbackend;
         return std::visit(
-            overloaded {
+            Overloaded {
                 [&](ParserErrorEvent const& v) {
                     return std::format_to(ctx.out(), "Parser Error. {}", v.reason);
                 },

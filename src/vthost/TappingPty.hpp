@@ -40,7 +40,7 @@ class TappingPty final: public vtpty::Pty
     void waitForClosed() override { _inner->waitForClosed(); }
     [[nodiscard]] bool isClosed() const noexcept override { return _inner->isClosed(); }
 
-    [[nodiscard]] std::optional<ReadResult> read(crispy::buffer_object<char>& storage,
+    [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
                                                  std::optional<std::chrono::milliseconds> timeout,
                                                  size_t size) override
     {

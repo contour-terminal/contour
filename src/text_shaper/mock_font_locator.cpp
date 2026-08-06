@@ -16,28 +16,28 @@ namespace text
 
 namespace mock_detail
 {
-    static std::vector<font_description_and_source> registry;
+    static std::vector<FontDescriptionAndSource> registry;
 
     /// What resolve() answers with, regardless of the codepoints asked about.
-    static font_source_list coverage;
+    static FontSourceList coverage;
 } // namespace mock_detail
 
-void mock_font_locator::configure(std::vector<font_description_and_source> registry)
+void MockFontLocator::configure(std::vector<FontDescriptionAndSource> registry)
 {
     mock_detail::registry = std::move(registry);
     mock_detail::coverage.clear();
 }
 
-void mock_font_locator::configureCoverage(font_source_list sources)
+void MockFontLocator::configureCoverage(FontSourceList sources)
 {
     mock_detail::coverage = std::move(sources);
 }
 
-font_source_list mock_font_locator::locate(font_description const& description)
+FontSourceList MockFontLocator::locate(FontDescription const& description)
 {
     locatorLog()("Locating font chain for: {}", description);
 
-    font_source_list output;
+    FontSourceList output;
 
     for (auto const& item: mock_detail::registry)
     {
@@ -65,9 +65,9 @@ font_source_list mock_font_locator::locate(font_description const& description)
     return output;
 }
 
-font_source_list mock_font_locator::all()
+FontSourceList MockFontLocator::all()
 {
-    font_source_list output;
+    FontSourceList output;
 
     for (auto const& item: mock_detail::registry)
         output.emplace_back(item.source);
@@ -75,7 +75,7 @@ font_source_list mock_font_locator::all()
     return output;
 }
 
-font_source_list mock_font_locator::resolve(gsl::span<char32_t const> /*codepoints*/)
+FontSourceList MockFontLocator::resolve(gsl::span<char32_t const> /*codepoints*/)
 {
     // A real locator answers by charset; a test says up front what the answer is, so that a case can
     // decide whether the coverage lookup finds anything without needing real fonts on the machine.

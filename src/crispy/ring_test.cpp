@@ -7,16 +7,16 @@
 #include <format>
 #include <iostream>
 
-using crispy::fixed_size_ring;
-using crispy::ring;
+using crispy::FixedSizeRing;
+using crispy::Ring;
 using std::generate_n;
 
 namespace
 {
 template <typename T>
-[[maybe_unused]] void dump(ring<T> const& r)
+[[maybe_unused]] void dump(Ring<T> const& r)
 {
-    std::cout << std::format("ring(@{}): {{", r.zero_index());
+    std::cout << std::format("Ring(@{}): {{", r.zero_index());
     for (size_t i = 0; i < r.size(); ++i)
     {
         if (i)
@@ -27,18 +27,18 @@ template <typename T>
 }
 } // namespace
 
-TEST_CASE("ring.init")
+TEST_CASE("Ring.init")
 {
-    ring<char> r(3, {});
+    Ring<char> r(3, {});
     generate_n(r.begin(), 3, [c = 'a']() mutable { return c++; });
     REQUIRE(r[0] == 'a');
     REQUIRE(r[1] == 'b');
     REQUIRE(r[2] == 'c');
 }
 
-TEST_CASE("ring.push_back")
+TEST_CASE("Ring.push_back")
 {
-    ring<char> r;
+    Ring<char> r;
     r.push_back('a');
     r.push_back('b');
     r.push_back('c');
@@ -47,9 +47,9 @@ TEST_CASE("ring.push_back")
     REQUIRE(r[2] == 'c');
 }
 
-TEST_CASE("ring.emplace_back")
+TEST_CASE("Ring.emplace_back")
 {
-    ring<char> r;
+    Ring<char> r;
     r.emplace_back('a');
     r.emplace_back('b');
     r.emplace_back('c');
@@ -58,9 +58,9 @@ TEST_CASE("ring.emplace_back")
     REQUIRE(r[2] == 'c');
 }
 
-TEST_CASE("ring.rotate_right")
+TEST_CASE("Ring.rotate_right")
 {
-    ring<char> r(3, {});
+    Ring<char> r(3, {});
     generate_n(r.begin(), 3, [c = 'a']() mutable { return c++; });
     r.rotate_right(1);
     REQUIRE(r[0] == 'c');
@@ -68,9 +68,9 @@ TEST_CASE("ring.rotate_right")
     REQUIRE(r[2] == 'b');
 }
 
-TEST_CASE("ring.rotate_right_2")
+TEST_CASE("Ring.rotate_right_2")
 {
-    ring<char> r(3, {});
+    Ring<char> r(3, {});
     generate_n(r.begin(), 3, [c = 'a']() mutable { return c++; });
     r.rotate_right(2);
     REQUIRE(r[0] == 'b');
@@ -78,9 +78,9 @@ TEST_CASE("ring.rotate_right_2")
     REQUIRE(r[2] == 'a');
 }
 
-TEST_CASE("ring.rotate_left")
+TEST_CASE("Ring.rotate_left")
 {
-    ring<char> r(3, {});
+    Ring<char> r(3, {});
     generate_n(r.begin(), 3, [c = 'a']() mutable { return c++; });
     r.rotate_left(1);
     REQUIRE(r[0] == 'b');
@@ -88,9 +88,9 @@ TEST_CASE("ring.rotate_left")
     REQUIRE(r[2] == 'a');
 }
 
-TEST_CASE("ring.rotate_left_2")
+TEST_CASE("Ring.rotate_left_2")
 {
-    ring<char> r(3, {});
+    Ring<char> r(3, {});
     generate_n(r.begin(), 3, [c = 'a']() mutable { return c++; });
     r.rotate_left(2);
     REQUIRE(r[0] == 'c');
@@ -98,9 +98,9 @@ TEST_CASE("ring.rotate_left_2")
     REQUIRE(r[2] == 'b');
 }
 
-TEST_CASE("ring.rotate_left_3")
+TEST_CASE("Ring.rotate_left_3")
 {
-    ring<char> r(3, {});
+    Ring<char> r(3, {});
     generate_n(r.begin(), 3, [c = 'a']() mutable { return c++; });
     r.rotate_left(3);
     REQUIRE(r[0] == 'a');
@@ -108,9 +108,9 @@ TEST_CASE("ring.rotate_left_3")
     REQUIRE(r[2] == 'c');
 }
 
-TEST_CASE("ring.rezero")
+TEST_CASE("Ring.rezero")
 {
-    ring<char> r(6, {});
+    Ring<char> r(6, {});
     generate_n(r.begin(), r.size(), [c = 'a']() mutable { return c++; });
 
     r.rotate_right(2);
@@ -123,9 +123,9 @@ TEST_CASE("ring.rezero")
     REQUIRE(r[5] == 'd');
 }
 
-TEST_CASE("ring.rezero.iterator")
+TEST_CASE("Ring.rezero.iterator")
 {
-    ring<char> r(6);
+    Ring<char> r(6);
     generate_n(r.begin(), r.size(), [c = 'a']() mutable { return c++; });
     r.rezero(std::next(r.begin(), 2));
     REQUIRE(r[0] == 'c');
@@ -136,9 +136,9 @@ TEST_CASE("ring.rezero.iterator")
     REQUIRE(r[5] == 'b');
 }
 
-TEST_CASE("ring.fixed_size")
+TEST_CASE("Ring.fixed_size")
 {
-    fixed_size_ring<char, 6> r;
+    FixedSizeRing<char, 6> r;
     generate_n(r.begin(), r.size(), [c = 'a']() mutable { return c++; });
     REQUIRE(r[0] == 'a');
     REQUIRE(r[1] == 'b');
@@ -148,9 +148,9 @@ TEST_CASE("ring.fixed_size")
     REQUIRE(r[5] == 'f');
 }
 
-TEST_CASE("ring.offset_negative")
+TEST_CASE("Ring.offset_negative")
 {
-    ring<char> r;
+    Ring<char> r;
     r.emplace_back('a');
     r.emplace_back('b');
     r.emplace_back('c');

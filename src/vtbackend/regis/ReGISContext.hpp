@@ -34,7 +34,7 @@ struct AddressWindow
 struct ReGISContext
 {
     // --- Position (in canvas pixel space) ---------------------------------------------------------
-    crispy::point position { .x = 0, .y = 0 }; ///< The graphics cursor, in pixels.
+    crispy::Point position { .x = 0, .y = 0 }; ///< The graphics cursor, in pixels.
 
     // --- Addressing ------------------------------------------------------------------------------
     AddressWindow window {}; ///< User-coordinate window mapped onto the canvas.
@@ -75,7 +75,7 @@ struct ReGISContext
     bool backgroundOpaque = false;    ///< Whether an erase paints an opaque background (vs. transparent).
 
     // --- Position / vector stack (P(B)/(S)...(E)) -------------------------------------------------
-    std::vector<crispy::point> positionStack {}; ///< Saved positions for bounded/unbounded stacks.
+    std::vector<crispy::Point> positionStack {}; ///< Saved positions for bounded/unbounded stacks.
 
     // --- Macrographs (@ command) -----------------------------------------------------------------
     std::unordered_map<char, std::string> macrographs {}; ///< Stored command-string macros by letter.
@@ -86,17 +86,17 @@ struct ReGISContext
     /// Maps a user coordinate to a canvas pixel through the current addressing window.
     /// @param userX,userY The user-space coordinate.
     /// @return The corresponding canvas pixel (clamped to int range).
-    [[nodiscard]] crispy::point userToPixel(double userX, double userY) const noexcept;
+    [[nodiscard]] crispy::Point userToPixel(double userX, double userY) const noexcept;
 
     /// Maps a canvas pixel back to user coordinates (used by @c R(P) position reports).
     /// @param p The canvas pixel.
     /// @return The corresponding user-space coordinate (x, y).
-    [[nodiscard]] std::pair<double, double> pixelToUser(crispy::point p) const noexcept;
+    [[nodiscard]] std::pair<double, double> pixelToUser(crispy::Point p) const noexcept;
 
     /// Scales a user-space delta to a pixel-space delta along each axis (for relative coordinates).
     /// @param dx,dy The user-space delta.
     /// @return The pixel-space delta.
-    [[nodiscard]] crispy::point userDeltaToPixel(double dx, double dy) const noexcept;
+    [[nodiscard]] crispy::Point userDeltaToPixel(double dx, double dy) const noexcept;
 
     /// @return the drawing @ref Pen assembled from the current write controls and foreground colour.
     [[nodiscard]] Pen currentPen() const noexcept;

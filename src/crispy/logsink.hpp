@@ -24,7 +24,7 @@ namespace logstore
 {
 
 /// How a log line is laid out.
-struct formatter_options
+struct FormatterOptions
 {
     /// Wraps the tag and the text in SGR colour. Never enable this for a file sink.
     bool colorize = false;
@@ -37,7 +37,7 @@ struct formatter_options
 };
 
 /// Where a program sends its log output, and what it logs.
-struct output_config
+struct OutputConfig
 {
     /// The logstore filter ("all", or a comma-separated list of category names each with an
     /// optional trailing `*`). EMPTY leaves the current enablement alone — which is both how
@@ -61,13 +61,13 @@ struct output_config
 /// indented under the text column and carrying no repeated tag.
 /// @param options How the line is laid out.
 /// @return The formatter, for logstore::set_formatter().
-[[nodiscard]] category::formatter makeStandardFormatter(formatter_options options);
+[[nodiscard]] Category::Formatter makeStandardFormatter(FormatterOptions options);
 
 /// As makeStandardFormatter(), but tagged `[error]` and coloured red — for the errorLog
 /// category, whose lines a reader must be able to pick out of a busy log at a glance.
 /// @param options How the line is laid out.
-/// @return The formatter, for category::set_formatter().
-[[nodiscard]] category::formatter makeErrorFormatter(formatter_options options);
+/// @return The formatter, for Category::set_formatter().
+[[nodiscard]] Category::Formatter makeErrorFormatter(FormatterOptions options);
 
 /// Names the filter patterns in @p filterString that match no registered category, so a typo
 /// ("--log vthost.session") can be reported instead of silently logging nothing.
@@ -78,12 +78,12 @@ struct output_config
 /// Installs a process-wide log destination for its own lifetime, restoring the console
 /// defaults on destruction.
 ///
-/// The restore is load-bearing, not tidiness: logstore::category holds its sink as a
+/// The restore is load-bearing, not tidiness: logstore::Category holds its sink as a
 /// std::reference_wrapper with NO lifetime management, so every category must be pointed back
 /// at a static sink before this object's sink dies.
 ///
 /// Thread safety: the writer serialises the whole write-and-flush under a mutex. logstore does
-/// NOT do this — sink::write() calls its writer unguarded, and the `<< text` / flush() pair
+/// NOT do this — Sink::write() calls its writer unguarded, and the `<< text` / flush() pair
 /// can interleave — while the daemon logs from its event-loop thread, its sigwait thread, and
 /// every hosted session's PTY pump thread. Emitting from any thread is therefore safe here.
 ///
@@ -91,36 +91,36 @@ struct output_config
 /// assigns each category's sink and formatter, which would race with a concurrent emit. Both
 /// contour verbs satisfy this structurally — the object is created before any thread is
 /// spawned and destroyed after every thread is joined.
-class scoped_output
+class ScopedOutput
 {
   public:
     /// Opens the configured destination (creating parent directories, appending to an existing
     /// file), applies the filter, and points every registered category at the new sink.
     /// @param config Where and what to log.
     /// @return The installed output, or a human-readable reason the file could not be opened.
-    [[nodiscard]] static std::expected<std::unique_ptr<scoped_output>, std::string> create(
-        output_config config);
+    [[nodiscard]] static std::expected<std::unique_ptr<ScopedOutput>, std::string> create(
+        OutputConfig config);
 
     /// Prefer create(), which owns the one fallible step.
     /// @param config Where and what to log.
     /// @param file An already-opened destination; a closed stream means standard error.
-    scoped_output(output_config const& config, std::ofstream file);
-    ~scoped_output();
+    ScopedOutput(OutputConfig const& config, std::ofstream file);
+    ~ScopedOutput();
 
     // Categories hold a reference into _sink and the writer captures `this`.
-    scoped_output(scoped_output const&) = delete;
-    scoped_output& operator=(scoped_output const&) = delete;
-    scoped_output(scoped_output&&) = delete;
-    scoped_output& operator=(scoped_output&&) = delete;
+    ScopedOutput(ScopedOutput const&) = delete;
+    ScopedOutput& operator=(ScopedOutput const&) = delete;
+    ScopedOutput(ScopedOutput&&) = delete;
+    ScopedOutput& operator=(ScopedOutput&&) = delete;
 
   private:
     /// One category's pre-install state, so the destructor restores exactly what was there
     /// rather than guessing at a default.
-    struct restore_point
+    struct RestorePoint
     {
-        category* target;
-        sink* previousSink;
-        category::formatter previousFormatter;
+        Category* target;
+        Sink* previousSink;
+        Category::Formatter previousFormatter;
     };
 
     /// @return Whether standard error is a terminal — the only correct colourisation gate for
@@ -129,8 +129,8 @@ class scoped_output
 
     std::mutex _mutex;
     std::ofstream _file;
-    sink _sink;
-    std::vector<restore_point> _restorePoints;
+    Sink _sink;
+    std::vector<RestorePoint> _restorePoints;
 };
 
 /// Redirects one category — or every category — into an in-memory buffer for this object's
@@ -142,17 +142,17 @@ class scoped_output
 ///
 /// Not thread-safe, which is sound because every instrumented emission point runs on one
 /// thread. Revisit if test cases are ever run concurrently.
-class scoped_capture
+class ScopedCapture
 {
   public:
     /// @param categoryName The category to capture; empty captures every registered category.
-    explicit scoped_capture(std::string_view categoryName = {});
-    ~scoped_capture();
+    explicit ScopedCapture(std::string_view categoryName = {});
+    ~ScopedCapture();
 
-    scoped_capture(scoped_capture const&) = delete;
-    scoped_capture& operator=(scoped_capture const&) = delete;
-    scoped_capture(scoped_capture&&) = delete;
-    scoped_capture& operator=(scoped_capture&&) = delete;
+    ScopedCapture(ScopedCapture const&) = delete;
+    ScopedCapture& operator=(ScopedCapture const&) = delete;
+    ScopedCapture(ScopedCapture&&) = delete;
+    ScopedCapture& operator=(ScopedCapture&&) = delete;
 
     /// @return Everything written to the captured categories so far, verbatim.
     [[nodiscard]] std::string const& text() const noexcept { return _text; }
@@ -170,16 +170,16 @@ class scoped_capture
 
   private:
     /// One captured category's pre-capture state, so the destructor can put it back.
-    struct restore_point
+    struct RestorePoint
     {
-        category* target;
-        sink* previousSink;
+        Category* target;
+        Sink* previousSink;
         bool wasEnabled;
     };
 
     std::string _text;
-    sink _sink;
-    std::vector<restore_point> _restorePoints;
+    Sink _sink;
+    std::vector<RestorePoint> _restorePoints;
 };
 
 } // namespace logstore

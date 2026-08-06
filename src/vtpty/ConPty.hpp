@@ -26,7 +26,7 @@ class ConPty: public Pty
     void waitForClosed() override;
     [[nodiscard]] bool isClosed() const noexcept override;
 
-    [[nodiscard]] std::optional<ReadResult> read(crispy::buffer_object<char>& storage,
+    [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
                                                  std::optional<std::chrono::milliseconds> timeout,
                                                  size_t size) override;
     void wakeupReader() override;

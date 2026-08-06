@@ -26,72 +26,72 @@ namespace
 ///
 /// It drives an external VT test program (vttest today) against Contour's own terminal engine over a
 /// real PTY, entirely headlessly, and reports what every oracle saw.
-class ConformanceApp: public crispy::app
+class ConformanceApp: public crispy::App
 {
   public:
     /// @param env The process environment every part of the harness reads through.
-    explicit ConformanceApp(crispy::environment const& env):
-        crispy::app(env, "vtconformance", "Contour VT conformance harness", "0.1.0", "Apache-2.0")
+    explicit ConformanceApp(crispy::Environment const& env):
+        crispy::App(env, "vtconformance", "Contour VT conformance harness", "0.1.0", "Apache-2.0")
     {
         link("vtconformance.run", [this] { return runCommand(); });
     }
 
-    [[nodiscard]] CLI::command parameterDefinition() const override
+    [[nodiscard]] CLI::Command parameterDefinition() const override
     {
-        return CLI::command {
+        return CLI::Command {
             "vtconformance",
             "Runs a VT conformance suite against Contour's terminal engine and reports the result.",
-            CLI::option_list {},
-            CLI::command_list {
-                // crispy::app links help/version/license handlers in its constructor and looks every
+            CLI::OptionList {},
+            CLI::CommandList {
+                // crispy::App links help/version/license handlers in its constructor and looks every
                 // linked handler's key up when dispatching, so these must be declared here or the
                 // lookup throws before main() ever gets a say.
-                CLI::command { "help", "Shows this help and exits." },
-                CLI::command { "version", "Shows the version and exits." },
-                CLI::command { "license", "Shows the license and exits." },
-                CLI::command {
+                CLI::Command { "help", "Shows this help and exits." },
+                CLI::Command { "version", "Shows the version and exits." },
+                CLI::Command { "license", "Shows the license and exits." },
+                CLI::Command {
                     "run",
                     "Runs a conformance suite headlessly and reports what every oracle saw.",
-                    CLI::option_list {
-                        CLI::option { "suite", CLI::value { "vttest"s }, "Which suite to run." },
-                        CLI::option { "program",
-                                      CLI::value { ""s },
+                    CLI::OptionList {
+                        CLI::Option { "suite", CLI::Value { "vttest"s }, "Which suite to run." },
+                        CLI::Option { "program",
+                                      CLI::Value { ""s },
                                       "Overrides the suite's test program (e.g. a locally built vttest)." },
-                        CLI::option {
-                            "golden-dir", CLI::value { ""s }, "Directory holding blessed screen dumps." },
-                        CLI::option { "known-gaps", CLI::value { ""s }, "The known-gap ratchet file." },
-                        CLI::option {
-                            "work-dir", CLI::value { ""s }, "Where suite transcripts are written." },
-                        CLI::option { "filter",
-                                      CLI::value { ""s },
+                        CLI::Option {
+                            "golden-dir", CLI::Value { ""s }, "Directory holding blessed screen dumps." },
+                        CLI::Option { "known-gaps", CLI::Value { ""s }, "The known-gap ratchet file." },
+                        CLI::Option {
+                            "work-dir", CLI::Value { ""s }, "Where suite transcripts are written." },
+                        CLI::Option { "filter",
+                                      CLI::Value { ""s },
                                       "Runs only scenarios whose id contains this text." },
-                        CLI::option { "test-filter",
-                                      CLI::value { ""s },
+                        CLI::Option { "test-filter",
+                                      CLI::Value { ""s },
                                       "Runs only the suite's own tests matching this (esctest)." },
-                        CLI::option {
-                            "markdown", CLI::value { ""s }, "Also writes a Markdown report to this file." },
-                        CLI::option { "bless",
-                                      CLI::value { false },
+                        CLI::Option {
+                            "markdown", CLI::Value { ""s }, "Also writes a Markdown report to this file." },
+                        CLI::Option { "bless",
+                                      CLI::Value { false },
                                       "Records the captured screens as the new goldens." },
-                        CLI::option { "update-known-gaps",
-                                      CLI::value { false },
+                        CLI::Option { "update-known-gaps",
+                                      CLI::Value { false },
                                       "Rewrites the ratchet from what this run observed." },
-                        CLI::option {
-                            "known-failures", CLI::value { ""s }, "The esctest failure ratchet file." },
-                        CLI::option { "update-known-failures",
-                                      CLI::value { false },
+                        CLI::Option {
+                            "known-failures", CLI::Value { ""s }, "The esctest failure ratchet file." },
+                        CLI::Option { "update-known-failures",
+                                      CLI::Value { false },
                                       "Rewrites the failure ratchet from what this run observed." },
-                        CLI::option {
-                            "suite-dir", CLI::value { ""s }, "Where a fetched suite (esctest) lives." },
-                        CLI::option { "skip-if-missing",
-                                      CLI::value { false },
+                        CLI::Option {
+                            "suite-dir", CLI::Value { ""s }, "Where a fetched suite (esctest) lives." },
+                        CLI::Option { "skip-if-missing",
+                                      CLI::Value { false },
                                       "Exits successfully when the test program is not installed." },
-                        CLI::option { "command-dir",
-                                      CLI::value { ""s },
+                        CLI::Option { "command-dir",
+                                      CLI::Value { ""s },
                                       "Directory holding the recorded command files a replayed "
                                       "scenario is driven by." },
-                        CLI::option { "bless-command-files",
-                                      CLI::value { false },
+                        CLI::Option { "bless-command-files",
+                                      CLI::Value { false },
                                       "Records each replayed scenario's command file instead of "
                                       "replaying it." },
                     },

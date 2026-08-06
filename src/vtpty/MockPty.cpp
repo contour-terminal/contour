@@ -20,7 +20,7 @@ PtySlave& MockPty::slave() noexcept
     return _slave;
 }
 
-std::optional<Pty::ReadResult> MockPty::read(crispy::buffer_object<char>& storage,
+std::optional<Pty::ReadResult> MockPty::read(crispy::BufferObject<char>& storage,
                                              std::optional<std::chrono::milliseconds> /*timeout*/,
                                              size_t size)
 {

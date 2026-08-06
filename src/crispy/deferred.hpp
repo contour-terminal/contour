@@ -9,7 +9,7 @@ namespace crispy
 {
 
 template <typename T>
-struct deferred // NOLINT(readability-identifier-naming)
+struct Deferred
 {
     std::optional<T> storage;
 

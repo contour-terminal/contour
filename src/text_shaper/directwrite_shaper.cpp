@@ -41,7 +41,7 @@ namespace
     void renderGlyphRunToBitmap(IDWriteGlyphRunAnalysis* _glyphAnalysis,
                                 const RECT& _textureBounds,
                                 const DWRITE_COLOR_F& runColor,
-                                bitmap_format _targetFormat,
+                                BitmapFormat _targetFormat,
                                 std::vector<uint8_t>::iterator& _it)
     {
         auto const width = _textureBounds.right - _textureBounds.left;
@@ -51,7 +51,7 @@ namespace
         tmp.resize(height * width * 3);
 
         auto hr = _glyphAnalysis->CreateAlphaTexture(
-            DWRITE_TEXTURE_CLEARTYPE_3x1, &_textureBounds, tmp.data(), tmp.size());
+            DWRITE_TEXTURE_CLEARTYPE_3x1, &_textureBounds, tmp.data(), tmp.Size());
 
         // TODO: #ifdef (__SSE2__) SIMD me :-)
         for (auto i = 0; i < height; i++)
@@ -62,14 +62,14 @@ namespace
                 auto const srcG = tmp[base + 1];
                 auto const srcB = tmp[base + 2];
 
-                if (_targetFormat == bitmap_format::rgb)
+                if (_targetFormat == BitmapFormat::RGB)
                 {
                     *_it++ = srcR;
                     *_it++ = srcG;
                     *_it++ = srcB;
                 }
 
-                if (_targetFormat == bitmap_format::rgba)
+                if (_targetFormat == BitmapFormat::RGBA)
                 {
                     auto const r = runColor.r * 255;
                     auto const g = runColor.g * 255;
@@ -103,29 +103,29 @@ namespace
 
 struct DxFontInfo
 {
-    font_description description;
-    font_size size;
-    font_metrics metrics;
+    FontDescription description;
+    FontSize size;
+    FontMetrics metrics;
     int fontUnitsPerEm;
 
     // Owning pointer
     IDWriteFontFace5* fontFace;
 };
 
-struct directwrite_shaper::Private
+struct DirectWriteShaper::Private
 {
     ComPtr<IDWriteFactory7> factory;
     ComPtr<IDWriteTextAnalyzer1> textAnalyzer;
-    font_locator* locator_;
+    FontLocator* locator_;
 
     DPI dpi_;
     std::wstring userLocale;
-    std::unordered_map<font_key, DxFontInfo> fonts;
-    std::unordered_map<font_key, bool> fontsHasColor;
+    std::unordered_map<FontKey, DxFontInfo> fonts;
+    std::unordered_map<FontKey, bool> fontsHasColor;
 
-    font_key nextFontKey;
+    FontKey nextFontKey;
 
-    Private(DPI dpi, font_locator& _locator): dpi_ { dpi }, locator_ { &_locator }
+    Private(DPI dpi, FontLocator& _locator): dpi_ { dpi }, locator_ { &_locator }
     {
         auto hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
                                       __uuidof(IDWriteFactory7),
@@ -139,23 +139,23 @@ struct directwrite_shaper::Private
         userLocale = locale;
     }
 
-    font_key create_font_key()
+    FontKey create_font_key()
     {
         auto result = nextFontKey;
         nextFontKey.value++;
         return result;
     }
 
-    optional<text::font_key> add_font(font_source const& _source,
-                                      font_description const& _description,
-                                      font_size _size)
+    optional<text::FontKey> add_font(FontSource const& _source,
+                                     FontDescription const& _description,
+                                     FontSize _size)
     {
-        if (!std::holds_alternative<font_path>(_source))
+        if (!std::holds_alternative<FontPath>(_source))
         {
             return nullopt;
         }
 
-        auto const& sourcePath = std::get<font_path>(_source);
+        auto const& sourcePath = std::get<FontPath>(_source);
 
         std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> wStringConverter;
         std::wstring wSourcePath = wStringConverter.from_bytes(sourcePath.value);
@@ -231,7 +231,7 @@ struct directwrite_shaper::Private
         fontInfo.description = _description;
         fontInfo.description.familyName = wStringConverter.to_bytes(resolvedFamilyName);
         fontInfo.description.wFamilyName = resolvedFamilyName;
-        fontInfo.size = _size;
+        fontInfo.Size = _size;
         fontInfo.metrics.lineHeight = int(ceil(lineHeight * dipScalar));
         fontInfo.metrics.ascender = int(ceil(dwMetrics.ascent * dipScalar));
         fontInfo.metrics.descender = int(ceil(dwMetrics.descent * dipScalar));
@@ -272,37 +272,37 @@ struct directwrite_shaper::Private
     float pixelPerDip() { return static_cast<float>(dpi_.x) / 96.0f; }
 };
 
-directwrite_shaper::directwrite_shaper(DPI _dpi, font_locator& _locator):
+DirectWriteShaper::DirectWriteShaper(DPI _dpi, FontLocator& _locator):
     d(new Private(_dpi, _locator), [](Private* p) { delete p; })
 {
 }
 
-optional<font_key> directwrite_shaper::load_font(font_description const& _description, font_size _size)
+optional<FontKey> DirectWriteShaper::load_font(FontDescription const& _description, FontSize _size)
 {
     locatorLog().operator()("Loading font chain for: {}", _description);
-    font_source_list sources = d->locator_->locate(_description);
+    FontSourceList sources = d->locator_->locate(_description);
     if (sources.empty())
         return nullopt;
 
-    optional<font_key> fontKeyOpt = d->add_font(sources[0], _description, _size);
+    optional<FontKey> fontKeyOpt = d->add_font(sources[0], _description, _size);
     if (!fontKeyOpt.has_value())
         return nullopt;
 
     return fontKeyOpt;
 }
 
-font_metrics directwrite_shaper::metrics(font_key _key) const
+FontMetrics DirectWriteShaper::metrics(FontKey _key) const
 {
     DxFontInfo const& fontInfo = d->fonts.at(_key);
     return fontInfo.metrics;
 }
 
-void directwrite_shaper::shape(font_key _font,
-                               std::u32string_view _text,
-                               gsl::span<unsigned> _clusters,
-                               unicode::Script _script,
-                               unicode::PresentationStyle _presentation,
-                               shape_result& _result)
+void DirectWriteShaper::shape(FontKey _font,
+                              std::u32string_view _text,
+                              gsl::span<unsigned> _clusters,
+                              unicode::Script _script,
+                              unicode::PresentationStyle _presentation,
+                              ShapeResult& _result)
 {
     wstring_convert<codecvt_utf8<char32_t>, char32_t> conv1;
     string bytes = conv1.to_bytes(u32string { _text });
@@ -310,7 +310,7 @@ void directwrite_shaper::shape(font_key _font,
     wstring wText = conv2.from_bytes(bytes);
 
     WCHAR const* textString = wText.c_str();
-    UINT32 textLength = wText.size();
+    UINT32 textLength = wText.Size();
     DxFontInfo fontInfo = d->fonts.at(_font);
     IDWriteFontFace5* fontFace = fontInfo.fontFace;
 
@@ -347,10 +347,10 @@ void directwrite_shaper::shape(font_key _font,
         for (size_t i = glyphStart; i < textLength; i++)
         {
             auto const cellWidth = static_cast<double>((float) glyphDesignUnitAdvances.at(i))
-                                   / designUnitsPerEm * ptToEm(fontInfo.size.pt) * d->pixelPerDip();
-            glyph_position gpos {};
+                                   / designUnitsPerEm * ptToEm(fontInfo.Size.pt) * d->pixelPerDip();
+            GlyphPosition gpos {};
             gpos.presentation = _presentation;
-            gpos.glyph = glyph_key { fontInfo.size, _font, glyph_index { glyphIndices.at(i) } };
+            gpos.glyph = GlyphKey { fontInfo.Size, _font, GlyphIndex { glyphIndices.at(i) } };
             gpos.advance.x = static_cast<int>(cellWidth);
             _result.emplace_back(gpos);
         }
@@ -359,10 +359,10 @@ void directwrite_shaper::shape(font_key _font,
     {
         // Complex shaping
         UINT32 const textStart = 0;
-        dwrite_analysis_wrapper analysisWrapper(wText, d->userLocale);
+        DWriteAnalysisWrapper analysisWrapper(wText, d->userLocale);
 
         // Script analysis
-        d->textAnalyzer->AnalyzeScript(&analysisWrapper, 0, wText.size(), &analysisWrapper);
+        d->textAnalyzer->AnalyzeScript(&analysisWrapper, 0, wText.Size(), &analysisWrapper);
 
         UINT32 actualGlyphCount = 0;
         UINT32 maxGlyphCount = textLength;
@@ -396,11 +396,11 @@ void directwrite_shaper::shape(font_key _font,
             {
                 // glyphIndices contains 0 means some glyphs are missing from the current font.
                 // Need to perform fallback analysis.
-                font_source_list sources = d->locator_->resolve(gsl::span(_text.data(), _text.size()));
-                if (sources.size() > 0)
+                FontSourceList sources = d->locator_->resolve(gsl::span(_text.data(), _text.Size()));
+                if (sources.Size() > 0)
                 {
-                    optional<font_key> fontKeyOpt =
-                        d->add_font(sources[0], fontInfo.description, fontInfo.size);
+                    optional<FontKey> fontKeyOpt =
+                        d->add_font(sources[0], fontInfo.description, fontInfo.Size);
                     if (fontKeyOpt.has_value())
                     {
                         _font = fontKeyOpt.value();
@@ -436,7 +436,7 @@ void directwrite_shaper::shape(font_key _font,
                                                       &glyphProps.at(0),
                                                       actualGlyphCount,
                                                       fontFace,
-                                                      fontInfo.size.pt,
+                                                      fontInfo.Size.pt,
                                                       0, // isSideways,
                                                       0, // isRightToLeft
                                                       &analysisWrapper.script,
@@ -449,8 +449,8 @@ void directwrite_shaper::shape(font_key _font,
 
         for (size_t i = glyphStart; i < actualGlyphCount; i++)
         {
-            glyph_position gpos {};
-            gpos.glyph = glyph_key { fontInfo.size, _font, glyph_index { glyphIndices.at(i) } };
+            GlyphPosition gpos {};
+            gpos.glyph = GlyphKey { fontInfo.Size, _font, GlyphIndex { glyphIndices.at(i) } };
             gpos.offset.x = static_cast<int>(glyphOffsets.at(i).advanceOffset);
             // gpos.offset.y = static_cast<int>(static_cast<double>(pos[i].y_offset) / 64.0f);
 
@@ -461,13 +461,13 @@ void directwrite_shaper::shape(font_key _font,
     }
 }
 
-std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph,
-                                                              render_mode _mode,
-                                                              float /*outlineThickness*/)
+std::optional<RasterizedGlyph> DirectWriteShaper::rasterize(GlyphKey _glyph,
+                                                            RenderMode _mode,
+                                                            float /*outlineThickness*/)
 {
     DxFontInfo const& fontInfo = d->fonts.at(_glyph.font);
     IDWriteFontFace5* fontFace = fontInfo.fontFace;
-    float const fontEmSize = static_cast<float>(ptToEm(_glyph.size.pt));
+    float const fontEmSize = static_cast<float>(ptToEm(_glyph.Size.pt));
 
     UINT16 const glyphIndex = static_cast<UINT16>(_glyph.index.value);
     DWRITE_GLYPH_OFFSET const glyphOffset {};
@@ -498,7 +498,7 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph,
     }
 
     ComPtr<IDWriteGlyphRunAnalysis> glyphAnalysis;
-    rasterized_glyph output {};
+    RasterizedGlyph output {};
 
     d->factory->CreateGlyphRunAnalysis(&glyphRun,
                                        d->pixelPerDip(),
@@ -535,7 +535,7 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph,
         if (hr == DWRITE_E_NOCOLOR)
         {
             output.bitmap.resize(*height * *width * 3);
-            output.format = bitmap_format::rgb;
+            output.format = BitmapFormat::RGB;
 
             auto t = output.bitmap.begin();
 
@@ -546,7 +546,7 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph,
         else
         {
             output.bitmap.resize(*height * *width * 4);
-            output.format = bitmap_format::rgba;
+            output.format = BitmapFormat::RGBA;
 
             d->fontsHasColor.at(_glyph.font) = true;
             while (true)
@@ -586,28 +586,28 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph,
     return nullopt;
 }
 
-void directwrite_shaper::set_dpi(DPI dpi)
+void DirectWriteShaper::set_dpi(DPI dpi)
 {
     d->dpi_ = dpi;
     clear_cache();
 }
 
-void directwrite_shaper::set_locator(font_locator& _locator)
+void DirectWriteShaper::set_locator(FontLocator& _locator)
 {
     d->locator_ = &_locator;
 }
 
-void directwrite_shaper::clear_cache()
+void DirectWriteShaper::clear_cache()
 {
     // TODO: clear the cache
 }
 
-void directwrite_shaper::set_font_fallback_limit([[maybe_unused]] int limit)
+void DirectWriteShaper::set_font_fallback_limit([[maybe_unused]] int limit)
 {
     // DirectWrite manages font fallback internally.
 }
 
-optional<glyph_position> directwrite_shaper::shape(font_key _font, char32_t _codepoint)
+optional<GlyphPosition> DirectWriteShaper::shape(FontKey _font, char32_t _codepoint)
 {
     return nullopt; // TODO
 }

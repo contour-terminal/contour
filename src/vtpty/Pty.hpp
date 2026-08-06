@@ -125,7 +125,7 @@ class Pty
     /// @returns A view to the consumed buffer. The boolean in the ReadResult
     ///          indicates whether or not this data was coming through
     ///          the stdout-fastpipe.
-    [[nodiscard]] virtual std::optional<ReadResult> read(crispy::buffer_object<char>& storage,
+    [[nodiscard]] virtual std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
                                                          std::optional<std::chrono::milliseconds> timeout,
                                                          size_t size) = 0;
 
@@ -153,9 +153,9 @@ class Pty
 
 [[nodiscard]] std::unique_ptr<Pty> createPty(PageSize pageSize, std::optional<ImageSize> viewSize);
 
-auto inline const ptyLog = logstore::category("pty", "Logs general PTY information.");
-auto inline const ptyInLog = logstore::category("pty.input", "Logs PTY raw input.");
-auto inline const ptyOutLog = logstore::category("pty.output", "Logs PTY raw output.");
+auto inline const ptyLog = logstore::Category("pty", "Logs general PTY information.");
+auto inline const ptyInLog = logstore::Category("pty.input", "Logs PTY raw input.");
+auto inline const ptyOutLog = logstore::Category("pty.output", "Logs PTY raw output.");
 
 } // namespace vtpty
 

@@ -21,17 +21,17 @@
 namespace vtpty
 {
 
-using crispy::file_descriptor;
+using crispy::FileDescriptor;
 
 class UnixPty final: public Pty
 {
   private:
     class Slave final: public PtySlave
     {
-        file_descriptor _slaveFd;
+        FileDescriptor _slaveFd;
 
       public:
-        explicit Slave(PtySlaveHandle fd): _slaveFd { file_descriptor::from_native(unbox<int>(fd)) } {}
+        explicit Slave(PtySlaveHandle fd): _slaveFd { FileDescriptor::from_native(unbox<int>(fd)) } {}
         ~Slave() override;
         [[nodiscard]] PtySlaveHandle handle() const noexcept;
         void close() override;
@@ -53,7 +53,7 @@ class UnixPty final: public Pty
     void waitForClosed() override;
     [[nodiscard]] bool isClosed() const noexcept override;
     void wakeupReader() noexcept override;
-    [[nodiscard]] std::optional<ReadResult> read(crispy::buffer_object<char>& storage,
+    [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
                                                  std::optional<std::chrono::milliseconds> timeout,
                                                  size_t size) override;
     int write(std::string_view data) override;
@@ -67,9 +67,9 @@ class UnixPty final: public Pty
 
     [[nodiscard]] bool started() const noexcept { return _masterFd != -1; }
 
-    file_descriptor _masterFd;
+    FileDescriptor _masterFd;
     UnixPipe _stdoutFastPipe;
-    crispy::read_selector _readSelector;
+    crispy::ReadSelector _readSelector;
     PageSize _pageSize;
     std::optional<ImageSize> _pixels;
     std::unique_ptr<Slave> _slave;

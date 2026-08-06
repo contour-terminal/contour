@@ -63,12 +63,12 @@ namespace views
             return result;
         }
 
-        struct join_with_fn
+        struct JoinWithFn
         {
             std::string_view separator;
 
             template <typename R>
-            friend auto operator|(R&& r, join_with_fn const& self)
+            friend auto operator|(R&& r, JoinWithFn const& self)
             {
                 return join_with_impl(std::forward<R>(r), self.separator);
             }
@@ -77,7 +77,7 @@ namespace views
 
     inline auto join_with(std::string_view sep)
     {
-        return detail::join_with_fn { sep };
+        return detail::JoinWithFn { sep };
     }
 
     template <typename Range>
@@ -86,37 +86,34 @@ namespace views
         return detail::join_with_impl(std::forward<Range>(range), sep);
     }
     template <typename Range>
-    struct enumerate_view_sentinel
+    struct EnumerateViewSentinel
     {
         using sentinel = std::ranges::sentinel_t<Range>;
         sentinel end;
 
         friend constexpr bool operator==(std::ranges::iterator_t<Range> const& it,
-                                         enumerate_view_sentinel const& s)
+                                         EnumerateViewSentinel const& s)
         {
             return it == s.end;
         }
     };
 
     template <typename Range>
-    struct enumerate_view
+    struct EnumerateView
     {
         Range range;
 
-        struct iterator
+        struct iterator // NOLINT(readability-identifier-naming)
         {
-            using range_iterator = std::ranges::iterator_t<Range>;
-            using range_reference = std::ranges::range_reference_t<Range>;
+            using RangeIterator = std::ranges::iterator_t<Range>;
+            using RangeReference = std::ranges::range_reference_t<Range>;
             using difference_type = std::ptrdiff_t;
             using value_type = std::pair<size_t, std::ranges::range_value_t<Range>>;
 
             size_t index;
-            range_iterator current;
+            RangeIterator current;
 
-            constexpr auto operator*() const
-            {
-                return std::pair<size_t, range_reference> { index, *current };
-            }
+            constexpr auto operator*() const { return std::pair<size_t, RangeReference> { index, *current }; }
 
             constexpr iterator& operator++()
             {
@@ -135,16 +132,16 @@ namespace views
         constexpr auto end() { return std::end(range); }
     };
 
-    struct enumerate_fn
+    struct EnumerateFn
     {
         template <typename Range>
         constexpr auto operator()(Range&& range) const
         {
-            return enumerate_view<Range> { std::forward<Range>(range) };
+            return EnumerateView<Range> { std::forward<Range>(range) };
         }
     };
 
-    constexpr inline enumerate_fn enumerate; // NOLINT(readability-identifier-naming)
+    constexpr inline EnumerateFn enumerate; // NOLINT(readability-identifier-naming)
 } // namespace views
 
 using views::join_with;
@@ -402,15 +399,15 @@ constexpr std::optional<T> to_integer(std::basic_string<C> const& text) noexcept
     return to_integer<Base, T, C>(std::basic_string_view<C>(text));
 }
 
-class finally // NOLINT(readability-identifier-naming)
+class Finally
 {
   public:
-    explicit finally(std::function<void()> hook): _hook(std::move(hook)) {}
+    explicit Finally(std::function<void()> hook): _hook(std::move(hook)) {}
 
-    finally(finally const&) = delete;
-    finally& operator=(finally const&) = delete;
-    finally(finally&&) = delete;
-    finally& operator=(finally&&) = delete;
+    Finally(Finally const&) = delete;
+    Finally& operator=(Finally const&) = delete;
+    Finally(Finally&&) = delete;
+    Finally& operator=(Finally&&) = delete;
 
     void run()
     {
@@ -422,7 +419,7 @@ class finally // NOLINT(readability-identifier-naming)
         }
     }
 
-    ~finally() { run(); }
+    ~Finally() { run(); }
 
   private:
     std::function<void()> _hook {};
@@ -482,7 +479,7 @@ inline std::string unescapeURL(std::string_view input)
     return result;
 }
 
-struct for_each_key_value_params
+struct ForEachKeyValueParams
 {
     std::string_view text;
     char entryDelimiter;
@@ -507,7 +504,7 @@ struct for_each_key_value_params
 
 template <typename Callback>
     requires std::is_invocable_v<Callback, std::string_view, std::string_view>
-constexpr void for_each_key_value(for_each_key_value_params params,
+constexpr void for_each_key_value(ForEachKeyValueParams params,
                                   Callback&& callback) noexcept(noexcept(callback(std::string_view {},
                                                                                   std::string_view {})))
 {
@@ -598,7 +595,7 @@ inline std::string readFileAsString(std::filesystem::path const& path)
 template <typename T>
 constexpr auto each_element() noexcept
 {
-    struct container
+    struct Container
     {
         struct iterator // NOLINT(readability-identifier-naming)
         {
@@ -619,7 +616,7 @@ constexpr auto each_element() noexcept
             return iterator { static_cast<T>(static_cast<int>(std::numeric_limits<T>::max()) + 1) };
         }
     };
-    return container {};
+    return Container {};
 }
 
 template <typename T>
@@ -747,13 +744,13 @@ constexpr void ignore_unused(Ts const&... /*values*/) noexcept
 std::string threadName();
 
 template <class... Ts>
-struct overloaded: Ts...
+struct Overloaded: Ts...
 {
     using Ts::operator()...;
 };
 
 template <class... Ts>
-overloaded(Ts...) -> overloaded<Ts...>;
+Overloaded(Ts...) -> Overloaded<Ts...>;
 
 template <typename T, typename... Ts>
 concept one_of = (std::same_as<T, Ts> || ...);

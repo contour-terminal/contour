@@ -106,7 +106,7 @@ struct DaemonConfig
 /// What `contour daemon --background` runs. The caller supplies the whole argv rather than
 /// options to rebuild one from: the CLI surface lives in `src/contour`, and the backgrounding
 /// daemon relaunches ITSELF, so replaying its own tokens is both exact and immune to a new
-/// option being forgotten here (see crispy::app::commandLine).
+/// option being forgotten here (see crispy::App::commandLine).
 ///
 /// Returning means the daemon ACCEPTS — not merely that the process started. A `--background`
 /// that returned earlier would hand the shell back before a bind failure could surface, which

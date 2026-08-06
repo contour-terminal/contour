@@ -65,7 +65,7 @@ CommandArguments commandArguments(actions::Action const& action)
     // an argument would collapse two commands that do different things onto one row.
     using namespace actions;
     return std::visit(
-        crispy::overloaded {
+        crispy::Overloaded {
             [](ChangeProfile const& a) -> CommandArguments {
                 return { .id = a.name, .title = std::format(": {}", a.name) };
             },

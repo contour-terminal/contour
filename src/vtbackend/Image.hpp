@@ -393,7 +393,7 @@ class ImagePool
 
     void removeRasterizedImage(RasterizedImage* image); //!< Removes a rasterized image from pool.
 
-    using NameToImageIdCache = crispy::strong_lru_cache<std::string, std::shared_ptr<Image const>>;
+    using NameToImageIdCache = crispy::StrongLRUCache<std::string, std::shared_ptr<Image const>>;
 
     /// The id index behind findImageById(): weak_ptrs so the index never extends image
     /// lifetime (eviction stays refcount-driven), shared with each image's remover so

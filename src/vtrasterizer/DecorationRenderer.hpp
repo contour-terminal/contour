@@ -39,7 +39,7 @@ class DecorationRenderer: public Renderable
     void renderLine(vtbackend::RenderLine const& line);
 
     void renderDecoration(Decorator decoration,
-                          crispy::point pos,
+                          crispy::Point pos,
                           vtbackend::ColumnCount columnCount,
                           vtbackend::RGBColor const& color);
 

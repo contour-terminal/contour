@@ -13,13 +13,13 @@
 namespace crispy
 {
 
-enum class numeric_escape : uint8_t
+enum class NumericEscape : uint8_t
 {
     Octal,
     Hex
 };
 
-inline std::string escape(uint8_t ch, numeric_escape numericEscape = numeric_escape::Hex)
+inline std::string escape(uint8_t ch, NumericEscape numericEscape = NumericEscape::Hex)
 {
     switch (ch)
     {
@@ -32,7 +32,7 @@ inline std::string escape(uint8_t ch, numeric_escape numericEscape = numeric_esc
         default:
             if (0x20 <= ch && ch < 0x7E)
                 return std::format("{}", static_cast<char>(ch));
-            else if (numericEscape == numeric_escape::Hex)
+            else if (numericEscape == NumericEscape::Hex)
                 return std::format("\\x{:02x}", ch & 0xFF);
             else
                 return std::format("\\{:03o}", ch & 0xFF);
@@ -40,7 +40,7 @@ inline std::string escape(uint8_t ch, numeric_escape numericEscape = numeric_esc
 }
 
 template <typename T>
-inline std::string escape(T begin, T end, numeric_escape numericEscape = numeric_escape::Hex)
+inline std::string escape(T begin, T end, NumericEscape numericEscape = NumericEscape::Hex)
 {
     static_assert(sizeof(*std::declval<T>()) == 1,
                   "should be only 1 byte, such as: char, char8_t, uint8_t, byte, ...");
@@ -70,7 +70,7 @@ inline std::string escapeMarkdown(T begin, T end)
     return result;
 }
 
-inline std::string escape(std::string_view s, numeric_escape numericEscape = numeric_escape::Hex)
+inline std::string escape(std::string_view s, NumericEscape numericEscape = NumericEscape::Hex)
 {
     return escape(begin(s), end(s), numericEscape);
 }
@@ -85,7 +85,7 @@ inline std::string unescape(std::string_view escapedText)
     std::string out;
     out.reserve(escapedText.size());
 
-    enum class state_type : uint8_t
+    enum class StateType : uint8_t
     {
         Text,
         Escape,
@@ -94,91 +94,91 @@ inline std::string unescape(std::string_view escapedText)
         Hex1,
         Hex2
     };
-    state_type state = state_type::Text;
+    StateType state = StateType::Text;
     char buf[3] = {};
 
     for (char const ch: escapedText)
     {
         switch (state)
         {
-            case state_type::Text:
+            case StateType::Text:
                 if (ch == '\\')
-                    state = state_type::Escape;
+                    state = StateType::Escape;
                 else
                     out.push_back(ch);
                 break;
-            case state_type::Escape:
+            case StateType::Escape:
                 switch (ch)
                 {
                     case '0':
                         //.
-                        state = state_type::Octal1;
+                        state = StateType::Octal1;
                         break;
                     case 'x':
                         //.
-                        state = state_type::Hex1;
+                        state = StateType::Hex1;
                         break;
                     case 'e':
-                        state = state_type::Text;
+                        state = StateType::Text;
                         out.push_back('\033');
                         break;
                     case 'a':
                         out.push_back(0x07);
-                        state = state_type::Text;
+                        state = StateType::Text;
                         break;
                     case 'b':
                         out.push_back(0x08);
-                        state = state_type::Text;
+                        state = StateType::Text;
                         break;
                     case 't':
                         out.push_back(0x09);
-                        state = state_type::Text;
+                        state = StateType::Text;
                         break;
                     case 'n':
                         out.push_back(0x0A);
-                        state = state_type::Text;
+                        state = StateType::Text;
                         break;
                     case 'v':
                         out.push_back(0x0B);
-                        state = state_type::Text;
+                        state = StateType::Text;
                         break;
                     case 'f':
                         out.push_back(0x0C);
-                        state = state_type::Text;
+                        state = StateType::Text;
                         break;
                     case 'r':
                         out.push_back(0x0D);
-                        state = state_type::Text;
+                        state = StateType::Text;
                         break;
                     case '\\':
                         out.push_back('\\');
-                        state = state_type::Text;
+                        state = StateType::Text;
                         break;
                     default:
                         // Unknown escape sequence, so just continue as text.
                         out.push_back('\\');
                         out.push_back(ch);
-                        state = state_type::Text;
+                        state = StateType::Text;
                         break;
                 }
                 break;
-            case state_type::Octal1:
+            case StateType::Octal1:
                 buf[0] = ch;
-                state = state_type::Octal2;
+                state = StateType::Octal2;
                 break;
-            case state_type::Octal2:
+            case StateType::Octal2:
                 buf[1] = ch;
                 out.push_back(static_cast<char>(strtoul(buf, nullptr, 8)));
-                state = state_type::Text;
+                state = StateType::Text;
                 break;
-            case state_type::Hex1:
+            case StateType::Hex1:
                 buf[0] = ch;
-                state = state_type::Hex2;
+                state = StateType::Hex2;
                 break;
-            case state_type::Hex2:
+            case StateType::Hex2:
                 buf[1] = ch;
                 out.push_back(static_cast<char>(strtoul(buf, nullptr, 16)));
-                state = state_type::Text;
+                state = StateType::Text;
                 break;
         }
     }

@@ -6,7 +6,7 @@ namespace crispy
 
 namespace
 {
-    void parse_attribute(string_interpolation* interpolation, std::string_view attribute)
+    void parse_attribute(StringInterpolation* interpolation, std::string_view attribute)
     {
         auto const equal = attribute.find('=');
         if (equal != std::string_view::npos)
@@ -22,9 +22,9 @@ namespace
     }
 } // anonymous namespace
 
-string_interpolation parse_interpolation(std::string_view text)
+StringInterpolation parse_interpolation(std::string_view text)
 {
-    auto result = string_interpolation {};
+    auto result = StringInterpolation {};
     auto const colon = text.find(':');
     if (colon != std::string_view::npos)
     {
@@ -53,7 +53,7 @@ string_interpolation parse_interpolation(std::string_view text)
     return result;
 }
 
-interpolated_string parse_interpolated_string(std::string_view text)
+InterpolatedString parse_interpolated_string(std::string_view text)
 {
     // "< {Clock:Bold,Italic,Color=#FFFF00} | {VTType} | {InputMode} {Search:Bold,Color=Yellow} >"
     //
@@ -64,7 +64,7 @@ interpolated_string parse_interpolated_string(std::string_view text)
     // recognize the name can emit it verbatim rather than dropping it (see expandTabLabel /
     // parseStatusLineSegment).
 
-    auto fragments = interpolated_string {};
+    auto fragments = InterpolatedString {};
 
     // Builds an interpolation for the placeholder spanning [openBrace, closeBrace] (closeBrace == npos for
     // an unterminated trailing placeholder, which extends to the end of the input). Captures the whole

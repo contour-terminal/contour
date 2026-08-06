@@ -47,7 +47,7 @@ namespace // helper functions
     }
 } // namespace
 
-static std::optional<RGBColor> tryParseColorAttribute(crispy::string_interpolation const& interpolation,
+static std::optional<RGBColor> tryParseColorAttribute(crispy::StringInterpolation const& interpolation,
                                                       std::string_view key)
 {
     if (auto const i = interpolation.attributes.find(key); i != interpolation.attributes.end())
@@ -57,7 +57,7 @@ static std::optional<RGBColor> tryParseColorAttribute(crispy::string_interpolati
 }
 
 /// The value of attribute @p key, or nullopt when the interpolation does not carry it.
-static std::optional<std::string> tryParseStringAttribute(crispy::string_interpolation const& interpolation,
+static std::optional<std::string> tryParseStringAttribute(crispy::StringInterpolation const& interpolation,
                                                           std::string_view key)
 {
     if (auto const i = interpolation.attributes.find(key); i != interpolation.attributes.end())
@@ -73,7 +73,7 @@ static std::optional<std::string> tryParseStringAttribute(crispy::string_interpo
 /// missing, which makes the placeholder unrecognized and so echoed verbatim by the caller.
 template <typename T>
 static std::optional<StatusLineDefinitions::Item> makeItemOfType(
-    StatusLineDefinitions::Styles const& styles, crispy::string_interpolation const& interpolation)
+    StatusLineDefinitions::Styles const& styles, crispy::StringInterpolation const& interpolation)
 {
     if constexpr (std::same_as<T, StatusLineDefinitions::Command>)
     {
@@ -106,7 +106,7 @@ static std::optional<StatusLineDefinitions::Item> makeItemOfType(
 /// The item @p interpolation describes, or nullopt when it names no known placeholder (or names one but
 /// omits an attribute it cannot do without), in which case the caller echoes it verbatim.
 static std::optional<StatusLineDefinitions::Item> makeStatusLineItem(
-    crispy::string_interpolation const& interpolation)
+    crispy::StringInterpolation const& interpolation)
 {
     auto styles = StatusLineDefinitions::Styles {};
 
@@ -152,13 +152,13 @@ StatusLineSegment parseStatusLineSegment(std::string_view text)
             segment.emplace_back(literalText(std::get<std::string_view>(fragment)));
         // Reached by const reference out of the variant (no copy): binding the string_interpolation by
         // value here would deep-copy its flag set and attribute map.
-        else if (auto const item = makeStatusLineItem(std::get<crispy::string_interpolation>(fragment)))
+        else if (auto const item = makeStatusLineItem(std::get<crispy::StringInterpolation>(fragment)))
             segment.emplace_back(*item);
         else
             // An unrecognized placeholder is echoed verbatim (its exact original `{...}` slice) rather than
             // dropped, so the user sees what they typed — matching expandTabLabel's tab-strip handling so
             // both surfaces treat unknown placeholders identically.
-            segment.emplace_back(literalText(std::get<crispy::string_interpolation>(fragment).whole));
+            segment.emplace_back(literalText(std::get<crispy::StringInterpolation>(fragment).whole));
     }
 
     return segment;

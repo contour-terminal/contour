@@ -15,7 +15,7 @@ namespace vtrasterizer
 namespace
 {
     /// Extracts the coverage (alpha) byte of the glyph pixel at (@p x, @p y).
-    uint8_t coverageAt(text::rasterized_glyph const& glyph, int x, int y) noexcept
+    uint8_t coverageAt(text::RasterizedGlyph const& glyph, int x, int y) noexcept
     {
         auto const width = unbox<int>(glyph.bitmapSize.width);
         auto const bytesPerPixel = static_cast<int>(text::pixel_size(glyph.format));
@@ -27,8 +27,8 @@ namespace
     }
 } // namespace
 
-ReGISFontRasterizer::ReGISFontRasterizer(text::DPI dpi, text::font_description font):
-    _shaper { std::make_unique<text::open_shaper>(dpi, text::font_locator_provider::get().native()) },
+ReGISFontRasterizer::ReGISFontRasterizer(text::DPI dpi, text::FontDescription font):
+    _shaper { std::make_unique<text::OpenShaper>(dpi, text::FontLocatorProvider::get().native()) },
     _font { std::move(font) },
     _dpi { dpi }
 {
@@ -57,7 +57,7 @@ std::optional<ReGISGlyphBitmap> ReGISFontRasterizer::rasterize(char32_t codepoin
     auto cached = _fontKeyByPointSize.find(sizeKey);
     if (cached == _fontKeyByPointSize.end())
     {
-        auto const loaded = _shaper->load_font(_font, text::font_size { points });
+        auto const loaded = _shaper->load_font(_font, text::FontSize { points });
         if (!loaded)
             return std::nullopt;
         cached = _fontKeyByPointSize.emplace(sizeKey, *loaded).first;
@@ -68,7 +68,7 @@ std::optional<ReGISGlyphBitmap> ReGISFontRasterizer::rasterize(char32_t codepoin
     if (!glyphPosition)
         return std::nullopt;
 
-    auto const glyph = _shaper->rasterize(glyphPosition->glyph, text::render_mode::gray);
+    auto const glyph = _shaper->rasterize(glyphPosition->glyph, text::RenderMode::Gray);
     if (!glyph)
         return std::nullopt;
 

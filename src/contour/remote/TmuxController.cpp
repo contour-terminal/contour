@@ -20,7 +20,7 @@ namespace
 {
     using vthost::tmux::BinaryLayout;
 
-    auto const tmuxLog = logstore::category("gui.tmux", "GUI tmux -CC mirroring controller.");
+    auto const tmuxLog = logstore::Category("gui.tmux", "GUI tmux -CC mirroring controller.");
 
     /// @return True when @p node is a split (has both children) rather than a leaf.
     [[nodiscard]] bool isSplit(BinaryLayout const& node) noexcept

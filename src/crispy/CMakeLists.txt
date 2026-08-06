@@ -140,7 +140,6 @@ if(CRISPY_TESTING)
         interpolated_string_test.cpp
         logsink_test.cpp
         utils_test.cpp
-        result_test.cpp
         ring_test.cpp
         sort_test.cpp
         times_test.cpp

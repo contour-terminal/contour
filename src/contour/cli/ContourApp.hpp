@@ -26,13 +26,13 @@ enum class DaemonServiceAction : std::uint8_t
 /// Contour CLI application base.
 ///
 /// TODO: provide special installable targets in debian packages (cmake and PPA)
-class ContourApp: public crispy::app
+class ContourApp: public crispy::App
 {
   public:
     /// @param env The process environment every part of the application reads through.
-    explicit ContourApp(crispy::environment const& env);
+    explicit ContourApp(crispy::Environment const& env);
 
-    [[nodiscard]] crispy::cli::command parameterDefinition() const override;
+    [[nodiscard]] crispy::cli::Command parameterDefinition() const override;
 
   private:
     int captureAction();

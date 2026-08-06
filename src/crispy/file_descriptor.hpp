@@ -16,19 +16,19 @@ namespace crispy
 {
 
 template <typename T>
-struct close_native_handle
+struct CloseNativeHandle
 {
 };
 
 #ifdef _WIN32
 template <>
-struct close_native_handle<HANDLE>
+struct CloseNativeHandle<HANDLE>
 {
     void operator()(HANDLE value) { CloseHandle(value); }
 };
 #else
 template <>
-struct close_native_handle<int>
+struct CloseNativeHandle<int>
 {
     void operator()(int fd)
     {
@@ -47,23 +47,23 @@ struct close_native_handle<int>
 #endif
 
 template <typename T, T const InvalidHandleValue>
-class native_handle
+class NativeHandle
 {
   public:
     using native_handle_type = T;
     static inline constexpr native_handle_type invalid_native_handle = InvalidHandleValue; // NOLINT
 
   private:
-    native_handle(native_handle_type fd) noexcept: _fd { fd } {}
+    NativeHandle(native_handle_type fd) noexcept: _fd { fd } {}
 
   public:
-    native_handle() noexcept = default;
+    NativeHandle() noexcept = default;
 
-    native_handle(native_handle const&) = delete;
-    native_handle& operator=(native_handle const&) = delete;
+    NativeHandle(NativeHandle const&) = delete;
+    NativeHandle& operator=(NativeHandle const&) = delete;
 
-    native_handle(native_handle&& fd) noexcept: _fd(fd.release()) {}
-    native_handle& operator=(native_handle&& fd) noexcept
+    NativeHandle(NativeHandle&& fd) noexcept: _fd(fd.release()) {}
+    NativeHandle& operator=(NativeHandle&& fd) noexcept
     {
         if (this != &fd)
         {
@@ -73,13 +73,13 @@ class native_handle
         return *this;
     }
 
-    ~native_handle() { close(); }
+    ~NativeHandle() { close(); }
 
-    static native_handle from_native(native_handle_type fd) // NOLINT
+    static NativeHandle from_native(native_handle_type fd) // NOLINT
     {
         if (fd == invalid_native_handle)
-            throw std::system_error(errno, std::generic_category(), "native_handle() failed");
-        return native_handle { fd };
+            throw std::system_error(errno, std::generic_category(), "NativeHandle() failed");
+        return NativeHandle { fd };
     }
 
     [[nodiscard]] native_handle_type get() const noexcept { return _fd; }
@@ -100,7 +100,7 @@ class native_handle
         if (_fd == invalid_native_handle)
             return;
 
-        crispy::close_native_handle<native_handle_type> {}(_fd);
+        crispy::CloseNativeHandle<native_handle_type> {}(_fd);
         _fd = invalid_native_handle;
     }
 
@@ -109,9 +109,9 @@ class native_handle
 };
 
 #ifdef _WIN32
-using file_descriptor = native_handle<HANDLE, INVALID_HANDLE_VALUE>;
+using FileDescriptor = NativeHandle<HANDLE, INVALID_HANDLE_VALUE>;
 #else
-using file_descriptor = native_handle<int, -1>;
+using FileDescriptor = NativeHandle<int, -1>;
 #endif
 
 } // end namespace crispy
@@ -129,10 +129,10 @@ struct std::formatter<HANDLE>: std::formatter<std::string>
 #endif
 
 template <>
-struct std::formatter<crispy::file_descriptor>: std::formatter<crispy::file_descriptor::native_handle_type>
+struct std::formatter<crispy::FileDescriptor>: std::formatter<crispy::FileDescriptor::native_handle_type>
 {
-    auto format(crispy::file_descriptor const& fd, auto& ctx) const
+    auto format(crispy::FileDescriptor const& fd, auto& ctx) const
     {
-        return std::formatter<crispy::file_descriptor::native_handle_type>::format(fd.get(), ctx);
+        return std::formatter<crispy::FileDescriptor::native_handle_type>::format(fd.get(), ctx);
     }
 };

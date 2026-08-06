@@ -19,16 +19,16 @@ namespace crispy
 /// the environment of the test binary that is running it.
 ///
 /// Implementations are thread safe.
-class environment
+class Environment
 {
   public:
-    environment() = default;
-    virtual ~environment() = default;
+    Environment() = default;
+    virtual ~Environment() = default;
 
-    environment(environment const&) = delete;
-    environment& operator=(environment const&) = delete;
-    environment(environment&&) = delete;
-    environment& operator=(environment&&) = delete;
+    Environment(Environment const&) = delete;
+    Environment& operator=(Environment const&) = delete;
+    Environment(Environment&&) = delete;
+    Environment& operator=(Environment&&) = delete;
 
     /// Reads a variable as the raw bytes the environment holds.
     ///
@@ -56,7 +56,7 @@ class environment
 /// it, which is why no first-party code may call `setenv()` -- see vtpty's InheritingEnvBlock, which
 /// mutates the environment around CreateProcess() and uses the Win32 API to do it for exactly this
 /// reason.
-class live_environment final: public environment
+class LiveEnvironment final: public Environment
 {
   public:
     /// @param name Name of the variable to look up.
@@ -73,19 +73,19 @@ class live_environment final: public environment
 /// value that changed halfway through would leave that configuration internally inconsistent.
 ///
 /// Thread safe: every lookup, hit or miss, runs under this object's own mutex.
-class caching_environment final: public environment
+class CachingEnvironment final: public Environment
 {
   public:
     /// @param source The environment to read a name from the first time it is asked for. It must
     ///               outlive this object.
-    explicit caching_environment(environment const& source) noexcept;
+    explicit CachingEnvironment(Environment const& source) noexcept;
 
     /// @param name Name of the variable to look up.
     /// @return What @c source answered the first time this name was asked for.
     [[nodiscard]] std::optional<std::string> get(std::string_view name) const override;
 
   private:
-    environment const& _source;
+    Environment const& _source;
     mutable std::mutex _mutex;
     /// Holds the misses too -- a name that is unset is a fact worth remembering, and re-reading it
     /// would be the one case the cache never covered.
@@ -95,10 +95,10 @@ class caching_environment final: public environment
 /// The process-wide environment, cached on first read.
 ///
 /// Composition-root scaffolding, for the free and static functions that have no constructor to take
-/// a collaborator in -- `vtpty::Process::homeDirectory()`, `crispy::app`'s log-filter read, the
-/// developer knobs. Anything with a lifetime takes a @c crispy::environment reference at
+/// a collaborator in -- `vtpty::Process::homeDirectory()`, `crispy::App`'s log-filter read, the
+/// developer knobs. Anything with a lifetime takes a @c crispy::Environment reference at
 /// construction instead; a test can then supply its own answers, which this cannot.
-/// @return A reference to a function-local-static @c caching_environment over a @c live_environment.
-[[nodiscard]] environment& defaultEnvironment();
+/// @return A reference to a function-local-static @c CachingEnvironment over a @c LiveEnvironment.
+[[nodiscard]] Environment& defaultEnvironment();
 
 } // namespace crispy

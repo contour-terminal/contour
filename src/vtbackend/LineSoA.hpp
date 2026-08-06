@@ -21,7 +21,7 @@ namespace vtbackend
 
 /// Convenience alias: 64-byte aligned vector for SIMD-friendly SoA arrays.
 template <typename T>
-using AlignedVector = crispy::aligned_vector<T>;
+using AlignedVector = crispy::AlignedVector<T>;
 
 /// Maximum number of codepoints in a grapheme cluster (matches CompactCell::MaxCodepoints).
 ///

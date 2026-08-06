@@ -51,7 +51,7 @@ class TextRendererTest
     static std::optional<TextureAtlas::TileCreateData> createRasterizedGlyph(
         TextRenderer& renderer,
         atlas::TileLocation tileLocation,
-        text::glyph_key const& glyphKey,
+        text::GlyphKey const& glyphKey,
         unicode::PresentationStyle presentation)
     {
         return renderer.createRasterizedGlyph(tileLocation, glyphKey, presentation);
@@ -98,7 +98,7 @@ class RendererTest
     }
 
     /// Returns the staged pending font size, if a size-only change is staged.
-    [[nodiscard]] static std::optional<text::font_size> pendingFontSize(Renderer const& renderer)
+    [[nodiscard]] static std::optional<text::FontSize> pendingFontSize(Renderer const& renderer)
     {
         if (!renderer._pendingReconfig)
             return std::nullopt;
@@ -267,12 +267,12 @@ ENDFONT
 )";
 
 std::optional<TextureAtlas::TileCreateData> renderSingleGlyph(TextRenderer& renderer,
-                                                              text::shaper& textShaper,
-                                                              text::font_key fontKey,
-                                                              text::font_size fontSize,
+                                                              text::Shaper& textShaper,
+                                                              text::FontKey fontKey,
+                                                              text::FontSize fontSize,
                                                               char32_t codepoint)
 {
-    text::shape_result shaped;
+    text::ShapeResult shaped;
     std::vector<unsigned> clusters(1, 0); // one char, one cluster
 
     textShaper.shape(fontKey,
@@ -287,7 +287,7 @@ std::optional<TextureAtlas::TileCreateData> renderSingleGlyph(TextRenderer& rend
 
     auto const& run = shaped[0];
     auto const glyphIndex = run.glyph.index;
-    auto const glyphKey = glyph_key { .size = fontSize, .font = fontKey, .index = glyphIndex };
+    auto const glyphKey = GlyphKey { .size = fontSize, .font = fontKey, .index = glyphIndex };
 
     return vtrasterizer::TextRendererTest::createRasterizedGlyph(renderer,
                                                                  atlas::TileLocation {}, // Dummy location
@@ -305,7 +305,7 @@ TEST_CASE("TextRenderer", "[renderer]")
 
     auto fontDescriptions = FontDescriptions {};
     fontDescriptions.dpi = DPI { 96, 96 };
-    fontDescriptions.size = font_size { 12.0 };
+    fontDescriptions.size = FontSize { 12.0 };
     fontDescriptions.textShapingEngine = TextShapingEngine::OpenShaper;
 
     constexpr auto RegularBitmapWidth = Width(8);
@@ -314,24 +314,24 @@ TEST_CASE("TextRenderer", "[renderer]")
     // Setup Mock Font Locator
     REQUIRE(std::filesystem::exists(testFontPath));
 
-    auto registry = std::vector<font_description_and_source> {
-        { .description = font_description::parse("regular"),
-          .source = font_path { .value = std::filesystem::absolute(testFontPath).string() } }
+    auto registry = std::vector<FontDescriptionAndSource> {
+        { .description = FontDescription::parse("regular"),
+          .source = FontPath { .value = std::filesystem::absolute(testFontPath).string() } }
     };
-    mock_font_locator::configure(std::move(registry));
+    MockFontLocator::configure(std::move(registry));
 
-    auto fontLocator = std::make_unique<mock_font_locator>();
+    auto fontLocator = std::make_unique<MockFontLocator>();
 
     // Verify locator finds it
-    auto const sources = fontLocator->locate(font_description::parse("regular"));
+    auto const sources = fontLocator->locate(FontDescription::parse("regular"));
     CHECK(!sources.empty());
 
     auto& fontLocatorRef = *fontLocator; // standard usage
-    auto textShaper = open_shaper(DPI { 96, 96 }, fontLocatorRef);
+    auto textShaper = OpenShaper(DPI { 96, 96 }, fontLocatorRef);
 
     // Pre-load font to get valid key
-    auto const regularFontDesc = font_description::parse("regular");
-    auto const regularFontSize = font_size { 9.0 }; // Matches BDF SIZE 9 96 96
+    auto const regularFontDesc = FontDescription::parse("regular");
+    auto const regularFontSize = FontSize { 9.0 }; // Matches BDF SIZE 9 96 96
     auto const regularFontKey = textShaper.load_font(regularFontDesc, regularFontSize);
     REQUIRE(regularFontKey.has_value());
 
@@ -785,14 +785,14 @@ struct ReconfigFixture
     FontDescriptions fontDescriptions = [] {
         auto fd = FontDescriptions {};
         fd.dpi = DPI { 96, 96 };
-        fd.size = text::font_size { 9.0 }; // Matches the BDF test font's SIZE 9 96 96.
+        fd.size = text::FontSize { 9.0 }; // Matches the BDF test font's SIZE 9 96 96.
         fd.textShapingEngine = TextShapingEngine::OpenShaper;
         fd.fontLocator = FontLocatorEngine::Mock;
-        fd.regular = text::font_description::parse("regular");
-        fd.bold = text::font_description::parse("regular");
-        fd.italic = text::font_description::parse("regular");
-        fd.boldItalic = text::font_description::parse("regular");
-        fd.emoji = text::font_description::parse("regular");
+        fd.regular = text::FontDescription::parse("regular");
+        fd.bold = text::FontDescription::parse("regular");
+        fd.italic = text::FontDescription::parse("regular");
+        fd.boldItalic = text::FontDescription::parse("regular");
+        fd.emoji = text::FontDescription::parse("regular");
         return fd;
     }();
 
@@ -816,8 +816,8 @@ struct ReconfigFixture
                  vtrasterizer::PageMargin {},
                  fontDescriptions,
                  colorPalette,
-                 crispy::strong_hashtable_size { 1024 },
-                 crispy::lru_capacity { 4096 },
+                 crispy::StrongHashtableSize { 1024 },
+                 crispy::LRUCapacity { 4096 },
                  /* atlasDirectMapping */ false,
                  Decorator::Underline,
                  Decorator::Underline)
@@ -839,11 +839,11 @@ struct ReconfigFixture
 /// Registers the BDF mock font used by the reconfiguration tests with the global mock locator.
 void configureMockFont()
 {
-    auto registry = std::vector<text::font_description_and_source> {
-        { .description = text::font_description::parse("regular"),
-          .source = text::font_path { .value = std::filesystem::absolute(testFontPath).string() } }
+    auto registry = std::vector<text::FontDescriptionAndSource> {
+        { .description = text::FontDescription::parse("regular"),
+          .source = text::FontPath { .value = std::filesystem::absolute(testFontPath).string() } }
     };
-    text::mock_font_locator::configure(std::move(registry));
+    text::MockFontLocator::configure(std::move(registry));
 }
 
 } // namespace
@@ -940,7 +940,7 @@ TEST_CASE("Renderer.reconfig.font_size_change_is_deferred", "[renderer]")
     auto const publishedBefore = renderer.gridMetrics();
     auto const liveBefore = vtrasterizer::RendererTest::liveGridMetrics(renderer);
 
-    REQUIRE(renderer.setFontSize(text::font_size { 9.0 }));
+    REQUIRE(renderer.setFontSize(text::FontSize { 9.0 }));
 
     // Deferred: nothing observable changed yet, but a reconfiguration is staged.
     CHECK(renderer.gridMetrics().cellSize == publishedBefore.cellSize);
@@ -964,7 +964,7 @@ TEST_CASE("Renderer.reconfig.font_apply_signals_display_to_resize", "[renderer]"
     // No font change yet → nothing to signal.
     CHECK_FALSE(renderer.consumeFontReconfigApplied());
 
-    REQUIRE(renderer.setFontSize(text::font_size { 9.0 }));
+    REQUIRE(renderer.setFontSize(text::FontSize { 9.0 }));
     // Staging alone does not raise the flag; only the render-thread apply does.
     CHECK_FALSE(renderer.consumeFontReconfigApplied());
 
@@ -1076,10 +1076,10 @@ TEST_CASE("Renderer.reconfig.font_load_failure_keeps_previous_font", "[renderer]
 
     // Make every subsequent font load fail: with an empty registry the mock locator returns no source,
     // so load_font() yields nullopt and loadFontKeys() throws (the regular font cannot be loaded).
-    text::mock_font_locator::configure({});
+    text::MockFontLocator::configure({});
 
     auto failing = fixture.fontDescriptions;
-    failing.regular = text::font_description::parse("this-font-does-not-exist");
+    failing.regular = text::FontDescription::parse("this-font-does-not-exist");
     failing.maxFallbackCount += 1; // ensure the descriptions differ so the change is not a no-op
     renderer.setFonts(failing);
 
@@ -1107,7 +1107,7 @@ TEST_CASE("Renderer.reconfig.setup_apply_returns_consumed_font_reconfig_flag", "
 
     // A size-only change that alters the cell size: the setup apply reports the font reconfig and the
     // flag is already consumed, so nothing is left for a later consumer.
-    REQUIRE(renderer.setFontSize(text::font_size { 9.0 }));
+    REQUIRE(renderer.setFontSize(text::FontSize { 9.0 }));
     auto const fontReconfigApplied = renderer.applyStagedReconfigDuringSetup();
     CHECK_FALSE(renderer.consumeFontReconfigApplied()); // consumed inside the setup apply, not here
     // The BDF mock font is fixed-size, so the cell size may or may not change vs the seeded metrics; the
@@ -1132,10 +1132,10 @@ TEST_CASE("Renderer.reconfig.set_font_size_folds_into_pending_set_fonts", "[rend
 
     auto changed = fixture.fontDescriptions;
     changed.maxFallbackCount += 1;
-    changed.size = text::font_size { 9.0 };
+    changed.size = text::FontSize { 9.0 };
 
     renderer.setFonts(changed);
-    REQUIRE(renderer.setFontSize(text::font_size { 9.0 })); // same valid BDF size, folds into pending
+    REQUIRE(renderer.setFontSize(text::FontSize { 9.0 })); // same valid BDF size, folds into pending
 
     // Both the descriptions change and the (folded) size apply together in one pass.
     vtrasterizer::RendererTest::applyPendingReconfig(renderer);
@@ -1158,7 +1158,7 @@ TEST_CASE("Renderer.reconfig.geometry_preserved_across_font_change", "[renderer]
     auto const newPixelSize = vtbackend::ImageSize { Width(1600), Height(900) };
 
     renderer.applyResize(newPixelSize, newPageSize, newMargin);
-    REQUIRE(renderer.setFontSize(text::font_size { 9.0 })); // BDF test font's only available size.
+    REQUIRE(renderer.setFontSize(text::FontSize { 9.0 })); // BDF test font's only available size.
 
     vtrasterizer::RendererTest::applyPendingReconfig(renderer);
 
@@ -1235,7 +1235,7 @@ TEST_CASE("Renderer.reconfig.concurrent_requests_and_apply", "[renderer]")
         if (i % 3 == 0)
             renderer.setPageSize(PageSize { LineCount(lines), ColumnCount(lines * 2) });
         if (i % 11 == 0)
-            (void) renderer.setFontSize(text::font_size { 9.0 }); // BDF font's only valid size.
+            (void) renderer.setFontSize(text::FontSize { 9.0 }); // BDF font's only valid size.
         if (i % 17 == 0)
         {
             // Exercise the full font-descriptions reconfiguration path concurrently as well.
@@ -1292,7 +1292,7 @@ TEST_CASE("Renderer.reconfig.set_font_dpi_folds_staged_size", "[renderer]")
     ReconfigFixture fixture;
     auto& renderer = fixture.renderer;
 
-    REQUIRE(renderer.setFontSize(text::font_size { 9.0 })); // BDF font's only valid size.
+    REQUIRE(renderer.setFontSize(text::FontSize { 9.0 })); // BDF font's only valid size.
     REQUIRE(vtrasterizer::RendererTest::pendingFontSize(renderer).has_value());
 
     renderer.setFontDPI(DPI { 144, 144 });
@@ -1333,7 +1333,7 @@ TEST_CASE("Renderer.reconfig.published_cell_size_tracks_grid_metrics", "[rendere
     CHECK(renderer.publishedCellSize() == renderer.gridMetrics().cellSize);
 
     // After a font apply, the mirror still equals the published cell size.
-    REQUIRE(renderer.setFontSize(text::font_size { 9.0 }));
+    REQUIRE(renderer.setFontSize(text::FontSize { 9.0 }));
     vtrasterizer::RendererTest::applyPendingReconfig(renderer);
     CHECK(renderer.publishedCellSize() == renderer.gridMetrics().cellSize);
 }
@@ -1353,7 +1353,7 @@ TEST_CASE("Renderer.reconfig.page_geometry_preserved_across_dpi_change", "[rende
     vtrasterizer::RendererTest::applyPendingReconfig(renderer);
 
     // Re-stage the same (valid) font size, which exercises updateFontMetrics() in place.
-    REQUIRE(renderer.setFontSize(text::font_size { 9.0 }));
+    REQUIRE(renderer.setFontSize(text::FontSize { 9.0 }));
     vtrasterizer::RendererTest::applyPendingReconfig(renderer);
 
     auto const& live = vtrasterizer::RendererTest::liveGridMetrics(renderer);
@@ -1406,32 +1406,32 @@ constexpr auto CellWidth = 10;
 TEST_CASE("TextRenderer.fallback_run_stays_on_the_cell_grid", "[renderer][fallback]")
 {
     // The primary is a monospaced terminal font with the letters but no prompt ornament: SF Mono.
-    auto primary = text::test::bdf_font { "primary", true, { { U'A', 8 }, { U'B', 8 } } };
+    auto primary = text::test::BDFFont { "primary", true, { { U'A', 8 }, { U'B', 8 } } };
 
     // The fallback is proportional and covers everything the primary is missing -- DejaVu Sans. Its
     // non-breaking space advances a mere 3px against a 10px cell, which is what used to round away to
     // nothing and drag the rest of the run one cell to the left.
-    auto fallback = text::test::bdf_font {
+    auto fallback = text::test::BDFFont {
         "fallback", false, { { Ornament, 12 }, { NoBreakSpace, 3 }, { U'A', 7 }, { U'B', 7 } }
     };
 
-    auto description = text::font_description {};
+    auto description = text::FontDescription {};
     description.familyName = "primary";
-    description.spacing = text::font_spacing::mono;
+    description.spacing = text::FontSpacing::Mono;
 
     auto fallbackDescription = description;
     fallbackDescription.familyName = "fallback";
 
-    mock_font_locator::configure({
+    MockFontLocator::configure({
         { .description = description, .source = primary.source() },
         { .description = fallbackDescription, .source = fallback.source() },
     });
-    auto const _ = crispy::finally { [] { mock_font_locator::configure({}); } };
+    auto const _ = crispy::Finally { [] { MockFontLocator::configure({}); } };
 
-    auto locator = mock_font_locator {};
-    auto textShaper = open_shaper { text::test::bdf_font::Dpi, locator };
+    auto locator = MockFontLocator {};
+    auto textShaper = OpenShaper { text::test::BDFFont::Dpi, locator };
 
-    auto const fontKey = textShaper.load_font(description, text::test::bdf_font::Size);
+    auto const fontKey = textShaper.load_font(description, text::test::BDFFont::Size);
     REQUIRE(fontKey.has_value());
 
     auto const gridMetrics = GridMetrics { .pageSize = PageSize { LineCount(24), ColumnCount(80) },
@@ -1440,8 +1440,8 @@ TEST_CASE("TextRenderer.fallback_run_stays_on_the_cell_grid", "[renderer][fallba
                                            .underline = { .position = 17, .thickness = 1 } };
 
     auto fontDescriptions = FontDescriptions {};
-    fontDescriptions.dpi = text::test::bdf_font::Dpi;
-    fontDescriptions.size = text::test::bdf_font::Size;
+    fontDescriptions.dpi = text::test::BDFFont::Dpi;
+    fontDescriptions.size = text::test::BDFFont::Size;
     fontDescriptions.textShapingEngine = TextShapingEngine::OpenShaper;
 
     auto const fontKeys = FontKeys {
@@ -1516,19 +1516,19 @@ TEST_CASE("TextRenderer.a_scaled_block_draws_one_cell_sized_tile_per_band", "[re
     // to reject. It is the banding half below that gates, and the oversize bound is gated for
     // real by MockAtlasBackend across every renderer test and by the [display] OSC 66 test, both
     // of which run against a scalable font.
-    auto font = text::test::bdf_font { "primary", true, { { U'A', 8 }, { U'B', 8 } } };
+    auto font = text::test::BDFFont { "primary", true, { { U'A', 8 }, { U'B', 8 } } };
 
-    auto description = text::font_description {};
+    auto description = text::FontDescription {};
     description.familyName = "primary";
-    description.spacing = text::font_spacing::mono;
+    description.spacing = text::FontSpacing::Mono;
 
-    mock_font_locator::configure({ { .description = description, .source = font.source() } });
-    auto const _ = crispy::finally { [] { mock_font_locator::configure({}); } };
+    MockFontLocator::configure({ { .description = description, .source = font.source() } });
+    auto const _ = crispy::Finally { [] { MockFontLocator::configure({}); } };
 
-    auto locator = mock_font_locator {};
-    auto textShaper = open_shaper { text::test::bdf_font::Dpi, locator };
+    auto locator = MockFontLocator {};
+    auto textShaper = OpenShaper { text::test::BDFFont::Dpi, locator };
 
-    auto const fontKey = textShaper.load_font(description, text::test::bdf_font::Size);
+    auto const fontKey = textShaper.load_font(description, text::test::BDFFont::Size);
     REQUIRE(fontKey.has_value());
 
     // `baseline` is the DESCENT -- Renderer computes it as lineHeight - ascender -- so it is a few
@@ -1541,8 +1541,8 @@ TEST_CASE("TextRenderer.a_scaled_block_draws_one_cell_sized_tile_per_band", "[re
                                            .underline = { .position = 2, .thickness = 1 } };
 
     auto fontDescriptions = FontDescriptions {};
-    fontDescriptions.dpi = text::test::bdf_font::Dpi;
-    fontDescriptions.size = text::test::bdf_font::Size;
+    fontDescriptions.dpi = text::test::BDFFont::Dpi;
+    fontDescriptions.size = text::test::BDFFont::Size;
     fontDescriptions.textShapingEngine = TextShapingEngine::OpenShaper;
 
     auto const fontKeys = FontKeys {
@@ -1645,7 +1645,7 @@ int main(int argc, char* argv[])
     crispy::suppressWindowsDialogs();
 
     auto const tempDir = std::filesystem::temp_directory_path();
-    auto const _ = crispy::finally { [&] { std::filesystem::remove(testFontPath); } };
+    auto const _ = crispy::Finally { [&] { std::filesystem::remove(testFontPath); } };
 
     testFontPath = tempDir / "contour_test_font.bdf";
 

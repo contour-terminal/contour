@@ -80,8 +80,8 @@ namespace
     /// @param messageSgr SGR prefix for the text.
     /// @param tag What goes in the trailing `[...]` of the tag block.
     /// @return The finished line (or lines), newline-terminated.
-    [[nodiscard]] std::string layOut(message_builder const& message,
-                                     formatter_options const& options,
+    [[nodiscard]] std::string layOut(MessageBuilder const& message,
+                                     FormatterOptions const& options,
                                      std::string_view tagSgr,
                                      std::string_view messageSgr,
                                      std::string_view tag)
@@ -144,9 +144,9 @@ std::optional<std::filesystem::path> parseLogFileSpec(std::string_view spec)
     return std::filesystem::path { spec };
 }
 
-category::formatter makeStandardFormatter(formatter_options options)
+Category::Formatter makeStandardFormatter(FormatterOptions options)
 {
-    return [options](message_builder const& message) -> std::string {
+    return [options](MessageBuilder const& message) -> std::string {
         auto const tagSgr = std::string_view { options.colorize ? "\033[1m" : "" };
         auto messageSgr = std::string {};
         if (options.colorize)
@@ -159,9 +159,9 @@ category::formatter makeStandardFormatter(formatter_options options)
     };
 }
 
-category::formatter makeErrorFormatter(formatter_options options)
+Category::Formatter makeErrorFormatter(FormatterOptions options)
 {
-    return [options](message_builder const& message) -> std::string {
+    return [options](MessageBuilder const& message) -> std::string {
         auto const tagSgr = std::string_view { options.colorize ? "\033[1;31m" : "" };
         auto const messageSgr = std::string_view { options.colorize ? "\033[31m" : "" };
         return layOut(message, options, tagSgr, messageSgr, "error");
@@ -188,7 +188,7 @@ std::vector<std::string> unmatchedFilters(std::string_view filterString)
     return unmatched;
 }
 
-std::expected<std::unique_ptr<scoped_output>, std::string> scoped_output::create(output_config config)
+std::expected<std::unique_ptr<ScopedOutput>, std::string> ScopedOutput::create(OutputConfig config)
 {
     auto file = std::ofstream {};
     if (config.file)
@@ -215,13 +215,13 @@ std::expected<std::unique_ptr<scoped_output>, std::string> scoped_output::create
                 std::format("cannot open log file '{}': {}", config.file->string(), reason));
         }
     }
-    return std::make_unique<scoped_output>(std::move(config), std::move(file));
+    return std::make_unique<ScopedOutput>(std::move(config), std::move(file));
 }
 
-scoped_output::scoped_output(output_config const& config, std::ofstream file):
+ScopedOutput::ScopedOutput(OutputConfig const& config, std::ofstream file):
     _file { std::move(file) },
     _sink { true, [this](std::string_view const& text) {
-               // sink::write hands us the FULLY formatted message, so locking here makes each
+               // Sink::write hands us the FULLY formatted message, so locking here makes each
                // line atomic — precisely the granularity that matters. The write and the flush
                // are one critical section, so two threads cannot interleave a line's bytes.
                auto const guard = std::lock_guard { _mutex };
@@ -236,7 +236,7 @@ scoped_output::scoped_output(output_config const& config, std::ofstream file):
     if (!config.filter.empty())
         configure(config.filter);
 
-    auto const options = formatter_options {
+    auto const options = FormatterOptions {
         // A file must never receive SGR escapes. For stderr the gate is stderr's own
         // tty-ness — note that logstore's console formatter asks about STDOUT while writing
         // to a stream that can be redirected independently.
@@ -246,12 +246,12 @@ scoped_output::scoped_output(output_config const& config, std::ofstream file):
     };
 
     // Snapshot before installing, so the destructor restores exactly what was here — including
-    // whatever crispy::app already set up. Categories constructed AFTER this point are not
+    // whatever crispy::App already set up. Categories constructed AFTER this point are not
     // covered; they default to the console sink, which is why this is installed early.
     for (auto const& each: get())
     {
         auto& target = each.get();
-        _restorePoints.push_back(restore_point {
+        _restorePoints.push_back(RestorePoint {
             .target = &target, .previousSink = &target.sink(), .previousFormatter = target.get_formatter() });
     }
 
@@ -260,7 +260,7 @@ scoped_output::scoped_output(output_config const& config, std::ofstream file):
     set_sink(_sink);
 }
 
-scoped_output::~scoped_output()
+ScopedOutput::~ScopedOutput()
 {
     // MUST run before _sink dies: every category holds a reference_wrapper into it.
     for (auto const& point: _restorePoints)
@@ -270,7 +270,7 @@ scoped_output::~scoped_output()
     }
 }
 
-bool scoped_output::isStdErrTty() noexcept
+bool ScopedOutput::isStdErrTty() noexcept
 {
 #ifndef _WIN32
     return ::isatty(STDERR_FILENO) != 0;
@@ -279,11 +279,11 @@ bool scoped_output::isStdErrTty() noexcept
 #endif
 }
 
-scoped_capture::scoped_capture(std::string_view categoryName):
+ScopedCapture::ScopedCapture(std::string_view categoryName):
     _sink { true, [this](std::string_view const& text) { _text += text; } }
 {
-    auto capture = [this](category& target) {
-        _restorePoints.push_back(restore_point {
+    auto capture = [this](Category& target) {
+        _restorePoints.push_back(RestorePoint {
             .target = &target, .previousSink = &target.sink(), .wasEnabled = target.is_enabled() });
         target.enable();
         target.set_sink(_sink);
@@ -296,7 +296,7 @@ scoped_capture::scoped_capture(std::string_view categoryName):
         capture(*target);
 }
 
-scoped_capture::~scoped_capture()
+ScopedCapture::~ScopedCapture()
 {
     for (auto const& point: _restorePoints)
     {
@@ -305,18 +305,18 @@ scoped_capture::~scoped_capture()
     }
 }
 
-bool scoped_capture::contains(std::string_view needle) const
+bool ScopedCapture::contains(std::string_view needle) const
 {
     return _text.contains(needle);
 }
 
-std::size_t scoped_capture::count(std::string_view needle) const
+std::size_t ScopedCapture::count(std::string_view needle) const
 {
     return static_cast<std::size_t>(
         std::ranges::count_if(lines(), [&](auto const& line) { return line.contains(needle); }));
 }
 
-std::vector<std::string> scoped_capture::lines() const
+std::vector<std::string> ScopedCapture::lines() const
 {
     auto result = std::vector<std::string> {};
     for (auto const line: crispy::split(std::string_view { _text }, '\n'))

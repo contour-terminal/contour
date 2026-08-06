@@ -112,7 +112,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     ///                       NullSpeechSynthesizer, which keeps the suite off the platform's speech
     ///                       service (on Linux that is a speech-dispatcher connection per use).
     /// @param env            The process environment every part of the application reads through.
-    explicit ContourGuiApp(crispy::environment const& env,
+    explicit ContourGuiApp(crispy::Environment const& env,
                            std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
                            std::unique_ptr<platform::ExternalLauncher> externalLauncher = nullptr,
                            std::unique_ptr<config::LayoutStore> layoutStore = nullptr,
@@ -123,7 +123,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(cli::ContourApp::instance()); }
 
     int run(int argc, char const* argv[]) override;
-    [[nodiscard]] crispy::cli::command parameterDefinition() const override;
+    [[nodiscard]] crispy::cli::Command parameterDefinition() const override;
 
     /// Opens a new OS window (loads a fresh Main.qml root).
     /// @param targetScreen The screen the new window should open on (the spawning window's screen),

@@ -121,7 +121,7 @@ class HostedSession
     ///        pump loop ended (the host marshals it onto the loop).
     /// @param env The process environment the hosted terminal reads through.
     HostedSession(vtworkspace::SessionId id,
-                  crispy::environment const& env,
+                  crispy::Environment const& env,
                   std::unique_ptr<vtpty::Pty> pty,
                   vtbackend::Settings settings,
                   std::function<void()> onScreenUpdated,
@@ -252,7 +252,7 @@ class SessionHost final: public vtworkspace::ModelEvents
     SessionHost(net::EventLoop& loop,
                 PtyFactory ptyFactory,
                 vtbackend::Settings settings,
-                crispy::environment const& env,
+                crispy::Environment const& env,
                 bool startPumps = true,
                 ClientSizePolicy sizePolicy = ClientSizePolicy::Latest);
     ~SessionHost() override;
@@ -463,7 +463,7 @@ class SessionHost final: public vtworkspace::ModelEvents
     net::EventLoop& _loop;
     PtyFactory _ptyFactory;
     vtbackend::Settings _settings;
-    crispy::environment const& _environment;
+    crispy::Environment const& _environment;
     vtpty::PageSize _pageSize; ///< The RESOLVED authoritative client area (see pageSize()).
     bool _startPumps;
     ClientSizePolicy _sizePolicy;

@@ -122,7 +122,7 @@ TEST_CASE("fromHexString")
 
 namespace
 {
-struct variable_collector
+struct VariableCollector
 {
     auto operator()(string_view name) const { return std::format("({})", name); }
 };
@@ -131,18 +131,18 @@ struct variable_collector
 TEST_CASE("replaceVariables")
 {
     // clang-format off
-    CHECK(crispy::replaceVariables("", variable_collector()).empty());
-    CHECK("()"sv == crispy::replaceVariables("${}", variable_collector()));
-    CHECK("(Hello)"sv == crispy::replaceVariables("${Hello}", variable_collector()));
-    CHECK("(Hello) World"sv == crispy::replaceVariables("${Hello} World", variable_collector()));
-    CHECK("Hello, (World)!"sv == crispy::replaceVariables("Hello, ${World}!", variable_collector()));
-    CHECK("(one), (two), (three)"sv == crispy::replaceVariables("${one}, ${two}, ${three}", variable_collector()));
+    CHECK(crispy::replaceVariables("", VariableCollector()).empty());
+    CHECK("()"sv == crispy::replaceVariables("${}", VariableCollector()));
+    CHECK("(Hello)"sv == crispy::replaceVariables("${Hello}", VariableCollector()));
+    CHECK("(Hello) World"sv == crispy::replaceVariables("${Hello} World", VariableCollector()));
+    CHECK("Hello, (World)!"sv == crispy::replaceVariables("Hello, ${World}!", VariableCollector()));
+    CHECK("(one), (two), (three)"sv == crispy::replaceVariables("${one}, ${two}, ${three}", VariableCollector()));
 
     // "$${" escapes expansion to a literal "${...}" (SaveLayout round-trip of literal ${...} text).
-    CHECK("${Hello}"sv == crispy::replaceVariables("$${Hello}", variable_collector()));
-    CHECK("${a} (b)"sv == crispy::replaceVariables("$${a} ${b}", variable_collector()));
-    CHECK("s/${VERSION}/1.0/"sv == crispy::replaceVariables("s/$${VERSION}/1.0/", variable_collector()));
-    CHECK("a $ b"sv == crispy::replaceVariables("a $ b", variable_collector())); // lone '$' untouched
+    CHECK("${Hello}"sv == crispy::replaceVariables("$${Hello}", VariableCollector()));
+    CHECK("${a} (b)"sv == crispy::replaceVariables("$${a} ${b}", VariableCollector()));
+    CHECK("s/${VERSION}/1.0/"sv == crispy::replaceVariables("s/$${VERSION}/1.0/", VariableCollector()));
+    CHECK("a $ b"sv == crispy::replaceVariables("a $ b", VariableCollector())); // lone '$' untouched
     // clang-format on
 }
 

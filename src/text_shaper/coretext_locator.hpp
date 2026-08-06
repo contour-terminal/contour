@@ -6,14 +6,14 @@
 
 namespace text
 {
-class coretext_locator: public font_locator
+class CoreTextLocator: public FontLocator
 {
   public:
-    coretext_locator();
+    CoreTextLocator();
 
-    [[nodiscard]] font_source_list locate(font_description const& description) override;
-    [[nodiscard]] font_source_list all() override;
-    [[nodiscard]] font_source_list resolve(gsl::span<char32_t const> codepoints) override;
+    [[nodiscard]] FontSourceList locate(FontDescription const& description) override;
+    [[nodiscard]] FontSourceList all() override;
+    [[nodiscard]] FontSourceList resolve(gsl::span<char32_t const> codepoints) override;
 
   private:
     struct Private;

@@ -18,7 +18,7 @@ using vthost::client::RemoteScreen;
 
 namespace
 {
-    auto const attachLog = logstore::category("gui.attach", "GUI native-attach controller.");
+    auto const attachLog = logstore::Category("gui.attach", "GUI native-attach controller.");
 } // namespace
 
 NativeController::NativeController(vthost::AttachEndpoint endpoint,
@@ -80,7 +80,7 @@ coro::Task<void> NativeController::runClient(net::EventLoop* loop)
     // Forgotten on EVERY exit, not only the epilogue's. An exception other than cancellation
     // unwinds straight past that epilogue (the reactor thread catches it), and `client` is a local
     // — _client would then point at a destroyed object for as long as the controller lives.
-    auto const forgetClient = crispy::finally { [this] {
+    auto const forgetClient = crispy::Finally { [this] {
         auto const lock = std::lock_guard { _mutex };
         _client = nullptr;
     } };

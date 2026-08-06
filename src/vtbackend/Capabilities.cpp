@@ -464,7 +464,7 @@ string StaticDatabase::terminfo() const
 
     for (auto const& cap: strings)
         if (!cap.name.empty() && !cap.value.empty())
-            output << "    " << cap.name << "=" << crispy::escape(cap.value, crispy::numeric_escape::Octal)
+            output << "    " << cap.name << "=" << crispy::escape(cap.value, crispy::NumericEscape::Octal)
                    << ",\n";
 
     return output.str();

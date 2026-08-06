@@ -127,7 +127,7 @@ void UnixPty::Slave::close()
 
 void UnixPty::waitForClosed()
 {
-    crispy::read_selector selector;
+    crispy::ReadSelector selector;
     selector.want_read(_masterFd);
     while (true)
     {
@@ -223,7 +223,7 @@ UnixPty::UnixPty(PageSize pageSize, optional<ImageSize> pixels): _pageSize { pag
 StartResult UnixPty::start()
 {
     auto const handles = createUnixPty(_pageSize, _pixels);
-    _masterFd = crispy::file_descriptor::from_native(unbox<int>(handles.master));
+    _masterFd = crispy::FileDescriptor::from_native(unbox<int>(handles.master));
     _slave = make_unique<Slave>(handles.slave);
 
     if (!util::setFileFlags(_masterFd, O_CLOEXEC | O_NONBLOCK))
@@ -325,7 +325,7 @@ optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
     return string_view { target, static_cast<size_t>(rv) };
 }
 
-std::optional<Pty::ReadResult> UnixPty::read(crispy::buffer_object<char>& storage,
+std::optional<Pty::ReadResult> UnixPty::read(crispy::BufferObject<char>& storage,
                                              std::optional<std::chrono::milliseconds> timeout,
                                              size_t size)
 {
