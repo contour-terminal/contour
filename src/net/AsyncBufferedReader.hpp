@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <expected>
 #include <string>
+#include <string_view>
 
 #include <coro/Task.hpp>
 #include <net/ISocket.hpp>
@@ -55,6 +56,28 @@ class AsyncBufferedReader
     ///         the socket's own read error.
     [[nodiscard]] coro::Task<std::expected<std::string, NetError>> readLine();
 
+    /// Reads until @p delimiter is seen, filling from the socket as needed.
+    ///
+    /// Like @c readLine, every buffered byte is examined at most once across
+    /// refills: the scan resumes at the last position that could still begin a
+    /// match, so a delimiter split across two reads is still found without
+    /// re-searching the prefix.
+    /// @param delimiter The byte sequence to stop after (must not be empty).
+    /// @return The bytes preceding @p delimiter, with the delimiter consumed but
+    ///         not returned; or @c NetErrorCode::Eof once the peer closed before
+    ///         the delimiter arrived (the buffered tail is dropped);
+    ///         @c NetErrorCode::MessageTooLarge if the bound is exceeded first; or
+    ///         the socket's own read error.
+    [[nodiscard]] coro::Task<std::expected<std::string, NetError>> readUntil(std::string_view delimiter);
+
+    /// Reads exactly @p count bytes, filling from the socket as needed.
+    /// @param count The number of bytes to deliver (0 returns an empty string).
+    /// @return The bytes; or @c NetErrorCode::Eof if the peer closed first (the
+    ///         partial tail is dropped — a truncated message is not a message); or
+    ///         the socket's own read error. Not subject to the line-length bound:
+    ///         the caller has already agreed to @p count (e.g. from Content-Length).
+    [[nodiscard]] coro::Task<std::expected<std::string, NetError>> readExactly(std::size_t count);
+
     /// @return The number of bytes buffered but not yet consumed (tests/diagnostics).
     [[nodiscard]] std::size_t buffered() const noexcept { return _buffer.size() - _consumed; }
 
@@ -73,6 +96,10 @@ class AsyncBufferedReader
     [[nodiscard]] std::size_t scannedBytes() const noexcept { return _scannedBytes; }
 
   private:
+    /// Compacts the delivered prefix and appends one chunk read from the socket.
+    /// @return False if the peer closed or the read failed; true if bytes arrived.
+    [[nodiscard]] coro::Task<bool> fill();
+
     ISocket* _socket;              ///< The transport read from (not owned).
     std::size_t _maxLineLength;    ///< Reject lines longer than this.
     std::string _buffer;           ///< Received bytes; [0, _consumed) already delivered.

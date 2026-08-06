@@ -74,6 +74,32 @@ Task<void> readOneLine(AsyncBufferedReader* reader, std::string* line, std::opti
         *error = result.error();
 }
 
+/// Reads up to @p delimiter and reports the outcome through pointers.
+Task<void> readOneUntil(AsyncBufferedReader* reader,
+                        std::string const* delimiter,
+                        std::string* payload,
+                        std::optional<net::NetError>* error)
+{
+    auto result = co_await reader->readUntil(*delimiter);
+    if (result.has_value())
+        *payload = std::move(*result);
+    else
+        *error = result.error();
+}
+
+/// Reads exactly @p count bytes and reports the outcome through pointers.
+Task<void> readOneExactly(AsyncBufferedReader* reader,
+                          std::size_t count,
+                          std::string* payload,
+                          std::optional<net::NetError>* error)
+{
+    auto result = co_await reader->readExactly(count);
+    if (result.has_value())
+        *payload = std::move(*result);
+    else
+        *error = result.error();
+}
+
 } // namespace
 
 TEST_CASE("readLine assembles lines across fragmented reads without re-scanning", "[net][reader]")
@@ -246,4 +272,186 @@ TEST_CASE("readLine works over a real transport through the reactor", "[net][rea
     loop.blockOn(writeThenRead(pair->first.get(), pair->second.get(), &got));
 
     REQUIRE(got == "over the wire");
+}
+
+TEST_CASE("readUntil finds a delimiter split across two reads", "[net][reader]")
+{
+    // The scan-offset optimization must not skip a delimiter straddling a read
+    // boundary: "\r\n\r\n" arrives as "..\r\n" + "\r\n..", so the match begins
+    // in bytes already scanned once.
+    auto fake = FakeSocket {};
+    fake.pushChunk("GET / HTTP/1.1\r\nHost: x\r\n");
+    fake.pushChunk("\r\nbody");
+
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = EventLoop { source };
+    auto reader = AsyncBufferedReader { &fake };
+
+    auto const delimiter = std::string { "\r\n\r\n" };
+    auto head = std::string {};
+    auto error = std::optional<net::NetError> {};
+    loop.blockOn(readOneUntil(&reader, &delimiter, &head, &error));
+
+    REQUIRE_FALSE(error.has_value());
+    REQUIRE(head == "GET / HTTP/1.1\r\nHost: x");
+    REQUIRE(reader.buffered() == 4); // "body" stays for the caller
+}
+
+TEST_CASE("readUntil consumes the delimiter and leaves the remainder buffered", "[net][reader]")
+{
+    auto fake = FakeSocket {};
+    fake.pushChunk("head\r\n\r\ntail");
+
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = EventLoop { source };
+    auto reader = AsyncBufferedReader { &fake };
+
+    auto const delimiter = std::string { "\r\n\r\n" };
+    auto head = std::string {};
+    auto error = std::optional<net::NetError> {};
+    loop.blockOn(readOneUntil(&reader, &delimiter, &head, &error));
+
+    REQUIRE_FALSE(error.has_value());
+    REQUIRE(head == "head");
+
+    // The delimiter itself is consumed, so a following readExactly sees only "tail".
+    auto body = std::string {};
+    loop.blockOn(readOneExactly(&reader, 4, &body, &error));
+    REQUIRE_FALSE(error.has_value());
+    REQUIRE(body == "tail");
+}
+
+TEST_CASE("readUntil reports EOF when the delimiter never arrives", "[net][reader]")
+{
+    auto fake = FakeSocket {};
+    fake.pushChunk("no terminator here");
+
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = EventLoop { source };
+    auto reader = AsyncBufferedReader { &fake };
+
+    auto const delimiter = std::string { "\r\n\r\n" };
+    auto head = std::string {};
+    auto error = std::optional<net::NetError> {};
+    loop.blockOn(readOneUntil(&reader, &delimiter, &head, &error));
+
+    REQUIRE(error.has_value());
+    REQUIRE(error->code == NetErrorCode::Eof);
+}
+
+TEST_CASE("readUntil rejects a message exceeding the bound", "[net][reader]")
+{
+    auto fake = FakeSocket {};
+    fake.pushChunk(std::string(64, 'x'));
+    fake.pushChunk(std::string(64, 'y'));
+
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = EventLoop { source };
+    auto reader = AsyncBufferedReader { &fake, 32 };
+
+    auto const delimiter = std::string { "\r\n\r\n" };
+    auto head = std::string {};
+    auto error = std::optional<net::NetError> {};
+    loop.blockOn(readOneUntil(&reader, &delimiter, &head, &error));
+
+    REQUIRE(error.has_value());
+    REQUIRE(error->code == NetErrorCode::MessageTooLarge);
+}
+
+TEST_CASE("readUntil rejects an empty delimiter", "[net][reader]")
+{
+    auto fake = FakeSocket {};
+    fake.pushChunk("anything");
+
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = EventLoop { source };
+    auto reader = AsyncBufferedReader { &fake };
+
+    auto const delimiter = std::string {};
+    auto head = std::string {};
+    auto error = std::optional<net::NetError> {};
+    loop.blockOn(readOneUntil(&reader, &delimiter, &head, &error));
+
+    REQUIRE(error.has_value());
+    REQUIRE(error->code == NetErrorCode::Other);
+}
+
+TEST_CASE("readExactly assembles a payload across fragmented reads", "[net][reader]")
+{
+    auto fake = FakeSocket {};
+    auto const payload = std::string(100, 'z');
+    for (std::size_t i = 0; i < payload.size(); i += 3)
+        fake.pushChunk(std::string_view { payload }.substr(i, 3));
+
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = EventLoop { source };
+    auto reader = AsyncBufferedReader { &fake };
+
+    auto got = std::string {};
+    auto error = std::optional<net::NetError> {};
+    loop.blockOn(readOneExactly(&reader, payload.size(), &got, &error));
+
+    REQUIRE_FALSE(error.has_value());
+    REQUIRE(got == payload);
+}
+
+TEST_CASE("readExactly of zero bytes returns empty without reading", "[net][reader]")
+{
+    auto fake = FakeSocket {}; // no chunks: any read would be EOF
+
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = EventLoop { source };
+    auto reader = AsyncBufferedReader { &fake };
+
+    auto got = std::string { "sentinel" };
+    auto error = std::optional<net::NetError> {};
+    loop.blockOn(readOneExactly(&reader, 0, &got, &error));
+
+    REQUIRE_FALSE(error.has_value());
+    REQUIRE(got.empty());
+}
+
+TEST_CASE("readExactly reports EOF rather than delivering a truncated payload", "[net][reader]")
+{
+    auto fake = FakeSocket {};
+    fake.pushChunk("only ten!!"); // 10 bytes, 20 requested
+
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = EventLoop { source };
+    auto reader = AsyncBufferedReader { &fake };
+
+    auto got = std::string {};
+    auto error = std::optional<net::NetError> {};
+    loop.blockOn(readOneExactly(&reader, 20, &got, &error));
+
+    REQUIRE(error.has_value());
+    REQUIRE(error->code == NetErrorCode::Eof);
+    REQUIRE(got.empty());
+}
+
+TEST_CASE("readExactly and readLine interleave over one buffer", "[net][reader]")
+{
+    // The framing pattern HttpServer relies on: a delimited head, then a
+    // length-prefixed body, then more lines — all sharing one read cursor.
+    auto fake = FakeSocket {};
+    fake.pushChunk("header\nAB");
+    fake.pushChunk("CDtrailer\n");
+
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = EventLoop { source };
+    auto reader = AsyncBufferedReader { &fake };
+
+    auto first = std::string {};
+    auto error = std::optional<net::NetError> {};
+    loop.blockOn(readOneLine(&reader, &first, &error));
+    REQUIRE(first == "header");
+
+    auto body = std::string {};
+    loop.blockOn(readOneExactly(&reader, 4, &body, &error));
+    REQUIRE(body == "ABCD");
+
+    auto last = std::string {};
+    loop.blockOn(readOneLine(&reader, &last, &error));
+    REQUIRE(last == "trailer");
+    REQUIRE_FALSE(error.has_value());
 }

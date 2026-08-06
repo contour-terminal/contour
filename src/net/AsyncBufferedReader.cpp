@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <net/AsyncBufferedReader.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <span>
@@ -71,6 +72,77 @@ coro::Task<std::expected<std::string, NetError>> AsyncBufferedReader::readLine()
 
         _buffer.append(reinterpret_cast<char const*>(chunk.data()), *got);
     }
+}
+
+coro::Task<std::expected<std::string, NetError>> AsyncBufferedReader::readUntil(std::string_view delimiter)
+{
+    // An empty delimiter would match at every position and never consume input.
+    if (delimiter.empty())
+        co_return std::unexpected(makeNetError(NetErrorCode::Other, 0, "empty delimiter"));
+
+    while (true)
+    {
+        auto const found = _buffer.find(delimiter, _scanOffset);
+        if (found != std::string::npos)
+        {
+            _scannedBytes += (found + delimiter.size()) - _scanOffset;
+            auto payload = _buffer.substr(_consumed, found - _consumed);
+            _consumed = found + delimiter.size();
+            _scanOffset = _consumed;
+            co_return payload;
+        }
+
+        // Resume the next search where a delimiter split across two reads could
+        // still start: the last (delimiter.size() - 1) bytes may be a prefix of it.
+        auto const keep = delimiter.size() - 1;
+        auto const scanned = _buffer.size() - _scanOffset;
+        _scannedBytes += scanned > keep ? scanned - keep : 0;
+        _scanOffset = _buffer.size() > keep ? _buffer.size() - keep : _consumed;
+        _scanOffset = std::max(_scanOffset, _consumed);
+
+        if (_buffer.size() - _consumed > _maxLineLength)
+            co_return std::unexpected(
+                makeNetError(NetErrorCode::MessageTooLarge, 0, "delimited message exceeds bound"));
+
+        if (!co_await fill())
+            co_return std::unexpected(makeNetError(NetErrorCode::Eof, 0, "peer closed"));
+    }
+}
+
+coro::Task<std::expected<std::string, NetError>> AsyncBufferedReader::readExactly(std::size_t count)
+{
+    while (_buffer.size() - _consumed < count)
+        if (!co_await fill())
+            // A truncated body is not a body: drop the partial tail rather than
+            // hand the caller fewer bytes than it asked for.
+            co_return std::unexpected(makeNetError(NetErrorCode::Eof, 0, "peer closed mid-message"));
+
+    auto payload = _buffer.substr(_consumed, count);
+    _consumed += count;
+    _scanOffset = std::max(_scanOffset, _consumed);
+    _scannedBytes += count;
+    co_return payload;
+}
+
+coro::Task<bool> AsyncBufferedReader::fill()
+{
+    // Reclaim the already-delivered prefix before growing. Compacting only here —
+    // when we actually go back to the socket — bounds the buffer to the in-progress
+    // message plus one chunk, without a per-message memmove.
+    if (_consumed > 0)
+    {
+        _buffer.erase(0, _consumed);
+        _scanOffset -= std::min(_scanOffset, _consumed);
+        _consumed = 0;
+    }
+
+    auto chunk = std::array<std::byte, 4096> {};
+    auto const got = co_await _socket->read(chunk);
+    if (!got.has_value() || *got == 0)
+        co_return false;
+
+    _buffer.append(reinterpret_cast<char const*>(chunk.data()), *got);
+    co_return true;
 }
 
 coro::Task<IoResult> appendReadChunk(ISocket* socket, std::vector<std::byte>* buffer)
