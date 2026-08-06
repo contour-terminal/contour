@@ -4,11 +4,13 @@
 // into its block canvas, and cutting that canvas into the cell-sized tiles the atlas can store.
 
 #include <vtrasterizer/GlyphSlicing.hpp>
+#include <vtrasterizer/TextureAtlas.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <ranges>
 #include <string>
+#include <vector>
 
 using namespace vtrasterizer;
 using vtbackend::Height;
@@ -348,3 +350,74 @@ TEST_CASE("GlyphSlicing.subKey.is_unique_per_cell_and_never_zero", "[glyphslicin
             seen.emplace_back(key);
         }
 }
+
+// {{{ atlas::sliced(): the tile-slice iteration a wide bitmap is cut along.
+//
+// Every slice must stay inside the bitmap, and the iteration must terminate. Both failed for a bitmap
+// whose width is not a whole number of tiles — see TextureAtlas.h's offsetForEndX(). Unreachable from
+// the only current caller (CursorRenderer always slices an exact multiple), so these pin the contract
+// for the next one rather than a live regression.
+namespace
+{
+/// Collects the slices, with a hard cap so a non-terminating iteration fails the test instead of
+/// hanging the suite.
+std::vector<vtrasterizer::atlas::TileSliceIndex> collectSlices(Width tileWidth, ImageSize bitmapSize)
+{
+    auto out = std::vector<vtrasterizer::atlas::TileSliceIndex> {};
+    for (auto const slice: vtrasterizer::atlas::sliced(tileWidth, 0, bitmapSize))
+    {
+        out.push_back(slice);
+        if (out.size() > 64)
+            break; // runaway: the caller's CHECK on size() reports it
+    }
+    return out;
+}
+} // namespace
+
+TEST_CASE("atlas.sliced.exactMultiple", "[vtrasterizer][atlas]")
+{
+    // The case the only caller produces: width is a whole number of tiles, so the slices tile it exactly.
+    auto const slices = collectSlices(Width(8), ImageSize { Width(24), Height(4) });
+    REQUIRE(slices.size() == 3);
+    CHECK(slices[0].beginX == 0);
+    CHECK(slices[0].endX == 8);
+    CHECK(slices[2].beginX == 16);
+    CHECK(slices[2].endX == 24); // ends exactly at the edge
+}
+
+TEST_CASE("atlas.sliced.partialTrailingSliceStaysInsideTheBitmap", "[vtrasterizer][atlas]")
+{
+    // 20 wide over 8-wide tiles: the last slice is a PARTIAL one and must stop at 20, not run to 24.
+    // Overrunning made sliceTileData() read past the row; its SoftRequire then broke out mid-copy and
+    // left the rest of the tile zero-filled while it still claimed full height.
+    auto const slices = collectSlices(Width(8), ImageSize { Width(20), Height(4) });
+    REQUIRE(slices.size() == 3);
+    CHECK(slices[2].beginX == 16);
+    CHECK(slices[2].endX == 20); // clamped, was 24
+
+    for (auto const& slice: slices)
+    {
+        INFO("slice " << slice.sliceIndex << " [" << slice.beginX << ", " << slice.endX << ")");
+        CHECK(slice.endX <= 20);
+        CHECK(slice.beginX < slice.endX); // no empty or inverted slice
+    }
+}
+
+TEST_CASE("atlas.sliced.terminatesWhenWidthIsNotTileAligned", "[vtrasterizer][atlas]")
+{
+    // 17 over 8 was the non-terminating case: the old sentinel was 18, which the sequence 0, 8, 16, 24…
+    // never equals, so the iterators never compared equal.
+    auto const slices = collectSlices(Width(8), ImageSize { Width(17), Height(4) });
+    REQUIRE(slices.size() == 3); // [0,8) [8,16) [16,17)
+    CHECK(slices[2].endX == 17);
+}
+
+TEST_CASE("atlas.sliced.narrowerThanOneTile", "[vtrasterizer][atlas]")
+{
+    // A bitmap smaller than a single tile is one slice covering exactly it.
+    auto const slices = collectSlices(Width(8), ImageSize { Width(5), Height(4) });
+    REQUIRE(slices.size() == 1);
+    CHECK(slices[0].beginX == 0);
+    CHECK(slices[0].endX == 5);
+}
+// }}}

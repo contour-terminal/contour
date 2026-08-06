@@ -8,6 +8,7 @@
 #include <crispy/StrongHash.hpp>
 #include <crispy/StrongLRUHashtable.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <format>
 #include <variant> // monostate
@@ -397,6 +398,7 @@ constexpr auto sliced(vtbackend::Width tileWidth, uint32_t offsetX, vtbackend::I
         struct iterator // NOLINT(readability-identifier-naming)
         {
             vtbackend::Width tileWidth;
+            uint32_t bitmapWidth; //!< Clamps the last slice; see the endX assignments below.
             TileSliceIndex value;
             constexpr TileSliceIndex const& operator*() const noexcept { return value; }
             constexpr bool operator==(iterator const& rhs) const noexcept
@@ -411,30 +413,51 @@ constexpr auto sliced(vtbackend::Width tileWidth, uint32_t offsetX, vtbackend::I
             {
                 value.sliceIndex++;
                 value.beginX = value.endX;
-                value.endX += unbox(tileWidth);
+                // Clamp: a trailing partial slice ends AT the bitmap's edge, not a full tile past its
+                // start. Without this the last slice of a bitmap whose width is not a whole number of
+                // tiles spans past the row, and sliceTileData() reads out of bounds.
+                value.endX = std::min(value.endX + unbox(tileWidth), bitmapWidth);
                 return *this;
             }
         };
 
-        [[nodiscard]] constexpr uint32_t offsetForEndX() const noexcept
-        {
-            auto const c = unbox(bitmapSize.width) % unbox(tileWidth);
-            return unbox(bitmapSize.width) + c;
-        }
+        /// The sentinel beginX the iteration stops at: the bitmap's width.
+        ///
+        /// It must be a value beginX actually *takes*, because the iterators compare beginX for equality.
+        /// Since endX is clamped to the width, beginX walks tileWidth at a time and then lands exactly on
+        /// the width — for both an exact multiple and a partial trailing slice.
+        ///
+        /// This used to return `width + (width % tileWidth)`, which is neither the width nor a slice
+        /// boundary. For width 20 / tile 8 it gave 24, one slice too many: the last slice spanned [16,24)
+        /// over a 20-wide bitmap, so sliceTileData() read past the row, and its SoftRequire then broke out
+        /// mid-copy — leaving the remaining rows zero-filled while the tile still claimed full height.
+        /// For width 17 / tile 8 it gave 18, which the sequence 0, 8, 16, … never hits at all: the
+        /// iteration did not terminate.
+        ///
+        /// Both are unreachable from the only current caller (CursorRenderer slices a bitmap whose width
+        /// is an exact multiple of the tile width), which is why this lay dormant; it is a trap for the
+        /// next one.
+        [[nodiscard]] constexpr uint32_t offsetForEndX() const noexcept { return unbox(bitmapSize.width); }
 
         [[nodiscard]] constexpr iterator begin() noexcept
         {
+            // A zero tile width cannot advance beginX, so the iteration would never reach the sentinel:
+            // yield the empty range rather than spin.
+            if (unbox(tileWidth) == 0)
+                return end();
             return iterator { .tileWidth = tileWidth,
+                              .bitmapWidth = unbox(bitmapSize.width),
                               .value = TileSliceIndex {
-                                  .sliceIndex = 0,         // index
-                                  .beginX = offsetX,       // begin
-                                  .endX = unbox(tileWidth) // end
+                                  .sliceIndex = 0,                                            // index
+                                  .beginX = offsetX,                                          // begin
+                                  .endX = std::min(unbox(tileWidth), unbox(bitmapSize.width)) // end
                               } };
         }
 
         [[nodiscard]] constexpr iterator end() noexcept
         {
             return iterator { .tileWidth = tileWidth,
+                              .bitmapWidth = unbox(bitmapSize.width),
                               .value = TileSliceIndex {
                                   .sliceIndex = 0,           // index (irrelevant, undefined)
                                   .beginX = offsetForEndX(), // begin
