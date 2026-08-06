@@ -150,22 +150,16 @@ FdToken KqueueEventSource::attach(NativeHandle fd, FdInterest interest)
         return FdToken::invalid();
     }
 
-    _applied.emplace(token.value, interest);
+    _registered.emplace(token.value, fd);
     return token;
 }
 
 void KqueueEventSource::detach(FdToken token)
 {
-    if (auto const it = _applied.find(token.value); it != _applied.end())
+    if (auto const it = _registered.find(token.value); it != _registered.end())
     {
-        for (auto const& reg: _registry.registrations())
-        {
-            if (reg.token != token)
-                continue;
-            dropFilters(reg.fd);
-            break;
-        }
-        _applied.erase(it);
+        dropFilters(it->second);
+        _registered.erase(it);
     }
     _registry.detach(token);
 }
@@ -175,17 +169,6 @@ WaitOutcome KqueueEventSource::wait(int timeoutMs)
     auto outcome = WaitOutcome {};
     if (_kq < 0)
         return outcome;
-
-    // Reconcile any interest the loop changed since the last wait. The registry is
-    // the source of truth; the kernel holds a cached copy that only this loop edits.
-    for (auto const& reg: _registry.registrations())
-    {
-        auto const it = _applied.find(reg.token.value);
-        if (it == _applied.end() || it->second == reg.interest)
-            continue;
-        if (applyInterest(reg.fd, reg.interest, reg.token))
-            it->second = reg.interest;
-    }
 
     auto const timeout = toTimespec(timeoutMs);
     auto const* const timeoutPtr = timeout.has_value() ? &*timeout : nullptr;

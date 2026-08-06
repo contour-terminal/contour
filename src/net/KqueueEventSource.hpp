@@ -32,9 +32,11 @@ namespace net
 /// An @c EventSource backed by a kqueue.
 ///
 /// The kqueue filter set is kept in step with the @c FdRegistry: @c attach arms the
-/// requested filters, @c detach drops them, and a changed interest mask is pushed on
-/// the next @c wait. Registration failures surface as @c FdToken::invalid() so the
-/// awaiting flow fails rather than parking on a filter the kernel never armed.
+/// requested filters, @c detach drops them. Interest is fixed for a registration's
+/// lifetime — @c EventLoop only ever attaches and detaches — so a wait costs nothing
+/// beyond the kevent() itself. Registration failures surface as
+/// @c FdToken::invalid() so the awaiting flow fails rather than parking on a filter
+/// the kernel never armed.
 class KqueueEventSource: public EventSource
 {
   public:
@@ -70,6 +72,12 @@ class KqueueEventSource: public EventSource
     /// never armed fails with `ENOENT`, so the routine "no read, yes write" case —
     /// a write parking while no read is outstanding — would abort on the read
     /// delete and never arm the write filter, parking that write forever.
+    /// Returns `bool` rather than `std::expected` deliberately: this is a private
+    /// helper whose only caller turns a failure into @c FdToken::invalid(), which
+    /// is all the @c EventSource interface can express.
+    /// @param fd The descriptor whose filters to arm or drop.
+    /// @param interest The readiness bits to watch.
+    /// @param token The registration's identity, echoed back by @c wait.
     /// @return True if every change applied (an `ENOENT` on a filter being dropped
     ///         is the normal steady state, not a failure).
     [[nodiscard]] bool applyInterest(NativeHandle fd, FdInterest interest, FdToken token) const noexcept;
@@ -79,7 +87,11 @@ class KqueueEventSource: public EventSource
 
     FdRegistry _registry;                                   ///< Watched fds, in registration order.
     int _kq = -1;                                           ///< The kqueue (owned).
-    std::unordered_map<std::uint64_t, FdInterest> _applied; ///< Interest last pushed, keyed by token.
+    /// The fd each live registration names, so detach can drop the kernel
+    /// registration in O(1) without scanning the registry. Interest itself is
+    /// fixed at attach — EventLoop only ever attaches and detaches — so there
+    /// is nothing to reconcile per wait.
+    std::unordered_map<std::uint64_t, NativeHandle> _registered;
 };
 
 } // namespace net

@@ -12,6 +12,12 @@
 namespace net
 {
 
+namespace
+{
+    /// How many bytes one refill asks the socket for.
+    constexpr std::size_t ReadChunkSize = 4096;
+} // namespace
+
 coro::Task<std::expected<std::string, NetError>> AsyncBufferedReader::readLine()
 {
     while (true)
@@ -51,26 +57,10 @@ coro::Task<std::expected<std::string, NetError>> AsyncBufferedReader::readLine()
         if (_buffer.size() - _consumed > _maxLineLength)
             co_return std::unexpected(makeNetError(NetErrorCode::MessageTooLarge, 0, "line exceeds bound"));
 
-        // Reclaim the already-delivered prefix before growing the buffer. Compacting
-        // here — only when we actually go back to the socket — bounds the buffer to
-        // the in-progress line plus one chunk, without a per-line memmove.
-        if (_consumed > 0)
-        {
-            _buffer.erase(0, _consumed);
-            _scanOffset -= _consumed;
-            _consumed = 0;
-        }
-
-        auto chunk = std::array<std::byte, 4096> {};
-        auto const got = co_await _socket->read(chunk);
-        if (!got.has_value())
-            co_return std::unexpected(got.error());
-        if (*got == 0)
-            // Peer closed. A buffered unterminated tail is dropped deliberately:
-            // the connection died mid-line, so there is no valid line to deliver.
-            co_return std::unexpected(makeNetError(NetErrorCode::Eof, 0, "peer closed"));
-
-        _buffer.append(reinterpret_cast<char const*>(chunk.data()), *got);
+        // A buffered unterminated tail is dropped deliberately on EOF: the
+        // connection died mid-line, so there is no valid line to deliver.
+        if (auto filled = co_await fill(); !filled.has_value())
+            co_return std::unexpected(filled.error());
     }
 }
 
@@ -104,18 +94,18 @@ coro::Task<std::expected<std::string, NetError>> AsyncBufferedReader::readUntil(
             co_return std::unexpected(
                 makeNetError(NetErrorCode::MessageTooLarge, 0, "delimited message exceeds bound"));
 
-        if (!co_await fill())
-            co_return std::unexpected(makeNetError(NetErrorCode::Eof, 0, "peer closed"));
+        if (auto filled = co_await fill(); !filled.has_value())
+            co_return std::unexpected(filled.error());
     }
 }
 
 coro::Task<std::expected<std::string, NetError>> AsyncBufferedReader::readExactly(std::size_t count)
 {
+    // A truncated body is not a body: on EOF drop the partial tail rather than
+    // hand the caller fewer bytes than it asked for.
     while (_buffer.size() - _consumed < count)
-        if (!co_await fill())
-            // A truncated body is not a body: drop the partial tail rather than
-            // hand the caller fewer bytes than it asked for.
-            co_return std::unexpected(makeNetError(NetErrorCode::Eof, 0, "peer closed mid-message"));
+        if (auto filled = co_await fill(); !filled.has_value())
+            co_return std::unexpected(filled.error());
 
     auto payload = _buffer.substr(_consumed, count);
     _consumed += count;
@@ -124,7 +114,7 @@ coro::Task<std::expected<std::string, NetError>> AsyncBufferedReader::readExactl
     co_return payload;
 }
 
-coro::Task<bool> AsyncBufferedReader::fill()
+coro::Task<std::expected<void, NetError>> AsyncBufferedReader::fill()
 {
     // Reclaim the already-delivered prefix before growing. Compacting only here —
     // when we actually go back to the socket — bounds the buffer to the in-progress
@@ -136,13 +126,15 @@ coro::Task<bool> AsyncBufferedReader::fill()
         _consumed = 0;
     }
 
-    auto chunk = std::array<std::byte, 4096> {};
+    auto chunk = std::array<std::byte, ReadChunkSize> {};
     auto const got = co_await _socket->read(chunk);
-    if (!got.has_value() || *got == 0)
-        co_return false;
+    if (!got.has_value())
+        co_return std::unexpected(got.error());
+    if (*got == 0)
+        co_return std::unexpected(makeNetError(NetErrorCode::Eof, 0, "peer closed"));
 
     _buffer.append(reinterpret_cast<char const*>(chunk.data()), *got);
-    co_return true;
+    co_return {};
 }
 
 coro::Task<IoResult> appendReadChunk(ISocket* socket, std::vector<std::byte>* buffer)

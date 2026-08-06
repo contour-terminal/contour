@@ -36,10 +36,19 @@ class FakeSocket final: public net::ISocket
     /// chunks are the fragmentation under test).
     void pushChunk(std::string_view bytes) { _chunks.emplace_back(bytes); }
 
+    /// Makes the read AFTER the scripted chunks fail with @p code instead of
+    /// reporting a clean EOF — the transport-failure case, distinct from the peer
+    /// simply closing.
+    void failAfterChunks(net::NetErrorCode code) { _failure = code; }
+
     Task<net::IoResult> read(std::span<std::byte> buffer) override
     {
         if (_chunks.empty())
+        {
+            if (_failure.has_value())
+                co_return std::unexpected(net::makeNetError(*_failure, 0, "injected failure"));
             co_return std::size_t { 0 }; // clean EOF
+        }
         auto& front = _chunks.front();
         auto const n = std::min(front.size(), buffer.size());
         std::memcpy(buffer.data(), front.data(), n);
@@ -60,6 +69,7 @@ class FakeSocket final: public net::ISocket
 
   private:
     std::deque<std::string> _chunks;
+    std::optional<net::NetErrorCode> _failure;
     bool _closed = false;
 };
 
@@ -454,4 +464,65 @@ TEST_CASE("readExactly and readLine interleave over one buffer", "[net][reader]"
     loop.blockOn(readOneLine(&reader, &last, &error));
     REQUIRE(last == "trailer");
     REQUIRE_FALSE(error.has_value());
+}
+
+TEST_CASE("a transport failure is reported as itself, not as EOF", "[net][reader]")
+{
+    // A connection reset must not be delivered as a clean end-of-message: the
+    // caller would conclude the peer finished sending when the transport actually
+    // failed. Each reader shares one refill path, so all three are checked.
+    SECTION("readLine")
+    {
+        auto fake = FakeSocket {};
+        fake.pushChunk("no terminator");
+        fake.failAfterChunks(NetErrorCode::ConnReset);
+
+        auto source = net::testing::ScriptedEventSource {};
+        auto loop = EventLoop { source };
+        auto reader = AsyncBufferedReader { &fake };
+
+        auto got = std::string {};
+        auto error = std::optional<net::NetError> {};
+        loop.blockOn(readOneLine(&reader, &got, &error));
+
+        REQUIRE(error.has_value());
+        REQUIRE(error->code == NetErrorCode::ConnReset);
+    }
+
+    SECTION("readUntil")
+    {
+        auto fake = FakeSocket {};
+        fake.pushChunk("head");
+        fake.failAfterChunks(NetErrorCode::ConnReset);
+
+        auto source = net::testing::ScriptedEventSource {};
+        auto loop = EventLoop { source };
+        auto reader = AsyncBufferedReader { &fake };
+
+        auto const delimiter = std::string { "\r\n\r\n" };
+        auto got = std::string {};
+        auto error = std::optional<net::NetError> {};
+        loop.blockOn(readOneUntil(&reader, &delimiter, &got, &error));
+
+        REQUIRE(error.has_value());
+        REQUIRE(error->code == NetErrorCode::ConnReset);
+    }
+
+    SECTION("readExactly")
+    {
+        auto fake = FakeSocket {};
+        fake.pushChunk("abc");
+        fake.failAfterChunks(NetErrorCode::ConnReset);
+
+        auto source = net::testing::ScriptedEventSource {};
+        auto loop = EventLoop { source };
+        auto reader = AsyncBufferedReader { &fake };
+
+        auto got = std::string {};
+        auto error = std::optional<net::NetError> {};
+        loop.blockOn(readOneExactly(&reader, 16, &got, &error));
+
+        REQUIRE(error.has_value());
+        REQUIRE(error->code == NetErrorCode::ConnReset);
+    }
 }

@@ -59,17 +59,14 @@ EpollEventSource::~EpollEventSource()
         ::close(_epollFd);
 }
 
-bool EpollEventSource::applyInterest(int op,
-                                     NativeHandle fd,
-                                     FdInterest interest,
-                                     FdToken token) const noexcept
+bool EpollEventSource::applyInterest(NativeHandle fd, FdInterest interest, FdToken token) const noexcept
 {
     auto event = epoll_event {};
     event.events = toEpollEvents(interest);
     // The token, not the fd, identifies the registration: two registrations may
     // share an fd, and the token is what the loop maps back to a parked coroutine.
     event.data.u64 = token.value;
-    return ::epoll_ctl(_epollFd, op, fd, &event) == 0;
+    return ::epoll_ctl(_epollFd, EPOLL_CTL_ADD, fd, &event) == 0;
 }
 
 FdToken EpollEventSource::attach(NativeHandle fd, FdInterest interest)
@@ -84,30 +81,23 @@ FdToken EpollEventSource::attach(NativeHandle fd, FdInterest interest)
     // A failed registration must not leave the registry claiming the fd is watched:
     // the awaiting flow has to fail rather than park on an interest the kernel never
     // accepted, which nothing could ever resume.
-    if (!applyInterest(EPOLL_CTL_ADD, fd, interest, token))
+    if (!applyInterest(fd, interest, token))
     {
         _registry.detach(token);
         return FdToken::invalid();
     }
 
-    _applied.emplace(token.value, interest);
+    _registered.emplace(token.value, fd);
     return token;
 }
 
 void EpollEventSource::detach(FdToken token)
 {
-    if (auto const it = _applied.find(token.value); it != _applied.end())
+    if (auto const it = _registered.find(token.value); it != _registered.end())
     {
-        // Find the fd this token names before dropping it from the registry.
-        for (auto const& reg: _registry.registrations())
-        {
-            if (reg.token != token)
-                continue;
-            auto event = epoll_event {};
-            ::epoll_ctl(_epollFd, EPOLL_CTL_DEL, reg.fd, &event);
-            break;
-        }
-        _applied.erase(it);
+        auto event = epoll_event {};
+        ::epoll_ctl(_epollFd, EPOLL_CTL_DEL, it->second, &event);
+        _registered.erase(it);
     }
     _registry.detach(token);
 }
@@ -117,17 +107,6 @@ WaitOutcome EpollEventSource::wait(int timeoutMs)
     auto outcome = WaitOutcome {};
     if (_epollFd < 0)
         return outcome;
-
-    // Reconcile any interest the loop changed since the last wait. The registry is
-    // the source of truth; the kernel holds a cached copy that only this loop edits.
-    for (auto const& reg: _registry.registrations())
-    {
-        auto const it = _applied.find(reg.token.value);
-        if (it == _applied.end() || it->second == reg.interest)
-            continue;
-        if (applyInterest(EPOLL_CTL_MOD, reg.fd, reg.interest, reg.token))
-            it->second = reg.interest;
-    }
 
     // Nothing to watch: honour the timeout so a parked timer can still fire, and
     // treat an infinite timeout as a benign timeout rather than blocking forever

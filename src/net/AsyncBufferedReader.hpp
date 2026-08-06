@@ -97,8 +97,11 @@ class AsyncBufferedReader
 
   private:
     /// Compacts the delivered prefix and appends one chunk read from the socket.
-    /// @return False if the peer closed or the read failed; true if bytes arrived.
-    [[nodiscard]] coro::Task<bool> fill();
+    /// @return Nothing on success; @c NetErrorCode::Eof once the peer closed, or the
+    ///         socket's own error. The two are kept distinct on purpose: reporting a
+    ///         connection reset as a clean EOF would tell the caller the message
+    ///         simply ended when in fact the transport failed.
+    [[nodiscard]] coro::Task<std::expected<void, NetError>> fill();
 
     ISocket* _socket;              ///< The transport read from (not owned).
     std::size_t _maxLineLength;    ///< Reject lines longer than this.

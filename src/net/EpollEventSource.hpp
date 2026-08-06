@@ -35,10 +35,11 @@ namespace net
 /// An @c EventSource backed by an epoll instance.
 ///
 /// The epoll set is kept in step with the @c FdRegistry: @c attach adds the
-/// descriptor, @c detach removes it, and a changed interest mask is pushed with
-/// `EPOLL_CTL_MOD` on the next @c wait. Registration failures surface as
-/// @c FdToken::invalid() so the awaiting flow fails rather than parking on an
-/// interest the kernel never accepted.
+/// descriptor with its interest, @c detach removes it. Interest is fixed for a
+/// registration's lifetime — @c EventLoop only ever attaches and detaches, and
+/// @c FdRegistry exposes no way to change it — so a wait costs nothing beyond the
+/// epoll_wait itself. Registration failures surface as @c FdToken::invalid() so the
+/// awaiting flow fails rather than parking on an interest the kernel never accepted.
 class EpollEventSource: public EventSource
 {
   public:
@@ -67,16 +68,25 @@ class EpollEventSource: public EventSource
     [[nodiscard]] std::size_t attachedCount() const noexcept { return _registry.size(); }
 
   private:
-    /// Pushes @p interest for @p fd into the kernel with @p op.
+    /// Registers @p fd with @p interest.
+    ///
+    /// Returns `bool` rather than `std::expected` deliberately: this is a private
+    /// helper whose only caller turns a failure into @c FdToken::invalid(), which
+    /// is all the @c EventSource interface can express. There is nowhere for a
+    /// richer error to go, so carrying one would be discarded at the next frame.
+    /// @param fd The descriptor to register.
+    /// @param interest The readiness bits to watch.
+    /// @param token The registration's identity, echoed back by @c wait.
     /// @return True if the epoll_ctl call succeeded.
-    [[nodiscard]] bool applyInterest(int op,
-                                     NativeHandle fd,
-                                     FdInterest interest,
-                                     FdToken token) const noexcept;
+    [[nodiscard]] bool applyInterest(NativeHandle fd, FdInterest interest, FdToken token) const noexcept;
 
     FdRegistry _registry;                                   ///< Watched fds, in registration order.
     int _epollFd = -1;                                      ///< The epoll instance (owned).
-    std::unordered_map<std::uint64_t, FdInterest> _applied; ///< Interest last pushed, keyed by token.
+    /// The fd each live registration names, so detach can drop the kernel
+    /// registration in O(1) without scanning the registry. Interest itself is
+    /// fixed at attach — EventLoop only ever attaches and detaches — so there
+    /// is nothing to reconcile per wait.
+    std::unordered_map<std::uint64_t, NativeHandle> _registered;
 };
 
 } // namespace net
