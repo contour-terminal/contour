@@ -573,6 +573,45 @@ TEST_CASE("a Kitty-flag reset carried by a snapshot reaches the mirror", "[vthos
     h.loop.blockOn(drive(&h, std::move(scenario)));
 }
 
+TEST_CASE("the progress indicator mirrors", "[vthost][mirror]")
+{
+    // OSC 9;4 is per-session state, so it rides the gated delta and the snapshot alike — a thin
+    // client must show the same bar the fat client would, including one already in flight when it
+    // attaches.
+    auto h = MirrorHarness {};
+    h.host.createTab();
+    auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    h.serverTerminal(session)->writeToScreen("shell-ready");
+
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
+        co_await waitUntil(&h->loop, [&] {
+            return h->mirror->primaryScreen().grid().renderMainPageText().contains("shell-ready");
+        });
+        REQUIRE(h->mirror->progress() == vtbackend::Progress {});
+
+        serverWrites(h, session, "\033]9;4;1;40\033\\");
+        co_await waitUntil(&h->loop, [&] { return h->mirror->progress().percentage == 40; });
+        CHECK(h->mirror->progress()
+              == vtbackend::Progress { .state = vtbackend::ProgressState::Normal, .percentage = 40 });
+
+        // A state carrying no percentage of its own keeps the one already mirrored, so the client
+        // must be applying the server's RESOLVED progress rather than re-deriving it.
+        serverWrites(h, session, "\033]9;4;2\033\\");
+        co_await waitUntil(&h->loop,
+                           [&] { return h->mirror->progress().state == vtbackend::ProgressState::Error; });
+        CHECK(h->mirror->progress().percentage == 40);
+
+        // And a withdrawal inside a snapshot must arrive too — the re-attach replay path.
+        co_await resetInsideSnapshot(h, session, "\033]9;4;0\033\\");
+        REQUIRE(h->serverTerminal(session)->progress() == vtbackend::Progress {});
+        CHECK(h->mirror->progress() == vtbackend::Progress {});
+
+        h->client->detach();
+    }(&h, session);
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+
 TEST_CASE("xterm's modifyOtherKeys level mirrors", "[vthost][mirror]")
 {
     // The other protocol an app uses to ask for modified keys as escape sequences. It

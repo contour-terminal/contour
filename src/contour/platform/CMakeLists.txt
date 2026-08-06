@@ -28,6 +28,7 @@ add_library(contour_platform STATIC
     QtInvoke.hpp
     QtPath.hpp
     SpeechSynthesizer.cpp SpeechSynthesizer.hpp
+    TaskbarProgressRouter.hpp
 )
 set_target_properties(contour_platform PROPERTIES AUTOMOC ON)
 

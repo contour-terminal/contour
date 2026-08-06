@@ -112,6 +112,10 @@ class WindowController:
         SessionIdRole = Qt::UserRole + 5, //!< The session id of the tab's active leaf.
         RawTitleRole = Qt::UserRole + 6,  //!< Un-expanded runtime rename template (empty if never renamed).
         ZoomedRole = Qt::UserRole + 7, //!< Whether this tab's active pane is zoomed (see vtworkspace::Tab).
+        //!< The active pane's OSC 9;4 progress state, as the vtbackend::ProgressState enumerator's
+        //!< value (0 = inactive, i.e. nothing to paint). @see vtbackend::ProgressState.
+        ProgressStateRole = Qt::UserRole + 8,
+        ProgressPercentageRole = Qt::UserRole + 9, //!< The active pane's progress percentage, 0..100.
     };
 
     /// @param manager  The session-lifetime service + model host (must outlive this controller).

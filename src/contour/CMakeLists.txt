@@ -574,6 +574,7 @@ if(CONTOUR_FRONTEND_GUI)
             session/FocusRouting_test.cpp
             window/MultiWindow_test.cpp
             platform/NotificationRouter_test.cpp
+            platform/TaskbarProgressRouter_test.cpp
             test/QmlDiagnosticPredicate_test.cpp
             display/RenderingBackendSelection_test.cpp
             display/ScissorRect_test.cpp

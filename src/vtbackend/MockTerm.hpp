@@ -213,6 +213,21 @@ class MockTerm: public Terminal::NullEvents
         ++windowFrameColorChangeCount;
     }
 
+    /// Every desktop notification raised, as (title, body), in order. Recorded so a test can assert
+    /// that a sequence did NOT raise one -- which is how the OSC 9;4 handler proves it no longer
+    /// mistakes a progress sequence for a ConEmu notification.
+    std::vector<std::pair<std::string, std::string>> notifications;
+
+    void notify(std::string_view title, std::string_view body) override
+    {
+        notifications.emplace_back(std::string { title }, std::string { body });
+    }
+
+    /// Every progress-indicator notification (OSC 9;4), in order. @see Terminal::setProgress.
+    std::vector<Progress> progressNotifications;
+
+    void progressChanged(Progress progress) override { progressNotifications.push_back(progress); }
+
     static vtbackend::Settings createSettings(PageSize pageSize,
                                               LineCount maxHistoryLineCount,
                                               size_t ptyReadBufferSize)

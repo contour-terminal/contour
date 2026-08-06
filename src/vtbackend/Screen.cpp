@@ -4133,22 +4133,32 @@ namespace impl
         /// Progress indicator:  OSC 9 ; 4 ; <State> ; <progress> ST
 
         // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
-        ApplyResult CONEMU(Sequence const& seq, Screen& screen)
+        ApplyResult CONEMU(Sequence const& seq, Terminal& terminal)
         {
             auto const& value = seq.intermediateCharacters();
             if (value.empty())
                 return ApplyResult::Invalid;
 
-            // Check for progress indicator: "4;state;progress"
-            if (value.size() >= 2 && value[0] == '4' && value[1] == ';')
+            // The progress indicator is the sub-function keyed by a leading "4". Tested on the whole
+            // first field rather than the first character, so that a notification whose message merely
+            // STARTS with a 4 ("4 files copied") is not mistaken for one -- and so that a bare
+            // `OSC 9;4 ST` reaches applyProgressSequence, which rejects it. It used to fall through to
+            // the notification path below and pop a notification whose body was the literal text "4".
+            auto const firstField = std::string_view { value }.substr(0, value.find(';'));
+            if (firstField == "4")
             {
-                // Progress indicator — currently, we silently accept it.
-                // TODO: expose progress state to the GUI layer
-                return ApplyResult::Ok;
+                return applyProgressSequence(terminal.progress(), value)
+                    .transform([&](Progress const& progress) {
+                        terminal.setProgress(progress);
+                        return ApplyResult::Ok;
+                    })
+                    // A malformed payload leaves the previous indicator alone: withdrawing one the
+                    // application still wants shown is worse than ignoring a sequence we cannot read.
+                    .value_or(ApplyResult::Invalid);
             }
 
             // Simple notification: the payload is the notification message
-            screen.notify(string("ConEmu"), string(value));
+            terminal.notify(string("ConEmu"), string(value));
             return ApplyResult::Ok;
         }
 
@@ -7020,7 +7030,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case RCOLORMOUSEBG: resetDynamicColor(DynamicColorName::MouseBackgroundColor); break;
         case RCOLORHIGHLIGHTFG: resetDynamicColor(DynamicColorName::HighlightForegroundColor); break;
         case RCOLORHIGHLIGHTBG: resetDynamicColor(DynamicColorName::HighlightBackgroundColor); break;
-        case CONEMU: return impl::CONEMU(seq, *this);
+        case CONEMU: return impl::CONEMU(seq, *_terminal);
         case NOTIFY: return impl::NOTIFY(seq, *this);
         case ITERM2: processITerm2(seq.intermediateCharacters()); return ApplyResult::Ok;
         case TEXTSIZING: return processTextSizing(seq.intermediateCharacters());

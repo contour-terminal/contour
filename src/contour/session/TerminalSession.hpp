@@ -509,6 +509,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void setTabName(std::string_view name) override;
     void setWindowFrameColor(vtbackend::RGBColor color) override;
     void resetWindowFrameColor() override;
+    void progressChanged(vtbackend::Progress progress) override;
     void setTerminalProfile(std::string const& configProfileName) override;
     void discardImage(vtbackend::Image const&) override;
     void inputModeChanged(vtbackend::ViMode mode) override;

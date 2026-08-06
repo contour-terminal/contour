@@ -128,6 +128,7 @@ nav:
     - vt-extensions/line-reflow-mode.md
     - vt-extensions/save-and-restore-sgr-attributes.md
     - vt-extensions/osc-133-shell-integration.md
+    - vt-extensions/osc-9-4-progress.md
     - vt-extensions/semantic-block-query.md
   - Internals:
     - internals/index.md

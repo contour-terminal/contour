@@ -49,6 +49,8 @@ void RemoteScreen::apply(proto::SessionState const& state)
     kittyKeyboardFlags = state.kittyKeyboardFlags;
     modifyOtherKeys = state.modifyOtherKeys;
     mouse = state.mouse;
+    progressState = state.progressState;
+    progressPercentage = state.progressPercentage;
 }
 
 void RemoteScreen::apply(proto::Delta const& delta)
@@ -94,6 +96,12 @@ void RemoteScreen::apply(proto::Delta const& delta)
         modifyOtherKeys = delta.modifyOtherKeys;
     if (delta.mouseChanged != 0)
         mouse = delta.mouse;
+    if (delta.progressChanged != 0)
+    {
+        // Kept current for the same reason the title is: a later fullReplay must restate it.
+        progressState = delta.progressState;
+        progressPercentage = delta.progressPercentage;
+    }
 
     for (auto const& line: delta.lines)
     {

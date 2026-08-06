@@ -4,6 +4,7 @@
 #include <contour/command/CommandHistoryStore.hpp>
 #include <contour/config/LayoutStore.hpp>
 #include <contour/display/TerminalDisplay.hpp>
+#include <contour/platform/TaskbarProgressRouter.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/window/WindowController.hpp>
@@ -444,6 +445,35 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param session The session whose hosting tab should refresh its label.
     void refreshTabForSession(vtworkspace::SessionId session);
 
+    /// Refreshes only the progress roles of the tab hosting @p session, so the strip repaints its
+    /// progress indicator without re-expanding the tab label. No-op if no tab hosts @p session.
+    /// MUST be called on the GUI thread (it emits dataChanged on the owning controller).
+    /// @param session The session whose hosting tab should refresh its progress indicator.
+    void refreshTabProgressForSession(vtworkspace::SessionId session);
+
+    /// What the OS taskbar should show right now, aggregated across every reporting session.
+    ///
+    /// The staleness policy is read from the config here, at the point of use, rather than pushed
+    /// into the router: the config file has not been read when this manager is constructed, and this
+    /// way a reload needs no second wiring step. @see platform::TaskbarProgressRouter::resolve.
+    /// @param now The current time; defaulted so ordinary callers need not supply one, and stated
+    ///        outright by a test rather than slept for.
+    /// @return The aggregate; ProgressState::Inactive means "show nothing".
+    [[nodiscard]] platform::TaskbarProgress taskbarProgress(
+        std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now()) const;
+
+    /// Records @p progress for @p session, for the taskbar aggregate above.
+    ///
+    /// @param session The reporting session.
+    /// @param progress What it reported.
+    /// @param now When it reported it; defaulted, and stated outright by a test.
+    void recordProgress(vtworkspace::SessionId session,
+                        vtbackend::Progress progress,
+                        std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now())
+    {
+        _taskbarProgress.onProgress(session.value, progress, now);
+    }
+
     /// Sets an explicit @p title on the tab hosting @p session, through the authoritative SessionModel
     /// (which repaints the owning window's tab strip). Used by the tmux mirror to reflect a
     /// `%window-renamed` onto the tab (a tmux window maps to a tab). No-op if no tab hosts @p session.
@@ -804,6 +834,10 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// in a background window reaches here (refreshGuiTabInfoForStatusLine -> update()) and refreshes that
     /// window's status line because its controller republishes to its own tabs' sessions.
     void updateStatusLine();
+
+    /// Where the taskbar's progress answer comes from. It holds neither a clock nor a timeout of its
+    /// own -- both are supplied per call -- so nothing here can drift from the configured value.
+    platform::TaskbarProgressRouter _taskbarProgress {};
 
     ContourGuiApp& _app;
     SessionFactory& _sessionFactory;

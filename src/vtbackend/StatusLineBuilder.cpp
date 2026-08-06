@@ -369,6 +369,26 @@ namespace
             return " (PROTECTED)";
         }
 
+        std::string visit(StatusLineDefinitions::Progress const&)
+        {
+            // Read without locking, as every other visit() here does: buildStatusLineText runs on the
+            // terminal's own thread with _stateMutex held.
+            auto const progress = vt.progress();
+            switch (progress.state)
+            {
+                // Nothing to say, so the segment collapses -- the same gating ProtectedMode and
+                // TraceMode use, which is what keeps the default status line clean.
+                case ProgressState::Inactive: return {};
+                case ProgressState::Normal: return std::format("{}%", progress.percentage);
+                case ProgressState::Error: return std::format("ERROR {}%", progress.percentage);
+                case ProgressState::Paused: return std::format("PAUSED {}%", progress.percentage);
+                // No percentage: an indeterminate operation has no meaningful one to show, and the
+                // number carried across the transition belongs to whatever ran before it.
+                case ProgressState::Indeterminate: return "BUSY";
+            }
+            crispy::unreachable();
+        }
+
         std::string visit(StatusLineDefinitions::TraceMode const&)
         {
             // Trace mode is off in Normal execution; render nothing then (mirrors ProtectedMode's gating), so

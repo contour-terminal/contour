@@ -311,6 +311,8 @@ namespace
         out.u8(pdu.kittyKeyboardFlags);
         out.u8(pdu.modifyOtherKeys);
         encodeMouseState(out, pdu.mouse);
+        out.u8(pdu.progressState);
+        out.u8(pdu.progressPercentage);
     }
 
     void encodeCell(Writer& out, WireCell const& cell)
@@ -410,6 +412,9 @@ namespace
         out.u8(pdu.modifyOtherKeys);
         out.u8(pdu.mouseChanged);
         encodeMouseState(out, pdu.mouse);
+        out.u8(pdu.progressChanged);
+        out.u8(pdu.progressState);
+        out.u8(pdu.progressPercentage);
     }
 
     void encodeBody(Writer& out, SessionBell const& pdu)
@@ -638,7 +643,8 @@ namespace
         if (!assign(in.string(), pdu.cwd, error) || !assign(in.u8(), pdu.statusDisplayType, error)
             || !assign(in.u8(), pdu.activeStatusDisplay, error)
             || !assign(in.u8(), pdu.kittyKeyboardFlags, error) || !assign(in.u8(), pdu.modifyOtherKeys, error)
-            || !decodeMouseState(in, pdu.mouse, error))
+            || !decodeMouseState(in, pdu.mouse, error) || !assign(in.u8(), pdu.progressState, error)
+            || !assign(in.u8(), pdu.progressPercentage, error))
             return std::unexpected(error);
         return pdu;
     }
@@ -752,7 +758,8 @@ namespace
             || !assign(in.u8(), pdu.kittyKeyboardFlags, error)
             || !assign(in.u8(), pdu.modifyOtherKeysChanged, error)
             || !assign(in.u8(), pdu.modifyOtherKeys, error) || !assign(in.u8(), pdu.mouseChanged, error)
-            || !decodeMouseState(in, pdu.mouse, error))
+            || !decodeMouseState(in, pdu.mouse, error) || !assign(in.u8(), pdu.progressChanged, error)
+            || !assign(in.u8(), pdu.progressState, error) || !assign(in.u8(), pdu.progressPercentage, error))
             return std::unexpected(error);
         return pdu;
     }

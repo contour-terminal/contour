@@ -37,6 +37,7 @@ namespace StatusLineDefinitions
     struct HistoryLineCount: Styles {};
     struct Hyperlink: Styles {};
     struct InputMode: Styles {};
+    struct Progress: Styles {};
     struct ProtectedMode: Styles {};
     struct SearchMode: Styles {};
     struct SearchPrompt: Styles {};
@@ -60,6 +61,7 @@ namespace StatusLineDefinitions
         HistoryLineCount,
         Hyperlink,
         InputMode,
+        Progress,
         ProtectedMode,
         SearchMode,
         SearchPrompt,
@@ -134,6 +136,9 @@ namespace StatusLineDefinitions
 
     template <> struct ItemTraits<ProtectedMode>
     { static constexpr std::string_view Name = "ProtectedMode", Label = "Protected mode", Sample = "PROTECTED"; };
+
+    template <> struct ItemTraits<Progress>
+    { static constexpr std::string_view Name = "Progress", Label = "Progress indicator", Sample = "45%"; };
 
     template <> struct ItemTraits<SearchMode>
     { static constexpr std::string_view Name = "SearchMode", Label = "Search mode", Sample = "SEARCH"; };

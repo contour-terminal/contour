@@ -401,6 +401,20 @@ void NativeSession::collectLiveState(vtbackend::Terminal& terminal,
         follow.lastMouse = mouse;
     }
 
+    // The progress indicator (OSC 9;4), pull+diff as one value: its two fields change together, and
+    // the snapshot carries it in SessionState below so a re-attaching client sees a bar still in flight.
+    auto const progress = terminal.progress();
+    if (progress != follow.lastProgress)
+    {
+        if (!snapshot)
+        {
+            delta.progressChanged = 1;
+            delta.progressState = static_cast<uint8_t>(std::to_underlying(progress.state));
+            delta.progressPercentage = progress.percentage;
+        }
+        follow.lastProgress = progress;
+    }
+
     if (snapshot)
     {
         auto& snap = state.emplace();
@@ -421,6 +435,8 @@ void NativeSession::collectLiveState(vtbackend::Terminal& terminal,
         snap.kittyKeyboardFlags = static_cast<uint8_t>(kittyFlags);
         snap.modifyOtherKeys = static_cast<uint8_t>(modifyOtherKeys);
         snap.mouse = mouse;
+        snap.progressState = static_cast<uint8_t>(std::to_underlying(progress.state));
+        snap.progressPercentage = progress.percentage;
     }
 }
 

@@ -188,6 +188,11 @@ class NativeSession final: public SessionStreamEvents
         /// freshly built terminal is genuinely in — so a first delta against an app that already
         /// enabled tracking reports the difference rather than assuming it was sent.
         proto::MouseState lastMouse {};
+
+        /// The progress indicator last sent, diffed as ONE value for the same reason `lastMouse` is:
+        /// its two fields change together and mean nothing apart. Zero here is likewise the genuine
+        /// state of a fresh terminal ("nothing shown"), not an "unknown" sentinel.
+        vtbackend::Progress lastProgress {};
     };
 
     void handlePdu(proto::DecodedFrame const& frame);

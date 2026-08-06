@@ -153,6 +153,18 @@ QColor UiStyleProvider::modelessScrim(QColor const& base) const
     return atOpacity(base, _tokens.modelessScrimPercent);
 }
 
+QColor UiStyleProvider::progressColor(int state) const
+{
+    // One accessor taking the state rather than three named ones: the mapping is an index into the
+    // style's own row, so QML says `progressColor(tabProgressState)` and neither side repeats the
+    // state->appearance table. Out-of-range is answered rather than asserted -- the value crosses
+    // from QML, and an unknown state paints nothing rather than aborting the GUI.
+    auto const& colors = _tokens.progressColors;
+    if (state < 0 || std::cmp_greater_equal(state, colors.size()))
+        return { Qt::transparent };
+    return QColor::fromRgb(colors[static_cast<size_t>(state)]);
+}
+
 QFont resolveChromeFont(config::Config const& config, std::string const& profileName)
 {
     auto const& tokens = config::uiStyleTokens(config.uiStyle.value());
