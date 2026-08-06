@@ -466,6 +466,7 @@ struct ConfigEntry
 template <typename T, documentation::StringLiteral configDoc, documentation::StringLiteral webDoc>
 struct ConfigEntry<T, documentation::DocumentationEntry<configDoc, webDoc>>
 {
+    // NOLINTNEXTLINE(readability-identifier-naming): standard iterator/container trait spelling.
     using value_type = T;
 
     std::string documentation = configDoc.value;
@@ -1625,7 +1626,9 @@ struct Writer
                       v.builtinBoxDrawing,
                       v.maxFallbackCount,
                       v.renderMode,
-                      "true",
+                      // strict_spacing is stored per face, but the reader fans one value out to
+                      // all four, so the regular face carries it for the whole block.
+                      v.regular.strictSpacing,
                       v.regular.familyName,
                       v.regular.weight,
                       v.regular.slant,
@@ -1663,7 +1666,7 @@ struct Writer
         {
             if (!result.empty())
                 result += ',';
-            result += std::format("{}", to_string(mode));
+            result += std::format("{}", toString(mode));
         }
         result += "]";
         return format(doc, result);

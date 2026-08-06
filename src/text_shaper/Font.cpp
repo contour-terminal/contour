@@ -13,9 +13,9 @@ string FontDescription::toPattern() const
 {
     string m;
     if (weight != FontWeight::Normal)
-        m = std::format(" {}", weight);
+        m += std::format(" {}", weight);
     if (slant != FontSlant::Normal)
-        m = std::format(" {}", slant);
+        m += std::format(" {}", slant);
     return std::format("{}{}", familyName, m);
 }
 

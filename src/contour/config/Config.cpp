@@ -1756,6 +1756,47 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         where = vtbackend::LineCount(child.as<int>());
 }
 
+namespace
+{
+    /// Reads a configuration enum spelled as one of the tokens its parser accepts.
+    ///
+    /// Case-insensitive, and an unrecognized value is reported rather than silently accepted -- a typo
+    /// in a visible appearance setting should not pass unnoticed. It still leaves @p where at its
+    /// default, so a bad value costs a log line rather than a failed startup. Mirrors the GuiTheme
+    /// reader below.
+    ///
+    /// @param node   The mapping to read from.
+    /// @param entry  The key within @p node.
+    /// @param where  Receives the value, and is left untouched when it is not recognized.
+    /// @param logger The reader's trace category, passed in because it is a member of the reader.
+    /// @param parse  Maps a spelling to a value. Defaults to the ConfigEnum.hpp token table; the
+    ///               text_shaper enums pass their own `make*()`, since a `contour::config` table
+    ///               cannot be hung off a type owned by a lower layer.
+    /// @return Whether @p entry was present and recognized, so a caller can add a fallback (a
+    ///         deprecated spelling, say) without duplicating the reading and the reporting.
+    template <typename Enum, typename Parser = decltype(&configEnumFromToken<Enum>)>
+    bool loadConfigEnum(YAML::Node const& node,
+                        std::string const& entry,
+                        Enum& where,
+                        logstore::Category const& logger,
+                        Parser parse = configEnumFromToken<Enum>)
+    {
+        auto const child = node[entry];
+        if (!child)
+            return false;
+
+        auto const rawValue = child.as<std::string>();
+        logger()("Loading entry: {}, value {}", entry, rawValue);
+        if (auto const value = parse(rawValue))
+        {
+            where = *value;
+            return true;
+        }
+        errorLog()("Unknown value for {}: '{}'; keeping {}.", entry, rawValue, where);
+        return false;
+    }
+} // namespace
+
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, text::FontSize& where)
 {
     if (auto const child = node[entry])
@@ -1774,24 +1815,29 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, text::FontSlant& where)
 {
-    if (auto const child = node[entry])
+    // `thin` is a weight, not a slant; it reached the slant table as a copy-paste and resolved to
+    // Normal for years. Keep honouring it so existing configs do not change behaviour, but say so --
+    // silently ignoring it would be worse here than elsewhere, because the italic and bold-italic
+    // faces are pre-seeded with FontSlant::Italic before this runs, so a dropped value leaves the
+    // inherited Italic rather than the default.
+    //
+    // Checked before the reader runs, not after: reporting it as unknown first and honouring it
+    // second would tell the user both that the value was rejected and that it was accepted.
+    if (auto const child = node[entry]; child && text::namesMatch(child.as<std::string>(), "thin"))
     {
-        auto opt = text::makeFontSlant(child.as<std::string>());
-        if (opt.has_value())
-            where = opt.value();
+        errorLog()(R"(Setting {} to "thin" is deprecated and means "normal".)", entry);
+        where = text::FontSlant::Normal;
+        return;
     }
+
+    loadConfigEnum(node, entry, where, logger, text::makeFontSlant);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
                                      text::FontWeight& where)
 {
-    if (auto const child = node[entry])
-    {
-        auto opt = text::makeFontWeight(child.as<std::string>());
-        if (opt.has_value())
-            where = opt.value();
-    }
+    loadConfigEnum(node, entry, where, logger, text::makeFontWeight);
 }
 // NOLINTEND(readability-convert-member-functions-to-static)
 
@@ -2017,88 +2063,57 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 #else
         vtrasterizer::TextShapingEngine::OpenShaper;
 #endif
-    auto parseModifierKey = [&](std::string const& key) -> std::optional<vtrasterizer::TextShapingEngine> {
-        auto const literal = crispy::toLower(key);
-        logger()("Loading entry: {}, value {}", entry, literal);
-        if (literal == "dwrite" || literal == "directwrite")
+    auto parseEngine = [NativeTextShapingEngine](
+                           std::string_view literal) -> std::optional<vtrasterizer::TextShapingEngine> {
+        using text::namesMatch;
+        if (namesMatch(literal, "dwrite") || namesMatch(literal, "directwrite"))
             return vtrasterizer::TextShapingEngine::DWrite;
-        if (literal == "core" || literal == "coretext")
+        if (namesMatch(literal, "core") || namesMatch(literal, "coretext"))
             return vtrasterizer::TextShapingEngine::CoreText;
-        if (literal == "open" || literal == "openshaper")
+        // `harfbuzz` is what std::formatter<TextShapingEngine> writes for OpenShaper, so it is the
+        // spelling `contour generate config` puts in the file; without it the generated config does
+        // not survive its own reader.
+        if (namesMatch(literal, "open") || namesMatch(literal, "openshaper")
+            || namesMatch(literal, "harfbuzz"))
             return vtrasterizer::TextShapingEngine::OpenShaper;
-        if (literal == "native")
+        if (namesMatch(literal, "native"))
             return NativeTextShapingEngine;
         return std::nullopt;
     };
 
-    if (auto const child = node[entry])
-    {
-        auto opt = parseModifierKey(child.as<std::string>());
-        if (opt.has_value())
-            where = opt.value();
-    }
+    loadConfigEnum(node, entry, where, logger, parseEngine);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
                                      vtrasterizer::FontLocatorEngine& where)
 {
-    auto constexpr NativeFontLocator = vtrasterizer::FontLocatorEngine::Native;
-    auto parseModifierKey = [&](std::string const& key) -> std::optional<vtrasterizer::FontLocatorEngine> {
-        auto const literal = crispy::toLower(key);
-        logger()("Loading entry: {}, value {}", entry, literal);
+    auto parseLocator = [](std::string_view literal) -> std::optional<vtrasterizer::FontLocatorEngine> {
+        auto constexpr NativeFontLocator = vtrasterizer::FontLocatorEngine::Native;
+        using text::namesMatch;
         for (auto const& deprecated: { "fontconfig", "coretext", "dwrite", "directwrite" })
         {
-            if (literal == deprecated)
+            if (namesMatch(literal, deprecated))
             {
                 errorLog()(R"(Setting font locator to "{}" is deprecated. Use "native".)", literal);
                 return NativeFontLocator;
             }
         }
-        if (literal == "native")
+        if (namesMatch(literal, "native"))
             return NativeFontLocator;
-        if (literal == "mock")
+        if (namesMatch(literal, "mock"))
             return vtrasterizer::FontLocatorEngine::Mock;
         return std::nullopt;
     };
 
-    if (auto const child = node[entry])
-    {
-        auto opt = parseModifierKey(child.as<std::string>());
-        if (opt.has_value())
-            where = opt.value();
-    }
+    loadConfigEnum(node, entry, where, logger, parseLocator);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
                                      text::RenderMode& where)
 {
-    auto parseModifierKey = [&](std::string const& key) -> std::optional<text::RenderMode> {
-        auto const literal = crispy::toLower(key);
-
-        auto constexpr static Mappings = std::array {
-            std::pair { "lcd", text::RenderMode::LCD },
-            std::pair { "light", text::RenderMode::Light },
-            std::pair { "gray", text::RenderMode::Gray },
-            std::pair { "", text::RenderMode::Gray },
-            std::pair { "monochrome", text::RenderMode::Bitmap },
-        };
-        for (auto const& mapping: Mappings)
-            if (mapping.first == literal)
-            {
-                logger()("Loading entry: {}, value {}", entry, literal);
-                return mapping.second;
-            }
-        return std::nullopt;
-    };
-
-    if (auto const child = node[entry])
-    {
-        auto opt = parseModifierKey(child.as<std::string>());
-        if (opt.has_value())
-            where = opt.value();
-    }
+    loadConfigEnum(node, entry, where, logger, text::makeRenderMode);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
@@ -2117,7 +2132,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
             loadFromEntry(textShaping, "engine", where.textShapingEngine);
         loadFromEntry(child, "builtin_box_drawing", where.builtinBoxDrawing);
         loadFromEntry(child, "max_fallback_count", where.maxFallbackCount);
-        loadFromEntry(child, "RenderMode", where.renderMode);
+        loadFromEntry(child, "render_mode", where.renderMode);
         loadFromEntry(child, "regular", where.regular);
 
         // inherit fonts from regular
@@ -2266,38 +2281,6 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
             errorLog()("Unknown theme value '{}'; keeping {}.", rawValue, where);
     }
 }
-
-namespace
-{
-    /// Reads a configuration enum spelled as one of the tokens its ConfigEnum.h table carries.
-    ///
-    /// Case-insensitive, and an unrecognized value is reported rather than silently accepted -- a typo
-    /// in a visible appearance setting should not pass unnoticed. It still leaves @p where at its
-    /// default, so a bad value costs a log line rather than a failed startup. Mirrors the GuiTheme
-    /// reader above.
-    ///
-    /// @param node   The mapping to read from.
-    /// @param entry  The key within @p node.
-    /// @param where  Receives the value, and is left untouched when it is not recognized.
-    /// @param logger The reader's trace category, passed in because it is a member of the reader.
-    template <typename Enum>
-    void loadConfigEnum(YAML::Node const& node,
-                        std::string const& entry,
-                        Enum& where,
-                        logstore::Category const& logger)
-    {
-        auto const child = node[entry];
-        if (!child)
-            return;
-
-        auto const rawValue = child.as<std::string>();
-        logger()("Loading entry: {}, value {}", entry, rawValue);
-        if (auto const value = configEnumFromToken<Enum>(rawValue))
-            where = *value;
-        else
-            errorLog()("Unknown value for {}: '{}'; keeping {}.", entry, rawValue, where);
-    }
-} // namespace
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarPosition& where)
 {

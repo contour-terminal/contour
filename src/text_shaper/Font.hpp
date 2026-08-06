@@ -7,6 +7,7 @@
     #undef GLYPH_KEY_DEBUG
 #endif
 
+#include <crispy/ASCII.hpp>
 #include <crispy/FNV.hpp>
 #include <crispy/LogStore.hpp>
 #include <crispy/Point.hpp>
@@ -16,11 +17,13 @@
     #include <libunicode/width.h>
 #endif
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <format>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <utility>
 #include <variant>
@@ -33,12 +36,43 @@ auto inline const locatorLog = logstore::Category("font.locator", "Logs about fo
 
 namespace detail
 {
+    constexpr bool isNameSeparator(char ch) noexcept
+    {
+        return ch == ' ' || ch == '_' || ch == '-';
+    }
+
+    /// @return @p name with its separators dropped and its letters ASCII-lower-cased.
+    constexpr auto normalized(std::string_view name) noexcept
+    {
+        return name | std::views::filter([](char ch) { return !isNameSeparator(ch); })
+               | std::views::transform(crispy::ascii::fold);
+    }
+} // namespace detail
+
+/// Compares two font-attribute names ignoring ASCII case and any separators, so that
+/// `extra_bold`, `extra bold`, `ExtraBold` and `extrabold` all name the same attribute.
+///
+/// The attribute names travel three different routes -- what a user types, what the documentation
+/// advertises, and what std::formatter writes back into a generated config -- and those routes
+/// historically disagreed on both case and separator. Normalizing here means the tables below
+/// carry one spelling per value instead of one per route.
+///
+/// @param a First name.
+/// @param b Second name.
+/// @return Whether both names denote the same attribute.
+[[nodiscard]] constexpr bool namesMatch(std::string_view a, std::string_view b) noexcept
+{
+    return std::ranges::equal(detail::normalized(a), detail::normalized(b));
+}
+
+namespace detail
+{
     template <typename T>
     constexpr std::optional<T> tryMatch(std::string_view text,
                                         std::initializer_list<std::pair<std::string_view, T>> mappings)
     {
         for (auto const& mapping: mappings)
-            if (mapping.first == text) // TODO: improvable (ignore case, '_' can be one or many ' ')
+            if (namesMatch(mapping.first, text))
                 return mapping.second;
 
         return std::nullopt;
@@ -93,23 +127,37 @@ enum class FontWeight : uint8_t
     ExtraBlack, // aka. ultrablack
 };
 
-constexpr std::optional<FontWeight> makeFontWeight(std::string_view text)
+/// Parses a font weight name.
+///
+/// Matching ignores case and separators, and each weight additionally accepts the alternate name
+/// noted on its enumerator above, so `Regular` -- which is what std::formatter writes into a
+/// generated config -- reads back as FontWeight::Normal.
+///
+/// @param text The name to parse.
+/// @return The weight, or std::nullopt if @p text names none.
+[[nodiscard]] constexpr std::optional<FontWeight> makeFontWeight(std::string_view text)
 {
     using namespace std::string_view_literals;
     using std::pair;
     return detail::tryMatch(text,
                             { pair { "thin"sv, FontWeight::Thin },
                               pair { "extra light"sv, FontWeight::ExtraLight },
+                              pair { "ultra light"sv, FontWeight::ExtraLight },
                               pair { "light"sv, FontWeight::Light },
                               pair { "demilight"sv, FontWeight::DemiLight },
+                              pair { "semilight"sv, FontWeight::DemiLight },
                               pair { "book"sv, FontWeight::Book },
                               pair { "normal"sv, FontWeight::Normal },
+                              pair { "regular"sv, FontWeight::Normal },
                               pair { "medium"sv, FontWeight::Medium },
                               pair { "demibold"sv, FontWeight::DemiBold },
+                              pair { "semibold"sv, FontWeight::DemiBold },
                               pair { "bold"sv, FontWeight::Bold },
                               pair { "extra bold"sv, FontWeight::ExtraBold },
+                              pair { "ultra bold"sv, FontWeight::ExtraBold },
                               pair { "black"sv, FontWeight::Black },
-                              pair { "extra black"sv, FontWeight::ExtraBlack } });
+                              pair { "extra black"sv, FontWeight::ExtraBlack },
+                              pair { "ultra black"sv, FontWeight::ExtraBlack } });
 }
 
 enum class FontSlant : uint8_t
@@ -119,7 +167,15 @@ enum class FontSlant : uint8_t
     Oblique
 };
 
-constexpr std::optional<FontSlant> makeFontSlant(std::string_view text)
+/// Parses a font slant name, ignoring case and separators.
+///
+/// @param text The name to parse.
+/// @return The slant, or std::nullopt if @p text names none.
+///
+/// @note `thin` is not a slant. It was accepted (as Normal) until it was recognized as a
+///       copy-paste of the weight table; the config reader keeps honouring it as a deprecated
+///       spelling, because that is where backwards compatibility for config files belongs.
+[[nodiscard]] constexpr std::optional<FontSlant> makeFontSlant(std::string_view text)
 {
     using namespace std::string_view_literals;
     using std::pair;
@@ -135,12 +191,19 @@ enum class FontSpacing : uint8_t
     Mono
 };
 
-constexpr std::optional<FontSpacing> makeFontSpacing(std::string_view text)
+/// Parses a font spacing name, ignoring case and separators.
+///
+/// @param text The name to parse.
+/// @return The spacing, or std::nullopt if @p text names none.
+[[nodiscard]] constexpr std::optional<FontSpacing> makeFontSpacing(std::string_view text)
 {
     using namespace std::string_view_literals;
     using std::pair;
-    return detail::tryMatch(
-        text, { pair { "proportional"sv, FontSpacing::Proportional }, pair { "mono"sv, FontSpacing::Mono } });
+    return detail::tryMatch(text,
+                            { pair { "proportional"sv, FontSpacing::Proportional },
+                              pair { "mono"sv, FontSpacing::Mono },
+                              // std::formatter<FontSpacing> writes Mono as "Monospace".
+                              pair { "monospace"sv, FontSpacing::Mono } });
 }
 
 struct FontFeature
@@ -303,7 +366,59 @@ enum class RenderMode : uint8_t
     Color   //!< embedded color bitmaps are preferred
 };
 
+/// Parses a glyph render mode name, ignoring case and separators.
+///
+/// @param text The name to parse. The empty name selects RenderMode::Gray, so that a config
+///             carrying the key with no value behaves as if the key were absent.
+/// @return The render mode, or std::nullopt if @p text names none.
+[[nodiscard]] constexpr std::optional<RenderMode> makeRenderMode(std::string_view text)
+{
+    using namespace std::string_view_literals;
+    using std::pair;
+    return detail::tryMatch(text,
+                            { pair { ""sv, RenderMode::Gray },
+                              pair { "gray"sv, RenderMode::Gray },
+                              pair { "light"sv, RenderMode::Light },
+                              pair { "lcd"sv, RenderMode::LCD },
+                              pair { "monochrome"sv, RenderMode::Bitmap },
+                              pair { "bitmap"sv, RenderMode::Bitmap },
+                              pair { "color"sv, RenderMode::Color } });
+}
+
 } // namespace text
+
+// {{{ std::numeric_limits<>
+// Bounds for crispy::eachElement<>, so code that must cover every value of one of these enums --
+// the parser/formatter round-trip test above all -- enumerates them instead of restating a list
+// that a newly added enumerator would silently fall out of.
+template <>
+struct std::numeric_limits<text::FontWeight>
+{
+    constexpr static text::FontWeight min() noexcept { return text::FontWeight::Thin; }
+    constexpr static text::FontWeight max() noexcept { return text::FontWeight::ExtraBlack; }
+};
+
+template <>
+struct std::numeric_limits<text::FontSlant>
+{
+    constexpr static text::FontSlant min() noexcept { return text::FontSlant::Normal; }
+    constexpr static text::FontSlant max() noexcept { return text::FontSlant::Oblique; }
+};
+
+template <>
+struct std::numeric_limits<text::FontSpacing>
+{
+    constexpr static text::FontSpacing min() noexcept { return text::FontSpacing::Proportional; }
+    constexpr static text::FontSpacing max() noexcept { return text::FontSpacing::Mono; }
+};
+
+template <>
+struct std::numeric_limits<text::RenderMode>
+{
+    constexpr static text::RenderMode min() noexcept { return text::RenderMode::Bitmap; }
+    constexpr static text::RenderMode max() noexcept { return text::RenderMode::Color; }
+};
+// }}}
 
 // {{{ std::hash<>
 namespace std

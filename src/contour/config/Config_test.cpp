@@ -16,6 +16,8 @@
 #include <vtbackend/InputGenerator.hpp>
 #include <vtbackend/Primitives.hpp>
 
+#include <text_shaper/Font.hpp>
+
 #include <crispy/LogSink.hpp>
 #include <crispy/LogStore.hpp>
 
@@ -895,6 +897,155 @@ profiles:
     CHECK(profile->fonts.value().size.pt == 13.0);
     CHECK(profile->fonts.value().regular.familyName == "Fira Code");
     CHECK(profile->fonts.value().builtinBoxDrawing == false);
+    // The weight was fed but never asserted, so the reader could have dropped it unnoticed --
+    // which is exactly what it did for every spelling but this one.
+    CHECK(profile->fonts.value().regular.weight == text::FontWeight::Bold);
+}
+
+TEST_CASE("Config: the font render mode loads from its documented key", "[config]")
+{
+    // The key is `render_mode`: it is what every released version reads, what metainfo.xml
+    // announces, and the only spelling a user has ever had reason to write. An identifier sweep
+    // briefly renamed the string literal along with the C++ type, which changed no code but
+    // invalidated every existing profile in silence.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        font:
+            render_mode: lcd
+)"sv);
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK(profile->fonts.value().renderMode == text::RenderMode::LCD);
+}
+
+TEST_CASE("Config: font weight and slant accept the spellings Contour itself writes", "[config]")
+{
+    // `contour generate config` formats these through std::formatter, which emits CamelCase, while
+    // the documentation advertises the underscore forms. Both must load, or the config Contour
+    // generated does not survive its own reader.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        font:
+            regular:
+                family: "Fira Code"
+                weight: ExtraBold
+                slant: Italic
+            bold:
+                family: "Fira Code"
+                weight: extra_light
+            italic:
+                family: "Fira Code"
+                slant: oblique
+)"sv);
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    auto const& fonts = profile->fonts.value();
+    CHECK(fonts.regular.weight == text::FontWeight::ExtraBold);
+    CHECK(fonts.regular.slant == text::FontSlant::Italic);
+    CHECK(fonts.bold.weight == text::FontWeight::ExtraLight);
+    CHECK(fonts.italic.slant == text::FontSlant::Oblique);
+}
+
+TEST_CASE("Config: an unparsable font weight or slant is reported, not swallowed", "[config]")
+{
+    // Silence here is worse than elsewhere: the italic and bold-italic faces are pre-seeded with
+    // FontSlant::Italic before the file is read, so a dropped value leaves the inherited Italic
+    // rather than the default -- the user sees a slant they did not ask for and no diagnostic.
+    QTemporaryDir dir;
+    auto capture = logstore::ScopedCapture { "error" };
+
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        font:
+            regular:
+                family: "Fira Code"
+                weight: heavyish
+                slant: itallic
+)"sv);
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK(profile->fonts.value().regular.weight == text::FontWeight::Normal);
+    CHECK(profile->fonts.value().regular.slant == text::FontSlant::Normal);
+
+    auto const& log = capture.text();
+    INFO("captured error log:\n" << log);
+    CHECK(log.contains("heavyish"));
+    CHECK(log.contains("itallic"));
+}
+
+TEST_CASE("Config: the deprecated slant 'thin' still loads, and says so", "[config]")
+{
+    // `thin` is a weight; it reached the slant table as a copy-paste and resolved to Normal for
+    // years. Removing it outright would silently flip an existing profile's italic face from
+    // upright to slanted, so it is honoured and announced instead.
+    QTemporaryDir dir;
+    auto capture = logstore::ScopedCapture { "error" };
+
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        font:
+            italic:
+                family: "Fira Code"
+                slant: thin
+)"sv);
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK(profile->fonts.value().italic.slant == text::FontSlant::Normal);
+
+    auto const& log = capture.text();
+    INFO("captured error log:\n" << log);
+    CHECK(log.contains("thin"));
+    CHECK(log.contains("deprecated"));
+}
+
+TEST_CASE("Config: the generated default config loads back into the defaults", "[config]")
+{
+    // `contour generate config` writes this file for the user to edit, so every key it emits and
+    // every value it formats must be something the reader accepts. The two sides were written
+    // independently: the writer emitted `weight: Regular` and `slant: Normal`, neither of which
+    // the parser knew, and the reader looked up a key the writer never wrote. Both failures were
+    // silent, because an unmatched key and an unparsed value both just leave the default in place.
+    //
+    // The empty error log is the load-bearing assertion, not the comparison. Because the generated
+    // file holds exactly the defaults, a silently dropped value leaves the field AT the default and
+    // the comparison still passes -- which is precisely how these bugs survived. What cannot pass
+    // is a reader reporting that it did not understand something Contour itself wrote.
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    auto capture = logstore::ScopedCapture { "error" };
+
+    auto const generated = contour::config::defaultConfigString();
+    auto const reloaded = loadFromYaml(dir, generated);
+    auto const defaults = contour::config::Config {};
+
+    INFO("generated config:\n" << generated);
+    CHECK(capture.text().empty());
+
+    auto const* profile = reloaded.profile(defaults.defaultProfileName.value());
+    REQUIRE(profile != nullptr);
+    auto const& expected = defaults.profiles.value().at(defaults.defaultProfileName.value()).fonts.value();
+
+    // Whole-struct, so a field added to FontDescriptions is covered without editing this test.
+    CHECK(profile->fonts.value() == expected);
 }
 
 TEST_CASE("Config: font features, fallback list, and a below-minimum size clamp load from YAML", "[config]")
@@ -970,6 +1121,11 @@ profiles:
              { "openshaper", vtrasterizer::TextShapingEngine::OpenShaper },
              { "dwrite", vtrasterizer::TextShapingEngine::DWrite },
              { "coretext", vtrasterizer::TextShapingEngine::CoreText },
+             // `harfbuzz` is what the writer emits for OpenShaper, and it is the default engine on
+             // every platform -- so until the reader learned this spelling, the engine line in a
+             // generated config was dropped on load.
+             { "harfbuzz", vtrasterizer::TextShapingEngine::OpenShaper },
+             { "DirectWrite", vtrasterizer::TextShapingEngine::DWrite },
          })
     {
         QTemporaryDir dir;
