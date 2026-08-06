@@ -10,6 +10,8 @@ on:
       - '*.c'
       - '*.hh'
       - '*.hpp'
+      # src/vtrasterizer/shared_defines.h keeps its .h: it is shared with GLSL, not a C++ header.
+      - '*.h'
     branches:
       - master
       - 'codechecker*'
