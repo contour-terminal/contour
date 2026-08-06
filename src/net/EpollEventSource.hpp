@@ -1,0 +1,84 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+/// @file
+/// The Linux @c EventSource: multiplexes the registered file descriptors with
+/// epoll(7) instead of poll(2).
+///
+/// Same contract and same observable behaviour as @c PollEventSource — it is a
+/// drop-in alternative, selected by @c makeDefaultEventSource(). The difference is
+/// cost: poll(2) hands the kernel the whole watch set on every call and scans it
+/// again on return, so a wait is O(registered); epoll keeps the set in the kernel
+/// and reports only what became ready, so a wait is O(ready). That is irrelevant
+/// for a terminal watching a handful of descriptors and decisive for a server
+/// holding thousands of idle connections.
+///
+/// Interest is **level-triggered** (no `EPOLLET`), matching what @c PosixSocket and
+/// the accept loop assume: a descriptor that stays ready is reported again on the
+/// next wait, so a partial read does not have to drain to `EAGAIN` to stay live.
+///
+/// Ported from the reactor in the fastcached project (Apache-2.0, same author).
+
+#include <cstddef>
+#include <cstdint>
+
+#ifdef __linux__
+
+    #include <unordered_map>
+
+    #include <net/EventSource.hpp>
+    #include <net/platform/NativeHandle.hpp>
+
+namespace net
+{
+
+/// An @c EventSource backed by an epoll instance.
+///
+/// The epoll set is kept in step with the @c FdRegistry: @c attach adds the
+/// descriptor, @c detach removes it, and a changed interest mask is pushed with
+/// `EPOLL_CTL_MOD` on the next @c wait. Registration failures surface as
+/// @c FdToken::invalid() so the awaiting flow fails rather than parking on an
+/// interest the kernel never accepted.
+class EpollEventSource: public EventSource
+{
+  public:
+    /// Creates the epoll instance.
+    /// @note Construction cannot fail usefully — if `epoll_create1` fails, @c good()
+    ///       reports false and every @c attach refuses, so a caller can fall back to
+    ///       @c PollEventSource. Use @c makeDefaultEventSource() to get that for free.
+    EpollEventSource() noexcept;
+    ~EpollEventSource() override;
+
+    EpollEventSource(EpollEventSource const&) = delete;
+    EpollEventSource& operator=(EpollEventSource const&) = delete;
+    EpollEventSource(EpollEventSource&&) = delete;
+    EpollEventSource& operator=(EpollEventSource&&) = delete;
+
+    [[nodiscard]] WaitOutcome wait(int timeoutMs) override;
+
+    [[nodiscard]] FdToken attach(NativeHandle fd, FdInterest interest) override;
+
+    void detach(FdToken token) override;
+
+    /// @return True if the epoll instance was created successfully.
+    [[nodiscard]] bool good() const noexcept { return _epollFd >= 0; }
+
+    /// @return The number of fds currently attached.
+    [[nodiscard]] std::size_t attachedCount() const noexcept { return _registry.size(); }
+
+  private:
+    /// Pushes @p interest for @p fd into the kernel with @p op.
+    /// @return True if the epoll_ctl call succeeded.
+    [[nodiscard]] bool applyInterest(int op,
+                                     NativeHandle fd,
+                                     FdInterest interest,
+                                     FdToken token) const noexcept;
+
+    FdRegistry _registry;                                   ///< Watched fds, in registration order.
+    int _epollFd = -1;                                      ///< The epoll instance (owned).
+    std::unordered_map<std::uint64_t, FdInterest> _applied; ///< Interest last pushed, keyed by token.
+};
+
+} // namespace net
+
+#endif // __linux__
