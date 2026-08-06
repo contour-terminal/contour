@@ -490,6 +490,43 @@ TEST_CASE("WindowGeometry.resolveContentScale.precedence", "[contour][geometry]"
     CHECK(resolveContentScale(row.forcedFontDpi, row.windowDpr, row.screenDpr) == row.expected);
 }
 
+TEST_CASE("WindowGeometry.fitPageToPixels.marginsUseTheDeviceRatioNotTheContentScale", "[contour][geometry]")
+{
+    // The page fit must scale its margins by the device-pixel RATIO. A forced font DPI changes how large
+    // glyphs are rasterized (the content scale); it does not change how many hardware pixels the surface
+    // has, so it must not change how many cells fit into it.
+    //
+    // The numbers are the divergent row from resolveContentScale.precedence above: forceFontDPI 144 on a
+    // DPR-2.0 window yields a content scale of 1.5 while the ratio stays 2.0. session::applyResize() used
+    // to scale the margins by the former, which both mis-fits the page and disagrees with the identical
+    // margin TerminalDisplay bakes into the renderer using the latter.
+    constexpr auto Dpr = 2.0;
+    constexpr auto ContentScaleUnderForcedDpi = 1.5;
+    REQUIRE(resolveContentScale(144.0, Dpr, Dpr) == ContentScaleUnderForcedDpi);
+
+    auto const cell = imageSize(10, 20);
+    auto const surface = imageSize(800, 600); // the hardware pixels the surface actually has
+    auto const logicalMargin = Margins { .horizontal = 5, .vertical = 5 };
+    auto const noClamp = [](vtbackend::PageSize page) {
+        return page;
+    };
+
+    auto const scaled = [](Margins m, double s) {
+        return Margins { .horizontal = static_cast<int>(m.horizontal * s),
+                         .vertical = static_cast<int>(m.vertical * s) };
+    };
+
+    auto const withRatio = fitPageToPixels(surface, cell, scaled(logicalMargin, Dpr), noClamp);
+    auto const withContentScale =
+        fitPageToPixels(surface, cell, scaled(logicalMargin, ContentScaleUnderForcedDpi), noClamp);
+
+    // The two disagree, which is precisely why the call site had to pick the right one: a margin scaled by
+    // 1.5 instead of 2.0 leaves 5 device pixels unaccounted for on each side.
+    CHECK(withRatio.pageMargin.left != withContentScale.pageMargin.left);
+    CHECK(withRatio.pageMargin.left == 10);       // 5 logical * DPR 2.0
+    CHECK(withContentScale.pageMargin.left == 7); // 5 logical * 1.5, truncated — the bug
+}
+
 TEST_CASE("viewportOrigin places a client's view inside a larger shared grid", "[geometry][viewport]")
 {
     // A daemon-hosted grid belongs to every attached client, so a client smaller than it shows a
