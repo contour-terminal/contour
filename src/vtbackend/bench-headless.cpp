@@ -180,9 +180,9 @@ class ContourHeadlessBench: public crispy::App
   public:
     /// @param env The process environment every part of the benchmark reads through.
     explicit ContourHeadlessBench(crispy::Environment const& env):
-        app(env, "bench-headless", "Contour Headless Benchmark", CONTOUR_VERSION_STRING, "Apache-2.0")
+        App(env, "bench-headless", "Contour Headless Benchmark", CONTOUR_VERSION_STRING, "Apache-2.0")
     {
-        using Project = crispy::cli::about::project;
+        using Project = crispy::cli::about::Project;
         crispy::cli::about::registerProjects(
 #ifdef CONTOUR_BUILD_WITH_MIMALLOC
             Project { "mimalloc", "", "" },
