@@ -6,11 +6,11 @@
 // config picked it up. This proves the QML actually wires its controls to the controller; the
 // controller's own logic is unit-tested separately in SettingsController_test.cpp.
 
-#include <contour/Config.h>
-#include <contour/GuiConfigStore.h>
-#include <contour/SettingsController.h>
+#include <contour/config/Config.h>
+#include <contour/config/GuiConfigStore.h>
 #include <contour/test/QmlChromeStyle.h>
 #include <contour/test/QmlMessageCapture.h>
+#include <contour/window/SettingsController.h>
 
 #include <QtCore/QTemporaryDir>
 #include <QtQml/QQmlComponent>
@@ -55,8 +55,9 @@ TEST_CASE("SettingsPage opens on the global settings pane", "[contour][gui][qml]
 
     config::Config cfg;
     config::loadConfigFromFile(cfg, configPath);
-    auto store = std::make_shared<FileGuiConfigStore>(configDir);
-    auto controller = SettingsController([&]() -> config::Config const& { return cfg; }, store, [&]() {});
+    auto store = std::make_shared<config::FileGuiConfigStore>(configDir);
+    auto controller =
+        contour::window::SettingsController([&]() -> config::Config const& { return cfg; }, store, [&]() {});
 
     QQmlEngine engine;
     contour::test::installChromeStyle(engine);
@@ -104,13 +105,13 @@ TEST_CASE("SettingsPage creates a profile through the QML and it lands on disk (
 
     config::Config cfg;
     config::loadConfigFromFile(cfg, configPath);
-    auto store = std::make_shared<FileGuiConfigStore>(configDir);
-    auto controller = SettingsController([&]() -> config::Config const& { return cfg; },
-                                         store,
-                                         [&]() {
-                                             cfg = config::Config {};
-                                             config::loadConfigFromFile(cfg, configPath);
-                                         });
+    auto store = std::make_shared<config::FileGuiConfigStore>(configDir);
+    auto controller = contour::window::SettingsController([&]() -> config::Config const& { return cfg; },
+                                                          store,
+                                                          [&]() {
+                                                              cfg = config::Config {};
+                                                              config::loadConfigFromFile(cfg, configPath);
+                                                          });
 
     QQmlEngine engine;
     contour::test::installChromeStyle(engine);
@@ -179,8 +180,8 @@ struct PageFixture
     config::Config cfg;
     std::filesystem::path configDir;
     std::filesystem::path configPath;
-    std::shared_ptr<FileGuiConfigStore> store;
-    std::unique_ptr<SettingsController> controller;
+    std::shared_ptr<config::FileGuiConfigStore> store;
+    std::unique_ptr<contour::window::SettingsController> controller;
     QQmlEngine engine;
     IncubationDriver incubation;
     std::unique_ptr<QQmlComponent> component;
@@ -198,13 +199,14 @@ struct PageFixture
             out << yaml;
         }
         config::loadConfigFromFile(cfg, configPath);
-        store = std::make_shared<FileGuiConfigStore>(configDir);
-        controller = std::make_unique<SettingsController>([this]() -> config::Config const& { return cfg; },
-                                                          store,
-                                                          [this]() {
-                                                              cfg = config::Config {};
-                                                              config::loadConfigFromFile(cfg, configPath);
-                                                          });
+        store = std::make_shared<config::FileGuiConfigStore>(configDir);
+        controller = std::make_unique<contour::window::SettingsController>(
+            [this]() -> config::Config const& { return cfg; },
+            store,
+            [this]() {
+                cfg = config::Config {};
+                config::loadConfigFromFile(cfg, configPath);
+            });
 
         contour::test::installChromeStyle(engine);
         engine.setIncubationController(&incubation);

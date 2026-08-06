@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/UiStyle.h>
-#include <contour/UiStyleProvider.h>
+#include <contour/config/UiStyle.h>
+#include <contour/window/UiStyleProvider.h>
 
 #include <QtGui/QGuiApplication>
 #include <QtQml/QQmlContext>
@@ -24,7 +24,7 @@ namespace contour::test
 ///               a test that does not care asserts against today's appearance.
 inline void installChromeStyle(QQmlEngine& engine, config::UiStyle style = config::UiStyle::Native)
 {
-    auto* provider = new UiStyleProvider(style, QGuiApplication::font(), &engine);
+    auto* provider = new contour::window::UiStyleProvider(style, QGuiApplication::font(), &engine);
     engine.rootContext()->setContextProperty(QStringLiteral("chromeStyle"), provider);
 }
 

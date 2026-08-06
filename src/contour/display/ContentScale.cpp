@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/Config.h>
+#include <contour/config/Config.h>
 #include <contour/display/ContentScale.h>
-#include <contour/helper.h>
+#include <contour/display/Logging.h>
 
 #include <crispy/utils.h>
 
@@ -54,7 +54,7 @@ ForcedFontDpiProvider::ForcedFontDpiProvider(QObject* parent): QObject(parent)
 {
     _cached = readForcedFontDpi();
     if (_cached)
-        displayLog()("Forcing font DPI to {} (from platform font configuration).", *_cached);
+        display::displayLog()("Forcing font DPI to {} (from platform font configuration).", *_cached);
     rewatch();
     connect(&_watcher, &QFileSystemWatcher::fileChanged, this, [this]() {
         reload();
@@ -68,9 +68,9 @@ void ForcedFontDpiProvider::reload()
     auto const fresh = readForcedFontDpi();
     if (fresh == _cached)
         return;
-    displayLog()("Forced font DPI changed: {} -> {}.",
-                 _cached ? std::format("{}", *_cached) : "none",
-                 fresh ? std::format("{}", *fresh) : "none");
+    display::displayLog()("Forced font DPI changed: {} -> {}.",
+                          _cached ? std::format("{}", *_cached) : "none",
+                          fresh ? std::format("{}", *fresh) : "none");
     _cached = fresh;
     emit changed();
 }

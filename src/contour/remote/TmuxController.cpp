@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/TerminalSession.h>
-#include <contour/TerminalSessionManager.h>
 #include <contour/remote/TmuxController.h>
+#include <contour/session/TerminalSession.h>
+#include <contour/session/TerminalSessionManager.h>
 
 #include <algorithm>
 #include <format>
@@ -13,7 +13,7 @@
 #include <vthost/tmux/ControlModeSpawn.h>
 #include <vtworkspace/LayoutConvert.h>
 
-namespace contour
+namespace contour::remote
 {
 
 namespace
@@ -367,7 +367,7 @@ void TmuxController::windowRenamed(uint64_t window, std::string const& name)
     emit tabTitleChanged();
 }
 
-void TmuxController::applyPendingRenames(TerminalSessionManager& manager)
+void TmuxController::applyPendingRenames(contour::session::TerminalSessionManager& manager)
 {
     // Resolve each pending rename to its tab's session under the lock (the acting-session
     // map is shared with the reactor thread), then apply outside it — setTabTitleForSession
@@ -612,7 +612,8 @@ std::unique_ptr<vtpty::Pty> TmuxController::createPty(std::optional<std::string>
     return pty;
 }
 
-void TmuxController::adoptPendingPanes(TerminalSessionManager& manager, vtworkspace::WindowId guiWindow)
+void TmuxController::adoptPendingPanes(contour::session::TerminalSessionManager& manager,
+                                       vtworkspace::WindowId guiWindow)
 {
     // Splits performed here (whole-tree realize, or an incremental split of an existing tmux pane)
     // must build the mirror pane locally, not author a new split back to tmux. (Mirrors
@@ -670,14 +671,14 @@ void TmuxController::adoptPendingPanes(TerminalSessionManager& manager, vtworksp
     applyPendingRenames(manager);
 }
 
-void TmuxController::realizeWindowLayout(TerminalSessionManager& manager,
+void TmuxController::realizeWindowLayout(contour::session::TerminalSessionManager& manager,
                                          vtworkspace::WindowId guiWindow,
                                          uint64_t tmuxWindow,
                                          vthost::tmux::BinaryLayout const& tree)
 {
     auto const converted = tmuxLayoutToWindowLayout(tree);
     manager.applyLayoutToWindow(
-        guiWindow, converted.layout, std::nullopt, [&](config::LayoutPane const& leaf) {
+        guiWindow, converted.layout, std::nullopt, [&](contour::config::LayoutPane const& leaf) {
             if (auto const it = converted.leafPane.find(&leaf); it != converted.leafPane.end())
                 setNextBindPane(it->second);
         });
@@ -693,7 +694,8 @@ void TmuxController::realizeWindowLayout(TerminalSessionManager& manager,
         }
 }
 
-bool TmuxController::realizeOnePane(TerminalSessionManager& manager, vtworkspace::WindowId guiWindow)
+bool TmuxController::realizeOnePane(contour::session::TerminalSessionManager& manager,
+                                    vtworkspace::WindowId guiWindow)
 {
     auto record = PendingPane {};
     {
@@ -720,7 +722,7 @@ bool TmuxController::realizeOnePane(TerminalSessionManager& manager, vtworkspace
     }();
     auto* acting = manager.sessionForId(anchor);
 
-    auto* created = static_cast<TerminalSession*>(nullptr);
+    auto* created = static_cast<contour::session::TerminalSession*>(nullptr);
     if (acting == nullptr)
         created = manager.createSessionInBackground(guiWindow);
     else
@@ -739,4 +741,4 @@ bool TmuxController::realizeOnePane(TerminalSessionManager& manager, vtworkspace
     return true;
 }
 
-} // namespace contour
+} // namespace contour::remote

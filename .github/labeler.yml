@@ -3,9 +3,6 @@ CI:
 CMake:
     - "**CMakeLists.txt"
     - cmake/**
-OpenGL:
-    - src/contour/opengl/*.cpp
-    - src/contour/opengl/*.h
 "VT: backend":
     - src/vtbackend/*.cpp
     - src/vtbackend/*.h

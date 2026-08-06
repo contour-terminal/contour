@@ -227,10 +227,37 @@ First-party modules under `src/`, roughly bottom-up (later depends on earlier):
 - `src/vtbackend` — terminal engine (grid, screen, VT semantics)
 - `src/vtrasterizer` — turns terminal cells into renderable geometry/atlases
 - `src/vtworkspace` — Qt-free tab/split-pane tree model
-- `src/contour` — the Qt/QML GUI frontend (windows, display, RHI renderer)
+- `src/contour` — the application: the headless CLI, and the Qt/QML GUI frontend
 
 Respect these boundaries: lower layers must not depend on higher ones, and the GUI must not
 reach around `vtbackend`/`vtworkspace` into rendering internals.
+
+`src/contour/` is itself layered, one directory per concern, and **each directory names the
+namespace it holds** — `src/contour/config/` is `contour::config`, and so on for every one. Only
+`main.cpp` and `ContourGuiApp` (the composition root) sit at the top. Lowest first:
+
+- `config/` — the configuration model, its parsing and its persistence. **Qt-free**, and the
+  `contour_config` target links no Qt at all. `Actions` lives here too, in `contour::actions`:
+  it is the vocabulary the key bindings bind to.
+- `command/` — the command palette's vocabulary and the context menus built from it. **Qt-free**;
+  what a menu row *is* is decided here and rendered a layer up.
+- `cli/` — the headless application: every `contour <verb>` that opens no window. **Qt-free**, and
+  what a `CONTOUR_FRONTEND_GUI=OFF` build consists of.
+- `geometry/` — page ⇄ pixel geometry, spoken by session, display and window alike.
+- `input/` — Qt event → `vtbackend` input translation, with **no knowledge of `TerminalSession`**:
+  what a chord *means* is decided here, where it is *delivered* a layer up.
+- `platform/` — adapters to Qt and the OS: bell, blur-behind, notifications, speech, URL opening.
+  Each splits into the decision and the adapter (`NotificationRouter` vs `FreeDesktopNotifier`),
+  so the decision stays testable when the resource is absent.
+- `session/` — one terminal session, the session-lifetime service, and the input routed into them.
+- `display/` — the `QQuickItem` terminal, the RHI renderer and the accessibility interfaces.
+- `window/` — the per-OS-window Qt/QML adapters (window controller, QML-facing models).
+- `remote/` — the daemon and tmux attach engines.
+- `qml/`, `styles/`, `res/`, `packaging/` — the QML modules, resources and installer inputs.
+
+The Qt-free half is not a convention but a build fact: `contour_config`, `contour_command` and
+`contour_cli` are separate library targets that do not link Qt, so reaching for a `QObject` from
+the configuration model is a build error rather than a review finding.
 
 # VT reference sources
 

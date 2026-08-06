@@ -18,11 +18,15 @@
 
 #include <vtworkspace/Primitives.h>
 
-namespace contour
+namespace contour::session
+{
+class TerminalSessionManager;
+}
+
+namespace contour::remote
 {
 
 class NativeController;
-class TerminalSessionManager;
 
 /// Reconciles one daemon window's tab/pane tree into @p window of @p manager,
 /// binding each realized pane to its remote session (via the controller's
@@ -36,10 +40,10 @@ class TerminalSessionManager;
 ///        (lowest-id) window — the single-window path.
 /// @param pageSize The size each realized pane's grid/pty is born at (the live
 ///        window size), or nullopt for the profile default.
-void applyRemoteLayout(TerminalSessionManager& manager,
+void applyRemoteLayout(contour::session::TerminalSessionManager& manager,
                        vtworkspace::WindowId window,
                        NativeController& controller,
                        std::optional<uint64_t> daemonWindow = std::nullopt,
                        std::optional<vtbackend::PageSize> pageSize = std::nullopt);
 
-} // namespace contour
+} // namespace contour::remote

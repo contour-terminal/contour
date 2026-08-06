@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/TerminalSessionManager.h>
 #include <contour/remote/NativeController.h>
+#include <contour/session/TerminalSessionManager.h>
 
 #include <crispy/utils.h>
 
@@ -10,7 +10,7 @@
 
 #include <net/Sockets.h>
 
-namespace contour
+namespace contour::remote
 {
 
 using vthost::client::NativeClient;
@@ -606,4 +606,4 @@ std::unique_ptr<vtpty::Pty> NativeController::createPty(std::optional<std::strin
     return pty;
 }
 
-} // namespace contour
+} // namespace contour::remote

@@ -14,10 +14,12 @@ set(crispy_SOURCES
     Comparison.h
     LRUCache.h
     StrongLRUCache.h
+    ScopedTimer.h
     StackTrace.cpp StackTrace.h
     TrieMap.h
     AlignedAllocator.h
     algorithm.h
+    ascii.h
     assert.h
     base64.h
     compose.h

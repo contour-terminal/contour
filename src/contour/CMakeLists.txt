@@ -98,15 +98,46 @@ endif()
 # }}}
 
 # The imported-target name differs between a vendored yaml-cpp and a system one, so
-# resolve it once here -- before add_subdirectory(display), which needs it too
-# (ContourTerminalDisplay includes contour/Config.h, hence yaml-cpp's headers).
+# resolve it once here -- before add_subdirectory(config), which puts it in contour_config's
+# PUBLIC interface (Config.h exposes yaml-cpp's headers).
 if (TARGET yaml-cpp::yaml-cpp)
     set(YAML_CPP_LIBRARIES yaml-cpp::yaml-cpp)
 else()
     set(YAML_CPP_LIBRARIES yaml-cpp)
 endif()
 
+# {{{ The frontend-independent layers
+# Three Qt-free libraries, lowest first: the configuration model, the command vocabulary built on
+# it, and the headless CLI application. Each is a target of its own rather than a pile of sources
+# in contour_core, which is what makes the layering checkable instead of merely documented --
+# contour_config cannot reach a QObject, because it does not link Qt.
+#
+# Added before display/ and before contour_core, both of which consume them.
+add_subdirectory(config)
+add_subdirectory(command)
+add_subdirectory(cli)
+
+# Declared once, on the lowest layer, and inherited by every consumer through contour_config's
+# PUBLIC usage requirements -- contour_command, contour_cli, contour_core, and through those the
+# executable and both test binaries.
+target_compile_definitions(contour_config PUBLIC
+    CONTOUR_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+    CONTOUR_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+    CONTOUR_VERSION_PATCH=${PROJECT_VERSION_PATCH}
+    CONTOUR_VERSION_STRING="${CONTOUR_VERSION_STRING}"
+    CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+    CONTOUR_APP_ID="${AppId}"
+)
 if(CONTOUR_FRONTEND_GUI)
+    target_compile_definitions(contour_config PUBLIC CONTOUR_FRONTEND_GUI)
+endif()
+# }}}
+
+# input/ and platform/ are GUI-only: one translates Qt events, the other adapts to Qt and the OS.
+# Both sit below display/ and session/, which is why they are added before them.
+if(CONTOUR_FRONTEND_GUI)
+    add_subdirectory(input)
+    add_subdirectory(platform)
     add_subdirectory(display)
 endif()
 
@@ -130,85 +161,21 @@ if(CONTOUR_MACOS_APP_BUNDLE)
 endif()
 
 set(_header_files
-    Actions.h
-    AsciiText.h
-    AtomicFileWrite.h
-    CaptureScreen.h
-    CatImageArgs.h
-    Command.h
-    CommandCatalog.h
-    CommandHistory.h
-    CommandHistoryStore.h
-    Config.h
-    ContextMenu.h
-    ContextMenuTable.h
-    TitleBarContextMenu.h
-    ContourApp.h
-    FuzzyFilter.h
-    GuiConfigStore.h
-    HyperlinkTooltip.h
-    SpeechSynthesizer.h
-    ModifierNames.h
-    Shortcut.h
-    ConfigEnum.h
-    ShellIntegration.h
-    TabBarMode.h
-    TabLabel.h
-    UiStyle.h
+    session/HyperlinkTooltip.h
+    window/TabLabel.h
 )
 
-# {{{ shell-integration scripts, embedded
-# One row per supported shell. Adding a shell is dropping its script beside the others in
-# shell-integration/ and adding it here: the embedded data, the `generate integration` dispatch and
-# that verb's help text all derive from this list.
-set(CONTOUR_SHELL_INTEGRATION_SHELLS bash fish tcsh zsh)
-
-list(TRANSFORM CONTOUR_SHELL_INTEGRATION_SHELLS
-     PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/shell-integration/shell-integration."
-     OUTPUT_VARIABLE _shell_integration_scripts)
-
-# The scripts used to reach the binary through resources.qrc, which made `contour generate
-# integration` -- a verb a GUI-less build keeps -- depend on Qt's resource system. See
-# EmbedShellIntegration.cmake for why the replacement is a CMake script.
-set(_shell_integration_data "${CMAKE_CURRENT_BINARY_DIR}/ShellIntegrationData.h")
-add_custom_command(
-    OUTPUT "${_shell_integration_data}"
-    COMMAND "${CMAKE_COMMAND}"
-            "-DSHELLS=${CONTOUR_SHELL_INTEGRATION_SHELLS}"
-            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
-            "-DOUTPUT=${_shell_integration_data}"
-            -P "${CMAKE_CURRENT_SOURCE_DIR}/EmbedShellIntegration.cmake"
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/EmbedShellIntegration.cmake" ${_shell_integration_scripts}
-    COMMENT "Embedding shell-integration scripts"
-    VERBATIM
-)
-# }}}
 # Sources are split into a reusable object library (contour_core) and the thin executable entry
-# point (main.cpp). The object library carries every translation unit of the frontend so that both
-# the `contour` executable AND the `contour_gui_test` target can link the exact same objects — this
-# is what lets the GUI tests construct real TerminalSession/ContourGuiApp objects instead of only
-# Qt-free surrogates. An OBJECT library (not STATIC) is used deliberately: it shares the compiled
-# objects without a static archive's symbol-stripping, which would otherwise drop AUTOMOC/AUTORCC
-# registration objects whose symbols are only referenced reflectively at runtime.
+# point (main.cpp). The object library carries every translation unit of the frontend that is not
+# yet a module of its own, so that both the `contour` executable AND the `contour_gui_test` target
+# can link the exact same objects — this is what lets the GUI tests construct real
+# TerminalSession/ContourGuiApp objects instead of only Qt-free surrogates. An OBJECT library (not
+# STATIC) is used deliberately: it shares the compiled objects without a static archive's
+# symbol-stripping, which would otherwise drop AUTOMOC/AUTORCC registration objects whose symbols
+# are only referenced reflectively at runtime.
 set(_core_source_files
-    Actions.cpp
-    AtomicFileWrite.cpp
-    CaptureScreen.cpp
-    Command.cpp
-    CommandCatalog.cpp
-    CommandHistory.cpp
-    CommandHistoryStore.cpp
-    Config.cpp
-    ContextMenu.cpp
-    TitleBarContextMenu.cpp
-    ContourApp.cpp
-    FuzzyFilter.cpp
-    GuiConfigStore.cpp
-    HyperlinkTooltip.cpp
-    SpeechSynthesizer.cpp
-    ShellIntegration.cpp
-    Shortcut.cpp
-    TabLabel.cpp
+    session/HyperlinkTooltip.cpp
+    window/TabLabel.cpp
 )
 # The executable entry point lives outside the object library so the test can supply its own main
 # (Catch2's) without a duplicate-symbol clash.
@@ -221,26 +188,27 @@ set(_main_source_files
 # which is why a GUI-less build is worth having at all.
 if(CONTOUR_FRONTEND_GUI)
     list(APPEND _header_files
-        Audio.h
-        AudioNote.h
-        BlurBehind.h
-        CommandPaletteModel.h
-        ContextMenuModel.h
+        window/CommandPaletteModel.h
+        window/ContextMenuModel.h
         ContourGuiApp.h
-        ExitCode.h
-        ExternalLauncher.h
-        FreeDesktopNotifier.h
-        KeyboardLayout.h
-        LayoutStore.h
-        NotificationRouter.h
-        PaneProxy.h
-        QtExternalLauncher.h
-        SessionFactory.h
-        SettingsController.h
-        TerminalSession.h
-        TerminalSessionManager.h
-        UiStyleProvider.h
-        helper.h
+        session/ExitCode.h
+        config/LayoutBuilder.h
+        config/LayoutStore.h
+        session/PaneProxy.h
+        session/SessionFactory.h
+        window/SettingsController.h
+        session/TerminalSession.h
+        session/TerminalSessionManager.h
+        window/UiStyleProvider.h
+        session/SessionInput.h
+        session/FontControl.h
+        session/SpawnCommand.h
+        session/Logging.h
+        Logging.h
+        display/RenderState.h
+        display/RenderingBackendSelection.h
+        geometry/CellRectangle.h
+        geometry/WindowGeometry.h
         remote/NativeController.h
         remote/RemoteController.h
         remote/ReactorThread.h
@@ -249,25 +217,22 @@ if(CONTOUR_FRONTEND_GUI)
         remote/TmuxController.h
     )
     list(APPEND _core_source_files
-        Audio.cpp
-        BlurBehind.cpp
-        CommandPaletteModel.cpp
-        ContextMenuModel.cpp
+        window/CommandPaletteModel.cpp
+        window/ContextMenuModel.cpp
         ContourGuiApp.cpp
-        FreeDesktopNotifier.cpp
-        KeyboardLayout.cpp
-        PaneProxy.cpp
-        QtExternalLauncher.cpp
-        LayoutBuilder.cpp
-        LayoutStore.cpp
-        SessionFactory.cpp
-        SettingsController.cpp
-        TerminalSession.cpp
+        session/PaneProxy.cpp
+        config/LayoutBuilder.cpp
+        config/LayoutStore.cpp
+        session/SessionFactory.cpp
+        window/SettingsController.cpp
+        session/TerminalSession.cpp
         display/TerminalAccessible.cpp
-        TerminalSessionManager.cpp
-        UiStyleProvider.cpp
-        WindowController.cpp
-        helper.cpp
+        session/TerminalSessionManager.cpp
+        window/UiStyleProvider.cpp
+        window/WindowController.cpp
+        session/SessionInput.cpp
+        session/FontControl.cpp
+        session/SpawnCommand.cpp
         remote/NativeController.cpp
         remote/RemoteController.cpp
         remote/RemoteLayout.cpp
@@ -276,7 +241,7 @@ if(CONTOUR_FRONTEND_GUI)
 endif()
 
 if(WIN32)
-    list(APPEND _main_source_files contour.rc)
+    list(APPEND _main_source_files packaging/contour.rc)
 endif()
 
 # Both QML modules exist only for the GUI frontend, so they are built only for it. Outside that
@@ -297,40 +262,40 @@ if(CONTOUR_FRONTEND_GUI)
     # NB: a QML module's type name is its file's stem, which must therefore start uppercase -- that is why
     # the window is Main.qml rather than the historical main.qml.
     set(_qml_files
-        ui/Main.qml
-        ui/BellSound.qml
-        ui/RequestPermission.qml
-        ui/SessionChrome.qml
-        ui/TitleBar.qml
-        ui/TabStrip.qml
-        ui/NewTabMenu.qml
-        ui/TabItem.qml
-        ui/TabContextMenu.qml
-        ui/TabColorFlyout.qml
-        ui/WindowControls.qml
-        ui/ResizeBorder.qml
-        ui/PaneNode.qml
-        ui/TerminalPane.qml
-        ui/ActionContextMenu.qml
-        ui/CommandPalette.qml
-        ui/SaveLayoutDialog.qml
-        ui/SettingsPage.qml
-        ui/SettingsNavItem.qml
-        ui/SettingsListItem.qml
-        ui/ConfirmDialog.qml
-        ui/SettingRow.qml
-        ui/SettingsSection.qml
-        ui/ColorSchemeEditor.qml
-        ui/StatusLineIndicatorEditor.qml
-        ui/StatusLineSegmentRow.qml
-        ui/StatusLineChip.qml
-        ui/StatusLineItemDialog.qml
-        ui/StatusLinePreviewItem.qml
-        ui/ColorSlotField.qml
+        qml/Main.qml
+        qml/BellSound.qml
+        qml/RequestPermission.qml
+        qml/SessionChrome.qml
+        qml/TitleBar.qml
+        qml/TabStrip.qml
+        qml/NewTabMenu.qml
+        qml/TabItem.qml
+        qml/TabContextMenu.qml
+        qml/TabColorFlyout.qml
+        qml/WindowControls.qml
+        qml/ResizeBorder.qml
+        qml/PaneNode.qml
+        qml/TerminalPane.qml
+        qml/ActionContextMenu.qml
+        qml/CommandPalette.qml
+        qml/SaveLayoutDialog.qml
+        qml/SettingsPage.qml
+        qml/SettingsNavItem.qml
+        qml/SettingsListItem.qml
+        qml/ConfirmDialog.qml
+        qml/SettingRow.qml
+        qml/SettingsSection.qml
+        qml/ColorSchemeEditor.qml
+        qml/StatusLineIndicatorEditor.qml
+        qml/StatusLineSegmentRow.qml
+        qml/StatusLineChip.qml
+        qml/StatusLineItemDialog.qml
+        qml/StatusLinePreviewItem.qml
+        qml/ColorSlotField.qml
     )
 
     # The files live in ui/ but the module is flat: without an alias each one would land at
-    # :/qt/qml/Contour/Ui/ui/<Name>.qml, leaving a stray directory level in every resource path and in
+    # :/qt/qml/Contour/Ui/qml/<Name>.qml, leaving a stray directory level in every resource path and in
     # the qmldir. Aliasing to the bare file name makes the resource layout match the module identity.
     foreach(_qml_file IN LISTS _qml_files)
         get_filename_component(_qml_name "${_qml_file}" NAME)
@@ -423,10 +388,7 @@ source_group(QML FILES ${_qml_files})
 
 # {{{ contour_core: the reusable object library (everything but main.cpp)
 add_library(contour_core OBJECT)
-# The generated header is listed as a source so that building contour_core runs the custom command
-# that produces it; nothing compiles it on its own.
-target_sources(contour_core
-    PRIVATE ${_core_source_files} ${_header_files} ${_qt_resources} "${_shell_integration_data}")
+target_sources(contour_core PRIVATE ${_core_source_files} ${_header_files} ${_qt_resources})
 
 # Both the binary dir (for generated headers) and the parent src dir (so "#include <contour/...>"
 # resolves) must be PUBLIC so consumers of the object library inherit them.
@@ -460,31 +422,17 @@ target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 # QML debugging can be enabled at runtime via -qmljsdebugger=... or QT_QML_DEBUG env var.
 # Avoid compile-time defines that force the "QML debugging is enabled" message on every
 # invocation, including headless CLI commands like `contour cat`.
-# These are attached to contour_core (which compiles the sources) as PUBLIC so the executable and
-# the test target both inherit them when they consume the object library.
-target_compile_definitions(contour_core PUBLIC
-    CONTOUR_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
-    CONTOUR_VERSION_MINOR=${PROJECT_VERSION_MINOR}
-    CONTOUR_VERSION_PATCH=${PROJECT_VERSION_PATCH}
-    CONTOUR_VERSION_STRING="${CONTOUR_VERSION_STRING}"
-    CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
-    CONTOUR_APP_ID="${AppId}"
-)
+#
+# The version/app-identity definitions are NOT repeated here: they are declared once on
+# contour_config (see the top of this file) and reach contour_core, the executable and both test
+# binaries through its PUBLIC usage requirements. Only what is genuinely frontend-specific lives
+# below.
 
 # Create custom target to execute contour
 add_custom_target(run COMMAND contour)
 
 if(CONTOUR_PERF_STATS)
     target_compile_definitions(contour_core PUBLIC CONTOUR_PERF_STATS)
-endif()
-
-if(CONTOUR_WITH_TTS)
-    target_compile_definitions(contour_core PUBLIC CONTOUR_WITH_TTS)
-    target_link_libraries(contour_core PUBLIC Qt6::TextToSpeech)
-endif()
-
-if(CONTOUR_FRONTEND_GUI)
-    target_compile_definitions(contour_core PUBLIC CONTOUR_FRONTEND_GUI)
 endif()
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
@@ -534,19 +482,27 @@ endif()
 
 # Link dependencies go on contour_core as PUBLIC so they propagate to the `contour` executable and
 # the `contour_gui_test` target through the object library's usage requirements.
-# vtrasterizer is Qt-free and Config.h includes its headers unconditionally (BoxDrawingRenderer,
-# Decorator, FontDescriptions, GlyphScaling), so it belongs here rather than with the GUI's Qt
-# dependencies -- which is what lets Config.cpp configure the box-drawing styles in either build.
+#
+# contour_command and contour_cli carry the layers beneath the frontend, and contour_config comes
+# with them -- along with crispy, vtbackend, vtpty, vtrasterizer, vtworkspace and yaml-cpp, which
+# are its PUBLIC interface and so need no restating here. vtworkspace is named anyway because the
+# frontend's own sources (the session manager's tab/pane tree) use it directly rather than through
+# the configuration model.
 target_link_libraries(contour_core
     PUBLIC
-    crispy::core
-    vtbackend
-    vtrasterizer
+    contour_command
+    contour_cli
     vtworkspace
-    ${YAML_CPP_LIBRARIES}
     PRIVATE
     vthost
 )
+
+# The GUI-only layers beneath the frontend. Guarded for the same reason they are only added as
+# subdirectories under it: without a frontend there is no Qt event to translate and no compositor,
+# audio device or notification bus to adapt to.
+if(CONTOUR_FRONTEND_GUI)
+    target_link_libraries(contour_core PUBLIC contour_input contour_platform)
+endif()
 
 # {{{ GUI: Declare Qt build dependencies
 # The QML modules are GUI-only (see the guard above), so the dependency on them is too -- as is
@@ -570,33 +526,12 @@ if(CONTOUR_FRONTEND_GUI)
         Qt6::QuickTemplates2
     )
 
-    if(OPENBSD)
-        target_link_libraries(contour_core PUBLIC X11::xcb X11::xcb_cursor)
-    elseif(NOT(WIN32) AND NOT(APPLE))
-        target_link_libraries(contour_core PUBLIC xcb)
-    endif()
-
-    if(APPLE)
-        # KeyboardLayout.cpp asks the Text Input Sources API what the active layout makes of a key
-        # code, because [NSEvent keyCode] -- which is what Qt hands us -- is positional and says
-        # nothing about the character. TIS* and UCKeyTranslate both live in Carbon/HIToolbox.
-        find_library(CARBON_LIBRARY Carbon REQUIRED)
-        target_link_libraries(contour_core PUBLIC ${CARBON_LIBRARY})
-    endif()
+    # xcb, Carbon and the Wayland blur protocol are declared by the targets that actually use them:
+    # xcb and Wayland by contour_platform (BlurBehind.cpp is the only caller of either), Carbon by
+    # contour_input (KeyboardLayout.cpp is the only caller). Restating them here would have generated
+    # the Wayland protocol sources a second time, into a target that no longer holds the .xml.
     if(CONTOUR_BUILD_STATIC)
         qt_import_qml_plugins(contour)
-    endif()
-
-    if(LINUX AND CONTOUR_WAYLAND)
-        find_package(Qt6 COMPONENTS WaylandClient WaylandClientPrivate)
-        target_compile_definitions(contour_core PUBLIC CONTOUR_WAYLAND)
-        target_link_libraries(contour_core PUBLIC Qt6::WaylandClient Qt6::WaylandClientPrivate)
-        # The Wayland protocol client sources are generated against contour_core (which owns the
-        # frontend translation units that reference them).
-        qt6_generate_wayland_protocol_client_sources(contour_core FILES "${CMAKE_CURRENT_SOURCE_DIR}/protocols/blur.xml")
-        # Explicitly add the generated protocol source code to the target, as the macro sometimes fails to do so.
-        target_sources(contour_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/wayland-blur-protocol.c")
-        target_sources(contour_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/qwayland-blur.cpp")
     endif()
 
     # {{{ GUI frontend E2E tests (run under the Qt offscreen platform; no display server needed)
@@ -612,63 +547,51 @@ if(CONTOUR_FRONTEND_GUI)
         # resources.qrc again — doing so would duplicate the resource registration symbols.
         add_executable(contour_gui_test
             test/test_main.cpp
-            test/Actions_test.cpp
-            test/NativeController_test.cpp
-            test/RemoteController_test.cpp
-            test/TmuxController_test.cpp
-            test/AudioNote_test.cpp
+            remote/NativeController_test.cpp
+            remote/RemoteController_test.cpp
+            remote/TmuxController_test.cpp
+            platform/AudioNote_test.cpp
             test/BenignQtMessages_test.cpp
-            test/CaptureScreen_test.cpp
-            test/CatImageArgs_test.cpp
-            test/CommandCatalog_test.cpp
-            test/CommandHistory_test.cpp
-            test/CommandPaletteModel_test.cpp
-            test/Config_test.cpp
-            test/SettingsController_test.cpp
+            window/CommandPaletteModel_test.cpp
+            config/Config_test.cpp
+            window/SettingsController_test.cpp
             test/SettingsPageQml_test.cpp
             test/Accessibility_qml_test.cpp
-            test/ContextMenu_test.cpp
-            test/SpeechSynthesizer_test.cpp
-            test/TitleBarContextMenu_test.cpp
-            test/FuzzyFilter_test.cpp
-            test/ShellIntegration_test.cpp
-            test/Shortcut_test.cpp
-            test/LayoutBuilder_test.cpp
+            platform/SpeechSynthesizer_test.cpp
             test/ContourGuiApp_test.cpp
-            test/DisplayRendering_test.cpp
-            test/ContentScale_test.cpp
-            test/ExitCode_test.cpp
-            test/CaretGeometry_test.cpp
-            test/CaretReportGate_test.cpp
-            test/TerminalAccessible_test.cpp
-            test/Helper_test.cpp
-            test/HyperlinkTooltip_test.cpp
-            test/HorizontalWheelGesture_test.cpp
-            test/ImeQueryRect_test.cpp
-            test/ViewportTextIndex_test.cpp
-            test/KeyboardRouting_test.cpp
+            display/DisplayRendering_test.cpp
+            display/ContentScale_test.cpp
+            session/ExitCode_test.cpp
+            display/CaretReportGate_test.cpp
+            display/TerminalAccessible_test.cpp
+            session/SessionInput_test.cpp
+            session/HyperlinkTooltip_test.cpp
+            input/HorizontalWheelGesture_test.cpp
+            display/ImeQueryRect_test.cpp
+            display/ViewportTextIndex_test.cpp
+            session/KeyboardRouting_test.cpp
             test/MainWindowQml_test.cpp
-            test/FocusRouting_test.cpp
-            test/MultiWindow_test.cpp
-            test/NotificationRouter_test.cpp
+            session/FocusRouting_test.cpp
+            window/MultiWindow_test.cpp
+            platform/NotificationRouter_test.cpp
             test/QmlDiagnosticPredicate_test.cpp
-            test/RenderingBackendSelection_test.cpp
-            test/ScissorRect_test.cpp
-            test/RhiVertexLayout_test.cpp
-            test/ScreenshotReadback_test.cpp
-            test/ScreenshotRhiReadback_test.cpp
-            test/TabSizeInheritance_test.cpp
-            test/TerminalSessionManager_test.cpp
-            test/TerminalSession_test.cpp
+            display/RenderingBackendSelection_test.cpp
+            display/ScissorRect_test.cpp
+            display/RhiVertexLayout_test.cpp
+            display/ScreenshotReadback_test.cpp
+            display/ScreenshotRhiReadback_test.cpp
+            session/TabSizeInheritance_test.cpp
+            session/TerminalSessionManager_test.cpp
+            session/TerminalSession_test.cpp
             test/QmlComponents_test.cpp
-            test/TabColorScheme_test.cpp
+            window/TabColorScheme_test.cpp
             test/ContourTuiStyle_test.cpp
-            test/UiStyle_test.cpp
-            test/UiStyleProvider_test.cpp
-            test/TabListModel_test.cpp
-            test/TabLabel_test.cpp
-            test/WindowGeometry_test.cpp
-            test/WindowSizing_test.cpp
+            window/UiStyleProvider_test.cpp
+            window/TabListModel_test.cpp
+            window/TabLabel_test.cpp
+            geometry/CellRectangle_test.cpp
+            geometry/WindowGeometry_test.cpp
+            window/WindowSizing_test.cpp
         )
         set_target_properties(contour_gui_test PROPERTIES AUTOMOC ON)
         target_link_libraries(contour_gui_test
@@ -759,6 +682,40 @@ if(CONTOUR_FRONTEND_GUI)
 endif()
 # }}}
 
+# {{{ contour_test: the Qt-free unit tests, in BOTH frontend configurations
+# config/, command/ and cli/ link no Qt, so their tests need none either -- and a build configured
+# without the GUI frontend has none to give them. That is how that configuration came to have no
+# unit tests at all: every one of them lived in contour_gui_test, which needs a QGuiApplication.
+#
+# Config_test stays with the GUI tests deliberately: besides the configuration model it also asserts
+# the Qt colour-scheme mapping and uses qputenv, so it is not Qt-free however Qt-free the model is.
+if(CONTOUR_TESTING)
+    enable_testing()
+    add_executable(contour_test
+        test/core_test_main.cpp
+        config/Actions_test.cpp
+        config/LayoutBuilder_test.cpp
+        config/UiStyle_test.cpp
+        command/CommandCatalog_test.cpp
+        command/CommandHistory_test.cpp
+        command/ContextMenu_test.cpp
+        command/FuzzyFilter_test.cpp
+        command/Shortcut_test.cpp
+        command/TitleBarContextMenu_test.cpp
+        cli/CaptureScreen_test.cpp
+        cli/CatImageArgs_test.cpp
+        cli/ShellIntegration_test.cpp
+    )
+    target_link_libraries(contour_test PRIVATE contour_command contour_cli Catch2::Catch2)
+    target_include_directories(contour_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+    if(NOT WIN32)
+        # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+        target_compile_options(contour_test PRIVATE -Wno-c2y-extensions)
+    endif()
+    add_test(NAME contour_test COMMAND $<TARGET_FILE:contour_test>)
+endif()
+# }}}
+
 # {{{ e2e: the CLI verb surface, in BOTH frontend configurations
 # Deliberately outside the CONTOUR_FRONTEND_GUI block above: what this asserts is which verbs each
 # configuration exposes, so it has to run in the configuration that has no GUI too -- that is the
@@ -810,7 +767,7 @@ if(CONTOUR_TESTING)
         SCRIPT ShellIntegration.cmake
         MARKER "shell-integration: OK"
         ARGS -D "SHELLS=${CONTOUR_SHELL_INTEGRATION_SHELLS}"
-             -D "SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+             -D "SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/cli"
              -D "WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}")
 endif()
 # }}}
@@ -931,7 +888,7 @@ set(CPACK_WIX_PRODUCT_GUID "0E736497-2B72-4117-95E9-54EC6D${HEX_MAJOR}${HEX_MINO
 set(CPACK_WIX_UPGRADE_GUID "0E736497-2B72-4117-95E9-54EC6D000000")
 if(WIN32)
     set(CPACK_PACKAGE_INSTALL_DIRECTORY "Contour Terminal Emulator ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
-    set(CPACK_WIX_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/wix_patch.xml")
+    set(CPACK_WIX_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/packaging/wix_patch.xml")
     set(CPACK_WIX_PROPERTY_WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT "Launch Contour")
 endif()
 if(CONTOUR_MACOS_APP_BUNDLE)
@@ -1002,7 +959,7 @@ elseif(CONTOUR_MACOS_APP_BUNDLE)
     # Install application icon
     install(FILES "res/images/contour-logo.icns" DESTINATION "${INSTALL_CMAKE_DIR}" RENAME "contour.icns")
     install(DIRECTORY "${terminfo_basedir}" DESTINATION "${INSTALL_CMAKE_DIR}")
-    install(DIRECTORY "shell-integration" DESTINATION "${INSTALL_CMAKE_DIR}")
+    install(DIRECTORY "cli/shell-integration" DESTINATION "${INSTALL_CMAKE_DIR}")
 
     # add_custom_target(Docs SOURCES README.md LICENSE.txt)
     # TODO: install(TARGETS Docs ...)
@@ -1039,7 +996,7 @@ elseif(CONTOUR_MACOS_APP_BUNDLE)
                     -always-overwrite
                     -verbose=1
                     -no-strip
-                    \"-qmldir=${CMAKE_CURRENT_SOURCE_DIR}/ui\"
+                    \"-qmldir=${CMAKE_CURRENT_SOURCE_DIR}/qml\"
             COMMAND_ERROR_IS_FATAL ANY
         )
 
@@ -1095,7 +1052,7 @@ else()
     # CLI tool: the executable and the data every platform wants, first.
     include(GNUInstallDirs)
     install(TARGETS contour DESTINATION bin)
-    install(DIRECTORY "shell-integration" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
+    install(DIRECTORY "cli/shell-integration" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(FILES "${PROJECT_SOURCE_DIR}/LICENSE.txt" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(FILES "${PROJECT_SOURCE_DIR}/README.md" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(DIRECTORY "${terminfo_basedir}" DESTINATION "${CMAKE_INSTALL_DATADIR}")
@@ -1140,9 +1097,9 @@ else()
 
         set(CPACK_COMPONENTS_ALL "contour")
 
-        install(FILES "contour.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/applications" RENAME "${AppId}.desktop")
-        install(FILES "contour-run.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus" RENAME "${AppId}.RunIn.desktop")
-        install(FILES "${AppId}.OpenHere.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus")
+        install(FILES "packaging/contour.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/applications" RENAME "${AppId}.desktop")
+        install(FILES "packaging/contour-run.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus" RENAME "${AppId}.RunIn.desktop")
+        install(FILES "packaging/${AppId}.OpenHere.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus")
         install(FILES "res/images/contour-logo-512.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512/apps" RENAME "${AppId}.png")
         install(FILES "res/images/contour-logo-256.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps" RENAME "${AppId}.png")
         install(FILES "res/images/contour-logo-128.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/128x128/apps" RENAME "${AppId}.png")

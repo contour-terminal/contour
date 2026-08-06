@@ -6,8 +6,8 @@
 // the offscreen e2e app runs, not here.
 
 #include <contour/ContourGuiApp.h>
-#include <contour/SessionFactory.h>
-#include <contour/TerminalSession.h>
+#include <contour/session/SessionFactory.h>
+#include <contour/session/TerminalSession.h>
 #include <contour/test/GuiTestFixtures.h>
 
 #include <QtCore/QTemporaryDir>
@@ -119,7 +119,7 @@ TEST_CASE("onExit records no exit status for a non-process session", "[contour][
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     auto* factory = factoryOwned.get();
     TestApp app(std::move(factoryOwned));
-    auto session = std::make_unique<contour::TerminalSession>(
+    auto session = std::make_unique<contour::session::TerminalSession>(
         &app.manager(), factory->createPty(std::nullopt), app.app());
     CHECK_NOTHROW(app.app().onExit(*session));
 }
@@ -140,21 +140,24 @@ TEST_CASE("childPtyPageSize reserves the status-line row(s) from the total page 
     using vtbackend::StatusDisplayType;
 
     // With a status line the child PTY is born one row shorter than the total (the reserved status row).
-    CHECK(contour::childPtyPageSize(PageSize { LineCount(25), ColumnCount(80) }, StatusDisplayType::Indicator)
+    CHECK(contour::session::childPtyPageSize(PageSize { LineCount(25), ColumnCount(80) },
+                                             StatusDisplayType::Indicator)
           == PageSize { LineCount(24), ColumnCount(80) });
-    CHECK(contour::childPtyPageSize(PageSize { LineCount(25), ColumnCount(80) },
-                                    StatusDisplayType::HostWritable)
+    CHECK(contour::session::childPtyPageSize(PageSize { LineCount(25), ColumnCount(80) },
+                                             StatusDisplayType::HostWritable)
           == PageSize { LineCount(24), ColumnCount(80) });
     // No status line: the child uses the full total, unchanged.
-    CHECK(contour::childPtyPageSize(PageSize { LineCount(25), ColumnCount(80) }, StatusDisplayType::None)
+    CHECK(contour::session::childPtyPageSize(PageSize { LineCount(25), ColumnCount(80) },
+                                             StatusDisplayType::None)
           == PageSize { LineCount(25), ColumnCount(80) });
     // Columns are never touched by the status line.
-    CHECK(
-        contour::childPtyPageSize(PageSize { LineCount(40), ColumnCount(120) }, StatusDisplayType::Indicator)
-            .columns
-        == ColumnCount(120));
+    CHECK(contour::session::childPtyPageSize(PageSize { LineCount(40), ColumnCount(120) },
+                                             StatusDisplayType::Indicator)
+              .columns
+          == ColumnCount(120));
     // A degenerate 1-line total must clamp, not underflow to 0.
-    CHECK(contour::childPtyPageSize(PageSize { LineCount(1), ColumnCount(80) }, StatusDisplayType::Indicator)
+    CHECK(contour::session::childPtyPageSize(PageSize { LineCount(1), ColumnCount(80) },
+                                             StatusDisplayType::Indicator)
           == PageSize { LineCount(1), ColumnCount(80) });
 }
 
@@ -167,14 +170,14 @@ TEST_CASE("overridesShellProgram only counts a real program override", "[contour
 {
     using vtpty::Process;
 
-    CHECK_FALSE(contour::overridesShellProgram(std::nullopt));
+    CHECK_FALSE(contour::session::overridesShellProgram(std::nullopt));
 
     // Directory-only layout pane: engaged override, empty program -> NOT a program override.
     auto directoryOnly = Process::ExecInfo {};
     directoryOnly.workingDirectory = "/tmp";
-    CHECK_FALSE(contour::overridesShellProgram(directoryOnly));
+    CHECK_FALSE(contour::session::overridesShellProgram(directoryOnly));
 
     auto command = Process::ExecInfo {};
     command.program = "htop";
-    CHECK(contour::overridesShellProgram(command));
+    CHECK(contour::session::overridesShellProgram(command));
 }

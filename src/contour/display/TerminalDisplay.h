@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/Actions.h>
-#include <contour/Config.h>
-#include <contour/TerminalSession.h>
+#include <contour/config/Actions.h>
+#include <contour/config/Config.h>
 #include <contour/display/ContentScale.h>
+#include <contour/display/RenderState.h>
 #include <contour/display/TerminalRenderNode.h>
-#include <contour/helper.h>
+#include <contour/display/WindowHost.h>
+#include <contour/input/MouseMapping.h>
+#include <contour/session/DisplaySurface.h>
+#include <contour/session/SessionInput.h>
+#include <contour/session/TerminalSession.h>
 
 #include <vtbackend/Color.h>
 #include <vtbackend/Metrics.h>
@@ -23,6 +27,7 @@
 #include <QtGui/QVector4D>
 #include <QtQml/QtQml>
 #include <QtQuick/QQuickItem>
+#include <QtQuick/QQuickWindow>
 #include <QtQuick/QSGRenderNode>
 
 #include <filesystem>
@@ -41,11 +46,10 @@ class QRhiRenderPassDescriptor;
 class QScreen;
 QT_END_NAMESPACE
 
-namespace contour
+namespace contour::session
 {
 class TerminalSessionManager;
-class WindowController;
-} // namespace contour
+}
 
 namespace contour::display
 {
@@ -54,15 +58,20 @@ class RhiRenderer;
 
 // It currently can handles multiple terminals inside via tabs support.
 // that is managed by TerminalSessionManager.
-class TerminalDisplay: public QQuickItem
+// The DisplaySurface overrides below are `final` rather than `override`, and the CLASS is not: QML
+// registration derives from it (QQmlPrivate::QQmlElement<T>), so a final class does not compile. Marking
+// each implementation final says the same thing where it matters -- this is the leaf -- and it is what
+// devirtualizes the surface calls this class makes on ITSELF from its own constructor and destructor
+// (window(), contentScale()), where dispatching virtually would be the classic bypass bug.
+class TerminalDisplay: public QQuickItem, public session::DisplaySurface
 {
     Q_OBJECT
-    Q_PROPERTY(TerminalSession* session READ getSessionHelper WRITE setSession NOTIFY sessionChanged)
+    Q_PROPERTY(session::TerminalSession* session READ getSessionHelper WRITE setSession NOTIFY sessionChanged)
     Q_PROPERTY(QString profile READ profileName WRITE setProfileName NOTIFY profileNameChanged)
     Q_PROPERTY(QString title READ title NOTIFY titleChanged)
     QML_ELEMENT
 
-    TerminalSession* getSessionHelper() { return _session; }
+    session::TerminalSession* getSessionHelper() { return _session; }
 
   public:
     explicit TerminalDisplay(QQuickItem* parent = nullptr);
@@ -101,16 +110,16 @@ class TerminalDisplay: public QQuickItem
         return _session->terminal();
     }
 
-    [[nodiscard]] bool hasSession() const noexcept { return _session != nullptr; }
+    [[nodiscard]] bool hasSession() const noexcept override { return _session != nullptr; }
 
     /// Whether the RHI render target currently exists. False before the first scene-graph sync and
     /// after a scene-graph invalidation (destroyRenderer) — posted GUI callbacks that reach
     /// render-target-dependent methods (e.g. setFonts) must re-check this at dispatch time, the same
     /// way they re-check window().
-    [[nodiscard]] bool hasRenderTarget() const noexcept { return _renderTarget != nullptr; }
+    [[nodiscard]] bool hasRenderTarget() const noexcept final { return _renderTarget != nullptr; }
 
     // NB: Use TerminalSession.attachDisplay, that one is calling this here. TODO(PR) ?
-    void setSession(TerminalSession* newSession);
+    void setSession(session::TerminalSession* newSession);
 
     /// Clears this display's session pointer, and — if the session's back-pointer still names this
     /// display — the session's back-pointer too. Called by TerminalSession::attachDisplay when another
@@ -118,9 +127,9 @@ class TerminalDisplay: public QQuickItem
     /// (e.g. the hidden single-pane view after a split) stops believing it is attached; and by
     /// setSession(nullptr) on the transient-null collapse path, where clearing the back-pointer keeps
     /// the session from posting into this display after it is destroyed.
-    void releaseSession();
+    void releaseSession() final;
 
-    [[nodiscard]] TerminalSession& session() noexcept
+    [[nodiscard]] session::TerminalSession& session() noexcept final
     {
         assert(_session != nullptr);
         return *_session;
@@ -170,8 +179,15 @@ class TerminalDisplay: public QQuickItem
     void releaseRenderResources();
 
     // {{{ TerminalDisplay API
-    void closeDisplay();
-    void post(std::function<void()> fn);
+    void closeDisplay() final;
+    void post(std::function<void()> fn) final;
+
+    /// The OS window this item is in, or nullptr while it is in none.
+    ///
+    /// Re-declared only so QQuickItem's own (non-virtual) window() answers session::DisplaySurface's
+    /// virtual one: without it the two names are ambiguous here and the surface stays abstract. The
+    /// answer is QQuickItem's, unchanged.
+    [[nodiscard]] QQuickWindow* window() const final { return QQuickItem::window(); }
 
     /// Announces a caret move to the platform: refreshes the IME cursor rectangle and, when assistive
     /// technology is listening, the accessible caret. The IME update is kept alongside the accessibility
@@ -180,7 +196,7 @@ class TerminalDisplay: public QQuickItem
     /// GUI THREAD ONLY: QInputMethod::update() is not fire-and-forget — the Wayland backend synchronously
     /// re-queries inputMethodQuery(), which reads the grid — and the terminal-side notification arrives
     /// on the terminal or render thread with the terminal's state mutex possibly already held.
-    void reportCursorMoved();
+    void reportCursorMoved() final;
 
     /// Tells assistive technology where the caret is, if it moved somewhere worth announcing.
     ///
@@ -212,12 +228,12 @@ class TerminalDisplay: public QQuickItem
     void reportAccessibleLocation();
 
     // Attributes
-    [[nodiscard]] vtbackend::RefreshRate refreshRate() const;
+    [[nodiscard]] vtbackend::RefreshRate refreshRate() const final;
     text::DPI fontDPI() const noexcept;
     [[nodiscard]] bool isFullScreen() const;
 
-    [[nodiscard]] vtbackend::ImageSize pixelSize() const;
-    [[nodiscard]] vtbackend::ImageSize cellSize() const;
+    [[nodiscard]] vtbackend::ImageSize pixelSize() const final;
+    [[nodiscard]] vtbackend::ImageSize cellSize() const final;
 
     /// The pixel size to tell applications about for a page of @p totalPageSize.
     ///
@@ -227,7 +243,7 @@ class TerminalDisplay: public QQuickItem
     /// recover the cell, so margins in that number come back as cell-size error.
     /// @param totalPageSize The page the report is for; callers mid-resize must pass the NEW page,
     ///                      not the terminal's current one.
-    [[nodiscard]] vtbackend::ImageSize reportedPixelSize(vtbackend::PageSize totalPageSize) const;
+    [[nodiscard]] vtbackend::ImageSize reportedPixelSize(vtbackend::PageSize totalPageSize) const final;
 
     /// Device pixels per reported pixel: the divisor taking a device-pixel extent into the unit
     /// `pixel_reporting` selects.
@@ -236,53 +252,52 @@ class TerminalDisplay: public QQuickItem
     /// through here -- an extent left in device pixels while the rest reports logical is not a smaller
     /// number, it is a number in a unit the application does not know it is reading.
     /// @return 1.0 when reporting device pixels, the content scale when reporting logical ones.
-    [[nodiscard]] double reportedPixelScale() const;
+    [[nodiscard]] double reportedPixelScale() const final;
 
-    void resizeTerminalToDisplaySize();
+    void resizeTerminalToDisplaySize() final;
 
     // (user requested) actions
-    vtbackend::FontDef getFontDef();
-    static void copyToClipboard(std::string_view /*_data*/);
-    void inspect();
-    void resizeWindow(vtbackend::LineCount, vtbackend::ColumnCount);
-    void resizeWindow(vtbackend::Width, vtbackend::Height);
-    void setFonts(vtrasterizer::FontDescriptions fontDescriptions);
-    bool setFontSize(text::font_size newFontSize);
+    vtbackend::FontDef getFontDef() final;
+    void inspect() final;
+    void resizeWindow(vtbackend::LineCount, vtbackend::ColumnCount) final;
+    void resizeWindow(vtbackend::Width, vtbackend::Height) final;
+    void setFonts(vtrasterizer::FontDescriptions fontDescriptions) final;
+    bool setFontSize(text::font_size newFontSize) final;
 
     /// The font size the renderer has actually loaded (its published font descriptions), which may differ
     /// from a just-requested size while a staged change is pending or after a swallowed font-load failure.
     [[nodiscard]] text::font_size fontSize() const { return _renderer->fontDescriptions().size; }
 
-    void setMouseCursorShape(MouseCursorShape newCursorShape);
+    void setMouseCursorShape(input::MouseCursorShape newCursorShape) final;
     void setWindowFullScreen();
     void setWindowMaximized();
     void setWindowNormal();
-    void setBlurBehind(bool enable);
-    void toggleFullScreen();
-    void toggleTitleBar();
+    void setBlurBehind(bool enable) final;
+    void toggleFullScreen() final;
+    void toggleTitleBar() final;
 
     /// Sets this WINDOW's tab bar visibility mode, for as long as the window lives.
     ///
     /// Window state, like the title bar above: a change made from any pane applies to the whole window
     /// and survives pane-focus changes and tab switches. A configuration reload supersedes it, which is
     /// what reloading a configuration means (see WindowController::applyTabBarFromConfig).
-    void setTabBarVisibility(config::TabBarVisibility mode);
+    void setTabBarVisibility(config::TabBarVisibility mode) final;
 
     /// Sets this WINDOW's tab bar placement. @see setTabBarVisibility.
-    void setTabBarPosition(config::TabBarPosition position);
-    void toggleInputMethodEditorHandling();
-    void setHyperlinkDecoration(vtrasterizer::Decorator normal, vtrasterizer::Decorator hover);
+    void setTabBarPosition(config::TabBarPosition position) final;
+    void toggleInputMethodEditorHandling() final;
+    void setHyperlinkDecoration(vtrasterizer::Decorator normal, vtrasterizer::Decorator hover) final;
 
     // terminal events
-    void scheduleRedraw();
-    void renderBufferUpdated();
+    void scheduleRedraw() final;
+    void renderBufferUpdated() final;
     void onSelectionCompleted();
-    void bufferChanged(vtbackend::ScreenType);
-    void discardImage(vtbackend::Image const&);
-    void setScreenshotOutput(auto&& where) { _saveScreenshot = std::forward<decltype(where)>(where); }
+    void bufferChanged(vtbackend::ScreenType) final;
+    void discardImage(vtbackend::Image const&) final;
+    void setScreenshotOutput(ScreenshotOutput where) final { _saveScreenshot = std::move(where); }
     // }}}
 
-    [[nodiscard]] double contentScale() const;
+    [[nodiscard]] double contentScale() const final;
 
     Q_INVOKABLE void logDisplayInfo();
 
@@ -342,12 +357,12 @@ class TerminalDisplay: public QQuickItem
     /// are materialized SYNCHRONOUSLY — even before the render target exists, where applyFontDPI()
     /// alone only stages the reload (the staged apply is CPU-side FreeType work; pattern borrowed from
     /// createRenderer()). Callers may derive geometry from cellSize() immediately afterwards.
-    void applyContentScaleChange();
+    void applyContentScaleChange() final;
 
   signals:
     void profileNameChanged();
     void titleChanged(QString const&);
-    void sessionChanged(TerminalSession*);
+    void sessionChanged(session::TerminalSession*);
     void terminalBufferChanged(vtbackend::ScreenType);
     void terminated();
     void showNotification(QString const& title, QString const& body);
@@ -389,14 +404,14 @@ class TerminalDisplay: public QQuickItem
     ///
     /// GUI THREAD ONLY, holding no lock the render thread takes mid-frame (the terminal state mutex, the
     /// renderer's _applyMutex), or this deadlocks.
-    void fenceRenderThread();
+    void fenceRenderThread() const;
 
     /// The ONLY writer of @ref _session: fences the render thread out, then stores @p newSession.
     ///
     /// A choke point rather than a rule to remember, since the two writers reach it by different routes
     /// (setSession() rebinds, releaseSession() detaches). GUI THREAD ONLY. Does not emit
     /// sessionChanged() — setSession() emits only once the new session is fully wired up.
-    void assignSession(TerminalSession* newSession);
+    void assignSession(session::TerminalSession* newSession);
 
     void doDumpStateInternal();
 
@@ -471,9 +486,9 @@ class TerminalDisplay: public QQuickItem
     /// resizeTerminalToDisplaySize().
     void applyDisplaySizeToGrid();
 
-    /// This display's per-OS-window controller (the window-geometry authority), or nullptr when the
-    /// display is not registered with a manager (offscreen tests).
-    [[nodiscard]] WindowController* windowController();
+    /// The OS window this display is shown in (@ref WindowHost — the window-geometry authority), or
+    /// nullptr when the display is not registered with a manager (offscreen tests).
+    [[nodiscard]] WindowHost* windowHost();
 
     /// Notifies the window-geometry authority that this display's cell geometry (font/DPI/margins)
     /// changed, so it refreshes the WM size hints. No-op without a controller.
@@ -487,7 +502,10 @@ class TerminalDisplay: public QQuickItem
     /// Public so the accessibility interface can map cells to screen rectangles. Returned BY VALUE, and
     /// callers should take one copy per query: two separate reads could straddle a concurrent font apply
     /// and mix a new cell size with an old margin.
-    [[nodiscard]] vtrasterizer::GridMetrics gridMetrics() const noexcept { return _renderer->gridMetrics(); }
+    [[nodiscard]] vtrasterizer::GridMetrics gridMetrics() const noexcept final
+    {
+        return _renderer->gridMetrics();
+    }
 
   private:
     /// Flags the screen as dirty.
@@ -506,12 +524,12 @@ class TerminalDisplay: public QQuickItem
     //
     std::string _profileName;
     std::string _programPath;
-    TerminalSession* _session = nullptr;
+    session::TerminalSession* _session = nullptr;
     /// The session manager this display is registered with, cached the first time the display learns
     /// of one (focus-in / setSession). Used by ~TerminalDisplay to evict this display from the
     /// manager's per-display bookkeeping even when the session has already been detached (a closed
     /// split pane is destroyed session-less), which a _session-routed call could not reach.
-    TerminalSessionManager* _manager = nullptr;
+    session::TerminalSessionManager* _manager = nullptr;
     std::chrono::steady_clock::time_point _startTime;
     text::DPI _lastFontDPI {};
     /// The app-wide forced-font-DPI provider (see ContentScale.h), injected in setSession(). Null until
@@ -541,7 +559,7 @@ class TerminalDisplay: public QQuickItem
 
     // {{{ Auto-scroll state for drag-selection outside window
     QTimer _autoScrollTimer;
-    AutoScrollInfo _autoScrollState;
+    session::AutoScrollInfo _autoScrollState;
     // }}}
 
     RenderStateManager _state;

@@ -1,28 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/CommandPaletteModel.h>
-#include <contour/Config.h>
 #include <contour/ContourGuiApp.h>
-#include <contour/GuiTheme.h>
-#include <contour/PaneProxy.h>
-#include <contour/QtExternalLauncher.h>
-#include <contour/RenderingBackendSelection.h>
-#include <contour/SessionFactory.h>
-#include <contour/SettingsController.h>
-#include <contour/WindowController.h>
+#include <contour/Logging.h>
+#include <contour/config/Config.h>
 #include <contour/display/ContentScale.h>
-#include <contour/display/ShaderConfig.h> // display::createSurfaceFormat
+#include <contour/display/Logging.h>
+#include <contour/display/RenderingBackendSelection.h>
+#include <contour/display/ShaderConfig.h> // createSurfaceFormat
 #include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
+#include <contour/platform/GuiTheme.h>
+#include <contour/platform/QtExternalLauncher.h>
+#include <contour/platform/QtPath.h>
 #include <contour/remote/NativeController.h>
 #include <contour/remote/RemoteLayout.h>
 #include <contour/remote/RoutingSessionFactory.h>
 #include <contour/remote/TmuxController.h>
+#include <contour/session/PaneProxy.h>
+#include <contour/session/SessionFactory.h>
+#include <contour/window/CommandPaletteModel.h>
+#include <contour/window/SettingsController.h>
+#include <contour/window/WindowController.h>
 
 #include <vtpty/Process.h>
 
 #include <text_shaper/font_locator.h>
 
 #include <crispy/CLI.h>
+#include <crispy/ScopedTimer.h>
 #include <crispy/logsink.h>
 #include <crispy/logstore.h>
 #include <crispy/utils.h>
@@ -108,21 +112,21 @@ bool hasStrandedQmlOverrides(fs::path const& configHome)
 }
 
 ContourGuiApp::ContourGuiApp(crispy::environment const& env,
-                             std::unique_ptr<SessionFactory> sessionFactory,
-                             std::unique_ptr<ExternalLauncher> externalLauncher,
-                             std::unique_ptr<LayoutStore> layoutStore,
-                             std::unique_ptr<CommandHistoryStore> commandHistoryStore,
-                             std::unique_ptr<SpeechSynthesizer> speechSynthesizer):
+                             std::unique_ptr<session::SessionFactory> sessionFactory,
+                             std::unique_ptr<platform::ExternalLauncher> externalLauncher,
+                             std::unique_ptr<config::LayoutStore> layoutStore,
+                             std::unique_ptr<command::CommandHistoryStore> commandHistoryStore,
+                             std::unique_ptr<platform::SpeechSynthesizer> speechSynthesizer):
     ContourApp { env },
-    _sessionFactory(std::make_unique<RoutingSessionFactory>(
-        sessionFactory ? std::move(sessionFactory) : std::make_unique<AppSessionFactory>(*this))),
-    _routingFactory(static_cast<RoutingSessionFactory*>(_sessionFactory.get())),
+    _sessionFactory(std::make_unique<remote::RoutingSessionFactory>(
+        sessionFactory ? std::move(sessionFactory) : std::make_unique<session::AppSessionFactory>(*this))),
+    _routingFactory(static_cast<remote::RoutingSessionFactory*>(_sessionFactory.get())),
     _externalLauncher(externalLauncher ? std::move(externalLauncher)
-                                       : std::make_unique<QtExternalLauncher>()),
-    _layoutStore(layoutStore ? std::move(layoutStore) : std::make_unique<FileLayoutStore>()),
+                                       : std::make_unique<platform::QtExternalLauncher>()),
+    _layoutStore(layoutStore ? std::move(layoutStore) : std::make_unique<config::FileLayoutStore>()),
     _commandHistoryStore(commandHistoryStore ? std::move(commandHistoryStore)
-                                             : std::make_unique<FileCommandHistoryStore>()),
-    _speechSynthesizer(speechSynthesizer ? std::move(speechSynthesizer) : makeSpeechSynthesizer()),
+                                             : std::make_unique<command::FileCommandHistoryStore>()),
+    _speechSynthesizer(speechSynthesizer ? std::move(speechSynthesizer) : platform::makeSpeechSynthesizer()),
     _sessionManager(*this, *_sessionFactory, *_layoutStore, *_commandHistoryStore)
 {
     link("contour.terminal", bind(&ContourGuiApp::terminalGuiAction, this));
@@ -202,7 +206,7 @@ int ContourGuiApp::clientAction()
     auto adopt = std::function<void()> {};
     if (wantsTmux)
     {
-        _tmuxController = std::make_unique<TmuxController>(tmuxSocket);
+        _tmuxController = std::make_unique<remote::TmuxController>(tmuxSocket);
         if (auto connected = _tmuxController->connectAndWait(std::chrono::seconds(10)); !connected)
         {
             cerr << std::format("contour client --tmux: {}\n", connected.error());
@@ -214,18 +218,21 @@ int ContourGuiApp::clientAction()
             if (auto const window = _sessionManager.focusedWindow())
                 _tmuxController->adoptPendingPanes(_sessionManager, *window);
         };
-        connect(
-            _tmuxController.get(), &TmuxController::remotePaneDiscovered, this, adopt, Qt::QueuedConnection);
+        connect(_tmuxController.get(),
+                &remote::TmuxController::remotePaneDiscovered,
+                this,
+                adopt,
+                Qt::QueuedConnection);
         // A %window-renamed reflects onto the owning tab's title (a tmux window is a tab).
         connect(
             _tmuxController.get(),
-            &TmuxController::tabTitleChanged,
+            &remote::TmuxController::tabTitleChanged,
             this,
             [this] { _tmuxController->applyPendingRenames(_sessionManager); },
             Qt::QueuedConnection);
         connect(
             _tmuxController.get(),
-            &TmuxController::connectionClosed,
+            &remote::TmuxController::connectionClosed,
             this,
             [this] { _tmuxController->stop(); },
             Qt::QueuedConnection);
@@ -291,7 +298,7 @@ int ContourGuiApp::clientAction()
                                 resolved.error());
 
         _nativeController =
-            std::make_unique<NativeController>(std::move(endpoint), std::move(sessionSettings));
+            std::make_unique<remote::NativeController>(std::move(endpoint), std::move(sessionSettings));
         if (auto connected = _nativeController->connectAndWait(std::chrono::seconds(5)); !connected)
         {
             cerr << std::format("contour client: {} ({})\n", connected.error(), endpointLabel);
@@ -302,7 +309,7 @@ int ContourGuiApp::clientAction()
         // A window spawned to host a daemon window binds itself here (from its
         // Main.qml, via consumeAttachWindow) instead of creating a fresh first tab.
         _sessionManager.setAttachWindowBinder(
-            [this](WindowController* controller) { return bindPendingAttachWindow(controller); });
+            [this](window::WindowController* controller) { return bindPendingAttachWindow(controller); });
         // Reconcile the GUI against the daemon's authoritative window→tab→split tree
         // (B2/B4): whenever a layout arrives or changes (GUI boot, or a window/tab/
         // split authored on the daemon, here or by another client), map each daemon
@@ -313,10 +320,14 @@ int ContourGuiApp::clientAction()
         adopt = [this] {
             reconcileAttachWindows();
         };
-        connect(_nativeController.get(), &NativeController::layoutChanged, this, adopt, Qt::QueuedConnection);
+        connect(_nativeController.get(),
+                &remote::NativeController::layoutChanged,
+                this,
+                adopt,
+                Qt::QueuedConnection);
         connect(
             _nativeController.get(),
-            &NativeController::connectionClosed,
+            &remote::NativeController::connectionClosed,
             this,
             [this] {
                 // Before stop(), which closes every mirror pty — the order matters.
@@ -368,12 +379,12 @@ int ContourGuiApp::run(int argc, char const* argv[])
     _argc = argc;
     _argv = argv;
 
-    return ContourApp::run(argc, argv);
+    return cli::ContourApp::run(argc, argv);
 }
 
 crispy::cli::command ContourGuiApp::parameterDefinition() const
 {
-    auto command = ContourApp::parameterDefinition();
+    auto command = cli::ContourApp::parameterDefinition();
 
     // NOLINTBEGIN
     command.children.insert(
@@ -535,7 +546,7 @@ std::chrono::seconds ContourGuiApp::earlyExitThreshold() const
     auto const configThreshold = config().earlyExitThreshold.value();
     auto const parameterThreshold = parameters().get<int>("contour.terminal.early-exit-threshold");
 
-    // default threshold is config::documentation::DefaultEarlyExitThreshold seconds
+    // default threshold is documentation::DefaultEarlyExitThreshold seconds
     if (parameterThreshold >= 0)
         return std::chrono::seconds(parameterThreshold);
 
@@ -574,7 +585,7 @@ std::optional<fs::path> ContourGuiApp::dumpStateAtExit() const
     return fs::path(path);
 }
 
-void ContourGuiApp::onExit(TerminalSession& session)
+void ContourGuiApp::onExit(session::TerminalSession& session)
 {
     if (auto const* localProcess = dynamic_cast<vtpty::Process const*>(&session.terminal().device()))
         _exitStatus = localProcess->checkStatus();
@@ -586,9 +597,9 @@ void ContourGuiApp::onExit(TerminalSession& session)
 
 void ContourGuiApp::applyGuiTheme(config::GuiTheme theme)
 {
-    // qtColorSchemeFor() is the pure decision (see GuiTheme.h): a forced scheme for dark/light,
+    // platform::qtColorSchemeFor() is the pure decision (see GuiTheme.h): a forced scheme for dark/light,
     // std::nullopt for system.
-    auto const scheme = qtColorSchemeFor(theme);
+    auto const scheme = platform::qtColorSchemeFor(theme);
 
     // Force the chrome palette explicitly. This is the load-bearing step: QStyleHints::setColorScheme
     // does NOT regenerate QGuiApplication::palette() on platforms whose platform-theme plugin owns the
@@ -603,20 +614,20 @@ void ContourGuiApp::applyGuiTheme(config::GuiTheme theme)
             _guiSystemPalette = QGuiApplication::palette();
             _guiPaletteOverridden = true;
         }
-        displayLog()("Applying GUI theme override: {}", theme);
-        QGuiApplication::setPalette(buildThemePalette(*scheme));
+        display::displayLog()("Applying GUI theme override: {}", theme);
+        QGuiApplication::setPalette(platform::buildThemePalette(*scheme));
     }
     else if (_guiPaletteOverridden)
     {
         // Returning to System after a prior dark/light override: restore the captured OS palette.
         // Note: once an explicit palette has been set, Qt no longer auto-tracks live OS theme
         // switches for the chrome until the next restart (the documented System-mode tradeoff).
-        displayLog()("Applying GUI theme: system (restore OS palette)");
+        display::displayLog()("Applying GUI theme: system (restore OS palette)");
         QGuiApplication::setPalette(_guiSystemPalette);
         _guiPaletteOverridden = false;
     }
     else
-        displayLog()("Applying GUI theme: system (follow OS color scheme)");
+        display::displayLog()("Applying GUI theme: system (follow OS color scheme)");
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
     // Also drive QStyleHints so QStyleHints::colorScheme() reports the pinned scheme: Qt Quick
@@ -777,7 +788,7 @@ int ContourGuiApp::fontConfigAction()
 int ContourGuiApp::terminalGuiAction()
 {
     {
-        auto const timer = ScopedTimer(startupLog, "loadConfig");
+        auto const timer = crispy::scoped_timer(startupLog, "loadConfig");
         if (!loadConfig("terminal"))
             return EXIT_FAILURE;
     }
@@ -860,7 +871,7 @@ int ContourGuiApp::terminalGuiAction()
                            ? vtbackend::ColorPreference::Dark
                            : vtbackend::ColorPreference::Light;
 
-    displayLog()("Color theme mode at startup: {}", _colorPreference);
+    display::displayLog()("Color theme mode at startup: {}", _colorPreference);
 
     connect(
         QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, [this](Qt::ColorScheme newScheme) {
@@ -876,7 +887,7 @@ int ContourGuiApp::terminalGuiAction()
                 return;
 
             _colorPreference = newValue;
-            displayLog()("Color preference changed to {} mode\n", _colorPreference);
+            display::displayLog()("Color preference changed to {} mode\n", _colorPreference);
             sessionsManager().updateColorPreference(_colorPreference);
         });
 #endif
@@ -929,7 +940,7 @@ int ContourGuiApp::terminalGuiAction()
     // maps a window but never composites the scene graph, leaving the user with an invisible window —
     // self-heals to Auto so a mis-set config never prevents startup or hangs on a dead window.
     auto const configuredBackend = _config.renderer.value().renderingBackend;
-    auto const requestedBackend = resolveRenderingBackend(currentRhiPlatform(), configuredBackend);
+    auto const requestedBackend = resolveRenderingBackend(display::currentRhiPlatform(), configuredBackend);
     if (requestedBackend != configuredBackend)
         errorLog()("Renderer backend {} is not available on this platform; falling back to auto.",
                    configuredBackend);
@@ -950,27 +961,27 @@ int ContourGuiApp::terminalGuiAction()
 
     // clang-format off
     qmlRegisterType<display::TerminalDisplay>("Contour.Terminal", 1, 0, "ContourTerminal");
-    qmlRegisterUncreatableType<TerminalSession>("Contour.Terminal", 1, 0, "TerminalSession", "Use factory.");
-    qmlRegisterUncreatableType<TerminalSessionManager>("Contour.Terminal", 1, 0, "TerminalSessionManager", "Do not use me directly.");
-    qmlRegisterUncreatableType<PaneProxy>("Contour.Terminal", 1, 0, "PaneProxy", "Created by the session manager.");
-    qmlRegisterUncreatableType<WindowController>("Contour.Terminal", 1, 0, "WindowController", "Created by the session manager.");
-    qmlRegisterUncreatableType<CommandPaletteModel>("Contour.Terminal", 1, 0, "CommandPaletteModel", "Created by the window controller.");
-    qmlRegisterUncreatableType<SettingsController>("Contour.Terminal", 1, 0, "SettingsController", "Created by the window controller.");
-    qRegisterMetaType<TerminalSession*>("TerminalSession*");
-    qRegisterMetaType<PaneProxy*>("PaneProxy*");
-    qRegisterMetaType<WindowController*>("WindowController*");
-    qRegisterMetaType<CommandPaletteModel*>("CommandPaletteModel*");
-    qRegisterMetaType<SettingsController*>("SettingsController*");
+    qmlRegisterUncreatableType<session::TerminalSession>("Contour.Terminal", 1, 0, "TerminalSession", "Use factory.");
+    qmlRegisterUncreatableType<session::TerminalSessionManager>("Contour.Terminal", 1, 0, "TerminalSessionManager", "Do not use me directly.");
+    qmlRegisterUncreatableType<session::PaneProxy>("Contour.Terminal", 1, 0, "PaneProxy", "Created by the session manager.");
+    qmlRegisterUncreatableType<window::WindowController>("Contour.Terminal", 1, 0, "WindowController", "Created by the session manager.");
+    qmlRegisterUncreatableType<window::CommandPaletteModel>("Contour.Terminal", 1, 0, "CommandPaletteModel", "Created by the window controller.");
+    qmlRegisterUncreatableType<window::SettingsController>("Contour.Terminal", 1, 0, "SettingsController", "Created by the window controller.");
+    qRegisterMetaType<session::TerminalSession*>("TerminalSession*");
+    qRegisterMetaType<session::PaneProxy*>("PaneProxy*");
+    qRegisterMetaType<window::WindowController*>("WindowController*");
+    qRegisterMetaType<window::CommandPaletteModel*>("CommandPaletteModel*");
+    qRegisterMetaType<window::SettingsController*>("SettingsController*");
     // clang-format on
 
     // The chrome's design tokens. An injected instance rather than a QML-created singleton, because
     // it is configured entirely at construction (see AGENT.md's complete-constructor rule) and its
     // configuration is this app's, not the engine's -- there is nothing for QML to build it from.
-    _uiStyleProvider =
-        make_unique<UiStyleProvider>(_config.uiStyle.value(), resolveChromeFont(_config, profileName()));
+    _uiStyleProvider = make_unique<window::UiStyleProvider>(
+        _config.uiStyle.value(), window::resolveChromeFont(_config, profileName()));
 
     {
-        auto const timer = ScopedTimer(startupLog, "QML engine setup");
+        auto const timer = crispy::scoped_timer(startupLog, "QML engine setup");
         _qmlEngine = make_unique<QQmlApplicationEngine>();
 
         // Keep the override seam resolveResource() gave the QML back when it shipped as loose qrc
@@ -979,7 +990,7 @@ int ContourGuiApp::terminalGuiAction()
         // replace) shadows the compiled-in one.
         //
         // Only this path, not the source tree resolveResource() also probed under !NDEBUG: an import
-        // path is searched for <path>/Contour/Ui/qmldir, and src/contour/ui is a flat directory of
+        // path is searched for <path>/Contour/Ui/qmldir, and src/contour/qml is a flat directory of
         // components with no module layout, so pointing at it would silently never resolve. The
         // developer loop is a rebuild, which is what qmlcachegen wants anyway.
         //
@@ -992,7 +1003,7 @@ int ContourGuiApp::terminalGuiAction()
                        "them apply again.",
                        (configHome / "ui").generic_string(),
                        uiModuleOverrideDirectory(configHome).generic_string());
-        _qmlEngine->addImportPath(toQString(configHome));
+        _qmlEngine->addImportPath(platform::toQString(configHome));
 
         QQmlContext* context = _qmlEngine->rootContext();
         context->setContextProperty("terminalSessions", &_sessionManager);
@@ -1041,7 +1052,7 @@ int ContourGuiApp::terminalGuiAction()
 
     // Spawn initial window.
     {
-        auto const timer = ScopedTimer(startupLog, "newWindow (QML load)");
+        auto const timer = crispy::scoped_timer(startupLog, "newWindow (QML load)");
         newWindow();
     }
 
@@ -1055,7 +1066,7 @@ int ContourGuiApp::terminalGuiAction()
     // so it is unit-testable without the event loop. NB: sequenced explicitly — passing exec() as an
     // argument alongside _exitStatus would read _exitStatus before the loop populated it.
     auto const loopResult = QApplication::exec();
-    auto const rv = exitCodeFor(_exitStatus, loopResult);
+    auto const rv = session::exitCodeFor(_exitStatus, loopResult);
 
     // Ensure the multimedia warmup thread has finished before destroying Qt objects -- but keep serving
     // this thread's event queue while waiting, rather than blocking straight into join().
@@ -1167,7 +1178,8 @@ void ContourGuiApp::reconcileAttachWindows()
         if (auto const mapped = _attachWindowMap.find(daemonWindow); mapped != _attachWindowMap.end())
         {
             // Already shown: bring its tree up to date.
-            contour::applyRemoteLayout(_sessionManager, mapped->second, *_nativeController, daemonWindow);
+            contour::remote::applyRemoteLayout(
+                _sessionManager, mapped->second, *_nativeController, daemonWindow);
             continue;
         }
         if (_pendingAttachWindow == daemonWindow)
@@ -1203,7 +1215,7 @@ std::optional<std::uint64_t> primaryDaemonWindowToAdopt(bool anyWindowMapped,
     return daemonWindowIds.front(); // windowIds() is ascending, so front() is the primary window
 }
 
-bool ContourGuiApp::bindPendingAttachWindow(WindowController* controller)
+bool ContourGuiApp::bindPendingAttachWindow(window::WindowController* controller)
 {
     if (!_nativeController || controller == nullptr)
         return false;
@@ -1235,7 +1247,7 @@ bool ContourGuiApp::bindPendingAttachWindow(WindowController* controller)
 void ContourGuiApp::bindDaemonWindow(std::uint64_t daemonWindow, vtworkspace::WindowId osWindow)
 {
     _attachWindowMap.emplace(daemonWindow, osWindow);
-    contour::applyRemoteLayout(_sessionManager, osWindow, *_nativeController, daemonWindow);
+    contour::remote::applyRemoteLayout(_sessionManager, osWindow, *_nativeController, daemonWindow);
 }
 
 display::ForcedFontDpiProvider* ContourGuiApp::forcedFontDpiProvider()

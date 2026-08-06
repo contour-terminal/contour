@@ -1,16 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/Actions.h>
-#include <contour/BlurBehind.h>
 #include <contour/ContourGuiApp.h>
-#include <contour/WindowController.h>
-#include <contour/display/Announcer.h>
+#include <contour/Logging.h>
+#include <contour/config/Actions.h>
 #include <contour/display/ContentScale.h>
 #include <contour/display/ImeQueryRect.h>
+#include <contour/display/Logging.h>
 #include <contour/display/RhiRenderer.h>
 #include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/display/TerminalRenderNode.h>
-#include <contour/helper.h>
+#include <contour/input/MouseMapping.h>
+#include <contour/platform/Announcer.h>
+#include <contour/platform/BlurBehind.h>
+#include <contour/platform/QtInvoke.h>
+#include <contour/session/FontControl.h>
+#include <contour/session/SessionInput.h>
 
 #include <vtbackend/Color.h>
 #include <vtbackend/Metrics.h>
@@ -18,6 +22,7 @@
 #include <vtpty/Pty.h>
 
 #include <crispy/App.h>
+#include <crispy/ScopedTimer.h>
 #include <crispy/logstore.h>
 #include <crispy/utils.h>
 
@@ -100,7 +105,7 @@ namespace
 
     void reportUnhandledException(std::string_view const& where, exception const& e)
     {
-        displayLog()("{}", unhandledExceptionMessage(where, e));
+        display::displayLog()("{}", unhandledExceptionMessage(where, e));
         cerr << unhandledExceptionMessage(where, e) << '\n';
     }
 
@@ -121,7 +126,7 @@ TerminalDisplay::TerminalDisplay(QQuickItem* parent):
     _lastFontDPI = fontDPI();
 
     startupLog()("TerminalDisplay constructed (QML component instantiation reached)");
-    auto const timer = ScopedTimer(startupLog, "TerminalDisplay constructor");
+    auto const timer = crispy::scoped_timer(startupLog, "TerminalDisplay constructor");
     initializeDisplayResources();
 
     setFlag(Flag::ItemIsFocusScope);
@@ -148,7 +153,7 @@ TerminalDisplay::TerminalDisplay(QQuickItem* parent):
 
 TerminalDisplay::~TerminalDisplay()
 {
-    displayLog()("Destroying terminal widget.");
+    display::displayLog()("Destroying terminal widget.");
     // ~QQuickItem (running AFTER this body) unparents the item and re-emits windowChanged(nullptr)
     // — at which point the TerminalDisplay part of `this` no longer exists, so the ctor's
     // windowChanged→handleWindowChanged connection would invoke a slot on a half-destroyed object
@@ -208,7 +213,7 @@ namespace
     };
 } // namespace
 
-void TerminalDisplay::fenceRenderThread()
+void TerminalDisplay::fenceRenderThread() const
 {
     // Contract and cost: see the declaration.
     if (auto* win = window(); win != nullptr)
@@ -219,15 +224,15 @@ void TerminalDisplay::fenceRenderThread()
     }
 }
 
-void TerminalDisplay::assignSession(TerminalSession* newSession)
+void TerminalDisplay::assignSession(session::TerminalSession* newSession)
 {
     fenceRenderThread();
     _session = newSession;
 }
 
-void TerminalDisplay::setSession(TerminalSession* newSession)
+void TerminalDisplay::setSession(session::TerminalSession* newSession)
 {
-    displayLog()("TerminalDisplay::setSession: {} -> {}\n", (void*) _session, (void*) newSession);
+    display::displayLog()("TerminalDisplay::setSession: {} -> {}\n", (void*) _session, (void*) newSession);
     if (_session == newSession)
         return;
 
@@ -259,7 +264,8 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
 
     if (_session)
     {
-        QObject::disconnect(_session, &TerminalSession::titleChanged, this, &TerminalDisplay::titleChanged);
+        QObject::disconnect(
+            _session, &session::TerminalSession::titleChanged, this, &TerminalDisplay::titleChanged);
         _session->detachDisplay(*this);
     }
 
@@ -281,7 +287,8 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
         connect(provider, &ForcedFontDpiProvider::changed, this, &TerminalDisplay::applyFontDPI);
     }
 
-    QObject::connect(newSession, &TerminalSession::titleChanged, this, &TerminalDisplay::titleChanged);
+    QObject::connect(
+        newSession, &session::TerminalSession::titleChanged, this, &TerminalDisplay::titleChanged);
 
     auto const imeEnabled = profile().inputMethodEditor.value();
     setFlag(Flag::ItemAcceptsInputMethod, imeEnabled);
@@ -296,35 +303,35 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     // Announcements go through THIS display, which is the object an assistive client already knows
     // about (TerminalAccessible::installFactory hands out its interface). Installed on every session
     // bind, so a rebound session speaks through the display it is actually shown in.
-    _session->setAnnouncer(std::make_unique<QtAnnouncer>(this));
+    _session->setAnnouncer(std::make_unique<platform::QtAnnouncer>(this));
 
-    if (auto* controller = windowController())
+    if (auto* host = windowHost())
     {
-        controller->seedTitleBarVisible(profile().showTitleBar.value());
+        host->seedTitleBarVisible(profile().showTitleBar.value());
         // Tab-strip placement + visibility are window state seeded once from the configuration, same
         // first-write-wins contract as the title bar (so a runtime state is never reset on rebind).
         // They are global rather than per-profile: one window shows one tab bar, whichever profiles
         // its tabs happen to run.
-        controller->seedTabBarPosition(_session->config().tabBarPosition.value());
-        controller->seedTabBarVisibility(_session->config().tabBarVisibility.value());
+        host->seedTabBarPosition(_session->config().tabBarPosition.value());
+        host->seedTabBarVisibility(_session->config().tabBarVisibility.value());
     }
 
     if (!_renderer)
     {
-        auto const timer = ScopedTimer(startupLog, "Renderer construction");
+        auto const timer = crispy::scoped_timer(startupLog, "Renderer construction");
         // The profile's own margin, scaled to device pixels, exactly as applyResize() derives it
         // (@see geometry::fitPageToPixels, which takes left/top straight from these). Seeded here so
         // the published grid origin is right from the very first event rather than from the first
         // geometry change: the mouse hit-test maps through it, and a zero origin under a configured
         // margin reports the cell the user clicked minus that margin.
         auto const marginsDevicePx =
-            geometry::scaled(toGeometryMargins(profile().margins.value()), contentScale());
+            geometry::scaled(session::toGeometryMargins(profile().margins.value()), contentScale());
         _renderer = make_unique<vtrasterizer::Renderer>(
             _session->profile().terminalSize.value(),
             vtrasterizer::PageMargin { .left = marginsDevicePx.horizontal,
                                        .top = marginsDevicePx.vertical,
                                        .bottom = marginsDevicePx.vertical },
-            sanitizeFontDescription(profile().fonts.value(), fontDPI()),
+            session::sanitizeFontDescription(profile().fonts.value(), fontDPI()),
             _session->terminal().colorPalette(),
             _session->config().renderer.value().textureAtlasHashtableSlots,
             _session->config().renderer.value().textureAtlasTileCount,
@@ -353,7 +360,7 @@ void TerminalDisplay::setSession(TerminalSession* newSession)
     // guessing a cell size. UnixPty::resizeScreen() stashes a size reported before start() precisely so
     // this ordering works.
     {
-        auto const timer = ScopedTimer(startupLog, "Session start");
+        auto const timer = crispy::scoped_timer(startupLog, "Session start");
         _session->start();
     }
 
@@ -418,7 +425,8 @@ void TerminalDisplay::releaseSession()
         return;
     displayLog()("TerminalDisplay::releaseSession: dropping session {} (taken over by another display)",
                  (void*) _session);
-    QObject::disconnect(_session, &TerminalSession::titleChanged, this, &TerminalDisplay::titleChanged);
+    QObject::disconnect(
+        _session, &session::TerminalSession::titleChanged, this, &TerminalDisplay::titleChanged);
     // Clear the session's back-pointer as well: on the transient-null collapse path (setSession(nullptr))
     // no other display takes the session over before this one may be destroyed, and ~TerminalDisplay
     // skips detachDisplay() once _session is null — leaving the session posting into a freed display.
@@ -446,10 +454,10 @@ void TerminalDisplay::applyDisplaySizeToGrid()
     // and apply it; the sub-cell remainder renders as background padding. This path never mutates the
     // QWindow — the WM's size is obeyed as-is (grid alignment during interactive resizes is the WM's job,
     // via the size-increment hint where the platform supports it) — so a resize event can never re-enter
-    // itself. Grid->window resizes exist only for content-driven requests through the WindowController.
+    // itself. Grid->window resizes exist only for content-driven requests through the WindowHost.
     auto const deviceSize = geometry::availableDevicePixels(width(), height(), contentScale());
     displayLog()("Display size changed to {}x{} virtual ({} device).", width(), height(), deviceSize);
-    applyResize(deviceSize, *_session, *_renderer);
+    session::applyResize(deviceSize, *_session, *_renderer);
 }
 
 void TerminalDisplay::geometryChange(QRectF const& newGeometry, QRectF const& oldGeometry)
@@ -488,17 +496,17 @@ void TerminalDisplay::handleWindowChanged(QQuickWindow* newWindow)
                 &TerminalDisplay::cleanup,
                 Qt::DirectConnection);
 
-        // setSession() may have run before a window existed, in which case windowController() could not
-        // route to THIS window's controller (it matches by the display's OS window) and the chrome
+        // setSession() may have run before a window existed, in which case windowHost() could not
+        // route to THIS window (it matches by the display's OS window) and the chrome
         // seeds were dropped or mis-targeted a no-op. Re-seed now that the window exists; all three are
         // first-write-wins per window, so an already-seeded window is unaffected. The tab bar pair is
         // seeded here too, not just the title bar: they are dropped by the very same race.
         if (_session != nullptr)
-            if (auto* controller = windowController())
+            if (auto* host = windowHost())
             {
-                controller->seedTitleBarVisible(_session->profile().showTitleBar.value());
-                controller->seedTabBarPosition(_session->config().tabBarPosition.value());
-                controller->seedTabBarVisibility(_session->config().tabBarVisibility.value());
+                host->seedTitleBarVisible(_session->profile().showTitleBar.value());
+                host->seedTabBarPosition(_session->config().tabBarPosition.value());
+                host->seedTabBarVisibility(_session->config().tabBarVisibility.value());
             }
     }
     else
@@ -812,7 +820,7 @@ void TerminalDisplay::onBeforeSynchronize()
             // session's own thread instead, matching how every other GUI-mutating callback in this render
             // path is deferred (and how TerminalSession fires onClosed() from its exit watcher). The inner
             // guard covers the display being torn down between this post and its dispatch.
-            postToObject(_session, [session = _session]() { session->onClosed(); });
+            platform::postToObject(_session, [session = _session]() { session->onClosed(); });
         }
     }
 
@@ -900,7 +908,8 @@ void TerminalDisplay::createRenderer()
     // Seed the grid from this item's current extent (window->grid, floor semantics). During the first
     // sync the anchor layout may not have fully propagated yet; that is fine: geometryChange() re-derives
     // the grid the moment the committed geometry changes, and applyResize() no-ops once they match.
-    applyResize(geometry::availableDevicePixels(width(), height(), contentScale()), *_session, *_renderer);
+    session::applyResize(
+        geometry::availableDevicePixels(width(), height(), contentScale()), *_session, *_renderer);
 
     // Defer configureDisplay() until the GUI thread processes QML binding propagation
     // and the window is committed at its final initial size (e.g. 1136x600 at DPR 1.5).
@@ -1237,45 +1246,46 @@ void TerminalDisplay::keyPressEvent(QKeyEvent* keyEvent)
 {
     if (!_session)
         return;
-    sendKeyEvent(keyEvent,
-                 keyEvent->isAutoRepeat() ? vtbackend::KeyboardEventType::Repeat
-                                          : vtbackend::KeyboardEventType::Press,
-                 *_session,
-                 _session->keyboardLayout());
+    session::sendKeyEvent(keyEvent,
+                          keyEvent->isAutoRepeat() ? vtbackend::KeyboardEventType::Repeat
+                                                   : vtbackend::KeyboardEventType::Press,
+                          *_session,
+                          _session->keyboardLayout());
 }
 
 void TerminalDisplay::keyReleaseEvent(QKeyEvent* keyEvent)
 {
     if (!_session || keyEvent->isAutoRepeat())
         return;
-    sendKeyEvent(keyEvent, vtbackend::KeyboardEventType::Release, *_session, _session->keyboardLayout());
+    session::sendKeyEvent(
+        keyEvent, vtbackend::KeyboardEventType::Release, *_session, _session->keyboardLayout());
 }
 
 void TerminalDisplay::wheelEvent(QWheelEvent* event)
 {
     if (!_session)
         return;
-    sendWheelEvent(event, *_session);
+    session::sendWheelEvent(event, *_session);
 }
 
 void TerminalDisplay::mousePressEvent(QMouseEvent* event)
 {
     if (!_session)
         return;
-    sendMousePressEvent(event, *_session);
+    session::sendMousePressEvent(event, *_session);
 }
 
 void TerminalDisplay::mouseMoveEvent(QMouseEvent* event)
 {
     if (!_session)
         return;
-    sendMouseMoveEvent(event, *_session);
+    session::sendMouseMoveEvent(event, *_session);
 
     // Start, update, or stop auto-scroll based on whether the mouse is outside the content area
     // while the left button is pressed (i.e., during a drag-selection).
     if (event->buttons() & Qt::LeftButton)
     {
-        _autoScrollState = computeAutoScrollInfo(event, *_session);
+        _autoScrollState = session::computeAutoScrollInfo(event, *_session);
         if (_autoScrollState.direction != 0)
         {
             if (!_autoScrollTimer.isActive())
@@ -1293,7 +1303,7 @@ void TerminalDisplay::hoverMoveEvent(QHoverEvent* event)
     QQuickItem::hoverMoveEvent(event);
     if (!_session)
         return;
-    sendMouseMoveEvent(event, *_session);
+    session::sendMouseMoveEvent(event, *_session);
 }
 
 void TerminalDisplay::hoverLeaveEvent(QHoverEvent* event)
@@ -1314,7 +1324,7 @@ void TerminalDisplay::mouseReleaseEvent(QMouseEvent* event)
         return;
     _autoScrollTimer.stop();
     _autoScrollState = {};
-    sendMouseReleaseEvent(event, *_session);
+    session::sendMouseReleaseEvent(event, *_session);
 }
 
 void TerminalDisplay::focusInEvent(QFocusEvent* event)
@@ -1485,18 +1495,18 @@ TerminalDisplay::DevicePixelGeometry TerminalDisplay::itemDevicePixelGeometry() 
     };
 }
 
-WindowController* TerminalDisplay::windowController()
+WindowHost* TerminalDisplay::windowHost()
 {
-    return _manager != nullptr ? _manager->controllerForDisplay(this) : nullptr;
+    return _manager != nullptr ? _manager->windowHostForDisplay(this) : nullptr;
 }
 
 void TerminalDisplay::notifyCellGeometryChanged()
 {
-    // Window-level hints are the controller's job (the window-geometry authority); it derives them from
+    // Window-level hints are the window host's job (the window-geometry authority); it derives them from
     // this display's cell size, margins, content scale and the QML-declared chrome. Displays without a
-    // controller (offscreen tests) simply have no WM hints to maintain.
-    if (auto* controller = windowController())
-        controller->updateSizeHintsFor(*this);
+    // window host (offscreen tests) simply have no WM hints to maintain.
+    if (auto* host = windowHost())
+        host->updateSizeHintsFor(*this);
 
     // Every cell rectangle we hand out is derived from the cell size, the margins and the content scale,
     // so all three of this seam's callers (font size, DPI/content scale, profile margins) move the caret
@@ -1532,7 +1542,7 @@ vtbackend::ImageSize TerminalDisplay::pixelSize() const
     return geometry::requiredPixelsForPage(
         _session->terminal().totalPageSize(),
         _renderer->publishedCellSize(),
-        geometry::scaled(toGeometryMargins(_session->profile().margins.value()), contentScale()));
+        geometry::scaled(session::toGeometryMargins(_session->profile().margins.value()), contentScale()));
 }
 
 vtbackend::ImageSize TerminalDisplay::reportedPixelSize(vtbackend::PageSize totalPageSize) const
@@ -1578,7 +1588,7 @@ vtbackend::ImageSize TerminalDisplay::cellSize() const
 // {{{ TerminalDisplay: (user requested) actions
 void TerminalDisplay::post(std::function<void()> fn)
 {
-    postToObject(this, std::move(fn));
+    platform::postToObject(this, std::move(fn));
 }
 
 namespace
@@ -1659,13 +1669,7 @@ void TerminalDisplay::resetAccessibleCaret()
 vtbackend::FontDef TerminalDisplay::getFontDef()
 {
     Require(_renderer);
-    return getFontDefinition(*_renderer);
-}
-
-void TerminalDisplay::copyToClipboard(std::string_view data)
-{
-    if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
-        clipboard->setText(QString::fromUtf8(data.data(), static_cast<int>(data.size())));
+    return session::getFontDefinition(*_renderer);
 }
 
 void TerminalDisplay::inspect()
@@ -1825,7 +1829,8 @@ void TerminalDisplay::resizeTerminalToDisplaySize()
     Require(_renderer != nullptr);
     Require(_session != nullptr);
 
-    applyResize(geometry::availableDevicePixels(width(), height(), contentScale()), *_session, *_renderer);
+    session::applyResize(
+        geometry::availableDevicePixels(width(), height(), contentScale()), *_session, *_renderer);
 }
 
 void TerminalDisplay::resizeWindow(vtbackend::Width newWidth, vtbackend::Height newHeight)
@@ -1833,11 +1838,11 @@ void TerminalDisplay::resizeWindow(vtbackend::Width newWidth, vtbackend::Height 
     Require(_session != nullptr);
 
     // CSI 4 t: pixel-size request for this pane's content area (device pixels). Routed through the
-    // controller choke point: it resizes the WINDOW, and the grid follows from the resulting resize
+    // window host's choke point: it resizes the WINDOW, and the grid follows from the resulting resize
     // event via the normal window->grid path. (The former direct applyResize() here resized the grid
     // WITHOUT the window — a guaranteed grid/window divergence.)
-    if (auto* controller = windowController())
-        controller->resizeWindowForContentPixels(*this, vtbackend::ImageSize { newWidth, newHeight });
+    if (auto* host = windowHost())
+        host->resizeWindowForContentPixels(*this, vtbackend::ImageSize { newWidth, newHeight });
 }
 
 void TerminalDisplay::resizeWindow(vtbackend::LineCount newLineCount, vtbackend::ColumnCount newColumnCount)
@@ -1852,8 +1857,8 @@ void TerminalDisplay::resizeWindow(vtbackend::LineCount newLineCount, vtbackend:
     if (*newLineCount)
         requestedPageSize.lines = newLineCount + terminal().statusLineHeight();
 
-    if (auto* controller = windowController())
-        controller->resizeWindowForPage(*this, requestedPageSize);
+    if (auto* host = windowHost())
+        host->resizeWindowForPage(*this, requestedPageSize);
 }
 
 void TerminalDisplay::recomputeGeometryAfterFontReconfig()
@@ -1916,7 +1921,7 @@ void TerminalDisplay::setFonts(vtrasterizer::FontDescriptions fontDescriptions)
         return;
 
     // Not a change: nothing staged, nothing to apply, either branch below.
-    if (!applyFontDescription(fontDPI(), *_renderer, std::move(fontDescriptions)))
+    if (!session::applyFontDescription(fontDPI(), *_renderer, std::move(fontDescriptions)))
         return;
 
     // Needs no render target, and must run on BOTH paths: the re-entry that materializes a deferred
@@ -1942,7 +1947,7 @@ void TerminalDisplay::updateReGISTextRasterizer()
     if (!_session)
         return;
     auto const dpi = fontDPI();
-    auto const font = sanitizeFontDescription(profile().fonts.value(), dpi).regular;
+    auto const font = session::sanitizeFontDescription(profile().fonts.value(), dpi).regular;
     // Rebuild only when the font or DPI actually changed -- a fresh shaper is not free, and a tab
     // switch between same-font profiles should reuse the existing instance.
     if (!_regisTextRasterizer || _regisTextRasterizerFont != font || _regisTextRasterizerDpi != dpi)
@@ -1980,60 +1985,60 @@ bool TerminalDisplay::setFontSize(text::font_size newFontSize)
     return _renderer->fontDescriptions().size.pt == newFontSize.pt;
 }
 
-void TerminalDisplay::setMouseCursorShape(MouseCursorShape newCursorShape)
+void TerminalDisplay::setMouseCursorShape(input::MouseCursorShape newCursorShape)
 {
-    if (auto const qtShape = toQtMouseShape(newCursorShape); qtShape != cursor().shape())
+    if (auto const qtShape = input::toQtMouseShape(newCursorShape); qtShape != cursor().shape())
         setCursor(qtShape);
 }
 
 void TerminalDisplay::setWindowFullScreen()
 {
-    if (auto* controller = windowController())
-        controller->setWindowFullScreen(*this);
+    if (auto* host = windowHost())
+        host->setWindowFullScreen(*this);
 }
 
 void TerminalDisplay::setWindowMaximized()
 {
-    if (auto* controller = windowController())
-        controller->setWindowMaximized(*this);
+    if (auto* host = windowHost())
+        host->setWindowMaximized(*this);
 }
 
 void TerminalDisplay::setWindowNormal()
 {
-    if (auto* controller = windowController())
-        controller->setWindowNormal(*this);
+    if (auto* host = windowHost())
+        host->setWindowNormal(*this);
 }
 
 void TerminalDisplay::setBlurBehind(bool enable)
 {
-    BlurBehind::setEnabled(window(), enable);
+    platform::setBlurBehind(window(), enable);
 }
 
 void TerminalDisplay::toggleFullScreen()
 {
-    if (auto* controller = windowController())
-        controller->toggleFullScreen(*this);
+    if (auto* host = windowHost())
+        host->toggleFullScreen(*this);
 }
 
 void TerminalDisplay::setTabBarVisibility(config::TabBarVisibility mode)
 {
-    if (auto* controller = windowController())
-        controller->setTabBarVisibility(mode);
+    if (auto* host = windowHost())
+        host->setTabBarVisibility(mode);
 }
 
 void TerminalDisplay::setTabBarPosition(config::TabBarPosition position)
 {
-    if (auto* controller = windowController())
-        controller->setTabBarPosition(position);
+    if (auto* host = windowHost())
+        host->setTabBarPosition(position);
 }
 
 void TerminalDisplay::toggleTitleBar()
 {
-    // Title-bar visibility is WINDOW state: it lives on the WindowController (the window authority),
+    // Title-bar visibility is WINDOW state: it lives on the WindowHost (the window authority),
     // so a toggle from any pane flips the whole window's decoration and survives pane-focus changes
     // and tab switches (per-display storage silently reverted it on the next focus).
-    if (auto* controller = windowController())
-        controller->toggleTitleBar();
+    if (auto* host = windowHost())
+        host->toggleTitleBar();
 }
 
 void TerminalDisplay::toggleInputMethodEditorHandling()

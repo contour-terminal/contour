@@ -14,7 +14,7 @@
         #include <QtCore/QtLogging>
     #endif
 #else
-    #include <contour/ContourApp.h>
+    #include <contour/cli/ContourApp.h>
 #endif
 
 #include <crispy/SuppressWindowsDialogs.hpp>
@@ -172,7 +172,7 @@ int main(int argc, char const* argv[])
 #else
     // Without the GUI frontend there is no window to open, so `contour client` is gone with it;
     // what remains is `contour daemon` and the CLI verbs, which need nothing beyond Qt Core.
-    contour::ContourApp app { environment };
+    contour::cli::ContourApp app { environment };
 #endif
 
     return app.run(argc, argv);

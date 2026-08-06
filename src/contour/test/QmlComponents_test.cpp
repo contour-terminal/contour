@@ -8,17 +8,17 @@
 // loads with no QML errors. This catches QML syntax/binding regressions deterministically without
 // having to boot a full terminal session.
 
-#include <contour/ColorConversion.h>
-#include <contour/CommandCatalog.h>
-#include <contour/CommandHistory.h>
-#include <contour/CommandPaletteModel.h>
-#include <contour/Config.h>
-#include <contour/ContextMenu.h>
-#include <contour/ContextMenuModel.h>
-#include <contour/Shortcut.h>
-#include <contour/TabColorScheme.h>
+#include <contour/command/CommandCatalog.h>
+#include <contour/command/CommandHistory.h>
+#include <contour/command/ContextMenu.h>
+#include <contour/command/Shortcut.h>
+#include <contour/config/Config.h>
+#include <contour/platform/ColorConversion.h>
 #include <contour/test/QmlChromeStyle.h>
 #include <contour/test/QmlMessageCapture.h>
+#include <contour/window/CommandPaletteModel.h>
+#include <contour/window/ContextMenuModel.h>
+#include <contour/window/TabColorScheme.h>
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QCoreApplication>
@@ -107,7 +107,8 @@ class MockTabController: public QAbstractListModel
         PaneCountRole = Qt::UserRole + 4,
         SessionIdRole = Qt::UserRole + 5,
         RawTitleRole =
-            Qt::UserRole + 6, //!< Must mirror TerminalSessionManager; TabStrip's delegate requires it.
+            Qt::UserRole
+            + 6, //!< Must mirror contour::session::TerminalSessionManager; TabStrip's delegate requires it.
         ZoomedRole =
             Qt::UserRole + 7, //!< Ditto: TabStrip's delegate requires it (drives TabItem's zoom badge).
     };
@@ -215,18 +216,19 @@ class MockTabController: public QAbstractListModel
     {
         auto const state = [&] {
             if (active)
-                return contour::TabVisualState::Active;
+                return contour::window::TabVisualState::Active;
             if (hovered)
-                return contour::TabVisualState::Hover;
-            return windowActive ? contour::TabVisualState::Inactive
-                                : contour::TabVisualState::InactiveWindowUnfocused;
+                return contour::window::TabVisualState::Hover;
+            return windowActive ? contour::window::TabVisualState::Inactive
+                                : contour::window::TabVisualState::InactiveWindowUnfocused;
         }();
-        return contour::toQColor(contour::tabBackgroundColor(
-            contour::toRGBColor(tabColor), contour::toRGBColor(rowBackground), state));
+        return contour::platform::toQColor(contour::window::tabBackgroundColor(
+            contour::platform::toRGBColor(tabColor), contour::platform::toRGBColor(rowBackground), state));
     }
     Q_INVOKABLE [[nodiscard]] QColor tabTextColor(QColor const& tabBackground) const
     {
-        return contour::toQColor(contour::contrastingTextColor(contour::toRGBColor(tabBackground)));
+        return contour::platform::toQColor(
+            contour::window::contrastingTextColor(contour::platform::toRGBColor(tabBackground)));
     }
 
   signals:
@@ -608,7 +610,7 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
     contour::test::installChromeStyle(engine);
-    auto const state = contour::ContextMenuState {
+    auto const state = contour::command::ContextMenuState {
         .hasSelection = false, // Copy must come out present-but-disabled
         .clipboardHasText = true,
         .hasLastCommand = false, // the three "last command" rows must be absent
@@ -620,7 +622,8 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
     };
 
     auto actions = std::vector<contour::actions::Action> {};
-    auto const model = contour::toContextMenuModel(contour::buildContextMenu(state), actions);
+    auto const model =
+        contour::window::toContextMenuModel(contour::command::buildContextMenu(state), actions);
     REQUIRE_FALSE(model.isEmpty());
 
     QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/ActionContextMenu.qml")));
@@ -656,7 +659,7 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
     REQUIRE(pickedSpy.count() == 1);
     CHECK(pickedSpy.at(0).at(0).toInt() == 0);
     REQUIRE_FALSE(actions.empty());
-    CHECK(contour::commandId(actions[0]) == "CopySelection");
+    CHECK(contour::command::commandId(actions[0]) == "CopySelection");
 
     SECTION("rebuilding it, as every right-click does, leaks nothing")
     {
@@ -2596,16 +2599,16 @@ class MockPaletteController: public QObject
 
   public:
     MockPaletteController():
-        _history { 5 }, _model { std::make_unique<contour::CommandPaletteModel>(_history) }
+        _history { 5 }, _model { std::make_unique<contour::window::CommandPaletteModel>(_history) }
     {
         _history.record("TogglePaneZoom");
         _model->setSources({ &_actionCommands });
-        _model->setShortcuts(contour::shortcutIndex(contour::config::defaultInputMappings()));
+        _model->setShortcuts(contour::command::shortcutIndex(contour::config::defaultInputMappings()));
         _model->refresh();
     }
 
     [[nodiscard]] QObject* commandPalette() const noexcept { return _model.get(); }
-    [[nodiscard]] contour::CommandPaletteModel& model() noexcept { return *_model; }
+    [[nodiscard]] contour::window::CommandPaletteModel& model() noexcept { return *_model; }
 
     /// Records what the popup asked to run, so a test can assert the pick actually routed.
     ///
@@ -2633,9 +2636,9 @@ class MockPaletteController: public QObject
     void commandPaletteRequested();
 
   private:
-    contour::CommandHistory _history;
-    contour::ActionCommandSource _actionCommands;
-    std::unique_ptr<contour::CommandPaletteModel> _model;
+    contour::command::CommandHistory _history;
+    contour::command::ActionCommandSource _actionCommands;
+    std::unique_ptr<contour::window::CommandPaletteModel> _model;
 };
 
 /// Hosts CommandPalette.qml in a Window that mirrors Main.qml's ApplicationWindow — in particular it
@@ -2744,17 +2747,18 @@ TEST_CASE("The command palette lists commands with their shortcut and documentat
 
         auto const index = controller.model().index(0, 0);
         CHECK(controller.model()
-                  .data(index, static_cast<int>(contour::CommandPaletteModel::Roles::TitleRole))
+                  .data(index, static_cast<int>(contour::window::CommandPaletteModel::Roles::TitleRole))
                   .toString()
               == QStringLiteral("Split Vertical"));
         CHECK(controller.model()
-                  .data(index, static_cast<int>(contour::CommandPaletteModel::Roles::ShortcutRole))
+                  .data(index, static_cast<int>(contour::window::CommandPaletteModel::Roles::ShortcutRole))
                   .toString()
               == QStringLiteral("Ctrl+Shift+E"));
-        CHECK_FALSE(controller.model()
-                        .data(index, static_cast<int>(contour::CommandPaletteModel::Roles::DescriptionRole))
-                        .toString()
-                        .isEmpty());
+        CHECK_FALSE(
+            controller.model()
+                .data(index, static_cast<int>(contour::window::CommandPaletteModel::Roles::DescriptionRole))
+                .toString()
+                .isEmpty());
     }
 
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
@@ -2858,7 +2862,7 @@ TEST_CASE("Picking OpenCommandPalette re-opens the palette cleanly, not on top o
     REQUIRE(controller.model().rowCount() > 0);
     REQUIRE(controller.model()
                 .data(controller.model().index(0, 0),
-                      static_cast<int>(contour::CommandPaletteModel::Roles::IdRole))
+                      static_cast<int>(contour::window::CommandPaletteModel::Roles::IdRole))
                 .toString()
             == QStringLiteral("OpenCommandPalette"));
 
@@ -3626,7 +3630,7 @@ TEST_CASE("The terminal chrome style quantizes the tab strip to whole cells (off
 
         auto const* provider = engine.rootContext()
                                    ->contextProperty(QStringLiteral("chromeStyle"))
-                                   .value<contour::UiStyleProvider*>();
+                                   .value<contour::window::UiStyleProvider*>();
         REQUIRE(provider != nullptr);
         return ChromeMetrics { .value = tab->property("implicitWidth").toReal(),
                                .cellWidth = provider->cellWidth(),
@@ -3757,7 +3761,7 @@ TEST_CASE("A tab's close button sits in clear space at both ends (offscreen)", "
 
         auto const* provider = engine.rootContext()
                                    ->contextProperty(QStringLiteral("chromeStyle"))
-                                   .value<contour::UiStyleProvider*>();
+                                   .value<contour::window::UiStyleProvider*>();
         REQUIRE(provider != nullptr);
 
         // The separator is anchored to the tab's trailing edge and collapses to zero width in a style
@@ -3882,7 +3886,7 @@ TEST_CASE("The terminal chrome style makes the title bar one character row tall 
 
         auto const* provider = engine.rootContext()
                                    ->contextProperty(QStringLiteral("chromeStyle"))
-                                   .value<contour::UiStyleProvider*>();
+                                   .value<contour::window::UiStyleProvider*>();
         REQUIRE(provider != nullptr);
         return ChromeMetrics { .value = bar->property("implicitHeight").toReal(),
                                .cellWidth = provider->cellWidth(),
@@ -3935,7 +3939,7 @@ TEST_CASE("The tab strip's \"+\" and \"▾\" are padded wider than a tab's close
 
     auto const* provider = engine.rootContext()
                                ->contextProperty(QStringLiteral("chromeStyle"))
-                               .value<contour::UiStyleProvider*>();
+                               .value<contour::window::UiStyleProvider*>();
     REQUIRE(provider != nullptr);
     REQUIRE(provider->stripButtonWidth() > provider->controlWidth());
 

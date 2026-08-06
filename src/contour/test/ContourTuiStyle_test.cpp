@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/UiStyle.h>
-#include <contour/UiStyleProvider.h>
+#include <contour/config/UiStyle.h>
 #include <contour/test/QmlChromeStyle.h>
+#include <contour/window/UiStyleProvider.h>
 
 #include <QtCore/QFile>
 #include <QtCore/QIODevice>
@@ -83,7 +83,7 @@ TEST_CASE("A ContourTui control is sized in whole character cells", "[contour][g
 
     auto const* provider = engine.rootContext()
                                ->contextProperty(QStringLiteral("chromeStyle"))
-                               .value<contour::UiStyleProvider*>();
+                               .value<contour::window::UiStyleProvider*>();
     REQUIRE(provider != nullptr);
     REQUIRE(provider->cellHeight() > 0.0);
 
@@ -230,7 +230,7 @@ TEST_CASE("A ContourTui scrollbar keeps a grabbable handle", "[contour][gui][sty
 
     auto const* provider = engine.rootContext()
                                ->contextProperty(QStringLiteral("chromeStyle"))
-                               .value<contour::UiStyleProvider*>();
+                               .value<contour::window::UiStyleProvider*>();
     REQUIRE(provider != nullptr);
     REQUIRE(provider->cellHeight() > 0.0);
 

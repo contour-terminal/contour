@@ -34,7 +34,7 @@ namespace net
 class EventLoop;
 }
 
-namespace contour
+namespace contour::remote
 {
 
 /// A ChannelPty that runs an on-destroy callback when the owning terminal
@@ -196,4 +196,4 @@ class RemoteController
     bool _stopped = false;
 };
 
-} // namespace contour
+} // namespace contour::remote

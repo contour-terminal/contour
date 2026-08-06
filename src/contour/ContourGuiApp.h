@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/CommandHistoryStore.h>
-#include <contour/Config.h>
-#include <contour/ContourApp.h>
-#include <contour/ExitCode.h>
-#include <contour/ExternalLauncher.h>
-#include <contour/LayoutStore.h>
-#include <contour/SpeechSynthesizer.h>
-#include <contour/TerminalSessionManager.h>
-#include <contour/UiStyleProvider.h>
-#include <contour/helper.h>
+#include <contour/cli/ContourApp.h>
+#include <contour/command/CommandHistoryStore.h>
+#include <contour/config/Config.h>
+#include <contour/config/LayoutStore.h>
+#include <contour/display/Logging.h>
+#include <contour/platform/ExternalLauncher.h>
+#include <contour/platform/SpeechSynthesizer.h>
+#include <contour/session/ExitCode.h>
+#include <contour/session/TerminalSessionManager.h>
+#include <contour/window/UiStyleProvider.h>
 
 #include <vtpty/Process.h>
 #include <vtpty/SshSession.h>
@@ -41,11 +41,22 @@ namespace display
     class ForcedFontDpiProvider;
 }
 
-class NativeController;
-class RoutingSessionFactory;
-class TerminalSession;
-class TmuxController;
-class WindowController;
+namespace remote
+{
+    class NativeController;
+    class RoutingSessionFactory;
+    class TmuxController;
+} // namespace remote
+
+namespace session
+{
+    class TerminalSession;
+} // namespace session
+
+namespace window
+{
+    class WindowController;
+} // namespace window
 
 /// The daemon window the boot (first) OS window should adopt when attaching, rather than authoring
 /// a fresh tab. In attach mode the boot window mirrors the daemon's primary (lowest-id) window; a
@@ -76,7 +87,7 @@ class WindowController;
 [[nodiscard]] std::filesystem::path uiModuleOverrideDirectory(std::filesystem::path const& configHome);
 
 /// Extends ContourApp with terminal GUI capability.
-class ContourGuiApp: public QObject, public ContourApp
+class ContourGuiApp: public QObject, public cli::ContourApp
 {
     Q_OBJECT
 
@@ -102,14 +113,14 @@ class ContourGuiApp: public QObject, public ContourApp
     ///                       service (on Linux that is a speech-dispatcher connection per use).
     /// @param env            The process environment every part of the application reads through.
     explicit ContourGuiApp(crispy::environment const& env,
-                           std::unique_ptr<SessionFactory> sessionFactory = nullptr,
-                           std::unique_ptr<ExternalLauncher> externalLauncher = nullptr,
-                           std::unique_ptr<LayoutStore> layoutStore = nullptr,
-                           std::unique_ptr<CommandHistoryStore> commandHistoryStore = nullptr,
-                           std::unique_ptr<SpeechSynthesizer> speechSynthesizer = nullptr);
+                           std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
+                           std::unique_ptr<platform::ExternalLauncher> externalLauncher = nullptr,
+                           std::unique_ptr<config::LayoutStore> layoutStore = nullptr,
+                           std::unique_ptr<command::CommandHistoryStore> commandHistoryStore = nullptr,
+                           std::unique_ptr<platform::SpeechSynthesizer> speechSynthesizer = nullptr);
     ~ContourGuiApp() override;
 
-    static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(ContourApp::instance()); }
+    static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(cli::ContourApp::instance()); }
 
     int run(int argc, char const* argv[]) override;
     [[nodiscard]] crispy::cli::command parameterDefinition() const override;
@@ -140,7 +151,7 @@ class ContourGuiApp: public QObject, public ContourApp
     /// process-global ambient state, and the macOS implementation registers an observer for changes
     /// to it, so one instance is shared rather than one per pane.
     /// @return The layout; never nullptr.
-    [[nodiscard]] KeyboardLayout const& keyboardLayout() const noexcept { return *_keyboardLayout; }
+    [[nodiscard]] input::KeyboardLayout const& keyboardLayout() const noexcept { return *_keyboardLayout; }
 
     [[nodiscard]] std::string profileName() const;
 
@@ -159,13 +170,13 @@ class ContourGuiApp: public QObject, public ContourApp
 
     /// The session exit status (Process/SSH exit variant, or nullopt). Single source of truth in
     /// ExitCode.h, shared with the pure exitCodeFor() mapping used by run().
-    using ExitStatus = SessionExitStatus;
+    using ExitStatus = session::SessionExitStatus;
 
     [[nodiscard]] ExitStatus exitStatus() const noexcept { return _exitStatus; }
 
     [[nodiscard]] std::optional<std::filesystem::path> dumpStateAtExit() const;
 
-    void onExit(TerminalSession& session);
+    void onExit(session::TerminalSession& session);
 
     config::Config& config() noexcept { return _config; }
     [[nodiscard]] config::Config const& config() const noexcept { return _config; }
@@ -173,13 +184,13 @@ class ContourGuiApp: public QObject, public ContourApp
     {
         if (auto const* const profile = config().profile(profileName()))
             return *profile;
-        displayLog()("Failed to access config profile.");
+        display::displayLog()("Failed to access config profile.");
         Require(false);
     }
 
     [[nodiscard]] bool liveConfig() const noexcept { return _config.live.value(); }
 
-    TerminalSessionManager& sessionsManager() noexcept { return _sessionManager; }
+    session::TerminalSessionManager& sessionsManager() noexcept { return _sessionManager; }
 
     [[nodiscard]] std::chrono::seconds earlyExitThreshold() const;
 
@@ -194,14 +205,14 @@ class ContourGuiApp: public QObject, public ContourApp
     }
 
     /// The external-resource launcher (URL opening, child-process spawning) for this app's sessions.
-    [[nodiscard]] ExternalLauncher& externalLauncher() noexcept { return *_externalLauncher; }
+    [[nodiscard]] platform::ExternalLauncher& externalLauncher() noexcept { return *_externalLauncher; }
 
     /// The voice this app's sessions read selections through.
     ///
     /// One per app rather than one per session, because a machine has one voice: two sessions
     /// speaking at once is not a thing the platform can do, and with an engine each, "Stop Speaking"
     /// in one tab could not stop what another tab had started.
-    [[nodiscard]] SpeechSynthesizer& speechSynthesizer() noexcept { return *_speechSynthesizer; }
+    [[nodiscard]] platform::SpeechSynthesizer& speechSynthesizer() noexcept { return *_speechSynthesizer; }
 
     [[nodiscard]] vtbackend::ColorPreference colorPreference() const noexcept { return _colorPreference; }
 
@@ -244,7 +255,7 @@ class ContourGuiApp: public QObject, public ContourApp
     /// its own first tab.
     /// @param controller The freshly-created controller of the just-spawned OS window.
     /// @return true if @p controller's window was bound to a pending daemon window.
-    bool bindPendingAttachWindow(WindowController* controller);
+    bool bindPendingAttachWindow(window::WindowController* controller);
 
     /// Records the daemon-window → OS-window mapping and immediately reconciles that daemon window's
     /// tab/pane tree into @p osWindow — the one place the "a mapping always implies a reconcile"
@@ -255,8 +266,8 @@ class ContourGuiApp: public QObject, public ContourApp
 
     /// The attach engines, declared FIRST so they are destroyed LAST: remote-
     /// backed sessions hold ptys that unregister from them on destruction.
-    std::unique_ptr<NativeController> _nativeController;
-    std::unique_ptr<TmuxController> _tmuxController;
+    std::unique_ptr<remote::NativeController> _nativeController;
+    std::unique_ptr<remote::TmuxController> _tmuxController;
 
     /// Invoked by terminalGuiAction right after the first window booted —
     /// attach mode adopts the remaining remote sessions as tabs here.
@@ -275,21 +286,21 @@ class ContourGuiApp: public QObject, public ContourApp
     // Declared before _sessionManager: the manager holds a reference to the factory.
     // Always a RoutingSessionFactory wrapping the injected/default factory,
     // so attach mode can switch the route without touching the manager.
-    std::unique_ptr<SessionFactory> _sessionFactory;
-    RoutingSessionFactory* _routingFactory = nullptr; ///< The concrete view of _sessionFactory.
+    std::unique_ptr<session::SessionFactory> _sessionFactory;
+    remote::RoutingSessionFactory* _routingFactory = nullptr; ///< The concrete view of _sessionFactory.
     // The external-resource launcher (URL open / process spawn), reached by sessions via _app.
-    std::unique_ptr<ExternalLauncher> _externalLauncher;
+    std::unique_ptr<platform::ExternalLauncher> _externalLauncher;
     // Declared before _sessionManager: the manager holds a reference to the store.
-    std::unique_ptr<LayoutStore> _layoutStore;
+    std::unique_ptr<config::LayoutStore> _layoutStore;
     // Likewise: the manager holds a reference to the command-history store.
-    std::unique_ptr<CommandHistoryStore> _commandHistoryStore;
+    std::unique_ptr<command::CommandHistoryStore> _commandHistoryStore;
     // Shared by every session, reached via _app; @see speechSynthesizer().
-    std::unique_ptr<SpeechSynthesizer> _speechSynthesizer;
-    TerminalSessionManager _sessionManager;
+    std::unique_ptr<platform::SpeechSynthesizer> _speechSynthesizer;
+    session::TerminalSessionManager _sessionManager;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
     // Shared by every display, reached via the session; @see keyboardLayout(). Unlike the DPI
     // provider this needs no Qt application, so it is built eagerly with the app.
-    std::unique_ptr<KeyboardLayout> _keyboardLayout = makePlatformKeyboardLayout();
+    std::unique_ptr<input::KeyboardLayout> _keyboardLayout = input::makePlatformKeyboardLayout();
     // Spawn context: the screen the next window should open on (QPointer: screens can be unplugged
     // between staging and consumption).
     QPointer<QScreen> _pendingSpawnScreen;
@@ -315,7 +326,7 @@ class ContourGuiApp: public QObject, public ContourApp
     /// The chrome's design tokens, handed to QML as the `chromeStyle` context property. Declared
     /// BEFORE the engine so it outlives it: a context property is a borrowed pointer the engine keeps
     /// dereferencing, and members are destroyed in reverse declaration order.
-    std::unique_ptr<UiStyleProvider> _uiStyleProvider;
+    std::unique_ptr<window::UiStyleProvider> _uiStyleProvider;
 
     std::unique_ptr<QQmlApplicationEngine> _qmlEngine;
 };

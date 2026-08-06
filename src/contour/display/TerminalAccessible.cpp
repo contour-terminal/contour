@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/TerminalSession.h>
-#include <contour/display/CaretGeometry.h>
 #include <contour/display/TerminalAccessible.h>
 #include <contour/display/TerminalDisplay.h>
 #include <contour/display/ViewportTextIndex.h>
+#include <contour/geometry/CellRectangle.h>
+#include <contour/session/TerminalSession.h>
 
 #include <vtbackend/Terminal.h>
 
@@ -176,8 +176,8 @@ QRect TerminalAccessible::rect() const
     if (item == nullptr || item->window() == nullptr)
         return {};
 
-    return toGlobalRect(QRectF { 0.0, 0.0, item->width(), item->height() },
-                        item->mapToGlobal(QPointF { 0.0, 0.0 }));
+    return geometry::toGlobalRect(QRectF { 0.0, 0.0, item->width(), item->height() },
+                                  item->mapToGlobal(QPointF { 0.0, 0.0 }));
 }
 
 QString TerminalAccessible::text(QAccessible::Text which) const
@@ -297,9 +297,10 @@ QRect TerminalAccessible::characterRect(int offset) const
     }();
 
     auto const cell = cellAtFlatOffset(offset, columns);
-    auto const local = cellRectangle(metrics.pageMargin, metrics.cellSize, cell, 1, item->contentScale());
+    auto const local =
+        geometry::cellRectangle(metrics.pageMargin, metrics.cellSize, cell, 1, item->contentScale());
 
-    return toGlobalRect(local, item->mapToGlobal(QPointF { 0.0, 0.0 }));
+    return geometry::toGlobalRect(local, item->mapToGlobal(QPointF { 0.0, 0.0 }));
 }
 
 QString TerminalAccessible::text(int startOffset, int endOffset) const
@@ -537,10 +538,10 @@ QRect PromptAccessible::rect() const
     if (!span.has_value())
         return {};
 
-    auto const local = rowBandRectangle(
+    auto const local = geometry::rowBandRectangle(
         metrics.pageMargin, metrics.cellSize, span->firstLine, span->lastLine, columns, item->contentScale());
 
-    return toGlobalRect(local, item->mapToGlobal(QPointF { 0.0, 0.0 }));
+    return geometry::toGlobalRect(local, item->mapToGlobal(QPointF { 0.0, 0.0 }));
 }
 
 QString PromptAccessible::text(QAccessible::Text which) const

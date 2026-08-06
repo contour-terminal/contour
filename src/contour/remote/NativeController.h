@@ -18,9 +18,9 @@
 /// terminal, which does not exist when `createPty` hands out the pty, so
 /// `bindTerminal` closes the cycle and primes the mirror.
 
-#include <contour/SessionFactory.h>
 #include <contour/remote/ReactorThread.h>
 #include <contour/remote/RemoteController.h>
+#include <contour/session/SessionFactory.h>
 
 #include <vtbackend/Settings.h>
 
@@ -49,13 +49,16 @@
 #include <vthost/client/ScreenMirror.h>
 #include <vtworkspace/Primitives.h>
 
-namespace contour
+namespace contour::session
+{
+class TerminalSessionManager;
+}
+
+namespace contour::remote
 {
 
-class TerminalSessionManager;
-
 /// The attach-mode session factory and remote-session registry.
-class NativeController final: public QObject, public SessionFactory, public RemoteController
+class NativeController final: public QObject, public contour::session::SessionFactory, public RemoteController
 {
     Q_OBJECT
 
@@ -375,4 +378,4 @@ class NativeController final: public QObject, public SessionFactory, public Remo
     vthost::client::NativeClient* _client = nullptr; ///< Reactor-owned; valid while serving.
 };
 
-} // namespace contour
+} // namespace contour::remote
