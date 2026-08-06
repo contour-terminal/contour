@@ -66,6 +66,8 @@ struct RemoteScreen
     /// The RESOLVED mouse-reporting state, applied to the mirror's input generator directly rather
     /// than through DEC modes. @see proto::MouseState.
     proto::MouseState mouse {};
+    uint8_t progressState = 0;                ///< ProgressState (OSC 9;4), applied to the mirror's terminal.
+    uint8_t progressPercentage = 0;           ///< The progress percentage, 0..100.
     std::vector<proto::WireLine> statusLines; ///< Host-writable status-line rows, painted on the status page.
 
     uint64_t generation = 0;

@@ -92,20 +92,22 @@ namespace
                    +[](DecodedPdu const& pdu) {
                        auto const& value = std::get<SessionState>(pdu);
                        // title/cwd are screen-derived content; their LENGTHS are the diagnostic.
-                       return std::format("session={} {}x{} screen={} title={}ch cwd={}ch",
+                       return std::format("session={} {}x{} screen={} title={}ch cwd={}ch progress={}/{}",
                                           value.session,
                                           value.columns,
                                           value.lines,
                                           value.screenType,
                                           value.title.size(),
-                                          value.cwd.size());
+                                          value.cwd.size(),
+                                          value.progressState,
+                                          value.progressPercentage);
                    } },
         TraceRow { PduType::Delta,
                    "Delta",
                    +[](DecodedPdu const& pdu) {
                        auto const& value = std::get<Delta>(pdu);
                        return std::format("session={} gen={} seq={} snapshot={} lines={} links={} "
-                                          "imagecells={} statuslines={}",
+                                          "imagecells={} statuslines={} progress={}/{}",
                                           value.session,
                                           value.generation,
                                           value.seqno,
@@ -113,7 +115,9 @@ namespace
                                           value.lines.size(),
                                           value.hyperlinks.size(),
                                           value.imageCells.size(),
-                                          value.statusLines.size());
+                                          value.statusLines.size(),
+                                          value.progressChanged != 0 ? value.progressState : 0,
+                                          value.progressChanged != 0 ? value.progressPercentage : 0);
                    } },
         TraceRow { PduType::SessionBell,
                    "SessionBell",

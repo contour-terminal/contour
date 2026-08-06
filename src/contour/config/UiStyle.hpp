@@ -128,6 +128,15 @@ struct UiStyleTokens
     /// the surrounding text.
     int badgePixelSize;
 
+    /// The colors a tab's OSC 9;4 progress bar is painted in, as 0xRRGGBB, indexed by
+    /// vtbackend::ProgressState. Index 0 (Inactive) paints nothing and is never read.
+    ///
+    /// A row here rather than a literal in the provider, so a style that wants its own palette says
+    /// so in the table like every other style value. They are stated rather than derived from the OS
+    /// palette because they say what an operation is DOING -- a theme-picked hue could render a
+    /// failure green. Both rows agree today; the point is that they need not.
+    std::array<uint32_t, 5> progressColors;
+
     std::string_view tabSeparator; ///< Drawn between adjacent tabs; empty when the style has none.
     std::string_view closeGlyph;   ///< The per-tab close affordance.
     std::string_view zoomGlyph;    ///< Marks a tab whose active pane is zoomed (see vtmux::Tab).
@@ -191,6 +200,13 @@ namespace detail
             .menuPointSize = 10,
             .windowControlPointSize = 10,
             .badgePixelSize = 10,
+            .progressColors = {
+                0x000000,  // Inactive: never painted
+                0x3D9A50,  // Normal: running
+                0xD13438,  // Error: failed
+                0x3D9A50,  // Indeterminate: busy, drawn as running but pulsing
+                0xE8A317,  // Paused: paused, or warning
+            },
             .tabSeparator = "",
             .closeGlyph = "✕",
             .zoomGlyph = "Z",
@@ -237,6 +253,13 @@ namespace detail
             .menuPointSize = 0,
             .windowControlPointSize = 0,
             .badgePixelSize = 0,
+            .progressColors = {
+                0x000000,  // Inactive: never painted
+                0x3D9A50,  // Normal: running
+                0xD13438,  // Error: failed
+                0x3D9A50,  // Indeterminate: busy, drawn as running but pulsing
+                0xE8A317,  // Paused: paused, or warning
+            },
             .tabSeparator = "│",
             .closeGlyph = "×",
             .zoomGlyph = "Z",

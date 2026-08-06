@@ -113,7 +113,9 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
                            .statusDisplayType = 1,
                            .activeStatusDisplay = 0,
                            .kittyKeyboardFlags = 5,
-                           .modifyOtherKeys = 2 },
+                           .modifyOtherKeys = 2,
+                           .progressState = 1,
+                           .progressPercentage = 42 },
             Delta { .session = 9,
                     .generation = 2,
                     .seqno = 1234,
@@ -148,7 +150,10 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
                     .kittyKeyboardChanged = 1,
                     .kittyKeyboardFlags = 11,
                     .modifyOtherKeysChanged = 1,
-                    .modifyOtherKeys = 2 },
+                    .modifyOtherKeys = 2,
+                    .progressChanged = 1,
+                    .progressState = 2,
+                    .progressPercentage = 80 },
         SessionBell { .session = 4 },
         SessionNotify { .session = 4, .title = "Build finished", .body = "3 warnings, 0 errors" },
         SessionClipboard { .session = 4, .selection = "c", .data = "copied text" },
@@ -422,6 +427,8 @@ TEST_CASE("an announced grid beyond MaxGridExtent is malformed", "[vthost][proto
         body.u16(0); // mouseProtocol
         body.u8(0);  // mouseTransport
         body.u8(0);  // mouseWheelMode
+        body.u8(0);  // progressState
+        body.u8(0);  // progressPercentage
         auto stream = Writer {};
         writeFrame(stream, 1, std::to_underlying(PduType::SessionState), body.view());
         return stream;
@@ -622,7 +629,7 @@ TEST_CASE("Delta::hasChanges answers for every gated field", "[vthost][proto]")
         &Delta::snapshot,           &Delta::titleChanged,         &Delta::cursorShapeChanged,
         &Delta::cwdChanged,         &Delta::colorsChanged,        &Delta::statusChanged,
         &Delta::statusLinesChanged, &Delta::kittyKeyboardChanged, &Delta::modifyOtherKeysChanged,
-        &Delta::mouseChanged,
+        &Delta::mouseChanged,       &Delta::progressChanged,
     };
     for (auto const gate: gates)
     {

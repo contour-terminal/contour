@@ -573,6 +573,63 @@ TEST_CASE("a Kitty-flag reset carried by a snapshot reaches the mirror", "[vthos
     h.loop.blockOn(drive(&h, std::move(scenario)));
 }
 
+TEST_CASE("the progress indicator mirrors", "[vthost][mirror]")
+{
+    // OSC 9;4 is per-session state, so it rides the gated delta and the snapshot alike — a thin
+    // client must show the same bar the fat client would, including one already in flight when it
+    // attaches.
+    auto h = MirrorHarness {};
+    h.host.createTab();
+    auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    h.serverTerminal(session)->writeToScreen("shell-ready");
+
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
+        co_await waitUntil(&h->loop, [&] {
+            return h->mirror->primaryScreen().grid().renderMainPageText().contains("shell-ready");
+        });
+        REQUIRE(h->mirror->progress() == vtbackend::Progress {});
+
+        serverWrites(h, session, "\033]9;4;1;40\033\\");
+        co_await waitUntil(&h->loop, [&] { return h->mirror->progress().percentage == 40; });
+        CHECK(h->mirror->progress()
+              == vtbackend::Progress { .state = vtbackend::ProgressState::Normal, .percentage = 40 });
+
+        // A state carrying no percentage of its own keeps the one already mirrored, so the client
+        // must be applying the server's RESOLVED progress rather than re-deriving it.
+        serverWrites(h, session, "\033]9;4;2\033\\");
+        co_await waitUntil(&h->loop,
+                           [&] { return h->mirror->progress().state == vtbackend::ProgressState::Error; });
+        CHECK(h->mirror->progress().percentage == 40);
+
+        // A LIVE indicator carried by a snapshot: the SessionState field exists for exactly this,
+        // and only a snapshot exercises it, since a delta would carry the same value through its
+        // gated field instead. This is the "attaching mid-operation adopts the bar already in
+        // flight" property -- without the SessionState half, progress would reach a client only if
+        // it happened to change after that client attached.
+        serverWrites(h, session, "\033]9;4;1;35\033\\");
+        co_await waitUntil(&h->loop, [&] { return h->mirror->progress().percentage == 35; });
+        // Switching the displayed page forces a snapshot, and this one says nothing about progress
+        // -- so the value can only arrive through SessionState. Entering the alternate screen rather
+        // than resetInsideSnapshot(), which asserts it is entered and so cannot be used twice.
+        serverWrites(h, session, "\033[?1049h");
+        co_await waitUntil(&h->loop, [&] { return h->mirror->isAlternateScreen(); });
+        REQUIRE(h->serverTerminal(session)->progress().percentage == 35);
+        CHECK(h->mirror->progress()
+              == vtbackend::Progress { .state = vtbackend::ProgressState::Normal, .percentage = 35 });
+
+        // And a withdrawal inside a snapshot must arrive too. Leaving the alternate screen is the
+        // page switch this time, since the mirror is already on it from the case above.
+        serverWrites(h, session, "\033]9;4;0\033\\\033[?1049l");
+        co_await waitUntil(&h->loop, [&] { return !h->mirror->isAlternateScreen(); });
+        REQUIRE(h->serverTerminal(session)->progress() == vtbackend::Progress {});
+        CHECK(h->mirror->progress() == vtbackend::Progress {});
+
+        h->client->detach();
+    }(&h, session);
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+
 TEST_CASE("xterm's modifyOtherKeys level mirrors", "[vthost][mirror]")
 {
     // The other protocol an app uses to ask for modified keys as escape sequences. It

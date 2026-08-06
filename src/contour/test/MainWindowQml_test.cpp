@@ -109,6 +109,8 @@ class MockMainController: public QAbstractListModel
         SessionIdRole = Qt::UserRole + 5,
         RawTitleRole = Qt::UserRole + 6,
         ZoomedRole = Qt::UserRole + 7,
+        ProgressStateRole = Qt::UserRole + 8,
+        ProgressPercentageRole = Qt::UserRole + 9,
     };
 
     [[nodiscard]] int activeTabIndex() const noexcept { return 0; }
@@ -231,6 +233,9 @@ class MockMainController: public QAbstractListModel
             case Roles::PaneCountRole: return 1;
             case Roles::SessionIdRole: return index.row();
             case Roles::ZoomedRole: return false;
+            // 0 = ProgressState::Inactive: no operation in flight, so TabItem paints no bar.
+            case Roles::ProgressStateRole:
+            case Roles::ProgressPercentageRole: return 0;
             default: return {};
         }
     }
@@ -245,6 +250,8 @@ class MockMainController: public QAbstractListModel
             { static_cast<int>(Roles::SessionIdRole), "sessionId" },
             { static_cast<int>(Roles::RawTitleRole), "rawTitle" },
             { static_cast<int>(Roles::ZoomedRole), "zoomed" },
+            { static_cast<int>(Roles::ProgressStateRole), "progressState" },
+            { static_cast<int>(Roles::ProgressPercentageRole), "progressPercentage" },
         };
     }
     // }}}

@@ -27,6 +27,10 @@ Item {
     required property bool tabActive
     required property int tabPaneCount
     required property bool tabZoomed     // active pane is zoomed: only it is on screen (see vtworkspace::Tab)
+    // The active pane's OSC 9;4 progress, as vtbackend::ProgressState's value: 0 inactive (nothing
+    // painted), 1 normal, 2 error, 3 indeterminate, 4 paused.
+    required property int tabProgressState
+    required property int tabProgressPercentage
 
     // The tab's natural size, in whatever unit the chrome style counts in: logical pixels natively,
     // whole character cells in the terminal style. `widthQuantum` is what expresses that difference
@@ -120,6 +124,49 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: root.effectiveBackground
+    }
+
+    // Progress indicator (OSC 9;4) for the tab's active pane: a thin bar along the tab's bottom edge,
+    // under the label rather than beside it, so it costs the title no width and every tab keeps the
+    // same layout whether or not an application is reporting progress.
+    Rectangle {
+        id: progressTrack
+        objectName: "progressTrack"  // findChild() handle for the GUI test
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: chromeStyle.borderWidth * 2
+        // State 0 is Inactive: nothing in flight, so nothing to paint.
+        visible: root.tabProgressState !== 0
+        // The unfilled remainder, tinted from the tab's own foreground exactly as the zoom badge is, so
+        // it tracks the active/inactive and colored/uncolored variants instead of hardcoding a color.
+        color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.18)
+
+        Rectangle {
+            id: progressFill
+            objectName: "progressFill"
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            // Indeterminate (3) has no meaningful position, so the bar fills whole and pulses instead.
+            width: root.tabProgressState === 3
+                   ? parent.width
+                   : parent.width * (root.tabProgressPercentage / 100.0)
+            // The state->color mapping lives in the style's own token row, so this side neither
+            // repeats it nor names the states. @see UiStyleProvider::progressColor.
+            color: chromeStyle.progressColor(root.tabProgressState)
+
+            SequentialAnimation on opacity {
+                running: root.tabProgressState === 3
+                loops: Animation.Infinite
+                // Restores full opacity when the state leaves Indeterminate mid-cycle; without it the
+                // bar would keep whatever opacity the animation was stopped at. Addressed by id: an
+                // animation attached with `on opacity` is not a visual child, so `parent` is null here.
+                onRunningChanged: if (!running) progressFill.opacity = 1.0
+                NumberAnimation { from: 1.0; to: 0.35; duration: 700; easing.type: Easing.InOutQuad }
+                NumberAnimation { from: 0.35; to: 1.0; duration: 700; easing.type: Easing.InOutQuad }
+            }
+        }
     }
 
     HoverHandler {

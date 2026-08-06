@@ -82,6 +82,8 @@ Row {
                 required property bool isActive
                 required property int paneCount
                 required property bool zoomed
+                required property int progressState
+                required property int progressPercentage
 
                 height: list.height
                 controller: root.controller
@@ -93,6 +95,8 @@ Row {
                 tabActive: isActive
                 tabPaneCount: paneCount
                 tabZoomed: zoomed
+                tabProgressState: progressState
+                tabProgressPercentage: progressPercentage
             }
 
             // Animate reordering when a tab is moved.

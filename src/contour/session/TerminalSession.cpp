@@ -1427,6 +1427,18 @@ void TerminalSession::resetWindowFrameColor()
     platform::postToObject(this, [this, id = modelSessionId()]() { _manager->resetTabColorForSession(id); });
 }
 
+void TerminalSession::progressChanged(vtbackend::Progress /*progress*/)
+{
+    // OSC 9;4. Same threading constraint as setWindowFrameColor() above: this runs on the parser
+    // thread with Terminal::_stateMutex held, and the tab-strip refresh reads the terminal back
+    // through resolvedProgress(), which takes that same non-recursive mutex. Post it to the GUI
+    // thread; postToObject targets `this`, so Qt cancels the queued call if the session dies first.
+    // The value itself is not carried across: the refresh reads it back from the terminal, so the
+    // strip cannot paint a state older than the one in effect when the posted call finally runs.
+    platform::postToObject(this,
+                           [this, id = modelSessionId()]() { _manager->refreshTabProgressForSession(id); });
+}
+
 void TerminalSession::setTerminalProfile(string const& configProfileName)
 {
     if (!_display)

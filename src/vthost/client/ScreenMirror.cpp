@@ -22,6 +22,7 @@
 #include <vthost/ImageWire.hpp>
 #include <vthost/MirroredModes.hpp>
 #include <vthost/MouseWire.hpp>
+#include <vthost/ProgressWire.hpp>
 #include <vthost/StatusWire.hpp>
 
 namespace vthost::client
@@ -292,6 +293,11 @@ void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
                 vtbackend::KeyboardEventFlags::fromValue(delta.kittyKeyboardFlags);
         if (delta.modifyOtherKeysChanged != 0)
             _terminal->setModifyOtherKeys(delta.modifyOtherKeys);
+        if (delta.progressChanged != 0)
+            // Validated rather than cast, per the rule in vthost/ProgressWire.hpp: a state no
+            // enumerator has is ignored, leaving what the mirror already shows standing.
+            if (auto const progress = progressOf(delta.progressState, delta.progressPercentage))
+                _terminal->setProgress(*progress);
         applyImages(screen);
         finish(screen);
     }
@@ -411,6 +417,12 @@ void ScreenMirror::applySessionState(RemoteScreen const& screen)
     // overwriting a known cwd with it would lose information rather than restore a default.
     if (!screen.cwd.empty() && _terminal->currentWorkingDirectory() != screen.cwd)
         _terminal->setCurrentWorkingDirectory(screen.cwd);
+    // The re-attach replay: a client joining mid-operation adopts the bar already in flight. Compared
+    // against the terminal first for the same reason the title is — setProgress announces to the
+    // frontend, and re-announcing an unchanged value is work for no change at all.
+    if (auto const progress = progressOf(screen.progressState, screen.progressPercentage);
+        progress.has_value() && _terminal->progress() != *progress)
+        _terminal->setProgress(*progress);
 }
 
 void ScreenMirror::applyStatusDisplay(uint8_t wireType, uint8_t wireActive)

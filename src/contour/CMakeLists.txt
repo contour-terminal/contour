@@ -574,6 +574,7 @@ if(CONTOUR_FRONTEND_GUI)
             session/FocusRouting_test.cpp
             window/MultiWindow_test.cpp
             platform/NotificationRouter_test.cpp
+            platform/TaskbarProgressRouter_test.cpp
             test/QmlDiagnosticPredicate_test.cpp
             display/RenderingBackendSelection_test.cpp
             display/ScissorRect_test.cpp
@@ -606,6 +607,20 @@ if(CONTOUR_FRONTEND_GUI)
             target_compile_options(contour_gui_test PRIVATE -Wno-c2y-extensions)
         endif()
         add_test(NAME contour_gui_test COMMAND $<TARGET_FILE:contour_gui_test>)
+
+        # The offscreen QPA, because this suite constructs a QGuiApplication and its QML trees: without
+        # it the run needs a real display and fails wherever there is none. It was passing only because
+        # every invocation that mattered happened to export QT_QPA_PLATFORM by hand.
+        #
+        # LeakSanitizer is off here for the same, already-documented reason as the e2e app runs below:
+        # constructing a QGuiApplication initializes freetype through Qt's font database, whose one-time
+        # global allocations are freed by teardown hooks that run AFTER LSan reports. Every block in that
+        # report is freetype/Qt-internal with ZERO first-party frames, and it fires after Catch2 has
+        # already reported the suite green -- so it turns a passing run into a failing test. ASan proper
+        # (use-after-free, overflow) stays fully enabled; the Qt-free unit suites keep leak checking.
+        set_tests_properties(contour_gui_test
+            PROPERTIES
+                ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=detect_leaks=0")
 
         # {{{ Offscreen end-to-end app runs
         # Each test boots the REAL contour binary headlessly (offscreen platform + software GL) and

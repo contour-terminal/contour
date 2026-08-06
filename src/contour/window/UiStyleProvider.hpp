@@ -162,6 +162,12 @@ class UiStyleProvider: public QObject
     [[nodiscard]] int borderWidth() const noexcept { return _tokens.borderWidthPixels; }
     [[nodiscard]] int dropCaretWidth() const noexcept { return _tokens.dropCaretPixels; }
 
+    /// The color a tab's OSC 9;4 progress bar is painted in for @p state.
+    ///
+    /// @param state A vtbackend::ProgressState as its underlying value, as the tab model reports it.
+    /// @return The style's color for that state; transparent for a state that paints nothing.
+    [[nodiscard]] Q_INVOKABLE QColor progressColor(int state) const;
+
     [[nodiscard]] QString const& tabSeparator() const noexcept { return _glyphs.tabSeparator; }
     [[nodiscard]] QString const& closeGlyph() const noexcept { return _glyphs.close; }
     [[nodiscard]] QString const& zoomGlyph() const noexcept { return _glyphs.zoom; }

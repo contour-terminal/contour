@@ -899,6 +899,11 @@ void TerminalSessionManager::removeSession(TerminalSession& thatSession)
     if (_focusedSession == &thatSession)
         _focusedSession = nullptr;
 
+    // And forget whatever progress it was reporting: with no expiry configured (the default) a
+    // report is kept until it is withdrawn, so a pane closed mid-operation would otherwise keep
+    // contributing to the window's taskbar aggregate for the life of the process.
+    _taskbarProgress.onSessionClosed(sessionId.value);
+
     // Mirror the removal into the vtworkspace model FIRST, while the registry still resolves this session
     // to its tab/leaf, then erase the local bookkeeping. A session is one *pane*; closing it must
     // close only that pane. closePane() absorbs the surviving sibling when the tab still has other
@@ -1163,6 +1168,34 @@ void TerminalSessionManager::refreshTabForSession(vtworkspace::SessionId session
     if (auto* tab = findTabHostingSession(session))
         if (auto* c = controllerFor(_model->windowOfTab(tab->id())))
             c->notifyTabRowChanged(tab->id(), { window::WindowController::Roles::TitleRole });
+}
+
+void TerminalSessionManager::refreshTabProgressForSession(vtworkspace::SessionId session)
+{
+    // Same routing as refreshTabForSession, but only the two progress roles: the tab label is
+    // untouched by OSC 9;4, and an application updating progress once a second must not drag the
+    // label's re-expansion along with it.
+    auto* tab = findTabHostingSession(session);
+    if (tab == nullptr)
+        return;
+    if (auto* c = controllerFor(_model->windowOfTab(tab->id())))
+        c->notifyTabRowChanged(tab->id(),
+                               { window::WindowController::Roles::ProgressStateRole,
+                                 window::WindowController::Roles::ProgressPercentageRole });
+
+    // The window-level aggregate the OS taskbar would show. Fed here, on the GUI thread, because
+    // this is the one place a progress change is already known to have landed; the router decides
+    // what several sessions reduce to and when a report goes stale, and a platform backend attaches
+    // to its answer. Kept current even with no backend present, so adding one is a sink, not a
+    // rewiring. @see platform::TaskbarProgressRouter.
+    if (auto* s = sessionForId(session))
+        recordProgress(session, s->terminal().resolvedProgress());
+}
+
+platform::TaskbarProgress TerminalSessionManager::taskbarProgress(
+    std::chrono::steady_clock::time_point now) const
+{
+    return _taskbarProgress.resolve(now, _app.config().progressTimeout.value());
 }
 
 void TerminalSessionManager::setTabTitleForSession(vtworkspace::SessionId session, std::string title)

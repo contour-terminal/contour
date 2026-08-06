@@ -3124,6 +3124,20 @@ std::string const& Terminal::windowTitle() const noexcept
     return _windowTitle;
 }
 
+void Terminal::setProgress(Progress progress)
+{
+    // Lock-free for the same reason as setWindowTitle() above: the OSC 9;4 dispatch in Screen reaches
+    // this from inside writeToScreen()'s _stateMutex hold, and _stateMutex is not recursive.
+    _progress = progress;
+    _eventListener.progressChanged(progress);
+}
+
+Progress Terminal::resolvedProgress() const
+{
+    auto const l = std::lock_guard { _stateMutex };
+    return _progress;
+}
+
 std::string Terminal::resolvedWindowTitle() const
 {
     auto const l = std::lock_guard { _stateMutex };
@@ -3748,6 +3762,10 @@ void Terminal::hardReset()
     // withdraws what the application itself assigned: a color the user picked in the GUI is a separate,
     // higher-precedence source that no escape sequence can clear.
     resetWindowFrameColor();
+
+    // Likewise the progress indicator (OSC 9;4): a program that dies mid-operation must not leave a
+    // half-filled bar behind. Announced rather than assigned, so the frontends withdraw it too.
+    setProgress(Progress {});
 
     _hostWritableStatusLineScreen.margin() = Margin {
         .vertical =

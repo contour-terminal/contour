@@ -9,6 +9,7 @@
 
     #include <array>
     #include <cerrno>
+    #include <charconv>
     #include <chrono>
     #include <cstring>
     #include <format>
@@ -16,6 +17,7 @@
     #include <memory>
     #include <string>
     #include <string_view>
+    #include <utility>
     #include <vector>
 
     #include <fcntl.h>
@@ -473,14 +475,26 @@ TEST_CASE("a real tmux binary attaches over imsg", "[vthost][imsgserver][oracle]
     {
         SKIP("tmux not available");
     }
-    // The rewritten imsg arrived around tmux 3.6; older clients speak the
-    // classic framing and cannot talk to this endpoint.
+    // The rewritten imsg arrived around tmux 3.6; older clients speak the classic framing and cannot
+    // talk to this endpoint.
+    //
+    // The version is PARSED rather than matched against a list of old spellings. `tmux -V` prints
+    // things like "tmux 3.4", "tmux 3.5a" and "tmux next-3.4", and a list of " 3.4"-style substrings
+    // silently misses every one of the prefixed forms -- so a `next-3.4` build sailed past the guard
+    // and failed the test outright instead of skipping it.
     auto const version = runShellCapture("tmux -V");
-    if (version.contains(" 2.") || version.contains(" 3.0") || version.contains(" 3.1")
-        || version.contains(" 3.2") || version.contains(" 3.3") || version.contains(" 3.4")
-        || version.contains(" 3.5"))
+    if (auto const digits = version.find_first_of("0123456789"); digits != std::string::npos)
     {
-        SKIP("tmux too old for the rewritten imsg protocol");
+        auto const rest = std::string_view { version }.substr(digits);
+        auto major = 0;
+        auto minor = 0;
+        auto const* const first = rest.data();
+        auto const* const last = first + rest.size();
+        if (auto const [ptr, ec] = std::from_chars(first, last, major);
+            ec == std::errc {} && ptr != last && *ptr == '.')
+            std::ignore = std::from_chars(ptr + 1, last, minor);
+        if (std::pair { major, minor } < std::pair { 3, 6 })
+            SKIP("tmux too old for the rewritten imsg protocol");
     }
 
     auto const socketDir = std::format("/tmp/contour-imsg-{}", ::getpid());

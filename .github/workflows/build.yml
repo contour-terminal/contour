@@ -651,10 +651,28 @@ jobs:
           echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
       - name: "install tmux (oracle for the tmux-interop tests)"
         # A CI-only tool, so it is here rather than in install-deps.sh, which lists what Contour
-        # needs to BUILD. Without it the four tmux oracles self-skip, and switching this job to
+        # needs to BUILD. Without it the tmux oracles self-skip, and switching this job to
         # ctest (below) would otherwise have reached them only to watch them do nothing -- macOS
         # is where the BSD socket and Apple-libc++ differences in that code path would show up.
-        run: brew install tmux && tmux -V
+        #
+        # Built from source at the same pinned 3.7b as the Linux matrix, rather than taken from the
+        # formula. Both platforms then measure against the exact protocol version the control-mode
+        # server claims to speak (docs/internals/vthost.md), and neither can start or stop running
+        # the imsg oracle because a formula moved.
+        run: |
+          set -ex
+          # tmux's configure hard-errors without libevent; ncurses comes with the SDK on macOS.
+          # PKG_CONFIG_PATH is stated rather than assumed: the formula is not keg-only today, so its
+          # .pc file is normally on the default search path anyway -- but naming the prefix keeps
+          # this working if that ever changes, and costs nothing while it has not.
+          brew install libevent
+          export PKG_CONFIG_PATH="$(brew --prefix libevent)/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          curl -sSL -o "$RUNNER_TEMP/tmux.tar.gz" \
+            https://github.com/tmux/tmux/releases/download/3.7b/tmux-3.7b.tar.gz
+          tar xzf "$RUNNER_TEMP/tmux.tar.gz" -C "$RUNNER_TEMP"
+          # The release tarball ships a generated configure, so no autotools are needed here.
+          cd "$RUNNER_TEMP/tmux-3.7b" && ./configure && make -j"$(sysctl -n hw.ncpu)" && sudo make install
+          tmux -V
       - name: "Generate build files"
         run: |
           # The `macos-package` preset IS the definition of a shippable macOS build --
@@ -689,13 +707,13 @@ jobs:
       - name: "verify the tmux oracles actually ran"
         # @see the identical assertion on the Linux matrix for why a green suite is not enough:
         # a Catch2 SKIP exits 0, so "no tmux, nothing ran" is indistinguishable from success.
-        # imsgserver stays excluded here for parity with Linux -- brew's tmux is new enough to run
-        # it, but making one platform's coverage depend on a formula's version is how this becomes
-        # a mystery failure the day the formula moves.
+        # Nothing is excluded, for parity with Linux: this job pins the same tmux 3.7b, so the imsg
+        # oracle runs here too rather than being carved out by name. Pinning is what makes that safe
+        # -- the version is stated in the workflow, not inherited from whatever a formula moved to.
         run: |
           set -o pipefail
           binary=out/macos-package/src/vthost/vthost_test
-          output=$("$binary" '[oracle]~[imsgserver]' 2>&1) || { printf '%s\n' "$output"; exit 1; }
+          output=$("$binary" '[oracle]' 2>&1) || { printf '%s\n' "$output"; exit 1; }
           printf '%s\n' "$output"
           if printf '%s' "$output" | grep -q 'skipped'; then
             echo "::error::$binary reported SKIPPED; the tmux interop tests are not being exercised on macOS"
@@ -1025,10 +1043,26 @@ jobs:
         # TmuxGateway's real `tmux -C` drive, and TmuxController's GUI mirror. They are the only
         # coverage `vthost/tmux/ControlModeSpawn.cpp` gets at all.
         #
-        # Ubuntu 24.04 ships tmux 3.4. That runs the four above, but NOT ImsgServer's
-        # "a real tmux binary attaches over imsg" — the rewritten imsg framing landed after 3.5,
-        # so that one still self-skips until a runner image ships tmux >= 3.6.
-        run: sudo apt -qy install tmux && tmux -V
+        # Built from source rather than installed from the distro, because Ubuntu 24.04 ships tmux
+        # 3.4 and ImsgServer's "a real tmux binary attaches over imsg" needs the rewritten imsg
+        # framing that landed after 3.5. With 3.4 that oracle self-skipped, and the verification step
+        # below had to exclude it by name to keep the matrix green — so the one test covering the
+        # imsg endpoint never ran anywhere.
+        #
+        # 3.7b is not an arbitrary "new enough": it is the version the control-mode server is pinned
+        # to (see docs/internals/vthost.md), so the oracle now measures us against the exact protocol
+        # we claim to speak.
+        run: |
+          set -ex
+          # tmux's configure hard-errors without these two; the runner image carries neither the
+          # libevent nor the ncurses development headers, only their runtimes.
+          sudo apt -qy install libevent-dev libncurses-dev
+          curl -sSL -o "$RUNNER_TEMP/tmux.tar.gz" \
+            https://github.com/tmux/tmux/releases/download/3.7b/tmux-3.7b.tar.gz
+          tar xzf "$RUNNER_TEMP/tmux.tar.gz" -C "$RUNNER_TEMP"
+          # The release tarball ships a generated configure, so no autotools are needed here.
+          cd "$RUNNER_TEMP/tmux-3.7b" && ./configure && make -j"$(nproc)" && sudo make install
+          tmux -V
       - name: "Post-fix embedded dependency permissions."
         run: sudo find _deps/sources -exec chown $UID {} \;
       # Ubuntu 24.04's distro Qt is 6.4.2, which does not provide the Qt6::GuiPrivate CMake package
@@ -1099,13 +1133,13 @@ jobs:
         # ambiguity is exactly how these tests went their whole existence without executing. Assert
         # it instead of inferring it: re-run the tagged subset and fail if anything reports skipped.
         #
-        # imsgserver is excluded on purpose: its oracle needs the rewritten imsg framing from tmux
-        # >= 3.6, and Ubuntu 24.04 ships 3.4, so that ONE self-skips legitimately. Drop the
-        # exclusion once a runner image ships a new enough tmux.
+        # Nothing is excluded any more: the job builds tmux 3.7b above, so the imsg oracle -- which
+        # needs the framing rewritten after 3.5 and had been carved out by name ever since -- runs
+        # like the rest and is held to the same "did not skip" bar.
         run: |
           set -o pipefail
           for oracle in \
-              'out/gcc-debug/src/vthost/vthost_test|[oracle]~[imsgserver]' \
+              'out/gcc-debug/src/vthost/vthost_test|[oracle]' \
               'out/gcc-debug/src/contour/contour_gui_test|[oracle]'; do
             binary=${oracle%%|*}
             filter=${oracle##*|}

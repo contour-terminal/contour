@@ -13,6 +13,7 @@
 #include <vtbackend/Logging.hpp>
 #include <vtbackend/PointerShape.hpp>
 #include <vtbackend/Primitives.hpp>
+#include <vtbackend/ProgressState.hpp>
 #include <vtbackend/RenderBuffer.hpp>
 #include <vtbackend/Selector.hpp>
 #include <vtbackend/SemanticBlockTracker.hpp>
@@ -300,6 +301,14 @@ class Terminal
         virtual void notify(std::string_view /*title*/, std::string_view /*body*/) {}
         virtual void showDesktopNotification(DesktopNotification const& /*notification*/) {}
         virtual void discardDesktopNotification(std::string_view /*identifier*/) {}
+
+        /// The application changed its progress indicator (`OSC 9 ; 4`), or a reset withdrew it.
+        ///
+        /// Raised on the parser thread with Terminal::_stateMutex ALREADY HELD, and that mutex is a
+        /// plain non-recursive std::mutex — so an implementation must not read terminal state here,
+        /// nor synchronously re-enter code that does. Defer to the GUI thread instead.
+        /// @param progress The state now in effect; ProgressState::Inactive means "show nothing".
+        virtual void progressChanged(Progress /*progress*/) {}
         virtual void focusTerminalWindow() {}
         virtual void onClosed() {}
         virtual void pasteFromClipboard(unsigned /*count*/, bool /*strip*/) {}
@@ -375,6 +384,7 @@ class Terminal
         void notify(std::string_view /*title*/, std::string_view /*body*/) override {}
         void showDesktopNotification(DesktopNotification const& /*notification*/) override {}
         void discardDesktopNotification(std::string_view /*identifier*/) override {}
+        void progressChanged(Progress /*progress*/) override {}
         void focusTerminalWindow() override {}
         void onClosed() override {}
         void pasteFromClipboard(unsigned /*count*/, bool /*strip*/) override {}
@@ -1598,6 +1608,25 @@ class Terminal
     /// @return The raw window title.
     [[nodiscard]] std::string resolvedWindowTitle() const;
 
+    /// Sets the application's progress indicator state (OSC 9;4) and announces it.
+    ///
+    /// Lock-free for the same reason as setWindowTitle() above: the only caller is the OSC 9
+    /// dispatch in Screen, which runs inside writeToScreen()'s _stateMutex hold.
+    void setProgress(Progress progress);
+
+    /// @return The progress indicator state, WITHOUT taking the lock. Parser thread only; the GUI
+    ///         thread must use resolvedProgress().
+    [[nodiscard]] Progress const& progress() const noexcept { return _progress; }
+
+    /// Returns a copy of the progress indicator state (OSC 9;4), read under _stateMutex.
+    ///
+    /// The GUI-thread counterpart to progress(), and required for the same reason
+    /// resolvedWindowTitle() is: _progress is written on the parser thread under _stateMutex, so an
+    /// unlocked read from the GUI thread would race the writer. A by-value copy rather than a
+    /// reference, so the two fields cannot be read from either side of a concurrent update.
+    /// @return The progress indicator state.
+    [[nodiscard]] Progress resolvedProgress() const;
+
     [[nodiscard]] std::optional<std::string> tabName() const noexcept;
 
     /// Resolves the indicator status-line tab label for this terminal under a single _stateMutex hold.
@@ -2376,6 +2405,9 @@ class Terminal
     HyperlinkStorage _hyperlinks {};
 
     std::string _windowTitle {};
+
+    /// The application's progress indicator state (OSC 9;4). @see setProgress(), resolvedProgress().
+    Progress _progress {};
 
     /// The icon (or tab) title. Set by `OSC 0` and `OSC 1`, reported by `CSI 20 t`.
     std::string _iconTitle {};

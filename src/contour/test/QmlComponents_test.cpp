@@ -111,6 +111,9 @@ class MockTabController: public QAbstractListModel
             + 6, //!< Must mirror contour::session::TerminalSessionManager; TabStrip's delegate requires it.
         ZoomedRole =
             Qt::UserRole + 7, //!< Ditto: TabStrip's delegate requires it (drives TabItem's zoom badge).
+        //!< Ditto: both drive TabItem's OSC 9;4 progress bar.
+        ProgressStateRole = Qt::UserRole + 8,
+        ProgressPercentageRole = Qt::UserRole + 9,
     };
 
     [[nodiscard]] int activeTabIndex() const noexcept { return _activeTabIndex; }
@@ -130,6 +133,9 @@ class MockTabController: public QAbstractListModel
             case Roles::RawTitleRole:
                 return QString {}; // never-renamed tab: empty raw template (editor blank)
             case Roles::ZoomedRole: return false;
+            // 0 = ProgressState::Inactive: no operation in flight, so TabItem paints no bar.
+            case Roles::ProgressStateRole:
+            case Roles::ProgressPercentageRole: return 0;
             default: return index.row();
         }
     }
@@ -145,7 +151,9 @@ class MockTabController: public QAbstractListModel
                  { static_cast<int>(Roles::PaneCountRole), "paneCount" },
                  { static_cast<int>(Roles::SessionIdRole), "sessionId" },
                  { static_cast<int>(Roles::RawTitleRole), "rawTitle" },
-                 { static_cast<int>(Roles::ZoomedRole), "zoomed" } };
+                 { static_cast<int>(Roles::ZoomedRole), "zoomed" },
+                 { static_cast<int>(Roles::ProgressStateRole), "progressState" },
+                 { static_cast<int>(Roles::ProgressPercentageRole), "progressPercentage" } };
     }
 
     Q_INVOKABLE [[nodiscard]] QObject* createSession() { return nullptr; }
@@ -746,6 +754,8 @@ TEST_CASE("A colored TabItem fills with the user color and picks contrasting tex
     initial.insert("tabActive", true);
     initial.insert("tabPaneCount", 1);
     initial.insert("tabZoomed", false);
+    initial.insert("tabProgressState", 0);
+    initial.insert("tabProgressPercentage", 0);
     std::unique_ptr<QObject> tab(component.createWithInitialProperties(initial));
     REQUIRE(tab != nullptr);
 
@@ -820,7 +830,9 @@ constexpr auto TabItemBindings = "    controller: terminalSessions\n"
                                  "    tabColor: \"transparent\"\n"
                                  "    tabActive: true\n"
                                  "    tabPaneCount: 1\n"
-                                 "    tabZoomed: false\n";
+                                 "    tabZoomed: false\n"
+                                 "    tabProgressState: 0\n"
+                                 "    tabProgressPercentage: 0\n";
 
 /// Hosts TabItem.qml inside a real Window, which is what its TabColorFlyout Popup needs: a Popup opens
 /// into its window's overlay, and a TabItem created bare (as the tests above do) has no window at all —
@@ -1296,6 +1308,8 @@ TEST_CASE("A zoomed TabItem shows the zoom badge and gives it back its width whe
     initial.insert("tabActive", true);
     initial.insert("tabPaneCount", 2);
     initial.insert("tabZoomed", false);
+    initial.insert("tabProgressState", 0);
+    initial.insert("tabProgressPercentage", 0);
     std::unique_ptr<QObject> tab(component.createWithInitialProperties(initial));
     REQUIRE(tab != nullptr);
 
@@ -1321,6 +1335,74 @@ TEST_CASE("A zoomed TabItem shows the zoom badge and gives it back its width whe
     CHECK_FALSE(badge->isVisible());
     CHECK(badge->width() == 0.0);
     CHECK(label->x() + label->width() == unzoomedLabelRight);
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("A TabItem paints its OSC 9;4 progress bar only while an operation is in flight",
+          "[contour][gui][qml][progress]")
+{
+    // The tab-strip half of OSC 9;4. The bar is anchored along the tab's bottom edge rather than
+    // beside the label, so — unlike the zoom badge above — it must cost the title NO width in any
+    // state; that is what lets it appear and vanish without reflowing the strip.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TabItem.qml")));
+    REQUIRE(component.isReady());
+
+    QVariantMap initial;
+    initial.insert("controller", QVariant::fromValue(&controller));
+    initial.insert("window", QVariant::fromValue(static_cast<QObject*>(&controller)));
+    initial.insert("tabIndex", 0);
+    initial.insert("tabTitle", QStringLiteral("build"));
+    initial.insert("tabRawTitle", QString {});
+    initial.insert("tabColor", QColor(Qt::transparent));
+    initial.insert("tabActive", true);
+    initial.insert("tabPaneCount", 1);
+    initial.insert("tabZoomed", false);
+    initial.insert("tabProgressState", 0);
+    initial.insert("tabProgressPercentage", 0);
+    std::unique_ptr<QObject> tab(component.createWithInitialProperties(initial));
+    REQUIRE(tab != nullptr);
+
+    auto* track = tab->findChild<QQuickItem*>(QStringLiteral("progressTrack"));
+    REQUIRE(track != nullptr);
+    auto* fill = tab->findChild<QQuickItem*>(QStringLiteral("progressFill"));
+    REQUIRE(fill != nullptr);
+    auto* label = tab->findChild<QQuickItem*>(QStringLiteral("tabLabel"));
+    REQUIRE(label != nullptr);
+    auto const labelRight = label->x() + label->width();
+
+    // Inactive (state 0): nothing in flight, nothing painted.
+    CHECK_FALSE(track->isVisible());
+
+    // Normal (1) at 40%: shown, and the fill is 40% of the track.
+    tab->setProperty("tabProgressState", 1);
+    tab->setProperty("tabProgressPercentage", 40);
+    CHECK(track->isVisible());
+    CHECK(track->width() > 0.0);
+    CHECK(fill->width() == Catch::Approx(track->width() * 0.4));
+
+    // Indeterminate (3): no meaningful position, so the bar fills whole and pulses instead.
+    tab->setProperty("tabProgressState", 3);
+    CHECK(track->isVisible());
+    CHECK(fill->width() == Catch::Approx(track->width()));
+
+    // Error (2) keeps the percentage it was given, and recolors rather than resizing.
+    tab->setProperty("tabProgressState", 2);
+    tab->setProperty("tabProgressPercentage", 90);
+    CHECK(fill->width() == Catch::Approx(track->width() * 0.9));
+
+    // Back to inactive: withdrawn again.
+    tab->setProperty("tabProgressState", 0);
+    CHECK_FALSE(track->isVisible());
+
+    // Through all of it the label never moved: the bar is under it, not beside it.
+    CHECK(label->x() + label->width() == labelRight);
 
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
 }
@@ -3625,6 +3707,8 @@ TEST_CASE("The terminal chrome style quantizes the tab strip to whole cells (off
         initial.insert("tabActive", true);
         initial.insert("tabPaneCount", 1);
         initial.insert("tabZoomed", false);
+        initial.insert("tabProgressState", 0);
+        initial.insert("tabProgressPercentage", 0);
         std::unique_ptr<QObject> tab(component.createWithInitialProperties(initial));
         REQUIRE(tab != nullptr);
 
@@ -3692,6 +3776,8 @@ TEST_CASE("A native tab keeps the exact width its historical literal gave it (of
     initial.insert("tabActive", true);
     initial.insert("tabPaneCount", 1);
     initial.insert("tabZoomed", false);
+    initial.insert("tabProgressState", 0);
+    initial.insert("tabProgressPercentage", 0);
     std::unique_ptr<QObject> tab(component.createWithInitialProperties(initial));
     REQUIRE(tab != nullptr);
 
@@ -3831,6 +3917,8 @@ TEST_CASE("The terminal style rules BETWEEN tabs, not after the last one (offscr
                                                   "      tabActive: index === 0\n"
                                                   "      tabPaneCount: 1\n"
                                                   "      tabZoomed: false\n"
+                                                  "      tabProgressState: 0\n"
+                                                  "      tabProgressPercentage: 0\n"
                                                   "    }\n"
                                                   "  }\n"
                                                   "}\n")

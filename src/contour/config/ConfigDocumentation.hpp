@@ -210,6 +210,14 @@ constexpr StringLiteral HyperlinkHoverTooltipConfig {
     "\n"
 };
 
+constexpr StringLiteral ProgressTimeoutConfig {
+    "{comment} How long an application's progress indicator (OSC 9;4) stays on screen without being\n"
+    "{comment} updated, in milliseconds. 0 (the default) disables expiry: the indicator persists\n"
+    "{comment} until the application clears it, which is what the sequence specifies.\n"
+    "progress_timeout: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral TabBarPositionConfig {
     "{comment} Where the GUI tab strip (tab bar) is placed within the window (ignore-case):\n"
     "{comment}   Top    = above the terminal content (default).\n"
@@ -1708,6 +1716,20 @@ constexpr StringLiteral HyperlinkHoverTooltipWeb {
     "\n"
 };
 
+constexpr StringLiteral ProgressTimeoutWeb {
+    "\n"
+    "How long an application's progress indicator ([OSC 9;4](../vt-extensions/osc-9-4-progress.md)) "
+    "stays on screen without being updated, in milliseconds.\n"
+    "\n"
+    "`0` (the default) disables expiry entirely: the indicator persists until the application clears "
+    "it with state `0`, which is what the sequence specifies and what ConEmu and Windows Terminal do. "
+    "The terminal cannot tell a long-running operation from an application that died holding one, so "
+    "a non-zero value trades that fidelity for a guard against a bar left stranded on screen. "
+    "Applications using the protocol are expected to refresh it about once a second, so a timeout "
+    "well above that -- 15000 or so -- is the useful range.\n"
+    "\n"
+};
+
 constexpr StringLiteral TabBarPositionWeb {
     "\n"
     "Selects where the GUI tab strip (tab bar) is placed within the window. Valid values (ignore-case):\n"
@@ -2302,6 +2324,7 @@ using AccessibilityAnnouncements =
 using AccessibilityCaretReporting =
     DocumentationEntry<AccessibilityCaretReportingConfig, AccessibilityCaretReportingWeb>;
 using HyperlinkHoverTooltip = DocumentationEntry<HyperlinkHoverTooltipConfig, HyperlinkHoverTooltipWeb>;
+using ProgressTimeout = DocumentationEntry<ProgressTimeoutConfig, ProgressTimeoutWeb>;
 using TabBarPosition = DocumentationEntry<TabBarPositionConfig, TabBarPositionWeb>;
 using TabBarVisibility = DocumentationEntry<TabBarVisibilityConfig, TabBarVisibilityWeb>;
 using UiStyle = DocumentationEntry<UiStyleConfig, UiStyleWeb>;

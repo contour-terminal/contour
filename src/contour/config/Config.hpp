@@ -1128,6 +1128,12 @@ struct Config
     ConfigEntry<bool, documentation::ReflowOnResize> reflowOnResize { true };
     ConfigEntry<bool, documentation::TabSwitchOnHorizontalWheel> tabSwitchOnHorizontalWheel { true };
     ConfigEntry<bool, documentation::HyperlinkHoverTooltip> hyperlinkHoverTooltip { true };
+
+    /// How long an OSC 9;4 progress indicator survives without an update. Zero disables expiry, which
+    /// is the sequence's own behaviour: the indicator persists until the application clears it.
+    ConfigEntry<std::chrono::milliseconds, documentation::ProgressTimeout> progressTimeout {
+        std::chrono::milliseconds { 0 }
+    };
     ConfigEntry<bool, documentation::AccessibilityAnnouncements> accessibilityAnnouncements { true };
     ConfigEntry<bool, documentation::AccessibilityCaretReporting> accessibilityCaretReporting { true };
     // The tab bar belongs to the WINDOW, not to the profile a pane happens to run: a window shows one

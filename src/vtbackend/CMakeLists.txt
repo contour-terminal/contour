@@ -15,6 +15,7 @@ set(vtbackend_HEADERS
     Animation.hpp
     Capabilities.hpp
     DesktopNotification.hpp
+    ProgressState.hpp
     CellProxy.hpp
     CellUtil.hpp
     Charset.hpp
@@ -74,6 +75,7 @@ set(vtbackend_SOURCES
     Capabilities.cpp
     Charset.cpp
     DesktopNotification.cpp
+    ProgressState.cpp
     Color.cpp
     ColorPalette.cpp
     CommandBlocks.cpp
@@ -162,6 +164,7 @@ if(LIBTERMINAL_TESTING)
         Animation_test.cpp
         Capabilities_test.cpp
         DesktopNotification_test.cpp
+        ProgressState_test.cpp
         Color_test.cpp
         CommandBlocks_test.cpp
         PromptRegion_test.cpp

@@ -261,6 +261,10 @@ struct SessionState
     /// Kitty flags above win whenever they are non-zero, matching InputGenerator.
     uint8_t modifyOtherKeys = 0;
     MouseState mouse {}; ///< The resolved mouse-reporting state; stated outright on every snapshot.
+    /// The application's progress indicator (OSC 9;4), replayed so a re-attaching client sees the
+    /// bar an operation still in flight had drawn. @see vtbackend::ProgressState.
+    uint8_t progressState = 0;      ///< vtbackend::ProgressState: 0 inactive … 4 paused.
+    uint8_t progressPercentage = 0; ///< 0..100.
     bool operator==(SessionState const&) const = default;
 };
 
@@ -430,6 +434,11 @@ struct Delta
     /// it. @see MouseState for why the mode set above cannot carry this.
     uint8_t mouseChanged = 0;
     MouseState mouse {};
+    /// Set (1) when the application's progress indicator changed in this batch (OSC 9;4); the two
+    /// bytes below then hold the new state. @see vtbackend::ProgressState.
+    uint8_t progressChanged = 0;
+    uint8_t progressState = 0;      ///< vtbackend::ProgressState: 0 inactive … 4 paused.
+    uint8_t progressPercentage = 0; ///< 0..100.
 
     /// Whether this delta says anything about the SESSION at all — a snapshot, changed rows, or any
     /// of the gated fields above.
@@ -447,7 +456,8 @@ struct Delta
     {
         return snapshot != 0 || !lines.empty() || titleChanged != 0 || cursorShapeChanged != 0
                || cwdChanged != 0 || colorsChanged != 0 || statusChanged != 0 || statusLinesChanged != 0
-               || kittyKeyboardChanged != 0 || modifyOtherKeysChanged != 0 || mouseChanged != 0;
+               || kittyKeyboardChanged != 0 || modifyOtherKeysChanged != 0 || mouseChanged != 0
+               || progressChanged != 0;
     }
 
     bool operator==(Delta const&) const = default;
