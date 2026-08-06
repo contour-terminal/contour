@@ -311,7 +311,7 @@ namespace
 
         std::string visit(StatusLineDefinitions::Clock const&)
         {
-            crispy::ignore_unused(this);
+            crispy::ignoreUnused(this);
 
             // TODO: Find a more convenient way; The following is printing the time in UTC,
             //       but we need it in local time.
@@ -406,7 +406,7 @@ namespace
 
         std::string visit(StatusLineDefinitions::Command const& item)
         {
-            crispy::ignore_unused(this);
+            crispy::ignoreUnused(this);
 
             std::string result;
             if (FILE* fp = popen(item.command.c_str(), "r"); fp)
@@ -429,7 +429,7 @@ namespace
 
         std::string visit(StatusLineDefinitions::Text const& item)
         {
-            crispy::ignore_unused(this);
+            crispy::ignoreUnused(this);
             return item.text;
         }
 

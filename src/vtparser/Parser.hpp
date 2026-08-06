@@ -369,7 +369,7 @@ constexpr State& operator++(State& s) noexcept
     return s;
 }
 
-constexpr std::string_view to_string(State state)
+constexpr std::string_view toString(State state)
 {
     switch (state)
     {
@@ -394,7 +394,7 @@ constexpr std::string_view to_string(State state)
     return "?";
 }
 
-constexpr std::string_view to_string(ActionClass actionClass)
+constexpr std::string_view toString(ActionClass actionClass)
 {
     switch (actionClass)
     {
@@ -406,7 +406,7 @@ constexpr std::string_view to_string(ActionClass actionClass)
     return "?";
 }
 
-constexpr std::string_view to_string(Action action)
+constexpr std::string_view toString(Action action)
 {
     switch (action)
     {
@@ -470,7 +470,7 @@ struct std::formatter<vtparser::State>: formatter<std::string_view>
 {
     auto format(vtparser::State state, auto& ctx) const
     {
-        return formatter<std::string_view>::format(vtparser::to_string(state), ctx);
+        return formatter<std::string_view>::format(vtparser::toString(state), ctx);
     }
 };
 
@@ -489,7 +489,7 @@ struct std::formatter<vtparser::Action>: formatter<std::string_view>
 {
     auto format(vtparser::Action value, auto& ctx) const
     {
-        return formatter<std::string_view>::format(vtparser::to_string(value), ctx);
+        return formatter<std::string_view>::format(vtparser::toString(value), ctx);
     }
 };
 // }}}
@@ -689,6 +689,7 @@ class Parser
     explicit Parser(EventListener& listener): _eventListener { listener } {}
 
     using ParseError = std::function<void(std::string const&)>;
+    // NOLINTNEXTLINE(readability-identifier-naming): standard iterator/container trait spelling.
     using iterator = uint8_t const*;
 
     /**

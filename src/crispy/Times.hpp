@@ -55,6 +55,7 @@ namespace detail
         I count;
         T step;
 
+        // NOLINTNEXTLINE(readability-identifier-naming): standard iterator/container trait spelling.
         using iterator = TimesIterator<I, T>;
 
         [[nodiscard]] constexpr std::size_t size() const noexcept { return count; }
@@ -115,6 +116,7 @@ namespace detail
         {
         }
 
+        // NOLINTNEXTLINE(readability-identifier-naming): standard iterator/container trait spelling.
         using value_type = std::tuple<T1, T2>;
         constexpr value_type operator*() const noexcept { return { *outerIt, *innerIt }; }
 
@@ -150,6 +152,7 @@ namespace detail
         Times<I, T1> first;
         Times<I, T2> second;
 
+        // NOLINTNEXTLINE(readability-identifier-naming): standard iterator/container trait spelling.
         using iterator = Times2DIterator<I, T1, T2>;
 
         [[nodiscard]] constexpr std::size_t size() const noexcept { return first.size() * second.size(); }

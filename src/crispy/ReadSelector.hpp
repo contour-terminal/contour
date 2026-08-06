@@ -44,8 +44,8 @@ class PosixReadSelector
         int pfd[2];
         int const rv = pipe(pfd);
         Require(rv == 0);
-        _breakPipeReader = FileDescriptor::from_native(pfd[0]);
-        _breakPipeWriter = FileDescriptor::from_native(pfd[1]);
+        _breakPipeReader = FileDescriptor::fromNative(pfd[0]);
+        _breakPipeWriter = FileDescriptor::fromNative(pfd[1]);
 
         int currentFlags = 0;
         for (int const fd: pfd)
@@ -217,8 +217,8 @@ class EpollReadSelector
 
 inline EpollReadSelector::EpollReadSelector()
 {
-    _epollFd = FileDescriptor::from_native(epoll_create1(EPOLL_CLOEXEC));
-    _eventFd = FileDescriptor::from_native(eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC));
+    _epollFd = FileDescriptor::fromNative(epoll_create1(EPOLL_CLOEXEC));
+    _eventFd = FileDescriptor::fromNative(eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC));
 
     auto event = epoll_event {};
     event.events = EPOLLIN;

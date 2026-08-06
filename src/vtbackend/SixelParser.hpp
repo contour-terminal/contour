@@ -217,6 +217,7 @@ class SixelParser: public ParserExtension
     using OnFinalize = std::function<void()>;
     explicit SixelParser(Events& events, OnFinalize finalizer = {});
 
+    // NOLINTNEXTLINE(readability-identifier-naming): standard iterator/container trait spelling.
     using iterator = char const*;
 
     /// Consumes @p range.

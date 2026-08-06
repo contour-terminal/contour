@@ -170,7 +170,7 @@ constexpr size_t makeVirtualTerminalParam(Modifiers modifier) noexcept
     return 1 + modifier.value();
 }
 
-std::string to_string(Modifiers modifier);
+std::string toString(Modifiers modifier);
 
 // }}}
 // {{{ KeyInputEvent, Key
@@ -340,7 +340,7 @@ enum class Win32ControlKeyFlag : uint16_t
 /// Type-safe bitset for Win32 control key state flags.
 using Win32ControlKeyState = crispy::Flags<Win32ControlKeyFlag>;
 
-std::string to_string(Key key);
+std::string toString(Key key);
 
 enum class KeyMode : uint8_t
 {
@@ -361,7 +361,7 @@ enum class MouseButton : uint8_t
     WheelRight,
 };
 
-std::string to_string(MouseButton button);
+std::string toString(MouseButton button);
 
 /// @return true if @p button is a wheel direction (vertical or horizontal) rather than a physical button.
 [[nodiscard]] constexpr bool isMouseWheel(MouseButton button) noexcept
@@ -832,7 +832,7 @@ class InputGenerator
     ExtendedKeyboardInputGenerator _keyboardInputGenerator {};
 };
 
-inline std::string to_string(InputGenerator::MouseEventType value)
+inline std::string toString(InputGenerator::MouseEventType value)
 {
     switch (value)
     {

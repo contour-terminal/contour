@@ -30,7 +30,7 @@ namespace
 {
 
 template <typename T, std::size_t Extent, typename S = T>
-std::vector<T> to_vector(gsl::span<S, Extent> span)
+std::vector<T> toVector(gsl::span<S, Extent> span)
 {
     auto result = std::vector<T> {};
     result.reserve(span.size());
@@ -171,7 +171,7 @@ struct EventRecorder final: public TextClusterGrouper::Events
         (void) sizing;
         events.emplace_back(TextClusterGroup {
             .codepoints = std::u32string(codepoints),
-            .clusters = to_vector<int>(clusters),
+            .clusters = toVector<int>(clusters),
             .initialPenPosition = initialPenPosition,
             .color = color,
             .style = style,

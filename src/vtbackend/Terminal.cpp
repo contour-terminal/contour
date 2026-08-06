@@ -3947,7 +3947,7 @@ void Terminal::markCellDirty(CellLocation position) noexcept
     if (!_selection)
         return;
 
-    crispy::ignore_unused(position);
+    crispy::ignoreUnused(position);
     // if (_selection->contains(position))
     //     clearSelection();
 }
@@ -3960,7 +3960,7 @@ void Terminal::markRegionDirty(Rect area) noexcept
     if (!_selection)
         return;
 
-    crispy::ignore_unused(area);
+    crispy::ignoreUnused(area);
     // if (_selection->intersects(area))
     //     clearSelection();
 }
@@ -4879,7 +4879,7 @@ void TraceHandler::flushOne(PendingSequence const& pendingSequence)
 // }}}
 
 // Applies a FunctionDefinition to a given context, emitting the respective command.
-std::string to_string(AnsiMode mode)
+std::string toString(AnsiMode mode)
 {
     switch (mode)
     {
@@ -4892,7 +4892,7 @@ std::string to_string(AnsiMode mode)
     return std::format("({})", static_cast<unsigned>(mode));
 }
 
-std::string to_string(DECMode mode)
+std::string toString(DECMode mode)
 {
     switch (mode)
     {

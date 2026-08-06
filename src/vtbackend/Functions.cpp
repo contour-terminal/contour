@@ -3,7 +3,6 @@
 
 #include <vtbackend/Color.hpp>
 
-#include <crispy/Algorithm.hpp>
 #include <crispy/Escape.hpp>
 #include <crispy/Sort.hpp>
 #include <crispy/Times.hpp>

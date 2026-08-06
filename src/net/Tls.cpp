@@ -161,11 +161,14 @@ namespace
         struct HandshakeGate
         {
             TlsSocket* self;
+            // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
             [[nodiscard]] bool await_ready() const noexcept { return !self->_handshaking; }
+            // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
             void await_suspend(std::coroutine_handle<> handle) const
             {
                 self->_handshakeWaiters.push_back(handle);
             }
+            // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
             void await_resume() const noexcept {}
         };
 

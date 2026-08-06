@@ -321,9 +321,9 @@ namespace
 
 #ifdef _WIN32
 // Why is it, that Windows API is so much more complicated than POSIX? Extrawurst!
-using socket_handle = crispy::NativeHandle<SOCKET, INVALID_SOCKET>;
+using SocketHandle = crispy::NativeHandle<SOCKET, INVALID_SOCKET>;
 #else
-using socket_handle = crispy::NativeHandle<int, -1>;
+using SocketHandle = crispy::NativeHandle<int, -1>;
 #endif
 
 std::string SshHostConfig::toString() const
@@ -475,7 +475,7 @@ struct SshSession::Private
     LIBSSH2_CHANNEL* sshChannel = nullptr;
     LIBSSH2_AGENT* sshAgent = nullptr;
 
-    socket_handle sshSocket;
+    SocketHandle sshSocket;
 };
 
 SshSession::SshSession(SshHostConfig config, SshHostkeyVerificationRequestCallback hostkeyRequestCallback):
@@ -1251,7 +1251,7 @@ bool SshSession::connect(std::string_view host, int port)
                     break;
             }
 
-            _p->sshSocket = socket_handle::from_native(
+            _p->sshSocket = SocketHandle::fromNative(
                 socket(addrEntry->ai_family, addrEntry->ai_socktype, addrEntry->ai_protocol));
 
             if (::connect(_p->sshSocket, addrEntry->ai_addr, addrEntry->ai_addrlen) == 0)

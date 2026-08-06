@@ -42,7 +42,7 @@ enum class Decorator : uint8_t
 
 /// Every decorator paired with the token that names it in a configuration file.
 ///
-/// The single source of truth for those tokens: @ref to_decorator parses with it, the
+/// The single source of truth for those tokens: @ref toDecorator parses with it, the
 /// `std::formatter` below prints with it, and a settings UI can build its option list from it. The
 /// parse table and the print table used to be written out separately -- the latter as a bare array
 /// indexed by the enumerator, so reordering the enumeration silently renamed every decorator.
@@ -58,10 +58,10 @@ inline constexpr auto DecoratorNames = std::array {
     std::pair { std::string_view { "encircle" }, Decorator::Encircle },
 };
 
-std::optional<Decorator> to_decorator(std::string const& value) noexcept;
+std::optional<Decorator> toDecorator(std::string const& value) noexcept;
 
 // {{{ impl
-inline std::optional<Decorator> to_decorator(std::string const& value) noexcept
+inline std::optional<Decorator> toDecorator(std::string const& value) noexcept
 {
     for (auto const& [token, decorator]: DecoratorNames)
         if (token == value)

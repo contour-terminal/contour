@@ -10,8 +10,8 @@ namespace crispy
 
 namespace detail
 {
-    template <typename Container, typename Comp, typename size_type>
-    constexpr size_type partition(Container& container, Comp compare, size_type low, size_type high)
+    template <typename Container, typename Comp, typename SizeType>
+    constexpr SizeType partition(Container& container, Comp compare, SizeType low, SizeType high)
     {
         auto i = low - 1;
         auto& pivot = container[high];

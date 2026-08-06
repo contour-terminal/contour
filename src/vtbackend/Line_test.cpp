@@ -474,5 +474,5 @@ TEST_CASE("Line.toUtf8WithSgr.carriesTheUnderlineColour", "[Line][sgr]")
     CHECK(capture(RGBColor { 0x11, 0x22, 0x33 }).contains("58;2;17;34;51"));
     CHECK(capture(Color::Indexed(IndexedColor::Red)).contains("58;5;1"));
     // The default underline colour is already implied by the leading reset and stays unspoken.
-    CHECK_FALSE(capture(DefaultColor()).contains("58"));
+    CHECK_FALSE(capture(defaultColor()).contains("58"));
 }

@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-using crispy::each_element;
+using crispy::eachElement;
 
 using std::max;
 using std::string;
@@ -69,7 +69,7 @@ void CursorRenderer::initializeDirectMapping()
 
     for (int width = 1; width <= 2; ++width)
     {
-        for (vtbackend::CursorShape const shape: each_element<vtbackend::CursorShape>())
+        for (vtbackend::CursorShape const shape: eachElement<vtbackend::CursorShape>())
         {
             auto const directMappingIndex = toDirectMappingIndex(shape, width, 0);
             auto const tileIndex = _directMapping.toTileIndex(directMappingIndex);

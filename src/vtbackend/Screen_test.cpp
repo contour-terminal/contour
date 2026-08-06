@@ -5867,7 +5867,7 @@ TEST_CASE("DECAUPSS treats an omitted Ps as zero", "[screen]")
 {
     // An omitted parameter is stored as 0 *and counted*, so a handler reading it must not fold zero
     // onto a default -- here zero is itself the meaningful value (94-character), which is why this
-    // reads param_or() rather than param_positive_or().
+    // reads paramOr() rather than paramPositiveOr().
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
 
     mock.writeToScreen("\033P1!uA\033\\"); // move UPSS off the default (ISO Latin-1, 96)
@@ -6805,8 +6805,8 @@ TEST_CASE("REP.explicit_zero_repeats_once", "[screen]")
 {
     // REP's parameter is a one-based count, so an explicit zero means the same as an omitted one --
     // xterm folds both with one_if_default(). Taken literally it repeated nothing and swallowed the
-    // character, which is what param_or() did here while every sibling sequence had moved on to
-    // param_positive_or().
+    // character, which is what paramOr() did here while every sibling sequence had moved on to
+    // paramPositiveOr().
     auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(8) } };
     auto& screen = mock.terminal.primaryScreen();
 

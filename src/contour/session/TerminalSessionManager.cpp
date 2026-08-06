@@ -285,12 +285,12 @@ void TerminalSessionManager::updateStatusLine()
         controller->updateStatusLine();
 }
 
-void TerminalSessionManager::FocusOnDisplay(display::TerminalDisplay* display)
+void TerminalSessionManager::focusOnDisplay(display::TerminalDisplay* display)
 {
     managerLog()("Setting active display to {}", (void*) display);
 
     // Session->display ownership lives solely on the pane tree (the QML `session:` binding -> setSession);
-    // a focused pane already owns its session. FocusOnDisplay only makes this the active display and hands
+    // a focused pane already owns its session. focusOnDisplay only makes this the active display and hands
     // the focus to the owning window's controller, which re-points its window-service signal bridge and
     // re-emits the window bindings. Route by the display's OS window so the correct controller updates.
     if (auto* c = controllerForDisplay(display))

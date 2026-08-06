@@ -318,7 +318,7 @@ void TextRenderer::restrictToTileSize(TextureAtlas::TileCreateData& tileCreateDa
     // TODO: In the longer term it would be nice to simply touch the pitch value in order to shrink.
     //       But this requires extending the data structure to also provide a pitch value.
 
-    auto const colorComponentCount = atlas::element_count(tileCreateData.bitmapFormat);
+    auto const colorComponentCount = atlas::elementCount(tileCreateData.bitmapFormat);
 
     auto const targetSize = ImageSize { _textureAtlas->tileSize().width, tileCreateData.bitmapSize.height };
     auto const targetPitch = unbox<uintptr_t>(targetSize.width) * colorComponentCount;
@@ -1000,7 +1000,7 @@ auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
     // to the caller.
 
     auto const bitmapFormat = createData.bitmapFormat;
-    auto const colorComponentCount = atlas::element_count(bitmapFormat);
+    auto const colorComponentCount = atlas::elementCount(bitmapFormat);
     auto const pitch = unbox<uintptr_t>(createData.bitmapSize.width) * colorComponentCount;
 
     auto const tileWidth = unbox<uintptr_t>(_gridMetrics.cellSize.width);

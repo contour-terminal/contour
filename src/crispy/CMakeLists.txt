@@ -18,7 +18,6 @@ set(crispy_SOURCES
     StackTrace.cpp StackTrace.hpp
     TrieMap.hpp
     AlignedAllocator.hpp
-    Algorithm.hpp
     ASCII.hpp
     Assert.hpp
     Base64.hpp

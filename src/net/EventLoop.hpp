@@ -265,9 +265,11 @@ class DelayAwaiter
   public:
     DelayAwaiter(EventLoop& loop, SteadyTimePoint deadline) noexcept: _loop(loop), _deadline(deadline) {}
 
+    // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
     [[nodiscard]] bool await_ready() const noexcept { return _deadline <= _loop.clock().now(); }
 
     template <typename Promise>
+    // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
     [[nodiscard]] bool await_suspend(std::coroutine_handle<Promise> awaiting)
     {
         if constexpr (requires { awaiting.promise().stopToken(); })
@@ -280,6 +282,7 @@ class DelayAwaiter
     }
 
     /// @throws OperationCancelled if the flow was cancelled while parked.
+    // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
     void await_resume()
     {
         _cancelReg.reset();
@@ -317,6 +320,7 @@ class WaitFdAwaiter
     /// before suspending. An invalid fd resolves immediately (await_resume then
     /// reports cancellation), avoiding a pointless park on a handle that can never
     /// signal.
+    // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
     [[nodiscard]] bool await_ready() const noexcept { return _fd == InvalidHandle; }
 
     /// Captures the cancellation token, then (unless already cancelled) attaches the
@@ -325,6 +329,7 @@ class WaitFdAwaiter
     /// @param awaiting The coroutine performing the `co_await`.
     /// @return False (resume now) if already cancelled or the attach failed; true to park.
     template <typename Promise>
+    // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
     [[nodiscard]] bool await_suspend(std::coroutine_handle<Promise> awaiting)
     {
         if constexpr (requires { awaiting.promise().stopToken(); })
@@ -346,6 +351,7 @@ class WaitFdAwaiter
     /// @throws FdRegistrationFailed if the fd could not be registered with the
     ///         event source (resource exhaustion — distinct from cancellation).
     /// @throws OperationCancelled if cancelled while parked or the fd was invalid.
+    // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
     void await_resume()
     {
         _cancelReg.reset();

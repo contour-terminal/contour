@@ -866,10 +866,9 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
         if (!_reflowOnResize)
         {
             _pageSize.columns = newColumnCount;
-            crispy::for_each(_lines, [=](Line& line) {
+            for (auto& line: _lines)
                 if (newColumnCount < line.size())
                     line.resize(newColumnCount);
-            });
             verifyState();
             return cursor + std::min(cursor.column, boxed_cast<ColumnOffset>(newColumnCount));
         }

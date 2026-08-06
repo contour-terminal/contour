@@ -8,8 +8,9 @@
 # kept out of linting by CMake, which clears CMAKE_CXX_CLANG_TIDY across the
 # dependency fetch -- see the top-level CMakeLists.txt.
 #
-# Module-local overrides live in src/<module>/.clang-tidy and use
-# `InheritParentConfig: true` so they extend rather than replace this file.
+# This is the only .clang-tidy in the tree, deliberately: one style, one config.
+# Every first-party directory resolves to it by clang-tidy's parent-directory
+# search, and there are no module-local overrides to diverge from it.
 #
 # A bare `-some-check` with no rationale is indistinguishable from an accident,
 # so record the reasoning here when disabling something. Note that YAML folded
@@ -206,8 +207,17 @@ CheckOptions:
   readability-function-cognitive-complexity.IgnoreMacros: 'true'
 
   # Identifier naming. Types are CamelCase, everything else camelBack, with a
-  # leading underscore on non-public data members. The snake_case modules
-  # (crispy, text_shaper) override the type categories in their own configs.
+  # leading underscore on non-public data members. This block is what makes that
+  # rule enforceable rather than aspirational, so a category missing from it is a
+  # category nothing checks: functions, methods and type aliases went unchecked
+  # tree-wide until they were added here, and snake_case survived a whole-tree
+  # rename sweep with a clean build to prove it.
+  #
+  # The names the standard library binds to *by spelling* -- member typedefs
+  # (value_type, iterator, difference_type), container methods (begin,
+  # push_back), std::formatter/std::hash specializations -- cannot follow this
+  # rule and carry a NOLINT(readability-identifier-naming) with their reason at
+  # the declaration.
   readability-identifier-naming.ClassCase: CamelCase
   readability-identifier-naming.ClassConstantCase: CamelCase
   readability-identifier-naming.ClassMemberCase: CamelCase
@@ -218,11 +228,20 @@ CheckOptions:
   readability-identifier-naming.ConstexprVariableCase: CamelCase
   readability-identifier-naming.EnumCase: CamelCase
   readability-identifier-naming.EnumConstantCase: CamelCase
+  readability-identifier-naming.FunctionCase: camelBack
+  readability-identifier-naming.MethodCase: camelBack
   readability-identifier-naming.ParameterCase: camelBack
   readability-identifier-naming.PrivateMemberCase: camelBack
   readability-identifier-naming.PrivateMemberPrefix: '_'
+  readability-identifier-naming.ProtectedMemberCase: camelBack
+  readability-identifier-naming.ProtectedMemberPrefix: '_'
   readability-identifier-naming.PublicMemberCase: camelBack
   readability-identifier-naming.ScopedEnumConstantCase: CamelCase
+  readability-identifier-naming.StructCase: CamelCase
+  readability-identifier-naming.TypeAliasCase: CamelCase
+  readability-identifier-naming.TypedefCase: CamelCase
+  readability-identifier-naming.TypeTemplateParameterCase: CamelCase
+  readability-identifier-naming.UnionCase: CamelCase
   readability-identifier-naming.VariableCase: camelBack
   readability-identifier-naming.GlobalVariableCase: camelBack
   # No Hungarian notation: no g/s_/k prefixes. Globals are plain camelBack.

@@ -163,7 +163,7 @@ template <typename TileCreateData>
 {
     auto const width = tileData.bitmapSize.width.template as<size_t>();
     auto const height = tileData.bitmapSize.height.template as<size_t>();
-    auto const componentCount = atlas::element_count(tileData.bitmapFormat);
+    auto const componentCount = atlas::elementCount(tileData.bitmapFormat);
 
     auto rows = std::vector<std::string> {};
     rows.reserve(height);

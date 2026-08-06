@@ -68,7 +68,7 @@ namespace detail
 } // namespace detail
 using HyperlinkId = boxed::boxed<uint16_t, detail::HyperlinkTag>;
 
-bool is_local(HyperlinkInfo const& hyperlink);
+bool isLocal(HyperlinkInfo const& hyperlink);
 
 using HyperlinkCache = crispy::LRUCache<HyperlinkId, std::shared_ptr<HyperlinkInfo>>;
 

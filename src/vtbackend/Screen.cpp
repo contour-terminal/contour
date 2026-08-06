@@ -19,7 +19,6 @@
 #include <vtbackend/regis/ReGISRasterizer.hpp>
 #include <vtbackend/regis/ReGISTextRasterizer.hpp>
 
-#include <crispy/Algorithm.hpp>
 #include <crispy/App.hpp>
 #include <crispy/Base64.hpp>
 #include <crispy/Comparison.hpp>
@@ -57,7 +56,6 @@
 using namespace std::string_view_literals;
 
 using crispy::escape;
-using crispy::for_each;
 using crispy::times;
 using crispy::toHexString;
 
@@ -107,7 +105,7 @@ namespace // {{{ helper
     }
 
     template <typename Rep, typename Period>
-    inline void sleep_for(std::chrono::duration<Rep, Period> const& rtime)
+    inline void sleepFor(std::chrono::duration<Rep, Period> const& rtime)
     {
 #ifdef USE_SLEEP_FOR_FROM_STD_CHRONO
         std::this_thread::sleep_for(rtime);
@@ -1188,7 +1186,7 @@ void Screen::linefeed()
         auto const _ = crispy::Finally([&]() { _terminal->lock(); });
         if (!_terminal->isModeEnabled(DECMode::BatchedRendering))
             _terminal->screenUpdated();
-        sleep_for(_terminal->settings().smoothLineScrolling);
+        sleepFor(_terminal->settings().smoothLineScrolling);
     }
 
     // If coming through stdout-fastpipe, the LF acts like CRLF.
@@ -1388,7 +1386,7 @@ void Screen::sendDeviceAttributes()
     // Required extensions are implied by the conformance level and should not be listed.
     da = filterRequiredExtensions(da, _terminal->operatingLevel());
 
-    auto const attrs = to_params(da);
+    auto const attrs = toParams(da);
 
     reply("\033[?{};{}c", id, attrs);
 }
@@ -3186,7 +3184,7 @@ void Screen::inspect()
 void Screen::inspect(std::string const& message, std::ostream& os) const
 {
     auto const hline = [&]() {
-        for_each(crispy::times(*pageSize().columns), [&](auto) { os << '='; });
+        os << std::string(static_cast<size_t>(*pageSize().columns), '=');
         os << '\n';
     };
 
@@ -3389,7 +3387,7 @@ namespace impl
 
             // One-based, relative to the origin, and never past the page's edge.
             auto const resolve = [&](size_t index, unsigned fallback, unsigned limit) {
-                return std::min(seq.param_positive_or(index, fallback), limit);
+                return std::min(seq.paramPositiveOr(index, fallback), limit);
             };
 
             auto const top = resolve(firstParameter + 0, 1, lines);
@@ -3625,7 +3623,7 @@ namespace impl
                     case 36: target.setForegroundColor(IndexedColor::Cyan); break;
                     case 37: target.setForegroundColor(IndexedColor::White); break;
                     case 38: target.setForegroundColor(parseColor(seq, &i)); break;
-                    case 39: target.setForegroundColor(DefaultColor()); break;
+                    case 39: target.setForegroundColor(defaultColor()); break;
                     case 40: target.setBackgroundColor(IndexedColor::Black); break;
                     case 41: target.setBackgroundColor(IndexedColor::Red); break;
                     case 42: target.setBackgroundColor(IndexedColor::Green); break;
@@ -3635,7 +3633,7 @@ namespace impl
                     case 46: target.setBackgroundColor(IndexedColor::Cyan); break;
                     case 47: target.setBackgroundColor(IndexedColor::White); break;
                     case 48: target.setBackgroundColor(parseColor(seq, &i)); break;
-                    case 49: target.setBackgroundColor(DefaultColor()); break;
+                    case 49: target.setBackgroundColor(defaultColor()); break;
                     case 51: target.setGraphicsRendition(GraphicsRendition::Framed); break;
                     case 53: target.setGraphicsRendition(GraphicsRendition::Overline); break;
                     case 54: target.setGraphicsRendition(GraphicsRendition::NoFramed); break;
@@ -3688,6 +3686,7 @@ namespace impl
                                   .background = palette.indexedColor(bg) };
         }
 
+        // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
         ApplyResult ANSIDSR(Sequence const& seq, Screen& screen)
         {
             switch (seq.param(0))
@@ -3737,9 +3736,10 @@ namespace impl
         };
 
         /// DECDSR -- `CSI ? Ps n`, the device status reports.
+        // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
         ApplyResult DSR(Sequence const& seq, Screen& screen)
         {
-            auto const request = seq.param_or(0, 0u);
+            auto const request = seq.paramOr(0, 0u);
 
             switch (request)
             {
@@ -3751,7 +3751,7 @@ namespace impl
                     // DECCKSR: the checksum of the macro memory. There are no macros, so it is zero --
                     // but the reply still carries back the id the request was tagged with, so that an
                     // application issuing several can tell the answers apart.
-                    screen.reportMacroSpaceChecksum(seq.param_or(1, 0u));
+                    screen.reportMacroSpaceChecksum(seq.paramOr(1, 0u));
                     return ApplyResult::Ok;
                 case ColorPaletteUpdateDsrRequestId:
                     screen.reportColorPaletteUpdate();
@@ -3769,6 +3769,7 @@ namespace impl
             return ApplyResult::Ok;
         }
 
+        // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
         ApplyResult DECRQPSR(Sequence const& seq, Screen& screen)
         {
             if (seq.parameterCount() != 1)
@@ -3787,11 +3788,12 @@ namespace impl
                 return ApplyResult::Invalid;
         }
 
+        // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
         ApplyResult DECSCUSR(Sequence const& seq, Terminal& terminal)
         {
             if (seq.parameterCount() <= 1)
             {
-                switch (seq.param_or(0, Sequence::Parameter { 0 }))
+                switch (seq.paramOr(0, Sequence::Parameter { 0 }))
                 {
                     case 0:
                         // NB: This deviates from DECSCUSR, which is documented to reset to blinking block.
@@ -3812,9 +3814,10 @@ namespace impl
                 return ApplyResult::Invalid;
         }
 
+        // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
         ApplyResult EL(Sequence const& seq, Screen& screen)
         {
-            switch (seq.param_or(0, Sequence::Parameter { 0 }))
+            switch (seq.paramOr(0, Sequence::Parameter { 0 }))
             {
                 case 0: screen.clearToEndOfLine(); break;
                 case 1: screen.clearToBeginOfLine(); break;
@@ -3824,6 +3827,7 @@ namespace impl
             return ApplyResult::Ok;
         }
 
+        // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
         ApplyResult TBC(Sequence const& seq, Screen& screen)
         {
             if (seq.parameterCount() != 1)
@@ -4110,6 +4114,7 @@ namespace impl
             return ApplyResult::Ok;
         }
 
+        // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
         ApplyResult NOTIFY(Sequence const& seq, Screen& screen)
         {
             auto const& value = seq.intermediateCharacters();
@@ -4127,6 +4132,7 @@ namespace impl
         /// Simple notification: OSC 9 ; <message> ST
         /// Progress indicator:  OSC 9 ; 4 ; <State> ; <progress> ST
 
+        // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
         ApplyResult CONEMU(Sequence const& seq, Screen& screen)
         {
             auto const& value = seq.intermediateCharacters();
@@ -4147,6 +4153,7 @@ namespace impl
         }
 
         /// OSC 99 — Kitty Desktop Notification protocol.
+        // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
         ApplyResult DESKTOPNOTIFY(Sequence const& seq, Terminal& terminal)
         {
             auto const& value = seq.intermediateCharacters();
@@ -4154,6 +4161,7 @@ namespace impl
             return ApplyResult::Ok;
         }
 
+        // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
         ApplyResult SETCWD(Sequence const& seq, Screen& screen)
         {
             string const& url = seq.intermediateCharacters();
@@ -4161,6 +4169,7 @@ namespace impl
             return ApplyResult::Ok;
         }
 
+        // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
         ApplyResult CAPTURE(Sequence const& seq, Terminal& terminal)
         {
             // CSI Mode ; [; Count] t
@@ -4171,11 +4180,11 @@ namespace impl
             // Count: number of lines to capture from main page aera's bottom upwards
             //        If omitted or 0, the main page area's line count will be used.
 
-            auto const logicalLines = seq.param_or(0, 0);
+            auto const logicalLines = seq.paramOr(0, 0);
             if (logicalLines != 0 && logicalLines != 1)
                 return ApplyResult::Invalid;
 
-            auto const lineCount = LineCount(seq.param_or(1, *terminal.pageSize().lines));
+            auto const lineCount = LineCount(seq.paramOr(1, *terminal.pageSize().lines));
 
             terminal.requestCaptureBuffer(lineCount, logicalLines);
 
@@ -4225,7 +4234,7 @@ namespace impl
         /// writes nothing. @see documentation::DECTST.
         ApplyResult invokeConfidenceTest(Sequence const& seq, Terminal& terminal)
         {
-            auto const invoke = seq.param_or(0, 0U);
+            auto const invoke = seq.paramOr(0, 0U);
             if (std::ranges::find(ConfidenceTestInvokeOpcodes, invoke) == ConfidenceTestInvokeOpcodes.end())
                 return ApplyResult::Invalid;
 
@@ -4234,7 +4243,7 @@ namespace impl
             auto reset = false;
             for (auto const i: std::views::iota(size_t { 1 }, seq.parameterCount()))
             {
-                auto const requested = seq.param_or(i, 0U);
+                auto const requested = seq.paramOr(i, 0U);
                 // `auto const`, not `auto const*`: libstdc++'s array iterator is a raw pointer but
                 // MSVC's is a class type. @see setDynamicColorCommand in primitives.h.
                 auto const test = std::ranges::find(
@@ -4274,6 +4283,7 @@ namespace impl
             return ApplyResult::Ok;
         }
 
+        // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
         ApplyResult HYPERLINK(Sequence const& seq, Screen& screen)
         {
             auto const& value = seq.intermediateCharacters();
@@ -4330,19 +4340,20 @@ namespace impl
         /// that sequence happens to carry two parameters rather than three.
         ///
         /// @see xterm's ctlseqs, "Window manipulation".
+        // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
         ApplyResult WINDOWMANIP(Sequence const& seq, Terminal& terminal)
         {
             // "Omitted parameters reuse the current height or width. Zero parameters use the display's
             // height or width." -- xterm's ctlseqs. So a dimension has three readings, not two, and the
             // display's size reaches the terminal only through the frontend. @see Terminal::windowState().
             auto const dimension = [&](size_t index, unsigned current, unsigned display) {
-                auto const value = seq.param_opt<unsigned>(index);
+                auto const value = seq.paramOpt<unsigned>(index);
                 if (!value.has_value())
                     return current;
                 return *value != 0 ? *value : display;
             };
 
-            switch (seq.param_or(0, 0))
+            switch (seq.paramOr(0, 0))
             {
                 case 1: // De-iconify.
                     terminal.requestWindowIconify(false);
@@ -4352,7 +4363,7 @@ namespace impl
                     return ApplyResult::Ok;
                 case 3: // Move the window's top-left corner to [x, y].
                     terminal.requestWindowMove(
-                        WindowPosition { .x = seq.param_or<int>(1, 0), .y = seq.param_or<int>(2, 0) });
+                        WindowPosition { .x = seq.paramOr<int>(1, 0), .y = seq.paramOr<int>(2, 0) });
                     return ApplyResult::Ok;
                 case 4: { // Resize the text area, in pixels.
                     auto const current = terminal.pixelSize();
@@ -4375,14 +4386,14 @@ namespace impl
                     return ApplyResult::Ok;
                 }
                 case 9: // Maximize the window, or restore it.
-                    if (auto const how = windowMaximizeOf(seq.param_or(1, 0)); how.has_value())
+                    if (auto const how = windowMaximizeOf(seq.paramOr(1, 0)); how.has_value())
                     {
                         terminal.requestWindowMaximize(*how);
                         return ApplyResult::Ok;
                     }
                     return ApplyResult::Invalid;
                 case 10: // Full screen, or out of it.
-                    if (auto const how = windowFullScreenOf(seq.param_or(1, 0)); how.has_value())
+                    if (auto const how = windowFullScreenOf(seq.paramOr(1, 0)); how.has_value())
                     {
                         terminal.requestWindowFullScreen(*how);
                         return ApplyResult::Ok;
@@ -4398,7 +4409,7 @@ namespace impl
                     return ApplyResult::Ok;
                 case 14: // Report the text area's size in pixels; `CSI 14 ; 2 t` the window's.
                     terminal.primaryScreen().requestPixelSize(
-                        seq.param_or(1, 0) == 2 ? RequestPixelSize::WindowArea : RequestPixelSize::TextArea);
+                        seq.paramOr(1, 0) == 2 ? RequestPixelSize::WindowArea : RequestPixelSize::TextArea);
                     return ApplyResult::Ok;
                 case 15: // Report the screen's size in pixels.
                     terminal.primaryScreen().requestPixelSize(RequestPixelSize::ScreenArea);
@@ -4420,14 +4431,14 @@ namespace impl
                     terminal.reply("\033]l{}\033\\", terminal.encodeTitleForReport(terminal.windowTitle()));
                     return ApplyResult::Ok;
                 case 22: // XTPUSHTITLE
-                    if (auto const kinds = titleKindsOf(seq.param_or(1, 0)); kinds.has_value())
+                    if (auto const kinds = titleKindsOf(seq.paramOr(1, 0)); kinds.has_value())
                     {
                         terminal.saveTitles(*kinds);
                         return ApplyResult::Ok;
                     }
                     return ApplyResult::Invalid;
                 case 23: // XTPOPTITLE
-                    if (auto const kinds = titleKindsOf(seq.param_or(1, 0)); kinds.has_value())
+                    if (auto const kinds = titleKindsOf(seq.paramOr(1, 0)); kinds.has_value())
                     {
                         terminal.restoreTitles(*kinds);
                         return ApplyResult::Ok;
@@ -4437,7 +4448,7 @@ namespace impl
                     // DECSLPP: an operation of 24 or more sets the page's length to that many lines. It
                     // shares its final byte with XTWINOPS, and xterm resolves the collision exactly here
                     // -- by the value of the first parameter.
-                    if (auto const lines = seq.param_or(0, 0); lines >= 24)
+                    if (auto const lines = seq.paramOr(0, 0); lines >= 24)
                     {
                         terminal.requestWindowResize(
                             PageSize { .lines = LineCount::cast_from(lines),
@@ -4448,12 +4459,13 @@ namespace impl
             }
         }
 
+        // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
         ApplyResult XTSMGRAPHICS(Sequence const& seq, Screen& screen)
         {
             auto const pi = seq.param<unsigned>(0);
             auto const pa = seq.param<unsigned>(1);
-            auto const pv = seq.param_or<unsigned>(2, 0);
-            auto const pu = seq.param_or<unsigned>(3, 0);
+            auto const pv = seq.paramOr<unsigned>(2, 0);
+            auto const pu = seq.paramOr<unsigned>(3, 0);
 
             auto const item = [&]() -> optional<XtSmGraphics::Item> {
                 switch (pi)
@@ -4517,7 +4529,7 @@ void Screen::executeControlCode(char controlCode)
     writeTextEnd();
     if (vtTraceSequenceLog)
         vtTraceSequenceLog()(
-            "control U+{:02X} ({})", controlCode, to_string(static_cast<ControlCode::C0>(controlCode)));
+            "control U+{:02X} ({})", controlCode, toString(static_cast<ControlCode::C0>(controlCode)));
 #endif
 
     _terminal->incrementInstructionCounter();
@@ -5846,8 +5858,8 @@ void Screen::handleSemanticBlockQuery(Sequence const& seq)
         return;
     }
 
-    auto const queryType = seq.param_or(0, SBQueryType::LastCommand);
-    auto const count = seq.param_or(1, 1); // Pn: count (default 1)
+    auto const queryType = seq.paramOr(0, SBQueryType::LastCommand);
+    auto const count = seq.paramOr(1, 1); // Pn: count (default 1)
 
     auto const& completedBlocks = tracker.completedBlocks();
 
@@ -6260,8 +6272,8 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case VT52_EL: clearToEndOfLine(); break;
         case VT52_CUP: {
             // ESC Y row col -- 1-based coordinates decoded by the parser; clamp to the page.
-            auto const line = std::min(seq.param_or(0, 1) - 1, unbox<int>(pageSize().lines) - 1);
-            auto const column = std::min(seq.param_or(1, 1) - 1, unbox<int>(pageSize().columns) - 1);
+            auto const line = std::min(seq.paramOr(0, 1) - 1, unbox<int>(pageSize().lines) - 1);
+            auto const column = std::min(seq.paramOr(1, 1) - 1, unbox<int>(pageSize().columns) - 1);
             moveCursorTo(LineOffset(std::max(0, line)), ColumnOffset(std::max(0, column)));
             break;
         }
@@ -6285,28 +6297,28 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         // CSI
         case ANSISYSSC: restoreCursor(); break;
         case CBT:
-            cursorBackwardTab(TabStopCount::cast_from(seq.param_positive_or(0, Sequence::Parameter { 1 })));
+            cursorBackwardTab(TabStopCount::cast_from(seq.paramPositiveOr(0, Sequence::Parameter { 1 })));
             break;
-        case CHA: moveCursorToColumn(seq.param_positive_or<ColumnOffset>(0, ColumnOffset { 1 }) - 1); break;
+        case CHA: moveCursorToColumn(seq.paramPositiveOr<ColumnOffset>(0, ColumnOffset { 1 }) - 1); break;
         case CHT:
-            cursorForwardTab(TabStopCount::cast_from(seq.param_positive_or(0, Sequence::Parameter { 1 })));
+            cursorForwardTab(TabStopCount::cast_from(seq.paramPositiveOr(0, Sequence::Parameter { 1 })));
             break;
         case CNL:
-            moveCursorToNextLine(LineCount::cast_from(seq.param_positive_or(0, Sequence::Parameter { 1 })));
+            moveCursorToNextLine(LineCount::cast_from(seq.paramPositiveOr(0, Sequence::Parameter { 1 })));
             break;
         case CPL:
-            moveCursorToPrevLine(LineCount::cast_from(seq.param_positive_or(0, Sequence::Parameter { 1 })));
+            moveCursorToPrevLine(LineCount::cast_from(seq.paramPositiveOr(0, Sequence::Parameter { 1 })));
             break;
         case ANSIDSR: return impl::ANSIDSR(seq, *this);
         case DSR: return impl::DSR(seq, *this);
-        case CUB: moveCursorBackward(seq.param_positive_or<ColumnCount>(0, ColumnCount { 1 })); break;
-        case CUD: moveCursorDown(seq.param_positive_or<LineCount>(0, LineCount { 1 })); break;
-        case CUF: moveCursorForward(seq.param_positive_or<ColumnCount>(0, ColumnCount { 1 })); break;
+        case CUB: moveCursorBackward(seq.paramPositiveOr<ColumnCount>(0, ColumnCount { 1 })); break;
+        case CUD: moveCursorDown(seq.paramPositiveOr<LineCount>(0, LineCount { 1 })); break;
+        case CUF: moveCursorForward(seq.paramPositiveOr<ColumnCount>(0, ColumnCount { 1 })); break;
         case CUP:
-            moveCursorTo(LineOffset::cast_from(seq.param_positive_or<int>(0, 1) - 1),
-                         ColumnOffset::cast_from(seq.param_positive_or<int>(1, 1) - 1));
+            moveCursorTo(LineOffset::cast_from(seq.paramPositiveOr<int>(0, 1) - 1),
+                         ColumnOffset::cast_from(seq.paramPositiveOr<int>(1, 1) - 1));
             break;
-        case CUU: moveCursorUp(seq.param_positive_or<LineCount>(0, LineCount { 1 })); break;
+        case CUU: moveCursorUp(seq.paramPositiveOr<LineCount>(0, LineCount { 1 })); break;
         case DA1: sendDeviceAttributes(); break;
         case DA2: sendTerminalId(); break;
         case DA3:
@@ -6325,7 +6337,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             auto constexpr ClockMultiplier = 1;
             auto constexpr StpFlags = 0;
 
-            auto const ps = seq.param_or(0, 0);
+            auto const ps = seq.paramOr(0, 0);
             if (ps != 0 && ps != 1)
                 return ApplyResult::Invalid;
 
@@ -6339,7 +6351,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
                   StpFlags);
             break;
         }
-        case DCH: deleteCharacters(seq.param_positive_or<ColumnCount>(0, ColumnCount { 1 })); break;
+        case DCH: deleteCharacters(seq.paramPositiveOr<ColumnCount>(0, ColumnCount { 1 })); break;
         case DECCARA: {
             auto const area = impl::readRectangularArea(seq, 0, origin(), pageSize());
             auto const top = LineOffset::cast_from(area.top);
@@ -6398,7 +6410,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             auto const toggleCell = [&](LineOffset row, ColumnOffset column) {
                 auto cell = at(row, column);
                 auto const oldFlags = cell.flags();
-                auto const toggled = CellFlags::from_value(oldFlags.value() ^ flagsToToggle.value());
+                auto const toggled = CellFlags::fromValue(oldFlags.value() ^ flagsToToggle.value());
                 cell.resetFlags(toggled);
             };
             if (_rectangularAttributeMode)
@@ -6422,13 +6434,13 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case DECCRA: {
             // The coordinates are affected by origin mode (DECOM), but not by the page margins.
             auto const sourceArea = impl::readRectangularArea(seq, 0, origin(), pageSize());
-            auto const sourcePage = seq.param_or(4, 0);
+            auto const sourcePage = seq.paramOr(4, 0);
 
             // The destination is named by its top-left corner alone; its extent is the source's.
             auto const target = impl::readRectangularArea(seq, 5, origin(), pageSize());
             auto const targetTopLeft = CellLocation { .line = LineOffset::cast_from(target.top),
                                                       .column = ColumnOffset::cast_from(target.left) };
-            auto const targetPage = seq.param_or(7, 0);
+            auto const targetPage = seq.paramOr(7, 0);
 
             copyArea(sourceArea, sourcePage, targetTopLeft, targetPage);
         }
@@ -6439,33 +6451,33 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         }
         break;
         case DECFRA: {
-            auto const ch = seq.param_or(0, Sequence::Parameter { 0 });
+            auto const ch = seq.paramOr(0, Sequence::Parameter { 0 });
             auto const area = impl::readRectangularArea(seq, 1, origin(), pageSize());
             fillArea(ch, unbox(area.top), unbox(area.left), unbox(area.bottom), unbox(area.right));
         }
         break;
-        case DECDC: deleteColumns(seq.param_positive_or(0, ColumnCount(1))); break;
-        case DECELR: _terminal->setLocatorMode(seq.param_or(0, 0), seq.param_or(1, 0)); break;
+        case DECDC: deleteColumns(seq.paramPositiveOr(0, ColumnCount(1))); break;
+        case DECELR: _terminal->setLocatorMode(seq.paramOr(0, 0), seq.paramOr(1, 0)); break;
         case DECSLE: {
             auto params = std::vector<int> {};
             for (size_t i = 0; i < seq.parameterCount(); ++i)
-                params.push_back(seq.param_or(i, 0));
+                params.push_back(seq.paramOr(i, 0));
             _terminal->selectLocatorEvents(params);
             break;
         }
         case DECRQLP: _terminal->requestLocatorPosition(); break;
-        case DECIC: insertColumns(seq.param_positive_or(0, ColumnCount(1))); break;
-        case DECINVM: _terminal->invokeMacro(seq.param_or(0, 0)); break;
+        case DECIC: insertColumns(seq.paramPositiveOr(0, ColumnCount(1))); break;
+        case DECINVM: _terminal->invokeMacro(seq.paramOr(0, 0)); break;
         case DECSACE:
             // Ps=0 or 1 → stream mode, Ps=2 → rectangle mode
-            _rectangularAttributeMode = (seq.param_or(0, 1) == 2);
+            _rectangularAttributeMode = (seq.paramOr(0, 1) == 2);
             break;
         // VT525 keyboard settings Contour remembers and reports through DECRQSS, but does not act on.
-        case DECELF: _enableLocalFunctions = seq.param_or(0, 0); break;
-        case DECLFKC: _localFunctionKeyControl = seq.param_or(0, 0); break;
-        case DECSMKR: _modifierKeyReporting = seq.param_or(0, 0); break;
+        case DECELF: _enableLocalFunctions = seq.paramOr(0, 0); break;
+        case DECLFKC: _localFunctionKeyControl = seq.paramOr(0, 0); break;
+        case DECSMKR: _modifierKeyReporting = seq.paramOr(0, 0); break;
         case DECSCA: {
-            auto const pc = seq.param_or(0, 0);
+            auto const pc = seq.paramOr(0, 0);
             // DECSCA (DEC) protection is per-cell via CellFlag::CharacterProtected; only the selective
             // erases (DECSED/DECSEL/DECSERA) spare it. It is independent of the ISO SPA/EPA guard.
             switch (pc)
@@ -6481,7 +6493,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             }
         }
         case DECSED: {
-            switch (seq.param_or(0, Sequence::Parameter { 0 }))
+            switch (seq.paramOr(0, Sequence::Parameter { 0 }))
             {
                 case 0: selectiveEraseToEndOfScreen(); break;
                 case 1: selectiveEraseToBeginOfScreen(); break;
@@ -6494,7 +6506,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             selectiveEraseArea(impl::readRectangularArea(seq, 0, origin(), pageSize()));
             return ApplyResult::Ok;
         case DECSEL: {
-            switch (seq.param_or(0, Sequence::Parameter { 0 }))
+            switch (seq.paramOr(0, Sequence::Parameter { 0 }))
             {
                 case 0: selectiveEraseToEndOfLine(); break;
                 case 1: selectiveEraseToBeginOfLine(); break;
@@ -6505,10 +6517,8 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         }
         case DECRM: {
             ApplyResult r = ApplyResult::Ok;
-            crispy::for_each(crispy::times(seq.parameterCount()), [&](size_t i) {
-                auto const t = impl::setModeDEC(seq, i, false, *_terminal);
-                r = std::max(r, t);
-            });
+            for (auto const i: crispy::times(seq.parameterCount()))
+                r = std::max(r, impl::setModeDEC(seq, i, false, *_terminal));
             return r;
         }
         break;
@@ -6524,7 +6534,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             return ApplyResult::Ok;
         case DECRQCRA: {
             // CSI Pid ; Pp ; Pt ; Pl ; Pb ; Pr * y
-            auto const requestId = seq.param_or(0, 0);
+            auto const requestId = seq.paramOr(0, 0);
             // Pp is the page number; Contour has a single page, so it is echoed and ignored. The
             // rectangle (Pt;Pl;Pb;Pr, at parameter index 2) is read like every other rectangular-area
             // sequence: one-based, relative to the origin -- so in origin mode (DECOM) it is measured
@@ -6562,8 +6572,8 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case DECSCL: {
             // DECSCL — Set Conformance Level
             // CSI Ps1 ; Ps2 " p
-            auto const level = seq.param_or(0, 65);
-            auto const c1Mode = seq.param_or(1, 0);
+            auto const level = seq.paramOr(0, 65);
+            auto const c1Mode = seq.paramOr(1, 0);
             auto const vtType = [&]() -> std::optional<VTType> {
                 switch (level)
                 {
@@ -6602,7 +6612,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         }
         case DECSCUSR: return impl::DECSCUSR(seq, *_terminal);
         case DECSCPP:
-            if (auto const columnCount = seq.param_or(0, 80); columnCount == 80 || columnCount == 132)
+            if (auto const columnCount = seq.paramOr(0, 80); columnCount == 80 || columnCount == 132)
             {
                 // If the cursor is beyond the width of the new page,
                 // then the cursor moves to the right column of the new page.
@@ -6627,7 +6637,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             // window that owns its size. DECSCPP and DECCOLM both go through requestWindowResize();
             // so does xterm, which answers DECSNLS with `RequestResize(xw, value, -1, True)` — rows
             // to `value`, columns untouched.
-            auto const lines = seq.param_or(0, 0);
+            auto const lines = seq.paramOr(0, 0);
             if (lines == 0)
                 return ApplyResult::Ok; // Omitted or zero: no change, as in xterm.
             if (lines < 1 || lines > 255)
@@ -6640,24 +6650,22 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case DECSLRM: {
             if (!_terminal->isModeEnabled(DECMode::LeftRightMargin))
                 return ApplyResult::Invalid;
-            auto l = decr(seq.param_opt<ColumnOffset>(0));
-            auto r = decr(seq.param_opt<ColumnOffset>(1));
+            auto l = decr(seq.paramOpt<ColumnOffset>(0));
+            auto r = decr(seq.paramOpt<ColumnOffset>(1));
             _terminal->setLeftRightMargin(l, r);
             moveCursorTo({}, {});
         }
         break;
-        case DECSSCLS: setScrollSpeed(seq.param_or(0, 2)); break;
+        case DECSSCLS: setScrollSpeed(seq.paramOr(0, 2)); break;
         case DECSM: {
             ApplyResult r = ApplyResult::Ok;
-            crispy::for_each(crispy::times(seq.parameterCount()), [&](size_t i) {
-                auto const t = impl::setModeDEC(seq, i, true, *_terminal);
-                r = std::max(r, t);
-            });
+            for (auto const i: crispy::times(seq.parameterCount()))
+                r = std::max(r, impl::setModeDEC(seq, i, true, *_terminal));
             return r;
         }
         case DECSTBM:
-            _terminal->setTopBottomMargin(decr(seq.param_opt<LineOffset>(0)),
-                                          decr(seq.param_opt<LineOffset>(1)));
+            _terminal->setTopBottomMargin(decr(seq.paramOpt<LineOffset>(0)),
+                                          decr(seq.paramOpt<LineOffset>(1)));
             moveCursorTo({}, {});
             break;
         case DECSTR:
@@ -6667,15 +6675,15 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             _terminal->softReset();
             break;
         case DECTST: return impl::invokeConfidenceTest(seq, *_terminal);
-        case NP: nextPage(seq.param_or(0, 1)); break;
-        case PP: previousPage(seq.param_or(0, 1)); break;
-        case PPA: pagePositionAbsolute(seq.param_or(0, 1)); break;
-        case PPR: pagePositionRelative(seq.param_or(0, 1)); break;
-        case PPB: pagePositionBackward(seq.param_or(0, 1)); break;
+        case NP: nextPage(seq.paramOr(0, 1)); break;
+        case PP: previousPage(seq.paramOr(0, 1)); break;
+        case PPA: pagePositionAbsolute(seq.paramOr(0, 1)); break;
+        case PPR: pagePositionRelative(seq.paramOr(0, 1)); break;
+        case PPB: pagePositionBackward(seq.paramOr(0, 1)); break;
         case DECRQDE: requestDisplayedExtent(); break;
         case DECRQUPSS: requestUserPreferredSupplementalSet(); break;
-        case DL: deleteLines(seq.param_positive_or(0, LineCount(1))); break;
-        case ECH: eraseCharacters(seq.param_positive_or(0, ColumnCount(1))); break;
+        case DL: deleteLines(seq.paramPositiveOr(0, LineCount(1))); break;
+        case ECH: eraseCharacters(seq.paramPositiveOr(0, ColumnCount(1))); break;
         case ED:
             if (seq.parameterCount() == 0)
                 clearToEndOfScreen();
@@ -6698,14 +6706,14 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             }
             break;
         case EL: return impl::EL(seq, *this);
-        case HPA: moveCursorToColumn(seq.param_positive_or<ColumnOffset>(0, ColumnOffset { 1 }) - 1); break;
-        case HPR: moveCursorForward(seq.param_positive_or<ColumnCount>(0, ColumnCount { 1 })); break;
+        case HPA: moveCursorToColumn(seq.paramPositiveOr<ColumnOffset>(0, ColumnOffset { 1 }) - 1); break;
+        case HPR: moveCursorForward(seq.paramPositiveOr<ColumnCount>(0, ColumnCount { 1 })); break;
         case HVP:
-            moveCursorTo(seq.param_positive_or(0, LineOffset(1)) - 1,
-                         seq.param_positive_or(1, ColumnOffset(1)) - 1);
+            moveCursorTo(seq.paramPositiveOr(0, LineOffset(1)) - 1,
+                         seq.paramPositiveOr(1, ColumnOffset(1)) - 1);
             break; // YES, it's like a CUP!
-        case ICH: insertCharacters(seq.param_positive_or(0, ColumnCount { 1 })); break;
-        case IL: insertLines(seq.param_positive_or(0, LineCount { 1 })); break;
+        case ICH: insertCharacters(seq.paramPositiveOr(0, ColumnCount { 1 })); break;
+        case IL: insertLines(seq.paramPositiveOr(0, LineCount { 1 })); break;
         case REP:
             if (auto const precedingChar = _terminal->parser().precedingGraphicCharacter())
             {
@@ -6714,23 +6722,22 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
                 // the current line -- as this once did -- defeated every one of them: past the right
                 // margin the repeats must wrap to the left margin of the next line, not stop dead.
                 // REP's parameter is a one-based count, so `CSI b` and `CSI 0 b` both repeat once --
-                // xterm folds both with one_if_default(). param_or() would take an explicit zero
+                // xterm folds both with one_if_default(). paramOr() would take an explicit zero
                 // literally and repeat nothing.
-                auto const count = seq.param_positive_or<size_t>(0, 1);
-                crispy::for_each(crispy::times(count), [&](auto) { writeText(precedingChar); });
+                auto const count = seq.paramPositiveOr<size_t>(0, 1);
+                for ([[maybe_unused]] auto const _: crispy::times(count))
+                    writeText(precedingChar);
             }
             break;
         case RM: {
             ApplyResult r = ApplyResult::Ok;
-            crispy::for_each(crispy::times(seq.parameterCount()), [&](size_t i) {
-                auto const t = impl::setAnsiMode(seq, i, false, *_terminal);
-                r = std::max(r, t);
-            });
+            for (auto const i: crispy::times(seq.parameterCount()))
+                r = std::max(r, impl::setAnsiMode(seq, i, false, *_terminal));
             return r;
         }
         case SCOSC: saveCursor(); break;
-        case SD: scrollDown(seq.param_positive_or<LineCount>(0, LineCount { 1 })); break;
-        case UNSCROLL: unscroll(seq.param_or<LineCount>(0, LineCount(1))); break;
+        case SD: scrollDown(seq.paramPositiveOr<LineCount>(0, LineCount { 1 })); break;
+        case UNSCROLL: unscroll(seq.paramOr<LineCount>(0, LineCount(1))); break;
         case SBQUERY: handleSemanticBlockQuery(seq); break;
         case SETMARK:
             // TODO: deprecated. Remove in some future version.
@@ -6743,18 +6750,16 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case SGRSAVE: saveGraphicsRendition(); return ApplyResult::Ok;
         case SM: {
             ApplyResult r = ApplyResult::Ok;
-            crispy::for_each(crispy::times(seq.parameterCount()), [&](size_t i) {
-                auto const t = impl::setAnsiMode(seq, i, true, *_terminal);
-                r = std::max(r, t);
-            });
+            for (auto const i: crispy::times(seq.parameterCount()))
+                r = std::max(r, impl::setAnsiMode(seq, i, true, *_terminal));
             return r;
         }
-        case SL: scrollLeft(seq.param_or<ColumnCount>(0, ColumnCount(1))); break;
-        case SR: scrollRight(seq.param_or<ColumnCount>(0, ColumnCount(1))); break;
-        case SU: scrollUp(seq.param_positive_or<LineCount>(0, LineCount(1))); break;
+        case SL: scrollLeft(seq.paramOr<ColumnCount>(0, ColumnCount(1))); break;
+        case SR: scrollRight(seq.paramOr<ColumnCount>(0, ColumnCount(1))); break;
+        case SU: scrollUp(seq.paramPositiveOr<LineCount>(0, LineCount(1))); break;
         case TBC: return impl::TBC(seq, *this);
-        case VPA: moveCursorToLine(seq.param_positive_or<LineOffset>(0, LineOffset { 1 }) - 1); break;
-        case VPR: moveCursorDown(seq.param_positive_or<LineCount>(0, LineCount { 1 })); break;
+        case VPA: moveCursorToLine(seq.paramPositiveOr<LineOffset>(0, LineOffset { 1 }) - 1); break;
+        case VPR: moveCursorDown(seq.paramPositiveOr<LineCount>(0, LineCount { 1 })); break;
         case WINMANIP: return impl::WINDOWMANIP(seq, *_terminal);
         case XTRESTORE: return impl::restoreDECModes(seq, *_terminal);
         case XTSAVE: return impl::saveDECModes(seq, *_terminal);
@@ -6764,7 +6769,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             // fg/bg are palette indices (0..255). Three forms: the item alone (1 param) resets the
             // item to its host default; item + both colors (3 params) assigns them; any other arity
             // (e.g. item + one color) is malformed and rejected rather than silently reset.
-            auto const item = seq.param_or<unsigned>(0, 0);
+            auto const item = seq.paramOr<unsigned>(0, 0);
             if (item != 1 && item != 2)
                 return ApplyResult::Invalid;
             auto const paramCount = seq.parameterCount();
@@ -6817,7 +6822,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             // so `CSI 0 , }` — the only way to spell "reset the normal-text entry" — arrives here with
             // no parameters at all. Defaulting the attribute to 0 makes that form, and the equivalent
             // `CSI , }`, reset entry 0 rather than be rejected as malformed.
-            auto const attribute = seq.param_or<unsigned>(0, 0);
+            auto const attribute = seq.paramOr<unsigned>(0, 0);
             if (attribute >= ColorPalette::AlternateTextColorCount)
                 return ApplyResult::Invalid;
             auto const paramCount = seq.parameterCount();
@@ -6844,7 +6849,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             // The manual's monochrome table (Ps 0) is not supported: a lone 0 collapses to "no
             // parameter" in the parser (VT convention), making it indistinguishable from the omitted
             // form, so the table could not be selected even if there were one to select.
-            switch (seq.param_or<unsigned>(0, 3))
+            switch (seq.paramOr<unsigned>(0, 3))
             {
                 case 1:
                 case 2: _terminal->colorPalette().colorLookupTable = ColorLookupTable::Alternate; break;
@@ -6870,7 +6875,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case XTREPORTCOLORS: _terminal->reportColorPaletteStack(); return ApplyResult::Ok;
         case XTCHECKSUM:
             _terminal->setChecksumExtension(
-                ChecksumFlags::from_value(static_cast<uint8_t>(seq.param_or(0, 0))));
+                ChecksumFlags::fromValue(static_cast<uint8_t>(seq.paramOr(0, 0))));
             break;
         case XTSMGRAPHICS: return impl::XTSMGRAPHICS(seq, *this);
         case XTVERSION:
@@ -6878,7 +6883,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             return ApplyResult::Ok;
         case DECSSDT: {
             // Changes the status line display type.
-            switch (seq.param_or(0, 0))
+            switch (seq.paramOr(0, 0))
             {
                 case 0: _terminal->setStatusDisplay(StatusDisplayType::None); break;
                 case 1: _terminal->setStatusDisplay(StatusDisplayType::Indicator); break;
@@ -6892,7 +6897,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         }
         case DECSASD:
             // Selects whether the terminal sends data to the main display or the status line.
-            switch (seq.param_or(0, 0))
+            switch (seq.paramOr(0, 0))
             {
                 case 0:
                     if (_terminal->activeStatusDisplay() == ActiveStatusDisplay::StatusLine
@@ -6912,7 +6917,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
 
         case DECPS: _terminal->playSound(seq.parameters()); break;
         case XTMODKEYS: {
-            // `CSI > Pp ; Pv m` assigns; `CSI > Pp m` resets that one resource (param_or
+            // `CSI > Pp ; Pv m` assigns; `CSI > Pp m` resets that one resource (paramOr
             // supplies the initial value for the absent Pv); bare `CSI > m` resets ALL of
             // them, which here means modifyOtherKeys -- the only one carrying state.
             // Read Pp as an int, NOT as a uint8_t: a CSI parameter is a uint16_t, and narrowing it
@@ -6921,9 +6926,9 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             // out-of-range selector falls through to Unknown, as xterm ignores what it does not define.
             auto const resource = seq.parameterCount() == 0
                                       ? int { toModifyKeysResourceNum(ModifyKeysResource::OtherKeys) }
-                                      : seq.param_or<int>(0, 0);
+                                      : seq.paramOr<int>(0, 0);
             return applyModifyKeys(*_terminal,
-                                   modifyKeysRequest(resource, seq.param_or(1, InitialModifyOtherKeys)));
+                                   modifyKeysRequest(resource, seq.paramOr(1, InitialModifyOtherKeys)));
         }
         case XTRMMODKEYS:
             // The resource value -1 that XTMODKEYS cannot express. An omitted Ps names
@@ -6935,10 +6940,10 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             return applyModifyKeys(
                 *_terminal,
                 modifyKeysRequest(
-                    seq.param_or<int>(0, toModifyKeysResourceNum(ModifyKeysResource::FunctionKeys)),
+                    seq.paramOr<int>(0, toModifyKeysResourceNum(ModifyKeysResource::FunctionKeys)),
                     InitialModifyOtherKeys));
         case CSIUENTER: {
-            auto const flags = KeyboardEventFlags::from_value(seq.param_or(0, 1));
+            auto const flags = KeyboardEventFlags::fromValue(seq.paramOr(0, 1));
             _terminal->keyboardProtocol().enter(flags);
             return ApplyResult::Ok;
         }
@@ -6948,8 +6953,8 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         }
         case CSIUENHCE: {
             // Defaulting flags to 0. (Seems not to be documented by the spec, but Fish shell is doing that!)
-            auto const flags = KeyboardEventFlags::from_value(seq.param_or(0, 0));
-            auto const mode = seq.param_or(1, 1);
+            auto const flags = KeyboardEventFlags::fromValue(seq.paramOr(0, 0));
+            auto const mode = seq.paramOr(1, 1);
             switch (mode)
             {
                 case 1: _terminal->keyboardProtocol().flags() = flags; return ApplyResult::Ok;
@@ -6960,7 +6965,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             return ApplyResult::Invalid;
         }
         case CSIULEAVE: {
-            auto const count = seq.param_or<size_t>(0, 1);
+            auto const count = seq.paramOr<size_t>(0, 1);
             _terminal->keyboardProtocol().leave(count);
             return ApplyResult::Ok;
         }
@@ -7031,7 +7036,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             // sequence is rejected outright and deliberately left un-hooked: SequenceBuilder::put
             // discards a DCS payload when no hook is installed, so the designator cannot reach the
             // screen as text.
-            if (auto const ps = seq.param_or(0, 0); ps != 0 && ps != 1)
+            if (auto const ps = seq.paramOr(0, 0); ps != 0 && ps != 1)
                 return ApplyResult::Invalid;
             _terminal->hookParser(hookDECAUPSS(seq));
             break;
@@ -7085,8 +7090,8 @@ void Screen::configureCurrentLineSize(LineFlags enabled)
 
 unique_ptr<ParserExtension> Screen::hookSixel(Sequence const& seq)
 {
-    auto const pa = seq.param_or(0, 1);
-    auto const pb = seq.param_or(1, 2);
+    auto const pa = seq.paramOr(0, 1);
+    auto const pb = seq.paramOr(1, 2);
 
     auto const aspectVertical = sixelAspectVertical(pa);
     auto const aspectHorizontal = 1;
@@ -7160,7 +7165,7 @@ unique_ptr<ParserExtension> Screen::hookReGIS(Sequence const& seq)
 
     // Pmode 1 or 3 resets the graphics state and clears the canvas; 0 and 2 resume the persistent
     // context (position, colours, write controls and addressing window carry over).
-    auto const pMode = seq.param_or(0, 0);
+    auto const pMode = seq.paramOr(0, 0);
     if (pMode == 1 || pMode == 3)
     {
         _regisContext->reset();
@@ -7282,8 +7287,8 @@ unique_ptr<ParserExtension> Screen::hookDECAUPSS(Sequence const& seq)
     // with the designator that follows, so `DCS 0 ! u A ST` is US ASCII while `DCS 1 ! u A ST` is ISO
     // Latin-1 -- the same designator naming two different sets. A disagreeing Ps names no set at all.
     //
-    // param_or (not param_positive_or): zero is a legitimate value here, and is also the default.
-    auto const is96 = seq.param_or(0, 0) == 1;
+    // paramOr (not paramPositiveOr): zero is a legitimate value here, and is also the default.
+    auto const is96 = seq.paramOr(0, 0) == 1;
 
     return make_unique<SimpleStringCollector>([this, is96](string_view data) {
         // The designator is either a lone final byte ("A") or an intermediate plus a final ("%5").
@@ -7314,14 +7319,14 @@ unique_ptr<ParserExtension> Screen::hookDECDLD(Sequence const& seq)
 {
     // DECDLD — Down-Line-Load Character Set (DRCS)
     // DCS Pfn;Pcn;Pe;Pcmw;Pw;Pt;Pcmh;Pcss { Dscs Sxbp1;Sxbp2;...ST
-    auto const fontNumber = seq.param_or(0, 0);
-    auto const startingChar = seq.param_or(1, 0);
-    auto const eraseControl = seq.param_or(2, 0);
-    auto const charMatrixWidth = seq.param_or(3, 0);
-    auto const fontWidth = seq.param_or(4, 0);
-    auto const textOrFullCell = seq.param_or(5, 0);
-    auto const charMatrixHeight = seq.param_or(6, 0);
-    auto const charsetSize = seq.param_or(7, 0);
+    auto const fontNumber = seq.paramOr(0, 0);
+    auto const startingChar = seq.paramOr(1, 0);
+    auto const eraseControl = seq.paramOr(2, 0);
+    auto const charMatrixWidth = seq.paramOr(3, 0);
+    auto const fontWidth = seq.paramOr(4, 0);
+    auto const textOrFullCell = seq.paramOr(5, 0);
+    auto const charMatrixHeight = seq.paramOr(6, 0);
+    auto const charsetSize = seq.paramOr(7, 0);
 
     return make_unique<SimpleStringCollector>([this,
                                                fontNumber,
@@ -7364,9 +7369,9 @@ unique_ptr<ParserExtension> Screen::hookDECDMAC(Sequence const& seq)
 {
     // DECDMAC — Define Macro
     // DCS Pid ; Pdt ; Pen ! z D...D ST
-    auto const macroId = seq.param_or(0, 0);
-    auto const deleteAll = seq.param_or(1, 0) == 1;
-    auto const hexEncoded = seq.param_or(2, 0) == 1;
+    auto const macroId = seq.paramOr(0, 0);
+    auto const deleteAll = seq.paramOr(1, 0) == 1;
+    auto const hexEncoded = seq.paramOr(2, 0) == 1;
 
     return make_unique<SimpleStringCollector>([this, macroId, deleteAll, hexEncoded](string_view data) {
         auto body = std::string {};
@@ -7403,8 +7408,8 @@ unique_ptr<ParserExtension> Screen::hookDECUDK(Sequence const& seq)
 {
     // DECUDK — User-Defined Keys
     // DCS Pc ; Pl | Ky1/St1 ; Ky2/St2 ; ... ST
-    auto const clearAll = seq.param_or(0, 0) == 0;
-    auto const locked = seq.param_or(1, 0) == 0;
+    auto const clearAll = seq.paramOr(0, 0) == 0;
+    auto const locked = seq.paramOr(1, 0) == 0;
 
     return make_unique<SimpleStringCollector>(
         [this, clearAll, locked](string_view data) { _terminal->programUDK(clearAll, locked, data); });

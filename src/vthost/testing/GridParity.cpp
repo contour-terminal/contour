@@ -36,19 +36,19 @@ namespace
     {
         if (raw == 0)
             return "none";
-        return std::format("{}", vtbackend::LineFlags::from_value(raw));
+        return std::format("{}", vtbackend::LineFlags::fromValue(raw));
     }
 
     /// Whether @p raw carries the flag that gives `WireLine::promptEndOffset` its meaning.
     [[nodiscard]] bool marksPromptEnd(uint16_t raw)
     {
-        return vtbackend::LineFlags::from_value(raw).contains(vtbackend::LineFlag::PromptEnd);
+        return vtbackend::LineFlags::fromValue(raw).contains(vtbackend::LineFlag::PromptEnd);
     }
 
     /// Whether @p raw carries the flag that gives `WireLine::commandEndOffset` its meaning.
     [[nodiscard]] bool marksCommandEnd(uint16_t raw)
     {
-        return vtbackend::LineFlags::from_value(raw).contains(vtbackend::LineFlag::CommandEnd);
+        return vtbackend::LineFlags::fromValue(raw).contains(vtbackend::LineFlag::CommandEnd);
     }
 
     /// Names the SGR flags set in @p raw.

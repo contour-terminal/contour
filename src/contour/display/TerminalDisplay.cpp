@@ -1078,7 +1078,7 @@ void TerminalDisplay::paint()
                              renderCount,
                              updateCount,
                              lastState,
-                             to_string(_session->terminal().renderBufferState()));
+                             toString(_session->terminal().renderBufferState()));
         }
 #endif
 
@@ -1335,9 +1335,9 @@ void TerminalDisplay::focusInEvent(QFocusEvent* event)
     {
         // Cache the manager so ~TerminalDisplay can self-evict from _displayStates even after the
         // session is gone (see the destructor). This focus-in is also where the display first enters
-        // _displayStates (FocusOnDisplay), so the cache and the registration are set together.
+        // _displayStates (focusOnDisplay), so the cache and the registration are set together.
         _manager = _session->getTerminalManager();
-        _manager->FocusOnDisplay(this); // record the active display before moving VT focus
+        _manager->focusOnDisplay(this); // record the active display before moving VT focus
         // Route VT focus through the manager's single authority (model tab/pane changes use the same
         // seam), so it stays correct even when no Qt focus event fires. Dimming is done in QML.
         _manager->setFocusedSession(_session);

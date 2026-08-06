@@ -26,12 +26,14 @@ template <typename T, typename Vector = std::vector<T>>
 class BasicRing
 {
   public:
+    // NOLINTBEGIN(readability-identifier-naming): standard iterator/container trait spelling.
     using value_type = T;
     using iterator = RingIterator<value_type, Vector>;
     using const_iterator = RingIterator<value_type const, Vector>;
     using reverse_iterator = RingReverseIterator<value_type, Vector>;
     using const_reverse_iterator = RingReverseIterator<value_type const, Vector>;
     using difference_type = long;
+    // NOLINTEND(readability-identifier-naming)
     using OffsetType = long;
 
     BasicRing() = default; // NOLINT(cppcoreguidelines-pro-type-member-init)
@@ -198,11 +200,13 @@ using FixedSizeRing = BasicRing<T, std::array<T, N>>;
 template <typename T, typename Vector>
 struct RingIterator
 {
+    // NOLINTBEGIN(readability-identifier-naming): standard iterator/container trait spelling.
     using iterator_category = std::random_access_iterator_tag;
     using value_type = T;
     using difference_type = long;
     using pointer = T*;
     using reference = T&;
+    // NOLINTEND(readability-identifier-naming)
 
     BasicRing<T, Vector>* ring {};
     difference_type current {};
@@ -289,11 +293,13 @@ struct RingIterator
 template <typename T, typename Vector>
 struct RingReverseIterator
 {
+    // NOLINTBEGIN(readability-identifier-naming): standard iterator/container trait spelling.
     using iterator_category = std::random_access_iterator_tag;
     using value_type = T;
     using difference_type = long;
     using pointer = T*;
     using reference = T&;
+    // NOLINTEND(readability-identifier-naming)
 
     BasicRing<T, Vector>* ring;
     difference_type current;

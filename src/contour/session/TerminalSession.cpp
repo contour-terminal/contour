@@ -114,7 +114,7 @@ namespace
         return nullptr;
     }
 
-    string normalize_crlf(QString text)
+    string normalizeCrlf(QString text)
     {
 #ifndef _WIN32
         return text.replace("\r\n", "\n").replace("\r", "\n").toUtf8().toStdString();
@@ -123,7 +123,7 @@ namespace
 #endif
     }
 
-    string strip_if(string input, bool shouldStrip)
+    string stripIf(string input, bool shouldStrip)
     {
         if (!shouldStrip)
             return input;
@@ -1198,7 +1198,7 @@ void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
             return;
         }
 
-        string const strippedText = strip_if(normalize_crlf(clipboard->text(QClipboard::Clipboard)), strip);
+        string const strippedText = stripIf(normalizeCrlf(clipboard->text(QClipboard::Clipboard)), strip);
         sessionLog()("Size of text: {}", strippedText.size());
         if (strippedText.empty())
             sessionLog()("Clipboard does not contain text.");
@@ -2319,7 +2319,7 @@ bool TerminalSession::operator()(actions::PasteSelection paste)
 {
     if (QClipboard const* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
     {
-        string const text = normalize_crlf(clipboard->text(QClipboard::Selection));
+        string const text = normalizeCrlf(clipboard->text(QClipboard::Selection));
 
         // Locked around the terminal calls only -- the clipboard read above is Qt's and must not run
         // with the terminal lock held. See ViNormalMode for the rationale.
@@ -3499,31 +3499,31 @@ QModelIndex TerminalSession::index(int row, int column, QModelIndex const& paren
     Require(column == 0);
     // NOTE: if at all, we could expose session attribs like session id, session type
     // (local process), ...?
-    crispy::ignore_unused(parent);
+    crispy::ignoreUnused(parent);
     return createIndex(row, column, nullptr);
 }
 
 QModelIndex TerminalSession::parent(QModelIndex const& child) const
 {
-    crispy::ignore_unused(child);
+    crispy::ignoreUnused(child);
     return {};
 }
 
 int TerminalSession::rowCount(QModelIndex const& parent) const
 {
-    crispy::ignore_unused(parent);
+    crispy::ignoreUnused(parent);
     return 1;
 }
 
 int TerminalSession::columnCount(QModelIndex const& parent) const
 {
-    crispy::ignore_unused(parent);
+    crispy::ignoreUnused(parent);
     return 1;
 }
 
 QVariant TerminalSession::data(QModelIndex const& index, int role) const
 {
-    crispy::ignore_unused(index, role);
+    crispy::ignoreUnused(index, role);
     Require(index.row() == 0);
     Require(index.column() == 0);
 
@@ -3533,7 +3533,7 @@ QVariant TerminalSession::data(QModelIndex const& index, int role) const
 bool TerminalSession::setData(QModelIndex const& index, QVariant const& value, int role)
 {
     // NB: Session-Id is read-only.
-    crispy::ignore_unused(index, value, role);
+    crispy::ignoreUnused(index, value, role);
     return false;
 }
 // }}}

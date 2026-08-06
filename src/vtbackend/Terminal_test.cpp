@@ -1184,8 +1184,8 @@ TEST_CASE("Terminal.DECATC", "[terminal]")
     // screen-wide reverse-video (DECSCNM) state, and optional SGR colors on the cell itself.
     auto resolve = [&](CellFlags flags,
                        bool reverseVideo = false,
-                       Color foreground = DefaultColor(),
-                       Color background = DefaultColor()) {
+                       Color foreground = defaultColor(),
+                       Color background = defaultColor()) {
         return CellUtil::makeColors(vt.colorPalette(),
                                     vt.colorPalette().colorLookupTable,
                                     flags,

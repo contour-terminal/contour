@@ -128,7 +128,7 @@ enum class C1_8bit : uint8_t
 };
 // NOLINTEND(readability-identifier-naming)
 
-constexpr std::string_view to_short_string(C0 code)
+constexpr std::string_view toShortString(C0 code)
 {
     switch (code)
     {
@@ -170,7 +170,7 @@ constexpr std::string_view to_short_string(C0 code)
     }
 }
 
-constexpr std::string_view to_string(C0 code)
+constexpr std::string_view toString(C0 code)
 {
     switch (code)
     {
@@ -212,7 +212,7 @@ constexpr std::string_view to_string(C0 code)
     }
 }
 
-constexpr std::string_view to_string(C1_7bit code)
+constexpr std::string_view toString(C1_7bit code)
 {
     switch (code)
     {
@@ -257,7 +257,7 @@ constexpr std::string_view to_string(C1_7bit code)
     }
 }
 
-constexpr std::string_view to_string(C1_8bit code)
+constexpr std::string_view toString(C1_8bit code)
 {
     switch (code)
     {

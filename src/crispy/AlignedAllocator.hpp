@@ -16,6 +16,7 @@ template <typename T>
 class AlignedAllocator
 {
   public:
+    // NOLINTNEXTLINE(readability-identifier-naming): standard iterator/container trait spelling.
     using value_type = T;
 
     static constexpr std::size_t Alignment = 64;

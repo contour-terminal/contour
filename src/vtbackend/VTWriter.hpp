@@ -64,9 +64,9 @@ class VTWriter
     std::vector<unsigned> _sgr;
     std::stringstream _sstr;
     std::vector<unsigned> _lastSGR;
-    Color _currentForegroundColor = DefaultColor();
-    Color _currentUnderlineColor = DefaultColor();
-    Color _currentBackgroundColor = DefaultColor();
+    Color _currentForegroundColor = defaultColor();
+    Color _currentUnderlineColor = defaultColor();
+    Color _currentBackgroundColor = defaultColor();
 };
 
 template <typename... Ts>

@@ -27,17 +27,17 @@ using namespace std;
 namespace vtbackend
 {
 
-string to_string(Modifiers modifiers)
+string toString(Modifiers modifiers)
 {
     return std::format("{}", modifiers);
 }
 
-string to_string(Key key)
+string toString(Key key)
 {
     return std::format("{}", key);
 }
 
-string to_string(MouseButton button)
+string toString(MouseButton button)
 {
     return std::format("{}", button);
 }
@@ -75,7 +75,7 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
                                                   KeyboardEventType eventType)
 {
     // Legacy encoding transmits bytes, not key identities: there is nowhere in it to put one.
-    crispy::ignore_unused(keyIdentity);
+    crispy::ignoreUnused(keyIdentity);
 
     if (eventType == KeyboardEventType::Release)
         return false;

@@ -4,7 +4,7 @@
 //
 // These drive the real DecorationRenderer headlessly: setTextureAtlas() triggers
 // initializeDirectMapping(), which rasterizes every Decorator once and uploads it. The uploads land
-// in each_element<Decorator>() order, so the enumerator is the index, and what the GPU would receive
+// in eachElement<Decorator>() order, so the enumerator is the index, and what the GPU would receive
 // is exactly what these tests read back.
 
 #include <vtrasterizer/DecorationRenderer.hpp>

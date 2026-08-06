@@ -487,7 +487,7 @@ namespace
         if (auto const pw = crispy::currentUserPasswordEntry(); pw.has_value())
         {
 #ifdef __APPLE__
-            crispy::ignore_unused(escapeSandbox);
+            crispy::ignoreUnused(escapeSandbox);
             return { pw->shell };
 #else
             if (Process::isFlatpak() && escapeSandbox)

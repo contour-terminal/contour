@@ -364,7 +364,7 @@ class Sequence
     /// and when it was given empty: `CSI ; 5 H` names no row either. ECMA-48 makes no distinction
     /// between the two, and neither does this.
     template <typename T = unsigned>
-    [[nodiscard]] std::optional<T> param_opt(size_t parameterIndex) const noexcept
+    [[nodiscard]] std::optional<T> paramOpt(size_t parameterIndex) const noexcept
     {
         // A parameter is stored as uint16_t (the parser clamps at 0xFFFF), and reading it into a
         // NARROWER T silently wraps: `CSI > 260 ; 2 m` read as a uint8_t arrived as resource 4 and
@@ -387,9 +387,9 @@ class Sequence
     }
 
     template <typename T = unsigned>
-    [[nodiscard]] T param_or(size_t parameterIndex, T defaultValue) const noexcept
+    [[nodiscard]] T paramOr(size_t parameterIndex, T defaultValue) const noexcept
     {
-        return param_opt<T>(parameterIndex).value_or(defaultValue);
+        return paramOpt<T>(parameterIndex).value_or(defaultValue);
     }
 
     /// Reads a parameter whose values start at one -- a coordinate, or a count of something.
@@ -399,21 +399,21 @@ class Sequence
     ///
     ///   - It was never given: `CSI H` names no row at all.
     ///   - It was given empty: `CSI ; 5 H` names no row either, but the parser stores an omitted
-    ///     parameter as the value zero and counts it, so param_or() would hand back that zero rather
+    ///     parameter as the value zero and counts it, so paramOr() would hand back that zero rather
     ///     than the default.
     ///
     /// Folding zero onto the default covers both, and is what DEC's terminals and xterm
     /// (`if (param < 1) param = 1`) do anyway: there is no row zero and no column zero, so a sequence
-    /// naming one is naming the default. Reading such a parameter with param_or() instead invites the
+    /// naming one is naming the default. Reading such a parameter with paramOr() instead invites the
     /// caller to compute `param - 1` and underflow into a negative offset.
     ///
     /// @param parameterIndex Zero-based index of the parameter.
     /// @param defaultValue   Value to use when the parameter is omitted, empty, or zero.
     /// @return The parameter's value, or @p defaultValue.
     template <typename T = unsigned>
-    [[nodiscard]] T param_positive_or(size_t parameterIndex, T defaultValue) const noexcept
+    [[nodiscard]] T paramPositiveOr(size_t parameterIndex, T defaultValue) const noexcept
     {
-        auto const value = param_opt<T>(parameterIndex);
+        auto const value = paramOpt<T>(parameterIndex);
         if (!value.has_value() || *value == T {})
             return defaultValue;
         return *value;

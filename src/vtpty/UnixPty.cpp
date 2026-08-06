@@ -223,7 +223,7 @@ UnixPty::UnixPty(PageSize pageSize, optional<ImageSize> pixels): _pageSize { pag
 StartResult UnixPty::start()
 {
     auto const handles = createUnixPty(_pageSize, _pixels);
-    _masterFd = crispy::FileDescriptor::from_native(unbox<int>(handles.master));
+    _masterFd = crispy::FileDescriptor::fromNative(unbox<int>(handles.master));
     _slave = make_unique<Slave>(handles.slave);
 
     if (!util::setFileFlags(_masterFd, O_CLOEXEC | O_NONBLOCK))

@@ -2485,7 +2485,7 @@ struct std::formatter<vtbackend::AnsiMode>: std::formatter<std::string>
 {
     auto format(vtbackend::AnsiMode mode, auto& ctx) const
     {
-        return formatter<std::string>::format(to_string(mode), ctx);
+        return formatter<std::string>::format(toString(mode), ctx);
     }
 };
 
@@ -2494,7 +2494,7 @@ struct std::formatter<vtbackend::DECMode>: std::formatter<std::string>
 {
     auto format(vtbackend::DECMode mode, auto& ctx) const
     {
-        return formatter<std::string>::format(to_string(mode), ctx);
+        return formatter<std::string>::format(toString(mode), ctx);
     }
 };
 

@@ -324,6 +324,7 @@ struct Range
     struct ValueTag
     {
     };
+    // NOLINTNEXTLINE(readability-identifier-naming): standard iterator/container trait spelling.
     using iterator = boxed::boxed<int, ValueTag>;
     [[nodiscard]] iterator begin() const { return iterator { from.value }; }
     [[nodiscard]] auto end() const { return iterator { to.value + 1 }; }
@@ -1256,7 +1257,7 @@ enum class ViMode : uint8_t
     Hint,
 };
 
-std::string to_string(GraphicsRendition s);
+std::string toString(GraphicsRendition s);
 
 constexpr unsigned toAnsiModeNum(AnsiMode m)
 {
@@ -1282,8 +1283,8 @@ constexpr bool isValidAnsiMode(unsigned int mode) noexcept
     return false;
 }
 
-std::string to_string(AnsiMode mode);
-std::string to_string(DECMode mode);
+std::string toString(AnsiMode mode);
+std::string toString(DECMode mode);
 
 /// One row of the @ref DECModeNumbers table: a @ref DECMode and the DEC private mode number it is
 /// spelled as on the wire (the `Ps` in `CSI ? Ps h`).

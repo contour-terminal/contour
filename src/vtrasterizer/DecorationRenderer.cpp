@@ -17,7 +17,7 @@
 #include <ranges>
 #include <utility>
 
-using crispy::each_element;
+using crispy::eachElement;
 
 using std::array;
 using std::ceil;
@@ -76,7 +76,7 @@ void DecorationRenderer::initializeDirectMapping()
     if (!SoftRequire(_textureAtlas))
         return;
 
-    for (Decorator const decoration: each_element<Decorator>())
+    for (Decorator const decoration: eachElement<Decorator>())
     {
         auto const tileIndex = _directMapping.toTileIndex(static_cast<uint32_t>(decoration));
         auto const tileLocation = _textureAtlas->tileLocation(tileIndex);

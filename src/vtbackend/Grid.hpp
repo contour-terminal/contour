@@ -6,7 +6,6 @@
 #include <vtbackend/Line.hpp>
 #include <vtbackend/Primitives.hpp>
 
-#include <crispy/Algorithm.hpp>
 #include <crispy/Assert.hpp>
 #include <crispy/Defines.hpp>
 #include <crispy/Ring.hpp>

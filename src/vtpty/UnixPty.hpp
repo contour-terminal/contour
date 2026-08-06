@@ -31,7 +31,7 @@ class UnixPty final: public Pty
         FileDescriptor _slaveFd;
 
       public:
-        explicit Slave(PtySlaveHandle fd): _slaveFd { FileDescriptor::from_native(unbox<int>(fd)) } {}
+        explicit Slave(PtySlaveHandle fd): _slaveFd { FileDescriptor::fromNative(unbox<int>(fd)) } {}
         ~Slave() override;
         [[nodiscard]] PtySlaveHandle handle() const noexcept;
         void close() override;

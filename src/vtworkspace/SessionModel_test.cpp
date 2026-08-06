@@ -1087,7 +1087,7 @@ TEST_CASE("SessionModel: a second split preserves every earlier leaf's id and se
     // Regression for "the first pane goes black after the second split": at the MODEL layer, splitting the
     // active (2nd) pane to make a 3rd must leave the FIRST pane's leaf id AND session completely untouched —
     // Pane::split only mutates the active-leaf subtree. (The GUI-thread session-STEAL that actually blacked
-    // out the first pane was in TerminalSessionManager::FocusOnDisplay/tryFindSessionForDisplayOrClose, fixed
+    // out the first pane was in TerminalSessionManager::focusOnDisplay/tryFindSessionForDisplayOrClose, fixed
     // separately; this pins the model invariant those relied on: sibling sessions are stable across a split.)
     Fixture f;
     auto const [win, tab, rootLeaf] = makeTab(f.model);

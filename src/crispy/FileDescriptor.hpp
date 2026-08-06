@@ -50,8 +50,10 @@ template <typename T, T const InvalidHandleValue>
 class NativeHandle
 {
   public:
+    // Mirrors std::thread::native_handle_type, which generic code binds to by spelling.
+    // NOLINTNEXTLINE(readability-identifier-naming): standard handle-type trait spelling.
     using native_handle_type = T;
-    static inline constexpr native_handle_type invalid_native_handle = InvalidHandleValue; // NOLINT
+    static constexpr native_handle_type InvalidNativeHandle = InvalidHandleValue;
 
   private:
     NativeHandle(native_handle_type fd) noexcept: _fd { fd } {}
@@ -75,9 +77,9 @@ class NativeHandle
 
     ~NativeHandle() { close(); }
 
-    static NativeHandle from_native(native_handle_type fd) // NOLINT
+    static NativeHandle fromNative(native_handle_type fd)
     {
-        if (fd == invalid_native_handle)
+        if (fd == InvalidNativeHandle)
             throw std::system_error(errno, std::generic_category(), "NativeHandle() failed");
         return NativeHandle { fd };
     }
@@ -85,27 +87,27 @@ class NativeHandle
     [[nodiscard]] native_handle_type get() const noexcept { return _fd; }
     operator native_handle_type() const noexcept { return _fd; }
 
-    [[nodiscard]] bool isClosed() const noexcept { return _fd == invalid_native_handle; }
+    [[nodiscard]] bool isClosed() const noexcept { return _fd == InvalidNativeHandle; }
     [[nodiscard]] bool isOpen() const noexcept { return !isClosed(); }
 
     [[nodiscard]] native_handle_type release() noexcept
     {
         native_handle_type const fd = _fd;
-        _fd = invalid_native_handle;
+        _fd = InvalidNativeHandle;
         return fd;
     }
 
     void close()
     {
-        if (_fd == invalid_native_handle)
+        if (_fd == InvalidNativeHandle)
             return;
 
         crispy::CloseNativeHandle<native_handle_type> {}(_fd);
-        _fd = invalid_native_handle;
+        _fd = InvalidNativeHandle;
     }
 
   private:
-    native_handle_type _fd = invalid_native_handle;
+    native_handle_type _fd = InvalidNativeHandle;
 };
 
 #ifdef _WIN32

@@ -13,9 +13,9 @@ namespace vtbackend
 /// Character graphics rendition information.
 struct GraphicsAttributes
 {
-    Color foregroundColor { DefaultColor() };
-    Color backgroundColor { DefaultColor() };
-    Color underlineColor { DefaultColor() };
+    Color foregroundColor { defaultColor() };
+    Color backgroundColor { defaultColor() };
+    Color underlineColor { defaultColor() };
     CellFlags flags {};
 
     [[nodiscard]] constexpr GraphicsAttributes with(CellFlags f) const noexcept

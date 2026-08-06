@@ -144,7 +144,7 @@ enum class RenderBufferState : uint8_t
     TrySwapBuffers
 };
 
-constexpr std::string_view to_string(RenderBufferState state) noexcept
+constexpr std::string_view toString(RenderBufferState state) noexcept
 {
     switch (state)
     {

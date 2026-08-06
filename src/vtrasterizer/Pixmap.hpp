@@ -217,9 +217,9 @@ struct Pixmap
         return *this;
     }
 
-    Pixmap& segment_bar(int which);
+    Pixmap& segmentBar(int which);
     template <typename... More>
-    Pixmap& segment_bar(int which, More... more);
+    Pixmap& segmentBar(int which, More... more);
 
     Pixmap& fill() { return fill(filler); }
     template <typename F>
@@ -293,10 +293,10 @@ Pixmap& Pixmap::fill(F const& filler)
 }
 
 template <typename... More>
-Pixmap& Pixmap::segment_bar(int which, More... more)
+Pixmap& Pixmap::segmentBar(int which, More... more)
 {
-    segment_bar(which);
-    return segment_bar(more...);
+    segmentBar(which);
+    return segmentBar(more...);
 }
 // }}}
 

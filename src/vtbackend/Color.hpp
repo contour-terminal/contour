@@ -412,15 +412,15 @@ constexpr RGBColor getRGBColor(Color color) noexcept
     return color.rgb();
 }
 
-std::string to_string(Color color);
-std::string to_string(IndexedColor color);
-std::string to_string(BrightColor color);
-std::string to_string(RGBColor c);
-std::string to_string(RGBAColor c);
+std::string toString(Color color);
+std::string toString(IndexedColor color);
+std::string toString(BrightColor color);
+std::string toString(RGBColor c);
+std::string toString(RGBAColor c);
 
 /// Renders @p color as a bare hex literal, e.g. "#FF0000" — the exact inverse of parseColor().
 ///
-/// Deliberately NOT to_string(RGBColor), which wraps the same value in single quotes: those are what a
+/// Deliberately NOT toString(RGBColor), which wraps the same value in single quotes: those are what a
 /// YAML emitter wants, and exactly what a value being handed back to parseColor(), or shown to a human
 /// as a command-palette row, must not have.
 /// @param color The color to render.
@@ -429,14 +429,14 @@ std::string to_string(RGBAColor c);
 
 inline std::ostream& operator<<(std::ostream& os, vtbackend::Color value)
 {
-    return os << to_string(value);
+    return os << toString(value);
 }
 
-constexpr Color UndefinedColor() noexcept
+constexpr Color undefinedColor() noexcept
 {
     return Color::Undefined();
 }
-constexpr Color DefaultColor() noexcept
+constexpr Color defaultColor() noexcept
 {
     return Color::Default();
 }
@@ -511,7 +511,7 @@ struct std::formatter<vtbackend::Color>: std::formatter<std::string>
 {
     auto format(vtbackend::Color value, auto& ctx) const
     {
-        return formatter<std::string>::format(to_string(value), ctx);
+        return formatter<std::string>::format(toString(value), ctx);
     }
 };
 
@@ -520,7 +520,7 @@ struct std::formatter<vtbackend::RGBColor>: std::formatter<std::string>
 {
     auto format(vtbackend::RGBColor value, auto& ctx) const
     {
-        return formatter<std::string>::format(to_string(value), ctx);
+        return formatter<std::string>::format(toString(value), ctx);
     }
 };
 
@@ -529,7 +529,7 @@ struct std::formatter<vtbackend::RGBAColor>: std::formatter<std::string>
 {
     auto format(vtbackend::RGBAColor value, auto& ctx) const
     {
-        return formatter<std::string>::format(to_string(value), ctx);
+        return formatter<std::string>::format(toString(value), ctx);
     }
 };
 
@@ -543,7 +543,7 @@ struct std::formatter<vtbackend::CellRGBColor>: std::formatter<std::string>
         else if (std::holds_alternative<vtbackend::CellBackgroundColor>(value))
             return formatter<std::string>::format("CellBackground", ctx);
         else
-            return formatter<std::string>::format(to_string(std::get<vtbackend::RGBColor>(value)), ctx);
+            return formatter<std::string>::format(toString(std::get<vtbackend::RGBColor>(value)), ctx);
     }
 };
 

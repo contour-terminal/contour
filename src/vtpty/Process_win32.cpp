@@ -178,7 +178,7 @@ Process::Process(string const& path,
                  std::unique_ptr<Pty> pty):
     _d(new Private { path, args, cwd, env, std::move(pty) }, [](Private* p) { delete p; })
 {
-    crispy::ignore_unused(escapeSandbox);
+    crispy::ignoreUnused(escapeSandbox);
 }
 
 bool Process::isFlatpak()
@@ -345,7 +345,7 @@ Process::ExitStatus Process::wait()
 
 vector<string> Process::loginShell(bool escapeSandbox)
 {
-    crispy::ignore_unused(escapeSandbox);
+    crispy::ignoreUnused(escapeSandbox);
 
     return { "powershell.exe"s }; // TODO: Find out what the user's default shell is.
 }

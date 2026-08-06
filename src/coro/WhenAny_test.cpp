@@ -26,9 +26,11 @@ struct ManualEvent
     std::vector<std::coroutine_handle<>>* waiters;
     StopToken token {}; // filled in await_suspend; defaulted so call sites name only waiters
 
+    // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
     [[nodiscard]] bool await_ready() const noexcept { return false; }
 
     template <typename Promise>
+    // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
     [[nodiscard]] bool await_suspend(std::coroutine_handle<Promise> awaiting) noexcept
     {
         if constexpr (requires { awaiting.promise().stopToken(); })
@@ -39,6 +41,7 @@ struct ManualEvent
         return true;
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
     void await_resume() const
     {
         if (token.stop_requested())

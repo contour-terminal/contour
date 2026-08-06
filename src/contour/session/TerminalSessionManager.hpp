@@ -391,7 +391,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
     void updateColorPreference(vtbackend::ColorPreference const& preference);
 
-    void FocusOnDisplay(display::TerminalDisplay* display);
+    void focusOnDisplay(display::TerminalDisplay* display);
 
     /// Single authority for terminal (VT) focus: sends a focus-OUT to the previously focused session
     /// and a focus-IN to @p next (nullptr = nothing focused), so exactly one session is ever focused.
@@ -417,7 +417,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Records @p window as the focus-owning OS window AND re-points terminal focus at its active leaf.
     /// Idempotent. Ownership is also recorded — without re-pointing, since there is no session to point
     /// at yet or the caller supplies its own — when a window is spawned (createWindowController) and
-    /// when one of its displays takes Qt focus (FocusOnDisplay). @see clearFocusedWindow.
+    /// when one of its displays takes Qt focus (focusOnDisplay). @see clearFocusedWindow.
     /// @param window The window that just became the active OS window.
     void setFocusedWindow(vtworkspace::WindowId window);
 

@@ -56,19 +56,23 @@ namespace detail
             WhenAllState* state = nullptr; ///< Borrowed; outlives every runner.
             StopToken token;               ///< Inherited from the awaiting coroutine.
 
+            // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
             WhenAllRunner get_return_object() noexcept
             {
                 return WhenAllRunner { std::coroutine_handle<PromiseType>::from_promise(*this) };
             }
 
+            // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
             [[nodiscard]] std::suspend_always initial_suspend() const noexcept { return {}; }
 
             /// Final awaiter that decrements the join counter and tail-transfers
             /// to the awaiting coroutine when this is the last child to finish.
             struct FinalAwaiter
             {
+                // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
                 [[nodiscard]] bool await_ready() const noexcept { return false; }
 
+                // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
                 [[nodiscard]] std::coroutine_handle<> await_suspend(
                     std::coroutine_handle<PromiseType> self) const noexcept
                 {
@@ -78,29 +82,34 @@ namespace detail
                     return std::noop_coroutine();
                 }
 
+                // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
                 void await_resume() const noexcept {}
             };
 
+            // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
             [[nodiscard]] FinalAwaiter final_suspend() const noexcept { return {}; }
 
             /// A runner body never lets an exception escape (it try/catches the
             /// awaited task), so this is unreachable in practice; capture defensively.
+            // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
             void unhandled_exception() const noexcept
             {
                 if (state && !state->exception)
                     state->exception = std::current_exception();
             }
 
+            // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
             void return_void() const noexcept {}
 
             /// @return The cancellation token observed by this runner (and the task it awaits).
             [[nodiscard]] StopToken const& stopToken() const noexcept { return token; }
         };
 
+        // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
         using promise_type = PromiseType;
-        using handle_type = std::coroutine_handle<PromiseType>;
+        using HandleType = std::coroutine_handle<PromiseType>;
 
-        explicit WhenAllRunner(handle_type handle) noexcept: _handle(handle) {}
+        explicit WhenAllRunner(HandleType handle) noexcept: _handle(handle) {}
 
         WhenAllRunner(WhenAllRunner&&) noexcept = default;
         WhenAllRunner& operator=(WhenAllRunner&&) noexcept = default;
@@ -108,7 +117,7 @@ namespace detail
         WhenAllRunner& operator=(WhenAllRunner const&) = delete;
         ~WhenAllRunner() = default;
 
-        [[nodiscard]] handle_type handle() const noexcept { return _handle.get(); }
+        [[nodiscard]] HandleType handle() const noexcept { return _handle.get(); }
 
       private:
         UniqueCoroHandle<PromiseType> _handle;
@@ -138,6 +147,7 @@ namespace detail
       public:
         explicit WhenAllAwaiter(std::vector<Task<void>> tasks): _tasks(std::move(tasks)) {}
 
+        // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
         [[nodiscard]] bool await_ready() const noexcept { return _tasks.empty(); }
 
         /// Builds and starts a runner per task; keeps the awaiting coroutine
@@ -145,6 +155,7 @@ namespace detail
         /// @param awaiting The coroutine performing the `co_await whenAll(...)`.
         /// @return False if all children finished synchronously (resume immediately).
         template <typename Promise>
+        // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
         [[nodiscard]] bool await_suspend(std::coroutine_handle<Promise> awaiting)
         {
             _state.continuation = awaiting;
@@ -171,6 +182,7 @@ namespace detail
         }
 
         /// Rethrows the first child exception, if any.
+        // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
         void await_resume() const
         {
             if (_state.exception)

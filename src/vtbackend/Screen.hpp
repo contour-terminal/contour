@@ -20,7 +20,6 @@
 
 #include <vtparser/ParserExtension.hpp>
 
-#include <crispy/Algorithm.hpp>
 #include <crispy/LogStore.hpp>
 #include <crispy/Size.hpp>
 #include <crispy/Utils.hpp>

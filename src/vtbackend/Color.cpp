@@ -16,7 +16,7 @@ using namespace std::string_view_literals;
 namespace vtbackend
 {
 
-string to_string(Color color)
+string toString(Color color)
 {
     using Type = ColorType;
     switch (color.type())
@@ -56,7 +56,7 @@ string to_string(Color color)
     return "?";
 }
 
-string to_string(IndexedColor color)
+string toString(IndexedColor color)
 {
     switch (color)
     {
@@ -73,7 +73,7 @@ string to_string(IndexedColor color)
     return std::format("IndexedColor:{}", static_cast<unsigned>(color));
 }
 
-string to_string(BrightColor color)
+string toString(BrightColor color)
 {
     switch (color)
     {
@@ -130,7 +130,7 @@ string formatColor(RGBColor color)
     return std::format("#{:02X}{:02X}{:02X}", color.red, color.green, color.blue);
 }
 
-string to_string(RGBColor c)
+string toString(RGBColor c)
 {
     // The quoted spelling of formatColor(), not a second copy of it: this is what the config emitter and
     // the logs print, and parseColor() is documented as the inverse of formatColor() — a hex format that
@@ -138,7 +138,7 @@ string to_string(RGBColor c)
     return std::format("'{}'", formatColor(c));
 }
 
-string to_string(RGBAColor c)
+string toString(RGBAColor c)
 {
     return std::format("'#{:02X}{:02X}{:02X}{:02X}'", c.red(), c.green(), c.blue(), c.alpha());
 }

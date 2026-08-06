@@ -156,10 +156,10 @@ constexpr int conformanceLevelOf(VTType vt) noexcept
 DeviceAttributes filterRequiredExtensions(DeviceAttributes attrs, VTType operatingLevel) noexcept;
 
 //! Generates human readable string of comma separated list of attribute names.
-std::string to_string(DeviceAttributes v);
+std::string toString(DeviceAttributes v);
 
 //! Generates a parameter list that can be used to generate the CSI response.
-std::string to_params(DeviceAttributes v);
+std::string toParams(DeviceAttributes v);
 
 } // namespace vtbackend
 

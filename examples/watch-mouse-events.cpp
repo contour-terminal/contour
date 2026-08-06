@@ -244,10 +244,10 @@ struct MouseTracker final: public BasicParserEvents
         {
             // CSI < {ButtonStates} ; {COLUMN} ; {LINE} ; {uiHandledHint} M
             // NB: button states on param index 0
-            mouseButton = sequence.param_or(0, 0);
-            column = sequence.param_or(1, -2);
-            line = sequence.param_or(2, -2);
-            uiHandledHint = sequence.param_or(3, 0) != 0;
+            mouseButton = sequence.paramOr(0, 0);
+            column = sequence.paramOr(1, -2);
+            line = sequence.paramOr(2, -2);
+            uiHandledHint = sequence.paramOr(3, 0) != 0;
         }
         else if (sequence.leaderSymbol() == '?' && sequence.intermediateCharacters() == "$"
                  && sequence.finalChar() == 'y' && sequence.parameterCount() == 2)

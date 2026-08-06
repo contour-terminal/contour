@@ -83,7 +83,7 @@ namespace detail
         // every one of their several hundred entries.
         using enum Line;
 
-        [[maybe_unused]] string_view to_stringview(Line lm)
+        [[maybe_unused]] string_view toStringView(Line lm)
         {
             switch (lm)
             {
@@ -319,12 +319,12 @@ namespace detail
                 return b;
             }
 
-            [[nodiscard]] constexpr optional<pair<uint8_t, Thickness>> get_dashed_horizontal() const noexcept
+            [[nodiscard]] constexpr optional<pair<uint8_t, Thickness>> getDashedHorizontal() const noexcept
             {
                 return getDashed(leftval, rightval);
             }
 
-            [[nodiscard]] constexpr optional<pair<uint8_t, Thickness>> get_dashed_vertical() const noexcept
+            [[nodiscard]] constexpr optional<pair<uint8_t, Thickness>> getDashedVertical() const noexcept
             {
                 return getDashed(upval, downval);
             }
@@ -648,7 +648,7 @@ namespace detail
         }
 
         template <size_t N>
-        auto right_circ(ImageSize size)
+        auto rightCirc(ImageSize size)
         {
             auto const s = unbox<int>(size.height) / int(N);
             return [s](int /*x*/, int y) {
@@ -927,13 +927,13 @@ namespace detail
         }
 
         // 1 <= n <= r*n
-        constexpr RatioBlock horiz_nth(double r, int n) noexcept
+        constexpr RatioBlock horizNth(double r, int n) noexcept
         {
             return RatioBlock { .from = { .x = 0, .y = r * double(n - 1) },
                                 .to = { .x = 1, .y = r * double(n) } };
         }
 
-        constexpr RatioBlock vert_nth(double r, int n) noexcept
+        constexpr RatioBlock vertNth(double r, int n) noexcept
         {
             return RatioBlock { .from = { .x = r * double(n - 1), .y = 0 },
                                 .to = { .x = r * double(n), .y = 1 } };
@@ -2357,18 +2357,18 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
         case 0x1FB6D: return /* 🭭  */ triangle<Dir::Top, Inverted::No>(size);
         case 0x1FB6E: return /* 🭮  */ triangle<Dir::Right, Inverted::No>(size);
         case 0x1FB6F: return /* 🭯  */ triangle<Dir::Bottom, Inverted::No>(size);
-        case 0x1FB70: return blockElement(size) | vert_nth(1 / 8_th, 2); // 🭰  VERTICAL ONE EIGHTH BLOCK-2
-        case 0x1FB71: return blockElement(size) | vert_nth(1 / 8_th, 3); // 🭱  VERTICAL ONE EIGHTH BLOCK-3
-        case 0x1FB72: return blockElement(size) | vert_nth(1 / 8_th, 4); // 🭲  VERTICAL ONE EIGHTH BLOCK-4
-        case 0x1FB73: return blockElement(size) | vert_nth(1 / 8_th, 5); // 🭳  VERTICAL ONE EIGHTH BLOCK-5
-        case 0x1FB74: return blockElement(size) | vert_nth(1 / 8_th, 6); // 🭴  VERTICAL ONE EIGHTH BLOCK-6
-        case 0x1FB75: return blockElement(size) | vert_nth(1 / 8_th, 7); // 🭵  VERTICAL ONE EIGHTH BLOCK-7
-        case 0x1FB76: return blockElement(size) | horiz_nth(1 / 8_th, 2); // 🭶  HORIZONTAL ONE EIGHTH BLOCK-2
-        case 0x1FB77: return blockElement(size) | horiz_nth(1 / 8_th, 3); // 🭷  HORIZONTAL ONE EIGHTH BLOCK-3
-        case 0x1FB78: return blockElement(size) | horiz_nth(1 / 8_th, 4); // 🭸  HORIZONTAL ONE EIGHTH BLOCK-4
-        case 0x1FB79: return blockElement(size) | horiz_nth(1 / 8_th, 5); // 🭹  HORIZONTAL ONE EIGHTH BLOCK-5
-        case 0x1FB7A: return blockElement(size) | horiz_nth(1 / 8_th, 6); // 🭺  HORIZONTAL ONE EIGHTH BLOCK-6
-        case 0x1FB7B: return blockElement(size) | horiz_nth(1 / 8_th, 7); // 🭻  HORIZONTAL ONE EIGHTH BLOCK-7
+        case 0x1FB70: return blockElement(size) | vertNth(1 / 8_th, 2); // 🭰  VERTICAL ONE EIGHTH BLOCK-2
+        case 0x1FB71: return blockElement(size) | vertNth(1 / 8_th, 3); // 🭱  VERTICAL ONE EIGHTH BLOCK-3
+        case 0x1FB72: return blockElement(size) | vertNth(1 / 8_th, 4); // 🭲  VERTICAL ONE EIGHTH BLOCK-4
+        case 0x1FB73: return blockElement(size) | vertNth(1 / 8_th, 5); // 🭳  VERTICAL ONE EIGHTH BLOCK-5
+        case 0x1FB74: return blockElement(size) | vertNth(1 / 8_th, 6); // 🭴  VERTICAL ONE EIGHTH BLOCK-6
+        case 0x1FB75: return blockElement(size) | vertNth(1 / 8_th, 7); // 🭵  VERTICAL ONE EIGHTH BLOCK-7
+        case 0x1FB76: return blockElement(size) | horizNth(1 / 8_th, 2); // 🭶  HORIZONTAL ONE EIGHTH BLOCK-2
+        case 0x1FB77: return blockElement(size) | horizNth(1 / 8_th, 3); // 🭷  HORIZONTAL ONE EIGHTH BLOCK-3
+        case 0x1FB78: return blockElement(size) | horizNth(1 / 8_th, 4); // 🭸  HORIZONTAL ONE EIGHTH BLOCK-4
+        case 0x1FB79: return blockElement(size) | horizNth(1 / 8_th, 5); // 🭹  HORIZONTAL ONE EIGHTH BLOCK-5
+        case 0x1FB7A: return blockElement(size) | horizNth(1 / 8_th, 6); // 🭺  HORIZONTAL ONE EIGHTH BLOCK-6
+        case 0x1FB7B: return blockElement(size) | horizNth(1 / 8_th, 7); // 🭻  HORIZONTAL ONE EIGHTH BLOCK-7
         case 0x1FB7C:
             return blockElement(size)
                    | (left(1 / 8_th) + lower(1 / 8_th)); // 🭼  LEFT AND LOWER ONE EIGHTH BLOCK
@@ -2386,8 +2386,8 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
                    | (upper(1 / 8_th) + lower(1 / 8_th)); // 🮀  UPPER AND LOWER ONE EIGHTH BLOCK
         case 0x1FB81:
             return blockElement(size)
-                   | (horiz_nth(1 / 8_th, 1) // 🮁  HORIZONTAL ONE EIGHTH BLOCK-1358
-                      + horiz_nth(1 / 8_th, 3) + horiz_nth(1 / 8_th, 5) + horiz_nth(1 / 8_th, 7));
+                   | (horizNth(1 / 8_th, 1) // 🮁  HORIZONTAL ONE EIGHTH BLOCK-1358
+                      + horizNth(1 / 8_th, 3) + horizNth(1 / 8_th, 5) + horizNth(1 / 8_th, 7));
         case 0x1FB82: return blockElement(size) | upper(1 / 4_th); // 🮂  UPPER ONE QUARTER BLOCK
         case 0x1FB83: return blockElement(size) | upper(3 / 8_th); // 🮃  UPPER THREE EIGHTHS BLOCK
         case 0x1FB84: return blockElement(size) | upper(5 / 8_th); // 🮄  UPPER FIVE EIGHTHS BLOCK
@@ -2486,16 +2486,16 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
                 .line({ .x=0, .y=1 / 2_th }, { .x=1, .y=1 / 2_th })
                 .line({ .x=1 / 2_th, .y=3 / 8_th }, { .x=1 / 2_th, .y=5 / 8_th })
                 .take();
-        case 0x1FBF0: return segmentArt().segment_bar(1, 2, 4, 5, 6, 7);
-        case 0x1FBF1: return segmentArt().segment_bar(2, 5);
-        case 0x1FBF2: return segmentArt().segment_bar(1, 2, 3, 6, 7);
-        case 0x1FBF3: return segmentArt().segment_bar(1, 2, 3, 5, 6);
-        case 0x1FBF4: return segmentArt().segment_bar(2, 3, 4, 5);
-        case 0x1FBF5: return segmentArt().segment_bar(1, 3, 4, 5, 6);
-        case 0x1FBF6: return segmentArt().segment_bar(1, 3, 4, 5, 6, 7);
-        case 0x1FBF7: return segmentArt().segment_bar(1, 2, 5);
-        case 0x1FBF8: return segmentArt().segment_bar(1, 2, 3, 4, 5, 6, 7);
-        case 0x1FBF9: return segmentArt().segment_bar(1, 2, 3, 4, 5, 6);
+        case 0x1FBF0: return segmentArt().segmentBar(1, 2, 4, 5, 6, 7);
+        case 0x1FBF1: return segmentArt().segmentBar(2, 5);
+        case 0x1FBF2: return segmentArt().segmentBar(1, 2, 3, 6, 7);
+        case 0x1FBF3: return segmentArt().segmentBar(1, 2, 3, 5, 6);
+        case 0x1FBF4: return segmentArt().segmentBar(2, 3, 4, 5);
+        case 0x1FBF5: return segmentArt().segmentBar(1, 3, 4, 5, 6);
+        case 0x1FBF6: return segmentArt().segmentBar(1, 3, 4, 5, 6, 7);
+        case 0x1FBF7: return segmentArt().segmentBar(1, 2, 5);
+        case 0x1FBF8: return segmentArt().segmentBar(1, 2, 3, 4, 5, 6, 7);
+        case 0x1FBF9: return segmentArt().segmentBar(1, 2, 3, 4, 5, 6);
         // }}}
 
         case 0xE0B0: return /*  */ triangle<Dir::Left, Inverted::No, 1>(size);
@@ -2582,10 +2582,10 @@ static auto buildBox(detail::Box box,
                      bool useEllipticArcs) -> std::optional<atlas::Buffer>
 {
     // catch all non-solid single-lines before the quad-render below
-    if (auto const dashed = box.get_dashed_horizontal())
+    if (auto const dashed = box.getDashedHorizontal())
         return boxDashedHorizontal(dashed, size, lineThickness);
 
-    if (auto const dashed = box.get_dashed_vertical())
+    if (auto const dashed = box.getDashedVertical())
         return boxDashedVertical(dashed, size, lineThickness);
 
     using detail::Line;

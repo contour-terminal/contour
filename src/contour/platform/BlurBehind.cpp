@@ -143,7 +143,7 @@ namespace
 
 void setBlurBehind(QWindow* window, bool enable, QRegion const& region)
 {
-    crispy::ignore_unused(region);
+    crispy::ignoreUnused(region);
 
 #if defined(CONTOUR_WAYLAND) && QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     if (QGuiApplication::platformName() == "wayland")
@@ -308,7 +308,7 @@ void setBlurBehind(QWindow* window, bool enable, QRegion const& region)
 #endif // }}}
 
     // Get me working on other platforms/compositors (such as OSX, Gnome, ...), please.
-    crispy::ignore_unused(window, enable);
+    crispy::ignoreUnused(window, enable);
 }
 
 } // namespace contour::platform

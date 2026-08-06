@@ -234,7 +234,8 @@ struct hash<FontInfo>
     {
         auto fnv = crispy::FNV<char>();
         return size_t(
-            fnv(fnv(fd.path), to_string(fd.size.pt), std::format("{}", fd.weight))); // SSO should kick in.
+            fnv(fnv(fd.path), std::to_string(fd.size.pt), std::format("{}", fd.weight))); // SSO should
+                                                                                          // kick in.
     }
 };
 
@@ -1644,7 +1645,7 @@ optional<RasterizedGlyph> OpenShaper::rasterize(GlyphKey glyph, RenderMode mode,
             {
                 for (auto const _: iota(0u, ftBitmap.rows))
                 {
-                    crispy::ignore_unused(_);
+                    crispy::ignoreUnused(_);
                     std::copy_n(s, ftBitmap.width, t);
                     s += ftBitmap.pitch;
                     t += ftBitmap.width;

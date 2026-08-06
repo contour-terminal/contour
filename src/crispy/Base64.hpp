@@ -53,8 +53,8 @@ struct EncoderState
     uint8_t pending[3] {};
 };
 
-template <typename Alphabet, typename sink>
-constexpr void encode(uint8_t ch, Alphabet const& alphabet, EncoderState& state, sink const& s)
+template <typename Alphabet, typename Sink>
+constexpr void encode(uint8_t ch, Alphabet const& alphabet, EncoderState& state, Sink const& s)
 {
     state.pending[state.modulo] = ch;
     if (++state.modulo != 3)
@@ -68,8 +68,8 @@ constexpr void encode(uint8_t ch, Alphabet const& alphabet, EncoderState& state,
       alphabet[input[2] & 0x3F]);
 }
 
-template <typename Alphabet, typename sink>
-constexpr void finish(Alphabet const& alphabet, EncoderState& state, sink const& s)
+template <typename Alphabet, typename Sink>
+constexpr void finish(Alphabet const& alphabet, EncoderState& state, Sink const& s)
 {
     if (state.modulo == 0)
         return;

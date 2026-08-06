@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <crispy/Algorithm.hpp>
 #include <crispy/Utils.hpp>
 
 #include <gsl/pointers>
@@ -204,7 +203,7 @@ class Sink
 
     /// Retrieves reference to standard debug-logging sink.
     static Sink& console();
-    static Sink& error_console(); // NOLINT(readability-identifier-naming)
+    static Sink& errorConsole();
 
   private:
     bool _enabled;
@@ -315,7 +314,7 @@ inline void configure(std::string_view filterString)
         auto const filters = crispy::split(filterString, ',');
         for (auto& category: logstore::get())
         {
-            category.get().enable(crispy::any_of(filters, [&](std::string_view filterPattern) {
+            category.get().enable(std::ranges::any_of(filters, [&](std::string_view filterPattern) {
                 return matchesFilterPattern(filterPattern, category.get().name());
             }));
         }

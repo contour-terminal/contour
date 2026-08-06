@@ -58,7 +58,7 @@ string Sequence::text() const
 
     if (_category == FunctionCategory::C0)
     {
-        sstr << to_short_string(ControlCode::C0(_finalChar));
+        sstr << toShortString(ControlCode::C0(_finalChar));
         return sstr.str();
     }
 

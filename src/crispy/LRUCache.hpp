@@ -24,7 +24,9 @@ class LRUCache
     };
     using ItemList = std::list<Item>;
 
+    // NOLINTNEXTLINE(readability-identifier-naming): standard iterator/container trait spelling.
     using iterator = ItemList::iterator;
+    // NOLINTNEXTLINE(readability-identifier-naming): standard iterator/container trait spelling.
     using const_iterator = ItemList::const_iterator;
 
     explicit LRUCache(std::size_t capacity): _capacity { capacity } {}

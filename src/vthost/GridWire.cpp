@@ -144,7 +144,7 @@ vtbackend::GraphicsAttributes fillAttrsOf(proto::WireLine const& line)
     attrs.foregroundColor = colorFromRaw(line.fillForeground);
     attrs.backgroundColor = colorFromRaw(line.fillBackground);
     attrs.underlineColor = colorFromRaw(line.fillUnderlineColor);
-    attrs.flags = vtbackend::CellFlags::from_value(line.fillFlags);
+    attrs.flags = vtbackend::CellFlags::fromValue(line.fillFlags);
     return attrs;
 }
 
@@ -153,11 +153,10 @@ void applyWireCell(vtbackend::LineSoA& soa,
                    proto::WireCell const& cell,
                    vtbackend::HyperlinkId hyperlink)
 {
-    auto const attrs =
-        vtbackend::GraphicsAttributes { .foregroundColor = colorFromRaw(cell.foreground),
-                                        .backgroundColor = colorFromRaw(cell.background),
-                                        .underlineColor = colorFromRaw(cell.underlineColor),
-                                        .flags = vtbackend::CellFlags::from_value(cell.flags) };
+    auto const attrs = vtbackend::GraphicsAttributes { .foregroundColor = colorFromRaw(cell.foreground),
+                                                       .backgroundColor = colorFromRaw(cell.background),
+                                                       .underlineColor = colorFromRaw(cell.underlineColor),
+                                                       .flags = vtbackend::CellFlags::fromValue(cell.flags) };
     vtbackend::writeCellToSoA(soa, column, cell.codepoint, cell.width, attrs, hyperlink);
     for (auto const extra: cell.clusterExtras)
         vtbackend::appendCodepointToCluster(
@@ -174,7 +173,7 @@ void applyWireLine(vtbackend::Line& line,
                    proto::WireLine const& wire,
                    std::unordered_map<uint16_t, vtbackend::HyperlinkId> const& hyperlinks)
 {
-    auto const flags = vtbackend::LineFlags::from_value(wire.flags);
+    auto const flags = vtbackend::LineFlags::fromValue(wire.flags);
     // The clear does three jobs at once: it drops stale content, it gives the omitted trailing
     // columns their color, and it puts the row into the blank state when nothing travelled — which
     // is what makes a uniformly-filled row as cheap on this side as it was on the wire.

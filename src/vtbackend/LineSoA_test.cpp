@@ -410,7 +410,7 @@ TEST_CASE("CellProxy.reset", "[CellProxy]")
     cell.reset();
     CHECK(cell.empty());
     CHECK(cell.codepoint() == 0);
-    CHECK(cell.foregroundColor() == DefaultColor());
+    CHECK(cell.foregroundColor() == defaultColor());
 }
 
 TEST_CASE("CellProxy.resetWithAttrs", "[CellProxy]")

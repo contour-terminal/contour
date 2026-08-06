@@ -13,7 +13,7 @@ struct Deferred
 {
     std::optional<T> storage;
 
-    [[nodiscard]] constexpr bool is_initialized() const noexcept { return storage.has_value(); }
+    [[nodiscard]] constexpr bool isInitialized() const noexcept { return storage.has_value(); }
 
     template <typename... Args>
     void initialize(Args&&... args)

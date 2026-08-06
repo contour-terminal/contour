@@ -289,7 +289,7 @@ void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
             applyStatusLines(screen);
         if (delta.kittyKeyboardChanged != 0)
             _terminal->keyboardProtocol().flags() =
-                vtbackend::KeyboardEventFlags::from_value(delta.kittyKeyboardFlags);
+                vtbackend::KeyboardEventFlags::fromValue(delta.kittyKeyboardFlags);
         if (delta.modifyOtherKeysChanged != 0)
             _terminal->setModifyOtherKeys(delta.modifyOtherKeys);
         applyImages(screen);
@@ -404,7 +404,7 @@ void ScreenMirror::applySessionState(RemoteScreen const& screen)
     _terminal->colorPalette().defaultBackground = vtbackend::RGBColor { screen.defaultBackground };
     applyStatusDisplay(screen.statusDisplayType, screen.activeStatusDisplay);
     _terminal->keyboardProtocol().flags() =
-        vtbackend::KeyboardEventFlags::from_value(screen.kittyKeyboardFlags);
+        vtbackend::KeyboardEventFlags::fromValue(screen.kittyKeyboardFlags);
     if (_terminal->modifyOtherKeys() != screen.modifyOtherKeys)
         _terminal->setModifyOtherKeys(screen.modifyOtherKeys);
     // The working directory is the exception: an empty one is "not known", not "the root", and

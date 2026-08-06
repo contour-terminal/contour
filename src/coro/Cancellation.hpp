@@ -60,6 +60,7 @@ struct ThisCoroStopToken
     StopToken token; ///< Filled from the awaiting promise in await_suspend.
 
     /// Never ready: await_suspend runs to capture the token, then resumes immediately.
+    // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
     [[nodiscard]] bool await_ready() const noexcept { return false; }
 
     /// Captures the awaiting coroutine's stop token (if its promise exposes one) and
@@ -67,6 +68,7 @@ struct ThisCoroStopToken
     /// @param awaiting The coroutine performing the co_await.
     /// @return false — do not suspend; resume @p awaiting immediately.
     template <typename Promise>
+    // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
     bool await_suspend(std::coroutine_handle<Promise> awaiting) noexcept
     {
         if constexpr (requires { awaiting.promise().stopToken(); })
@@ -75,6 +77,7 @@ struct ThisCoroStopToken
     }
 
     /// @return The captured stop token.
+    // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
     [[nodiscard]] StopToken await_resume() const noexcept { return token; }
 };
 

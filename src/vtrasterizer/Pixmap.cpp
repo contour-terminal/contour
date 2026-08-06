@@ -19,7 +19,7 @@ namespace
     struct BaseOffset { int value; };
     // clang-format on
 
-    Pixmap& segment_line(Pixmap& pixmap, Orientation orientation, BaseOffset base, From from, To to)
+    Pixmap& segmentLine(Pixmap& pixmap, Orientation orientation, BaseOffset base, From from, To to)
     {
         // If the font size is very very small, line length calculation might cause negative values.
         // Be sensible here then to not cause an infinite loop.
@@ -117,7 +117,7 @@ Pixmap& Pixmap::halfFilledCircleRight()
     return *this;
 }
 
-Pixmap& Pixmap::segment_bar(int which)
+Pixmap& Pixmap::segmentBar(int which)
 {
     if (!SoftRequire(1 <= which) || !SoftRequire(which <= 7))
         return *this;
@@ -140,13 +140,13 @@ Pixmap& Pixmap::segment_bar(int which)
     // clang-format off
     switch (which)
     {
-        case 1: return segment_line(*this, Orientation::Horizontal, BaseOffset { t }, From { l }, To { r });
-        case 2: return segment_line(*this, Orientation::Vertical, BaseOffset { r }, From { t + z }, To { m - z });
-        case 3: return segment_line(*this, Orientation::Horizontal, BaseOffset { m }, From { l }, To { r });
-        case 4: return segment_line(*this, Orientation::Vertical, BaseOffset { l }, From { t + z }, To { m - z });
-        case 5: return segment_line(*this, Orientation::Vertical, BaseOffset { r }, From { m + z }, To { b - z });
-        case 6: return segment_line(*this, Orientation::Horizontal, BaseOffset { b }, From { l }, To { r });
-        case 7: return segment_line(*this, Orientation::Vertical, BaseOffset { l }, From { m + z }, To { b - z });
+        case 1: return segmentLine(*this, Orientation::Horizontal, BaseOffset { t }, From { l }, To { r });
+        case 2: return segmentLine(*this, Orientation::Vertical, BaseOffset { r }, From { t + z }, To { m - z });
+        case 3: return segmentLine(*this, Orientation::Horizontal, BaseOffset { m }, From { l }, To { r });
+        case 4: return segmentLine(*this, Orientation::Vertical, BaseOffset { l }, From { t + z }, To { m - z });
+        case 5: return segmentLine(*this, Orientation::Vertical, BaseOffset { r }, From { m + z }, To { b - z });
+        case 6: return segmentLine(*this, Orientation::Horizontal, BaseOffset { b }, From { l }, To { r });
+        case 7: return segmentLine(*this, Orientation::Vertical, BaseOffset { l }, From { m + z }, To { b - z });
         default: crispy::unreachable();
     }
     // clang-format on

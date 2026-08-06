@@ -172,7 +172,7 @@ struct DisplayHarness
         controller = testApp.app().sessionsManager().createWindowController();
         controller->bindWindow(window.get());
         // Focus the display in so the manager records it as the controller's active display.
-        testApp.app().sessionsManager().FocusOnDisplay(display);
+        testApp.app().sessionsManager().focusOnDisplay(display);
         return *controller;
     }
 

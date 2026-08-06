@@ -316,9 +316,9 @@ struct Function
         return result;
     }
 
-    using id_type = uint32_t;
+    using IdType = uint32_t;
 
-    [[nodiscard]] constexpr id_type id() const noexcept
+    [[nodiscard]] constexpr IdType id() const noexcept
     {
         // clang-format off
         unsigned constexpr CategoryShift     = 0;
@@ -330,26 +330,26 @@ struct Function
         // clang-format on
 
         // if (category == FunctionCategory::C0)
-        //     return static_cast<id_type>(category) | finalSymbol << 3;
+        //     return static_cast<IdType>(category) | finalSymbol << 3;
 
-        auto const maskCat = static_cast<id_type>(category) << CategoryShift;
+        auto const maskCat = static_cast<IdType>(category) << CategoryShift;
 
         // 0x3C..0x3F; (one of: < = > ?, or 0x00 for none)
-        auto const maskLeader = !leader ? 0 : (static_cast<id_type>(leader) - 0x3C) << LeaderShift;
+        auto const maskLeader = !leader ? 0 : (static_cast<IdType>(leader) - 0x3C) << LeaderShift;
 
         // 0x20..0x2F: (intermediates, usually just one, or 0x00 if none)
         auto const maskIntermediate =
-            !intermediate ? 0 : (static_cast<id_type>(intermediate) - 0x20 + 1) << IntermediateShift;
+            !intermediate ? 0 : (static_cast<IdType>(intermediate) - 0x20 + 1) << IntermediateShift;
 
         // 0x40..0x7E: final character
-        auto const maskFinalS = !finalSymbol ? 0 : (static_cast<id_type>(finalSymbol) - 0x40) << FinalShift;
-        auto const maskMinPar = static_cast<id_type>(minimumParameters) << MinParamShift;
-        auto const maskMaxPar = static_cast<id_type>(maximumParameters) << MaxParamShift;
+        auto const maskFinalS = !finalSymbol ? 0 : (static_cast<IdType>(finalSymbol) - 0x40) << FinalShift;
+        auto const maskMinPar = static_cast<IdType>(minimumParameters) << MinParamShift;
+        auto const maskMaxPar = static_cast<IdType>(maximumParameters) << MaxParamShift;
 
         return maskCat | maskLeader | maskIntermediate | maskFinalS | maskMinPar | maskMaxPar;
     }
 
-    constexpr operator id_type() const noexcept { return id(); }
+    constexpr operator IdType() const noexcept { return id(); }
 };
 
 constexpr int compare(Function const& a, Function const& b)
@@ -423,6 +423,7 @@ constexpr int compare(FunctionSelector const& a, Function const& b) noexcept
 
 namespace detail // {{{
 {
+    // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
     constexpr auto C0(char finalCharacter,
                       std::string_view mnemonic,
                       std::string_view comment,
@@ -440,6 +441,7 @@ namespace detail // {{{
                               FunctionDocumentation { .mnemonic = mnemonic, .comment = comment } };
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
     constexpr auto OSC(uint16_t code, VTExtension ext, FunctionDocumentation documentation) noexcept
     {
         return Function { .category = FunctionCategory::OSC,
@@ -453,6 +455,7 @@ namespace detail // {{{
                           .documentation = documentation };
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
     constexpr auto ESC(std::optional<char> intermediate,
                        char finalCharacter,
                        VTType vt,
@@ -469,6 +472,7 @@ namespace detail // {{{
                           .documentation = documentation };
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
     constexpr auto VT52(char finalCharacter,
                         uint8_t argc0,
                         uint8_t argc1,
@@ -485,6 +489,7 @@ namespace detail // {{{
                           .documentation = documentation };
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
     constexpr auto CSI(std::optional<char> leader,
                        uint8_t argc0,
                        uint8_t argc1,
@@ -505,6 +510,7 @@ namespace detail // {{{
                           .documentation = documentation };
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
     constexpr auto CSI(std::optional<char> leader,
                        uint8_t argc0,
                        uint8_t argc1,
@@ -525,6 +531,7 @@ namespace detail // {{{
                           .documentation = documentation };
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
     constexpr auto DCS(std::optional<char> leader,
                        uint8_t argc0,
                        uint8_t argc1,
@@ -545,6 +552,7 @@ namespace detail // {{{
                           .documentation = documentation };
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
     constexpr auto DCS(std::optional<char> leader,
                        uint8_t argc0,
                        uint8_t argc1,

@@ -30,7 +30,7 @@ Sink& Sink::console()
     return instance;
 }
 
-Sink& Sink::error_console() // NOLINT(readability-identifier-naming)
+Sink& Sink::errorConsole()
 {
     static auto instance = Sink(true, std::cerr);
     return instance;

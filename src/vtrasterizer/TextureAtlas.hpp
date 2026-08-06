@@ -27,7 +27,7 @@ enum class Format : uint8_t
     RGBA = 4
 };
 
-constexpr uint32_t element_count(Format format) noexcept
+constexpr uint32_t elementCount(Format format) noexcept
 {
     return static_cast<uint32_t>(format);
 }

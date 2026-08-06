@@ -53,7 +53,7 @@ class MatchModes
         _disabled |= static_cast<uint8_t>(flag);
     }
 
-    [[nodiscard]] constexpr bool has_value(Flag flag) const noexcept
+    [[nodiscard]] constexpr bool hasValue(Flag flag) const noexcept
     {
         return _enabled & static_cast<uint8_t>(flag) || _disabled & static_cast<uint8_t>(flag);
     }
