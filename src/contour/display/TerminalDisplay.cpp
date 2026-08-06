@@ -1211,6 +1211,12 @@ QSGNode* TerminalDisplay::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*
         // this display every frame, or a released-but-reused node would render nothing (black terminal).
         node->setLiveness(_nodeLiveness);
 
+    // Snapshot the window's logical extent here, for the same reason the render size and model matrix are
+    // snapshotted above: this is the sync point, with the GUI thread blocked. The node needs it to derive
+    // the frame's device→logical scale, and reading QWindow::size() from the render phase instead would
+    // race a concurrent resize (see TerminalRenderNode::setWindowLogicalSize).
+    node->setWindowLogicalSize(window() != nullptr ? QSizeF(window()->size()) : QSizeF {});
+
     // Content changes every frame the terminal is dirty; mark the node so Qt invokes render() again.
     node->markDirty(QSGNode::DirtyMaterial);
     return node;

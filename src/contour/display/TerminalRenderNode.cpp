@@ -65,8 +65,21 @@ void TerminalRenderNode::prepare()
     // projectionMatrix() from QQuickWindow::effectiveDevicePixelRatio(). When they disagree the quads are
     // scaled by the ratio, and because the atlas sampler is Nearest, glyph columns are duplicated and
     // dropped instead of merely displaced — mangled text in one pane, which is what the issue reported.
-    auto const dpr = deviceToLogicalScale(
-        rt->pixelSize(), display->window() != nullptr ? QSizeF(display->window()->size()) : QSizeF {});
+    // The window extent comes from the snapshot updatePaintNode() took at the sync point, where the GUI
+    // thread is blocked. Reading QWindow::size() here instead — as this did — is a live read from the
+    // render phase with the GUI thread running, so mid-resize it can pair a window size with a render
+    // target from a different moment; the ratio derived from that pair is then wrong for the whole frame,
+    // which is the scale mismatch this function exists to rule out. The fallback covers the first frame,
+    // before any sync has happened.
+    auto const windowLogicalSize = [this, display]() -> QSizeF {
+        if (!_windowLogicalSize.isEmpty())
+            return _windowLogicalSize;
+        if (auto const* window = display->window())
+            return { static_cast<qreal>(window->size().width()),
+                     static_cast<qreal>(window->size().height()) };
+        return {};
+    }();
+    auto const dpr = deviceToLogicalScale(rt->pixelSize(), windowLogicalSize);
     auto const itemToClip = composeItemToClip(*projectionMatrix(), *matrix(), dpr);
 
     // This item's top-left corner inside the render target, in device pixels. matrix() maps item-local
