@@ -107,7 +107,7 @@ constexpr std::optional<FontWeight> makeFontWeight(std::string_view text)
                               pair { "medium"sv, FontWeight::Medium },
                               pair { "demibold"sv, FontWeight::DemiBold },
                               pair { "bold"sv, FontWeight::Bold },
-                              pair { "extra bold"sv, FontWeight::ExtraBlack },
+                              pair { "extra bold"sv, FontWeight::ExtraBold },
                               pair { "black"sv, FontWeight::Black },
                               pair { "extra black"sv, FontWeight::ExtraBlack } });
 }
@@ -124,7 +124,7 @@ constexpr std::optional<FontSlant> makeFontSlant(std::string_view text)
     using namespace std::string_view_literals;
     using std::pair;
     return detail::tryMatch(text,
-                            { pair { "thin"sv, FontSlant::Normal },
+                            { pair { "normal"sv, FontSlant::Normal },
                               pair { "italic"sv, FontSlant::Italic },
                               pair { "oblique"sv, FontSlant::Oblique } });
 }
