@@ -17,18 +17,18 @@
 // window (hence never had a render target), which the offscreen platform supplies perfectly well. See
 // the teardown-lifetimes section there.
 
-#include <contour/config/Actions.h>
-#include <contour/display/TerminalAccessible.h>
-#include <contour/display/TerminalDisplay.h>
-#include <contour/input/MouseMapping.h>
-#include <contour/session/TerminalSession.h>
-#include <contour/session/TerminalSessionManager.h>
-#include <contour/test/GuiTestFixtures.h>
-#include <contour/window/WindowController.h>
+#include <contour/config/Actions.hpp>
+#include <contour/display/TerminalAccessible.hpp>
+#include <contour/display/TerminalDisplay.hpp>
+#include <contour/input/MouseMapping.hpp>
+#include <contour/session/TerminalSession.hpp>
+#include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/GuiTestFixtures.hpp>
+#include <contour/window/WindowController.hpp>
 
-#include <vtbackend/primitives.h>
+#include <vtbackend/Primitives.hpp>
 
-#include <vtpty/ChannelPty.h>
+#include <vtpty/ChannelPty.hpp>
 
 #include <QtCore/QBuffer>
 #include <QtCore/QDir>
@@ -56,9 +56,9 @@
 #include <unordered_map>
 
 #include <QtTest/QTest>
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/SessionModel.h>
-#include <vtworkspace/Tab.h>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/SessionModel.hpp>
+#include <vtworkspace/Tab.hpp>
 
 using namespace std::string_view_literals;
 using namespace std::chrono_literals;
@@ -172,7 +172,7 @@ struct DisplayHarness
         controller = testApp.app().sessionsManager().createWindowController();
         controller->bindWindow(window.get());
         // Focus the display in so the manager records it as the controller's active display.
-        testApp.app().sessionsManager().FocusOnDisplay(display);
+        testApp.app().sessionsManager().focusOnDisplay(display);
         return *controller;
     }
 
@@ -727,7 +727,7 @@ TEST_CASE("display: font-size changes re-render without crashing and publish new
     // async), so comparing it here races the render loop and can equal the old value at some DPIs.
     // Driving frames afterward still exercises the re-render path (the point of this display test).
     REQUIRE(h.display->fontSize().pt != 14.0);
-    CHECK(h.display->setFontSize(text::font_size { 14.0 }));
+    CHECK(h.display->setFontSize(text::FontSize { 14.0 }));
     CHECK(h.display->fontSize().pt == 14.0);
     h.pump();
     h.pump();
@@ -748,7 +748,7 @@ TEST_CASE("display: font zoom keeps the window fixed and changes the page size i
 
     // A large font step forces a clearly larger cell, so the fixed pane must hold fewer columns/lines.
     REQUIRE(h.display->fontSize().pt < 24.0);
-    CHECK(h.display->setFontSize(text::font_size { 24.0 }));
+    CHECK(h.display->setFontSize(text::FontSize { 24.0 }));
     // pageSize is republished over subsequent frames (recomputeGeometryAfterFontReconfig runs async);
     // wait for it to settle, mirroring the window-resize case above.
     for (int i = 0; i < 50 && h.session->terminal().pageSize() == pageBefore; ++i)
@@ -766,7 +766,7 @@ TEST_CASE("display: font zoom keeps the window fixed and changes the page size i
     CHECK(pageAfter.columns <= pageBefore.columns);
 
     // Shrinking the font back grows the page again, still without touching the window.
-    CHECK(h.display->setFontSize(text::font_size { 8.0 }));
+    CHECK(h.display->setFontSize(text::FontSize { 8.0 }));
     for (int i = 0; i < 50 && h.session->terminal().pageSize() == pageAfter; ++i)
     {
         QTest::qWait(10);

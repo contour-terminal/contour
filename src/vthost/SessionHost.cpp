@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/SessionHost.h>
+#include <vthost/SessionHost.hpp>
 
 #include <chrono>
 #include <mutex>
@@ -7,12 +7,12 @@
 #include <utility>
 #include <vector>
 
-#include <vthost/SessionSettings.h>
-#include <vthost/TappingPty.h>
-#include <vthost/logging.h>
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/PaneLayout.h>
-#include <vtworkspace/Tab.h>
+#include <vthost/Logging.hpp>
+#include <vthost/SessionSettings.hpp>
+#include <vthost/TappingPty.hpp>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/PaneLayout.hpp>
+#include <vtworkspace/Tab.hpp>
 
 namespace vthost
 {
@@ -28,7 +28,7 @@ using vtworkspace::WindowId;
 // HostedSession
 
 HostedSession::HostedSession(SessionId id,
-                             crispy::environment const& env,
+                             crispy::Environment const& env,
                              std::unique_ptr<vtpty::Pty> pty,
                              vtbackend::Settings settings,
                              std::function<void()> onScreenUpdated,
@@ -110,7 +110,7 @@ void HostedSession::pumpLoop()
 SessionHost::SessionHost(net::EventLoop& loop,
                          PtyFactory ptyFactory,
                          vtbackend::Settings settings,
-                         crispy::environment const& env,
+                         crispy::Environment const& env,
                          bool startPumps,
                          ClientSizePolicy sizePolicy):
     _loop(loop),

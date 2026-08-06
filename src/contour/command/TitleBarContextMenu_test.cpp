@@ -4,7 +4,7 @@
 // rule about when a row is shown, greyed or ticked is decided — and asserted — with no window, no
 // terminal and no Qt behind it.
 
-#include <contour/command/TitleBarContextMenu.h>
+#include <contour/command/TitleBarContextMenu.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

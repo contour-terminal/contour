@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtconformance/Diagnostics.h>
+#include <vtconformance/Diagnostics.hpp>
 
-#include <vtbackend/logging.h>
+#include <vtbackend/Logging.hpp>
 
-#include <crispy/logstore.h>
+#include <crispy/LogStore.hpp>
 
 #include <algorithm>
 #include <array>
@@ -32,7 +32,7 @@ namespace
 
     /// The `vt.parser` category, looked up by name so this module does not have to be a friend of
     /// the engine's logging header layout.
-    [[nodiscard]] logstore::category* parserCategory() noexcept
+    [[nodiscard]] logstore::Category* parserCategory() noexcept
     {
         return logstore::get(vtbackend::vtParserLog.name());
     }
@@ -74,7 +74,7 @@ std::optional<Diagnostic> classifyDiagnostic(std::string_view line)
 }
 
 DiagnosticsCollector::DiagnosticsCollector():
-    _sink(std::make_unique<logstore::sink>(true, [this](std::string_view const& line) { record(line); }))
+    _sink(std::make_unique<logstore::Sink>(true, [this](std::string_view const& line) { record(line); }))
 {
     auto* const category = parserCategory();
     if (!category)
@@ -83,16 +83,16 @@ DiagnosticsCollector::DiagnosticsCollector():
     category->enable();
     // The default formatter decorates messages with source locations; the oracle wants the bare
     // text so that `classifyDiagnostic` can stay a pure string function.
-    category->set_formatter([](logstore::message_builder const& message) { return message.text(); });
-    category->set_sink(*_sink);
+    category->setFormatter([](logstore::MessageBuilder const& message) { return message.text(); });
+    category->setSink(*_sink);
 }
 
 DiagnosticsCollector::~DiagnosticsCollector()
 {
     if (auto* const category = parserCategory())
     {
-        category->set_formatter(&logstore::category::defaultFormatter);
-        category->set_sink(logstore::sink::console());
+        category->setFormatter(&logstore::Category::defaultFormatter);
+        category->setSink(logstore::Sink::console());
     }
 }
 

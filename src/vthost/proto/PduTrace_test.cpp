@@ -10,8 +10,8 @@
 #include <variant>
 #include <vector>
 
-#include <vthost/proto/Pdu.h>
-#include <vthost/proto/PduTrace.h>
+#include <vthost/proto/Pdu.hpp>
+#include <vthost/proto/PduTrace.hpp>
 
 using namespace vthost::proto;
 using namespace std::string_view_literals;

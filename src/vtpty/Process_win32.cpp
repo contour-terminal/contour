@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtpty/ConPty.h>
-#include <vtpty/Process.h>
-#include <vtpty/Pty.h>
-#include <vtpty/SpawnLadder.h>
+#include <vtpty/ConPty.hpp>
+#include <vtpty/Process.hpp>
+#include <vtpty/Pty.hpp>
+#include <vtpty/SpawnLadder.hpp>
 
-#include <crispy/assert.h>
-#include <crispy/overloaded.h>
+#include <crispy/Assert.hpp>
+#include <crispy/Overloaded.hpp>
 
 #include <cassert>
 #include <cerrno>
@@ -178,7 +178,7 @@ Process::Process(string const& path,
                  std::unique_ptr<Pty> pty):
     _d(new Private { path, args, cwd, env, std::move(pty) }, [](Private* p) { delete p; })
 {
-    crispy::ignore_unused(escapeSandbox);
+    crispy::ignoreUnused(escapeSandbox);
 }
 
 bool Process::isFlatpak()
@@ -345,7 +345,7 @@ Process::ExitStatus Process::wait()
 
 vector<string> Process::loginShell(bool escapeSandbox)
 {
-    crispy::ignore_unused(escapeSandbox);
+    crispy::ignoreUnused(escapeSandbox);
 
     return { "powershell.exe"s }; // TODO: Find out what the user's default shell is.
 }

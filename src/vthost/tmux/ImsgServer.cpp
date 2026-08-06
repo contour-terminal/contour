@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/tmux/ImsgServer.h>
+#include <vthost/tmux/ImsgServer.hpp>
 
-#include <vthost/logging.h>
+#include <vthost/Logging.hpp>
 
 #ifndef _WIN32
 
-    #include <crispy/utils.h>
+    #include <crispy/Utils.hpp>
 
     #include <algorithm>
     #include <array>
@@ -17,12 +17,12 @@
     #include <unistd.h>
 
     #include <coro/WhenAll.hpp>
-    #include <net/Sockets.h>
-    #include <net/SplitSocket.h>
-    #include <vthost/imsg/CommandArgv.h>
-    #include <vthost/imsg/Identify.h>
-    #include <vthost/imsg/ImsgCodec.h>
-    #include <vthost/tmux/ControlSession.h>
+    #include <net/Sockets.hpp>
+    #include <net/SplitSocket.hpp>
+    #include <vthost/imsg/CommandArgv.hpp>
+    #include <vthost/imsg/Identify.hpp>
+    #include <vthost/imsg/ImsgCodec.hpp>
+    #include <vthost/tmux/ControlSession.hpp>
 
 namespace vthost::tmux
 {
@@ -78,7 +78,7 @@ namespace
         // released, and the ControlSession plus every pane it drives stayed resident until daemon
         // shutdown — one leaked session, and one leaked fd, per malformed frame. A scope guard
         // rather than three call sites, so a fourth exit cannot forget.
-        auto const unwindControlSession = crispy::finally([bridge]() noexcept { bridge->close(); });
+        auto const unwindControlSession = crispy::Finally([bridge]() noexcept { bridge->close(); });
 
         auto buffer = std::array<std::byte, 4096> {};
         while (true)

@@ -1,31 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/ContourGuiApp.h>
-#include <contour/config/Actions.h>
-#include <contour/display/TerminalDisplay.h>
-#include <contour/geometry/CellRectangle.h>
-#include <contour/input/KeyMapping.h>
-#include <contour/input/Logging.h>
-#include <contour/input/MouseMapping.h>
-#include <contour/platform/Clipboard.h>
-#include <contour/platform/ExternalLauncher.h>
-#include <contour/platform/QtInvoke.h>
-#include <contour/platform/SpeechSynthesizer.h>
-#include <contour/session/Logging.h>
-#include <contour/session/SpawnCommand.h>
-#include <contour/session/TerminalSession.h>
+#include <contour/ContourGuiApp.hpp>
+#include <contour/config/Actions.hpp>
+#include <contour/display/TerminalDisplay.hpp>
+#include <contour/geometry/CellRectangle.hpp>
+#include <contour/input/KeyMapping.hpp>
+#include <contour/input/Logging.hpp>
+#include <contour/input/MouseMapping.hpp>
+#include <contour/platform/Clipboard.hpp>
+#include <contour/platform/ExternalLauncher.hpp>
+#include <contour/platform/QtInvoke.hpp>
+#include <contour/platform/SpeechSynthesizer.hpp>
+#include <contour/session/Logging.hpp>
+#include <contour/session/SpawnCommand.hpp>
+#include <contour/session/TerminalSession.hpp>
 
-#include <vtbackend/HintModeHandler.h>
-#include <vtbackend/MatchModes.h>
-#include <vtbackend/Terminal.h>
-#include <vtbackend/ViCommands.h>
+#include <vtbackend/HintModeHandler.hpp>
+#include <vtbackend/MatchModes.hpp>
+#include <vtbackend/Terminal.hpp>
+#include <vtbackend/ViCommands.hpp>
 
-#include <vtpty/Process.h>
-#include <vtpty/Pty.h>
-#include <vtpty/SshSession.h>
+#include <vtpty/Process.hpp>
+#include <vtpty/Pty.hpp>
+#include <vtpty/SshSession.hpp>
 
-#include <crispy/StackTrace.h>
-#include <crispy/assert.h>
-#include <crispy/utils.h>
+#include <crispy/Assert.hpp>
+#include <crispy/StackTrace.hpp>
+#include <crispy/Utils.hpp>
 
 #include <QtCore/QDeadlineTimer>
 #include <QtCore/QDebug>
@@ -114,7 +114,7 @@ namespace
         return nullptr;
     }
 
-    string normalize_crlf(QString text)
+    string normalizeCrlf(QString text)
     {
 #ifndef _WIN32
         return text.replace("\r\n", "\n").replace("\r", "\n").toUtf8().toStdString();
@@ -123,7 +123,7 @@ namespace
 #endif
     }
 
-    string strip_if(string input, bool shouldStrip)
+    string stripIf(string input, bool shouldStrip)
     {
         if (!shouldStrip)
             return input;
@@ -833,17 +833,17 @@ void TerminalSession::applyPendingFontChange(bool allow, bool remember)
         return;
 
     if (spec.size != 0.0)
-        newFonts.size = text::font_size { spec.size };
+        newFonts.size = text::FontSize { spec.size };
 
     if (!spec.regular.empty())
-        newFonts.regular = text::font_description::parse(spec.regular);
+        newFonts.regular = text::FontDescription::parse(spec.regular);
 
-    auto const styledFont = [&](string_view font) -> text::font_description {
+    auto const styledFont = [&](string_view font) -> text::FontDescription {
         // if a styled font is "auto" then infer froom regular font"
         if (font == "auto"sv)
             return currentFonts.regular;
         else
-            return text::font_description::parse(font);
+            return text::FontDescription::parse(font);
     };
 
     if (!spec.bold.empty())
@@ -856,7 +856,7 @@ void TerminalSession::applyPendingFontChange(bool allow, bool remember)
         newFonts.boldItalic = styledFont(spec.boldItalic);
 
     if (!spec.emoji.empty() && spec.emoji != "auto"sv)
-        newFonts.emoji = text::font_description::parse(spec.emoji);
+        newFonts.emoji = text::FontDescription::parse(spec.emoji);
 
     // Persist as THIS session's own, the way setFontSize() does: setSession() and configureDisplay() both
     // re-seed from profile().fonts, so leaving the pre-OSC-50 value made the approved font revert on the
@@ -1198,7 +1198,7 @@ void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
             return;
         }
 
-        string const strippedText = strip_if(normalize_crlf(clipboard->text(QClipboard::Clipboard)), strip);
+        string const strippedText = stripIf(normalizeCrlf(clipboard->text(QClipboard::Clipboard)), strip);
         sessionLog()("Size of text: {}", strippedText.size());
         if (strippedText.empty())
             sessionLog()("Clipboard does not contain text.");
@@ -1297,8 +1297,8 @@ void TerminalSession::requestWindowResize(Width width, Height height)
     });
 }
 
-void TerminalSession::addToAccumulatedScroll(crispy::point pixelDelta,
-                                             crispy::point angleDelta,
+void TerminalSession::addToAccumulatedScroll(crispy::Point pixelDelta,
+                                             crispy::Point angleDelta,
                                              vtbackend::ScrollPhase phase,
                                              bool platformInverted) noexcept
 {
@@ -1323,7 +1323,7 @@ std::tuple<LineOffset, ColumnOffset> TerminalSession::consumeScroll() noexcept
 {
     if (_accumulatedPixelScroll)
     {
-        auto const pixelStepSize = crispy::point {
+        auto const pixelStepSize = crispy::Point {
             .x = _display->cellSize().width.as<int>(),
             .y = _display->cellSize().height.as<int>(),
         };
@@ -2066,7 +2066,7 @@ bool TerminalSession::operator()(actions::CreateSelection const& customSelector)
 
 bool TerminalSession::operator()(actions::DecreaseFontSize)
 {
-    auto constexpr OnePt = text::font_size { 1.0 };
+    auto constexpr OnePt = text::FontSize { 1.0 };
     setFontSize(profile().fonts.value().size - OnePt);
 
     emit fontSizeChanged();
@@ -2213,7 +2213,7 @@ bool TerminalSession::operator()(actions::HintMode const& action)
 
 bool TerminalSession::operator()(actions::IncreaseFontSize)
 {
-    auto constexpr OnePt = text::font_size { 1.0 };
+    auto constexpr OnePt = text::FontSize { 1.0 };
     // auto const currentFontSize = view().renderer().fontDescriptions().size;
     // auto const newFontSize = currentFontSize + OnePt;
     // setFontSize(newFontSize);
@@ -2319,7 +2319,7 @@ bool TerminalSession::operator()(actions::PasteSelection paste)
 {
     if (QClipboard const* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
     {
-        string const text = normalize_crlf(clipboard->text(QClipboard::Selection));
+        string const text = normalizeCrlf(clipboard->text(QClipboard::Selection));
 
         // Locked around the terminal calls only -- the clipboard read above is Qt's and must not run
         // with the terminal lock held. See ViNormalMode for the rationale.
@@ -2383,7 +2383,7 @@ bool TerminalSession::operator()(actions::ScreenshotVT)
 bool TerminalSession::operator()(actions::SaveScreenshot)
 {
     auto savePath =
-        app().dumpStateAtExit().value_or(crispy::app::instance()->localStateDir())
+        app().dumpStateAtExit().value_or(crispy::App::instance()->localStateDir())
         / fs::path(std::format("contour-screenshot-{:%Y-%m-%d-%H-%M-%S}.png", chrono::system_clock::now()));
 
     _display->setScreenshotOutput(savePath);
@@ -3354,7 +3354,7 @@ uint8_t TerminalSession::matchModeFlags() const
     return flags;
 }
 
-void TerminalSession::setFontSize(text::font_size size)
+void TerminalSession::setFontSize(text::FontSize size)
 {
     // No display (a background tab/split pane whose display was detached on the last tab switch):
     // there is no renderer to reconfigure, so persist the requested size to the profile directly. It
@@ -3499,31 +3499,31 @@ QModelIndex TerminalSession::index(int row, int column, QModelIndex const& paren
     Require(column == 0);
     // NOTE: if at all, we could expose session attribs like session id, session type
     // (local process), ...?
-    crispy::ignore_unused(parent);
+    crispy::ignoreUnused(parent);
     return createIndex(row, column, nullptr);
 }
 
 QModelIndex TerminalSession::parent(QModelIndex const& child) const
 {
-    crispy::ignore_unused(child);
+    crispy::ignoreUnused(child);
     return {};
 }
 
 int TerminalSession::rowCount(QModelIndex const& parent) const
 {
-    crispy::ignore_unused(parent);
+    crispy::ignoreUnused(parent);
     return 1;
 }
 
 int TerminalSession::columnCount(QModelIndex const& parent) const
 {
-    crispy::ignore_unused(parent);
+    crispy::ignoreUnused(parent);
     return 1;
 }
 
 QVariant TerminalSession::data(QModelIndex const& index, int role) const
 {
-    crispy::ignore_unused(index, role);
+    crispy::ignoreUnused(index, role);
     Require(index.row() == 0);
     Require(index.column() == 0);
 
@@ -3533,7 +3533,7 @@ QVariant TerminalSession::data(QModelIndex const& index, int role) const
 bool TerminalSession::setData(QModelIndex const& index, QVariant const& value, int role)
 {
     // NB: Session-Id is read-only.
-    crispy::ignore_unused(index, value, role);
+    crispy::ignoreUnused(index, value, role);
     return false;
 }
 // }}}

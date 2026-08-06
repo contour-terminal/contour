@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/ConnectionAcceptor.h>
+#include <vthost/ConnectionAcceptor.hpp>
 
 #include <chrono>
 #include <exception>
@@ -9,7 +9,7 @@
 #include <utility>
 
 #include <coro/Cancellation.hpp>
-#include <vthost/logging.h>
+#include <vthost/Logging.hpp>
 
 namespace vthost
 {

@@ -99,7 +99,7 @@ endif()
 
 # The imported-target name differs between a vendored yaml-cpp and a system one, so
 # resolve it once here -- before add_subdirectory(config), which puts it in contour_config's
-# PUBLIC interface (Config.h exposes yaml-cpp's headers).
+# PUBLIC interface (Config.hpp exposes yaml-cpp's headers).
 if (TARGET yaml-cpp::yaml-cpp)
     set(YAML_CPP_LIBRARIES yaml-cpp::yaml-cpp)
 else()
@@ -161,8 +161,8 @@ if(CONTOUR_MACOS_APP_BUNDLE)
 endif()
 
 set(_header_files
-    session/HyperlinkTooltip.h
-    window/TabLabel.h
+    session/HyperlinkTooltip.hpp
+    window/TabLabel.hpp
 )
 
 # Sources are split into a reusable object library (contour_core) and the thin executable entry
@@ -188,33 +188,33 @@ set(_main_source_files
 # which is why a GUI-less build is worth having at all.
 if(CONTOUR_FRONTEND_GUI)
     list(APPEND _header_files
-        window/CommandPaletteModel.h
-        window/ContextMenuModel.h
-        ContourGuiApp.h
-        session/ExitCode.h
-        config/LayoutBuilder.h
-        config/LayoutStore.h
-        session/PaneProxy.h
-        session/SessionFactory.h
-        window/SettingsController.h
-        session/TerminalSession.h
-        session/TerminalSessionManager.h
-        window/UiStyleProvider.h
-        session/SessionInput.h
-        session/FontControl.h
-        session/SpawnCommand.h
-        session/Logging.h
-        Logging.h
-        display/RenderState.h
-        display/RenderingBackendSelection.h
-        geometry/CellRectangle.h
-        geometry/WindowGeometry.h
-        remote/NativeController.h
-        remote/RemoteController.h
-        remote/ReactorThread.h
-        remote/RemoteLayout.h
-        remote/RoutingSessionFactory.h
-        remote/TmuxController.h
+        window/CommandPaletteModel.hpp
+        window/ContextMenuModel.hpp
+        ContourGuiApp.hpp
+        session/ExitCode.hpp
+        config/LayoutBuilder.hpp
+        config/LayoutStore.hpp
+        session/PaneProxy.hpp
+        session/SessionFactory.hpp
+        window/SettingsController.hpp
+        session/TerminalSession.hpp
+        session/TerminalSessionManager.hpp
+        window/UiStyleProvider.hpp
+        session/SessionInput.hpp
+        session/FontControl.hpp
+        session/SpawnCommand.hpp
+        session/Logging.hpp
+        Logging.hpp
+        display/RenderState.hpp
+        display/RenderingBackendSelection.hpp
+        geometry/CellRectangle.hpp
+        geometry/WindowGeometry.hpp
+        remote/NativeController.hpp
+        remote/RemoteController.hpp
+        remote/ReactorThread.hpp
+        remote/RemoteLayout.hpp
+        remote/RoutingSessionFactory.hpp
+        remote/TmuxController.hpp
     )
     list(APPEND _core_source_files
         window/CommandPaletteModel.cpp

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Grid.h>
+#include <vtbackend/Grid.hpp>
 
-#include <vtbackend/primitives.h>
+#include <vtbackend/Primitives.hpp>
 
-#include <crispy/assert.h>
-#include <crispy/logstore.h>
+#include <crispy/Assert.hpp>
+#include <crispy/LogStore.hpp>
 
 #include <algorithm>
 #include <format>
@@ -21,8 +21,8 @@ using std::vector;
 namespace vtbackend
 {
 
-auto inline const gridLog = logstore::category(
-    "vt.grid", "Grid related", logstore::category::state::Disabled, logstore::category::visibility::Hidden);
+auto inline const gridLog = logstore::Category(
+    "vt.grid", "Grid related", logstore::Category::State::Disabled, logstore::Category::Visibility::Hidden);
 
 namespace detail
 {
@@ -647,7 +647,7 @@ void Grid::scrollLeft(GraphicsAttributes defaultAttributes, Margin margin) noexc
 void Grid::reset()
 {
     _linesUsed = _pageSize.lines;
-    _lines.rotate_right(_lines.zero_index());
+    _lines.rotateRight(_lines.zeroIndex());
     for (int i = 0; i < unbox(_pageSize.lines); ++i)
         _lines[i].reset(defaultLineFlags(), GraphicsAttributes {});
     bumpGeneration();
@@ -866,10 +866,9 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
         if (!_reflowOnResize)
         {
             _pageSize.columns = newColumnCount;
-            crispy::for_each(_lines, [=](Line& line) {
+            for (auto& line: _lines)
                 if (newColumnCount < line.size())
                     line.resize(newColumnCount);
-            });
             verifyState();
             return cursor + std::min(cursor.column, boxed_cast<ColumnOffset>(newColumnCount));
         }
@@ -985,19 +984,19 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
 
     CellLocation cursor = currentCursorPos;
 
-    using crispy::comparison;
+    using crispy::Comparison;
     switch (crispy::strongCompare(newSize.columns, _pageSize.columns))
     {
-        case comparison::Greater: cursor += growColumns(newSize.columns); break;
-        case comparison::Less: cursor = shrinkColumns(newSize.columns, newSize.lines, cursor); break;
-        case comparison::Equal: break;
+        case Comparison::Greater: cursor += growColumns(newSize.columns); break;
+        case Comparison::Less: cursor = shrinkColumns(newSize.columns, newSize.lines, cursor); break;
+        case Comparison::Equal: break;
     }
 
     switch (crispy::strongCompare(newSize.lines, _pageSize.lines))
     {
-        case comparison::Greater: cursor += growLines(newSize.lines, cursor); break;
-        case comparison::Less: cursor += shrinkLines(newSize.lines, cursor); break;
-        case comparison::Equal: break;
+        case Comparison::Greater: cursor += growLines(newSize.lines, cursor); break;
+        case Comparison::Less: cursor += shrinkLines(newSize.lines, cursor); break;
+        case Comparison::Equal: break;
     }
 
     Ensures(_pageSize == newSize);
@@ -1023,7 +1022,7 @@ std::ostream& dumpGrid(std::ostream& os, Grid const& grid)
         grid.maxHistoryLineCount(),
         grid.pageSize().lines,
         grid.linesUsed(),
-        grid.zero_index());
+        grid.zeroIndex());
 
     for (int const lineOffset:
          std::views::iota(-unbox(grid.historyLineCount()), unbox(grid.pageSize().lines)))

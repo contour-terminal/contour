@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/MockTerm.h>
+#include <vtbackend/MockTerm.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 
-#include <vtconformance/Diagnostics.h>
+#include <vtconformance/Diagnostics.hpp>
 
 using namespace std::string_view_literals;
 using namespace vtconformance;

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/StatusLineBuilder.h>
+#include <vtbackend/StatusLineBuilder.hpp>
 
-#include <vtbackend/CellFlags.h>
-#include <vtbackend/Color.h>
-#include <vtbackend/Terminal.h>
+#include <vtbackend/CellFlags.hpp>
+#include <vtbackend/Color.hpp>
+#include <vtbackend/Terminal.hpp>
 
-#include <crispy/interpolated_string.h>
-#include <crispy/utils.h>
+#include <crispy/InterpolatedString.hpp>
+#include <crispy/Utils.hpp>
 
 #include <libunicode/convert.h>
 
@@ -47,7 +47,7 @@ namespace // helper functions
     }
 } // namespace
 
-static std::optional<RGBColor> tryParseColorAttribute(crispy::string_interpolation const& interpolation,
+static std::optional<RGBColor> tryParseColorAttribute(crispy::StringInterpolation const& interpolation,
                                                       std::string_view key)
 {
     if (auto const i = interpolation.attributes.find(key); i != interpolation.attributes.end())
@@ -57,7 +57,7 @@ static std::optional<RGBColor> tryParseColorAttribute(crispy::string_interpolati
 }
 
 /// The value of attribute @p key, or nullopt when the interpolation does not carry it.
-static std::optional<std::string> tryParseStringAttribute(crispy::string_interpolation const& interpolation,
+static std::optional<std::string> tryParseStringAttribute(crispy::StringInterpolation const& interpolation,
                                                           std::string_view key)
 {
     if (auto const i = interpolation.attributes.find(key); i != interpolation.attributes.end())
@@ -73,7 +73,7 @@ static std::optional<std::string> tryParseStringAttribute(crispy::string_interpo
 /// missing, which makes the placeholder unrecognized and so echoed verbatim by the caller.
 template <typename T>
 static std::optional<StatusLineDefinitions::Item> makeItemOfType(
-    StatusLineDefinitions::Styles const& styles, crispy::string_interpolation const& interpolation)
+    StatusLineDefinitions::Styles const& styles, crispy::StringInterpolation const& interpolation)
 {
     if constexpr (std::same_as<T, StatusLineDefinitions::Command>)
     {
@@ -106,7 +106,7 @@ static std::optional<StatusLineDefinitions::Item> makeItemOfType(
 /// The item @p interpolation describes, or nullopt when it names no known placeholder (or names one but
 /// omits an attribute it cannot do without), in which case the caller echoes it verbatim.
 static std::optional<StatusLineDefinitions::Item> makeStatusLineItem(
-    crispy::string_interpolation const& interpolation)
+    crispy::StringInterpolation const& interpolation)
 {
     auto styles = StatusLineDefinitions::Styles {};
 
@@ -138,7 +138,7 @@ StatusLineSegment parseStatusLineSegment(std::string_view text)
     // Parses a string like:
     // "{Clock:Bold,Italic,Color=#FFFF00} | {VTType} | {InputMode} {Search:Bold,Color=Yellow}"
 
-    auto const interpolations = crispy::parse_interpolated_string(text);
+    auto const interpolations = crispy::parseInterpolatedString(text);
 
     // An un-styled literal Text item wrapping the given source bytes; used both for the plain-text
     // fragments and for the verbatim echo of an unrecognized placeholder.
@@ -150,15 +150,15 @@ StatusLineSegment parseStatusLineSegment(std::string_view text)
     {
         if (std::holds_alternative<std::string_view>(fragment))
             segment.emplace_back(literalText(std::get<std::string_view>(fragment)));
-        // Reached by const reference out of the variant (no copy): binding the string_interpolation by
+        // Reached by const reference out of the variant (no copy): binding the StringInterpolation by
         // value here would deep-copy its flag set and attribute map.
-        else if (auto const item = makeStatusLineItem(std::get<crispy::string_interpolation>(fragment)))
+        else if (auto const item = makeStatusLineItem(std::get<crispy::StringInterpolation>(fragment)))
             segment.emplace_back(*item);
         else
             // An unrecognized placeholder is echoed verbatim (its exact original `{...}` slice) rather than
             // dropped, so the user sees what they typed — matching expandTabLabel's tab-strip handling so
             // both surfaces treat unknown placeholders identically.
-            segment.emplace_back(literalText(std::get<crispy::string_interpolation>(fragment).whole));
+            segment.emplace_back(literalText(std::get<crispy::StringInterpolation>(fragment).whole));
     }
 
     return segment;
@@ -311,7 +311,7 @@ namespace
 
         std::string visit(StatusLineDefinitions::Clock const&)
         {
-            crispy::ignore_unused(this);
+            crispy::ignoreUnused(this);
 
             // TODO: Find a more convenient way; The following is printing the time in UTC,
             //       but we need it in local time.
@@ -406,7 +406,7 @@ namespace
 
         std::string visit(StatusLineDefinitions::Command const& item)
         {
-            crispy::ignore_unused(this);
+            crispy::ignoreUnused(this);
 
             std::string result;
             if (FILE* fp = popen(item.command.c_str(), "r"); fp)
@@ -429,7 +429,7 @@ namespace
 
         std::string visit(StatusLineDefinitions::Text const& item)
         {
-            crispy::ignore_unused(this);
+            crispy::ignoreUnused(this);
             return item.text;
         }
 
@@ -486,7 +486,7 @@ namespace
     /// Writes a placeholder's attribute list, emitting the ':' that separates the placeholder name
     /// from its first attribute and the ',' before each subsequent one.
     ///
-    /// crispy::parse_interpolation splits a placeholder at its *first* colon -- everything before it
+    /// crispy::parseInterpolation splits a placeholder at its *first* colon -- everything before it
     /// is the name -- then splits what follows on commas. Emitting a comma where the colon belongs
     /// therefore folds the entire attribute list into the name, which matches no placeholder and is
     /// echoed back as literal text: the item and every style on it are destroyed by one round trip.

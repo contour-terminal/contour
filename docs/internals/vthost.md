@@ -315,7 +315,7 @@ pre-retrofit baseline (acceptance was < 0.5 %), `writeTextToSoA` and
 `NativeSession` (server) pushes an attach snapshot (SessionState + a snapshot
 Delta per session), then 20 ms-debounced deltas off the host's screen-updated
 signal. Deltas also carry the currently-SET DEC private modes of a
-single-sourced mirrored-mode table (`vthost/MirroredModes.h`: cursor keys,
+single-sourced mirrored-mode table (`vthost/MirroredModes.hpp`: cursor keys,
 keypad, backarrow, bracketed paste, focus, cursor visibility) —
 everything a client needs to encode INPUT correctly; a pure mode flip pushes
 even when no cell changed. Output-side modes (autowrap, origin, margins) stay
@@ -369,7 +369,7 @@ still outruns what the floor can name, `pushDelta` promotes it to a snapshot: ro
 the daemon can no longer name become an honest absence rather than fabricated blanks.
 
 **The invariants live at the mechanism, not at the policy above it.** `vthost::
-hostedSessionSettings` (`vthost/SessionSettings.h`) normalizes any settings a hosted session is
+hostedSessionSettings` (`vthost/SessionSettings.hpp`) normalizes any settings a hosted session is
 about to be built with, whatever produced them — the daemon's profile, a client's stated preference,
 or a bare `vtbackend::Settings`. `SessionHost` runs it in its constructor and again in
 `seedSession`, so no caller can open the defect back up. Two things it asserts: a zero scrollback
@@ -638,7 +638,7 @@ Its diagnostics go to `--log-file`, which this path always supplies.
 
 `contour daemon-service install|uninstall|start|stop|restart|status` registers that daemon with
 the OS. Two mechanisms hide behind the verbs, because on Windows **no single one does both
-halves** of what is wanted (`vthost/ServiceControl.h`):
+halves** of what is wanted (`vthost/ServiceControl.hpp`):
 
 | `--start` | Backend | Trigger | Elevation | Password |
 | --- | --- | --- | --- | --- |

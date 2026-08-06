@@ -1,60 +1,60 @@
 add_library(vthost STATIC
-    ClientSizePolicy.h
-    ImageWire.h
-    MouseWire.h
+    ClientSizePolicy.hpp
+    ImageWire.hpp
+    MouseWire.hpp
     Daemon.cpp
-    Daemon.h
+    Daemon.hpp
     ConnectionAcceptor.cpp
-    ConnectionAcceptor.h
+    ConnectionAcceptor.hpp
     NativeSession.cpp
-    NativeSession.h
-    PduPump.h
+    NativeSession.hpp
+    PduPump.hpp
     SessionHost.cpp
-    SessionHost.h
+    SessionHost.hpp
     ServiceControl.cpp
-    ServiceControl.h
+    ServiceControl.hpp
     ServiceControl_win32.cpp
     SessionSettings.cpp
-    SessionSettings.h
-    SocketPath.h
-    TappingPty.h
+    SessionSettings.hpp
+    SocketPath.hpp
+    TappingPty.hpp
     client/NativeClient.cpp
-    client/NativeClient.h
+    client/NativeClient.hpp
     client/LayoutReconstruction.cpp
-    client/LayoutReconstruction.h
+    client/LayoutReconstruction.hpp
     imsg/CommandArgv.cpp
-    imsg/CommandArgv.h
+    imsg/CommandArgv.hpp
     imsg/Identify.cpp
-    imsg/Identify.h
+    imsg/Identify.hpp
     imsg/ImsgCodec.cpp
-    imsg/ImsgCodec.h
+    imsg/ImsgCodec.hpp
     client/ScreenMirror.cpp
-    client/ScreenMirror.h
+    client/ScreenMirror.hpp
     GridWire.cpp
-    GridWire.h
+    GridWire.hpp
     proto/Pdu.cpp
-    proto/Pdu.h
+    proto/Pdu.hpp
     proto/PduTrace.cpp
-    proto/PduTrace.h
+    proto/PduTrace.hpp
     proto/Wire.cpp
-    proto/Wire.h
+    proto/Wire.hpp
     tmux/ControlModeParser.cpp
-    tmux/ControlModeParser.h
+    tmux/ControlModeParser.hpp
     tmux/ControlModeSpawn.cpp
-    tmux/ControlModeSpawn.h
+    tmux/ControlModeSpawn.hpp
     tmux/ControlOutput.cpp
-    tmux/ControlOutput.h
+    tmux/ControlOutput.hpp
     tmux/ControlSession.cpp
-    tmux/ControlSession.h
+    tmux/ControlSession.hpp
     tmux/ImsgServer.cpp
-    tmux/ImsgServer.h
+    tmux/ImsgServer.hpp
     tmux/LayoutString.cpp
-    tmux/LayoutString.h
-    tmux/PaneSink.h
+    tmux/LayoutString.hpp
+    tmux/PaneSink.hpp
     tmux/TmuxClientModel.cpp
-    tmux/TmuxClientModel.h
+    tmux/TmuxClientModel.hpp
     tmux/TmuxGateway.cpp
-    tmux/TmuxGateway.h
+    tmux/TmuxGateway.hpp
 )
 target_link_libraries(vthost PUBLIC
     net
@@ -90,7 +90,7 @@ if(VTHOST_TESTING)
         SocketPath_test.cpp
         Token_test.cpp
         testing/GridParity.cpp
-        testing/GridParity.h
+        testing/GridParity.hpp
         client/NativeClient_test.cpp
         client/LayoutReconstruction_test.cpp
         client/ScreenMirror_test.cpp

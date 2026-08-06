@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtrasterizer/ImageRenderer.h>
+#include <vtrasterizer/ImageRenderer.hpp>
 
-#include <crispy/StrongHash.h>
-#include <crispy/algorithm.h>
-#include <crispy/times.h>
+#include <crispy/StrongHash.hpp>
+#include <crispy/Times.hpp>
 
 #include <algorithm>
 #include <array>
@@ -161,7 +160,7 @@ void ImageRenderer::evictToBudget()
     }
 }
 
-void ImageRenderer::fillGap(crispy::point pos,
+void ImageRenderer::fillGap(crispy::Point pos,
                             vtbackend::FragmentPlacement const& placement,
                             vtbackend::RGBAColor color,
                             bool aboveText)
@@ -203,7 +202,7 @@ void ImageRenderer::fillGap(crispy::point pos,
     emit(coveredRight, placement.targetY, cellWidth - coveredRight, coveredHeight); // right
 }
 
-void ImageRenderer::renderImage(crispy::point pos, vtbackend::ImageFragment const& fragment)
+void ImageRenderer::renderImage(crispy::Point pos, vtbackend::ImageFragment const& fragment)
 {
     auto const& rasterizedImage = fragment.rasterizedImage();
     auto const placement = rasterizedImage.fragmentPlacement(fragment.offset(), _cellSize);

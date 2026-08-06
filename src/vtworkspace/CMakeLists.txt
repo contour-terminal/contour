@@ -1,16 +1,16 @@
 add_library(vtworkspace STATIC
-    LayoutConvert.h
+    LayoutConvert.hpp
     LayoutTree.cpp
-    LayoutTree.h
+    LayoutTree.hpp
     Pane.cpp
-    Pane.h
-    PaneLayout.h
+    Pane.hpp
+    PaneLayout.hpp
     Tab.cpp
-    Tab.h
+    Tab.hpp
     SessionModel.cpp
-    SessionModel.h
-    ModelEvents.h
-    Primitives.h
+    SessionModel.hpp
+    ModelEvents.hpp
+    Primitives.hpp
 )
 target_link_libraries(vtworkspace PUBLIC
     vtbackend

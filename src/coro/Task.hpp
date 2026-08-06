@@ -56,10 +56,12 @@ namespace detail
         // the compiler-generated promise.hook() calls trip static-accessed-through-
         // instance). readability-convert-member-functions-to-static is therefore
         // disabled for this directory (see src/coro/.clang-tidy).
+        // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
         [[nodiscard]] bool await_ready() const noexcept { return false; }
 
         /// @return The continuation to resume via symmetric transfer.
         template <typename Promise>
+        // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
         [[nodiscard]] std::coroutine_handle<> await_suspend(
             std::coroutine_handle<Promise> self) const noexcept
         {
@@ -67,6 +69,7 @@ namespace detail
             return continuation ? continuation : std::noop_coroutine();
         }
 
+        // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
         void await_resume() const noexcept {}
     };
 
@@ -80,12 +83,15 @@ namespace detail
         StopToken token;                      ///< Inherited from the awaiting coroutine.
 
         /// Start suspended so a continuation can be attached before the body runs.
+        // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
         [[nodiscard]] std::suspend_always initial_suspend() const noexcept { return {}; }
 
         /// Suspend at the end and tail-transfer to the continuation.
+        // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
         [[nodiscard]] FinalAwaiter final_suspend() const noexcept { return {}; }
 
         /// Captures an exception escaping the coroutine body for later rethrow.
+        // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
         void unhandled_exception() noexcept { exception = std::current_exception(); }
 
         /// @return The cancellation token observed by this coroutine.
@@ -110,6 +116,7 @@ class [[nodiscard]] Task
         std::optional<T> result; ///< The produced value, populated by `co_return`.
 
         /// @return The owning task wrapping this coroutine.
+        // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
         Task get_return_object() noexcept
         {
             return Task { std::coroutine_handle<PromiseType>::from_promise(*this) };
@@ -119,22 +126,25 @@ class [[nodiscard]] Task
         /// @param value The produced value, perfect-forwarded into storage.
         template <typename U = T>
             requires std::convertible_to<U&&, T>
+        // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
         void return_value(U&& value)
         {
             result.emplace(std::forward<U>(value));
         }
     };
 
+    // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
     using promise_type = PromiseType;
-    using handle_type = std::coroutine_handle<PromiseType>;
+    using HandleType = std::coroutine_handle<PromiseType>;
 
     /// Awaiter produced by `co_await`-ing a task; starts the child and yields its result.
     class Awaiter
     {
       public:
-        explicit Awaiter(handle_type child) noexcept: _child(child) {}
+        explicit Awaiter(HandleType child) noexcept: _child(child) {}
 
         /// @return True if there is nothing to suspend for (no child, or already done).
+        // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
         [[nodiscard]] bool await_ready() const noexcept { return !_child || _child.done(); }
 
         /// Records the awaiting coroutine as the child's continuation, propagates
@@ -142,6 +152,7 @@ class [[nodiscard]] Task
         /// @param awaiting The coroutine performing the `co_await`.
         /// @return The child handle to resume.
         template <typename Promise>
+        // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
         [[nodiscard]] std::coroutine_handle<> await_suspend(std::coroutine_handle<Promise> awaiting) noexcept
         {
             _child.promise().continuation = awaiting;
@@ -151,6 +162,7 @@ class [[nodiscard]] Task
         }
 
         /// @return The value produced by the child, or rethrows its exception.
+        // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
         T await_resume()
         {
             if (!_child)
@@ -161,12 +173,12 @@ class [[nodiscard]] Task
         }
 
       private:
-        handle_type _child; ///< Borrowed; owned and destroyed by the awaited Task value.
+        HandleType _child; ///< Borrowed; owned and destroyed by the awaited Task value.
     };
 
     Task() noexcept = default;
 
-    explicit Task(handle_type handle) noexcept: _handle(handle) {}
+    explicit Task(HandleType handle) noexcept: _handle(handle) {}
 
     Task(Task&&) noexcept = default;
     Task& operator=(Task&&) noexcept = default;
@@ -180,7 +192,7 @@ class [[nodiscard]] Task
 
     /// @return The underlying coroutine handle (for the runtime/driver to start
     /// and inspect a root task). Prefer `co_await` for composition.
-    [[nodiscard]] handle_type handle() const noexcept { return _handle.get(); }
+    [[nodiscard]] HandleType handle() const noexcept { return _handle.get(); }
 
     /// @return True once the coroutine has run to completion.
     [[nodiscard]] bool done() const noexcept { return !_handle || _handle.get().done(); }
@@ -215,26 +227,31 @@ class [[nodiscard]] Task<void>
     struct PromiseType: detail::TaskPromiseBase
     {
         /// @return The owning task wrapping this coroutine.
+        // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
         Task get_return_object() noexcept
         {
             return Task { std::coroutine_handle<PromiseType>::from_promise(*this) };
         }
 
+        // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
         void return_void() const noexcept {}
     };
 
+    // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
     using promise_type = PromiseType;
-    using handle_type = std::coroutine_handle<PromiseType>;
+    using HandleType = std::coroutine_handle<PromiseType>;
 
     /// Awaiter produced by `co_await`-ing a `Task<void>`.
     class Awaiter
     {
       public:
-        explicit Awaiter(handle_type child) noexcept: _child(child) {}
+        explicit Awaiter(HandleType child) noexcept: _child(child) {}
 
+        // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
         [[nodiscard]] bool await_ready() const noexcept { return !_child || _child.done(); }
 
         template <typename Promise>
+        // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
         [[nodiscard]] std::coroutine_handle<> await_suspend(std::coroutine_handle<Promise> awaiting) noexcept
         {
             _child.promise().continuation = awaiting;
@@ -244,6 +261,7 @@ class [[nodiscard]] Task<void>
         }
 
         /// Rethrows any exception escaping the child body.
+        // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
         void await_resume() const
         {
             if (!_child)
@@ -253,12 +271,12 @@ class [[nodiscard]] Task<void>
         }
 
       private:
-        handle_type _child; ///< Borrowed; owned and destroyed by the awaited Task value.
+        HandleType _child; ///< Borrowed; owned and destroyed by the awaited Task value.
     };
 
     Task() noexcept = default;
 
-    explicit Task(handle_type handle) noexcept: _handle(handle) {}
+    explicit Task(HandleType handle) noexcept: _handle(handle) {}
 
     Task(Task&&) noexcept = default;
     Task& operator=(Task&&) noexcept = default;
@@ -268,7 +286,7 @@ class [[nodiscard]] Task<void>
 
     [[nodiscard]] Awaiter operator co_await() && noexcept { return Awaiter { _handle.get() }; }
 
-    [[nodiscard]] handle_type handle() const noexcept { return _handle.get(); }
+    [[nodiscard]] HandleType handle() const noexcept { return _handle.get(); }
 
     [[nodiscard]] bool done() const noexcept { return !_handle || _handle.get().done(); }
 

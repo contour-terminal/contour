@@ -3,7 +3,7 @@
 
 #include <cstdlib>
 
-#include <vtconformance/Report.h>
+#include <vtconformance/Report.hpp>
 
 using namespace std::string_view_literals;
 using namespace vtconformance;

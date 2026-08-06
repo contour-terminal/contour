@@ -5,20 +5,22 @@ CMake:
     - cmake/**
 "VT: backend":
     - src/vtbackend/*.cpp
-    - src/vtbackend/*.h
+    - src/vtbackend/*.hpp
     - src/vtpty/*.cpp
-    - src/vtpty/*.h
+    - src/vtpty/*.hpp
     - src/vtparser/*.cpp
-    - src/vtparser/*.h
+    - src/vtparser/*.hpp
 "VT: rasterizer":
     - src/vtrasterizer/*.cpp
+    - src/vtrasterizer/*.hpp
+    # shared_defines.h keeps its .h: it is shared with GLSL, not a C++ header.
     - src/vtrasterizer/*.h
 documentation:
     - "**/*.md"
     - docs/**
 fonts:
     - src/text_shaper/*.cpp
-    - src/text_shaper/*.h
+    - src/text_shaper/*.hpp
 frontend:
     - src/contour/**
 test:

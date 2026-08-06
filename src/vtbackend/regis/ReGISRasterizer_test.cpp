@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/regis/ReGISRasterizer.h>
+#include <vtbackend/regis/ReGISRasterizer.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 using namespace vtbackend;
 using namespace vtbackend::regis;
-using crispy::point;
+using crispy::Point;
 
 namespace
 {
@@ -43,7 +43,7 @@ TEST_CASE("ReGISRasterizer.plotDot", "[regis][raster]")
 {
     auto r = canvas(8, 8);
     auto const pen = Pen { .color = RGBColor { 255, 255, 255 } };
-    r.plotDot(pen, point { .x = 3, .y = 4 });
+    r.plotDot(pen, Point { .x = 3, .y = 4 });
     CHECK(painted(r, 3, 4));
     CHECK_FALSE(painted(r, 2, 4));
     CHECK_FALSE(painted(r, 4, 4));
@@ -53,7 +53,7 @@ TEST_CASE("ReGISRasterizer.plotLine.horizontal", "[regis][raster]")
 {
     auto r = canvas(10, 4);
     auto const pen = Pen { .color = RGBColor { 255, 255, 255 } };
-    r.plotLine(pen, point { .x = 1, .y = 2 }, point { .x = 8, .y = 2 });
+    r.plotLine(pen, Point { .x = 1, .y = 2 }, Point { .x = 8, .y = 2 });
     for (auto x = 1; x <= 8; ++x)
         CHECK(painted(r, x, 2));
     CHECK_FALSE(painted(r, 0, 2));
@@ -64,7 +64,7 @@ TEST_CASE("ReGISRasterizer.plotLine.diagonal", "[regis][raster]")
 {
     auto r = canvas(6, 6);
     auto const pen = Pen { .color = RGBColor { 255, 255, 255 } };
-    r.plotLine(pen, point { .x = 0, .y = 0 }, point { .x = 5, .y = 5 });
+    r.plotLine(pen, Point { .x = 0, .y = 0 }, Point { .x = 5, .y = 5 });
     for (auto i = 0; i <= 5; ++i)
         CHECK(painted(r, i, i));
 }
@@ -75,7 +75,7 @@ TEST_CASE("ReGISRasterizer.plotLine.pattern", "[regis][raster]")
     auto r = canvas(8, 2);
     auto pen = Pen { .color = RGBColor { 255, 255, 255 }, .pattern = 0xAA };
     r.resetPattern();
-    r.plotLine(pen, point { .x = 0, .y = 0 }, point { .x = 7, .y = 0 });
+    r.plotLine(pen, Point { .x = 0, .y = 0 }, Point { .x = 7, .y = 0 });
     CHECK(painted(r, 0, 0));
     CHECK_FALSE(painted(r, 1, 0));
     CHECK(painted(r, 2, 0));
@@ -87,7 +87,7 @@ TEST_CASE("ReGISRasterizer.writeMode.erase", "[regis][raster]")
     auto r = canvas(4, 4);
     r.eraseTo(RGBAColor { 200, 200, 200, 255 });
     auto const pen = Pen { .mode = WritingMode::Erase };
-    r.plotDot(pen, point { .x = 1, .y = 1 });
+    r.plotDot(pen, Point { .x = 1, .y = 1 });
     CHECK(r.at(1, 1).value == 0u); // erased back to transparent
     CHECK(painted(r, 0, 0));       // neighbour untouched
 }
@@ -97,7 +97,7 @@ TEST_CASE("ReGISRasterizer.writeMode.complement", "[regis][raster]")
     auto r = canvas(4, 4);
     r.eraseTo(RGBAColor { 0, 0, 0, 255 });
     auto const pen = Pen { .mode = WritingMode::Complement };
-    r.plotDot(pen, point { .x = 2, .y = 2 });
+    r.plotDot(pen, Point { .x = 2, .y = 2 });
     auto const c = r.at(2, 2);
     CHECK(c.red() == 255);
     CHECK(c.green() == 255);
@@ -109,9 +109,9 @@ TEST_CASE("ReGISRasterizer.fillPolygon.triangle", "[regis][raster]")
     auto r = canvas(10, 10);
     auto const pen = Pen { .color = RGBColor { 255, 255, 255 } };
     auto const pts = std::array {
-        point { .x = 1, .y = 1 },
-        point { .x = 8, .y = 1 },
-        point { .x = 1, .y = 8 },
+        Point { .x = 1, .y = 1 },
+        Point { .x = 8, .y = 1 },
+        Point { .x = 1, .y = 8 },
     };
     r.fillPolygon(pen, pts);
     CHECK(painted(r, 2, 2));       // inside
@@ -122,7 +122,7 @@ TEST_CASE("ReGISRasterizer.plotCircle.onRadius", "[regis][raster]")
 {
     auto r = canvas(21, 21);
     auto const pen = Pen { .color = RGBColor { 255, 255, 255 } };
-    r.plotCircle(pen, point { .x = 10, .y = 10 }, 8);
+    r.plotCircle(pen, Point { .x = 10, .y = 10 }, 8);
     // Cardinal points of the circle are painted; the centre is not.
     CHECK(painted(r, 18, 10));
     CHECK(painted(r, 2, 10));
@@ -136,9 +136,9 @@ TEST_CASE("ReGISRasterizer.plotCurve.passesThroughPoints", "[regis][raster]")
     auto r = canvas(30, 30);
     auto const pen = Pen { .color = RGBColor { 255, 255, 255 } };
     auto const pts = std::array {
-        point { .x = 2, .y = 15 },
-        point { .x = 15, .y = 2 },
-        point { .x = 28, .y = 15 },
+        Point { .x = 2, .y = 15 },
+        Point { .x = 15, .y = 2 },
+        Point { .x = 28, .y = 15 },
     };
     r.plotCurve(pen, pts, false);
     // A Catmull-Rom spline interpolates its control points, so each is painted.
@@ -154,7 +154,7 @@ TEST_CASE("ReGISRasterizer.shade.fillsToReference", "[regis][raster]")
     auto const pen = Pen {
         .color = RGBColor { 255, 255, 255 }, .shade = true, .shadeVertical = false, .shadeReference = 9
     };
-    r.plotLine(pen, point { .x = 1, .y = 2 }, point { .x = 10, .y = 2 });
+    r.plotLine(pen, Point { .x = 1, .y = 2 }, Point { .x = 10, .y = 2 });
     for (auto y = 2; y <= 9; ++y)
         CHECK(painted(r, 5, y)); // the column under the line is filled to the reference
     CHECK_FALSE(painted(r, 5, 11));
@@ -176,8 +176,8 @@ TEST_CASE("ReGISRasterizer.plotArc.boundsEnormousSweep", "[regis][raster]")
     // the cap keeps it bounded while still drawing the arc. This test must simply return.
     auto r = canvas(40, 40);
     auto const pen = Pen { .color = RGBColor { 255, 255, 255 } };
-    r.plotArc(pen, point { .x = 20, .y = 20 }, 10, 0.0, 1e12);
-    CHECK(painted(r, 30, 20)); // the arc's start point (radius 10 to the right of centre)
+    r.plotArc(pen, Point { .x = 20, .y = 20 }, 10, 0.0, 1e12);
+    CHECK(painted(r, 30, 20)); // the arc's start Point (radius 10 to the right of centre)
 }
 
 TEST_CASE("ReGISRasterizer.plotCircle.boundsEnormousRadius", "[regis][raster]")
@@ -186,6 +186,6 @@ TEST_CASE("ReGISRasterizer.plotCircle.boundsEnormousRadius", "[regis][raster]")
     // radius far beyond the canvas paints nothing on-canvas but must return promptly rather than spin.
     auto r = canvas(40, 40);
     auto const pen = Pen { .color = RGBColor { 255, 255, 255 } };
-    r.plotCircle(pen, point { .x = 20, .y = 20 }, 1 << 20);
+    r.plotCircle(pen, Point { .x = 20, .y = 20 }, 1 << 20);
     SUCCEED("returned without spinning on an out-of-range radius");
 }

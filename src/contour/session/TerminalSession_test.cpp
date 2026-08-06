@@ -5,7 +5,7 @@
 // Unlike the model-layer tests (TabListModel_test / vtworkspace SessionModel_test), these construct an
 // actual TerminalSession around a MockPty and a test-configured ContourGuiApp. That is only possible
 // because the contour frontend is built as the `contour_core` object library the test links against,
-// and because crispy::app exposes parseParametersForTesting() to populate parameters() without
+// and because crispy::App exposes parseParametersForTesting() to populate parameters() without
 // launching the GUI event loop.
 //
 // The headline case is the regression behind the "close leaks background tabs" finding:
@@ -14,19 +14,19 @@
 // terminate() early-returned for a display-less session, so the device stayed open and the session —
 // plus its shell process — leaked.
 
-#include <contour/ContourGuiApp.h>
-#include <contour/config/Actions.h>
-#include <contour/input/MouseMapping.h>
-#include <contour/session/TerminalSession.h>
-#include <contour/session/TerminalSessionManager.h>
-#include <contour/test/FakeDisplaySurface.h>
-#include <contour/test/GuiTestFixtures.h>
+#include <contour/ContourGuiApp.hpp>
+#include <contour/config/Actions.hpp>
+#include <contour/input/MouseMapping.hpp>
+#include <contour/session/TerminalSession.hpp>
+#include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/FakeDisplaySurface.hpp>
+#include <contour/test/GuiTestFixtures.hpp>
 
-#include <vtbackend/Hyperlink.h>
+#include <vtbackend/Hyperlink.hpp>
 
-#include <vtpty/MockPty.h>
+#include <vtpty/MockPty.hpp>
 
-#include <crispy/utils.h>
+#include <crispy/Utils.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QTemporaryDir>
@@ -1104,7 +1104,7 @@ TEST_CASE("TerminalSession: ScreenshotVT writes the screen capture to a file", "
     std::filesystem::create_directories(tmp);
     auto const prev = std::filesystem::current_path();
     std::filesystem::current_path(tmp);
-    auto const restore = crispy::finally { [&] {
+    auto const restore = crispy::Finally { [&] {
         std::filesystem::current_path(prev);
         std::filesystem::remove_all(tmp);
     } };
@@ -1672,8 +1672,8 @@ TEST_CASE("TerminalSession: accumulated angle scroll consumes into line/column s
     auto session = makeDisplaylessSession(testApp.app());
 
     // angle-only delta with no pixel delta takes the "reset pixel accumulation" branch.
-    session->addToAccumulatedScroll(crispy::point { .x = 0, .y = 0 },
-                                    crispy::point { .x = 0, .y = 8 * 5 * 3 },
+    session->addToAccumulatedScroll(crispy::Point { .x = 0, .y = 0 },
+                                    crispy::Point { .x = 0, .y = 8 * 5 * 3 },
                                     vtbackend::ScrollPhase::NoPhase,
                                     false);
     auto const [lines, columns] = session->consumeScroll();
@@ -1692,10 +1692,10 @@ TEST_CASE("TerminalSession: sideways drift of a vertical scroll never becomes a 
     auto constexpr Step = 8 * 5; // one angle notch, per consumeScroll()
 
     session->addToAccumulatedScroll(
-        crispy::point {}, crispy::point { .x = 0, .y = -Step }, vtbackend::ScrollPhase::Begin, false);
+        crispy::Point {}, crispy::Point { .x = 0, .y = -Step }, vtbackend::ScrollPhase::Begin, false);
     for ([[maybe_unused]] auto const _: std::views::iota(0, 20))
         session->addToAccumulatedScroll(
-            crispy::point {}, crispy::point { .x = Step, .y = -1 }, vtbackend::ScrollPhase::Update, false);
+            crispy::Point {}, crispy::Point { .x = Step, .y = -1 }, vtbackend::ScrollPhase::Update, false);
 
     auto const [lines, columns] = session->consumeScroll();
     CHECK(columns.value == 0);
@@ -1713,9 +1713,9 @@ TEST_CASE("TerminalSession: a deliberate sideways swipe does produce column step
     auto constexpr Step = 8 * 5;
 
     session->addToAccumulatedScroll(
-        crispy::point {}, crispy::point { .x = Step, .y = 0 }, vtbackend::ScrollPhase::Begin, false);
+        crispy::Point {}, crispy::Point { .x = Step, .y = 0 }, vtbackend::ScrollPhase::Begin, false);
     session->addToAccumulatedScroll(
-        crispy::point {}, crispy::point { .x = Step, .y = 0 }, vtbackend::ScrollPhase::Update, false);
+        crispy::Point {}, crispy::Point { .x = Step, .y = 0 }, vtbackend::ScrollPhase::Update, false);
 
     auto const [lines, columns] = session->consumeScroll();
     CHECK(columns.value != 0);

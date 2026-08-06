@@ -4,7 +4,7 @@
     #include <windows.h>
 #endif
 
-#include <contour/input/KeyMapping.h>
+#include <contour/input/KeyMapping.hpp>
 
 namespace contour::input
 {

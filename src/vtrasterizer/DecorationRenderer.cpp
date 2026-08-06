@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtrasterizer/DecorationRenderer.h>
+#include <vtrasterizer/DecorationRenderer.hpp>
 
-#include <vtrasterizer/GridMetrics.h>
-#include <vtrasterizer/Pixmap.h>
-#include <vtrasterizer/UnderlineGeometry.h>
+#include <vtrasterizer/GridMetrics.hpp>
+#include <vtrasterizer/Pixmap.hpp>
+#include <vtrasterizer/UnderlineGeometry.hpp>
 #include <vtrasterizer/shared_defines.h>
 
-#include <crispy/times.h>
-#include <crispy/utils.h>
+#include <crispy/Times.hpp>
+#include <crispy/Utils.hpp>
 
 #include <array>
 #include <cmath>
@@ -17,7 +17,7 @@
 #include <ranges>
 #include <utility>
 
-using crispy::each_element;
+using crispy::eachElement;
 
 using std::array;
 using std::ceil;
@@ -76,7 +76,7 @@ void DecorationRenderer::initializeDirectMapping()
     if (!SoftRequire(_textureAtlas))
         return;
 
-    for (Decorator const decoration: each_element<Decorator>())
+    for (Decorator const decoration: eachElement<Decorator>())
     {
         auto const tileIndex = _directMapping.toTileIndex(static_cast<uint32_t>(decoration));
         auto const tileLocation = _textureAtlas->tileLocation(tileIndex);
@@ -312,7 +312,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
 }
 
 void DecorationRenderer::renderDecoration(Decorator decoration,
-                                          crispy::point pos,
+                                          crispy::Point pos,
                                           vtbackend::ColumnCount columnCount,
                                           vtbackend::RGBColor const& color)
 {

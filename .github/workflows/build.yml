@@ -75,8 +75,12 @@ jobs:
         chmod +x llvm.sh
         sudo ./llvm.sh "$LLVM_VERSION"
         sudo apt-get install "clang-format-$LLVM_VERSION"
+    # The predicates must stay grouped: an ungrouped `-o` binds looser than any predicate added
+    # later (e.g. -print0), which would silently reduce the file set instead of failing.
+    # `*.h` is not dead weight: src/vtrasterizer/shared_defines.h keeps that extension because it
+    # is shared with GLSL, and it is still a file we format.
     - name: "Clang-format"
-      run: find ./src/ -name "*.cpp" -o -name "*.h" | xargs "clang-format-$LLVM_VERSION" --Werror --dry-run
+      run: find ./src/ \( -name "*.cpp" -o -name "*.hpp" -o -name "*.h" \) -print0 | xargs -0 "clang-format-$LLVM_VERSION" --Werror --dry-run
     - name: "Check includes"
       run: ./scripts/check-includes.sh
 

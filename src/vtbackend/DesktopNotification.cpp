@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/DesktopNotification.h>
+#include <vtbackend/DesktopNotification.hpp>
 
-#include <vtbackend/Terminal.h>
+#include <vtbackend/Terminal.hpp>
 
-#include <crispy/base64.h>
-#include <crispy/utils.h>
+#include <crispy/Base64.hpp>
+#include <crispy/Utils.hpp>
 
 #include <charconv>
 #include <format>
@@ -22,8 +22,8 @@ namespace
     /// Parses the colon-separated key=value metadata portion of an OSC 99 sequence.
     void parseMetadata(string_view metadata, DesktopNotification& notification)
     {
-        crispy::for_each_key_value(
-            crispy::for_each_key_value_params {
+        crispy::forEachKeyValue(
+            crispy::ForEachKeyValueParams {
                 .text = metadata,
                 .entryDelimiter = ':',
                 .assignmentDelimiter = '=',

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/LRUCache.h>
+#include <crispy/LRUCache.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -15,8 +15,8 @@ using namespace std::string_view_literals;
 // {
 //     std::ostream& out = std::cout;
 //
-//     out << std::format("lru_cache({}/{}): {}\n", cache.size(), cache.capacity(), header);
-//     for (typename crispy::lru_cache<A, B>::Item const& item: cache)
+//     out << std::format("LRUCache({}/{}): {}\n", cache.size(), cache.capacity(), header);
+//     for (typename crispy::LRUCache<A, B>::Item const& item: cache)
 //     {
 //         out << std::format("{}: {}\n", item.key, item.value);
 //     }
@@ -38,44 +38,44 @@ static std::string join(std::vector<T> const& list, std::string_view delimiter =
 }
 
 // NOLINTBEGIN(misc-const-correctness,readability-function-cognitive-complexity)
-TEST_CASE("lru_cache.ctor", "[lrucache]")
+TEST_CASE("LRUCache.ctor", "[lrucache]")
 {
-    auto cache = crispy::lru_cache<int, int>(4);
+    auto cache = crispy::LRUCache<int, int>(4);
     CHECK(cache.size() == 0);
     CHECK(cache.capacity() == 4);
 }
 
-TEST_CASE("lru_cache.at", "[lrucache]")
+TEST_CASE("LRUCache.at", "[lrucache]")
 {
-    auto cache = crispy::lru_cache<int, int>(2);
+    auto cache = crispy::LRUCache<int, int>(2);
 
     CHECK_THROWS_AS(cache.at(2), std::out_of_range);
     cache[2] = 4;
     CHECK_NOTHROW(cache.at(2));
 }
 
-TEST_CASE("lru_cache.get_or_emplace", "[lrucache]")
+TEST_CASE("LRUCache.getOrEmplace", "[lrucache]")
 {
-    auto cache = crispy::lru_cache<int, int>(2);
+    auto cache = crispy::LRUCache<int, int>(2);
 
-    int const& a = cache.get_or_emplace(2, []() { return 4; });
+    int const& a = cache.getOrEmplace(2, []() { return 4; });
     CHECK(a == 4);
     CHECK(cache.at(2) == 4);
     CHECK(cache.size() == 1);
     CHECK(join(cache.keys()) == "2"sv);
 
-    int const& a2 = cache.get_or_emplace(2, []() { return -4; });
+    int const& a2 = cache.getOrEmplace(2, []() { return -4; });
     CHECK(a2 == 4);
     CHECK(cache.at(2) == 4);
     CHECK(cache.size() == 1);
 
-    int const& b = cache.get_or_emplace(3, []() { return 6; });
+    int const& b = cache.getOrEmplace(3, []() { return 6; });
     CHECK(b == 6);
     CHECK(cache.at(3) == 6);
     CHECK(cache.size() == 2);
     CHECK(join(cache.keys()) == "3 2"sv);
 
-    int const& c = cache.get_or_emplace(4, []() { return 8; });
+    int const& c = cache.getOrEmplace(4, []() { return 8; });
     CHECK(join(cache.keys()) == "4 3"sv);
     CHECK(c == 8);
     CHECK(cache.at(4) == 8);
@@ -83,16 +83,16 @@ TEST_CASE("lru_cache.get_or_emplace", "[lrucache]")
     CHECK(cache.contains(3));
     CHECK_FALSE(cache.contains(2)); // thrown out
 
-    int const& b2 = cache.get_or_emplace(3, []() { return -3; });
+    int const& b2 = cache.getOrEmplace(3, []() { return -3; });
     CHECK(join(cache.keys()) == "3 4"sv);
     CHECK(b2 == 6);
     CHECK(cache.at(3) == 6);
     CHECK(cache.size() == 2);
 }
 
-TEST_CASE("lru_cache.operator[]", "[lrucache]")
+TEST_CASE("LRUCache.operator[]", "[lrucache]")
 {
-    auto cache = crispy::lru_cache<int, int>(2);
+    auto cache = crispy::LRUCache<int, int>(2);
 
     (void) cache[2];
     CHECK(join(cache.keys()) == "2"sv);
@@ -124,9 +124,9 @@ TEST_CASE("lru_cache.operator[]", "[lrucache]")
     CHECK_FALSE(cache.contains(4)); // thrown out
 }
 
-TEST_CASE("lru_cache.clear", "[lrucache]")
+TEST_CASE("LRUCache.clear", "[lrucache]")
 {
-    auto cache = crispy::lru_cache<int, int>(4);
+    auto cache = crispy::LRUCache<int, int>(4);
     cache[2] = 4;
     cache[3] = 6;
     CHECK(cache.size() == 2);
@@ -134,21 +134,21 @@ TEST_CASE("lru_cache.clear", "[lrucache]")
     CHECK(cache.size() == 0);
 }
 
-TEST_CASE("lru_cache.try_emplace", "[lrucache]")
+TEST_CASE("LRUCache.tryEmplace", "[lrucache]")
 {
-    auto cache = crispy::lru_cache<int, int>(2);
-    auto rv = cache.try_emplace(2, []() { return 4; });
+    auto cache = crispy::LRUCache<int, int>(2);
+    auto rv = cache.tryEmplace(2, []() { return 4; });
     CHECK(rv);
     CHECK(join(cache.keys()) == "2");
     CHECK(cache.at(2) == 4);
 
-    rv = cache.try_emplace(3, []() { return 6; });
+    rv = cache.tryEmplace(3, []() { return 6; });
     CHECK(rv);
     CHECK(join(cache.keys()) == "3 2");
     CHECK(cache.at(2) == 4);
     CHECK(cache.at(3) == 6);
 
-    rv = cache.try_emplace(2, []() { return -1; });
+    rv = cache.tryEmplace(2, []() { return -1; });
     CHECK_FALSE(rv);
     CHECK(join(cache.keys()) == "2 3");
     CHECK(cache.at(2) == 4);

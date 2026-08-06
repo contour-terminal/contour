@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <net/Sockets.h>
+#include <net/Sockets.hpp>
 
 #ifndef _WIN32
 
@@ -15,11 +15,11 @@
     #include <netdb.h>
     #include <unistd.h>
 
-    #include <net/platform/WinsockInit.h>
-    #include <net/posix/FdUtils.h>
-    #include <net/posix/PosixListener.h>
-    #include <net/posix/PosixSocket.h>
-    #include <net/posix/UnixListener.h>
+    #include <net/platform/WinsockInit.hpp>
+    #include <net/posix/FdUtils.hpp>
+    #include <net/posix/PosixListener.hpp>
+    #include <net/posix/PosixSocket.hpp>
+    #include <net/posix/UnixListener.hpp>
 
 namespace net
 {

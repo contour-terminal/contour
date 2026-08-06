@@ -5,9 +5,9 @@
 // The MRU is the one part of the palette that carries state across restarts, so these tests drive the
 // full record -> persist -> reload cycle through the injected store — no filesystem involved.
 
-#include <contour/command/CommandHistory.h>
-#include <contour/command/CommandHistoryStore.h>
-#include <contour/test/CoreFixtures.h>
+#include <contour/command/CommandHistory.hpp>
+#include <contour/command/CommandHistoryStore.hpp>
+#include <contour/test/CoreFixtures.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

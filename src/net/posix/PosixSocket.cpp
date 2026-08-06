@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <net/posix/PosixSocket.h>
+#include <net/posix/PosixSocket.hpp>
 
 #ifndef _WIN32
 
@@ -12,7 +12,7 @@
     #include <fcntl.h>
     #include <unistd.h>
 
-    #include <net/posix/FdUtils.h> // MSG_NOSIGNAL fallback, makeNonBlockingCloexec
+    #include <net/posix/FdUtils.hpp> // MSG_NOSIGNAL fallback, makeNonBlockingCloexec
 
     // macOS / BSD also lack MSG_CMSG_CLOEXEC (atomic close-on-exec for received
     // descriptors); there readWithFd sets FD_CLOEXEC via fcntl right after

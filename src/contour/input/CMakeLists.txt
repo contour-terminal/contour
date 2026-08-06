@@ -5,11 +5,11 @@
 # platform-specific modifier and lock-key handling — three #ifdef branches deep — a pure function of
 # its arguments, and therefore testable without a window, a session or the machine's live lock state.
 add_library(contour_input STATIC
-    HorizontalWheelGesture.h
-    KeyMapping.cpp KeyMapping.h
-    KeyboardLayout.cpp KeyboardLayout.h
-    Logging.h
-    MouseMapping.cpp MouseMapping.h
+    HorizontalWheelGesture.hpp
+    KeyMapping.cpp KeyMapping.hpp
+    KeyboardLayout.cpp KeyboardLayout.hpp
+    Logging.hpp
+    MouseMapping.cpp MouseMapping.hpp
 )
 
 target_link_libraries(contour_input PUBLIC

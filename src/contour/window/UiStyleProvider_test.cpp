@@ -8,11 +8,11 @@
 // native chrome, a lost fixed-pitch hint -- would first be seen by a user whose title bar and tab
 // strip are drawn in the wrong font.
 
-#include <contour/config/Config.h>
-#include <contour/config/UiStyle.h>
-#include <contour/window/UiStyleProvider.h>
+#include <contour/config/Config.hpp>
+#include <contour/config/UiStyle.hpp>
+#include <contour/window/UiStyleProvider.hpp>
 
-#include <text_shaper/font.h>
+#include <text_shaper/Font.hpp>
 
 #include <QtGui/QColor>
 #include <QtGui/QFont>
@@ -42,11 +42,11 @@ namespace
 
     auto& mainProfile = profiles.at("main");
     mainProfile.fonts.value().regular.familyName = "Main Mono";
-    mainProfile.fonts.value().size = text::font_size { 12.0 };
+    mainProfile.fonts.value().size = text::FontSize { 12.0 };
 
     auto big = mainProfile;
     big.fonts.value().regular.familyName = "Big Mono";
-    big.fonts.value().size = text::font_size { 20.0 };
+    big.fonts.value().size = text::FontSize { 20.0 };
     profiles["big"] = std::move(big);
 
     config.defaultProfileName = "main";

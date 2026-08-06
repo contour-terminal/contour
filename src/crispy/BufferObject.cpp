@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/BufferObject.h>
+#include <crispy/BufferObject.hpp>
 
 namespace crispy
 {
 
-template class buffer_object<char>;
-template class buffer_fragment<char>;
-template class buffer_object_pool<char>;
+template class BufferObject<char>;
+template class BufferFragment<char>;
+template class BufferObjectPool<char>;
 
 } // namespace crispy

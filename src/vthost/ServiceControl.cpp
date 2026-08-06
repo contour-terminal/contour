@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/ServiceControl.h>
+#include <vthost/ServiceControl.hpp>
 
 #include <algorithm>
 #include <format>

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/display/ShaderConfig.h>
+#include <contour/display/ShaderConfig.hpp>
 
 #include <QtGui/QOpenGLContext>
 

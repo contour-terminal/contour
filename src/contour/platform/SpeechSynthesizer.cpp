@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/platform/SpeechSynthesizer.h>
+#include <contour/platform/SpeechSynthesizer.hpp>
 
 #ifdef CONTOUR_WITH_TTS
     #include <QtTextToSpeech/QTextToSpeech>

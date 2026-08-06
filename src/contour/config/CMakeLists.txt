@@ -5,20 +5,20 @@
 # lets a CONTOUR_FRONTEND_GUI=OFF build read the very configuration whose point is not to render.
 # Anything here that needs a QObject, a QML property or a widget belongs a layer up.
 add_library(contour_config STATIC
-    Actions.cpp Actions.h
-    AtomicFileWrite.cpp AtomicFileWrite.h
-    Config.cpp Config.h
-    ConfigDocumentation.h
-    ConfigEnum.h
-    GuiConfigStore.cpp GuiConfigStore.h
-    LayoutBuilder.cpp LayoutBuilder.h
-    LayoutStore.cpp LayoutStore.h
-    ModifierNames.h
-    TabBarMode.h
-    UiStyle.h
+    Actions.cpp Actions.hpp
+    AtomicFileWrite.cpp AtomicFileWrite.hpp
+    Config.cpp Config.hpp
+    ConfigDocumentation.hpp
+    ConfigEnum.hpp
+    GuiConfigStore.cpp GuiConfigStore.hpp
+    LayoutBuilder.cpp LayoutBuilder.hpp
+    LayoutStore.cpp LayoutStore.hpp
+    ModifierNames.hpp
+    TabBarMode.hpp
+    UiStyle.hpp
 )
 
-# yaml-cpp is PUBLIC because Config.h exposes it in its own interface, so every consumer of the
+# yaml-cpp is PUBLIC because Config.hpp exposes it in its own interface, so every consumer of the
 # configuration model compiles against yaml-cpp's headers whether it names them or not.
 target_link_libraries(contour_config PUBLIC
     crispy::core

@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/remote/TmuxController.h>
-#include <contour/session/TerminalSession.h>
-#include <contour/session/TerminalSessionManager.h>
-#include <contour/test/GuiTestFixtures.h>
+#include <contour/remote/TmuxController.hpp>
+#include <contour/session/TerminalSession.hpp>
+#include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/GuiTestFixtures.hpp>
 
-#include <vtpty/ChannelPty.h>
-#include <vtpty/MockPty.h>
+#include <vtpty/ChannelPty.hpp>
+#include <vtpty/MockPty.hpp>
 
-#include <crispy/BufferObject.h>
+#include <crispy/BufferObject.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
 #include <format>
 
-#include <vthost/tmux/LayoutString.h>
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/SessionModel.h>
-#include <vtworkspace/Tab.h>
+#include <vthost/tmux/LayoutString.hpp>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/SessionModel.hpp>
+#include <vtworkspace/Tab.hpp>
 
 // The tmux mirror's structural reactions are driven through the TmuxModelEvents overrides, which
 // are pure C++ (no tmux process) — so this maps to a real GUI SessionModel headlessly, on every
@@ -409,7 +409,7 @@ struct RealTmuxServer
 /// Drains @p pty until @p needle shows up (bounded), returning what was read.
 std::string drainUntil(vtpty::Pty& pty, std::string_view needle)
 {
-    auto pool = crispy::buffer_object_pool<char> { 65536 };
+    auto pool = crispy::BufferObjectPool<char> { 65536 };
     auto collected = std::string {};
     for (auto i = 0; i < 300 && !collected.contains(needle); ++i)
     {

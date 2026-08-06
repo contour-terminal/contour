@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/input/KeyboardLayout.h>
+#include <contour/input/KeyboardLayout.hpp>
 
 #include <libunicode/convert.h>
 

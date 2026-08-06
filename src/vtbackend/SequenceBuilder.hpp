@@ -1,0 +1,255 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <vtbackend/Logging.hpp>
+#include <vtbackend/Sequence.hpp>
+#include <vtbackend/SixelParser.hpp>
+
+#include <vtparser/Parser.hpp>
+#include <vtparser/ParserExtension.hpp>
+
+#include <concepts>
+#include <memory>
+#include <string_view>
+
+namespace vtbackend
+{
+
+template <typename T>
+concept InstructionCounterConcept = requires(T t, size_t n) {
+    { t() } -> std::same_as<void>;
+    { t(n) } -> std::same_as<void>;
+};
+
+struct NoOpInstructionCounter
+{
+    void operator()(size_t /*increment*/ = 1) const noexcept {}
+};
+
+/// SequenceBuilder - The semantic VT analyzer layer.
+///
+/// SequenceBuilder implements the translation from VT parser events, forming a higher level Sequence,
+/// that can be matched against FunctionDefinition objects and then handled on the currently active Screen.
+template <SequenceHandlerConcept Handler, InstructionCounterConcept IncrementInstructionCounter>
+class SequenceBuilder
+{
+  public:
+    explicit SequenceBuilder(Handler handler, IncrementInstructionCounter incrementInstructionCounter):
+        _sequence {},
+        _parameterBuilder { _sequence.parameters() },
+        _incrementInstructionCounter { std::move(incrementInstructionCounter) },
+        _handler { std::move(handler) }
+    {
+    }
+
+    // {{{ ParserEvents interface
+    void error(std::string_view errorString)
+    {
+        if (vtParserLog)
+            vtParserLog()("Parser error: {}", errorString);
+    }
+    void print(char32_t codepoint)
+    {
+        _incrementInstructionCounter();
+        _handler.writeText(codepoint);
+    }
+
+    size_t print(std::string_view chars, size_t cellCount)
+    {
+        assert(!chars.empty());
+
+        _incrementInstructionCounter(cellCount);
+        _handler.writeText(chars, cellCount);
+        return _handler.maxBulkTextSequenceWidth();
+    }
+
+    void printEnd() { _handler.writeTextEnd(); }
+
+    void execute(char controlCode) { _handler.executeControlCode(controlCode); }
+
+    void clear() noexcept
+    {
+        _sequence.clearExceptParameters();
+        _parameterBuilder.reset();
+    }
+
+    void collect(char ch) { _sequence.intermediateCharacters().push_back(ch); }
+
+    void collectLeader(char leader) noexcept { _sequence.setLeader(leader); }
+
+    void param(char ch) noexcept
+    {
+        switch (ch)
+        {
+            case ';': paramSeparator(); break;
+            case ':': paramSubSeparator(); break;
+            case '0':
+            case '1':
+            case '2':
+            case '3':
+            case '4':
+            case '5':
+            case '6':
+            case '7':
+            case '8':
+            case '9': paramDigit(ch); break;
+            default: crispy::unreachable();
+        }
+    }
+
+    void paramDigit(char ch) noexcept
+    {
+        _parameterBuilder.multiplyBy10AndAdd(static_cast<uint8_t>(ch - '0'));
+    }
+
+    void paramSeparator() noexcept { _parameterBuilder.nextParameter(); }
+    void paramSubSeparator() noexcept { _parameterBuilder.nextSubParameter(); }
+
+    void dispatchESC(char finalChar)
+    {
+        _sequence.setCategory(FunctionCategory::ESC);
+        _sequence.setFinalChar(finalChar);
+        handleSequence();
+    }
+
+    void dispatchCSI(char finalChar)
+    {
+        _sequence.setCategory(FunctionCategory::CSI);
+        _sequence.setFinalChar(finalChar);
+        handleSequence();
+    }
+
+    void dispatchVT52(char finalChar, unsigned line, unsigned column)
+    {
+        // VT52 commands do not pass through the ANSI Escape state, whose entry would Clear the
+        // sequence, so reset it here or a previous sequence's parameters would leak in.
+        clear();
+        _sequence.setCategory(FunctionCategory::VT52);
+        _sequence.setFinalChar(finalChar);
+        // The direct cursor address (ESC Y) is the only VT52 command with parameters; carry its
+        // 1-based row and column so the handler reads them like any other CSI parameter.
+        if (finalChar == 'Y')
+        {
+            _parameterBuilder.set(static_cast<Sequence::Parameter>(line));
+            _parameterBuilder.nextParameter();
+            _parameterBuilder.set(static_cast<Sequence::Parameter>(column));
+        }
+        handleSequence();
+    }
+
+    void startOSC() { _sequence.setCategory(FunctionCategory::OSC); }
+
+    void putOSC(char ch)
+    {
+        if (_sequence.intermediateCharacters().size() + 1 < Sequence::MaxOscLength)
+            _sequence.intermediateCharacters().push_back(ch);
+    }
+
+    void dispatchOSC()
+    {
+        auto const [code, skipCount] = vtparser::extractCodePrefix(_sequence.intermediateCharacters());
+        _parameterBuilder.set(static_cast<Sequence::Parameter>(code));
+        _sequence.intermediateCharacters().erase(0, skipCount);
+        handleSequence();
+        clear();
+    }
+
+    void hook(char finalChar)
+    {
+        _incrementInstructionCounter();
+        _sequence.setCategory(FunctionCategory::DCS);
+        _sequence.setFinalChar(finalChar);
+
+        handleSequence();
+    }
+    void put(char ch)
+    {
+        if (_hookedParser)
+            _hookedParser->pass(ch);
+    }
+    void put(std::string_view bytes)
+    {
+        if (_hookedParser)
+            _hookedParser->pass(bytes);
+    }
+    void unhook()
+    {
+        if (_hookedParser)
+        {
+            _hookedParser->finalize();
+            _hookedParser.reset();
+        }
+    }
+    void startAPC()
+    {
+        _apcBuffer.clear();
+        _apcTruncated = false;
+    }
+
+    void putAPC(char ch)
+    {
+        // Bounded like OSC is: an APC body is attacker-controlled, and the kitty graphics protocol
+        // chunks anything large anyway (`m=1`), so a single unbounded body is never legitimate.
+        if (_apcBuffer.size() < Sequence::MaxOscLength)
+            _apcBuffer.push_back(ch);
+        else
+            _apcTruncated = true;
+    }
+
+    void dispatchAPC()
+    {
+        // A body that hit the cap is DROPPED, not dispatched. Handing the front of it on as though it
+        // were whole gave the kitty graphics parser a well-formed command carrying base64 cut off
+        // mid-stream: the image decodes to garbage or fails outright, and because nothing said so the
+        // terminal answered as if the transmission had succeeded, leaving the client with no reason
+        // to retry with the chunking that would have worked.
+        if (_apcTruncated)
+            vtParserLog()("APC body exceeded {} bytes and was dropped. Chunked transmission (m=1) is "
+                          "the supported way to send a payload this large.",
+                          Sequence::MaxOscLength);
+        else
+            _handler.processAPC(_apcBuffer);
+
+        _apcBuffer.clear();
+        _apcTruncated = false;
+        clear();
+    }
+    void startPM() {}
+    void putPM(char) {}
+    void dispatchPM() {}
+
+    void hookParser(std::unique_ptr<ParserExtension> parserExtension) noexcept
+    {
+        _hookedParser = std::move(parserExtension);
+    }
+
+    [[nodiscard]] size_t maxBulkTextSequenceWidth() const noexcept
+    {
+        return _handler.maxBulkTextSequenceWidth();
+    }
+    // }}}
+
+  private:
+    void handleSequence()
+    {
+        _parameterBuilder.fixiate();
+        _handler.processSequence(_sequence);
+    }
+
+    Sequence _sequence {};
+    std::string _apcBuffer {};
+
+    /// Whether the APC body being accumulated overran MaxOscLength. @see dispatchAPC.
+    bool _apcTruncated = false;
+    SequenceParameterBuilder _parameterBuilder;
+    IncrementInstructionCounter _incrementInstructionCounter;
+    Handler _handler;
+
+    std::unique_ptr<ParserExtension> _hookedParser {};
+};
+
+template <SequenceHandlerConcept Handler, InstructionCounterConcept IncrementInstructionCounter>
+SequenceBuilder(Handler&, IncrementInstructionCounter)
+    -> SequenceBuilder<Handler, IncrementInstructionCounter>;
+
+} // namespace vtbackend

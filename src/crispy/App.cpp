@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/App.h>
+#include <crispy/App.hpp>
 
-#include <crispy/environment.h>
-#include <crispy/logsink.h>
-#include <crispy/logstore.h>
-#include <crispy/user_info.h>
-#include <crispy/utils.h>
+#include <crispy/Environment.hpp>
+#include <crispy/LogSink.hpp>
+#include <crispy/LogStore.hpp>
+#include <crispy/UserInfo.hpp>
+#include <crispy/Utils.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -46,11 +46,11 @@ std::string operator*(std::string_view a, size_t n)
     return s;
 }
 
-CLI::help_display_style helpStyle()
+CLI::HelpDisplayStyle helpStyle()
 {
-    auto style = CLI::help_display_style {};
+    auto style = CLI::HelpDisplayStyle {};
 
-    style.optionStyle = CLI::option_style::Natural;
+    style.optionStyle = CLI::OptionStyle::Natural;
 
 #ifndef _WIN32
     if (isatty(STDOUT_FILENO) == 0)
@@ -78,7 +78,7 @@ unsigned screenWidth()
 
 /// @param env The environment to read the state-directory variables from.
 /// @return The base directory this application's local state belongs under.
-fs::path xdgStateHome(crispy::environment const& env)
+fs::path xdgStateHome(crispy::Environment const& env)
 {
     if (auto const p = env.get("XDG_STATE_HOME"); p && !p->empty())
         return { *p };
@@ -98,9 +98,9 @@ fs::path xdgStateHome(crispy::environment const& env)
 namespace crispy
 {
 
-app* app::_instance = nullptr;
+App* App::_instance = nullptr;
 
-app::app(environment const& env,
+App::App(Environment const& env,
          std::string appName,
          std::string appTitle,
          std::string appVersion,
@@ -120,22 +120,22 @@ app::app(environment const& env,
 
     _instance = this;
 
-    link(_appName + ".help", bind(&app::helpAction, this));
-    link(_appName + ".version", bind(&app::versionAction, this));
-    link(_appName + ".license", bind(&app::licenseAction, this));
+    link(_appName + ".help", bind(&App::helpAction, this));
+    link(_appName + ".version", bind(&App::versionAction, this));
+    link(_appName + ".license", bind(&App::licenseAction, this));
 }
 
-app::~app()
+App::~App()
 {
     _instance = nullptr;
 }
 
-void app::link(std::string command, std::function<int()> handler)
+void App::link(std::string command, std::function<int()> handler)
 {
     _handlers[std::move(command)] = std::move(handler);
 }
 
-void app::listDebugTags()
+void App::listDebugTags()
 {
     auto& categories = logstore::get();
     std::ranges::sort(categories,
@@ -158,13 +158,13 @@ void app::listDebugTags()
     }
 }
 
-int app::helpAction()
+int App::helpAction()
 {
     std::cout << CLI::helpText(_syntax.value(), helpStyle(), screenWidth());
     return EXIT_SUCCESS;
 }
 
-int app::licenseAction()
+int App::licenseAction()
 {
     auto const& store = crispy::cli::about::store();
     auto const titleWidth = std::accumulate(
@@ -198,28 +198,28 @@ int app::licenseAction()
     return EXIT_SUCCESS;
 }
 
-int app::versionAction()
+int App::versionAction()
 {
     std::cout << std::format("{} {}\n\n", _appTitle, _appVersion);
     return EXIT_SUCCESS;
 }
 
-bool app::reparseParameters(int argc, char const* argv[])
+bool App::reparseParameters(int argc, char const* argv[])
 {
     _syntax = parameterDefinition();
-    optional<CLI::flag_store> flagsOpt = CLI::parse(_syntax.value(), argc, argv);
+    optional<CLI::FlagStore> flagsOpt = CLI::parse(_syntax.value(), argc, argv);
     if (!flagsOpt.has_value())
         return false;
     _flags = std::move(flagsOpt.value());
     return true;
 }
 
-bool app::parseParametersForTesting(int argc, char const* argv[])
+bool App::parseParametersForTesting(int argc, char const* argv[])
 {
     return reparseParameters(argc, argv);
 }
 
-int app::run(int argc, char const* argv[])
+int App::run(int argc, char const* argv[])
 {
     try
     {
@@ -231,7 +231,7 @@ int app::run(int argc, char const* argv[])
 
         _syntax = parameterDefinition();
 
-        optional<CLI::flag_store> flagsOpt = CLI::parse(_syntax.value(), argc, argv);
+        optional<CLI::FlagStore> flagsOpt = CLI::parse(_syntax.value(), argc, argv);
         if (!flagsOpt.has_value())
         {
             std::cerr << "Failed to parse command line parameters.\n";
@@ -257,10 +257,10 @@ int app::run(int argc, char const* argv[])
     }
 }
 
-std::expected<void, std::string> app::installLogging(std::string const& optionPrefix, bool showProcessId)
+std::expected<void, std::string> App::installLogging(std::string const& optionPrefix, bool showProcessId)
 {
     auto const filter = parameters().get<std::string>(optionPrefix + ".log");
-    auto output = logstore::scoped_output::create({
+    auto output = logstore::ScopedOutput::create({
         .filter = filter,
         .file = logstore::parseLogFileSpec(parameters().get<std::string>(optionPrefix + ".log-file")),
         .showProcessId = showProcessId,
@@ -280,12 +280,12 @@ std::expected<void, std::string> app::installLogging(std::string const& optionPr
     return {};
 }
 
-void app::customizeLogStoreOutput()
+void App::customizeLogStoreOutput()
 {
-    logstore::sink::console().set_enabled(true);
+    logstore::Sink::console().setEnabled(true);
 
     // console() writes to std::cout, so STDOUT is the right stream to ask about here.
-    // (A destination that writes elsewhere must gate on ITS stream — see logstore::scoped_output.)
+    // (A destination that writes elsewhere must gate on ITS stream — see logstore::ScopedOutput.)
     static bool const colorized =
 #ifndef _WIN32
         isatty(STDOUT_FILENO) != 0;
@@ -296,8 +296,8 @@ void app::customizeLogStoreOutput()
     // The historical console shape: timestamped standard lines, and a bare `[error]` tag with
     // no timestamp for errors. Destinations that want the process id (or a timestamp on error
     // lines) build their own options; the layout itself is single-sourced in logsink.cpp.
-    logstore::set_formatter(logstore::makeStandardFormatter({ .colorize = colorized }));
-    logstore::errorLog.set_formatter(
+    logstore::setFormatter(logstore::makeStandardFormatter({ .colorize = colorized }));
+    logstore::errorLog.setFormatter(
         logstore::makeErrorFormatter({ .colorize = colorized, .showTimestamp = false }));
 }
 

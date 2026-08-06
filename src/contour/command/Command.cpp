@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/command/Command.h>
+#include <contour/command/Command.hpp>
 
-#include <vtbackend/Color.h>
+#include <vtbackend/Color.hpp>
 
-#include <crispy/ascii.h>
-#include <crispy/escape.h>
-#include <crispy/utils.h>
+#include <crispy/ASCII.hpp>
+#include <crispy/Escape.hpp>
+#include <crispy/Utils.hpp>
 
 #include <format>
 #include <ranges>
@@ -65,7 +65,7 @@ CommandArguments commandArguments(actions::Action const& action)
     // an argument would collapse two commands that do different things onto one row.
     using namespace actions;
     return std::visit(
-        crispy::overloaded {
+        crispy::Overloaded {
             [](ChangeProfile const& a) -> CommandArguments {
                 return { .id = a.name, .title = std::format(": {}", a.name) };
             },

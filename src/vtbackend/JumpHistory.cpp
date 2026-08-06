@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/JumpHistory.h>
+#include <vtbackend/JumpHistory.hpp>
 
 namespace vtbackend
 {

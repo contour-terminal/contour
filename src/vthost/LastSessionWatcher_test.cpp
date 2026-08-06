@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtpty/MockPty.h>
+#include <vtpty/MockPty.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -9,16 +9,16 @@
 
 #include <coro/Cancellation.hpp>
 #include <coro/Task.hpp>
-#include <net/EventLoop.h>
-#include <net/PollEventSource.h>
-#include <net/Sockets.h>
-#include <net/testing/CoroTestSupport.h>
-#include <net/testing/ScriptedEventSource.h>
-#include <net/testing/TempDir.h>
-#include <vthost/ConnectionAcceptor.h>
-#include <vthost/LastSessionWatcher.h>
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/Tab.h>
+#include <net/EventLoop.hpp>
+#include <net/PollEventSource.hpp>
+#include <net/Sockets.hpp>
+#include <net/testing/CoroTestSupport.hpp>
+#include <net/testing/ScriptedEventSource.hpp>
+#include <net/testing/TempDir.hpp>
+#include <vthost/ConnectionAcceptor.hpp>
+#include <vthost/LastSessionWatcher.hpp>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/Tab.hpp>
 
 using namespace std::chrono_literals;
 

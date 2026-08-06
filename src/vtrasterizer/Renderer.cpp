@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtrasterizer/Renderer.h>
+#include <vtrasterizer/Renderer.hpp>
 
-#include <vtrasterizer/TextRenderer.h>
-#include <vtrasterizer/utils.h>
+#include <vtrasterizer/TextRenderer.hpp>
+#include <vtrasterizer/Utils.hpp>
 
-#include <text_shaper/font_locator.h>
-#include <text_shaper/open_shaper.h>
+#include <text_shaper/FontLocator.hpp>
+#include <text_shaper/OpenShaper.hpp>
 
-#include <crispy/StrongLRUHashtable.h>
-#include <crispy/utils.h>
+#include <crispy/StrongLRUHashtable.hpp>
+#include <crispy/Utils.hpp>
 
 #ifdef _WIN32
-    #include <text_shaper/directwrite_shaper.h>
+    #include <text_shaper/DirectWriteShaper.hpp>
 #endif
 
 #include <algorithm>
@@ -34,7 +34,7 @@ namespace vtrasterizer
 namespace
 {
 
-    void loadGridMetricsFromFont(text::font_key font, GridMetrics& gm, text::shaper& textShaper)
+    void loadGridMetricsFromFont(text::FontKey font, GridMetrics& gm, text::Shaper& textShaper)
     {
         auto const m = textShaper.metrics(font);
 
@@ -53,10 +53,10 @@ namespace
         rendererLog()("Loading grid metrics {}", gm);
     }
 
-    GridMetrics loadGridMetrics(text::font_key font,
+    GridMetrics loadGridMetrics(text::FontKey font,
                                 vtbackend::PageSize pageSize,
                                 PageMargin pageMargin,
-                                text::shaper& textShaper)
+                                text::Shaper& textShaper)
     {
         auto gm = GridMetrics {};
 
@@ -76,27 +76,27 @@ namespace
     /// Loads the font keys (regular/bold/italic/...) for the given descriptions.
     ///
     /// @throws std::runtime_error if the @e regular font fails to load. The regular key is the
-    ///         anchor every other style falls back to, and a default-constructed (invalid) font_key
-    ///         would later abort inside text::shaper::metrics() (Require on the key mapping). Throwing
+    ///         anchor every other style falls back to, and a default-constructed (invalid) FontKey
+    ///         would later abort inside text::Shaper::metrics() (Require on the key mapping). Throwing
     ///         instead lets applyPendingReconfig()'s try/catch keep the previously loaded font, honoring
     ///         the "keep previous font on failure" guarantee, and surfaces a startup font-load failure
     ///         as a clear error rather than a deep abort.
-    FontKeys loadFontKeys(FontDescriptions const& fd, text::shaper& shaper)
+    FontKeys loadFontKeys(FontDescriptions const& fd, text::Shaper& shaper)
     {
         FontKeys output {};
-        auto const regularOpt = shaper.load_font(fd.regular, fd.size);
+        auto const regularOpt = shaper.loadFont(fd.regular, fd.size);
         if (!regularOpt.has_value())
             throw std::runtime_error(std::format("Failed to load regular font: {}", fd.regular));
         output.regular = regularOpt.value();
-        output.bold = shaper.load_font(fd.bold, fd.size).value_or(output.regular);
-        output.italic = shaper.load_font(fd.italic, fd.size).value_or(output.regular);
-        output.boldItalic = shaper.load_font(fd.boldItalic, fd.size).value_or(output.regular);
-        output.emoji = shaper.load_font(fd.emoji, fd.size).value_or(output.regular);
+        output.bold = shaper.loadFont(fd.bold, fd.size).value_or(output.regular);
+        output.italic = shaper.loadFont(fd.italic, fd.size).value_or(output.regular);
+        output.boldItalic = shaper.loadFont(fd.boldItalic, fd.size).value_or(output.regular);
+        output.emoji = shaper.loadFont(fd.emoji, fd.size).value_or(output.regular);
 
         return output;
     }
 
-    unique_ptr<text::shaper> createTextShaper(TextShapingEngine engine, DPI dpi, text::font_locator& locator)
+    unique_ptr<text::Shaper> createTextShaper(TextShapingEngine engine, DPI dpi, text::FontLocator& locator)
     {
         switch (engine)
         {
@@ -104,7 +104,7 @@ namespace
 #ifdef _WIN32
                 rendererLog()("Using DirectWrite text shaping engine.");
                 // TODO: do we want to use custom font locator here?
-                return make_unique<text::directwrite_shaper>(dpi, locator);
+                return make_unique<text::DirectWriteShaper>(dpi, locator);
 #else
                 rendererLog()("DirectWrite not available on this platform.");
                 break;
@@ -123,7 +123,7 @@ namespace
         }
 
         rendererLog()("Using OpenShaper text shaping engine.");
-        return make_unique<text::open_shaper>(dpi, locator);
+        return make_unique<text::OpenShaper>(dpi, locator);
     }
 
 } // namespace
@@ -132,8 +132,8 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
                    PageMargin pageMargin,
                    FontDescriptions fontDescriptions,
                    vtbackend::ColorPalette const& colorPalette,
-                   crispy::strong_hashtable_size atlasHashtableSlotCount,
-                   crispy::lru_capacity atlasTileCount,
+                   crispy::StrongHashtableSize atlasHashtableSlotCount,
+                   crispy::LRUCapacity atlasTileCount,
                    bool atlasDirectMapping,
                    Decorator hyperlinkNormal,
                    Decorator hyperlinkHover,
@@ -150,7 +150,7 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
         auto shaper = createTextShaper(_fontDescriptions.textShapingEngine,
                                        _fontDescriptions.dpi,
                                        createFontLocator(_fontDescriptions.fontLocator));
-        shaper->set_font_fallback_limit(_fontDescriptions.maxFallbackCount);
+        shaper->setFontFallbackLimit(_fontDescriptions.maxFallbackCount);
         return shaper;
     }() },
     _fonts { loadFontKeys(_fontDescriptions, *_textShaper) },
@@ -322,8 +322,8 @@ void Renderer::applyFontDescriptions(FontDescriptions fontDescriptions)
     if (fontDescriptions == _fontDescriptions)
         return;
 
-    // When only DPI changed, the enhanced set_dpi() updates existing FT_Face
-    // objects in-place. Skip clear_cache() to avoid destroying them.
+    // When only DPI changed, the enhanced setDPI() updates existing FT_Face
+    // objects in-place. Skip clearCache() to avoid destroying them.
     auto descriptionsWithSameDpi = fontDescriptions;
     descriptionsWithSameDpi.dpi = _fontDescriptions.dpi;
     auto const onlyDpiChanged = (descriptionsWithSameDpi == _fontDescriptions);
@@ -331,18 +331,18 @@ void Renderer::applyFontDescriptions(FontDescriptions fontDescriptions)
     if (_fontDescriptions.textShapingEngine == fontDescriptions.textShapingEngine)
     {
         if (!onlyDpiChanged)
-            _textShaper->clear_cache();
-        _textShaper->set_dpi(fontDescriptions.dpi);
-        _textShaper->set_font_fallback_limit(fontDescriptions.maxFallbackCount);
+            _textShaper->clearCache();
+        _textShaper->setDPI(fontDescriptions.dpi);
+        _textShaper->setFontFallbackLimit(fontDescriptions.maxFallbackCount);
         if (_fontDescriptions.fontLocator != fontDescriptions.fontLocator)
-            _textShaper->set_locator(createFontLocator(fontDescriptions.fontLocator));
+            _textShaper->setLocator(createFontLocator(fontDescriptions.fontLocator));
     }
     else
     {
         _textShaper = createTextShaper(fontDescriptions.textShapingEngine,
                                        fontDescriptions.dpi,
                                        createFontLocator(fontDescriptions.fontLocator));
-        _textShaper->set_font_fallback_limit(fontDescriptions.maxFallbackCount);
+        _textShaper->setFontFallbackLimit(fontDescriptions.maxFallbackCount);
     }
 
     // Load the fonts against the NEW descriptions but only commit them to _fontDescriptions once the
@@ -362,7 +362,7 @@ void Renderer::applyFontDescriptions(FontDescriptions fontDescriptions)
                                       _fontDescriptions.textOutline.color);
 }
 
-bool Renderer::setFontSize(text::font_size fontSize)
+bool Renderer::setFontSize(text::FontSize fontSize)
 {
     if (fontSize.pt < 5.) // Let's not be crazy.
         return false;
@@ -677,7 +677,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
             auto const renderHeight = renderSize.height.as<int>();
             auto const scissorY = renderHeight - (mainAreaTop + mainAreaHeight);
             _renderTarget->setScissorRect(0, scissorY, renderWidth, mainAreaHeight);
-            auto const scissorGuard = crispy::finally([this] { _renderTarget->clearScissorRect(); });
+            auto const scissorGuard = crispy::Finally([this] { _renderTarget->clearScissorRect(); });
             _renderTarget->execute(now);
         }
 
@@ -704,7 +704,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
             auto const fromPixel = _gridMetrics.map(*cursor.animateFrom, smoothPixelOffset);
             auto const toPixel = _gridMetrics.map(cursor.position, smoothPixelOffset);
             auto const animationProgress = cursor.animationProgress;
-            auto const interpolated = crispy::point {
+            auto const interpolated = crispy::Point {
                 .x = fromPixel.x
                      + static_cast<int>(animationProgress * static_cast<float>(toPixel.x - fromPixel.x)),
                 .y = fromPixel.y
@@ -736,7 +736,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
             auto const renderHeight = renderSize.height.as<int>();
             auto const scissorY = renderHeight - (mainAreaTop + mainAreaHeight);
             _renderTarget->setScissorRect(0, scissorY, renderWidth, mainAreaHeight);
-            auto const scissorGuard = crispy::finally([this] { _renderTarget->clearScissorRect(); });
+            auto const scissorGuard = crispy::Finally([this] { _renderTarget->clearScissorRect(); });
             _renderTarget->execute(now);
         }
     }

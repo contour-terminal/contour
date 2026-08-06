@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/tmux/ControlModeParser.h>
+#include <vthost/tmux/ControlModeParser.hpp>
 
 #include <array>
 #include <charconv>

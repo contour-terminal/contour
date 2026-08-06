@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtparser/Parser.h>
+#include <vtparser/Parser.hpp>
 
-#include <vtparser/ParserEvents.h>
+#include <vtparser/ParserEvents.hpp>
 
-#include <crispy/utils.h>
+#include <crispy/Utils.hpp>
 
 #include <format>
 #include <map>

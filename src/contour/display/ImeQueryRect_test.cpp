@@ -4,7 +4,7 @@
 // in item-local LOGICAL coordinates, derived from device-pixel grid metrics (page-margin inset +
 // cell-sized cursor cell), divided by the device-pixel ratio, and widened for double-width glyphs.
 
-#include <contour/display/ImeQueryRect.h>
+#include <contour/display/ImeQueryRect.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

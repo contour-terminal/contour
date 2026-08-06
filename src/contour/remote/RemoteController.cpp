@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/remote/ReactorThread.h>
-#include <contour/remote/RemoteController.h>
+#include <contour/remote/ReactorThread.hpp>
+#include <contour/remote/RemoteController.hpp>
 
-#include <vtpty/ChannelPty.h>
+#include <vtpty/ChannelPty.hpp>
 
 namespace contour::remote
 {

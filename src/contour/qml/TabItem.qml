@@ -71,7 +71,7 @@ Item {
     readonly property color hoverWash: chromeStyle.wash(systemPalette.highlight)
 
     // The fill behind the label; also drives text contrast. Colored: the WT-style fade from
-    // TabColorScheme.h (via the controller). Uncolored: OS highlight / hover wash / transparent.
+    // TabColorScheme.hpp (via the controller). Uncolored: OS highlight / hover wash / transparent.
     // controller is null-guarded (torn down before this tree on window close).
     readonly property color effectiveBackground: {
         if (root.colored && root.controller)

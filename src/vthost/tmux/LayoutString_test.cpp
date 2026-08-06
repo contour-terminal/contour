@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtpty/PageSize.h>
+#include <vtpty/PageSize.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -10,8 +10,8 @@
 #include <ranges>
 #include <string>
 
-#include <vthost/tmux/LayoutString.h>
-#include <vtworkspace/Pane.h>
+#include <vthost/tmux/LayoutString.hpp>
+#include <vtworkspace/Pane.hpp>
 
 using vthost::tmux::BinaryLayout;
 using vthost::tmux::collapseToBinary;

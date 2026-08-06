@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/SessionSettings.h>
+#include <vthost/SessionSettings.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/utf8.h>

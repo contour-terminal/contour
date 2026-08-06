@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtpty/UnixPty.h>
+#include <vtpty/UnixPty.hpp>
 
-#include <vtpty/Process.h>
-#include <vtpty/UnixUtils.h>
+#include <vtpty/Process.hpp>
+#include <vtpty/UnixUtils.hpp>
 
-#include <crispy/BufferObject.h>
-#include <crispy/deferred.h>
-#include <crispy/environment.h>
-#include <crispy/escape.h>
-#include <crispy/logstore.h>
+#include <crispy/BufferObject.hpp>
+#include <crispy/Deferred.hpp>
+#include <crispy/Environment.hpp>
+#include <crispy/Escape.hpp>
+#include <crispy/LogStore.hpp>
 
 #include <cassert>
 #include <csignal>
@@ -127,11 +127,11 @@ void UnixPty::Slave::close()
 
 void UnixPty::waitForClosed()
 {
-    crispy::read_selector selector;
-    selector.want_read(_masterFd);
+    crispy::ReadSelector selector;
+    selector.wantRead(_masterFd);
     while (true)
     {
-        selector.wait_one();
+        selector.waitOne();
         if (isClosed())
             break;
 
@@ -223,7 +223,7 @@ UnixPty::UnixPty(PageSize pageSize, optional<ImageSize> pixels): _pageSize { pag
 StartResult UnixPty::start()
 {
     auto const handles = createUnixPty(_pageSize, _pixels);
-    _masterFd = crispy::file_descriptor::from_native(unbox<int>(handles.master));
+    _masterFd = crispy::FileDescriptor::fromNative(unbox<int>(handles.master));
     _slave = make_unique<Slave>(handles.slave);
 
     if (!util::setFileFlags(_masterFd, O_CLOEXEC | O_NONBLOCK))
@@ -234,8 +234,8 @@ StartResult UnixPty::start()
     util::setFileFlags(_stdoutFastPipe.reader(), O_NONBLOCK);
     ptyLog()("stdout fastpipe: reader {}, writer {}", _stdoutFastPipe.reader(), _stdoutFastPipe.writer());
 
-    _readSelector.want_read(_masterFd);
-    _readSelector.want_read(_stdoutFastPipe.reader());
+    _readSelector.wantRead(_masterFd);
+    _readSelector.wantRead(_stdoutFastPipe.reader());
 
 #if defined(__linux__) && defined(UTEMPTER)
     // Held in a local: utempter wants a C string, and a temporary's would dangle the moment the
@@ -266,14 +266,14 @@ PtyMasterHandle UnixPty::handle() const noexcept
 void UnixPty::close()
 {
     auto const _ = std::scoped_lock { _mutex };
-    if (_masterFd.is_closed())
+    if (_masterFd.isClosed())
     {
         ptyLog()("PTY closing master from thread {} (already closed).", crispy::threadName());
         return;
     }
 
     ptyLog()("PTY closing master from thread {} (file descriptor {}).", crispy::threadName(), _masterFd);
-    _readSelector.cancel_read(_masterFd);
+    _readSelector.cancelRead(_masterFd);
     _masterFd.close();
     wakeupReader();
 }
@@ -316,7 +316,7 @@ optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
     if (rv == 0 && fd == _stdoutFastPipe.reader())
     {
         ptyInLog()("Closing stdout-fastpipe.");
-        _readSelector.cancel_read(fd);
+        _readSelector.cancelRead(fd);
         _stdoutFastPipe.closeReader();
         errno = EAGAIN;
         return nullopt;
@@ -325,37 +325,37 @@ optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
     return string_view { target, static_cast<size_t>(rv) };
 }
 
-std::optional<Pty::ReadResult> UnixPty::read(crispy::buffer_object<char>& storage,
+std::optional<Pty::ReadResult> UnixPty::read(crispy::BufferObject<char>& storage,
                                              std::optional<std::chrono::milliseconds> timeout,
                                              size_t size)
 {
     // This runs on the session's read thread while close() may run concurrently on the GUI thread
-    // (e.g. when a GUI tab is closed). _readSelector is internally thread-safe: want_read/cancel_read/
-    // wait_one serialize their own access to the registered-fd set, so the blocking wait_one() is safe
+    // (e.g. when a GUI tab is closed). _readSelector is internally thread-safe: wantRead/cancelRead/
+    // waitOne serialize their own access to the registered-fd set, so the blocking waitOne() is safe
     // to call unlocked -- and it MUST stay unlocked, or a concurrent close() would block trying to
-    // cancel_read()/wakeup() and the teardown would deadlock. The wakeup writes a separate,
-    // always-registered eventfd/break-pipe, so a blocked wait_one() is woken regardless of the
+    // cancelRead()/wakeup() and the teardown would deadlock. The wakeup writes a separate,
+    // always-registered eventfd/break-pipe, so a blocked waitOne() is woken regardless of the
     // selector's fd contents.
 
     // Blocking wait. On an empty selector (master closed by a concurrent close() plus a prior
-    // stdout-fastpipe EOF) wait_one() blocks on the break-pipe until the timeout or the next wakeup(),
+    // stdout-fastpipe EOF) waitOne() blocks on the break-pipe until the timeout or the next wakeup(),
     // rather than spinning: returning EAGAIN immediately here would make the caller's read loop busy-spin
     // a CPU core until the session is torn down.
-    auto const fd = _readSelector.wait_one(timeout);
+    auto const fd = _readSelector.waitOne(timeout);
     if (!fd.has_value())
     {
         errno = EAGAIN;
         return std::nullopt;
     }
 
-    // Locked read and bookkeeping. readSome() may cancel_read the stdout-fastpipe on EOF, so it mutates
+    // Locked read and bookkeeping. readSome() may cancelRead the stdout-fastpipe on EOF, so it mutates
     // shared state under _mutex. Re-validate first: if close() ran between the wait and here it removed
     // the master fd from the selector, so the returned fd is no longer wanted -- do not ::read() a
     // just-closed (and possibly already recycled) fd. A fastpipe fd that is still wanted remains
-    // drainable. is_wanted() reflects the current registration on both selector backends, so this
-    // detects the concurrent close() that the stale `_masterFd.is_closed()` check could not.
+    // drainable. isWanted() reflects the current registration on both selector backends, so this
+    // detects the concurrent close() that the stale `_masterFd.isClosed()` check could not.
     auto const _ = std::scoped_lock { _mutex };
-    if (!_readSelector.is_wanted(*fd))
+    if (!_readSelector.isWanted(*fd))
     {
         errno = EAGAIN;
         return std::nullopt;
@@ -379,7 +379,7 @@ int UnixPty::write(std::string_view data)
     // rare fallback (PTY buffer full) bounded by the child draining its side, and holding _mutex
     // across it pins the fd open for the duration -- the invariant the fd-validity check relies on.
     auto const _ = std::scoped_lock { _mutex };
-    if (_masterFd.is_closed())
+    if (_masterFd.isClosed())
     {
         errno = EPIPE;
         return -1;

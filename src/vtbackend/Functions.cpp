@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Functions.h>
+#include <vtbackend/Functions.hpp>
 
-#include <vtbackend/Color.h>
+#include <vtbackend/Color.hpp>
 
-#include <crispy/algorithm.h>
-#include <crispy/escape.h>
-#include <crispy/sort.h>
-#include <crispy/times.h>
-#include <crispy/utils.h>
+#include <crispy/Escape.hpp>
+#include <crispy/Sort.hpp>
+#include <crispy/Times.hpp>
+#include <crispy/Utils.hpp>
 
 #include <algorithm>
 #include <array>

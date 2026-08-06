@@ -5,9 +5,9 @@
 // and server-event dispatch paths that the D-Bus backend would otherwise only reach with a live
 // notification server.
 
-#include <contour/platform/NotificationRouter.h>
+#include <contour/platform/NotificationRouter.hpp>
 
-#include <vtbackend/DesktopNotification.h>
+#include <vtbackend/DesktopNotification.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

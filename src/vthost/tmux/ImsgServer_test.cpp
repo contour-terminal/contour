@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #ifndef _WIN32
 
-    #include <vtpty/MockPty.h>
+    #include <vtpty/MockPty.hpp>
 
     #include <catch2/catch_test_macros.hpp>
 
@@ -23,14 +23,14 @@
 
     #include <coro/Task.hpp>
     #include <coro/WhenAll.hpp>
-    #include <net/EventLoop.h>
-    #include <net/PollEventSource.h>
-    #include <net/Sockets.h>
-    #include <vthost/SessionHost.h>
-    #include <vthost/imsg/CommandArgv.h>
-    #include <vthost/imsg/Identify.h>
-    #include <vthost/imsg/ImsgCodec.h>
-    #include <vthost/tmux/ImsgServer.h>
+    #include <net/EventLoop.hpp>
+    #include <net/PollEventSource.hpp>
+    #include <net/Sockets.hpp>
+    #include <vthost/SessionHost.hpp>
+    #include <vthost/imsg/CommandArgv.hpp>
+    #include <vthost/imsg/Identify.hpp>
+    #include <vthost/imsg/ImsgCodec.hpp>
+    #include <vthost/tmux/ImsgServer.hpp>
 
 using coro::Task;
 using namespace std::chrono_literals;
@@ -416,7 +416,7 @@ TEST_CASE("a client-sent MSG_EXITING unwinds the control session", "[vthost][ims
         #include <pty.h>
     #endif
 
-    #include <vthost/ConnectionAcceptor.h>
+    #include <vthost/ConnectionAcceptor.hpp>
 
 namespace
 {

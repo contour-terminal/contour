@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/test_helpers.h>
+#include <vtbackend/TestHelpers.hpp>
 
-#include <vtrasterizer/FontDescriptions.h>
-#include <vtrasterizer/TextClusterGrouper.h>
+#include <vtrasterizer/FontDescriptions.hpp>
+#include <vtrasterizer/TextClusterGrouper.hpp>
 
-#include <crispy/escape.h>
-#include <crispy/utils.h>
+#include <crispy/Escape.hpp>
+#include <crispy/Utils.hpp>
 
 #include <libunicode/convert.h>
 
@@ -30,7 +30,7 @@ namespace
 {
 
 template <typename T, std::size_t Extent, typename S = T>
-std::vector<T> to_vector(gsl::span<S, Extent> span)
+std::vector<T> toVector(gsl::span<S, Extent> span)
 {
     auto result = std::vector<T> {};
     result.reserve(span.size());
@@ -116,7 +116,7 @@ struct std::formatter<TextClusterGroup>: formatter<std::string>
                         group.initialPenPosition,
                         group.clusters | std::views::transform([](int cluster) {
                             return std::to_string(cluster);
-                        }) | crispy::views::join_with(", "),
+                        }) | crispy::views::joinWith(", "),
                         group.style,
                         group.color,
                         group.flags),
@@ -171,7 +171,7 @@ struct EventRecorder final: public TextClusterGrouper::Events
         (void) sizing;
         events.emplace_back(TextClusterGroup {
             .codepoints = std::u32string(codepoints),
-            .clusters = to_vector<int>(clusters),
+            .clusters = toVector<int>(clusters),
             .initialPenPosition = initialPenPosition,
             .color = color,
             .style = style,

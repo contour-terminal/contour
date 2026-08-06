@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/App.h>
+#include <crispy/App.hpp>
+#include <crispy/Environment.hpp>
+#include <crispy/LogStore.hpp>
 #include <crispy/SuppressWindowsDialogs.hpp>
-#include <crispy/environment.h>
-#include <crispy/logstore.h>
 
 #define CATCH_CONFIG_RUNNER
 #include <catch2/catch_session.hpp>
@@ -15,7 +15,7 @@ int main(int argc, char const* argv[])
     if (auto const logFilterString = crispy::defaultEnvironment().get("LOG"))
     {
         logstore::configure(*logFilterString);
-        crispy::app::customizeLogStoreOutput();
+        crispy::App::customizeLogStoreOutput();
     }
     int const result = Catch::Session().run(argc, argv);
 

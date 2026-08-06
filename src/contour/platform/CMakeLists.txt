@@ -12,26 +12,26 @@
 # Nothing in this target is registered reflectively: Audio and FreeDesktopNotifier declare Q_OBJECT, but
 # their moc output is referenced by the very code that emits their signals, so the archive keeps it.
 add_library(contour_platform STATIC
-    Announcer.h
-    Audio.cpp Audio.h
-    AudioNote.h
-    BlurBehind.cpp BlurBehind.h
-    Clipboard.cpp Clipboard.h
-    ColorConversion.h
-    ExternalLauncher.h
+    Announcer.hpp
+    Audio.cpp Audio.hpp
+    AudioNote.hpp
+    BlurBehind.cpp BlurBehind.hpp
+    Clipboard.cpp Clipboard.hpp
+    ColorConversion.hpp
+    ExternalLauncher.hpp
     # Its whole translation unit is inside `#ifdef __linux__`, so it compiles to nothing elsewhere.
     # Listed unconditionally all the same: AUTOMOC must still see the Q_OBJECT, exactly as before.
-    FreeDesktopNotifier.cpp FreeDesktopNotifier.h
-    GuiTheme.h
-    NotificationRouter.h
-    QtExternalLauncher.cpp QtExternalLauncher.h
-    QtInvoke.h
-    QtPath.h
-    SpeechSynthesizer.cpp SpeechSynthesizer.h
+    FreeDesktopNotifier.cpp FreeDesktopNotifier.hpp
+    GuiTheme.hpp
+    NotificationRouter.hpp
+    QtExternalLauncher.cpp QtExternalLauncher.hpp
+    QtInvoke.hpp
+    QtPath.hpp
+    SpeechSynthesizer.cpp SpeechSynthesizer.hpp
 )
 set_target_properties(contour_platform PROPERTIES AUTOMOC ON)
 
-# contour_config, because GuiTheme.h resolves a configured theme and ColorConversion.h converts the
+# contour_config, because GuiTheme.hpp resolves a configured theme and ColorConversion.hpp converts the
 # palette the configuration model owns.
 target_link_libraries(contour_platform PUBLIC
     contour_config

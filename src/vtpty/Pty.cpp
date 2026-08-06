@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtpty/Pty.h>
+#include <vtpty/Pty.hpp>
 
 // _WIN32, not _MSC_VER: a MinGW/clang Windows build must also pick ConPty —
 // UnixPty does not exist there.
 #ifdef _WIN32
-    #include <vtpty/ConPty.h>
+    #include <vtpty/ConPty.hpp>
 #else
-    #include <vtpty/UnixPty.h>
+    #include <vtpty/UnixPty.hpp>
 #endif
 
 using std::make_unique;

@@ -14,17 +14,17 @@
 // The pure decision itself is unit-tested in WindowGeometry_test; the end-to-end grid refit on a live
 // display is pinned by the [display] case in DisplayRendering_test.
 
-#include <contour/ContourGuiApp.h>
-#include <contour/session/TerminalSession.h>
-#include <contour/session/TerminalSessionManager.h>
-#include <contour/test/GuiTestFixtures.h>
-#include <contour/window/WindowController.h>
+#include <contour/ContourGuiApp.hpp>
+#include <contour/session/TerminalSession.hpp>
+#include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/GuiTestFixtures.hpp>
+#include <contour/window/WindowController.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <mutex>
 
-#include <vtworkspace/SessionModel.h>
+#include <vtworkspace/SessionModel.hpp>
 
 namespace
 {

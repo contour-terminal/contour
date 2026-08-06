@@ -22,10 +22,13 @@ struct ManualEvent
 {
     std::vector<std::coroutine_handle<>>* waiters;
 
+    // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
     [[nodiscard]] bool await_ready() const noexcept { return false; }
 
+    // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
     void await_suspend(std::coroutine_handle<> waiting) const { waiters->push_back(waiting); }
 
+    // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
     void await_resume() const noexcept {}
 };
 

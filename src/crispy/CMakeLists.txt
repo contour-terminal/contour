@@ -8,36 +8,35 @@ endif()
 option(STRONGHASH_USE_INTRINSICS "Build StrongHash with AES-NI (x86-64) / NEON (ARM64) support [default: ON]" ON)
 
 set(crispy_SOURCES
-    App.cpp App.h
-    BufferObject.cpp BufferObject.h
-    CLI.cpp CLI.h
-    Comparison.h
-    LRUCache.h
-    StrongLRUCache.h
-    ScopedTimer.h
-    StackTrace.cpp StackTrace.h
-    TrieMap.h
-    AlignedAllocator.h
-    algorithm.h
-    ascii.h
-    assert.h
-    base64.h
-    compose.h
-    defines.h
-    environment.cpp environment.h
-    escape.h
-    file_descriptor.h
-    flags.h
-    interpolated_string.cpp interpolated_string.h
-    logsink.cpp logsink.h
-    logstore.cpp logstore.h
-    overloaded.h
-    reference.h
-    ring.h
-    testing/environment.h
-    times.h
-    user_info.cpp user_info.h
-    utils.cpp utils.h
+    App.cpp App.hpp
+    BufferObject.cpp BufferObject.hpp
+    CLI.cpp CLI.hpp
+    Comparison.hpp
+    LRUCache.hpp
+    StrongLRUCache.hpp
+    ScopedTimer.hpp
+    StackTrace.cpp StackTrace.hpp
+    TrieMap.hpp
+    AlignedAllocator.hpp
+    ASCII.hpp
+    Assert.hpp
+    Base64.hpp
+    Compose.hpp
+    Defines.hpp
+    Environment.cpp Environment.hpp
+    Escape.hpp
+    FileDescriptor.hpp
+    Flags.hpp
+    InterpolatedString.cpp InterpolatedString.hpp
+    LogSink.cpp LogSink.hpp
+    LogStore.cpp LogStore.hpp
+    Overloaded.hpp
+    Reference.hpp
+    Ring.hpp
+    testing/Environment.hpp
+    Times.hpp
+    UserInfo.cpp UserInfo.hpp
+    Utils.cpp Utils.hpp
 )
 
 add_library(crispy-core STATIC ${crispy_SOURCES})
@@ -134,22 +133,21 @@ if(CRISPY_TESTING)
         StrongLRUCache_test.cpp
         StrongLRUHashtable_test.cpp
         TrieMap_test.cpp
-        base64_test.cpp
-        compose_test.cpp
-        environment_test.cpp
-        interpolated_string_test.cpp
-        logsink_test.cpp
-        utils_test.cpp
-        result_test.cpp
-        ring_test.cpp
-        sort_test.cpp
-        times_test.cpp
+        Base64_test.cpp
+        Compose_test.cpp
+        Environment_test.cpp
+        InterpolatedString_test.cpp
+        LogSink_test.cpp
+        Utils_test.cpp
+        Ring_test.cpp
+        Sort_test.cpp
+        Times_test.cpp
     )
     # read_selector is a POSIX select()/epoll() construct (uses fd_set, sys/select.h); its header is
     # only ever compiled through the UNIX-gated UnixPty. The test likewise only builds off Windows,
     # where MSVC would otherwise choke on the unavailable fd_set type.
     if(NOT WIN32)
-        target_sources(crispy_test PRIVATE read_selector_test.cpp)
+        target_sources(crispy_test PRIVATE ReadSelector_test.cpp)
     endif()
     target_link_libraries(crispy_test Catch2::Catch2 crispy::core)
     add_test(NAME crispy_test COMMAND $<TARGET_FILE:crispy_test>)

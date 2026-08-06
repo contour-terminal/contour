@@ -38,11 +38,11 @@ changed, because the architecture underneath moved:
   to a monolithic GUI — which is what gives extensions a well-defined answer to "which process am I
   in, and what can I see from there".
 - **`Grid` grew a change stream** — stable row ids plus per-line dirty bits, consumed through
-  `Grid::forEachLineChangedSince` (`src/vtbackend/Grid.h:756`) with a per-consumer
+  `Grid::forEachLineChangedSince` (`src/vtbackend/Grid.hpp:756`) with a per-consumer
   `GridDeltaCursor`. Built for the daemon's cell tap, it is exactly the event source a
   grid-observing extension needs, and it already costs one byte store per mutation on the hot paths.
 - **Shell integration became an interface.** `vtbackend::ShellIntegration`
-  (`src/vtbackend/ShellIntegration.h:10`) is pure-virtual with precisely the four OSC 133 events,
+  (`src/vtbackend/ShellIntegration.hpp:10`) is pure-virtual with precisely the four OSC 133 events,
   and there is a `NullShellIntegration` for "nobody is listening". The single most valuable
   extension surface in this whole document therefore needs *no new hook* — only a fan-out decorator.
 - **WASI 0.3.0 shipped on 2026-06-11** with native async in the Component Model (`async func`,
@@ -63,14 +63,14 @@ It is to let a sandboxed guest **contribute rows to registries that already acce
 
 | Registry | Location | What its own documentation already says |
 | --- | --- | --- |
-| `contour::CommandSource` | `src/contour/Command.h:33` | *"a sixth kind of command is therefore a new class, not an edit to the palette"* |
-| `detail::MenuTable<State>` | `src/contour/ContextMenuTable.h` | *"Adding an entry to a context menu is adding one of these to that menu's table, and nothing else"* |
-| `StatusLineDefinitions::Item` | `src/vtbackend/StatusLineBuilder.h` | a `std::variant` of 16 item kinds; a new kind is a new struct |
-| `HintPattern` | `src/vtbackend/HintModeHandler.h:27` | pattern + action, pure data, with an `Executor` seam |
-| `actions::Action` | `src/contour/Actions.h` | one variant that the keymap, the command palette **and** every context menu read |
-| `vtpty::Pty` | `src/vtpty/Pty.h:52` | already a pure-virtual transport interface |
-| `vtbackend::ShellIntegration` | `src/vtbackend/ShellIntegration.h:10` | already a pure-virtual observer interface |
-| `vtworkspace::SessionModel` | `src/vtworkspace/SessionModel.h` | a complete tab/pane/window verb set, Qt-free |
+| `contour::CommandSource` | `src/contour/Command.hpp:33` | *"a sixth kind of command is therefore a new class, not an edit to the palette"* |
+| `detail::MenuTable<State>` | `src/contour/ContextMenuTable.hpp` | *"Adding an entry to a context menu is adding one of these to that menu's table, and nothing else"* |
+| `StatusLineDefinitions::Item` | `src/vtbackend/StatusLineBuilder.hpp` | a `std::variant` of 16 item kinds; a new kind is a new struct |
+| `HintPattern` | `src/vtbackend/HintModeHandler.hpp:27` | pattern + action, pure data, with an `Executor` seam |
+| `actions::Action` | `src/contour/Actions.hpp` | one variant that the keymap, the command palette **and** every context menu read |
+| `vtpty::Pty` | `src/vtpty/Pty.hpp:52` | already a pure-virtual transport interface |
+| `vtbackend::ShellIntegration` | `src/vtbackend/ShellIntegration.hpp:10` | already a pure-virtual observer interface |
+| `vtworkspace::SessionModel` | `src/vtworkspace/SessionModel.hpp` | a complete tab/pane/window verb set, Qt-free |
 
 The consequence for scope: **milestone 1 is small**, because for several interfaces the work is a
 binding and a permission check, not a new mechanism. And the consequence for design: an extension
@@ -248,7 +248,7 @@ decides what an extension can see and how long it lives.
 | Sees | grid & scrollback, VT stream, PTY, layout model, shell semantics | overlays, panels, input gestures, render slots, window chrome |
 | Cannot see | pixels, fonts, the window | anything that outlives the window |
 | Lifetime | the session's — survives client disconnect and GUI restart | the window's |
-| Thread | its own; marshals via `net::EventLoop::post()` (`src/net/EventLoop.h:116`) | its own; marshals to the GUI thread |
+| Thread | its own; marshals via `net::EventLoop::post()` (`src/net/EventLoop.hpp:116`) | its own; marshals to the GUI thread |
 | Tested by | `vtscript_test`, Qt-free | `contour_gui_test`, offscreen |
 
 Three consequences worth stating explicitly:
@@ -299,7 +299,7 @@ constrains the IDL to stay serializable, which it must be anyway.
 ### 3.3 Threading, cancellation, and deadlines
 
 Host calls are `coro::Task`-shaped on the session side, matching `net::EventLoop`, `net::ISocket`
-(`src/net/ISocket.h:37`), and WASI 0.3's native async — a guest's `await` on a socket read suspends
+(`src/net/ISocket.hpp:37`), and WASI 0.3's native async — a guest's `await` on a socket read suspends
 that guest without blocking the loop or any other extension.
 
 Each callback carries a wall-clock deadline. **Do not implement that deadline with
@@ -356,7 +356,7 @@ costs when nobody uses it, and which existing type it is built on. Signatures ar
 Enumerate and manipulate the window/tab/pane tree: create, split, close, focus, move, resize, zoom,
 swap; read and set tab titles and tab colours; load and save layouts.
 
-This maps almost one-to-one onto `vtworkspace::SessionModel` (`src/vtworkspace/SessionModel.h`),
+This maps almost one-to-one onto `vtworkspace::SessionModel` (`src/vtworkspace/SessionModel.hpp`),
 which is already Qt-free and already has the whole verb set — `createTab`, `closeTab`, `activateTab`,
 `moveTab`, `moveTabToWindow`, `closePane`, `setActivePane`, `focusDirection`, `setPaneRatio`,
 `resizeActivePane`, `toggleActivePaneOrientation`, `swapActivePane`, `moveActivePane`,
@@ -401,7 +401,7 @@ Use cases: error triage, redaction, the recorder's replay verification, the agen
 `NullShellIntegration` stays installed until someone subscribes
 
 The most valuable interface in this document, and the cheapest to build, because
-`vtbackend::ShellIntegration` (`src/vtbackend/ShellIntegration.h:10`) is already a pure-virtual
+`vtbackend::ShellIntegration` (`src/vtbackend/ShellIntegration.hpp:10`) is already a pure-virtual
 observer with exactly the four OSC 133 events: `promptStart`, `promptEnd`, `commandOutputStart`
 (carrying the command line, when the shell sent one), `commandFinished(exitCode)`. Subscribing means
 swapping the null implementation for a fan-out decorator.
@@ -412,7 +412,7 @@ On top of those raw events the interface offers the semantics extensions actuall
   the logical line range the output occupied.
 - **Block queries** — the block at a position, the last N blocks, a block's prompt / command /
   output text. Backed by `scanCommandBlocksBackward` and `textOf`
-  (`src/vtbackend/CommandBlocks.h`), which are already written against a
+  (`src/vtbackend/CommandBlocks.hpp`), which are already written against a
   `CommandBlockLineSource` DI seam and are therefore already testable without a Grid.
 - **The live prompt span** — where the shell's prompt is *right now*, or why there isn't one.
   Backed by `Terminal::livePromptSpan()`, which returns
@@ -445,8 +445,8 @@ with future standard sequences. So:
 
 - **Primary: APC, namespaced by extension id.** `APC x <ext-id> ; <payload> ST`. APC is unallocated
   in the DEC manuals, ignored by xterm, and Contour's parser already recognizes it
-  (`Parser.h` states `APC_String`/`APC_Start`/`APC_Put`/`APC_End`) and already collects a bounded
-  body that it drops when overlong (`SequenceBuilder.h:183`). A string extension id cannot collide by
+  (`Parser.hpp` states `APC_String`/`APC_Start`/`APC_Put`/`APC_End`) and already collects a bounded
+  body that it drops when overlong (`SequenceBuilder.hpp:183`). A string extension id cannot collide by
   accident, and `x` keeps clear of kitty's `APC G`.
 - **Fallback: one reserved OSC id, namespaced identically** — `OSC 889 ; <ext-id> ; <payload> ST` —
   for tooling that can only emit OSC. One number to register with the community, not a range to
@@ -478,7 +478,7 @@ first-class session kind: openable from the command palette, referenceable from 
 restorable from a saved layout, and — because the session lives in the daemon — reconnectable after
 the GUI restarts.
 
-`vtpty::Pty` (`src/vtpty/Pty.h:52`) is already the right interface: `start`, `read` into a
+`vtpty::Pty` (`src/vtpty/Pty.hpp:52`) is already the right interface: `start`, `read` into a
 `crispy::buffer_object`, `write`, `resizeScreen`, `pageSize`, `waitForClosed`, `wakeupReader`, plus a
 `PtySlave`. The guest side is the inverse of the normal binding direction — the host calls into the
 guest — so it needs a genuine async read (WASI 0.3's `stream<u8>`, or a poll-shaped fallback).
@@ -609,7 +609,7 @@ list.
 **Permission:** `ui:palette` · **Placement:** client · **Cost unused:** nil — a source that is only
 queried when the palette opens
 
-An extension becomes a `contour::CommandSource` (`src/contour/Command.h:33`) — the interface whose
+An extension becomes a `contour::CommandSource` (`src/contour/Command.hpp:33`) — the interface whose
 documentation already anticipates this: *"a sixth kind of command is therefore a new class, not an
 edit to the palette."* It is asked for rows each time the palette opens, so rows can depend on live
 state, and it participates in the existing dedup-by-id precedence.
@@ -621,7 +621,7 @@ Use cases: recent directories, git branches, k8s contexts, saved SSH hosts, "att
 **Permission:** `ui:hints` · **Placement:** client · **Cost unused:** nil — patterns are scanned only
 while hint mode is active
 
-Register `HintPattern`s (`src/vtbackend/HintModeHandler.h:27`) with a custom handler through the
+Register `HintPattern`s (`src/vtbackend/HintModeHandler.hpp:27`) with a custom handler through the
 existing `HintModeHandler::Executor` seam: recognize `ABC-123` and open the ticket, recognize
 `file.cpp:42:17` and open the editor there, recognize a container id and offer `exec`. Patterns join
 `builtinPatterns()` rather than replacing them.
@@ -1364,7 +1364,7 @@ interface vt {
   // --- vt:tap-sequences (read-only) --------------------------------------
   record sequence {
     category: string,          // "CSI" | "OSC" | "DCS" | "ESC" | "C0"
-    mnemonic: option<string>,  // resolved from the Functions.h registry
+    mnemonic: option<string>,  // resolved from the Functions.hpp registry
     raw: string,
     handled: bool,
   }

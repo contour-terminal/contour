@@ -1,18 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/display/Logging.h>
-#include <contour/display/RhiRenderer.h>
-#include <contour/display/RhiVertexLayout.h>
-#include <contour/display/ScreenshotReadback.h>
-#include <contour/display/ShaderConfig.h>
+#include <contour/display/Logging.hpp>
+#include <contour/display/RhiRenderer.hpp>
+#include <contour/display/RhiVertexLayout.hpp>
+#include <contour/display/ScreenshotReadback.hpp>
+#include <contour/display/ShaderConfig.hpp>
 
-#include <vtbackend/primitives.h>
+#include <vtbackend/Primitives.hpp>
 
-#include <vtrasterizer/TextureAtlas.h>
+#include <vtrasterizer/TextureAtlas.hpp>
 
-#include <crispy/algorithm.h>
-#include <crispy/assert.h>
-#include <crispy/defines.h>
-#include <crispy/utils.h>
+#include <crispy/Assert.hpp>
+#include <crispy/Defines.hpp>
+#include <crispy/Utils.hpp>
 
 #include <QtCore/QFile>
 #include <QtCore/QVarLengthArray>
@@ -513,7 +512,7 @@ void RhiRenderer::renderTile(atlas::RenderTile tile)
     // clang-format on
 
     batch.renderTiles.emplace_back(tile);
-    crispy::copy(vertices, back_inserter(batch.buffer));
+    std::ranges::copy(vertices, back_inserter(batch.buffer));
 }
 
 void RhiRenderer::createImageTexture(atlas::CreateImageTexture param)
@@ -581,7 +580,7 @@ void RhiRenderer::renderImageQuad(atlas::RenderImageQuad param)
     };
     // clang-format on
 
-    crispy::copy(vertices, back_inserter(buffer));
+    std::ranges::copy(vertices, back_inserter(buffer));
 }
 // }}}
 
@@ -1123,7 +1122,7 @@ namespace
         };
         // clang-format on
 
-        crispy::copy(vertices, back_inserter(out));
+        std::ranges::copy(vertices, back_inserter(out));
     }
 } // namespace
 
@@ -1190,7 +1189,7 @@ optional<vtrasterizer::AtlasTextureScreenshot> RhiRenderer::readAtlas()
     };
 
     auto const expectedBytes =
-        static_cast<size_t>(_atlasTextureSize.area()) * element_count(_atlasProperties.format);
+        static_cast<size_t>(_atlasTextureSize.area()) * elementCount(_atlasProperties.format);
 
     if (!_atlasReadbackResult.data.isEmpty()
         && _atlasReadbackResult.pixelSize

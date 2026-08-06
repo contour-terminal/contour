@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/testing/GridParity.h>
+#include <vthost/testing/GridParity.hpp>
 
-#include <vtbackend/Image.h>
-#include <vtbackend/LineFlags.h>
+#include <vtbackend/Image.hpp>
+#include <vtbackend/LineFlags.hpp>
 
 #include <algorithm>
 #include <array>
@@ -12,7 +12,7 @@
 #include <string_view>
 #include <utility>
 
-#include <vthost/GridWire.h>
+#include <vthost/GridWire.hpp>
 
 namespace vthost::testing
 {
@@ -36,19 +36,19 @@ namespace
     {
         if (raw == 0)
             return "none";
-        return std::format("{}", vtbackend::LineFlags::from_value(raw));
+        return std::format("{}", vtbackend::LineFlags::fromValue(raw));
     }
 
     /// Whether @p raw carries the flag that gives `WireLine::promptEndOffset` its meaning.
     [[nodiscard]] bool marksPromptEnd(uint16_t raw)
     {
-        return vtbackend::LineFlags::from_value(raw).contains(vtbackend::LineFlag::PromptEnd);
+        return vtbackend::LineFlags::fromValue(raw).contains(vtbackend::LineFlag::PromptEnd);
     }
 
     /// Whether @p raw carries the flag that gives `WireLine::commandEndOffset` its meaning.
     [[nodiscard]] bool marksCommandEnd(uint16_t raw)
     {
-        return vtbackend::LineFlags::from_value(raw).contains(vtbackend::LineFlag::CommandEnd);
+        return vtbackend::LineFlags::fromValue(raw).contains(vtbackend::LineFlag::CommandEnd);
     }
 
     /// Names the SGR flags set in @p raw.

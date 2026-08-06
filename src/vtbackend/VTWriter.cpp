@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/VTWriter.h>
+#include <vtbackend/VTWriter.hpp>
 
-#include <vtbackend/CellProxy.h>
+#include <vtbackend/CellProxy.hpp>
 
 #include <numeric>
 
@@ -77,9 +77,9 @@ void VTWriter::sgrAddExplicit(unsigned n)
 {
     if (n == 0)
     {
-        _currentForegroundColor = DefaultColor();
-        _currentBackgroundColor = DefaultColor();
-        _currentUnderlineColor = DefaultColor();
+        _currentForegroundColor = defaultColor();
+        _currentBackgroundColor = defaultColor();
+        _currentUnderlineColor = defaultColor();
     }
 
     _sgr.push_back(n);
@@ -91,9 +91,9 @@ void VTWriter::sgrAdd(unsigned n)
     {
         _sgr.clear();
         _sgr.push_back(n);
-        _currentForegroundColor = DefaultColor();
-        _currentBackgroundColor = DefaultColor();
-        _currentUnderlineColor = DefaultColor();
+        _currentForegroundColor = defaultColor();
+        _currentBackgroundColor = defaultColor();
+        _currentUnderlineColor = defaultColor();
     }
     else
     {

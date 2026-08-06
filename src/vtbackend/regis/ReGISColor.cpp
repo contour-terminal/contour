@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/regis/ReGISColor.h>
+#include <vtbackend/regis/ReGISColor.hpp>
 
 #include <algorithm>
 #include <cstdint>

@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-#include <vtconformance/TerminalHarness.h>
+#include <vtconformance/TerminalHarness.hpp>
 
 using namespace std::chrono_literals;
 using namespace std::string_literals;

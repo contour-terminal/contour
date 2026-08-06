@@ -1,6 +1,6 @@
-#include <crispy/StackTrace.h>
+#include <crispy/StackTrace.hpp>
 
-#include <crispy/utils.h>
+#include <crispy/Utils.hpp>
 
 #include <cctype>
 #include <cstdlib>
@@ -48,11 +48,11 @@ constexpr size_t SKIP_FRAMES { 0 };  // NOLINT
 #if defined(__linux__) || defined(__APPLE__)
 namespace
 {
-    struct system_wrap // {{{
+    struct SystemWrap // {{{
     {
         int pfd[2] { -1, -1 };
 
-        system_wrap()
+        SystemWrap()
         {
             if (pipe(pfd))
                 perror("pipe");
@@ -62,7 +62,7 @@ namespace
         [[nodiscard]] int reader() noexcept { return pfd[0]; }
         [[nodiscard]] int writer() noexcept { return pfd[1]; }
 
-        ~system_wrap() { close(); }
+        ~SystemWrap() { close(); }
 
         void close()
         {
@@ -76,7 +76,7 @@ namespace
 } // namespace
 #endif
 
-vector<void*> stack_trace::getFrames(size_t skip, size_t max)
+vector<void*> StackTrace::getFrames(size_t skip, size_t max)
 {
     vector<void*> frames;
 
@@ -86,19 +86,19 @@ vector<void*> stack_trace::getFrames(size_t skip, size_t max)
     std::copy(std::next(frames.begin(), (int) skip), frames.end(), frames.begin());
     frames.resize(frames.size() > skip ? frames.size() - skip : std::min(frames.size(), skip));
 #else
-    crispy::ignore_unused(skip, max);
+    crispy::ignoreUnused(skip, max);
 #endif
 
     return frames;
 }
 
-optional<debug_info> stack_trace::getDebugInfoForFrame(void const* frameAddress)
+optional<DebugInfo> StackTrace::getDebugInfoForFrame(void const* frameAddress)
 {
     if (!frameAddress)
         return nullopt;
 
 #ifdef __linux__
-    auto pipe = system_wrap();
+    auto pipe = SystemWrap();
     if (!pipe.good())
         return nullopt;
     pid_t const childPid = fork();
@@ -142,7 +142,7 @@ optional<debug_info> stack_trace::getDebugInfoForFrame(void const* frameAddress)
                 --len;
 
             // result on success:
-            debug_info info;
+            DebugInfo info;
     #if 0
             auto static const re = regex(R"(^(.*):\d+$)");
             std::cmatch cm;
@@ -167,7 +167,7 @@ optional<debug_info> stack_trace::getDebugInfoForFrame(void const* frameAddress)
 #endif
 }
 
-stack_trace::stack_trace():
+StackTrace::StackTrace():
 #ifdef HAVE_BACKTRACE
     _frames { SKIP_FRAMES + MAX_FRAMES }
 #else
@@ -179,7 +179,7 @@ stack_trace::stack_trace():
 #endif
 }
 
-string stack_trace::demangleSymbol(char const* symbol)
+string StackTrace::demangleSymbol(char const* symbol)
 {
 #if (defined(__linux__) || defined(__APPLE__)) && defined(HAVE_CXXABI_H)
     int status = 0;
@@ -200,7 +200,7 @@ string stack_trace::demangleSymbol(char const* symbol)
 #endif
 }
 
-vector<string> stack_trace::symbols() const
+vector<string> StackTrace::symbols() const
 {
     if (empty())
         return {};

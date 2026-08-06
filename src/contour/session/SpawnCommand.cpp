@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/session/SpawnCommand.h>
+#include <contour/session/SpawnCommand.hpp>
 
 #include <QtCore/QUrl>
 #include <QtNetwork/QHostInfo>

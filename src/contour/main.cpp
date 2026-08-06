@@ -4,8 +4,8 @@
 // what Qt itself prints. A build without the GUI frontend links no Qt, so nothing there emits a Qt
 // message and there is no handler to install.
 #ifdef CONTOUR_FRONTEND_GUI
-    #include <contour/BenignQtMessages.h>
-    #include <contour/ContourGuiApp.h>
+    #include <contour/BenignQtMessages.hpp>
+    #include <contour/ContourGuiApp.hpp>
 
     #include <QtCore/QByteArray>
     #include <QtCore/QString>
@@ -14,11 +14,11 @@
         #include <QtCore/QtLogging>
     #endif
 #else
-    #include <contour/cli/ContourApp.h>
+    #include <contour/cli/ContourApp.hpp>
 #endif
 
+#include <crispy/Environment.hpp>
 #include <crispy/SuppressWindowsDialogs.hpp>
-#include <crispy/environment.h>
 
 #include <cstddef>
 #include <cstdio>

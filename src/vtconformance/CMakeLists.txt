@@ -8,22 +8,22 @@ add_library(vtconformance STATIC
     Diagnostics.cpp
     EscTestLog.cpp
     EscTestSuite.cpp
-    Diagnostics.h
+    Diagnostics.hpp
     MarkerScanner.cpp
-    MarkerScanner.h
+    MarkerScanner.hpp
     Report.cpp
-    Report.h
+    Report.hpp
     Runner.cpp
-    Runner.h
+    Runner.hpp
     ScreenDump.cpp
-    ScreenDump.h
-    Suite.h
+    ScreenDump.hpp
+    Suite.hpp
     TerminalEngine.cpp
-    TerminalEngine.h
+    TerminalEngine.hpp
     TerminalHarness.cpp
-    TerminalHarness.h
+    TerminalHarness.hpp
     VtTestLog.cpp
-    VtTestLog.h
+    VtTestLog.hpp
     VtTestSuite.cpp
 )
 target_link_libraries(vtconformance PUBLIC
@@ -69,7 +69,7 @@ if(VTCONFORMANCE_TESTING)
     # barrier rather than on a timeout, so both are reproducible and both break the build. Note that many
     # of those goldens are recorded rather than reviewed: they pin today's behaviour without asserting it
     # is correct, which a gate serves perfectly well -- it makes a change to them deliberate. What keeps
-    # this honest rather than merely noisy is the ratchet in known-gaps.txt -- see Report.h.
+    # this honest rather than merely noisy is the ratchet in known-gaps.txt -- see Report.hpp.
     #
     # vttest is not a build dependency, so a machine without it skips rather than fails. A skip says
     # so loudly on stderr; it never masquerades as a pass.

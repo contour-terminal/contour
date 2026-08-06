@@ -9,11 +9,11 @@
 // The tests SKIP (do not fail) when no GL context / RHI is available (common in headless CI without a
 // software GL stack), so they harden coverage where possible without becoming a flaky gate.
 
-#include <contour/display/RhiRenderer.h>
-#include <contour/display/ScreenshotReadback.h>
+#include <contour/display/RhiRenderer.hpp>
+#include <contour/display/ScreenshotReadback.hpp>
 
-#include <vtbackend/Color.h>
-#include <vtbackend/primitives.h>
+#include <vtbackend/Color.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <QtGui/QColor>
 #include <QtGui/QOffscreenSurface>

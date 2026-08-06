@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <net/AsyncBufferedReader.h>
+#include <net/AsyncBufferedReader.hpp>
 
 #include <array>
 #include <cstring>
 #include <span>
 #include <vector>
 
-#include <net/Sockets.h>
+#include <net/Sockets.hpp>
 
 namespace net
 {

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/ViInputHandler.h>
+#include <vtbackend/ViInputHandler.hpp>
 
-#include <vtbackend/HintModeHandler.h>
-#include <vtbackend/logging.h>
+#include <vtbackend/HintModeHandler.hpp>
+#include <vtbackend/Logging.hpp>
 
-#include <crispy/TrieMap.h>
-#include <crispy/assert.h>
-#include <crispy/utils.h>
+#include <crispy/Assert.hpp>
+#include <crispy/TrieMap.hpp>
+#include <crispy/Utils.hpp>
 
 #include <libunicode/convert.h>
 
@@ -297,16 +297,16 @@ void ViInputHandler::handlePendingInput()
 
     CommandHandlerMap const& mapping = isVisualMode() ? _visualMode : _normalMode;
     auto const mappingResult = mapping.search(_pendingInput, TrieMapAllowWildcardDot);
-    if (std::holds_alternative<crispy::exact_match<CommandHandler>>(mappingResult))
+    if (std::holds_alternative<crispy::ExactMatch<CommandHandler>>(mappingResult))
     {
         inputLog()("Executing handler for: {}{}", _count ? std::format("{} ", _count) : "", _pendingInput);
         _lastChar =
             unicode::convert_to<char32_t>(std::string_view(_pendingInput.data(), _pendingInput.size()))
                 .back();
-        std::get<crispy::exact_match<CommandHandler>>(mappingResult).value();
+        std::get<crispy::ExactMatch<CommandHandler>>(mappingResult).value();
         clearPendingInput();
     }
-    else if (std::holds_alternative<crispy::no_match>(mappingResult))
+    else if (std::holds_alternative<crispy::NoMatch>(mappingResult))
     {
         inputLog()("Invalid command: {}", _pendingInput);
         clearPendingInput();

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <net/windows/WindowsSocket.h>
+#include <net/windows/WindowsSocket.hpp>
 
 #ifdef _WIN32
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtpty/MockPty.h>
+#include <vtpty/MockPty.hpp>
 
-#include <crispy/logsink.h>
+#include <crispy/LogSink.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -20,17 +20,17 @@
 #include <vector>
 
 #include <coro/WhenAll.hpp>
-#include <net/AsyncBufferedReader.h>
-#include <net/EventLoop.h>
-#include <net/ISocket.h>
-#include <net/IoResult.h>
-#include <net/PollEventSource.h>
-#include <net/testing/InMemoryTransport.h>
-#include <vthost/SessionHost.h>
-#include <vthost/TappingPty.h>
-#include <vthost/tmux/ControlSession.h>
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/Tab.h>
+#include <net/AsyncBufferedReader.hpp>
+#include <net/EventLoop.hpp>
+#include <net/ISocket.hpp>
+#include <net/IoResult.hpp>
+#include <net/PollEventSource.hpp>
+#include <net/testing/InMemoryTransport.hpp>
+#include <vthost/SessionHost.hpp>
+#include <vthost/TappingPty.hpp>
+#include <vthost/tmux/ControlSession.hpp>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/Tab.hpp>
 
 using coro::Task;
 using vthost::SessionHost;
@@ -243,7 +243,7 @@ TEST_CASE("a control session reports the transport error that ended it", "[vthos
     // Every readLine failure used to print "end of stream", so a reset or a bad handle was
     // indistinguishable from a peer hanging up cleanly — which is what made a daemon's log
     // unreadable when a second daemon's bind probe poked it.
-    auto capture = logstore::scoped_capture { "vthost.tmux" };
+    auto capture = logstore::ScopedCapture { "vthost.tmux" };
 
     auto h = ControlHarness { {},
                               {},
@@ -263,7 +263,7 @@ TEST_CASE("the detach line counts the commands the client issued", "[vthost][con
     // quit. The count is what tells the two apart.
     SECTION("a peer that never speaks")
     {
-        auto capture = logstore::scoped_capture { "vthost.tmux" };
+        auto capture = logstore::ScopedCapture { "vthost.tmux" };
         auto h = ControlHarness {};
         std::ignore = h.exchange({});
         CHECK(capture.contains("0 commands"));
@@ -271,7 +271,7 @@ TEST_CASE("the detach line counts the commands the client issued", "[vthost][con
 
     SECTION("a peer that issued commands")
     {
-        auto capture = logstore::scoped_capture { "vthost.tmux" };
+        auto capture = logstore::ScopedCapture { "vthost.tmux" };
         auto h = ControlHarness {};
         std::ignore = h.exchange({ "new-window", "list-panes" });
         CHECK(capture.contains("2 commands"));

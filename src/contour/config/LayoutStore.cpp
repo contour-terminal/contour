@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/config/AtomicFileWrite.h>
-#include <contour/config/LayoutBuilder.h>
-#include <contour/config/LayoutStore.h>
+#include <contour/config/AtomicFileWrite.hpp>
+#include <contour/config/LayoutBuilder.hpp>
+#include <contour/config/LayoutStore.hpp>
 
 namespace contour::config
 {

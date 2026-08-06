@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/ContourGuiApp.h>
-#include <contour/session/SessionFactory.h>
+#include <contour/ContourGuiApp.hpp>
+#include <contour/session/SessionFactory.hpp>
 
-#include <vtpty/Process.h>
+#include <vtpty/Process.hpp>
 #ifdef VTPTY_LIBSSH2
-    #include <vtpty/SshSession.h>
+    #include <vtpty/SshSession.hpp>
 #endif
 
 #include <filesystem>

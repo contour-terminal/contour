@@ -4,7 +4,7 @@
 // Qt-internal log messages the app's message handler (main.cpp) drops before they reach the user;
 // testing it directly verifies that decision without installing a Qt message handler.
 
-#include <contour/BenignQtMessages.h>
+#include <contour/BenignQtMessages.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>

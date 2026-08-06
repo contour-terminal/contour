@@ -4,7 +4,7 @@
 // integer offset; a terminal is a grid. Every row occupies one offset MORE than it has columns -- the
 // newline joining it to the row below -- which is what makes both directions plain division and modulo.
 
-#include <contour/display/ViewportTextIndex.h>
+#include <contour/display/ViewportTextIndex.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/remote/NativeController.h>
-#include <contour/remote/RoutingSessionFactory.h>
-#include <contour/test/GuiTestFixtures.h>
+#include <contour/remote/NativeController.hpp>
+#include <contour/remote/RoutingSessionFactory.hpp>
+#include <contour/test/GuiTestFixtures.hpp>
 
-#include <vtpty/MockPty.h>
+#include <vtpty/MockPty.hpp>
 
-#include <crispy/BufferObject.h>
+#include <crispy/BufferObject.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -27,25 +27,25 @@
     #include <unistd.h>
 #endif
 
-#include <contour/remote/RemoteLayout.h>
+#include <contour/remote/RemoteLayout.hpp>
 
 #include <cstdint>
 
 #include <coro/Cancellation.hpp>
-#include <net/EventLoop.h>
-#include <net/ISocket.h>
-#include <net/PollEventSource.h>
-#include <net/Sockets.h>
-#include <net/Tls.h>
-#include <vthost/ConnectionAcceptor.h>
-#include <vthost/NativeSession.h>
-#include <vthost/SessionHost.h>
-#include <vthost/SocketPath.h>
-#include <vthost/TappingPty.h>
-#include <vthost/client/LayoutReconstruction.h>
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/SessionModel.h>
-#include <vtworkspace/Tab.h>
+#include <net/EventLoop.hpp>
+#include <net/ISocket.hpp>
+#include <net/PollEventSource.hpp>
+#include <net/Sockets.hpp>
+#include <net/Tls.hpp>
+#include <vthost/ConnectionAcceptor.hpp>
+#include <vthost/NativeSession.hpp>
+#include <vthost/SessionHost.hpp>
+#include <vthost/SocketPath.hpp>
+#include <vthost/TappingPty.hpp>
+#include <vthost/client/LayoutReconstruction.hpp>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/SessionModel.hpp>
+#include <vtworkspace/Tab.hpp>
 
 using namespace std::chrono_literals;
 

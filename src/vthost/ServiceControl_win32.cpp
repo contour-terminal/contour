@@ -7,8 +7,8 @@
 #endif
 // clang-format on
 
-#include <vthost/Daemon.h>
-#include <vthost/ServiceControl.h>
+#include <vthost/Daemon.hpp>
+#include <vthost/ServiceControl.hpp>
 
 #ifdef _WIN32
 

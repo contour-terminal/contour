@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/proto/PduTrace.h>
+#include <vthost/proto/PduTrace.hpp>
 
 #include <algorithm>
 #include <array>

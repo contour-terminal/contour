@@ -10,11 +10,10 @@
 #endif
 // clang-format on
 
-#include <vthost/Daemon.h>
+#include <vthost/Daemon.hpp>
 
-#include <crispy/algorithm.h>
-#include <crispy/environment.h>
-#include <crispy/utils.h>
+#include <crispy/Environment.hpp>
+#include <crispy/Utils.hpp>
 
 #include <atomic>
 #include <charconv>
@@ -36,18 +35,18 @@
 #include <vector>
 
 #include <coro/WhenAll.hpp>
-#include <net/EventLoop.h>
-#include <net/PollEventSource.h>
-#include <net/Sockets.h>
-#include <net/Tls.h>
-#include <vthost/ConnectionAcceptor.h>
-#include <vthost/LastSessionWatcher.h>
-#include <vthost/NativeSession.h>
-#include <vthost/SessionHost.h>
-#include <vthost/SocketPath.h>
-#include <vthost/logging.h>
-#include <vthost/tmux/ControlSession.h>
-#include <vthost/tmux/ImsgServer.h>
+#include <net/EventLoop.hpp>
+#include <net/PollEventSource.hpp>
+#include <net/Sockets.hpp>
+#include <net/Tls.hpp>
+#include <vthost/ConnectionAcceptor.hpp>
+#include <vthost/LastSessionWatcher.hpp>
+#include <vthost/Logging.hpp>
+#include <vthost/NativeSession.hpp>
+#include <vthost/SessionHost.hpp>
+#include <vthost/SocketPath.hpp>
+#include <vthost/tmux/ControlSession.hpp>
+#include <vthost/tmux/ImsgServer.hpp>
 
 #ifndef _WIN32
     #include <csignal>
@@ -265,7 +264,7 @@ namespace
         // Resolved in the PARENT: the child may only call async-signal-safe functions between fork
         // and exec, and a PATH walk is not one. argv[0] itself stays as the caller named it — that
         // is what the daemon's `ps` line and its own commandLine() replay should show.
-        // crispy::environment, not getenv: this runs on a client that already has a live reactor
+        // crispy::Environment, not getenv: this runs on a client that already has a live reactor
         // thread, and the snapshot exists precisely so an environment read is not racing it.
         auto const image = resolveExecutablePath(
             args[0], crispy::defaultEnvironment().get("PATH").value_or(""), isExecutableFile);

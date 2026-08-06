@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Terminal.h>
+#include <vtbackend/Terminal.hpp>
 
-#include <vtpty/MockPty.h>
+#include <vtpty/MockPty.hpp>
 
-#include <crispy/base64.h>
+#include <crispy/Base64.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -21,17 +21,17 @@
 #include <vector>
 
 #include <coro/WhenAll.hpp>
-#include <net/EventLoop.h>
-#include <net/PollEventSource.h>
-#include <net/testing/InMemoryTransport.h>
-#include <vthost/GridWire.h>
-#include <vthost/NativeSession.h>
-#include <vthost/SessionHost.h>
-#include <vthost/client/NativeClient.h>
-#include <vthost/client/ScreenMirror.h>
-#include <vthost/testing/GridParity.h>
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/Tab.h>
+#include <net/EventLoop.hpp>
+#include <net/PollEventSource.hpp>
+#include <net/testing/InMemoryTransport.hpp>
+#include <vthost/GridWire.hpp>
+#include <vthost/NativeSession.hpp>
+#include <vthost/SessionHost.hpp>
+#include <vthost/client/NativeClient.hpp>
+#include <vthost/client/ScreenMirror.hpp>
+#include <vthost/testing/GridParity.hpp>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/Tab.hpp>
 
 using coro::Task;
 using vthost::NativeSession;

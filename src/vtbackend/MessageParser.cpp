@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/MessageParser.h>
+#include <vtbackend/MessageParser.hpp>
 
-#include <crispy/base64.h>
+#include <crispy/Base64.hpp>
 
 #include <iostream>
 #include <vector>

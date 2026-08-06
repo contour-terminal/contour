@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <catch2/catch_test_macros.hpp>
 
-#include <vtconformance/EscTestLog.h>
+#include <vtconformance/EscTestLog.hpp>
 
 using namespace vtconformance;
 

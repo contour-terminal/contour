@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtpty/Process.h>
-#include <vtpty/Pty.h>
-#include <vtpty/UnixPty.h>
+#include <vtpty/Process.hpp>
+#include <vtpty/Pty.hpp>
+#include <vtpty/UnixPty.hpp>
 
-#include <crispy/environment.h>
-#include <crispy/overloaded.h>
-#include <crispy/user_info.h>
-#include <crispy/utils.h>
+#include <crispy/Environment.hpp>
+#include <crispy/Overloaded.hpp>
+#include <crispy/UserInfo.hpp>
+#include <crispy/Utils.hpp>
 
 #include <array>
 #include <cassert>
@@ -487,7 +487,7 @@ namespace
         if (auto const pw = crispy::currentUserPasswordEntry(); pw.has_value())
         {
 #ifdef __APPLE__
-            crispy::ignore_unused(escapeSandbox);
+            crispy::ignoreUnused(escapeSandbox);
             return { pw->shell };
 #else
             if (Process::isFlatpak() && escapeSandbox)
@@ -495,7 +495,7 @@ namespace
                 char buf[1024];
                 auto const cmd = std::format("flatpak-spawn --host getent passwd {}", pw->name);
                 FILE* fp = popen(cmd.c_str(), "r");
-                auto fpCloser = crispy::finally { [fp]() { pclose(fp); } };
+                auto fpCloser = crispy::Finally { [fp]() { pclose(fp); } };
                 size_t const nread = fread(buf, sizeof(char), sizeof(buf) / sizeof(char), fp);
                 auto const output = trimRight(string_view(buf, nread));
                 auto const colonIndex = output.rfind(':');

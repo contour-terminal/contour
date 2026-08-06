@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/config/Actions.h>
+#include <contour/config/Actions.hpp>
 
-#include <crispy/utils.h>
+#include <crispy/Utils.hpp>
 
 #include <algorithm>
 #include <optional>

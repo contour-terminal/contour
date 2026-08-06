@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/client/NativeClient.h>
+#include <vthost/client/NativeClient.hpp>
 
 #include <libunicode/convert.h>
 
@@ -10,11 +10,11 @@
 #include <variant>
 #include <vector>
 
-#include <net/Sockets.h>
-#include <vthost/PduPump.h>
-#include <vthost/SessionSettings.h>
-#include <vthost/logging.h>
-#include <vthost/proto/PduTrace.h>
+#include <net/Sockets.hpp>
+#include <vthost/Logging.hpp>
+#include <vthost/PduPump.hpp>
+#include <vthost/SessionSettings.hpp>
+#include <vthost/proto/PduTrace.hpp>
 
 namespace vthost::client
 {

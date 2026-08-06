@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/command/Command.h>
-#include <contour/command/ContextMenu.h>
-#include <contour/config/Actions.h>
+#include <contour/command/Command.hpp>
+#include <contour/command/ContextMenu.hpp>
+#include <contour/config/Actions.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#include <vtpty/MockViewPty.h>
+#include <vtpty/MockViewPty.hpp>
 
-#include <crispy/BufferObject.h>
+#include <crispy/BufferObject.hpp>
 
 namespace vtpty
 {
@@ -18,7 +18,7 @@ PtySlave& MockViewPty::slave() noexcept
     return _slave;
 }
 
-std::optional<Pty::ReadResult> MockViewPty::read(crispy::buffer_object<char>& storage,
+std::optional<Pty::ReadResult> MockViewPty::read(crispy::BufferObject<char>& storage,
                                                  std::optional<std::chrono::milliseconds> /*timeout*/,
                                                  size_t size)
 {

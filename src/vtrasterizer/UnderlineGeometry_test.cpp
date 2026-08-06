@@ -2,7 +2,7 @@
 //
 // Unit tests for the curly underline's geometry -- the decision issue #1754 got wrong.
 
-#include <vtrasterizer/UnderlineGeometry.h>
+#include <vtrasterizer/UnderlineGeometry.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

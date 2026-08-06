@@ -8,7 +8,7 @@
 // See issue #1711: the Windows retry passed the SAME working directory as the first attempt, so
 // ERROR_DIRECTORY ("The directory name is invalid") failed both times by construction.
 
-#include <vtpty/SpawnLadder.h>
+#include <vtpty/SpawnLadder.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

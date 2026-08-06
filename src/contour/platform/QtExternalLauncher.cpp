@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/platform/QtExternalLauncher.h>
+#include <contour/platform/QtExternalLauncher.hpp>
 
 #include <QtCore/QProcess>
 #include <QtGui/QDesktopServices>

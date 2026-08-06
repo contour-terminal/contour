@@ -8,7 +8,7 @@
 #include <variant>
 #include <vector>
 
-#include <vthost/proto/Pdu.h>
+#include <vthost/proto/Pdu.hpp>
 
 using namespace vthost::proto;
 

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Grid.h>
-#include <vtbackend/primitives.h>
+#include <vtbackend/Grid.hpp>
+#include <vtbackend/Primitives.hpp>
 
-#include <crispy/BufferObject.h>
+#include <crispy/BufferObject.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -27,7 +27,7 @@ void logGridText(Grid const& grid, string const& headline = "")
                               grid.historyLineCount(),
                               grid.maxHistoryLineCount(),
                               grid.pageSize(),
-                              grid.zero_index(),
+                              grid.zeroIndex(),
                               headline));
 
     for (int line = -grid.historyLineCount().as<int>(); line < grid.pageSize().lines.as<int>(); ++line)
@@ -46,7 +46,7 @@ void logGridText(Grid const& grid, string const& headline = "")
                              grid.historyLineCount(),
                              grid.maxHistoryLineCount(),
                              grid.pageSize(),
-                             grid.zero_index(),
+                             grid.zeroIndex(),
                              headline);
     std::cout << std::format("{}\n", dumpGrid(grid));
 }
@@ -889,7 +889,7 @@ TEST_CASE("Grid resize", "[grid]")
     auto width = ColumnCount(6);
     auto grid = Grid(PageSize { LineCount(2), width }, true, LineCount(0));
     auto text = "abcd"sv;
-    auto pool = crispy::buffer_object_pool<char>(32);
+    auto pool = crispy::BufferObjectPool<char>(32);
     auto bufferObject = pool.allocateBufferObject();
     bufferObject->writeAtEnd(text);
     auto const bufferFragment = bufferObject->ref(0, 4);
@@ -921,7 +921,7 @@ TEST_CASE("Grid resize with wrap and spaces", "[grid]")
     auto grid = Grid(PageSize { LineCount(3), width }, true, LineCount(0));
 
     auto text = "a a a a"sv;
-    auto pool = crispy::buffer_object_pool<char>(static_cast<size_t>(unbox(width) * 8));
+    auto pool = crispy::BufferObjectPool<char>(static_cast<size_t>(unbox(width) * 8));
     auto bufferObject = pool.allocateBufferObject();
     bufferObject->writeAtEnd(text);
     auto const bufferFragment = bufferObject->ref(0, unbox(width));

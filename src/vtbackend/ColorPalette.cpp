@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/ColorPalette.h>
+#include <vtbackend/ColorPalette.hpp>
 
-#include <vtbackend/Color.h>
+#include <vtbackend/Color.hpp>
 
-#include <crispy/overloaded.h>
+#include <crispy/Overloaded.hpp>
 
 #include <cstdio>
 #include <map>
@@ -293,7 +293,7 @@ bool defaultColorPalettes(std::string const& colorPaletteName, ColorPalette& pal
 void ImageData::updateHash() noexcept
 {
     // clang-format off
-    auto hashValue = crispy::strong_hash(0, 0, 0, size.width.value)
+    auto hashValue = crispy::StrongHash(0, 0, 0, size.width.value)
                    * static_cast<uint32_t>(size.height.value)
                    * static_cast<uint32_t>(rowAlignment)
                    * static_cast<uint32_t>(format);
@@ -302,7 +302,7 @@ void ImageData::updateHash() noexcept
     auto const pitch = roundUp(scanLineLength, static_cast<size_t>(rowAlignment));
     for (unsigned row = 0; row < size.height.value; ++row)
     {
-        hashValue = hashValue * crispy::strong_hash::compute(scanLine, scanLineLength);
+        hashValue = hashValue * crispy::StrongHash::compute(scanLine, scanLineLength);
         scanLine += pitch;
     }
     hash = hashValue;

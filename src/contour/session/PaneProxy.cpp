@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/session/PaneProxy.h>
-#include <contour/session/TerminalSessionManager.h>
+#include <contour/session/PaneProxy.hpp>
+#include <contour/session/TerminalSessionManager.hpp>
 
 namespace contour::session
 {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/command/Command.h>
-#include <contour/command/ContextMenu.h>
-#include <contour/command/ContextMenuTable.h>
+#include <contour/command/Command.hpp>
+#include <contour/command/ContextMenu.hpp>
+#include <contour/command/ContextMenuTable.hpp>
 
 #include <array>
 #include <span>

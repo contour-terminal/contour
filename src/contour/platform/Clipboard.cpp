@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/platform/Clipboard.h>
+#include <contour/platform/Clipboard.hpp>
 
 #include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>

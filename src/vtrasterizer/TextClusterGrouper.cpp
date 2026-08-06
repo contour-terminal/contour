@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtrasterizer/TextClusterGrouper.h>
+#include <vtrasterizer/TextClusterGrouper.hpp>
 
 #include <cassert>
 

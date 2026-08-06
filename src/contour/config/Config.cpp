@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/config/Actions.h>
-#include <contour/config/Config.h>
-#include <contour/config/ModifierNames.h>
+#include <contour/config/Actions.hpp>
+#include <contour/config/Config.hpp>
+#include <contour/config/ModifierNames.hpp>
 
-#include <vtbackend/Color.h>
-#include <vtbackend/ColorPalette.h>
+#include <vtbackend/Color.hpp>
+#include <vtbackend/ColorPalette.hpp>
 
-#include <vtpty/ImageSize.h>
+#include <vtpty/ImageSize.hpp>
 
-#include <text_shaper/font.h>
+#include <text_shaper/Font.hpp>
 
-#include <crispy/StrongHash.h>
-#include <crispy/environment.h>
-#include <crispy/escape.h>
+#include <crispy/Environment.hpp>
+#include <crispy/Escape.hpp>
+#include <crispy/StrongHash.hpp>
 
 #include <libunicode/convert.h>
 
@@ -36,7 +36,7 @@
     #include <unistd.h>
 #endif
 
-auto constexpr MinimumFontSize = text::font_size { 8.0 };
+auto constexpr MinimumFontSize = text::FontSize { 8.0 };
 
 using namespace std;
 using crispy::homeResolvedPath;
@@ -184,11 +184,11 @@ ActionList const* applyBuiltinFallback(Config const& config,
 namespace
 {
 
-    auto const configLog = logstore::category("config", "Logs configuration file loading.");
+    auto const configLog = logstore::Category("config", "Logs configuration file loading.");
 
     /// This translation unit's one environment reader.
     ///
-    /// A crispy::live_environment, constructed on the spot rather than the process-wide cached one:
+    /// A crispy::LiveEnvironment, constructed on the spot rather than the process-wide cached one:
     /// `${VAR}` expansion has to see the environment as it stands when the config is read, not as it
     /// stood when the process started. The live reader is nonetheless thread safe, which is what
     /// rules out a bare getenv() here -- config (re)load runs while the PTY threads are live.
@@ -199,9 +199,9 @@ namespace
     /// user's configuration had never been there.
     ///
     /// @return A reference to a function-local static; it outlives every caller.
-    [[nodiscard]] crispy::environment const& configEnvironment()
+    [[nodiscard]] crispy::Environment const& configEnvironment()
     {
-        static crispy::live_environment const instance;
+        static crispy::LiveEnvironment const instance;
         return instance;
     }
 
@@ -210,7 +210,7 @@ namespace
     /// @param name Name of the variable to read.
     /// @param env Environment to read from.
     /// @return The variable's value as raw bytes, or an empty string if it is unset.
-    [[nodiscard]] std::string environmentBytes(std::string_view name, crispy::environment const& env)
+    [[nodiscard]] std::string environmentBytes(std::string_view name, crispy::Environment const& env)
     {
         return env.get(name).value_or("");
     }
@@ -244,7 +244,7 @@ namespace
     [[nodiscard]] std::string acceptedModifierSpellings()
     {
         return ConfigModifierTable | std::views::transform(&ConfigModifierRow::name)
-               | crispy::views::join_with(", ");
+               | crispy::views::joinWith(", ");
     }
 
     /// Renders an `input_mapping` row for a diagnostic, e.g. "action: ClearHistoryAndReset, key: Q".
@@ -265,7 +265,7 @@ namespace
 
         if (described.empty())
             return "<empty>";
-        return described | crispy::views::join_with(", ");
+        return described | crispy::views::joinWith(", ");
     }
 
     optional<std::string> readFile(fs::path const& path)
@@ -738,8 +738,8 @@ optional<std::string> readConfigFile(std::string const& filename)
 }
 
 YAMLConfigReader::YAMLConfigReader(std::string const& filename,
-                                   logstore::category const& log,
-                                   crispy::environment const& env,
+                                   logstore::Category const& log,
+                                   crispy::Environment const& env,
                                    VariableReplacer replacer):
     configFile(filename), logger { log }, variableReplacer { std::move(replacer) }
 {
@@ -1470,7 +1470,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         loadFromEntry(child, "blur", where->blur);
         auto const resolved = resolvedPath(filename);
         where->location = resolved;
-        where->hash = crispy::strong_hash::compute(resolved.string());
+        where->hash = crispy::StrongHash::compute(resolved.string());
     }
 }
 
@@ -1612,7 +1612,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     std::vector<text::font_feature>& where)
+                                     std::vector<text::FontFeature>& where)
 {
     if (auto child = node[entry])
     {
@@ -1756,7 +1756,48 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         where = vtbackend::LineCount(child.as<int>());
 }
 
-void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, text::font_size& where)
+namespace
+{
+    /// Reads a configuration enum spelled as one of the tokens its parser accepts.
+    ///
+    /// Case-insensitive, and an unrecognized value is reported rather than silently accepted -- a typo
+    /// in a visible appearance setting should not pass unnoticed. It still leaves @p where at its
+    /// default, so a bad value costs a log line rather than a failed startup. Mirrors the GuiTheme
+    /// reader below.
+    ///
+    /// @param node   The mapping to read from.
+    /// @param entry  The key within @p node.
+    /// @param where  Receives the value, and is left untouched when it is not recognized.
+    /// @param logger The reader's trace category, passed in because it is a member of the reader.
+    /// @param parse  Maps a spelling to a value. Defaults to the ConfigEnum.hpp token table; the
+    ///               text_shaper enums pass their own `make*()`, since a `contour::config` table
+    ///               cannot be hung off a type owned by a lower layer.
+    /// @return Whether @p entry was present and recognized, so a caller can add a fallback (a
+    ///         deprecated spelling, say) without duplicating the reading and the reporting.
+    template <typename Enum, typename Parser = decltype(&configEnumFromToken<Enum>)>
+    bool loadConfigEnum(YAML::Node const& node,
+                        std::string const& entry,
+                        Enum& where,
+                        logstore::Category const& logger,
+                        Parser parse = configEnumFromToken<Enum>)
+    {
+        auto const child = node[entry];
+        if (!child)
+            return false;
+
+        auto const rawValue = child.as<std::string>();
+        logger()("Loading entry: {}, value {}", entry, rawValue);
+        if (auto const value = parse(rawValue))
+        {
+            where = *value;
+            return true;
+        }
+        errorLog()("Unknown value for {}: '{}'; keeping {}.", entry, rawValue, where);
+        return false;
+    }
+} // namespace
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, text::FontSize& where)
 {
     if (auto const child = node[entry])
     {
@@ -1772,34 +1813,37 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     logger()("Loading entry: {}, value {}", entry, where.pt);
 }
 
-void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
-                                     std::string const& entry,
-                                     text::font_slant& where)
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, text::FontSlant& where)
 {
-    if (auto const child = node[entry])
+    // `thin` is a weight, not a slant; it reached the slant table as a copy-paste and resolved to
+    // Normal for years. Keep honouring it so existing configs do not change behaviour, but say so --
+    // silently ignoring it would be worse here than elsewhere, because the italic and bold-italic
+    // faces are pre-seeded with FontSlant::Italic before this runs, so a dropped value leaves the
+    // inherited Italic rather than the default.
+    //
+    // Checked before the reader runs, not after: reporting it as unknown first and honouring it
+    // second would tell the user both that the value was rejected and that it was accepted.
+    if (auto const child = node[entry]; child && text::namesMatch(child.as<std::string>(), "thin"))
     {
-        auto opt = text::make_font_slant(child.as<std::string>());
-        if (opt.has_value())
-            where = opt.value();
+        errorLog()(R"(Setting {} to "thin" is deprecated and means "normal".)", entry);
+        where = text::FontSlant::Normal;
+        return;
     }
+
+    loadConfigEnum(node, entry, where, logger, text::makeFontSlant);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     text::font_weight& where)
+                                     text::FontWeight& where)
 {
-    if (auto const child = node[entry])
-    {
-        auto opt = text::make_font_weight(child.as<std::string>());
-        if (opt.has_value())
-            where = opt.value();
-    }
+    loadConfigEnum(node, entry, where, logger, text::makeFontWeight);
 }
 // NOLINTEND(readability-convert-member-functions-to-static)
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     text::font_description& where)
+                                     text::FontDescription& where)
 {
     if (auto const child = node[entry])
     {
@@ -1814,12 +1858,12 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
             {
                 if (child["fallback"].IsScalar() && (child["fallback"].as<std::string>() == "none"))
                 {
-                    where.fontFallback = text::font_fallback_none {};
+                    where.fontFallback = text::FontFallbackNone {};
                 }
                 else if (child["fallback"].IsSequence())
                 {
-                    where.fontFallback = text::font_fallback_list {};
-                    auto& list = std::get<text::font_fallback_list>(where.fontFallback);
+                    where.fontFallback = text::FontFallbackList {};
+                    auto& list = std::get<text::FontFallbackList>(where.fontFallback);
                     for (auto&& fallback: child["fallback"])
                     {
                         list.fallbackFonts.emplace_back(fallback.as<std::string>());
@@ -2019,88 +2063,57 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 #else
         vtrasterizer::TextShapingEngine::OpenShaper;
 #endif
-    auto parseModifierKey = [&](std::string const& key) -> std::optional<vtrasterizer::TextShapingEngine> {
-        auto const literal = crispy::toLower(key);
-        logger()("Loading entry: {}, value {}", entry, literal);
-        if (literal == "dwrite" || literal == "directwrite")
+    auto parseEngine = [NativeTextShapingEngine](
+                           std::string_view literal) -> std::optional<vtrasterizer::TextShapingEngine> {
+        using text::namesMatch;
+        if (namesMatch(literal, "dwrite") || namesMatch(literal, "directwrite"))
             return vtrasterizer::TextShapingEngine::DWrite;
-        if (literal == "core" || literal == "coretext")
+        if (namesMatch(literal, "core") || namesMatch(literal, "coretext"))
             return vtrasterizer::TextShapingEngine::CoreText;
-        if (literal == "open" || literal == "openshaper")
+        // `harfbuzz` is what std::formatter<TextShapingEngine> writes for OpenShaper, so it is the
+        // spelling `contour generate config` puts in the file; without it the generated config does
+        // not survive its own reader.
+        if (namesMatch(literal, "open") || namesMatch(literal, "openshaper")
+            || namesMatch(literal, "harfbuzz"))
             return vtrasterizer::TextShapingEngine::OpenShaper;
-        if (literal == "native")
+        if (namesMatch(literal, "native"))
             return NativeTextShapingEngine;
         return std::nullopt;
     };
 
-    if (auto const child = node[entry])
-    {
-        auto opt = parseModifierKey(child.as<std::string>());
-        if (opt.has_value())
-            where = opt.value();
-    }
+    loadConfigEnum(node, entry, where, logger, parseEngine);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
                                      vtrasterizer::FontLocatorEngine& where)
 {
-    auto constexpr NativeFontLocator = vtrasterizer::FontLocatorEngine::Native;
-    auto parseModifierKey = [&](std::string const& key) -> std::optional<vtrasterizer::FontLocatorEngine> {
-        auto const literal = crispy::toLower(key);
-        logger()("Loading entry: {}, value {}", entry, literal);
+    auto parseLocator = [](std::string_view literal) -> std::optional<vtrasterizer::FontLocatorEngine> {
+        auto constexpr NativeFontLocator = vtrasterizer::FontLocatorEngine::Native;
+        using text::namesMatch;
         for (auto const& deprecated: { "fontconfig", "coretext", "dwrite", "directwrite" })
         {
-            if (literal == deprecated)
+            if (namesMatch(literal, deprecated))
             {
                 errorLog()(R"(Setting font locator to "{}" is deprecated. Use "native".)", literal);
                 return NativeFontLocator;
             }
         }
-        if (literal == "native")
+        if (namesMatch(literal, "native"))
             return NativeFontLocator;
-        if (literal == "mock")
+        if (namesMatch(literal, "mock"))
             return vtrasterizer::FontLocatorEngine::Mock;
         return std::nullopt;
     };
 
-    if (auto const child = node[entry])
-    {
-        auto opt = parseModifierKey(child.as<std::string>());
-        if (opt.has_value())
-            where = opt.value();
-    }
+    loadConfigEnum(node, entry, where, logger, parseLocator);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     text::render_mode& where)
+                                     text::RenderMode& where)
 {
-    auto parseModifierKey = [&](std::string const& key) -> std::optional<text::render_mode> {
-        auto const literal = crispy::toLower(key);
-
-        auto constexpr static Mappings = std::array {
-            std::pair { "lcd", text::render_mode::lcd },
-            std::pair { "light", text::render_mode::light },
-            std::pair { "gray", text::render_mode::gray },
-            std::pair { "", text::render_mode::gray },
-            std::pair { "monochrome", text::render_mode::bitmap },
-        };
-        for (auto const& mapping: Mappings)
-            if (mapping.first == literal)
-            {
-                logger()("Loading entry: {}, value {}", entry, literal);
-                return mapping.second;
-            }
-        return std::nullopt;
-    };
-
-    if (auto const child = node[entry])
-    {
-        auto opt = parseModifierKey(child.as<std::string>());
-        if (opt.has_value())
-            where = opt.value();
-    }
+    loadConfigEnum(node, entry, where, logger, text::makeRenderMode);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
@@ -2124,12 +2137,12 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
         // inherit fonts from regular
         where.bold = where.regular;
-        where.bold.weight = text::font_weight::bold;
+        where.bold.weight = text::FontWeight::Bold;
         where.italic = where.regular;
-        where.italic.slant = text::font_slant::italic;
+        where.italic.slant = text::FontSlant::Italic;
         where.boldItalic = where.regular;
-        where.boldItalic.slant = text::font_slant::italic;
-        where.boldItalic.weight = text::font_weight::bold;
+        where.boldItalic.slant = text::FontSlant::Italic;
+        where.boldItalic.weight = text::FontWeight::Bold;
 
         loadFromEntry(child, "bold", where.bold);
         loadFromEntry(child, "italic", where.italic);
@@ -2269,38 +2282,6 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     }
 }
 
-namespace
-{
-    /// Reads a configuration enum spelled as one of the tokens its ConfigEnum.h table carries.
-    ///
-    /// Case-insensitive, and an unrecognized value is reported rather than silently accepted -- a typo
-    /// in a visible appearance setting should not pass unnoticed. It still leaves @p where at its
-    /// default, so a bad value costs a log line rather than a failed startup. Mirrors the GuiTheme
-    /// reader above.
-    ///
-    /// @param node   The mapping to read from.
-    /// @param entry  The key within @p node.
-    /// @param where  Receives the value, and is left untouched when it is not recognized.
-    /// @param logger The reader's trace category, passed in because it is a member of the reader.
-    template <typename Enum>
-    void loadConfigEnum(YAML::Node const& node,
-                        std::string const& entry,
-                        Enum& where,
-                        logstore::category const& logger)
-    {
-        auto const child = node[entry];
-        if (!child)
-            return;
-
-        auto const rawValue = child.as<std::string>();
-        logger()("Loading entry: {}, value {}", entry, rawValue);
-        if (auto const value = configEnumFromToken<Enum>(rawValue))
-            where = *value;
-        else
-            errorLog()("Unknown value for {}: '{}'; keeping {}.", entry, rawValue, where);
-    }
-} // namespace
-
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarPosition& where)
 {
     loadConfigEnum(node, entry, where, logger);
@@ -2420,7 +2401,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
                         unparsed.emplace_back("mode");
                     errorLog()("Dropping input_mapping entry [{}]: could not parse its {}.",
                                describeInputMappingRow(mapping),
-                               unparsed | crispy::views::join_with(", "));
+                               unparsed | crispy::views::joinWith(", "));
                 }
             }
         }
@@ -3321,7 +3302,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     crispy::lru_capacity& where)
+                                     crispy::LRUCapacity& where)
 {
     if (auto const child = node[entry])
         where.value = child.as<uint32_t>();
@@ -3348,7 +3329,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     crispy::strong_hashtable_size& where)
+                                     crispy::StrongHashtableSize& where)
 {
     if (auto const child = node[entry])
         where.value = child.as<uint32_t>();
@@ -3386,7 +3367,7 @@ static std::string createForGlobal(Config const& c)
             doc.append(writer.process(writer.whichDoc(v), name, escapeSequence(v.value())));
         };
 
-    auto completeOverload = crispy::overloaded {
+    auto completeOverload = crispy::Overloaded {
         processConfigEntry,
         processConfigEntryWithEscape,
         // Ignored entries
@@ -3442,7 +3423,7 @@ static void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile co
                 contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& vEntry) {
             auto v = vEntry.value();
             auto args = std::string { "[" };
-            args.append(v.arguments | crispy::views::join_with(", "sv));
+            args.append(v.arguments | crispy::views::joinWith(", "sv));
             args.append("]");
 
             doc.append(writer.process(writer.whichDoc(vEntry), name, v.program, args, [&]() -> std::string {
@@ -3454,7 +3435,7 @@ static void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile co
             }()));
         };
 
-    auto completeOverload = crispy::overloaded {
+    auto completeOverload = crispy::Overloaded {
         processConfigEntryWithExecInfo,
         processConfigEntry,
         [&]([[maybe_unused]] auto const& name, [[maybe_unused]] auto const& v) {},

@@ -1,30 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/ContourGuiApp.h>
-#include <contour/Logging.h>
-#include <contour/config/Actions.h>
-#include <contour/display/ContentScale.h>
-#include <contour/display/ImeQueryRect.h>
-#include <contour/display/Logging.h>
-#include <contour/display/RhiRenderer.h>
-#include <contour/display/TerminalAccessible.h>
-#include <contour/display/TerminalDisplay.h>
-#include <contour/display/TerminalRenderNode.h>
-#include <contour/input/MouseMapping.h>
-#include <contour/platform/Announcer.h>
-#include <contour/platform/BlurBehind.h>
-#include <contour/platform/QtInvoke.h>
-#include <contour/session/FontControl.h>
-#include <contour/session/SessionInput.h>
+#include <contour/ContourGuiApp.hpp>
+#include <contour/Logging.hpp>
+#include <contour/config/Actions.hpp>
+#include <contour/display/ContentScale.hpp>
+#include <contour/display/ImeQueryRect.hpp>
+#include <contour/display/Logging.hpp>
+#include <contour/display/RhiRenderer.hpp>
+#include <contour/display/TerminalAccessible.hpp>
+#include <contour/display/TerminalDisplay.hpp>
+#include <contour/display/TerminalRenderNode.hpp>
+#include <contour/input/MouseMapping.hpp>
+#include <contour/platform/Announcer.hpp>
+#include <contour/platform/BlurBehind.hpp>
+#include <contour/platform/QtInvoke.hpp>
+#include <contour/session/FontControl.hpp>
+#include <contour/session/SessionInput.hpp>
 
-#include <vtbackend/Color.h>
-#include <vtbackend/Metrics.h>
+#include <vtbackend/Color.hpp>
+#include <vtbackend/Metrics.hpp>
 
-#include <vtpty/Pty.h>
+#include <vtpty/Pty.hpp>
 
-#include <crispy/App.h>
-#include <crispy/ScopedTimer.h>
-#include <crispy/logstore.h>
-#include <crispy/utils.h>
+#include <crispy/App.hpp>
+#include <crispy/LogStore.hpp>
+#include <crispy/ScopedTimer.hpp>
+#include <crispy/Utils.hpp>
 
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
@@ -126,7 +126,7 @@ TerminalDisplay::TerminalDisplay(QQuickItem* parent):
     _lastFontDPI = fontDPI();
 
     startupLog()("TerminalDisplay constructed (QML component instantiation reached)");
-    auto const timer = crispy::scoped_timer(startupLog, "TerminalDisplay constructor");
+    auto const timer = crispy::ScopedTimer(startupLog, "TerminalDisplay constructor");
     initializeDisplayResources();
 
     setFlag(Flag::ItemIsFocusScope);
@@ -318,7 +318,7 @@ void TerminalDisplay::setSession(session::TerminalSession* newSession)
 
     if (!_renderer)
     {
-        auto const timer = crispy::scoped_timer(startupLog, "Renderer construction");
+        auto const timer = crispy::ScopedTimer(startupLog, "Renderer construction");
         // The profile's own margin, scaled to device pixels, exactly as applyResize() derives it
         // (@see geometry::fitPageToPixels, which takes left/top straight from these). Seeded here so
         // the published grid origin is right from the very first event rather than from the first
@@ -360,7 +360,7 @@ void TerminalDisplay::setSession(session::TerminalSession* newSession)
     // guessing a cell size. UnixPty::resizeScreen() stashes a size reported before start() precisely so
     // this ordering works.
     {
-        auto const timer = crispy::scoped_timer(startupLog, "Session start");
+        auto const timer = crispy::ScopedTimer(startupLog, "Session start");
         _session->start();
     }
 
@@ -1078,7 +1078,7 @@ void TerminalDisplay::paint()
                              renderCount,
                              updateCount,
                              lastState,
-                             to_string(_session->terminal().renderBufferState()));
+                             toString(_session->terminal().renderBufferState()));
         }
 #endif
 
@@ -1121,7 +1121,7 @@ void TerminalDisplay::paint()
             auto const destination = _saveScreenshot.value();
             _saveScreenshot = std::nullopt;
             requestScreenshot([destination](QImage const& image) {
-                std::visit(crispy::overloaded { [&](std::filesystem::path const& path) {
+                std::visit(crispy::Overloaded { [&](std::filesystem::path const& path) {
                                                    image.save(QString::fromStdString(path.string()));
                                                },
                                                 [&](std::monostate) {
@@ -1335,9 +1335,9 @@ void TerminalDisplay::focusInEvent(QFocusEvent* event)
     {
         // Cache the manager so ~TerminalDisplay can self-evict from _displayStates even after the
         // session is gone (see the destructor). This focus-in is also where the display first enters
-        // _displayStates (FocusOnDisplay), so the cache and the registration are set together.
+        // _displayStates (focusOnDisplay), so the cache and the registration are set together.
         _manager = _session->getTerminalManager();
-        _manager->FocusOnDisplay(this); // record the active display before moving VT focus
+        _manager->focusOnDisplay(this); // record the active display before moving VT focus
         // Route VT focus through the manager's single authority (model tab/pane changes use the same
         // seam), so it stays correct even when no Qt focus event fires. Dimming is done in QML.
         _manager->setFocusedSession(_session);
@@ -1744,7 +1744,7 @@ void TerminalDisplay::doDumpStateInternal()
     Require(_renderer);
 
     // clang-format off
-    auto const targetBaseDir = _session->app().dumpStateAtExit().value_or(crispy::app::instance()->localStateDir() / "dump");
+    auto const targetBaseDir = _session->app().dumpStateAtExit().value_or(crispy::App::instance()->localStateDir() / "dump");
     auto const workDirName = fs::path(std::format("contour-dump-{:%Y-%m-%d-%H-%M-%S}", chrono::system_clock::now()));
     auto const targetDir = targetBaseDir / workDirName;
     auto const latestDirName = fs::path("latest");
@@ -1959,7 +1959,7 @@ void TerminalDisplay::updateReGISTextRasterizer()
     _session->terminal().setReGISTextRasterizer(_regisTextRasterizer);
 }
 
-bool TerminalDisplay::setFontSize(text::font_size newFontSize)
+bool TerminalDisplay::setFontSize(text::FontSize newFontSize)
 {
     Require(_renderer != nullptr);
 
@@ -1979,7 +1979,7 @@ bool TerminalDisplay::setFontSize(text::font_size newFontSize)
 
     // Report whether the change actually took: the render-thread apply catches and swallows font-load
     // failures (keeping the previous font), so the caller must not record a size the renderer never
-    // loaded. font_size has no operator==; compare the point size the apply published against the request.
+    // loaded. FontSize has no operator==; compare the point size the apply published against the request.
     // The request is the exact value just staged (no arithmetic in between), so an exact compare is
     // correct: equal means the apply loaded it, unequal means it was swallowed.
     return _renderer->fontDescriptions().size.pt == newFontSize.pt;

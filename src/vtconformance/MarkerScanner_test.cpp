@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-#include <vtconformance/MarkerScanner.h>
+#include <vtconformance/MarkerScanner.hpp>
 
 using namespace std::string_view_literals;
 using vtconformance::MarkerScanner;

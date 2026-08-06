@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtpty/MockPty.h>
+#include <vtpty/MockPty.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -13,16 +13,16 @@
 #include <vector>
 
 #include <coro/WhenAll.hpp>
-#include <net/EventLoop.h>
-#include <net/PollEventSource.h>
-#include <net/testing/InMemoryTransport.h>
-#include <vthost/SessionHost.h>
-#include <vthost/TappingPty.h>
-#include <vthost/tmux/ControlSession.h>
-#include <vthost/tmux/LayoutString.h>
-#include <vthost/tmux/TmuxGateway.h>
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/Tab.h>
+#include <net/EventLoop.hpp>
+#include <net/PollEventSource.hpp>
+#include <net/testing/InMemoryTransport.hpp>
+#include <vthost/SessionHost.hpp>
+#include <vthost/TappingPty.hpp>
+#include <vthost/tmux/ControlSession.hpp>
+#include <vthost/tmux/LayoutString.hpp>
+#include <vthost/tmux/TmuxGateway.hpp>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/Tab.hpp>
 
 using coro::Task;
 using vthost::SessionHost;
@@ -339,7 +339,7 @@ TEST_CASE("a partial trailing line does not trigger a premature notification dra
     #endif
     #include <unistd.h>
 
-    #include <net/Sockets.h>
+    #include <net/Sockets.hpp>
 
 namespace
 {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/remote/TmuxController.h>
-#include <contour/session/TerminalSession.h>
-#include <contour/session/TerminalSessionManager.h>
+#include <contour/remote/TmuxController.hpp>
+#include <contour/session/TerminalSession.hpp>
+#include <contour/session/TerminalSessionManager.hpp>
 
 #include <algorithm>
 #include <format>
@@ -10,8 +10,8 @@
 #include <utility>
 #include <vector>
 
-#include <vthost/tmux/ControlModeSpawn.h>
-#include <vtworkspace/LayoutConvert.h>
+#include <vthost/tmux/ControlModeSpawn.hpp>
+#include <vtworkspace/LayoutConvert.hpp>
 
 namespace contour::remote
 {
@@ -20,7 +20,7 @@ namespace
 {
     using vthost::tmux::BinaryLayout;
 
-    auto const tmuxLog = logstore::category("gui.tmux", "GUI tmux -CC mirroring controller.");
+    auto const tmuxLog = logstore::Category("gui.tmux", "GUI tmux -CC mirroring controller.");
 
     /// @return True when @p node is a split (has both children) rather than a leaf.
     [[nodiscard]] bool isSplit(BinaryLayout const& node) noexcept

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/imsg/Identify.h>
+#include <vthost/imsg/Identify.hpp>
 
 #include <array>
 #include <cstring>

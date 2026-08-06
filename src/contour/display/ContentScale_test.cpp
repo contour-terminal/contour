@@ -4,7 +4,7 @@
 // parse rule (extracted from the filesystem-coupled provider) and the null-argument fallbacks of the
 // screen/window scale resolvers.
 
-#include <contour/display/ContentScale.h>
+#include <contour/display/ContentScale.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

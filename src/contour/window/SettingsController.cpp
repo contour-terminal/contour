@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/platform/QtPath.h>
-#include <contour/window/SettingsController.h>
+#include <contour/platform/QtPath.hpp>
+#include <contour/window/SettingsController.hpp>
 
-#include <vtbackend/StatusLineBuilder.h>
+#include <vtbackend/StatusLineBuilder.hpp>
 
-#include <text_shaper/font.h>
+#include <text_shaper/Font.hpp>
 
 #include <QtCore/QStringList>
 #include <QtGui/QColor>
@@ -197,7 +197,7 @@ namespace
                     "double",
                     [](TerminalProfile const& p) { return QVariant(p.fonts.value().size.pt); },
                     [](TerminalProfile& p, QVariant const& v) {
-                        p.fonts.value().size = text::font_size { v.toDouble() };
+                        p.fonts.value().size = text::FontSize { v.toDouble() };
                     } },
                   boolField("draw_bold_text_with_bright_colors",
                             "Bold text uses bright colors",

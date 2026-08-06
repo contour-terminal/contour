@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Image.h>
-#include <vtbackend/MessageParser.h>
-#include <vtbackend/MockTerm.h>
-#include <vtbackend/Screen.h>
-#include <vtbackend/test_helpers.h>
+#include <vtbackend/Image.hpp>
+#include <vtbackend/MessageParser.hpp>
+#include <vtbackend/MockTerm.hpp>
+#include <vtbackend/Screen.hpp>
+#include <vtbackend/TestHelpers.hpp>
 
-#include <crispy/base64.h>
+#include <crispy/Base64.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

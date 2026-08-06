@@ -16,8 +16,8 @@
 // stand-in that mirrors the real display's focus behavior (ItemIsFocusScope) and its silent-drop
 // failure mode.
 
-#include <contour/test/QmlChromeStyle.h>
-#include <contour/test/QmlMessageCapture.h>
+#include <contour/test/QmlChromeStyle.hpp>
+#include <contour/test/QmlMessageCapture.hpp>
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QCoreApplication>
@@ -35,7 +35,7 @@
 #include <memory>
 
 #include <QtTest/QTest>
-#include <vtworkspace/PaneLayout.h>
+#include <vtworkspace/PaneLayout.hpp>
 
 namespace
 {

@@ -10,14 +10,14 @@
 #include <thread>
 #include <utility>
 
-#include <net/EventLoop.h>
-#include <net/IListener.h>
-#include <net/ISocket.h>
-#include <net/PollEventSource.h>
-#include <net/Sockets.h>
-#include <net/Tls.h>
-#include <net/testing/CoroTestSupport.h>
-#include <net/testing/InMemoryTransport.h>
+#include <net/EventLoop.hpp>
+#include <net/IListener.hpp>
+#include <net/ISocket.hpp>
+#include <net/PollEventSource.hpp>
+#include <net/Sockets.hpp>
+#include <net/Tls.hpp>
+#include <net/testing/CoroTestSupport.hpp>
+#include <net/testing/InMemoryTransport.hpp>
 
 using coro::Task;
 

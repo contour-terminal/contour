@@ -9,9 +9,9 @@
 #include <string_view>
 #include <vector>
 
-#include <vthost/imsg/CommandArgv.h>
-#include <vthost/imsg/Identify.h>
-#include <vthost/imsg/ImsgCodec.h>
+#include <vthost/imsg/CommandArgv.hpp>
+#include <vthost/imsg/Identify.hpp>
+#include <vthost/imsg/ImsgCodec.hpp>
 
 using namespace vthost::imsg;
 

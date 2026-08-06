@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <net/platform/WinsockInit.h>
+#include <net/platform/WinsockInit.hpp>
 
 #ifdef _WIN32
 // clang-format off

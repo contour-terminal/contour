@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtpty/UnixUtils.h>
+#include <vtpty/UnixUtils.hpp>
 
 #include <cstring>
 #include <stdexcept>

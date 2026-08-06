@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/primitives.h>
+#include <vtbackend/Primitives.hpp>
 
-#include <vtpty/MockPty.h>
+#include <vtpty/MockPty.hpp>
 
-#include <crispy/logsink.h>
+#include <crispy/LogSink.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -19,15 +19,15 @@
 #include <vector>
 
 #include <coro/WhenAll.hpp>
-#include <net/EventLoop.h>
-#include <net/PollEventSource.h>
-#include <net/testing/CoroTestSupport.h>
-#include <net/testing/InMemoryTransport.h>
-#include <vthost/NativeSession.h>
-#include <vthost/SessionHost.h>
-#include <vthost/TappingPty.h>
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/Tab.h>
+#include <net/EventLoop.hpp>
+#include <net/PollEventSource.hpp>
+#include <net/testing/CoroTestSupport.hpp>
+#include <net/testing/InMemoryTransport.hpp>
+#include <vthost/NativeSession.hpp>
+#include <vthost/SessionHost.hpp>
+#include <vthost/TappingPty.hpp>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/Tab.hpp>
 
 using namespace std::chrono_literals;
 
@@ -806,7 +806,7 @@ TEST_CASE("a client that overflows the write queue is disconnected", "[vthost][n
 
 TEST_CASE("a codec-version mismatch is reported with both versions", "[vthost][native][diagnostics]")
 {
-    auto capture = logstore::scoped_capture {};
+    auto capture = logstore::ScopedCapture {};
     auto harness = NativeHarness {};
     auto const received = harness.exchange(
         { proto::DecodedPdu { proto::ClientHello { .codecVersion = proto::CodecVersion - 1 } } }, 1);
@@ -823,7 +823,7 @@ TEST_CASE("a codec-version mismatch is reported with both versions", "[vthost][n
 
 TEST_CASE("a missing ClientHello names what arrived instead", "[vthost][native][diagnostics]")
 {
-    auto capture = logstore::scoped_capture {};
+    auto capture = logstore::ScopedCapture {};
     auto harness = NativeHarness {};
     std::ignore = harness.exchange({ proto::DecodedPdu { proto::CreateTab {} } }, 1);
 
@@ -836,7 +836,7 @@ TEST_CASE("a token mismatch is reported without either token", "[vthost][native]
     // The wire answer deliberately makes this indistinguishable from a version mismatch, so the
     // daemon-side log is the ONLY place the real reason exists. It must still not write the
     // secret down.
-    auto capture = logstore::scoped_capture {};
+    auto capture = logstore::ScopedCapture {};
 
     auto source = net::PollEventSource {};
     auto loop = net::EventLoop { source };
@@ -920,7 +920,7 @@ TEST_CASE("a client area that did change is answered with a resync", "[vthost][n
 
 TEST_CASE("an out-of-range resize proposal is reported", "[vthost][native][diagnostics]")
 {
-    auto capture = logstore::scoped_capture {};
+    auto capture = logstore::ScopedCapture {};
     auto harness = NativeHarness {};
     std::ignore =
         harness.exchange({ proto::DecodedPdu { proto::ClientHello {} },
@@ -932,7 +932,7 @@ TEST_CASE("an out-of-range resize proposal is reported", "[vthost][native][diagn
 
 TEST_CASE("an unexpected PDU is reported rather than silently dropped", "[vthost][native][diagnostics]")
 {
-    auto capture = logstore::scoped_capture {};
+    auto capture = logstore::ScopedCapture {};
     auto harness = NativeHarness {};
     // A server-to-client PDU sent the wrong way: valid on the wire, meaningless here.
     std::ignore = harness.exchange(
@@ -943,7 +943,7 @@ TEST_CASE("an unexpected PDU is reported rather than silently dropped", "[vthost
 
 TEST_CASE("the PDU trace records both directions when enabled", "[vthost][native][diagnostics]")
 {
-    auto capture = logstore::scoped_capture { "vthost.trace.proto" };
+    auto capture = logstore::ScopedCapture { "vthost.trace.proto" };
     auto harness = NativeHarness {};
     std::ignore = harness.exchange({ proto::DecodedPdu { proto::ClientHello {} } }, 1);
 
@@ -959,7 +959,7 @@ TEST_CASE("the PDU trace is disabled by default", "[vthost][native][diagnostics]
     // performance and a privacy problem at once.
     auto const* const category = logstore::get("vthost.trace.proto");
     REQUIRE(category != nullptr);
-    CHECK_FALSE(category->is_enabled());
+    CHECK_FALSE(category->isEnabled());
 }
 
 TEST_CASE("a ClientHello's settings reach the sessions that client creates", "[vthost][native]")

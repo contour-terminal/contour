@@ -10,8 +10,8 @@
 // What this canNOT assert is what a bridge would DELIVER; offscreen QPA has no accessibility bridge at
 // all. That remains a manual check — see docs/accessibility.md for the Accerciser recipe.
 
-#include <contour/test/QmlChromeStyle.h>
-#include <contour/test/QmlMessageCapture.h>
+#include <contour/test/QmlChromeStyle.hpp>
+#include <contour/test/QmlMessageCapture.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtQml/QQmlComponent>

@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Terminal.h>
+#include <vtbackend/Terminal.hpp>
 
-#include <vtbackend/ControlCode.h>
-#include <vtbackend/Functions.h>
-#include <vtbackend/InputGenerator.h>
-#include <vtbackend/RenderBuffer.h>
-#include <vtbackend/RenderBufferBuilder.h>
-#include <vtbackend/SequenceBuilder.h>
-#include <vtbackend/logging.h>
-#include <vtbackend/primitives.h>
+#include <vtbackend/ControlCode.hpp>
+#include <vtbackend/Functions.hpp>
+#include <vtbackend/InputGenerator.hpp>
+#include <vtbackend/Logging.hpp>
+#include <vtbackend/Primitives.hpp>
+#include <vtbackend/RenderBuffer.hpp>
+#include <vtbackend/RenderBufferBuilder.hpp>
+#include <vtbackend/SequenceBuilder.hpp>
 
-#include <vtparser/Parser.h>
+#include <vtparser/Parser.hpp>
 
-#include <vtpty/MockPty.h>
+#include <vtpty/MockPty.hpp>
 
-#include <crispy/assert.h>
-#include <crispy/base64.h>
-#include <crispy/environment.h>
-#include <crispy/escape.h>
-#include <crispy/utils.h>
+#include <crispy/Assert.hpp>
+#include <crispy/Base64.hpp>
+#include <crispy/Environment.hpp>
+#include <crispy/Escape.hpp>
+#include <crispy/Utils.hpp>
 
 #include <libunicode/convert.h>
 
@@ -163,7 +163,7 @@ namespace // {{{ helpers
 // }}}
 
 Terminal::Terminal(Events& eventListener,
-                   crispy::environment const& env,
+                   crispy::Environment const& env,
                    std::unique_ptr<vtpty::Pty> pty,
                    Settings factorySettings,
                    chrono::steady_clock::time_point now):
@@ -413,7 +413,7 @@ bool Terminal::processInputOnce()
         auto const _ = std::lock_guard { *this };
         // Use the buffer that readFromPty() actually read into, not _currentPtyBuffer
         // which might have been changed by another thread (e.g., writeToScreen()).
-        // This is critical to ensure buffer_fragment in TrivialLineBuffer holds
+        // This is critical to ensure BufferFragment in TrivialLineBuffer holds
         // the correct buffer reference.
         _parsingBuffer = ptyReadResult->buffer;
         {
@@ -899,7 +899,7 @@ void Terminal::updateIndicatorStatusLine()
     _colorPalette.defaultForeground = colors.foreground;
     _colorPalette.defaultBackground = colors.background;
 
-    auto const _ = crispy::finally { [&]() {
+    auto const _ = crispy::Finally { [&]() {
         // Cleaning up.
         _colorPalette.defaultForeground = backupForeground;
         _colorPalette.defaultBackground = backupBackground;
@@ -1593,7 +1593,7 @@ void Terminal::parseFragmentChunked(string_view vtStream)
             _currentPtyBuffer = _ptyBufferPool.allocateBufferObject();
         auto const chunk = vtStream.substr(0, std::min(vtStream.size(), _currentPtyBuffer->bytesAvailable()));
         vtStream.remove_prefix(chunk.size());
-        // Set parsingBuffer to ensure buffer_fragment holds the correct buffer reference.
+        // Set parsingBuffer to ensure BufferFragment holds the correct buffer reference.
         _parsingBuffer = _currentPtyBuffer;
         _parser.parseFragment(_currentPtyBuffer->writeAtEnd(chunk));
         _parsingBuffer = nullptr;
@@ -3947,7 +3947,7 @@ void Terminal::markCellDirty(CellLocation position) noexcept
     if (!_selection)
         return;
 
-    crispy::ignore_unused(position);
+    crispy::ignoreUnused(position);
     // if (_selection->contains(position))
     //     clearSelection();
 }
@@ -3960,7 +3960,7 @@ void Terminal::markRegionDirty(Rect area) noexcept
     if (!_selection)
         return;
 
-    crispy::ignore_unused(area);
+    crispy::ignoreUnused(area);
     // if (_selection->intersects(area))
     //     clearSelection();
 }
@@ -4879,7 +4879,7 @@ void TraceHandler::flushOne(PendingSequence const& pendingSequence)
 // }}}
 
 // Applies a FunctionDefinition to a given context, emitting the respective command.
-std::string to_string(AnsiMode mode)
+std::string toString(AnsiMode mode)
 {
     switch (mode)
     {
@@ -4892,7 +4892,7 @@ std::string to_string(AnsiMode mode)
     return std::format("({})", static_cast<unsigned>(mode));
 }
 
-std::string to_string(DECMode mode)
+std::string toString(DECMode mode)
 {
     switch (mode)
     {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/config/Config.h>
-#include <contour/config/LayoutBuilder.h>
-#include <contour/test/CoreFixtures.h>
+#include <contour/config/Config.hpp>
+#include <contour/config/LayoutBuilder.hpp>
+#include <contour/test/CoreFixtures.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -9,7 +9,7 @@
 #include <string>
 #include <unordered_map>
 
-#include <vtworkspace/LayoutTree.h>
+#include <vtworkspace/LayoutTree.hpp>
 
 // The pure layout tree model (structs, realize, serialize, ratio math) is tested in
 // src/vtworkspace/LayoutTree_test.cpp; this file covers only the contour-side YAML emission

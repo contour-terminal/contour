@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtrasterizer/GlyphAdvance.h>
+#include <vtrasterizer/GlyphAdvance.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

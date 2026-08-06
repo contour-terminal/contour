@@ -8,9 +8,9 @@
 // block must match byte-for-byte). A drift here renders garbage or a black terminal, so the constants are
 // pinned against the documented shader contract here — without needing a GPU/RHI context.
 
-#include <contour/display/RhiTransform.h>
-#include <contour/display/RhiVertexLayout.h>
-#include <contour/display/ScissorRect.h>
+#include <contour/display/RhiTransform.hpp>
+#include <contour/display/RhiVertexLayout.hpp>
+#include <contour/display/ScissorRect.hpp>
 
 #include <QtGui/QMatrix4x4>
 

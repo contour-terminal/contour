@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/CellUtil.h>
-#include <vtbackend/HintModeHandler.h>
-#include <vtbackend/MockTerm.h>
-#include <vtbackend/Terminal.h>
-#include <vtbackend/primitives.h>
-#include <vtbackend/test_helpers.h>
+#include <vtbackend/CellUtil.hpp>
+#include <vtbackend/HintModeHandler.hpp>
+#include <vtbackend/MockTerm.hpp>
+#include <vtbackend/Primitives.hpp>
+#include <vtbackend/Terminal.hpp>
+#include <vtbackend/TestHelpers.hpp>
 
-#include <vtpty/MockPty.h>
+#include <vtpty/MockPty.hpp>
 
-#include <crispy/App.h>
-#include <crispy/testing/environment.h>
-#include <crispy/times.h>
-#include <crispy/utils.h>
+#include <crispy/App.hpp>
+#include <crispy/Times.hpp>
+#include <crispy/Utils.hpp>
+#include <crispy/testing/Environment.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/width.h>
@@ -235,7 +235,7 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
         file << "test";
     }
 
-    auto const cleanup = crispy::finally { [&]() { fs::remove_all(tmpRoot); } };
+    auto const cleanup = crispy::Finally { [&]() { fs::remove_all(tmpRoot); } };
     auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
     auto constexpr UiHandledHint = false;
 
@@ -1184,8 +1184,8 @@ TEST_CASE("Terminal.DECATC", "[terminal]")
     // screen-wide reverse-video (DECSCNM) state, and optional SGR colors on the cell itself.
     auto resolve = [&](CellFlags flags,
                        bool reverseVideo = false,
-                       Color foreground = DefaultColor(),
-                       Color background = DefaultColor()) {
+                       Color foreground = defaultColor(),
+                       Color background = defaultColor()) {
         return CellUtil::makeColors(vt.colorPalette(),
                                     vt.colorPalette().colorLookupTable,
                                     flags,
@@ -1803,7 +1803,7 @@ TEST_CASE("Terminal.ParsingBuffer", "[terminal]")
 TEST_CASE("Terminal.TrivialLineBufferIntegrity", "[terminal]")
 {
     // Test that TrivialLineBuffer correctly stores text when written through terminal.
-    // This tests the fast path where text is stored directly in a buffer_fragment.
+    // This tests the fast path where text is stored directly in a BufferFragment.
 
     auto mock = MockTerm { ColumnCount { 20 }, LineCount { 3 } };
     auto& terminal = mock.terminal;
@@ -5275,7 +5275,7 @@ TEST_CASE("Terminal.hint_mode_validates_and_resolves_paths_against_the_working_d
         auto file = std::ofstream(tmpRoot / "Makefile");
         file << "all:\n";
     }
-    auto const cleanup = crispy::finally { [&]() { fs::remove_all(tmpRoot); } };
+    auto const cleanup = crispy::Finally { [&]() { fs::remove_all(tmpRoot); } };
 
     auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(60) }, LineCount(10) };
     mock.terminal.setCurrentWorkingDirectory("file://" + tmpRoot.generic_string());
@@ -5475,7 +5475,7 @@ TEST_CASE("Terminal reports the identity its settings named", "[terminal]")
     settings.pageSize = pageSize;
     settings.terminalId = vtbackend::VTType::VT340;
 
-    auto const environment = crispy::testing::fake_environment {};
+    auto const environment = crispy::testing::FakeEnvironment {};
     auto terminal = vtbackend::Terminal { events,
                                           environment,
                                           std::make_unique<vtpty::MockPty>(pageSize),
@@ -5505,7 +5505,7 @@ TEST_CASE("a terminal constructed below VT525 narrows its sequence table too", "
     auto events = vtbackend::Terminal::NullEvents {};
     auto const pageSize = vtbackend::PageSize { vtbackend::LineCount(5), vtbackend::ColumnCount(20) };
 
-    auto const environment = crispy::testing::fake_environment {};
+    auto const environment = crispy::testing::FakeEnvironment {};
     auto makeTerminal = [&](vtbackend::VTType id) {
         auto settings = vtbackend::Settings {};
         settings.pageSize = pageSize;

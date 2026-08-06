@@ -3,7 +3,7 @@
 // Unit tests for the pure raster primitives a text-sizing block is built from: compositing a glyph
 // into its block canvas, and cutting that canvas into the cell-sized tiles the atlas can store.
 
-#include <vtrasterizer/GlyphSlicing.h>
+#include <vtrasterizer/GlyphSlicing.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

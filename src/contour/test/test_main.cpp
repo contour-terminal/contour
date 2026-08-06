@@ -4,7 +4,7 @@
 // engine and scene graph run without a display server (CI-safe), then constructs the
 // QGuiApplication that the QML components need before running the Catch2 session.
 
-#include <contour/test/QmlMessageCapture.h>
+#include <contour/test/QmlMessageCapture.hpp>
 
 #include <crispy/SuppressWindowsDialogs.hpp>
 

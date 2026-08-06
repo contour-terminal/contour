@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/ContourGuiApp.h>
-#include <contour/config/LayoutBuilder.h>
-#include <contour/platform/ColorConversion.h>
-#include <contour/session/Logging.h>
-#include <contour/session/PaneProxy.h>
-#include <contour/session/TerminalSession.h>
-#include <contour/session/TerminalSessionManager.h>
-#include <contour/window/SettingsController.h>
-#include <contour/window/TabLabel.h>
-#include <contour/window/WindowController.h>
+#include <contour/ContourGuiApp.hpp>
+#include <contour/config/LayoutBuilder.hpp>
+#include <contour/platform/ColorConversion.hpp>
+#include <contour/session/Logging.hpp>
+#include <contour/session/PaneProxy.hpp>
+#include <contour/session/TerminalSession.hpp>
+#include <contour/session/TerminalSessionManager.hpp>
+#include <contour/window/SettingsController.hpp>
+#include <contour/window/TabLabel.hpp>
+#include <contour/window/WindowController.hpp>
 
-#include <vtbackend/primitives.h>
+#include <vtbackend/Primitives.hpp>
 
-#include <vtpty/Process.h>
+#include <vtpty/Process.hpp>
 #ifdef VTPTY_LIBSSH2
-    #include <vtpty/SshSession.h>
+    #include <vtpty/SshSession.hpp>
 #endif
 
 #include <QtQml/QQmlEngine>
@@ -285,12 +285,12 @@ void TerminalSessionManager::updateStatusLine()
         controller->updateStatusLine();
 }
 
-void TerminalSessionManager::FocusOnDisplay(display::TerminalDisplay* display)
+void TerminalSessionManager::focusOnDisplay(display::TerminalDisplay* display)
 {
     managerLog()("Setting active display to {}", (void*) display);
 
     // Session->display ownership lives solely on the pane tree (the QML `session:` binding -> setSession);
-    // a focused pane already owns its session. FocusOnDisplay only makes this the active display and hands
+    // a focused pane already owns its session. focusOnDisplay only makes this the active display and hands
     // the focus to the owning window's controller, which re-points its window-service signal bridge and
     // re-emits the window bindings. Route by the display's OS window so the correct controller updates.
     if (auto* c = controllerForDisplay(display))

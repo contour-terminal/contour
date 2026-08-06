@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/VTType.h>
+#include <vtbackend/VTType.hpp>
 
 #include <array>
 #include <utility>
@@ -9,7 +9,7 @@ using namespace std;
 namespace vtbackend
 {
 
-string to_string(DeviceAttributes v)
+string toString(DeviceAttributes v)
 {
     string s;
 
@@ -70,7 +70,7 @@ DeviceAttributes filterRequiredExtensions(DeviceAttributes attrs, VTType operati
     return static_cast<DeviceAttributes>(result);
 }
 
-string to_params(DeviceAttributes v)
+string toParams(DeviceAttributes v)
 {
     string s;
 

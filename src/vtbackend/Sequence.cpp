@@ -1,8 +1,8 @@
-#include <vtbackend/Sequence.h>
+#include <vtbackend/Sequence.hpp>
 
-#include <vtbackend/ControlCode.h>
+#include <vtbackend/ControlCode.hpp>
 
-#include <crispy/escape.h>
+#include <crispy/Escape.hpp>
 
 #include <numeric>
 #include <sstream>
@@ -58,7 +58,7 @@ string Sequence::text() const
 
     if (_category == FunctionCategory::C0)
     {
-        sstr << to_short_string(ControlCode::C0(_finalChar));
+        sstr << toShortString(ControlCode::C0(_finalChar));
         return sstr.str();
     }
 

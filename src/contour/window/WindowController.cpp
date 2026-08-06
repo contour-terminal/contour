@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/ContourGuiApp.h>
-#include <contour/command/ContextMenu.h>
-#include <contour/command/Shortcut.h>
-#include <contour/command/TitleBarContextMenu.h>
-#include <contour/config/GuiConfigStore.h>
-#include <contour/display/Logging.h>
-#include <contour/input/MouseMapping.h>
-#include <contour/platform/ColorConversion.h>
-#include <contour/session/FontControl.h>
-#include <contour/session/PaneProxy.h>
-#include <contour/session/TerminalSession.h>
-#include <contour/session/TerminalSessionManager.h>
-#include <contour/window/ContextMenuModel.h>
-#include <contour/window/SettingsController.h>
-#include <contour/window/TabColorScheme.h>
-#include <contour/window/TabLabel.h>
-#include <contour/window/WindowController.h>
+#include <contour/ContourGuiApp.hpp>
+#include <contour/command/ContextMenu.hpp>
+#include <contour/command/Shortcut.hpp>
+#include <contour/command/TitleBarContextMenu.hpp>
+#include <contour/config/GuiConfigStore.hpp>
+#include <contour/display/Logging.hpp>
+#include <contour/input/MouseMapping.hpp>
+#include <contour/platform/ColorConversion.hpp>
+#include <contour/session/FontControl.hpp>
+#include <contour/session/PaneProxy.hpp>
+#include <contour/session/TerminalSession.hpp>
+#include <contour/session/TerminalSessionManager.hpp>
+#include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/SettingsController.hpp>
+#include <contour/window/TabColorScheme.hpp>
+#include <contour/window/TabLabel.hpp>
+#include <contour/window/WindowController.hpp>
 
 #include <QtCore/QDir>
 #include <QtGui/QCursor>
@@ -27,10 +27,10 @@
 #include <ranges>
 #include <utility>
 
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/PaneLayout.h>
-#include <vtworkspace/SessionModel.h>
-#include <vtworkspace/Tab.h>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/PaneLayout.hpp>
+#include <vtworkspace/SessionModel.hpp>
+#include <vtworkspace/Tab.hpp>
 
 namespace contour::window
 {
@@ -395,8 +395,8 @@ void WindowController::dispatchTabStripWheel(
     if (session == nullptr)
         return;
 
-    auto const pixelDelta = crispy::point { .x = pixelDeltaX, .y = pixelDeltaY };
-    auto const angleDelta = crispy::point { .x = angleDeltaX, .y = angleDeltaY };
+    auto const pixelDelta = crispy::Point { .x = pixelDeltaX, .y = pixelDeltaY };
+    auto const angleDelta = crispy::Point { .x = angleDeltaX, .y = angleDeltaY };
     // Translated, not cast: QML can only hand the phase across as an int, and the two enumerations
     // agreeing numerically today is a coincidence rather than a contract.
     auto const scrollPhase = input::mapScrollPhase(static_cast<Qt::ScrollPhase>(phase));

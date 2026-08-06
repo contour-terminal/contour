@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/cli/CaptureScreen.h>
-#include <contour/cli/CatImageArgs.h>
-#include <contour/cli/ContourApp.h>
-#include <contour/cli/ShellIntegration.h>
-#include <contour/config/Config.h>
+#include <contour/cli/CaptureScreen.hpp>
+#include <contour/cli/CatImageArgs.hpp>
+#include <contour/cli/ContourApp.hpp>
+#include <contour/cli/ShellIntegration.hpp>
+#include <contour/config/Config.hpp>
 
-#include <vtbackend/Capabilities.h>
-#include <vtbackend/Functions.h>
+#include <vtbackend/Capabilities.hpp>
+#include <vtbackend/Functions.hpp>
 
-#include <vtparser/Parser.h>
+#include <vtparser/Parser.hpp>
 
-#include <crispy/App.h>
-#include <crispy/CLI.h>
-#include <crispy/StackTrace.h>
-#include <crispy/base64.h>
-#include <crispy/logsink.h>
-#include <crispy/utils.h>
+#include <crispy/App.hpp>
+#include <crispy/Base64.hpp>
+#include <crispy/CLI.hpp>
+#include <crispy/LogSink.hpp>
+#include <crispy/StackTrace.hpp>
+#include <crispy/Utils.hpp>
 
 #include <charconv>
 #include <chrono>
@@ -28,10 +28,10 @@
 #include <memory>
 #include <utility>
 
-#include <vthost/Daemon.h>
-#include <vthost/ServiceControl.h>
-#include <vthost/SocketPath.h>
-#include <vthost/Token.h>
+#include <vthost/Daemon.hpp>
+#include <vthost/ServiceControl.hpp>
+#include <vthost/SocketPath.hpp>
+#include <vthost/Token.hpp>
 
 #ifndef _WIN32
     #include <sys/ioctl.h>
@@ -71,7 +71,7 @@ namespace
             << "Stack Trace:\r\n"
             << "------------\r\n";
 
-        auto stackTrace = crispy::stack_trace();
+        auto stackTrace = crispy::StackTrace();
         auto symbols = stackTrace.symbols();
         for (auto const& symbol: symbols)
             out << symbol << "\r\n";
@@ -164,45 +164,45 @@ namespace
     /// that fails. Built once here so the spellings and help texts still have a single home.
     /// @param full Whether to include the options only `install` needs.
     /// @return The option list.
-    [[nodiscard]] crispy::cli::option_list daemonServiceOptions(bool full)
+    [[nodiscard]] crispy::cli::OptionList daemonServiceOptions(bool full)
     {
         namespace CLI = crispy::cli;
 
-        auto options = CLI::option_list {
-            CLI::option { "label", CLI::value { "default"s }, "Socket label the daemon serves.", "NAME" },
+        auto options = CLI::OptionList {
+            CLI::Option { "label", CLI::Value { "default"s }, "Socket label the daemon serves.", "NAME" },
         };
         if (!full)
             return options;
 
-        options.emplace_back(CLI::option { "socket",
-                                           CLI::value { ""s },
+        options.emplace_back(CLI::Option { "socket",
+                                           CLI::Value { ""s },
                                            "Control socket path. Resolved to an absolute path at "
                                            "install time, since a registration outlives this shell.",
                                            "PATH" });
-        options.emplace_back(CLI::option { "start",
-                                           CLI::value { "logon"s },
+        options.emplace_back(CLI::Option { "start",
+                                           CLI::Value { "logon"s },
                                            "When the daemon starts: `logon` (a Scheduled Task "
                                            "triggered by your logon, running as you, needing no "
                                            "elevation and no password — the default), `boot` or "
                                            "`manual` (an SCM service; not implemented yet, since a "
                                            "service under a named account needs its password).",
                                            "MODE" });
-        options.emplace_back(CLI::option { "config",
-                                           CLI::value { ""s },
+        options.emplace_back(CLI::Option { "config",
+                                           CLI::Value { ""s },
                                            "Configuration file the hosted sessions' terminal "
                                            "settings come from.",
                                            "FILE" });
-        options.emplace_back(CLI::option {
-            "profile", CLI::value { ""s }, "Config profile those settings come from.", "NAME" });
-        options.emplace_back(CLI::option { "size-policy",
-                                           CLI::value { "latest"s },
+        options.emplace_back(CLI::Option {
+            "profile", CLI::Value { ""s }, "Config profile those settings come from.", "NAME" });
+        options.emplace_back(CLI::Option { "size-policy",
+                                           CLI::Value { "latest"s },
                                            "Which attached client's size the shared grid takes: "
                                            "`latest`, `smallest` or `largest`.",
                                            "POLICY" });
         options.emplace_back(
-            CLI::option { "log", CLI::value { ""s }, "Log tag filter for the installed daemon.", "TAGS" });
-        options.emplace_back(CLI::option { "log-file",
-                                           CLI::value { ""s },
+            CLI::Option { "log", CLI::Value { ""s }, "Log tag filter for the installed daemon.", "TAGS" });
+        options.emplace_back(CLI::Option { "log-file",
+                                           CLI::Value { ""s },
                                            "Where the installed daemon logs. Defaults to SOCKET.log, "
                                            "because a detached daemon has no console to write to.",
                                            "FILE" });
@@ -211,11 +211,11 @@ namespace
 
     /// Builds the `daemon-service` sub-verbs from @ref DaemonServiceVerbs.
     /// @return One command per verb, each carrying the options it needs.
-    [[nodiscard]] crispy::cli::command_list daemonServiceCommands()
+    [[nodiscard]] crispy::cli::CommandList daemonServiceCommands()
     {
-        auto commands = crispy::cli::command_list {};
+        auto commands = crispy::cli::CommandList {};
         for (auto const& verb: DaemonServiceVerbs)
-            commands.emplace_back(crispy::cli::command {
+            commands.emplace_back(crispy::cli::Command {
                 .name = verb.name,
                 .helpText = verb.helpText,
                 .options = daemonServiceOptions(verb.action == contour::cli::DaemonServiceAction::Install) });
@@ -224,7 +224,7 @@ namespace
 
     /// Help text for `generate integration`'s `shell` option, naming the shells this binary was
     /// actually built with rather than a list maintained by hand beside them.
-    /// @return A view of storage with process lifetime, because crispy::cli::option::helpText
+    /// @return A view of storage with process lifetime, because crispy::cli::Option::helpText
     ///         borrows rather than owns.
     [[nodiscard]] std::string_view integrationShellHelpText()
     {
@@ -237,10 +237,10 @@ namespace
 } // namespace
 // }}}
 
-ContourApp::ContourApp(crispy::environment const& env):
-    app(env, "contour", "Contour Terminal Emulator", CONTOUR_VERSION_STRING, "Apache-2.0")
+ContourApp::ContourApp(crispy::Environment const& env):
+    App(env, "contour", "Contour Terminal Emulator", CONTOUR_VERSION_STRING, "Apache-2.0")
 {
-    using Project = crispy::cli::about::project;
+    using Project = crispy::cli::about::Project;
     crispy::cli::about::registerProjects(
 #ifdef CONTOUR_BUILD_WITH_MIMALLOC
         Project { "mimalloc", "", "" },
@@ -255,7 +255,7 @@ ContourApp::ContourApp(crispy::environment const& env):
         Project { "fmt", "MIT", "https://github.com/fmtlib/fmt" });
 
 #ifdef __linux__
-    auto crashLogDirPath = crispy::app::instance()->localStateDir() / "crash";
+    auto crashLogDirPath = crispy::App::instance()->localStateDir() / "crash";
     crashLogDir = crashLogDirPath.string();
     auto errorCode = std::error_code {};
     std::filesystem::create_directories(crashLogDirPath, errorCode);
@@ -293,7 +293,7 @@ ContourApp::ContourApp(crispy::environment const& env):
     link("contour.documentation.configuration.profile", bind(&ContourApp::documentationProfileConfig, this));
     link("contour.cat", bind(&ContourApp::catAction, this));
     link("contour.daemon", bind(&ContourApp::daemonAction, this));
-    // One handler per verb rather than one that switches: crispy::app dispatches on the first
+    // One handler per verb rather than one that switches: crispy::App dispatches on the first
     // true flag, so the verb IS the dispatch.
     for (auto const& verb: DaemonServiceVerbs)
     {
@@ -306,7 +306,7 @@ ContourApp::ContourApp(crispy::environment const& env):
 }
 
 template <typename Callback>
-static auto withOutput(crispy::cli::flag_store const& flags, std::string const& name, Callback callback)
+static auto withOutput(crispy::cli::FlagStore const& flags, std::string const& name, Callback callback)
 {
     std::ostream* out = &cout;
 
@@ -323,18 +323,18 @@ static auto withOutput(crispy::cli::flag_store const& flags, std::string const& 
 
 int ContourApp::documentationVT()
 {
-    using category = vtbackend::FunctionCategory;
+    using Category = vtbackend::FunctionCategory;
     using namespace std::string_view_literals;
 
     std::string info;
     auto back = std::back_inserter(info);
     std::format_to(back, "# {}\n", "VT sequences");
     std::format_to(back, "{}\n\n", "List of VT sequences supported by Contour Terminal Emulator.");
-    for (auto const& [category, headline]: { std::pair { category::C0, "Control Codes"sv },
-                                             std::pair { category::ESC, "Escape Sequences"sv },
-                                             std::pair { category::CSI, "Control Sequences"sv },
-                                             std::pair { category::OSC, "Operating System Commands"sv },
-                                             std::pair { category::DCS, "Device Control Sequences"sv } })
+    for (auto const& [category, headline]: { std::pair { Category::C0, "Control Codes"sv },
+                                             std::pair { Category::ESC, "Escape Sequences"sv },
+                                             std::pair { Category::CSI, "Control Sequences"sv },
+                                             std::pair { Category::OSC, "Operating System Commands"sv },
+                                             std::pair { Category::DCS, "Device Control Sequences"sv } })
     {
 
         std::format_to(back, "## {}\n\n", headline);
@@ -507,16 +507,16 @@ int ContourApp::documentationProfileConfig()
 
 int ContourApp::infoVT()
 {
-    using category = vtbackend::FunctionCategory;
+    using Category = vtbackend::FunctionCategory;
     using std::pair;
     using vtbackend::VTExtension;
     using namespace std::string_view_literals;
 
-    for (auto const& [category, headline]: { pair { category::C0, "Control Codes"sv },
-                                             pair { category::ESC, "Escape Sequences"sv },
-                                             pair { category::CSI, "Control Sequences"sv },
-                                             pair { category::OSC, "Operating System Commands"sv },
-                                             pair { category::DCS, "Device Control Sequences"sv } })
+    for (auto const& [category, headline]: { pair { Category::C0, "Control Codes"sv },
+                                             pair { Category::ESC, "Escape Sequences"sv },
+                                             pair { Category::CSI, "Control Sequences"sv },
+                                             pair { Category::OSC, "Operating System Commands"sv },
+                                             pair { Category::DCS, "Device Control Sequences"sv } })
     {
         std::cout << std::format("{}\n", headline);
         std::cout << std::format("{}\n\n", string(headline.size(), '='));
@@ -624,7 +624,7 @@ namespace
 
     void displayImage(vtbackend::ImageResize resizePolicy,
                       vtbackend::ImageAlignment alignmentPolicy,
-                      crispy::size screenSize,
+                      crispy::Size screenSize,
                       int layer,
                       string_view fileName)
     {
@@ -647,7 +647,7 @@ namespace
                             static_cast<int>(resizePolicy),
                             layer);
 
-        auto encoderState = crispy::base64::encoder_state {};
+        auto encoderState = crispy::base64::EncoderState {};
         std::vector<char> buf;
         auto const writer = [&](char a, char b, char c, char d) {
             buf.push_back(a);
@@ -1002,261 +1002,261 @@ int ContourApp::profileAction()
     return EXIT_SUCCESS;
 }
 
-crispy::cli::command ContourApp::parameterDefinition() const
+crispy::cli::Command ContourApp::parameterDefinition() const
 {
     // NOLINTBEGIN
-    return CLI::command {
+    return CLI::Command {
         "contour",
         "Contour Terminal Emulator " CONTOUR_VERSION_STRING
         " - https://github.com/contour-terminal/contour/ ;-)",
-        CLI::option_list {},
-        CLI::command_list {
-            CLI::command { "help", "Shows this help and exits." },
-            CLI::command { "version", "Shows the version and exits." },
-            CLI::command { "license",
+        CLI::OptionList {},
+        CLI::CommandList {
+            CLI::Command { "help", "Shows this help and exits." },
+            CLI::Command { "version", "Shows the version and exits." },
+            CLI::Command { "license",
                            "Shows the license, and project URL of the used projects and Contour." },
-            CLI::command { "list-debug-tags", "Lists all available debug tags and exits." },
-            CLI::command {
+            CLI::Command { "list-debug-tags", "Lists all available debug tags and exits." },
+            CLI::Command {
                 "info",
                 "General informational outputs.",
-                CLI::option_list {},
-                CLI::command_list {
-                    CLI::command { "vt", "Prints general information about supported VT sequences." },
-                    CLI::command { "config", "Prints missing entries from user config file." },
+                CLI::OptionList {},
+                CLI::CommandList {
+                    CLI::Command { "vt", "Prints general information about supported VT sequences." },
+                    CLI::Command { "config", "Prints missing entries from user config file." },
                 } },
-            CLI::command {
+            CLI::Command {
                 "documentation",
                 "Generate documentation for web page",
-                CLI::option_list {},
-                CLI::command_list {
-                    CLI::command { "vt", "VT sequence reference documentation" },
-                    CLI::command { "keys", "List of configurable actions for key binding" },
-                    CLI::command {
+                CLI::OptionList {},
+                CLI::CommandList {
+                    CLI::Command { "vt", "VT sequence reference documentation" },
+                    CLI::Command { "keys", "List of configurable actions for key binding" },
+                    CLI::Command {
                         "configuration",
                         "Create documentation for configuration file",
-                        CLI::option_list {},
-                        CLI::command_list {
-                            CLI::command { "global",
+                        CLI::OptionList {},
+                        CLI::CommandList {
+                            CLI::Command { "global",
                                            "Create documentation entry for global part of the config file" },
-                            CLI::command { "profile",
+                            CLI::Command { "profile",
                                            "Create documentation entry for profile part of the config file" },
                         } },
                 },
             },
-            CLI::command {
+            CLI::Command {
                 "generate",
                 "Generation utilities.",
-                CLI::option_list {},
-                CLI::command_list {
-                    CLI::command { "parser-table",
+                CLI::OptionList {},
+                CLI::CommandList {
+                    CLI::Command { "parser-table",
                                    "Dumps VT parser's state machine in dot-file format to stdout." },
-                    CLI::command {
+                    CLI::Command {
                         "terminfo",
                         "Generates the terminfo source file that will reflect the features of "
                         "this version "
                         "of contour. Using - as value will write to stdout instead.",
                         {
-                            CLI::option { "to",
-                                          CLI::value { ""s },
+                            CLI::Option { "to",
+                                          CLI::Value { ""s },
                                           "Output file name to store the screen capture to. If - (dash) is "
                                           "given, the output will be written to standard output.",
                                           "FILE",
-                                          CLI::presence::Required },
+                                          CLI::Presence::Required },
                         } },
-                    CLI::command {
+                    CLI::Command {
                         "config",
                         "Generates configuration file with the default configuration.",
-                        CLI::option_list {
-                            CLI::option { "to",
-                                          CLI::value { ""s },
+                        CLI::OptionList {
+                            CLI::Option { "to",
+                                          CLI::Value { ""s },
                                           "Output file name to store the config file to. If - (dash) is "
                                           "given, the output will be written to standard output.",
                                           "FILE",
-                                          CLI::presence::Required },
+                                          CLI::Presence::Required },
                         } },
-                    CLI::command {
+                    CLI::Command {
                         "integration",
                         "Generates shell integration script.",
-                        CLI::option_list {
-                            CLI::option { "shell",
-                                          CLI::value { ""s },
+                        CLI::OptionList {
+                            CLI::Option { "shell",
+                                          CLI::Value { ""s },
                                           integrationShellHelpText(),
                                           "SHELL",
-                                          CLI::presence::Required },
-                            CLI::option { "to",
-                                          CLI::value { ""s },
+                                          CLI::Presence::Required },
+                            CLI::Option { "to",
+                                          CLI::Value { ""s },
                                           "Output file name to store the shell integration file to. If - "
                                           "(dash) is given, the output will be written to standard output.",
                                           "FILE",
-                                          CLI::presence::Required },
+                                          CLI::Presence::Required },
                         } } } },
-            CLI::command {
+            CLI::Command {
                 "cat",
                 "Displays an image in the terminal using the Good Image Protocol.",
-                CLI::option_list {
-                    CLI::option { "resize",
-                                  CLI::value { "fit"s },
+                CLI::OptionList {
+                    CLI::Option { "resize",
+                                  CLI::Value { "fit"s },
                                   "Sets the image resize policy.\n"
                                   "Policies available are:\n"
                                   " - no/none (no resize),\n"
                                   " - fit (resize to fit),\n"
                                   " - fill (resize to fill),\n"
                                   " - stretch (stretch to fill)." },
-                    CLI::option { "align",
-                                  CLI::value { "center"s },
+                    CLI::Option { "align",
+                                  CLI::Value { "center"s },
                                   "Sets the image alignment policy.\n"
                                   "Possible values: top-start, top-center, top-end, "
                                   "middle-start, middle-center/center, middle-end, "
                                   "bottom-start, bottom-center, bottom-end." },
-                    CLI::option { "size",
-                                  CLI::value { "0x0"s },
+                    CLI::Option { "size",
+                                  CLI::Value { "0x0"s },
                                   "Sets the amount of columns and rows to place the image onto "
                                   "(format: COLSxROWS, e.g. 80x24). "
                                   "The top-left of the area is the current cursor position." },
-                    CLI::option { "layer",
-                                  CLI::value { "1"s },
+                    CLI::Option { "layer",
+                                  CLI::Value { "1"s },
                                   "Sets the image layer relative to text.\n"
                                   "Values: 0/below (below text), 1/replace (replace text, default), "
                                   "2/above (above text)." } },
-                CLI::command_list {},
-                CLI::command_select::Explicit,
-                CLI::verbatim {
+                CLI::CommandList {},
+                CLI::CommandSelect::Explicit,
+                CLI::Verbatim {
                     "IMAGE_FILE",
                     "Path to image to be displayed. Image formats supported are at least PNG, JPG." } },
-            CLI::command { "daemon-service",
+            CLI::Command { "daemon-service",
                            "Installs, removes and controls an OS-managed Contour daemon that starts on its "
                            "own. A sibling verb rather than `daemon service` because options bind to the "
                            "command they follow, and the daemon verb already owns its own set.",
-                           CLI::option_list {},
+                           CLI::OptionList {},
                            daemonServiceCommands() },
-            CLI::command {
+            CLI::Command {
                 "daemon",
                 "(experimental) Runs the headless terminal multiplexer daemon, serving sessions "
                 "to attaching clients over a control socket. Its options and wire protocol may "
                 "still change between releases.",
-                CLI::option_list {
-                    CLI::option { "socket",
-                                  CLI::value { ""s },
+                CLI::OptionList {
+                    CLI::Option { "socket",
+                                  CLI::Value { ""s },
                                   "Path of the control socket file. Defaults to "
                                   "$XDG_RUNTIME_DIR/contour/LABEL (respecting $CONTOUR_MUX).",
                                   "PATH" },
-                    CLI::option { "label",
-                                  CLI::value { "default"s },
+                    CLI::Option { "label",
+                                  CLI::Value { "default"s },
                                   "Socket label distinguishing daemon instances.",
                                   "NAME" },
-                    CLI::option { "config",
-                                  CLI::value { ""s },
+                    CLI::Option { "config",
+                                  CLI::Value { ""s },
                                   "Path to the configuration file whose profile supplies the "
                                   "hosted sessions' terminal settings (history depth, terminal "
                                   "id, reflow, image limits).",
                                   "FILE" },
-                    CLI::option { "profile",
-                                  CLI::value { ""s },
+                    CLI::Option { "profile",
+                                  CLI::Value { ""s },
                                   "Config profile the hosted sessions' terminal settings come "
                                   "from. Defaults to the configuration's default profile.",
                                   "NAME" },
-                    CLI::option { "background",
-                                  CLI::value { false },
+                    CLI::Option { "background",
+                                  CLI::Value { false },
                                   "Relaunches this command detached and returns once the daemon "
                                   "is accepting connections, instead of holding the terminal. "
                                   "Without --log-file the detached daemon logs beside its socket "
                                   "(SOCKET.log), since a detached process has no console to write "
                                   "its diagnostics to." },
-                    CLI::option { "exit-with-last-session",
-                                  CLI::value { false },
+                    CLI::Option { "exit-with-last-session",
+                                  CLI::Value { false },
                                   "Terminates the daemon once its last hosted session is gone "
                                   "instead of waiting for further clients (tmux spells this "
                                   "`exit-empty`). Off by default, so a daemon started by hand "
                                   "keeps serving with no sessions; `contour client` passes this "
                                   "to a daemon it auto-spawns, which belongs to that client." },
-                    CLI::option { "size-policy",
-                                  CLI::value { "latest"s },
+                    CLI::Option { "size-policy",
+                                  CLI::Value { "latest"s },
                                   "Which attached client's size the shared grid takes when several "
                                   "clients of different sizes are attached: `latest` (the client "
                                   "that resized most recently, the default), `smallest` (the "
                                   "largest grid every client can fully display) or `largest` (the "
                                   "union, which smaller clients pan). Mirrors tmux's `window-size`.",
                                   "POLICY" },
-                    CLI::option { "tmux-compat-socket",
-                                  CLI::value { ""s },
+                    CLI::Option { "tmux-compat-socket",
+                                  CLI::Value { ""s },
                                   "Additionally binds tmux's own discovery path "
                                   "/tmp/tmux-<uid>/<LABEL> so a plain `tmux -L LABEL -C "
                                   "attach-session` finds this daemon.",
                                   "LABEL" },
-                    CLI::option { "listen-tcp",
-                                  CLI::value { ""s },
+                    CLI::Option { "listen-tcp",
+                                  CLI::Value { ""s },
                                   "Also serve the native protocol over TCP at HOST:PORT "
                                   "(opt-in; loopback e.g. 127.0.0.1:9090 by default). Always "
                                   "TLS-encrypted and token-authenticated.",
                                   "HOST:PORT" },
-                    CLI::option { "token",
-                                  CLI::value { ""s },
+                    CLI::Option { "token",
+                                  CLI::Value { ""s },
                                   "Preshared token every TCP client must present; required with "
                                   "--listen-tcp, which has no filesystem gate to fall back on. "
                                   "Note that a token given here is visible to other local users "
                                   "via the process list; prefer --token-file.",
                                   "TOKEN" },
-                    CLI::option { "token-file",
-                                  CLI::value { ""s },
+                    CLI::Option { "token-file",
+                                  CLI::Value { ""s },
                                   "Reads the preshared token from FILE instead of the command "
                                   "line, so the secret is protected by that file's permissions "
                                   "rather than exposed in the process list. Trailing newlines "
                                   "are ignored.",
                                   "FILE" },
-                    CLI::option { "tls-cert",
-                                  CLI::value { ""s },
+                    CLI::Option { "tls-cert",
+                                  CLI::Value { ""s },
                                   "PEM certificate for the TCP listener. When omitted (with "
                                   "--tls-key) the daemon generates an ephemeral self-signed "
                                   "certificate (TOFU).",
                                   "FILE" },
-                    CLI::option {
-                        "tls-key", CLI::value { ""s }, "PEM private key matching --tls-cert.", "FILE" },
-                    CLI::option { "log",
-                                  CLI::value { ""s },
+                    CLI::Option {
+                        "tls-key", CLI::Value { ""s }, "PEM private key matching --tls-cert.", "FILE" },
+                    CLI::Option { "log",
+                                  CLI::Value { ""s },
                                   "Enables logging for a comma (,) separated list of tags, or "
                                   "`all` (see `contour list-debug-tags`). Note the trailing `*` "
                                   "is a prefix match, so `vthost.*` includes the verbose "
                                   "`vthost.trace.*` tiers. Overrides $LOG.",
                                   "TAGS" },
-                    CLI::option { "log-file",
-                                  CLI::value { ""s },
+                    CLI::Option { "log-file",
+                                  CLI::Value { ""s },
                                   "Appends log output to FILE instead of standard error. If - "
                                   "(dash) is given, standard error is used explicitly.",
                                   "FILE" },
                 } },
-            CLI::command {
+            CLI::Command {
                 "capture",
                 "Captures the screen buffer of the currently running terminal.",
                 {
-                    CLI::option { "logical",
-                                  CLI::value { false },
+                    CLI::Option { "logical",
+                                  CLI::Value { false },
                                   "Tells the terminal to use logical lines for counting and capturing." },
-                    CLI::option { "words",
-                                  CLI::value { false },
+                    CLI::Option { "words",
+                                  CLI::Value { false },
                                   "Splits each line into words and outputs only one word per line." },
-                    CLI::option { "timeout",
-                                  CLI::value { 1.0 },
+                    CLI::Option { "timeout",
+                                  CLI::Value { 1.0 },
                                   "Sets timeout seconds to wait for terminal to respond.",
                                   "SECONDS" },
-                    CLI::option { "lines", CLI::value { 0u }, "The number of lines to capture", "COUNT" },
-                    CLI::option { "to",
-                                  CLI::value { ""s },
+                    CLI::Option { "lines", CLI::Value { 0u }, "The number of lines to capture", "COUNT" },
+                    CLI::Option { "to",
+                                  CLI::Value { ""s },
                                   "Output file name to store the screen capture to. If - (dash) is given, "
                                   "the capture will be written to standard output.",
                                   "FILE",
-                                  CLI::presence::Required },
+                                  CLI::Presence::Required },
                 } },
-            CLI::command {
+            CLI::Command {
                 "set",
                 "Sets various aspects of the connected terminal.",
-                CLI::option_list {},
-                CLI::command_list {
-                    CLI::command { "profile",
+                CLI::OptionList {},
+                CLI::CommandList {
+                    CLI::Command { "profile",
                                    "Changes the terminal profile of the currently attached terminal to the "
                                    "given value.",
-                                   CLI::option_list { CLI::option {
+                                   CLI::OptionList { CLI::Option {
                                        "to",
-                                       CLI::value { ""s },
+                                       CLI::Value { ""s },
                                        "Profile name to activate in the currently connected terminal.",
                                        "NAME" } } } } } }
     };

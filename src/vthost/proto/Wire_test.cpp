@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-#include <vthost/proto/Wire.h>
+#include <vthost/proto/Wire.hpp>
 
 using namespace vthost::proto;
 

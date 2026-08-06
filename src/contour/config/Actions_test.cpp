@@ -7,7 +7,7 @@
 // repeat. The dispatch path (TerminalSession::handleAction) delegates that filtering to
 // actions::filterRepeatableActions, which this suite exercises directly.
 
-#include <contour/config/Actions.h>
+#include <contour/config/Actions.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtworkspace/SessionModel.h>
+#include <vtworkspace/SessionModel.hpp>
 
 #include <algorithm>
 #include <cassert>

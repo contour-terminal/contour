@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/SixelParser.h>
+#include <vtbackend/SixelParser.hpp>
 
-#include <crispy/times.h>
+#include <crispy/Times.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>

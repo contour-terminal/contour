@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/NativeSession.h>
+#include <vthost/NativeSession.hpp>
 
-#include <vtbackend/Image.h>
-#include <vtbackend/Line.h>
+#include <vtbackend/Image.hpp>
+#include <vtbackend/Line.hpp>
 
 #include <algorithm>
 #include <bit>
@@ -15,17 +15,17 @@
 #include <utility>
 #include <vector>
 
-#include <net/Sockets.h>
-#include <net/Tls.h>
-#include <vthost/CursorStyle.h>
-#include <vthost/GridWire.h>
-#include <vthost/MirroredModes.h>
-#include <vthost/MouseWire.h>
-#include <vthost/PduPump.h>
-#include <vthost/logging.h>
-#include <vthost/proto/PduTrace.h>
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/Tab.h>
+#include <net/Sockets.hpp>
+#include <net/Tls.hpp>
+#include <vthost/CursorStyle.hpp>
+#include <vthost/GridWire.hpp>
+#include <vthost/Logging.hpp>
+#include <vthost/MirroredModes.hpp>
+#include <vthost/MouseWire.hpp>
+#include <vthost/PduPump.hpp>
+#include <vthost/proto/PduTrace.hpp>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/Tab.hpp>
 
 namespace vthost
 {

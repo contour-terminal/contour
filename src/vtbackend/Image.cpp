@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Image.h>
+#include <vtbackend/Image.hpp>
 
-#include <crispy/StrongLRUHashtable.h>
-#include <crispy/point.h>
+#include <crispy/Point.hpp>
+#include <crispy/StrongLRUHashtable.hpp>
 
 #include <algorithm>
 #include <memory>
@@ -53,8 +53,8 @@ ImageFragment::~ImageFragment()
 
 ImagePool::ImagePool(OnImageRemove onImageRemove, ImageId nextImageId):
     _nextImageId { nextImageId },
-    _imageNameToImageCache { crispy::strong_hashtable_size { 1024 },
-                             crispy::lru_capacity { 100 },
+    _imageNameToImageCache { crispy::StrongHashtableSize { 1024 },
+                             crispy::LRUCapacity { 100 },
                              "ImagePool name-to-image mappings" },
     _onImageRemove { std::move(onImageRemove) }
 {
@@ -160,13 +160,13 @@ namespace
 
     void fillFragmentSimd(int& x, uint8_t*& target, SimdContext const& context, int globalY, bool yInBounds)
     {
-        using float_v = simd::native_simd<float>;
-        using int_v = simd::rebind_simd_t<int, float_v>;
-        constexpr int SimdWidth = float_v::size();
+        using FloatV = simd::native_simd<float>;
+        using IntV = simd::rebind_simd_t<int, FloatV>;
+        constexpr int SimdWidth = FloatV::size();
 
         for (; x + SimdWidth <= context.width; x += SimdWidth) // SIMD loop
         {
-            auto const globalXVec = int_v([](int i) { return i; }) + (context.cellX + x);
+            auto const globalXVec = IntV([](int i) { return i; }) + (context.cellX + x);
 
             // Check bounds
             // X bounds depend on vector, Y bounds are scalar for this row
@@ -475,7 +475,7 @@ void ImagePool::link(string const& name, shared_ptr<Image const> imageRef)
 
 shared_ptr<Image const> ImagePool::findImageByName(string const& name) const noexcept
 {
-    if (auto const* imageRef = _imageNameToImageCache.try_get(name))
+    if (auto const* imageRef = _imageNameToImageCache.tryGet(name))
         return *imageRef;
 
     return {};

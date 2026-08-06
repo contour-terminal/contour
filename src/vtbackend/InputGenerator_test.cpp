@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/InputBinding.h>
-#include <vtbackend/InputGenerator.h>
-#include <vtbackend/test_helpers.h>
+#include <vtbackend/InputBinding.hpp>
+#include <vtbackend/InputGenerator.hpp>
+#include <vtbackend/TestHelpers.hpp>
 
-#include <crispy/escape.h>
+#include <crispy/Escape.hpp>
 
 #include <libunicode/convert.h>
 
@@ -83,7 +83,7 @@ TEST_CASE("InputGenerator.Modifier.chordModifierTable")
 
     SECTION("a value naming no chord modifier formats empty")
     {
-        // crispy::flags's formatter walks every bit position of the underlying type and skips the
+        // crispy::Flags's formatter walks every bit position of the underlying type and skips the
         // ones that format empty. Were a lock bit to name itself here, it would leak into the
         // rendering of a Modifiers set.
         CHECK(std::format("{}", static_cast<Modifier>(LockKey::CapsLock)).empty());

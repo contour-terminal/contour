@@ -24,12 +24,12 @@ template <typename Promise>
 class UniqueCoroHandle
 {
   public:
-    using handle_type = std::coroutine_handle<Promise>;
+    using HandleType = std::coroutine_handle<Promise>;
 
     UniqueCoroHandle() noexcept = default;
 
     /// @param handle The coroutine frame to own (empty by default).
-    explicit UniqueCoroHandle(handle_type handle) noexcept: _handle(handle) {}
+    explicit UniqueCoroHandle(HandleType handle) noexcept: _handle(handle) {}
 
     UniqueCoroHandle(UniqueCoroHandle&& other) noexcept: _handle(std::exchange(other._handle, {})) {}
 
@@ -54,13 +54,13 @@ class UniqueCoroHandle
     }
 
     /// @return The owned handle (empty when none is owned).
-    [[nodiscard]] handle_type get() const noexcept { return _handle; }
+    [[nodiscard]] HandleType get() const noexcept { return _handle; }
 
     /// @return True when a frame is owned.
     explicit operator bool() const noexcept { return static_cast<bool>(_handle); }
 
   private:
-    handle_type _handle {};
+    HandleType _handle {};
 };
 
 } // namespace coro::detail

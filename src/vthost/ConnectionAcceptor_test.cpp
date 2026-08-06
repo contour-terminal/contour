@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #ifndef _WIN32
 
-    #include <crispy/logsink.h>
+    #include <crispy/LogSink.hpp>
 
     #include <catch2/catch_test_macros.hpp>
 
@@ -20,14 +20,14 @@
 
     #include <coro/Task.hpp>
     #include <coro/WhenAll.hpp>
-    #include <net/AsyncBufferedReader.h>
-    #include <net/EventLoop.h>
-    #include <net/IListener.h>
-    #include <net/PollEventSource.h>
-    #include <net/Sockets.h>
-    #include <net/testing/CoroTestSupport.h>
-    #include <net/testing/TempDir.h>
-    #include <vthost/ConnectionAcceptor.h>
+    #include <net/AsyncBufferedReader.hpp>
+    #include <net/EventLoop.hpp>
+    #include <net/IListener.hpp>
+    #include <net/PollEventSource.hpp>
+    #include <net/Sockets.hpp>
+    #include <net/testing/CoroTestSupport.hpp>
+    #include <net/testing/TempDir.hpp>
+    #include <vthost/ConnectionAcceptor.hpp>
 
 using coro::Task;
 using net::EventLoop;
@@ -221,7 +221,7 @@ TEST_CASE("the accepting endpoint is named in the connection log", "[vthost][acc
 {
     // The daemon serves up to five listeners at once, so "accepted a connection" without a name
     // is barely a diagnostic. The identity also has to survive into the handler's frame.
-    auto capture = logstore::scoped_capture { "vthost.conn" };
+    auto capture = logstore::ScopedCapture { "vthost.conn" };
 
     auto source = net::PollEventSource {};
     auto loop = EventLoop { source };
@@ -251,7 +251,7 @@ TEST_CASE("a persistently failing accept is reported, not silent", "[vthost][acc
 {
     // Before this, fd exhaustion was invisible: the acceptor retried every 100ms forever and
     // said nothing, so a daemon that had stopped serving looked identical to an idle one.
-    auto capture = logstore::scoped_capture {};
+    auto capture = logstore::ScopedCapture {};
 
     auto source = net::PollEventSource {};
     auto loop = EventLoop { source };
@@ -278,7 +278,7 @@ TEST_CASE("an exception escaping a connection handler is reported, not reaped", 
     // their frames — so coro::Task's captured exception_ptr went to the grave unread. The daemon
     // survived (which is right: one bad peer must not take it down) but said nothing at all, which
     // is how a real bug would hide. Surviving is still the behaviour; the silence is not.
-    auto capture = logstore::scoped_capture {};
+    auto capture = logstore::ScopedCapture {};
 
     auto source = net::PollEventSource {};
     auto loop = EventLoop { source };

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Charset.h>
+#include <vtbackend/Charset.hpp>
 
 #include <ranges>
 

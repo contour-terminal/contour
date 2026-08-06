@@ -5,7 +5,7 @@
 // twice a second. The gate is fed the blink-free state and must collapse that to silence, while still
 // reporting the transitions an assistive client genuinely needs.
 
-#include <contour/display/CaretReportGate.h>
+#include <contour/display/CaretReportGate.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/InputGenerator.h>
+#include <vtbackend/InputGenerator.hpp>
 
-#include <vtbackend/ControlCode.h>
-#include <vtbackend/logging.h>
+#include <vtbackend/ControlCode.hpp>
+#include <vtbackend/Logging.hpp>
 
-#include <crispy/assert.h>
-#include <crispy/utils.h>
+#include <crispy/Assert.hpp>
+#include <crispy/Utils.hpp>
 
 #include <libunicode/case_mapping.h>
 #include <libunicode/convert.h>
@@ -27,17 +27,17 @@ using namespace std;
 namespace vtbackend
 {
 
-string to_string(Modifiers modifiers)
+string toString(Modifiers modifiers)
 {
     return std::format("{}", modifiers);
 }
 
-string to_string(Key key)
+string toString(Key key)
 {
     return std::format("{}", key);
 }
 
-string to_string(MouseButton button)
+string toString(MouseButton button)
 {
     return std::format("{}", button);
 }
@@ -75,7 +75,7 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
                                                   KeyboardEventType eventType)
 {
     // Legacy encoding transmits bytes, not key identities: there is nowhere in it to put one.
-    crispy::ignore_unused(keyIdentity);
+    crispy::ignoreUnused(keyIdentity);
 
     if (eventType == KeyboardEventType::Release)
         return false;

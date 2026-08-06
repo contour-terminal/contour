@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/StatusLineBuilder.h>
+#include <vtbackend/StatusLineBuilder.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -75,7 +75,7 @@ TEST_CASE("parseStatusLineSegment.unknownPlaceholderEchoesVerbatim", "[statuslin
 // parses a profile's template into editable items and serializes them back on save -- so anything the
 // parser understands the serializer has to be able to write back in a form the parser still understands.
 //
-// The separator matters more than it looks. crispy::parse_interpolation splits a placeholder at its FIRST
+// The separator matters more than it looks. crispy::parseInterpolation splits a placeholder at its FIRST
 // colon and splits what follows on commas, so writing "{InputMode,Bold}" where "{InputMode:Bold}" belongs
 // makes "InputMode,Bold" the placeholder *name*. That name matches nothing, so the item is echoed back as
 // literal text and its styling is gone -- a saved profile silently loses its status line.
@@ -219,7 +219,7 @@ TEST_CASE("serializeStatusLineSegment.textKeepsBracesAndCommasVerbatim", "[statu
 {
     SECTION("braces are not doubled")
     {
-        // A template has no brace escaping (see crispy::parse_interpolated_string), so emitting "{{" for
+        // A template has no brace escaping (see crispy::parseInterpolatedString), so emitting "{{" for
         // "{" would not read back as one brace -- the text would gain a brace on every save.
         auto const text = canonical("a{b"sv);
         CHECK(text == "a{b");

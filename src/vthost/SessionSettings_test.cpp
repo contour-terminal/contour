@@ -5,7 +5,7 @@
 #include <string>
 #include <variant>
 
-#include <vthost/SessionSettings.h>
+#include <vthost/SessionSettings.hpp>
 
 using namespace vthost;
 

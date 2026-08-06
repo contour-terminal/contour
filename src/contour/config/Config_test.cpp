@@ -6,18 +6,20 @@
 // renamed/retyped YAML key or a broken loadFromEntry overload fails here instead of silently
 // falling back to defaults at runtime.
 
-#include <contour/config/Actions.h>
-#include <contour/config/Config.h>
-#include <contour/config/GuiConfigStore.h>
-#include <contour/config/ModifierNames.h>
-#include <contour/platform/GuiTheme.h>
+#include <contour/config/Actions.hpp>
+#include <contour/config/Config.hpp>
+#include <contour/config/GuiConfigStore.hpp>
+#include <contour/config/ModifierNames.hpp>
+#include <contour/platform/GuiTheme.hpp>
 
-#include <vtbackend/Color.h>
-#include <vtbackend/InputGenerator.h>
-#include <vtbackend/primitives.h>
+#include <vtbackend/Color.hpp>
+#include <vtbackend/InputGenerator.hpp>
+#include <vtbackend/Primitives.hpp>
 
-#include <crispy/logsink.h>
-#include <crispy/logstore.h>
+#include <text_shaper/Font.hpp>
+
+#include <crispy/LogSink.hpp>
+#include <crispy/LogStore.hpp>
 
 #include <QtCore/QTemporaryDir>
 
@@ -895,6 +897,155 @@ profiles:
     CHECK(profile->fonts.value().size.pt == 13.0);
     CHECK(profile->fonts.value().regular.familyName == "Fira Code");
     CHECK(profile->fonts.value().builtinBoxDrawing == false);
+    // The weight was fed but never asserted, so the reader could have dropped it unnoticed --
+    // which is exactly what it did for every spelling but this one.
+    CHECK(profile->fonts.value().regular.weight == text::FontWeight::Bold);
+}
+
+TEST_CASE("Config: the font render mode loads from its documented key", "[config]")
+{
+    // The key is `render_mode`: it is what every released version reads, what metainfo.xml
+    // announces, and the only spelling a user has ever had reason to write. An identifier sweep
+    // briefly renamed the string literal along with the C++ type, which changed no code but
+    // invalidated every existing profile in silence.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        font:
+            render_mode: lcd
+)"sv);
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK(profile->fonts.value().renderMode == text::RenderMode::LCD);
+}
+
+TEST_CASE("Config: font weight and slant accept the spellings Contour itself writes", "[config]")
+{
+    // `contour generate config` formats these through std::formatter, which emits CamelCase, while
+    // the documentation advertises the underscore forms. Both must load, or the config Contour
+    // generated does not survive its own reader.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        font:
+            regular:
+                family: "Fira Code"
+                weight: ExtraBold
+                slant: Italic
+            bold:
+                family: "Fira Code"
+                weight: extra_light
+            italic:
+                family: "Fira Code"
+                slant: oblique
+)"sv);
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    auto const& fonts = profile->fonts.value();
+    CHECK(fonts.regular.weight == text::FontWeight::ExtraBold);
+    CHECK(fonts.regular.slant == text::FontSlant::Italic);
+    CHECK(fonts.bold.weight == text::FontWeight::ExtraLight);
+    CHECK(fonts.italic.slant == text::FontSlant::Oblique);
+}
+
+TEST_CASE("Config: an unparsable font weight or slant is reported, not swallowed", "[config]")
+{
+    // Silence here is worse than elsewhere: the italic and bold-italic faces are pre-seeded with
+    // FontSlant::Italic before the file is read, so a dropped value leaves the inherited Italic
+    // rather than the default -- the user sees a slant they did not ask for and no diagnostic.
+    QTemporaryDir dir;
+    auto capture = logstore::ScopedCapture { "error" };
+
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        font:
+            regular:
+                family: "Fira Code"
+                weight: heavyish
+                slant: itallic
+)"sv);
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK(profile->fonts.value().regular.weight == text::FontWeight::Normal);
+    CHECK(profile->fonts.value().regular.slant == text::FontSlant::Normal);
+
+    auto const& log = capture.text();
+    INFO("captured error log:\n" << log);
+    CHECK(log.contains("heavyish"));
+    CHECK(log.contains("itallic"));
+}
+
+TEST_CASE("Config: the deprecated slant 'thin' still loads, and says so", "[config]")
+{
+    // `thin` is a weight; it reached the slant table as a copy-paste and resolved to Normal for
+    // years. Removing it outright would silently flip an existing profile's italic face from
+    // upright to slanted, so it is honoured and announced instead.
+    QTemporaryDir dir;
+    auto capture = logstore::ScopedCapture { "error" };
+
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        font:
+            italic:
+                family: "Fira Code"
+                slant: thin
+)"sv);
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK(profile->fonts.value().italic.slant == text::FontSlant::Normal);
+
+    auto const& log = capture.text();
+    INFO("captured error log:\n" << log);
+    CHECK(log.contains("thin"));
+    CHECK(log.contains("deprecated"));
+}
+
+TEST_CASE("Config: the generated default config loads back into the defaults", "[config]")
+{
+    // `contour generate config` writes this file for the user to edit, so every key it emits and
+    // every value it formats must be something the reader accepts. The two sides were written
+    // independently: the writer emitted `weight: Regular` and `slant: Normal`, neither of which
+    // the parser knew, and the reader looked up a key the writer never wrote. Both failures were
+    // silent, because an unmatched key and an unparsed value both just leave the default in place.
+    //
+    // The empty error log is the load-bearing assertion, not the comparison. Because the generated
+    // file holds exactly the defaults, a silently dropped value leaves the field AT the default and
+    // the comparison still passes -- which is precisely how these bugs survived. What cannot pass
+    // is a reader reporting that it did not understand something Contour itself wrote.
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    auto capture = logstore::ScopedCapture { "error" };
+
+    auto const generated = contour::config::defaultConfigString();
+    auto const reloaded = loadFromYaml(dir, generated);
+    auto const defaults = contour::config::Config {};
+
+    INFO("generated config:\n" << generated);
+    CHECK(capture.text().empty());
+
+    auto const* profile = reloaded.profile(defaults.defaultProfileName.value());
+    REQUIRE(profile != nullptr);
+    auto const& expected = defaults.profiles.value().at(defaults.defaultProfileName.value()).fonts.value();
+
+    // Whole-struct, so a field added to FontDescriptions is covered without editing this test.
+    CHECK(profile->fonts.value() == expected);
 }
 
 TEST_CASE("Config: font features, fallback list, and a below-minimum size clamp load from YAML", "[config]")
@@ -921,9 +1072,9 @@ profiles:
     CHECK(profile->fonts.value().size.pt >= 8.0);
     // The three 4-letter feature codes are parsed into the feature vector.
     CHECK(profile->fonts.value().regular.features.size() == 3);
-    // The fallback sequence populates a font_fallback_list.
-    REQUIRE(std::holds_alternative<text::font_fallback_list>(profile->fonts.value().regular.fontFallback));
-    auto const& list = std::get<text::font_fallback_list>(profile->fonts.value().regular.fontFallback);
+    // The fallback sequence populates a FontFallbackList.
+    REQUIRE(std::holds_alternative<text::FontFallbackList>(profile->fonts.value().regular.fontFallback));
+    auto const& list = std::get<text::FontFallbackList>(profile->fonts.value().regular.fontFallback);
     CHECK(list.fallbackFonts.size() == 2);
 }
 
@@ -943,7 +1094,7 @@ profiles:
 
     auto const* profile = config.profile("main");
     REQUIRE(profile != nullptr);
-    CHECK(std::holds_alternative<text::font_fallback_none>(profile->fonts.value().regular.fontFallback));
+    CHECK(std::holds_alternative<text::FontFallbackNone>(profile->fonts.value().regular.fontFallback));
 }
 
 TEST_CASE("Config: text-shaping engine names map to their engines", "[config]")
@@ -970,6 +1121,11 @@ profiles:
              { "openshaper", vtrasterizer::TextShapingEngine::OpenShaper },
              { "dwrite", vtrasterizer::TextShapingEngine::DWrite },
              { "coretext", vtrasterizer::TextShapingEngine::CoreText },
+             // `harfbuzz` is what the writer emits for OpenShaper, and it is the default engine on
+             // every platform -- so until the reader learned this spelling, the engine line in a
+             // generated config was dropped on load.
+             { "harfbuzz", vtrasterizer::TextShapingEngine::OpenShaper },
+             { "DirectWrite", vtrasterizer::TextShapingEngine::DWrite },
          })
     {
         QTemporaryDir dir;
@@ -987,7 +1143,7 @@ TEST_CASE("Config: environment variables in values are expanded (defined and und
     // deterministic; use a clearly-undefined name for the other branch. qputenv/qunsetenv are Qt's
     // portable env wrappers (POSIX ::setenv is unavailable on MSVC) -- Qt is fine here because this
     // suite only ever builds with the GUI frontend, and writing through it is in fact the stronger
-    // assertion: the replacer reads a crispy::live_environment, so this also proves that reader sees
+    // assertion: the replacer reads a crispy::LiveEnvironment, so this also proves that reader sees
     // a variable written after the process started, which is the whole reason it is not the cached
     // one. (A test that needs to control what the replacer reads injects its own environment into
     // YAMLConfigReader instead; loadFromYaml goes through the production entry point on purpose.)
@@ -3309,7 +3465,7 @@ TEST_CASE("Config: a dropped input_mapping entry is reported", "[config][input-m
     // The silence was the whole reason issue #1987 was hard to diagnose: a row vanished and nothing
     // anywhere said so. These assertions stay deliberately weak -- that the offending row and field
     // are NAMED -- rather than pinning the sentence, which would break on any rewording.
-    auto capture = logstore::scoped_capture { "error" };
+    auto capture = logstore::ScopedCapture { "error" };
 
     auto const config = loadFromYaml(dir, R"(
 default_profile: main
@@ -3347,7 +3503,7 @@ TEST_CASE("Config: an input_mapping that is not a list is reported, not silently
     // malformed section leaves the user with nothing bound at all -- the worst version of the silent
     // loss behind issue #1987, and now the most likely one, since the docs tell people the section
     // replaces the defaults.
-    auto capture = logstore::scoped_capture { "error" };
+    auto capture = logstore::ScopedCapture { "error" };
 
     auto const config = loadFromYaml(dir, R"(
 default_profile: main

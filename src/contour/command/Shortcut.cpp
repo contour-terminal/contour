@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/command/Command.h>
-#include <contour/command/Shortcut.h>
+#include <contour/command/Command.hpp>
+#include <contour/command/Shortcut.hpp>
 
 #include <libunicode/convert.h>
 
@@ -20,7 +20,7 @@ namespace
     /// wants to REBIND what the palette just taught them types exactly this name into `input_mapping:`.
     [[nodiscard]] std::string inputText(ShortcutInput input)
     {
-        return std::visit(crispy::overloaded {
+        return std::visit(crispy::Overloaded {
                               [](vtbackend::Key key) { return std::format("{}", key); },
                               [](char32_t ch) { return unicode::convert_to<char>(ch); },
                           },

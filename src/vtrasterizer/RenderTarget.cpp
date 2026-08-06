@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtrasterizer/RenderTarget.h>
+#include <vtrasterizer/RenderTarget.hpp>
 
 using namespace crispy;
 using namespace std;
@@ -31,7 +31,7 @@ auto Renderable::createTileData(atlas::TileLocation tileLocation,
     auto const atlasSize = _textureScheduler->atlasSize();
     Require(!!atlasSize.width);
     Require(!!atlasSize.height);
-    if (!SoftRequire(bitmap.size() == bitmapSize.area() * atlas::element_count(bitmapFormat)))
+    if (!SoftRequire(bitmap.size() == bitmapSize.area() * atlas::elementCount(bitmapFormat)))
         return {};
     tileData.bitmap = std::move(bitmap);
     tileData.bitmapSize = bitmapSize;
@@ -53,7 +53,7 @@ auto Renderable::sliceTileData(Renderable::TextureAtlas::TileCreateData const& c
                                atlas::TileLocation tileLocation) -> Renderable::TextureAtlas::TileCreateData
 {
     auto const bitmapFormat = createData.bitmapFormat;
-    auto const colorComponentCount = element_count(bitmapFormat);
+    auto const colorComponentCount = elementCount(bitmapFormat);
     auto const pitch = unbox<uintptr_t>(createData.bitmapSize.width) * colorComponentCount;
 
     auto const subWidth = Width(sliceIndex.endX - sliceIndex.beginX);

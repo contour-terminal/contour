@@ -13,8 +13,8 @@
 //   * rows track tabs, not sessions/panes (a split must not grow the row count);
 //   * structural changes use the proper begin/end* notifications.
 
-#include <contour/window/TabLabel.h>
-#include <contour/window/WindowController.h> // for the production Roles enum the static_asserts pin to
+#include <contour/window/TabLabel.hpp>
+#include <contour/window/WindowController.hpp> // for the production Roles enum the static_asserts pin to
 
 #include <QtCore/QAbstractListModel>
 #include <QtGui/QColor>
@@ -29,8 +29,8 @@
 
 #include <QtTest/QAbstractItemModelTester>
 #include <QtTest/QSignalSpy>
-#include <vtworkspace/ModelEvents.h>
-#include <vtworkspace/SessionModel.h>
+#include <vtworkspace/ModelEvents.hpp>
+#include <vtworkspace/SessionModel.hpp>
 
 using namespace vtworkspace;
 

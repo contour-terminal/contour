@@ -5,7 +5,7 @@
 // (pageSizeForPixels(requiredPixelsForPage(p)) == p) at every cell size, margin and content scale.
 // The historic sizing bugs were divergent conversions violating exactly this.
 
-#include <contour/geometry/WindowGeometry.h>
+#include <contour/geometry/WindowGeometry.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>

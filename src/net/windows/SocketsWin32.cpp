@@ -10,7 +10,7 @@
 #endif
 // clang-format on
 
-#include <net/Sockets.h>
+#include <net/Sockets.hpp>
 
 #ifdef _WIN32
 
@@ -20,9 +20,9 @@
 
     #include <afunix.h>
 
-    #include <net/platform/WinsockInit.h>
-    #include <net/windows/WindowsListener.h>
-    #include <net/windows/WindowsSocket.h>
+    #include <net/platform/WinsockInit.hpp>
+    #include <net/windows/WindowsListener.hpp>
+    #include <net/windows/WindowsSocket.hpp>
 
 namespace net
 {

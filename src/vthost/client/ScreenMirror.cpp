@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/client/ScreenMirror.h>
+#include <vthost/client/ScreenMirror.hpp>
 
-#include <vtbackend/Color.h>
-#include <vtbackend/Hyperlink.h>
-#include <vtbackend/Image.h>
-#include <vtbackend/primitives.h>
+#include <vtbackend/Color.hpp>
+#include <vtbackend/Hyperlink.hpp>
+#include <vtbackend/Image.hpp>
+#include <vtbackend/Primitives.hpp>
 
-#include <crispy/overloaded.h>
+#include <crispy/Overloaded.hpp>
 
 #include <algorithm>
 #include <array>
@@ -17,12 +17,12 @@
 #include <unordered_map>
 #include <utility>
 
-#include <vthost/CursorStyle.h>
-#include <vthost/GridWire.h>
-#include <vthost/ImageWire.h>
-#include <vthost/MirroredModes.h>
-#include <vthost/MouseWire.h>
-#include <vthost/StatusWire.h>
+#include <vthost/CursorStyle.hpp>
+#include <vthost/GridWire.hpp>
+#include <vthost/ImageWire.hpp>
+#include <vthost/MirroredModes.hpp>
+#include <vthost/MouseWire.hpp>
+#include <vthost/StatusWire.hpp>
 
 namespace vthost::client
 {
@@ -289,7 +289,7 @@ void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
             applyStatusLines(screen);
         if (delta.kittyKeyboardChanged != 0)
             _terminal->keyboardProtocol().flags() =
-                vtbackend::KeyboardEventFlags::from_value(delta.kittyKeyboardFlags);
+                vtbackend::KeyboardEventFlags::fromValue(delta.kittyKeyboardFlags);
         if (delta.modifyOtherKeysChanged != 0)
             _terminal->setModifyOtherKeys(delta.modifyOtherKeys);
         applyImages(screen);
@@ -404,7 +404,7 @@ void ScreenMirror::applySessionState(RemoteScreen const& screen)
     _terminal->colorPalette().defaultBackground = vtbackend::RGBColor { screen.defaultBackground };
     applyStatusDisplay(screen.statusDisplayType, screen.activeStatusDisplay);
     _terminal->keyboardProtocol().flags() =
-        vtbackend::KeyboardEventFlags::from_value(screen.kittyKeyboardFlags);
+        vtbackend::KeyboardEventFlags::fromValue(screen.kittyKeyboardFlags);
     if (_terminal->modifyOtherKeys() != screen.modifyOtherKeys)
         _terminal->setModifyOtherKeys(screen.modifyOtherKeys);
     // The working directory is the exception: an empty one is "not known", not "the root", and
@@ -603,7 +603,7 @@ void ScreenMirror::applyEvent(proto::SessionEventPdu const& event)
     // One overload per event shape, so each reads only the fields it has. The visit is exhaustive by
     // construction: a fourth event alternative fails to compile until it gets its own arm.
     std::visit(
-        overloaded {
+        Overloaded {
             [this](proto::SessionBell const&) { _terminal->bell(); },
             [this](proto::SessionNotify const& notify) { _terminal->notify(notify.title, notify.body); },
             [this](proto::SessionClipboard const& clipboard) {

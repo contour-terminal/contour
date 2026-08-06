@@ -5,7 +5,7 @@
 // Terminal's 1.0 / 0.6 / 0.3 look), the OKLab lightness metric, and the resulting black/white text
 // decision. Reference L values were cross-checked against WT's ColorFix::GetLightness pipeline.
 
-#include <contour/window/TabColorScheme.h>
+#include <contour/window/TabColorScheme.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>

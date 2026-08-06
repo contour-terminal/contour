@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/tmux/ControlModeSpawn.h>
+#include <vthost/tmux/ControlModeSpawn.hpp>
 
 #include <format>
 
-#include <net/Sockets.h>
+#include <net/Sockets.hpp>
 
 #ifndef _WIN32
     #include <sys/wait.h>

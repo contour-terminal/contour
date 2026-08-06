@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #ifdef __linux__
 
-    #include <contour/platform/FreeDesktopNotifier.h>
+    #include <contour/platform/FreeDesktopNotifier.hpp>
 
-    #include <crispy/logstore.h>
+    #include <crispy/LogStore.hpp>
 
     #include <QtDBus/QDBusConnection>
     #include <QtDBus/QDBusReply>
@@ -13,7 +13,7 @@ namespace contour::platform
 
 namespace
 {
-    auto const notifierLog = logstore::category("gui.notifier", "Desktop notification backend");
+    auto const notifierLog = logstore::Category("gui.notifier", "Desktop notification backend");
 } // namespace
 
 FreeDesktopNotifier::FreeDesktopNotifier(QObject* parent): QObject(parent)

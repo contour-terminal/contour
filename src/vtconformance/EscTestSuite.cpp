@@ -2,7 +2,7 @@
 #include <array>
 #include <string_view>
 
-#include <vtconformance/Suite.h>
+#include <vtconformance/Suite.hpp>
 
 using namespace std::string_view_literals;
 using vtbackend::ChecksumFlag;

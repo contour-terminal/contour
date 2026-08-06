@@ -2,7 +2,7 @@
 //
 // Unit tests for the pure `contour cat` image-argument parsers extracted into CatImageArgs.h.
 
-#include <contour/cli/CatImageArgs.h>
+#include <contour/cli/CatImageArgs.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -11,14 +11,14 @@ using namespace std::string_view_literals;
 
 TEST_CASE("parseCatSize accepts WxH and rejects malformed input", "[cat][image]")
 {
-    CHECK(parseCatSize("80x24"sv) == crispy::size { .width = 80, .height = 24 });
-    CHECK(parseCatSize("1x1"sv) == crispy::size { .width = 1, .height = 1 });
+    CHECK(parseCatSize("80x24"sv) == crispy::Size { .width = 80, .height = 24 });
+    CHECK(parseCatSize("1x1"sv) == crispy::Size { .width = 1, .height = 1 });
     // No 'x', leading/trailing 'x', and non-numeric all yield {0,0}.
-    CHECK(parseCatSize("80"sv) == crispy::size {});
-    CHECK(parseCatSize("x24"sv) == crispy::size {});
-    CHECK(parseCatSize("80x"sv) == crispy::size {});
-    CHECK(parseCatSize("axb"sv) == crispy::size {});
-    CHECK(parseCatSize(""sv) == crispy::size {});
+    CHECK(parseCatSize("80"sv) == crispy::Size {});
+    CHECK(parseCatSize("x24"sv) == crispy::Size {});
+    CHECK(parseCatSize("80x"sv) == crispy::Size {});
+    CHECK(parseCatSize("axb"sv) == crispy::Size {});
+    CHECK(parseCatSize(""sv) == crispy::Size {});
 }
 
 TEST_CASE("parseCatAlignment maps every name and defaults to center", "[cat][image]")

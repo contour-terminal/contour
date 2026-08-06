@@ -15,8 +15,8 @@
 // without PTYs or displays. activeTabRootPane stays null, so the pane tree (which would need a real
 // TerminalDisplay) never instantiates — exactly the pre-first-session state.
 
-#include <contour/test/QmlChromeStyle.h>
-#include <contour/test/QmlMessageCapture.h>
+#include <contour/test/QmlChromeStyle.hpp>
+#include <contour/test/QmlMessageCapture.hpp>
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QCoreApplication>
@@ -34,7 +34,7 @@
 #include <cstdint>
 #include <memory>
 
-#include <vtworkspace/PaneLayout.h>
+#include <vtworkspace/PaneLayout.hpp>
 
 namespace
 {

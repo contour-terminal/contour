@@ -4,7 +4,7 @@
 // run-wide gate in test_main.cpp uses to fail the whole run on QML defects; testing it directly verifies the
 // oracle without emitting a live diagnostic (which would fail the run-wide gate itself).
 
-#include <contour/test/QmlMessageCapture.h>
+#include <contour/test/QmlMessageCapture.hpp>
 
 #include <QtCore/QString>
 

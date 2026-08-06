@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/tmux/LayoutString.h>
+#include <vthost/tmux/LayoutString.hpp>
 
 #include <algorithm>
 #include <array>
@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <format>
 
-#include <vtworkspace/PaneLayout.h>
+#include <vtworkspace/PaneLayout.hpp>
 
 namespace vthost::tmux
 {

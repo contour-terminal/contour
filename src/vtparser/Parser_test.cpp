@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtparser/Parser.h>
-#include <vtparser/ParserEvents.h>
+#include <vtparser/Parser.hpp>
+#include <vtparser/ParserEvents.hpp>
 
 #include <libunicode/convert.h>
 

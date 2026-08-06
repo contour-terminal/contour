@@ -9,7 +9,7 @@
 #endif
 // clang-format on
 
-#include <net/platform/WindowsLoopback.h>
+#include <net/platform/WindowsLoopback.hpp>
 
 #ifdef _WIN32
 

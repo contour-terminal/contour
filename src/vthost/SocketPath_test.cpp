@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/testing/environment.h>
+#include <crispy/testing/Environment.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <optional>
 #include <string>
 
-#include <vthost/SocketPath.h>
+#include <vthost/SocketPath.hpp>
 
 using vthost::muxSocketPath;
 
@@ -53,14 +53,13 @@ TEST_CASE("the production overload reads its inputs from the injected environmen
 {
     // What the `env` parameter is for: no variable of the test process is consulted, and none is
     // mutated to arrange this.
-    auto const environment =
-        crispy::testing::fake_environment { { { "XDG_RUNTIME_DIR", "/run/user/4242" } } };
+    auto const environment = crispy::testing::FakeEnvironment { { { "XDG_RUNTIME_DIR", "/run/user/4242" } } };
 
     CHECK(muxSocketPath("work", "", environment) == "/run/user/4242/contour/work");
 
     SECTION("and $CONTOUR_MUX still outranks it")
     {
-        auto const overridden = crispy::testing::fake_environment { {
+        auto const overridden = crispy::testing::FakeEnvironment { {
             { "CONTOUR_MUX", "/env/mux.sock" },
             { "XDG_RUNTIME_DIR", "/run/user/4242" },
         } };

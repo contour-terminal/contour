@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/client/LayoutReconstruction.h>
+#include <vthost/client/LayoutReconstruction.hpp>
 
 #include <algorithm>
 #include <cstddef>
 #include <ranges>
 
-#include <vtworkspace/LayoutConvert.h>
-#include <vtworkspace/PaneLayout.h>
+#include <vtworkspace/LayoutConvert.hpp>
+#include <vtworkspace/PaneLayout.hpp>
 
 namespace vthost::client
 {

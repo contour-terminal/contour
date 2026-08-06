@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <net/Tls.h>
+#include <net/Tls.hpp>
 
-#include <crispy/utils.h>
+#include <crispy/Utils.hpp>
 
 #include <algorithm>
 #include <array>
@@ -161,11 +161,14 @@ namespace
         struct HandshakeGate
         {
             TlsSocket* self;
+            // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
             [[nodiscard]] bool await_ready() const noexcept { return !self->_handshaking; }
+            // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
             void await_suspend(std::coroutine_handle<> handle) const
             {
                 self->_handshakeWaiters.push_back(handle);
             }
+            // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
             void await_resume() const noexcept {}
         };
 
@@ -226,7 +229,7 @@ namespace
 
             _handshaking = true;
             auto outcome = std::expected<void, NetError> {};
-            auto const openGate = crispy::finally([this]() noexcept { openHandshakeGate(); });
+            auto const openGate = crispy::Finally([this]() noexcept { openHandshakeGate(); });
             while (true)
             {
                 auto const result = SSL_do_handshake(_ssl);

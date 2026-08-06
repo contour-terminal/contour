@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/BufferObject.h>
+#include <crispy/BufferObject.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
-TEST_CASE("buffer_object", "[buffer_object]")
+TEST_CASE("BufferObject", "[BufferObject]")
 {
     // TODO
 }

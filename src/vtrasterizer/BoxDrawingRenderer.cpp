@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtrasterizer/BoxDrawingRenderer.h>
+#include <vtrasterizer/BoxDrawingRenderer.hpp>
 
-#include <vtrasterizer/Pixmap.h>
-#include <vtrasterizer/utils.h>
+#include <vtrasterizer/Pixmap.hpp>
+#include <vtrasterizer/Utils.hpp>
 
-#include <crispy/environment.h>
-#include <crispy/logstore.h>
+#include <crispy/Environment.hpp>
+#include <crispy/LogStore.hpp>
 
 #include <array>
 #include <charconv>
@@ -24,7 +24,7 @@ using std::optional;
 using std::pair;
 using std::string_view;
 
-using crispy::point;
+using crispy::Point;
 
 namespace Ranges = std::ranges;
 namespace Views = std::views;
@@ -34,10 +34,10 @@ namespace vtrasterizer
 
 namespace
 {
-    auto inline const boxDrawingLog = logstore::category("renderer.boxdrawing",
+    auto inline const boxDrawingLog = logstore::Category("renderer.boxdrawing",
                                                          "Logs box drawing debugging.",
-                                                         logstore::category::state::Disabled,
-                                                         logstore::category::visibility::Hidden);
+                                                         logstore::Category::State::Disabled,
+                                                         logstore::Category::Visibility::Hidden);
 
     // TODO: Do not depend on this function but rather construct the pixmaps using the correct Y-coordinates.
     atlas::Buffer invertY(atlas::Buffer const& image, ImageSize cellSize)
@@ -83,7 +83,7 @@ namespace detail
         // every one of their several hundred entries.
         using enum Line;
 
-        [[maybe_unused]] string_view to_stringview(Line lm)
+        [[maybe_unused]] string_view toStringView(Line lm)
         {
             switch (lm)
             {
@@ -143,7 +143,7 @@ namespace detail
             // inner circle
             drawEllipseArc(putpixel,
                            imageSize,
-                           crispy::point { // radius
+                           crispy::Point { // radius
                                            .x = (unbox<int>(imageSize.width) / 2) - (int(thickness) / 2),
                                            .y = (unbox<int>(imageSize.height) / 2) - (int(thickness) / 2) },
                            arc);
@@ -152,7 +152,7 @@ namespace detail
             drawEllipseArc(
                 putpixel,
                 imageSize,
-                crispy::point { // radius
+                crispy::Point { // radius
                                 .x = (unbox<int>(imageSize.width) / 2) + (int(thickness) / 2) - 1,
                                 .y = (unbox<int>(imageSize.height) / 2) + (int(thickness) / 2) - 1 },
                 arc);
@@ -319,12 +319,12 @@ namespace detail
                 return b;
             }
 
-            [[nodiscard]] constexpr optional<pair<uint8_t, Thickness>> get_dashed_horizontal() const noexcept
+            [[nodiscard]] constexpr optional<pair<uint8_t, Thickness>> getDashedHorizontal() const noexcept
             {
                 return getDashed(leftval, rightval);
             }
 
-            [[nodiscard]] constexpr optional<pair<uint8_t, Thickness>> get_dashed_vertical() const noexcept
+            [[nodiscard]] constexpr optional<pair<uint8_t, Thickness>> getDashedVertical() const noexcept
             {
                 return getDashed(upval, downval);
             }
@@ -648,7 +648,7 @@ namespace detail
         }
 
         template <size_t N>
-        auto right_circ(ImageSize size)
+        auto rightCirc(ImageSize size)
         {
             auto const s = unbox<int>(size.height) / int(N);
             return [s](int /*x*/, int y) {
@@ -724,7 +724,7 @@ namespace detail
         template <Dir Direction, int DivisorX>
         auto getTriangleProps(ImageSize size)
         {
-            auto const c = point { .x = Direction == Dir::Left
+            auto const c = Point { .x = Direction == Dir::Left
                                             ? unbox<int>(size.width) / DivisorX
                                             : unbox<int>(size.width) - (unbox<int>(size.width) / DivisorX),
                                    .y = unbox<int>(size.height) / 2 };
@@ -774,7 +774,7 @@ namespace detail
         template <int P>
         auto triChecker(ImageSize size)
         {
-            auto const c = point { .x = unbox<int>(size.width) / 2, .y = unbox<int>(size.height) / 2 };
+            auto const c = Point { .x = unbox<int>(size.width) / 2, .y = unbox<int>(size.height) / 2 };
             auto const w = unbox<int>(size.width) - 1;
 
             auto const f = linearEq({ .x = 0, .y = 0 }, c);
@@ -800,7 +800,7 @@ namespace detail
             auto constexpr Set = Inv == Inverted::No ? 255 : 0;
             auto constexpr Unset = 255 - Set;
 
-            auto const c = point { .x = unbox<int>(size.width) / 2, .y = unbox<int>(size.height) / 2 };
+            auto const c = Point { .x = unbox<int>(size.width) / 2, .y = unbox<int>(size.height) / 2 };
             auto const w = unbox<int>(size.width) - 1;
 
             auto const f = linearEq({ .x = 0, .y = 0 }, c);
@@ -927,13 +927,13 @@ namespace detail
         }
 
         // 1 <= n <= r*n
-        constexpr RatioBlock horiz_nth(double r, int n) noexcept
+        constexpr RatioBlock horizNth(double r, int n) noexcept
         {
             return RatioBlock { .from = { .x = 0, .y = r * double(n - 1) },
                                 .to = { .x = 1, .y = r * double(n) } };
         }
 
-        constexpr RatioBlock vert_nth(double r, int n) noexcept
+        constexpr RatioBlock vertNth(double r, int n) noexcept
         {
             return RatioBlock { .from = { .x = r * double(n - 1), .y = 0 },
                                 .to = { .x = r * double(n), .y = 1 } };
@@ -1973,12 +1973,11 @@ Renderable::AtlasTileAttributes const* BoxDrawingRenderer::getOrCreateCachedTile
     // Layout: [Codepoint 21][Flags 8][SubIndex 1] -> 30 bits used.
     auto const cacheKey = (static_cast<uint32_t>(codepoint) << 9)
                           | (static_cast<uint32_t>(cacheKeyFlags) << 1) | static_cast<uint32_t>(subIndex);
-    return textureAtlas().get_or_try_emplace(
-        crispy::strong_hash { 31, 13, 8, cacheKey },
-        [this, codepoint, flags, subIndex](
-            atlas::TileLocation tileLocation) -> optional<TextureAtlas::TileCreateData> {
-            return createTileData(codepoint, flags, tileLocation, subIndex);
-        });
+    return textureAtlas().getOrTryEmplace(crispy::StrongHash { 31, 13, 8, cacheKey },
+                                          [this, codepoint, flags, subIndex](atlas::TileLocation tileLocation)
+                                              -> optional<TextureAtlas::TileCreateData> {
+                                              return createTileData(codepoint, flags, tileLocation, subIndex);
+                                          });
 }
 
 bool BoxDrawingRenderer::renderable(char32_t codepoint) noexcept
@@ -2358,18 +2357,18 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
         case 0x1FB6D: return /* 🭭  */ triangle<Dir::Top, Inverted::No>(size);
         case 0x1FB6E: return /* 🭮  */ triangle<Dir::Right, Inverted::No>(size);
         case 0x1FB6F: return /* 🭯  */ triangle<Dir::Bottom, Inverted::No>(size);
-        case 0x1FB70: return blockElement(size) | vert_nth(1 / 8_th, 2); // 🭰  VERTICAL ONE EIGHTH BLOCK-2
-        case 0x1FB71: return blockElement(size) | vert_nth(1 / 8_th, 3); // 🭱  VERTICAL ONE EIGHTH BLOCK-3
-        case 0x1FB72: return blockElement(size) | vert_nth(1 / 8_th, 4); // 🭲  VERTICAL ONE EIGHTH BLOCK-4
-        case 0x1FB73: return blockElement(size) | vert_nth(1 / 8_th, 5); // 🭳  VERTICAL ONE EIGHTH BLOCK-5
-        case 0x1FB74: return blockElement(size) | vert_nth(1 / 8_th, 6); // 🭴  VERTICAL ONE EIGHTH BLOCK-6
-        case 0x1FB75: return blockElement(size) | vert_nth(1 / 8_th, 7); // 🭵  VERTICAL ONE EIGHTH BLOCK-7
-        case 0x1FB76: return blockElement(size) | horiz_nth(1 / 8_th, 2); // 🭶  HORIZONTAL ONE EIGHTH BLOCK-2
-        case 0x1FB77: return blockElement(size) | horiz_nth(1 / 8_th, 3); // 🭷  HORIZONTAL ONE EIGHTH BLOCK-3
-        case 0x1FB78: return blockElement(size) | horiz_nth(1 / 8_th, 4); // 🭸  HORIZONTAL ONE EIGHTH BLOCK-4
-        case 0x1FB79: return blockElement(size) | horiz_nth(1 / 8_th, 5); // 🭹  HORIZONTAL ONE EIGHTH BLOCK-5
-        case 0x1FB7A: return blockElement(size) | horiz_nth(1 / 8_th, 6); // 🭺  HORIZONTAL ONE EIGHTH BLOCK-6
-        case 0x1FB7B: return blockElement(size) | horiz_nth(1 / 8_th, 7); // 🭻  HORIZONTAL ONE EIGHTH BLOCK-7
+        case 0x1FB70: return blockElement(size) | vertNth(1 / 8_th, 2); // 🭰  VERTICAL ONE EIGHTH BLOCK-2
+        case 0x1FB71: return blockElement(size) | vertNth(1 / 8_th, 3); // 🭱  VERTICAL ONE EIGHTH BLOCK-3
+        case 0x1FB72: return blockElement(size) | vertNth(1 / 8_th, 4); // 🭲  VERTICAL ONE EIGHTH BLOCK-4
+        case 0x1FB73: return blockElement(size) | vertNth(1 / 8_th, 5); // 🭳  VERTICAL ONE EIGHTH BLOCK-5
+        case 0x1FB74: return blockElement(size) | vertNth(1 / 8_th, 6); // 🭴  VERTICAL ONE EIGHTH BLOCK-6
+        case 0x1FB75: return blockElement(size) | vertNth(1 / 8_th, 7); // 🭵  VERTICAL ONE EIGHTH BLOCK-7
+        case 0x1FB76: return blockElement(size) | horizNth(1 / 8_th, 2); // 🭶  HORIZONTAL ONE EIGHTH BLOCK-2
+        case 0x1FB77: return blockElement(size) | horizNth(1 / 8_th, 3); // 🭷  HORIZONTAL ONE EIGHTH BLOCK-3
+        case 0x1FB78: return blockElement(size) | horizNth(1 / 8_th, 4); // 🭸  HORIZONTAL ONE EIGHTH BLOCK-4
+        case 0x1FB79: return blockElement(size) | horizNth(1 / 8_th, 5); // 🭹  HORIZONTAL ONE EIGHTH BLOCK-5
+        case 0x1FB7A: return blockElement(size) | horizNth(1 / 8_th, 6); // 🭺  HORIZONTAL ONE EIGHTH BLOCK-6
+        case 0x1FB7B: return blockElement(size) | horizNth(1 / 8_th, 7); // 🭻  HORIZONTAL ONE EIGHTH BLOCK-7
         case 0x1FB7C:
             return blockElement(size)
                    | (left(1 / 8_th) + lower(1 / 8_th)); // 🭼  LEFT AND LOWER ONE EIGHTH BLOCK
@@ -2387,8 +2386,8 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
                    | (upper(1 / 8_th) + lower(1 / 8_th)); // 🮀  UPPER AND LOWER ONE EIGHTH BLOCK
         case 0x1FB81:
             return blockElement(size)
-                   | (horiz_nth(1 / 8_th, 1) // 🮁  HORIZONTAL ONE EIGHTH BLOCK-1358
-                      + horiz_nth(1 / 8_th, 3) + horiz_nth(1 / 8_th, 5) + horiz_nth(1 / 8_th, 7));
+                   | (horizNth(1 / 8_th, 1) // 🮁  HORIZONTAL ONE EIGHTH BLOCK-1358
+                      + horizNth(1 / 8_th, 3) + horizNth(1 / 8_th, 5) + horizNth(1 / 8_th, 7));
         case 0x1FB82: return blockElement(size) | upper(1 / 4_th); // 🮂  UPPER ONE QUARTER BLOCK
         case 0x1FB83: return blockElement(size) | upper(3 / 8_th); // 🮃  UPPER THREE EIGHTHS BLOCK
         case 0x1FB84: return blockElement(size) | upper(5 / 8_th); // 🮄  UPPER FIVE EIGHTHS BLOCK
@@ -2487,16 +2486,16 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
                 .line({ .x=0, .y=1 / 2_th }, { .x=1, .y=1 / 2_th })
                 .line({ .x=1 / 2_th, .y=3 / 8_th }, { .x=1 / 2_th, .y=5 / 8_th })
                 .take();
-        case 0x1FBF0: return segmentArt().segment_bar(1, 2, 4, 5, 6, 7);
-        case 0x1FBF1: return segmentArt().segment_bar(2, 5);
-        case 0x1FBF2: return segmentArt().segment_bar(1, 2, 3, 6, 7);
-        case 0x1FBF3: return segmentArt().segment_bar(1, 2, 3, 5, 6);
-        case 0x1FBF4: return segmentArt().segment_bar(2, 3, 4, 5);
-        case 0x1FBF5: return segmentArt().segment_bar(1, 3, 4, 5, 6);
-        case 0x1FBF6: return segmentArt().segment_bar(1, 3, 4, 5, 6, 7);
-        case 0x1FBF7: return segmentArt().segment_bar(1, 2, 5);
-        case 0x1FBF8: return segmentArt().segment_bar(1, 2, 3, 4, 5, 6, 7);
-        case 0x1FBF9: return segmentArt().segment_bar(1, 2, 3, 4, 5, 6);
+        case 0x1FBF0: return segmentArt().segmentBar(1, 2, 4, 5, 6, 7);
+        case 0x1FBF1: return segmentArt().segmentBar(2, 5);
+        case 0x1FBF2: return segmentArt().segmentBar(1, 2, 3, 6, 7);
+        case 0x1FBF3: return segmentArt().segmentBar(1, 2, 3, 5, 6);
+        case 0x1FBF4: return segmentArt().segmentBar(2, 3, 4, 5);
+        case 0x1FBF5: return segmentArt().segmentBar(1, 3, 4, 5, 6);
+        case 0x1FBF6: return segmentArt().segmentBar(1, 3, 4, 5, 6, 7);
+        case 0x1FBF7: return segmentArt().segmentBar(1, 2, 5);
+        case 0x1FBF8: return segmentArt().segmentBar(1, 2, 3, 4, 5, 6, 7);
+        case 0x1FBF9: return segmentArt().segmentBar(1, 2, 3, 4, 5, 6);
         // }}}
 
         case 0xE0B0: return /*  */ triangle<Dir::Left, Inverted::No, 1>(size);
@@ -2583,10 +2582,10 @@ static auto buildBox(detail::Box box,
                      bool useEllipticArcs) -> std::optional<atlas::Buffer>
 {
     // catch all non-solid single-lines before the quad-render below
-    if (auto const dashed = box.get_dashed_horizontal())
+    if (auto const dashed = box.getDashedHorizontal())
         return boxDashedHorizontal(dashed, size, lineThickness);
 
-    if (auto const dashed = box.get_dashed_vertical())
+    if (auto const dashed = box.getDashedVertical())
         return boxDashedVertical(dashed, size, lineThickness);
 
     using detail::Line;

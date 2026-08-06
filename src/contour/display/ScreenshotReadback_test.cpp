@@ -8,7 +8,7 @@
 // GPU/RHI context, so they are pinned here. Which of the two orientations a real capture actually needs is
 // a property of the live RHI backend, so it is pinned end-to-end in ScreenshotRhiReadback_test instead.
 
-#include <contour/display/ScreenshotReadback.h>
+#include <contour/display/ScreenshotReadback.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

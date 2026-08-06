@@ -2,7 +2,7 @@
 //
 // Unit tests for the glyph scaling strategy used by the kitty text sizing protocol.
 
-#include <vtrasterizer/GlyphScaling.h>
+#include <vtrasterizer/GlyphScaling.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

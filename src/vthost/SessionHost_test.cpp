@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtpty/MockPty.h>
+#include <vtpty/MockPty.hpp>
 
-#include <crispy/BufferObject.h>
-#include <crispy/logsink.h>
+#include <crispy/BufferObject.hpp>
+#include <crispy/LogSink.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -23,13 +23,13 @@
 #include <vector>
 
 #include <coro/Task.hpp>
-#include <net/EventLoop.h>
-#include <net/PollEventSource.h>
-#include <net/testing/ScriptedEventSource.h>
-#include <vthost/SessionHost.h>
-#include <vthost/TappingPty.h>
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/Tab.h>
+#include <net/EventLoop.hpp>
+#include <net/PollEventSource.hpp>
+#include <net/testing/ScriptedEventSource.hpp>
+#include <vthost/SessionHost.hpp>
+#include <vthost/TappingPty.hpp>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/Tab.hpp>
 
 using vthost::SessionHost;
 using vtworkspace::SplitState;
@@ -119,7 +119,7 @@ class BlockingPty final: public vtpty::Pty
         _wake.notify_all();
     }
 
-    [[nodiscard]] std::optional<ReadResult> read(crispy::buffer_object<char>& /*storage*/,
+    [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& /*storage*/,
                                                  std::optional<std::chrono::milliseconds> timeout,
                                                  size_t /*size*/) override
     {
@@ -524,7 +524,7 @@ TEST_CASE("stream events fan out to every subscriber independently", "[vthost][h
     auto& tapped = dynamic_cast<vthost::TappingPty&>(terminal->device());
     auto& mock = dynamic_cast<vtpty::MockPty&>(tapped.inner());
     mock.appendStdOutBuffer("raw-bytes");
-    auto pool = crispy::buffer_object_pool<char> { 4096 };
+    auto pool = crispy::BufferObjectPool<char> { 4096 };
     auto const storage = pool.allocateBufferObject();
     std::ignore = tapped.read(*storage, std::nullopt, 4096);
     loop.blockOn(waitFor(&loop, [&] { return !first.output.empty() && !second.output.empty(); }));
@@ -553,7 +553,7 @@ TEST_CASE("stream events fan out to every subscriber independently", "[vthost][h
 
 TEST_CASE("a failing PTY factory is reported", "[vthost][host][diagnostics]")
 {
-    auto capture = logstore::scoped_capture {};
+    auto capture = logstore::ScopedCapture {};
 
     auto source = net::testing::ScriptedEventSource {};
     auto loop = net::EventLoop { source };
@@ -570,7 +570,7 @@ TEST_CASE("a failing PTY factory is reported", "[vthost][host][diagnostics]")
 
 TEST_CASE("reaping an orphaned session after a model refusal is reported", "[vthost][host][diagnostics]")
 {
-    auto capture = logstore::scoped_capture {};
+    auto capture = logstore::ScopedCapture {};
     auto h = HostHarness {};
     REQUIRE(h.host.createTab() != nullptr);
 
@@ -583,7 +583,7 @@ TEST_CASE("reaping an orphaned session after a model refusal is reported", "[vth
 
 TEST_CASE("session spawn and exit are recorded once each", "[vthost][host][diagnostics]")
 {
-    auto capture = logstore::scoped_capture { "vthost.session" };
+    auto capture = logstore::ScopedCapture { "vthost.session" };
     auto h = HostHarness {};
     auto* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
@@ -647,7 +647,7 @@ TEST_CASE("a hosted session with a parked pump can still be torn down", "[vthost
 
 TEST_CASE("resizing an unknown pane is reported", "[vthost][host][diagnostics]")
 {
-    auto capture = logstore::scoped_capture {};
+    auto capture = logstore::ScopedCapture {};
     auto h = HostHarness {};
 
     h.host.applyPaneSize(vtworkspace::SessionId { 9999 },

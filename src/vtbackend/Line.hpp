@@ -1,0 +1,622 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <vtbackend/CellProxy.hpp>
+#include <vtbackend/CellUtil.hpp>
+#include <vtbackend/GraphicsAttributes.hpp>
+#include <vtbackend/Hyperlink.hpp>
+#include <vtbackend/LineFlags.hpp>
+#include <vtbackend/LineSoA.hpp>
+#include <vtbackend/Primitives.hpp>
+#include <vtbackend/SoAClusterWriter.hpp>
+
+#include <crispy/Assert.hpp>
+#include <crispy/BufferObject.hpp>
+#include <crispy/Comparison.hpp>
+#include <crispy/Flags.hpp>
+
+#include <libunicode/convert.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <optional>
+#include <string>
+
+namespace vtbackend
+{
+
+/// How @ref Line::toUtf8 renders the continuation cell(s) of a wide (double-width) character.
+enum class ContinuationCell : uint8_t
+{
+    /// Emit nothing: a wide character contributes a single codepoint, so the result is the text as
+    /// written. This is what copy/yank and selection want.
+    Collapse = 0,
+    /// Emit one space per continuation cell, so every grid cell contributes exactly one codepoint and
+    /// a codepoint index into the result equals a column offset. This is what the hint scanner needs
+    /// to map a regex match position back to a grid column.
+    Pad = 1,
+};
+
+// clang-format off
+template <typename, bool> struct OptionalProperty;
+template <typename T> struct OptionalProperty<T, false> {};
+template <typename T> struct OptionalProperty<T, true> { T value; };
+// clang-format on
+
+/// [[deprecated("Use LineSoA directly")]]
+/// Kept for backward compatibility with RenderBufferBuilder.
+struct TrivialLineBuffer
+{
+    ColumnCount displayWidth;
+    GraphicsAttributes textAttributes;
+    GraphicsAttributes fillAttributes = textAttributes;
+    HyperlinkId hyperlink {};
+
+    ColumnCount usedColumns {};
+    crispy::BufferFragment<char> text {};
+
+    void reset(GraphicsAttributes attributes) noexcept
+    {
+        textAttributes = attributes;
+        fillAttributes = attributes;
+        hyperlink = {};
+        usedColumns = {};
+        text.reset();
+    }
+};
+
+/**
+ * Line API backed by LineSoA (Structure-of-Arrays storage).
+ */
+class Line
+{
+  public:
+    /// Buffer type for reflow overflow columns.
+    using InflatedBuffer = LineSoA;
+
+    Line() { initializeBlankLineSoA(_storage); }
+
+    /// Constructs a blank (un-materialized) line of @p cols width with @p attrs as fill attributes.
+    /// O(1): no per-column allocation. The line materializes lazily on first write.
+    Line(ColumnCount cols, LineFlags flags = {}, GraphicsAttributes attrs = {}):
+        _columns { cols }, _flags { flags }
+    {
+        initializeBlankLineSoA(_storage, attrs);
+    }
+
+    /// Construct from TrivialLineBuffer (backward compat -- converts to SoA internally).
+    Line(LineFlags flags, TrivialLineBuffer const& buffer): _columns { buffer.displayWidth }, _flags { flags }
+    {
+        if (buffer.text.empty())
+        {
+            initializeBlankLineSoA(_storage, buffer.fillAttributes);
+        }
+        else
+        {
+            initializeLineSoA(_storage, buffer.displayWidth, buffer.fillAttributes);
+            writeTextToSoA(_storage, 0, buffer.text.view(), buffer.textAttributes, buffer.hyperlink);
+        }
+    }
+
+    /// Construct from a LineSoA (used by reflow to create new lines from overflow data).
+    Line(LineFlags flags, LineSoA&& soa, ColumnCount cols):
+        _storage { std::move(soa) }, _columns { cols }, _flags { flags }
+    {
+    }
+
+    Line(Line const&) = default;
+    Line(Line&&) noexcept = default;
+
+    /// Assignment dirties the DESTINATION row: margin scrolls and rotations move whole lines
+    /// between rows (`lineAt(t) = std::move(lineAt(s))`, std::rotate, std::fill_n in Grid.cpp),
+    /// and the receiving row is what changed from a consumer's point of view. Constructors stay
+    /// defaulted on purpose: constructing a fresh slot is not a row change, and `_dirty = true`
+    /// by default makes new lines pending anyway (bootstrap and rebuilds self-heal).
+    Line& operator=(Line const& other)
+    {
+        if (this == &other)
+            return *this;
+        _storage = other._storage;
+        _columns = other._columns;
+        _flags = other._flags;
+        _commandEndOffset = other._commandEndOffset;
+        _promptEndOffset = other._promptEndOffset;
+        _revision = other._revision;
+        _dirty = true;
+        return *this;
+    }
+
+    Line& operator=(Line&& other) noexcept
+    {
+        if (this == &other)
+            return *this;
+        _storage = std::move(other._storage);
+        _columns = other._columns;
+        _flags = other._flags;
+        _commandEndOffset = other._commandEndOffset;
+        _promptEndOffset = other._promptEndOffset;
+        _revision = other._revision;
+        _dirty = true;
+        return *this;
+    }
+
+    // --- Change tracking (the daemon's per-line delta source) -------------------------------
+    //
+    // A one-byte dirty bit set by every mutating entry point below, and a revision stamped
+    // lazily in batches by Grid::finalizeRevisions() from the grid's single monotonic
+    // sequence counter. Deliberately NOT a LineFlag: flags flow into rendering and test
+    // equality, and a transport-layer bookkeeping bit must not.
+
+    /// The batch sequence number of the last change (0 = never stamped).
+    [[nodiscard]] uint64_t revision() const noexcept { return _revision; }
+
+    /// Marks the line as changed; the next finalize pass stamps it.
+    void markDirty() noexcept { _dirty = true; }
+
+    /// @return True while a change awaits its revision stamp.
+    [[nodiscard]] bool isDirty() const noexcept { return _dirty; }
+
+    /// Stamps the line with @p seqno iff it is dirty, clearing the dirty bit.
+    /// @return True if the line was dirty (and got stamped).
+    bool stampRevision(uint64_t seqno) noexcept
+    {
+        if (!_dirty)
+            return false;
+        _revision = seqno;
+        _dirty = false;
+        return true;
+    }
+
+    // ----------------------------------------------------------------------------------------
+
+    /// Reset the line to the blank state with the given fill attributes.
+    /// O(1): clears the SoA arrays without re-allocating per-column storage.
+    /// Skips the six vector swaps when the line is already blank with matching fillAttrs.
+    void reset(LineFlags flags, GraphicsAttributes attributes) noexcept
+    {
+        _dirty = true;
+        _flags = flags;
+        _commandEndOffset = {};
+        _promptEndOffset = {};
+        if (isBlankWithFillAttrs(attributes))
+            return;
+        initializeBlankLineSoA(_storage, attributes);
+    }
+
+    void reset(LineFlags flags, GraphicsAttributes attributes, ColumnCount count) noexcept
+    {
+        _dirty = true;
+        _flags = flags;
+        _commandEndOffset = {};
+        _promptEndOffset = {};
+        _columns = count;
+        if (isBlankWithFillAttrs(attributes))
+            return;
+        initializeBlankLineSoA(_storage, attributes);
+    }
+
+    /// Fill all cells with the given codepoint and attributes.
+    void fill(LineFlags flags,
+              GraphicsAttributes const& attributes,
+              char32_t codepoint,
+              uint8_t width) noexcept
+    {
+        _dirty = true;
+        _flags = flags;
+        _commandEndOffset = {};
+        _promptEndOffset = {};
+        if (codepoint == 0)
+        {
+            initializeBlankLineSoA(_storage, attributes);
+        }
+        else
+        {
+            materialize();
+            for (size_t i = 0; i < unbox<size_t>(_columns); ++i)
+                writeCellToSoA(_storage, i, codepoint, width, attributes);
+        }
+    }
+
+    /// Fill from a column offset with ASCII text.
+    void fill(ColumnOffset start, GraphicsAttributes const& sgr, std::string_view ascii)
+    {
+        assert(unbox<size_t>(start) + ascii.size() <= unbox<size_t>(_columns));
+        _dirty = true;
+        materialize();
+        auto constexpr AsciiWidth = 1;
+        auto col = unbox<size_t>(start);
+        for (char const ch: ascii)
+            writeCellToSoA(_storage, col++, static_cast<char32_t>(ch), AsciiWidth, sgr);
+        // Reset remaining cells on the line after the written text
+        auto const remaining = unbox<size_t>(_columns) - col;
+        if (remaining > 0)
+            clearRange(_storage, col, remaining, GraphicsAttributes {});
+    }
+
+    /// Tests if the line is in the blank (un-materialized) state.
+    /// Blank lines have all SoA arrays empty but a non-zero logical column count.
+    [[nodiscard]] bool isBlank() const noexcept
+    {
+        return isBlankLineSoA(_storage) && unbox<size_t>(_columns) > 0;
+    }
+
+    /// Tests if the line is blank AND its cached fill attributes match @p attrs.
+    /// This is the invariant used to short-circuit partial-line clear and copy operations:
+    /// a blank line with matching fillAttrs is already in the target state, so mutating
+    /// would only trigger materialization without any observable effect.
+    [[nodiscard]] bool isBlankWithFillAttrs(GraphicsAttributes const& attrs) const noexcept
+    {
+        return isBlank() && _storage.fillAttrs == attrs;
+    }
+
+    /// Tests if all cells are empty.
+    [[nodiscard]] bool empty() const noexcept
+    {
+        if (isBlank())
+            return true;
+        return trimBlankRight(_storage, unbox<size_t>(_columns)) == 0;
+    }
+
+    [[nodiscard]] ColumnCount size() const noexcept { return _columns; }
+
+    void resize(ColumnCount count)
+    {
+        _dirty = true;
+        if (isBlank())
+        {
+            _columns = count;
+            return;
+        }
+        _columns = count;
+        resizeLineSoA(_storage, count);
+    }
+
+    /// Materialize the SoA arrays in-place if the line is blank.
+    /// After materialize() returns, all six SoA arrays are sized to @c _columns and
+    /// initialized to default values + the cached @c fillAttrs.
+    void materialize() noexcept
+    {
+        if (isBlank())
+            initializeLineSoA(_storage, _columns, _storage.fillAttrs);
+    }
+
+    /// Force materialization and return a mutable reference to the underlying SoA storage.
+    /// Use this in place of @c storage() at every call site that writes through SoA arrays.
+    /// Dirties pessimistically: this is the bulk-ASCII funnel (ONE store per writeText call).
+    [[nodiscard]] LineSoA& materializedStorage() noexcept
+    {
+        _dirty = true;
+        materialize();
+        return _storage;
+    }
+
+    [[nodiscard]] CellProxy useCellAt(ColumnOffset column) noexcept
+    {
+        Require(ColumnOffset(0) <= column);
+        Require(column <= ColumnOffset::cast_from(size())); // Allow off-by-one for sentinel.
+        // Dirtying is deferred to the CellProxy write methods: a read-only proxy
+        // (cast from non-const Line, or a const-qualified comparison path) no longer
+        // dirties the line spuriously.
+        materialize();
+        return { _storage, unbox<size_t>(column), &_dirty };
+    }
+
+    [[nodiscard]] uint8_t cellEmptyAt(ColumnOffset column) const noexcept
+    {
+        Require(ColumnOffset(0) <= column);
+        Require(column < ColumnOffset::cast_from(size()));
+        if (isBlank())
+            return true;
+        auto const col = unbox<size_t>(column);
+        return _storage.codepoints[col] == 0 || _storage.codepoints[col] == 0x20;
+    }
+
+    [[nodiscard]] uint8_t cellWidthAt(ColumnOffset column) const noexcept
+    {
+        if (isBlank())
+            return 1;
+        return _storage.widths[unbox<size_t>(column)];
+    }
+
+    [[nodiscard]] LineFlags flags() const noexcept { return _flags; }
+    [[nodiscard]] LineFlags& flags() noexcept
+    {
+        // Pessimistic: DECDWL/DECDHL and friends mutate through this reference.
+        _dirty = true;
+        return _flags;
+    }
+
+    [[nodiscard]] bool marked() const noexcept { return isFlagEnabled(LineFlag::Marked); }
+    void setMarked(bool enable) { setFlag(LineFlag::Marked, enable); }
+
+    [[nodiscard]] bool wrapped() const noexcept { return isFlagEnabled(LineFlag::Wrapped); }
+    void setWrapped(bool enable) { setFlag(LineFlag::Wrapped, enable); }
+
+    [[nodiscard]] bool wrappable() const noexcept { return isFlagEnabled(LineFlag::Wrappable); }
+    void setWrappable(bool enable) { setFlag(LineFlag::Wrappable, enable); }
+
+    [[nodiscard]] LineFlags wrappableFlag() const noexcept
+    {
+        return wrappable() ? LineFlag::Wrappable : LineFlag::None;
+    }
+    [[nodiscard]] LineFlags wrappedFlag() const noexcept
+    {
+        return wrapped() ? LineFlag::Wrapped : LineFlag::None;
+    }
+    [[nodiscard]] LineFlags markedFlag() const noexcept
+    {
+        return marked() ? LineFlag::Marked : LineFlag::None;
+    }
+
+    /// The flags a continuation line inherits from the logical line it belongs to.
+    ///
+    /// Only the ones that describe a PHYSICAL line. The semantic marks (HeadOnlyLineFlags) deliberately
+    /// stay behind on the head: they say where a prompt or a command's output begins, and a wrap does not
+    /// begin a second one.
+    [[nodiscard]] LineFlags inheritableFlags() const noexcept
+    {
+        auto constexpr Inheritables = LineFlags { LineFlag::Wrappable };
+        return _flags & Inheritables;
+    }
+
+    /// How many columns of this LOGICAL line a finished command printed, when the shell closed that
+    /// command part-way into the line. Meaningful only on a head carrying LineFlag::CommandEnd.
+    ///
+    /// A shell's precmd emits OSC 133;D at the cursor, and the cursor is still sitting at the end of the
+    /// command's output whenever that output did not end in a newline — so the prompt printed next lands
+    /// on the very same line. One line, two owners; this offset is the border between them. Zero (the
+    /// common case) means the output did end in a newline and the whole line belongs to the prompt.
+    ///
+    /// Counted from the start of the LOGICAL line, not of the physical one it happens to fall in. That is
+    /// what makes it survive a resize: reflow re-chops a logical line into different physical pieces, but
+    /// it never changes the line's content, so the border does not move.
+    [[nodiscard]] ColumnOffset commandEndOffset() const noexcept { return _commandEndOffset; }
+    void setCommandEndOffset(ColumnOffset offset) noexcept
+    {
+        _dirty = true;
+        _commandEndOffset = offset;
+    }
+
+    /// Where on this LOGICAL line the shell's prompt stopped printing and the user's input begins — the
+    /// column OSC 133;B was emitted at. Meaningful only on a head carrying LineFlag::PromptEnd.
+    ///
+    /// The mirror image of commandEndOffset(): that one says where the PREVIOUS command's output stopped
+    /// on this line, this one says where the prompt did. Together they cut a line that a shell shares
+    /// between three owners — trailing output, prompt, typed command — into its parts.
+    ///
+    /// Counted from the start of the LOGICAL line for the same reason commandEndOffset() is: reflow
+    /// re-chops a logical line into different physical pieces but never changes its content, so a
+    /// logical column does not move when the window is resized.
+    [[nodiscard]] ColumnOffset promptEndOffset() const noexcept { return _promptEndOffset; }
+    void setPromptEndOffset(ColumnOffset offset) noexcept
+    {
+        _dirty = true;
+        _promptEndOffset = offset;
+    }
+
+    void setFlag(LineFlags flags, bool enable) noexcept
+    {
+        _dirty = true;
+        if (enable)
+            _flags.enable(flags);
+        else
+            _flags.disable(flags);
+    }
+
+    [[nodiscard]] bool isFlagEnabled(LineFlags flags) const noexcept { return (_flags & flags).any(); }
+
+    [[nodiscard]] LineSoA reflow(ColumnCount newColumnCount);
+    [[nodiscard]] std::string toUtf8() const;
+
+    /// The text of the columns [@p begin, @p end) of this line, blank cells rendered as spaces.
+    /// @param begin First column to render; clamped to the line.
+    /// @param end One past the last column to render; clamped to the line.
+    /// @param continuation Whether a wide character's continuation cell(s) collapse away or emit a
+    ///                     padding space; see @ref ContinuationCell.
+    [[nodiscard]] std::string toUtf8(ColumnOffset begin,
+                                     ColumnOffset end,
+                                     ContinuationCell continuation = ContinuationCell::Collapse) const;
+
+    /// The full text of this line with exactly one codepoint per grid column: a wide character's
+    /// continuation cell becomes a space, so a codepoint index into the result equals a column
+    /// offset. Used by the hint scanner, which maps regex match positions back to grid columns.
+    [[nodiscard]] std::string toUtf8ColumnAligned() const;
+
+    [[nodiscard]] std::string toUtf8Trimmed() const;
+    [[nodiscard]] std::string toUtf8Trimmed(bool stripLeadingSpaces, bool stripTrailingSpaces) const;
+
+    /// The text of columns [@p begin, @p end) with per-cell SGR escape sequences interleaved so each
+    /// cell's rendition (colours + style flags) is preserved — the shape `capture-pane -e` wants. An
+    /// SGR sequence is emitted only where the rendition CHANGES (reset-first, so nothing leaks), and a
+    /// trailing reset closes any rendition still open at the end. A blank line renders as spaces wearing
+    /// its FILL rendition — which is the cursor's pen at erase time, not necessarily the default one.
+    /// @param begin First column to render; clamped to the line.
+    /// @param end One past the last column to render; clamped to the line.
+    /// @return The columns as UTF-8 with interleaved SGR.
+    [[nodiscard]] std::string toUtf8WithSgr(ColumnOffset begin, ColumnOffset end) const;
+
+    /// How many leading columns survive a trailing-space trim — tmux's `grid_line_length`, which
+    /// `capture-pane` applies to every row unless the caller asked for `-J`/`-N`.
+    ///
+    /// A trailing column is dropped only when it is the DEFAULT cell: no text or a plain space,
+    /// wearing the default rendition, carrying neither a hyperlink nor an image fragment. A space on
+    /// a coloured pen therefore survives — it is something the application drew, and dropping it
+    /// would silently erase the colour of every cleared region from a `capture-pane -e`.
+    /// @return The column count to render; 0 for a row that is default cells throughout.
+    [[nodiscard]] ColumnCount trimmedColumns() const noexcept;
+
+    /// Check if all cells share the same graphics attributes (uniform SGR).
+    /// O(1) — reads a cached flag maintained by writeCellToSoA/resetLine. Blank lines
+    /// are trivial by definition (uniformly filled with @c fillAttrs).
+    [[nodiscard]] bool isTrivialBuffer() const noexcept { return isBlank() || _storage.trivial; }
+
+    /// Build a TrivialLineBuffer for the render fast path.
+    /// Only valid when isTrivialBuffer() returns true.
+    ///
+    /// @c textOut carries exactly ONE codepoint per column, which is what makes this cheap and what
+    /// bounds when it may be used: a cell holding a grapheme cluster cannot be represented here,
+    /// because the flat text has no cell boundaries for the renderer to recover the extra codepoints
+    /// from. Such a line therefore never reaches this function -- appending a continuation codepoint
+    /// clears the trivial flag (@see appendCodepointToCluster), as writing a wide cell's
+    /// continuation and an image fragment already do. Without that, everything after each cluster's
+    /// base codepoint is silently dropped from the rendered text.
+    ///
+    /// One codepoint per column is NOT the same as one COLUMN per cell, and the difference is
+    /// reachable: a wide character leaves the batched path only through the continuation cell it
+    /// writes, and @c Screen::clearAndAdvance skips that fill when a single column is left, so a
+    /// full-width character on the last writable column stays here as a two-column cell. Consumers
+    /// must therefore measure each codepoint rather than assume it is one column wide.
+    ///
+    /// @param textOut receives the codepoints directly from SoA (no UTF-8 encoding).
+    [[nodiscard]] TrivialLineBuffer trivialBuffer(std::u32string& textOut) const
+    {
+        if (isBlank())
+        {
+            textOut.clear();
+            return TrivialLineBuffer {
+                .displayWidth = _columns,
+                .textAttributes = _storage.fillAttrs,
+                .fillAttributes = _storage.fillAttrs,
+                .hyperlink = HyperlinkId {},
+                .usedColumns = ColumnCount(0),
+            };
+        }
+
+        auto const cols = unbox<size_t>(_columns);
+        auto const used = trimBlankRight(_storage, cols);
+
+        auto const textAttrs = (cols > 0) ? _storage.sgr[0] : GraphicsAttributes {};
+
+        // Direct copy from SoA codepoints — no UTF-8 encoding needed.
+        textOut.resize(used);
+        for (size_t i = 0; i < used; ++i)
+            textOut[i] = (_storage.clusterSize[i] == 0) ? U' ' : _storage.codepoints[i];
+
+        auto tb = TrivialLineBuffer {
+            .displayWidth = _columns,
+            .textAttributes = textAttrs,
+            .fillAttributes = textAttrs,
+            .hyperlink = (cols > 0) ? _storage.hyperlinks[0] : HyperlinkId {},
+            .usedColumns = ColumnCount::cast_from(used),
+        };
+        // text field left empty — caller passes textOut to the renderer directly
+        return tb;
+    }
+
+    /// Access the underlying SoA storage. The mutable overload dirties
+    /// pessimistically — callers reach it to write.
+    [[nodiscard]] LineSoA& storage() noexcept
+    {
+        _dirty = true;
+        return _storage;
+    }
+    [[nodiscard]] LineSoA const& storage() const noexcept { return _storage; }
+
+    // Tests if the given text can be matched in this line at the exact given start column, in sensitive
+    // or insensitive mode.
+    [[nodiscard]] bool matchTextAtWithSensitivityMode(std::u32string_view text,
+                                                      ColumnOffset startColumn,
+                                                      bool isCaseSensitive) const noexcept
+    {
+        auto const cols = unbox<size_t>(size());
+        auto const baseColumn = unbox<size_t>(startColumn);
+        if (text.size() > cols - baseColumn)
+            return false;
+
+        // A blank line has no codepoints to match against; only an empty needle matches.
+        if (isBlank())
+            return text.empty();
+
+        size_t i = 0;
+        while (i < text.size())
+        {
+            auto const col = baseColumn + i;
+            auto const proxy = ConstCellProxy(_storage, col);
+            if (!CellUtil::beginsWith(text.substr(i), proxy, isCaseSensitive))
+                return false;
+            ++i;
+        }
+        return i == text.size();
+    }
+
+    // Search a line from left to right
+    [[nodiscard]] std::optional<SearchResult> search(std::u32string_view text,
+                                                     ColumnOffset startColumn,
+                                                     bool isCaseSensitive) const noexcept
+    {
+        auto const cols = unbox<size_t>(size());
+        if (cols < text.size())
+            return std::nullopt;
+
+        auto matchTextAt = [&](auto text, auto baseColumn) {
+            return matchTextAtWithSensitivityMode(text, baseColumn, isCaseSensitive);
+        };
+
+        auto baseColumn = startColumn;
+        auto rightMostSearchPosition = ColumnOffset::cast_from(cols);
+        while (baseColumn < rightMostSearchPosition)
+        {
+            if (cols - unbox<size_t>(baseColumn) < text.size())
+            {
+                auto partialText = text;
+                partialText.remove_suffix(text.size() - (unbox<size_t>(size()) - unbox<size_t>(baseColumn)));
+                if (matchTextAt(partialText, baseColumn))
+                    return SearchResult { .column = startColumn, .partialMatchLength = partialText.size() };
+            }
+            else if (matchTextAt(text, baseColumn))
+                return SearchResult { .column = baseColumn };
+            baseColumn++;
+        }
+
+        return std::nullopt;
+    }
+
+    // Search a line from right to left
+    [[nodiscard]] std::optional<SearchResult> searchReverse(std::u32string_view text,
+                                                            ColumnOffset startColumn,
+                                                            bool isCaseSensitive) const noexcept
+    {
+        auto const cols = unbox<size_t>(size());
+        if (cols < text.size())
+            return std::nullopt;
+
+        auto matchTextAt = [&](auto text, auto baseColumn) {
+            return matchTextAtWithSensitivityMode(text, baseColumn, isCaseSensitive);
+        };
+
+        auto baseColumn = std::min(startColumn, ColumnOffset::cast_from(cols - text.size()));
+        while (baseColumn >= ColumnOffset(0))
+        {
+            if (matchTextAt(text, baseColumn))
+                return SearchResult { .column = baseColumn };
+            baseColumn--;
+        }
+        baseColumn = ColumnOffset::cast_from(text.size() - 1);
+        auto remainingText = text;
+        while (!remainingText.empty())
+        {
+            if (matchTextAt(remainingText, ColumnOffset(0)))
+                return SearchResult { .column = startColumn, .partialMatchLength = remainingText.size() };
+            baseColumn--;
+            remainingText.remove_prefix(1);
+        }
+        return std::nullopt;
+    }
+
+  private:
+    LineSoA _storage;
+    ColumnCount _columns {};
+    LineFlags _flags {};
+    ColumnOffset _commandEndOffset {};
+    ColumnOffset _promptEndOffset {};
+    uint64_t _revision = 0; ///< Batch seqno of the last change (see revision()).
+                            ///< Compared against Grid::_seqno via operator> in
+                            ///< forEachLineChangedSince. Both are uint64_t — at
+                            ///< one batch per ~20ms a wrap takes ~11.7 billion
+                            ///< years, so wrap is not handled in the comparison.
+    bool _dirty = true;     ///< Fresh lines are pending: bootstrap self-heals.
+};
+
+} // namespace vtbackend
+
+// LineFlags formatter is in LineFlags.h

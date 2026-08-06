@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/ViCommands.h>
+#include <vtbackend/ViCommands.hpp>
 
-#include <vtbackend/Terminal.h>
-#include <vtbackend/ViInputHandler.h>
-#include <vtbackend/logging.h>
-#include <vtbackend/primitives.h>
+#include <vtbackend/Logging.hpp>
+#include <vtbackend/Primitives.hpp>
+#include <vtbackend/Terminal.hpp>
+#include <vtbackend/ViInputHandler.hpp>
 
 #include <libunicode/ucd.h>
 
@@ -231,7 +231,7 @@ void ViCommands::updateSearchTerm(std::u32string const& text)
 
 void ViCommands::modeChanged(ViMode mode)
 {
-    auto _ = crispy::finally { [this, mode]() { _lastMode = mode; } };
+    auto _ = crispy::Finally { [this, mode]() { _lastMode = mode; } };
 
     inputLog()("mode changed to {}\n", mode);
 

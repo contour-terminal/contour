@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/regis/ReGISParser.h>
+#include <vtbackend/regis/ReGISParser.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -10,7 +10,7 @@
 
 using namespace vtbackend;
 using namespace vtbackend::regis;
-using crispy::point;
+using crispy::Point;
 
 namespace
 {
@@ -52,23 +52,23 @@ TEST_CASE("ReGISParser.position.absolute", "[regis][parser]")
 {
     auto fx = Fixture { 100, 100 };
     CHECK_FALSE(fx.run("P[30,40]")); // P moves; it draws nothing
-    CHECK(fx.context.position == point { .x = 30, .y = 40 });
+    CHECK(fx.context.position == Point { .x = 30, .y = 40 });
 }
 
 TEST_CASE("ReGISParser.position.relative", "[regis][parser]")
 {
     auto fx = Fixture { 100, 100 };
     fx.run("P[30,40]P[+5,-10]");
-    CHECK(fx.context.position == point { .x = 35, .y = 30 });
+    CHECK(fx.context.position == Point { .x = 35, .y = 30 });
 }
 
 TEST_CASE("ReGISParser.position.partialAxis", "[regis][parser]")
 {
     auto fx = Fixture { 100, 100 };
     fx.run("P[30,40]P[50]"); // x only; y unchanged
-    CHECK(fx.context.position == point { .x = 50, .y = 40 });
+    CHECK(fx.context.position == Point { .x = 50, .y = 40 });
     fx.run("P[,70]"); // y only; x unchanged
-    CHECK(fx.context.position == point { .x = 50, .y = 70 });
+    CHECK(fx.context.position == Point { .x = 50, .y = 70 });
 }
 
 TEST_CASE("ReGISParser.vector.line", "[regis][parser]")
@@ -77,7 +77,7 @@ TEST_CASE("ReGISParser.vector.line", "[regis][parser]")
     CHECK(fx.run("P[2,3]V[10,3]"));
     for (auto x = 2; x <= 10; ++x)
         CHECK(fx.painted(x, 3));
-    CHECK(fx.context.position == point { .x = 10, .y = 3 });
+    CHECK(fx.context.position == Point { .x = 10, .y = 3 });
 }
 
 TEST_CASE("ReGISParser.vector.dot", "[regis][parser]")
@@ -95,7 +95,7 @@ TEST_CASE("ReGISParser.vector.pixelVector", "[regis][parser]")
     CHECK(fx.run("P[2,2]V000"));
     for (auto x = 2; x <= 5; ++x)
         CHECK(fx.painted(x, 2));
-    CHECK(fx.context.position == point { .x = 5, .y = 2 });
+    CHECK(fx.context.position == Point { .x = 5, .y = 2 });
 }
 
 TEST_CASE("ReGISParser.write.pixelVectorMultiplier", "[regis][parser]")
@@ -103,7 +103,7 @@ TEST_CASE("ReGISParser.write.pixelVectorMultiplier", "[regis][parser]")
     auto fx = Fixture { 40, 8 };
     // W(M5) makes each pixel-vector step 5 pixels.
     fx.run("W(M5)P[2,2]V0");
-    CHECK(fx.context.position == point { .x = 7, .y = 2 });
+    CHECK(fx.context.position == Point { .x = 7, .y = 2 });
 }
 
 TEST_CASE("ReGISParser.write.foregroundRegister", "[regis][parser]")
@@ -259,14 +259,14 @@ TEST_CASE("ReGISParser.reset.preservesDisplayProperties", "[regis][parser]")
     context.supersample = 3;
     context.canvasSize = ImageSize { Width(2400), Height(1440) };
     context.foregroundRegister = 2;                // a piece of ReGIS state that must be reset
-    context.position = point { .x = 50, .y = 60 }; // ditto
+    context.position = Point { .x = 50, .y = 60 }; // ditto
 
     context.reset();
 
     CHECK(context.supersample == 3);
     CHECK(context.canvasSize == ImageSize { Width(2400), Height(1440) });
     CHECK(context.foregroundRegister == 7);              // default restored
-    CHECK(context.position == point { .x = 0, .y = 0 }); // default restored
+    CHECK(context.position == Point { .x = 0, .y = 0 }); // default restored
 }
 
 TEST_CASE("ReGISParser.text.multiplierNeverCollapsesCell", "[regis][parser]")
@@ -294,12 +294,12 @@ TEST_CASE("ReGISParser.text.negativeCellSizeIsClamped", "[regis][parser]")
 TEST_CASE("ReGISParser.position.nestedStackIsLIFO", "[regis][parser]")
 {
     auto fx = Fixture { 100, 100 };
-    // Position stacks are LIFO: the inner (E) restores the inner-most saved point, the outer (E) the
+    // Position stacks are LIFO: the inner (E) restores the inner-most saved Point, the outer (E) the
     // outer one -- not front()+clear(), which would jump to the outermost and discard both frames.
     fx.run("P[10,10]P(S)P[40,40]P(S)P[70,70]P(E)");
-    CHECK(fx.context.position == point { .x = 40, .y = 40 }); // inner (E) -> inner-most save
+    CHECK(fx.context.position == Point { .x = 40, .y = 40 }); // inner (E) -> inner-most save
     fx.run("P(E)");
-    CHECK(fx.context.position == point { .x = 10, .y = 10 }); // outer (E) -> outer save
+    CHECK(fx.context.position == Point { .x = 10, .y = 10 }); // outer (E) -> outer save
 }
 
 TEST_CASE("ReGISParser.curve.pixelVectorControlPoints", "[regis][parser]")
@@ -339,7 +339,7 @@ TEST_CASE("ReGISParser.deeplyNestedOptionsDoNotOverflow", "[regis][parser]")
 TEST_CASE("ReGISParser.hugeCoordinateDoesNotHang", "[regis][parser]")
 {
     auto fx = Fixture { 40, 40 };
-    // A vector to a far-off-canvas point must be bounded (plotLine is capped and coordinates clamped),
+    // A vector to a far-off-canvas Point must be bounded (plotLine is capped and coordinates clamped),
     // so this returns promptly rather than spinning ~10^8 iterations.
     CHECK(fx.run("P[0,0]V[80000000,0]"));
 }
@@ -349,8 +349,8 @@ TEST_CASE("ReGISParser.curve.circleThroughPoint", "[regis][parser]")
     auto fx = Fixture { 40, 40 };
     // Centre at (20,20); C[30,20] draws a circle of radius 10 through (30,20).
     CHECK(fx.run("P[20,20]C[30,20]"));
-    CHECK(fx.painted(30, 20));       // rightmost point
-    CHECK(fx.painted(10, 20));       // leftmost point
+    CHECK(fx.painted(30, 20));       // rightmost Point
+    CHECK(fx.painted(10, 20));       // leftmost Point
     CHECK(fx.painted(20, 30));       // bottom
     CHECK_FALSE(fx.painted(20, 20)); // centre is empty
 }
@@ -367,7 +367,7 @@ TEST_CASE("ReGISParser.curve.circleCentered", "[regis][parser]")
 TEST_CASE("ReGISParser.curve.interpolated", "[regis][parser]")
 {
     auto fx = Fixture { 40, 40 };
-    // An open interpolated curve through three points passes through each control point.
+    // An open interpolated curve through three points passes through each control Point.
     CHECK(fx.run("P[2,20]C(S)[20,4][38,20](E)"));
     CHECK(fx.painted(2, 20));
     CHECK(fx.painted(20, 4));
@@ -448,8 +448,8 @@ TEST_CASE("ReGISParser.macrograph.recursionGuard", "[regis][parser]")
     // A self-referential macro must not hang: the depth cap bounds expansion.
     auto fx = Fixture { 20, 8 };
     fx.run("@:AP[1,1]@A@;@A"); // A invokes itself
-    // Reaching here without hanging is the assertion; the cursor moved to the defined point.
-    CHECK(fx.context.position == point { .x = 1, .y = 1 });
+    // Reaching here without hanging is the assertion; the cursor moved to the defined Point.
+    CHECK(fx.context.position == Point { .x = 1, .y = 1 });
 }
 
 TEST_CASE("ReGISParser.persistence.acrossCalls", "[regis][parser]")
@@ -459,5 +459,5 @@ TEST_CASE("ReGISParser.persistence.acrossCalls", "[regis][parser]")
     fx.run("P[5,3]");
     fx.run("V[10,3]");
     CHECK(fx.painted(7, 3));
-    CHECK(fx.context.position == point { .x = 10, .y = 3 });
+    CHECK(fx.context.position == Point { .x = 10, .y = 3 });
 }

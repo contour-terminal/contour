@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/CellProxy.h>
-#include <vtbackend/LineSoA.h>
-#include <vtbackend/SoAClusterWriter.h>
+#include <vtbackend/CellProxy.hpp>
+#include <vtbackend/LineSoA.hpp>
+#include <vtbackend/SoAClusterWriter.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

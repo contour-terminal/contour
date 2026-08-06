@@ -1,43 +1,43 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/ContourGuiApp.h>
-#include <contour/Logging.h>
-#include <contour/config/Config.h>
-#include <contour/display/ContentScale.h>
-#include <contour/display/Logging.h>
-#include <contour/display/RenderingBackendSelection.h>
-#include <contour/display/ShaderConfig.h> // createSurfaceFormat
-#include <contour/display/TerminalAccessible.h>
-#include <contour/display/TerminalDisplay.h>
-#include <contour/platform/GuiTheme.h>
-#include <contour/platform/QtExternalLauncher.h>
-#include <contour/platform/QtPath.h>
-#include <contour/remote/NativeController.h>
-#include <contour/remote/RemoteLayout.h>
-#include <contour/remote/RoutingSessionFactory.h>
-#include <contour/remote/TmuxController.h>
-#include <contour/session/PaneProxy.h>
-#include <contour/session/SessionFactory.h>
-#include <contour/window/CommandPaletteModel.h>
-#include <contour/window/SettingsController.h>
-#include <contour/window/WindowController.h>
+#include <contour/ContourGuiApp.hpp>
+#include <contour/Logging.hpp>
+#include <contour/config/Config.hpp>
+#include <contour/display/ContentScale.hpp>
+#include <contour/display/Logging.hpp>
+#include <contour/display/RenderingBackendSelection.hpp>
+#include <contour/display/ShaderConfig.hpp> // createSurfaceFormat
+#include <contour/display/TerminalAccessible.hpp>
+#include <contour/display/TerminalDisplay.hpp>
+#include <contour/platform/GuiTheme.hpp>
+#include <contour/platform/QtExternalLauncher.hpp>
+#include <contour/platform/QtPath.hpp>
+#include <contour/remote/NativeController.hpp>
+#include <contour/remote/RemoteLayout.hpp>
+#include <contour/remote/RoutingSessionFactory.hpp>
+#include <contour/remote/TmuxController.hpp>
+#include <contour/session/PaneProxy.hpp>
+#include <contour/session/SessionFactory.hpp>
+#include <contour/window/CommandPaletteModel.hpp>
+#include <contour/window/SettingsController.hpp>
+#include <contour/window/WindowController.hpp>
 
-#include <vtpty/Process.h>
+#include <vtpty/Process.hpp>
 
-#include <text_shaper/font_locator.h>
+#include <text_shaper/FontLocator.hpp>
 
-#include <crispy/CLI.h>
-#include <crispy/ScopedTimer.h>
-#include <crispy/logsink.h>
-#include <crispy/logstore.h>
-#include <crispy/utils.h>
+#include <crispy/CLI.hpp>
+#include <crispy/LogSink.hpp>
+#include <crispy/LogStore.hpp>
+#include <crispy/ScopedTimer.hpp>
+#include <crispy/Utils.hpp>
 
 #include <QtCore/QEventLoop>
 #include <QtCore/QProcess>
 #include <QtQml/qqmlextensionplugin.h>
 
-#include <vthost/Daemon.h>
-#include <vthost/SocketPath.h>
-#include <vthost/Token.h>
+#include <vthost/Daemon.hpp>
+#include <vthost/SocketPath.hpp>
+#include <vthost/Token.hpp>
 #if !defined(__APPLE__) && !defined(_WIN32)
     #include <QtDBus/QDBusConnection>
 #endif
@@ -111,7 +111,7 @@ bool hasStrandedQmlOverrides(fs::path const& configHome)
     return false;
 }
 
-ContourGuiApp::ContourGuiApp(crispy::environment const& env,
+ContourGuiApp::ContourGuiApp(crispy::Environment const& env,
                              std::unique_ptr<session::SessionFactory> sessionFactory,
                              std::unique_ptr<platform::ExternalLauncher> externalLauncher,
                              std::unique_ptr<config::LayoutStore> layoutStore,
@@ -382,74 +382,74 @@ int ContourGuiApp::run(int argc, char const* argv[])
     return cli::ContourApp::run(argc, argv);
 }
 
-crispy::cli::command ContourGuiApp::parameterDefinition() const
+crispy::cli::Command ContourGuiApp::parameterDefinition() const
 {
     auto command = cli::ContourApp::parameterDefinition();
 
     // NOLINTBEGIN
     command.children.insert(
         command.children.begin(),
-        CLI::command {
+        CLI::Command {
             "client",
             "(experimental) Connects to a terminal multiplexer daemon in a GUI window (auto-spawns "
             "the daemon if needed). Its options and wire protocol may still change between "
             "releases.",
-            CLI::option_list {
-                CLI::option { "socket",
-                              CLI::value { ""s },
+            CLI::OptionList {
+                CLI::Option { "socket",
+                              CLI::Value { ""s },
                               "Path of the daemon's control socket file. Defaults to "
                               "$XDG_RUNTIME_DIR/contour/LABEL (respecting $CONTOUR_MUX).",
                               "PATH" },
-                CLI::option { "label",
-                              CLI::value { "default"s },
+                CLI::Option { "label",
+                              CLI::Value { "default"s },
                               "Socket label distinguishing daemon instances.",
                               "NAME" },
-                CLI::option { "tmux",
-                              CLI::value { false },
+                CLI::Option { "tmux",
+                              CLI::Value { false },
                               "Attaches to a real tmux server (spawns `tmux -C attach-session`): "
                               "tmux windows become tabs, panes become splits." },
-                CLI::option {
-                    "tmux-socket", CLI::value { ""s }, "tmux server socket path (-S) for --tmux.", "PATH" },
-                CLI::option { "profile",
-                              CLI::value { ""s },
+                CLI::Option {
+                    "tmux-socket", CLI::Value { ""s }, "tmux server socket path (-S) for --tmux.", "PATH" },
+                CLI::Option { "profile",
+                              CLI::Value { ""s },
                               "Config profile the GUI renders remote sessions with.",
                               "NAME" },
-                CLI::option {
-                    "config", CLI::value { ""s }, "Path to configuration file the GUI loads.", "FILE" },
-                CLI::option { "connect-tcp",
-                              CLI::value { ""s },
+                CLI::Option {
+                    "config", CLI::Value { ""s }, "Path to configuration file the GUI loads.", "FILE" },
+                CLI::Option { "connect-tcp",
+                              CLI::Value { ""s },
                               "Connect to a TCP daemon at HOST:PORT (TLS-encrypted, "
                               "token-authenticated) instead of the local socket.",
                               "HOST:PORT" },
-                CLI::option { "token",
-                              CLI::value { ""s },
+                CLI::Option { "token",
+                              CLI::Value { ""s },
                               "Preshared token sent to a --connect-tcp daemon. Visible to other "
                               "local users via the process list; prefer --token-file.",
                               "TOKEN" },
-                CLI::option { "token-file",
-                              CLI::value { ""s },
+                CLI::Option { "token-file",
+                              CLI::Value { ""s },
                               "Reads the preshared token from FILE instead of the command line. "
                               "Trailing newlines are ignored.",
                               "FILE" },
-                CLI::option { "tls-ca",
-                              CLI::value { ""s },
+                CLI::Option { "tls-ca",
+                              CLI::Value { ""s },
                               "PEM trust anchor pinning the daemon's TLS certificate "
                               "for --connect-tcp. Omitted = TOFU (encrypt, don't verify; "
                               "the token authenticates).",
                               "FILE" },
-                CLI::option { "log",
-                              CLI::value { ""s },
+                CLI::Option { "log",
+                              CLI::Value { ""s },
                               "Enables logging for a comma (,) separated list of tags, or `all` "
                               "(see `contour list-debug-tags`). Also passed to an auto-spawned "
                               "daemon. Overrides $LOG.",
                               "TAGS" },
-                CLI::option { "log-file",
-                              CLI::value { ""s },
+                CLI::Option { "log-file",
+                              CLI::Value { ""s },
                               "Appends log output to FILE instead of standard error ('-' means "
                               "standard error). Also passed to an auto-spawned daemon.",
                               "FILE" },
-                CLI::option { "size-policy",
-                              CLI::value { "latest"s },
+                CLI::Option { "size-policy",
+                              CLI::Value { "latest"s },
                               "Which attached client's size the shared grid takes when several "
                               "clients of different sizes are attached: `latest`, `smallest` or "
                               "`largest` (see `contour daemon --help`). Applies only to an "
@@ -461,18 +461,18 @@ crispy::cli::command ContourGuiApp::parameterDefinition() const
 
     command.children.insert(
         command.children.begin(),
-        CLI::command {
+        CLI::Command {
             "font-locator",
             "Inspects font locator service.",
-            CLI::option_list {
-                CLI::option { "config",
-                              CLI::value { contour::config::defaultConfigFilePath() },
+            CLI::OptionList {
+                CLI::Option { "config",
+                              CLI::Value { contour::config::defaultConfigFilePath() },
                               "Path to configuration file to load at startup.",
                               "FILE" },
-                CLI::option {
-                    "profile", CLI::value { ""s }, "Terminal Profile to load (overriding config).", "NAME" },
-                CLI::option { "debug",
-                              CLI::value { ""s },
+                CLI::Option {
+                    "profile", CLI::Value { ""s }, "Terminal Profile to load (overriding config).", "NAME" },
+                CLI::Option { "debug",
+                              CLI::Value { ""s },
                               "Enables debug logging, using a comma (,) separated list of tags.",
                               "TAGS" },
             },
@@ -480,61 +480,61 @@ crispy::cli::command ContourGuiApp::parameterDefinition() const
 
     command.children.insert(
         command.children.begin(),
-        CLI::command {
+        CLI::Command {
             "terminal",
             "Spawns a new terminal application.",
-            CLI::option_list {
-                CLI::option { "config",
-                              CLI::value { contour::config::defaultConfigFilePath() },
+            CLI::OptionList {
+                CLI::Option { "config",
+                              CLI::Value { contour::config::defaultConfigFilePath() },
                               "Path to configuration file to load at startup.",
                               "FILE" },
-                CLI::option {
-                    "profile", CLI::value { ""s }, "Terminal Profile to load (overriding config).", "NAME" },
-                CLI::option { "debug",
-                              CLI::value { ""s },
+                CLI::Option {
+                    "profile", CLI::Value { ""s }, "Terminal Profile to load (overriding config).", "NAME" },
+                CLI::Option { "debug",
+                              CLI::Value { ""s },
                               "Enables debug logging, using a comma (,) separated list of tags.",
                               "TAGS" },
-                CLI::option { "live-config", CLI::value { false }, "Enables live config reloading." },
-                CLI::option {
+                CLI::Option { "live-config", CLI::Value { false }, "Enables live config reloading." },
+                CLI::Option {
                     "dump-state-at-exit",
-                    CLI::value { ""s },
+                    CLI::Value { ""s },
                     "Dumps internal state at exit into the given directory. This is for debugging contour.",
                     "PATH" },
-                CLI::option { "early-exit-threshold",
-                              CLI::value { -1 },
+                CLI::Option { "early-exit-threshold",
+                              CLI::Value { -1 },
                               "If the spawned process exits earlier than the given threshold seconds, an "
                               "error message will be printed and the window not closed immediately." },
-                CLI::option { "working-directory",
-                              CLI::value { ""s },
+                CLI::Option { "working-directory",
+                              CLI::Value { ""s },
                               "Sets initial working directory (overriding config).",
                               "DIRECTORY" },
-                CLI::option { "layout", CLI::value { ""s }, "Opens the named layout at startup.", "NAME" },
-                CLI::option {
+                CLI::Option { "layout", CLI::Value { ""s }, "Opens the named layout at startup.", "NAME" },
+                CLI::Option {
                     "class",
-                    CLI::value { ""s },
+                    CLI::Value { ""s },
                     "Sets the class part of the WM_CLASS property for the window (overriding config).",
                     "WM_CLASS" },
-                CLI::option {
-                    "platform", CLI::value { ""s }, "Sets the QPA platform.", "PLATFORM[:OPTIONS]" },
-                CLI::option { "session",
-                              CLI::value { ""s },
+                CLI::Option {
+                    "platform", CLI::Value { ""s }, "Sets the QPA platform.", "PLATFORM[:OPTIONS]" },
+                CLI::Option { "session",
+                              CLI::Value { ""s },
                               "Sets the sessioni ID used for resuming a prior session.",
                               "SESSION_ID" },
 #if defined(__linux__)
-                CLI::option {
-                    "display", CLI::value { ""s }, "Sets the X11 display to connect to.", "DISPLAY_ID" },
+                CLI::Option {
+                    "display", CLI::Value { ""s }, "Sets the X11 display to connect to.", "DISPLAY_ID" },
 #endif
-                CLI::option {
-                    CLI::option_name { 'e', "execute" },
-                    CLI::value { ""s },
+                CLI::Option {
+                    CLI::OptionName { 'e', "execute" },
+                    CLI::Value { ""s },
                     "DEPRECATED: Program to execute instead of running the shell as configured.",
                     "PROGRAM",
-                    CLI::presence::Optional,
-                    CLI::deprecated { "Only supported for compatibility with very old KDE desktops." } },
+                    CLI::Presence::Optional,
+                    CLI::Deprecated { "Only supported for compatibility with very old KDE desktops." } },
             },
-            CLI::command_list {},
-            CLI::command_select::Implicit,
-            CLI::verbatim { "PROGRAM ARGS...",
+            CLI::CommandList {},
+            CLI::CommandSelect::Implicit,
+            CLI::Verbatim { "PROGRAM ARGS...",
                             "Executes given program instead of the one provided in the configuration." } });
 
     // NOLINTEND
@@ -651,7 +651,7 @@ int ContourGuiApp::checkConfig()
                                    : contour::config::loadConfigFromFile(configPath.toStdString());
 
     contour::config::compareEntries(
-        _config, logstore::category("", "Console Logger", logstore::category::state::Enabled));
+        _config, logstore::Category("", "Console Logger", logstore::Category::State::Enabled));
 
     return EXIT_SUCCESS;
 }
@@ -772,14 +772,14 @@ int ContourGuiApp::fontConfigAction()
 
     vtrasterizer::FontDescriptions const& fonts =
         _config.profile(_config.defaultProfileName.value())->fonts.value();
-    text::font_description const& fontDescription = fonts.regular;
-    text::font_locator& fontLocator = createFontLocator(fonts.fontLocator);
-    text::font_source_list const fontSources = fontLocator.locate(fontDescription);
+    text::FontDescription const& fontDescription = fonts.regular;
+    text::FontLocator& fontLocator = createFontLocator(fonts.fontLocator);
+    text::FontSourceList const fontSources = fontLocator.locate(fontDescription);
 
     std::cout << std::format("Matching fonts using  : {}\n", fonts.fontLocator);
     std::cout << std::format("Font description      : {}\n", fontDescription);
     std::cout << std::format("Number of fonts found : {}\n", fontSources.size());
-    for (text::font_source const& fontSource: fontSources)
+    for (text::FontSource const& fontSource: fontSources)
         std::cout << std::format("  {}\n", fontSource);
 
     return EXIT_SUCCESS;
@@ -788,7 +788,7 @@ int ContourGuiApp::fontConfigAction()
 int ContourGuiApp::terminalGuiAction()
 {
     {
-        auto const timer = crispy::scoped_timer(startupLog, "loadConfig");
+        auto const timer = crispy::ScopedTimer(startupLog, "loadConfig");
         if (!loadConfig("terminal"))
             return EXIT_FAILURE;
     }
@@ -854,7 +854,7 @@ int ContourGuiApp::terminalGuiAction()
     auto const qtInitStart = std::chrono::steady_clock::now();
     QApplication const app(qtArgsCount, (char**) qtArgsPtr.data());
     setupQCoreApplication();
-    if (startupLog.is_enabled())
+    if (startupLog.isEnabled())
     {
         auto const elapsed = std::chrono::steady_clock::now() - qtInitStart;
         auto const ms =
@@ -981,7 +981,7 @@ int ContourGuiApp::terminalGuiAction()
         _config.uiStyle.value(), window::resolveChromeFont(_config, profileName()));
 
     {
-        auto const timer = crispy::scoped_timer(startupLog, "QML engine setup");
+        auto const timer = crispy::ScopedTimer(startupLog, "QML engine setup");
         _qmlEngine = make_unique<QQmlApplicationEngine>();
 
         // Keep the override seam resolveResource() gave the QML back when it shipped as loose qrc
@@ -1052,7 +1052,7 @@ int ContourGuiApp::terminalGuiAction()
 
     // Spawn initial window.
     {
-        auto const timer = crispy::scoped_timer(startupLog, "newWindow (QML load)");
+        auto const timer = crispy::ScopedTimer(startupLog, "newWindow (QML load)");
         newWindow();
     }
 

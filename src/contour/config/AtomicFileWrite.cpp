@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/config/AtomicFileWrite.h>
+#include <contour/config/AtomicFileWrite.hpp>
 
 #include <format>
 #include <fstream>

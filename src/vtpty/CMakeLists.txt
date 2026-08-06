@@ -25,14 +25,14 @@ set(vtpty_SOURCES
 )
 
 set(vtpty_HEADERS
-    ChannelPty.h
-    ImageSize.h
-    MockPty.h
-    MockViewPty.h
-    PageSize.h
-    Process.h
-    Pty.h
-    SpawnLadder.h
+    ChannelPty.hpp
+    ImageSize.hpp
+    MockPty.hpp
+    MockViewPty.hpp
+    PageSize.hpp
+    Process.hpp
+    Pty.hpp
+    SpawnLadder.hpp
 )
 
 set(_include_SshSession_module FALSE)
@@ -49,7 +49,7 @@ endif()
 if(_include_SshSession_module)
     add_compile_definitions(VTPTY_LIBSSH2)
     list(APPEND vtpty_SOURCES SshSession.cpp)
-    list(APPEND vtpty_HEADERS SshSession.h)
+    list(APPEND vtpty_HEADERS SshSession.hpp)
     message(STATUS "[vtpty] Builtin-SSH support enabled")
 else()
     message(STATUS "[vtpty] Builtin-SSH support disabled")
@@ -67,10 +67,10 @@ if(UNIX)
 
     list(APPEND vtpty_LIBRARIES util)
     list(APPEND vtpty_SOURCES UnixPty.cpp UnixUtils.cpp)
-    list(APPEND vtpty_SOURCES UnixPty.h UnixUtils.h)
+    list(APPEND vtpty_SOURCES UnixPty.hpp UnixUtils.hpp)
 else()
     list(APPEND vtpty_SOURCES ConPty.cpp)
-    list(APPEND vtpty_HEADERS ConPty.h)
+    list(APPEND vtpty_HEADERS ConPty.hpp)
     #TODO: list(APPEND vtpty_SOURCES WinPty.cpp)
 endif()
 

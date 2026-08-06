@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtpty/MockPty.h>
+#include <vtpty/MockPty.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -25,24 +25,24 @@
 #include <coro/Cancellation.hpp>
 #include <coro/WhenAll.hpp>
 #include <coro/WhenAny.hpp>
-#include <net/EventLoop.h>
-#include <net/ISocket.h>
-#include <net/PollEventSource.h>
-#include <net/Sockets.h>
-#include <net/Tls.h>
-#include <net/WriteQueue.h>
-#include <net/testing/CoroTestSupport.h>
-#include <net/testing/InMemoryTransport.h>
-#include <vthost/ConnectionAcceptor.h>
-#include <vthost/Daemon.h>
-#include <vthost/NativeSession.h>
-#include <vthost/PduPump.h>
-#include <vthost/SessionHost.h>
-#include <vthost/SessionSettings.h>
-#include <vthost/TappingPty.h>
-#include <vthost/client/NativeClient.h>
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/Tab.h>
+#include <net/EventLoop.hpp>
+#include <net/ISocket.hpp>
+#include <net/PollEventSource.hpp>
+#include <net/Sockets.hpp>
+#include <net/Tls.hpp>
+#include <net/WriteQueue.hpp>
+#include <net/testing/CoroTestSupport.hpp>
+#include <net/testing/InMemoryTransport.hpp>
+#include <vthost/ConnectionAcceptor.hpp>
+#include <vthost/Daemon.hpp>
+#include <vthost/NativeSession.hpp>
+#include <vthost/PduPump.hpp>
+#include <vthost/SessionHost.hpp>
+#include <vthost/SessionSettings.hpp>
+#include <vthost/TappingPty.hpp>
+#include <vthost/client/NativeClient.hpp>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/Tab.hpp>
 
 using coro::Task;
 using vthost::NativeSession;

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <net/PollEventSource.h>
+#include <net/PollEventSource.hpp>
 
 #ifdef _WIN32
-    #include <crispy/logstore.h>
+    #include <crispy/LogStore.hpp>
 
     #include <algorithm>
     #include <cstdint>
@@ -10,7 +10,7 @@
 
     #include <windows.h>
 
-    #include <net/WaitChunking.h>
+    #include <net/WaitChunking.hpp>
 #else
     #include <poll.h>
 #endif

@@ -6,9 +6,9 @@
 // press it next time. So these tests care about the two ways that promise can be broken — rendering a
 // chord the user cannot type, and attaching a chord to the wrong command.
 
-#include <contour/command/Command.h>
-#include <contour/command/Shortcut.h>
-#include <contour/config/Config.h>
+#include <contour/command/Command.hpp>
+#include <contour/command/Shortcut.hpp>
+#include <contour/config/Config.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

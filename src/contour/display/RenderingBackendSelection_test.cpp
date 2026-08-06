@@ -5,7 +5,7 @@
 // QQuickWindow. These assert the whole (platform x backend) matrix on any host — including the macOS
 // rule that rejects desktop OpenGL, whose RHI path maps a window but never composites it.
 
-#include <contour/display/RenderingBackendSelection.h>
+#include <contour/display/RenderingBackendSelection.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

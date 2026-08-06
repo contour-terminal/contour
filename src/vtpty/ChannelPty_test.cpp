@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtpty/ChannelPty.h>
+#include <vtpty/ChannelPty.hpp>
 
-#include <crispy/BufferObject.h>
+#include <crispy/BufferObject.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -28,7 +28,7 @@ PageSize testPageSize()
 
 std::string readAll(ChannelPty& pty, std::optional<std::chrono::milliseconds> timeout)
 {
-    auto pool = crispy::buffer_object_pool<char> { 4096 };
+    auto pool = crispy::BufferObjectPool<char> { 4096 };
     auto const storage = pool.allocateBufferObject();
     auto const result = pty.read(*storage, timeout, 4096);
     if (!result)
@@ -122,7 +122,7 @@ TEST_CASE("resize updates the page size and notifies the sink", "[vtpty][channel
 TEST_CASE("feed reclaims the consumed prefix instead of growing without bound", "[vtpty][channelpty]")
 {
     auto pty = ChannelPty { testPageSize() };
-    auto pool = crispy::buffer_object_pool<char> { 4096 };
+    auto pool = crispy::BufferObjectPool<char> { 4096 };
     auto const storage = pool.allocateBufferObject();
 
     constexpr std::size_t ChunkSize = 4096;
@@ -164,7 +164,7 @@ TEST_CASE("feed reclaims the consumed prefix instead of growing without bound", 
 TEST_CASE("feed preserves byte order across a compaction", "[vtpty][channelpty]")
 {
     auto pty = ChannelPty { testPageSize() };
-    auto pool = crispy::buffer_object_pool<char> { std::size_t { 1024 } * 1024 };
+    auto pool = crispy::BufferObjectPool<char> { std::size_t { 1024 } * 1024 };
     auto const storage = pool.allocateBufferObject();
 
     auto expected = std::string {};
