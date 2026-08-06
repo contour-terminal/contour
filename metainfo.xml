@@ -249,6 +249,7 @@
           <li>Fixes Contour aborting when an application's font request (OSC 50) was approved after the pane it came from had gone away, or after the window had briefly lost its drawing surface — leaving the dialog open across a pane close, a tab switch or a screen change was enough. The approved font is now remembered as that session's own, so it also survives a configuration reload or a tab rebind instead of silently reverting to the profile's font</li>
           <li>Fixes characters rendering as other characters on a window that has grown a lot since it opened, such as one maximized from a small size or a split pane given most of the tab. The glyph cache was sized once, for the window's original size, so a screenful of distinct characters could need more slots than it held and glyphs began overwriting each other mid-frame. It is now resized along with the page</li>
           <li>Fixes a pane rendering blank or partially after a font, font-size or DPI change that reached it while it was not on screen — minimized, occluded, or on another tab. The pane kept shaping text with fonts it had already discarded, and the frame was dropped instead of drawn</li>
+          <li>Fixes the window padding being computed against the wrong scale when a forced font DPI is configured (KDE's "Force font DPI"), which fitted the grid to a width the window did not have and left the terminal's own idea of where the grid starts disagreeing with where it was drawn</li>
         </ul>
       </description>
     </release>
