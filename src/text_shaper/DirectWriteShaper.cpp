@@ -38,11 +38,20 @@ namespace text
 {
 namespace
 {
-    void renderGlyphRunToBitmap(IDWriteGlyphRunAnalysis* glyphAnalysis,
-                                const RECT& textureBounds,
-                                const DWRITE_COLOR_F& runColor,
-                                BitmapFormat targetFormat,
-                                std::vector<uint8_t>::iterator& _it)
+    /// Rasterizes one glyph run into @p _it, returning false when DirectWrite could not produce the
+    /// alpha texture.
+    ///
+    /// The HRESULT is load-bearing and used to be discarded. CreateAlphaTexture() leaves the buffer
+    /// untouched on failure, and `tmp` is zero-initialized, so a swallowed failure did not skip the glyph
+    /// -- it copied ZEROS out as if they were coverage. In an RGB subpixel bitmap a zero run is not a
+    /// hole, it is *attenuated ink*: the glyph keeps its shape but loses weight over the affected span,
+    /// which is exactly the "stem dims for two scanlines then recovers" artifact reported in #2040 and
+    /// impossible to see on the FreeType path our CI actually builds.
+    [[nodiscard]] bool renderGlyphRunToBitmap(IDWriteGlyphRunAnalysis* glyphAnalysis,
+                                              const RECT& textureBounds,
+                                              const DWRITE_COLOR_F& runColor,
+                                              BitmapFormat targetFormat,
+                                              std::vector<uint8_t>::iterator& _it)
     {
         auto const width = textureBounds.right - textureBounds.left;
         auto const height = textureBounds.bottom - textureBounds.top;
@@ -50,8 +59,13 @@ namespace
         std::vector<uint8_t> tmp;
         tmp.resize(height * width * 3);
 
-        auto hr = glyphAnalysis->CreateAlphaTexture(
+        auto const hr = glyphAnalysis->CreateAlphaTexture(
             DWRITE_TEXTURE_CLEARTYPE_3x1, &textureBounds, tmp.data(), tmp.size());
+        if (FAILED(hr))
+        {
+            errorLog()("directwrite: CreateAlphaTexture failed for a {}x{} glyph run.", width, height);
+            return false;
+        }
 
         // TODO: #ifdef (__SSE2__) SIMD me :-)
         for (auto i = 0; i < height; i++)
@@ -93,6 +107,8 @@ namespace
                     *_it++ = currentA * (1.0 - averageAlpha) + averageAlpha * 255;
                 }
             }
+
+        return true;
     }
 
     constexpr double ptToEm(double pt)
@@ -539,7 +555,12 @@ std::optional<RasterizedGlyph> DirectWriteShaper::rasterize(GlyphKey glyph,
 
             auto t = output.bitmap.begin();
 
-            renderGlyphRunToBitmap(glyphAnalysis.Get(), textureBounds, DWRITE_COLOR_F {}, output.format, t);
+            // Report the failure rather than returning a bitmap the texture step never filled: the
+            // caller's std::nullopt path skips the glyph, where a zero-filled buffer would have been
+            // drawn as a faded one.
+            if (!renderGlyphRunToBitmap(
+                    glyphAnalysis.Get(), textureBounds, DWRITE_COLOR_F {}, output.format, t))
+                return std::nullopt;
 
             return output;
         }
@@ -576,7 +597,11 @@ std::optional<RasterizedGlyph> DirectWriteShaper::rasterize(GlyphKey glyph,
 
                 auto t = output.bitmap.begin();
                 auto const color = colorRun->paletteIndex == 0xFFFF ? DWRITE_COLOR_F {} : colorRun->runColor;
-                renderGlyphRunToBitmap(colorGlyphsAnalysis.Get(), textureBounds, color, output.format, t);
+                // A color glyph composites one layer per run, so a failed layer leaves the ones already
+                // blended in place; abandoning the glyph is still better than compositing zeros over them.
+                if (!renderGlyphRunToBitmap(
+                        colorGlyphsAnalysis.Get(), textureBounds, color, output.format, t))
+                    return std::nullopt;
             }
 
             return output;
