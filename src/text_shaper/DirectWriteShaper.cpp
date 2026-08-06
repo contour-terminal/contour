@@ -463,6 +463,16 @@ void DirectWriteShaper::shape(FontKey font,
                                                        &glyphAdvances.at(glyphStart),
                                                        &glyphOffsets.at(glyphStart));
 
+        // Checked for the same reason CreateAlphaTexture() is: the out-parameters are zero-initialized
+        // vectors DirectWrite leaves untouched on failure, so a discarded HRESULT here does not lose the
+        // placements loudly -- it gives every glyph in the run an advance of 0, stacking the whole run on
+        // one pen position. Emitting no positions lets the caller fall back instead.
+        if (FAILED(hr))
+        {
+            errorLog()("directwrite: GetGlyphPlacements failed for a {}-glyph run.", actualGlyphCount);
+            return;
+        }
+
         for (size_t i = glyphStart; i < actualGlyphCount; i++)
         {
             GlyphPosition gpos {};
