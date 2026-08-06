@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/command/Command.h>
+#include <contour/command/Command.hpp>
 
-#include <vtbackend/Color.h>
+#include <vtbackend/Color.hpp>
 
-#include <crispy/ascii.h>
-#include <crispy/escape.h>
-#include <crispy/utils.h>
+#include <crispy/ascii.hpp>
+#include <crispy/escape.hpp>
+#include <crispy/utils.hpp>
 
 #include <format>
 #include <ranges>

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/imsg/ImsgCodec.h>
+#include <vthost/imsg/ImsgCodec.hpp>
 
 #include <cstring>
 

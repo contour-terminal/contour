@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Charset.h>
-#include <vtbackend/InputGenerator.h>
-#include <vtbackend/MockTerm.h>
-#include <vtbackend/Screen.h>
-#include <vtbackend/Viewport.h>
-#include <vtbackend/primitives.h>
-#include <vtbackend/test_helpers.h>
+#include <vtbackend/Charset.hpp>
+#include <vtbackend/InputGenerator.hpp>
+#include <vtbackend/MockTerm.hpp>
+#include <vtbackend/Screen.hpp>
+#include <vtbackend/Viewport.hpp>
+#include <vtbackend/primitives.hpp>
+#include <vtbackend/test_helpers.hpp>
 
-#include <crispy/escape.h>
-#include <crispy/utils.h>
+#include <crispy/escape.hpp>
+#include <crispy/utils.hpp>
 
 #include <libunicode/convert.h>
 

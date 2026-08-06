@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/command/FuzzyFilter.h>
+#include <contour/command/FuzzyFilter.hpp>
 
-#include <crispy/ascii.h>
+#include <crispy/ascii.hpp>
 
 #include <algorithm>
 #include <cstddef>

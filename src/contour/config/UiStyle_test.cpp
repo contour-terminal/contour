@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/config/UiStyle.h>
+#include <contour/config/UiStyle.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -1,18 +1,18 @@
-#include <vtbackend/Color.h>
-#include <vtbackend/ColorPalette.h>
+#include <vtbackend/Color.hpp>
+#include <vtbackend/ColorPalette.hpp>
 
-#include <vtrasterizer/FontDescriptions.h>
-#include <vtrasterizer/GridMetrics.h>
-#include <vtrasterizer/Renderer.h>
-#include <vtrasterizer/RendererTestHelpers.h>
-#include <vtrasterizer/TextRenderer.h>
+#include <vtrasterizer/FontDescriptions.hpp>
+#include <vtrasterizer/GridMetrics.hpp>
+#include <vtrasterizer/Renderer.hpp>
+#include <vtrasterizer/RendererTestHelpers.hpp>
+#include <vtrasterizer/TextRenderer.hpp>
 
-#include <text_shaper/bdf_test_font.h>
-#include <text_shaper/mock_font_locator.h>
-#include <text_shaper/open_shaper.h>
+#include <text_shaper/bdf_test_font.hpp>
+#include <text_shaper/mock_font_locator.hpp>
+#include <text_shaper/open_shaper.hpp>
 
 #include <crispy/SuppressWindowsDialogs.hpp>
-#include <crispy/utils.h>
+#include <crispy/utils.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_session.hpp>

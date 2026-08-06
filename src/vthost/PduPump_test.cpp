@@ -10,10 +10,10 @@
 #include <vector>
 
 #include <coro/WhenAll.hpp>
-#include <net/EventLoop.h>
-#include <net/PollEventSource.h>
-#include <net/testing/InMemoryTransport.h>
-#include <vthost/PduPump.h>
+#include <net/EventLoop.hpp>
+#include <net/PollEventSource.hpp>
+#include <net/testing/InMemoryTransport.hpp>
+#include <vthost/PduPump.hpp>
 
 using coro::Task;
 using vthost::pumpPdus;

@@ -9,13 +9,13 @@
 #include <utility>
 #include <vector>
 
-#include <vthost/client/LayoutReconstruction.h>
-#include <vtworkspace/LayoutTree.h>
-#include <vtworkspace/ModelEvents.h>
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/PaneLayout.h>
-#include <vtworkspace/SessionModel.h>
-#include <vtworkspace/Tab.h>
+#include <vthost/client/LayoutReconstruction.hpp>
+#include <vtworkspace/LayoutTree.hpp>
+#include <vtworkspace/ModelEvents.hpp>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/PaneLayout.hpp>
+#include <vtworkspace/SessionModel.hpp>
+#include <vtworkspace/Tab.hpp>
 
 using vthost::client::composeClientArea;
 using vthost::client::WireLayout;

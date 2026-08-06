@@ -3,9 +3,9 @@
 // Unit tests for exitCodeFor() — the pure policy behind ContourGuiApp::run()'s return value,
 // extracted from the Qt event loop so the exit-status → exit-code mapping is testable in isolation.
 
-#include <contour/session/ExitCode.h>
+#include <contour/session/ExitCode.hpp>
 
-#include <vtpty/Process.h>
+#include <vtpty/Process.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

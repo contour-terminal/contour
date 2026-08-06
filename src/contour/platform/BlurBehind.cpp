@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/ContourGuiApp.h>
-#include <contour/platform/BlurBehind.h>
+#include <contour/ContourGuiApp.hpp>
+#include <contour/platform/BlurBehind.hpp>
 
-#include <crispy/utils.h>
+#include <crispy/utils.hpp>
 
 #include <QtCore/QDebug>
 #include <QtGui/QWindow>

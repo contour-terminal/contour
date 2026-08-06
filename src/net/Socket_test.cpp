@@ -18,12 +18,12 @@
 
 #include <coro/Task.hpp>
 #include <coro/WhenAll.hpp>
-#include <net/EventLoop.h>
-#include <net/IListener.h>
-#include <net/ISocket.h>
-#include <net/PollEventSource.h>
-#include <net/Sockets.h>
-#include <net/testing/InMemoryTransport.h>
+#include <net/EventLoop.hpp>
+#include <net/IListener.hpp>
+#include <net/ISocket.hpp>
+#include <net/PollEventSource.hpp>
+#include <net/Sockets.hpp>
+#include <net/testing/InMemoryTransport.hpp>
 
 using coro::Task;
 using net::EventLoop;

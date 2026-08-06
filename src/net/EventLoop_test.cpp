@@ -8,13 +8,13 @@
 
 #include <coro/Cancellation.hpp>
 #include <coro/Task.hpp>
-#include <net/EventLoop.h>
-#include <net/PollEventSource.h>
-#include <net/WaitChunking.h>
-#include <net/WithTimeout.h>
-#include <net/platform/Clock.h>
-#include <net/platform/SystemPipe.h>
-#include <net/testing/ScriptedEventSource.h>
+#include <net/EventLoop.hpp>
+#include <net/PollEventSource.hpp>
+#include <net/WaitChunking.hpp>
+#include <net/WithTimeout.hpp>
+#include <net/platform/Clock.hpp>
+#include <net/platform/SystemPipe.hpp>
+#include <net/testing/ScriptedEventSource.hpp>
 
 using coro::OperationCancelled;
 using coro::Task;

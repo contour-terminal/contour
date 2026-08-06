@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/remote/NativeController.h>
-#include <contour/remote/RemoteLayout.h>
-#include <contour/session/TerminalSession.h>
-#include <contour/session/TerminalSessionManager.h>
+#include <contour/remote/NativeController.hpp>
+#include <contour/remote/RemoteLayout.hpp>
+#include <contour/session/TerminalSession.hpp>
+#include <contour/session/TerminalSessionManager.hpp>
 
 #include <algorithm>
 #include <optional>
@@ -11,11 +11,11 @@
 #include <unordered_set>
 #include <vector>
 
-#include <vthost/client/LayoutReconstruction.h>
-#include <vthost/proto/Pdu.h>
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/SessionModel.h>
-#include <vtworkspace/Tab.h>
+#include <vthost/client/LayoutReconstruction.hpp>
+#include <vthost/proto/Pdu.hpp>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/SessionModel.hpp>
+#include <vtworkspace/Tab.hpp>
 
 namespace contour::remote
 {

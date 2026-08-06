@@ -1,22 +1,22 @@
 set(_header_files
-    BackgroundRenderer.h
-    BoxDrawingRenderer.h
-    CursorRenderer.h
-    DecorationRenderer.h
-    GlyphAdvance.h
-    GlyphScaling.h
-    GlyphSlicing.h
-    GridMetrics.h
-    ImageRenderer.h
-    Pixmap.h
-    RenderTarget.h
-    ReGISFontRasterizer.h
-    Renderer.h
-    TextClusterGrouper.h
-    TextRenderer.h
-    TextureAtlas.h
-    UnderlineGeometry.h
-    utils.h
+    BackgroundRenderer.hpp
+    BoxDrawingRenderer.hpp
+    CursorRenderer.hpp
+    DecorationRenderer.hpp
+    GlyphAdvance.hpp
+    GlyphScaling.hpp
+    GlyphSlicing.hpp
+    GridMetrics.hpp
+    ImageRenderer.hpp
+    Pixmap.hpp
+    RenderTarget.hpp
+    ReGISFontRasterizer.hpp
+    Renderer.hpp
+    TextClusterGrouper.hpp
+    TextRenderer.hpp
+    TextureAtlas.hpp
+    UnderlineGeometry.hpp
+    utils.hpp
 )
 
 set(_source_files

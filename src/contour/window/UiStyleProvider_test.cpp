@@ -8,11 +8,11 @@
 // native chrome, a lost fixed-pitch hint -- would first be seen by a user whose title bar and tab
 // strip are drawn in the wrong font.
 
-#include <contour/config/Config.h>
-#include <contour/config/UiStyle.h>
-#include <contour/window/UiStyleProvider.h>
+#include <contour/config/Config.hpp>
+#include <contour/config/UiStyle.hpp>
+#include <contour/window/UiStyleProvider.hpp>
 
-#include <text_shaper/font.h>
+#include <text_shaper/font.hpp>
 
 #include <QtGui/QColor>
 #include <QtGui/QFont>

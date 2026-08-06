@@ -6,11 +6,11 @@
 // disk exactly as the production apply does. So a test exercises the whole stack (controller → store →
 // loader), not a mock of it.
 
-#include <contour/config/Config.h>
-#include <contour/config/GuiConfigStore.h>
-#include <contour/window/SettingsController.h>
+#include <contour/config/Config.hpp>
+#include <contour/config/GuiConfigStore.hpp>
+#include <contour/window/SettingsController.hpp>
 
-#include <vtbackend/Color.h>
+#include <vtbackend/Color.hpp>
 
 #include <QtCore/QStringList>
 #include <QtCore/QTemporaryDir>

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtconformance/TerminalHarness.h>
+#include <vtconformance/TerminalHarness.hpp>
 
 #include <chrono>
 #include <format>

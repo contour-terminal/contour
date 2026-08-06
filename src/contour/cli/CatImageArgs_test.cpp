@@ -2,7 +2,7 @@
 //
 // Unit tests for the pure `contour cat` image-argument parsers extracted into CatImageArgs.h.
 
-#include <contour/cli/CatImageArgs.h>
+#include <contour/cli/CatImageArgs.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

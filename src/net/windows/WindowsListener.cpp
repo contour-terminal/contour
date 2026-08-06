@@ -10,9 +10,9 @@
 #endif
 // clang-format on
 
-#include <net/windows/WindowsListener.h>
+#include <net/windows/WindowsListener.hpp>
 
-#include <net/windows/WindowsSocket.h>
+#include <net/windows/WindowsSocket.hpp>
 
 #ifdef _WIN32
 
@@ -22,7 +22,7 @@
 
     #include <afunix.h>
 
-    #include <net/platform/PeerAddress.h>
+    #include <net/platform/PeerAddress.hpp>
 
     // A bound AF_UNIX socket is a file-system reparse point carrying this tag. The
     // constant lives in the WDK's ntifs.h; user-mode SDK headers omit it, so define

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/tmux/ImsgServer.h>
+#include <vthost/tmux/ImsgServer.hpp>
 
-#include <vthost/logging.h>
+#include <vthost/logging.hpp>
 
 #ifndef _WIN32
 
-    #include <crispy/utils.h>
+    #include <crispy/utils.hpp>
 
     #include <algorithm>
     #include <array>
@@ -17,12 +17,12 @@
     #include <unistd.h>
 
     #include <coro/WhenAll.hpp>
-    #include <net/Sockets.h>
-    #include <net/SplitSocket.h>
-    #include <vthost/imsg/CommandArgv.h>
-    #include <vthost/imsg/Identify.h>
-    #include <vthost/imsg/ImsgCodec.h>
-    #include <vthost/tmux/ControlSession.h>
+    #include <net/Sockets.hpp>
+    #include <net/SplitSocket.hpp>
+    #include <vthost/imsg/CommandArgv.hpp>
+    #include <vthost/imsg/Identify.hpp>
+    #include <vthost/imsg/ImsgCodec.hpp>
+    #include <vthost/tmux/ControlSession.hpp>
 
 namespace vthost::tmux
 {

@@ -6,18 +6,18 @@
 // renamed/retyped YAML key or a broken loadFromEntry overload fails here instead of silently
 // falling back to defaults at runtime.
 
-#include <contour/config/Actions.h>
-#include <contour/config/Config.h>
-#include <contour/config/GuiConfigStore.h>
-#include <contour/config/ModifierNames.h>
-#include <contour/platform/GuiTheme.h>
+#include <contour/config/Actions.hpp>
+#include <contour/config/Config.hpp>
+#include <contour/config/GuiConfigStore.hpp>
+#include <contour/config/ModifierNames.hpp>
+#include <contour/platform/GuiTheme.hpp>
 
-#include <vtbackend/Color.h>
-#include <vtbackend/InputGenerator.h>
-#include <vtbackend/primitives.h>
+#include <vtbackend/Color.hpp>
+#include <vtbackend/InputGenerator.hpp>
+#include <vtbackend/primitives.hpp>
 
-#include <crispy/logsink.h>
-#include <crispy/logstore.h>
+#include <crispy/logsink.hpp>
+#include <crispy/logstore.hpp>
 
 #include <QtCore/QTemporaryDir>
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtconformance/EscTestLog.h>
+#include <vtconformance/EscTestLog.hpp>
 
-#include <crispy/utils.h>
+#include <crispy/utils.hpp>
 
 #include <algorithm>
 #include <charconv>

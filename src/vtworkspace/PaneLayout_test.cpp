@@ -10,7 +10,7 @@
 #include <ranges>
 #include <vector>
 
-#include <vtworkspace/PaneLayout.h>
+#include <vtworkspace/PaneLayout.hpp>
 
 using namespace vtworkspace;
 using vtpty::ColumnCount;

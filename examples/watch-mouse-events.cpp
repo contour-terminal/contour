@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/InputGenerator.h>
-#include <vtbackend/Sequence.h>
-#include <vtbackend/primitives.h>
+#include <vtbackend/InputGenerator.hpp>
+#include <vtbackend/Sequence.hpp>
+#include <vtbackend/primitives.hpp>
 
-#include <vtparser/Parser.h>
-#include <vtparser/ParserEvents.h>
+#include <vtparser/Parser.hpp>
+#include <vtparser/ParserEvents.hpp>
 
-#include <vtpty/UnixUtils.h>
+#include <vtpty/UnixUtils.hpp>
 
 #include <csignal>
 #include <format>

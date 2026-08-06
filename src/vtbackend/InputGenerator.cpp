@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/InputGenerator.h>
+#include <vtbackend/InputGenerator.hpp>
 
-#include <vtbackend/ControlCode.h>
-#include <vtbackend/logging.h>
+#include <vtbackend/ControlCode.hpp>
+#include <vtbackend/logging.hpp>
 
-#include <crispy/assert.h>
-#include <crispy/utils.h>
+#include <crispy/assert.hpp>
+#include <crispy/utils.hpp>
 
 #include <libunicode/case_mapping.h>
 #include <libunicode/convert.h>

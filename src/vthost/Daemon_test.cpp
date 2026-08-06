@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#include <crispy/utils.h>
+#include <crispy/utils.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -16,12 +16,12 @@
 #include <utility>
 #include <vector>
 
-#include <net/EventLoop.h>
-#include <net/IoResult.h>
-#include <net/PollEventSource.h>
-#include <net/Sockets.h>
-#include <vthost/Daemon.h>
-#include <vthost/SocketPath.h>
+#include <net/EventLoop.hpp>
+#include <net/IoResult.hpp>
+#include <net/PollEventSource.hpp>
+#include <net/Sockets.hpp>
+#include <vthost/Daemon.hpp>
+#include <vthost/SocketPath.hpp>
 
 namespace
 {

@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <text_shaper/font.hpp>
+#include <text_shaper/font_locator.hpp>
+
+namespace text
+{
+class coretext_locator: public font_locator
+{
+  public:
+    coretext_locator();
+
+    [[nodiscard]] font_source_list locate(font_description const& description) override;
+    [[nodiscard]] font_source_list all() override;
+    [[nodiscard]] font_source_list resolve(gsl::span<char32_t const> codepoints) override;
+
+  private:
+    struct Private;
+    std::unique_ptr<Private, void (*)(Private*)> _d;
+};
+} // namespace text

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/client/ScreenMirror.h>
+#include <vthost/client/ScreenMirror.hpp>
 
-#include <vtbackend/Color.h>
-#include <vtbackend/Hyperlink.h>
-#include <vtbackend/Image.h>
-#include <vtbackend/primitives.h>
+#include <vtbackend/Color.hpp>
+#include <vtbackend/Hyperlink.hpp>
+#include <vtbackend/Image.hpp>
+#include <vtbackend/primitives.hpp>
 
-#include <crispy/overloaded.h>
+#include <crispy/overloaded.hpp>
 
 #include <algorithm>
 #include <array>
@@ -17,12 +17,12 @@
 #include <unordered_map>
 #include <utility>
 
-#include <vthost/CursorStyle.h>
-#include <vthost/GridWire.h>
-#include <vthost/ImageWire.h>
-#include <vthost/MirroredModes.h>
-#include <vthost/MouseWire.h>
-#include <vthost/StatusWire.h>
+#include <vthost/CursorStyle.hpp>
+#include <vthost/GridWire.hpp>
+#include <vthost/ImageWire.hpp>
+#include <vthost/MirroredModes.hpp>
+#include <vthost/MouseWire.hpp>
+#include <vthost/StatusWire.hpp>
 
 namespace vthost::client
 {

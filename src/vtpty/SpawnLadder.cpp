@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtpty/SpawnLadder.h>
+#include <vtpty/SpawnLadder.hpp>
 
 #include <format>
 #include <string>

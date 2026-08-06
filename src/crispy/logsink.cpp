@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/logsink.h>
+#include <crispy/logsink.hpp>
 
-#include <crispy/utils.h>
+#include <crispy/utils.hpp>
 
 #include <algorithm>
 #include <array>

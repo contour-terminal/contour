@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtrasterizer/CursorRenderer.h>
+#include <vtrasterizer/CursorRenderer.hpp>
 
-#include <vtbackend/Color.h>
+#include <vtbackend/Color.hpp>
 
-#include <crispy/utils.h>
+#include <crispy/utils.hpp>
 
 #include <stdexcept>
 #include <utility>

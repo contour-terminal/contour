@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/config/UiStyle.h>
-#include <contour/test/QmlChromeStyle.h>
-#include <contour/window/UiStyleProvider.h>
+#include <contour/config/UiStyle.hpp>
+#include <contour/test/QmlChromeStyle.hpp>
+#include <contour/window/UiStyleProvider.hpp>
 
 #include <QtCore/QFile>
 #include <QtCore/QIODevice>

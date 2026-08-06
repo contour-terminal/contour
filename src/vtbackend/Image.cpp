@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Image.h>
+#include <vtbackend/Image.hpp>
 
-#include <crispy/StrongLRUHashtable.h>
-#include <crispy/point.h>
+#include <crispy/StrongLRUHashtable.hpp>
+#include <crispy/point.hpp>
 
 #include <algorithm>
 #include <memory>

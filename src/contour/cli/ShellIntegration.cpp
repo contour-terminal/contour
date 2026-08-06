@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/cli/ShellIntegration.h>
+#include <contour/cli/ShellIntegration.hpp>
 
-#include <crispy/utils.h>
+#include <crispy/utils.hpp>
 
 #include <algorithm>
 #include <ranges>
 #include <string>
 
-#include <ShellIntegrationData.h>
+#include <ShellIntegrationData.hpp>
 
 namespace contour::cli
 {

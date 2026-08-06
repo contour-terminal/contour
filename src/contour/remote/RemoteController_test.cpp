@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/remote/ReactorThread.h>
-#include <contour/remote/RemoteController.h>
+#include <contour/remote/ReactorThread.hpp>
+#include <contour/remote/RemoteController.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -15,7 +15,7 @@
 
 #include <coro/Cancellation.hpp>
 #include <coro/Task.hpp>
-#include <net/EventLoop.h>
+#include <net/EventLoop.hpp>
 
 using namespace std::chrono_literals;
 using contour::remote::awaitMuxConnect;

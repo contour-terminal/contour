@@ -5,9 +5,9 @@
 // (CSI 18 t handshake, CSI > Ps;Ps t request, PM 314 reply chunks, words splitting, timeout
 // behavior) runs headlessly.
 
-#include <contour/cli/CaptureScreen.h>
+#include <contour/cli/CaptureScreen.hpp>
 
-#include <vtbackend/Functions.h>
+#include <vtbackend/Functions.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <text_shaper/open_shaper.h>
+#include <text_shaper/open_shaper.hpp>
 
-#include <text_shaper/cluster_spans.h>
-#include <text_shaper/font.h>
-#include <text_shaper/font_locator.h>
+#include <text_shaper/cluster_spans.hpp>
+#include <text_shaper/font.hpp>
+#include <text_shaper/font_locator.hpp>
 
-#include <crispy/assert.h>
-#include <crispy/times.h>
+#include <crispy/assert.hpp>
+#include <crispy/times.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/ucd_fmt.h>

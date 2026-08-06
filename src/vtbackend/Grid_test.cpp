@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Grid.h>
-#include <vtbackend/primitives.h>
+#include <vtbackend/Grid.hpp>
+#include <vtbackend/primitives.hpp>
 
-#include <crispy/BufferObject.h>
+#include <crispy/BufferObject.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

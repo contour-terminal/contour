@@ -1,26 +1,26 @@
 set(text_shaper_SRC
-    cluster_spans.h
-    font.cpp font.h
-    font_locator.h
-    font_locator_provider.cpp font_locator_provider.h
-    mock_font_locator.cpp mock_font_locator.h
-    open_shaper.cpp open_shaper.h
-    shaper.cpp shaper.h
+    cluster_spans.hpp
+    font.cpp font.hpp
+    font_locator.hpp
+    font_locator_provider.cpp font_locator_provider.hpp
+    mock_font_locator.cpp mock_font_locator.hpp
+    open_shaper.cpp open_shaper.hpp
+    shaper.cpp shaper.hpp
 )
 
 if("${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
-    list(APPEND text_shaper_SRC directwrite_analysis_wrapper.h)
-    list(APPEND text_shaper_SRC directwrite_locator.cpp directwrite_locator.h)
-    list(APPEND text_shaper_SRC directwrite_shaper.cpp directwrite_shaper.h)
+    list(APPEND text_shaper_SRC directwrite_analysis_wrapper.hpp)
+    list(APPEND text_shaper_SRC directwrite_locator.cpp directwrite_locator.hpp)
+    list(APPEND text_shaper_SRC directwrite_shaper.cpp directwrite_shaper.hpp)
 endif()
 if(APPLE)
-    list(APPEND text_shaper_SRC coretext_locator.h coretext_locator.mm)
+    list(APPEND text_shaper_SRC coretext_locator.hpp coretext_locator.mm)
 endif()
 if("${CMAKE_SYSTEM_NAME}" MATCHES "Linux" OR "${CMAKE_SYSTEM_NAME}" MATCHES "FreeBSD" OR "${CMAKE_SYSTEM_NAME}" MATCHES "OpenBSD")
-    list(APPEND text_shaper_SRC fontconfig_locator.cpp fontconfig_locator.h)
+    list(APPEND text_shaper_SRC fontconfig_locator.cpp fontconfig_locator.hpp)
 endif()
 
-# TODO: coretext_shaper.cpp coretext_shaper.h
+# TODO: coretext_shaper.cpp coretext_shaper.hpp
 add_library(text_shaper STATIC ${text_shaper_SRC})
 set(TEXT_SHAPER_LIBS unicode::unicode boxed-cpp::boxed-cpp)
 list(APPEND TEXT_SHAPER_LIBS Microsoft.GSL::GSL)

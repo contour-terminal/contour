@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/display/TerminalAccessible.h>
-#include <contour/display/TerminalDisplay.h>
-#include <contour/display/ViewportTextIndex.h>
-#include <contour/geometry/CellRectangle.h>
-#include <contour/session/TerminalSession.h>
+#include <contour/display/TerminalAccessible.hpp>
+#include <contour/display/TerminalDisplay.hpp>
+#include <contour/display/ViewportTextIndex.hpp>
+#include <contour/geometry/CellRectangle.hpp>
+#include <contour/session/TerminalSession.hpp>
 
-#include <vtbackend/Terminal.h>
+#include <vtbackend/Terminal.hpp>
 
 #include <QtQuick/QQuickWindow>
 

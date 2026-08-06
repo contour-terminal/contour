@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/tmux/TmuxGateway.h>
+#include <vthost/tmux/TmuxGateway.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -7,7 +7,7 @@
 #include <utility>
 #include <variant>
 
-#include <net/AsyncBufferedReader.h>
+#include <net/AsyncBufferedReader.hpp>
 
 namespace vthost::tmux
 {

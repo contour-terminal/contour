@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtpty/ConPty.h>
-#include <vtpty/Process.h>
-#include <vtpty/Pty.h>
-#include <vtpty/SpawnLadder.h>
+#include <vtpty/ConPty.hpp>
+#include <vtpty/Process.hpp>
+#include <vtpty/Pty.hpp>
+#include <vtpty/SpawnLadder.hpp>
 
-#include <crispy/assert.h>
-#include <crispy/overloaded.h>
+#include <crispy/assert.hpp>
+#include <crispy/overloaded.hpp>
 
 #include <cassert>
 #include <cerrno>

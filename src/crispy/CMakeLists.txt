@@ -8,36 +8,36 @@ endif()
 option(STRONGHASH_USE_INTRINSICS "Build StrongHash with AES-NI (x86-64) / NEON (ARM64) support [default: ON]" ON)
 
 set(crispy_SOURCES
-    App.cpp App.h
-    BufferObject.cpp BufferObject.h
-    CLI.cpp CLI.h
-    Comparison.h
-    LRUCache.h
-    StrongLRUCache.h
-    ScopedTimer.h
-    StackTrace.cpp StackTrace.h
-    TrieMap.h
-    AlignedAllocator.h
-    algorithm.h
-    ascii.h
-    assert.h
-    base64.h
-    compose.h
-    defines.h
-    environment.cpp environment.h
-    escape.h
-    file_descriptor.h
-    flags.h
-    interpolated_string.cpp interpolated_string.h
-    logsink.cpp logsink.h
-    logstore.cpp logstore.h
-    overloaded.h
-    reference.h
-    ring.h
-    testing/environment.h
-    times.h
-    user_info.cpp user_info.h
-    utils.cpp utils.h
+    App.cpp App.hpp
+    BufferObject.cpp BufferObject.hpp
+    CLI.cpp CLI.hpp
+    Comparison.hpp
+    LRUCache.hpp
+    StrongLRUCache.hpp
+    ScopedTimer.hpp
+    StackTrace.cpp StackTrace.hpp
+    TrieMap.hpp
+    AlignedAllocator.hpp
+    algorithm.hpp
+    ascii.hpp
+    assert.hpp
+    base64.hpp
+    compose.hpp
+    defines.hpp
+    environment.cpp environment.hpp
+    escape.hpp
+    file_descriptor.hpp
+    flags.hpp
+    interpolated_string.cpp interpolated_string.hpp
+    logsink.cpp logsink.hpp
+    logstore.cpp logstore.hpp
+    overloaded.hpp
+    reference.hpp
+    ring.hpp
+    testing/environment.hpp
+    times.hpp
+    user_info.cpp user_info.hpp
+    utils.cpp utils.hpp
 )
 
 add_library(crispy-core STATIC ${crispy_SOURCES})

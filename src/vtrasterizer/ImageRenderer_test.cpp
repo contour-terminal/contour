@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Image.h>
+#include <vtbackend/Image.hpp>
 
-#include <vtrasterizer/ImageRenderer.h>
-#include <vtrasterizer/RendererTestHelpers.h>
+#include <vtrasterizer/ImageRenderer.hpp>
+#include <vtrasterizer/RendererTestHelpers.hpp>
 
-#include <crispy/utils.h>
+#include <crispy/utils.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/SixelParser.h>
+#include <vtbackend/SixelParser.hpp>
 
 #include <algorithm>
 #include <array>

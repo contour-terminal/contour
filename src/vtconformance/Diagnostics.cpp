@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtconformance/Diagnostics.h>
+#include <vtconformance/Diagnostics.hpp>
 
-#include <vtbackend/logging.h>
+#include <vtbackend/logging.hpp>
 
-#include <crispy/logstore.h>
+#include <crispy/logstore.hpp>
 
 #include <algorithm>
 #include <array>

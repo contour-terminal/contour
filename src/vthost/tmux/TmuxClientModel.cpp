@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/tmux/TmuxClientModel.h>
+#include <vthost/tmux/TmuxClientModel.hpp>
 
 #include <charconv>
 #include <chrono>

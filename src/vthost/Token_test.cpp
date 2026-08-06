@@ -6,8 +6,8 @@
 #include <string>
 #include <string_view>
 
-#include <net/Tls.h>
-#include <vthost/Token.h>
+#include <net/Tls.hpp>
+#include <vthost/Token.hpp>
 
 using vthost::readTokenFile;
 using vthost::resolveToken;

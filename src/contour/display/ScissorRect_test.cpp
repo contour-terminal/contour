@@ -4,7 +4,7 @@
 // transient inner scissor (e.g. smooth scroll) inside the outer scissor that clips the terminal
 // below the custom title bar. Coordinates are OpenGL scissor space: bottom-left origin, device px.
 
-#include <contour/display/ScissorRect.h>
+#include <contour/display/ScissorRect.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

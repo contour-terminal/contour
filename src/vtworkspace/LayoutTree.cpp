@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtworkspace/LayoutTree.h>
+#include <vtworkspace/LayoutTree.hpp>
 
 #include <algorithm>
 #include <numeric>
 #include <tuple>
 
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/Tab.h>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/Tab.hpp>
 
 namespace vtworkspace
 {

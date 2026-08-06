@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <net/WriteQueue.h>
+#include <net/WriteQueue.hpp>
 
 #include <span>
 #include <utility>

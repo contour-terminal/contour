@@ -15,13 +15,13 @@
 #endif
 // clang-format on
 
-#include <vtpty/SshSession.h>
+#include <vtpty/SshSession.hpp>
 
-#include <vtpty/Process.h>
-#include <vtpty/Pty.h>
+#include <vtpty/Process.hpp>
+#include <vtpty/Pty.hpp>
 
-#include <crispy/escape.h>
-#include <crispy/utils.h>
+#include <crispy/escape.hpp>
+#include <crispy/utils.hpp>
 
 #include <chrono>
 #include <expected>

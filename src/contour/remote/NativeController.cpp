@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/remote/NativeController.h>
-#include <contour/session/TerminalSessionManager.h>
+#include <contour/remote/NativeController.hpp>
+#include <contour/session/TerminalSessionManager.hpp>
 
-#include <crispy/utils.h>
+#include <crispy/utils.hpp>
 
 #include <algorithm>
 #include <ranges>
 #include <utility>
 
-#include <net/Sockets.h>
+#include <net/Sockets.hpp>
 
 namespace contour::remote
 {

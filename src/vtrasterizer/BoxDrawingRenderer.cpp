@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtrasterizer/BoxDrawingRenderer.h>
+#include <vtrasterizer/BoxDrawingRenderer.hpp>
 
-#include <vtrasterizer/Pixmap.h>
-#include <vtrasterizer/utils.h>
+#include <vtrasterizer/Pixmap.hpp>
+#include <vtrasterizer/utils.hpp>
 
-#include <crispy/environment.h>
-#include <crispy/logstore.h>
+#include <crispy/environment.hpp>
+#include <crispy/logstore.hpp>
 
 #include <array>
 #include <charconv>

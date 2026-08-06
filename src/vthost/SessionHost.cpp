@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/SessionHost.h>
+#include <vthost/SessionHost.hpp>
 
 #include <chrono>
 #include <mutex>
@@ -7,12 +7,12 @@
 #include <utility>
 #include <vector>
 
-#include <vthost/SessionSettings.h>
-#include <vthost/TappingPty.h>
-#include <vthost/logging.h>
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/PaneLayout.h>
-#include <vtworkspace/Tab.h>
+#include <vthost/SessionSettings.hpp>
+#include <vthost/TappingPty.hpp>
+#include <vthost/logging.hpp>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/PaneLayout.hpp>
+#include <vtworkspace/Tab.hpp>
 
 namespace vthost
 {

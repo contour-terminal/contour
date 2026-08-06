@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Terminal.h>
+#include <vtbackend/Terminal.hpp>
 
-#include <vtbackend/ControlCode.h>
-#include <vtbackend/Functions.h>
-#include <vtbackend/InputGenerator.h>
-#include <vtbackend/RenderBuffer.h>
-#include <vtbackend/RenderBufferBuilder.h>
-#include <vtbackend/SequenceBuilder.h>
-#include <vtbackend/logging.h>
-#include <vtbackend/primitives.h>
+#include <vtbackend/ControlCode.hpp>
+#include <vtbackend/Functions.hpp>
+#include <vtbackend/InputGenerator.hpp>
+#include <vtbackend/RenderBuffer.hpp>
+#include <vtbackend/RenderBufferBuilder.hpp>
+#include <vtbackend/SequenceBuilder.hpp>
+#include <vtbackend/logging.hpp>
+#include <vtbackend/primitives.hpp>
 
-#include <vtparser/Parser.h>
+#include <vtparser/Parser.hpp>
 
-#include <vtpty/MockPty.h>
+#include <vtpty/MockPty.hpp>
 
-#include <crispy/assert.h>
-#include <crispy/base64.h>
-#include <crispy/environment.h>
-#include <crispy/escape.h>
-#include <crispy/utils.h>
+#include <crispy/assert.hpp>
+#include <crispy/base64.hpp>
+#include <crispy/environment.hpp>
+#include <crispy/escape.hpp>
+#include <crispy/utils.hpp>
 
 #include <libunicode/convert.h>
 

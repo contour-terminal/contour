@@ -5,7 +5,7 @@
 // vertical scroll must never reach the binding table. The rule is a per-gesture latch: one vertically
 // dominant event silences the horizontal axis for the rest of that gesture.
 
-#include <contour/input/HorizontalWheelGesture.h>
+#include <contour/input/HorizontalWheelGesture.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

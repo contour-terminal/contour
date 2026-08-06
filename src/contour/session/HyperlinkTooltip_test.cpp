@@ -4,7 +4,7 @@
 // hide it. The tooltip itself is a QML popup and cannot be opened offscreen, so this is the seam that
 // carries the behaviour under test.
 
-#include <contour/session/HyperlinkTooltip.h>
+#include <contour/session/HyperlinkTooltip.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

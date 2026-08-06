@@ -1,6 +1,6 @@
-#include <crispy/StackTrace.h>
+#include <crispy/StackTrace.hpp>
 
-#include <crispy/utils.h>
+#include <crispy/utils.hpp>
 
 #include <cctype>
 #include <cstdlib>

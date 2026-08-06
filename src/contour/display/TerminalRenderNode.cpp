@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/display/RhiTransform.h>
-#include <contour/display/TerminalDisplay.h>
-#include <contour/display/TerminalRenderNode.h>
+#include <contour/display/RhiTransform.hpp>
+#include <contour/display/TerminalDisplay.hpp>
+#include <contour/display/TerminalRenderNode.hpp>
 
 #include <QtQuick/QQuickWindow>
 #include <QtQuick/QSGRendererInterface>

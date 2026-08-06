@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Line.h>
+#include <vtbackend/Line.hpp>
 
-#include <vtbackend/SgrWriter.h>
+#include <vtbackend/SgrWriter.hpp>
 
 #include <libunicode/grapheme_segmenter.h>
 #include <libunicode/utf8.h>

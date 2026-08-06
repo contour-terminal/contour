@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/test_helpers.h>
+#include <vtbackend/test_helpers.hpp>
 
-#include <vtrasterizer/FontDescriptions.h>
-#include <vtrasterizer/TextClusterGrouper.h>
+#include <vtrasterizer/FontDescriptions.hpp>
+#include <vtrasterizer/TextClusterGrouper.hpp>
 
-#include <crispy/escape.h>
-#include <crispy/utils.h>
+#include <crispy/escape.hpp>
+#include <crispy/utils.hpp>
 
 #include <libunicode/convert.h>
 

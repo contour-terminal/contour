@@ -1,8 +1,8 @@
-#include <vtbackend/Sequence.h>
+#include <vtbackend/Sequence.hpp>
 
-#include <vtbackend/ControlCode.h>
+#include <vtbackend/ControlCode.hpp>
 
-#include <crispy/escape.h>
+#include <crispy/escape.hpp>
 
 #include <numeric>
 #include <sstream>

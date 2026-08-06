@@ -13,6 +13,9 @@
   /// @param name Description.
   /// @return Description.
   ```
+- **Header files use the `.hpp` extension.** `.h` is reserved for what is genuinely a C header —
+  system and third-party headers, and files shared with GLSL (`src/vtrasterizer/shared_defines.h`
+  is the sole first-party example). Every header carries `#pragma once`, never an include guard.
 - Naming conventions and static-analysis rules live in **`.clang-tidy` files** (`./.clang-tidy` at
   the repository root is the base, so every first-party tree resolves to it by clang-tidy's normal
   parent-directory search; `src/crispy/` and `src/text_shaper/` override it for their snake_case
@@ -107,7 +110,7 @@ manages to be both a defaulted `bool` parameter and a `bool` return.
   at the boundary and keep the `enum class` inside it. `Config`'s public `bool` fields are the
   documented exception; do not open a sweep of the config schema on their account.
 - **Generic code with no domain meaning** — a `bool` template argument threaded to `if constexpr`,
-  as in `Parser.h`'s `TraceStateChanges`.
+  as in `Parser.hpp`'s `TraceStateChanges`.
 - **QML-facing `Q_INVOKABLE`/`Q_PROPERTY`** — an enum reaches QML only once registered with the
   meta-object system (`Q_ENUM`), and the QML side must then name the enumerators. Worth doing, but
   find the QML callers before promising it.

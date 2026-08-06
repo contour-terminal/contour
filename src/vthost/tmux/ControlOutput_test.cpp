@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include <vthost/tmux/ControlOutput.h>
+#include <vthost/tmux/ControlOutput.hpp>
 
 using vthost::tmux::ControlOutput;
 using vthost::tmux::ControlOutputLimits;

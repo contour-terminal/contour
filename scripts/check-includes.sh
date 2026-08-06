@@ -3,7 +3,7 @@
 grep -R --include '*.cpp' -E '^#.*include ".*"$' src/
 rv1=$?
 
-grep -R --include '*.h' -E '^#.*include ".*"$' src/
+grep -R --include '*.hpp' -E '^#.*include ".*"$' src/
 rv2=$?
 
 if [[ $rv1 -eq 0 || $rv2 -eq 0 ]]; then

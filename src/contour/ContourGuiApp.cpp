@@ -1,43 +1,43 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/ContourGuiApp.h>
-#include <contour/Logging.h>
-#include <contour/config/Config.h>
-#include <contour/display/ContentScale.h>
-#include <contour/display/Logging.h>
-#include <contour/display/RenderingBackendSelection.h>
-#include <contour/display/ShaderConfig.h> // createSurfaceFormat
-#include <contour/display/TerminalAccessible.h>
-#include <contour/display/TerminalDisplay.h>
-#include <contour/platform/GuiTheme.h>
-#include <contour/platform/QtExternalLauncher.h>
-#include <contour/platform/QtPath.h>
-#include <contour/remote/NativeController.h>
-#include <contour/remote/RemoteLayout.h>
-#include <contour/remote/RoutingSessionFactory.h>
-#include <contour/remote/TmuxController.h>
-#include <contour/session/PaneProxy.h>
-#include <contour/session/SessionFactory.h>
-#include <contour/window/CommandPaletteModel.h>
-#include <contour/window/SettingsController.h>
-#include <contour/window/WindowController.h>
+#include <contour/ContourGuiApp.hpp>
+#include <contour/Logging.hpp>
+#include <contour/config/Config.hpp>
+#include <contour/display/ContentScale.hpp>
+#include <contour/display/Logging.hpp>
+#include <contour/display/RenderingBackendSelection.hpp>
+#include <contour/display/ShaderConfig.hpp> // createSurfaceFormat
+#include <contour/display/TerminalAccessible.hpp>
+#include <contour/display/TerminalDisplay.hpp>
+#include <contour/platform/GuiTheme.hpp>
+#include <contour/platform/QtExternalLauncher.hpp>
+#include <contour/platform/QtPath.hpp>
+#include <contour/remote/NativeController.hpp>
+#include <contour/remote/RemoteLayout.hpp>
+#include <contour/remote/RoutingSessionFactory.hpp>
+#include <contour/remote/TmuxController.hpp>
+#include <contour/session/PaneProxy.hpp>
+#include <contour/session/SessionFactory.hpp>
+#include <contour/window/CommandPaletteModel.hpp>
+#include <contour/window/SettingsController.hpp>
+#include <contour/window/WindowController.hpp>
 
-#include <vtpty/Process.h>
+#include <vtpty/Process.hpp>
 
-#include <text_shaper/font_locator.h>
+#include <text_shaper/font_locator.hpp>
 
-#include <crispy/CLI.h>
-#include <crispy/ScopedTimer.h>
-#include <crispy/logsink.h>
-#include <crispy/logstore.h>
-#include <crispy/utils.h>
+#include <crispy/CLI.hpp>
+#include <crispy/ScopedTimer.hpp>
+#include <crispy/logsink.hpp>
+#include <crispy/logstore.hpp>
+#include <crispy/utils.hpp>
 
 #include <QtCore/QEventLoop>
 #include <QtCore/QProcess>
 #include <QtQml/qqmlextensionplugin.h>
 
-#include <vthost/Daemon.h>
-#include <vthost/SocketPath.h>
-#include <vthost/Token.h>
+#include <vthost/Daemon.hpp>
+#include <vthost/SocketPath.hpp>
+#include <vthost/Token.hpp>
 #if !defined(__APPLE__) && !defined(_WIN32)
     #include <QtDBus/QDBusConnection>
 #endif

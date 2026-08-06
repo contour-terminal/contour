@@ -10,11 +10,11 @@
 #endif
 // clang-format on
 
-#include <vthost/Daemon.h>
+#include <vthost/Daemon.hpp>
 
-#include <crispy/algorithm.h>
-#include <crispy/environment.h>
-#include <crispy/utils.h>
+#include <crispy/algorithm.hpp>
+#include <crispy/environment.hpp>
+#include <crispy/utils.hpp>
 
 #include <atomic>
 #include <charconv>
@@ -36,18 +36,18 @@
 #include <vector>
 
 #include <coro/WhenAll.hpp>
-#include <net/EventLoop.h>
-#include <net/PollEventSource.h>
-#include <net/Sockets.h>
-#include <net/Tls.h>
-#include <vthost/ConnectionAcceptor.h>
-#include <vthost/LastSessionWatcher.h>
-#include <vthost/NativeSession.h>
-#include <vthost/SessionHost.h>
-#include <vthost/SocketPath.h>
-#include <vthost/logging.h>
-#include <vthost/tmux/ControlSession.h>
-#include <vthost/tmux/ImsgServer.h>
+#include <net/EventLoop.hpp>
+#include <net/PollEventSource.hpp>
+#include <net/Sockets.hpp>
+#include <net/Tls.hpp>
+#include <vthost/ConnectionAcceptor.hpp>
+#include <vthost/LastSessionWatcher.hpp>
+#include <vthost/NativeSession.hpp>
+#include <vthost/SessionHost.hpp>
+#include <vthost/SocketPath.hpp>
+#include <vthost/logging.hpp>
+#include <vthost/tmux/ControlSession.hpp>
+#include <vthost/tmux/ImsgServer.hpp>
 
 #ifndef _WIN32
     #include <csignal>

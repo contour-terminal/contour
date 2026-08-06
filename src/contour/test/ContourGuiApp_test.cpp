@@ -5,10 +5,10 @@
 // path, resource resolution). The event-loop-driven paths (run/terminalGuiAction) are covered by
 // the offscreen e2e app runs, not here.
 
-#include <contour/ContourGuiApp.h>
-#include <contour/session/SessionFactory.h>
-#include <contour/session/TerminalSession.h>
-#include <contour/test/GuiTestFixtures.h>
+#include <contour/ContourGuiApp.hpp>
+#include <contour/session/SessionFactory.hpp>
+#include <contour/session/TerminalSession.hpp>
+#include <contour/test/GuiTestFixtures.hpp>
 
 #include <QtCore/QTemporaryDir>
 

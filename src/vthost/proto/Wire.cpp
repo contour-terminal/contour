@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/proto/Wire.h>
+#include <vthost/proto/Wire.hpp>
 
 namespace vthost::proto
 {

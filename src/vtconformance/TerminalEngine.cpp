@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtconformance/TerminalEngine.h>
+#include <vtconformance/TerminalEngine.hpp>
 
-#include <vtbackend/Screen.h>
-#include <vtbackend/Settings.h>
+#include <vtbackend/Screen.hpp>
+#include <vtbackend/Settings.hpp>
 
 #include <chrono>
 #include <memory>

@@ -1,31 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/ContourGuiApp.h>
-#include <contour/config/Actions.h>
-#include <contour/display/TerminalDisplay.h>
-#include <contour/geometry/CellRectangle.h>
-#include <contour/input/KeyMapping.h>
-#include <contour/input/Logging.h>
-#include <contour/input/MouseMapping.h>
-#include <contour/platform/Clipboard.h>
-#include <contour/platform/ExternalLauncher.h>
-#include <contour/platform/QtInvoke.h>
-#include <contour/platform/SpeechSynthesizer.h>
-#include <contour/session/Logging.h>
-#include <contour/session/SpawnCommand.h>
-#include <contour/session/TerminalSession.h>
+#include <contour/ContourGuiApp.hpp>
+#include <contour/config/Actions.hpp>
+#include <contour/display/TerminalDisplay.hpp>
+#include <contour/geometry/CellRectangle.hpp>
+#include <contour/input/KeyMapping.hpp>
+#include <contour/input/Logging.hpp>
+#include <contour/input/MouseMapping.hpp>
+#include <contour/platform/Clipboard.hpp>
+#include <contour/platform/ExternalLauncher.hpp>
+#include <contour/platform/QtInvoke.hpp>
+#include <contour/platform/SpeechSynthesizer.hpp>
+#include <contour/session/Logging.hpp>
+#include <contour/session/SpawnCommand.hpp>
+#include <contour/session/TerminalSession.hpp>
 
-#include <vtbackend/HintModeHandler.h>
-#include <vtbackend/MatchModes.h>
-#include <vtbackend/Terminal.h>
-#include <vtbackend/ViCommands.h>
+#include <vtbackend/HintModeHandler.hpp>
+#include <vtbackend/MatchModes.hpp>
+#include <vtbackend/Terminal.hpp>
+#include <vtbackend/ViCommands.hpp>
 
-#include <vtpty/Process.h>
-#include <vtpty/Pty.h>
-#include <vtpty/SshSession.h>
+#include <vtpty/Process.hpp>
+#include <vtpty/Pty.hpp>
+#include <vtpty/SshSession.hpp>
 
-#include <crispy/StackTrace.h>
-#include <crispy/assert.h>
-#include <crispy/utils.h>
+#include <crispy/StackTrace.hpp>
+#include <crispy/assert.hpp>
+#include <crispy/utils.hpp>
 
 #include <QtCore/QDeadlineTimer>
 #include <QtCore/QDebug>

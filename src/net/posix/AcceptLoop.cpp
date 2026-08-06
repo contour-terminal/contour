@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <net/posix/AcceptLoop.h>
+#include <net/posix/AcceptLoop.hpp>
 
 #ifndef _WIN32
 
@@ -11,9 +11,9 @@
     #include <unistd.h>
 
     #include <coro/Cancellation.hpp>
-    #include <net/EventLoop.h>
-    #include <net/platform/PeerAddress.h>
-    #include <net/posix/PosixSocket.h>
+    #include <net/EventLoop.hpp>
+    #include <net/platform/PeerAddress.hpp>
+    #include <net/posix/PosixSocket.hpp>
 
 namespace net
 {

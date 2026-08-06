@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/App.h>
+#include <crispy/App.hpp>
 #include <crispy/SuppressWindowsDialogs.hpp>
-#include <crispy/environment.h>
-#include <crispy/logstore.h>
+#include <crispy/environment.hpp>
+#include <crispy/logstore.hpp>
 
 #define CATCH_CONFIG_RUNNER
 #include <catch2/catch_session.hpp>

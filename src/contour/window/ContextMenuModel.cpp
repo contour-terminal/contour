@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/window/ContextMenuModel.h>
+#include <contour/window/ContextMenuModel.hpp>
 
 #include <QtCore/QString>
 #include <QtCore/QVariantMap>

@@ -5,7 +5,7 @@
 // system so that a GUI-less build needs no Qt, and a generator that quietly mangled them would be
 // found only by a user whose shell broke.
 
-#include <contour/cli/ShellIntegration.h>
+#include <contour/cli/ShellIntegration.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

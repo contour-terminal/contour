@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/sort.h>
+#include <crispy/sort.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

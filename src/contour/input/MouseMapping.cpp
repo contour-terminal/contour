@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/input/MouseMapping.h>
+#include <contour/input/MouseMapping.hpp>
 
 namespace contour::input
 {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/imsg/CommandArgv.h>
+#include <vthost/imsg/CommandArgv.hpp>
 
 #include <cstring>
 #include <ranges>

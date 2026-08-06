@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/command/CommandHistory.h>
+#include <contour/command/CommandHistory.hpp>
 
 #include <algorithm>
 #include <string>

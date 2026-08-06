@@ -1,4 +1,4 @@
-#include <crispy/interpolated_string.h>
+#include <crispy/interpolated_string.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Image.h>
+#include <vtbackend/Image.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <vthost/ImageWire.h>
+#include <vthost/ImageWire.hpp>
 
 using namespace vthost;
 

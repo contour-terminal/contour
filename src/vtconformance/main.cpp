@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/App.h>
-#include <crispy/CLI.h>
+#include <crispy/App.hpp>
+#include <crispy/CLI.hpp>
 
 #include <cstdlib>
 #include <filesystem>
@@ -9,9 +9,9 @@
 #include <iostream>
 #include <string>
 
-#include <vtconformance/Report.h>
-#include <vtconformance/Runner.h>
-#include <vtconformance/Suite.h>
+#include <vtconformance/Report.hpp>
+#include <vtconformance/Runner.hpp>
+#include <vtconformance/Suite.hpp>
 
 namespace fs = std::filesystem;
 namespace CLI = crispy::cli;

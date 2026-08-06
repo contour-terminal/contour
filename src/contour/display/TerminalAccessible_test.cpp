@@ -8,8 +8,8 @@
 // assistive client is attached. The end-to-end counterpart -- a live session whose OSC 133 marks make
 // the prompt genuinely appear -- is display-gated, in DisplayRendering_test.cpp.
 
-#include <contour/display/TerminalAccessible.h>
-#include <contour/display/TerminalDisplay.h>
+#include <contour/display/TerminalAccessible.hpp>
+#include <contour/display/TerminalDisplay.hpp>
 
 #include <QtGui/QAccessible>
 

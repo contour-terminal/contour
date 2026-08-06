@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #ifdef __linux__
 
-    #include <contour/platform/FreeDesktopNotifier.h>
+    #include <contour/platform/FreeDesktopNotifier.hpp>
 
-    #include <crispy/logstore.h>
+    #include <crispy/logstore.hpp>
 
     #include <QtDBus/QDBusConnection>
     #include <QtDBus/QDBusReply>

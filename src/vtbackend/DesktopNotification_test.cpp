@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/DesktopNotification.h>
+#include <vtbackend/DesktopNotification.hpp>
 
-#include <crispy/base64.h>
+#include <crispy/base64.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

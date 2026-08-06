@@ -7,11 +7,11 @@ find_package(Qt6 COMPONENTS ShaderTools REQUIRED)
 set(QT_RESOURCES DisplayResources.qrc)
 
 add_library(ContourTerminalDisplay STATIC
-    ContentScale.cpp ContentScale.h
-    RhiRenderer.cpp RhiRenderer.h
-    ShaderConfig.cpp ShaderConfig.h
-    TerminalDisplay.cpp TerminalDisplay.h
-    TerminalRenderNode.cpp TerminalRenderNode.h
+    ContentScale.cpp ContentScale.hpp
+    RhiRenderer.cpp RhiRenderer.hpp
+    ShaderConfig.cpp ShaderConfig.hpp
+    TerminalDisplay.cpp TerminalDisplay.hpp
+    TerminalRenderNode.cpp TerminalRenderNode.hpp
     ${QT_RESOURCES}
 )
 set_target_properties(ContourTerminalDisplay PROPERTIES AUTOMOC ON)
@@ -49,8 +49,8 @@ target_include_directories(ContourTerminalDisplay PRIVATE "${CMAKE_CURRENT_BINAR
 # Note: qt6_add_shaders() links Qt6::ShaderTools via the keyword signature, so every
 # target_link_libraries() call on this target must also use the keyword signature.
 target_link_libraries(ContourTerminalDisplay PUBLIC vtrasterizer)
-# The display sources include contour/config/Config.h, so they compile against the configuration
-# model's interface -- yaml-cpp included, which Config.h exposes in its own right. Linking the
+# The display sources include contour/config/Config.hpp, so they compile against the configuration
+# model's interface -- yaml-cpp included, which Config.hpp exposes in its own right. Linking the
 # target that owns it beats restating its dependencies here.
 target_link_libraries(ContourTerminalDisplay PUBLIC contour_config)
 # The display drives blur-behind and the accessibility announcer through platform/, and translates

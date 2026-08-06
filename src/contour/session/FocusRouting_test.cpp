@@ -16,17 +16,17 @@
 // and the path was untestable. Ownership is now a modelled vtworkspace::WindowId, so the production path
 // is the tested path. All cases here run headless: no [display] tag, nothing skips offscreen.
 
-#include <contour/ContourGuiApp.h>
-#include <contour/session/TerminalSession.h>
-#include <contour/session/TerminalSessionManager.h>
-#include <contour/test/GuiTestFixtures.h>
-#include <contour/window/WindowController.h>
+#include <contour/ContourGuiApp.hpp>
+#include <contour/session/TerminalSession.hpp>
+#include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/GuiTestFixtures.hpp>
+#include <contour/window/WindowController.hpp>
 
-#include <vtbackend/primitives.h>
+#include <vtbackend/primitives.hpp>
 
-#include <vtpty/MockPty.h>
+#include <vtpty/MockPty.hpp>
 
-#include <crispy/escape.h>
+#include <crispy/escape.hpp>
 
 #include <QtGui/QWindow>
 #include <QtQuick/QQuickWindow>
@@ -36,9 +36,9 @@
 #include <memory>
 #include <string>
 
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/SessionModel.h>
-#include <vtworkspace/Tab.h>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/SessionModel.hpp>
+#include <vtworkspace/Tab.hpp>
 
 namespace
 {

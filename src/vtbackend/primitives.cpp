@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/primitives.h>
+#include <vtbackend/primitives.hpp>
 
 #include <algorithm>
 #include <cctype>

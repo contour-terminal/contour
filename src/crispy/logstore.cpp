@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/logstore.h>
+#include <crispy/logstore.hpp>
 
 namespace logstore
 {

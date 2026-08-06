@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/command/ContextMenuTable.h>
-#include <contour/command/TitleBarContextMenu.h>
+#include <contour/command/ContextMenuTable.hpp>
+#include <contour/command/TitleBarContextMenu.hpp>
 
 #include <array>
 #include <span>

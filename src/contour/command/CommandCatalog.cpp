@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/command/CommandCatalog.h>
+#include <contour/command/CommandCatalog.hpp>
 
 #include <format>
 #include <ranges>

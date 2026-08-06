@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtworkspace/Tab.h>
+#include <vtworkspace/Tab.hpp>
 
 #include <cassert>
 

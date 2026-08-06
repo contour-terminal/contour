@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/App.h>
+#include <crispy/App.hpp>
 
-#include <crispy/environment.h>
-#include <crispy/logsink.h>
-#include <crispy/logstore.h>
-#include <crispy/user_info.h>
-#include <crispy/utils.h>
+#include <crispy/environment.hpp>
+#include <crispy/logsink.hpp>
+#include <crispy/logstore.hpp>
+#include <crispy/user_info.hpp>
+#include <crispy/utils.hpp>
 
 #include <algorithm>
 #include <filesystem>

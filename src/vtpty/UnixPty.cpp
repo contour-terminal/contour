@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtpty/UnixPty.h>
+#include <vtpty/UnixPty.hpp>
 
-#include <vtpty/Process.h>
-#include <vtpty/UnixUtils.h>
+#include <vtpty/Process.hpp>
+#include <vtpty/UnixUtils.hpp>
 
-#include <crispy/BufferObject.h>
-#include <crispy/deferred.h>
-#include <crispy/environment.h>
-#include <crispy/escape.h>
-#include <crispy/logstore.h>
+#include <crispy/BufferObject.hpp>
+#include <crispy/deferred.hpp>
+#include <crispy/environment.hpp>
+#include <crispy/escape.hpp>
+#include <crispy/logstore.hpp>
 
 #include <cassert>
 #include <csignal>

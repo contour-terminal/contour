@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/CellUtil.h>
-#include <vtbackend/HintModeHandler.h>
-#include <vtbackend/MockTerm.h>
-#include <vtbackend/Terminal.h>
-#include <vtbackend/primitives.h>
-#include <vtbackend/test_helpers.h>
+#include <vtbackend/CellUtil.hpp>
+#include <vtbackend/HintModeHandler.hpp>
+#include <vtbackend/MockTerm.hpp>
+#include <vtbackend/Terminal.hpp>
+#include <vtbackend/primitives.hpp>
+#include <vtbackend/test_helpers.hpp>
 
-#include <vtpty/MockPty.h>
+#include <vtpty/MockPty.hpp>
 
-#include <crispy/App.h>
-#include <crispy/testing/environment.h>
-#include <crispy/times.h>
-#include <crispy/utils.h>
+#include <crispy/App.hpp>
+#include <crispy/testing/environment.hpp>
+#include <crispy/times.hpp>
+#include <crispy/utils.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/width.h>

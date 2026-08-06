@@ -17,18 +17,18 @@
 // window (hence never had a render target), which the offscreen platform supplies perfectly well. See
 // the teardown-lifetimes section there.
 
-#include <contour/config/Actions.h>
-#include <contour/display/TerminalAccessible.h>
-#include <contour/display/TerminalDisplay.h>
-#include <contour/input/MouseMapping.h>
-#include <contour/session/TerminalSession.h>
-#include <contour/session/TerminalSessionManager.h>
-#include <contour/test/GuiTestFixtures.h>
-#include <contour/window/WindowController.h>
+#include <contour/config/Actions.hpp>
+#include <contour/display/TerminalAccessible.hpp>
+#include <contour/display/TerminalDisplay.hpp>
+#include <contour/input/MouseMapping.hpp>
+#include <contour/session/TerminalSession.hpp>
+#include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/GuiTestFixtures.hpp>
+#include <contour/window/WindowController.hpp>
 
-#include <vtbackend/primitives.h>
+#include <vtbackend/primitives.hpp>
 
-#include <vtpty/ChannelPty.h>
+#include <vtpty/ChannelPty.hpp>
 
 #include <QtCore/QBuffer>
 #include <QtCore/QDir>
@@ -56,9 +56,9 @@
 #include <unordered_map>
 
 #include <QtTest/QTest>
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/SessionModel.h>
-#include <vtworkspace/Tab.h>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/SessionModel.hpp>
+#include <vtworkspace/Tab.hpp>
 
 using namespace std::string_view_literals;
 using namespace std::chrono_literals;

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #ifndef _WIN32
 
-    #include <crispy/logsink.h>
+    #include <crispy/logsink.hpp>
 
     #include <catch2/catch_test_macros.hpp>
 
@@ -20,14 +20,14 @@
 
     #include <coro/Task.hpp>
     #include <coro/WhenAll.hpp>
-    #include <net/AsyncBufferedReader.h>
-    #include <net/EventLoop.h>
-    #include <net/IListener.h>
-    #include <net/PollEventSource.h>
-    #include <net/Sockets.h>
-    #include <net/testing/CoroTestSupport.h>
-    #include <net/testing/TempDir.h>
-    #include <vthost/ConnectionAcceptor.h>
+    #include <net/AsyncBufferedReader.hpp>
+    #include <net/EventLoop.hpp>
+    #include <net/IListener.hpp>
+    #include <net/PollEventSource.hpp>
+    #include <net/Sockets.hpp>
+    #include <net/testing/CoroTestSupport.hpp>
+    #include <net/testing/TempDir.hpp>
+    #include <vthost/ConnectionAcceptor.hpp>
 
 using coro::Task;
 using net::EventLoop;

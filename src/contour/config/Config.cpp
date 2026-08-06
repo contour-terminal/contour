@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/config/Actions.h>
-#include <contour/config/Config.h>
-#include <contour/config/ModifierNames.h>
+#include <contour/config/Actions.hpp>
+#include <contour/config/Config.hpp>
+#include <contour/config/ModifierNames.hpp>
 
-#include <vtbackend/Color.h>
-#include <vtbackend/ColorPalette.h>
+#include <vtbackend/Color.hpp>
+#include <vtbackend/ColorPalette.hpp>
 
-#include <vtpty/ImageSize.h>
+#include <vtpty/ImageSize.hpp>
 
-#include <text_shaper/font.h>
+#include <text_shaper/font.hpp>
 
-#include <crispy/StrongHash.h>
-#include <crispy/environment.h>
-#include <crispy/escape.h>
+#include <crispy/StrongHash.hpp>
+#include <crispy/environment.hpp>
+#include <crispy/escape.hpp>
 
 #include <libunicode/convert.h>
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtrasterizer/utils.h>
+#include <vtrasterizer/utils.hpp>
 
 #include <algorithm> // max?
 #include <cassert>

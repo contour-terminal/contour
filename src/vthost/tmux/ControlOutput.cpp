@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/tmux/ControlOutput.h>
+#include <vthost/tmux/ControlOutput.hpp>
 
 #include <algorithm>
 #include <format>

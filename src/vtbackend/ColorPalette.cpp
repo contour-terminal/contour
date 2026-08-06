@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/ColorPalette.h>
+#include <vtbackend/ColorPalette.hpp>
 
-#include <vtbackend/Color.h>
+#include <vtbackend/Color.hpp>
 
-#include <crispy/overloaded.h>
+#include <crispy/overloaded.hpp>
 
 #include <cstdio>
 #include <map>

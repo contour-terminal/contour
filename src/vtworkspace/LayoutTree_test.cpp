@@ -8,9 +8,9 @@
 #include <span>
 #include <string>
 
-#include <vtworkspace/LayoutTree.h>
-#include <vtworkspace/ModelEvents.h>
-#include <vtworkspace/SessionModel.h>
+#include <vtworkspace/LayoutTree.hpp>
+#include <vtworkspace/ModelEvents.hpp>
+#include <vtworkspace/SessionModel.hpp>
 
 using namespace vtworkspace;
 

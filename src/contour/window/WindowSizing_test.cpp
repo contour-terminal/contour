@@ -8,11 +8,11 @@
 // chrome property, the fullscreen/maximize increment-zeroing (WMs must not cell-snap a fullscreen
 // window), the displayless early-outs, and that tab switching never touches window geometry.
 
-#include <contour/ContourGuiApp.h>
-#include <contour/display/TerminalDisplay.h>
-#include <contour/session/TerminalSessionManager.h>
-#include <contour/test/GuiTestFixtures.h>
-#include <contour/window/WindowController.h>
+#include <contour/ContourGuiApp.hpp>
+#include <contour/display/TerminalDisplay.hpp>
+#include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/GuiTestFixtures.hpp>
+#include <contour/window/WindowController.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtGui/QGuiApplication>
@@ -21,7 +21,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QtTest/QSignalSpy>
-#include <vtworkspace/SessionModel.h>
+#include <vtworkspace/SessionModel.hpp>
 
 namespace
 {

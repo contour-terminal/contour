@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtrasterizer/BackgroundRenderer.h>
+#include <vtrasterizer/BackgroundRenderer.hpp>
 
-#include <vtrasterizer/GridMetrics.h>
-#include <vtrasterizer/RenderTarget.h>
+#include <vtrasterizer/GridMetrics.hpp>
+#include <vtrasterizer/RenderTarget.hpp>
 
-#include <crispy/algorithm.h>
+#include <crispy/algorithm.hpp>
 
 #include <iostream>
 

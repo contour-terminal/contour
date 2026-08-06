@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/StatusLineBuilder.h>
+#include <vtbackend/StatusLineBuilder.hpp>
 
-#include <vtbackend/CellFlags.h>
-#include <vtbackend/Color.h>
-#include <vtbackend/Terminal.h>
+#include <vtbackend/CellFlags.hpp>
+#include <vtbackend/Color.hpp>
+#include <vtbackend/Terminal.hpp>
 
-#include <crispy/interpolated_string.h>
-#include <crispy/utils.h>
+#include <crispy/interpolated_string.hpp>
+#include <crispy/utils.hpp>
 
 #include <libunicode/convert.h>
 

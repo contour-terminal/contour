@@ -17,11 +17,11 @@
     #include <unistd.h>
 
     #include <coro/Task.hpp>
-    #include <net/EventLoop.h>
-    #include <net/PollEventSource.h>
-    #include <net/Sockets.h>
-    #include <net/SplitSocket.h>
-    #include <net/testing/InMemoryTransport.h>
+    #include <net/EventLoop.hpp>
+    #include <net/PollEventSource.hpp>
+    #include <net/Sockets.hpp>
+    #include <net/SplitSocket.hpp>
+    #include <net/testing/InMemoryTransport.hpp>
 
 using coro::Task;
 

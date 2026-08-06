@@ -1,6 +1,6 @@
-#include <vtbackend/MatchModes.h>
+#include <vtbackend/MatchModes.hpp>
 
-#include <vtbackend/Terminal.h>
+#include <vtbackend/Terminal.hpp>
 
 namespace vtbackend
 {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/interpolated_string.h>
+#include <crispy/interpolated_string.hpp>
 
 namespace crispy
 {

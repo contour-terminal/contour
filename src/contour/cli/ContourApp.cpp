@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/cli/CaptureScreen.h>
-#include <contour/cli/CatImageArgs.h>
-#include <contour/cli/ContourApp.h>
-#include <contour/cli/ShellIntegration.h>
-#include <contour/config/Config.h>
+#include <contour/cli/CaptureScreen.hpp>
+#include <contour/cli/CatImageArgs.hpp>
+#include <contour/cli/ContourApp.hpp>
+#include <contour/cli/ShellIntegration.hpp>
+#include <contour/config/Config.hpp>
 
-#include <vtbackend/Capabilities.h>
-#include <vtbackend/Functions.h>
+#include <vtbackend/Capabilities.hpp>
+#include <vtbackend/Functions.hpp>
 
-#include <vtparser/Parser.h>
+#include <vtparser/Parser.hpp>
 
-#include <crispy/App.h>
-#include <crispy/CLI.h>
-#include <crispy/StackTrace.h>
-#include <crispy/base64.h>
-#include <crispy/logsink.h>
-#include <crispy/utils.h>
+#include <crispy/App.hpp>
+#include <crispy/CLI.hpp>
+#include <crispy/StackTrace.hpp>
+#include <crispy/base64.hpp>
+#include <crispy/logsink.hpp>
+#include <crispy/utils.hpp>
 
 #include <charconv>
 #include <chrono>
@@ -28,10 +28,10 @@
 #include <memory>
 #include <utility>
 
-#include <vthost/Daemon.h>
-#include <vthost/ServiceControl.h>
-#include <vthost/SocketPath.h>
-#include <vthost/Token.h>
+#include <vthost/Daemon.hpp>
+#include <vthost/ServiceControl.hpp>
+#include <vthost/SocketPath.hpp>
+#include <vthost/Token.hpp>
 
 #ifndef _WIN32
     #include <sys/ioctl.h>

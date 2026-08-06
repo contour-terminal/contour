@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/display/Logging.h>
-#include <contour/display/TerminalDisplay.h>
-#include <contour/session/FontControl.h>
-#include <contour/session/Logging.h>
-#include <contour/session/TerminalSession.h>
+#include <contour/display/Logging.hpp>
+#include <contour/display/TerminalDisplay.hpp>
+#include <contour/session/FontControl.hpp>
+#include <contour/session/Logging.hpp>
+#include <contour/session/TerminalSession.hpp>
 
-#include <vtbackend/Terminal.h>
+#include <vtbackend/Terminal.hpp>
 
-#include <vtrasterizer/Renderer.h>
+#include <vtrasterizer/Renderer.hpp>
 
 #include <algorithm>
 #include <mutex>

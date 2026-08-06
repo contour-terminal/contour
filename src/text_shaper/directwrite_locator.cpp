@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <text_shaper/directwrite_locator.h>
+#include <text_shaper/directwrite_locator.hpp>
 
-#include <text_shaper/directwrite_analysis_wrapper.h>
-#include <text_shaper/font.h>
+#include <text_shaper/directwrite_analysis_wrapper.hpp>
+#include <text_shaper/font.hpp>
 
 #include <string_view>
 

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/testing/GridParity.h>
+#include <vthost/testing/GridParity.hpp>
 
-#include <vtbackend/Image.h>
-#include <vtbackend/LineFlags.h>
+#include <vtbackend/Image.hpp>
+#include <vtbackend/LineFlags.hpp>
 
 #include <algorithm>
 #include <array>
@@ -12,7 +12,7 @@
 #include <string_view>
 #include <utility>
 
-#include <vthost/GridWire.h>
+#include <vthost/GridWire.hpp>
 
 namespace vthost::testing
 {

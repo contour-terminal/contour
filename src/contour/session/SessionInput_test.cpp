@@ -3,19 +3,19 @@
 // Unit tests for the Qt→vtbackend input translation helpers (helper.h/helper.cpp): the pure
 // mapping functions every key/mouse event flows through before reaching a terminal session.
 
-#include <contour/ContourGuiApp.h>
-#include <contour/config/Config.h>
-#include <contour/input/KeyMapping.h>
-#include <contour/input/MouseMapping.h>
-#include <contour/platform/QtPath.h>
-#include <contour/session/SessionInput.h>
-#include <contour/session/SpawnCommand.h>
-#include <contour/session/TerminalSession.h>
-#include <contour/test/GuiTestFixtures.h>
+#include <contour/ContourGuiApp.hpp>
+#include <contour/config/Config.hpp>
+#include <contour/input/KeyMapping.hpp>
+#include <contour/input/MouseMapping.hpp>
+#include <contour/platform/QtPath.hpp>
+#include <contour/session/SessionInput.hpp>
+#include <contour/session/SpawnCommand.hpp>
+#include <contour/session/TerminalSession.hpp>
+#include <contour/test/GuiTestFixtures.hpp>
 
-#include <vtbackend/InputGenerator.h>
+#include <vtbackend/InputGenerator.hpp>
 
-#include <vtpty/MockPty.h>
+#include <vtpty/MockPty.hpp>
 
 #include <QtGui/QKeyEvent>
 #include <QtGui/QMouseEvent>

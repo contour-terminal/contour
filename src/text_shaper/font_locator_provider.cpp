@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <text_shaper/font_locator_provider.h>
+#include <text_shaper/font_locator_provider.hpp>
 
-#include <text_shaper/coretext_locator.h>
-#include <text_shaper/directwrite_locator.h>
-#include <text_shaper/fontconfig_locator.h>
-#include <text_shaper/mock_font_locator.h>
+#include <text_shaper/coretext_locator.hpp>
+#include <text_shaper/directwrite_locator.hpp>
+#include <text_shaper/fontconfig_locator.hpp>
+#include <text_shaper/mock_font_locator.hpp>
 
 #include <memory>
 

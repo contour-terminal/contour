@@ -8,7 +8,6 @@ on:
       - '*.cpp'
       - '*.cc'
       - '*.c'
-      - '*.h'
       - '*.hh'
       - '*.hpp'
     branches:

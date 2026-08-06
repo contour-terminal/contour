@@ -3,7 +3,7 @@
 // Unit tests for the pure PCM bell synthesis (contour/AudioNote.h), extracted from Audio.cpp's
 // anonymous namespace so the waveform math is verifiable without an audio device.
 
-#include <contour/platform/AudioNote.h>
+#include <contour/platform/AudioNote.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtpty/MockPty.h>
+#include <vtpty/MockPty.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -7,7 +7,7 @@
 #include <string>
 #include <utility>
 
-#include <vtconformance/TerminalEngine.h>
+#include <vtconformance/TerminalEngine.hpp>
 
 using namespace std::string_literals;
 using namespace std::string_view_literals;

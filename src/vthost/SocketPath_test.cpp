@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/testing/environment.h>
+#include <crispy/testing/environment.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <optional>
 #include <string>
 
-#include <vthost/SocketPath.h>
+#include <vthost/SocketPath.hpp>
 
 using vthost::muxSocketPath;
 

@@ -11,12 +11,12 @@
 #include <vector>
 
 #include <coro/Task.hpp>
-#include <net/AsyncBufferedReader.h>
-#include <net/EventLoop.h>
-#include <net/ISocket.h>
-#include <net/PollEventSource.h>
-#include <net/testing/InMemoryTransport.h>
-#include <net/testing/ScriptedEventSource.h>
+#include <net/AsyncBufferedReader.hpp>
+#include <net/EventLoop.hpp>
+#include <net/ISocket.hpp>
+#include <net/PollEventSource.hpp>
+#include <net/testing/InMemoryTransport.hpp>
+#include <net/testing/ScriptedEventSource.hpp>
 
 using coro::Task;
 using net::AsyncBufferedReader;

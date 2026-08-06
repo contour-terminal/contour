@@ -19,10 +19,10 @@
 
     #include <coro/Task.hpp>
     #include <coro/WhenAll.hpp>
-    #include <net/EventLoop.h>
-    #include <net/PollEventSource.h>
-    #include <net/Sockets.h>
-    #include <net/posix/UnixListener.h>
+    #include <net/EventLoop.hpp>
+    #include <net/PollEventSource.hpp>
+    #include <net/Sockets.hpp>
+    #include <net/posix/UnixListener.hpp>
 
 using coro::Task;
 using net::EventLoop;

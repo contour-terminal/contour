@@ -3,9 +3,9 @@
 
 add_library(vtparser STATIC
     Parser.cpp
-    Parser.h
-    Parser-impl.h
-    ParserEvents.h
+    Parser.hpp
+    Parser-impl.hpp
+    ParserEvents.hpp
 )
 target_link_libraries(vtparser PUBLIC
     Microsoft.GSL::GSL

@@ -21,7 +21,7 @@ list(TRANSFORM CONTOUR_SHELL_INTEGRATION_SHELLS
 # The scripts used to reach the binary through resources.qrc, which made `contour generate
 # integration` -- a verb a GUI-less build keeps -- depend on Qt's resource system. See
 # EmbedShellIntegration.cmake for why the replacement is a CMake script.
-set(_shell_integration_data "${CMAKE_CURRENT_BINARY_DIR}/ShellIntegrationData.h")
+set(_shell_integration_data "${CMAKE_CURRENT_BINARY_DIR}/ShellIntegrationData.hpp")
 add_custom_command(
     OUTPUT "${_shell_integration_data}"
     COMMAND "${CMAKE_COMMAND}"
@@ -38,10 +38,10 @@ add_custom_command(
 # The generated header is listed as a source so that building this target runs the custom command
 # that produces it; nothing compiles it on its own.
 add_library(contour_cli STATIC
-    CaptureScreen.cpp CaptureScreen.h
-    CatImageArgs.h
-    ContourApp.cpp ContourApp.h
-    ShellIntegration.cpp ShellIntegration.h
+    CaptureScreen.cpp CaptureScreen.hpp
+    CatImageArgs.hpp
+    ContourApp.cpp ContourApp.hpp
+    ShellIntegration.cpp ShellIntegration.hpp
     "${_shell_integration_data}"
 )
 
@@ -50,7 +50,7 @@ target_link_libraries(contour_cli
     PRIVATE vthost
 )
 
-# The binary dir is PUBLIC so that ShellIntegration.cpp's <ShellIntegrationData.h> resolves, and
+# The binary dir is PUBLIC so that ShellIntegration.cpp's <ShellIntegrationData.hpp> resolves, and
 # so it keeps resolving for any consumer that compiles this target's sources.
 target_include_directories(contour_cli PUBLIC
     "${CMAKE_CURRENT_BINARY_DIR}"

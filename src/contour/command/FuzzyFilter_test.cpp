@@ -3,7 +3,7 @@
 // The command palette's filter. What matters is not just "does it match" but "does the thing the user
 // meant come up FIRST" — a palette that finds the right command and ranks it fourth has failed.
 
-#include <contour/command/FuzzyFilter.h>
+#include <contour/command/FuzzyFilter.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

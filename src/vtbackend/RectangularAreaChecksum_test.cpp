@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/RectangularAreaChecksum.h>
+#include <vtbackend/RectangularAreaChecksum.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/user_info.h>
+#include <crispy/user_info.hpp>
 
 #include <vector>
 

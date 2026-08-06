@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/CellFlags.h>
-#include <vtbackend/MockTerm.h>
+#include <vtbackend/CellFlags.hpp>
+#include <vtbackend/MockTerm.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <format>
 
-#include <vtconformance/ScreenDump.h>
+#include <vtconformance/ScreenDump.hpp>
 
 using namespace std::string_view_literals;
 using namespace vtconformance;

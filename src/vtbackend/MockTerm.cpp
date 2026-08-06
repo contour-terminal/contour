@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/MockTerm.h>
+#include <vtbackend/MockTerm.hpp>
 
-#include <vtbackend/Screen.h>
+#include <vtbackend/Screen.hpp>
 
-#include <vtpty/MockPty.h>
+#include <vtpty/MockPty.hpp>
 
-#include <crispy/App.h>
+#include <crispy/App.hpp>
 
 namespace vtbackend
 {

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/platform/QtPath.h>
-#include <contour/window/SettingsController.h>
+#include <contour/platform/QtPath.hpp>
+#include <contour/window/SettingsController.hpp>
 
-#include <vtbackend/StatusLineBuilder.h>
+#include <vtbackend/StatusLineBuilder.hpp>
 
-#include <text_shaper/font.h>
+#include <text_shaper/font.hpp>
 
 #include <QtCore/QStringList>
 #include <QtGui/QColor>

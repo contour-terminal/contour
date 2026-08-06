@@ -8,17 +8,17 @@
 // loads with no QML errors. This catches QML syntax/binding regressions deterministically without
 // having to boot a full terminal session.
 
-#include <contour/command/CommandCatalog.h>
-#include <contour/command/CommandHistory.h>
-#include <contour/command/ContextMenu.h>
-#include <contour/command/Shortcut.h>
-#include <contour/config/Config.h>
-#include <contour/platform/ColorConversion.h>
-#include <contour/test/QmlChromeStyle.h>
-#include <contour/test/QmlMessageCapture.h>
-#include <contour/window/CommandPaletteModel.h>
-#include <contour/window/ContextMenuModel.h>
-#include <contour/window/TabColorScheme.h>
+#include <contour/command/CommandCatalog.hpp>
+#include <contour/command/CommandHistory.hpp>
+#include <contour/command/ContextMenu.hpp>
+#include <contour/command/Shortcut.hpp>
+#include <contour/config/Config.hpp>
+#include <contour/platform/ColorConversion.hpp>
+#include <contour/test/QmlChromeStyle.hpp>
+#include <contour/test/QmlMessageCapture.hpp>
+#include <contour/window/CommandPaletteModel.hpp>
+#include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/TabColorScheme.hpp>
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QCoreApplication>
@@ -52,7 +52,7 @@
 
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
-#include <vtworkspace/PaneLayout.h>
+#include <vtworkspace/PaneLayout.hpp>
 
 namespace
 {

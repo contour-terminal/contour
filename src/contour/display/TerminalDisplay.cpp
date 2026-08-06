@@ -1,30 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/ContourGuiApp.h>
-#include <contour/Logging.h>
-#include <contour/config/Actions.h>
-#include <contour/display/ContentScale.h>
-#include <contour/display/ImeQueryRect.h>
-#include <contour/display/Logging.h>
-#include <contour/display/RhiRenderer.h>
-#include <contour/display/TerminalAccessible.h>
-#include <contour/display/TerminalDisplay.h>
-#include <contour/display/TerminalRenderNode.h>
-#include <contour/input/MouseMapping.h>
-#include <contour/platform/Announcer.h>
-#include <contour/platform/BlurBehind.h>
-#include <contour/platform/QtInvoke.h>
-#include <contour/session/FontControl.h>
-#include <contour/session/SessionInput.h>
+#include <contour/ContourGuiApp.hpp>
+#include <contour/Logging.hpp>
+#include <contour/config/Actions.hpp>
+#include <contour/display/ContentScale.hpp>
+#include <contour/display/ImeQueryRect.hpp>
+#include <contour/display/Logging.hpp>
+#include <contour/display/RhiRenderer.hpp>
+#include <contour/display/TerminalAccessible.hpp>
+#include <contour/display/TerminalDisplay.hpp>
+#include <contour/display/TerminalRenderNode.hpp>
+#include <contour/input/MouseMapping.hpp>
+#include <contour/platform/Announcer.hpp>
+#include <contour/platform/BlurBehind.hpp>
+#include <contour/platform/QtInvoke.hpp>
+#include <contour/session/FontControl.hpp>
+#include <contour/session/SessionInput.hpp>
 
-#include <vtbackend/Color.h>
-#include <vtbackend/Metrics.h>
+#include <vtbackend/Color.hpp>
+#include <vtbackend/Metrics.hpp>
 
-#include <vtpty/Pty.h>
+#include <vtpty/Pty.hpp>
 
-#include <crispy/App.h>
-#include <crispy/ScopedTimer.h>
-#include <crispy/logstore.h>
-#include <crispy/utils.h>
+#include <crispy/App.hpp>
+#include <crispy/ScopedTimer.hpp>
+#include <crispy/logstore.hpp>
+#include <crispy/utils.hpp>
 
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>

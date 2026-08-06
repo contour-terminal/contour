@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/display/TerminalDisplay.h>
-#include <contour/input/KeyMapping.h>
-#include <contour/input/Logging.h>
-#include <contour/input/MouseMapping.h>
-#include <contour/session/Logging.h>
-#include <contour/session/SessionInput.h>
-#include <contour/session/TerminalSession.h>
+#include <contour/display/TerminalDisplay.hpp>
+#include <contour/input/KeyMapping.hpp>
+#include <contour/input/Logging.hpp>
+#include <contour/input/MouseMapping.hpp>
+#include <contour/session/Logging.hpp>
+#include <contour/session/SessionInput.hpp>
+#include <contour/session/TerminalSession.hpp>
 
-#include <vtbackend/Terminal.h>
+#include <vtbackend/Terminal.hpp>
 
-#include <vtrasterizer/Renderer.h>
+#include <vtrasterizer/Renderer.hpp>
 
 #include <QtGui/QGuiApplication>
 

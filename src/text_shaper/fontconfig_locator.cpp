@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <text_shaper/fontconfig_locator.h>
+#include <text_shaper/fontconfig_locator.hpp>
 
-#include <text_shaper/font.h>
+#include <text_shaper/font.hpp>
 
-#include <crispy/assert.h>
-#include <crispy/utils.h>
+#include <crispy/assert.hpp>
+#include <crispy/utils.hpp>
 
 #include <fontconfig/fontconfig.h>
 

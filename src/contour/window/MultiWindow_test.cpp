@@ -10,11 +10,11 @@
 // FIRST window's model. Each pin drives the operation through window B's controller and asserts A is
 // untouched.
 
-#include <contour/ContourGuiApp.h>
-#include <contour/session/PaneProxy.h>
-#include <contour/session/TerminalSessionManager.h>
-#include <contour/test/GuiTestFixtures.h>
-#include <contour/window/WindowController.h>
+#include <contour/ContourGuiApp.hpp>
+#include <contour/session/PaneProxy.hpp>
+#include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/GuiTestFixtures.hpp>
+#include <contour/window/WindowController.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>
@@ -29,9 +29,9 @@
 
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/SessionModel.h>
-#include <vtworkspace/Tab.h>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/SessionModel.hpp>
+#include <vtworkspace/Tab.hpp>
 
 namespace
 {

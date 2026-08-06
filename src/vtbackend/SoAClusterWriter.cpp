@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/SoAClusterWriter.h>
+#include <vtbackend/SoAClusterWriter.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/grapheme_segmenter.h>

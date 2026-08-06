@@ -10,7 +10,7 @@
     #include <pthread.h>
 #endif
 
-#include <crispy/utils.h>
+#include <crispy/utils.hpp>
 
 namespace crispy
 {

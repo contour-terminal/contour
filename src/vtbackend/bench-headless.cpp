@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/MockTerm.h>
-#include <vtbackend/Terminal.h>
-#include <vtbackend/logging.h>
+#include <vtbackend/MockTerm.hpp>
+#include <vtbackend/Terminal.hpp>
+#include <vtbackend/logging.hpp>
 
-#include <vtparser/ParserEvents.h>
+#include <vtparser/ParserEvents.hpp>
 
-#include <vtpty/MockViewPty.h>
+#include <vtpty/MockViewPty.hpp>
 
-#include <crispy/App.h>
-#include <crispy/BufferObject.h>
-#include <crispy/CLI.h>
-#include <crispy/environment.h>
-#include <crispy/utils.h>
+#include <crispy/App.hpp>
+#include <crispy/BufferObject.hpp>
+#include <crispy/CLI.hpp>
+#include <crispy/environment.hpp>
+#include <crispy/utils.hpp>
 
 #include <chrono>
 #include <format>

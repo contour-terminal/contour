@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/session/HyperlinkTooltip.h>
+#include <contour/session/HyperlinkTooltip.hpp>
 
 #include <algorithm>
 #include <ranges>

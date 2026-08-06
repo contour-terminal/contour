@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <net/posix/UnixListener.h>
+#include <net/posix/UnixListener.hpp>
 
 #ifndef _WIN32
 
@@ -12,8 +12,8 @@
 
     #include <unistd.h>
 
-    #include <net/posix/AcceptLoop.h>
-    #include <net/posix/FdUtils.h>
+    #include <net/posix/AcceptLoop.hpp>
+    #include <net/posix/FdUtils.hpp>
 
 namespace net
 {

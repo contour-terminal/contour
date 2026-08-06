@@ -9,11 +9,11 @@
 // set, so the testable invariant — window count as windows are created and removed — is exercised here
 // against the Qt-free model. (Per-window tab/pane isolation is covered in SessionModel_test.cpp.)
 
-#include <contour/config/Config.h>
-#include <contour/session/TerminalSessionManager.h>
-#include <contour/test/GuiTestFixtures.h>
+#include <contour/config/Config.hpp>
+#include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/GuiTestFixtures.hpp>
 
-#include <vtbackend/primitives.h>
+#include <vtbackend/primitives.hpp>
 
 #include <QtCore/QTemporaryDir>
 
@@ -28,12 +28,12 @@
 #include <sstream>
 #include <vector>
 
-#include <vthost/client/LayoutReconstruction.h>
-#include <vthost/proto/Pdu.h>
-#include <vtworkspace/ModelEvents.h>
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/SessionModel.h>
-#include <vtworkspace/Tab.h>
+#include <vthost/client/LayoutReconstruction.hpp>
+#include <vthost/proto/Pdu.hpp>
+#include <vtworkspace/ModelEvents.hpp>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/SessionModel.hpp>
+#include <vtworkspace/Tab.hpp>
 
 using namespace vtworkspace;
 

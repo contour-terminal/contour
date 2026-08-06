@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/command/CommandHistoryStore.h>
-#include <contour/config/AtomicFileWrite.h>
+#include <contour/command/CommandHistoryStore.hpp>
+#include <contour/config/AtomicFileWrite.hpp>
 
 #include <yaml-cpp/yaml.h>
 

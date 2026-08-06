@@ -4,8 +4,8 @@
 
 #include <vector>
 
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/Primitives.h>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/Primitives.hpp>
 
 using namespace vtworkspace;
 

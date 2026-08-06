@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/display/Logging.h>
-#include <contour/display/RhiRenderer.h>
-#include <contour/display/RhiVertexLayout.h>
-#include <contour/display/ScreenshotReadback.h>
-#include <contour/display/ShaderConfig.h>
+#include <contour/display/Logging.hpp>
+#include <contour/display/RhiRenderer.hpp>
+#include <contour/display/RhiVertexLayout.hpp>
+#include <contour/display/ScreenshotReadback.hpp>
+#include <contour/display/ShaderConfig.hpp>
 
-#include <vtbackend/primitives.h>
+#include <vtbackend/primitives.hpp>
 
-#include <vtrasterizer/TextureAtlas.h>
+#include <vtrasterizer/TextureAtlas.hpp>
 
-#include <crispy/algorithm.h>
-#include <crispy/assert.h>
-#include <crispy/defines.h>
-#include <crispy/utils.h>
+#include <crispy/algorithm.hpp>
+#include <crispy/assert.hpp>
+#include <crispy/defines.hpp>
+#include <crispy/utils.hpp>
 
 #include <QtCore/QFile>
 #include <QtCore/QVarLengthArray>

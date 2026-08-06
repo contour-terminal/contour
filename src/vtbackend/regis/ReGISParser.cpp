@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/regis/ReGISParser.h>
+#include <vtbackend/regis/ReGISParser.hpp>
 
 #include <algorithm>
 #include <cctype>

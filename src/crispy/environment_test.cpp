@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/environment.h>
-#include <crispy/testing/environment.h>
+#include <crispy/environment.hpp>
+#include <crispy/testing/environment.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

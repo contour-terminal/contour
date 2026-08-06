@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtrasterizer/Renderer.h>
+#include <vtrasterizer/Renderer.hpp>
 
-#include <vtrasterizer/TextRenderer.h>
-#include <vtrasterizer/utils.h>
+#include <vtrasterizer/TextRenderer.hpp>
+#include <vtrasterizer/utils.hpp>
 
-#include <text_shaper/font_locator.h>
-#include <text_shaper/open_shaper.h>
+#include <text_shaper/font_locator.hpp>
+#include <text_shaper/open_shaper.hpp>
 
-#include <crispy/StrongLRUHashtable.h>
-#include <crispy/utils.h>
+#include <crispy/StrongLRUHashtable.hpp>
+#include <crispy/utils.hpp>
 
 #ifdef _WIN32
-    #include <text_shaper/directwrite_shaper.h>
+    #include <text_shaper/directwrite_shaper.hpp>
 #endif
 
 #include <algorithm>

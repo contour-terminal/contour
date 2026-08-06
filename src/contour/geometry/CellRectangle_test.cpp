@@ -5,7 +5,7 @@
 // divided out exactly once, on the way out. Scaling again when lifting into screen coordinates is the
 // classic HiDPI double-scale bug, and is pinned against below.
 
-#include <contour/geometry/CellRectangle.h>
+#include <contour/geometry/CellRectangle.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -1,7 +1,7 @@
-#include <text_shaper/directwrite_shaper.h>
+#include <text_shaper/directwrite_shaper.hpp>
 
-#include <text_shaper/directwrite_analysis_wrapper.h>
-#include <text_shaper/font_locator.h>
+#include <text_shaper/directwrite_analysis_wrapper.hpp>
+#include <text_shaper/font_locator.hpp>
 
 #include <algorithm>
 #include <string>

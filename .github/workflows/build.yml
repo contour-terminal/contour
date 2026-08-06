@@ -76,7 +76,7 @@ jobs:
         sudo ./llvm.sh "$LLVM_VERSION"
         sudo apt-get install "clang-format-$LLVM_VERSION"
     - name: "Clang-format"
-      run: find ./src/ -name "*.cpp" -o -name "*.h" | xargs "clang-format-$LLVM_VERSION" --Werror --dry-run
+      run: find ./src/ -name "*.cpp" -o -name "*.hpp" | xargs "clang-format-$LLVM_VERSION" --Werror --dry-run
     - name: "Check includes"
       run: ./scripts/check-includes.sh
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/LRUCache.h>
+#include <crispy/LRUCache.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

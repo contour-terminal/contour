@@ -8,9 +8,9 @@
 #endif
 // clang-format on
 
-#include <net/testing/InMemoryTransport.h>
+#include <net/testing/InMemoryTransport.hpp>
 
-#include <net/platform/WinsockInit.h>
+#include <net/platform/WinsockInit.hpp>
 
 #ifndef _WIN32
     #include <sys/socket.h>
@@ -21,10 +21,10 @@
     #include <fcntl.h>
     #include <unistd.h>
 
-    #include <net/posix/PosixSocket.h>
+    #include <net/posix/PosixSocket.hpp>
 #else
-    #include <net/platform/WindowsLoopback.h>
-    #include <net/windows/WindowsSocket.h>
+    #include <net/platform/WindowsLoopback.hpp>
+    #include <net/windows/WindowsSocket.hpp>
 #endif
 
 namespace net::testing

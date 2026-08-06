@@ -1,53 +1,53 @@
 set(net_SOURCES
     AsyncBufferedReader.cpp
-    AsyncBufferedReader.h
+    AsyncBufferedReader.hpp
     EventLoop.cpp
-    EventLoop.h
-    EventSource.h
-    IListener.h
-    ISocket.h
-    IoResult.h
+    EventLoop.hpp
+    EventSource.hpp
+    IListener.hpp
+    ISocket.hpp
+    IoResult.hpp
     WriteQueue.cpp
-    WriteQueue.h
+    WriteQueue.hpp
     PollEventSource.cpp
-    PollEventSource.h
-    Sockets.h
-    SplitSocket.h
+    PollEventSource.hpp
+    Sockets.hpp
+    SplitSocket.hpp
     Tls.cpp
-    Tls.h
-    WithTimeout.h
-    platform/Clock.h
-    platform/NativeHandle.h
-    platform/PeerAddress.h
+    Tls.hpp
+    WithTimeout.hpp
+    platform/Clock.hpp
+    platform/NativeHandle.hpp
+    platform/PeerAddress.hpp
     platform/SystemPipe.cpp
-    platform/SystemPipe.h
+    platform/SystemPipe.hpp
     platform/WinsockInit.cpp
-    platform/WinsockInit.h
+    platform/WinsockInit.hpp
     testing/InMemoryTransport.cpp
-    testing/InMemoryTransport.h
-    testing/ScriptedEventSource.h
+    testing/InMemoryTransport.hpp
+    testing/ScriptedEventSource.hpp
 )
 if(WIN32)
     list(APPEND net_SOURCES
         platform/WindowsLoopback.cpp
-        platform/WindowsLoopback.h
+        platform/WindowsLoopback.hpp
         windows/SocketsWin32.cpp
         windows/WindowsListener.cpp
-        windows/WindowsListener.h
+        windows/WindowsListener.hpp
         windows/WindowsSocket.cpp
-        windows/WindowsSocket.h
+        windows/WindowsSocket.hpp
     )
 else()
     list(APPEND net_SOURCES
         posix/AcceptLoop.cpp
-        posix/AcceptLoop.h
+        posix/AcceptLoop.hpp
         posix/PosixListener.cpp
-        posix/PosixListener.h
+        posix/PosixListener.hpp
         posix/PosixSocket.cpp
-        posix/PosixSocket.h
+        posix/PosixSocket.hpp
         posix/SocketsPosix.cpp
         posix/UnixListener.cpp
-        posix/UnixListener.h
+        posix/UnixListener.hpp
     )
 endif()
 

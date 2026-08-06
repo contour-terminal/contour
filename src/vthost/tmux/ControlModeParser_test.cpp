@@ -3,7 +3,7 @@
 
 #include <variant>
 
-#include <vthost/tmux/ControlModeParser.h>
+#include <vthost/tmux/ControlModeParser.hpp>
 
 using namespace vthost::tmux;
 

@@ -10,20 +10,20 @@
 #endif
 // clang-format on
 
-#include <net/platform/SystemPipe.h>
+#include <net/platform/SystemPipe.hpp>
 
 #include <array>
 #include <cerrno>
 
-#include <net/platform/WindowsLoopback.h>
-#include <net/platform/WinsockInit.h>
+#include <net/platform/WindowsLoopback.hpp>
+#include <net/platform/WinsockInit.hpp>
 
 #ifndef _WIN32
     #include <sys/socket.h>
 
     #include <unistd.h>
 
-    #include <net/posix/FdUtils.h>
+    #include <net/posix/FdUtils.hpp>
 #endif
 
 namespace net

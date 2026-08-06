@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/config/LayoutBuilder.h>
+#include <contour/config/LayoutBuilder.hpp>
 
-#include <vtbackend/Color.h>
+#include <vtbackend/Color.hpp>
 
 #include <yaml-cpp/yaml.h>
 

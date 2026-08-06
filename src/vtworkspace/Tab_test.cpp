@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include <vtworkspace/Tab.h>
+#include <vtworkspace/Tab.hpp>
 
 using namespace vtworkspace;
 

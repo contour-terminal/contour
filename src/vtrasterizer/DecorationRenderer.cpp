@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtrasterizer/DecorationRenderer.h>
+#include <vtrasterizer/DecorationRenderer.hpp>
 
-#include <vtrasterizer/GridMetrics.h>
-#include <vtrasterizer/Pixmap.h>
-#include <vtrasterizer/UnderlineGeometry.h>
+#include <vtrasterizer/GridMetrics.hpp>
+#include <vtrasterizer/Pixmap.hpp>
+#include <vtrasterizer/UnderlineGeometry.hpp>
 #include <vtrasterizer/shared_defines.h>
 
-#include <crispy/times.h>
-#include <crispy/utils.h>
+#include <crispy/times.hpp>
+#include <crispy/utils.hpp>
 
 #include <array>
 #include <cmath>

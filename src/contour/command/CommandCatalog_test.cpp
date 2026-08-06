@@ -6,10 +6,10 @@
 // no action is offered in a form that cannot actually run, and a command's ID is stable — because the
 // id is what gets written into command-history.yml and read back on the next start.
 
-#include <contour/command/Command.h>
-#include <contour/command/CommandCatalog.h>
-#include <contour/config/Config.h>
-#include <contour/test/CoreFixtures.h>
+#include <contour/command/Command.hpp>
+#include <contour/command/CommandCatalog.hpp>
+#include <contour/config/Config.hpp>
+#include <contour/test/CoreFixtures.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

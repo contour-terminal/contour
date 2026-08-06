@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/ViInputHandler.h>
+#include <vtbackend/ViInputHandler.hpp>
 
-#include <vtbackend/HintModeHandler.h>
-#include <vtbackend/logging.h>
+#include <vtbackend/HintModeHandler.hpp>
+#include <vtbackend/logging.hpp>
 
-#include <crispy/TrieMap.h>
-#include <crispy/assert.h>
-#include <crispy/utils.h>
+#include <crispy/TrieMap.hpp>
+#include <crispy/assert.hpp>
+#include <crispy/utils.hpp>
 
 #include <libunicode/convert.h>
 

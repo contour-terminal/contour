@@ -5,7 +5,7 @@
 // and substitutes from a TabLabelContext, so it is tested here in isolation from the QAbstractListModel
 // integration covered in TabListModel_test.
 
-#include <contour/window/TabLabel.h>
+#include <contour/window/TabLabel.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

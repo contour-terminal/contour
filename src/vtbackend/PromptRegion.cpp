@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/PromptRegion.h>
+#include <vtbackend/PromptRegion.hpp>
 
 #include <ranges>
 

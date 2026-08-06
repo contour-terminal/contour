@@ -1,9 +1,9 @@
-#include <vtbackend/Color.h>
+#include <vtbackend/Color.hpp>
 
-#include <vtrasterizer/BoxDrawingRenderer.h>
-#include <vtrasterizer/GridMetrics.h>
-#include <vtrasterizer/RendererTestHelpers.h>
-#include <vtrasterizer/TextureAtlas.h>
+#include <vtrasterizer/BoxDrawingRenderer.hpp>
+#include <vtrasterizer/GridMetrics.hpp>
+#include <vtrasterizer/RendererTestHelpers.hpp>
+#include <vtrasterizer/TextureAtlas.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

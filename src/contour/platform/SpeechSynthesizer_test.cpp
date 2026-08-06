@@ -4,8 +4,8 @@
 // optional Qt module and a platform voice, neither of which a test can rely on — so the part that is
 // pinned here is the part that is ours: the text preparation, and the decision to stay quiet.
 
-#include <contour/command/ContextMenu.h>
-#include <contour/platform/SpeechSynthesizer.h>
+#include <contour/command/ContextMenu.hpp>
+#include <contour/platform/SpeechSynthesizer.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

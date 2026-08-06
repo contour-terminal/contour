@@ -7,10 +7,10 @@
 // in each_element<Decorator>() order, so the enumerator is the index, and what the GPU would receive
 // is exactly what these tests read back.
 
-#include <vtrasterizer/DecorationRenderer.h>
-#include <vtrasterizer/GridMetrics.h>
-#include <vtrasterizer/RendererTestHelpers.h>
-#include <vtrasterizer/TextureAtlas.h>
+#include <vtrasterizer/DecorationRenderer.hpp>
+#include <vtrasterizer/GridMetrics.hpp>
+#include <vtrasterizer/RendererTestHelpers.hpp>
+#include <vtrasterizer/TextureAtlas.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

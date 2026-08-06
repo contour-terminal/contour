@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtrasterizer/ReGISFontRasterizer.h>
+#include <vtrasterizer/ReGISFontRasterizer.hpp>
 
-#include <text_shaper/font_locator_provider.h>
-#include <text_shaper/open_shaper.h>
+#include <text_shaper/font_locator_provider.hpp>
+#include <text_shaper/open_shaper.hpp>
 
 #include <algorithm>
 #include <cmath>

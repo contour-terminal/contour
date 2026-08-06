@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtpty/MockPty.h>
+#include <vtpty/MockPty.hpp>
 
-#include <crispy/BufferObject.h>
-#include <crispy/logsink.h>
+#include <crispy/BufferObject.hpp>
+#include <crispy/logsink.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -23,13 +23,13 @@
 #include <vector>
 
 #include <coro/Task.hpp>
-#include <net/EventLoop.h>
-#include <net/PollEventSource.h>
-#include <net/testing/ScriptedEventSource.h>
-#include <vthost/SessionHost.h>
-#include <vthost/TappingPty.h>
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/Tab.h>
+#include <net/EventLoop.hpp>
+#include <net/PollEventSource.hpp>
+#include <net/testing/ScriptedEventSource.hpp>
+#include <vthost/SessionHost.hpp>
+#include <vthost/TappingPty.hpp>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/Tab.hpp>
 
 using vthost::SessionHost;
 using vtworkspace::SplitState;

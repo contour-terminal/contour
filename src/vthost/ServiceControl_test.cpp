@@ -3,7 +3,7 @@
 
 #include <string>
 
-#include <vthost/ServiceControl.h>
+#include <vthost/ServiceControl.hpp>
 
 using namespace vthost;
 

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/utils.h>
+#include <crispy/utils.hpp>
 
-#include <text_shaper/coretext_locator.h>
-#include <text_shaper/font.h>
-#include <text_shaper/font_locator.h>
+#include <text_shaper/coretext_locator.hpp>
+#include <text_shaper/font.hpp>
+#include <text_shaper/font_locator.hpp>
 
 #import <AppKit/AppKit.h>
 #import <CoreText/CTFont.h>

@@ -107,25 +107,25 @@ Making use of reserved glyph slots
     }
 */
 
-#include <vtrasterizer/TextRenderer.h>
+#include <vtrasterizer/TextRenderer.hpp>
 
-#include <vtbackend/logging.h>
-#include <vtbackend/primitives.h>
+#include <vtbackend/logging.hpp>
+#include <vtbackend/primitives.hpp>
 
-#include <vtrasterizer/BoxDrawingRenderer.h>
-#include <vtrasterizer/GlyphAdvance.h>
-#include <vtrasterizer/GlyphSlicing.h>
-#include <vtrasterizer/GridMetrics.h>
+#include <vtrasterizer/BoxDrawingRenderer.hpp>
+#include <vtrasterizer/GlyphAdvance.hpp>
+#include <vtrasterizer/GlyphSlicing.hpp>
+#include <vtrasterizer/GridMetrics.hpp>
 #include <vtrasterizer/shared_defines.h>
-#include <vtrasterizer/utils.h>
+#include <vtrasterizer/utils.hpp>
 
-#include <text_shaper/font_locator_provider.h>
-#include <text_shaper/fontconfig_locator.h>
-#include <text_shaper/mock_font_locator.h>
+#include <text_shaper/font_locator_provider.hpp>
+#include <text_shaper/fontconfig_locator.hpp>
+#include <text_shaper/mock_font_locator.hpp>
 
-#include <crispy/StrongHash.h>
-#include <crispy/StrongLRUHashtable.h>
-#include <crispy/point.h>
+#include <crispy/StrongHash.hpp>
+#include <crispy/StrongLRUHashtable.hpp>
+#include <crispy/point.hpp>
 
 #include <algorithm>
 #include <ranges>

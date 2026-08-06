@@ -9,13 +9,13 @@
 #include <string>
 
 #include <coro/Task.hpp>
-#include <net/EventLoop.h>
-#include <net/ISocket.h>
-#include <net/IoResult.h>
-#include <net/PollEventSource.h>
-#include <net/WriteQueue.h>
-#include <net/testing/CoroTestSupport.h>
-#include <net/testing/InMemoryTransport.h>
+#include <net/EventLoop.hpp>
+#include <net/ISocket.hpp>
+#include <net/IoResult.hpp>
+#include <net/PollEventSource.hpp>
+#include <net/WriteQueue.hpp>
+#include <net/testing/CoroTestSupport.hpp>
+#include <net/testing/InMemoryTransport.hpp>
 
 using coro::Task;
 using net::EventLoop;

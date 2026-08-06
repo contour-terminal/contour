@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/command/Command.h>
-#include <contour/command/Shortcut.h>
+#include <contour/command/Command.hpp>
+#include <contour/command/Shortcut.hpp>
 
 #include <libunicode/convert.h>
 

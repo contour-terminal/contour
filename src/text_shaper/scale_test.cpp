@@ -1,6 +1,6 @@
-#include <vtbackend/primitives.h>
+#include <vtbackend/primitives.hpp>
 
-#include <text_shaper/shaper.h>
+#include <text_shaper/shaper.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>

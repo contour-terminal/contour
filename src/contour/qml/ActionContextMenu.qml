@@ -2,7 +2,7 @@
 // Right-click context menu for a terminal pane.
 //
 // The menu's STRUCTURE is not written here. It arrives as data from C++ (WindowController.contextMenuModel,
-// produced by the pure table in ContextMenu.h), and this file only knows how to turn one ROW into one menu
+// produced by the pure table in ContextMenu.hpp), and this file only knows how to turn one ROW into one menu
 // entry. That is what keeps "what is in the menu, and when is each entry shown or grayed out" in a single
 // headlessly testable place, and keeps the QML from growing a second copy of the command list that could
 // drift from the first.

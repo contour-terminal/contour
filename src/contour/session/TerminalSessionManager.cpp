@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/ContourGuiApp.h>
-#include <contour/config/LayoutBuilder.h>
-#include <contour/platform/ColorConversion.h>
-#include <contour/session/Logging.h>
-#include <contour/session/PaneProxy.h>
-#include <contour/session/TerminalSession.h>
-#include <contour/session/TerminalSessionManager.h>
-#include <contour/window/SettingsController.h>
-#include <contour/window/TabLabel.h>
-#include <contour/window/WindowController.h>
+#include <contour/ContourGuiApp.hpp>
+#include <contour/config/LayoutBuilder.hpp>
+#include <contour/platform/ColorConversion.hpp>
+#include <contour/session/Logging.hpp>
+#include <contour/session/PaneProxy.hpp>
+#include <contour/session/TerminalSession.hpp>
+#include <contour/session/TerminalSessionManager.hpp>
+#include <contour/window/SettingsController.hpp>
+#include <contour/window/TabLabel.hpp>
+#include <contour/window/WindowController.hpp>
 
-#include <vtbackend/primitives.h>
+#include <vtbackend/primitives.hpp>
 
-#include <vtpty/Process.h>
+#include <vtpty/Process.hpp>
 #ifdef VTPTY_LIBSSH2
-    #include <vtpty/SshSession.h>
+    #include <vtpty/SshSession.hpp>
 #endif
 
 #include <QtQml/QQmlEngine>

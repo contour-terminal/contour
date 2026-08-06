@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vthost/tmux/ControlSession.h>
+#include <vthost/tmux/ControlSession.hpp>
 
 #include <algorithm>
 #include <array>
@@ -10,10 +10,10 @@
 #include <ranges>
 #include <utility>
 
-#include <vthost/logging.h>
-#include <vthost/tmux/LayoutString.h>
-#include <vtworkspace/Pane.h>
-#include <vtworkspace/Tab.h>
+#include <vthost/logging.hpp>
+#include <vthost/tmux/LayoutString.hpp>
+#include <vtworkspace/Pane.hpp>
+#include <vtworkspace/Tab.hpp>
 
 namespace vthost::tmux
 {

@@ -14,19 +14,19 @@
 // terminate() early-returned for a display-less session, so the device stayed open and the session —
 // plus its shell process — leaked.
 
-#include <contour/ContourGuiApp.h>
-#include <contour/config/Actions.h>
-#include <contour/input/MouseMapping.h>
-#include <contour/session/TerminalSession.h>
-#include <contour/session/TerminalSessionManager.h>
-#include <contour/test/FakeDisplaySurface.h>
-#include <contour/test/GuiTestFixtures.h>
+#include <contour/ContourGuiApp.hpp>
+#include <contour/config/Actions.hpp>
+#include <contour/input/MouseMapping.hpp>
+#include <contour/session/TerminalSession.hpp>
+#include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/FakeDisplaySurface.hpp>
+#include <contour/test/GuiTestFixtures.hpp>
 
-#include <vtbackend/Hyperlink.h>
+#include <vtbackend/Hyperlink.hpp>
 
-#include <vtpty/MockPty.h>
+#include <vtpty/MockPty.hpp>
 
-#include <crispy/utils.h>
+#include <crispy/utils.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QTemporaryDir>

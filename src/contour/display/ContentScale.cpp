@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/config/Config.h>
-#include <contour/display/ContentScale.h>
-#include <contour/display/Logging.h>
+#include <contour/config/Config.hpp>
+#include <contour/display/ContentScale.hpp>
+#include <contour/display/Logging.hpp>
 
-#include <crispy/utils.h>
+#include <crispy/utils.hpp>
 
 #include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>

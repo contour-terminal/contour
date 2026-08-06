@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtpty/ChannelPty.h>
+#include <vtpty/ChannelPty.hpp>
 
 #include <algorithm>
 #include <cerrno>

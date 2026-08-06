@@ -9,8 +9,8 @@
 #include <string>
 #include <vector>
 
-#include <vtworkspace/ModelEvents.h>
-#include <vtworkspace/SessionModel.h>
+#include <vtworkspace/ModelEvents.hpp>
+#include <vtworkspace/SessionModel.hpp>
 
 using namespace vtworkspace;
 
